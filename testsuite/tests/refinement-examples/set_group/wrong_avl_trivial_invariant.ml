@@ -1,4 +1,4 @@
-module M : Set_intf.SET = struct
+module M : Bal_intf.BALANCED_SET = struct
 type t =
   | Leaf
   | Node of t * int * t
@@ -1074,4 +1074,289 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
   prove t2;
   equal_def t1 t2;
   ()
+
+(* ------------------------------------------------------------------ *)
+(* Size and a unary height, and the two bounds that pin the height.     *)
+(* ------------------------------------------------------------------ *)
+
+let[@vox.def] rec size (tree : t @ logical) : Bigint.t =
+  match tree with
+  | Leaf -> Bigint.zero
+  | Node (l, _, r) -> Bigint.add Bigint.one (Bigint.add (size l) (size r))
+
+let rec size_nonneg (tree : t @ logical)
+    : unit{ Bigint.le Bigint.zero (size tree) = true } =
+  match tree with
+  | Leaf -> size_def Leaf; ()
+  | Node (l, k, r) ->
+    size_def (Node (l, k, r)); size_nonneg l; size_nonneg r; ()
+
+(* Rotations move nodes about; they do not create or destroy any. *)
+let rotate_right_size (tree : t @ logical)
+    : unit{ size (rotate_right tree) = size tree } =
+  rotate_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, y, c) ->
+    (match l with
+     | Leaf -> ()
+     | Node (a, x, b) ->
+       size_def (Node (l, y, c));
+       size_def (Node (a, x, b));
+       size_def (Node (a, x, Node (b, y, c)));
+       size_def (Node (b, y, c));
+       ())
+
+let rotate_left_size (tree : t @ logical)
+    : unit{ size (rotate_left tree) = size tree } =
+  rotate_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (a, x, r) ->
+    (match r with
+     | Leaf -> ()
+     | Node (b, y, c) ->
+       size_def (Node (a, x, r));
+       size_def (Node (b, y, c));
+       size_def (Node (Node (a, x, b), y, c));
+       size_def (Node (a, x, b));
+       ())
+
+let rotate_left_right_size (tree : t @ logical)
+    : unit{ size (rotate_left_right tree) = size tree } =
+  rotate_left_right_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    rotate_right_size (Node (rotate_left l, k, r));
+    rotate_left_size l;
+    size_def (Node (rotate_left l, k, r));
+    size_def (Node (l, k, r));
+    ()
+
+let rotate_right_left_size (tree : t @ logical)
+    : unit{ size (rotate_right_left tree) = size tree } =
+  rotate_right_left_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, k, r) ->
+    rotate_left_size (Node (l, k, rotate_right r));
+    rotate_right_size r;
+    size_def (Node (l, k, rotate_right r));
+    size_def (Node (l, k, r));
+    ()
+
+let rebalance_size (tree : t @ logical)
+    : unit{ size (rebalance tree) = size tree } =
+  rebalance_def tree;
+  match tree with
+  | Leaf -> ()
+  | Node (l, _k, r) ->
+    if Bigint.lt (Bigint.add (height r) Bigint.one) (height l)
+    then
+      (match l with
+       | Leaf -> ()
+       | Node (ll, _lk, lr) ->
+         if Bigint.le (height lr) (height ll)
+         then rotate_right_size tree
+         else rotate_left_right_size tree)
+    else if Bigint.lt (Bigint.add (height l) Bigint.one) (height r)
+    then
+      (match r with
+       | Leaf -> ()
+       | Node (rl, _rk, rr) ->
+         if Bigint.le (height rl) (height rr)
+         then rotate_left_size tree
+         else rotate_right_left_size tree)
+    else ()
+
+(* [insert] adds exactly one node, and none when the key is already
+   found.  This is what refuses a duplicate-pushing insert. *)
+let rec size_insert_step (new_key : int) (tree : t @ logical)
+    : unit{
+      size (insert new_key tree)
+      = (if member new_key tree
+         then size tree
+         else Bigint.add (size tree) Bigint.one)
+    } =
+  match tree with
+  | Leaf ->
+    insert_def new_key Leaf;
+    member_def new_key Leaf;
+    size_def Leaf;
+    size_def (Node (Leaf, new_key, Leaf));
+    ()
+  | Node (l, key, r) ->
+    insert_def new_key (Node (l, key, r));
+    member_def new_key (Node (l, key, r));
+    size_def (Node (l, key, r));
+    let choice = direction new_key key in
+    direction_def new_key key;
+    (match choice with
+     | Same -> ()
+     | Left ->
+       size_insert_step new_key l;
+       rebalance_size (Node (insert new_key l, key, r));
+       size_def (Node (insert new_key l, key, r));
+       ()
+     | Right ->
+       size_insert_step new_key r;
+       rebalance_size (Node (l, key, insert new_key r));
+       size_def (Node (l, key, insert new_key r));
+       ())
+
+(* A unary copy of the height, so that the two bound functions can be
+   structurally recursive.  The [Bigint] height and its balance proof are
+   untouched; [height_bridge] connects them. *)
+let[@vox.def] rec depth (tree : t @ logical) : Bal_intf.nat =
+  match tree with
+  | Leaf -> Bal_intf.Z
+  | Node (l, _, r) -> Bal_intf.S (Bal_intf.nmax (depth l) (depth r))
+
+let nat_to_big_nmax (a : Bal_intf.nat @ logical)
+    (b : Bal_intf.nat @ logical)
+    : unit{
+      Bal_intf.nat_to_big (Bal_intf.nmax a b)
+      = max_height (Bal_intf.nat_to_big a) (Bal_intf.nat_to_big b)
+    } =
+  max_height_def (Bal_intf.nat_to_big a) (Bal_intf.nat_to_big b);
+  Bal_intf.nle_total a b;
+  Bal_intf.nle_iff a b;
+  Bal_intf.nle_iff b a;
+  let leaning = Bal_intf.nle a b in
+  (match leaning with
+   | true -> Bal_intf.nmax_right a b ()
+   | false -> Bal_intf.nmax_left a b ())
+
+let rec height_bridge (tree : t @ logical)
+    : unit{ Bal_intf.nat_to_big (depth tree) = height tree } =
+  match tree with
+  | Leaf -> depth_def Leaf; height_def Leaf; Bal_intf.nat_to_big_def Bal_intf.Z; ()
+  | Node (l, k, r) ->
+    depth_def (Node (l, k, r));
+    height_def (Node (l, k, r));
+    Bal_intf.nat_to_big_def
+      (Bal_intf.S (Bal_intf.nmax (depth l) (depth r)));
+    nat_to_big_nmax (depth l) (depth r);
+    height_bridge l;
+    height_bridge r;
+    ()
+
+(* Height is not understated: fewer than 2^(h+1) keys at height h.  True
+   of any binary tree, balanced or not. *)
+let rec pow2_bound (tree : t @ logical)
+    : unit{
+      Bigint.lt (size tree) (Bal_intf.pow2 (Bal_intf.S (depth tree)))
+      = true
+    } =
+  match tree with
+  | Leaf ->
+    size_def Leaf;
+    depth_def Leaf;
+    Bal_intf.pow2_def (Bal_intf.S Bal_intf.Z);
+    Bal_intf.pow2_def Bal_intf.Z;
+    ()
+  | Node (l, k, r) ->
+    size_def (Node (l, k, r));
+    depth_def (Node (l, k, r));
+    Bal_intf.pow2_def
+      (Bal_intf.S (Bal_intf.S (Bal_intf.nmax (depth l) (depth r))));
+    pow2_bound l;
+    pow2_bound r;
+    Bal_intf.nle_nmax_left (depth l) (depth r);
+    Bal_intf.nle_nmax_right (depth l) (depth r);
+    Bal_intf.nle_def (Bal_intf.S (depth l))
+      (Bal_intf.S (Bal_intf.nmax (depth l) (depth r)));
+    Bal_intf.nle_def (Bal_intf.S (depth r))
+      (Bal_intf.S (Bal_intf.nmax (depth l) (depth r)));
+    Bal_intf.pow2_mono (Bal_intf.S (depth l))
+      (Bal_intf.S (Bal_intf.nmax (depth l) (depth r))) ();
+    Bal_intf.pow2_mono (Bal_intf.S (depth r))
+      (Bal_intf.S (Bal_intf.nmax (depth l) (depth r))) ();
+    ()
+
+(* Height is not overstated: at least [fib h] keys at height h.  This is
+   the AVL minimum-size theorem, and it is false without [balanced]. *)
+let rec min_size (tree : t @ logical)
+    (_balanced : unit{ balanced tree = true })
+    : unit{
+      Bigint.le (Bal_intf.fib (depth tree)) (size tree) = true
+    } =
+  match tree with
+  | Leaf ->
+    balanced_def Leaf;
+    depth_def Leaf;
+    size_def Leaf;
+    Bal_intf.fib_def Bal_intf.Z;
+    ()
+  | Node (l, k, r) ->
+    balanced_def (Node (l, k, r));
+    depth_def (Node (l, k, r));
+    size_def (Node (l, k, r));
+    min_size l ();
+    min_size r ();
+    size_nonneg l;
+    size_nonneg r;
+    (* carry the [Bigint] balance condition across to the unary side *)
+    height_bridge l;
+    height_bridge r;
+    Bal_intf.nat_to_big_def (Bal_intf.S (depth l));
+    Bal_intf.nat_to_big_def (Bal_intf.S (depth r));
+    Bal_intf.nle_iff (depth l) (Bal_intf.S (depth r));
+    Bal_intf.nle_iff (depth r) (Bal_intf.S (depth l));
+    Bal_intf.nle_total (depth l) (depth r);
+    let leaning = Bal_intf.nle (depth l) (depth r) in
+    (match leaning with
+     | true ->
+       Bal_intf.nmax_right (depth l) (depth r) ();
+       (match depth r with
+        | Bal_intf.Z -> Bal_intf.fib_def (Bal_intf.S Bal_intf.Z); ()
+        | Bal_intf.S qq ->
+          Bal_intf.fib_def (Bal_intf.S (Bal_intf.S qq));
+          Bal_intf.nle_def (Bal_intf.S qq) (Bal_intf.S (depth l));
+          Bal_intf.fib_mono qq (depth l) ();
+          ())
+     | false ->
+       Bal_intf.nmax_left (depth l) (depth r) ();
+       (match depth l with
+        | Bal_intf.Z -> Bal_intf.fib_def (Bal_intf.S Bal_intf.Z); ()
+        | Bal_intf.S pp ->
+          Bal_intf.fib_def (Bal_intf.S (Bal_intf.S pp));
+          Bal_intf.nle_def (Bal_intf.S pp) (Bal_intf.S (depth r));
+          Bal_intf.fib_mono pp (depth r) ();
+          ()))
+
+(* ------------------------------------------------------------------ *)
+(* The [BALANCED_SET] laws.                                            *)
+(* ------------------------------------------------------------------ *)
+
+let size_empty : unit{ size empty = Bigint.zero } =
+  size_def Leaf;
+  ()
+
+let size_insert ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      size (insert inserted tree)
+      = (if member inserted tree
+         then size tree
+         else Bigint.add (size tree) Bigint.one)
+    } =
+  size_insert_step inserted tree
+
+let size_depth_bound ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      Bigint.lt (size tree) (Bal_intf.pow2 (Bal_intf.S (depth tree)))
+      = true
+    } =
+  pow2_bound tree
+
+let depth_size_bound ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      Bigint.le (Bal_intf.fib (depth tree)) (size tree) = true
+    } =
+  invariant_def tree;
+  min_size tree ()
 end

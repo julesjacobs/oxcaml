@@ -1,14 +1,14 @@
-File "avl.ml", lines 1-1081, characters 26-3:
-   1 | ..........................struct
+File "avl.ml", lines 1-1366, characters 35-3:
+   1 | ...................................struct
    2 | type t =
    3 |   | Leaf
    4 |   | Node of t * int * t
    5 | 
 ...
-1078 |   prove t2;
-1079 |   equal_def t1 t2;
-1080 |   ()
-1081 | end
+1363 |     } =
+1364 |   invariant_def tree;
+1365 |   min_size tree ()
+1366 | end
 Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
 File "set_intf.ml", lines 43-48, characters 2-39:
   Interface declaration for value equal_backward_law

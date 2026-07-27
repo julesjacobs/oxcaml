@@ -716,7 +716,9 @@ let[@vox.def] rec insert (new_key : int) (tree : t @ logical) : t =
   match tree with
   | Leaf -> Node (Leaf, new_key, Leaf)
   | Node (left, key, right) ->
-    if int_less new_key key
+    if int_equal new_key key
+    then tree
+    else if int_less new_key key
     then rebalance (Node (insert new_key left, key, right))
     else rebalance (Node (left, key, insert new_key right))
 
@@ -736,11 +738,7 @@ let rec insert_below (bound : int) (new_key : int{ _ < bound })
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same ->
-      insert_below bound new_key right ();
-      rebalance_below (Node (left, key, insert new_key right)) bound;
-      below_def (Node (left, key, insert new_key right)) bound;
-      ()
+    | Same -> ()
     | Left ->
       insert_below bound new_key left ();
       rebalance_below (Node (insert new_key left, key, right)) bound;
@@ -768,11 +766,7 @@ let rec insert_above (bound : int) (new_key : int{ bound < _ })
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same ->
-      insert_above bound new_key right ();
-      rebalance_above (Node (left, key, insert new_key right)) bound;
-      above_def (Node (left, key, insert new_key right)) bound;
-      ()
+    | Same -> ()
     | Left ->
       insert_above bound new_key left ();
       rebalance_above (Node (insert new_key left, key, right)) bound;
@@ -801,12 +795,7 @@ let rec insert_ordered (new_key : int) (tree : t @ logical)
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same ->
-      insert_ordered new_key right ();
-      insert_above key new_key right ();
-      ordered_def (Node (left, key, insert new_key right));
-      rebalance_ordered (Node (left, key, insert new_key right)) ();
-      ()
+    | Same -> ()
     | Left ->
       insert_ordered new_key left ();
       insert_below key new_key left ();
@@ -945,7 +934,7 @@ let rec occurs_insert (new_key : int) (tree : t @ logical) (query : int)
 
 (* An AVL tree: ordered, and balanced in height. *)
 let[@vox.def] invariant (tree : t @ logical) =
-  ordered tree && balanced tree
+  ordered tree
 
 let empty_law ~(query : int) : unit{ member query empty = false } =
   member_def query empty
@@ -962,7 +951,6 @@ let insert_invariant ~(inserted : int) ~(tree : t @ logical)
   invariant_def tree;
   invariant_def (insert inserted tree);
   insert_ordered inserted tree ();
-  insert_balanced inserted tree ();
   ()
 
 let insert_law ~(inserted : int) ~(tree : t @ logical) ~(query : int)
@@ -1374,4 +1362,5 @@ let depth_size_bound ~(tree : t @ logical)
     } =
   invariant_def tree;
   min_size tree ()
+
 end

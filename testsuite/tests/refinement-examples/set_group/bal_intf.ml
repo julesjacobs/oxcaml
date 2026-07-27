@@ -201,15 +201,14 @@ let rec nle_iff (a : nat @ logical) (b : nat @ logical)
 
 (* ------------------------------------------------------------------ *)
 
-module type BALANCED_SET = sig
+(* The counting layer.  [size] is anchored to membership, so an
+   implementation has no freedom in what it means, and the increment law
+   is false for any insert that adds a node for a key it already holds.
+   Every implementation in the family can carry this. *)
+module type COUNTED_SET = sig
   include Set_intf.SET
 
-  (* The number of keys held.  Anchored to membership by the two laws
-     below, so an implementation has no freedom in what it means. *)
   val size : t @ local logical -> Bigint.t @@ total
-
-  (* The new observation.  Anchored by the two bounds below. *)
-  val depth : t @ local logical -> nat @@ total
 
   val size_empty : unit{ size empty = Bigint.zero } @@ total
 
@@ -223,6 +222,15 @@ module type BALANCED_SET = sig
          then size tree
          else Bigint.add (size tree) Bigint.one)
     } @@ total
+end
+
+(* The balance layer, on top of the counting one.  Only an implementation
+   that really is height-balanced can carry it. *)
+module type BALANCED_SET = sig
+  include COUNTED_SET
+
+  (* The new observation.  Anchored by the two bounds below. *)
+  val depth : t @ local logical -> nat @@ total
 
   (* Depth is not understated: a tree of depth h holds fewer than
      2^(h+1) keys.  True of any binary tree; it is what stops an
@@ -234,7 +242,9 @@ module type BALANCED_SET = sig
 
   (* Depth is not overstated: a tree of depth h holds at least [fib h]
      keys.  False for an unbalanced tree, which is what makes the
-     balance component of [invariant] load-bearing. *)
+     balance component of [invariant] load-bearing.  This is the AVL
+     bound specifically; a red-black tree satisfies only the weaker
+     2^(h/2) bound and would need a different bound function here. *)
   val depth_size_bound :
     tree:t @ logical ->
     well_formed:unit{ invariant tree = true } ->

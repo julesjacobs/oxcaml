@@ -1,14 +1,14 @@
-File "bst.ml", lines 1-439, characters 26-3:
-  1 | ..........................struct
+File "bst.ml", lines 1-498, characters 34-3:
+  1 | ..................................struct
   2 | type t =
   3 |   | Empty
   4 |   | Node of t * int * t
   5 | 
 ...
-436 |   prove t2;
-437 |   equal_def t1 t2;
-438 |   ()
-439 | end
+495 |          else Bigint.add (size tree) Bigint.one)
+496 |     } =
+497 |   size_insert_step inserted tree
+498 | end
 Error: Refinement verification failed at module seal for value "equal_backward_law" (disproved)
 File "set_intf.ml", lines 43-48, characters 2-39:
   Interface declaration for value equal_backward_law

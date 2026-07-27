@@ -435,3 +435,62 @@ let equal_backward_law ~(t1 : t @ logical) ~(t2 : t @ logical)
   prove t2;
   equal_def t1 t2;
   ()
+
+(* ------------------------------------------------------------------ *)
+(* The [COUNTED_SET] laws.                                             *)
+(* ------------------------------------------------------------------ *)
+
+let[@vox.def] rec size (tree : t @ logical) : Bigint.t =
+  match tree with
+  | Empty -> Bigint.zero
+  | Node (left, _, right) ->
+    Bigint.add Bigint.one (Bigint.add (size left) (size right))
+
+(* [insert] adds exactly one node, and none when the key is already
+   found.  This is false for an insert that pushes a second copy of a key
+   it already holds, however that insert's ordering predicate is
+   written. *)
+let rec size_insert_step (new_key : int) (tree : t @ logical)
+    : unit{
+      size (insert new_key tree)
+      = (if member new_key tree
+         then size tree
+         else Bigint.add (size tree) Bigint.one)
+    } =
+  match tree with
+  | Empty ->
+    insert_def new_key Empty;
+    member_def new_key Empty;
+    size_def Empty;
+    size_def (Node (Empty, new_key, Empty));
+    ()
+  | Node (left, key, right) ->
+    insert_def new_key (Node (left, key, right));
+    member_def new_key (Node (left, key, right));
+    size_def (Node (left, key, right));
+    let choice = direction new_key key in
+    direction_def new_key key;
+    (match choice with
+     | Same -> ()
+     | Left ->
+       size_insert_step new_key left;
+       size_def (Node (insert new_key left, key, right));
+       ()
+     | Right ->
+       size_insert_step new_key right;
+       size_def (Node (left, key, insert new_key right));
+       ())
+
+let size_empty : unit{ size empty = Bigint.zero } =
+  size_def Empty;
+  ()
+
+let size_insert ~(inserted : int) ~(tree : t @ logical)
+    ~(well_formed : unit{ invariant tree = true })
+    : unit{
+      size (insert inserted tree)
+      = (if member inserted tree
+         then size tree
+         else Bigint.add (size tree) Bigint.one)
+    } =
+  size_insert_step inserted tree

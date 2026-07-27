@@ -5,6 +5,7 @@ type t =
 
 external int_equal : int -> int -> bool @@ total = "%equal"
 external int_less : int -> int -> bool @@ total = "%lessthan"
+external int_leq : int -> int -> bool @@ total = "%lessequal"
 
 type direction =
   | Same
@@ -55,13 +56,13 @@ let[@vox.def] rec below (tree : t @ logical) (bound : int) =
   match tree with
   | Empty -> true
   | Node (left, key, right) ->
-    int_less key bound && below left bound && below right bound
+    int_leq key bound && below left bound && below right bound
 
 let[@vox.def] rec above (tree : t @ logical) (bound : int) =
   match tree with
   | Empty -> true
   | Node (left, key, right) ->
-    int_less bound key && above left bound && above right bound
+    int_leq bound key && above left bound && above right bound
 
 let[@vox.def] rec ordered (tree : t @ logical) =
   match tree with
@@ -133,7 +134,7 @@ let[@vox.def] rec insert (new_key : int) (tree : t @ logical)
     then Node (insert new_key left, key, right)
     else Node (left, key, insert new_key right)
 
-let rec insert_below (bound : int) (new_key : int{ _ < bound })
+let rec insert_below (bound : int) (new_key : int{ _ <= bound })
     (tree : t @ logical)
     (_bounded : unit{ below tree bound = true })
     : unit{ below (insert new_key tree) bound = true } =
@@ -149,20 +150,20 @@ let rec insert_below (bound : int) (new_key : int{ _ < bound })
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same ->
-      insert_below bound new_key right ();
-      below_def (Node (left, key, insert new_key right)) bound;
-      ()
     | Left ->
       insert_below bound new_key left ();
       below_def (Node (insert new_key left, key, right)) bound;
+      ()
+    | Same ->
+      insert_below bound new_key right ();
+      below_def (Node (left, key, insert new_key right)) bound;
       ()
     | Right ->
       insert_below bound new_key right ();
       below_def (Node (left, key, insert new_key right)) bound;
       ()
 
-let rec insert_above (bound : int) (new_key : int{ bound < _ })
+let rec insert_above (bound : int) (new_key : int{ bound <= _ })
     (tree : t @ logical)
     (_bounded : unit{ above tree bound = true })
     : unit{ above (insert new_key tree) bound = true } =
@@ -178,13 +179,13 @@ let rec insert_above (bound : int) (new_key : int{ bound < _ })
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same ->
-      insert_above bound new_key right ();
-      above_def (Node (left, key, insert new_key right)) bound;
-      ()
     | Left ->
       insert_above bound new_key left ();
       above_def (Node (insert new_key left, key, right)) bound;
+      ()
+    | Same ->
+      insert_above bound new_key right ();
+      above_def (Node (left, key, insert new_key right)) bound;
       ()
     | Right ->
       insert_above bound new_key right ();
@@ -208,15 +209,15 @@ let rec insert_ordered (new_key : int) (tree : t @ logical)
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same ->
-      insert_ordered new_key right ();
-      insert_above key new_key right ();
-      ordered_def (Node (left, key, insert new_key right));
-      ()
     | Left ->
       insert_ordered new_key left ();
       insert_below key new_key left ();
       ordered_def (Node (insert new_key left, key, right));
+      ()
+    | Same ->
+      insert_ordered new_key right ();
+      insert_above key new_key right ();
+      ordered_def (Node (left, key, insert new_key right));
       ()
     | Right ->
       insert_ordered new_key right ();
@@ -248,18 +249,6 @@ let member_insert_empty new_key query
   member_node query Empty new_key Empty;
   ()
 
-let member_insert_same key (new_key : int{ _ = key }) left right query
-    : unit{
-      member query (insert new_key (Node (left, key, right)))
-      = if query = new_key
-        then true
-        else member query (Node (left, key, right))
-  }
-  =
-  insert_def new_key (Node (left, key, right));
-  member_node query left key right;
-  ()
-
 let member_insert_left key (new_key : int{ _ < key }) left right query
     (_induction : unit{
        member query (insert new_key left)
@@ -278,7 +267,7 @@ let member_insert_left key (new_key : int{ _ < key }) left right query
   ()
 
 let member_insert_right key
-    (new_key : int{ _ <> key && not (_ < key) }) left right query
+    (new_key : int{ not (_ < key) }) left right query
     (_induction : unit{
        member query (insert new_key right)
        = if query = new_key then true else member query right
@@ -307,10 +296,12 @@ let rec member_insert new_key tree query
     let choice = direction new_key key in
     direction_def new_key key;
     match choice with
-    | Same -> member_insert_same key new_key left right query
     | Left ->
       let induction = member_insert new_key left query in
       member_insert_left key new_key left right query induction
+    | Same ->
+      let induction = member_insert new_key right query in
+      member_insert_right key new_key left right query induction
     | Right ->
       let induction = member_insert new_key right query in
       member_insert_right key new_key left right query induction
@@ -480,10 +471,13 @@ let rec size_insert_step (new_key : int) (tree : t @ logical)
     let choice = direction new_key key in
     direction_def new_key key;
     (match choice with
-     | Same -> ()
      | Left ->
        size_insert_step new_key left;
        size_def (Node (insert new_key left, key, right));
+       ()
+     | Same ->
+       size_insert_step new_key right;
+       size_def (Node (left, key, insert new_key right));
        ()
      | Right ->
        size_insert_step new_key right;
@@ -503,4 +497,5 @@ let size_insert ~(inserted : int) ~(tree : t @ logical)
          else Bigint.add (size tree) Bigint.one)
     } =
   size_insert_step inserted tree
+
 end

@@ -1,7 +1,10 @@
 (* TEST
- readonly_files = "set_intf.ml wrong_avl_no_rotation.ml wrong_avl_no_rotation.reference";
+ readonly_files = "set_intf.ml bal_intf.ml wrong_avl_no_rotation.ml wrong_avl_no_rotation.reference";
  setup-ocamlc.byte-build-env;
  module = "set_intf.ml";
+ ocamlc.byte;
+ module = "bal_intf.ml";
+ flags = "-I ocamlc.byte";
  ocamlc.byte;
  script = "cp wrong_avl_no_rotation.ml avl.ml";
  script;
