@@ -1,0 +1,7 @@
+File "assume_admitted.ml", line 38, characters 2-11
+Admitted: unit{ length v >= 0 } is assumed here, not proved.
+File "assume_admitted.ml", line 41, characters 56-65
+Admitted: unit{ s = s } is assumed here, not proved.
+File "assume_admitted.ml", line 50, characters 41-49
+Admitted: int{ _ > 0 } is assumed here, not proved.
+Admitted 3 obligations in this unit.
