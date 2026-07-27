@@ -141,6 +141,16 @@ end
    this is a measurement of these four implementations as written, and has to
    be re-measured after any substantive change to a proof.
 
+   What an unforced component costs, which is less than it sounds and is
+   worth stating because it is the opposite of what a false key law costs.
+   [gen_ulist] with [invariant = true] AND an unconditional cons seals as a
+   generic [SET]; built and run, it answers [member] and [equal] correctly
+   and every exported law is true of the running program, while three
+   inserts of one key occupy three cells.  So a client can derive nothing
+   false from a weakened invariant -- it can only be surprised by the space.
+   A key that breaks one of the three comparison laws is the other way
+   round: the exported laws themselves become false.
+
    The invariant is exported for all four anyway, because a search structure
    without its invariant is not that structure -- not because the interface
    extracts it. *)
