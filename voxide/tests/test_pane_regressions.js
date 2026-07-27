@@ -883,12 +883,12 @@ section("Calls whose proposition no obligation read");
   }
   ok(
     model.lemmaUnusedHint(["lean", "z3"]) ===
-      "lemma facts unused by every verification condition (lean, z3)",
+      "lean, z3 proved every obligation without this call's facts",
     "the hover text names its backend scope"
   );
   ok(
     model.lemmaUnusedHint([]) ===
-      "lemma facts unused by every verification condition",
+      "every obligation was proved without this call's facts",
     "with no backend scope the hover text is the bare phrase"
   );
   ok(

@@ -2258,7 +2258,7 @@ async function main() {
     );
     ok(
       marked &&
-        /^lemma facts unused by every verification condition \((lean|z3|oxsmt)\)$/.test(
+        /^(lean|z3|oxsmt) proved every obligation without this call's facts$/.test(
           marked.opts.title
         ),
       "the mark's hover text names the backend scope the answer holds for"

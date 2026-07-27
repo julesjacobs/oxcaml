@@ -750,15 +750,21 @@ function unnecessaryLemmaCalls(options) {
   return { calls, backendScope: [...backendScope].sort() };
 }
 
-const LEMMA_UNUSED_HINT = "lemma facts unused by every verification condition";
+const LEMMA_UNUSED_HINT = "every obligation was proved without this call's facts";
 
-// The hover text names the backends the answer holds for, so a reader is
-// never left to assume it covers ones that were not consulted.
+// What was measured, with the prover that measured it as the subject of the
+// sentence.  The reading is that prover's alone: another backend can prove
+// the same obligations by a different route through the same facts, and has
+// been seen to, so the sentence a reader forms must not be wider than the
+// run behind it.  "Unnecessary" is the reader's conclusion to draw, not this
+// text's to assert.
 function lemmaUnusedHint(backendScope) {
   if (!Array.isArray(backendScope) || backendScope.length === 0) {
     return LEMMA_UNUSED_HINT;
   }
-  return LEMMA_UNUSED_HINT + " (" + backendScope.join(", ") + ")";
+  return (
+    backendScope.join(", ") + " proved every obligation without this call's facts"
+  );
 }
 
 // ---------------------------------------------------------------------------
