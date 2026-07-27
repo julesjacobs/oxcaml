@@ -162,8 +162,9 @@ type in_a_predicate = int{ (assume _ : int{ _ > 0 }) = _ }
 Line 1, characters 27-52:
 1 | type in_a_predicate = int{ (assume _ : int{ _ > 0 }) = _ }
                                ^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: This obligation cannot be admitted: this is inside a proposition, and
-       a proposition has no code in it for an admission to be about
+Error: This obligation cannot be admitted:
+       this is inside a proposition, and a proposition has no code in it
+       for an admission to be about
 |}]
 
 (* Not a refusal of [assume] at all, and here because of what it rules out.
@@ -177,7 +178,7 @@ type vec
 
 external size : vec -> int @@ total = "vec_size"
 [%%expect {|
-external size : vec -> int @@ total = "vec_size"
+external size : vec -> int = "vec_size"
 |}]
 
 let (physical_of_logical @ total) (v : vec @ logical) : unit{ size v >= 0 } =
@@ -186,7 +187,7 @@ let (physical_of_logical @ total) (v : vec @ logical) : unit{ size v >= 0 } =
 Line 1, characters 67-68:
 1 | let (physical_of_logical @ total) (v : vec @ logical) : unit{ size v >= 0 } =
                                                                        ^
-Error: This value is logical but is expected to be physical.
+Error: This value is "logical" but is expected to be "physical".
 |}]
 
 (* The name is not what is recognised.  A user's own [assume] is an ordinary
