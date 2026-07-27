@@ -455,12 +455,24 @@ module Persistent_cache = struct
       Hashtbl.replace logs filename (stamp, table);
       table
 
+  (* [Misc.remove_file] asks [Sys.file_exists] first, which follows symlinks
+     and so declines to unlink a dangling one.  Unlink directly and let the
+     failure of a name that is not there be the ordinary case. *)
+  let unlink filename = try Sys.remove filename with Sys_error _ -> ()
+
   let append filename record =
-    if Sys.file_exists filename && not (cache_file_is_private filename) then
-      (* The directory is private, so an unreadable log is one this compiler
-         left behind under a permissive umask.  Replace it rather than append
-         to a file no lookup will ever read. *)
-      Misc.remove_file filename;
+    (* The directory is verified private, so anything at this name that is
+       not one of our logs is something this compiler left behind: an
+       unreadable log written under a permissive umask, or a link.  Replace
+       it rather than write through it.
+
+       Testing [Sys.file_exists] first would be wrong, because it follows
+       symlinks: a dangling link at this name reports as absent, and the
+       [Open_creat] below would then create and append to its target,
+       outside the store.  [cache_file_is_private] uses [lstat], so it
+       refuses a link whether or not it resolves, and unlinking removes the
+       link itself rather than what it points at. *)
+    if not (cache_file_is_private filename) then unlink filename;
     let channel =
       open_out_gen
         [Open_wronly; Open_append; Open_creat; Open_binary] 0o600 filename
