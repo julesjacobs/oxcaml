@@ -27,6 +27,32 @@ module Recursive_binding = struct
   let defeq_requested loc = memq loc defeq_locations
 end
 
+module Decreases = struct
+  type measure =
+    { parameters : Ident.t list list;
+      components : Types.refinement_expression list;
+      group : Ident.t list;
+      loc : Location.t;
+    }
+
+  (* Typecore checks a termination measure while the parameters it is written
+     over are still in scope; the verifier states the obligation at each
+     recursive call.  The two phases meet here, keyed on the identifier the
+     binding introduces, which is the name both of them hold. *)
+  let measures : measure Ident.Tbl.t = Ident.Tbl.create 16
+
+  let record id measure = Ident.Tbl.replace measures id measure
+  let find id = Ident.Tbl.find_opt measures id
+
+  (* The keys are local identifiers, whose identity is a stamp drawn from a
+     counter that is reset at the start of every compilation unit.  An entry
+     left behind by an earlier unit in the same process therefore names a
+     binding in the current one, and the verifier would install that stranger
+     as the measure of a binding that never asked for one.  Compiling two
+     files in one [ocamlc] invocation is enough to see it. *)
+  let reset () = Ident.Tbl.clear measures
+end
+
 let create ~loc ~facts ~goal = { location = loc; facts; goal }
 
 let instantiate ~(refinement : Types.refinement_desc) ~with_ =
@@ -67,6 +93,9 @@ module Fact_env = struct
           env.facts_rev;
       scope;
     }
+
+  let filter keep env =
+    { env with facts_rev = List.filter (fun fact -> keep fact) env.facts_rev }
 
   let leave id env = restrict (Ident.Set.remove id env.scope) env
 

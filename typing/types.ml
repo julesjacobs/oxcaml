@@ -1971,6 +1971,29 @@ module Refinement = struct
     | Rexp_ident (Rbound occurrence) when Ident.same occurrence id -> by
     | _ -> with_desc expression rexp_desc
 
+  (* Simultaneous substitution of several bound identifiers.
+
+     Folding the single-identifier [subst] over the pairs is not this: once a
+     pair has put its replacement in place, a later pair whose identifier
+     occurs inside that replacement replaces it again, and the result speaks
+     about the wrong values.  That is not hypothetical -- the identifiers a
+     recursive call substitutes for are the identifiers its arguments are
+     written over.  Renaming every identifier apart first makes the two
+     passes independent: nothing a replacement contains can be a renamed
+     identifier, because the renamed ones are fresh. *)
+  let subst_many bindings expression =
+    let renamed =
+      List.map (fun (id, by) -> id, fresh_id id, by) bindings
+    in
+    let expression =
+      rename_free_many
+        (List.map (fun (id, fresh, _) -> id, fresh) renamed)
+        expression
+    in
+    List.fold_left
+      (fun expression (_, fresh, by) -> subst ~id:fresh ~by expression)
+      expression renamed
+
   let collect_binder_stamps avoid expression =
     let add id = Hashtbl.replace avoid (Ident.stamp id) () in
     let rec collect expression =

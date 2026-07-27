@@ -88,6 +88,10 @@ let init_parameters () =
 let initial_env () =
   Ident.reinit();
   Types.Uid.reinit();
+  (* Keyed on identifiers whose stamps [Ident.reinit] has just made available
+     again, so the two belong together: what the previous unit recorded now
+     names bindings of this one. *)
+  Vox_vc.Decreases.reset ();
   let initially_opened_module =
     if !Clflags.nopervasives then
       None

@@ -670,6 +670,11 @@ module Refinement : sig
   val subst : id:Ident.t -> by:t -> t -> t
   (** Capture-avoiding substitution of a bound value identifier. *)
 
+  val subst_many : (Ident.t * t) list -> t -> t
+  (** Capture-avoiding substitution of several bound value identifiers at
+      once.  Simultaneous, not sequential: an identifier occurring inside one
+      pair's replacement is not substituted for by a later pair. *)
+
   val freshen_binders : t -> t
   (** Unconditionally freshen every binder and its bound occurrences. *)
 

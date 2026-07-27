@@ -1,0 +1,5 @@
+File "decreases_tot_state_local.ml", line 20, characters 4-11:
+20 |     f j i y
+         ^^^^^^^
+Error: Refinement verification failed (not-proved)
+Hypotheses mentioning get were not available for this descent.  A total function may still read mutable state, so what it answered before another call is not what it answers after one, and a measure may not descend on that.

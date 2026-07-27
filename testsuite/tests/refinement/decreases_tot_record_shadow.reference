@@ -1,0 +1,4 @@
+File "decreases_tot_record_shadow.ml", line 40, characters 33-38:
+40 | let total_use () = expects_total depth
+                                      ^^^^^
+Error: This value is partial but is expected to be total.

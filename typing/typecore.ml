@@ -7331,9 +7331,14 @@ let add_zero_alloc_attribute expr attributes =
     end
   | _ -> expr
 
+(* A value reached from the parameter a structural check is descending on:
+   either that parameter, or something inside it.  A sub-term carries the
+   record fields crossed to reach it, because whether crossing them is sound
+   is a question about those labels' mutability, which the parse tree cannot
+   answer on its own -- see [check_structural_record_fields]. *)
 type structural_relation =
   | Structural_root
-  | Structural_subterm
+  | Structural_subterm of Longident.t loc list
 
 module Structural_string = Misc.Stdlib.String
 
@@ -7359,39 +7364,135 @@ let structural_pattern_bound_names pat =
   iterator.pat iterator pat;
   !names
 
+(* The mutability of every field this name could stand for, as far as the
+   parse tree can tell.
+
+   Two places to look.  An ordinary record's labels are in the lexical label
+   namespace, so looking the name up finds them.  An inline record's labels
+   are not there at all -- [Node of { left : t }] gives no way to write
+   [x.left], so [left] is never in scope as a label -- and are reached
+   instead through the constructor whose argument the record is.  A pattern
+   under a constructor may be either form, so both are consulted and the
+   answers pooled.
+
+   Asking here is what keeps ordinary programs behaving as they did: a
+   recursion over a record whose field is declared mutable in plain sight is
+   declined at this point, so the binding stays partial rather than becoming
+   an error.  It is not the whole answer, because a field name is finally
+   resolved against the expected type and the label chosen need not have been
+   findable here at all; [check_structural_record_fields] settles those. *)
+let structural_lexical_field_mutability type_env (lid : Longident.t loc) =
+  match
+    Env.lookup_all_labels ~use:false ~record_form:Legacy ~loc:lid.loc
+      Env.Projection lid.txt type_env
+  with
+  | exception _ -> []
+  | Error _ -> []
+  | Ok labels ->
+    List.map (fun ((label : label_description), _) -> label.lbl_mut) labels
+
+let structural_inline_field_mutability type_env constructor
+      (lid : Longident.t loc) =
+  match constructor with
+  | None -> []
+  | Some (constructor : Longident.t loc) ->
+    let name = Longident.last lid.txt in
+    let inline_labels (constructor : constructor_description) =
+      match constructor.cstr_inlined with
+      | None -> []
+      | Some declaration ->
+        begin match declaration.type_kind with
+        | Type_record (labels, _, _) ->
+          List.filter_map
+            (fun (label : Types.label_declaration) ->
+              if Ident.name label.ld_id = name
+              then Some label.ld_mutable
+              else None)
+            labels
+        | Type_abstract _ | Type_record_unboxed_product _ | Type_variant _
+        | Type_open -> []
+        end
+    in
+    begin match
+      Env.lookup_all_constructors ~use:false ~loc:constructor.loc Env.Pattern
+        constructor.txt type_env
+    with
+    | exception _ -> []
+    | Error _ -> []
+    | Ok constructors ->
+      List.concat_map
+        (fun ((constructor, _), _) -> inline_labels constructor) constructors
+    end
+
+let structural_field_immutable type_env ~constructor lid =
+  let mutability =
+    structural_lexical_field_mutability type_env lid
+    @ structural_inline_field_mutability type_env constructor lid
+  in
+  (* Nothing found means nothing established, which is not the same as
+     immutable. *)
+  mutability <> [] && List.for_all (fun mut -> not (is_mutable mut)) mutability
+
 (* Return the variables whose values are the root represented by [pat], or
-   strict constructor sub-terms of it.  In particular, record and array
-   projections are deliberately absent: they may cross mutable indirections. *)
-let rec structural_pattern_relations relation pat =
+   strict sub-terms of it, each with the record fields crossed to reach it.
+   Array patterns are deliberately absent: an element can be replaced between
+   the match and the call, so a projection through one is not a sub-term. *)
+let rec structural_pattern_relations type_env ~constructor relation pat =
   let singleton name relation = Structural_string.Map.singleton name relation in
   let union left right =
     Structural_string.Map.union (fun _ left _ -> Some left) left right
   in
-  let strict pat = structural_pattern_relations Structural_subterm pat in
+  let crossed =
+    match relation with
+    | Structural_root -> []
+    | Structural_subterm crossed -> crossed
+  in
+  let strict ?(constructor = None) pat =
+    structural_pattern_relations type_env ~constructor
+      (Structural_subterm crossed) pat
+  in
   match pat.ppat_desc with
   | Ppat_var { txt = name; _ } -> singleton name relation
   | Ppat_alias (pat, { txt = name; _ }) ->
-    union (singleton name relation) (structural_pattern_relations relation pat)
-  | Ppat_construct (_, Some (_, pat))
-  | Ppat_variant (_, Some pat) ->
-    strict pat
+    union (singleton name relation)
+      (structural_pattern_relations type_env ~constructor relation pat)
+  | Ppat_construct (constructor, Some (_, pat)) ->
+    strict ~constructor:(Some constructor) pat
+  | Ppat_variant (_, Some pat) -> strict pat
   | Ppat_tuple (pats, _)
   | Ppat_unboxed_tuple (pats, _) ->
     List.fold_left
       (fun relations (_, pat) -> union relations (strict pat))
       Structural_string.Map.empty pats
+  | Ppat_record (fields, _) ->
+    List.fold_left
+      (fun relations (lid, pat) ->
+        if not (structural_field_immutable type_env ~constructor lid)
+        then relations
+        else
+          union relations
+            (structural_pattern_relations type_env ~constructor:None
+               (Structural_subterm (lid :: crossed))
+               pat))
+      Structural_string.Map.empty fields
   | Ppat_or (left, right) ->
-    let left = structural_pattern_relations relation left in
-    let right = structural_pattern_relations relation right in
+    let left = structural_pattern_relations type_env ~constructor relation left in
+    let right =
+      structural_pattern_relations type_env ~constructor relation right
+    in
     Structural_string.Map.merge
       (fun _ left right ->
         match left, right with
-        | Some left, Some right when left = right -> Some left
+        | Some Structural_root, Some Structural_root -> Some Structural_root
+        | Some (Structural_subterm left), Some (Structural_subterm right) ->
+          (* Either branch may be the one taken, so both branches' fields
+             have to be immutable for the relation to hold. *)
+          Some (Structural_subterm (left @ right))
         | _ -> None)
       left right
   | Ppat_constraint (pat, _, _)
   | Ppat_open (_, pat) ->
-    structural_pattern_relations relation pat
+    structural_pattern_relations type_env ~constructor relation pat
   | Ppat_any
   | Ppat_constant _
   | Ppat_interval _
@@ -7399,7 +7500,6 @@ let rec structural_pattern_relations relation pat =
   | Ppat_unboxed_bool _
   | Ppat_construct (_, None)
   | Ppat_variant (_, None)
-  | Ppat_record _
   | Ppat_record_unboxed_product _
   | Ppat_array _
   | Ppat_type _
@@ -7410,7 +7510,7 @@ let rec structural_pattern_relations relation pat =
   | Ppat_extension _ ->
     Structural_string.Map.empty
 
-let structural_bind_pattern env relation pat =
+let structural_bind_pattern type_env env relation pat =
   let names = structural_pattern_bound_names pat in
   let relations =
     Structural_string.Set.fold Structural_string.Map.remove names env.relations
@@ -7421,7 +7521,8 @@ let structural_bind_pattern env relation pat =
     | Some relation ->
       Structural_string.Map.union
         (fun _ relation _ -> Some relation)
-        (structural_pattern_relations relation pat) relations
+        (structural_pattern_relations type_env ~constructor:None relation pat)
+        relations
   in
   { bound = Structural_string.Set.union names env.bound; relations }
 
@@ -7465,7 +7566,7 @@ let structural_binding_name { pvb_pat; _ } =
   | [name] -> Some name
   | _ -> None
 
-let structurally_terminating_group bindings =
+let structurally_terminating_group type_env bindings =
   let binding_info =
     List.map
       (fun binding ->
@@ -7475,7 +7576,7 @@ let structurally_terminating_group bindings =
       bindings
   in
   if List.exists Option.is_none binding_info
-  then false
+  then None
   else
     let binding_info = List.map Option.get binding_info in
     let group_names =
@@ -7496,6 +7597,10 @@ let structurally_terminating_group bindings =
     in
     let check_position position =
       let valid = ref true in
+      (* The record fields crossed by the descents this position accepts.
+         Collected here rather than where the patterns are read, so that a
+         field a call never actually descends through is not asked about. *)
+      let crossed = ref [] in
       let is_group_reference env lid =
         match lid.txt with
         | Longident.Lident name ->
@@ -7559,10 +7664,12 @@ let structurally_terminating_group bindings =
              args)
           when is_group_reference env lid ->
           (match call_argument name args with
-           | Some argument
-             when relation_of_expression env argument
-                  = Some Structural_subterm -> ()
-           | None | Some _ -> valid := false);
+           | Some argument ->
+             begin match relation_of_expression env argument with
+             | Some (Structural_subterm fields) -> crossed := fields @ !crossed
+             | Some Structural_root | None -> valid := false
+             end
+           | None -> valid := false);
           List.iter (fun (_, argument) -> expression env argument) args
         | Pexp_function (params, _, body) ->
           let env =
@@ -7572,7 +7679,7 @@ let structurally_terminating_group bindings =
                 | Pparam_newtype _ -> env
                 | Pparam_val (_, default, pat) ->
                   Option.iter (expression env) default;
-                  structural_bind_pattern env None pat)
+                  structural_bind_pattern type_env env None pat)
               env params
           in
           begin match body with
@@ -7589,7 +7696,7 @@ let structurally_terminating_group bindings =
           let body_env =
             List.fold_left
               (fun env { pvb_pat; _ } ->
-                structural_bind_pattern env None pvb_pat)
+                structural_bind_pattern type_env env None pvb_pat)
               env bindings
           in
           let rhs_env = if recursive = Recursive then body_env else env in
@@ -7600,7 +7707,7 @@ let structurally_terminating_group bindings =
         | Pexp_for (pat, start, stop, _, body) ->
           expression env start;
           expression env stop;
-          expression (structural_bind_pattern env None pat) body
+          expression (structural_bind_pattern type_env env None pat) body
         | Pexp_letmodule _
         | Pexp_object _
         | Pexp_pack _
@@ -7611,7 +7718,7 @@ let structurally_terminating_group bindings =
       and cases_with_relation env relation cases =
         List.iter
           (fun { pc_lhs; pc_guard; pc_rhs } ->
-            let env = structural_bind_pattern env relation pc_lhs in
+            let env = structural_bind_pattern type_env env relation pc_lhs in
             Option.iter (expression env) pc_guard;
             expression env pc_rhs)
           cases
@@ -7634,7 +7741,7 @@ let structurally_terminating_group bindings =
                     then Some Structural_root
                     else None
                   in
-                  structural_bind_pattern env relation pat,
+                  structural_bind_pattern type_env env relation pat,
                   parameter_index + 1)
               (env, parameter_index) params
           in
@@ -7662,13 +7769,317 @@ let structurally_terminating_group bindings =
             }
             0 pvb_expr)
         bindings;
-      !valid
+      if !valid then Some !crossed else None
     in
     let rec try_position position =
-      position < max_common_position
-      && (check_position position || try_position (position + 1))
+      if position >= max_common_position
+      then None
+      else
+        match check_position position with
+        | Some crossed -> Some crossed
+        | None -> try_position (position + 1)
     in
     try_position 0
+
+(* Settle, on the typed tree, whether the record fields a structural descent
+   crossed are immutable.
+
+   [structural_field_immutable] has already declined every field it could see
+   was mutable.  What it cannot see is a label that is chosen from the
+   expected type without being in lexical scope, which is an ordinary thing
+   for OCaml to do: a homonym in scope can be immutable while the label
+   actually resolved to is not.  By the time that is known the descent has
+   been granted and the mode fixed, so the only honest outcome left is to
+   refuse the program and say why.  A crossed field the walk fails to find is
+   refused on the same footing: an unchecked crossing is the case this exists
+   to prevent, so not finding one is not a reason to let it pass.
+
+   What to do about one is not decided here.  The grant may still be
+   retractable, in which case the honest outcome is the binding staying
+   partial rather than the program being refused -- see where this is
+   called. *)
+let structural_record_field_offence crossed exp_list =
+  (* One entry per distinct field, because a field crossed by both branches
+     of an or-pattern is asked about once per branch and would otherwise have
+     a second entry that nothing ever reaches. *)
+  let wanted =
+    List.fold_left
+      (fun wanted (lid : Longident.t loc) ->
+        if List.mem_assoc lid.loc wanted
+        then wanted
+        else (lid.loc, ref false) :: wanted)
+      [] crossed
+  in
+  let offence = ref None in
+  let record loc message =
+    match !offence with None -> offence := Some (loc, message) | Some _ -> ()
+  in
+  let check_field (lid : Longident.t loc) (label : label_description) =
+    match List.assoc_opt lid.loc wanted with
+    | None -> ()
+    | Some found ->
+      found := true;
+      if is_mutable label.lbl_mut
+      then
+        record lid.loc
+          "vox: this recursion descends through a mutable field. \
+           Assignment can replace what the field holds, so the value bound \
+           here need not be a part of the value matched."
+  in
+  let iterator =
+    let pat
+      : type k. Tast_iterator.iterator -> k general_pattern -> unit
+      =
+      fun iterator pat ->
+        (match pat.pat_desc with
+         | Tpat_record (labels, _, _, _) ->
+           List.iter (fun (lid, label, _) -> check_field lid label) labels
+         | _ -> ());
+        Tast_iterator.default_iterator.pat iterator pat
+    in
+    { Tast_iterator.default_iterator with pat }
+  in
+  List.iter
+    (fun (exp, _) -> iterator.Tast_iterator.expr iterator exp)
+    exp_list;
+  List.iter
+    (fun (loc, found) ->
+      if not !found
+      then
+        record loc
+          "vox: a structural recursion descends through this field, but the \
+           field was not reached when checking that it is immutable.")
+    wanted;
+  !offence
+
+(* [vox.decreases]: termination by a lexicographically ordered tuple of
+   integer measures over the parameters, for recursive groups that structural
+   recursion does not reach.
+
+   The parts below run in the typing phase, so they hold under
+   [-vox-type-only] and on the editor's typing path as well as in a full
+   compile.  They decide eligibility -- whether the group is shaped so that a
+   measure can be stated at all -- and check the measure itself.  Whether the
+   measure actually descends is a solver obligation, emitted per recursive
+   call by [Vox_verify]. *)
+
+let decreases_attribute = "vox.decreases"
+
+let decreases_error ~loc message =
+  Location.raise_errorf ~loc "vox: [@@vox.decreases] %s" message
+
+let decreases_binding_attribute binding =
+  List.find_opt
+    (fun (attribute : Parsetree.attribute) ->
+      String.equal attribute.attr_name.txt decreases_attribute)
+    binding.pvb_attributes
+
+(* [@vox.decreases e] is one component; [@vox.decreases e1, e2] is a
+   lexicographic tuple, most significant first.  A labelled tuple component
+   has no lexicographic reading and is refused. *)
+let decreases_components (attribute : Parsetree.attribute) =
+  let loc = attribute.attr_loc in
+  match attribute.attr_payload with
+  | PStr [{ pstr_desc = Pstr_eval (expression, _); _ }] ->
+    begin match expression.pexp_desc with
+    | Pexp_tuple fields ->
+      List.map
+        (fun (label, field) ->
+          match label with
+          | None -> field
+          | Some _ ->
+            decreases_error ~loc:field.pexp_loc
+              "components must not be labelled")
+        fields
+    | _ -> [expression]
+    end
+  | PStr _ | PSig _ | PTyp _ | PPat (_, _) ->
+    decreases_error ~loc
+      "expects a measure expression, or a comma-separated tuple of them"
+
+(* Every occurrence of a name the group binds has to be the head of a direct
+   application supplying all of that binding's parameters.  A bare reference
+   or a partial application leaves no argument tuple for the obligation to
+   compare against the parameters, and the constructs listed as unsupported
+   below can bind names this traversal does not follow, so a name that looks
+   free here might really be shadowed. *)
+let decreases_calls_saturated bindings =
+  let binding_info =
+    List.map
+      (fun binding ->
+        Option.map
+          (fun name -> name, structural_function_labels binding.pvb_expr)
+          (structural_binding_name binding))
+      bindings
+  in
+  if List.exists Option.is_none binding_info then false
+  else
+    let binding_info = List.map Option.get binding_info in
+    if List.exists (fun (_, labels) -> labels = []) binding_info then false
+    else
+      let group_names =
+        List.fold_left
+          (fun names (name, _) -> Structural_string.Set.add name names)
+          Structural_string.Set.empty binding_info
+      in
+      let target_labels =
+        List.fold_left
+          (fun labels (name, function_labels) ->
+            Structural_string.Map.add name function_labels labels)
+          Structural_string.Map.empty binding_info
+      in
+      let valid = ref true in
+      let is_group_reference bound lid =
+        match lid.txt with
+        | Longident.Lident name ->
+          Structural_string.Set.mem name group_names
+          && not (Structural_string.Set.mem name bound)
+        | Longident.Ldot _ | Longident.Lapply _ -> false
+      in
+      let supplies_every_parameter name args =
+        match Structural_string.Map.find_opt name target_labels with
+        | None -> false
+        | Some labels ->
+          let supplied_nolabel =
+            List.length
+              (List.filter (fun (label, _) -> label = Asttypes.Nolabel) args)
+          in
+          let rec check consumed_nolabel = function
+            | [] -> true
+            | Asttypes.Nolabel :: rest ->
+              consumed_nolabel < supplied_nolabel
+              && check (consumed_nolabel + 1) rest
+            | label :: rest ->
+              List.exists (fun (supplied, _) -> supplied = label) args
+              && check consumed_nolabel rest
+          in
+          check 0 labels
+      in
+      let bind bound pat =
+        Structural_string.Set.union bound
+          (structural_pattern_bound_names pat)
+      in
+      let rec expression bound exp =
+        let default () =
+          let iterator =
+            { Ast_iterator.default_iterator with
+              expr = (fun _ exp -> expression bound exp)
+            }
+          in
+          Ast_iterator.default_iterator.expr iterator exp
+        in
+        match exp.pexp_desc with
+        | Pexp_ident lid ->
+          if is_group_reference bound lid then valid := false
+        | Pexp_apply
+            ({ pexp_desc =
+                 Pexp_ident ({ txt = Longident.Lident name; _ } as lid);
+               _ },
+             args)
+          when is_group_reference bound lid ->
+          if not (supplies_every_parameter name args) then valid := false;
+          List.iter (fun (_, argument) -> expression bound argument) args
+        | Pexp_function (params, _, body) ->
+          let bound =
+            List.fold_left
+              (fun bound { pparam_desc; _ } ->
+                match pparam_desc with
+                | Pparam_newtype _ -> bound
+                | Pparam_val (_, default, pat) ->
+                  Option.iter (expression bound) default;
+                  bind bound pat)
+              bound params
+          in
+          begin match body with
+          | Pfunction_body body -> expression bound body
+          | Pfunction_cases (cases, _, _) -> case_list bound cases
+          end
+        | Pexp_match (scrutinee, cases) ->
+          expression bound scrutinee;
+          case_list bound cases
+        | Pexp_try (body, cases) ->
+          expression bound body;
+          case_list bound cases
+        | Pexp_let (_, recursive, bindings, body) ->
+          let body_bound =
+            List.fold_left
+              (fun bound { pvb_pat; _ } -> bind bound pvb_pat)
+              bound bindings
+          in
+          let rhs_bound = if recursive = Recursive then body_bound else bound in
+          List.iter
+            (fun { pvb_expr; _ } -> expression rhs_bound pvb_expr)
+            bindings;
+          expression body_bound body
+        | Pexp_for (pat, start, stop, _, body) ->
+          expression bound start;
+          expression bound stop;
+          expression (bind bound pat) body
+        | Pexp_letmodule _
+        | Pexp_object _
+        | Pexp_pack _
+        | Pexp_letop _
+        | Pexp_comprehension _ ->
+          valid := false
+        | _ -> default ()
+      and case_list bound cases =
+        List.iter
+          (fun { pc_lhs; pc_guard; pc_rhs } ->
+            let bound = bind bound pc_lhs in
+            Option.iter (expression bound) pc_guard;
+            expression bound pc_rhs)
+          cases
+      in
+      List.iter
+        (fun { pvb_expr; _ } ->
+          expression Structural_string.Set.empty pvb_expr)
+        bindings;
+      !valid
+
+(* Whether the group carries measures at all, having refused the ways of
+   carrying them that cannot mean anything.  The mode decision is taken from
+   this, before the right-hand sides are typed, so a measured group escapes
+   the partiality that recursion otherwise forces. *)
+let decreases_group_measured ~is_recursive bindings =
+  let attributes = List.map decreases_binding_attribute bindings in
+  match List.filter_map Fun.id attributes with
+  | [] -> false
+  | (first : Parsetree.attribute) :: _ ->
+    if not is_recursive then
+      decreases_error ~loc:first.attr_loc
+        "applies to a recursive binding; this one is not recursive";
+    if List.exists Option.is_none attributes then
+      decreases_error ~loc:first.attr_loc
+        "must be given on every binding of a mutually recursive group";
+    let component_counts =
+      List.map
+        (fun attribute ->
+          List.length (decreases_components (Option.get attribute)))
+        attributes
+    in
+    begin match component_counts with
+    | [] | [_] -> ()
+    | count :: rest ->
+      if List.exists (fun other -> other <> count) rest then
+        decreases_error ~loc:first.attr_loc
+          "must give the same number of components on every binding of a \
+           mutually recursive group"
+    end;
+    List.iter
+      (fun binding ->
+        if Option.is_none (structural_binding_name binding) then
+          decreases_error ~loc:binding.pvb_loc
+            "requires a binding of a single named function";
+        if structural_function_labels binding.pvb_expr = [] then
+          decreases_error ~loc:binding.pvb_loc
+            "requires a function with explicit parameters and no optional \
+             argument defaults")
+      bindings;
+    if not (decreases_calls_saturated bindings) then
+      decreases_error ~loc:first.attr_loc
+        "requires every occurrence of a name in the recursive group to be a \
+         direct call supplying all of its parameters";
+    true
 
 let totality_is_total totality =
   match Mode.Totality.Guts.check_const_conservative totality with
@@ -7769,6 +8180,163 @@ let evaluated_argument_subject expression =
   match lower expression with
   | subject -> subject
   | exception Omitted_argument -> opaque expression
+
+(* The parameters of a typed function, in source order, together with the
+   environment of its body, in which all of them are bound.  A position
+   carries more than one identifier when its pattern aliases, and every one of
+   them then denotes the whole argument, which is what lets a call site
+   substitute the actual for any of them.  A pattern that decomposes its
+   argument, an optional parameter, and a [function] body all give [None]:
+   there is then no name standing for the argument to write a measure over. *)
+let rec decreases_parameter_ids (pattern : Typedtree.pattern) =
+  match pattern.pat_desc with
+  | Tpat_var { id; _ } -> Some [id]
+  | Tpat_alias { pattern; id; _ } ->
+    Option.map (fun ids -> id :: ids) (decreases_parameter_ids pattern)
+  | _ -> None
+
+let rec decreases_function_shape expression =
+  match expression.exp_desc with
+  | Texp_function { params; body; _ } ->
+    let positions =
+      List.map
+        (fun parameter ->
+          match parameter.fp_kind with
+          | Tparam_pat pattern -> decreases_parameter_ids pattern
+          | Tparam_optional_default _ -> None)
+        params
+    in
+    if List.exists Option.is_none positions then None
+    else
+      let positions = List.map Option.get positions in
+      begin match body with
+      | Tfunction_cases _ -> None
+      | Tfunction_body body ->
+        begin match decreases_function_shape body with
+        | Some (nested, env) -> Some (positions @ nested, env)
+        | None -> Some (positions, body.exp_env)
+        end
+      end
+  | _ -> None
+
+(* A measure component descends in one of two carriers.  Ordinary [int] is a
+   signed 63-bit bitvector, where the lower bound in the obligation keeps a
+   subtraction from wrapping past the minimum and calling that progress.
+   [Bigint.t] is the mathematical integers, where the lower bound is there for
+   the reason it is usually there: the naturals are well-founded and the
+   integers are not.  The same obligation, read in whichever arithmetic the
+   component is written in. *)
+type decreases_carrier =
+  | Machine_integer
+  | Mathematical_integer
+
+let decreases_carrier_of_type env type_ =
+  match get_desc (Ctype.expand_head env type_) with
+  | Tconstr (path, [], _) when Path.same path Predef.path_int ->
+    Some Machine_integer
+  | Tconstr (path, [], _) when Vox_builtin.is_bigint_type path ->
+    Some Mathematical_integer
+  | _ -> None
+
+let decreases_carrier_name = function
+  | Machine_integer -> "int"
+  | Mathematical_integer -> "Bigint.t"
+
+(* A measure is an integer expression over the measured function's
+   parameters.  Lowering it here rather than through the predicate lowering
+   keeps the fragment explicit: a parameter becomes a bound occurrence, which
+   is the same name the verifier gives it at the call site, and anything the
+   solver cannot read is refused outright rather than turned into an opaque
+   symbol.  An opaque measure would simply fail to descend, and the author
+   would have no way to see why. *)
+(* The operations a measure may call.  [Vox_builtin]'s recognised set is
+   documented as pure and deterministic, which is the property a measure
+   needs and the property totality does not supply: a total function may read
+   mutable state, and a measure read through one is not a function of the
+   parameters at all.  Refusing it here, where the measure is written, says
+   so once; letting it through would instead fail to descend at every call
+   with nothing pointing at the reason.
+
+   Being recognised is necessary and not sufficient: the structural
+   comparisons are recognised by primitive name, and on a carrier that
+   contains a mutable field comparing reads it.  That question needs the
+   operand carriers, so the verifier asks it of the measure at each call
+   rather than being asked twice here. *)
+let measure_call_is_modelled function_ =
+  match function_.exp_desc with
+  | Texp_ident { path; desc; _ } ->
+    Option.is_some (Vox_builtin.of_path path)
+    || begin match desc.val_kind with
+       | Val_prim primitive ->
+         let path =
+           Env.normalize_value_path None function_.exp_env path
+         in
+         Option.is_some (Vox_builtin.of_primitive ~path primitive.prim_name)
+       | Val_reg _ | Val_mut _ | Val_ivar _ | Val_self _ | Val_anc _ -> false
+       end
+  | _ -> false
+
+let lower_measure_expression ~parameters expression =
+  let is_parameter id =
+    List.exists (List.exists (Ident.same id)) parameters
+  in
+  let rec lower ?(function_head = false) expression =
+    let create rexp_desc =
+      Refinement.create ~loc:expression.exp_loc
+        ~type_:(refinement_logical_type expression.exp_type) rexp_desc
+    in
+    match expression.exp_desc with
+    | Texp_ident { path = Pident id; _ } when is_parameter id ->
+      create (Rexp_ident (Rbound id))
+    | Texp_ident { path; _ } ->
+      let reference = if function_head then Rapp path else Rglobal path in
+      create (Rexp_ident (Rfree reference))
+    | Texp_constant constant -> create (Rexp_constant constant)
+    | Texp_apply (function_, arguments, _, _, _) ->
+      if not (measure_call_is_modelled function_) then
+        decreases_error ~loc:function_.exp_loc
+          "cannot read this call as a measure.  A measure has to be a \
+           function of the parameters, and being total is not that: reading \
+           a mutable field terminates, so an accessor over one is truthfully \
+           total while its result changes under an assignment the descent \
+           knows nothing about.  Only the arithmetic and comparisons the \
+           verifier reproduces itself may appear here";
+      let function_ = lower ~function_head:true function_ in
+      let arguments =
+        List.map
+          (function
+            | label, Arg (argument, _) -> label, lower argument
+            | _, Omitted _ ->
+              decreases_error ~loc:expression.exp_loc
+                "cannot read a partial application as a measure")
+          arguments
+      in
+      create (Rexp_apply (function_, arguments))
+    | Texp_construct (_, constructor, _, arguments, _) ->
+      let constructor =
+        { rconstr_type_path = cstr_res_type_path constructor;
+          rconstr_name = constructor.cstr_name;
+        }
+      in
+      create
+        (Rexp_construct
+           (constructor,
+            List.map (fun (_, argument) -> lower argument) arguments))
+    | Texp_field { record; label; _ } when label.lbl_mut = Immutable ->
+      let field =
+        { rfield_type_path = lbl_res_type_path label;
+          rfield_name = label.lbl_name;
+        }
+      in
+      create (Rexp_field (lower record, field))
+    | Texp_ifthenelse (condition, ifso, Some ifnot) ->
+      create
+        (Rexp_ifthenelse (lower condition, lower ifso, Some (lower ifnot)))
+    | _ ->
+      decreases_error ~loc:expression.exp_loc
+        "cannot read this expression as a measure"
+  in
+  lower expression
 
 type dependent_case_parameter =
   | Open_case_parameter of Ident.t * type_expr
@@ -13563,9 +14131,12 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
          we type-checked expressions before patterns, then we could call
          [add_module_variables] here.
       *)
-      let structurally_terminating =
-        is_recursive && structurally_terminating_group spat_sexp_list
+      let structural_crossed_fields =
+        if is_recursive
+        then structurally_terminating_group env spat_sexp_list
+        else None
       in
+      let structurally_terminating = Option.is_some structural_crossed_fields in
       if is_recursive && not structurally_terminating then
         List.iter
           (fun binding ->
@@ -13574,18 +14145,54 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 "vox: [@vox.def] cannot be used on this recursive binding: \
                  its recursive group is not structurally total")
           spat_sexp_list;
+      (* Structural recursion is not the only evidence of termination: a
+         group carrying [@vox.decreases] offers a measure instead, and the
+         obligations that make it evidence are emitted per recursive call by
+         the verifier.  [@vox.def] deliberately does not accept that trade:
+         its generated equation is trusted because the body it was read from
+         is structurally total, so it keeps asking for exactly that. *)
+      let measure_terminating =
+        decreases_group_measured ~is_recursive spat_sexp_list
+      in
+      let terminating = structurally_terminating || measure_terminating in
+      let partial_totality =
+        Value.of_const
+          { Value.Const.min with totality = Totality.Const.Partial }
+      in
+      (* A structural descent that crossed a record field was granted on the
+         parse tree, where a field name has not been resolved to a label, and
+         the label the compiler goes on to choose can be a mutable one the
+         grant never saw ([check_structural_record_fields]).  Joining a
+         variable into the recursive occurrences' mode keeps a handle on the
+         grant: nothing constrains it, so it costs the group nothing, and if
+         the label turns out mutable the totality can be pushed back out of
+         it.  That succeeds exactly when no use inside the group has been
+         checked against the grant, which is the case where taking it back is
+         honest -- the group is then partial, as it was before a record
+         pattern gave a sub-term relation at all, and a program that asked
+         for nothing keeps compiling. *)
+      let record_descent_totality =
+        match structural_crossed_fields with
+        | Some (_ :: _) when is_recursive && not measure_terminating ->
+          Some (Value.newvar ())
+        | Some _ | None -> None
+      in
       let rhs_pvs =
-        if is_recursive && not structurally_terminating
+        if is_recursive && not terminating
         then
-          let partial =
-            Value.of_const
-              { Value.Const.min with totality = Totality.Const.Partial }
-          in
           List.map
             (fun pv ->
-               { pv with pv_mode = Value.join [pv.pv_mode; partial] })
+               { pv with pv_mode = Value.join [pv.pv_mode; partial_totality] })
             pvs
-        else pvs
+        else
+          match record_descent_totality with
+          | None -> pvs
+          | Some variable ->
+            let variable = Value.disallow_right variable in
+            List.map
+              (fun pv ->
+                 { pv with pv_mode = Value.join [pv.pv_mode; variable] })
+              pvs
       in
       let continuation_env =
         add_pattern_variables ~strip_refinement new_env pvs
@@ -13681,6 +14288,20 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 in
                 exp, None)
       in
+      (match structural_crossed_fields with
+       | None | Some [] -> ()
+       | Some (_ :: _ as crossed) ->
+         begin match structural_record_field_offence crossed exp_list with
+         | None -> ()
+         | Some (loc, message) ->
+           let given_back =
+             match record_descent_totality with
+             | None -> false
+             | Some variable ->
+               Result.is_ok (Value.submode partial_totality variable)
+           in
+           if not given_back then Location.raise_errorf ~loc "%s" message
+         end);
       List.iter2
         (fun (_, pat, _) (attrs, exp) ->
           Builtin_attributes.warning_scope ~ppwarning:false attrs
@@ -13858,7 +14479,102 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     (fun (_, name, type_, _, _) ->
       check_refinement_scope ~loc:name.loc ~env:new_env ~program_scope type_)
     bound_idents;
+  if is_recursive then type_decreases_measures spat_sexp_list l;
   (l, new_env)
+
+and type_decreases_measures spat_sexp_list bindings =
+  let attributes = List.map decreases_binding_attribute spat_sexp_list in
+  if List.exists Option.is_some attributes then begin
+    let binding_id binding =
+      match binding.vb_pat.pat_desc with
+      | Tpat_var { id; _ } -> Some id
+      | _ -> None
+    in
+    let group = List.filter_map binding_id bindings in
+    (* The two sides of the comparison at position [i] come from different
+       measures when the group is mutual, so the group has to agree on which
+       arithmetic each position descends in. *)
+    let group_carriers = ref None in
+    let agree_on_carriers ~loc carriers =
+      match !group_carriers with
+      | None -> group_carriers := Some carriers
+      | Some established ->
+        List.iteri
+          (fun position (carrier, other) ->
+            if carrier <> other then
+              decreases_error ~loc
+                (Printf.sprintf
+                   "component %d descends in %s here and in %s elsewhere in \
+                    the same recursive group"
+                   (position + 1)
+                   (decreases_carrier_name carrier)
+                   (decreases_carrier_name other)))
+          (List.combine carriers established)
+    in
+    List.iter2
+      (fun attribute (source, binding) ->
+        match attribute with
+        | None -> ()
+        | Some (attribute : Parsetree.attribute) ->
+          let loc = attribute.attr_loc in
+          let id =
+            match binding_id binding with
+            | Some id -> id
+            | None ->
+              decreases_error ~loc
+                "requires a binding of a single named function"
+          in
+          let parameters, body_env =
+            match decreases_function_shape binding.vb_expr with
+            | Some shape -> shape
+            | None ->
+              decreases_error ~loc
+                "requires a function whose parameters are all plain named \
+                 variables"
+          in
+          (* The eligibility gate counted the parameters on the parsetree and
+             the calls were checked saturated against that count.  If the
+             typed function disagrees, the obligation would be stated over a
+             different tuple than the one the calls were checked to fill. *)
+          if
+            List.length parameters
+            <> List.length (structural_function_labels source.pvb_expr)
+          then
+            decreases_error ~loc
+              "cannot agree on how many parameters this function takes";
+          let measure_mode =
+            Mode.Value.of_const
+              { Mode.Value.Const.legacy with
+                totality = Mode.Totality.Const.Total;
+              }
+          in
+          let carriers = ref [] in
+          let components =
+            List.map
+              (fun component ->
+                let typed =
+                  Typetexp.TyVarEnv.with_reentrant_scope (fun () ->
+                    with_refinement_typing_frame ~loc:component.pexp_loc
+                      body_env
+                      (fun env ->
+                        type_exp env (mode_default measure_mode) component))
+                in
+                (match
+                   decreases_carrier_of_type typed.exp_env typed.exp_type
+                 with
+                 | Some carrier -> carriers := carrier :: !carriers
+                 | None ->
+                   decreases_error ~loc:component.pexp_loc
+                     "measures descend in int or in Bigint.t; this component \
+                      is neither");
+                lower_measure_expression ~parameters typed)
+              (decreases_components attribute)
+          in
+          agree_on_carriers ~loc (List.rev !carriers);
+          Vox_vc.Decreases.record id { parameters; components; group; loc })
+      attributes
+      (List.combine spat_sexp_list bindings)
+  end
 
 and type_let_def_wrap_warnings
     ?(check = fun name mutated -> Warnings.Unused_var { name; mutated })

@@ -1,0 +1,4 @@
+File "decreases_tot_state.ml", line 21, characters 4-17:
+21 |     f j i (get j)
+         ^^^^^^^^^^^^^
+Error: vox: this recursive call leaves no position of the termination measure that can be decided.  Its argument at the first position is, or contains, a call whose result the verifier does not reproduce: a total function may still read mutable state, so its value is not settled by its arguments, and a measure read through one says nothing about what changes between two calls.

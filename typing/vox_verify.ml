@@ -556,10 +556,26 @@ let () =
           end
       end)
 
+(* While the right-hand side of a measured recursive binding is walked, the
+   binding it belongs to is the one every recursive call inside it has to
+   descend from.  Frames nest so that an inner measured group does not hide
+   an outer one: a call is attributed to the innermost frame whose group
+   binds it. *)
+type termination_frame =
+  { tf_group : Ident.t list;
+    tf_caller : Types.refinement_expression list;
+    tf_loc : Location.t;
+  }
+
 type state =
   { mutable facts : Facts.t;
     total_functions : unit Types.Uid.Tbl.t;
     call_subjects : (Location.t, (expression * Ident.t) list) Hashtbl.t;
+    mutable termination : termination_frame list;
+    (* Call nodes that received a termination obligation, by physical
+       identity.  A measured group is refused unless every recursive call in
+       it is here once the walk is done. *)
+    mutable discharged_calls : expression list;
   }
 
 exception Unsupported_subject of Location.t * string
@@ -758,6 +774,69 @@ let equality ~env ~loc left right =
       end
     | _ -> None
     end
+
+(* [Stdlib.( < )] and [Stdlib.( <= )] at the integer carrier, built the same
+   way as [equality] above: the primitive's own arrow shape, re-instantiated
+   at the operand type.  Both backends read these through the value
+   description the path resolves to, so under the machine-integer model they
+   are the signed bitvector comparisons, which is exactly what makes a
+   subtraction that wraps fail to descend. *)
+let integer_comparison ~env ~loc ~name ~primitive_name left right =
+  match find_stdlib_value env name with
+  | exception Not_found -> None
+  | path, description ->
+    begin match description.val_kind with
+    | Val_prim primitive
+      when String.equal primitive.prim_name primitive_name ->
+      begin match
+        equality_types ~env description primitive left.rexp_type
+      with
+      | None -> None
+      | Some (head_type, _, result_type) ->
+        let head =
+          Refinement.create ~loc ~type_:head_type
+            (Rexp_ident (Rfree (Rapp path)))
+        in
+        Some
+          (Refinement.create ~loc ~type_:result_type
+             (Rexp_apply (head, [Nolabel, left; Nolabel, right])))
+      end
+    | _ -> None
+    end
+
+(* [Bigint.zero], [Bigint.lt], [Bigint.le] and [Bigint.equal] are recognised
+   by path rather than by a primitive, and the backends read them as the
+   mathematical-integer operations.  Looked up by their qualified name so a
+   local rebinding of the same word cannot be mistaken for them. *)
+let find_bigint_value env name =
+  let bigint =
+    Longident.Ldot
+      ( Location.mknoloc (Longident.Lident "Stdlib"),
+        Location.mknoloc "Bigint" )
+  in
+  let qualified =
+    Longident.Ldot (Location.mknoloc bigint, Location.mknoloc name)
+  in
+  Env.find_value_by_name qualified env
+
+let bigint_zero ~env ~loc type_ =
+  match find_bigint_value env "zero" with
+  | exception Not_found -> None
+  | path, _ ->
+    Some (Refinement.create ~loc ~type_ (Rexp_ident (Rfree (Rglobal path))))
+
+let bigint_application ~env ~loc ~name ~result_type arguments =
+  match find_bigint_value env name with
+  | exception Not_found -> None
+  | path, description ->
+    let head_type = Ctype.instance description.val_type in
+    let head =
+      Refinement.create ~loc ~type_:head_type (Rexp_ident (Rfree (Rapp path)))
+    in
+    Some
+      (Refinement.create ~loc ~type_:result_type
+         (Rexp_apply
+            (head, List.map (fun argument -> Nolabel, argument) arguments)))
 
 let constructor_mismatch ~env ~loc ~constructor subject =
   match find_stdlib_value env "=" with
@@ -2267,6 +2346,291 @@ let selfification_fact state ?scope binding =
     | result_subject -> add binding.vb_pat result_subject
     | exception Unsupported_subject _ -> ()
 
+(* What a termination argument is allowed to rest on.
+
+   Totality is not purity.  Reading a mutable record field terminates, so an
+   accessor over one is truthfully total, and so is the write beside it; and
+   the verifier models a total call as a mathematical function of its
+   arguments, so a value observed through such an accessor before a write is
+   still believed after it.  For an ordinary refinement that is a stale
+   hypothesis.  For a measure it is the whole argument, because a descent is a
+   claim relating two evaluations of the same expression at two different
+   times, and the write between them is exactly what the claim is about.
+
+   So the descent is stated and discharged over the operations the verifier
+   reproduces itself: the arithmetic and comparisons [Vox_builtin] recognises,
+   whose recognised set is documented as pure and deterministic, together with
+   values, constructors, immutable fields, and the mismatch marker the fact
+   walk generates for a match arm that did not fire.  An application of
+   anything else is not admissible here, however total it is. *)
+(* A carrier whose values contain nothing that can be assigned, so that
+   reading one twice reads the same thing.  [bytes] is deliberately absent:
+   its contents are mutable.  Anything else -- a record, a variant, an array,
+   an abstract type -- may hold a mutable field, and structural comparison
+   reads it. *)
+let termination_immutable_carrier ~env type_ =
+  let type_ = carrier ~env type_ |> expand_head_for_refinement ~env in
+  match get_desc type_ with
+  | Tconstr (path, [], _) ->
+    List.exists (Path.same path)
+      [ Predef.path_int; Predef.path_bool; Predef.path_char;
+        Predef.path_string; Predef.path_unit; Predef.path_float;
+        Predef.path_int32; Predef.path_int64; Predef.path_nativeint ]
+    || Vox_builtin.is_bigint_type path
+  | _ -> false
+
+(* The structural comparisons are recognised by primitive name, and the name
+   says nothing about the carrier.  On a value that contains a mutable field,
+   [x = y] reads that field, which makes it exactly the kind of term this is
+   here to refuse -- two evaluations at two times, two answers.  So they are
+   admitted only where comparing reads nothing that can be assigned.  The
+   stable-call classifier asks the narrower question of the same primitives,
+   admitting them at [int] alone, because what it is deciding is whether the
+   backend has a model of the comparison rather than whether the comparison
+   is stable; both have to hold for a term to be built here and used, and
+   this one is the half this gate answers.  The rest of [Vox_builtin] is
+   arithmetic on those same carriers, or a constant. *)
+let termination_head_is_modelled ~env reference arguments =
+  let comparable_operands () =
+    List.for_all
+      (fun (_, argument) ->
+        termination_immutable_carrier ~env argument.rexp_type)
+      arguments
+  in
+  let modelled (builtin : Vox_builtin.t) =
+    match builtin with
+    | `Equal | `Not_equal | `Less | `Less_equal | `Greater | `Greater_equal ->
+      comparable_operands ()
+    | _ -> true
+  in
+  match reference with
+  | Rfun name -> Option.is_some (Vox_builtin.constructor_mismatch name)
+  | Rsibling _ -> false
+  | Rapp path | Rglobal path ->
+    begin match Vox_builtin.of_path path with
+    | Some builtin -> modelled builtin
+    | None ->
+      begin match
+        Subst.Lazy.force_value_description (Env.find_value path env)
+      with
+      | { val_kind = Val_prim primitive; _ } ->
+        let path = Env.normalize_value_path None env path in
+        begin match Vox_builtin.of_primitive ~path primitive.prim_name with
+        | Some builtin -> modelled builtin
+        | None -> false
+        end
+      | _ -> false
+      | exception Not_found -> false
+      end
+    end
+
+(* Walks an expression and answers whether the descent may rest on it,
+   naming the calls that say otherwise.  The names are for the diagnostic:
+   a hypothesis dropped here is invisible in the source, and a [not-proved]
+   whose cause is an invisible filter is expensive to read. *)
+let termination_offences ~env expression =
+  let admissible = ref true in
+  let names = ref [] in
+  let refuse ?name () =
+    admissible := false;
+    match name with
+    | None -> ()
+    | Some name ->
+      if not (List.exists (String.equal name) !names)
+      then names := name :: !names
+  in
+  let reference_name = function
+    | Rapp path | Rglobal path -> Path.last path
+    | Rfun name | Rsibling name -> name
+  in
+  let rec walk expression =
+    match expression.rexp_desc with
+    | Rexp_constant _ -> ()
+    | Rexp_ident (Rbound _) -> ()
+    (* A value, rather than a call: what it denotes does not change under an
+       assignment, because an assignment replaces what a mutable field holds
+       and not the value bound here. *)
+    | Rexp_ident (Rfree (Rglobal _ | Rsibling _)) -> ()
+    | Rexp_ident (Rfree ((Rapp _ | Rfun _) as reference)) ->
+      refuse ~name:(reference_name reference) ()
+    | Rexp_apply (head, arguments) ->
+      (match head.rexp_desc with
+       | Rexp_ident (Rfree reference) ->
+         if not (termination_head_is_modelled ~env reference arguments)
+         then refuse ~name:(reference_name reference) ()
+       (* A function defined in this scope: the condition assembler binds its
+          reference like any other, so the head arrives bound rather than
+          free.  Nothing recognised is reachable that way -- what the
+          verifier reproduces lives at a qualified path -- so this is a call
+          it does not model, and it can be named. *)
+       | Rexp_ident (Rbound id) -> refuse ~name:(Ident.name id) ()
+       | _ -> refuse ());
+      List.iter (fun (_, argument) -> walk argument) arguments
+    | Rexp_tuple fields -> List.iter (fun (_, field) -> walk field) fields
+    | Rexp_construct (_, arguments) -> List.iter walk arguments
+    (* Every lowering that builds a field projection has already established
+       that the label is immutable; a mutable one is refused where it is
+       read, not here. *)
+    | Rexp_field (record, _) -> walk record
+    | Rexp_ifthenelse (condition, ifso, ifnot) ->
+      walk condition;
+      walk ifso;
+      Option.iter walk ifnot
+    | Rexp_let (bindings, body) ->
+      List.iter (fun binding -> walk binding.rbind_expr) bindings;
+      walk body
+    | Rexp_match (scrutinee, cases) ->
+      walk scrutinee;
+      List.iter (fun case -> walk case.rcase_body) cases
+    | Rexp_function { body; _ } -> walk body
+  in
+  walk expression;
+  !admissible, List.rev !names
+
+let termination_admissible ~env expression =
+  fst (termination_offences ~env expression)
+
+let termination_provenance ~measure_location ~call_location ~callee =
+  { kind = "termination";
+    name = Some (Ident.name callee);
+    source_span = Some measure_location;
+    related_spans = ["call", call_location];
+  }
+
+(* The measure at a call's actual arguments.  Typing recorded the measure over
+   the callee's parameters as bound occurrences; substituting the arguments
+   for them is what turns it into a statement about this call.  A parameter
+   position that aliases contributes several identifiers, all denoting that
+   same argument.
+
+   All the positions are substituted at once.  In a self-recursive call the
+   callee's parameters are the caller's parameters, so an argument at one
+   position is written over the very identifiers the other positions are
+   substituting for: taking the positions one after another would replace an
+   argument's own parameters with the arguments at their positions, and state
+   the obligation about values the call never passes.  [f b 0] under the
+   measure [a] would then say [0 < a] rather than [b < a], which is not a
+   statement about this call at all. *)
+let measure_at_arguments (measure : Vox_vc.Decreases.measure) actuals =
+  let bindings =
+    List.concat
+      (List.map2
+         (fun identifiers actual ->
+           List.map (fun id -> id, actual) identifiers)
+         measure.parameters actuals)
+  in
+  List.map (Refinement.subst_many bindings) measure.components
+
+(* The lexicographic descent obligation, in the shape that makes it evidence
+   of termination over a bounded integer type.
+
+   Reading it from the front: the tuple descends if its first component
+   descends, or if that component is unchanged and the rest descends.  The
+   component that actually descends must additionally be at or above zero.
+
+   That lower bound is what the machine-integer model requires and it is
+   attached exactly where it does the work.  Signed comparison on a 63-bit
+   integer is a finite order, so a value getting smaller is not on its own an
+   argument that anything ends -- and worse, subtracting one from the minimum
+   makes it larger, which is why the strict comparison is stated in the same
+   machine arithmetic the program runs in rather than in mathematical
+   integers.  With the bound, each descent of a position lands in the
+   naturals and there are only finitely many descents available before the
+   position is exhausted; a position only ever moves while every position
+   before it stands still, so the whole tuple admits no infinite descent.
+
+   The bound is asked of the descending position only.  A position that is
+   passed over because an earlier one already descended carries no
+   information about this step, and requiring it to be non-negative as well
+   would reject Ackermann's outer call, where the second argument is itself
+   a recursive result.
+
+   A component descends in the arithmetic it is written in.  On [int] that is
+   the signed bitvector comparison, and the lower bound is what stops a
+   subtraction that wrapped past the minimum from counting as progress.  On
+   [Bigint.t] it is the mathematical order, and the lower bound is there for
+   the older reason: the naturals are well-founded and the integers are not.
+   The machine case is the same rule with a second reason to want it. *)
+let lexicographic_descent ~env ~loc callee caller =
+  let bool_type = Predef.type_bool in
+  let conjoin left right =
+    Refinement.create ~loc ~type_:bool_type
+      (Rexp_ifthenelse (left, right, Some (bool_node ~loc false)))
+  in
+  let disjoin left right =
+    Refinement.create ~loc ~type_:bool_type
+      (Rexp_ifthenelse (left, bool_node ~loc true, Some right))
+  in
+  let unrepresentable () =
+    Location.raise_errorf ~loc
+      "vox: this termination measure cannot be compared in a verification \
+       condition"
+  in
+  let mathematical component =
+    match get_desc (Ctype.expand_head env component.rexp_type) with
+    | Tconstr (path, [], _) -> Vox_builtin.is_bigint_type path
+    | _ -> false
+  in
+  let at_most left right =
+    if mathematical left then
+      bigint_application ~env ~loc ~name:"le" ~result_type:bool_type
+        [left; right]
+    else
+      integer_comparison ~env ~loc ~name:"<=" ~primitive_name:"%lessequal"
+        left right
+  in
+  let below left right =
+    if mathematical left then
+      bigint_application ~env ~loc ~name:"lt" ~result_type:bool_type
+        [left; right]
+    else
+      integer_comparison ~env ~loc ~name:"<" ~primitive_name:"%lessthan"
+        left right
+  in
+  (* [Bigint.equal] rather than the polymorphic equality, whose agreement with
+     it rests on the representation being canonical. *)
+  let same left right =
+    if mathematical left then
+      bigint_application ~env ~loc ~name:"equal" ~result_type:bool_type
+        [left; right]
+    else equality ~env ~loc left right
+  in
+  let zero component =
+    if mathematical component then
+      bigint_zero ~env ~loc component.rexp_type
+    else
+      Some
+        (Refinement.create ~loc ~type_:component.rexp_type
+           (Rexp_constant (Const_int 0)))
+  in
+  let descends actual formal =
+    (* A position whose two sides descend in different arithmetics has no
+       comparison to be made; the group agreement in typing refuses that, and
+       this refuses it again rather than building a mismatched term. *)
+    if mathematical actual <> mathematical formal then unrepresentable ();
+    match zero actual with
+    | None -> unrepresentable ()
+    | Some zero ->
+      begin match at_most zero actual, below actual formal with
+      | Some bounded, Some smaller -> conjoin bounded smaller
+      | _ -> unrepresentable ()
+      end
+  in
+  let rec descent callee caller =
+    match callee, caller with
+    | [actual], [formal] -> descends actual formal
+    | actual :: actuals, formal :: formals ->
+      let unchanged =
+        match same actual formal with
+        | Some equation -> equation
+        | None -> unrepresentable ()
+      in
+      disjoin (descends actual formal)
+        (conjoin unchanged (descent actuals formals))
+    | [], _ | _, [] -> unrepresentable ()
+  in
+  descent callee caller
+
 let annotation_provenance ~annotation_location ~subject_location =
   { kind = "annotation";
     name = None;
@@ -2388,7 +2752,7 @@ let rec walk_expression ?(inherited_marks = []) state expression =
               None
             end
           | _, _ ->
-            walk_expression state binding.vb_expr;
+            walk_binding_expression state binding;
             if expression_may_complete binding.vb_expr
             then Some state.facts
             else begin
@@ -2429,7 +2793,7 @@ let rec walk_expression ?(inherited_marks = []) state expression =
     List.iter
       (fun binding ->
         if not (is_def_axiom_binding binding) then
-          walk_expression state binding.vb_expr)
+          walk_binding_expression state binding)
       bindings;
     List.iter
       (enter_pattern state ~fact:true ~scope:body.exp_loc)
@@ -2829,6 +3193,12 @@ and walk_quotation state quoted =
     { facts = Facts.empty;
       total_functions = Types.Uid.Tbl.create 16;
       call_subjects = Hashtbl.create 16;
+      (* A recursive name reaching a quotation is a cross-stage reference,
+         not a call this stage makes, so no frame carries into it.  The
+         discharge check then refuses such a group rather than measuring a
+         call that never happens here. *)
+      termination = [];
+      discharged_calls = [];
     }
   in
   walk_expression future_state quoted;
@@ -3801,6 +4171,11 @@ and check_application state application function_ arguments
   | None -> ()
   end;
   state.facts <- merge_facts boundary_facts !relation_facts;
+  (* Before the result facts below, and deliberately so.  A postcondition
+     instantiated at this call's own arguments is only true if the call
+     returns; letting it stand as a hypothesis while proving that the call
+     descends would prove termination from the assumption of termination. *)
+  check_termination state application function_ arguments;
   Option.iter
     (fun metadata ->
       let name =
@@ -3816,6 +4191,217 @@ and check_application state application function_ arguments
             (apply_subject_replacements refinement))
         (refinement ~env:application.exp_env metadata.rapp_result))
     metadata
+
+and check_termination state application function_ arguments =
+  match function_.exp_desc with
+  | Texp_ident { path = Path.Pident callee; _ } ->
+    begin match
+      List.find_opt
+        (fun frame -> List.exists (Ident.same callee) frame.tf_group)
+        state.termination
+    with
+    | None -> ()
+    | Some frame ->
+      let loc = application.exp_loc in
+      let measure =
+        match Vox_vc.Decreases.find callee with
+        | Some measure -> measure
+        | None ->
+          Location.raise_errorf ~loc
+            "vox: no termination measure was recorded for %s"
+            (Ident.name callee)
+      in
+      (* Typing puts the arguments of an application in parameter order, and
+         the eligibility gate refused any occurrence that does not fill every
+         parameter, so the leading arguments are the ones the measure is
+         written over.  Anything else here is a shape the gate was supposed
+         to have refused, and is refused again rather than measured
+         partially. *)
+      let rec actual_arguments positions arguments =
+        match positions, arguments with
+        | [], _ -> []
+        | _ :: positions, (_, Arg (argument, _)) :: arguments ->
+          subject state argument :: actual_arguments positions arguments
+        | _ :: _, ((_, Omitted _) :: _ | []) ->
+          Location.raise_errorf ~loc
+            "vox: this recursive call does not supply every parameter the \
+             termination measure is written over"
+      in
+      let actuals = actual_arguments measure.parameters arguments in
+      let callee_measure = measure_at_arguments measure actuals in
+      let env = application.exp_env in
+      (* A lexicographic tuple descends at one position, so a position the
+         verifier cannot decide is one the descent may not be decided at --
+         nor at any position after it, since reaching those means having
+         shown this one unchanged.  Keeping the leading run it can decide is
+         therefore the whole of what this call can honestly claim.  The
+         measure at the parameters is admissible by construction, since a
+         measure that is not was refused where it was written; what arrives
+         here is an argument. *)
+      let rec decidable_prefix callee caller =
+        match callee, caller with
+        | component :: callee, caller_component :: caller
+          when termination_admissible ~env component ->
+          let callee, caller = decidable_prefix callee caller in
+          component :: callee, caller_component :: caller
+        | _, _ -> [], []
+      in
+      let callee_measure, caller_measure =
+        decidable_prefix callee_measure frame.tf_caller
+      in
+      (match callee_measure with
+       | _ :: _ -> ()
+       | [] ->
+        Location.raise_errorf ~loc
+          "vox: this recursive call leaves no position of the termination \
+           measure that can be decided.  Its argument at the first position \
+           is, or contains, a call whose result the verifier does not \
+           reproduce: a total function may still read mutable state, so its \
+           value is not settled by its arguments, and a measure read through \
+           one says nothing about what changes between two calls.");
+      let goal =
+        lexicographic_descent ~env ~loc callee_measure caller_measure
+      in
+      let goal = bind_scope_references (Facts.scope state.facts) goal in
+      state.discharged_calls <- application :: state.discharged_calls;
+      (* Discharged against the facts the same rule admits.  A hypothesis
+         about a call the verifier does not reproduce is exactly the stale
+         observation the two-state loop is built out of, so it is not
+         available here, and the obligation is proved without it or not at
+         all. *)
+      let outer_facts = state.facts in
+      let dropped =
+        List.filter
+          (fun (fact : Vox_vc.fact) ->
+            not (termination_admissible ~env fact.expression))
+          (Facts.facts outer_facts)
+      in
+      state.facts <-
+        Facts.filter
+          (fun (fact : Vox_vc.fact) ->
+            termination_admissible ~env fact.expression)
+          outer_facts;
+      (* A dropped hypothesis is invisible in the source: the reader sees the
+         guard that would discharge the descent and no reason it did not.  So
+         when one of them was about a value this goal mentions, the refusal
+         says which calls put it out of reach. *)
+      let dropped_note =
+        let names =
+          List.concat_map
+            (fun (fact : Vox_vc.fact) ->
+              snd (termination_offences ~env fact.expression))
+            dropped
+        in
+        let names = List.sort_uniq String.compare names in
+        match names with
+        | [] -> None
+        | _ :: _ ->
+          Some
+            (Location.msg
+               "Hypotheses mentioning %s were not available for this \
+                descent.  A total function may still read mutable state, so \
+                what it answered before another call is not what it answers \
+                after one, and a measure may not descend on that."
+               (String.concat ", " names))
+      in
+      let restore () = state.facts <- outer_facts in
+      begin
+        match
+          prove state ~env ~loc ~kind:"termination"
+            ~program_point:loc ~result_span:function_.exp_loc
+            ~provenance:(fun () ->
+              termination_provenance ~measure_location:frame.tf_loc
+                ~call_location:loc ~callee)
+            goal
+        with
+        | () -> restore ()
+        | exception Location.Error report when Option.is_some dropped_note ->
+          restore ();
+          let note = Option.get dropped_note in
+          raise
+            (Location.Error
+               { report with Location.sub = report.Location.sub @ [note] })
+        | exception exception_ -> restore (); raise exception_
+      end
+    end
+  | _ -> ()
+
+(* Walking the right-hand side of a binding that carries a measure, with that
+   binding installed as the one every recursive call inside it descends from.
+   Every site that walks a definition goes through here; a site that did not
+   would leave its calls unmeasured, which is what the structure-wide check
+   after the walk exists to catch. *)
+and walk_binding_expression state binding =
+  let measure =
+    match binding.vb_pat.pat_desc with
+    | Tpat_var { id; _ } -> Vox_vc.Decreases.find id
+    | _ -> None
+  in
+  let outer_termination = state.termination in
+  Option.iter
+    (fun (measure : Vox_vc.Decreases.measure) ->
+      state.termination <-
+        { tf_group = measure.group;
+          tf_caller = measure.components;
+          tf_loc = measure.loc;
+        }
+        :: outer_termination)
+    measure;
+  walk_expression state binding.vb_expr;
+  state.termination <- outer_termination
+
+(* Every occurrence of a group name inside a measured right-hand side has to
+   have produced an obligation.  The eligibility gate makes the same demand on
+   the parsetree, and this repeats it on the tree the verifier actually
+   walked: a call the walk never reached would otherwise be a recursive call
+   with nothing said about it, in a group whose totality has already been
+   granted.
+
+   It is a single pass over the whole structure rather than something each
+   walk site remembers to do, so that a definition reached by a site nobody
+   thought about is caught rather than quietly unmeasured. *)
+and check_every_recursive_call_discharged state ~group expression =
+  let super = Tast_iterator.default_iterator in
+  let discharged application =
+    List.exists (fun other -> other == application) state.discharged_calls
+  in
+  let in_group path =
+    match path with
+    | Path.Pident id -> List.exists (Ident.same id) group
+    | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> false
+  in
+  let heads = ref [] in
+  let iterator =
+    { super with
+      expr =
+        (fun sub expression ->
+          (match expression.exp_desc with
+           | Texp_apply
+               (({ exp_desc = Texp_ident { path; _ }; _ } as head), _, _, _, _)
+             when in_group path ->
+             heads := head :: !heads;
+             (* A call whose own evaluation cannot complete -- an argument
+                that raises, say -- never becomes a recursive activation, and
+                the fact walk skips it for the same reason. *)
+             if
+               not (discharged expression)
+               && expression_may_complete expression
+             then
+               Location.raise_errorf ~loc:expression.exp_loc
+                 "vox: this recursive call did not produce a termination \
+                  obligation"
+           | Texp_ident { path; _ }
+             when in_group path
+                  && not (List.exists (fun head -> head == expression) !heads)
+             ->
+             Location.raise_errorf ~loc:expression.exp_loc
+               "vox: a name in this recursive group is used other than as a \
+                direct call, so its termination measure cannot be stated here"
+           | _ -> ());
+          super.expr sub expression);
+    }
+  in
+  iterator.expr iterator expression
 
 and walk_default_expression state expression =
   let super = Tast_iterator.default_iterator in
@@ -3855,7 +4441,7 @@ and walk_value_bindings state ~persist rec_flag bindings =
         state.facts <- rhs_entry_facts;
         if is_def_axiom_binding binding then Some rhs_entry_facts
         else begin
-          walk_expression state binding.vb_expr;
+          walk_binding_expression state binding;
           if expression_may_complete binding.vb_expr
           then Some state.facts
           else None
@@ -3889,6 +4475,30 @@ and walk_structure state structure =
 
 let toplevel_facts = ref Facts.empty
 let toplevel_total_functions = Types.Uid.Tbl.create 16
+
+(* After the walk, every binding that carries a measure is revisited and its
+   recursive calls are required to have produced obligations. *)
+let check_measured_bindings state structure =
+  let super = Tast_iterator.default_iterator in
+  let iterator =
+    { super with
+      value_bindings =
+        (fun sub (_, bindings) ->
+          List.iter
+            (fun binding ->
+              match binding.vb_pat.pat_desc with
+              | Tpat_var { id; _ } ->
+                Option.iter
+                  (fun (measure : Vox_vc.Decreases.measure) ->
+                    check_every_recursive_call_discharged state
+                      ~group:measure.group binding.vb_expr)
+                  (Vox_vc.Decreases.find id)
+              | _ -> ())
+            bindings;
+          super.value_bindings sub (Nonrecursive, bindings));
+    }
+  in
+  List.iter (super.structure_item iterator) structure.str_items
 
 (* Walk a refinement predicate, recording [{location, type}] for every
    sub-expression node, using its stored [rexp_loc]/[rexp_type].  The hole [_]
@@ -4217,11 +4827,15 @@ let verify_structure ?(toplevel = false) structure =
       { facts = !toplevel_facts;
         total_functions = toplevel_total_functions;
         call_subjects = Hashtbl.create 16;
+        termination = [];
+        discharged_calls = [];
       }
     else
       { facts = Facts.empty;
         total_functions = Types.Uid.Tbl.create 16;
         call_subjects = Hashtbl.create 16;
+        termination = [];
+        discharged_calls = [];
       }
   in
   let walk_root () =
@@ -4236,6 +4850,7 @@ let verify_structure ?(toplevel = false) structure =
     List.iter
       (Tast_iterator.default_iterator.structure_item iterator)
       structure.str_items;
+    check_measured_bindings state structure;
     if toplevel then toplevel_facts := state.facts
   in
   begin try walk_root () with

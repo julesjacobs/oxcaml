@@ -36,7 +36,10 @@ let int_ge (left : int) (right : int) = left >= right
    it is not total-annotatable today, but for a different reason: the int wrappers use
    comparison primitives, which are admitted total only INSIDE a refinement predicate
    (predicate-scoped) and so are rejected at a top-level [@ total]; this one is blocked
-   more deeply -- [List.length] is a recursive stdlib function and the mode checker
-   cannot establish structural recursive totality, so the wrapper stays partial. *)
-(* @pre id=list_length final=ACCEPT today=ACCEPT stable=no unlocks=recursive-totality *)
+   by the standard library's interface. [list.mli] declares [val length] with no mode,
+   and an interface fixes the mode of what it describes whatever the implementation
+   would have inferred, so the wrapper stays partial. This is not a limit of the
+   structural check: the identical recursion written where no interface intervenes is
+   total, and the same code behind an interface reading [@@ total] is admitted. *)
+(* @pre id=list_length final=ACCEPT today=ACCEPT stable=no unlocks=stdlib-interface-modes *)
 let list_length values = List.length values

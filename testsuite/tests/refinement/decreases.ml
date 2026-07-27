@@ -1,0 +1,793 @@
+(* TEST
+ expect;
+*)
+
+(* Termination by a [@vox.decreases] measure: a lexicographically ordered
+   tuple of integer expressions over a recursive function's parameters.
+
+   Ordinary [int] is a signed 63-bit bitvector, so a value getting smaller is
+   not by itself progress -- one less than the minimum is the maximum.  The
+   obligation at each recursive call therefore asks, of the position that
+   descends, both that it is strictly smaller in the same machine arithmetic
+   the program runs in, and that it is at or above zero.  Each expectation
+   below is written from what that obligation has to mean, not from what the
+   compiler happened to print. *)
+
+(* Expect: accepted.  [n >= 0] and [n <> 0] give [n >= 1], so [n - 1] does
+   not wrap and lands in the naturals. *)
+let[@vox.decreases n] rec countdown (n : int{ _ >= 0 }) : int =
+  if n = 0 then 0 else countdown (n - 1)
+
+[%%expect {|
+val countdown : int{ _ >= 0 } -> int = <fun>
+|}]
+
+(* That the measure is what pays for totality cannot be witnessed here: in
+   this harness even an ordinary [fun x -> x + 1] is reported partial where a
+   total value is wanted, so a toplevel test would say nothing either way.
+   It is witnessed in batch by [decreases_totality_batch.ml], which compiles
+   the binding above against a total-argument function and compiles the same
+   body without the measure beside it. *)
+
+(* Expect: refused.  The same body without the lower bound on [n]: at a
+   negative [n] the measure leaves the naturals, so nothing stops it
+   descending forever. *)
+module Unbounded_below : sig end = struct
+  let[@vox.decreases n] rec countdown (n : int) : int =
+    if n = 0 then 0 else countdown (n - 1)
+end
+
+[%%expect {|
+Line 3, characters 25-42:
+3 |     if n = 0 then 0 else countdown (n - 1)
+                             ^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused.  The measure is bounded but the call does not move it. *)
+module Does_not_decrease : sig end = struct
+  let[@vox.decreases n] rec spin (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else spin n
+end
+
+[%%expect {|
+Line 3, characters 25-31:
+3 |     if n = 0 then 0 else spin n
+                             ^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Expect: refused.  [0 - n] descends as mathematics but not as machine
+   arithmetic: at the minimum, negation returns the minimum, so the caller's
+   measure is the smallest value there is and the callee's is the largest. *)
+module Subtraction_wraps : sig end = struct
+  let[@vox.decreases 0 - n] rec up (n : int{ _ <= 0 }) : int =
+    if n = 0 then 0 else up (n + 1)
+end
+
+[%%expect {|
+Line 3, characters 25-35:
+3 |     if n = 0 then 0 else up (n + 1)
+                             ^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: accepted.  The same measure, once the parameter is held away from
+   the machine minimum so the negation cannot wrap. *)
+let[@vox.decreases 0 - n] rec up (n : int{ _ <= 0 && _ > min_int }) : int =
+  if n = 0 then 0 else up (n + 1)
+
+[%%expect {|
+val up : int{ _ <= 0 && _ > min_int } -> int = <fun>
+|}]
+
+(* The same obligation in the other arithmetic.  A component may descend in
+   [Bigint.t], the mathematical integers, and then the lower bound is there
+   for the reason it is usually there -- the naturals are well-founded and the
+   integers are not -- rather than to stop a wrap being mistaken for
+   progress. *)
+
+(* Expect: accepted.  Bounded below, so the descent is in the naturals. *)
+let[@vox.decreases n] rec countdown_big
+    (n : Bigint.t{ Bigint.ge _ Bigint.zero }) : int =
+  if Bigint.is_zero n then 0 else countdown_big (Bigint.sub n Bigint.one)
+
+[%%expect {|
+val countdown_big : Bigint.t{ Bigint.ge _ Bigint.zero } -> int = <fun>
+|}]
+
+(* Expect: refused.  Nothing wraps here; the measure simply descends forever
+   through the negative integers. *)
+module Big_unbounded_below : sig end = struct
+  let[@vox.decreases n] rec countdown (n : Bigint.t) : int =
+    if Bigint.is_zero n then 0 else countdown (Bigint.sub n Bigint.one)
+end
+
+[%%expect {|
+Line 3, characters 36-71:
+3 |     if Bigint.is_zero n then 0 else countdown (Bigint.sub n Bigint.one)
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: accepted.  Positions are compared each in its own arithmetic, so a
+   tuple may mix them. *)
+let[@vox.decreases k, n] rec mixed (k : int{ _ >= 0 })
+    (n : Bigint.t{ Bigint.ge _ Bigint.zero }) : int =
+  if Bigint.is_zero n then (if k = 0 then 0 else mixed (k - 1) (Bigint.of_int 5))
+  else mixed k (Bigint.sub n Bigint.one)
+
+[%%expect {|
+val mixed : int{ _ >= 0 } -> Bigint.t{ Bigint.ge _ Bigint.zero } -> int =
+  <fun>
+|}]
+
+(* Expect: refused.  The two sides of the comparison at a position come from
+   different measures when the group is mutual, so the group has to agree on
+   which arithmetic each position descends in. *)
+module Carriers_disagree : sig end = struct
+  let[@vox.decreases k] rec one (k : int{ _ >= 0 }) (b : Bigint.t) : int =
+    if k = 0 then 0 else two k b
+  and[@vox.decreases b] two (k : int{ _ >= 0 }) (b : Bigint.t) : int =
+    if k = 0 then 0 else one (k - 1) b
+end
+
+[%%expect {|
+Line 4, characters 5-23:
+4 |   and[@vox.decreases b] two (k : int{ _ >= 0 }) (b : Bigint.t) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] component 1 descends in Bigint.t here and in int elsewhere in the same recursive group
+|}]
+
+(* Expect: refused.  A measure has to descend in one of the two arithmetics
+   the obligation can be stated in. *)
+module Neither_arithmetic : sig end = struct
+  let[@vox.decreases s] rec loop (s : string) (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else loop s (n - 1)
+end
+
+[%%expect {|
+Line 2, characters 21-22:
+2 |   let[@vox.decreases s] rec loop (s : string) (n : int{ _ >= 0 }) : int =
+                         ^
+Error: vox: [@vox.decreases] measures descend in int or in Bigint.t; this component is neither
+|}]
+
+(* Expect: accepted.  A lexicographic pair whose first component stands still
+   while the second descends, and whose first component descends when the
+   second is reset upwards. *)
+let[@vox.decreases m, n] rec walk (m : int{ _ >= 0 }) (n : int{ _ >= 0 })
+    : int =
+  if n = 0 then (if m = 0 then 0 else walk (m - 1) 5)
+  else walk m (n - 1)
+
+[%%expect {|
+val walk : int{ _ >= 0 } -> int{ _ >= 0 } -> int = <fun>
+|}]
+
+(* Expect: refused.  The second component descends but the first one grows,
+   and a lexicographic tuple is read from the front. *)
+module Leading_component_grows : sig end = struct
+  let[@vox.decreases m, n] rec walk (m : int) (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else walk (m + 1) (n - 1)
+end
+
+[%%expect {|
+Line 3, characters 25-45:
+3 |     if n = 0 then 0 else walk (m + 1) (n - 1)
+                             ^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Expect: accepted.  An argument written over a parameter at a later
+   position than its own.  The measure at this call is the caller's [b] less
+   one, which the guard holds between zero and [a]: the arguments replace the
+   parameters all at once, so [b] here is the value the caller holds and not
+   the [0] that goes to [b]'s own position. *)
+let[@vox.decreases a] rec descends_on_a_later_parameter (a : int) (b : int)
+    : int =
+  if a >= 1 && b >= 1 && b < a
+  then descends_on_a_later_parameter (b - 1) 0
+  else 0
+
+[%%expect {|
+val descends_on_a_later_parameter : int -> int -> int = <fun>
+|}]
+
+(* Expect: refused.  The same shape with nothing relating [b] to [a].  The
+   obligation is about [b], and neither [0 <= b] nor [b < a] is known.
+
+   Substituting the positions one after another would instead state the
+   obligation about [0]: the first position's argument is [b], and [b] is
+   itself a parameter, so the second position would replace it with its own
+   argument.  That reads [0 < a], which the guard discharges, and the binding
+   would be accepted while running forever on [f 1 1]. *)
+module Argument_at_a_later_position : sig end = struct
+  let[@vox.decreases a] rec f (a : int) (b : int) : int =
+    if a >= 1 then f b 0 else 0
+end
+
+[%%expect {|
+Line 3, characters 19-24:
+3 |     if a >= 1 then f b 0 else 0
+                       ^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused.  A two-component measure whose call swaps its arguments.
+   The callee's tuple is [b, a] and the caller's is [a, b], and neither
+   position descends. *)
+module Swapped_arguments : sig end = struct
+  let[@vox.decreases a, b] rec f (a : int) (b : int) : int = f b a
+end
+
+[%%expect {|
+Line 2, characters 61-66:
+2 |   let[@vox.decreases a, b] rec f (a : int) (b : int) : int = f b a
+                                                                 ^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused, and this is the shape that makes the two above worth
+   having.  The orbit [(3, 0) -> (5, 1) -> (3, 0)] never ends, and every
+   argument of the call is written over both parameters. *)
+module Two_state_orbit : sig end = struct
+  let[@vox.decreases a] rec f (a : int) (b : int) : int =
+    if (a = 3 && b = 0) || (a = 5 && b = 1)
+    then
+      f (if a = 3 then (if b = 0 then 5 else 0) else (if b = 1 then 3 else 1))
+        (if b = 0 then 1 else 0)
+    else 0
+end
+
+[%%expect {|
+Lines 5-6, characters 6-32:
+5 | ......f (if a = 3 then (if b = 0 then 5 else 0) else (if b = 1 then 3 else 1))
+6 |         (if b = 0 then 1 else 0)
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused.  A measure has to be a function of the parameters, and a
+   call being total does not make it one.  [double] here is in fact pure, but
+   nothing the verifier can see says so, and the same shape with a mutable
+   field behind it would read differently at two different times. *)
+module Measure_calls_a_user_function : sig end = struct
+  let double (x : int) : int = 2 * x
+
+  let[@vox.decreases double n] rec f (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else f (n - 1)
+end
+
+[%%expect {|
+Line 4, characters 21-27:
+4 |   let[@vox.decreases double n] rec f (n : int{ _ >= 0 }) : int =
+                         ^^^^^^
+Error: vox: [@vox.decreases] cannot read this call as a measure.  A measure has to be a function of the parameters, and being total is not that: reading a mutable field terminates, so an accessor over one is truthfully total while its result changes under an assignment the descent knows nothing about.  Only the arithmetic and comparisons the verifier reproduces itself may appear here
+|}]
+
+(* Expect: accepted.  An immutable field is not a call: reading it twice
+   reads the same value, so a measure may be written over one. *)
+type counter = { size : int }
+
+let[@vox.decreases c.size] rec shrink (c : counter{ _.size >= 0 }) : int =
+  if c.size = 0 then 0 else shrink { size = c.size - 1 }
+
+[%%expect {|
+type counter = { size : int; }
+val shrink : counter{ _.size >= 0 } -> int = <fun>
+|}]
+
+(* Expect: refused.  This is the second way a measured recursion could have
+   been granted totality while running forever: the state is behind an
+   [int -> int] interface, so no mutable value appears in any obligation, and
+   every function here is truthfully total -- reading and writing a mutable
+   field both terminate.  What is not true is that [get j] is a function of
+   [j]: the [set] between the test and the call changes it, and the
+   observation made before the write would otherwise still be believed after
+   it.  [f 0 1 1] runs forever.
+
+   Written at the top of a file the totality request is what fails, and the
+   call carries the located reason; [decreases_tot_state.ml] is that witness.
+   Wrapped in a module here, the harness refuses it before reaching that, so
+   what this fixture pins is only that it stays refused. *)
+module State_behind_an_interface : sig end = struct
+  let a = ref 0
+  let b = ref 0
+  let cell (i : int) : int ref = if i = 0 then a else b
+  let get (i : int) : int = (cell i).contents
+  let set (i : int) (x : int) : unit = (cell i).contents <- x
+
+  let[@vox.decreases n] rec f (i : int) (j : int) (n : int) : int =
+    if get j >= 0 && get j < n
+    then begin
+      set j (n + 1);
+      f j i (get j)
+    end
+    else 0
+end
+
+[%%expect {|
+Line 12, characters 6-19:
+12 |       f j i (get j)
+           ^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused.  The same loop with the reads bound to locals first, so
+   the argument at the measured position is a plain identifier and the
+   position is one the verifier can decide.  What it may not do is prove the
+   descent from what it observed through [get] before the write, so the
+   hypotheses that would discharge it are not available.  Its witness at the
+   top of a file is [decreases_tot_state_local.ml]. *)
+module State_behind_a_local : sig end = struct
+  let a = ref 0
+  let b = ref 0
+  let cell (i : int) : int ref = if i = 0 then a else b
+  let get (i : int) : int = (cell i).contents
+  let set (i : int) (x : int) : unit = (cell i).contents <- x
+
+  let[@vox.decreases n] rec f (i : int) (j : int) (n : int) : int =
+    let x = get j in
+    if x >= 0 && x < n
+    then begin
+      set j (n + 1);
+      let y = get j in
+      f j i y
+    end
+    else 0
+end
+
+[%%expect {|
+Line 14, characters 6-13:
+14 |       f j i y
+           ^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: accepted.  A position whose argument the verifier cannot reproduce
+   is one the descent may not be decided at, and neither may any position
+   after it -- but the positions before it are untouched.  Here the pair
+   descends on its first position and the second is an opaque call, which is
+   Ackermann's shape without Ackermann's arithmetic. *)
+let opaque (x : int) : int = x + 1
+
+let[@vox.decreases m, n] rec passed_over (m : int{ _ >= 0 }) (n : int) : int =
+  if m = 0 then 0 else passed_over (m - 1) (opaque n)
+
+[%%expect {|
+val opaque : int -> int = <fun>
+val passed_over : int{ _ >= 0 } -> int -> int = <fun>
+|}]
+
+(* Expect: refused.  Structural comparison is recognised by primitive name,
+   and the name says nothing about what is being compared.  On a carrier that
+   contains a mutable field, [eq x y] reads that field, so it is not settled
+   by [x] and [y] and a measure written over it says nothing about what
+   changes between two calls.  The abstract type crosses logicality, which is
+   what lets the parameter appear in a measure at all. *)
+module Comparison_at_a_mutable_carrier : sig end = struct
+  module Cell : sig
+    type t : value mod logical
+
+    val make : int -> t
+    val differ : t -> unit @@ total
+    val same : t -> unit @@ total
+  end = struct
+    type t = { mutable v : int }
+
+    let make (n : int) : t = { v = n }
+    let (differ @ total) (c : t) : unit = c.v <- 1
+    let (same @ total) (c : t) : unit = c.v <- 0
+  end
+
+  external eq : Cell.t -> Cell.t -> bool @@ total = "%equal"
+
+  let[@vox.decreases if eq x y then n else 2 - n] rec loop
+      (x : Cell.t) (y : Cell.t) (n : int) : int =
+    if eq x y
+    then (if n >= 1 then (Cell.differ y; loop x y (n - 1)) else 0)
+    else (if n <= 1 then (Cell.same y; loop x y (n + 1)) else 0)
+end
+
+[%%expect {|
+Line 21, characters 41-57:
+21 |     then (if n >= 1 then (Cell.differ y; loop x y (n - 1)) else 0)
+                                              ^^^^^^^^^^^^^^^^
+Error: vox: this recursive call leaves no position of the termination measure that can be decided.  Its argument at the first position is, or contains, a call whose result the verifier does not reproduce: a total function may still read mutable state, so its value is not settled by its arguments, and a measure read through one says nothing about what changes between two calls.
+|}]
+
+(* Expect: refused, and this is the boundary of the rule rather than a
+   defect in the program.  [dec] is pure and its contract is proved, but
+   nothing the verifier can see distinguishes it from an accessor over
+   mutable state, so the position its result fills is one the descent may not
+   be decided at.  Writing [f (n - 1)] verifies. *)
+module Argument_through_a_helper : sig end = struct
+  let (dec @ total) (n : int{ _ >= 1 }) : int{ _ = n - 1 } = n - 1
+
+  let[@vox.decreases n] rec f (n : int{ _ >= 0 }) : int =
+    if n >= 1 then f (dec n) else 0
+end
+
+[%%expect {|
+Line 5, characters 19-28:
+5 |     if n >= 1 then f (dec n) else 0
+                       ^^^^^^^^^
+Error: vox: this recursive call leaves no position of the termination measure that can be decided.  Its argument at the first position is, or contains, a call whose result the verifier does not reproduce: a total function may still read mutable state, so its value is not settled by its arguments, and a measure read through one says nothing about what changes between two calls.
+|}]
+
+(* Expect: refused, the same boundary reached through the guard rather than
+   the argument.  The bound on [n] is true and proved, and it is unavailable
+   here because it is stated about a call the verifier does not reproduce.
+   The refusal says which call, since a dropped hypothesis is otherwise
+   invisible in the source. *)
+module Guard_through_a_helper : sig end = struct
+  let (positive @ total) (n : int) : bool{ _ = (n >= 1) } = n >= 1
+
+  let[@vox.decreases n] rec f (n : int{ _ >= 0 }) : int =
+    if positive n then f (n - 1) else 0
+end
+
+[%%expect {|
+Line 5, characters 23-32:
+5 |     if positive n then f (n - 1) else 0
+                           ^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+Hypotheses mentioning positive were not available for this descent.  A total function may still read mutable state, so what it answered before another call is not what it answers after one, and a measure may not descend on that.
+|}]
+
+(* Expect: accepted.  Mutual recursion descends on the measure the whole
+   group shares; each call compares the callee's measure at its arguments
+   against the caller's at its parameters. *)
+let[@vox.decreases n] rec even (n : int{ _ >= 0 }) : bool =
+  if n = 0 then true else odd (n - 1)
+and[@vox.decreases n] odd (n : int{ _ >= 0 }) : bool =
+  if n = 0 then false else even (n - 1)
+
+[%%expect {|
+val even : int{ _ >= 0 } -> bool = <fun>
+val odd : int{ _ >= 0 } -> bool = <fun>
+|}]
+
+(* Expect: refused.  One direction of the mutual group stands still. *)
+module Mutual_does_not_decrease : sig end = struct
+  let[@vox.decreases n] rec even (n : int{ _ >= 0 }) : bool =
+    if n = 0 then true else odd n
+  and[@vox.decreases n] odd (n : int{ _ >= 0 }) : bool =
+    if n = 0 then false else even (n - 1)
+end
+
+[%%expect {|
+Line 3, characters 28-33:
+3 |     if n = 0 then true else odd n
+                                ^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Expect: accepted.  A mutual group whose members take different numbers of
+   parameters, and whose lower bound comes from the guard on the path to the
+   call rather than from a refinement on the parameter. *)
+let[@vox.decreases n] rec one (n : int) (k : int) : int =
+  if n <= 0 then k else two (n - 1) k 7
+and[@vox.decreases a] two (a : int) (b : int) (c : int) : int =
+  if a <= 0 then b + c else one (a - 1) (b + c)
+
+[%%expect {|
+val one : int -> int -> int = <fun>
+val two : int -> int -> int -> int = <fun>
+|}]
+
+(* Expect: refused, and this is the case that fixes where the obligation
+   sits.  A result refinement of [false] is exactly what a call that never
+   returns establishes, and the body below is accepted without a measure for
+   that reason.  If the call's own result fact were in scope while proving
+   that the call descends, the measure would be proved from the assumption
+   that the call terminates, and this binding would be accepted as total.
+   The obligation is emitted first, so it is refused. *)
+module Diverging_result_contract : sig end = struct
+  let rec accepted_without_a_measure (n : int) : int{ false } =
+    accepted_without_a_measure (n + 1)
+
+  let[@vox.decreases n] rec bogus (n : int) : int{ false } = bogus (n + 1)
+end
+
+[%%expect {|
+Line 5, characters 61-74:
+5 |   let[@vox.decreases n] rec bogus (n : int) : int{ false } = bogus (n + 1)
+                                                                 ^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Expect: accepted.  A recursive call under a nested lambda is still a call
+   whose arguments the measure can be stated over; termination is an
+   induction on the argument, so where the call is written does not matter as
+   long as its measure descends. *)
+let[@vox.decreases n] rec nested (n : int{ _ >= 0 }) : int =
+  if n = 0 then 0 else (let step () = nested (n - 1) in step ())
+
+[%%expect {|
+val nested : int{ _ >= 0 } -> int = <fun>
+|}]
+
+(* Expect: accepted.  A recursive call in a guard. *)
+let[@vox.decreases n] rec guarded (n : int{ _ >= 0 }) : int =
+  match n with
+  | m when m > 0 && guarded (m - 1) >= 0 -> 1
+  | _ -> 0
+
+[%%expect {|
+val guarded : int{ _ >= 0 } -> int = <fun>
+|}]
+
+(* Expect: accepted.  Labelled arguments are supplied in an order other than
+   the one the parameters are written in.  The obligation is stated over the
+   parameter the measure names, not over whichever argument comes first at
+   the call, so this descends. *)
+let[@vox.decreases n] rec labelled ~(n : int{ _ >= 0 }) ~(k : int) : int =
+  if n = 0 then k else labelled ~k ~n:(n - 1)
+
+[%%expect {|
+val labelled : n:int{ _ >= 0 } -> k:int -> int = <fun>
+|}]
+
+(* Expect: refused.  The same call measured on the parameter that stands
+   still.  Together with the previous case this pins the argument-to-
+   parameter correspondence in both directions. *)
+module Labelled_wrong_position : sig end = struct
+  let[@vox.decreases k] rec labelled ~(n : int{ _ >= 0 }) ~(k : int{ _ >= 0 })
+      : int =
+    if n = 0 then k else labelled ~k ~n:(n - 1)
+end
+
+[%%expect {|
+Line 4, characters 25-47:
+4 |     if n = 0 then k else labelled ~k ~n:(n - 1)
+                             ^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Expect: refused.  A measure has to be an expression the verifier can
+   evaluate at every activation, so it may not call a partial function. *)
+module Partial_measure : sig end = struct
+  let half (x : int) = x / 2
+
+  let[@vox.decreases half n] rec f (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else f (n - 2)
+end
+
+[%%expect {|
+Line 4, characters 21-25:
+4 |   let[@vox.decreases half n] rec f (n : int{ _ >= 0 }) : int =
+                         ^^^^
+Error: The value "half" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 4, characters 21-27).
+|}]
+
+(* Expect: accepted.  A partial operation in the body is no obstacle to
+   stating a measure; it only stops the function being total, which
+   [decreases_totality_batch.ml] witnesses. *)
+let[@vox.decreases n] rec halves (n : int{ _ >= 0 }) : int =
+  if n = 0 then 0 else (n / 2) + halves (n - 1)
+
+[%%expect {|
+val halves : int{ _ >= 0 } -> int = <fun>
+|}]
+
+(* Expect: accepted.  A measured group written in expression position rather
+   than at the top of a structure. *)
+let local_descends () =
+  let[@vox.decreases n] rec countdown (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else countdown (n - 1)
+  in
+  countdown 3
+
+[%%expect {|
+val local_descends : unit -> int = <fun>
+|}]
+
+(* Expect: refused.  The same position, with a call that does not descend.
+   Obligations for a group in expression position come from a different walk
+   site than one at the top of a structure, and during development that site
+   did not install the measure, so a group written here was granted totality
+   with nothing proved about it. *)
+module Local_group_does_not_decrease : sig end = struct
+  let outer () =
+    let[@vox.decreases n] rec spin (n : int{ _ >= 0 }) : int =
+      if n = 0 then 0 else spin n
+    in
+    spin 3
+end
+
+[%%expect {|
+Line 4, characters 27-33:
+4 |       if n = 0 then 0 else spin n
+                               ^^^^^^
+Error: Refinement verification failed (disproved)
+|}]
+
+(* Eligibility.  The checks below decide whether a measure can be stated at
+   all; they run in the typing phase, so they hold under [-vox-type-only] and
+   on the editor's typing path as well as in a full compile. *)
+
+(* Expect: refused.  Nothing recurses, so there is nothing to measure. *)
+module Not_recursive : sig end = struct
+  let[@vox.decreases n] plain (n : int) : int = n
+end
+
+[%%expect {|
+Line 2, characters 5-23:
+2 |   let[@vox.decreases n] plain (n : int) : int = n
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] applies to a recursive binding; this one is not recursive
+|}]
+
+(* Expect: refused.  A group descends on one order, so a measure on one half
+   of it says nothing about the other. *)
+module Half_a_group : sig end = struct
+  let[@vox.decreases n] rec even (n : int) : bool =
+    if n = 0 then true else odd (n - 1)
+  and odd (n : int) : bool =
+    if n = 0 then false else even (n - 1)
+end
+
+[%%expect {|
+Line 2, characters 5-23:
+2 |   let[@vox.decreases n] rec even (n : int) : bool =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] must be given on every binding of a mutually recursive group
+|}]
+
+(* Expect: refused.  Two tuples of different lengths have no lexicographic
+   order between them. *)
+module Ragged_group : sig end = struct
+  let[@vox.decreases n, n] rec even (n : int) : bool =
+    if n = 0 then true else odd (n - 1)
+  and[@vox.decreases n] odd (n : int) : bool =
+    if n = 0 then false else even (n - 1)
+end
+
+[%%expect {|
+Line 2, characters 5-26:
+2 |   let[@vox.decreases n, n] rec even (n : int) : bool =
+         ^^^^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] must give the same number of components on every binding of a mutually recursive group
+|}]
+
+(* Expect: refused.  No measure was written. *)
+module Empty_measure : sig end = struct
+  let[@vox.decreases] rec loop (n : int) : int =
+    if n = 0 then 0 else loop (n - 1)
+end
+
+[%%expect {|
+Line 2, characters 5-21:
+2 |   let[@vox.decreases] rec loop (n : int) : int =
+         ^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] expects a measure expression, or a comma-separated tuple of them
+|}]
+
+(* Expect: refused.  A function is in neither arithmetic either; this and the
+   string case above are the two shapes worth having, since one is a value the
+   solver could otherwise carry and the other is not. *)
+module Not_an_integer : sig end = struct
+  let[@vox.decreases f] rec loop (f : int -> int) (n : int) : int =
+    if n = 0 then 0 else loop f (n - 1)
+end
+
+[%%expect {|
+Line 2, characters 21-22:
+2 |   let[@vox.decreases f] rec loop (f : int -> int) (n : int) : int =
+                         ^
+Error: vox: [@vox.decreases] measures descend in int or in Bigint.t; this component is neither
+|}]
+
+(* Expect: refused.  A recursive name reached other than as a saturated call
+   has no argument tuple for the obligation to compare against the
+   parameters. *)
+module Passed_as_a_value : sig end = struct
+  let[@vox.decreases n] rec loop (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0
+    else List.fold_left (fun a b -> a + b) 0 (List.map loop [n - 1])
+end
+
+[%%expect {|
+Line 2, characters 5-23:
+2 |   let[@vox.decreases n] rec loop (n : int{ _ >= 0 }) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
+(* The three phrases below are the same refusal reached by three different
+   routes, and they are the ones that matter most: a group name that is not a
+   call generates no obligation, so if any of them were admitted the function
+   could diverge through the escaped value while typed total.  Eleven shapes
+   were probed in all -- alias, argument, return, record, ref, tuple, list,
+   local module, nested closure, partial and over-application -- and each is
+   refused twice over, once here on the parsetree and once by the rescan of
+   the typed tree, which was confirmed by disabling the first and rerunning
+   them all. *)
+
+(* Expect: refused.  Bound to a local and called through the alias. *)
+module Escapes_as_an_alias : sig end = struct
+  let[@vox.decreases n] rec loop (n : int) : int =
+    let step = loop in
+    step (n + 1)
+end
+
+[%%expect {|
+Line 2, characters 5-23:
+2 |   let[@vox.decreases n] rec loop (n : int) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
+(* Expect: refused.  Stored in a record and called through the field. *)
+module Escapes_into_a_record : sig end = struct
+  type box = { run : int -> int }
+
+  let[@vox.decreases n] rec loop (n : int) : int =
+    let boxed = { run = loop } in
+    boxed.run (n + 1)
+end
+
+[%%expect {|
+Line 4, characters 5-23:
+4 |   let[@vox.decreases n] rec loop (n : int) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
+(* Expect: refused.  Handed to another function, which does the calling. *)
+module Escapes_as_an_argument : sig end = struct
+  let apply (step : int -> int) (x : int) = step x
+
+  let[@vox.decreases n] rec loop (n : int) : int = apply loop (n + 1)
+end
+
+[%%expect {|
+Line 4, characters 5-23:
+4 |   let[@vox.decreases n] rec loop (n : int) : int = apply loop (n + 1)
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
+(* Expect: refused.  Likewise for a partial application: the closure it
+   builds is called somewhere the obligation cannot see. *)
+module Partial_application : sig end = struct
+  let[@vox.decreases n] rec loop (n : int{ _ >= 0 }) (k : int) : int =
+    if n = 0 then k else (loop (n - 1)) k
+end
+
+[%%expect {|
+Line 2, characters 5-23:
+2 |   let[@vox.decreases n] rec loop (n : int{ _ >= 0 }) (k : int) : int =
+         ^^^^^^^^^^^^^^^^^^
+Error: vox: [@vox.decreases] requires every occurrence of a name in the recursive group to be a direct call supplying all of its parameters
+|}]
+
+(* Expect: refused.  [@vox.def] generates a trusted equation from the body it
+   reads, and reads it on the strength of structural recursion; a measure is
+   deliberately not accepted in its place. *)
+module Def_stays_structural : sig end = struct
+  let[@vox.def] [@vox.decreases n] rec dbl (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else 2 + dbl (n - 1)
+end
+
+[%%expect {|
+Lines 2-3, characters 2-40:
+2 | ..let[@vox.def] [@vox.decreases n] rec dbl (n : int{ _ >= 0 }) : int =
+3 |     if n = 0 then 0 else 2 + dbl (n - 1)
+Error: vox: [@vox.def] cannot be used on this recursive binding: its recursive group is not structurally total
+|}]
+
+(* Expect: accepted.  A local binding that shadows a group name is not a
+   recursive occurrence. *)
+let[@vox.decreases n] rec shadowed (n : int{ _ >= 0 }) : int =
+  if n = 0 then 0
+  else
+    let shadowed = 3 in
+    shadowed + 0
+
+[%%expect {|
+val shadowed : int{ _ >= 0 } -> int = <fun>
+|}]
