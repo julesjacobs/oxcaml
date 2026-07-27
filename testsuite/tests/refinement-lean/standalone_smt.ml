@@ -1217,6 +1217,8 @@ let cache_test_environment =
 external unset_environment_variable : string -> bool
   = "caml_vox_unset_environment_variable"
 
+external file_stamp : string -> string = "caml_vox_file_stamp"
+
 let restore_environment saved =
   List.iter
     (fun (name, value) ->
@@ -1250,8 +1252,7 @@ let string_contains ~needle haystack =
 let cache_test_record ?(verdict = "p") key =
   let body =
     String.concat " "
-      [ "2";
-        Digest.BLAKE256.to_hex (Digest.BLAKE256.string key);
+      [ Digest.BLAKE256.to_hex (Digest.BLAKE256.string key);
         verdict;
         "u";
         "-";
@@ -1501,10 +1502,15 @@ let () =
           |> Option.get
         else Sys.executable_name
       in
-      let compiler_digest = Digest.to_hex (Digest.file compiler_executable) in
+      (* The compiler is identified by its filesystem stamp rather than by a
+         digest of its 42 MB of content, which cost 0.10s an invocation. *)
+      let compiler_identity =
+        compiler_executable ^ ":" ^ file_stamp compiler_executable
+      in
+      assert (not (String.equal (file_stamp compiler_executable) ""));
       assert
         (match z3_key_a with
-         | Some key -> string_contains ~needle:compiler_digest key
+         | Some key -> string_contains ~needle:compiler_identity key
          | None -> false);
       Unix.putenv "VOX_SOLVER_CACHE_COMPILER_IDENTITY" "test-build-b";
       let z3_key_b =

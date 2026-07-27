@@ -72,41 +72,24 @@ external file_stamp : string -> string = "caml_vox_file_stamp"
 external is_regular_executable : string -> bool
   = "caml_vox_file_is_executable"
 
-let executable_digests = Atomic.make []
+(* A binary's identity, for deciding whether a cached result was produced by
+   this exact compiler and this exact solver.  Its content digest answers the
+   same question and costs 0.10s per compiler invocation: 42 MB of compiler
+   and 22 MB of solver, hashed before the first obligation can be looked up,
+   and paid in full by a module carrying a single obligation.
 
-(* Solver executables can be replaced while the IDE remains live.  Their
-   content digest is reused only while the cheap filesystem stamp matches. *)
-let file_digest_identity path =
+   The stamp is device, inode, size, modification time and change time, each
+   to the nanosecond.  It changes whenever the file's content could have
+   changed, which is the property the key needs.  It cannot be carried over a
+   rebuild: an install writes new content, so size or modification time move,
+   and even a copy that restores the modification time cannot restore the
+   change time, because setting the one sets the other.  It also cannot be
+   staler than the digest it replaces, because the digest was already trusted
+   only for as long as this stamp held: version 1 memoised the content digest
+   against exactly these bytes. *)
+let file_identity path =
   let stamp = file_stamp path in
-  if String.equal stamp "" then None
-  else match
-    List.find_opt
-      (fun (cached_path, cached_stamp, _) ->
-        String.equal cached_path path && String.equal cached_stamp stamp)
-      (Atomic.get executable_digests)
-  with
-  | Some (_, _, fingerprint) -> Some fingerprint
-  | None ->
-    begin
-      try
-        let fingerprint = path ^ ":" ^ Digest.to_hex (Digest.file path) in
-        let rec remember () =
-          let previous = Atomic.get executable_digests in
-          if
-            List.exists
-              (fun (cached_path, cached_stamp, _) ->
-                String.equal cached_path path && String.equal cached_stamp stamp)
-              previous
-          then ()
-          else if not
-              (Atomic.compare_and_set executable_digests previous
-                 ((path, stamp, fingerprint) :: previous))
-          then remember ()
-        in
-        remember ();
-        Some fingerprint
-      with Sys_error _ -> None
-    end
+  if String.equal stamp "" then None else Some (path ^ ":" ^ stamp)
 
 let resolve_executable executable =
   if Filename.is_implicit executable then
@@ -120,24 +103,22 @@ let resolve_executable executable =
   else if is_regular_executable executable then Some executable
   else None
 
-let running_compiler_digest =
-  lazy
-    (Option.bind (resolve_executable Sys.executable_name) (fun executable ->
-       try
-         Some (executable ^ ":" ^ Digest.to_hex (Digest.file executable))
-       with Sys_error _ -> None))
+let running_compiler_identity =
+  lazy (Option.bind (resolve_executable Sys.executable_name) file_identity)
 
-(* The running executable cannot change underneath this process; the optional
-   declared identity only further partitions its mandatory content digest. *)
+(* The running executable cannot change underneath this process, so its
+   identity is taken once.  The declared identity partitions that further
+   rather than standing in for it: the reason to want it to stand in was the
+   cost of the digest, and the digest is gone. *)
 let compiler_implementation_identity () =
-  match Lazy.force running_compiler_digest with
+  match Lazy.force running_compiler_identity with
   | None -> None
-  | Some digest ->
+  | Some identity ->
     Some
       (match Sys.getenv_opt "VOX_SOLVER_CACHE_COMPILER_IDENTITY" with
-       | Some identity when not (String.equal identity "") ->
-         digest ^ "|declared=" ^ identity
-       | Some _ | None -> digest)
+       | Some declared when not (String.equal declared "") ->
+         identity ^ "|declared=" ^ declared
+       | Some _ | None -> identity)
 
 module Persistent_cache = struct
   (* Version 1 of this store gave every result a file of its own, holding the
@@ -165,7 +146,6 @@ module Persistent_cache = struct
      that no result loses its entry in practice. *)
   let max_detail_bytes = 64 * 1024
 
-  let record_tag = "2"
   let key_digest_length = 64
   let checksum_length = 16
 
@@ -226,6 +206,13 @@ module Persistent_cache = struct
       (Digest.BLAKE128.to_hex (Digest.BLAKE128.string body))
       0 checksum_length
 
+  (* Only a decision about the obligation itself is written down.  Not-proved
+     and unknown are as often a report about the machine as about the goal --
+     a solver that ran out of its thirty seconds under load returns them --
+     so storing one would turn a slow afternoon into a permanent rejection of
+     correct code.  Solver-error and unavailable say the solver could not be
+     run at all.  None of the four has a reader that recomputing would not
+     serve better. *)
   let cache_string_of_verdict = function
     | Proved -> "p"
     | Disproved -> "d"
@@ -269,11 +256,28 @@ module Persistent_cache = struct
         (string_of_hex (String.sub text 1 (String.length text - 1)))
     | _ -> None
 
-  (* A record is one line of printable text whose only spaces are the five
+  (* A record is one line of printable text whose only spaces are the four
      field separators, so a reader resynchronizes on the next newline however
-     badly the previous line was damaged. *)
+     badly the previous line was damaged.
+
+     Every field is here because something reads it back, and no field is
+     here for any other reason.  The digest decides whether this record
+     answers the obligation in hand.  The verdict is the answer.  The
+     unused-fact indices become the per-fact [used] flag in the dumped
+     verification condition, which is what fades a hypothesis no proof needed
+     ([Vox_verify.json_fact]).  The detail is the text of a refutation, which
+     reaches the reader twice, as the [counterexample] field of that dump and
+     as the message of the failure the compiler reports
+     ([Vox_verify.counterexample] and [Vox_verify.failure_text]); dropping it
+     would make a cached run print something an uncached run does not.  The
+     checksum is what makes an interleaved append cost a recomputation rather
+     than a wrong verdict.
+
+     There is no version tag.  A log is named for the digest of its schema,
+     so a record written under one version is never opened by a reader of
+     another, and a tag in the line would have had no reader. *)
   let record_body ~digest ~verdict ~unused_facts ~detail =
-    String.concat " " [record_tag; digest; verdict; unused_facts; detail]
+    String.concat " " [digest; verdict; unused_facts; detail]
 
   let encoded_record ~digest (entry : entry) =
     let body =
@@ -286,9 +290,8 @@ module Persistent_cache = struct
 
   let parse_record line =
     match String.split_on_char ' ' line with
-    | [tag; digest; verdict; unused_facts; detail; checksum]
-      when String.equal tag record_tag
-           && String.length digest = key_digest_length
+    | [digest; verdict; unused_facts; detail; checksum]
+      when String.length digest = key_digest_length
            && String.equal checksum
                 (record_checksum
                    (record_body ~digest ~verdict ~unused_facts ~detail)) ->
@@ -813,7 +816,7 @@ let command_fingerprint ~backend = function
       | Some executable when solver_basename_matches backend executable ->
         Option.bind (resolve_executable executable) (fun executable ->
           Option.map (fun identity -> command ^ "|" ^ identity)
-            (file_digest_identity executable))
+            (file_identity executable))
       | Some _ | None -> declared_command_fingerprint ~backend command
     end
 
@@ -844,7 +847,7 @@ module Lean_backend_uncached = struct
       let lean = Vox_lean.resolve_lean () in
       Option.bind lean (fun lean ->
         Option.bind (resolve_executable lean) (fun lean ->
-          Option.bind (file_digest_identity lean) (fun solver ->
+          Option.bind (file_identity lean) (fun solver ->
           cache_key ~backend ~implementation:"lean-translation-bv63-v2" ~solver
               ~options:"timeout=30;linter=unusedVariables" ~payload)))
 
