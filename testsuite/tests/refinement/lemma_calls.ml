@@ -66,3 +66,13 @@ external outer : unit -> unit{ 2 > 1 } @@ total = "%ignore"
 let nested_argument (g : int) =
   let () = outer (needed ~x:g) in
   (g : int{ _ > 2 })
+
+(* The same, where the argument states a proposition an earlier call already
+   stated.  The fact environment keeps one entry for it, so the only trace
+   the inner call leaves is a producer added to that entry -- and a check
+   that compared the propositions alone would see an unchanged environment
+   and offer the outer call. *)
+let nested_merged (h : int{ _ > 3 }) =
+  let () = law ~x:h in
+  let () = outer (law ~x:h) in
+  (h : int{ _ > 2 })

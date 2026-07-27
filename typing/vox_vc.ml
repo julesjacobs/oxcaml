@@ -295,7 +295,26 @@ module Fact_env = struct
       scope = Ident.Set.union left.scope right.scope;
     }
 
-  let same_facts left right = left.facts_rev == right.facts_rev
+  (* Nothing was added to, merged into or dropped from these facts between
+     one environment and the other.  Identity of the list answers the common
+     case, since a walk that touched nothing hands back what it was given.
+     Content answers the rest, because ordinary walking rebuilds the list
+     without changing it -- [merge_facts] re-inserts every fact -- and a
+     caller that read a rebuild as a change would refuse to answer about any
+     call with a compound argument.  Producers are compared and not only the
+     propositions: a site whose proposition is already present leaves the
+     list the same length, and the only trace of it is the producer it added
+     to the entry that was there. *)
+  let same_facts left right =
+    let same_fact left right =
+      left == right
+      || (same_expression left.expression right.expression
+          && List.length left.producers = List.length right.producers
+          && List.for_all2 same_origin left.producers right.producers)
+    in
+    left.facts_rev == right.facts_rev
+    || (List.length left.facts_rev = List.length right.facts_rev
+        && List.for_all2 same_fact left.facts_rev right.facts_rev)
 
   let snapshot ~loc ~goal env =
     let escaped =

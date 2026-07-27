@@ -99,11 +99,13 @@ module Fact_env : sig
   (** Combine facts and scope from two environments. *)
 
   val same_facts : t -> t -> bool
-  (** Whether these two environments hold the same facts: not equal ones, the
-      same list, unchanged since it was taken.  Identity is deliberate.  It is
-      false whenever anything rebuilt the list, a rebuild that changed nothing
-      included, so a caller asking "did evaluating this expression contribute
-      a fact?" is told yes wherever the answer is not certainly no. *)
+  (** Whether nothing was added to, merged into or dropped from these facts
+      between the one environment and the other.  For a caller asking "did
+      evaluating this expression contribute anything to what is known?", to
+      which the safe answer wherever it is unclear is yes: two entries count
+      as the same only when they hold the same proposition and name the same
+      introducers, so a site whose proposition was already present -- which
+      changes nothing but that entry's producer list -- is a contribution. *)
 
   val snapshot :
     loc:Location.t ->
