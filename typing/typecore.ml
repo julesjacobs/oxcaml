@@ -7785,7 +7785,18 @@ let is_stdlib_assume env path =
   && Path.same (Env.normalize_value_path None env path) stdlib_assume_path
 
 let assume_error ~loc format =
-  Location.raise_errorf ~loc ("This obligation cannot be admitted: " ^^ format)
+  Location.raise_errorf ~loc ("This obligation cannot be admitted:@ " ^^ format)
+
+(* Where the identifier is reached with nothing imposed on it.  Resolution
+   is name-guarded to keep it off the path every identifier takes. *)
+let refuse_bare_assume env lid =
+  if String.equal (Longident.last lid.Location.txt) "assume" then
+    match Env.find_value_by_name lid.txt env with
+    | path, _ when is_stdlib_assume env path ->
+      Location.raise_errorf ~loc:lid.loc
+        "[assume] admits the obligation of the refinement imposed on it,@ and \
+         there is none here"
+    | _ | (exception Not_found) -> ()
 
 (* The admitted expression, when this is an [assume] applied to one ordinary
    argument.  The refinement is not read from here: it comes from whatever
@@ -8412,13 +8423,15 @@ and type_expect_
   in
   match sexp.pexp_desc with
   | Pexp_ident lid ->
+      (* Ahead of [type_ident], so that the reason a use is refused is the
+         reason, and not whatever the ordinary rules would say about a
+         function reached where it should not have been reached at all.  A
+         law is written inside a total function, and there this identifier
+         is a partial one; being told so instead helps nobody. *)
+      refuse_bare_assume env lid;
       let path, actual_mode, layout_args, desc, kind =
         type_ident env ~recarg lid
       in
-      if is_stdlib_assume env path then
-        Location.raise_errorf ~loc:lid.loc
-          "[assume] admits the obligation of the refinement imposed on it, \
-           and there is none here";
       let exp_desc =
         match desc.val_kind with
         | Val_ivar (_, cl_num) ->
