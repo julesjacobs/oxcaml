@@ -1,0 +1,49 @@
+units:     bst.ml rbt.ml avl.ml ulist.ml client.ml 
+original:  /usr/local/home/jujacobs/oxcamls/vox2/main/worktrees/latency/tools/vox-latency/corpus
+compiler:  /usr/local/home/jujacobs/oxcamls/vox2/main/worktrees/latency/_install/bin/ocamlc
+backend:   z3, median of 21 runs, private solver cache
+load:      31.63, 27.15, 23.08  (64 cpus)
+
+row sanity
+  original verify                    ok
+  original -vox-no-verify            ok
+  original -vox-type-only            ok
+  VOX_MEASURE_STOP_AFTER available   yes
+
+configuration                       median      [min .. max]
+        compiler startup floor (x5)    0.2097   [0.1843 .. 0.2437]
+  orig  -vox-type-only                 0.4094   [0.3862 .. 0.4405]
+  orig  -vox-no-verify                 0.4149   [0.3879 .. 0.4370]
+  orig  -vox-dump-vc                   0.4102   [0.3741 .. 0.4439]
+  orig  stop-after=obligations         0.4233   [0.4096 .. 0.4559]
+  orig  stop-after=translation         0.9959   [0.9619 .. 1.1053]
+  orig  stop-after=translation x2      1.0660   [1.0068 .. 1.1550]
+  orig  stop-after=lookup (warm)       1.1753   [1.0126 .. 1.5575]
+  orig  verify, warm cache             1.0856   [1.0113 .. 1.6373]
+  orig  verify, cold cache             1.7562   [1.7255 .. 2.2151]
+
+attributed to                       seconds    share of cold total
+  compiler startup, 5 invocation(s)    0.2097    11.9%
+  typecheck + refinements              0.1997    11.4%
+  conformance + cmi/cmo                0.0055     0.3%
+  obligation construction              0.0084     0.5%
+  SMT translation + key                0.5726    32.6%
+  cache lookup + result plumbing       0.0897     5.1%
+  solving, cold (as measured)          0.6706    38.2%
+    of which: 2nd SMT emission         0.0701     4.0%
+    of which: solver proper            0.6005    34.2%
+
+  A cold obligation is translated TWICE: once by cache_key to derive
+  the key, and again by the backend's discharge, which is not handed
+  what cache_key already built.  Cold minus warm therefore charges the
+  second emission to the solver; the two rows above split it out.
+
+  cross-check: stop-after=lookup does strictly less than verify-warm,
+  so warm minus lookup should be small and non-negative.  A negative
+  figure means the rows are inside the noise of a loaded box and the
+  lookup split should not be quoted to more than one digit.
+  warm minus stop-after=lookup        -0.0897
+
+  a perfect cache saves the solving row and nothing above it:
+  cold total                           1.7562   100.0%
+  warm total                           1.0856    61.8%
