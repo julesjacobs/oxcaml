@@ -3,6 +3,7 @@
    key_intf.ml int_key.mli int_key.ml \
    gen_ulist.mli gen_ulist.ml gen_bst.mli gen_bst.ml \
    gen_avl.mli gen_avl.ml gen_rbt.mli gen_rbt.ml \
+   gen_sorted.mli gen_sorted.ml \
    client.ml \
  ";
  setup-ocamlc.byte-build-env;
@@ -28,6 +29,10 @@
  module = "gen_rbt.mli";
  ocamlc.byte;
  module = "gen_rbt.ml";
+ ocamlc.byte;
+ module = "gen_sorted.mli";
+ ocamlc.byte;
+ module = "gen_sorted.ml";
  ocamlc.byte;
  module = "client.ml";
  ocamlc.byte;
