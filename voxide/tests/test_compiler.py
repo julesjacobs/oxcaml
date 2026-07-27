@@ -762,7 +762,11 @@ class TranslateVcTests(unittest.TestCase):
     def test_v1_goal_and_facts_fall_back_to_raw_text(self):
         # Schema v1 has no display/origin: display falls back to raw text
         # (whitespace preserved, not collapsed), hypotheses are positional
-        # (name None) and have no clickable span.
+        # (name None) and have no clickable span.  It carries neither of the
+        # two later provenance fields either, and both stay explicitly None:
+        # a consumer asking who introduced a fact, or which backend read it,
+        # has to see "not reported" rather than an absent key it could read
+        # as an empty answer.
         result = self._one()
         self.assertEqual(
             result["goal"],
@@ -777,6 +781,8 @@ class TranslateVcTests(unittest.TestCase):
                     "display": "(app a\n  b)",
                     "raw": "(app a\n  b)",
                     "span": None,
+                    "producers": None,
+                    "used_by": None,
                 }
             ],
         )
