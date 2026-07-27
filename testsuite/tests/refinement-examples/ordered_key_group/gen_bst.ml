@@ -8,7 +8,7 @@
    pair means anything alone; together they show that whether the interface
    forces a component is a fact about the proof, not about the structure.
 
-   It also shares 341 non-blank lines verbatim with [gen_avl], whose tree
+   It also shares 344 non-blank lines verbatim with [gen_avl], whose tree
    type is this one with [Leaf] for [Empty], and a shared ordered-tree core
    could remove them.  It is left as it is on purpose: the two are kept as
    independent measurements of what abstracting the key costs, and merging

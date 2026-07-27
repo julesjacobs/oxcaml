@@ -9,7 +9,7 @@
    implementation's [insert_law] needs.  Its [balanced] component is not
    forced, which is the shape half of the measurement in [key_intf.ml].
 
-   On the 341 lines it shares with [gen_bst], see the note at the head of
+   On the 344 lines it shares with [gen_bst], see the note at the head of
    that file. *)
 
 external int_equal : int -> int -> bool @@ total = "%equal"
