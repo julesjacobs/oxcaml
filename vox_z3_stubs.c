@@ -120,21 +120,31 @@ static void close_descriptor(int *descriptor)
    between attempts was 100 ms of sleeping on every compilation that opened a
    session -- and the sleep was spent waiting for a child that had already
    exited. Start a thousand times shorter and back off, which reaps the usual
-   case on the first pause and keeps the same two-second budget before
-   escalating to SIGKILL. */
+   case on the first pause.
+
+   What is held fixed is the time a child is given before escalation, not the
+   number of polls: the loop spends exactly WAIT_BUDGET_MICROSECONDS asleep,
+   the same two seconds the flat 100 ms loop spent over its twenty attempts,
+   and the last pause is clamped so that backing off cannot overrun it. It
+   takes more polls to spend that budget -- 29 rather than 20, since the first
+   nine are short -- which only means a child that exits late is noticed
+   sooner. */
 #define WAIT_INITIAL_MICROSECONDS 200
 #define WAIT_MAXIMUM_MICROSECONDS 100000
-#define WAIT_ATTEMPTS 29
+#define WAIT_BUDGET_MICROSECONDS 2000000
 
 static void wait_briefly(pid_t pid)
 {
-  int attempts;
   int status;
+  long remaining = WAIT_BUDGET_MICROSECONDS;
   useconds_t pause = WAIT_INITIAL_MICROSECONDS;
-  for (attempts = 0; attempts < WAIT_ATTEMPTS; attempts++) {
+  for (;;) {
     pid_t waited = waitpid(pid, &status, WNOHANG);
     if (waited == pid || (waited < 0 && errno == ECHILD)) return;
+    if (remaining <= 0) break;
+    if ((long)pause > remaining) pause = (useconds_t)remaining;
     usleep(pause);
+    remaining -= (long)pause;
     pause *= 2;
     if (pause > WAIT_MAXIMUM_MICROSECONDS) pause = WAIT_MAXIMUM_MICROSECONDS;
   }
