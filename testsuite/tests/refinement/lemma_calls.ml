@@ -43,3 +43,15 @@ let branches (c : bool) (d : int{ _ > 3 }) =
 let not_evidence (e : int{ _ > 3 }) =
   let () = effectful_law ~x:e in
   (e : int{ _ > 2 })
+
+(* A law an obligation genuinely needs.  Without one of these the usage half
+   of this test cannot fail in the direction that matters: every reading of
+   [used] above is "unread", so a mechanism that had stopped reading the
+   solver's answer and returned "unread" for everything would satisfy it, and
+   that is exactly the failure that would tell a reader to delete a call the
+   proof depends on. *)
+external needed : x:int -> unit{ x > 3 } @@ total = "%ignore"
+
+let uses_law (f : int) =
+  let () = needed ~x:f in
+  (f : int{ _ > 2 })
