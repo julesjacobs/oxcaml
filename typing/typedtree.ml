@@ -267,10 +267,14 @@ and exp_extra =
   | Texp_stack
   | Texp_mode of Mode.Alloc.Const.Option.t modes
   | Texp_refinement_application of refinement_application
-  | Texp_refinement_constraint of type_expr
+  | Texp_refinement_constraint of type_expr * refinement_admission
   | Texp_inspected_type of [ `exp ] type_inspection
   | Texp_borrowed
   | Texp_ghost_region
+
+and refinement_admission =
+  | Refinement_proved
+  | Refinement_admitted of int
 
 and refinement_application_argument =
   { rap_domain : type_expr;

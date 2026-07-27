@@ -1,0 +1,19 @@
+File "assume_tiers.ml", line 23, characters 68-77
+Admitted (checked at run time): unit{ length v >= 0 } is assumed here, not proved.
+File "assume_tiers.ml", line 28, characters 2-11
+Admitted (checked at run time): unit{ min_int <= n && n <= max_int } is assumed here, not proved.
+File "assume_tiers.ml", line 31, characters 2-11
+Admitted (checked at run time): unit{ Int.max_int > Int.min_int } is assumed here, not proved.
+File "assume_tiers.ml", line 35, characters 31-39
+Admitted (checked at run time): int{ _ > 0 } is assumed here, not proved.
+File "assume_tiers.ml", line 40, characters 2-11
+Admitted (checked at run time): unit{ n <= max_int } is assumed here, not proved.
+File "assume_tiers.ml", line 47, characters 2-11
+Admitted (checked at run time): unit{ length v >= 0 } is assumed here, not proved.
+File "assume_tiers.ml", line 51, characters 56-65
+Admitted (unchecked): unit{ s = s } is assumed here, not proved.
+File "assume_tiers.ml", line 56, characters 2-11
+Admitted (unchecked): unit{ 1 lsl n > 0 } is assumed here, not proved.
+File "assume_tiers.ml", line 61, characters 34-48
+Admitted (unchecked): int{ _ > 0 } is assumed here, not proved.
+Admitted 9 obligations in this unit: 6 checked at run time, 3 unchecked.

@@ -7779,10 +7779,23 @@ let stdlib_assume_path =
   Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib"), "assume")
 
 (* The name is checked first only to keep the resolution off the path every
-   identifier takes: a value reached under any other name is not this one. *)
+   identifier takes: a value reached under any other name is not this one.
+
+   Identity is then the declaration's, not the path's.  A re-export that
+   COPIES the value rather than aliasing the module -- [include Stdlib], or
+   a signature ascription naming it -- gives it a path of its own, and the
+   copy is the same declaration.  Comparing paths alone lets those through
+   as an ordinary identity function: harmless, since nothing can be admitted
+   through one, but confusing to be handed. *)
 let is_stdlib_assume env path =
   String.equal (Path.last path) "assume"
-  && Path.same (Env.normalize_value_path None env path) stdlib_assume_path
+  && (Path.same (Env.normalize_value_path None env path) stdlib_assume_path
+      || match
+           (Env.find_value path env).val_uid,
+           (Env.find_value stdlib_assume_path env).val_uid
+         with
+         | copied, original -> Shape.Uid.equal copied original
+         | exception Not_found -> false)
 
 let assume_error ~loc format =
   Location.raise_errorf ~loc ("This obligation cannot be admitted:@ " ^^ format)
@@ -8067,7 +8080,8 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
            else
              { exp with
                exp_extra =
-                 ( Texp_refinement_constraint ty_expected_explained.ty,
+                 ( Texp_refinement_constraint
+                     (ty_expected_explained.ty, Refinement_proved),
                    exp.exp_loc,
                    [] )
                  :: exp.exp_extra;
@@ -8240,15 +8254,22 @@ and type_refinement_annotation
    [Vox_verify] turns the admission into a fact, and reports it. *)
 and type_assume env expected_mode ~loc ~sarg_loc argument refined_type refinement =
   if !refinement_predicate_context then
-    assume_error ~loc "a refinement predicate is a proposition, not code";
+    (* Written in a predicate, or in the body of a definition that [@vox.def]
+       reflects as one.  Either way what surrounds this is a proposition, and
+       a proposition has no code in it for an admission to be about. *)
+    assume_error ~loc
+      "this is inside a proposition, and a proposition has no code in it@ \
+       for an admission to be about";
   if not (Int.equal 0 (Env.stage env :> int)) then
     assume_error ~loc "a quoted or spliced admission belongs to another stage";
   let refined_type = instance refined_type in
   let skeleton = instance refinement.ref_skeleton in
   let arg = type_expect env expected_mode argument (mk_expected skeleton) in
   let check = type_assume_check env ~loc:sarg_loc argument refinement in
-  Vox_vc.Assumption.record ~key:loc ~site:sarg_loc
-    ~guarded:(Option.is_some check) refinement refined_type;
+  let token =
+    Vox_vc.Assumption.record ~site:sarg_loc ~guarded:(Option.is_some check)
+      refinement refined_type
+  in
   let admitted =
     match check with
     | None -> { arg with exp_type = refined_type; exp_loc = loc }
@@ -8264,7 +8285,19 @@ and type_assume env expected_mode ~loc ~sarg_loc argument refined_type refinemen
         exp_env = env;
       }
   in
-  (admitted, true)
+  (* This arm carries its own mark, and tells its caller to add none.  The
+     mark is where the admission's identity lives, so it has to be built
+     here; a caller's mark would be an ordinary one and the obligation would
+     be raised to be proved. *)
+  ( { admitted with
+      exp_extra =
+        ( Texp_refinement_constraint
+            (refined_type, Refinement_admitted token),
+          sarg_loc,
+          [] )
+        :: admitted.exp_extra;
+    },
+    false )
 
 (* The check for this admission, or [None] where the predicate does not run.
 
@@ -8301,10 +8334,6 @@ and type_assume_check env ~loc argument refinement =
     | (check, sort) ->
       begin match check.exp_desc with
       | Texp_assert (condition, _) when assume_check_is_executable condition ->
-        (* Registered by whatever location object the node ended up with,
-           rather than by the one handed to the constructor, so the identity
-           the verifier reads is the identity recorded. *)
-        Vox_vc.Assumption.record_check check.exp_loc;
         Some (check, sort)
       | _ -> abandon ()
       end
@@ -11631,7 +11660,7 @@ and type_function
                 else
                   { body with
                     exp_extra =
-                      ( Texp_refinement_constraint ty_expected,
+                      ( Texp_refinement_constraint (ty_expected, Refinement_proved),
                         body.exp_loc,
                         [] )
                       :: body.exp_extra;
@@ -13559,7 +13588,7 @@ and type_cases
               else
                 { exp with
                   exp_extra =
-                    ( Texp_refinement_constraint ty_expected,
+                    ( Texp_refinement_constraint (ty_expected, Refinement_proved),
                       exp.exp_loc,
                       [] )
                     :: exp.exp_extra;

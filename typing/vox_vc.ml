@@ -27,16 +27,18 @@ module Recursive_binding = struct
   let defeq_requested loc = memq loc defeq_locations
 end
 
-(* The obligations a unit admitted rather than proved.  Typecore mints a
-   location object for each [assume] and records the refinement it admits
-   here; [Vox_verify] recognises the site by PHYSICAL identity of that object
-   rather than by anything a user could write, so an ordinary annotation is
-   never admitted by accident.  Losing the identity to a copy would lose the
-   admission and leave the obligation to be proved, so the channel fails
-   closed. *)
+(* The obligations a unit admitted rather than proved.
+
+   A site is identified by a number the typechecker mints for it and puts in
+   the one verification mark it belongs to.  Nothing weaker will do.  An
+   identity derived from a location, or from a type, can be shared between
+   two marks by an ordinary program transformation -- sharing a location
+   record is what [Ast_helper] does whenever [~loc] is omitted -- and both
+   marks would then be admitted on the strength of one [assume], which is a
+   route to accepting a program the verifier should refuse. *)
 module Assumption = struct
   type t =
-    { key : Location.t;
+    { token : int;
       site : Location.t;
       guarded : bool;
       refinement : Types.refinement_desc;
@@ -44,29 +46,29 @@ module Assumption = struct
     }
 
   let sites : t list ref = ref []
+  let next_token = ref 0
 
-  let record ~key ~site ~guarded refinement refined_type =
-    sites := { key; site; guarded; refinement; refined_type } :: !sites
+  let record ~site ~guarded refinement refined_type =
+    incr next_token;
+    let token = !next_token in
+    sites := { token; site; guarded; refinement; refined_type } :: !sites;
+    token
 
-  let refinement key =
+  (* The statement THIS site admits, rather than whatever the mark happens to
+     carry.  The two agree, and reading the recorded one keeps them from
+     having to. *)
+  let refinement token =
     List.find_map
-      (fun site -> if site.key == key then Some site.refinement else None)
+      (fun site -> if site.token = token then Some site.refinement else None)
       !sites
-
-  (* The generated checks, by the physical identity of the location object
-     each one's node ended up carrying.  A check is code the compiler wrote,
-     so the obligations its calls raise are nobody's to discharge; requiring
-     them would let a check reject a program, and whether a predicate runs
-     is not supposed to decide whether a program compiles. *)
-  let checks : Location.t list ref = ref []
-  let record_check location = checks := location :: !checks
-  let is_check location = List.memq location !checks
 
   let admitted () = List.rev !sites
 
   (* Reporting a unit's admissions consumes them, so that the toplevel, which
-     reports after every phrase, does not repeat the ones before it. *)
-  let forget () = sites := []; checks := []
+     reports after every phrase, does not repeat the ones before it, and so
+     that a phrase that failed does not leave its sites to be printed against
+     a later one. *)
+  let forget () = sites := []
 end
 
 let create ~loc ~facts ~goal = { location = loc; facts; goal }

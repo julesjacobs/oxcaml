@@ -152,16 +152,41 @@ Error: [assume] admits the obligation of the refinement imposed on it,
 |}]
 
 (* A refinement IS imposed here and the admission is still refused, because
-   a predicate is a proposition and there is no code in it for an admission
-   to be about.  The staged case is in assume_refused_quotation.ml, which
+   a proposition has no code in it for an admission to be about.  The body of
+   a definition reflected by [@vox.def] becomes a proposition too, and lands
+   here for the same reason, which is why the wording does not say
+   "predicate".  The staged case is in assume_refused_quotation.ml, which
    needs an extension flag of its own. *)
 type in_a_predicate = int{ (assume _ : int{ _ > 0 }) = _ }
 [%%expect {|
 Line 1, characters 27-52:
 1 | type in_a_predicate = int{ (assume _ : int{ _ > 0 }) = _ }
                                ^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: This obligation cannot be admitted:
-       a refinement predicate is a proposition, not code
+Error: This obligation cannot be admitted: this is inside a proposition, and
+       a proposition has no code in it for an admission to be about
+|}]
+
+(* Not a refusal of [assume] at all, and here because of what it rules out.
+   A predicate cannot pass a logical value where a physical one is wanted, so
+   the shape whose check would have read something with no run-time existence
+   never reaches the tier: it is gone before there is an admission to make. *)
+type vec
+[%%expect {|
+type vec
+|}]
+
+external size : vec -> int @@ total = "vec_size"
+[%%expect {|
+external size : vec -> int @@ total = "vec_size"
+|}]
+
+let (physical_of_logical @ total) (v : vec @ logical) : unit{ size v >= 0 } =
+  assume ()
+[%%expect {|
+Line 1, characters 67-68:
+1 | let (physical_of_logical @ total) (v : vec @ logical) : unit{ size v >= 0 } =
+                                                                       ^
+Error: This value is logical but is expected to be physical.
 |}]
 
 (* The name is not what is recognised.  A user's own [assume] is an ordinary

@@ -1,0 +1,16 @@
+VC contract-argument at assume_shared_locations.ml:33:50-51
+  y > 0
+|- y > 0
+
+VC annotation at assume_shared_locations.ml:33:50-51
+  y > 0
+|- needs_positive y > 100
+
+VC contract-argument at assume_shared_locations.ml:33:50-51
+  call_result > 100
+|- call_result > 100
+
+File "assume_shared_locations.ml", line 33, characters 50-51
+Admitted (checked at run time): int{ _ > 0 } is assumed here, not proved.
+Admitted 1 obligation in this unit: 1 checked at run time, 0 unchecked.
+Error: VCs dumped, not discharged.

@@ -26,16 +26,13 @@ module Recursive_binding : sig
   val defeq_requested : Location.t -> bool
 end
 
-(* The obligations a unit admitted rather than proved, each recognised by the
-   physical identity of the location object typecore minted for its [assume].
-   The refinement travels with the site rather than being read back off the
-   expression, because a use in statement position weakens the refined type
-   away before the verifier sees it. *)
+(* The obligations a unit admitted rather than proved, each identified by a
+   number the typechecker minted for it and put in the one verification mark
+   it belongs to.  See the implementation for why nothing derived from a
+   location or a type would do. *)
 module Assumption : sig
   type t =
-    { key : Location.t;
-      (** The location object the verification mark carries, which is what
-          identifies the site.  Never compared by span. *)
+    { token : int;
       site : Location.t;
       (** Where the [assume] is written, for reporting. *)
       guarded : bool;
@@ -47,27 +44,21 @@ module Assumption : sig
     }
 
   val record :
-    key:Location.t ->
     site:Location.t ->
     guarded:bool ->
     Types.refinement_desc ->
     Types.type_expr ->
-    unit
+    int
 
-  val refinement : Location.t -> Types.refinement_desc option
+  (** The statement the site with this token admits. *)
+  val refinement : int -> Types.refinement_desc option
 
-  (** A check the compiler generated for an admission, recognised by the
-      physical identity of the location object its node carries.  The
-      obligations its calls raise are not the program's, since whether a
-      predicate runs must not decide whether the program compiles. *)
-  val record_check : Location.t -> unit
-
-  val is_check : Location.t -> bool
-
-  (** Every obligation admitted in the unit, in source order. *)
+  (** Every obligation admitted since the last [forget], in source order. *)
   val admitted : unit -> t list
 
-  (** Forget them, once reported. *)
+  (** Forget them, once reported.  Must run whether or not the unit
+      typechecked, or a failed phrase leaves its sites to be reported against
+      a later one. *)
   val forget : unit -> unit
 end
 

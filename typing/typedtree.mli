@@ -420,7 +420,7 @@ and exp_extra =
         (** Instantiated formal domains, in formal parameter order, for a
             refinement-aware application.  This metadata is internal and is
             omitted when converting back to a parsetree. *)
-  | Texp_refinement_constraint of Types.type_expr
+  | Texp_refinement_constraint of Types.type_expr * refinement_admission
         (** A refined expected type inherited from an enclosing dependent
             function annotation.  This records the result obligation when no
             result constraint remains in the parsetree after elaboration. *)
@@ -444,6 +444,17 @@ and exp_extra =
         (* NB. If an expression has both [Texp_borrowed] and
         [Texp_ghost_region], we assume the [Texp_borrowed] is inner than
         [Texp_ghost_region]. Currently it's impossible. *)
+
+and refinement_admission =
+  | Refinement_proved
+  | Refinement_admitted of int
+        (** Whether the obligation this mark raises is to be PROVED or is
+            admitted at the reader's word.  The number is minted by the
+            typechecker for one admission and appears in one mark, which is
+            what makes it an identity: anything derived from a location or a
+            type could be shared between two marks by an ordinary program
+            transformation, and both would then be admitted on the strength
+            of one [assume]. *)
 
 and refinement_application_argument =
   { rap_domain : Types.type_expr;
