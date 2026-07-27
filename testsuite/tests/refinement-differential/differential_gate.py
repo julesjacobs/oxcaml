@@ -15,6 +15,7 @@ every later case.
 import argparse
 import concurrent.futures
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,7 +36,13 @@ class GateFailure(Exception):
 # The verifier's own report when it will not discharge an obligation.  Any
 # other compiler failure is a fault in the gate, not a verdict, and is
 # reported as such rather than counted as a refusal.
-REFUSAL = "Refinement verification failed"
+REFUSAL = re.compile(r"Refinement verification failed \(([^)]*)\)")
+
+# A refusal only counts as one when the backend actually decided.  A backend
+# that could not answer has said nothing about whether the two meanings agree,
+# and an obligation the gate expects to be refused would otherwise pass on a
+# non-answer.
+DECIDED = ("not-proved", "disproved")
 
 
 class Observation:
@@ -60,6 +67,17 @@ class Observation:
             return None
         text = next(iter(self.answers.values()))
         return None if text.startswith("!") else text
+
+    @property
+    def candidates(self):
+        """Every value the machine produced, ignoring the runs that raised.
+
+        Where the four runs did not agree there is more than one, and the
+        verifier must commit to none of them.
+        """
+        return sorted(
+            {text for text in self.answers.values() if not text.startswith("!")}
+        )
 
     def describe(self):
         return " ".join(
@@ -143,6 +161,7 @@ class Probe:
         self.expect_proved = expect_proved
         self.reason = reason
         self.proved = None
+        self.verdict = None
         self.detail = None
 
     def describe(self):
@@ -168,17 +187,23 @@ def build_probes(cases, observations, sentinels_everywhere):
         observed = observations[case.key]
         answer = observed.answer
         value = None if answer is None else parse_value(case.sort, answer)
-        specified = observed.agreed and answer is not None
-        if answer is not None:
-            expect = case.modelled and specified
-            probes.append(
-                Probe(
-                    case,
-                    value,
-                    expect,
-                    "machine answer" if expect else "no committed meaning",
+        specified = answer is not None
+        if specified and case.modelled:
+            probes.append(Probe(case, value, True, "machine answer"))
+        else:
+            # Either the operation is left uninterpreted, or the four runs
+            # did not agree and so there is nothing for the verifier to be
+            # right about.  Every answer the machine was seen to give must be
+            # refused, not just some of them.
+            for candidate in observed.candidates:
+                probes.append(
+                    Probe(
+                        case,
+                        parse_value(case.sort, candidate),
+                        False,
+                        "no committed meaning",
+                    )
                 )
-            )
         group = (case.family, case.operator)
         wanted = (
             sentinels_everywhere
@@ -209,12 +234,13 @@ def discharge(probe, index, scratch, compiler, environment):
         )
         if result.returncode == 0:
             probe.proved = True
-        elif REFUSAL in result.stdout:
+            probe.verdict = "proved"
+            return probe
+        reported = REFUSAL.search(result.stdout)
+        probe.verdict = reported.group(1) if reported else "no verdict"
+        probe.detail = result.stdout
+        if probe.verdict in DECIDED:
             probe.proved = False
-            probe.detail = result.stdout
-        else:
-            probe.proved = None
-            probe.detail = result.stdout
         return probe
     finally:
         shutil.rmtree(directory, ignore_errors=True)
@@ -222,17 +248,13 @@ def discharge(probe, index, scratch, compiler, environment):
 
 def unavailable(probes):
     """Obligations the backend could not answer at all, solver included."""
-    return [
-        probe
-        for probe in probes
-        if probe.proved is False and "unavailable" in (probe.detail or "")
-    ]
+    return [probe for probe in probes if probe.verdict == "unavailable"]
 
 
-def report(probes, cases, engines, observations, elapsed, arguments):
+def report(probes, cases, engines, observations, elapsed, arguments, jobs):
     lines = [
         "differential gate: backend=%s profile=%s jobs=%d"
-        % (arguments.backend, arguments.profile, arguments.jobs),
+        % (arguments.backend, arguments.profile, jobs),
         "observation: %d-bit int, engines %s" % (model.WIDTH, ", ".join(engines)),
     ]
 
@@ -259,17 +281,17 @@ def report(probes, cases, engines, observations, elapsed, arguments):
         if probe.proved is not None and probe.proved != probe.expect_proved
     ]
 
+    verdicts = {}
+    for probe in probes:
+        verdicts[probe.verdict] = verdicts.get(probe.verdict, 0) + 1
+
     lines.append(
-        "cases=%d obligations=%d proved=%d refused=%d disagreements=%d "
-        "errors=%d"
-        % (
-            len(cases),
-            len(probes),
-            sum(1 for probe in probes if probe.proved is True),
-            sum(1 for probe in probes if probe.proved is False),
-            len(disagreements),
-            len(broken),
-        )
+        "cases=%d obligations=%d disagreements=%d undecided=%d"
+        % (len(cases), len(probes), len(disagreements), len(broken))
+    )
+    lines.append(
+        "verdicts: %s"
+        % ", ".join("%s=%d" % pair for pair in sorted(verdicts.items()))
     )
     for family in sorted(families):
         total, proved, wrong = families[family]
@@ -284,11 +306,11 @@ def report(probes, cases, engines, observations, elapsed, arguments):
 
     for probe in disagreements[:8]:
         lines.append(
-            "  DISAGREEMENT %s expected %s, backend %s [%s]"
+            "  DISAGREEMENT %s expected %s, backend said %s [%s]"
             % (
                 probe.describe(),
                 "proved" if probe.expect_proved else "refused",
-                "proved" if probe.proved else "refused",
+                probe.verdict,
                 probe.reason,
             )
         )
@@ -296,8 +318,9 @@ def report(probes, cases, engines, observations, elapsed, arguments):
     if len(disagreements) > 8:
         lines.append("  ... and %d more" % (len(disagreements) - 8))
     for probe in broken[:4]:
-        lines.append("  ERROR %s" % probe.describe())
-        lines.append("    %s" % (probe.detail or "").strip()[:400])
+        lines.append("  UNDECIDED %s: %s" % (probe.describe(), probe.verdict))
+        if probe.verdict == "no verdict":
+            lines.append("    %s" % (probe.detail or "").strip()[:400])
     return lines, disagreements, broken
 
 
@@ -348,13 +371,15 @@ def main():
         compilers.append(("native", [native], "exe"))
 
     cases = model.cases(arguments.profile)
+    # Lean is held to one process at a time; the SMT paths take the requested
+    # width.
+    jobs = 1 if arguments.backend == "lean" else max(arguments.jobs, 1)
     scratch = tempfile.mkdtemp(prefix="differential-", dir=scratch_root)
     try:
         observations, engines = observe(cases, scratch, compilers, environment)
         probes = build_probes(cases, observations, arguments.sentinels_everywhere)
 
         started = time.time()
-        jobs = 1 if arguments.backend == "lean" else max(arguments.jobs, 1)
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
             list(
                 pool.map(
@@ -380,7 +405,7 @@ def main():
         )
 
     lines, disagreements, broken = report(
-        probes, cases, engines, observations, elapsed, arguments
+        probes, cases, engines, observations, elapsed, arguments, jobs
     )
     if absent:
         lines.append(
