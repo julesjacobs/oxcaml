@@ -833,6 +833,36 @@ let process_deferred_actions env =
             fatal "Options -c -o are incompatible with compiling multiple files"
         end;
   end;
+  (* -vox-dump-vc-json takes a destination and truncates it. Every neighbouring
+     vox flag takes no argument, so the source is easy to write where the
+     destination belongs, and the source is then destroyed with no diagnostic.
+     No dump is ever wanted at a source extension, so refuse the whole class
+     rather than only the case where the file already exists: refusing on
+     existence would still eat a source the first time someone got the order
+     wrong on one not yet dumped over. Checked here rather than while parsing
+     the argument so the message reads like the other command-line
+     diagnostics, without the program path Arg prepends. *)
+  begin match !Clflags.vox_dump_vc_json with
+  | Some file ->
+      begin match Filename.extension file with
+      | ".ml" | ".mli" | ".mll" | ".mly" ->
+          (* Clear the destination before refusing. The dump is written from an
+             at_exit handler, so refusing and then exiting would run that
+             handler, open the destination, and truncate the very file this
+             check exists to protect -- the guard would print its refusal and
+             destroy the file anyway. Measured: it did, in all three
+             invocation shapes, including with no source file at all. *)
+          Clflags.vox_dump_vc_json := None;
+          fatal
+            (Printf.sprintf
+               "-vox-dump-vc-json refuses to write over %s: it truncates its \
+                destination, and that looks like a source file. If you meant \
+                to compile it, put it after the flag's destination"
+               file)
+      | _ -> ()
+      end
+  | None -> ()
+  end;
   if !make_archive then begin
     if List.exists (function
         | ProcessOtherFile name -> Filename.check_suffix name ".cmxa"
