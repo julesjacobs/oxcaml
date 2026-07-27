@@ -146,6 +146,7 @@ type context =
     mutable tuples : tuple_instance list;
     mutable references : reference list;
     mutable unspecified_shifts : string list;
+    mutable unspecified_divisions : string list;
   }
 
 let int_width = 63
@@ -162,6 +163,19 @@ let solver_symbol context basename =
 
 let shift_fallback_name context builtin =
   solver_symbol context (shift_fallback_basename builtin)
+
+(* Division by zero raises rather than producing a value, so the model must
+   not hand out one.  The quotient and remainder at a zero divisor are an
+   uninterpreted function of the operands, exactly as an out-of-range shift
+   is: nothing is provable about the result, which is conservative because
+   the program does not reach a post-state at all. *)
+let division_fallback_basename = function
+  | `Divide -> "VoxInt_divide_by_zero"
+  | `Remainder -> "VoxInt_remainder_by_zero"
+  | _ -> invalid_arg "division_fallback_basename"
+
+let division_fallback_name context builtin =
+  solver_symbol context (division_fallback_basename builtin)
 
 let rec sort_key = function
   | Sint -> "int"
@@ -550,6 +564,10 @@ let note_reference context expression reference =
     let name = shift_fallback_name context builtin in
     if not (List.mem name context.unspecified_shifts) then
       context.unspecified_shifts <- name :: context.unspecified_shifts
+  | Some ((`Divide | `Remainder) as builtin) ->
+    let name = division_fallback_name context builtin in
+    if not (List.mem name context.unspecified_divisions) then
+      context.unspecified_divisions <- name :: context.unspecified_divisions
   | Some _ -> ()
   | None ->
     let sort = sort_of_type context expression.rexp_loc expression.rexp_type in
@@ -781,6 +799,25 @@ let emit_builtin context location builtin arguments =
       | `Bit_xor -> "bvxor"
     in
     binary operator (expect_int location) Sint
+  | (`Divide | `Remainder) as operation ->
+    (* [bvsdiv] truncates towards zero and [bvsrem] takes the sign of the
+       dividend, which is what OCaml does, including the wrap at
+       [min_int / (-1)].  Only the zero divisor parts company: SMT-LIB gives
+       it a value where the program raises. *)
+    begin match terms, sorts with
+    | [left; right], [Sint; Sint] ->
+      let operator =
+        match operation with
+        | `Divide -> "bvsdiv"
+        | `Remainder -> "bvsrem"
+      in
+      ( "(ite (distinct " ^ right ^ " " ^ smt_int_constant 0 ^ ") ("
+        ^ operator ^ " " ^ left ^ " " ^ right ^ ") ("
+        ^ division_fallback_name context operation ^ " " ^ left ^ " "
+        ^ right ^ "))",
+        Sint )
+    | _ -> error location "integer division used with the wrong arity"
+    end
   | (`Shift_left | `Shift_right_logical
     | `Shift_right_arithmetic) as operation ->
     begin match terms, sorts with
@@ -1545,6 +1582,7 @@ type oxsmt_environment =
     bv_minter : Oxsmt_bv.minter;
     datatypes : (string * Oxsmt_datatype_defs.datatype) list;
     references : (reference * Oxsmt_core.Symbol.t) list;
+    divisions : (string * Oxsmt_core.Symbol.t) list;
     variables : (variable * Oxsmt_core.Symbol.t) list;
     nia_minter : Oxsmt_internal_minter.t option;
     mutable nia_mul_symbol : Oxsmt_core.Symbol.t option;
@@ -1660,6 +1698,17 @@ let oxsmt_declare_references session (context : context) sorts location =
         (Oxsmt_rank.create arguments result)
     in
     reference, symbol)
+
+(* The uninterpreted quotient and remainder at a zero divisor.  The vendored
+   bitvector vocabulary has no signed division, so this path builds its own
+   below; this declares the symbol the guarded branch falls back to. *)
+let oxsmt_declare_divisions session (context : context) =
+  List.sort_uniq String.compare context.unspecified_divisions
+  |> List.map (fun name ->
+       let sort = Oxsmt_sort.bitvec int_width in
+       ( name,
+         Oxsmt_session.declare_fun
+           session name (Oxsmt_rank.create [sort; sort] sort) ))
 
 let oxsmt_declare_variables session context sorts location variables =
   List.map
@@ -1789,7 +1838,7 @@ let oxsmt_int_constant environment integer =
   Oxsmt_bv.const environment.terms environment.bv_minter
     ~value:(Oxsmt_core.Bigint.of_int integer) ~width:int_width
 
-let oxsmt_builtin environment location builtin arguments =
+let oxsmt_builtin context environment location builtin arguments =
   let terms = environment.terms in
   let term_values = List.map fst arguments in
   let term_sorts = List.map snd arguments in
@@ -1884,6 +1933,56 @@ let oxsmt_builtin environment location builtin arguments =
     in
     binary (expect_int location) Sint
       (Oxsmt_bv.binop terms environment.bv_minter operator)
+  | (`Divide | `Remainder) as operation ->
+    (* The vendored bitvector operators are unsigned, so the signed quotient
+       and remainder are built here the way SMT-LIB defines them: on the
+       magnitudes, with the sign put back.  Truncation towards zero and a
+       remainder carrying the dividend's sign are what OCaml does, and
+       [min_int / (-1)] wraps because negating [min_int] wraps.  A zero
+       divisor raises rather than producing a value, so that branch goes to
+       an uninterpreted symbol and nothing about it is provable. *)
+    begin match term_values, term_sorts with
+    | [left; right], [Sint; Sint] ->
+      let zero = oxsmt_int_constant environment 0 in
+      let apply operator x y =
+        Oxsmt_bv.binop terms environment.bv_minter operator x y
+      in
+      let negate x =
+        Oxsmt_bv.unop terms environment.bv_minter Oxsmt_bv.Bvneg x
+      in
+      let below_zero x = apply Oxsmt_bv.Bvslt x zero in
+      let magnitude, negate_left_only, negate_right_only =
+        match operation with
+        | `Divide -> Oxsmt_bv.Bvudiv, true, true
+        | `Remainder -> Oxsmt_bv.Bvurem, true, false
+      in
+      let signed =
+        Oxsmt_context.ite terms (below_zero left)
+          (Oxsmt_context.ite terms (below_zero right)
+             (let both = apply magnitude (negate left) (negate right) in
+              match operation with
+              | `Divide -> both
+              | `Remainder -> negate both)
+             (let value = apply magnitude (negate left) right in
+              if negate_left_only then negate value else value))
+          (Oxsmt_context.ite terms (below_zero right)
+             (let value = apply magnitude left (negate right) in
+              if negate_right_only then negate value else value)
+             (apply magnitude left right))
+      in
+      let fallback =
+        let name = division_fallback_name context operation in
+        match List.assoc_opt name environment.divisions with
+        | Some symbol -> Oxsmt_context.app terms symbol [left; right]
+        | None ->
+          error location "internal error: missing oxsmt symbol %s" name
+      in
+      ( Oxsmt_context.ite terms
+          (Oxsmt_context.distinct terms [right; zero])
+          signed fallback,
+        Sint )
+    | _ -> error location "integer division used with the wrong arity"
+    end
   | (`Shift_left | `Shift_right_logical
     | `Shift_right_arithmetic) as operation ->
     begin match term_values, term_sorts with
@@ -2159,7 +2258,7 @@ let oxsmt_expression context environment expression =
           match builtin_name context reference_identifier with
           | Some builtin ->
             let term, actual_sort =
-              oxsmt_builtin environment expression.rexp_loc
+              oxsmt_builtin context environment expression.rexp_loc
                 builtin built_arguments
             in
             expect_sort expression.rexp_loc result_sort actual_sort;
@@ -2625,6 +2724,7 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
       tuples = [];
       references = [];
       unspecified_shifts = [];
+      unspecified_divisions = [];
     }
   in
   let variables = collect context expressions in
@@ -2643,6 +2743,7 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
   let references =
     oxsmt_declare_references session context sorts vc.location
   in
+  let divisions = oxsmt_declare_divisions session context in
   let variables =
     oxsmt_declare_variables
       session context sorts vc.location variables
@@ -2653,6 +2754,7 @@ let solve_oxsmt_query ~query ~env (vc : Vox_vc.t) =
         Oxsmt_internal_minter.mint (Oxsmt_session.parse_minter session);
       datatypes;
       references;
+      divisions;
       variables;
       nia_minter;
       nia_mul_symbol = None;
@@ -2791,7 +2893,8 @@ let emit_datatypes context location buffer =
        ^ constructor_lists ^ "))\n")
 
 let emit_references (context : context) location buffer =
-  List.sort_uniq String.compare context.unspecified_shifts
+  List.sort_uniq String.compare
+    (context.unspecified_shifts @ context.unspecified_divisions)
   |> List.iter (fun name ->
        Buffer.add_string buffer
          ("(declare-fun " ^ name
@@ -2858,6 +2961,7 @@ let emit_internal ?(symbol_namespace = "") ?(model = false) ~query ~env
       tuples = [];
       references = [];
       unspecified_shifts = [];
+      unspecified_divisions = [];
     }
   in
   let variables = collect context expressions in

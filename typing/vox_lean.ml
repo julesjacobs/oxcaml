@@ -551,6 +551,9 @@ let display_operator = function
   | `Add -> { op_text = "+"; op_precedence = 40; op_associativity = Left }
   | `Subtract -> { op_text = "-"; op_precedence = 40; op_associativity = Left }
   | `Multiply -> { op_text = "*"; op_precedence = 50; op_associativity = Left }
+  | `Divide -> { op_text = "/"; op_precedence = 50; op_associativity = Left }
+  | `Remainder ->
+    { op_text = "mod"; op_precedence = 50; op_associativity = Left }
   | `Bit_and ->
     { op_text = "land"; op_precedence = 50; op_associativity = Left }
   | `Bit_or ->
@@ -618,7 +621,7 @@ let binary_operator ~env reference =
       ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less | `Less_equal
        | `Multiply | `Not_equal | `Or | `Subtract | `Bit_and | `Bit_or
        | `Bit_xor | `Shift_left | `Shift_right_logical
-       | `Shift_right_arithmetic) as builtin) ->
+       | `Shift_right_arithmetic | `Divide | `Remainder) as builtin) ->
     Some (display_operator builtin)
   | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
          | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
@@ -778,7 +781,8 @@ let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
             (`Add | `And | `Equal | `Greater | `Greater_equal | `Less
             | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract
             | `Bit_and | `Bit_or | `Bit_xor | `Shift_left
-            | `Shift_right_logical | `Shift_right_arithmetic)
+            | `Shift_right_logical | `Shift_right_arithmetic | `Divide
+            | `Remainder)
         | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
                | `Bigint_gt | `Bigint_is_zero | `Bigint_le | `Bigint_lt
                | `Bigint_mul | `Bigint_neg | `Bigint_of_int | `Bigint_one
@@ -810,7 +814,8 @@ let render_predicate ?(names = Out_type.Refinement_names.empty) ~env
         ((`Add | `And | `Equal | `Greater | `Greater_equal | `Less
          | `Less_equal | `Multiply | `Not_equal | `Or | `Subtract
          | `Bit_and | `Bit_or | `Bit_xor | `Shift_left
-         | `Shift_right_logical | `Shift_right_arithmetic)
+         | `Shift_right_logical | `Shift_right_arithmetic | `Divide
+         | `Remainder)
          as builtin) ->
       display_function_name (display_operator builtin).op_text
     | Some (`Bigint_abs | `Bigint_add | `Bigint_compare | `Bigint_ge
@@ -1136,6 +1141,13 @@ let lean_shift_fallback = function
     "VoxInt_shift_right_arithmetic_unspecified"
   | _ -> invalid_arg "lean_shift_fallback"
 
+(* Division by zero raises rather than producing a value, so the model must
+   not hand out one. *)
+let lean_division_fallback = function
+  | `Divide -> "VoxInt_divide_by_zero"
+  | `Remainder -> "VoxInt_remainder_by_zero"
+  | _ -> invalid_arg "lean_division_fallback"
+
 let emit_builtin context location builtin arguments =
   let terms = List.map fst arguments in
   let sorts = List.map snd arguments in
@@ -1251,6 +1263,23 @@ let emit_builtin context location builtin arguments =
     | [left; right], [Sint; Sint] ->
       "(" ^ operator ^ " " ^ left ^ " " ^ right ^ ")"
     | _ -> error location "bitwise builtin used with the wrong arity"
+    end
+  | (`Divide | `Remainder) as operation ->
+    (* [BitVec.sdiv] truncates towards zero and [BitVec.srem] takes the sign
+       of the dividend, which is what OCaml does, including the wrap at
+       [min_int / (-1)].  Only the zero divisor parts company, and that
+       branch is uninterpreted. *)
+    begin match terms, sorts with
+    | [left; right], [Sint; Sint] ->
+      let operator =
+        match operation with
+        | `Divide -> "BitVec.sdiv"
+        | `Remainder -> "BitVec.srem"
+      in
+      "(if decide (" ^ right ^ " ≠ " ^ lean_int_constant 0 ^ ") then "
+      ^ operator ^ " " ^ left ^ " " ^ right ^ " else "
+      ^ lean_division_fallback operation ^ " " ^ left ^ " " ^ right ^ ")"
+    | _ -> error location "integer division used with the wrong arity"
     end
   | (`Shift_left | `Shift_right_logical
     | `Shift_right_arithmetic) as operation ->
@@ -1893,6 +1922,12 @@ let emit_internal ~negated ?(linter = false) ~env (vc : Vox_vc.t) =
      ^ "BitVec 63 → BitVec 63 → BitVec 63\n");
   Buffer.add_string buffer
     ("opaque VoxInt_shift_right_arithmetic_unspecified : "
+     ^ "BitVec 63 → BitVec 63 → BitVec 63\n");
+  Buffer.add_string buffer
+    ("opaque VoxInt_divide_by_zero : "
+     ^ "BitVec 63 → BitVec 63 → BitVec 63\n");
+  Buffer.add_string buffer
+    ("opaque VoxInt_remainder_by_zero : "
      ^ "BitVec 63 → BitVec 63 → BitVec 63\n\n");
   let data =
     List.sort
