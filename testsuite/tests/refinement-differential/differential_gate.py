@@ -482,10 +482,16 @@ def main():
     byte = [arguments.ocamlrun, arguments.ocamlc]
     native = arguments.ocamlopt_opt
     fast = arguments.ocamlc_opt
-    prover = [fast] if fast and os.access(fast, os.X_OK) else byte
+    fast_available = bool(fast) and os.access(fast, os.X_OK)
+    prover = [fast] if fast_available else byte
     prover = prover + ["-vox-backend", arguments.backend]
 
-    compilers = [("bytecode", byte, "byte")]
+    # Which compiler binary builds the observation program does not change
+    # what the program computes -- the two are the same compiler -- but the
+    # bytecode one costs six times as much to start, and this gate is meant
+    # to run with the suite.  The engines being compared are the runtimes,
+    # not the compilers.
+    compilers = [("bytecode", [fast] if fast_available else byte, "byte")]
     if native and os.access(native, os.X_OK):
         compilers.append(("native", [native], "exe"))
     elif not arguments.allow_bytecode_only:

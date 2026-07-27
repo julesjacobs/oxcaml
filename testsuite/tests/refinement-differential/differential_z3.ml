@@ -5,18 +5,18 @@
            --ocamlrun ${ocamlrun} --ocamlc ${ocamlc_byte} \
            --ocamlc-opt ${ocamlsrcdir}/ocamlc.opt \
            --ocamlopt-opt ${ocamlsrcdir}/ocamlopt.opt \
-           --backend z3 --profile core --jobs 2";
+           --backend z3 --profile division --jobs 4";
  script;
 *)
 
-(* The gate compares what the compiled program computes with what the backend
-   proves, over the operations whose two meanings could differ.  The driver
-   holds the case table and the comparison; this file only chooses a backend
-   and a size.
+(* The same comparison against the other SMT path.  Running both is the
+   point: [Vox_smt] builds oxsmt terms directly rather than through the
+   printed SMT-LIB text, so the two are independent translations and a
+   mistake in one does not reach the other.
 
-   This file is deliberately empty of obligations.  Anything written here
-   would be checked against an answer someone wrote down, which is the shape
-   of test the gate exists to replace.  The obligations are generated from
-   what the compiled program produced, and each is compiled on its own,
-   because the compiler stops at the first one it cannot discharge and a
-   single disagreement would otherwise hide every later case. *)
+   An obligation costs several times as much through an external solver, so
+   this arm keeps the operation whose translation is newest -- division and
+   remainder, at the operands where truncation, the sign of a remainder, the
+   quotient that leaves the range and a divisor of zero would each show --
+   and leaves the rest of the SMT-LIB table to the sweep, which is where a
+   change to that emitter is expected to be checked. *)

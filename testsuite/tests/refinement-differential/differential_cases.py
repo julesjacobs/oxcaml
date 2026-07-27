@@ -186,6 +186,45 @@ CORE_NUMERAL_PAIRS = [
     (str(MIN_INT), "1"),
 ]
 
+# The table the ordinary suite runs.  Everything here is an operand pair at
+# which a plausible wrong translation gives a different answer from the
+# machine; the interior of the range, where a wrong translation is least
+# likely to hide, is left to the offline sweep.
+ROUTINE_ARITHMETIC = [
+    # The sum leaves the range at the top and at the bottom.
+    ("+", [("max_int", "1"), ("min_int", "(-1)")]),
+    # The difference does the same, at operands where the sum does not.
+    ("-", [("min_int", "1"), ("max_int", "(-1)")]),
+    # The first product of two equal operands to leave the range, the last
+    # one that does not, and the negation that wraps to itself.
+    ("*", [(str(ROOT), str(ROOT)), (str(ROOT_BELOW), str(ROOT_BELOW)),
+           ("min_int", "(-1)")]),
+]
+
+# The sign bit set on one side and not the other separates an operation on
+# this width from one on another; operands that share a bit separate [lor]
+# from [lxor], which agree wherever the operands are disjoint.
+ROUTINE_BITWISE_PAIRS = [("max_int", "min_int"), ("max_int", "1")]
+
+# [<] and [<=] separate a signed comparison from an unsigned one and a
+# strict one from a reflexive one; [<>] separates the negated form.  The
+# three mirrors run in the sweep.
+ROUTINE_COMPARISONS = ["<", "<=", "<>"]
+
+# A negative operand separates the logical from the arithmetic right shift;
+# a distance past the word is where the machine stops agreeing with itself.
+ROUTINE_SHIFT_OPERANDS = ["min_int"]
+ROUTINE_SHIFT_DISTANCES = [1, WIDTH + 1]
+
+# Truncation towards zero against rounding towards minus infinity, the one
+# quotient that leaves the range, and a zero divisor of each operation.
+ROUTINE_DIVISION_PAIRS = [
+    ("(-7)", "2"),
+    ("7", "(-2)"),
+    ("min_int", "(-1)"),
+    ("1", "0"),
+]
+
 FULL_VALUES = [
     "max_int",
     "min_int",
@@ -238,10 +277,10 @@ def _unary(operands):
     ]
 
 
-def _comparisons(pairs):
+def _comparisons(pairs, operators=None):
     return [
         Case("compare", operator, "infix", "bool", [left, right])
-        for operator in COMPARISONS
+        for operator in (COMPARISONS if operators is None else operators)
         for left, right in pairs
     ]
 
@@ -276,6 +315,46 @@ def core_cases():
         + _comparisons(CORE_COMPARISON_PAIRS)
         + _division(CORE_DIVISION_PAIRS)
     )
+
+
+def routine_cases():
+    """What the ordinary suite runs: the smallest table that still separates
+    each operation from the translations it could have been given.
+
+    Every operator keeps at least one operand pair at which a wrong
+    translation answers differently, and every operand pair is here because
+    of a specific confusion it rules out.  The broad matrix -- the interior
+    of the range, the whole cross product, and the backend that costs the
+    most per obligation -- runs in the offline sweep.
+    """
+    arithmetic = []
+    for operator, pairs in ROUTINE_ARITHMETIC:
+        arithmetic += _binary("arith", [operator], pairs)
+    return (
+        arithmetic
+        # A boundary written as a numeral rather than as [max_int] reaches
+        # the verifier by a different route.
+        + _binary("numeral", ["+"], [(str(MAX_INT), "1")])
+        + _binary("bitwise", BITWISE, ROUTINE_BITWISE_PAIRS)
+        + _shifts(ROUTINE_SHIFT_OPERANDS, ROUTINE_SHIFT_DISTANCES)
+        + _unary(["min_int"])
+        + _comparisons([("min_int", "max_int")], ROUTINE_COMPARISONS)
+        + _division(ROUTINE_DIVISION_PAIRS)
+    )
+
+
+def division_cases():
+    """Division and remainder alone: what the ordinary z3 arm runs.
+
+    An obligation costs several times as much through an external solver as
+    it does through the in-process one, so the two ordinary arms do not run
+    the same table.  This one keeps the operation whose translation is new,
+    at the operands where each of the choices in it -- truncation, the sign
+    of a remainder, the quotient that leaves the range, and the divisor that
+    makes the operation raise -- would show.  The rest of the table reaches
+    z3 in the offline sweep.
+    """
+    return _division(ROUTINE_DIVISION_PAIRS)
 
 
 def full_cases():
@@ -337,6 +416,8 @@ def lean_cases():
 
 
 PROFILES = {
+    "routine": routine_cases,
+    "division": division_cases,
     "core": core_cases,
     "lean": lean_cases,
     "full": full_cases,
