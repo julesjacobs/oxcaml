@@ -38,7 +38,11 @@
    What this twin therefore controls for is the refinement predicates and the
    mode annotations that carry no code consequence.  It does not control for
    allocation behaviour, because there is none left to control for: the two
-   Lambdas are identical.
+   Lambdas are identical modulo mode annotations, which is what --validate
+   compares.  The raw dumps still differ in [L] markers and {nlocal = n}
+   counts, and in nothing else; the allocation primitives themselves --
+   makeblock, makelocalblock, region -- appear the same number of times in
+   both.
 
    See tools/vox-latency/vox_attribute_time.sh --validate for the Lambda-level
    check, which is an error exit rather than a printed observation. *)

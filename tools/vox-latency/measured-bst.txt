@@ -5,7 +5,9 @@ compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
 backend:   z3, median of 25 runs, private solver cache
 cache:     cold = empty solver RESULT cache, reset before every repeat;
            not cold pages and not a cold filesystem
-load:      26.01, 23.08, 21.85  (64 cpus)
+load:      11.16, 9.76, 12.24  (64 cpus)
+
+obligations: 47 across 1 unit(s); 1 of them carry at least one
 
 row sanity
   original verify                    ok
@@ -17,48 +19,48 @@ row sanity
   control verify                     ok
   control -vox-no-verify             ok
 
-obligations: 47 across 1 unit(s)
-
 configuration                       median      [min .. max]
-        compiler startup floor (x1)    0.0366   [0.0339 .. 0.0432]
-  twin  -vox-type-only                 0.0595   [0.0516 .. 0.0898]
-  twin  plain compile                  0.0591   [0.0556 .. 0.0737]
-  orig  -vox-type-only                 0.0775   [0.0723 .. 0.0970]
-  orig  -vox-no-verify                 0.0779   [0.0734 .. 0.0939]
-  orig  -vox-dump-vc                   0.0788   [0.0735 .. 0.1046]
-  orig  verify, warm cache             0.1936   [0.1878 .. 0.2049]
-  orig  verify, cold cache             0.3518   [0.3441 .. 0.3783]
+        compiler startup floor (x1)    0.0327   [0.0313 .. 0.0351]
+  twin  -vox-type-only                 0.0506   [0.0487 .. 0.0566]
+  twin  plain compile                  0.0545   [0.0521 .. 0.0591]
+  orig  -vox-type-only                 0.0715   [0.0669 .. 0.0819]
+  orig  -vox-no-verify                 0.0715   [0.0696 .. 0.0927]
+  orig  -vox-dump-vc                   0.0742   [0.0731 .. 0.0841]
+  orig  verify, warm cache             0.1892   [0.1861 .. 0.2099]
+  orig  verify, cold cache             0.3472   [0.3447 .. 0.3572]
 
 known in advance
   1 control module(s) carrying one obligation each, 1 in all, put
-  through the same rows and so making the same 1 compiler invocation(s).
+  through the same rows.  They make one compiler invocation for each of
+  the 1 timed units that carry obligations, and none for the 0 that do
+  not, because those ask for no cache key and spawn no solver.
   Every row below is per-obligation work by its own name, and the timed
   row carries 47 obligations against the control's 1, so on the
   control every one of them is expected to be near zero.
-  control  construct + translate + key   0.1017   expected ~0
-  control  solving + teardown          0.1106   expected ~0
+  control  construct + translate + key   0.1035   expected ~0
+  control  solving + teardown          0.1119   expected ~0
   Whatever the control still pays here is a PER-INVOCATION charge, and
   the same row on the real module is paying it too.  It is separated out
   in the table below rather than left inside a row named after solving.
 
-  cold total, measured first           0.3518
-  cold total, re-measured last         0.3539
-  drift over the run                   0.0021   expected ~0; this is the table's residual
+  cold total, measured first           0.3472
+  cold total, re-measured last         0.3470
+  drift over the run                  -0.0002   expected ~0; this is the table's residual
   The attributed rows telescope to the FIRST cold measurement by
   construction, so their sum is an identity.  The two independent cold
   measurements above are the check that the run was stable enough for
   the differences between rows to mean anything.
 
 attributed to                       seconds    share of cold total
-  compiler startup, 1 invocation(s)    0.0366    10.4%
-  ordinary OCaml typecheck             0.0229     6.5%
-  refinement elaboration + modes       0.0180     5.1%
-  ordinary artefact staging           -0.0004    -0.1%
-  refined conformance + cmi/cmo        0.0008     0.2%
-  fixed: cache key, per invocation     0.1017    28.9%
-  construction + translation + key, marginal   0.0140     4.0%
-  fixed: solver teardown, per invocation   0.1106    31.4%
-  solving + 2nd emission, marginal     0.0476    13.5%
+  compiler startup, 1 invocation(s)    0.0327     9.4%
+  ordinary OCaml typecheck             0.0179     5.2%
+  refinement elaboration + modes       0.0209     6.0%
+  ordinary artefact staging            0.0039     1.1%
+  refined conformance + cmi/cmo       -0.0039    -1.1%
+  fixed: cache key, per invocation     0.1035    29.8%
+  construction + translation + key, marginal   0.0142     4.1%
+  fixed: solver teardown, per invocation   0.1119    32.2%
+  solving + 2nd emission, marginal     0.0461    13.3%
 
   The two 'fixed' rows are the control's own values: they are what this
   compiler spends per invocation before any obligation is considered.
@@ -75,7 +77,7 @@ attributed to                       seconds    share of cold total
   same amount.
 
   RAW ROW, BEFORE THE CONTROL IS SUBTRACTED.  cold minus warm is
-    cold - warm, raw                   0.1582    45.0%
+    cold - warm, raw                   0.1580    45.5%
   and this raw figure IS NOT SOLVING: most of it is the per-invocation
   teardown charge the control measures above.  Reading it as solver time
   is the mistake that produced a 44% 'solving' figure that has since
@@ -87,7 +89,7 @@ attributed to                       seconds    share of cold total
   of obligation counts instead of against a one-obligation control.
 
   THE -vox-dump-vc BOUNDARY, AND WHY NO ROW ABOVE IS DERIVED FROM IT:
-    dump - no-verify                   0.0009
+    dump - no-verify                   0.0027
   -vox-dump-vc builds and formats every obligation but exits before
   emitting bytecode -- it writes no .cmo, and -vox-no-verify does.  So
   this difference is (construction + formatting) MINUS (bytecode
@@ -100,5 +102,5 @@ attributed to                       seconds    share of cold total
 
   a perfect cache saves the cold-minus-warm row, most of which is the
   teardown charge rather than the solver:
-  cold total                           0.3518   100.0%
-  warm total                           0.1936    55.0%
+  cold total                           0.3472   100.0%
+  warm total                           0.1892    54.5%

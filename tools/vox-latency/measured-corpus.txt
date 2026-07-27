@@ -4,7 +4,9 @@ compiler:  /usr/local/home/jujacobs/oxcamls/vox2/fix-latency/_install/bin/ocamlc
 backend:   z3, median of 21 runs, private solver cache
 cache:     cold = empty solver RESULT cache, reset before every repeat;
            not cold pages and not a cold filesystem
-load:      19.56, 21.43, 21.58  (64 cpus)
+load:      11.55, 10.91, 12.04  (64 cpus)
+
+obligations: 205 across 5 unit(s); 5 of them carry at least one
 
 row sanity
   original verify                    ok
@@ -14,44 +16,44 @@ row sanity
   control verify                     ok
   control -vox-no-verify             ok
 
-obligations: 205 across 5 unit(s)
-
 configuration                       median      [min .. max]
-        compiler startup floor (x5)    0.1714   [0.1635 .. 0.1832]
-  orig  -vox-type-only                 0.3701   [0.3496 .. 0.3922]
-  orig  -vox-no-verify                 0.4094   [0.3732 .. 0.5018]
-  orig  -vox-dump-vc                   0.4044   [0.3825 .. 0.5214]
-  orig  verify, warm cache             1.0200   [0.9911 .. 1.3287]
-  orig  verify, cold cache             1.7567   [1.7364 .. 1.8207]
+        compiler startup floor (x5)    0.1969   [0.1710 .. 0.2554]
+  orig  -vox-type-only                 0.3505   [0.3427 .. 0.3880]
+  orig  -vox-no-verify                 0.3675   [0.3601 .. 0.3843]
+  orig  -vox-dump-vc                   0.3836   [0.3752 .. 0.4049]
+  orig  verify, warm cache             0.9718   [0.9655 .. 0.9988]
+  orig  verify, cold cache             1.7449   [1.7252 .. 1.7985]
 
 known in advance
   5 control module(s) carrying one obligation each, 5 in all, put
-  through the same rows and so making the same 5 compiler invocation(s).
+  through the same rows.  They make one compiler invocation for each of
+  the 5 timed units that carry obligations, and none for the 0 that do
+  not, because those ask for no cache key and spawn no solver.
   Every row below is per-obligation work by its own name, and the timed
   row carries 205 obligations against the control's 5, so on the
   control every one of them is expected to be near zero.
-  control  construct + translate + key   0.5171   expected ~0
-  control  solving + teardown          0.5554   expected ~0
+  control  construct + translate + key   0.5041   expected ~0
+  control  solving + teardown          0.5550   expected ~0
   Whatever the control still pays here is a PER-INVOCATION charge, and
   the same row on the real module is paying it too.  It is separated out
   in the table below rather than left inside a row named after solving.
 
-  cold total, measured first           1.7567
-  cold total, re-measured last         1.7378
-  drift over the run                  -0.0189   expected ~0; this is the table's residual
+  cold total, measured first           1.7449
+  cold total, re-measured last         1.7298
+  drift over the run                  -0.0151   expected ~0; this is the table's residual
   The attributed rows telescope to the FIRST cold measurement by
   construction, so their sum is an identity.  The two independent cold
   measurements above are the check that the run was stable enough for
   the differences between rows to mean anything.
 
 attributed to                       seconds    share of cold total
-  compiler startup, 5 invocation(s)    0.1714     9.8%
-  typecheck + refinements              0.1987    11.3%
-  conformance + cmi/cmo                0.0393     2.2%
-  fixed: cache key, per invocation     0.5171    29.4%
-  construction + translation + key, marginal   0.0935     5.3%
-  fixed: solver teardown, per invocation   0.5554    31.6%
-  solving + 2nd emission, marginal     0.1813    10.3%
+  compiler startup, 5 invocation(s)    0.1969    11.3%
+  typecheck + refinements              0.1536     8.8%
+  conformance + cmi/cmo                0.0170     1.0%
+  fixed: cache key, per invocation     0.5041    28.9%
+  construction + translation + key, marginal   0.1002     5.7%
+  fixed: solver teardown, per invocation   0.5550    31.8%
+  solving + 2nd emission, marginal     0.2181    12.5%
 
   The two 'fixed' rows are the control's own values: they are what this
   compiler spends per invocation before any obligation is considered.
@@ -68,7 +70,7 @@ attributed to                       seconds    share of cold total
   same amount.
 
   RAW ROW, BEFORE THE CONTROL IS SUBTRACTED.  cold minus warm is
-    cold - warm, raw                   0.7367    41.9%
+    cold - warm, raw                   0.7731    44.3%
   and this raw figure IS NOT SOLVING: most of it is the per-invocation
   teardown charge the control measures above.  Reading it as solver time
   is the mistake that produced a 44% 'solving' figure that has since
@@ -80,7 +82,7 @@ attributed to                       seconds    share of cold total
   of obligation counts instead of against a one-obligation control.
 
   THE -vox-dump-vc BOUNDARY, AND WHY NO ROW ABOVE IS DERIVED FROM IT:
-    dump - no-verify                  -0.0050
+    dump - no-verify                   0.0161
   -vox-dump-vc builds and formats every obligation but exits before
   emitting bytecode -- it writes no .cmo, and -vox-no-verify does.  So
   this difference is (construction + formatting) MINUS (bytecode
@@ -93,5 +95,5 @@ attributed to                       seconds    share of cold total
 
   a perfect cache saves the cold-minus-warm row, most of which is the
   teardown charge rather than the solver:
-  cold total                           1.7567   100.0%
-  warm total                           1.0200    58.1%
+  cold total                           1.7449   100.0%
+  warm total                           0.9718    55.7%
