@@ -166,6 +166,21 @@ type context =
 
 let int_width = 63
 
+(* Two to a power, as a bitvector-sized integer.  The sign bit of an
+   [int_width]-wide literal is 2^(int_width - 1), which is one past this
+   host's [max_int] at the width the model uses today and so cannot be
+   written as an [int] literal. *)
+let two_to_the exponent =
+  let rec double value remaining =
+    if remaining = 0 then value
+    else double (Oxsmt_core.Bigint.add value value) (remaining - 1)
+  in
+  double Oxsmt_core.Bigint.one exponent
+
+(* A canonical [int_width]-wide literal stands for a negative number exactly
+   when it is at least this. *)
+let int_sign_bit = two_to_the (int_width - 1)
+
 let shift_fallback_basename = function
   | `Shift_left -> "VoxInt_shift_left_unspecified"
   | `Shift_right_logical -> "VoxInt_shift_right_logical_unspecified"
@@ -1966,13 +1981,13 @@ let oxsmt_builtin environment location builtin arguments =
           if Oxsmt_core.Bigint.equal value (Oxsmt_core.Bigint.of_int 0) then
             None
           else
-            (* The literal is canonical in [0, 2^63), so it stands for a
-               negative number exactly when it is at least 2^62, and this
-               host's own [max_int] is 2^62 - 1. *)
-            Some
-              (Oxsmt_core.Bigint.compare value
-                 (Oxsmt_core.Bigint.of_int max_int)
-               > 0)
+            (* The literal is canonical in [0, 2^int_width), so it stands for
+               a negative number exactly when its sign bit is set.  The
+               threshold comes from [int_width] rather than from the host's
+               own [max_int]: the two agree today, but they are independent
+               constants, and reading the sign against the wrong one would
+               emit a wrong quotient rather than fail. *)
+            Some (Oxsmt_core.Bigint.compare value int_sign_bit >= 0)
         | Some (Oxsmt_bv.Const _ | Oxsmt_bv.Op _) | None -> None
       in
       let divisor_negative =
