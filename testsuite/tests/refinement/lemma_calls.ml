@@ -55,3 +55,14 @@ external needed : x:int -> unit{ x > 3 } @@ total = "%ignore"
 let uses_law (f : int) =
   let () = needed ~x:f in
   (f : int{ _ > 2 })
+
+(* An argument that does work of its own.  [outer]'s own proposition is read
+   by nothing, but its span contains the call to [needed] whose proposition
+   the goal below rests on, and the two are one span to anyone deleting the
+   marked text.  So [outer] must not be offered as a call at all, while the
+   inner call, whose span is its own, still is. *)
+external outer : unit -> unit{ 2 > 1 } @@ total = "%ignore"
+
+let nested_argument (g : int) =
+  let () = outer (needed ~x:g) in
+  (g : int{ _ > 2 })

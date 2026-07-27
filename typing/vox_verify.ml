@@ -121,8 +121,10 @@ let dumped_identifier_modes = ref []
    a reader wanting to know whether it earned its place has to ask whether any
    obligation read them.  Recorded here, span and callee name, so the answer
    can be given for a call whose fact was dropped (out of scope, already
-   present) as readily as for one whose fact survived.  Populated and emitted
-   only when [-vox-dump-vc-json] is set. *)
+   present) as readily as for one whose fact survived.  A call whose
+   arguments did work of their own is not recorded at all: its span contains
+   theirs, so an answer about it would be read as an answer about them.
+   Populated and emitted only when [-vox-dump-vc-json] is set. *)
 let lemma_call_sites : (Location.t * string option * bool) list ref = ref []
 
 let valid_local_span (location : Location.t) =
@@ -3946,6 +3948,31 @@ and check_application state application function_ arguments
   | None -> ()
   end;
   state.facts <- merge_facts boundary_facts !relation_facts;
+  (* What a reader does with the mark is delete the marked text, and the
+     marked text is the whole application -- its arguments with it.  So the
+     question the mark answers is not only whether this call's own
+     proposition went unread: it is whether anything inside its span did work
+     that would go with it.  An argument that is itself a lemma call is the
+     case that matters, since the fact an obligation read may be the inner
+     one while the outer one goes unread, and the two are one span on screen.
+     Admit only arguments whose evaluation left the fact environment as it
+     was and which are stable, so nothing observable leaves with them; where
+     that is not established, record no call and the mark is never offered. *)
+  let arguments_are_inert =
+    match
+      List.for_all2
+        (fun (_, argument) argument_facts ->
+          match argument, argument_facts with
+          | Arg (argument, _), Some argument_facts ->
+            Facts.same_facts argument_facts entry_facts
+            && expression_is_stable state argument
+          | Omitted _, None -> true
+          | Arg _, None | Omitted _, Some _ -> false)
+        arguments argument_facts
+    with
+    | inert -> inert
+    | exception Invalid_argument _ -> false
+  in
   Option.iter
     (fun metadata ->
       let name =
@@ -3966,6 +3993,7 @@ and check_application state application function_ arguments
             && valid_local_span application.exp_loc
             && refines_unit ~env:application.exp_env refinement
             && call_is_proof_evidence state function_
+            && arguments_are_inert
           in
           add_extracted_refinement_fact state ~env:application.exp_env
             ~kind:"application" ?name

@@ -14,12 +14,24 @@ def main():
         return (span["start"]["line"], span["start"]["column"])
 
     sites = sorted(site(call["span"]) for call in calls)
-    # The five `law` calls and the call to `needed`, and only those: the
+    # The five `law` calls and the two calls to `needed`, and only those: the
     # `effectful_law` call on line 45 hands back a refined unit too, but it is
-    # not evidence-only, so it is not a call anyone could be told to drop.
-    expected = [(31, 11), (35, 11), (36, 11), (40, 21), (40, 35), (56, 11)]
+    # not evidence-only, so it is not a call anyone could be told to drop, and
+    # the `outer` call on line 67 is evidence-only but its span contains an
+    # argument that did work, so it is not one either.
+    expected = [(31, 11), (35, 11), (36, 11), (40, 21), (40, 35), (56, 11), (67, 17)]
     if sites != expected:
         raise AssertionError("lemma_calls sites %s != %s" % (sites, expected))
+    # Said again on its own, because the list above fails for any difference
+    # and this is the difference that matters: the text of the `outer` call
+    # contains the call to `needed` at 67:17, whose proposition is the only
+    # reason the goal on line 68 holds.  Recording the outer call invites a
+    # reader to delete both.
+    if (67, 11) in sites:
+        raise AssertionError(
+            "the call at 67:11 was recorded; its span contains the call at "
+            "67:17 whose fact the goal on line 68 needs"
+        )
     for call in calls:
         if call["name"] not in ("law", "needed"):
             raise AssertionError("unexpected callee %r" % (call["name"],))
@@ -76,8 +88,8 @@ def main():
             # on the binder alone.
             if name == "law" and fact["used"]:
                 raise AssertionError("law fact reported as read: %r" % (fact,))
-            # Every `needed` fact is read: the goal on line 57 holds for no
-            # other reason.
+            # Every `needed` fact is read: the goals on lines 57 and 68 hold
+            # for no other reason.
             if name == "needed":
                 needed_facts += 1
                 if not fact["used"]:

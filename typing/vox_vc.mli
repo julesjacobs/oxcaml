@@ -98,6 +98,13 @@ module Fact_env : sig
   val union : t -> t -> t
   (** Combine facts and scope from two environments. *)
 
+  val same_facts : t -> t -> bool
+  (** Whether these two environments hold the same facts: not equal ones, the
+      same list, unchanged since it was taken.  Identity is deliberate.  It is
+      false whenever anything rebuilt the list, a rebuild that changed nothing
+      included, so a caller asking "did evaluating this expression contribute
+      a fact?" is told yes wherever the answer is not certainly no. *)
+
   val snapshot :
     loc:Location.t ->
     goal:Types.refinement_expression ->

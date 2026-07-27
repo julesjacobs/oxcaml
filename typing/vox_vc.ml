@@ -295,6 +295,8 @@ module Fact_env = struct
       scope = Ident.Set.union left.scope right.scope;
     }
 
+  let same_facts left right = left.facts_rev == right.facts_rev
+
   let snapshot ~loc ~goal env =
     let escaped =
       Ident.Set.diff
