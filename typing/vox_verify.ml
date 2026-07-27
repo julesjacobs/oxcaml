@@ -3967,7 +3967,16 @@ and check_application state application function_ arguments
      one while the outer one goes unread, and the two are one span on screen.
      Admit only arguments whose evaluation left the fact environment as it
      was and which are stable, so nothing observable leaves with them; where
-     that is not established, record no call and the mark is never offered. *)
+     that is not established, record no call and the mark is never offered.
+
+     What is admitted is narrower than "no nested lemma call", and
+     deliberately: any argument that touched the fact environment is refused,
+     including one that only mentions a refined value, since referring to
+     such a binding introduces a fact of its own.  Measured over the
+     refinement corpus that costs one recording in the whole of bst.ml --
+     [member_def query empty], where [empty] is a refined value -- and no
+     mark anywhere, so the narrower rule is paid for at the price of a hint
+     nobody was shown. *)
   let arguments_are_inert =
     match
       List.for_all2
