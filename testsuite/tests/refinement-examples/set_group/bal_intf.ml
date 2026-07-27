@@ -4,11 +4,27 @@
    over exactly those four says anything about the shape of a value.
    Balance is a shape property and is not determined by the member set
    even on well-formed values, so forcing it needs a new observation
-   rather than a new law.  [depth] is that observation, and it is the
-   one addition here that has to be argued for: [LEAST_SET] and
-   [REMOVING_SET] below also enlarge the algebra, but their operations
-   are fixed by the member set on well-formed values and expose nothing
-   a client could not already compute.
+   rather than a new law.  [depth] is that observation.
+
+   [LEAST_SET] and [REMOVING_SET] below also enlarge the algebra, and it
+   is worth being exact about how far that goes, because an earlier
+   version of this note was not.  [remove_law] pins the member set of
+   [remove]'s result completely, for every query, so nothing about
+   [remove] is left to leak.  [least_law] does not do the same for
+   [least]: it says only that the result is a member of the value or
+   else the fallback.  A [least] returning the ROOT key satisfies it ---
+   the root is always a member --- and returns 5 on
+   [Node (Node (Empty, 3, Empty), 5, Empty)] against 3 on
+   [Node (Empty, 3, Node (Empty, 5, Empty))], two ORDERED trees over the
+   same member set.  So a conforming [least] can expose shape, and this
+   layer does not stop it.
+
+   What is true, and is what the corpus relies on, is that [bst.ml]'s
+   [least] is the leftmost key of an ordered tree and so is determined by
+   the member set on well-formed values.  That is a property of the
+   implementation, not of the module type, and no exported law states
+   it.  [CARDINAL_SET] is the one layer here that adds nothing to expose:
+   it adds a law and no operation at all.
 
    Exporting [depth] alone moves the problem rather than solving it: an
    implementation would be free to define it however it liked, and a
@@ -274,32 +290,38 @@ module type COUNTED_SET = sig
     } @@ total
 end
 
-(* The least-element layer.  [least tree fallback] is the least key the
-   value holds, or [fallback] when it holds none; a standard set library
-   exports it as [min_elt].  It exposes no shape --- on a well-formed
-   value it is the minimum of the member set --- and it nevertheless
-   forces an ordering invariant that the four [SET] operations cannot
-   reach.
+(* The least-element layer.  [least tree fallback] is intended to be the
+   least key the value holds, or [fallback] when it holds none; a
+   standard set library exports it as [min_elt].  Read "intended":
+   [least_law] below requires only that the result be a member or the
+   fallback, so the layer does not specify the value, and the note at the
+   head of this file gives a conforming [least] that returns the root key
+   and tells two ordered trees over the same member set apart.  What
+   [bst.ml] supplies is the leftmost key, which on a well-formed value is
+   the minimum of the member set and exposes no shape --- a fact about
+   that implementation, not about this signature.
 
-   The reason is the general rule, and it is worth stating here rather
-   than at the one implementation that uses it.  An operation separates
-   ill-formed values from well-formed ones when its own recursion reads
-   the structure the invariant constrains, even when the value it is
-   *specified* to return is a function of the member set alone.  [least]
-   descends the left spine, so on an unordered value it can return a key
-   that the one-spine [member] never finds, and [least_law] is then
-   false rather than merely unproved.  Being membership-determined on
-   well-formed values is not the same as being membership-determined,
-   and it is the second that would leave an operation unable to
-   separate.  [depth] below is not membership-determined even on
-   well-formed values, which is why enlarging the algebra with it needs
-   a justification and enlarging it with [least] does not.
+   With that implementation in place, the layer reaches an ordering
+   invariant that the four [SET] operations cannot.  The mechanism is
+   worth stating here rather than at the one file that uses it.  An
+   operation separates ill-formed values from well-formed ones when its
+   own recursion reads the structure the invariant constrains, even when
+   the value it is *intended* to return is a function of the member set
+   alone.  [least] descends the left spine, so on an unordered value it
+   can return a key that the one-spine [member] never finds, and
+   [least_law] is then false rather than merely unproved.  Being
+   membership-determined on well-formed values is not the same as being
+   membership-determined, and it is the second that would leave an
+   operation unable to separate.  [depth] below is not
+   membership-determined even on well-formed values, which is the
+   sharpest case of the same point.
 
    Subject to the note above: the law does not pin [least] itself.
    [least tree fallback = fallback] for every value satisfies the second
    disjunct, so an implementation that weakens its invariant and gives up
-   on returning a least element together carries this layer.  What is
-   refused is dropping [ordered] while keeping the honest [least]. *)
+   on returning a least element together carries this layer, as does the
+   root-key one.  What is refused is dropping [ordered] while keeping the
+   honest [least]. *)
 module type LEAST_SET = sig
   include COUNTED_SET
 
