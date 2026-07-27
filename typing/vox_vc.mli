@@ -97,6 +97,11 @@ module Fact_env : sig
       make [scope] the resulting lexical scope. *)
   val restrict : Ident.Set.t -> t -> t
 
+  val filter : (fact -> bool) -> t -> t
+  (** Keep only the facts the predicate accepts.  The scope is unchanged, so
+      the result still admits the same identifiers; only what may be assumed
+      about them is narrowed. *)
+
   val intersect : t -> t -> t
   (** Keep the facts, and only the scope, shared by both environments. *)
 

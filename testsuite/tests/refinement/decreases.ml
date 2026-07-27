@@ -247,6 +247,118 @@ Lines 5-6, characters 6-32:
 Error: Refinement verification failed (not-proved)
 |}]
 
+(* Expect: refused.  A measure has to be a function of the parameters, and a
+   call being total does not make it one.  [double] here is in fact pure, but
+   nothing the verifier can see says so, and the same shape with a mutable
+   field behind it would read differently at two different times. *)
+module Measure_calls_a_user_function : sig end = struct
+  let double (x : int) : int = 2 * x
+
+  let[@vox.decreases double n] rec f (n : int{ _ >= 0 }) : int =
+    if n = 0 then 0 else f (n - 1)
+end
+
+[%%expect {|
+Line 4, characters 21-27:
+4 |   let[@vox.decreases double n] rec f (n : int{ _ >= 0 }) : int =
+                         ^^^^^^
+Error: vox: [@vox.decreases] cannot read this call as a measure.  A measure has to be a function of the parameters, and being total is not that: reading a mutable field terminates, so an accessor over one is truthfully total while its result changes under an assignment the descent knows nothing about.  Only the arithmetic and comparisons the verifier reproduces itself may appear here
+|}]
+
+(* Expect: accepted.  An immutable field is not a call: reading it twice
+   reads the same value, so a measure may be written over one. *)
+type counter = { size : int }
+
+let[@vox.decreases c.size] rec shrink (c : counter{ _.size >= 0 }) : int =
+  if c.size = 0 then 0 else shrink { size = c.size - 1 }
+
+[%%expect {|
+type counter = { size : int; }
+val shrink : counter{ _.size >= 0 } -> int = <fun>
+|}]
+
+(* Expect: refused.  This is the second way a measured recursion could have
+   been granted totality while running forever: the state is behind an
+   [int -> int] interface, so no mutable value appears in any obligation, and
+   every function here is truthfully total -- reading and writing a mutable
+   field both terminate.  What is not true is that [get j] is a function of
+   [j]: the [set] between the test and the call changes it, and the
+   observation made before the write would otherwise still be believed after
+   it.  [f 0 1 1] runs forever.
+
+   Written at the top of a file the totality request is what fails, and the
+   call carries the located reason; [decreases_tot_state.ml] is that witness.
+   Wrapped in a module here, the harness refuses it before reaching that, so
+   what this fixture pins is only that it stays refused. *)
+module State_behind_an_interface : sig end = struct
+  let a = ref 0
+  let b = ref 0
+  let cell (i : int) : int ref = if i = 0 then a else b
+  let get (i : int) : int = (cell i).contents
+  let set (i : int) (x : int) : unit = (cell i).contents <- x
+
+  let[@vox.decreases n] rec f (i : int) (j : int) (n : int) : int =
+    if get j >= 0 && get j < n
+    then begin
+      set j (n + 1);
+      f j i (get j)
+    end
+    else 0
+end
+
+[%%expect {|
+Line 12, characters 6-19:
+12 |       f j i (get j)
+           ^^^^^^^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: refused.  The same loop with the reads bound to locals first, so
+   the argument at the measured position is a plain identifier and the
+   position is one the verifier can decide.  What it may not do is prove the
+   descent from what it observed through [get] before the write, so the
+   hypotheses that would discharge it are not available.  Its witness at the
+   top of a file is [decreases_tot_state_local.ml]. *)
+module State_behind_a_local : sig end = struct
+  let a = ref 0
+  let b = ref 0
+  let cell (i : int) : int ref = if i = 0 then a else b
+  let get (i : int) : int = (cell i).contents
+  let set (i : int) (x : int) : unit = (cell i).contents <- x
+
+  let[@vox.decreases n] rec f (i : int) (j : int) (n : int) : int =
+    let x = get j in
+    if x >= 0 && x < n
+    then begin
+      set j (n + 1);
+      let y = get j in
+      f j i y
+    end
+    else 0
+end
+
+[%%expect {|
+Line 14, characters 6-13:
+14 |       f j i y
+           ^^^^^^^
+Error: Refinement verification failed (not-proved)
+|}]
+
+(* Expect: accepted.  A position whose argument the verifier cannot reproduce
+   is one the descent may not be decided at, and neither may any position
+   after it -- but the positions before it are untouched.  Here the pair
+   descends on its first position and the second is an opaque call, which is
+   Ackermann's shape without Ackermann's arithmetic. *)
+let opaque (x : int) : int = x + 1
+
+let[@vox.decreases m, n] rec passed_over (m : int{ _ >= 0 }) (n : int) : int =
+  if m = 0 then 0 else passed_over (m - 1) (opaque n)
+
+[%%expect {|
+val opaque : int -> int = <fun>
+val passed_over : int{ _ >= 0 } -> int -> int = <fun>
+|}]
+
 (* Expect: accepted.  Mutual recursion descends on the measure the whole
    group shares; each call compares the callee's measure at its arguments
    against the caller's at its parameters. *)

@@ -2327,6 +2327,76 @@ let selfification_fact state ?scope binding =
     | result_subject -> add binding.vb_pat result_subject
     | exception Unsupported_subject _ -> ()
 
+(* What a termination argument is allowed to rest on.
+
+   Totality is not purity.  Reading a mutable record field terminates, so an
+   accessor over one is truthfully total, and so is the write beside it; and
+   the verifier models a total call as a mathematical function of its
+   arguments, so a value observed through such an accessor before a write is
+   still believed after it.  For an ordinary refinement that is a stale
+   hypothesis.  For a measure it is the whole argument, because a descent is a
+   claim relating two evaluations of the same expression at two different
+   times, and the write between them is exactly what the claim is about.
+
+   So the descent is stated and discharged over the operations the verifier
+   reproduces itself: the arithmetic and comparisons [Vox_builtin] recognises,
+   whose recognised set is documented as pure and deterministic, together with
+   values, constructors, immutable fields, and the mismatch marker the fact
+   walk generates for a match arm that did not fire.  An application of
+   anything else is not admissible here, however total it is. *)
+let termination_admissible_head ~env reference =
+  match reference with
+  | Rfun name -> Option.is_some (Vox_builtin.constructor_mismatch name)
+  | Rsibling _ -> false
+  | Rapp path | Rglobal path ->
+    begin match Vox_builtin.of_path path with
+    | Some _ -> true
+    | None ->
+      begin match
+        Subst.Lazy.force_value_description (Env.find_value path env)
+      with
+      | { val_kind = Val_prim primitive; _ } ->
+        let path = Env.normalize_value_path None env path in
+        Option.is_some (Vox_builtin.of_primitive ~path primitive.prim_name)
+      | _ -> false
+      | exception Not_found -> false
+      end
+    end
+
+let rec termination_admissible ~env expression =
+  let admissible = termination_admissible ~env in
+  match expression.rexp_desc with
+  | Rexp_constant _ -> true
+  | Rexp_ident (Rbound _) -> true
+  (* A value, rather than a call: what it denotes does not change under an
+     assignment, because an assignment replaces what a mutable field holds
+     and not the value bound here. *)
+  | Rexp_ident (Rfree (Rglobal _ | Rsibling _)) -> true
+  | Rexp_ident (Rfree (Rapp _ | Rfun _)) -> false
+  | Rexp_apply (head, arguments) ->
+    begin match head.rexp_desc with
+    | Rexp_ident (Rfree reference) -> termination_admissible_head ~env reference
+    | _ -> false
+    end
+    && List.for_all (fun (_, argument) -> admissible argument) arguments
+  | Rexp_tuple fields ->
+    List.for_all (fun (_, field) -> admissible field) fields
+  | Rexp_construct (_, arguments) -> List.for_all admissible arguments
+  (* Every lowering that builds a field projection has already established
+     that the label is immutable; a mutable one is refused where it is read,
+     not here. *)
+  | Rexp_field (record, _) -> admissible record
+  | Rexp_ifthenelse (condition, ifso, ifnot) ->
+    admissible condition && admissible ifso
+    && (match ifnot with None -> true | Some ifnot -> admissible ifnot)
+  | Rexp_let (bindings, body) ->
+    List.for_all (fun binding -> admissible binding.rbind_expr) bindings
+    && admissible body
+  | Rexp_match (scrutinee, cases) ->
+    admissible scrutinee
+    && List.for_all (fun case -> admissible case.rcase_body) cases
+  | Rexp_function { body; _ } -> admissible body
+
 let termination_provenance ~measure_location ~call_location ~callee =
   { kind = "termination";
     name = Some (Ident.name callee);
@@ -4066,18 +4136,65 @@ and check_termination state application function_ arguments =
       in
       let actuals = actual_arguments measure.parameters arguments in
       let callee_measure = measure_at_arguments measure actuals in
+      let env = application.exp_env in
+      (* A lexicographic tuple descends at one position, so a position the
+         verifier cannot decide is one the descent may not be decided at --
+         nor at any position after it, since reaching those means having
+         shown this one unchanged.  Keeping the leading run it can decide is
+         therefore the whole of what this call can honestly claim.  The
+         measure at the parameters is admissible by construction, since a
+         measure that is not was refused where it was written; what arrives
+         here is an argument. *)
+      let rec decidable_prefix callee caller =
+        match callee, caller with
+        | component :: callee, caller_component :: caller
+          when termination_admissible ~env component ->
+          let callee, caller = decidable_prefix callee caller in
+          component :: callee, caller_component :: caller
+        | _, _ -> [], []
+      in
+      let callee_measure, caller_measure =
+        decidable_prefix callee_measure frame.tf_caller
+      in
+      (match callee_measure with
+       | _ :: _ -> ()
+       | [] ->
+        Location.raise_errorf ~loc
+          "vox: this recursive call leaves no position of the termination \
+           measure that can be decided.  Its argument at the first position \
+           is, or contains, a call whose result the verifier does not \
+           reproduce: a total function may still read mutable state, so its \
+           value is not settled by its arguments, and a measure read through \
+           one says nothing about what changes between two calls.");
       let goal =
-        lexicographic_descent ~env:application.exp_env ~loc callee_measure
-          frame.tf_caller
+        lexicographic_descent ~env ~loc callee_measure caller_measure
       in
       let goal = bind_scope_references (Facts.scope state.facts) goal in
       state.discharged_calls <- application :: state.discharged_calls;
-      prove state ~env:application.exp_env ~loc ~kind:"termination"
-        ~program_point:loc ~result_span:function_.exp_loc
-        ~provenance:(fun () ->
-          termination_provenance ~measure_location:frame.tf_loc
-            ~call_location:loc ~callee)
-        goal
+      (* Discharged against the facts the same rule admits.  A hypothesis
+         about a call the verifier does not reproduce is exactly the stale
+         observation the two-state loop is built out of, so it is not
+         available here, and the obligation is proved without it or not at
+         all. *)
+      let outer_facts = state.facts in
+      state.facts <-
+        Facts.filter
+          (fun (fact : Vox_vc.fact) ->
+            termination_admissible ~env fact.expression)
+          outer_facts;
+      let restore () = state.facts <- outer_facts in
+      begin
+        match
+          prove state ~env ~loc ~kind:"termination"
+            ~program_point:loc ~result_span:function_.exp_loc
+            ~provenance:(fun () ->
+              termination_provenance ~measure_location:frame.tf_loc
+                ~call_location:loc ~callee)
+            goal
+        with
+        | () -> restore ()
+        | exception exception_ -> restore (); raise exception_
+      end
     end
   | _ -> ()
 

@@ -1,0 +1,4 @@
+File "decreases_tot_state_local.ml", line 20, characters 4-11:
+20 |     f j i y
+         ^^^^^^^
+Error: Refinement verification failed (not-proved)

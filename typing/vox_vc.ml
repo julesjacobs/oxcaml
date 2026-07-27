@@ -94,6 +94,9 @@ module Fact_env = struct
       scope;
     }
 
+  let filter keep env =
+    { env with facts_rev = List.filter (fun fact -> keep fact) env.facts_rev }
+
   let leave id env = restrict (Ident.Set.remove id env.scope) env
 
   let leave_many ids env =

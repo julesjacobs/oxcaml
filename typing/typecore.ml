@@ -8228,6 +8228,27 @@ let decreases_carrier_name = function
    solver cannot read is refused outright rather than turned into an opaque
    symbol.  An opaque measure would simply fail to descend, and the author
    would have no way to see why. *)
+(* The operations a measure may call.  [Vox_builtin]'s recognised set is
+   documented as pure and deterministic, which is the property a measure
+   needs and the property totality does not supply: a total function may read
+   mutable state, and a measure read through one is not a function of the
+   parameters at all.  Refusing it here, where the measure is written, says
+   so once; letting it through would instead fail to descend at every call
+   with nothing pointing at the reason. *)
+let measure_call_is_modelled function_ =
+  match function_.exp_desc with
+  | Texp_ident { path; desc; _ } ->
+    Option.is_some (Vox_builtin.of_path path)
+    || begin match desc.val_kind with
+       | Val_prim primitive ->
+         let path =
+           Env.normalize_value_path None function_.exp_env path
+         in
+         Option.is_some (Vox_builtin.of_primitive ~path primitive.prim_name)
+       | Val_reg _ | Val_mut _ | Val_ivar _ | Val_self _ | Val_anc _ -> false
+       end
+  | _ -> false
+
 let lower_measure_expression ~parameters expression =
   let is_parameter id =
     List.exists (List.exists (Ident.same id)) parameters
@@ -8245,6 +8266,14 @@ let lower_measure_expression ~parameters expression =
       create (Rexp_ident (Rfree reference))
     | Texp_constant constant -> create (Rexp_constant constant)
     | Texp_apply (function_, arguments, _, _, _) ->
+      if not (measure_call_is_modelled function_) then
+        decreases_error ~loc:function_.exp_loc
+          "cannot read this call as a measure.  A measure has to be a \
+           function of the parameters, and being total is not that: reading \
+           a mutable field terminates, so an accessor over one is truthfully \
+           total while its result changes under an assignment the descent \
+           knows nothing about.  Only the arithmetic and comparisons the \
+           verifier reproduces itself may appear here";
       let function_ = lower ~function_head:true function_ in
       let arguments =
         List.map

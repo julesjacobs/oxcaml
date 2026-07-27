@@ -8,6 +8,8 @@
    decreases_tot_record_mutable.ml decreases_tot_record_mutable.reference \
    decreases_tot_record_shadow.ml decreases_tot_record_shadow.reference \
    decreases_tot_orbit.ml decreases_tot_orbit.reference \
+   decreases_tot_state.ml decreases_tot_state.reference \
+   decreases_tot_state_local.ml decreases_tot_state_local.reference \
  ";
  setup-ocamlc.byte-build-env;
 
@@ -70,6 +72,21 @@
  ocamlc.byte;
  compiler_reference = "${test_source_directory}/decreases_tot_orbit.reference";
  check-ocamlc.byte-output;
+
+ module = "decreases_tot_state.ml";
+ compiler_output = "decreases_tot_state.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+ compiler_reference = "${test_source_directory}/decreases_tot_state.reference";
+ check-ocamlc.byte-output;
+
+ module = "decreases_tot_state_local.ml";
+ compiler_output = "decreases_tot_state_local.output";
+ ocamlc_byte_exit_status = "2";
+ ocamlc.byte;
+ compiler_reference =
+   "${test_source_directory}/decreases_tot_state_local.reference";
+ check-ocamlc.byte-output;
 *)
 
 (* What a [@vox.decreases] measure buys, witnessed in batch rather than at the
@@ -90,8 +107,14 @@
    mutable field stays refused; and a mutable field the parse tree cannot see
    is refused with a message of its own.
 
-   The last subject is a two-parameter recursion that does not terminate,
-   asked for where a total value is wanted.  Its measure descends only if
-   each argument is read at the values the call passes; it is here because a
-   reading that let one position's argument be rewritten by another's
-   accepted it as total. *)
+   The last three subjects are recursions that do not terminate, each asked
+   for where a total value is wanted.  The first descends only if each
+   argument is read at the values the call passes, and was accepted as total
+   by a reading that let one position's argument be rewritten by another's.
+   The other two keep their state behind an [int -> int] interface, where
+   every function involved is truthfully total -- reading and writing a
+   mutable field both terminate -- and the descent nevertheless rests on an
+   observation that the write between the test and the call invalidates.
+   They differ in whether the read reaches the call directly or through a
+   local binding, which is the difference between the two halves of the rule
+   that refuses them. *)
