@@ -1,22 +1,21 @@
 (**************************************************************************)
-(*                                                                        *)
-(*                                 OCaml                                  *)
-(*                                                                        *)
-(*                       Pierre Chambart, OCamlPro                        *)
-(*           Mark Shinwell and Leo White, Jane Street Europe              *)
-(*                                                                        *)
-(*   Copyright 2013--2021 OCamlPro SAS                                    *)
-(*   Copyright 2014--2021 Jane Street Group LLC                           *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
+(* *)
+(* OCaml *)
+(* *)
+(* Pierre Chambart, OCamlPro *)
+(* Mark Shinwell and Leo White, Jane Street Europe *)
+(* *)
+(* Copyright 2013--2021 OCamlPro SAS *)
+(* Copyright 2014--2021 Jane Street Group LLC *)
+(* *)
+(* All rights reserved. This file is distributed under the terms of *)
+(* the GNU Lesser General Public License version 2.1, with the *)
+(* special exception on linking described in the file LICENSE. *)
+(* *)
 (**************************************************************************)
-(** This module follows the structure of driver/main_args.ml and
-    driver/main_args.mli. It provides a way to (a) share argument
-    implementations between different installable tools and (b) override default
-    implementations of arguments. *)
+(** This module follows the structure of driver/main_args.ml and driver/main_args.mli. It
+    provides a way to (a) share argument implementations between different installable
+    tools and (b) override default implementations of arguments. *)
 
 (** Command line arguments required for flambda backend. *)
 module type Oxcaml_options = sig
@@ -109,6 +108,12 @@ module type Oxcaml_options = sig
   val no_dissector_assume_lld_without_64_bit_eh_frames : unit -> unit
   val manual_module_init : unit -> unit
   val no_manual_module_init : unit -> unit
+  val emit_startup_key : string -> unit
+  val compile_startup_stable : string -> unit
+  val use_startup_stable : string -> unit
+  val compile_startup_volatile : unit -> unit
+  val emit_startup_volatile_inline : unit -> unit
+  val use_startup_volatile : string -> unit
   val gc_timings : unit -> unit
   val no_mach_ir : unit -> unit
   val dllvmir : unit -> unit
@@ -197,12 +202,19 @@ module type Oxcaml_options = sig
   val dflow : unit -> unit
   val dsimplify : unit -> unit
   val dreaper : unit -> unit
+  val assume_consistent_inputs : unit -> unit
+  val cmxa_summaries : string -> unit
+  val emit_cmxa_summary : unit -> unit
+  val emit_link_plan : string -> unit
+  val use_link_plan : string -> unit
+  val plan_emit_startup_stable : string -> unit
+  val plan_emit_startup_volatile : string -> unit
   val use_cached_generic_functions : unit -> unit
   val cached_generic_functions_path : string -> unit
   val x : string -> unit
 end
 
-(** Command line arguments required for ocamlopt.*)
+(** Command line arguments required for ocamlopt. *)
 module type Debugging_options = sig
   val restrict_to_upstream_dwarf : unit -> unit
   val no_restrict_to_upstream_dwarf : unit -> unit
@@ -234,9 +246,9 @@ module type Opttop_options = sig
   include Debugging_options
 end
 
-(** Transform required command-line arguments into actual arguments. Each tool
-    can define its own argument implementations and call the right functor to
-    actualize them into [Arg.t] list. *)
+(** Transform required command-line arguments into actual arguments. Each tool can define
+    its own argument implementations and call the right functor to actualize them into
+    [Arg.t] list. *)
 module Make_optcomp_options (_ : Optcomp_options) : Main_args.Arg_list
 
 module Make_opttop_options (_ : Opttop_options) : Main_args.Arg_list
@@ -247,38 +259,39 @@ module Default : sig
   module Opttopmain : Opttop_options
 end
 
-(** Extra_params module provides a way to read oxcaml flags from OCAMLPARAM. All
-    command line flags should support it, with the exception of debug printing,
-    such as -dcfg. *)
+(** Extra_params module provides a way to read oxcaml flags from OCAMLPARAM. All command
+    line flags should support it, with the exception of debug printing, such as -dcfg. *)
 module Extra_params : sig
-  val read_param :
-    Format.formatter -> Compenv.readenv_position -> string -> string -> bool
   (** [read_param ppf pos name value] returns whether the param was handled. *)
+  val read_param
+    :  Format.formatter
+    -> Compenv.readenv_position
+    -> string
+    -> string
+    -> bool
 end
 
 module Extra_options : sig
   (** This module allows to define new [-X] options.
 
-      [-X] options can be passed on the command line as [-X name=value], and
-      from the [OCAMLPARAM] environment variable as [Xname=value].
+      [-X] options can be passed on the command line as [-X name=value], and from the
+      [OCAMLPARAM] environment variable as [Xname=value].
 
-      {b Note}: [-X] options are intended for internal use only. They are not
-      documented in the output of [--help] and may be removed without notice. *)
+      {b Note}: [-X] options are intended for internal use only. They are not documented
+      in the output of [--help] and may be removed without notice. *)
 
+  (** [string __LOC__ name default] defines a new extra option which accepts arbitrary
+      strings. *)
   val string : string -> string -> string -> unit -> string
-  (** [string __LOC__ name default] defines a new extra option which accepts
-      arbitrary strings. *)
 
+  (** [int __LOC__ name default] defines a new extra option which accepts only integers. *)
   val int : string -> string -> int -> unit -> int
-  (** [int __LOC__ name default] defines a new extra option which accepts only
-      integers. *)
 
+  (** [bool __LOC__ name] defines a new extra option which accepts booleans written as the
+      integers '0' and '1'. *)
   val bool : string -> string -> unit -> bool
-  (** [bool __LOC__ name] defines a new extra option which accepts booleans
-      written as the integers '0' and '1'. *)
 
+  (** [symbol __LOC__ name default spec] defines a new extra option which accepts only the
+      strings in [spec] and associates them with the corresponding value. *)
   val symbol : string -> string -> 'a -> (string * 'a) list -> unit -> 'a
-  (** [symbol __LOC__ name default spec] defines a new extra option which
-      accepts only the strings in [spec] and associates them with the
-      corresponding value. *)
 end

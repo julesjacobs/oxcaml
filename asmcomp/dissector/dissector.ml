@@ -108,7 +108,7 @@ let dump_sizes file_sizes =
   Printf.eprintf "  %12Ld  TOTAL\n%!" total
 
 let run ~(unix : (module Compiler_owee.Unix_intf.S)) ~temp_dir ~ml_objfiles
-    ~startup_obj ~ccobjs ~runtime_libs ~cached_genfns =
+    ~startup_objs ~ccobjs ~runtime_libs ~cached_genfns =
   (* Check that -nodynlink was not used. The dissector requires GOTPCREL
      relocations which are only emitted when dlcode=true. *)
   if not !Clflags.dlcode then raise (Error Nodynlink_incompatible);
@@ -126,7 +126,7 @@ let run ~(unix : (module Compiler_owee.Unix_intf.S)) ~temp_dir ~ml_objfiles
      are passthrough (passed directly to final linker, not partially linked). *)
   let files_to_measure =
     List.map (fun f -> f, MOF.OCaml) ml_objfiles
-    @ [startup_obj, MOF.Startup]
+    @ List.map (fun f -> f, MOF.Startup) startup_objs
     @ match cached_genfns with None -> [] | Some f -> [f, MOF.Cached_genfns]
   in
   let passthrough_files = ccobjs @ runtime_libs in

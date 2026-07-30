@@ -1,16 +1,16 @@
 (**************************************************************************)
-(*                                                                        *)
-(*                                 OCaml                                  *)
-(*                                                                        *)
-(*             Xavier Leroy, projet Cristal, INRIA Rocquencourt           *)
-(*                                                                        *)
-(*   Copyright 1996 Institut National de Recherche en Informatique et     *)
-(*     en Automatique.                                                    *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
+(* *)
+(* OCaml *)
+(* *)
+(* Xavier Leroy, projet Cristal, INRIA Rocquencourt *)
+(* *)
+(* Copyright 1996 Institut National de Recherche en Informatique et *)
+(* en Automatique. *)
+(* *)
+(* All rights reserved. This file is distributed under the terms of *)
+(* the GNU Lesser General Public License version 2.1, with the *)
+(* special exception on linking described in the file LICENSE. *)
+(* *)
 (**************************************************************************)
 
 (* Link a set of .cmx/.o files and produce an executable *)
@@ -27,16 +27,20 @@ type error =
   | Dsymutil_error of int
   | Objcopy_error of int
   | Cm_bundle_error of Cm_bundle.error
+  | Startup_stable_and_cache_dir
+  | Startup_key_bad_magic of string
+  | Startup_key_version_mismatch of string
+  | Startup_stable_unsupported of string
 
 exception Error of error
 
 type unit_link_info = Linkenv.unit_link_info =
-  { name : Compilation_unit.t;
-    defines : Compilation_unit.t list;
-    file_name : string;
-    crc : Digest.t;
-    imports_cmx : Import_info.t list;
-    (* for shared libs *)
+  { name : Compilation_unit.t
+  ; defines : Compilation_unit.t list
+  ; file_name : string
+  ; crc : Digest.t
+  ; imports_cmx : Import_info.t list
+  ; (* for shared libs *)
     dynunit : Cmxs_format.dynunit option
   }
 
@@ -48,53 +52,79 @@ let runtime_lib () =
   try
     if !Clflags.nopervasives || not !Clflags.with_runtime
     then []
-    else [Load_path.find libname]
-  with Not_found -> raise (Linkenv.Error (File_not_found libname))
+    else [ Load_path.find libname ]
+  with
+  | Not_found -> raise (Linkenv.Error (File_not_found libname))
+;;
 
 (* Second pass: generate the startup file and link it with everything else *)
 
 let named_startup_file () =
   !Clflags.keep_startup_file || !Emitaux.binary_backend_available
+;;
 
 let force_linking_of_startup ~ppf_dump =
-  Asmgen.compile_phrase ~ppf_dump
-    (Cmm.Cdata [Cmm.Csymbol_address (Cmm.global_symbol "caml_startup")])
+  Asmgen.compile_phrase
+    ~ppf_dump
+    (Cmm.Cdata [ Cmm.Csymbol_address (Cmm.global_symbol "caml_startup") ])
+;;
 
 let sourcefile_for_dwarf ~named_startup_file filename =
-  (* Ensure the name emitted into the DWARF is stable, for build reproducibility
-     purposes. *)
+  (* Ensure the name emitted into the DWARF is stable, for build reproducibility purposes. *)
   if named_startup_file then filename else ".startup"
+;;
 
 let emit_ocamlrunparam ~ppf_dump =
-  Asmgen.compile_phrase ~ppf_dump
+  Asmgen.compile_phrase
+    ~ppf_dump
     (Cmm.Cdata
-       [ Cmm.Cdefine_symbol
-           { sym_name = "caml_ocamlrunparam"; sym_global = Global };
-         Cmm.Cstring (!Clflags.ocamlrunparam ^ "\000") ])
+       [ Cmm.Cdefine_symbol { sym_name = "caml_ocamlrunparam"; sym_global = Global }
+       ; Cmm.Cstring (!Clflags.ocamlrunparam ^ "\000")
+       ])
+;;
 
 (* The startup object can be emitted in three modes:
    - [`Both]: the original behaviour, one object holding every phrase;
-   - [`Stable]: everything whose bytes depend only on the ordered unit list and
-     the generic-function set (all generic-function codegen, the symbol-address
-     tables and all their relocations);
-   - [`Volatile]: only [caml_ocamlrunparam] and [caml_globals_map], the sole
-     phrases whose bytes depend on per-unit contents (the marshaled CRCs).
-   Neither volatile phrase allocates const symbols, so emitting [`Stable] alone
-   produces the same symbol numbering (hence the same bytes) as the stable
-   phrases within [`Both].  This lets [link_actual] cache the (large, stable)
-   object across relinks and regenerate only the (tiny) volatile object. *)
-let make_startup_file ?(part = `Both) linkenv unix ~ppf_dump
-    ~sourcefile_for_dwarf genfns units cached_gen =
+   - [`Stable]: everything whose bytes depend only on the ordered unit list and the
+     generic-function set (all generic-function codegen, the symbol-address tables and all
+     their relocations);
+   - [`Volatile]: only [caml_ocamlrunparam] and [caml_globals_map], the sole phrases whose
+     bytes depend on per-unit contents (the marshaled CRCs). Neither volatile phrase
+     allocates const symbols, so emitting [`Stable] alone produces the same symbol
+     numbering (hence the same bytes) as the stable phrases within [`Both]. This lets
+     [link_actual] cache the (large, stable) object across relinks and regenerate only the
+     (tiny) volatile object. *)
+(* [precomputed_globals_map]: when [Some gm], the volatile part emits [gm] verbatim
+   instead of calling [Linkenv.make_globals_map]. The plan-consuming volatile action
+   passes the plan's stored globals_map so its object is byte-identical to the scan-driven
+   one, without reconstructing a linkenv. *)
+let make_startup_file
+  ?(part = `Both)
+  ?precomputed_globals_map
+  linkenv
+  unix
+  ~ppf_dump
+  ~sourcefile_for_dwarf
+  genfns
+  units
+  cached_imported_units
+  =
   Location.input_name := "caml_startup";
   let emit_stable_part =
-    match part with `Both | `Stable -> true | `Volatile -> false
+    match part with
+    | `Both | `Stable -> true
+    | `Volatile -> false
   in
   let emit_volatile_part =
-    match part with `Both | `Volatile -> true | `Stable -> false
+    match part with
+    | `Both | `Volatile -> true
+    | `Stable -> false
   in
   (* set name of "current" input *)
   let startup_unit_name =
-    match part with `Volatile -> "_startup_volatile" | _ -> "_startup"
+    match part with
+    | `Volatile -> "_startup_volatile"
+    | _ -> "_startup"
   in
   let startup_comp_unit =
     CU.create CU.Prefix.empty (CU.Name.of_string startup_unit_name)
@@ -103,7 +133,8 @@ let make_startup_file ?(part = `Both) linkenv unix ~ppf_dump
     Unit_info.make_dummy ~input_name:"caml_startup" startup_comp_unit
   in
   Compilenv.reset startup_unit_info;
-  Emitaux.Dwarf_helpers.init ~ppf_dump
+  Emitaux.Dwarf_helpers.init
+    ~ppf_dump
     ~disable_dwarf:(not !Dwarf_flags.dwarf_for_startup_file)
     ~sourcefile:sourcefile_for_dwarf;
   if !Clflags.llvm_backend
@@ -112,56 +143,58 @@ let make_startup_file ?(part = `Both) linkenv unix ~ppf_dump
   let compile_phrase p = Asmgen.compile_phrase ~ppf_dump p in
   let name_list = List.flatten (List.map (fun u -> u.defines) units) in
   (* In manual module init mode, entry_point and global_table should be empty *)
-  let init_name_list =
-    if !Oxcaml_flags.manual_module_init then [] else name_list
-  in
+  let init_name_list = if !Oxcaml_flags.manual_module_init then [] else name_list in
   if emit_volatile_part then emit_ocamlrunparam ~ppf_dump;
-  if emit_stable_part then begin
+  if emit_stable_part
+  then (
     List.iter compile_phrase (Cmm_helpers.entry_point init_name_list);
-    List.iter compile_phrase
+    List.iter
+      compile_phrase
       (* Emit the GC roots table, for dynlink. *)
-      (Cmm_helpers.emit_gc_roots_table ~symbols:[]
+      (Cmm_helpers.emit_gc_roots_table
+         ~symbols:[]
          (Generic_fns.compile ~cache:false ~shared:false genfns));
     Array.iteri
       (fun i name -> compile_phrase (Cmm_helpers.predef_exception i name))
       Runtimedef.builtin_exceptions;
-    compile_phrase (Cmm_helpers.global_table init_name_list)
-  end;
-  if emit_volatile_part then begin
-    let globals_map = Linkenv.make_globals_map linkenv units in
-    compile_phrase (Cmm_helpers.globals_map globals_map)
-  end;
-  if emit_stable_part then begin
-    compile_phrase
-      (Cmm_helpers.data_segment_table (startup_comp_unit :: name_list));
-    (* CR mshinwell: We should have a separate notion of "backend compilation
-       unit" really, since the units here don't correspond to .ml source files. *)
-    let system_comp_unit =
-      CU.create CU.Prefix.empty (CU.Name.of_string "_system")
+    compile_phrase (Cmm_helpers.global_table init_name_list));
+  if emit_volatile_part
+  then (
+    let globals_map =
+      match precomputed_globals_map with
+      | Some gm -> gm
+      | None -> Linkenv.make_globals_map linkenv units
     in
+    compile_phrase (Cmm_helpers.globals_map globals_map));
+  if emit_stable_part
+  then (
+    compile_phrase (Cmm_helpers.data_segment_table (startup_comp_unit :: name_list));
+    (* CR mshinwell: We should have a separate notion of "backend compilation unit"
+       really, since the units here don't correspond to .ml source files. *)
+    let system_comp_unit = CU.create CU.Prefix.empty (CU.Name.of_string "_system") in
     let code_comp_units = startup_comp_unit :: name_list in
     let code_comp_units =
       if !Oxcaml_flags.use_cached_generic_functions
-      then Generic_fns.imported_units cached_gen @ code_comp_units
+      then cached_imported_units @ code_comp_units
       else code_comp_units
     in
     compile_phrase (Cmm_helpers.code_segment_table code_comp_units);
     let all_comp_units = startup_comp_unit :: system_comp_unit :: name_list in
     let all_comp_units =
       if !Oxcaml_flags.use_cached_generic_functions
-      then Generic_fns.imported_units cached_gen @ all_comp_units
+      then cached_imported_units @ all_comp_units
       else all_comp_units
     in
-    (* In manual module init mode, exclude user modules from the static frame
-       table; their frametables will be registered dynamically when each module is
-       initialized via caml_init_module. *)
+    (* In manual module init mode, exclude user modules from the static frame table; their
+       frametables will be registered dynamically when each module is initialized via
+       caml_init_module. *)
     let frame_table_units =
       if !Oxcaml_flags.manual_module_init
-      then
-        let base = [startup_comp_unit; system_comp_unit] in
+      then (
+        let base = [ startup_comp_unit; system_comp_unit ] in
         if !Oxcaml_flags.use_cached_generic_functions
-        then Generic_fns.imported_units cached_gen @ base
-        else base
+        then cached_imported_units @ base
+        else base)
       else all_comp_units
     in
     compile_phrase (Cmm_helpers.frame_table frame_table_units);
@@ -172,11 +205,9 @@ let make_startup_file ?(part = `Both) linkenv unix ~ppf_dump
       else []
     in
     compile_phrase (Cmm_helpers.unit_deps_table unit_deps);
-    if !Clflags.output_complete_object then force_linking_of_startup ~ppf_dump
-  end;
-  if !Clflags.llvm_backend
-  then Llvmize.end_assembly ()
-  else Emit.end_assembly ()
+    if !Clflags.output_complete_object then force_linking_of_startup ~ppf_dump);
+  if !Clflags.llvm_backend then Llvmize.end_assembly () else Emit.end_assembly ()
+;;
 
 let make_shared_startup_file unix ~ppf_dump ~sourcefile_for_dwarf genfns units =
   let compile_phrase p = Asmgen.compile_phrase ~ppf_dump p in
@@ -188,22 +219,25 @@ let make_shared_startup_file unix ~ppf_dump ~sourcefile_for_dwarf genfns units =
     Unit_info.make_dummy ~input_name:"caml_startup" shared_startup_comp_unit
   in
   Compilenv.reset shared_startup_unit_info;
-  Emitaux.Dwarf_helpers.init ~ppf_dump
+  Emitaux.Dwarf_helpers.init
+    ~ppf_dump
     ~disable_dwarf:(not !Dwarf_flags.dwarf_for_startup_file)
     ~sourcefile:sourcefile_for_dwarf;
   if !Clflags.llvm_backend
   then Llvmize.begin_assembly ~is_startup:true ~sourcefile:sourcefile_for_dwarf
   else Emit.begin_assembly unix;
   emit_ocamlrunparam ~ppf_dump;
-  List.iter compile_phrase
-    (Cmm_helpers.emit_gc_roots_table ~symbols:[]
+  List.iter
+    compile_phrase
+    (Cmm_helpers.emit_gc_roots_table
+       ~symbols:[]
        (Generic_fns.compile ~cache:false ~shared:true genfns));
   let dynunits = List.map (fun u -> Option.get u.dynunit) units in
   compile_phrase (Cmm_helpers.plugin_header dynunits);
   (* In manual module init mode, global_table should be empty *)
-  (* CR mshinwell: why does caml_globals need to be populated in this case?
-     Note that the frametables are not registered here; they are done
-     dynamically by the natdynlink code, together with the GC roots. *)
+  (* CR mshinwell: why does caml_globals need to be populated in this case? Note that the
+     frametables are not registered here; they are done dynamically by the natdynlink
+     code, together with the GC roots. *)
   let init_name_list =
     if !Oxcaml_flags.manual_module_init
     then []
@@ -218,37 +252,34 @@ let make_shared_startup_file unix ~ppf_dump ~sourcefile_for_dwarf genfns units =
   in
   compile_phrase (Cmm_helpers.unit_deps_table unit_deps);
   if !Clflags.output_complete_object then force_linking_of_startup ~ppf_dump;
-  (* this is to force a reference to all units, otherwise the linker might drop
-     some of them (in case of libraries) *)
-  if !Clflags.llvm_backend
-  then Llvmize.end_assembly ()
-  else Emit.end_assembly ()
+  (* this is to force a reference to all units, otherwise the linker might drop some of
+     them (in case of libraries) *)
+  if !Clflags.llvm_backend then Llvmize.end_assembly () else Emit.end_assembly ()
+;;
 
 let call_linker_shared ?(native_toplevel = false) file_list output_name =
   let exitcode =
     Profile.record_call "link_object" (fun () ->
-        Ccomp.call_linker ~native_toplevel Ccomp.Dll output_name file_list "")
+      Ccomp.call_linker ~native_toplevel Ccomp.Dll output_name file_list "")
   in
   if not (exitcode = 0) then raise (Linkenv.Error (Linking_error exitcode))
+;;
 
-(* The compiler allows [-o /dev/null], which can be used for testing linking. In
-   this case, we should not use the DWARF fission workflow during linking. *)
-let not_output_to_dev_null output_name =
-  not (String.equal output_name "/dev/null")
+(* The compiler allows [-o /dev/null], which can be used for testing linking. In this
+   case, we should not use the DWARF fission workflow during linking. *)
+let not_output_to_dev_null output_name = not (String.equal output_name "/dev/null")
 
-let link_shared_actual unix ml_objfiles output_name ~genfns ~units_tolink
-    ~ppf_dump =
+let link_shared_actual unix ml_objfiles output_name ~genfns ~units_tolink ~ppf_dump =
   if !Oxcaml_flags.use_cached_generic_functions
   then
-    (* When doing shared linking do not use the shared generated startup file.
-       Frametables for the imported functions needs to be initialized, which is
-       a bit tricky to do in the context of shared libraries as the frametables
-       are initialized at runtime. *)
+    (* When doing shared linking do not use the shared generated startup file. Frametables
+       for the imported functions needs to be initialized, which is a bit tricky to do in
+       the context of shared libraries as the frametables are initialized at runtime. *)
     Oxcaml_flags.use_cached_generic_functions := false;
   if !Oxcaml_flags.internal_assembler
   then
-    (* CR-soon gyorsh: workaround to turn off internal assembler temporarily,
-       until it is properly tested for shared library linking. *)
+    (* CR-soon gyorsh: workaround to turn off internal assembler temporarily, until it is
+       properly tested for shared library linking. *)
     Emitaux.binary_backend_available := false;
   let objfiles = List.rev ml_objfiles @ List.rev !Clflags.ccobjs in
   let named_startup_file = named_startup_file () in
@@ -259,24 +290,33 @@ let link_shared_actual unix ml_objfiles output_name ~genfns ~units_tolink
   in
   let startup_obj = output_name ^ ".startup" ^ ext_obj in
   let sourcefile_for_dwarf = sourcefile_for_dwarf ~named_startup_file startup in
-  Asmgen.compile_unit unix ~output_prefix:output_name ~asm_filename:startup
-    ~keep_asm:!Clflags.keep_startup_file ~obj_filename:startup_obj
-    ~may_reduce_heap:true ~ppf_dump (fun () ->
-      Profile.record_call "make_shared_startup_file" (fun () ->
-          make_shared_startup_file unix ~ppf_dump
-            ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf) genfns
-            units_tolink));
+  Asmgen.compile_unit
+    unix
+    ~output_prefix:output_name
+    ~asm_filename:startup
+    ~keep_asm:!Clflags.keep_startup_file
+    ~obj_filename:startup_obj
+    ~may_reduce_heap:true
+    ~ppf_dump
+    (fun () ->
+       Profile.record_call "make_shared_startup_file" (fun () ->
+         make_shared_startup_file
+           unix
+           ~ppf_dump
+           ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf)
+           genfns
+           units_tolink));
   call_linker_shared (startup_obj :: objfiles) output_name;
   if !Oxcaml_flags.internal_assembler
-  then
-    (* CR gyorsh: restore after workaround. *)
+  then (* CR gyorsh: restore after workaround. *)
     Emitaux.binary_backend_available := true;
   remove_file startup_obj
+;;
 
 let link_shared unix ml_objfiles output_name ~genfns ~units_tolink ~ppf_dump =
   Profile.record_call "link_shared" (fun () ->
-      link_shared_actual unix ml_objfiles output_name ~genfns ~units_tolink
-        ~ppf_dump)
+    link_shared_actual unix ml_objfiles output_name ~genfns ~units_tolink ~ppf_dump)
+;;
 
 let call_linker ?dissector_args file_list_rev startup_files output_name =
   let main_dll =
@@ -285,15 +325,14 @@ let call_linker ?dissector_args file_list_rev startup_files output_name =
   let files, c_lib =
     match dissector_args with
     | Some args ->
-      (* Dissector mode: partition files contain everything (startup,
-         ml_objfiles, ccobjs, runtime_lib). Don't add them again. Add linker
-         script flag. However, linker flags (starting with -l) need to be passed
-         through as they can't be baked into partition files. *)
+      (* Dissector mode: partition files contain everything (startup, ml_objfiles, ccobjs,
+         runtime_lib). Don't add them again. Add linker script flag. However, linker flags
+         (starting with -l) need to be passed through as they can't be baked into
+         partition files. *)
       Clflags.all_ccopts
-        := Build_linker_args.linker_script_flag args :: !Clflags.all_ccopts;
-      (* When assuming LLD without 64-bit EH frame support, suppress LLD's
-         broken .eh_frame_hdr generation - we provide our own in the linker
-         script. *)
+      := Build_linker_args.linker_script_flag args :: !Clflags.all_ccopts;
+      (* When assuming LLD without 64-bit EH frame support, suppress LLD's broken
+         .eh_frame_hdr generation - we provide our own in the linker script. *)
       if !Oxcaml_flags.dissector_assume_lld_without_64_bit_eh_frames
       then Clflags.all_ccopts := "-Wl,--no-eh-frame-hdr" :: !Clflags.all_ccopts;
       let c_lib =
@@ -319,8 +358,8 @@ let call_linker ?dissector_args file_list_rev startup_files output_name =
       let files, c_lib =
         if (not !Clflags.output_c_object) || main_dll || main_obj_runtime
         then
-          ( files @ List.rev !Clflags.ccobjs @ runtime_lib (),
-            if !Clflags.nopervasives || (main_obj_runtime && not main_dll)
+          ( files @ List.rev !Clflags.ccobjs @ runtime_lib ()
+          , if !Clflags.nopervasives || (main_obj_runtime && not main_dll)
             then ""
             else Config.native_c_libraries )
         else files, ""
@@ -350,13 +389,13 @@ let call_linker ?dissector_args file_list_rev startup_files output_name =
   in
   let exitcode =
     Profile.record_call "link_object" (fun () ->
-        Ccomp.call_linker mode link_output_name files c_lib)
+      Ccomp.call_linker mode link_output_name files c_lib)
   in
   if not (exitcode = 0)
   then (
     if needs_objcopy_workflow then Misc.remove_file link_output_name;
     raise (Linkenv.Error (Linking_error exitcode)))
-  else
+  else (
     (* Handle DWARF fission if requested and linking succeeded *)
     match !Clflags.dwarf_fission with
     | Fission_none -> ()
@@ -370,20 +409,23 @@ let call_linker ?dissector_args file_list_rev startup_files output_name =
         let compression_flag =
           match Dwarf_flags.get_dwarf_objcopy_compression_format () with
           | Some compression ->
-            Printf.sprintf " %s=%s" Config.objcopy_compress_debug_sections_flag
+            Printf.sprintf
+              " %s=%s"
+              Config.objcopy_compress_debug_sections_flag
               compression
           | None -> ""
         in
         let objcopy_cmd_create_debug =
           Printf.sprintf
             "%s --enable-deterministic-archives --only-keep-debug%s %s %s"
-            Config.objcopy compression_flag
+            Config.objcopy
+            compression_flag
             (Filename.quote link_output_name)
             (Filename.quote debug_file)
         in
         let objcopy_exit =
           Profile.record_call "objcopy_create_debug" (fun () ->
-              Ccomp.command objcopy_cmd_create_debug)
+            Ccomp.command objcopy_cmd_create_debug)
         in
         if objcopy_exit <> 0
         then (
@@ -391,8 +433,8 @@ let call_linker ?dissector_args file_list_rev startup_files output_name =
           raise (Error (Objcopy_error objcopy_exit)));
         let objcopy_cmd_create_stripped_exe =
           Printf.sprintf
-            "%s --enable-deterministic-archives --strip-debug \
-             --add-gnu-debuglink=%s %s %s"
+            "%s --enable-deterministic-archives --strip-debug --add-gnu-debuglink=%s %s \
+             %s"
             Config.objcopy
             (Filename.quote debug_file)
             (Filename.quote link_output_name)
@@ -400,46 +442,47 @@ let call_linker ?dissector_args file_list_rev startup_files output_name =
         in
         let objcopy_exit =
           Profile.record_call "objcopy_create_stripped_exe" (fun () ->
-              Ccomp.command objcopy_cmd_create_stripped_exe)
+            Ccomp.command objcopy_cmd_create_stripped_exe)
         in
         Misc.remove_file link_output_name;
         if objcopy_exit <> 0 then raise (Error (Objcopy_error objcopy_exit)))
     | Fission_dsymutil ->
       if not (Target_system.is_macos ())
       then raise (Error Dwarf_fission_dsymutil_not_macos)
-      else if
-        not_output_to_dev_null output_name
-        && mode = Ccomp.Exe
-        && not !Dwarf_flags.restrict_to_upstream_dwarf
-      then
+      else if not_output_to_dev_null output_name
+              && mode = Ccomp.Exe
+              && not !Dwarf_flags.restrict_to_upstream_dwarf
+      then (
         (* Run dsymutil on the executable *)
-        let dsymutil_cmd =
-          Printf.sprintf "dsymutil %s" (Filename.quote output_name)
-        in
+        let dsymutil_cmd = Printf.sprintf "dsymutil %s" (Filename.quote output_name) in
         let dsymutil_exit =
           Profile.record_call "dsymutil" (fun () -> Ccomp.command dsymutil_cmd)
         in
-        if dsymutil_exit <> 0 then raise (Error (Dsymutil_error dsymutil_exit))
+        if dsymutil_exit <> 0 then raise (Error (Dsymutil_error dsymutil_exit))))
+;;
 
 (* Split-emission startup cache.
 
-   When [OCAMLOPT_STARTUP_CACHE_DIR] is set, the startup object is emitted as
-   two objects: a large "stable" object (all generic-function codegen, the
-   symbol-address tables, relocations and section tables, which depend only on
-   the ordered unit list and the generic-function set) that is content-addressed
-   and cached across relinks, plus a tiny "volatile" object ([caml_globals_map]
-   and [caml_ocamlrunparam], the only phrases whose bytes depend on per-unit
-   contents) regenerated on every link.  A leaf-module edit changes only the
-   volatile object, so the expensive stable object is a cache hit. *)
+   When [OCAMLOPT_STARTUP_CACHE_DIR] is set, the startup object is emitted as two objects:
+   a large "stable" object (all generic-function codegen, the symbol-address tables,
+   relocations and section tables, which depend only on the ordered unit list and the
+   generic-function set) that is content-addressed and cached across relinks, plus a tiny
+   "volatile" object ([caml_globals_map] and [caml_ocamlrunparam], the only phrases whose
+   bytes depend on per-unit contents) regenerated on every link. A leaf-module edit
+   changes only the volatile object, so the expensive stable object is a cache hit. *)
 
 let startup_cache_dir () =
   match Sys.getenv_opt "OCAMLOPT_STARTUP_CACHE_DIR" with
   | Some d when String.length d > 0 -> Some d
   | _ -> None
+;;
 
 let stable_startup_cache_key ~genfns ~units_tolink ~cached_genfns_imports =
   let b = Buffer.create 65536 in
-  let add s = Buffer.add_string b s; Buffer.add_char b '\000' in
+  let add s =
+    Buffer.add_string b s;
+    Buffer.add_char b '\000'
+  in
   add Config.cmx_magic_number;
   add (string_of_bool !Oxcaml_flags.manual_module_init);
   add (string_of_bool !Oxcaml_flags.use_cached_generic_functions);
@@ -450,28 +493,166 @@ let stable_startup_cache_key ~genfns ~units_tolink ~cached_genfns_imports =
   add "|genfns|";
   add (Marshal.to_string (Generic_fns.Tbl.entries genfns) []);
   if !Oxcaml_flags.use_cached_generic_functions
-  then begin
+  then (
     add "|cached|";
-    List.iter (fun cu -> add (CU.full_path_as_string cu))
-      (Generic_fns.imported_units cached_genfns_imports)
-  end;
+    List.iter
+      (fun cu -> add (CU.full_path_as_string cu))
+      (Generic_fns.imported_units cached_genfns_imports));
   Digest.to_hex (Digest.string (Buffer.contents b))
+;;
 
 let copy_file_path ~src ~dst =
   let ic = open_in_bin src in
   Misc.try_finally
     (fun () ->
       let oc = open_out_bin dst in
-      Misc.try_finally (fun () -> Misc.copy_file ic oc)
-        ~always:(fun () -> close_out oc))
+      Misc.try_finally (fun () -> Misc.copy_file ic oc) ~always:(fun () -> close_out oc))
     ~always:(fun () -> close_in ic)
+;;
+
+(* Startup-object artifact mode.
+
+   The env-gated cache above content-addresses the stable startup object and stores it in
+   a shared mutable directory. The artifact mode exposes the same decomposition as three
+   explicit, cache-free steps that a build system can schedule as ordinary actions:
+
+   - [-emit-startup-key <file>] writes the stable inputs (compiler version, the three
+     startup-affecting flags, the ordered flattened unit list, the generic-function set,
+     and the cached-genfns imports) to <file>. These are exactly the ingredients the cache
+     key is computed from; per-unit contents (CRCs, imports_cmx) are excluded, so the file
+     is unchanged by a leaf-module implementation edit (this is the early-cutoff
+     property).
+   - [-compile-startup-stable <keyfile>] re-emits the stable object from a key file alone,
+     touching no .cmx/.cmxa.
+   - [-use-startup-stable <obj>] links against a prebuilt stable object and emits only the
+     volatile object, exactly as the cache-hit path does. *)
+
+type startup_key =
+  { sk_version : string
+  ; sk_manual_module_init : bool
+  ; sk_use_cached_generic_functions : bool
+  ; sk_output_complete_object : bool
+  ; sk_name_list : CU.t list
+  ; sk_genfns_entries : Cmx_format.generic_fns
+  ; sk_cached_imported_units : CU.t list
+  }
+
+let startup_key_magic = "ocamlopt-startup-stable-key-v1\n"
+
+let build_startup_key ~genfns ~units_tolink ~cached_genfns_imports =
+  { sk_version = Config.cmx_magic_number
+  ; sk_manual_module_init = !Oxcaml_flags.manual_module_init
+  ; sk_use_cached_generic_functions = !Oxcaml_flags.use_cached_generic_functions
+  ; sk_output_complete_object = !Clflags.output_complete_object
+  ; sk_name_list = List.concat_map (fun (u : unit_link_info) -> u.defines) units_tolink
+  ; sk_genfns_entries = Generic_fns.Tbl.entries genfns
+  ; sk_cached_imported_units = Generic_fns.imported_units cached_genfns_imports
+  }
+;;
+
+let write_startup_key ~path key =
+  let oc = open_out_bin path in
+  Misc.try_finally
+    (fun () ->
+      output_string oc startup_key_magic;
+      Marshal.to_channel oc (key : startup_key) [])
+    ~always:(fun () -> close_out oc)
+;;
+
+let read_startup_key ~path : startup_key =
+  let ic = open_in_bin path in
+  Misc.try_finally
+    (fun () ->
+      let magic =
+        try really_input_string ic (String.length startup_key_magic) with
+        | End_of_file -> ""
+      in
+      if not (String.equal magic startup_key_magic)
+      then raise (Error (Startup_key_bad_magic path));
+      let key = (Marshal.from_channel ic : startup_key) in
+      if not (String.equal key.sk_version Config.cmx_magic_number)
+      then raise (Error (Startup_key_version_mismatch path));
+      key)
+    ~always:(fun () -> close_in ic)
+;;
+
+(* Emit only the stable startup object from a key file, reading no .cmx/.cmxa. The object
+   is byte-identical to the stable object emitted by the cache-miss path (and hence reused
+   by the cache-hit path): [make_startup_file ~part:`Stable] reads only the flattened unit
+   list, the generic-function set, the cached-genfns imports and the three keyed flags,
+   all carried by the key file; every other input (target, codegen flags) is supplied on
+   the command line by the build rule, which copies them from the link. *)
+let compile_startup_stable unix ~keyfile ~output_name ~ppf_dump =
+  if !Oxcaml_flags.internal_assembler then Emitaux.binary_backend_available := true;
+  let key = read_startup_key ~path:keyfile in
+  Oxcaml_flags.manual_module_init := key.sk_manual_module_init;
+  Oxcaml_flags.use_cached_generic_functions := key.sk_use_cached_generic_functions;
+  Clflags.output_complete_object := key.sk_output_complete_object;
+  if !Dwarf_flags.dwarf_for_startup_file
+  then
+    raise
+      (Error
+         (Startup_stable_unsupported
+            "-gstartup (DWARF for the startup file) cannot be reproduced in artifact mode"));
+  let genfns = Generic_fns.Tbl.of_fns key.sk_genfns_entries in
+  let units =
+    [ { name = CU.create CU.Prefix.empty (CU.Name.of_string "_startup")
+      ; defines = key.sk_name_list
+      ; file_name = ""
+      ; crc = ""
+      ; imports_cmx = []
+      ; dynunit = None
+      }
+    ]
+  in
+  let named_startup_file = named_startup_file () in
+  let startup =
+    if named_startup_file
+    then output_name ^ ".startup" ^ ext_asm
+    else Filename.temp_file "camlstartup" ext_asm
+  in
+  let sourcefile_for_dwarf = sourcefile_for_dwarf ~named_startup_file startup in
+  (* [linkenv] is unused by the [`Stable] emission (only the volatile phrases read it);
+     pass a fresh empty one. *)
+  let linkenv = Linkenv.create () in
+  Asmgen.compile_unit
+    unix
+    ~output_prefix:output_name
+    ~asm_filename:startup
+    ~keep_asm:!Clflags.keep_startup_file
+    ~obj_filename:output_name
+    ~may_reduce_heap:true
+    ~ppf_dump
+    (fun () ->
+       Profile.record_call "make_startup_file" (fun () ->
+         make_startup_file
+           ~part:`Stable
+           linkenv
+           unix
+           ~ppf_dump
+           ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf)
+           genfns
+           units
+           key.sk_cached_imported_units))
+;;
 
 (* Main entry point *)
 
-let link_actual unix linkenv ml_objfiles output_name ~cached_genfns_imports
-    ~genfns ~units_tolink ~uses_eval ~quoted_cmi ~quoted_cmx ~ppf_dump : unit =
-  if !Oxcaml_flags.internal_assembler
-  then Emitaux.binary_backend_available := true;
+let link_actual
+  unix
+  linkenv
+  ml_objfiles
+  output_name
+  ~cached_genfns_imports
+  ~genfns
+  ~units_tolink
+  ~uses_eval
+  ~quoted_cmi
+  ~quoted_cmx
+  ~ppf_dump
+  : unit
+  =
+  if !Oxcaml_flags.internal_assembler then Emitaux.binary_backend_available := true;
   let named_startup_file = named_startup_file () in
   let startup =
     if named_startup_file
@@ -483,56 +664,100 @@ let link_actual unix linkenv ml_objfiles output_name ~cached_genfns_imports
   let ml_objfiles =
     if not uses_eval
     then ml_objfiles
-    else
+    else (
       match
-        Cm_bundle.make_bundled_cm_file unix ~ppf_dump ~quoted_cmi ~quoted_cmx
-          ~named_startup_file ~output_name
+        Cm_bundle.make_bundled_cm_file
+          unix
+          ~ppf_dump
+          ~quoted_cmi
+          ~quoted_cmx
+          ~named_startup_file
+          ~output_name
       with
       | exception Cm_bundle.Error error -> raise (Error (Cm_bundle_error error))
-      | bundled_cm_obj -> bundled_cm_obj :: ml_objfiles
+      | bundled_cm_obj -> bundled_cm_obj :: ml_objfiles)
   in
+  let cached_imported_units = Generic_fns.imported_units cached_genfns_imports in
   let emit_startup ~part ~asm_filename ~obj_filename =
-    Asmgen.compile_unit unix ~output_prefix:output_name ~asm_filename
-      ~keep_asm:!Clflags.keep_startup_file ~obj_filename ~may_reduce_heap:true
-      ~ppf_dump (fun () ->
-        Profile.record_call "make_startup_file" (fun () ->
-            make_startup_file ~part linkenv unix ~ppf_dump
-              ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf) genfns
-              units_tolink cached_genfns_imports))
+    Asmgen.compile_unit
+      unix
+      ~output_prefix:output_name
+      ~asm_filename
+      ~keep_asm:!Clflags.keep_startup_file
+      ~obj_filename
+      ~may_reduce_heap:true
+      ~ppf_dump
+      (fun () ->
+         Profile.record_call "make_startup_file" (fun () ->
+           make_startup_file
+             ~part
+             linkenv
+             unix
+             ~ppf_dump
+             ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf)
+             genfns
+             units_tolink
+             cached_imported_units))
   in
-  (* [startup_objs]: startup object files handed to the linker.
-     [temp_startup_objs]: the subset to delete afterwards (never the shared
-     cache entry). *)
+  let emit_volatile_obj () =
+    let volatile_asm = Filename.temp_file "camlstartupv" ext_asm in
+    let volatile_obj = Filename.temp_file "camlstartupv" ext_obj in
+    emit_startup ~part:`Volatile ~asm_filename:volatile_asm ~obj_filename:volatile_obj;
+    volatile_obj
+  in
+  (* [startup_objs]: startup object files handed to the linker. [temp_startup_objs]: the
+     subset to delete afterwards (never the shared cache entry). *)
   let startup_objs, temp_startup_objs =
     match startup_cache_dir () with
-    | Some cache_dir when not !Clflags.dissector ->
-      let key =
-        stable_startup_cache_key ~genfns ~units_tolink ~cached_genfns_imports
-      in
+    | Some _
+      when !Oxcaml_flags.use_startup_stable <> None
+           || !Oxcaml_flags.use_startup_volatile <> None ->
+      raise (Error Startup_stable_and_cache_dir)
+    | Some cache_dir ->
+      let key = stable_startup_cache_key ~genfns ~units_tolink ~cached_genfns_imports in
       let cached_stable = Filename.concat cache_dir (key ^ ext_obj) in
       let hit = Sys.file_exists cached_stable in
       if hit
       then Profile.record_call "startup_stable_cache_hit" (fun () -> ())
-      else begin
+      else (
         Profile.record_call "startup_stable_cache_miss" (fun () ->
-            emit_startup ~part:`Stable ~asm_filename:startup
-              ~obj_filename:startup_obj);
-        (try
-           let tmp = Filename.temp_file ~temp_dir:cache_dir "stable" ext_obj in
-           copy_file_path ~src:startup_obj ~dst:tmp;
-           Sys.rename tmp cached_stable
-         with _ -> ())
-      end;
+          emit_startup ~part:`Stable ~asm_filename:startup ~obj_filename:startup_obj);
+        try
+          let tmp = Filename.temp_file ~temp_dir:cache_dir "stable" ext_obj in
+          copy_file_path ~src:startup_obj ~dst:tmp;
+          Sys.rename tmp cached_stable
+        with
+        | _ -> ());
       let stable_obj = if hit then cached_stable else startup_obj in
-      let volatile_asm = Filename.temp_file "camlstartupv" ext_asm in
-      let volatile_obj = Filename.temp_file "camlstartupv" ext_obj in
-      emit_startup ~part:`Volatile ~asm_filename:volatile_asm
-        ~obj_filename:volatile_obj;
-      let temps = (if hit then [] else [startup_obj]) @ [volatile_obj] in
-      [stable_obj; volatile_obj], temps
-    | _ ->
-      emit_startup ~part:`Both ~asm_filename:startup ~obj_filename:startup_obj;
-      [startup_obj], [startup_obj]
+      let volatile_obj = emit_volatile_obj () in
+      let temps = (if hit then [] else [ startup_obj ]) @ [ volatile_obj ] in
+      [ stable_obj; volatile_obj ], temps
+    | None ->
+      (match !Oxcaml_flags.use_startup_stable, !Oxcaml_flags.use_startup_volatile with
+       | None, None ->
+         (* Untouched default: one monolithic object holding every phrase. *)
+         emit_startup ~part:`Both ~asm_filename:startup ~obj_filename:startup_obj;
+         [ startup_obj ], [ startup_obj ]
+       | use_stable, use_volatile ->
+         (* At least one prebuilt artifact: assemble [stable; volatile] from prebuilt
+            objects and emit only the missing part(s). No freshness check: the build
+            system guarantees the prebuilt objects match these inputs. With both prebuilt,
+            no startup object is emitted at all. *)
+         let stable_obj, stable_temp =
+           match use_stable with
+           | Some obj -> obj, []
+           | None ->
+             emit_startup ~part:`Stable ~asm_filename:startup ~obj_filename:startup_obj;
+             startup_obj, [ startup_obj ]
+         in
+         let volatile_obj, volatile_temp =
+           match use_volatile with
+           | Some obj -> obj, []
+           | None ->
+             let v = emit_volatile_obj () in
+             v, [ v ]
+         in
+         [ stable_obj; volatile_obj ], stable_temp @ volatile_temp)
   in
   Emitaux.reduce_heap_size ~reset:(fun () -> ());
   (* Dissector pass: partitions all object files and rewrites them *)
@@ -547,17 +772,21 @@ let link_actual unix linkenv ml_objfiles output_name ~cached_genfns_imports
       let temp_dir = mk_temp_dir "camldissector" "" in
       let result =
         Profile.record_call "dissector" (fun () ->
-            Dissector.run ~unix ~temp_dir ~ml_objfiles ~startup_obj
-              ~ccobjs:(List.rev !Clflags.ccobjs) ~runtime_libs:(runtime_lib ())
-              ~cached_genfns)
+          Dissector.run
+            ~unix
+            ~temp_dir
+            ~ml_objfiles
+            ~startup_objs
+            ~ccobjs:(List.rev !Clflags.ccobjs)
+            ~runtime_libs:(runtime_lib ())
+            ~cached_genfns)
       in
       let linker_args = Build_linker_args.build result in
-      (* Add EH frame registration object if the dissector generated one. This
-         handles runtime frame registration when using LLD without 64-bit EH
-         frame support. *)
+      (* Add EH frame registration object if the dissector generated one. This handles
+         runtime frame registration when using LLD without 64-bit EH frame support. *)
       (match Dissector.Result.eh_frame_registration_obj result with
-      | Some eh_frame_obj -> Clflags.ccobjs := eh_frame_obj :: !Clflags.ccobjs
-      | None -> ());
+       | Some eh_frame_obj -> Clflags.ccobjs := eh_frame_obj :: !Clflags.ccobjs
+       | None -> ());
       (* Print partition file paths if requested *)
       if !Clflags.ddissector_partitions
       then (
@@ -582,12 +811,210 @@ let link_actual unix linkenv ml_objfiles output_name ~cached_genfns_imports
     ~always:(fun () ->
       List.iter remove_file temp_startup_objs;
       cleanup_dissector_temp_dir ())
+;;
 
-let link unix linkenv ml_objfiles output_name ~cached_genfns_imports ~genfns
-    ~units_tolink ~uses_eval ~quoted_cmi ~quoted_cmx ~ppf_dump : unit =
-  Profile.record_call "link" (fun () ->
-      link_actual unix linkenv ml_objfiles output_name ~cached_genfns_imports
-        ~genfns ~units_tolink ~uses_eval ~quoted_cmi ~quoted_cmx ~ppf_dump)
+(* Emit only the volatile startup object to [output_name] and do not link. The volatile
+   phrases ([caml_ocamlrunparam] and [caml_globals_map]) are a function of the
+   interface-CRC map and each unit's implementation CRC, so this reuses the scan the
+   driver already ran (it cannot be driven by the key file, which excludes CRCs). The
+   object is byte-identical to the volatile object the [-use-startup-stable] link emits
+   inline: same [make_startup_file] volatile phrases through the same
+   [Asmgen.compile_unit], with [Compilenv.reset] making the emission self-contained. *)
+let compile_startup_volatile
+  unix
+  linkenv
+  output_name
+  ~cached_genfns_imports
+  ~genfns
+  ~units_tolink
+  ~ppf_dump
+  =
+  if !Oxcaml_flags.internal_assembler then Emitaux.binary_backend_available := true;
+  if !Dwarf_flags.dwarf_for_startup_file
+  then
+    raise
+      (Error
+         (Startup_stable_unsupported
+            "-gstartup (DWARF for the startup file) cannot be reproduced in artifact mode"));
+  let named_startup_file = named_startup_file () in
+  let startup =
+    if named_startup_file
+    then output_name ^ ".startup" ^ ext_asm
+    else Filename.temp_file "camlstartup" ext_asm
+  in
+  let sourcefile_for_dwarf = sourcefile_for_dwarf ~named_startup_file startup in
+  let cached_imported_units = Generic_fns.imported_units cached_genfns_imports in
+  let volatile_asm = Filename.temp_file "camlstartupv" ext_asm in
+  Asmgen.compile_unit
+    unix
+    ~output_prefix:output_name
+    ~asm_filename:volatile_asm
+    ~keep_asm:!Clflags.keep_startup_file
+    ~obj_filename:output_name
+    ~may_reduce_heap:true
+    ~ppf_dump
+    (fun () ->
+       Profile.record_call "make_startup_file" (fun () ->
+         make_startup_file
+           ~part:`Volatile
+           linkenv
+           unix
+           ~ppf_dump
+           ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf)
+           genfns
+           units_tolink
+           cached_imported_units))
+;;
+
+(* Emit the stable startup object from a plan-stable file (no scan, no .cmx/.cmxa, no
+   CRCs). Byte-identical to the key-driven [compile_startup_stable]: same flattened unit
+   list, generic-fn set, cached-genfns imports and keyed flags fed to
+   [make_startup_file ~part:`Stable]. *)
+let compile_startup_stable_from_plan unix ~stable ~output_name ~ppf_dump =
+  if !Oxcaml_flags.internal_assembler then Emitaux.binary_backend_available := true;
+  Oxcaml_flags.manual_module_init := stable.Link_plan.manual_module_init;
+  Oxcaml_flags.use_cached_generic_functions
+  := stable.Link_plan.use_cached_generic_functions;
+  Clflags.output_complete_object := stable.Link_plan.output_complete_object;
+  if !Dwarf_flags.dwarf_for_startup_file
+  then
+    raise
+      (Error
+         (Startup_stable_unsupported
+            "-gstartup (DWARF for the startup file) cannot be reproduced in artifact mode"));
+  let genfns = Generic_fns.Tbl.of_fns stable.Link_plan.genfns_entries in
+  let name_list =
+    List.concat_map
+      (fun (u : Link_plan.unit_stable) -> u.us_defines)
+      stable.Link_plan.units
+  in
+  let units =
+    [ { name = CU.create CU.Prefix.empty (CU.Name.of_string "_startup")
+      ; defines = name_list
+      ; file_name = ""
+      ; crc = ""
+      ; imports_cmx = []
+      ; dynunit = None
+      }
+    ]
+  in
+  let named_startup_file = named_startup_file () in
+  let startup =
+    if named_startup_file
+    then output_name ^ ".startup" ^ ext_asm
+    else Filename.temp_file "camlstartup" ext_asm
+  in
+  let sourcefile_for_dwarf = sourcefile_for_dwarf ~named_startup_file startup in
+  let linkenv = Linkenv.create () in
+  Asmgen.compile_unit
+    unix
+    ~output_prefix:output_name
+    ~asm_filename:startup
+    ~keep_asm:!Clflags.keep_startup_file
+    ~obj_filename:output_name
+    ~may_reduce_heap:true
+    ~ppf_dump
+    (fun () ->
+       Profile.record_call "make_startup_file" (fun () ->
+         make_startup_file
+           ~part:`Stable
+           linkenv
+           unix
+           ~ppf_dump
+           ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf)
+           genfns
+           units
+           stable.Link_plan.cached_imported_units))
+;;
+
+(* Emit the volatile startup object from a plan-volatile file. Byte-identical to the
+   scan-driven [compile_startup_volatile]: the plan stored make_globals_map's exact
+   output, replayed here as [precomputed_globals_map], so no linkenv is reconstructed. *)
+let compile_startup_volatile_from_plan unix ~volatile ~output_name ~ppf_dump =
+  if !Oxcaml_flags.internal_assembler then Emitaux.binary_backend_available := true;
+  if !Dwarf_flags.dwarf_for_startup_file
+  then
+    raise
+      (Error
+         (Startup_stable_unsupported
+            "-gstartup (DWARF for the startup file) cannot be reproduced in artifact mode"));
+  let named_startup_file = named_startup_file () in
+  let startup =
+    if named_startup_file
+    then output_name ^ ".startup" ^ ext_asm
+    else Filename.temp_file "camlstartup" ext_asm
+  in
+  let sourcefile_for_dwarf = sourcefile_for_dwarf ~named_startup_file startup in
+  let volatile_asm = Filename.temp_file "camlstartupv" ext_asm in
+  Asmgen.compile_unit
+    unix
+    ~output_prefix:output_name
+    ~asm_filename:volatile_asm
+    ~keep_asm:!Clflags.keep_startup_file
+    ~obj_filename:output_name
+    ~may_reduce_heap:true
+    ~ppf_dump
+    (fun () ->
+       Profile.record_call "make_startup_file" (fun () ->
+         make_startup_file
+           ~part:`Volatile
+           ~precomputed_globals_map:volatile.Link_plan.globals_map
+           (Linkenv.create ())
+           unix
+           ~ppf_dump
+           ~sourcefile_for_dwarf:(Some sourcefile_for_dwarf)
+           (Generic_fns.Tbl.make ())
+           []
+           []))
+;;
+
+let link
+  unix
+  linkenv
+  ml_objfiles
+  output_name
+  ~cached_genfns_imports
+  ~genfns
+  ~units_tolink
+  ~uses_eval
+  ~quoted_cmi
+  ~quoted_cmx
+  ~ppf_dump
+  : unit
+  =
+  match !Oxcaml_flags.emit_startup_key with
+  | Some path ->
+    (* Reuse the scan the driver already ran; write the key and do not link. *)
+    Profile.record_call "emit_startup_key" (fun () ->
+      write_startup_key
+        ~path
+        (build_startup_key ~genfns ~units_tolink ~cached_genfns_imports))
+  | None when !Oxcaml_flags.compile_startup_volatile ->
+    (* Reuse the scan the driver already ran; emit only the volatile object. *)
+    Profile.record_call "compile_startup_volatile" (fun () ->
+      compile_startup_volatile
+        unix
+        linkenv
+        output_name
+        ~cached_genfns_imports
+        ~genfns
+        ~units_tolink
+        ~ppf_dump)
+  | None ->
+    Profile.record_call "link" (fun () ->
+      link_actual
+        unix
+        linkenv
+        ml_objfiles
+        output_name
+        ~cached_genfns_imports
+        ~genfns
+        ~units_tolink
+        ~uses_eval
+        ~quoted_cmi
+        ~quoted_cmx
+        ~ppf_dump)
+;;
 
 (* Error report *)
 
@@ -595,23 +1022,42 @@ open Format_doc
 
 let report_error_doc ppf = function
   | Dwarf_fission_objcopy_on_macos ->
-    fprintf ppf
-      "Error: -gdwarf-fission=objcopy is not supported on macOS systems.@ \
-       Please use -gdwarf-fission=dsymutil instead."
+    fprintf
+      ppf
+      "Error: -gdwarf-fission=objcopy is not supported on macOS systems.@ Please use \
+       -gdwarf-fission=dsymutil instead."
   | Dwarf_fission_dsymutil_not_macos ->
-    fprintf ppf
-      "Error: -gdwarf-fission=dsymutil is only supported on macOS systems."
+    fprintf ppf "Error: -gdwarf-fission=dsymutil is only supported on macOS systems."
   | Dsymutil_error exitcode ->
     fprintf ppf "Error running dsymutil (exit code %d)" exitcode
-  | Objcopy_error exitcode ->
-    fprintf ppf "Error running objcopy (exit code %d)" exitcode
+  | Objcopy_error exitcode -> fprintf ppf "Error running objcopy (exit code %d)" exitcode
   | Cm_bundle_error (Missing_intf_for_quote intf) ->
-    fprintf ppf "Missing interface for module %a which is required by quote"
-      CU.Name.print_as_inline_code intf
+    fprintf
+      ppf
+      "Missing interface for module %a which is required by quote"
+      CU.Name.print_as_inline_code
+      intf
   | Cm_bundle_error (Missing_impl_for_quote impl) ->
-    fprintf ppf
+    fprintf
+      ppf
       "Missing implementation for module %a which is required by quote"
-      CU.print_as_inline_code impl
+      CU.print_as_inline_code
+      impl
+  | Startup_stable_and_cache_dir ->
+    fprintf
+      ppf
+      "-use-startup-stable is incompatible with@ OCAMLOPT_STARTUP_CACHE_DIR;@ use one or \
+       the other, not both."
+  | Startup_key_bad_magic file ->
+    fprintf ppf "%s is not a valid startup-stable key file" file
+  | Startup_key_version_mismatch file ->
+    fprintf
+      ppf
+      "startup-stable key file %s was produced by a different compiler@ version"
+      file
+  | Startup_stable_unsupported reason ->
+    fprintf ppf "startup-object artifact mode is unsupported: %s" reason
+;;
 
 let report_error = Format_doc.compat report_error_doc
 
@@ -619,3 +1065,4 @@ let () =
   Location.register_error_of_exn (function
     | Error err -> Some (Location.error_of_printer_file report_error_doc err)
     | _ -> None)
+;;

@@ -43,6 +43,9 @@ module type S = sig
 
   val link : ppf_dump:Format.formatter -> string list -> string -> unit
 
+  val compile_startup_stable :
+    ppf_dump:Format.formatter -> keyfile:string -> string -> unit
+
   val link_shared :
     ppf_dump:Format.formatter -> Linkenv.t -> string list -> string -> unit
 
@@ -232,6 +235,9 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
 
   module Link = Optlink.Make (Backend)
 
+  let compile_startup_stable ~ppf_dump ~keyfile output_name =
+    Backend.compile_startup_stable ~keyfile ~output_name ~ppf_dump
+
   module Link_input = struct
     include Backend
     include Link
@@ -279,6 +285,9 @@ let native unix
     let default_executable_name = Config.default_executable_name
 
     let link = Asmlink.link unix
+
+    let compile_startup_stable ~keyfile ~output_name ~ppf_dump =
+      Asmlink.compile_startup_stable unix ~keyfile ~output_name ~ppf_dump
 
     let link_shared target objfiles ~genfns ~units_tolink ~ppf_dump =
       Asmlink.link_shared unix target objfiles ~genfns ~units_tolink ~ppf_dump

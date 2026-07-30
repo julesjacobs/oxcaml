@@ -48,7 +48,7 @@ exception Error of error
 val report_error : Format_doc.formatter -> error -> unit
 
 (** Result of running the dissector. After the dissector runs, OCaml object
-    files (ml_objfiles, startup_obj) are baked into the partition files.
+    files (ml_objfiles, startup_objs) are baked into the partition files.
     Passthrough files (ccobjs, runtime_libs) bypass partial linking and are
     passed directly to the final linker. Use {!Build_linker_args.build} to
     convert this result into linker arguments. *)
@@ -81,13 +81,15 @@ end
     threshold, partially links each partition, and extracts relocations that
     need conversion to use an intermediate PLT or GOT.
 
-    The startup_obj is analyzed like all other .o files but may need to be
+    The startup objects are analyzed like all other .o files but may need to be
     handled specially during partitioning.
 
     @param unix First-class Unix module for file operations
     @param temp_dir Directory for temporary and output files
     @param ml_objfiles The OCaml object files (.o, .a derived from .cmx, .cmxa)
-    @param startup_obj The startup object file
+    @param startup_objs
+      The startup object files (a single combined object, or the stable+volatile
+      pair when the split-emission startup cache is active)
     @param ccobjs Extra C object files from -cclib (Clflags.ccobjs)
     @param runtime_libs Runtime libraries (from runtime_lib ())
     @param cached_genfns Optional path to cached generic functions
@@ -102,7 +104,7 @@ val run :
   unix:(module Compiler_owee.Unix_intf.S) ->
   temp_dir:string ->
   ml_objfiles:string list ->
-  startup_obj:string ->
+  startup_objs:string list ->
   ccobjs:string list ->
   runtime_libs:string list ->
   cached_genfns:string option ->
