@@ -49,6 +49,13 @@ end) : sig
         (* Same as [check], but raise [Not_available] if no CRC was previously
              associated with [name]. *)
 
+  val set: t -> Module_name.t -> Data.t -> Digest.t -> filepath -> unit
+        (* [set tbl name data crc source] records ([name], [data], [crc]) in
+           [tbl] if [name] has no associated CRC, and does nothing otherwise.
+           Unlike [check] it never compares CRCs and never raises, so it records
+           the same table contents as [check] would on consistent inputs without
+           paying the consistency comparison. *)
+
   val source: t -> Module_name.t -> filepath
         (* [source tbl name] returns the file name associated with [name]
            if the latter has an associated CRC in [tbl].

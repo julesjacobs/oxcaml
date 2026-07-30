@@ -1,1268 +1,1488 @@
 (**************************************************************************)
-(*                                                                        *)
-(*                                 OCaml                                  *)
-(*                                                                        *)
-(*                       Pierre Chambart, OCamlPro                        *)
-(*           Mark Shinwell and Leo White, Jane Street Europe              *)
-(*                                                                        *)
-(*   Copyright 2013--2021 OCamlPro SAS                                    *)
-(*   Copyright 2014--2021 Jane Street Group LLC                           *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
+(* *)
+(* OCaml *)
+(* *)
+(* Pierre Chambart, OCamlPro *)
+(* Mark Shinwell and Leo White, Jane Street Europe *)
+(* *)
+(* Copyright 2013--2021 OCamlPro SAS *)
+(* Copyright 2014--2021 Jane Street Group LLC *)
+(* *)
+(* All rights reserved. This file is distributed under the terms of *)
+(* the GNU Lesser General Public License version 2.1, with the *)
+(* special exception on linking described in the file LICENSE. *)
+(* *)
 (**************************************************************************)
 
-(* TODO Consider removing unused declarations or binding them to _
-   individually *)
+(* TODO Consider removing unused declarations or binding them to _ individually *)
 [@@@warning "-unused-value-declaration"]
 
 let format_default flag = if flag then " (default)" else ""
 let format_not_default flag = if flag then "" else " (default)"
 
 let mk_flambda2_debug f =
-  ("-flambda2-debug", Arg.Unit f, " Enable debug output for the Flambda2 pass")
+  "-flambda2-debug", Arg.Unit f, " Enable debug output for the Flambda2 pass"
+;;
 
 let mk_no_flambda2_debug f =
-  ( "-no-flambda2-debug",
-    Arg.Unit f,
-    " Disable debug output for the Flambda2 pass" )
+  "-no-flambda2-debug", Arg.Unit f, " Disable debug output for the Flambda2 pass"
+;;
 
 let mk_reaper_debug_flags f =
-  ("-reaper-debug-flags", Arg.String f, " Debug flags for the reaper pass")
+  "-reaper-debug-flags", Arg.String f, " Debug flags for the reaper pass"
+;;
 
 let mk_no_mach_ir f =
-  ( "-no-mach-ir",
-    Arg.Unit f,
-    " Avoid using the Mach IR (kept temporarily only for backward \
-     compatibility, has no effects)" )
+  ( "-no-mach-ir"
+  , Arg.Unit f
+  , " Avoid using the Mach IR (kept temporarily only for backward compatibility, has no \
+     effects)" )
+;;
 
-let mk_ocamlcfg f =
-  ("-ocamlcfg", Arg.Unit f, " Use ocamlcfg (deprecated, does nothing)")
+let mk_ocamlcfg f = "-ocamlcfg", Arg.Unit f, " Use ocamlcfg (deprecated, does nothing)"
 
 let mk_no_ocamlcfg f =
-  ("-no-ocamlcfg", Arg.Unit f, " Do not use ocamlcfg (deprecated, does nothing)")
+  "-no-ocamlcfg", Arg.Unit f, " Do not use ocamlcfg (deprecated, does nothing)"
+;;
 
-let mk_dcfg f = ("-dcfg", Arg.Unit f, " (undocumented)")
-
-let mk_dcfg_invariants f =
-  ("-dcfg-invariants", Arg.Unit f, " Extra sanity checks on Cfg")
+let mk_dcfg f = "-dcfg", Arg.Unit f, " (undocumented)"
+let mk_dcfg_invariants f = "-dcfg-invariants", Arg.Unit f, " Extra sanity checks on Cfg"
 
 let mk_regalloc f =
-  ( "-regalloc",
-    Arg.Symbol
-      ( List.map fst Clflags.Register_allocator.assoc_list,
-        fun s -> f (List.assoc s Clflags.Register_allocator.assoc_list) ),
-    " Select the register allocator" )
+  ( "-regalloc"
+  , Arg.Symbol
+      ( List.map fst Clflags.Register_allocator.assoc_list
+      , fun s -> f (List.assoc s Clflags.Register_allocator.assoc_list) )
+  , " Select the register allocator" )
+;;
 
 let mk_regalloc_linscan_threshold f =
-  ( "-regalloc-linscan-threshold",
-    Arg.Int f,
-    Printf.sprintf
-      " Use linscan on functions with more temporaries than the threshold \
-       (default is %d)"
+  ( "-regalloc-linscan-threshold"
+  , Arg.Int f
+  , Printf.sprintf
+      " Use linscan on functions with more temporaries than the threshold (default is %d)"
       Oxcaml_flags.default_regalloc_linscan_threshold )
+;;
 
 let mk_regalloc_param f =
-  ( "-regalloc-param",
-    Arg.String f,
-    " Pass a parameter to the register allocator" )
+  "-regalloc-param", Arg.String f, " Pass a parameter to the register allocator"
+;;
 
 let mk_regalloc_validate f =
-  ("-regalloc-validate", Arg.Unit f, " Validate register allocation")
+  "-regalloc-validate", Arg.Unit f, " Validate register allocation"
+;;
 
 let mk_no_regalloc_validate f =
-  ("-no-regalloc-validate", Arg.Unit f, " Do not validate register allocation")
+  "-no-regalloc-validate", Arg.Unit f, " Do not validate register allocation"
+;;
 
-let mk_vectorize f =
-  ("-vectorize", Arg.Unit f, " Enable vectorizer (EXPERIMENTAL)")
-
-let mk_no_vectorize f =
-  ("-no-vectorize", Arg.Unit f, " Disable vectorizer (EXPERIMENTAL)")
+let mk_vectorize f = "-vectorize", Arg.Unit f, " Enable vectorizer (EXPERIMENTAL)"
+let mk_no_vectorize f = "-no-vectorize", Arg.Unit f, " Disable vectorizer (EXPERIMENTAL)"
 
 let mk_vectorize_max_block_size f =
-  ( "-vectorize-max-block-size",
-    Arg.Int f,
-    Printf.sprintf
-      "<n>  Only CFG block with at most n IR instructions will be vectorized \
-       (default %d)"
+  ( "-vectorize-max-block-size"
+  , Arg.Int f
+  , Printf.sprintf
+      "<n>  Only CFG block with at most n IR instructions will be vectorized (default %d)"
       Oxcaml_flags.default_vectorize_max_block_size )
+;;
 
-let mk_dvectorize f = ("-dvectorize", Arg.Unit f, " (undocumented)")
-
-let mk_cfg_selection f =
-  ("-cfg-selection", Arg.Unit f, " Produce CFG at selection")
+let mk_dvectorize f = "-dvectorize", Arg.Unit f, " (undocumented)"
+let mk_cfg_selection f = "-cfg-selection", Arg.Unit f, " Produce CFG at selection"
 
 let mk_no_cfg_selection f =
-  ("-no-cfg-selection", Arg.Unit f, " Do not produce CFG at selection")
+  "-no-cfg-selection", Arg.Unit f, " Do not produce CFG at selection"
+;;
 
 let mk_cfg_peephole_optimize f =
-  ("-cfg-peephole-optimize", Arg.Unit f, " Apply peephole optimizations to CFG")
+  "-cfg-peephole-optimize", Arg.Unit f, " Apply peephole optimizations to CFG"
+;;
 
 let mk_no_cfg_peephole_optimize f =
-  ( "-no-cfg-peephole-optimize",
-    Arg.Unit f,
-    " Do not apply peephole optimizations to CFG" )
+  "-no-cfg-peephole-optimize", Arg.Unit f, " Do not apply peephole optimizations to CFG"
+;;
 
 let mk_x86_peephole_optimize f =
-  ("-x86-peephole-optimize", Arg.Unit f, " Apply peephole optimizations to x86")
+  "-x86-peephole-optimize", Arg.Unit f, " Apply peephole optimizations to x86"
+;;
 
 let mk_no_x86_peephole_optimize f =
-  ( "-no-x86-peephole-optimize",
-    Arg.Unit f,
-    " Do not apply peephole optimizations to x86" )
+  "-no-x86-peephole-optimize", Arg.Unit f, " Do not apply peephole optimizations to x86"
+;;
 
 let mk_no_x86_peephole_remove_mov_to_dead_register f =
-  ( "-no-x86-peephole-remove-mov-to-dead-register",
-    Arg.Unit f,
-    " Disable x86 peephole: remove mov to dead register" )
+  ( "-no-x86-peephole-remove-mov-to-dead-register"
+  , Arg.Unit f
+  , " Disable x86 peephole: remove mov to dead register" )
+;;
 
 let mk_no_x86_peephole_remove_redundant_cmp f =
-  ( "-no-x86-peephole-remove-redundant-cmp",
-    Arg.Unit f,
-    " Disable x86 peephole: remove redundant cmp" )
+  ( "-no-x86-peephole-remove-redundant-cmp"
+  , Arg.Unit f
+  , " Disable x86 peephole: remove redundant cmp" )
+;;
 
 let mk_no_x86_peephole_combine_add_rsp f =
-  ( "-no-x86-peephole-combine-add-rsp",
-    Arg.Unit f,
-    " Disable x86 peephole: combine adjacent add rsp" )
+  ( "-no-x86-peephole-combine-add-rsp"
+  , Arg.Unit f
+  , " Disable x86 peephole: combine adjacent add rsp" )
+;;
 
 let mk_cfg_cse_optimize f =
-  ("-cfg-cse-optimize", Arg.Unit f, " Apply CSE optimizations to CFG")
+  "-cfg-cse-optimize", Arg.Unit f, " Apply CSE optimizations to CFG"
+;;
 
 let mk_no_cfg_cse_optimize f =
-  ("-no-cfg-cse-optimize", Arg.Unit f, " Do not apply CSE optimizations to CFG")
+  "-no-cfg-cse-optimize", Arg.Unit f, " Do not apply CSE optimizations to CFG"
+;;
 
 let mk_cfg_zero_alloc_checker f =
-  ("-cfg-zero-alloc-checker", Arg.Unit f, " Apply zero_alloc checker to CFG")
+  "-cfg-zero-alloc-checker", Arg.Unit f, " Apply zero_alloc checker to CFG"
+;;
 
 let mk_no_cfg_zero_alloc_checker f =
-  ( "-no-cfg-zero-alloc-checker",
-    Arg.Unit f,
-    " Do not apply zero_alloc checker to CFG" )
+  "-no-cfg-zero-alloc-checker", Arg.Unit f, " Do not apply zero_alloc checker to CFG"
+;;
 
 let mk_cfg_stack_checks f =
-  ( "-cfg-stack-checks",
-    Arg.Unit f,
-    " Insert the stack checks on the CFG representation" )
+  "-cfg-stack-checks", Arg.Unit f, " Insert the stack checks on the CFG representation"
+;;
 
 let mk_no_cfg_stack_checks f =
-  ( "-no-cfg-stack-checks",
-    Arg.Unit f,
-    " Insert the stack checks on the linear representation" )
+  ( "-no-cfg-stack-checks"
+  , Arg.Unit f
+  , " Insert the stack checks on the linear representation" )
+;;
 
 let mk_cfg_stack_checks_threshold f =
-  ( "-cfg-stack-checks-threshold",
-    Arg.Int f,
-    "<n>  Only CFGs with fewer than n blocks will be optimized" )
+  ( "-cfg-stack-checks-threshold"
+  , Arg.Int f
+  , "<n>  Only CFGs with fewer than n blocks will be optimized" )
+;;
 
 let mk_cfg_eliminate_dead_trap_handlers f =
-  ( "-cfg-eliminate-dead-trap-handlers",
-    Arg.Unit f,
-    " Eliminate dead trap handlers" )
+  "-cfg-eliminate-dead-trap-handlers", Arg.Unit f, " Eliminate dead trap handlers"
+;;
 
 let mk_no_cfg_eliminate_dead_trap_handlers f =
-  ( "-no-cfg-eliminate-dead-trap-handlers",
-    Arg.Unit f,
-    " Do not eliminate dead trap handlers" )
+  ( "-no-cfg-eliminate-dead-trap-handlers"
+  , Arg.Unit f
+  , " Do not eliminate dead trap handlers" )
+;;
 
 let mk_cfg_prologue_validate f =
-  ("-cfg-prologue-validate", Arg.Unit f, " Validate prologues added to CFG")
+  "-cfg-prologue-validate", Arg.Unit f, " Validate prologues added to CFG"
+;;
 
 let mk_no_cfg_prologue_validate f =
-  ( "-no-cfg-prologue-validate",
-    Arg.Unit f,
-    " Do not validate prologues added to CFG" )
+  "-no-cfg-prologue-validate", Arg.Unit f, " Do not validate prologues added to CFG"
+;;
 
 let mk_cfg_prologue_shrink_wrap f =
-  ( "-cfg-prologue-shrink-wrap",
-    Arg.Unit f,
-    " Place prologues optimally in the CFG to minimise unnecessary prologue \
-     executions" )
+  ( "-cfg-prologue-shrink-wrap"
+  , Arg.Unit f
+  , " Place prologues optimally in the CFG to minimise unnecessary prologue executions" )
+;;
 
 let mk_no_cfg_prologue_shrink_wrap f =
-  ( "-no-cfg-prologue-shrink-wrap",
-    Arg.Unit f,
-    " Place prologues at the entrypoint of the CFG" )
+  ( "-no-cfg-prologue-shrink-wrap"
+  , Arg.Unit f
+  , " Place prologues at the entrypoint of the CFG" )
+;;
 
 let mk_cfg_prologue_shrink_wrap_threshold f =
-  ( "-cfg-prologue-shrink-wrap-threshold",
-    Arg.Int f,
-    "<n>  Only CFGs with fewer than n blocks will be shrink-wrapped" )
+  ( "-cfg-prologue-shrink-wrap-threshold"
+  , Arg.Int f
+  , "<n>  Only CFGs with fewer than n blocks will be shrink-wrapped" )
+;;
 
 let mk_cfg_merge_blocks f =
-  ("-cfg-merge-blocks", Arg.Unit f, " Merge equivalent CFG blocks")
+  "-cfg-merge-blocks", Arg.Unit f, " Merge equivalent CFG blocks"
+;;
 
 let mk_no_cfg_merge_blocks f =
-  ("-no-cfg-merge-blocks", Arg.Unit f, " Do not merge equivalent CFG blocks")
+  "-no-cfg-merge-blocks", Arg.Unit f, " Do not merge equivalent CFG blocks"
+;;
 
 let mk_cfg_value_propagation f =
-  ("-cfg-value-propagation", Arg.Unit f, " Propagate value to simplify CFG")
+  "-cfg-value-propagation", Arg.Unit f, " Propagate value to simplify CFG"
+;;
 
 let mk_no_cfg_value_propagation f =
-  ( "-no-cfg-value-propagation",
-    Arg.Unit f,
-    " Do not propagate value to simplify CFG" )
+  "-no-cfg-value-propagation", Arg.Unit f, " Do not propagate value to simplify CFG"
+;;
 
 let mk_cfg_value_propagation_float f =
-  ( "-cfg-value-propagation-float",
-    Arg.Unit f,
-    " Propagate float value to simplify CFG" )
+  "-cfg-value-propagation-float", Arg.Unit f, " Propagate float value to simplify CFG"
+;;
 
 let mk_no_cfg_value_propagation_float f =
-  ( "-no-cfg-value-propagation-float",
-    Arg.Unit f,
-    " Do not propagate float value to simplify CFG" )
+  ( "-no-cfg-value-propagation-float"
+  , Arg.Unit f
+  , " Do not propagate float value to simplify CFG" )
+;;
 
 let mk_cfg_value_propagation_flow f =
-  ( "-cfg-value-propagation-flow",
-    Arg.Unit f,
-    " Propagate values across block to simplify CFG" )
+  ( "-cfg-value-propagation-flow"
+  , Arg.Unit f
+  , " Propagate values across block to simplify CFG" )
+;;
 
 let mk_no_cfg_value_propagation_flow f =
-  ( "-no-cfg-value-propagation-flow",
-    Arg.Unit f,
-    " Do not propagate values across block to simplify CFG" )
+  ( "-no-cfg-value-propagation-flow"
+  , Arg.Unit f
+  , " Do not propagate values across block to simplify CFG" )
+;;
 
 let mk_experimental_optimizations f =
-  ( "-experimental-optimizations",
-    Arg.Unit f,
-    " Enable a bundle of experimental codegen optimizations that are not yet \
-     on by default (subject to change)" )
+  ( "-experimental-optimizations"
+  , Arg.Unit f
+  , " Enable a bundle of experimental codegen optimizations that are not yet on by \
+     default (subject to change)" )
+;;
 
 let mk_reorder_blocks_random f =
-  ( "-reorder-blocks-random",
-    Arg.Int f,
-    Printf.sprintf
-      "<seed> Randomly reorder basic blocks in every function, using the \
-       provided seed (intended for testing, off by default)." )
+  ( "-reorder-blocks-random"
+  , Arg.Int f
+  , Printf.sprintf
+      "<seed> Randomly reorder basic blocks in every function, using the provided seed \
+       (intended for testing, off by default)." )
+;;
 
 let mk_basic_block_sections f =
-  if Config.function_sections then
-    ( "-basic-block-sections",
-      Arg.Unit f,
-      " Emit each basic block in a separate section if target supports it. \
-       Requires -ocamlcfg." )
-  else
+  if Config.function_sections
+  then
+    ( "-basic-block-sections"
+    , Arg.Unit f
+    , " Emit each basic block in a separate section if target supports it. Requires \
+       -ocamlcfg." )
+  else (
     let err () =
       raise
         (Arg.Bad
-           "OCaml has been configured without support for -function-sections \
-            which is required for -basic-block-sections")
+           "OCaml has been configured without support for -function-sections which is \
+            required for -basic-block-sections")
     in
-    ("-basic-block-sections", Arg.Unit err, " (option not available)")
+    "-basic-block-sections", Arg.Unit err, " (option not available)")
+;;
 
 let mk_module_entry_functions_section f =
-  if Config.function_sections then
-    ( "-module-entry-functions-section",
-      Arg.Unit f,
-      " Emit all module entry functions into a separate section if the target \
-       supports it. Requires -ocamlcfg." )
-  else
+  if Config.function_sections
+  then
+    ( "-module-entry-functions-section"
+    , Arg.Unit f
+    , " Emit all module entry functions into a separate section if the target supports \
+       it. Requires -ocamlcfg." )
+  else (
     let err () =
       raise
         (Arg.Bad
-           "OCaml has been configured without support for -function-sections \
-            which is required for -module-entry-functions-section")
+           "OCaml has been configured without support for -function-sections which is \
+            required for -module-entry-functions-section")
     in
-    ("-module-entry-functions-section", Arg.Unit err, " (option not available)")
+    "-module-entry-functions-section", Arg.Unit err, " (option not available)")
+;;
 
 let mk_dasm_comments f =
-  ("-dasm-comments", Arg.Unit f, " Add comments in .s files (e.g. for DWARF)")
+  "-dasm-comments", Arg.Unit f, " Add comments in .s files (e.g. for DWARF)"
+;;
 
 let mk_dno_asm_comments f =
-  ("-dno-asm-comments", Arg.Unit f, " Do not add comments in .s files")
+  "-dno-asm-comments", Arg.Unit f, " Do not add comments in .s files"
+;;
 
 let mk_frametables_in_rodata f =
-  ( "-frametables-in-rodata",
-    Arg.Unit f,
-    " Emit GC frametables into the .rodata section (default)" )
+  ( "-frametables-in-rodata"
+  , Arg.Unit f
+  , " Emit GC frametables into the .rodata section (default)" )
+;;
 
 let mk_no_frametables_in_rodata f =
-  ( "-no-frametables-in-rodata",
-    Arg.Unit f,
-    " Do not emit GC frametables into the .rodata section" )
+  ( "-no-frametables-in-rodata"
+  , Arg.Unit f
+  , " Do not emit GC frametables into the .rodata section" )
+;;
 
 let mk_heap_reduction_threshold f =
-  ( "-heap-reduction-threshold",
-    Arg.Int f,
-    Printf.sprintf
-      " Threshold (in major words, defaulting to %d) to trigger a heap \
-       reduction before code emission"
+  ( "-heap-reduction-threshold"
+  , Arg.Int f
+  , Printf.sprintf
+      " Threshold (in major words, defaulting to %d) to trigger a heap reduction before \
+       code emission"
       Oxcaml_flags.default_heap_reduction_threshold )
+;;
 
 let mk_zero_alloc_check f =
   let annotations = Zero_alloc_annotations.Check.(List.map to_string all) in
-  ( "-zero-alloc-check",
-    Arg.Symbol (annotations, f),
-    " Check that annotated functions do not allocate and do not have indirect \
-     calls. " ^ Zero_alloc_annotations.Check.doc )
+  ( "-zero-alloc-check"
+  , Arg.Symbol (annotations, f)
+  , " Check that annotated functions do not allocate and do not have indirect calls. "
+    ^ Zero_alloc_annotations.Check.doc )
+;;
 
 let mk_zero_alloc_assert f =
   let annotations = Zero_alloc_annotations.Assert.(List.map to_string all) in
-  ( "-zero-alloc-assert",
-    Arg.Symbol (annotations, f),
-    " Add zero_alloc annotations to all functions."
-    ^ Zero_alloc_annotations.Assert.doc )
+  ( "-zero-alloc-assert"
+  , Arg.Symbol (annotations, f)
+  , " Add zero_alloc annotations to all functions." ^ Zero_alloc_annotations.Assert.doc )
+;;
 
-let mk_dzero_alloc f = ("-dzero-alloc", Arg.Unit f, " (undocumented)")
+let mk_dzero_alloc f = "-dzero-alloc", Arg.Unit f, " (undocumented)"
 
 let mk_disable_zero_alloc_checker f =
-  ( "-disable-zero-alloc-checker",
-    Arg.Unit f,
-    " Conservatively assume that all functions may allocate, without checking. \
-     Disables computation of zero_alloc function summaries, unlike \
-     \"-zero-alloc-check none\" which disables checking of zero_alloc \
-     annotations)" )
+  ( "-disable-zero-alloc-checker"
+  , Arg.Unit f
+  , " Conservatively assume that all functions may allocate, without checking. Disables \
+     computation of zero_alloc function summaries, unlike \"-zero-alloc-check none\" \
+     which disables checking of zero_alloc annotations)" )
+;;
 
 let mk_disable_precise_zero_alloc_checker f =
-  ( "-disable-precise-zero-alloc-checker",
-    Arg.Unit f,
-    " Conservatively assume that all forward calls and mutually recursive \
-     functions may allocate. Disables fixed point computation of summaries for \
-     these functions. Intended as a temporary workaround when precise analysis \
-     is too expensive." )
+  ( "-disable-precise-zero-alloc-checker"
+  , Arg.Unit f
+  , " Conservatively assume that all forward calls and mutually recursive functions may \
+     allocate. Disables fixed point computation of summaries for these functions. \
+     Intended as a temporary workaround when precise analysis is too expensive." )
+;;
 
 let mk_zero_alloc_checker_details_cutoff f =
-  ( "-zero-alloc-checker-details-cutoff",
-    Arg.Int f,
-    Printf.sprintf
-      " Do not show more than this number of error locations in each function \
-       that fails the check (default %d, negative to show all)"
+  ( "-zero-alloc-checker-details-cutoff"
+  , Arg.Int f
+  , Printf.sprintf
+      " Do not show more than this number of error locations in each function that fails \
+       the check (default %d, negative to show all)"
       (match Oxcaml_flags.default_zero_alloc_checker_details_cutoff with
-      | Keep_all -> -1
-      | No_details -> 0
-      | At_most n -> n) )
+       | Keep_all -> -1
+       | No_details -> 0
+       | At_most n -> n) )
+;;
 
 let mk_zero_alloc_checker_details_extra f =
-  ( "-zero-alloc-checker-details-extra",
-    Arg.Unit f,
-    " Show extra details in error messages from zero_alloc checker" )
+  ( "-zero-alloc-checker-details-extra"
+  , Arg.Unit f
+  , " Show extra details in error messages from zero_alloc checker" )
+;;
 
 let mk_no_zero_alloc_checker_details_extra f =
-  ( "-no-zero-alloc-checker-details-extra",
-    Arg.Unit f,
-    " Do not show extra details in error messages from zero_alloc checker" )
+  ( "-no-zero-alloc-checker-details-extra"
+  , Arg.Unit f
+  , " Do not show extra details in error messages from zero_alloc checker" )
+;;
 
 let mk_zero_alloc_checker_join f =
-  ( "-zero-alloc-checker-join",
-    Arg.Int f,
-    Printf.sprintf
-      " How many abstract paths before losing precision (default %d, negative \
-       to fail instead of widening, 0 to keep all)"
+  ( "-zero-alloc-checker-join"
+  , Arg.Int f
+  , Printf.sprintf
+      " How many abstract paths before losing precision (default %d, negative to fail \
+       instead of widening, 0 to keep all)"
       (match Oxcaml_flags.default_zero_alloc_checker_join with
-      | Keep_all -> 0
-      | Widen n -> n
-      | Error n -> -n) )
+       | Keep_all -> 0
+       | Widen n -> n
+       | Error n -> -n) )
+;;
 
 let mk_function_layout f =
   let layouts = Oxcaml_flags.Function_layout.(List.map to_string all) in
   let default = Oxcaml_flags.Function_layout.(to_string default) in
-  ( "-function-layout",
-    Arg.Symbol (layouts, f),
-    Printf.sprintf " Order of functions in the generated assembly (default: %s)"
-      default )
+  ( "-function-layout"
+  , Arg.Symbol (layouts, f)
+  , Printf.sprintf " Order of functions in the generated assembly (default: %s)" default )
+;;
 
 let mk_name_mangling_scheme f =
-  ( "-name-mangling-scheme",
-    Arg.Symbol ([ "flat"; "structured" ], f),
-    " Override the default name mangling scheme set at configure time" )
+  ( "-name-mangling-scheme"
+  , Arg.Symbol ([ "flat"; "structured" ], f)
+  , " Override the default name mangling scheme set at configure time" )
+;;
 
 let mk_disable_builtin_check f =
-  ( "-disable-builtin-check",
-    Arg.Unit f,
-    " If an external annotated with [@@builtin] is not recognized, fall back \
-     to the corresponding C stub, instead of compilation error." )
+  ( "-disable-builtin-check"
+  , Arg.Unit f
+  , " If an external annotated with [@@builtin] is not recognized, fall back to the \
+     corresponding C stub, instead of compilation error." )
+;;
 
 let mk_disable_poll_insertion f =
-  ("-disable-poll-insertion", Arg.Unit f, " Do not insert poll points")
+  "-disable-poll-insertion", Arg.Unit f, " Do not insert poll points"
+;;
 
 let mk_enable_poll_insertion f =
-  ("-enable-poll-insertion", Arg.Unit f, " Insert poll points")
+  "-enable-poll-insertion", Arg.Unit f, " Insert poll points"
+;;
 
 let mk_long_frames f =
-  ("-long-frames", Arg.Unit f, " Allow stack frames longer than 2^16 bytes")
+  "-long-frames", Arg.Unit f, " Allow stack frames longer than 2^16 bytes"
+;;
 
 let mk_no_long_frames f =
-  ( "-no-long-frames",
-    Arg.Unit f,
-    " Do not allow stack frames longer than 2^16 bytes" )
+  "-no-long-frames", Arg.Unit f, " Do not allow stack frames longer than 2^16 bytes"
+;;
 
 let mk_debug_long_frames_threshold f =
-  ( "-debug-long-frames-threshold",
-    Arg.Int f,
-    "<n>  debug only: set long frames threshold" )
+  "-debug-long-frames-threshold", Arg.Int f, "<n>  debug only: set long frames threshold"
+;;
 
 let mk_dbranch_relaxation_max_displacement f =
-  ( "-dbranch-relaxation-max-displacement",
-    Arg.Int f,
-    "<n>  debug only: lower the branch relaxation displacement threshold" )
+  ( "-dbranch-relaxation-max-displacement"
+  , Arg.Int f
+  , "<n>  debug only: lower the branch relaxation displacement threshold" )
+;;
 
 let mk_caml_apply_inline_fast_path f =
-  ( "-caml-apply-inline-fast-path",
-    Arg.Unit f,
-    " Inline the fast path of caml_applyN" )
+  "-caml-apply-inline-fast-path", Arg.Unit f, " Inline the fast path of caml_applyN"
+;;
 
 let mk_dump_inlining_paths f =
-  ( "-dump-inlining-paths",
-    Arg.Unit f,
-    " Dump inlining paths when dumping flambda2 terms" )
+  "-dump-inlining-paths", Arg.Unit f, " Dump inlining paths when dumping flambda2 terms"
+;;
 
-let mk_davail f =
-  ("-davail", Arg.Unit f, " Dump register availability information")
-
-let mk_dranges f = ("-dranges", Arg.Unit f, " Dump results of Compute_ranges")
+let mk_davail f = "-davail", Arg.Unit f, " Dump register availability information"
+let mk_dranges f = "-dranges", Arg.Unit f, " Dump results of Compute_ranges"
 
 let mk_ddebug_invariants f =
-  ( "-ddebug-invariants",
-    Arg.Unit f,
-    " Run invariant checks during generation of debugging information" )
+  ( "-ddebug-invariants"
+  , Arg.Unit f
+  , " Run invariant checks during generation of debugging information" )
+;;
 
 let mk_ddebug_available_regs f =
-  ( "-ddebug-available-regs",
-    Arg.Unit f,
-    " Enable debug output for available registers analysis" )
+  ( "-ddebug-available-regs"
+  , Arg.Unit f
+  , " Enable debug output for available registers analysis" )
+;;
 
 let mk_ddwarf_types f =
-  ("-ddwarf-types", Arg.Unit f, " Enable debug output for DWARF type generation")
+  "-ddwarf-types", Arg.Unit f, " Enable debug output for DWARF type generation"
+;;
 
 let mk_ddwarf_metrics f =
-  ( "-ddwarf-metrics",
-    Arg.Unit f,
-    " Write DWARF metrics to auxiliary JSON file .debug-stats.json, which can \
-     then be aggregated with the analyze_debug_stats.py Python script." )
+  ( "-ddwarf-metrics"
+  , Arg.Unit f
+  , " Write DWARF metrics to auxiliary JSON file .debug-stats.json, which can then be \
+     aggregated with the analyze_debug_stats.py Python script." )
+;;
 
 let mk_ddwarf_metrics_output_file f =
-  ( "-ddwarf-metrics-output-file",
-    Arg.String f,
-    "<file>  Set output filename for DWARF metrics data" )
+  ( "-ddwarf-metrics-output-file"
+  , Arg.String f
+  , "<file>  Set output filename for DWARF metrics data" )
+;;
 
 let mk_internal_assembler f =
-  ( "-internal-assembler",
-    Arg.Unit f,
-    "Write object files directly instead of using the system assembler (x86-64 \
-     ELF only)" )
+  ( "-internal-assembler"
+  , Arg.Unit f
+  , "Write object files directly instead of using the system assembler (x86-64 ELF only)"
+  )
+;;
 
 let mk_dissector f =
-  ( "-dissector",
-    Arg.Unit f,
-    " Enable the dissector pass (prevents relocation overflow when linking \
-     very large executables with the small code model).  (Experimental)" )
+  ( "-dissector"
+  , Arg.Unit f
+  , " Enable the dissector pass (prevents relocation overflow when linking very large \
+     executables with the small code model).  (Experimental)" )
+;;
 
 let mk_dissector_partition_size f =
-  ( "-dissector-partition-size",
-    Arg.Float f,
-    Printf.sprintf
-      "<size>  Set the partition size threshold in gigabytes for the dissector \
-       pass (default: %g)"
+  ( "-dissector-partition-size"
+  , Arg.Float f
+  , Printf.sprintf
+      "<size>  Set the partition size threshold in gigabytes for the dissector pass \
+       (default: %g)"
       Clflags.dissector_partition_size_default )
+;;
 
 let mk_ddissector f =
-  ("-ddissector", Arg.Unit f, " Print verbose logging from the dissector pass")
+  "-ddissector", Arg.Unit f, " Print verbose logging from the dissector pass"
+;;
 
 let mk_ddissector_sizes f =
-  ( "-ddissector-sizes",
-    Arg.Unit f,
-    " Dump allocated section sizes for each input file during linking" )
+  ( "-ddissector-sizes"
+  , Arg.Unit f
+  , " Dump allocated section sizes for each input file during linking" )
+;;
 
 let mk_ddissector_verbose f =
-  ( "-ddissector-verbose",
-    Arg.Unit f,
-    " Print detailed per-relocation logging from the dissector pass" )
+  ( "-ddissector-verbose"
+  , Arg.Unit f
+  , " Print detailed per-relocation logging from the dissector pass" )
+;;
 
 let mk_ddissector_partitions f =
-  ( "-ddissector-partitions",
-    Arg.Unit f,
-    " Keep partition .o files and print their paths (for debugging)" )
+  ( "-ddissector-partitions"
+  , Arg.Unit f
+  , " Keep partition .o files and print their paths (for debugging)" )
+;;
 
 let mk_ddissector_inputs f =
-  ( "-ddissector-inputs",
-    Arg.String f,
-    "<file>  Write dissector input analysis to <file>" )
+  "-ddissector-inputs", Arg.String f, "<file>  Write dissector input analysis to <file>"
+;;
 
 let mk_verify_binary_emitter f =
-  ( "-verify-binary-emitter",
-    Arg.Unit f,
-    " Verify binary emitter output matches system assembler output. Exits with \
-     error on mismatch. (ARM64 only)" )
+  ( "-verify-binary-emitter"
+  , Arg.Unit f
+  , " Verify binary emitter output matches system assembler output. Exits with error on \
+     mismatch. (ARM64 only)" )
+;;
 
 let mk_dissector_assume_lld_without_64_bit_eh_frames f =
-  ( "-dissector-assume-lld-without-64-bit-eh-frames",
-    Arg.Unit f,
-    " Assume LLD linker without 64-bit EH frame support (default)" )
+  ( "-dissector-assume-lld-without-64-bit-eh-frames"
+  , Arg.Unit f
+  , " Assume LLD linker without 64-bit EH frame support (default)" )
+;;
 
 let mk_no_dissector_assume_lld_without_64_bit_eh_frames f =
-  ( "-no-dissector-assume-lld-without-64-bit-eh-frames",
-    Arg.Unit f,
-    " Do not assume LLD linker limitation" )
+  ( "-no-dissector-assume-lld-without-64-bit-eh-frames"
+  , Arg.Unit f
+  , " Do not assume LLD linker limitation" )
+;;
 
 let mk_manual_module_init f =
-  ( "-manual-module-init",
-    Arg.Unit f,
-    " Enable manual module initialization (emit unit dependency table)" )
+  ( "-manual-module-init"
+  , Arg.Unit f
+  , " Enable manual module initialization (emit unit dependency table)" )
+;;
 
 let mk_no_manual_module_init f =
-  ( "-no-manual-module-init",
-    Arg.Unit f,
-    " Disable manual module initialization (default)" )
+  "-no-manual-module-init", Arg.Unit f, " Disable manual module initialization (default)"
+;;
+
+let mk_emit_startup_key f =
+  ( "-emit-startup-key"
+  , Arg.String f
+  , "<file>  Run the link scan of the given inputs, write the startup-stable key \
+     (compiler version, startup flags, ordered unit list, generic-function set) to \
+     <file>, and exit without linking" )
+;;
+
+let mk_compile_startup_stable f =
+  ( "-compile-startup-stable"
+  , Arg.String f
+  , "<keyfile>  Emit only the stable startup object described by <keyfile> (with -o); \
+     reads no .cmx/.cmxa" )
+;;
+
+let mk_use_startup_stable f =
+  ( "-use-startup-stable"
+  , Arg.String f
+  , "<obj>  On a normal link, reuse <obj> as the prebuilt stable startup object and emit \
+     only the volatile startup object.  The build system must guarantee <obj> matches \
+     these inputs; the compiler performs no freshness check.  Mutually exclusive with \
+     OCAMLOPT_STARTUP_CACHE_DIR" )
+;;
+
+let mk_compile_startup_volatile f =
+  ( "-compile-startup-volatile"
+  , Arg.Unit f
+  , " On a normal link, emit only the volatile startup object (with -o) and exit without \
+     emitting the stable object or running the final link.  Reads the same .cmx/.cmxa \
+     and flags as the link.  Mutually exclusive with OCAMLOPT_STARTUP_CACHE_DIR" )
+;;
+
+let mk_emit_startup_volatile_inline f =
+  ( "-emit-startup-volatile-inline"
+  , Arg.Unit f
+  , " In a -use-link-plan consume link, generate the volatile startup object in-process \
+     from the plan-volatile and link it directly, instead of reading a prebuilt \
+     -use-startup-volatile <obj>.  Removes the separate volatile-emit action from the \
+     incremental relink critical path.  Requires -use-startup-stable; mutually exclusive \
+     with -use-startup-volatile" )
+;;
+
+let mk_use_startup_volatile f =
+  ( "-use-startup-volatile"
+  , Arg.String f
+  , "<obj>  On a normal link, reuse <obj> as the prebuilt volatile startup object and \
+     skip volatile emission.  Combined with -use-startup-stable the link emits no \
+     startup object.  The build system must guarantee <obj> matches these inputs; the \
+     compiler performs no freshness check.  Mutually exclusive with \
+     OCAMLOPT_STARTUP_CACHE_DIR" )
+;;
 
 let mk_gc_timings f =
-  ("-dgc-timings", Arg.Unit f, "Output information about time spent in the GC")
+  "-dgc-timings", Arg.Unit f, "Output information about time spent in the GC"
+;;
 
-let mk_dllvmir f = ("-dllvmir", Arg.Unit f, " (undocumented)")
+let mk_dllvmir f = "-dllvmir", Arg.Unit f, " (undocumented)"
 
 let mk_keep_llvmir f =
-  ( "-keep-llvmir",
-    Arg.Unit f,
-    " Keep the LLVM IR file produced by -llvm-backend" )
+  "-keep-llvmir", Arg.Unit f, " Keep the LLVM IR file produced by -llvm-backend"
+;;
 
-let mk_llvm_path f =
-  ("-llvm-path", Arg.String f, " Specify which LLVM compiler to use")
+let mk_llvm_path f = "-llvm-path", Arg.String f, " Specify which LLVM compiler to use"
 
 let mk_llvm_flags f =
-  ( "-llvm-flags",
-    Arg.String f,
-    " Extra flags to pass to LLVM (like -march or -mtune)" )
+  "-llvm-flags", Arg.String f, " Extra flags to pass to LLVM (like -march or -mtune)"
+;;
 
 module Flambda2 = Oxcaml_flags.Flambda2
 
 let mk_flambda2_result_types_functors_only f =
-  ( "-flambda2-result-types-functors-only",
-    Arg.Unit f,
-    Printf.sprintf
-      " Infer result types for functors (but no other\n\
-      \     functions)%s (Flambda 2 only)"
+  ( "-flambda2-result-types-functors-only"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Infer result types for functors (but no other\n     functions)%s (Flambda 2 only)"
       (format_default
          (match Flambda2.Default.function_result_types with
-         | Functors_only -> true
-         | Never | All_functions -> false)) )
+          | Functors_only -> true
+          | Never | All_functions -> false)) )
+;;
 
 let mk_flambda2_result_types_all_functions f =
-  ( "-flambda2-result-types-all-functions",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-result-types-all-functions"
+  , Arg.Unit f
+  , Printf.sprintf
       " Infer result types for all functions\n\
       \     (including functors)%s (Flambda 2 only)"
       (format_default
          (match Flambda2.Default.function_result_types with
-         | All_functions -> true
-         | Never | Functors_only -> false)) )
+          | All_functions -> true
+          | Never | Functors_only -> false)) )
+;;
 
 let mk_no_flambda2_result_types f =
-  ( "-no-flambda2-result-types",
-    Arg.Unit f,
-    Printf.sprintf
-      " Do not infer result types for functions (or\n\
-      \     functors)%s (Flambda 2 only)"
+  ( "-no-flambda2-result-types"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Do not infer result types for functions (or\n     functors)%s (Flambda 2 only)"
       (format_default
          (match Flambda2.Default.function_result_types with
-         | Never -> true
-         | Functors_only | All_functions -> false)) )
+          | Never -> true
+          | Functors_only | All_functions -> false)) )
+;;
 
 let mk_flambda2_basic_meet f =
-  ( "-flambda2-basic-meet",
-    Arg.Unit f,
-    Printf.sprintf
-      " Use a basic meet algorithm (deprecated, does nothing) (Flambda 2 only)"
-  )
+  ( "-flambda2-basic-meet"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Use a basic meet algorithm (deprecated, does nothing) (Flambda 2 only)" )
+;;
 
 let mk_flambda2_advanced_meet f =
-  ( "-flambda2-advanced-meet",
-    Arg.Unit f,
-    Printf.sprintf
-      " Use an advanced meet algorithm (deprecated, does nothing) (Flambda 2 \
-       only)" )
+  ( "-flambda2-advanced-meet"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Use an advanced meet algorithm (deprecated, does nothing) (Flambda 2 only)" )
+;;
 
 let mk_flambda2_join_algorithm f =
-  ( "-flambda2-join-algorithm",
-    Arg.Symbol ([ "binary"; "n-way"; "checked" ], f),
-    Printf.sprintf
+  ( "-flambda2-join-algorithm"
+  , Arg.Symbol ([ "binary"; "n-way"; "checked" ], f)
+  , Printf.sprintf
       " Select the join algorithm to use (Flambda 2 only)\n\
       \      Valid values are: \n\
       \       \"binary\" is the legacy binary join;\n\
       \       \"n-way\" is the new n-way join;\n\
-      \       \"checked\" runs both algorithms and compares them (use for \
-       debugging)." )
+      \       \"checked\" runs both algorithms and compares them (use for debugging)." )
+;;
 
 let mk_flambda2_join_points f =
-  ( "-flambda2-join-points",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-join-points"
+  , Arg.Unit f
+  , Printf.sprintf
       " Propagate information from all incoming edges to a join\n\
       \     point%s (Flambda 2 only)"
       (format_default Flambda2.Default.join_points) )
+;;
 
 let mk_no_flambda2_join_points f =
-  ( "-no-flambda2-join-points",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-join-points"
+  , Arg.Unit f
+  , Printf.sprintf
       " Propagate information to a join point only if there are\n\
       \     zero or one incoming edge(s)%s (Flambda 2 only)"
       (format_not_default Flambda2.Default.join_points) )
+;;
 
 let mk_flambda2_unbox_along_intra_function_control_flow f =
-  ( "-flambda2-unbox-along-intra-function-control-flow",
-    Arg.Unit f,
-    Printf.sprintf
-      " Pass values within\n\
-      \     a function as unboxed where possible%s (Flambda 2 only)"
-      (format_default Flambda2.Default.unbox_along_intra_function_control_flow)
-  )
+  ( "-flambda2-unbox-along-intra-function-control-flow"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Pass values within\n     a function as unboxed where possible%s (Flambda 2 only)"
+      (format_default Flambda2.Default.unbox_along_intra_function_control_flow) )
+;;
 
 let mk_no_flambda2_unbox_along_intra_function_control_flow f =
-  ( "-no-flambda2-unbox-along-intra-function-control-flow",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-unbox-along-intra-function-control-flow"
+  , Arg.Unit f
+  , Printf.sprintf
       " Pass values within\n\
       \     a function in their normal representation%s (Flambda 2 only)"
-      (format_not_default
-         Flambda2.Default.unbox_along_intra_function_control_flow) )
+      (format_not_default Flambda2.Default.unbox_along_intra_function_control_flow) )
+;;
 
 let mk_flambda2_backend_cse_at_toplevel f =
-  ( "-flambda2-backend-cse-at-toplevel",
-    Arg.Unit f,
-    Printf.sprintf
-      " Apply the backend CSE pass to module\n\
-      \     initializers%s (Flambda 2 only)"
+  ( "-flambda2-backend-cse-at-toplevel"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Apply the backend CSE pass to module\n     initializers%s (Flambda 2 only)"
       (format_default Flambda2.Default.backend_cse_at_toplevel) )
+;;
 
 let mk_no_flambda2_backend_cse_at_toplevel f =
-  ( "-no-flambda2-backend-cse-at-toplevel",
-    Arg.Unit f,
-    Printf.sprintf
-      " Do not apply the backend CSE pass to\n\
-      \     module initializers%s (Flambda 2 only)"
+  ( "-no-flambda2-backend-cse-at-toplevel"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Do not apply the backend CSE pass to\n     module initializers%s (Flambda 2 only)"
       (format_not_default Flambda2.Default.backend_cse_at_toplevel) )
+;;
 
 let mk_flambda2_cse_depth f =
-  ( "-flambda2-cse-depth",
-    Arg.Int f,
-    Printf.sprintf
+  ( "-flambda2-cse-depth"
+  , Arg.Int f
+  , Printf.sprintf
       " Depth threshold for eager tracking of CSE equations\n\
       \     (default %d) (Flambda 2 only)"
       Flambda2.Default.cse_depth )
+;;
 
 let mk_flambda2_join_depth f =
-  ( "-flambda2-join-depth",
-    Arg.Int f,
-    Printf.sprintf
-      " Depth threshold for alias expansion in join\n\
-      \     (default %d) (Flambda 2 only)"
+  ( "-flambda2-join-depth"
+  , Arg.Int f
+  , Printf.sprintf
+      " Depth threshold for alias expansion in join\n     (default %d) (Flambda 2 only)"
       Flambda2.Default.join_depth )
+;;
 
 let mk_flambda2_reaper f =
-  ( "-flambda2-reaper",
-    Arg.Unit f,
-    Printf.sprintf " Enable reaper pass%s (Flambda2 only)"
+  ( "-flambda2-reaper"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Enable reaper pass%s (Flambda2 only)"
       (format_default Flambda2.Default.enable_reaper) )
+;;
 
 let mk_no_flambda2_reaper f =
-  ( "-no-flambda2-reaper",
-    Arg.Unit f,
-    Printf.sprintf " Disable reaper pass%s (Flambda2 only)"
+  ( "-no-flambda2-reaper"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Disable reaper pass%s (Flambda2 only)"
       (format_not_default Flambda2.Default.enable_reaper) )
+;;
 
 let mk_reaper_preserve_direct_calls f =
-  ( "-reaper-preserve-direct-calls",
-    Arg.Symbol ([ "never"; "always"; "zero-alloc"; "auto" ], f),
-    Printf.sprintf
-      " Choose the direct call preservation strategy of the reaper (Flambda2 \
-       only)\n\
+  ( "-reaper-preserve-direct-calls"
+  , Arg.Symbol ([ "never"; "always"; "zero-alloc"; "auto" ], f)
+  , Printf.sprintf
+      " Choose the direct call preservation strategy of the reaper (Flambda2 only)\n\
       \      Valid values are: \n\
       \       \"never\": do not try to preserve direct calls to old functions;\n\
       \       \"always\": always preserve existing direct calls;\n\
       \       \"zero-alloc\": preserve direct calls only in zero-alloc checked;\n\
-      \       \"auto\": preserve direct calls only when the reaper is unable \
-       to identify a set of possibly called functions." )
+      \       \"auto\": preserve direct calls only when the reaper is unable to identify \
+       a set of possibly called functions." )
+;;
 
 let mk_reaper_local_fields f =
-  ( "-reaper-local-fields",
-    Arg.Unit f,
-    Printf.sprintf " Enable local field handing in the reaper%s (Flambda2 only)"
+  ( "-reaper-local-fields"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Enable local field handing in the reaper%s (Flambda2 only)"
       (format_default Flambda2.Default.reaper_local_fields) )
+;;
 
 let mk_no_reaper_local_fields f =
-  ( "-no-reaper-local-fields",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-reaper-local-fields"
+  , Arg.Unit f
+  , Printf.sprintf
       " Disable local field handing in the reaper%s (Flambda2 only)"
       (format_not_default Flambda2.Default.reaper_local_fields) )
+;;
 
 let mk_reaper_unbox f =
-  ( "-reaper-unbox",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-reaper-unbox"
+  , Arg.Unit f
+  , Printf.sprintf
       " Enable unboxing in the reaper%s (Flambda2 only, requires \
        -reaper-change-calling-conventions)"
       (format_default Flambda2.Default.reaper_unbox) )
+;;
 
 let mk_no_reaper_unbox f =
-  ( "-no-reaper-unbox",
-    Arg.Unit f,
-    Printf.sprintf " Disable unboxing in the reaper%s (Flambda2 only)"
+  ( "-no-reaper-unbox"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Disable unboxing in the reaper%s (Flambda2 only)"
       (format_not_default Flambda2.Default.reaper_unbox) )
+;;
 
 let mk_reaper_max_unbox_size f =
-  ( "-reaper-max-unbox-size",
-    Arg.Int f,
-    Printf.sprintf
-      " Maximum number of fields unboxed by the reaper for a single block \
-       (default %d) (Flambda2 only)"
+  ( "-reaper-max-unbox-size"
+  , Arg.Int f
+  , Printf.sprintf
+      " Maximum number of fields unboxed by the reaper for a single block (default %d) \
+       (Flambda2 only)"
       Flambda2.Default.reaper_max_unbox_size )
+;;
 
 let mk_reaper_change_calling_conventions f =
-  ( "-reaper-change-calling-conventions",
-    Arg.Unit f,
-    Printf.sprintf
-      " Allow the reaper to change the calling conventions of functions%s \
-       (Flambda2 only)"
+  ( "-reaper-change-calling-conventions"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Allow the reaper to change the calling conventions of functions%s (Flambda2 only)"
       (format_default Flambda2.Default.reaper_change_calling_conventions) )
+;;
 
 let mk_no_reaper_change_calling_conventions f =
-  ( "-no-reaper-change-calling-conventions",
-    Arg.Unit f,
-    Printf.sprintf
-      " Prevent the reaper from changing the calling conventions of \
-       functions%s (Flambda2 only)"
+  ( "-no-reaper-change-calling-conventions"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Prevent the reaper from changing the calling conventions of functions%s \
+       (Flambda2 only)"
       (format_not_default Flambda2.Default.reaper_change_calling_conventions) )
+;;
 
 let mk_flambda2_match_in_match f =
-  ( "-flambda2-match-in-match",
-    Arg.Unit f,
-    Printf.sprintf " Enable the match-in-match optimisation (Flambda2 only)" )
+  ( "-flambda2-match-in-match"
+  , Arg.Unit f
+  , Printf.sprintf " Enable the match-in-match optimisation (Flambda2 only)" )
+;;
 
 let mk_no_flambda2_match_in_match f =
-  ( "-no-flambda2-match-in-match",
-    Arg.Unit f,
-    Printf.sprintf " Disable the match-in-match optimisation (Flambda2 only)" )
+  ( "-no-flambda2-match-in-match"
+  , Arg.Unit f
+  , Printf.sprintf " Disable the match-in-match optimisation (Flambda2 only)" )
+;;
 
 let mk_flambda2_expert_fallback_inlining_heuristic f =
-  ( "-flambda2-expert-fallback-inlining-heuristic",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-expert-fallback-inlining-heuristic"
+  , Arg.Unit f
+  , Printf.sprintf
       " Prevent inlining of functions\n\
       \     whose bodies contain closures%s (Flambda 2 only)"
       (format_default Flambda2.Expert.Default.fallback_inlining_heuristic) )
+;;
 
 let mk_no_flambda2_expert_fallback_inlining_heuristic f =
-  ( "-no-flambda2-expert-fallback-inlining-heuristic",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-expert-fallback-inlining-heuristic"
+  , Arg.Unit f
+  , Printf.sprintf
       " Allow inlining of functions\n\
       \     whose bodies contain closures%s (Flambda 2 only)"
-      (format_not_default Flambda2.Expert.Default.fallback_inlining_heuristic)
-  )
+      (format_not_default Flambda2.Expert.Default.fallback_inlining_heuristic) )
+;;
 
 let mk_flambda2_expert_inline_effects_in_cmm f =
-  ( "-flambda2-expert-inline-effects-in-cmm",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-expert-inline-effects-in-cmm"
+  , Arg.Unit f
+  , Printf.sprintf
       " Allow inlining of effectful\n\
       \     expressions in the produced Cmm code\n\
       \     into any context%s (Flambda 2 only)"
       (format_default Flambda2.Expert.Default.inline_effects_in_cmm) )
+;;
 
 let mk_no_flambda2_expert_inline_effects_in_cmm f =
-  ( "-no-flambda2-expert-inline-effects-in-cmm",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-expert-inline-effects-in-cmm"
+  , Arg.Unit f
+  , Printf.sprintf
       " Only allow inlining of effectful\n\
       \     expressions in the produced Cmm code into\n\
       \     the arguments of allocation primitives%s (Flambda 2 only)"
       (format_not_default Flambda2.Expert.Default.inline_effects_in_cmm) )
+;;
 
 let mk_flambda2_expert_cmm_safe_subst f =
-  ( "-flambda2-expert-cmm-safe-subst",
-    Arg.Unit f,
-    Printf.sprintf
-      " Prevent potentially unsafe substitutions in cmm but may produce less \
-       optimized code%s"
+  ( "-flambda2-expert-cmm-safe-subst"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Prevent potentially unsafe substitutions in cmm but may produce less optimized \
+       code%s"
       (format_default Flambda2.Expert.Default.cmm_safe_subst) )
+;;
 
 let mk_no_flambda2_expert_cmm_safe_subst f =
-  ( "-no-flambda2-expert-cmm-safe-subst",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-expert-cmm-safe-subst"
+  , Arg.Unit f
+  , Printf.sprintf
       " Allow more substitutions in cmm, even ones that may be unsafe%s"
       (format_not_default Flambda2.Expert.Default.cmm_safe_subst) )
+;;
 
 let mk_flambda2_expert_phantom_lets f =
-  ( "-flambda2-expert-phantom-lets",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-expert-phantom-lets"
+  , Arg.Unit f
+  , Printf.sprintf
       " Generate phantom lets when -g\n     is specified%s (Flambda 2 only)"
       (format_default Flambda2.Expert.Default.phantom_lets) )
+;;
 
 let mk_no_flambda2_expert_phantom_lets f =
-  ( "-no-flambda2-expert-phantom-lets",
-    Arg.Unit f,
-    Printf.sprintf
-      " Do not generate phantom lets even when -g\n\
-      \     is specified%s (Flambda 2 only)"
+  ( "-no-flambda2-expert-phantom-lets"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Do not generate phantom lets even when -g\n     is specified%s (Flambda 2 only)"
       (format_not_default Flambda2.Expert.Default.phantom_lets) )
+;;
 
 let mk_flambda2_expert_max_block_size_for_projections f =
-  ( "-flambda2-expert-max-block-size-for-projections",
-    Arg.Int f,
-    Printf.sprintf
+  ( "-flambda2-expert-max-block-size-for-projections"
+  , Arg.Int f
+  , Printf.sprintf
       " Do not simplify projections\n\
       \     from blocks if the block size exceeds this value (default %s)\n\
       \     (Flambda 2 only)"
       (match Flambda2.Expert.Default.max_block_size_for_projections with
-      | None -> "not set"
-      | Some max -> string_of_int max) )
+       | None -> "not set"
+       | Some max -> string_of_int max) )
+;;
 
 let mk_flambda2_expert_max_unboxing_depth f =
-  ( "-flambda2-expert-max-unboxing-depth",
-    Arg.Int f,
-    Printf.sprintf
+  ( "-flambda2-expert-max-unboxing-depth"
+  , Arg.Int f
+  , Printf.sprintf
       " Do not unbox (nested) values deeper\n\
       \     than this many levels (default %d) (Flambda 2 only)"
       Flambda2.Expert.Default.max_unboxing_depth )
+;;
 
 let mk_flambda2_expert_can_inline_recursive_functions f =
-  ( "-flambda2-expert-can-inline-recursive-functions",
-    Arg.Unit f,
-    Printf.sprintf
-      " Consider inlining\n\
-      \      recursive functions (default %s) (Flambda 2 only)"
+  ( "-flambda2-expert-can-inline-recursive-functions"
+  , Arg.Unit f
+  , Printf.sprintf
+      " Consider inlining\n      recursive functions (default %s) (Flambda 2 only)"
       (format_default Flambda2.Expert.Default.can_inline_recursive_functions) )
+;;
 
 let mk_no_flambda2_expert_can_inline_recursive_functions f =
-  ( "-no-flambda2-expert-can-inline-recursive-functions",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-expert-can-inline-recursive-functions"
+  , Arg.Unit f
+  , Printf.sprintf
       " Only inline recursive\n\
       \     functions if forced to so do by an attribute\n\
       \     (default %s) (Flambda 2 only)"
-      (format_not_default Flambda2.Expert.Default.can_inline_recursive_functions)
-  )
+      (format_not_default Flambda2.Expert.Default.can_inline_recursive_functions) )
+;;
 
 let mk_flambda2_expert_max_function_simplify_run f =
-  ( "-flambda2-expert-max-function-simplify-run",
-    Arg.Int f,
-    Printf.sprintf
+  ( "-flambda2-expert-max-function-simplify-run"
+  , Arg.Int f
+  , Printf.sprintf
       " Do not run simplification of function more\n\
       \     than this (default %d) (Flambda 2 only)"
       Flambda2.Expert.Default.max_function_simplify_run )
+;;
 
 let mk_flambda2_expert_shorten_symbol_names f =
-  ( "-flambda2-expert-shorten-symbol-names",
-    Arg.Unit f,
-    " Shorten symbol names (Flambda 2 only, set by\n\
-    \     default in classic mode)" )
+  ( "-flambda2-expert-shorten-symbol-names"
+  , Arg.Unit f
+  , " Shorten symbol names (Flambda 2 only, set by\n     default in classic mode)" )
+;;
 
 let mk_no_flambda2_expert_shorten_symbol_names f =
-  ( "-no-flambda2-expert-shorten-symbol-names",
-    Arg.Unit f,
-    " Do not shorten symbol names (Flambda 2 only, set by\n\
+  ( "-no-flambda2-expert-shorten-symbol-names"
+  , Arg.Unit f
+  , " Do not shorten symbol names (Flambda 2 only, set by\n\
     \     default except for classic mode)" )
+;;
 
 let mk_flambda2_expert_cont_lifting_budget f =
-  ( "-flambda2-expert-cont-lifting-budget",
-    Arg.Int f,
-    Printf.sprintf
+  ( "-flambda2-expert-cont-lifting-budget"
+  , Arg.Int f
+  , Printf.sprintf
       " Set the limit of extra parameters introduced\n\
       \ when lifting continuations (per function)" )
+;;
 
 let mk_flambda2_expert_cont_spec_threshold f =
-  ( "-flambda2-expert-cont-specialization-threshold",
-    Arg.Float f,
-    Printf.sprintf
-      " Aggressiveness of continuation specialization, similar to  the inline \
-       threshold." )
+  ( "-flambda2-expert-cont-specialization-threshold"
+  , Arg.Float f
+  , Printf.sprintf
+      " Aggressiveness of continuation specialization, similar to  the inline threshold."
+  )
+;;
 
 let mk_flambda2_debug_concrete_types_only_on_canonicals f =
-  ( "-flambda2-debug-concrete-types-only-on-canonicals",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-debug-concrete-types-only-on-canonicals"
+  , Arg.Unit f
+  , Printf.sprintf
       " Check that concrete\n\
       \     types are only assigned to canonical\n\
       \     names%s (Flambda 2 only)"
-      (format_default Flambda2.Debug.Default.concrete_types_only_on_canonicals)
-  )
+      (format_default Flambda2.Debug.Default.concrete_types_only_on_canonicals) )
+;;
 
 let mk_no_flambda2_debug_concrete_types_only_on_canonicals f =
-  ( "-no-flambda2-debug-concrete-types-only-on-canonicals",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-debug-concrete-types-only-on-canonicals"
+  , Arg.Unit f
+  , Printf.sprintf
       " Do not check that\n\
       \     concrete types are only assigned to canonical\n\
       \     names%s (Flambda 2 only)"
-      (format_not_default
-         Flambda2.Debug.Default.concrete_types_only_on_canonicals) )
+      (format_not_default Flambda2.Debug.Default.concrete_types_only_on_canonicals) )
+;;
 
 let mk_flambda2_debug_keep_invalid_handlers f =
-  ( "-flambda2-debug-keep-invalid-handlers",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-debug-keep-invalid-handlers"
+  , Arg.Unit f
+  , Printf.sprintf
       " Keep branches simplified\n     to Invalid%s (Flambda 2 only)"
       (format_default Flambda2.Debug.Default.keep_invalid_handlers) )
+;;
 
 let mk_no_flambda2_debug_keep_invalid_handlers f =
-  ( "-no-flambda2-debug-keep-invalid-handlers",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-debug-keep-invalid-handlers"
+  , Arg.Unit f
+  , Printf.sprintf
       " Delete branches simplified\n     to Invalid%s (Flambda 2 only)"
       (format_not_default Flambda2.Debug.Default.keep_invalid_handlers) )
+;;
 
 let mk_flambda2_inline_max_depth f =
-  ( "-flambda2-inline-max-depth",
-    Arg.String f,
-    Printf.sprintf
+  ( "-flambda2-inline-max-depth"
+  , Arg.String f
+  , Printf.sprintf
       "<int>|<round>=<int>[,...]\n\
       \     Maximum depth of search for inlining opportunities inside\n\
       \     inlined functions (default %d) (Flambda 2 only)"
       Oxcaml_flags.Flambda2.Inlining.Default.default_arguments.max_depth )
+;;
 
 let mk_flambda2_inline_max_rec_depth f =
-  ( "-flambda2-inline-max-rec-depth",
-    Arg.String f,
-    Printf.sprintf
+  ( "-flambda2-inline-max-rec-depth"
+  , Arg.String f
+  , Printf.sprintf
       "<int>|<round>=<int>[,...]\n\
       \     Maximum depth of search for inlining opportunities inside\n\
       \     inlined recursive functions (default %d) (Flambda 2 only)"
       Oxcaml_flags.Flambda2.Inlining.Default.default_arguments.max_rec_depth )
+;;
 
 let mk_flambda2_inline_cost arg descr ~default f =
-  ( Printf.sprintf "-flambda2-inline-%s-cost" arg,
-    Arg.String f,
-    Printf.sprintf
+  ( Printf.sprintf "-flambda2-inline-%s-cost" arg
+  , Arg.String f
+  , Printf.sprintf
       "<float>|<round>=<float>[,...]\n\
       \     The cost of not removing %s during inlining\n\
       \     (default %.03f, higher = more costly) (Flambda 2 only)"
-      descr default )
+      descr
+      default )
+;;
 
 module Flambda2_inlining_default = Oxcaml_flags.Flambda2.Inlining.Default
 
 let mk_flambda2_inline_call_cost =
-  mk_flambda2_inline_cost "call" "a call"
+  mk_flambda2_inline_cost
+    "call"
+    "a call"
     ~default:Flambda2_inlining_default.default_arguments.call_cost
+;;
 
 let mk_flambda2_inline_alloc_cost =
-  mk_flambda2_inline_cost "alloc" "an allocation"
+  mk_flambda2_inline_cost
+    "alloc"
+    "an allocation"
     ~default:Flambda2_inlining_default.default_arguments.alloc_cost
+;;
 
 let mk_flambda2_inline_prim_cost =
-  mk_flambda2_inline_cost "prim" "a primitive"
+  mk_flambda2_inline_cost
+    "prim"
+    "a primitive"
     ~default:Flambda2_inlining_default.default_arguments.prim_cost
+;;
 
 let mk_flambda2_inline_branch_cost =
-  mk_flambda2_inline_cost "branch" "a conditional"
+  mk_flambda2_inline_cost
+    "branch"
+    "a conditional"
     ~default:Flambda2_inlining_default.default_arguments.branch_cost
+;;
 
 let mk_flambda2_inline_indirect_call_cost =
-  mk_flambda2_inline_cost "indirect" "an indirect call"
+  mk_flambda2_inline_cost
+    "indirect"
+    "an indirect call"
     ~default:Flambda2_inlining_default.default_arguments.indirect_call_cost
+;;
 
 let mk_flambda2_inline_poly_compare_cost =
-  mk_flambda2_inline_cost "poly-compare" "a polymorphic comparison"
+  mk_flambda2_inline_cost
+    "poly-compare"
+    "a polymorphic comparison"
     ~default:Flambda2_inlining_default.default_arguments.poly_compare_cost
+;;
 
-(* CR-someday mshinwell: We should have a check that the parameters provided by
-   the user are sensible, e.g. small_function_size <= large_function_size. *)
+(* CR-someday mshinwell: We should have a check that the parameters provided by the user
+   are sensible, e.g. small_function_size <= large_function_size. *)
 
 let mk_flambda2_inline_small_function_size f =
-  ( "-flambda2-inline-small-function-size",
-    Arg.String f,
-    Printf.sprintf
+  ( "-flambda2-inline-small-function-size"
+  , Arg.String f
+  , Printf.sprintf
       "<int>|<round>=<int>[,...]\n\
       \     Functions with a cost less than this will always be inlined\n\
       \     unless an attribute instructs otherwise (default %d)\n\
       \     (Flambda 2 only)"
       Flambda2_inlining_default.default_arguments.small_function_size )
+;;
 
 let mk_flambda2_inline_large_function_size f =
-  ( "-flambda2-inline-large-function-size",
-    Arg.String f,
-    Printf.sprintf
+  ( "-flambda2-inline-large-function-size"
+  , Arg.String f
+  , Printf.sprintf
       "<int>|<round>=<int>[,...]\n\
       \     Functions with a cost greater than this will never be inlined\n\
       \     unless an attribute instructs otherwise (default %d); speculative\n\
       \     inlining will be disabled if equal to the small function size\n\
       \     (Flambda 2 only)"
       Flambda2_inlining_default.default_arguments.large_function_size )
+;;
 
 let mk_flambda2_inline_small_functor_size f =
-  ( "-flambda2-inline-small-functor-size",
-    Arg.String f,
-    Printf.sprintf
+  ( "-flambda2-inline-small-functor-size"
+  , Arg.String f
+  , Printf.sprintf
       "<int>|<round>=<int>[,...]\n\
       \     Functors with a cost less than this will always be inlined\n\
       \     unless an attribute instructs otherwise (default %d)\n\
       \     (Flambda 2 only)"
       Flambda2_inlining_default.default_arguments.small_functor_size )
+;;
 
 let mk_flambda2_inline_large_functor_size f =
-  ( "-flambda2-inline-large-functor-size",
-    Arg.String f,
-    Printf.sprintf
+  ( "-flambda2-inline-large-functor-size"
+  , Arg.String f
+  , Printf.sprintf
       "<int>|<round>=<int>[,...]\n\
       \     Functors with a cost greater than this will never be inlined\n\
       \     unless an attribute instructs otherwise (default %d); speculative\n\
       \     inlining will be disabled if equal to the small functor size\n\
       \     (Flambda 2 only)"
       Flambda2_inlining_default.default_arguments.large_functor_size )
+;;
 
 let mk_flambda2_inline_threshold f =
-  ( "-flambda2-inline-threshold",
-    Arg.String f,
-    Printf.sprintf
+  ( "-flambda2-inline-threshold"
+  , Arg.String f
+  , Printf.sprintf
       "<float>|<round>=<float>[,...]\n\
       \     Aggressiveness of inlining (default %.02f, higher numbers mean\n\
       \     more aggressive) (Flambda 2 only)"
       Flambda2_inlining_default.default_arguments.threshold )
+;;
 
 let mk_flambda2_speculative_inlining_only_if_arguments_useful f =
-  ( "-flambda2-speculative-inlining-only-if-arguments-useful",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-speculative-inlining-only-if-arguments-useful"
+  , Arg.Unit f
+  , Printf.sprintf
       " Only\n\
       \    perform speculative inlining if the Flambda type system has\n\
       \    useful information about the argument(s) at the call site%s\n\
       \    (Flambda 2 only)"
       (format_default
-         Flambda2.Inlining.Default.speculative_inlining_only_if_arguments_useful)
-  )
+         Flambda2.Inlining.Default.speculative_inlining_only_if_arguments_useful) )
+;;
 
 let mk_no_flambda2_speculative_inlining_only_if_arguments_useful f =
-  ( "-no-flambda2-speculative-inlining-only-if-arguments-useful",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-speculative-inlining-only-if-arguments-useful"
+  , Arg.Unit f
+  , Printf.sprintf
       " Ignore\n\
       \     whether the Flambda type system has useful information\n\
       \     about the argument(s) at the call site when performing\n\
       \     speculative inlining%s (Flambda 2 only)"
       (format_not_default
-         Flambda2.Inlining.Default.speculative_inlining_only_if_arguments_useful)
-  )
+         Flambda2.Inlining.Default.speculative_inlining_only_if_arguments_useful) )
+;;
 
 let mk_flambda2_speculative_inlining_track_lifted_constants f =
-  ( "-flambda2-speculative-inlining-track-lifted-constants",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-flambda2-speculative-inlining-track-lifted-constants"
+  , Arg.Unit f
+  , Printf.sprintf
       " Track the size of lifted constants when doing speculative inlining%s\n\
       \    (Flambda 2 only)"
       (format_default
-         Flambda2.Inlining.Default.speculative_inlining_track_lifted_constants)
-  )
+         Flambda2.Inlining.Default.speculative_inlining_track_lifted_constants) )
+;;
 
 let mk_no_flambda2_speculative_inlining_track_lifted_constants f =
-  ( "-no-flambda2-speculative-inlining-track-lifted-constants",
-    Arg.Unit f,
-    Printf.sprintf
+  ( "-no-flambda2-speculative-inlining-track-lifted-constants"
+  , Arg.Unit f
+  , Printf.sprintf
       " Do not track the size of lifted constants when doing speculative\n\
       \    inlining%s (Flambda 2 only)"
       (format_not_default
-         Flambda2.Inlining.Default.speculative_inlining_track_lifted_constants)
-  )
+         Flambda2.Inlining.Default.speculative_inlining_track_lifted_constants) )
+;;
 
 let mk_flambda2_inlining_report_bin f =
-  ( "-flambda2-inlining-report-bin",
-    Arg.Unit f,
-    " Write inlining report\n     in binary format (Flambda 2 only)" )
+  ( "-flambda2-inlining-report-bin"
+  , Arg.Unit f
+  , " Write inlining report\n     in binary format (Flambda 2 only)" )
+;;
 
 let mk_flambda2_unicode f =
-  ( "-flambda2-unicode",
-    Arg.Unit f,
-    " Use Unicode output when printing\n     Flambda 2 code" )
+  ( "-flambda2-unicode"
+  , Arg.Unit f
+  , " Use Unicode output when printing\n     Flambda 2 code" )
+;;
 
 let mk_flambda2_kind_checks f =
-  ( "-flambda2-kind-checks",
-    Arg.Unit f,
-    " Perform kind checks on Flambda 2\n\
+  ( "-flambda2-kind-checks"
+  , Arg.Unit f
+  , " Perform kind checks on Flambda 2\n\
     \     code (may cause fatal errors with layout-poly GADT code)" )
+;;
 
 let mk_no_flambda2_kind_checks f =
-  ( "-no-flambda2-kind-checks",
-    Arg.Unit f,
-    " Elide kind checks on Flambda 2\n     code" )
+  "-no-flambda2-kind-checks", Arg.Unit f, " Elide kind checks on Flambda 2\n     code"
+;;
 
 let mk_drawfexpr f =
-  ( "-drawfexpr",
-    Arg.Unit f,
-    " Like -drawflambda but outputs fexpr language\n     (Flambda 2 only)" )
+  ( "-drawfexpr"
+  , Arg.Unit f
+  , " Like -drawflambda but outputs fexpr language\n     (Flambda 2 only)" )
+;;
 
 let mk_drawfexpr_to f =
-  ( "-drawfexpr-to",
-    Arg.String f,
-    "<file> Like -drawfexpr but dumps to given file (Flambda 2 only)" )
+  ( "-drawfexpr-to"
+  , Arg.String f
+  , "<file> Like -drawfexpr but dumps to given file (Flambda 2 only)" )
+;;
 
 let mk_dfexpr f =
-  ( "-dfexpr",
-    Arg.Unit f,
-    " Like -dflambda but outputs fexpr language\n     (Flambda 2 only)" )
+  ( "-dfexpr"
+  , Arg.Unit f
+  , " Like -dflambda but outputs fexpr language\n     (Flambda 2 only)" )
+;;
 
 let mk_dfexpr_annot f =
-  ( "-dfexpr-annot",
-    Arg.Unit f,
-    " Dump fexpr of all passes alongside each compilation unit\n\
-    \     (Flambda 2 only)" )
+  ( "-dfexpr-annot"
+  , Arg.Unit f
+  , " Dump fexpr of all passes alongside each compilation unit\n     (Flambda 2 only)" )
+;;
 
 let mk_dfexpr_annot_after f =
-  ( "-dfexpr-annot-after",
-    Arg.String f,
-    " Dump fexpr of given pass alongside each compilation unit\n\
-    \     (Flambda 2 only)" )
+  ( "-dfexpr-annot-after"
+  , Arg.String f
+  , " Dump fexpr of given pass alongside each compilation unit\n     (Flambda 2 only)" )
+;;
 
 let mk_dfexpr_after f =
   let passes = [ "simplify"; "reaper" ] in
-  ( "-dfexpr-after",
-    Arg.Symbol (passes, f),
-    " <pass> Like -dfexpr, but dumps after the provided pass (Flambda 2 only)"
-  )
+  ( "-dfexpr-after"
+  , Arg.Symbol (passes, f)
+  , " <pass> Like -dfexpr, but dumps after the provided pass (Flambda 2 only)" )
+;;
 
 let mk_dfexpr_to f =
-  ( "-dfexpr-to",
-    Arg.String f,
-    "<file> Like -dfexpr but dumps to given file (Flambda 2 only)" )
+  ( "-dfexpr-to"
+  , Arg.String f
+  , "<file> Like -dfexpr but dumps to given file (Flambda 2 only)" )
+;;
 
 let mk_dslot_offsets f =
-  ("-dslot-offsets", Arg.Unit f, " Dump closure offsets (Flambda 2 only)")
+  "-dslot-offsets", Arg.Unit f, " Dump closure offsets (Flambda 2 only)"
+;;
 
 let mk_dfreshen f =
-  ( "-dfreshen",
-    Arg.Unit f,
-    " Freshen bound names when printing (Flambda 2 only)" )
+  "-dfreshen", Arg.Unit f, " Freshen bound names when printing (Flambda 2 only)"
+;;
 
 let mk_dflow f =
-  ( "-dflow",
-    Arg.Unit f,
-    " Dump debug info for the flow computation (Flambda 2 only)" )
+  "-dflow", Arg.Unit f, " Dump debug info for the flow computation (Flambda 2 only)"
+;;
 
 let mk_dsimplify f =
-  ( "-dsimplify",
-    Arg.Unit f,
-    " Print Flambda 2 terms after simplify (Flambda 2 only)" )
+  "-dsimplify", Arg.Unit f, " Print Flambda 2 terms after simplify (Flambda 2 only)"
+;;
 
 let mk_dreaper f =
-  ( "-dreaper",
-    Arg.Unit f,
-    " Dump debug info for the reaper pass (Flambda 2 only)" )
+  "-dreaper", Arg.Unit f, " Dump debug info for the reaper pass (Flambda 2 only)"
+;;
 
 module Debugging = Dwarf_flags
 
 (* CR mshinwell: These help texts should show the default values. *)
 
 let mk_restrict_to_upstream_dwarf f =
-  ( "-gupstream-dwarf",
-    Arg.Unit f,
-    " Only emit the same DWARF information as the upstream compiler" )
+  ( "-gupstream-dwarf"
+  , Arg.Unit f
+  , " Only emit the same DWARF information as the upstream compiler" )
+;;
 
 let mk_no_restrict_to_upstream_dwarf f =
-  ( "-gno-upstream-dwarf",
-    Arg.Unit f,
-    " Emit potentially more DWARF information than the upstream compiler. \
-     Implies -shape-format debugging-shapes." )
+  ( "-gno-upstream-dwarf"
+  , Arg.Unit f
+  , " Emit potentially more DWARF information than the upstream compiler. Implies \
+     -shape-format debugging-shapes." )
+;;
 
 let mk_dwarf_inlined_frames f =
-  ("-gdwarf-inlined-frames", Arg.Unit f, " Emit DWARF inlined frame information")
+  "-gdwarf-inlined-frames", Arg.Unit f, " Emit DWARF inlined frame information"
+;;
 
 let mk_no_dwarf_inlined_frames f =
-  ( "-gno-dwarf-inlined-frames",
-    Arg.Unit f,
-    " Do not emit DWARF inlined frame information" )
+  "-gno-dwarf-inlined-frames", Arg.Unit f, " Do not emit DWARF inlined frame information"
+;;
 
 let mk_dwarf_for_startup_file f =
-  ( "-gstartup",
-    Arg.Unit f,
-    " Emit potentially more DWARF information\n\
+  ( "-gstartup"
+  , Arg.Unit f
+  , " Emit potentially more DWARF information\n\
     \     for the startup file than the upstream compiler\n\
     \     (only takes effect with -gno-upstream-dwarf)" )
+;;
 
 let mk_no_dwarf_for_startup_file f =
-  ( "-gno-startup",
-    Arg.Unit f,
-    " Emit the same DWARF information for the\n\
-    \     startup file as the upstream compiler" )
+  ( "-gno-startup"
+  , Arg.Unit f
+  , " Emit the same DWARF information for the\n     startup file as the upstream compiler"
+  )
+;;
 
 let mk_gdwarf_may_alter_codegen f =
-  ( "-gdwarf-may-alter-codegen",
-    Arg.Unit f,
-    " Allow code generation (and\n\
+  ( "-gdwarf-may-alter-codegen"
+  , Arg.Unit f
+  , " Allow code generation (and\n\
     \     when finalizers may run, etc) to be altered\n\
     \     in order to produce a better debugging experience" )
+;;
 
 let mk_no_gdwarf_may_alter_codegen f =
-  ( "-gno-dwarf-may-alter-codegen",
-    Arg.Unit f,
-    " Do not alter code generation when emitting debugging information" )
+  ( "-gno-dwarf-may-alter-codegen"
+  , Arg.Unit f
+  , " Do not alter code generation when emitting debugging information" )
+;;
 
 let mk_gdwarf_may_alter_codegen_experimental f =
-  ( "-gdwarf-may-alter-codegen-experimental",
-    Arg.Unit f,
-    " Like -gdwarf-may-alter-codegen but with more experimental features.\n\
+  ( "-gdwarf-may-alter-codegen-experimental"
+  , Arg.Unit f
+  , " Like -gdwarf-may-alter-codegen but with more experimental features.\n\
     \     Implies -gdwarf-may-alter-codegen.\n\
     \     THIS MAY GENERATE BROKEN CODE." )
+;;
 
 let mk_no_gdwarf_may_alter_codegen_experimental f =
-  ( "-gno-dwarf-may-alter-codegen-experimental",
-    Arg.Unit f,
-    " Disable experimental changes to code generation when emitting\n\
+  ( "-gno-dwarf-may-alter-codegen-experimental"
+  , Arg.Unit f
+  , " Disable experimental changes to code generation when emitting\n\
     \     debugging information." )
+;;
 
 let mk_gdwarf_max_function_complexity f =
-  ( "-gdwarf-max-function-complexity",
-    Arg.Int f,
-    Format.sprintf
+  ( "-gdwarf-max-function-complexity"
+  , Arg.Int f
+  , Format.sprintf
       " Maximum function\n\
       \     complexity above which -gno-upstream-dwarf information\n\
       \     will not be emitted, to improve compilation time (default %d)"
       !Dwarf_flags.dwarf_max_function_complexity )
+;;
 
 let mk_gdwarf_compression f =
-  ( "-gdwarf-compression",
-    Arg.String f,
-    Format.sprintf " Set the DWARF compression format (default %s)"
+  ( "-gdwarf-compression"
+  , Arg.String f
+  , Format.sprintf
+      " Set the DWARF compression format (default %s)"
       !Dwarf_flags.gdwarf_compression )
+;;
 
 let mk_gdwarf_fission f =
-  ( "-gdwarf-fission",
-    Arg.String f,
-    " Set the DWARF fission method: none, objcopy, or dsymutil.\n\
+  ( "-gdwarf-fission"
+  , Arg.String f
+  , " Set the DWARF fission method: none, objcopy, or dsymutil.\n\
     \     Default: none (dsymutil on macOS with --enable-oxcaml-dwarf).\n\
-    \     Only takes effect with -gno-upstream-dwarf or --enable-oxcaml-dwarf"
-  )
+    \     Only takes effect with -gno-upstream-dwarf or --enable-oxcaml-dwarf" )
+;;
 
 let mk_gdwarf_pedantic f =
-  ( "-gdwarf-pedantic",
-    Arg.Unit f,
-    " Enable pedantic DWARF error checking (fatal errors instead of silent \
-     fallbacks)" )
+  ( "-gdwarf-pedantic"
+  , Arg.Unit f
+  , " Enable pedantic DWARF error checking (fatal errors instead of silent fallbacks)" )
+;;
+
+let mk_assume_consistent_inputs f =
+  ( "-assume-consistent-inputs"
+  , Arg.Unit f
+  , " At link time, skip interface/implementation CRC consistency\n\
+    \           verification of inputs (the build system is trusted to own\n\
+    \           consistency). Does not change which units are linked." )
+;;
+
+let mk_cmxa_summaries f =
+  ( "-cmxa-summaries"
+  , Arg.String f
+  , "<dir>  At link time, read per-library lean summaries (<md5 of the .cmxa \
+     path>.cmxasum) from <dir> instead of the full .cmxa metadata. Requires \
+     -assume-consistent-inputs (summaries carry no dependency CRCs)." )
+;;
+
+let mk_emit_cmxa_summary f =
+  ( "-emit-cmxa-summary"
+  , Arg.Unit f
+  , " Standalone mode: read the input .cmxa and write its lean per-library summary \
+     (magic CMXASUM3) to the -o output, for later consumption via -cmxa-summaries. \
+     Exactly one .cmxa input and -o are required." )
+;;
+
+let mk_emit_link_plan f =
+  ( "-emit-link-plan"
+  , Arg.String f
+  , "<base>  Standalone mode: run link pass 1 over the given inputs (typically with \
+     -cmxa-summaries) and write <base>.plan-stable + <base>.plan-volatile, then exit \
+     without linking." )
+;;
+
+let mk_use_link_plan f =
+  ( "-use-link-plan"
+  , Arg.String f
+  , "<base>  Final link consuming <base>.plan-{stable,volatile} instead of scanning the \
+     .cmxa inputs (which may be absent). Requires -use-startup-stable and \
+     -use-startup-volatile." )
+;;
+
+let mk_plan_emit_startup_stable f =
+  ( "-plan-emit-startup-stable"
+  , Arg.String f
+  , "<base>  Emit the stable startup object (to -o) from <base>.plan-stable, reading no \
+     .cmx/.cmxa." )
+;;
+
+let mk_plan_emit_startup_volatile f =
+  ( "-plan-emit-startup-volatile"
+  , Arg.String f
+  , "<base>  Emit the volatile startup object (to -o) from <base>.plan-volatile, reading \
+     no .cmx/.cmxa." )
+;;
 
 let mk_use_cached_generic_functions f =
-  ( "-use-cached-generic-functions",
-    Arg.Unit f,
-    " Use the cached generated functions" )
+  "-use-cached-generic-functions", Arg.Unit f, " Use the cached generated functions"
+;;
 
 let mk_cached_generic_functions_path f =
-  ( "-cached-generic-functions-path",
-    Arg.String f,
-    "<file>  Set the path of the cached generic functions (default to \
+  ( "-cached-generic-functions-path"
+  , Arg.String f
+  , "<file>  Set the path of the cached generic functions (default to \
      cached-generic-functions.o)" )
+;;
 
-let mk_x f = ("-X", Arg.String f, "(undocumented)")
+let mk_x f = "-X", Arg.String f, "(undocumented)"
 
 let set_long_frames_threshold n =
   if n < 0 then raise (Arg.Bad "Long frames threshold must be non-negative.");
-  if n > Oxcaml_flags.max_long_frames_threshold then
+  if n > Oxcaml_flags.max_long_frames_threshold
+  then
     raise
       (Arg.Bad
          (Printf.sprintf
             "Long frames threshold too big: 0x%x, must be less or equal to 0x%x"
-            n Oxcaml_flags.max_long_frames_threshold));
+            n
+            Oxcaml_flags.max_long_frames_threshold));
   Oxcaml_flags.long_frames_threshold := n
+;;
 
 let mk_symbol_visibility_protected f =
-  ( "-symbol-visibility-protected",
-    Arg.Unit f,
-    " Emit global symbols with visibility STV_PROTECTED on supported systems" )
+  ( "-symbol-visibility-protected"
+  , Arg.Unit f
+  , " Emit global symbols with visibility STV_PROTECTED on supported systems" )
+;;
 
 let mk_no_symbol_visibility_protected f =
-  ( "-no-symbol-visibility-protected",
-    Arg.Unit f,
-    " Emit global symbols with visibility STV_DEFAULT" )
+  ( "-no-symbol-visibility-protected"
+  , Arg.Unit f
+  , " Emit global symbols with visibility STV_DEFAULT" )
+;;
 
 module type Oxcaml_options = sig
   val ocamlcfg : unit -> unit
@@ -1354,6 +1574,12 @@ module type Oxcaml_options = sig
   val no_dissector_assume_lld_without_64_bit_eh_frames : unit -> unit
   val manual_module_init : unit -> unit
   val no_manual_module_init : unit -> unit
+  val emit_startup_key : string -> unit
+  val compile_startup_stable : string -> unit
+  val use_startup_stable : string -> unit
+  val compile_startup_volatile : unit -> unit
+  val emit_startup_volatile_inline : unit -> unit
+  val use_startup_volatile : string -> unit
   val gc_timings : unit -> unit
   val no_mach_ir : unit -> unit
   val dllvmir : unit -> unit
@@ -1442,6 +1668,13 @@ module type Oxcaml_options = sig
   val dflow : unit -> unit
   val dsimplify : unit -> unit
   val dreaper : unit -> unit
+  val assume_consistent_inputs : unit -> unit
+  val cmxa_summaries : string -> unit
+  val emit_cmxa_summary : unit -> unit
+  val emit_link_plan : string -> unit
+  val use_link_plan : string -> unit
+  val plan_emit_startup_stable : string -> unit
+  val plan_emit_startup_volatile : string -> unit
   val use_cached_generic_functions : unit -> unit
   val cached_generic_functions_path : string -> unit
   val x : string -> unit
@@ -1449,231 +1682,227 @@ end
 
 module Make_oxcaml_options (F : Oxcaml_options) = struct
   let list2 =
-    [
-      mk_dump_inlining_paths F.dump_inlining_paths;
-      mk_davail F.davail;
-      mk_dranges F.dranges;
-      mk_ddebug_invariants F.ddebug_invariants;
-      mk_ddebug_available_regs F.ddebug_available_regs;
-      mk_ddwarf_types F.ddwarf_types;
-      mk_ddwarf_metrics F.ddwarf_metrics;
-      mk_ddwarf_metrics_output_file F.ddwarf_metrics_output_file;
-      mk_ocamlcfg F.ocamlcfg;
-      mk_no_ocamlcfg F.no_ocamlcfg;
-      mk_dcfg F.dcfg;
-      mk_dcfg_invariants F.dcfg_invariants;
-      mk_regalloc F.regalloc;
-      mk_regalloc_linscan_threshold F.regalloc_linscan_threshold;
-      mk_regalloc_param F.regalloc_param;
-      mk_regalloc_validate F.regalloc_validate;
-      mk_no_regalloc_validate F.no_regalloc_validate;
-      mk_vectorize F.vectorize;
-      mk_no_vectorize F.no_vectorize;
-      mk_vectorize_max_block_size F.vectorize_max_block_size;
-      mk_dvectorize F.dvectorize;
-      mk_cfg_peephole_optimize F.cfg_peephole_optimize;
-      mk_no_cfg_peephole_optimize F.no_cfg_peephole_optimize;
-      mk_x86_peephole_optimize F.x86_peephole_optimize;
-      mk_no_x86_peephole_optimize F.no_x86_peephole_optimize;
-      mk_no_x86_peephole_remove_mov_to_dead_register
-        F.no_x86_peephole_remove_mov_to_dead_register;
-      mk_no_x86_peephole_remove_redundant_cmp
-        F.no_x86_peephole_remove_redundant_cmp;
-      mk_no_x86_peephole_combine_add_rsp F.no_x86_peephole_combine_add_rsp;
-      mk_cfg_stack_checks F.cfg_stack_checks;
-      mk_no_cfg_stack_checks F.no_cfg_stack_checks;
-      mk_cfg_stack_checks_threshold F.cfg_stack_checks_threshold;
-      mk_cfg_eliminate_dead_trap_handlers F.cfg_eliminate_dead_trap_handlers;
-      mk_no_cfg_eliminate_dead_trap_handlers
-        F.no_cfg_eliminate_dead_trap_handlers;
-      mk_cfg_prologue_validate F.cfg_prologue_validate;
-      mk_no_cfg_prologue_validate F.no_cfg_prologue_validate;
-      mk_cfg_prologue_shrink_wrap F.cfg_prologue_shrink_wrap;
-      mk_no_cfg_prologue_shrink_wrap F.no_cfg_prologue_shrink_wrap;
-      mk_cfg_prologue_shrink_wrap_threshold F.cfg_prologue_shrink_wrap_threshold;
-      mk_cfg_merge_blocks F.cfg_merge_blocks;
-      mk_no_cfg_merge_blocks F.no_cfg_merge_blocks;
-      mk_cfg_value_propagation F.cfg_value_propagation;
-      mk_no_cfg_value_propagation F.no_cfg_value_propagation;
-      mk_cfg_value_propagation_float F.cfg_value_propagation_float;
-      mk_no_cfg_value_propagation_float F.no_cfg_value_propagation_float;
-      mk_cfg_value_propagation_flow F.cfg_value_propagation_flow;
-      mk_no_cfg_value_propagation_flow F.no_cfg_value_propagation_flow;
-      mk_experimental_optimizations F.experimental_optimizations;
-      mk_reorder_blocks_random F.reorder_blocks_random;
-      mk_basic_block_sections F.basic_block_sections;
-      mk_module_entry_functions_section F.module_entry_functions_section;
-      mk_dasm_comments F.dasm_comments;
-      mk_dno_asm_comments F.dno_asm_comments;
-      mk_frametables_in_rodata F.frametables_in_rodata;
-      mk_no_frametables_in_rodata F.no_frametables_in_rodata;
-      mk_heap_reduction_threshold F.heap_reduction_threshold;
-      mk_zero_alloc_check F.zero_alloc_check;
-      mk_zero_alloc_assert F.zero_alloc_assert;
-      mk_dzero_alloc F.dzero_alloc;
-      mk_disable_zero_alloc_checker F.disable_zero_alloc_checker;
-      mk_disable_precise_zero_alloc_checker F.disable_precise_zero_alloc_checker;
-      mk_zero_alloc_checker_details_cutoff F.zero_alloc_checker_details_cutoff;
-      mk_zero_alloc_checker_details_extra F.zero_alloc_checker_details_extra;
-      mk_no_zero_alloc_checker_details_extra
-        F.no_zero_alloc_checker_details_extra;
-      mk_zero_alloc_checker_join F.zero_alloc_checker_join;
-      mk_function_layout F.function_layout;
-      mk_name_mangling_scheme F.name_mangling_scheme;
-      mk_disable_builtin_check F.disable_builtin_check;
-      mk_disable_poll_insertion F.disable_poll_insertion;
-      mk_enable_poll_insertion F.enable_poll_insertion;
-      mk_symbol_visibility_protected F.symbol_visibility_protected;
-      mk_no_symbol_visibility_protected F.symbol_visibility_protected;
-      mk_long_frames F.long_frames;
-      mk_no_long_frames F.no_long_frames;
-      mk_debug_long_frames_threshold F.long_frames_threshold;
-      mk_dbranch_relaxation_max_displacement
-        F.dbranch_relaxation_max_displacement;
-      mk_caml_apply_inline_fast_path F.caml_apply_inline_fast_path;
-      mk_internal_assembler F.internal_assembler;
-      mk_verify_binary_emitter F.verify_binary_emitter;
-      mk_dissector F.dissector;
-      mk_dissector_partition_size F.dissector_partition_size;
-      mk_ddissector F.ddissector;
-      mk_ddissector_sizes F.ddissector_sizes;
-      mk_ddissector_verbose F.ddissector_verbose;
-      mk_ddissector_partitions F.ddissector_partitions;
-      mk_ddissector_inputs F.ddissector_inputs;
-      mk_dissector_assume_lld_without_64_bit_eh_frames
-        F.dissector_assume_lld_without_64_bit_eh_frames;
-      mk_no_dissector_assume_lld_without_64_bit_eh_frames
-        F.no_dissector_assume_lld_without_64_bit_eh_frames;
-      mk_manual_module_init F.manual_module_init;
-      mk_no_manual_module_init F.no_manual_module_init;
-      mk_gc_timings F.gc_timings;
-      mk_no_mach_ir F.no_mach_ir;
-      mk_dllvmir F.dllvmir;
-      mk_keep_llvmir F.keep_llvmir;
-      mk_llvm_path F.llvm_path;
-      mk_llvm_flags F.llvm_flags;
-      mk_flambda2_debug F.flambda2_debug;
-      mk_no_flambda2_debug F.no_flambda2_debug;
-      mk_reaper_debug_flags F.reaper_debug_flags;
-      mk_flambda2_join_points F.flambda2_join_points;
-      mk_no_flambda2_join_points F.no_flambda2_join_points;
-      mk_flambda2_result_types_functors_only
-        F.flambda2_result_types_functors_only;
-      mk_flambda2_result_types_all_functions
-        F.flambda2_result_types_all_functions;
-      mk_no_flambda2_result_types F.no_flambda2_result_types;
-      mk_flambda2_basic_meet F.flambda2_basic_meet;
-      mk_flambda2_advanced_meet F.flambda2_advanced_meet;
-      mk_flambda2_join_algorithm F.flambda2_join_algorithm;
-      mk_flambda2_unbox_along_intra_function_control_flow
-        F.flambda2_unbox_along_intra_function_control_flow;
-      mk_no_flambda2_unbox_along_intra_function_control_flow
-        F.no_flambda2_unbox_along_intra_function_control_flow;
-      mk_flambda2_backend_cse_at_toplevel F.flambda2_backend_cse_at_toplevel;
-      mk_no_flambda2_backend_cse_at_toplevel
-        F.no_flambda2_backend_cse_at_toplevel;
-      mk_flambda2_cse_depth F.flambda2_cse_depth;
-      mk_flambda2_join_depth F.flambda2_join_depth;
-      mk_flambda2_reaper F.flambda2_reaper;
-      mk_no_flambda2_reaper F.no_flambda2_reaper;
-      mk_reaper_preserve_direct_calls F.reaper_preserve_direct_calls;
-      mk_reaper_local_fields F.reaper_local_fields;
-      mk_no_reaper_local_fields F.no_reaper_local_fields;
-      mk_reaper_unbox F.reaper_unbox;
-      mk_no_reaper_unbox F.no_reaper_unbox;
-      mk_reaper_max_unbox_size F.reaper_max_unbox_size;
-      mk_reaper_change_calling_conventions F.reaper_change_calling_conventions;
-      mk_no_reaper_change_calling_conventions
-        F.no_reaper_change_calling_conventions;
-      mk_flambda2_match_in_match F.flambda2_match_in_match;
-      mk_no_flambda2_match_in_match F.no_flambda2_match_in_match;
-      mk_flambda2_expert_fallback_inlining_heuristic
-        F.flambda2_expert_fallback_inlining_heuristic;
-      mk_no_flambda2_expert_fallback_inlining_heuristic
-        F.no_flambda2_expert_fallback_inlining_heuristic;
-      mk_flambda2_expert_inline_effects_in_cmm
-        F.flambda2_expert_inline_effects_in_cmm;
-      mk_no_flambda2_expert_inline_effects_in_cmm
-        F.no_flambda2_expert_inline_effects_in_cmm;
-      mk_flambda2_expert_cmm_safe_subst F.flambda2_expert_cmm_safe_subst;
-      mk_no_flambda2_expert_cmm_safe_subst F.no_flambda2_expert_cmm_safe_subst;
-      mk_flambda2_expert_phantom_lets F.flambda2_expert_phantom_lets;
-      mk_no_flambda2_expert_phantom_lets F.no_flambda2_expert_phantom_lets;
-      mk_flambda2_expert_max_block_size_for_projections
-        F.flambda2_expert_max_block_size_for_projections;
-      mk_flambda2_expert_max_unboxing_depth F.flambda2_expert_max_unboxing_depth;
-      mk_flambda2_expert_can_inline_recursive_functions
-        F.flambda2_expert_can_inline_recursive_functions;
-      mk_no_flambda2_expert_can_inline_recursive_functions
-        F.no_flambda2_expert_can_inline_recursive_functions;
-      mk_flambda2_expert_max_function_simplify_run
-        F.flambda2_expert_max_function_simplify_run;
-      mk_flambda2_expert_shorten_symbol_names
-        F.flambda2_expert_shorten_symbol_names;
-      mk_no_flambda2_expert_shorten_symbol_names
-        F.no_flambda2_expert_shorten_symbol_names;
-      mk_flambda2_expert_cont_lifting_budget
-        F.flambda2_expert_cont_lifting_budget;
-      mk_flambda2_expert_cont_spec_threshold
-        F.flambda2_expert_cont_spec_threshold;
-      mk_flambda2_debug_concrete_types_only_on_canonicals
-        F.flambda2_debug_concrete_types_only_on_canonicals;
-      mk_no_flambda2_debug_concrete_types_only_on_canonicals
-        F.no_flambda2_debug_concrete_types_only_on_canonicals;
-      mk_flambda2_debug_keep_invalid_handlers
-        F.flambda2_debug_keep_invalid_handlers;
-      mk_no_flambda2_debug_keep_invalid_handlers
-        F.no_flambda2_debug_keep_invalid_handlers;
-      mk_flambda2_inline_max_depth F.flambda2_inline_max_depth;
-      mk_flambda2_inline_max_rec_depth F.flambda2_inline_max_rec_depth;
-      mk_flambda2_inline_alloc_cost F.flambda2_inline_alloc_cost;
-      mk_flambda2_inline_branch_cost F.flambda2_inline_branch_cost;
-      mk_flambda2_inline_call_cost F.flambda2_inline_call_cost;
-      mk_flambda2_inline_prim_cost F.flambda2_inline_prim_cost;
-      mk_flambda2_inline_indirect_call_cost F.flambda2_inline_indirect_call_cost;
-      mk_flambda2_inline_poly_compare_cost F.flambda2_inline_poly_compare_cost;
-      mk_flambda2_inline_small_function_size
-        F.flambda2_inline_small_function_size;
-      mk_flambda2_inline_large_function_size
-        F.flambda2_inline_large_function_size;
-      mk_flambda2_inline_small_functor_size F.flambda2_inline_small_functor_size;
-      mk_flambda2_inline_large_functor_size F.flambda2_inline_large_functor_size;
-      mk_flambda2_inline_threshold F.flambda2_inline_threshold;
-      mk_flambda2_speculative_inlining_only_if_arguments_useful
-        F.flambda2_speculative_inlining_only_if_arguments_useful;
-      mk_no_flambda2_speculative_inlining_only_if_arguments_useful
-        F.no_flambda2_speculative_inlining_only_if_arguments_useful;
-      mk_flambda2_speculative_inlining_track_lifted_constants
-        F.flambda2_speculative_inlining_track_lifted_constants;
-      mk_no_flambda2_speculative_inlining_track_lifted_constants
-        F.no_flambda2_speculative_inlining_track_lifted_constants;
-      mk_flambda2_inlining_report_bin F.flambda2_inlining_report_bin;
-      mk_flambda2_unicode F.flambda2_unicode;
-      mk_flambda2_kind_checks F.flambda2_kind_checks;
-      mk_drawfexpr F.drawfexpr;
-      mk_drawfexpr_to F.drawfexpr_to;
-      mk_dfexpr F.dfexpr;
-      mk_dfexpr_to F.dfexpr_to;
-      mk_dfexpr_after F.dfexpr_after;
-      mk_dfexpr_annot F.dfexpr_annot;
-      mk_dfexpr_annot_after F.dfexpr_annot_after;
-      mk_dslot_offsets F.dslot_offsets;
-      mk_dfreshen F.dfreshen;
-      mk_dflow F.dflow;
-      mk_dsimplify F.dsimplify;
-      mk_dreaper F.dreaper;
-      mk_use_cached_generic_functions F.use_cached_generic_functions;
-      mk_cached_generic_functions_path F.cached_generic_functions_path;
-      mk_x F.x;
+    [ mk_dump_inlining_paths F.dump_inlining_paths
+    ; mk_davail F.davail
+    ; mk_dranges F.dranges
+    ; mk_ddebug_invariants F.ddebug_invariants
+    ; mk_ddebug_available_regs F.ddebug_available_regs
+    ; mk_ddwarf_types F.ddwarf_types
+    ; mk_ddwarf_metrics F.ddwarf_metrics
+    ; mk_ddwarf_metrics_output_file F.ddwarf_metrics_output_file
+    ; mk_ocamlcfg F.ocamlcfg
+    ; mk_no_ocamlcfg F.no_ocamlcfg
+    ; mk_dcfg F.dcfg
+    ; mk_dcfg_invariants F.dcfg_invariants
+    ; mk_regalloc F.regalloc
+    ; mk_regalloc_linscan_threshold F.regalloc_linscan_threshold
+    ; mk_regalloc_param F.regalloc_param
+    ; mk_regalloc_validate F.regalloc_validate
+    ; mk_no_regalloc_validate F.no_regalloc_validate
+    ; mk_vectorize F.vectorize
+    ; mk_no_vectorize F.no_vectorize
+    ; mk_vectorize_max_block_size F.vectorize_max_block_size
+    ; mk_dvectorize F.dvectorize
+    ; mk_cfg_peephole_optimize F.cfg_peephole_optimize
+    ; mk_no_cfg_peephole_optimize F.no_cfg_peephole_optimize
+    ; mk_x86_peephole_optimize F.x86_peephole_optimize
+    ; mk_no_x86_peephole_optimize F.no_x86_peephole_optimize
+    ; mk_no_x86_peephole_remove_mov_to_dead_register
+        F.no_x86_peephole_remove_mov_to_dead_register
+    ; mk_no_x86_peephole_remove_redundant_cmp F.no_x86_peephole_remove_redundant_cmp
+    ; mk_no_x86_peephole_combine_add_rsp F.no_x86_peephole_combine_add_rsp
+    ; mk_cfg_stack_checks F.cfg_stack_checks
+    ; mk_no_cfg_stack_checks F.no_cfg_stack_checks
+    ; mk_cfg_stack_checks_threshold F.cfg_stack_checks_threshold
+    ; mk_cfg_eliminate_dead_trap_handlers F.cfg_eliminate_dead_trap_handlers
+    ; mk_no_cfg_eliminate_dead_trap_handlers F.no_cfg_eliminate_dead_trap_handlers
+    ; mk_cfg_prologue_validate F.cfg_prologue_validate
+    ; mk_no_cfg_prologue_validate F.no_cfg_prologue_validate
+    ; mk_cfg_prologue_shrink_wrap F.cfg_prologue_shrink_wrap
+    ; mk_no_cfg_prologue_shrink_wrap F.no_cfg_prologue_shrink_wrap
+    ; mk_cfg_prologue_shrink_wrap_threshold F.cfg_prologue_shrink_wrap_threshold
+    ; mk_cfg_merge_blocks F.cfg_merge_blocks
+    ; mk_no_cfg_merge_blocks F.no_cfg_merge_blocks
+    ; mk_cfg_value_propagation F.cfg_value_propagation
+    ; mk_no_cfg_value_propagation F.no_cfg_value_propagation
+    ; mk_cfg_value_propagation_float F.cfg_value_propagation_float
+    ; mk_no_cfg_value_propagation_float F.no_cfg_value_propagation_float
+    ; mk_cfg_value_propagation_flow F.cfg_value_propagation_flow
+    ; mk_no_cfg_value_propagation_flow F.no_cfg_value_propagation_flow
+    ; mk_experimental_optimizations F.experimental_optimizations
+    ; mk_reorder_blocks_random F.reorder_blocks_random
+    ; mk_basic_block_sections F.basic_block_sections
+    ; mk_module_entry_functions_section F.module_entry_functions_section
+    ; mk_dasm_comments F.dasm_comments
+    ; mk_dno_asm_comments F.dno_asm_comments
+    ; mk_frametables_in_rodata F.frametables_in_rodata
+    ; mk_no_frametables_in_rodata F.no_frametables_in_rodata
+    ; mk_heap_reduction_threshold F.heap_reduction_threshold
+    ; mk_zero_alloc_check F.zero_alloc_check
+    ; mk_zero_alloc_assert F.zero_alloc_assert
+    ; mk_dzero_alloc F.dzero_alloc
+    ; mk_disable_zero_alloc_checker F.disable_zero_alloc_checker
+    ; mk_disable_precise_zero_alloc_checker F.disable_precise_zero_alloc_checker
+    ; mk_zero_alloc_checker_details_cutoff F.zero_alloc_checker_details_cutoff
+    ; mk_zero_alloc_checker_details_extra F.zero_alloc_checker_details_extra
+    ; mk_no_zero_alloc_checker_details_extra F.no_zero_alloc_checker_details_extra
+    ; mk_zero_alloc_checker_join F.zero_alloc_checker_join
+    ; mk_function_layout F.function_layout
+    ; mk_name_mangling_scheme F.name_mangling_scheme
+    ; mk_disable_builtin_check F.disable_builtin_check
+    ; mk_disable_poll_insertion F.disable_poll_insertion
+    ; mk_enable_poll_insertion F.enable_poll_insertion
+    ; mk_symbol_visibility_protected F.symbol_visibility_protected
+    ; mk_no_symbol_visibility_protected F.symbol_visibility_protected
+    ; mk_long_frames F.long_frames
+    ; mk_no_long_frames F.no_long_frames
+    ; mk_debug_long_frames_threshold F.long_frames_threshold
+    ; mk_dbranch_relaxation_max_displacement F.dbranch_relaxation_max_displacement
+    ; mk_caml_apply_inline_fast_path F.caml_apply_inline_fast_path
+    ; mk_internal_assembler F.internal_assembler
+    ; mk_verify_binary_emitter F.verify_binary_emitter
+    ; mk_dissector F.dissector
+    ; mk_dissector_partition_size F.dissector_partition_size
+    ; mk_ddissector F.ddissector
+    ; mk_ddissector_sizes F.ddissector_sizes
+    ; mk_ddissector_verbose F.ddissector_verbose
+    ; mk_ddissector_partitions F.ddissector_partitions
+    ; mk_ddissector_inputs F.ddissector_inputs
+    ; mk_dissector_assume_lld_without_64_bit_eh_frames
+        F.dissector_assume_lld_without_64_bit_eh_frames
+    ; mk_no_dissector_assume_lld_without_64_bit_eh_frames
+        F.no_dissector_assume_lld_without_64_bit_eh_frames
+    ; mk_manual_module_init F.manual_module_init
+    ; mk_no_manual_module_init F.no_manual_module_init
+    ; mk_emit_startup_key F.emit_startup_key
+    ; mk_compile_startup_stable F.compile_startup_stable
+    ; mk_use_startup_stable F.use_startup_stable
+    ; mk_compile_startup_volatile F.compile_startup_volatile
+    ; mk_emit_startup_volatile_inline F.emit_startup_volatile_inline
+    ; mk_use_startup_volatile F.use_startup_volatile
+    ; mk_gc_timings F.gc_timings
+    ; mk_no_mach_ir F.no_mach_ir
+    ; mk_dllvmir F.dllvmir
+    ; mk_keep_llvmir F.keep_llvmir
+    ; mk_llvm_path F.llvm_path
+    ; mk_llvm_flags F.llvm_flags
+    ; mk_flambda2_debug F.flambda2_debug
+    ; mk_no_flambda2_debug F.no_flambda2_debug
+    ; mk_reaper_debug_flags F.reaper_debug_flags
+    ; mk_flambda2_join_points F.flambda2_join_points
+    ; mk_no_flambda2_join_points F.no_flambda2_join_points
+    ; mk_flambda2_result_types_functors_only F.flambda2_result_types_functors_only
+    ; mk_flambda2_result_types_all_functions F.flambda2_result_types_all_functions
+    ; mk_no_flambda2_result_types F.no_flambda2_result_types
+    ; mk_flambda2_basic_meet F.flambda2_basic_meet
+    ; mk_flambda2_advanced_meet F.flambda2_advanced_meet
+    ; mk_flambda2_join_algorithm F.flambda2_join_algorithm
+    ; mk_flambda2_unbox_along_intra_function_control_flow
+        F.flambda2_unbox_along_intra_function_control_flow
+    ; mk_no_flambda2_unbox_along_intra_function_control_flow
+        F.no_flambda2_unbox_along_intra_function_control_flow
+    ; mk_flambda2_backend_cse_at_toplevel F.flambda2_backend_cse_at_toplevel
+    ; mk_no_flambda2_backend_cse_at_toplevel F.no_flambda2_backend_cse_at_toplevel
+    ; mk_flambda2_cse_depth F.flambda2_cse_depth
+    ; mk_flambda2_join_depth F.flambda2_join_depth
+    ; mk_flambda2_reaper F.flambda2_reaper
+    ; mk_no_flambda2_reaper F.no_flambda2_reaper
+    ; mk_reaper_preserve_direct_calls F.reaper_preserve_direct_calls
+    ; mk_reaper_local_fields F.reaper_local_fields
+    ; mk_no_reaper_local_fields F.no_reaper_local_fields
+    ; mk_reaper_unbox F.reaper_unbox
+    ; mk_no_reaper_unbox F.no_reaper_unbox
+    ; mk_reaper_max_unbox_size F.reaper_max_unbox_size
+    ; mk_reaper_change_calling_conventions F.reaper_change_calling_conventions
+    ; mk_no_reaper_change_calling_conventions F.no_reaper_change_calling_conventions
+    ; mk_flambda2_match_in_match F.flambda2_match_in_match
+    ; mk_no_flambda2_match_in_match F.no_flambda2_match_in_match
+    ; mk_flambda2_expert_fallback_inlining_heuristic
+        F.flambda2_expert_fallback_inlining_heuristic
+    ; mk_no_flambda2_expert_fallback_inlining_heuristic
+        F.no_flambda2_expert_fallback_inlining_heuristic
+    ; mk_flambda2_expert_inline_effects_in_cmm F.flambda2_expert_inline_effects_in_cmm
+    ; mk_no_flambda2_expert_inline_effects_in_cmm
+        F.no_flambda2_expert_inline_effects_in_cmm
+    ; mk_flambda2_expert_cmm_safe_subst F.flambda2_expert_cmm_safe_subst
+    ; mk_no_flambda2_expert_cmm_safe_subst F.no_flambda2_expert_cmm_safe_subst
+    ; mk_flambda2_expert_phantom_lets F.flambda2_expert_phantom_lets
+    ; mk_no_flambda2_expert_phantom_lets F.no_flambda2_expert_phantom_lets
+    ; mk_flambda2_expert_max_block_size_for_projections
+        F.flambda2_expert_max_block_size_for_projections
+    ; mk_flambda2_expert_max_unboxing_depth F.flambda2_expert_max_unboxing_depth
+    ; mk_flambda2_expert_can_inline_recursive_functions
+        F.flambda2_expert_can_inline_recursive_functions
+    ; mk_no_flambda2_expert_can_inline_recursive_functions
+        F.no_flambda2_expert_can_inline_recursive_functions
+    ; mk_flambda2_expert_max_function_simplify_run
+        F.flambda2_expert_max_function_simplify_run
+    ; mk_flambda2_expert_shorten_symbol_names F.flambda2_expert_shorten_symbol_names
+    ; mk_no_flambda2_expert_shorten_symbol_names F.no_flambda2_expert_shorten_symbol_names
+    ; mk_flambda2_expert_cont_lifting_budget F.flambda2_expert_cont_lifting_budget
+    ; mk_flambda2_expert_cont_spec_threshold F.flambda2_expert_cont_spec_threshold
+    ; mk_flambda2_debug_concrete_types_only_on_canonicals
+        F.flambda2_debug_concrete_types_only_on_canonicals
+    ; mk_no_flambda2_debug_concrete_types_only_on_canonicals
+        F.no_flambda2_debug_concrete_types_only_on_canonicals
+    ; mk_flambda2_debug_keep_invalid_handlers F.flambda2_debug_keep_invalid_handlers
+    ; mk_no_flambda2_debug_keep_invalid_handlers F.no_flambda2_debug_keep_invalid_handlers
+    ; mk_flambda2_inline_max_depth F.flambda2_inline_max_depth
+    ; mk_flambda2_inline_max_rec_depth F.flambda2_inline_max_rec_depth
+    ; mk_flambda2_inline_alloc_cost F.flambda2_inline_alloc_cost
+    ; mk_flambda2_inline_branch_cost F.flambda2_inline_branch_cost
+    ; mk_flambda2_inline_call_cost F.flambda2_inline_call_cost
+    ; mk_flambda2_inline_prim_cost F.flambda2_inline_prim_cost
+    ; mk_flambda2_inline_indirect_call_cost F.flambda2_inline_indirect_call_cost
+    ; mk_flambda2_inline_poly_compare_cost F.flambda2_inline_poly_compare_cost
+    ; mk_flambda2_inline_small_function_size F.flambda2_inline_small_function_size
+    ; mk_flambda2_inline_large_function_size F.flambda2_inline_large_function_size
+    ; mk_flambda2_inline_small_functor_size F.flambda2_inline_small_functor_size
+    ; mk_flambda2_inline_large_functor_size F.flambda2_inline_large_functor_size
+    ; mk_flambda2_inline_threshold F.flambda2_inline_threshold
+    ; mk_flambda2_speculative_inlining_only_if_arguments_useful
+        F.flambda2_speculative_inlining_only_if_arguments_useful
+    ; mk_no_flambda2_speculative_inlining_only_if_arguments_useful
+        F.no_flambda2_speculative_inlining_only_if_arguments_useful
+    ; mk_flambda2_speculative_inlining_track_lifted_constants
+        F.flambda2_speculative_inlining_track_lifted_constants
+    ; mk_no_flambda2_speculative_inlining_track_lifted_constants
+        F.no_flambda2_speculative_inlining_track_lifted_constants
+    ; mk_flambda2_inlining_report_bin F.flambda2_inlining_report_bin
+    ; mk_flambda2_unicode F.flambda2_unicode
+    ; mk_flambda2_kind_checks F.flambda2_kind_checks
+    ; mk_drawfexpr F.drawfexpr
+    ; mk_drawfexpr_to F.drawfexpr_to
+    ; mk_dfexpr F.dfexpr
+    ; mk_dfexpr_to F.dfexpr_to
+    ; mk_dfexpr_after F.dfexpr_after
+    ; mk_dfexpr_annot F.dfexpr_annot
+    ; mk_dfexpr_annot_after F.dfexpr_annot_after
+    ; mk_dslot_offsets F.dslot_offsets
+    ; mk_dfreshen F.dfreshen
+    ; mk_dflow F.dflow
+    ; mk_dsimplify F.dsimplify
+    ; mk_dreaper F.dreaper
+    ; mk_assume_consistent_inputs F.assume_consistent_inputs
+    ; mk_cmxa_summaries F.cmxa_summaries
+    ; mk_emit_cmxa_summary F.emit_cmxa_summary
+    ; mk_emit_link_plan F.emit_link_plan
+    ; mk_use_link_plan F.use_link_plan
+    ; mk_plan_emit_startup_stable F.plan_emit_startup_stable
+    ; mk_plan_emit_startup_volatile F.plan_emit_startup_volatile
+    ; mk_use_cached_generic_functions F.use_cached_generic_functions
+    ; mk_cached_generic_functions_path F.cached_generic_functions_path
+    ; mk_x F.x
     ]
+  ;;
 end
 
 let set_dissector_partition_size f =
-  if f <= 0.0 || f >= 2.0 then
-    raise
-      (Arg.Bad
-         "-dissector-partition-size must be greater than 0 and less than 2 GiB");
+  if f <= 0.0 || f >= 2.0
+  then
+    raise (Arg.Bad "-dissector-partition-size must be greater than 0 and less than 2 GiB");
   Clflags.dissector_partition_size := Some f
+;;
 
 module Extra_options = struct
   type 'a arg_parser = string -> 'a ref -> string -> unit
@@ -1687,40 +1916,43 @@ module Extra_options = struct
   let register loc r parser setter kwd =
     match Hashtbl.find_opt extra_params kwd with
     | Some (O (_, _, _, loc2)) ->
-        Printf.eprintf
-          "Warning: extra compiler argument '-X %s' is already defined:\n" kwd;
-        Printf.eprintf "  First definition: %s\n" loc2;
-        Printf.eprintf "  New definition: %s\n" loc;
-        fun () -> !r
+      Printf.eprintf "Warning: extra compiler argument '-X %s' is already defined:\n" kwd;
+      Printf.eprintf "  First definition: %s\n" loc2;
+      Printf.eprintf "  New definition: %s\n" loc;
+      fun () -> !r
     | None ->
-        Hashtbl.replace extra_params kwd (O (r, parser, setter, loc));
-        fun () -> !r
+      Hashtbl.replace extra_params kwd (O (r, parser, setter, loc));
+      fun () -> !r
+  ;;
 
   let wrong opt arg expected =
     raise
       (Arg.Bad
-         (Format.asprintf "wrong argument '%s'; option '-X %s' expects %s" opt
-            arg expected))
+         (Format.asprintf
+            "wrong argument '%s'; option '-X %s' expects %s"
+            opt
+            arg
+            expected))
+  ;;
 
   let set_string _ r opt = r := opt
   let string_setter _ppf _name option s = option := s
-
-  let string loc kwd default =
-    register loc (ref default) set_string string_setter kwd
+  let string loc kwd default = register loc (ref default) set_string string_setter kwd
 
   let set_int arg r opt =
     match int_of_string_opt opt with
     | Some i -> r := i
     | None -> wrong opt arg "an integer"
+  ;;
 
-  let int loc kwd default =
-    register loc (ref default) set_int Compenv.int_setter kwd
+  let int loc kwd default = register loc (ref default) set_int Compenv.int_setter kwd
 
   let bool_arg arg r opt =
     match opt with
     | "0" -> r := false
     | "1" -> r := true
     | _ -> wrong opt arg "'0' or '1'"
+  ;;
 
   let set' ppf name option s = Compenv.setter ppf (fun b -> b) name [ option ] s
   let bool loc kwd = register loc (ref false) bool_arg set' kwd
@@ -1729,45 +1961,50 @@ module Extra_options = struct
     match flags with
     | [] -> "<none>"
     | (h, _) :: t -> List.fold_left (fun x (y, _) -> x ^ sep ^ y) h t
+  ;;
 
   let set_symbol symbols arg r opt =
     match List.assoc opt symbols with
-    | exception Not_found ->
-        wrong opt arg ("one of: " ^ make_symlist ~sep:" " symbols)
+    | exception Not_found -> wrong opt arg ("one of: " ^ make_symlist ~sep:" " symbols)
     | v -> r := v
+  ;;
 
   let symbol_setter symbols _ppf name option s =
     match List.assoc s symbols with
     | exception Not_found ->
-        Misc.fatal_errorf "Syntax: %s=%s" name (make_symlist ~sep:"|" symbols)
+      Misc.fatal_errorf "Syntax: %s=%s" name (make_symlist ~sep:"|" symbols)
     | v -> option := v
+  ;;
 
   let symbol loc kwd default symbols =
     register loc (ref default) (set_symbol symbols) (symbol_setter symbols) kwd
+  ;;
 
   let parse_one_arg name =
     match Misc.cut_at name '=' with
     | exception Not_found ->
-        raise
-          (Arg.Bad
-             (Format.asprintf
-                "wrong argument '%s'; option '-X' expects a name=value pair"
-                name))
-    | name, v -> (
-        match Hashtbl.find_opt extra_params name with
-        | Some (O (option, parser, _setter, _loc)) -> parser name option v
-        | None ->
-            raise (Arg.Bad (Format.asprintf "unknown option '-X %s'" name)))
+      raise
+        (Arg.Bad
+           (Format.asprintf
+              "wrong argument '%s'; option '-X' expects a name=value pair"
+              name))
+    | name, v ->
+      (match Hashtbl.find_opt extra_params name with
+       | Some (O (option, parser, _setter, _loc)) -> parser name option v
+       | None -> raise (Arg.Bad (Format.asprintf "unknown option '-X %s'" name)))
+  ;;
 
   let read_one_param ppf name v =
-    if String.starts_with ~prefix:"X" name then
+    if String.starts_with ~prefix:"X" name
+    then (
       let name_without_prefix = String.sub name 1 (String.length name - 1) in
       match Hashtbl.find_opt extra_params name_without_prefix with
       | Some (O (option, _parser, setter, _loc)) ->
-          setter ppf name option v;
-          true
-      | None -> false
+        setter ppf name option v;
+        true
+      | None -> false)
     else false
+  ;;
 end
 
 module Oxcaml_options_impl = struct
@@ -1780,12 +2017,11 @@ module Oxcaml_options_impl = struct
   let dcfg = set' Oxcaml_flags.dump_cfg
   let dcfg_invariants = set' Oxcaml_flags.cfg_invariants
   let regalloc x = Oxcaml_flags.regalloc := x
-
-  let regalloc_linscan_threshold x =
-    Oxcaml_flags.regalloc_linscan_threshold := x
+  let regalloc_linscan_threshold x = Oxcaml_flags.regalloc_linscan_threshold := x
 
   let regalloc_param x =
     Oxcaml_flags.regalloc_params := x :: !Oxcaml_flags.regalloc_params
+  ;;
 
   let regalloc_validate = set' Oxcaml_flags.regalloc_validate
   let no_regalloc_validate = clear' Oxcaml_flags.regalloc_validate
@@ -1800,27 +2036,28 @@ module Oxcaml_options_impl = struct
 
   let no_x86_peephole_remove_mov_to_dead_register =
     clear' Oxcaml_flags.x86_peephole_remove_mov_to_dead_register
+  ;;
 
   let no_x86_peephole_remove_redundant_cmp =
     clear' Oxcaml_flags.x86_peephole_remove_redundant_cmp
+  ;;
 
-  let no_x86_peephole_combine_add_rsp =
-    clear' Oxcaml_flags.x86_peephole_combine_add_rsp
-
+  let no_x86_peephole_combine_add_rsp = clear' Oxcaml_flags.x86_peephole_combine_add_rsp
   let cfg_stack_checks = set' Oxcaml_flags.cfg_stack_checks
   let no_cfg_stack_checks = clear' Oxcaml_flags.cfg_stack_checks
-
-  let cfg_stack_checks_threshold n =
-    Oxcaml_flags.cfg_stack_checks_threshold := n
+  let cfg_stack_checks_threshold n = Oxcaml_flags.cfg_stack_checks_threshold := n
 
   let cfg_prologue_shrink_wrap_threshold n =
     Oxcaml_flags.cfg_prologue_shrink_wrap_threshold := n
+  ;;
 
   let cfg_eliminate_dead_trap_handlers =
     set' Oxcaml_flags.cfg_eliminate_dead_trap_handlers
+  ;;
 
   let no_cfg_eliminate_dead_trap_handlers =
     clear' Oxcaml_flags.cfg_eliminate_dead_trap_handlers
+  ;;
 
   let cfg_prologue_validate = set' Oxcaml_flags.cfg_prologue_validate
   let no_cfg_prologue_validate = clear' Oxcaml_flags.cfg_prologue_validate
@@ -1830,17 +2067,10 @@ module Oxcaml_options_impl = struct
   let no_cfg_merge_blocks = clear' Oxcaml_flags.cfg_merge_blocks
   let cfg_value_propagation = set' Oxcaml_flags.cfg_value_propagation
   let no_cfg_value_propagation = clear' Oxcaml_flags.cfg_value_propagation
-
-  let cfg_value_propagation_float =
-    set' Oxcaml_flags.cfg_value_propagation_float
-
-  let no_cfg_value_propagation_float =
-    clear' Oxcaml_flags.cfg_value_propagation_float
-
+  let cfg_value_propagation_float = set' Oxcaml_flags.cfg_value_propagation_float
+  let no_cfg_value_propagation_float = clear' Oxcaml_flags.cfg_value_propagation_float
   let cfg_value_propagation_flow = set' Oxcaml_flags.cfg_value_propagation_flow
-
-  let no_cfg_value_propagation_flow =
-    clear' Oxcaml_flags.cfg_value_propagation_flow
+  let no_cfg_value_propagation_flow = clear' Oxcaml_flags.cfg_value_propagation_flow
 
   (* Bundle of experimental codegen optimizations enabled by
      [-experimental-optimizations]. *)
@@ -1855,14 +2085,14 @@ module Oxcaml_options_impl = struct
     cfg_merge_blocks ();
     cfg_eliminate_dead_trap_handlers ();
     cfg_value_propagation_flow ()
+  ;;
 
-  let reorder_blocks_random seed =
-    Oxcaml_flags.reorder_blocks_random := Some seed
-
+  let reorder_blocks_random seed = Oxcaml_flags.reorder_blocks_random := Some seed
   let basic_block_sections () = set' Oxcaml_flags.basic_block_sections ()
 
   let module_entry_functions_section () =
     set' Oxcaml_flags.module_entry_functions_section ()
+  ;;
 
   let dasm_comments = set' Oxcaml_flags.dasm_comments
   let dno_asm_comments = clear' Oxcaml_flags.dasm_comments
@@ -1875,50 +2105,55 @@ module Oxcaml_options_impl = struct
   let ddebug_available_regs = set' Dwarf_flags.ddebug_available_regs
   let ddwarf_types = set' Dwarf_flags.ddwarf_types
   let ddwarf_metrics = set' Dwarf_flags.ddwarf_metrics
-
-  let ddwarf_metrics_output_file s =
-    Dwarf_flags.ddwarf_metrics_output_file := Some s
-
+  let ddwarf_metrics_output_file s = Dwarf_flags.ddwarf_metrics_output_file := Some s
   let heap_reduction_threshold x = Oxcaml_flags.heap_reduction_threshold := x
 
   let zero_alloc_check s =
     match Zero_alloc_annotations.Check.of_string s with
     | None -> () (* this should not occur as we use Arg.Symbol *)
     | Some a -> Clflags.zero_alloc_check := a
+  ;;
 
   let zero_alloc_assert s =
     match Zero_alloc_annotations.Assert.of_string s with
     | None -> () (* this should not occur as we use Arg.Symbol *)
     | Some a -> Clflags.zero_alloc_assert := a
+  ;;
 
   let dzero_alloc = set' Oxcaml_flags.dump_zero_alloc
   let disable_zero_alloc_checker = set' Oxcaml_flags.disable_zero_alloc_checker
 
   let disable_precise_zero_alloc_checker =
     set' Oxcaml_flags.disable_precise_zero_alloc_checker
+  ;;
 
   let zero_alloc_checker_details_cutoff n =
     let c : Oxcaml_flags.zero_alloc_checker_details_cutoff =
       if n < 0 then Keep_all else if n = 0 then No_details else At_most n
     in
     Oxcaml_flags.zero_alloc_checker_details_cutoff := c
+  ;;
 
   let zero_alloc_checker_details_extra =
     set' Oxcaml_flags.zero_alloc_checker_details_extra
+  ;;
 
   let no_zero_alloc_checker_details_extra =
     clear' Oxcaml_flags.zero_alloc_checker_details_extra
+  ;;
 
   let zero_alloc_checker_join n =
     let c : Oxcaml_flags.zero_alloc_checker_join =
       if n < 0 then Error (-n) else if n = 0 then Keep_all else Widen n
     in
     Oxcaml_flags.zero_alloc_checker_join := c
+  ;;
 
   let function_layout s =
     match Oxcaml_flags.Function_layout.of_string s with
     | None -> () (* this should not occur as we use Arg.Symbol *)
     | Some layout -> Oxcaml_flags.function_layout := layout
+  ;;
 
   let name_mangling_scheme s =
     let scheme : Config.name_mangling_scheme option =
@@ -1930,27 +2165,22 @@ module Oxcaml_options_impl = struct
     match scheme with
     | Some scheme -> Compilation_unit.set_name_mangling_scheme_override scheme
     | None -> ()
+  ;;
 
   let disable_builtin_check = set' Oxcaml_flags.disable_builtin_check
   let disable_poll_insertion = set' Oxcaml_flags.disable_poll_insertion
   let enable_poll_insertion = clear' Oxcaml_flags.disable_poll_insertion
-
-  let symbol_visibility_protected =
-    set' Oxcaml_flags.symbol_visibility_protected
-
-  let no_symbol_visibility_protected =
-    clear' Oxcaml_flags.symbol_visibility_protected
-
+  let symbol_visibility_protected = set' Oxcaml_flags.symbol_visibility_protected
+  let no_symbol_visibility_protected = clear' Oxcaml_flags.symbol_visibility_protected
   let long_frames = set' Oxcaml_flags.allow_long_frames
   let no_long_frames = clear' Oxcaml_flags.allow_long_frames
   let long_frames_threshold n = set_long_frames_threshold n
 
   let dbranch_relaxation_max_displacement n =
     Oxcaml_flags.branch_relaxation_max_displacement := n
+  ;;
 
-  let caml_apply_inline_fast_path =
-    set' Oxcaml_flags.caml_apply_inline_fast_path
-
+  let caml_apply_inline_fast_path = set' Oxcaml_flags.caml_apply_inline_fast_path
   let internal_assembler = set' Oxcaml_flags.internal_assembler
   let verify_binary_emitter = set' Oxcaml_flags.verify_binary_emitter
   let dissector = set' Clflags.dissector
@@ -1963,12 +2193,20 @@ module Oxcaml_options_impl = struct
 
   let dissector_assume_lld_without_64_bit_eh_frames () =
     Oxcaml_flags.dissector_assume_lld_without_64_bit_eh_frames := true
+  ;;
 
   let no_dissector_assume_lld_without_64_bit_eh_frames =
     clear' Oxcaml_flags.dissector_assume_lld_without_64_bit_eh_frames
+  ;;
 
   let manual_module_init = set' Oxcaml_flags.manual_module_init
   let no_manual_module_init = clear' Oxcaml_flags.manual_module_init
+  let emit_startup_key f = Oxcaml_flags.emit_startup_key := Some f
+  let compile_startup_stable f = Oxcaml_flags.compile_startup_stable := Some f
+  let use_startup_stable f = Oxcaml_flags.use_startup_stable := Some f
+  let compile_startup_volatile = set' Oxcaml_flags.compile_startup_volatile
+  let emit_startup_volatile_inline = set' Oxcaml_flags.emit_startup_volatile_inline
+  let use_startup_volatile f = Oxcaml_flags.use_startup_volatile := Some f
   let gc_timings = set' Oxcaml_flags.gc_timings
   let no_mach_ir () = ()
   let dllvmir () = set' Oxcaml_flags.dump_llvmir ()
@@ -1979,47 +2217,47 @@ module Oxcaml_options_impl = struct
   let no_flambda2_debug = clear' Oxcaml_flags.Flambda2.debug
 
   let reaper_debug_flags s =
-    Oxcaml_flags.Flambda2.reaper_debug_flags :=
-      String.split_on_char ',' s @ !Oxcaml_flags.Flambda2.reaper_debug_flags
+    Oxcaml_flags.Flambda2.reaper_debug_flags
+    := String.split_on_char ',' s @ !Oxcaml_flags.Flambda2.reaper_debug_flags
+  ;;
 
   let flambda2_join_points = set Flambda2.join_points
   let no_flambda2_join_points = clear Flambda2.join_points
 
   let flambda2_result_types_functors_only () =
-    Flambda2.function_result_types :=
-      Oxcaml_flags.Set Oxcaml_flags.Functors_only
+    Flambda2.function_result_types := Oxcaml_flags.Set Oxcaml_flags.Functors_only
+  ;;
 
   let flambda2_result_types_all_functions () =
-    Flambda2.function_result_types :=
-      Oxcaml_flags.Set Oxcaml_flags.All_functions
+    Flambda2.function_result_types := Oxcaml_flags.Set Oxcaml_flags.All_functions
+  ;;
 
   let no_flambda2_result_types () =
-    Flambda2.function_result_types :=
-      Oxcaml_flags.Set (Oxcaml_flags.Never : Oxcaml_flags.function_result_types)
+    Flambda2.function_result_types
+    := Oxcaml_flags.Set (Oxcaml_flags.Never : Oxcaml_flags.function_result_types)
+  ;;
 
   let flambda2_basic_meet () = ()
   let flambda2_advanced_meet () = ()
 
   let flambda2_join_algorithm algorithm =
     match algorithm with
-    | "binary" ->
-        Flambda2.join_algorithm := Oxcaml_flags.Set Oxcaml_flags.Binary
+    | "binary" -> Flambda2.join_algorithm := Oxcaml_flags.Set Oxcaml_flags.Binary
     | "n-way" -> Flambda2.join_algorithm := Oxcaml_flags.Set Oxcaml_flags.N_way
-    | "checked" ->
-        Flambda2.join_algorithm := Oxcaml_flags.Set Oxcaml_flags.Checked
+    | "checked" -> Flambda2.join_algorithm := Oxcaml_flags.Set Oxcaml_flags.Checked
     | _ -> () (* This should not occur as we use Arg.Symbol *)
+  ;;
 
   let flambda2_unbox_along_intra_function_control_flow =
     set Flambda2.unbox_along_intra_function_control_flow
+  ;;
 
   let no_flambda2_unbox_along_intra_function_control_flow =
     clear Flambda2.unbox_along_intra_function_control_flow
+  ;;
 
   let flambda2_backend_cse_at_toplevel = set Flambda2.backend_cse_at_toplevel
-
-  let no_flambda2_backend_cse_at_toplevel =
-    clear Flambda2.backend_cse_at_toplevel
-
+  let no_flambda2_backend_cse_at_toplevel = clear Flambda2.backend_cse_at_toplevel
   let flambda2_cse_depth n = Flambda2.cse_depth := Oxcaml_flags.Set n
   let flambda2_join_depth n = Flambda2.join_depth := Oxcaml_flags.Set n
   let flambda2_reaper = set Flambda2.enable_reaper
@@ -2030,45 +2268,41 @@ module Oxcaml_options_impl = struct
   let reaper_preserve_direct_calls s =
     match s with
     | "never" ->
-        Flambda2.reaper_preserve_direct_calls :=
-          Oxcaml_flags.Set
-            (Oxcaml_flags.Never : Oxcaml_flags.reaper_preserve_direct_calls)
+      Flambda2.reaper_preserve_direct_calls
+      := Oxcaml_flags.Set (Oxcaml_flags.Never : Oxcaml_flags.reaper_preserve_direct_calls)
     | "always" ->
-        Flambda2.reaper_preserve_direct_calls :=
-          Oxcaml_flags.Set Oxcaml_flags.Always
+      Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.Set Oxcaml_flags.Always
     | "zero-alloc" ->
-        Flambda2.reaper_preserve_direct_calls :=
-          Oxcaml_flags.Set Oxcaml_flags.Zero_alloc
+      Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.Set Oxcaml_flags.Zero_alloc
     | "auto" ->
-        Flambda2.reaper_preserve_direct_calls :=
-          Oxcaml_flags.Set Oxcaml_flags.Auto
+      Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.Set Oxcaml_flags.Auto
     | _ -> () (* This should not occur as we use Arg.Symbol *)
+  ;;
 
   let reaper_local_fields = set Flambda2.reaper_local_fields
   let no_reaper_local_fields = clear Flambda2.reaper_local_fields
   let reaper_unbox = set Flambda2.reaper_unbox
   let no_reaper_unbox = clear Flambda2.reaper_unbox
-
-  let reaper_max_unbox_size size =
-    Flambda2.reaper_max_unbox_size := Oxcaml_flags.Set size
-
-  let reaper_change_calling_conventions =
-    set Flambda2.reaper_change_calling_conventions
+  let reaper_max_unbox_size size = Flambda2.reaper_max_unbox_size := Oxcaml_flags.Set size
+  let reaper_change_calling_conventions = set Flambda2.reaper_change_calling_conventions
 
   let no_reaper_change_calling_conventions =
     clear Flambda2.reaper_change_calling_conventions
+  ;;
 
   let flambda2_expert_fallback_inlining_heuristic =
     set Flambda2.Expert.fallback_inlining_heuristic
+  ;;
 
   let no_flambda2_expert_fallback_inlining_heuristic =
     clear Flambda2.Expert.fallback_inlining_heuristic
+  ;;
 
-  let flambda2_expert_inline_effects_in_cmm =
-    set Flambda2.Expert.inline_effects_in_cmm
+  let flambda2_expert_inline_effects_in_cmm = set Flambda2.Expert.inline_effects_in_cmm
 
   let no_flambda2_expert_inline_effects_in_cmm =
     clear Flambda2.Expert.inline_effects_in_cmm
+  ;;
 
   let flambda2_expert_cmm_safe_subst = set Flambda2.Expert.cmm_safe_subst
   let no_flambda2_expert_cmm_safe_subst = clear Flambda2.Expert.cmm_safe_subst
@@ -2076,123 +2310,161 @@ module Oxcaml_options_impl = struct
   let no_flambda2_expert_phantom_lets = clear Flambda2.Expert.phantom_lets
 
   let flambda2_expert_max_block_size_for_projections size =
-    Flambda2.Expert.max_block_size_for_projections :=
-      Oxcaml_flags.Set (Some size)
+    Flambda2.Expert.max_block_size_for_projections := Oxcaml_flags.Set (Some size)
+  ;;
 
   let flambda2_expert_max_unboxing_depth depth =
     Flambda2.Expert.max_unboxing_depth := Oxcaml_flags.Set depth
+  ;;
 
   let flambda2_expert_can_inline_recursive_functions () =
     Flambda2.Expert.can_inline_recursive_functions := Oxcaml_flags.Set true
+  ;;
 
   let no_flambda2_expert_can_inline_recursive_functions () =
     Flambda2.Expert.can_inline_recursive_functions := Oxcaml_flags.Set false
+  ;;
 
   let flambda2_expert_max_function_simplify_run runs =
     Flambda2.Expert.max_function_simplify_run := Oxcaml_flags.Set runs
+  ;;
 
   let flambda2_expert_shorten_symbol_names () =
     Flambda2.Expert.shorten_symbol_names := Oxcaml_flags.Set true
+  ;;
 
   let no_flambda2_expert_shorten_symbol_names () =
     Flambda2.Expert.shorten_symbol_names := Oxcaml_flags.Set false
+  ;;
 
   let flambda2_expert_cont_lifting_budget budget =
     Flambda2.Expert.cont_lifting_budget := Oxcaml_flags.Set budget
+  ;;
 
   let flambda2_expert_cont_spec_threshold threshold =
     Flambda2.Expert.cont_spec_threshold := Oxcaml_flags.Set threshold
+  ;;
 
   let flambda2_debug_concrete_types_only_on_canonicals =
     set' Flambda2.Debug.concrete_types_only_on_canonicals
+  ;;
 
   let no_flambda2_debug_concrete_types_only_on_canonicals =
     clear' Flambda2.Debug.concrete_types_only_on_canonicals
+  ;;
 
-  let flambda2_debug_keep_invalid_handlers =
-    set' Flambda2.Debug.keep_invalid_handlers
+  let flambda2_debug_keep_invalid_handlers = set' Flambda2.Debug.keep_invalid_handlers
 
   let no_flambda2_debug_keep_invalid_handlers =
     clear' Flambda2.Debug.keep_invalid_handlers
+  ;;
 
   let flambda2_inline_max_depth spec =
-    Clflags.Int_arg_helper.parse spec
+    Clflags.Int_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-max-depth <int> | <round>=<int>[,...]"
       Flambda2.Inlining.max_depth
+  ;;
 
   let flambda2_inline_max_rec_depth spec =
-    Clflags.Int_arg_helper.parse spec
+    Clflags.Int_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-max-rec-depth <int> | <round>=<int>[,...]"
       Flambda2.Inlining.max_rec_depth
+  ;;
 
   let flambda2_inline_alloc_cost spec =
-    Clflags.Float_arg_helper.parse spec
+    Clflags.Float_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-alloc-cost <float> | <round>=<float>[,...]"
       Flambda2.Inlining.alloc_cost
+  ;;
 
   let flambda2_inline_branch_cost spec =
-    Clflags.Float_arg_helper.parse spec
+    Clflags.Float_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-branch-cost <float> | <round>=<float>[,...]"
       Flambda2.Inlining.branch_cost
+  ;;
 
   let flambda2_inline_call_cost spec =
-    Clflags.Float_arg_helper.parse spec
+    Clflags.Float_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-call-cost <float> | <round>=<float>[,...]"
       Flambda2.Inlining.call_cost
+  ;;
 
   let flambda2_inline_prim_cost spec =
-    Clflags.Float_arg_helper.parse spec
+    Clflags.Float_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-prim-cost <float> | <round>=<float>[,...]"
       Flambda2.Inlining.prim_cost
+  ;;
 
   let flambda2_inline_indirect_call_cost spec =
-    Clflags.Float_arg_helper.parse spec
-      "Syntax: -flambda2-inline-indirect-call-cost <float> | \
-       <round>=<float>[,...]"
+    Clflags.Float_arg_helper.parse
+      spec
+      "Syntax: -flambda2-inline-indirect-call-cost <float> | <round>=<float>[,...]"
       Flambda2.Inlining.indirect_call_cost
+  ;;
 
   let flambda2_inline_poly_compare_cost spec =
-    Clflags.Float_arg_helper.parse spec
-      "Syntax: -flambda2-inline-poly-compare-cost <float> | \
-       <round>=<float>[,...]"
+    Clflags.Float_arg_helper.parse
+      spec
+      "Syntax: -flambda2-inline-poly-compare-cost <float> | <round>=<float>[,...]"
       Flambda2.Inlining.poly_compare_cost
+  ;;
 
   let flambda2_inline_small_function_size spec =
-    Clflags.Int_arg_helper.parse spec
+    Clflags.Int_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-small-function-size <int> | <round>=<int>[,...]"
       Flambda2.Inlining.small_function_size
+  ;;
 
   let flambda2_inline_large_function_size spec =
-    Clflags.Int_arg_helper.parse spec
+    Clflags.Int_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-large-function-size <int> | <round>=<int>[,...]"
       Flambda2.Inlining.large_function_size
+  ;;
 
   let flambda2_inline_small_functor_size spec =
-    Clflags.Int_arg_helper.parse spec
+    Clflags.Int_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-small-functor-size <int> | <round>=<int>[,...]"
       Flambda2.Inlining.small_functor_size
+  ;;
 
   let flambda2_inline_large_functor_size spec =
-    Clflags.Int_arg_helper.parse spec
+    Clflags.Int_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-large-functor-size <int> | <round>=<int>[,...]"
       Flambda2.Inlining.large_functor_size
+  ;;
 
   let flambda2_inline_threshold spec =
-    Clflags.Float_arg_helper.parse spec
+    Clflags.Float_arg_helper.parse
+      spec
       "Syntax: -flambda2-inline-threshold <float> | <round>=<float>[,...]"
       Flambda2.Inlining.threshold
+  ;;
 
   let flambda2_speculative_inlining_only_if_arguments_useful =
     set' Flambda2.Inlining.speculative_inlining_only_if_arguments_useful
+  ;;
 
   let no_flambda2_speculative_inlining_only_if_arguments_useful =
     clear' Flambda2.Inlining.speculative_inlining_only_if_arguments_useful
+  ;;
 
   let flambda2_speculative_inlining_track_lifted_constants =
     set' Flambda2.Inlining.speculative_inlining_track_lifted_constants
+  ;;
 
   let no_flambda2_speculative_inlining_track_lifted_constants =
     clear' Flambda2.Inlining.speculative_inlining_track_lifted_constants
+  ;;
 
   let flambda2_inlining_report_bin = set' Flambda2.Inlining.report_bin
   let flambda2_unicode = set Flambda2.unicode
@@ -2204,24 +2476,36 @@ module Oxcaml_options_impl = struct
   let dfexpr_after pass =
     dfexpr ();
     Flambda2.Dump.fexpr_after := Flambda2.Dump.This_pass pass
+  ;;
 
   let dfexpr_to file = Flambda2.Dump.fexpr := Flambda2.Dump.File file
   let dfexpr_annot () = Flambda2.Dump.fexpr_annot := true
 
   let dfexpr_annot_after pass =
     Flambda2.Dump.fexpr_annot_after := pass :: !Flambda2.Dump.fexpr_annot_after
+  ;;
 
   let dslot_offsets = set' Flambda2.Dump.slot_offsets
   let dfreshen = set' Flambda2.Dump.freshen
   let dflow = set' Flambda2.Dump.flow
   let dsimplify = set' Flambda2.Dump.simplify
   let dreaper = set' Flambda2.Dump.reaper
+  let assume_consistent_inputs = set' Oxcaml_flags.assume_consistent_inputs
+  let cmxa_summaries path = Oxcaml_flags.cmxa_summaries_path := path
+  let emit_cmxa_summary = set' Oxcaml_flags.emit_cmxa_summary
+  let emit_link_plan base = Oxcaml_flags.emit_link_plan := Some base
+  let use_link_plan base = Oxcaml_flags.use_link_plan := Some base
+  let plan_emit_startup_stable base = Oxcaml_flags.plan_emit_startup_stable := Some base
 
-  let use_cached_generic_functions =
-    set' Oxcaml_flags.use_cached_generic_functions
+  let plan_emit_startup_volatile base =
+    Oxcaml_flags.plan_emit_startup_volatile := Some base
+  ;;
+
+  let use_cached_generic_functions = set' Oxcaml_flags.use_cached_generic_functions
 
   let cached_generic_functions_path file =
     Oxcaml_flags.cached_generic_functions_path := file
+  ;;
 
   let x = Extra_options.parse_one_arg
 end
@@ -2245,38 +2529,40 @@ end
 
 module Make_debugging_options (F : Debugging_options) = struct
   let list3 =
-    [
-      mk_restrict_to_upstream_dwarf F.restrict_to_upstream_dwarf;
-      mk_no_restrict_to_upstream_dwarf F.no_restrict_to_upstream_dwarf;
-      mk_dwarf_inlined_frames F.dwarf_inlined_frames;
-      mk_no_dwarf_inlined_frames F.no_dwarf_inlined_frames;
-      mk_dwarf_for_startup_file F.dwarf_for_startup_file;
-      mk_no_dwarf_for_startup_file F.no_dwarf_for_startup_file;
-      mk_gdwarf_may_alter_codegen F.gdwarf_may_alter_codegen;
-      mk_no_gdwarf_may_alter_codegen F.no_gdwarf_may_alter_codegen;
-      mk_gdwarf_may_alter_codegen_experimental
-        F.gdwarf_may_alter_codegen_experimental;
-      mk_no_gdwarf_may_alter_codegen_experimental
-        F.no_gdwarf_may_alter_codegen_experimental;
-      mk_gdwarf_max_function_complexity F.gdwarf_max_function_complexity;
-      mk_gdwarf_compression F.gdwarf_compression;
-      mk_gdwarf_fission F.gdwarf_fission;
-      mk_gdwarf_pedantic F.gdwarf_pedantic;
+    [ mk_restrict_to_upstream_dwarf F.restrict_to_upstream_dwarf
+    ; mk_no_restrict_to_upstream_dwarf F.no_restrict_to_upstream_dwarf
+    ; mk_dwarf_inlined_frames F.dwarf_inlined_frames
+    ; mk_no_dwarf_inlined_frames F.no_dwarf_inlined_frames
+    ; mk_dwarf_for_startup_file F.dwarf_for_startup_file
+    ; mk_no_dwarf_for_startup_file F.no_dwarf_for_startup_file
+    ; mk_gdwarf_may_alter_codegen F.gdwarf_may_alter_codegen
+    ; mk_no_gdwarf_may_alter_codegen F.no_gdwarf_may_alter_codegen
+    ; mk_gdwarf_may_alter_codegen_experimental F.gdwarf_may_alter_codegen_experimental
+    ; mk_no_gdwarf_may_alter_codegen_experimental
+        F.no_gdwarf_may_alter_codegen_experimental
+    ; mk_gdwarf_max_function_complexity F.gdwarf_max_function_complexity
+    ; mk_gdwarf_compression F.gdwarf_compression
+    ; mk_gdwarf_fission F.gdwarf_fission
+    ; mk_gdwarf_pedantic F.gdwarf_pedantic
     ]
+  ;;
 end
 
 module Debugging_options_impl = struct
   let restrict_to_upstream_dwarf () =
     Debugging.restrict_to_upstream_dwarf := true;
     Clflags.shape_format := Clflags.Old_merlin
+  ;;
 
   let no_restrict_to_upstream_dwarf () =
     Debugging.restrict_to_upstream_dwarf := false;
     Clflags.shape_format := Clflags.Debugging_shapes
-  (* CR sspies: We should only enable OxCaml DWARF on the compiler once we are
-     ready to switch, since it leads to a new format of shapes in the .cms and
-     .cmt files. Merlin should continue to work, but we should be careful and
-     probably should switch over to debugging shapes in general first. *)
+  ;;
+
+  (* CR sspies: We should only enable OxCaml DWARF on the compiler once we are ready to
+     switch, since it leads to a new format of shapes in the .cms and .cmt files. Merlin
+     should continue to work, but we should be careful and probably should switch over to
+     debugging shapes in general first. *)
 
   let dwarf_inlined_frames () = Debugging.dwarf_inlined_frames := true
   let no_dwarf_inlined_frames () = Debugging.dwarf_inlined_frames := false
@@ -2288,21 +2574,24 @@ module Debugging_options_impl = struct
     Debugging.gdwarf_may_alter_codegen := false;
     Debugging.gdwarf_may_alter_codegen_experimental := false;
     Oxcaml_options_impl.clear Flambda2.Expert.phantom_lets ()
+  ;;
 
   let gdwarf_may_alter_codegen_experimental () =
     Debugging.gdwarf_may_alter_codegen := true;
     Debugging.gdwarf_may_alter_codegen_experimental := true;
     Oxcaml_options_impl.set Flambda2.Expert.phantom_lets ()
+  ;;
 
   let no_gdwarf_may_alter_codegen_experimental () =
     Debugging.gdwarf_may_alter_codegen_experimental := false;
     Oxcaml_options_impl.clear Flambda2.Expert.phantom_lets ()
+  ;;
 
-  let gdwarf_max_function_complexity c =
-    Debugging.dwarf_max_function_complexity := c
+  let gdwarf_max_function_complexity c = Debugging.dwarf_max_function_complexity := c
 
   let gdwarf_compression value =
     Debugging.gdwarf_compression := String.lowercase_ascii value
+  ;;
 
   let gdwarf_fission value =
     match String.lowercase_ascii value with
@@ -2310,12 +2599,13 @@ module Debugging_options_impl = struct
     | "objcopy" -> Clflags.dwarf_fission := Clflags.Fission_objcopy
     | "dsymutil" -> Clflags.dwarf_fission := Clflags.Fission_dsymutil
     | _ ->
-        raise
-          (Arg.Bad
-             (Printf.sprintf
-                "Invalid value for -gdwarf-fission: %s\n\
-                 Valid values are: none, objcopy, dsymutil"
-                value))
+      raise
+        (Arg.Bad
+           (Printf.sprintf
+              "Invalid value for -gdwarf-fission: %s\n\
+               Valid values are: none, objcopy, dsymutil"
+              value))
+  ;;
 
   let gdwarf_pedantic () = Clflags.dwarf_pedantic := true
 end
@@ -2342,25 +2632,23 @@ module Extra_params = struct
     in
     let set_int option =
       (match Compenv.check_int ppf name v with
-      | Some i -> option := Oxcaml_flags.Set i
-      | None -> ());
+       | Some i -> option := Oxcaml_flags.Set i
+       | None -> ());
       true
     in
     let set' option =
       Compenv.setter ppf (fun b -> b) name [ option ] v;
       true
     in
-    (*let clear' option =
-        Compenv.setter ppf (fun b -> not b) name [ option ] v; true
-      in*)
+    (* let clear' option = Compenv.setter ppf (fun b -> not b) name [ option ] v; true in *)
     let set_int' option =
       Compenv.int_setter ppf name option v;
       true
     in
     let set_int_option' option =
       (match Compenv.check_int ppf name v with
-      | Some seed -> option := Some seed
-      | None -> ());
+       | Some seed -> option := Some seed
+       | None -> ());
       true
     in
     match name with
@@ -2368,54 +2656,50 @@ module Extra_params = struct
     | "verify-binary-emitter" -> set' Oxcaml_flags.verify_binary_emitter
     | "dgc-timings" -> set' Oxcaml_flags.gc_timings
     | "no-mach-ir" ->
-        Oxcaml_options_impl.no_mach_ir ();
-        true
+      Oxcaml_options_impl.no_mach_ir ();
+      true
     | "ocamlcfg" ->
-        let dummy = ref false in
-        set' dummy
+      let dummy = ref false in
+      set' dummy
     | "cfg-invariants" -> set' Oxcaml_flags.cfg_invariants
-    | "regalloc" -> (
-        match Clflags.Register_allocator.of_string v with
-        | Some regalloc ->
-            Oxcaml_flags.regalloc := regalloc;
-            true
-        | None ->
-            let possible_values =
-              String.concat ","
-                (List.map fst Clflags.Register_allocator.assoc_list)
-            in
-            raise
-              (Arg.Bad
-                 (Printf.sprintf
-                    "invalid register allocator %S (possible values: %s)" v
-                    possible_values)))
-    | "regalloc-linscan-threshold" ->
-        set_int' Oxcaml_flags.regalloc_linscan_threshold
+    | "regalloc" ->
+      (match Clflags.Register_allocator.of_string v with
+       | Some regalloc ->
+         Oxcaml_flags.regalloc := regalloc;
+         true
+       | None ->
+         let possible_values =
+           String.concat "," (List.map fst Clflags.Register_allocator.assoc_list)
+         in
+         raise
+           (Arg.Bad
+              (Printf.sprintf
+                 "invalid register allocator %S (possible values: %s)"
+                 v
+                 possible_values)))
+    | "regalloc-linscan-threshold" -> set_int' Oxcaml_flags.regalloc_linscan_threshold
     | "dbranch-relaxation-max-displacement" ->
-        set_int' Oxcaml_flags.branch_relaxation_max_displacement
+      set_int' Oxcaml_flags.branch_relaxation_max_displacement
     | "regalloc-param" -> add_string Oxcaml_flags.regalloc_params
     | "regalloc-validate" -> set' Oxcaml_flags.regalloc_validate
     | "vectorize" -> set' Oxcaml_flags.vectorize
     | "dump-vectorize" -> set' Oxcaml_flags.dump_vectorize
-    | "vectorize-max-block-size" ->
-        set_int' Oxcaml_flags.vectorize_max_block_size
+    | "vectorize-max-block-size" -> set_int' Oxcaml_flags.vectorize_max_block_size
     | "cfg-peephole-optimize" -> set' Oxcaml_flags.cfg_peephole_optimize
     | "x86-peephole-optimize" -> set' Oxcaml_flags.x86_peephole_optimize
     | "cfg-stack-checks" -> set' Oxcaml_flags.cfg_stack_checks
     | "cfg-eliminate-dead-trap-handlers" ->
-        set' Oxcaml_flags.cfg_eliminate_dead_trap_handlers
+      set' Oxcaml_flags.cfg_eliminate_dead_trap_handlers
     | "cfg-prologue-validate" -> set' Oxcaml_flags.cfg_prologue_validate
     | "cfg-prologue-shrink-wrap" -> set' Oxcaml_flags.cfg_prologue_shrink_wrap
     | "cfg-merge-blocks" -> set' Oxcaml_flags.cfg_merge_blocks
     | "cfg-value-propagation" -> set' Oxcaml_flags.cfg_value_propagation
-    | "cfg-value-propagation-float" ->
-        set' Oxcaml_flags.cfg_value_propagation_float
-    | "cfg-value-propagation-flow" ->
-        set' Oxcaml_flags.cfg_value_propagation_flow
+    | "cfg-value-propagation-float" -> set' Oxcaml_flags.cfg_value_propagation_float
+    | "cfg-value-propagation-flow" -> set' Oxcaml_flags.cfg_value_propagation_flow
     | "experimental-optimizations" ->
-        if Compenv.check_bool ppf name v then
-          Oxcaml_options_impl.experimental_optimizations ();
-        true
+      if Compenv.check_bool ppf name v
+      then Oxcaml_options_impl.experimental_optimizations ();
+      true
     | "dump-inlining-paths" -> set' Oxcaml_flags.dump_inlining_paths
     | "davail" -> set' Oxcaml_flags.davail
     | "dranges" -> set' Oxcaml_flags.dranges
@@ -2424,301 +2708,292 @@ module Extra_params = struct
     | "ddwarf-types" -> set' Dwarf_flags.ddwarf_types
     | "ddwarf-metrics" -> set' Dwarf_flags.ddwarf_metrics
     | "ddwarf-metrics-output-file" ->
-        Dwarf_flags.ddwarf_metrics_output_file := Some v;
-        true
-    | "reorder-blocks-random" ->
-        set_int_option' Oxcaml_flags.reorder_blocks_random
+      Dwarf_flags.ddwarf_metrics_output_file := Some v;
+      true
+    | "reorder-blocks-random" -> set_int_option' Oxcaml_flags.reorder_blocks_random
     | "basic-block-sections" -> set' Oxcaml_flags.basic_block_sections
-    | "module-entry-functions-section" ->
-        set' Oxcaml_flags.module_entry_functions_section
-    | "heap-reduction-threshold" ->
-        set_int' Oxcaml_flags.heap_reduction_threshold
-    | "zero-alloc-check" -> (
-        match Zero_alloc_annotations.Check.of_string v with
-        | Some a ->
-            Clflags.zero_alloc_check := a;
-            true
-        | None ->
-            raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name))
-        )
-    | "zero-alloc-assert" -> (
-        match Zero_alloc_annotations.Assert.of_string v with
-        | Some a ->
-            Clflags.zero_alloc_assert := a;
-            true
-        | None ->
-            raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name))
-        )
+    | "module-entry-functions-section" -> set' Oxcaml_flags.module_entry_functions_section
+    | "heap-reduction-threshold" -> set_int' Oxcaml_flags.heap_reduction_threshold
+    | "zero-alloc-check" ->
+      (match Zero_alloc_annotations.Check.of_string v with
+       | Some a ->
+         Clflags.zero_alloc_check := a;
+         true
+       | None -> raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name)))
+    | "zero-alloc-assert" ->
+      (match Zero_alloc_annotations.Assert.of_string v with
+       | Some a ->
+         Clflags.zero_alloc_assert := a;
+         true
+       | None -> raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name)))
     | "dump-zero-alloc" -> set' Oxcaml_flags.dump_zero_alloc
-    | "disable-zero-alloc-checker" ->
-        set' Oxcaml_flags.disable_zero_alloc_checker
+    | "disable-zero-alloc-checker" -> set' Oxcaml_flags.disable_zero_alloc_checker
     | "disable-precise-zero-alloc-checker" ->
-        set' Oxcaml_flags.disable_precise_zero_alloc_checker
+      set' Oxcaml_flags.disable_precise_zero_alloc_checker
     | "zero_alloc_checker_details_extra" ->
-        set' Oxcaml_flags.zero_alloc_checker_details_extra
+      set' Oxcaml_flags.zero_alloc_checker_details_extra
     | "zero-alloc-checker-details-cutoff" ->
-        (match Compenv.check_int ppf name v with
-        | Some i -> Oxcaml_options_impl.zero_alloc_checker_details_cutoff i
-        | None -> ());
-        true
+      (match Compenv.check_int ppf name v with
+       | Some i -> Oxcaml_options_impl.zero_alloc_checker_details_cutoff i
+       | None -> ());
+      true
     | "zero-alloc-checker-join" ->
-        (match Compenv.check_int ppf name v with
-        | Some i -> Oxcaml_options_impl.zero_alloc_checker_join i
-        | None -> ());
-        true
-    | "function-layout" -> (
-        match Oxcaml_flags.Function_layout.of_string v with
-        | Some layout ->
-            Oxcaml_flags.function_layout := layout;
-            true
-        | None ->
-            raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name))
-        )
-    | "name-mangling-scheme" -> (
-        let scheme : Config.name_mangling_scheme option =
-          match v with
-          | "flat" -> Some Flat
-          | "structured" -> Some Structured
-          | _ -> None
-        in
-        match scheme with
-        | Some scheme ->
-            Compilation_unit.set_name_mangling_scheme_override scheme;
-            true
-        | None ->
-            raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name))
-        )
+      (match Compenv.check_int ppf name v with
+       | Some i -> Oxcaml_options_impl.zero_alloc_checker_join i
+       | None -> ());
+      true
+    | "function-layout" ->
+      (match Oxcaml_flags.Function_layout.of_string v with
+       | Some layout ->
+         Oxcaml_flags.function_layout := layout;
+         true
+       | None -> raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name)))
+    | "name-mangling-scheme" ->
+      let scheme : Config.name_mangling_scheme option =
+        match v with
+        | "flat" -> Some Flat
+        | "structured" -> Some Structured
+        | _ -> None
+      in
+      (match scheme with
+       | Some scheme ->
+         Compilation_unit.set_name_mangling_scheme_override scheme;
+         true
+       | None -> raise (Arg.Bad (Printf.sprintf "Unexpected value %s for %s" v name)))
     | "builtin-check" -> set' Oxcaml_flags.disable_builtin_check
     | "poll-insertion" -> set' Oxcaml_flags.disable_poll_insertion
-    | "symbol-visibility-protected" ->
-        set' Oxcaml_flags.symbol_visibility_protected
+    | "symbol-visibility-protected" -> set' Oxcaml_flags.symbol_visibility_protected
     | "long-frames" -> set' Oxcaml_flags.allow_long_frames
-    | "debug-long-frames-threshold" -> (
-        match Compenv.check_int ppf name v with
-        | Some n ->
-            set_long_frames_threshold n;
-            true
-        | None ->
-            raise
-              (Arg.Bad
-                 (Printf.sprintf "Expected integer between 0 and %d"
-                    Oxcaml_flags.max_long_frames_threshold)))
-    | "caml-apply-inline-fast-path" ->
-        set' Oxcaml_flags.caml_apply_inline_fast_path
+    | "debug-long-frames-threshold" ->
+      (match Compenv.check_int ppf name v with
+       | Some n ->
+         set_long_frames_threshold n;
+         true
+       | None ->
+         raise
+           (Arg.Bad
+              (Printf.sprintf
+                 "Expected integer between 0 and %d"
+                 Oxcaml_flags.max_long_frames_threshold)))
+    | "caml-apply-inline-fast-path" -> set' Oxcaml_flags.caml_apply_inline_fast_path
     | "dasm-comments" -> set' Oxcaml_flags.dasm_comments
     | "gupstream-dwarf" -> set' Debugging.restrict_to_upstream_dwarf
     | "gdwarf-inlined-frames" -> set' Debugging.dwarf_inlined_frames
     | "gdwarf-may-alter-codegen" -> set' Debugging.gdwarf_may_alter_codegen
     | "gdwarf-may-alter-codegen-experimental" ->
-        set' Debugging.gdwarf_may_alter_codegen_experimental
-        && set Flambda2.Expert.phantom_lets
+      set' Debugging.gdwarf_may_alter_codegen_experimental
+      && set Flambda2.Expert.phantom_lets
     | "gstartup" -> set' Debugging.dwarf_for_startup_file
     | "gdwarf-pedantic" -> set' Clflags.dwarf_pedantic
-    | "gdwarf-max-function-complexity" ->
-        set_int' Debugging.dwarf_max_function_complexity
-    | "gdwarf-fidelity" -> (
-        match Clflags.gdwarf_fidelity_of_string v with
-        | Some fidelity ->
-            Clflags.set_gdwarf_fidelity fidelity;
-            true
-        | None -> Misc.fatal_error ("Invalid gdwarf-fidelity value: " ^ v))
+    | "gdwarf-max-function-complexity" -> set_int' Debugging.dwarf_max_function_complexity
+    | "gdwarf-fidelity" ->
+      (match Clflags.gdwarf_fidelity_of_string v with
+       | Some fidelity ->
+         Clflags.set_gdwarf_fidelity fidelity;
+         true
+       | None -> Misc.fatal_error ("Invalid gdwarf-fidelity value: " ^ v))
     | "llvm-path" ->
-        Oxcaml_flags.llvm_path := Some v;
-        true
+      Oxcaml_flags.llvm_path := Some v;
+      true
     | "keep-llvmir" -> set' Oxcaml_flags.keep_llvmir
     | "llvm-flags" -> set_string Oxcaml_flags.llvm_flags
     | "flambda2-debug" -> set' Oxcaml_flags.Flambda2.debug
     | "reaper-debug-flags" ->
-        Oxcaml_flags.Flambda2.reaper_debug_flags :=
-          String.split_on_char ',' v @ !Oxcaml_flags.Flambda2.reaper_debug_flags;
-        true
+      Oxcaml_flags.Flambda2.reaper_debug_flags
+      := String.split_on_char ',' v @ !Oxcaml_flags.Flambda2.reaper_debug_flags;
+      true
     | "flambda2-join-points" -> set Flambda2.join_points
     | "flambda2-result-types" ->
-        (match String.lowercase_ascii v with
-        | "never" ->
-            Flambda2.function_result_types :=
-              Oxcaml_flags.(Set (Never : function_result_types))
-        | "functors-only" ->
-            Flambda2.function_result_types := Oxcaml_flags.(Set Functors_only)
-        | "all-functions" ->
-            Flambda2.function_result_types := Oxcaml_flags.(Set All_functions)
-        | _ ->
-            Misc.fatal_error
-              "Syntax: flambda2-result-types=never|functors-only|all-functions");
-        true
+      (match String.lowercase_ascii v with
+       | "never" ->
+         Flambda2.function_result_types
+         := Oxcaml_flags.(Set (Never : function_result_types))
+       | "functors-only" ->
+         Flambda2.function_result_types := Oxcaml_flags.(Set Functors_only)
+       | "all-functions" ->
+         Flambda2.function_result_types := Oxcaml_flags.(Set All_functions)
+       | _ ->
+         Misc.fatal_error
+           "Syntax: flambda2-result-types=never|functors-only|all-functions");
+      true
     | "flambda2-result-types-all-functions" ->
-        (Flambda2.function_result_types := Oxcaml_flags.(Set All_functions));
-        true
+      (Flambda2.function_result_types := Oxcaml_flags.(Set All_functions));
+      true
     | "flambda2-meet-algorithm" ->
-        (match String.lowercase_ascii v with
-        | "basic" | "advanced" -> ()
-        | _ -> Misc.fatal_error "Syntax: flambda2-meet_algorithm=basic|advanced");
-        true
+      (match String.lowercase_ascii v with
+       | "basic" | "advanced" -> ()
+       | _ -> Misc.fatal_error "Syntax: flambda2-meet_algorithm=basic|advanced");
+      true
     | "flambda2-join-algorithm" ->
-        (match String.lowercase_ascii v with
-        | ("binary" | "n-way" | "checked") as v ->
-            Oxcaml_options_impl.flambda2_join_algorithm v
-        | _ ->
-            Misc.fatal_error
-              "Syntax: flambda2-join-algorithm=binary|n-way|checked");
-        true
+      (match String.lowercase_ascii v with
+       | ("binary" | "n-way" | "checked") as v ->
+         Oxcaml_options_impl.flambda2_join_algorithm v
+       | _ -> Misc.fatal_error "Syntax: flambda2-join-algorithm=binary|n-way|checked");
+      true
     | "flambda2-unbox-along-intra-function-control-flow" ->
-        set Flambda2.unbox_along_intra_function_control_flow
+      set Flambda2.unbox_along_intra_function_control_flow
     | "flambda2-backend-cse-at-toplevel" -> set Flambda2.backend_cse_at_toplevel
     | "flambda2-cse-depth" -> set_int Flambda2.cse_depth
     | "flambda2-join-depth" -> set_int Flambda2.join_depth
-    | "flambda2-expert-inline-effects-in-cmm" ->
-        set Flambda2.Expert.inline_effects_in_cmm
+    | "flambda2-expert-inline-effects-in-cmm" -> set Flambda2.Expert.inline_effects_in_cmm
     | "flambda2-expert-cmm-safe-subst" -> set Flambda2.Expert.cmm_safe_subst
     | "flambda2-expert-phantom-lets" -> set Flambda2.Expert.phantom_lets
-    | "flambda2-expert-max-unboxing-depth" ->
-        set_int Flambda2.Expert.max_unboxing_depth
+    | "flambda2-expert-max-unboxing-depth" -> set_int Flambda2.Expert.max_unboxing_depth
     | "flambda2-expert-can-inline-recursive-functions" ->
-        set Flambda2.Expert.can_inline_recursive_functions
+      set Flambda2.Expert.can_inline_recursive_functions
     | "flambda2-expert-max-function-simplify-run" ->
-        set_int Flambda2.Expert.max_function_simplify_run
+      set_int Flambda2.Expert.max_function_simplify_run
     | "flambda2-match-in-match" -> set Flambda2.match_in_match
     | "flambda2-expert-cont-lifting-budget" ->
-        (match Compenv.check_int ppf name v with
-        | Some i -> Flambda2.Expert.cont_lifting_budget := Oxcaml_flags.Set i
-        | None -> ());
-        true
+      (match Compenv.check_int ppf name v with
+       | Some i -> Flambda2.Expert.cont_lifting_budget := Oxcaml_flags.Set i
+       | None -> ());
+      true
     | "flambda2-expert-cont-specialization-threshold" ->
-        (match Compenv.check_int ppf name v with
-        | Some i ->
-            Flambda2.Expert.cont_spec_threshold :=
-              Oxcaml_flags.Set (Float.of_int i)
-        | None -> ());
-        true
+      (match Compenv.check_int ppf name v with
+       | Some i ->
+         Flambda2.Expert.cont_spec_threshold := Oxcaml_flags.Set (Float.of_int i)
+       | None -> ());
+      true
     | "flambda2-inline-max-depth" ->
-        Clflags.Int_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-max-depth'"
-          Flambda2.Inlining.max_depth;
-        true
+      Clflags.Int_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-max-depth'"
+        Flambda2.Inlining.max_depth;
+      true
     | "flambda2-inline-max-rec-depth" ->
-        Clflags.Int_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-max-rec-depth'"
-          Flambda2.Inlining.max_rec_depth;
-        true
+      Clflags.Int_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-max-rec-depth'"
+        Flambda2.Inlining.max_rec_depth;
+      true
     | "flambda2-inline-call-cost" ->
-        Clflags.Float_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-call-cost'"
-          Flambda2.Inlining.call_cost;
-        true
+      Clflags.Float_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-call-cost'"
+        Flambda2.Inlining.call_cost;
+      true
     | "flambda2-inline-alloc-cost" ->
-        Clflags.Float_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-alloc-cost'"
-          Flambda2.Inlining.alloc_cost;
-        true
+      Clflags.Float_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-alloc-cost'"
+        Flambda2.Inlining.alloc_cost;
+      true
     | "flambda2-inline-prim-cost" ->
-        Clflags.Float_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-prim-cost'"
-          Flambda2.Inlining.prim_cost;
-        true
+      Clflags.Float_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-prim-cost'"
+        Flambda2.Inlining.prim_cost;
+      true
     | "flambda2-inline-branch-cost" ->
-        Clflags.Float_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-branch-cost'"
-          Flambda2.Inlining.branch_cost;
-        true
+      Clflags.Float_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-branch-cost'"
+        Flambda2.Inlining.branch_cost;
+      true
     | "flambda2-inline-indirect-cost" ->
-        Clflags.Float_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-indirect-cost'"
-          Flambda2.Inlining.indirect_call_cost;
-        true
+      Clflags.Float_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-indirect-cost'"
+        Flambda2.Inlining.indirect_call_cost;
+      true
     | "flambda2-inline-poly-compare-cost" ->
-        Clflags.Float_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-poly-compare-cost'"
-          Flambda2.Inlining.poly_compare_cost;
-        true
+      Clflags.Float_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-poly-compare-cost'"
+        Flambda2.Inlining.poly_compare_cost;
+      true
     | "flambda2-inline-small-function-size" ->
-        Clflags.Int_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-small-function-size'"
-          Flambda2.Inlining.small_function_size;
-        true
+      Clflags.Int_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-small-function-size'"
+        Flambda2.Inlining.small_function_size;
+      true
     | "flambda2-inline-large-function-size" ->
-        Clflags.Int_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-large-function-size'"
-          Flambda2.Inlining.large_function_size;
-        true
+      Clflags.Int_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-large-function-size'"
+        Flambda2.Inlining.large_function_size;
+      true
     | "flambda2-inline-small-functor-size" ->
-        Clflags.Int_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-small-functor-size'"
-          Flambda2.Inlining.small_functor_size;
-        true
+      Clflags.Int_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-small-functor-size'"
+        Flambda2.Inlining.small_functor_size;
+      true
     | "flambda2-inline-large-functor-size" ->
-        Clflags.Int_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-large-functor-size'"
-          Flambda2.Inlining.large_functor_size;
-        true
+      Clflags.Int_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-large-functor-size'"
+        Flambda2.Inlining.large_functor_size;
+      true
     | "flambda2-inline-threshold" ->
-        Clflags.Float_arg_helper.parse v
-          "Bad syntax in OCAMLPARAM for 'flambda2-inline-threshold'"
-          Flambda2.Inlining.threshold;
-        true
+      Clflags.Float_arg_helper.parse
+        v
+        "Bad syntax in OCAMLPARAM for 'flambda2-inline-threshold'"
+        Flambda2.Inlining.threshold;
+      true
     | "flambda2-speculative-inlining-only-if-arguments-useful" ->
-        set' Flambda2.Inlining.speculative_inlining_only_if_arguments_useful
+      set' Flambda2.Inlining.speculative_inlining_only_if_arguments_useful
     | "flambda2-speculative-inlining-track-lifted-constants" ->
-        set' Flambda2.Inlining.speculative_inlining_track_lifted_constants
+      set' Flambda2.Inlining.speculative_inlining_track_lifted_constants
     | "flambda2-inlining-report-bin" -> set' Flambda2.Inlining.report_bin
     | "flambda2-expert-fallback-inlining-heuristic" ->
-        set Flambda2.Expert.fallback_inlining_heuristic
+      set Flambda2.Expert.fallback_inlining_heuristic
     | "flambda2-debug-concrete-types-only-on-canonicals" ->
-        set' Flambda2.Debug.concrete_types_only_on_canonicals
-    | "flambda2-debug-keep-invalid-handlers" ->
-        set' Flambda2.Debug.keep_invalid_handlers
-    | "use-cached-generic-functions" ->
-        set' Oxcaml_flags.use_cached_generic_functions
+      set' Flambda2.Debug.concrete_types_only_on_canonicals
+    | "flambda2-debug-keep-invalid-handlers" -> set' Flambda2.Debug.keep_invalid_handlers
+    | "assume-consistent-inputs" -> set' Oxcaml_flags.assume_consistent_inputs
+    | "cmxa-summaries" ->
+      Oxcaml_flags.cmxa_summaries_path := v;
+      true
+    | "use-cached-generic-functions" -> set' Oxcaml_flags.use_cached_generic_functions
     | "cached-generic-functions-path" ->
-        Oxcaml_flags.cached_generic_functions_path := v;
-        true
+      Oxcaml_flags.cached_generic_functions_path := v;
+      true
     | "reaper" -> set Flambda2.enable_reaper
     | "reaper-preserve-direct-calls" ->
-        (match String.lowercase_ascii v with
-        | "never" ->
-            Flambda2.reaper_preserve_direct_calls :=
-              Oxcaml_flags.(Set (Never : reaper_preserve_direct_calls))
-        | "always" ->
-            Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.(Set Always)
-        | "zero-alloc" ->
-            Flambda2.reaper_preserve_direct_calls :=
-              Oxcaml_flags.(Set Zero_alloc)
-        | "auto" ->
-            Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.(Set Auto)
-        | _ ->
-            Misc.fatal_error
-              "Syntax: reaper-preserve-direct-calls: \
-               always|never|zero-alloc|auto");
-        true
+      (match String.lowercase_ascii v with
+       | "never" ->
+         Flambda2.reaper_preserve_direct_calls
+         := Oxcaml_flags.(Set (Never : reaper_preserve_direct_calls))
+       | "always" -> Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.(Set Always)
+       | "zero-alloc" ->
+         Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.(Set Zero_alloc)
+       | "auto" -> Flambda2.reaper_preserve_direct_calls := Oxcaml_flags.(Set Auto)
+       | _ ->
+         Misc.fatal_error
+           "Syntax: reaper-preserve-direct-calls: always|never|zero-alloc|auto");
+      true
     | "reaper-local-fields" -> set Flambda2.reaper_local_fields
     | "reaper-unbox" -> set Flambda2.reaper_unbox
     | "reaper-change-calling-conventions" ->
-        set Flambda2.reaper_change_calling_conventions
+      set Flambda2.reaper_change_calling_conventions
     | "dissector" -> set' Clflags.dissector
-    | "dissector-partition-size" -> (
-        match float_of_string_opt v with
-        | Some f ->
-            set_dissector_partition_size f;
-            true
-        | None ->
-            raise
-              (Arg.Bad (Printf.sprintf "Expected float for %s, got %S" name v)))
+    | "dissector-partition-size" ->
+      (match float_of_string_opt v with
+       | Some f ->
+         set_dissector_partition_size f;
+         true
+       | None -> raise (Arg.Bad (Printf.sprintf "Expected float for %s, got %S" name v)))
     | "ddissector" -> set' Clflags.ddissector
     | "ddissector-sizes" -> set' Clflags.ddissector_sizes
     | "ddissector-verbose" -> set' Clflags.ddissector_verbose
     | "ddissector-partitions" -> set' Clflags.ddissector_partitions
     | "ddissector-inputs" ->
-        Clflags.ddissector_inputs := Some v;
-        true
+      Clflags.ddissector_inputs := Some v;
+      true
     | "dissector-assume-lld-without-64-bit-eh-frames" ->
-        set' Oxcaml_flags.dissector_assume_lld_without_64_bit_eh_frames
+      set' Oxcaml_flags.dissector_assume_lld_without_64_bit_eh_frames
     | "no-dissector-assume-lld-without-64-bit-eh-frames" ->
-        Oxcaml_flags.dissector_assume_lld_without_64_bit_eh_frames := false;
-        true
+      Oxcaml_flags.dissector_assume_lld_without_64_bit_eh_frames := false;
+      true
     | "manual-module-init" -> set' Oxcaml_flags.manual_module_init
     | "no-manual-module-init" ->
-        Oxcaml_flags.manual_module_init := false;
-        true
+      Oxcaml_flags.manual_module_init := false;
+      true
     | _ -> Extra_options.read_one_param ppf name v
+  ;;
 end
 
 module type Optcomp_options = sig
@@ -2734,15 +3009,14 @@ module type Opttop_options = sig
 end
 
 module Make_optcomp_options (F : Optcomp_options) = struct
-  include Make_debugging_options (F) (* provides [list3]  *)
-  include Make_oxcaml_options (F) (* provides [list2]  *)
+  include Make_debugging_options (F) (* provides [list3] *)
+  include Make_oxcaml_options (F) (* provides [list2] *)
   include Main_args.Make_optcomp_options (F) (* provides [list] *)
 
-  (* Overwrite [list] with the combination of the above options.
-     If the same string input can be recognized by two options,
-     the oxcaml implementation will take precedence,
-     but this should be avoided. To override an option from Main_args,
-     redefine it in the implementation of this functor's argument. *)
+  (* Overwrite [list] with the combination of the above options. If the same string input
+     can be recognized by two options, the oxcaml implementation will take precedence, but
+     this should be avoided. To override an option from Main_args, redefine it in the
+     implementation of this functor's argument. *)
   let list = list3 @ list2 @ list
 end
 

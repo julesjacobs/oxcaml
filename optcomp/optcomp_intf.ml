@@ -75,6 +75,9 @@ module type Backend = sig
     ppf_dump:Format.formatter ->
     unit
 
+  val compile_startup_stable :
+    keyfile:string -> output_name:string -> ppf_dump:Format.formatter -> unit
+
   val link_partial : string -> string list -> unit
 
   val create_archive : string -> string list -> unit

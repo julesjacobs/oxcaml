@@ -1,32 +1,105 @@
 (**************************************************************************)
-(*                                                                        *)
-(*                                 OCaml                                  *)
-(*                                                                        *)
-(*             Xavier Leroy, projet Cristal, INRIA Rocquencourt           *)
-(*                                                                        *)
-(*   Copyright 1996 Institut National de Recherche en Informatique et     *)
-(*     en Automatique.                                                    *)
-(*                                                                        *)
-(*   All rights reserved.  This file is distributed under the terms of    *)
-(*   the GNU Lesser General Public License version 2.1, with the          *)
-(*   special exception on linking described in the file LICENSE.          *)
-(*                                                                        *)
+(* *)
+(* OCaml *)
+(* *)
+(* Xavier Leroy, projet Cristal, INRIA Rocquencourt *)
+(* *)
+(* Copyright 1996 Institut National de Recherche en Informatique et *)
+(* en Automatique. *)
+(* *)
+(* All rights reserved. This file is distributed under the terms of *)
+(* the GNU Lesser General Public License version 2.1, with the *)
+(* special exception on linking described in the file LICENSE. *)
+(* *)
 (**************************************************************************)
 
 (* Link a set of native/flambda2 object files and produce an executable *)
 
 open Format
 
+(* Pass-1 scan timing breakdown (profiling instrumentation).
+
+   Guarded by [LINK_SCAN_PROFILE]: when set, accumulate processor time (via [Sys.time])
+   into per-bucket refs during the pass-1 scan and print a breakdown to stderr at the end
+   of the link. Buckets: read_cmxa (reading + unmarshaling library metadata), read_cmx,
+   lib_consist / unit_consist (interface/implementation CRC checks), and md5 (the
+   content-digest cost paid only by the link-plan cache key). Plan-assembly is the
+   remainder of pass1_total. CPU time is used because pass 1 is single-threaded and immune
+   to box load; end-to-end wall is measured externally. *)
+module Scan_prof = struct
+  let enabled = lazy (Sys.getenv_opt "LINK_SCAN_PROFILE" <> None)
+  let read_cmxa = ref 0.0
+  let read_cmx = ref 0.0
+  let lib_consist = ref 0.0
+  let unit_consist = ref 0.0
+  let md5 = ref 0.0
+  let pass1_total = ref 0.0
+  let n_cmxa = ref 0
+  let n_cmx = ref 0
+  let cmxa_meta_bytes = ref 0
+  let plan_snapshot_bytes = ref 0
+
+  let time bucket f =
+    if not (Lazy.force enabled)
+    then f ()
+    else (
+      let t0 = Sys.time () in
+      let r = f () in
+      bucket := !bucket +. (Sys.time () -. t0);
+      r)
+  ;;
+
+  let file_size path =
+    try
+      let ic = open_in_bin path in
+      let n = in_channel_length ic in
+      close_in ic;
+      n
+    with
+    | _ -> 0
+  ;;
+
+  let report () =
+    if Lazy.force enabled
+    then (
+      let assembly =
+        !pass1_total -. !read_cmxa -. !read_cmx -. !lib_consist -. !unit_consist
+      in
+      let pct x = 100.0 *. x /. !pass1_total in
+      Printf.eprintf "LINK_SCAN_PROFILE pass1_total=%.4f s\n" !pass1_total;
+      Printf.eprintf
+        "  read_cmxa      %.4f s  %5.1f%%  (n=%d)\n"
+        !read_cmxa
+        (pct !read_cmxa)
+        !n_cmxa;
+      Printf.eprintf
+        "  read_cmx       %.4f s  %5.1f%%  (n=%d)\n"
+        !read_cmx
+        (pct !read_cmx)
+        !n_cmx;
+      Printf.eprintf "  lib_consist    %.4f s  %5.1f%%\n" !lib_consist (pct !lib_consist);
+      Printf.eprintf
+        "  unit_consist   %.4f s  %5.1f%%\n"
+        !unit_consist
+        (pct !unit_consist);
+      Printf.eprintf "  plan_assembly  %.4f s  %5.1f%%\n" assembly (pct assembly);
+      Printf.eprintf "  md5_key_digest %.4f s\n" !md5;
+      Printf.eprintf "  cmxa_meta_bytes      %d\n" !cmxa_meta_bytes;
+      Printf.eprintf "  plan_snapshot_bytes  %d\n" !plan_snapshot_bytes;
+      if !plan_snapshot_bytes > 0
+      then
+        Printf.eprintf
+          "  redundancy_ratio     %.2fx\n"
+          (float_of_int !cmxa_meta_bytes /. float_of_int !plan_snapshot_bytes);
+      flush stderr)
+  ;;
+end
+
 module type S = sig
   val link : ppf_dump:formatter -> string list -> string -> unit
-
-  val link_shared :
-    ppf_dump:formatter -> Linkenv.t -> string list -> string -> unit
-
+  val link_shared : ppf_dump:formatter -> Linkenv.t -> string list -> string -> unit
   val link_partial : string -> string list -> unit
-
-  val check_consistency :
-    Linkenv.t -> string -> Cmx_format.unit_infos -> Digest.t -> unit
+  val check_consistency : Linkenv.t -> string -> Cmx_format.unit_infos -> Digest.t -> unit
 end
 
 module Make (Backend : Optcomp_intf.Backend) : S = struct
@@ -39,12 +112,12 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
   module CU = Compilation_unit
 
   type unit_link_info = Linkenv.unit_link_info =
-    { name : Compilation_unit.t;
-      defines : Compilation_unit.t list;
-      file_name : string;
-      crc : Digest.t;
-      imports_cmx : Import_info.t list;
-      (* for shared libs *)
+    { name : Compilation_unit.t
+    ; defines : Compilation_unit.t list
+    ; file_name : string
+    ; crc : Digest.t
+    ; imports_cmx : Import_info.t list
+    ; (* for shared libs *)
       dynunit : Cmxs_format.dynunit option
     }
 
@@ -54,35 +127,60 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
     | Unit of string * unit_infos * Digest.t
     | Library of string * library_infos
 
+  (* -cmxa-summaries: pass 1 consumes a lean per-library projection (magic CMXASUM3;
+     format + read path in [Cmxa_summary]) instead of the full [.cmxa] metadata, inflated
+     to a [library_infos] so [scan_file] is unchanged. Requires -assume-consistent-inputs:
+     summaries carry no dependency CRCs, so the consistency check they cannot feed must
+     already be off. Interface CRC entries are per-unit self entries only; globals_map
+     entries for interfaces defined by no linked unit are dropped. Unsupported with
+     -shared (dynunit metadata needs the full import tables). *)
+
   (* CR mshinwell: This should not be raising errors from [Linkenv] *)
   let read_file obj_name =
     let file_name =
-      try Load_path.find obj_name
-      with Not_found -> raise (Linkenv.Error (File_not_found obj_name))
+      try Load_path.find obj_name with
+      | Not_found -> raise (Linkenv.Error (File_not_found obj_name))
     in
     if Filename.check_suffix file_name Backend.ext_flambda_obj
-    then
-      (* This is a cmx file. It must be linked in any case. Read the infos to
-         see which modules it requires. *)
+    then (
+      (* This is a cmx file. It must be linked in any case. Read the infos to see which
+         modules it requires. *)
       let info, crc =
-        Profile.record_call ~accumulate:true "link/scan/read_cmx" (fun () ->
-            read_unit_info file_name)
+        Scan_prof.time Scan_prof.read_cmx (fun () ->
+          Profile.record_call ~accumulate:true "link/scan/read_cmx" (fun () ->
+            read_unit_info file_name))
       in
-      Unit (file_name, info, crc)
+      incr Scan_prof.n_cmx;
+      Unit (file_name, info, crc))
     else if Filename.check_suffix file_name Backend.ext_flambda_lib
-    then
+    then (
+      if Lazy.force Scan_prof.enabled
+      then
+        Scan_prof.cmxa_meta_bytes
+        := !Scan_prof.cmxa_meta_bytes + Scan_prof.file_size file_name;
+      incr Scan_prof.n_cmxa;
       let infos =
         try
-          Profile.record_call ~accumulate:true "link/scan/read_cmxa" (fun () ->
-              read_library_info file_name)
-        with Compilenv.Error (Not_a_unit_info filename) ->
+          Scan_prof.time Scan_prof.read_cmxa (fun () ->
+            Profile.record_call ~accumulate:true "link/scan/read_cmxa" (fun () ->
+              match Cmxa_summary.dir () with
+              | Some dir -> Cmxa_summary.read ~dir ~obj_name ~file_name
+              | None -> read_library_info file_name))
+        with
+        | Compilenv.Error (Not_a_unit_info filename) ->
           raise (Linkenv.Error (Not_an_object_file filename))
       in
-      Library (file_name, infos)
+      Library (file_name, infos))
     else raise (Linkenv.Error (Not_an_object_file file_name))
+  ;;
 
-  let scan_file linkenv ~shared genfns file
-      (full_paths, objfiles, tolink, cached_genfns_imports) =
+  let scan_file
+    linkenv
+    ~shared
+    genfns
+    file
+    (full_paths, objfiles, tolink, cached_genfns_imports)
+    =
     match read_file file with
     | Unit (file_name, info, crc) ->
       (* This is a cmx file. It must be linked in any case. *)
@@ -97,102 +195,96 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
         then None
         else
           Some
-            { dynu_name = info.ui_unit;
-              dynu_crc = crc;
-              dynu_defines = info.ui_defines;
-              dynu_imports_cmi = info.ui_imports_cmi |> Array.of_list;
-              dynu_imports_cmx = info.ui_imports_cmx |> Array.of_list;
-              dynu_quoted_cmi = info.ui_quoted_cmi |> Array.of_list;
-              dynu_quoted_cmx = info.ui_quoted_cmx |> Array.of_list
+            { dynu_name = info.ui_unit
+            ; dynu_crc = crc
+            ; dynu_defines = info.ui_defines
+            ; dynu_imports_cmi = info.ui_imports_cmi |> Array.of_list
+            ; dynu_imports_cmx = info.ui_imports_cmx |> Array.of_list
+            ; dynu_quoted_cmi = info.ui_quoted_cmi |> Array.of_list
+            ; dynu_quoted_cmx = info.ui_quoted_cmx |> Array.of_list
             }
       in
       let unit =
-        { name = info.ui_unit;
-          crc;
-          defines = info.ui_defines;
-          file_name;
-          imports_cmx = info.ui_imports_cmx;
-          dynunit
+        { name = info.ui_unit
+        ; crc
+        ; defines = info.ui_defines
+        ; file_name
+        ; imports_cmx = info.ui_imports_cmx
+        ; dynunit
         }
       in
       let object_file_name =
         Filename.chop_suffix file_name Backend.ext_flambda_obj ^ Backend.ext_obj
       in
-      Profile.record_call ~accumulate:true "link/scan/check_consistency"
-        (fun () ->
-          Linkenv.check_consistency linkenv ~unit
+      Scan_prof.time Scan_prof.unit_consist (fun () ->
+        Profile.record_call ~accumulate:true "link/scan/check_consistency" (fun () ->
+          Linkenv.check_consistency
+            linkenv
+            ~unit
             (Array.of_list info.ui_imports_cmi)
-            (Array.of_list info.ui_imports_cmx));
+            (Array.of_list info.ui_imports_cmx)));
       let cached_genfns_imports =
-        Generic_fns.Tbl.add ~imports:cached_genfns_imports genfns
-          info.ui_generic_fns
+        Generic_fns.Tbl.add ~imports:cached_genfns_imports genfns info.ui_generic_fns
       in
-      if
-        (not shared) && info.ui_requires_metaprogramming
-        && not !Clflags.uses_metaprogramming
-      then
-        raise (Linkenv.Error (Requires_metaprogramming_without_flag file_name));
-      ( file_name :: full_paths,
-        object_file_name :: objfiles,
-        unit :: tolink,
-        cached_genfns_imports )
+      if (not shared)
+         && info.ui_requires_metaprogramming
+         && not !Clflags.uses_metaprogramming
+      then raise (Linkenv.Error (Requires_metaprogramming_without_flag file_name));
+      ( file_name :: full_paths
+      , object_file_name :: objfiles
+      , unit :: tolink
+      , cached_genfns_imports )
     | Library (file_name, infos) ->
-      (* This is an archive file. Each unit contained in it will be linked in
-         only if needed. *)
+      (* This is an archive file. Each unit contained in it will be linked in only if
+         needed. *)
       Linkenv.add_ccobjs linkenv (Filename.dirname file_name) infos;
       let cached_genfns_imports =
-        Generic_fns.Tbl.add ~imports:cached_genfns_imports genfns
-          infos.lib_generic_fns
+        Generic_fns.Tbl.add ~imports:cached_genfns_imports genfns infos.lib_generic_fns
       in
-      Linkenv.check_cmi_consistency linkenv file_name infos.lib_imports_cmi;
-      Linkenv.check_cmx_consistency linkenv file_name infos.lib_imports_cmx;
-      if
-        (not shared) && infos.lib_requires_metaprogramming
-        && not !Clflags.uses_metaprogramming
-      then
-        raise (Linkenv.Error (Requires_metaprogramming_without_flag file_name));
+      Scan_prof.time Scan_prof.lib_consist (fun () ->
+        Linkenv.check_cmi_consistency linkenv file_name infos.lib_imports_cmi;
+        Linkenv.check_cmx_consistency linkenv file_name infos.lib_imports_cmx);
+      if (not shared)
+         && infos.lib_requires_metaprogramming
+         && not !Clflags.uses_metaprogramming
+      then raise (Linkenv.Error (Requires_metaprogramming_without_flag file_name));
       let objfiles =
         let obj_file =
-          Filename.chop_suffix file_name Backend.ext_flambda_lib
-          ^ Backend.ext_lib
+          Filename.chop_suffix file_name Backend.ext_flambda_lib ^ Backend.ext_lib
         in
-        (* MSVC doesn't support empty .lib files, and macOS struggles to make
-           them (#6550), so there shouldn't be one if the cmxa contains no
-           units. The file_exists check is added to be ultra-defensive for the
-           case where a user has manually added things to the .a/.lib file *)
+        (* MSVC doesn't support empty .lib files, and macOS struggles to make them
+           (#6550), so there shouldn't be one if the cmxa contains no units. The
+           file_exists check is added to be ultra-defensive for the case where a user has
+           manually added things to the .a/.lib file *)
         if infos.lib_units = [] && not (Sys.file_exists obj_file)
         then objfiles
         else obj_file :: objfiles
       in
-      (* [file_name] is always returned irrespective of the [objfiles]
-         calculation above and the units calculation below: the aim is to know
-         the full set of files which were provided on the command line. *)
-      ( file_name :: full_paths,
-        objfiles,
-        List.fold_right
+      (* [file_name] is always returned irrespective of the [objfiles] calculation above
+         and the units calculation below: the aim is to know the full set of files which
+         were provided on the command line. *)
+      ( file_name :: full_paths
+      , objfiles
+      , List.fold_right
           (fun info reqd ->
             let li_name = CU.name info.li_name in
-            if
-              info.li_force_link || !Clflags.link_everything
-              || Linkenv.is_required linkenv info.li_name
+            if info.li_force_link
+               || !Clflags.link_everything
+               || Linkenv.is_required linkenv info.li_name
             then (
               Linkenv.remove_required linkenv info.li_name;
               let req_by = file_name, Some li_name in
               info.li_imports_cmx
               |> Misc.Bitmap.iter (fun i ->
-                  let import = infos.lib_imports_cmx.(i) in
-                  Linkenv.add_required linkenv req_by import);
+                let import = infos.lib_imports_cmx.(i) in
+                Linkenv.add_required linkenv req_by import);
               let imports_list tbl bits =
                 List.init (Array.length tbl) (fun i ->
-                    if Misc.Bitmap.get bits i then Some tbl.(i) else None)
+                  if Misc.Bitmap.get bits i then Some tbl.(i) else None)
                 |> List.filter_map Fun.id
               in
-              let quoted_cmi =
-                imports_list infos.lib_quoted_cmi info.li_quoted_cmi
-              in
-              let quoted_cmx =
-                imports_list infos.lib_quoted_cmx info.li_quoted_cmx
-              in
+              let quoted_cmi = imports_list infos.lib_quoted_cmi info.li_quoted_cmi in
+              let quoted_cmx = imports_list infos.lib_quoted_cmx info.li_quoted_cmx in
               Linkenv.add_quoted_cmi linkenv quoted_cmi;
               Linkenv.add_quoted_cmx linkenv quoted_cmx;
               let dynunit : Cmxs_format.dynunit option =
@@ -200,91 +292,94 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
                 then None
                 else
                   Some
-                    { dynu_name = info.li_name;
-                      dynu_crc = info.li_crc;
-                      dynu_defines = info.li_defines;
-                      dynu_imports_cmi =
+                    { dynu_name = info.li_name
+                    ; dynu_crc = info.li_crc
+                    ; dynu_defines = info.li_defines
+                    ; dynu_imports_cmi =
                         imports_list infos.lib_imports_cmi info.li_imports_cmi
-                        |> Array.of_list;
-                      dynu_imports_cmx =
+                        |> Array.of_list
+                    ; dynu_imports_cmx =
                         imports_list infos.lib_imports_cmx info.li_imports_cmx
-                        |> Array.of_list;
-                      dynu_quoted_cmi = quoted_cmi |> Array.of_list;
-                      dynu_quoted_cmx = quoted_cmx |> Array.of_list
+                        |> Array.of_list
+                    ; dynu_quoted_cmi = quoted_cmi |> Array.of_list
+                    ; dynu_quoted_cmx = quoted_cmx |> Array.of_list
                     }
               in
-              let imports_cmx =
-                imports_list infos.lib_imports_cmx info.li_imports_cmx
-              in
+              let imports_cmx = imports_list infos.lib_imports_cmx info.li_imports_cmx in
               let unit =
-                { name = info.li_name;
-                  crc = info.li_crc;
-                  defines = info.li_defines;
-                  file_name;
-                  imports_cmx;
-                  dynunit
+                { name = info.li_name
+                ; crc = info.li_crc
+                ; defines = info.li_defines
+                ; file_name
+                ; imports_cmx
+                ; dynunit
                 }
               in
-              Linkenv.check_consistency linkenv ~unit [||] [||];
+              Scan_prof.time Scan_prof.unit_consist (fun () ->
+                Linkenv.check_consistency linkenv ~unit [||] [||]);
               unit :: reqd)
             else reqd)
-          infos.lib_units tolink,
-        cached_genfns_imports )
+          infos.lib_units
+          tolink
+      , cached_genfns_imports )
+  ;;
 
   (* Second pass: generate the startup file and link it with everything else *)
 
   let named_startup_file () =
     !Clflags.keep_startup_file || !Emitaux.binary_backend_available
+  ;;
 
-  (* The compiler allows [-o /dev/null], which can be used for testing linking.
-     In this case, we should not use the DWARF fission workflow during
-     linking. *)
-  let not_output_to_dev_null output_name =
-    not (String.equal output_name "/dev/null")
+  (* The compiler allows [-o /dev/null], which can be used for testing linking. In this
+     case, we should not use the DWARF fission workflow during linking. *)
+  let not_output_to_dev_null output_name = not (String.equal output_name "/dev/null")
 
   let link_shared ~ppf_dump linkenv objfiles output_name =
+    (match Cmxa_summary.dir () with
+     | Some _ -> Misc.fatal_error "-cmxa-summaries is not supported with -shared"
+     | None -> ());
     Profile.(record_call (annotate_file_name output_name)) (fun () ->
-        let genfns = Generic_fns.Tbl.make () in
-        let _full_paths, ml_objfiles, units_tolink, _ =
-          List.fold_right
-            (scan_file linkenv ~shared:true genfns)
-            objfiles
-            ([], [], [], Generic_fns.Partition.Set.empty)
-        in
-        Clflags.ccobjs := !Clflags.ccobjs @ Linkenv.lib_ccobjs linkenv;
-        Clflags.all_ccopts := Linkenv.lib_ccopts linkenv @ !Clflags.all_ccopts;
-        Backend.link_shared ml_objfiles output_name ~ppf_dump ~genfns
-          ~units_tolink)
+      let genfns = Generic_fns.Tbl.make () in
+      let _full_paths, ml_objfiles, units_tolink, _ =
+        List.fold_right
+          (scan_file linkenv ~shared:true genfns)
+          objfiles
+          ([], [], [], Generic_fns.Partition.Set.empty)
+      in
+      Clflags.ccobjs := !Clflags.ccobjs @ Linkenv.lib_ccobjs linkenv;
+      Clflags.all_ccopts := Linkenv.lib_ccopts linkenv @ !Clflags.all_ccopts;
+      Backend.link_shared ml_objfiles output_name ~ppf_dump ~genfns ~units_tolink)
+  ;;
 
   (* Link-plan cache (prototype).
 
-     The first scan pass re-opens and re-parses every [.cmxa] on the command
-     line on every relink (~2.75s / ~4.71s on two large exes, pure CPU: unmarshal
+     The first scan pass re-opens and re-parses every [.cmxa] on the command line on every
+     relink (~2.75s / ~4.71s on two large exes, pure CPU: unmarshal
      + redundant interface-CRC consistency checks; see cmxaspike/CMXA.md). When
-     [OCAMLOPT_LINK_PLAN_CACHE_DIR] is set, memoize the whole pass-1 result
-     keyed on the identity of the inputs, and skip the scan on a hit.
+       [OCAMLOPT_LINK_PLAN_CACHE_DIR] is set, memoize the whole pass-1 result keyed on the
+       identity of the inputs, and skip the scan on a hit.
 
-     Key = digest of: cmxa magic + scan-affecting flags + load path + the
-     ordered input paths + a CONTENT DIGEST of each [.cmxa] input's bytes. The
-     content digest (rather than inode/mtime/size) makes the key independent of
-     dune's artifact-materialization behavior at the cost of reading the cmxa
-     bytes (~0.4s MD5 warm; a stat-memoized or BLAKE3 digest is the future
-     optimization). Non-[.cmxa] inputs (the executable's own .cmx/.o) are keyed
-     by path only, not content — see the applicability note in E2E.md. *)
+     Key = digest of: cmxa magic + scan-affecting flags + load path + the ordered input
+     paths + a CONTENT DIGEST of each [.cmxa] input's bytes. The content digest (rather
+     than inode/mtime/size) makes the key independent of dune's artifact-materialization
+     behavior at the cost of reading the cmxa bytes (~0.4s MD5 warm; a stat-memoized or
+     BLAKE3 digest is the future optimization). Non-[.cmxa] inputs (the executable's own
+     .cmx/.o) are keyed by path only, not content — see the applicability note in E2E.md. *)
   module Link_plan_cache = struct
     type plan =
-      { full_paths : string list;
-        ml_objfiles : string list;
-        units_tolink : unit_link_info list;
-        cached_genfns_imports : Generic_fns.Partition.Set.t;
-        genfns_entries : Cmx_format.generic_fns;
-        linkenv_snapshot : string
+      { full_paths : string list
+      ; ml_objfiles : string list
+      ; units_tolink : unit_link_info list
+      ; cached_genfns_imports : Generic_fns.Partition.Set.t
+      ; genfns_entries : Cmx_format.generic_fns
+      ; linkenv_snapshot : string
       }
 
     let cache_dir () =
       match Sys.getenv_opt "OCAMLOPT_LINK_PLAN_CACHE_DIR" with
       | Some d when String.length d > 0 -> Some d
       | _ -> None
+    ;;
 
     let is_library path = Filename.check_suffix path Backend.ext_flambda_lib
 
@@ -307,11 +402,18 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
       add "|inputs|";
       List.iter
         (fun file ->
-          let path = try Load_path.find file with Not_found -> file in
+          let path =
+            try Load_path.find file with
+            | Not_found -> file
+          in
           add path;
-          if is_library path then add (Digest.to_hex (Digest.file path)))
+          if is_library path
+          then
+            add
+              (Scan_prof.time Scan_prof.md5 (fun () -> Digest.to_hex (Digest.file path))))
         objfiles;
       Digest.to_hex (Digest.string (Buffer.contents b))
+    ;;
 
     let entry_path ~dir key = Filename.concat dir (key ^ ".linkplan")
 
@@ -325,7 +427,9 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
           Misc.try_finally
             (fun () -> Some (Marshal.from_channel ic : plan))
             ~always:(fun () -> close_in ic)
-        with _ -> None)
+        with
+        | _ -> None)
+    ;;
 
     let store ~dir key (plan : plan) =
       try
@@ -335,21 +439,73 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
           (fun () -> Marshal.to_channel oc plan [])
           ~always:(fun () -> close_out oc);
         Sys.rename tmp (entry_path ~dir key)
-      with _ -> ()
+      with
+      | _ -> ()
+    ;;
   end
 
   (* Main entry point *)
 
-  let link ~ppf_dump objfiles output_name =
-    let shared = false in
+  (* -use-link-plan: the final link consumes a plan instead of scanning. Pass 1 is
+     replaced by reads of <base>.plan-[{stable,volatile}]; no [.cmxa] is resolved, so the
+     archives may be absent. Requires both startup objects prebuilt (-use-startup-stable +
+     -use-startup-volatile), so no startup codegen (hence no linkenv/globals_map) is
+     needed here. The ld inputs and C objects come from the plan (ml_objfiles / ccobjs /
+     ccopts), never re-derived from Load_path. *)
+  let link_from_plan ~ppf_dump base output_name =
+    (match !Oxcaml_flags.use_startup_stable, !Oxcaml_flags.use_startup_volatile with
+     | Some _, Some _ -> ()
+     | _ ->
+       Misc.fatal_error
+         "-use-link-plan requires -use-startup-stable and -use-startup-volatile (the \
+          plan carries no data to re-emit the startup object)");
+    let stable = Link_plan.read_stable (base ^ ".plan-stable") in
+    let volatile = Link_plan.read_volatile (base ^ ".plan-volatile") in
+    let units_tolink = Link_plan.units_tolink stable volatile in
+    Clflags.ccobjs := !Clflags.ccobjs @ stable.ccobjs;
+    Clflags.all_ccopts := stable.ccopts @ !Clflags.all_ccopts;
+    (* The scan-driven link resolves each library's [.cmxa] and thereby adds its directory
+       to [Load_path], from which [Ccomp] derives the C linker's [-L] search dirs (so stub
+       archives like [libstr_stubs.a] alongside [str.a] are found). The plan carries only
+       absolute [.a]/[.o] paths and never scans, so those dirs are absent here. Re-add
+       each objfile's directory as an [-L] so the stubs beside every archive resolve
+       exactly as they do in the scan-driven link. *)
+    let objfile_lib_dirs =
+      List.sort_uniq String.compare (List.map Filename.dirname stable.ml_objfiles)
+    in
+    Clflags.all_ccopts
+    := List.map (fun d -> "-L" ^ d) objfile_lib_dirs @ !Clflags.all_ccopts;
     Profile.(record_call (annotate_file_name output_name)) (fun () ->
+      Backend.link
+        (Linkenv.create ())
+        stable.ml_objfiles
+        output_name
+        ~cached_genfns_imports:Generic_fns.Partition.Set.empty
+        ~genfns:(Generic_fns.Tbl.make ())
+        ~units_tolink
+        ~uses_eval:false
+        ~quoted_cmi:CU.Name.Set.empty
+        ~quoted_cmx:CU.Set.empty
+        ~ppf_dump)
+  ;;
+
+  let link ~ppf_dump objfiles output_name =
+    match !Oxcaml_flags.use_link_plan with
+    | Some base -> link_from_plan ~ppf_dump base output_name
+    | None ->
+      (match Cmxa_summary.dir () with
+       | Some _ when not !Oxcaml_flags.assume_consistent_inputs ->
+         Misc.fatal_error "-cmxa-summaries requires -assume-consistent-inputs"
+       | _ -> ());
+      let shared = false in
+      Profile.(record_call (annotate_file_name output_name)) (fun () ->
         let stdlib = "stdlib" ^ Backend.ext_flambda_lib in
         let stdexit = "std_exit" ^ Backend.ext_flambda_obj in
         let objfiles =
           (* stdlib is added below as part of [early_pervasives], if required *)
           if !Clflags.nopervasives || !Clflags.output_c_object
           then objfiles
-          else objfiles @ [stdexit]
+          else objfiles @ [ stdexit ]
         in
         let genfns = Generic_fns.Tbl.make () in
         (* CR mshinwell/xclerc: This tuple should be a record *)
@@ -360,23 +516,21 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
             objfiles
             ([], [], [], Generic_fns.Partition.Set.empty)
         in
-        let ( linkenv,
-              full_paths,
-              ml_objfiles,
-              units_tolink,
-              cached_genfns_imports,
-              genfns ) =
+        let linkenv, full_paths, ml_objfiles, units_tolink, cached_genfns_imports, genfns =
           let run_pass1 () =
             let linkenv = Linkenv.create () in
             let full_paths, ml_objfiles, units_tolink, cached_genfns_imports =
-              Profile.record_call "link/scan/user_files_pass1" (fun () ->
-                  scan_user_supplied_files linkenv ~genfns ~objfiles)
+              Scan_prof.time Scan_prof.pass1_total (fun () ->
+                Profile.record_call "link/scan/user_files_pass1" (fun () ->
+                  scan_user_supplied_files linkenv ~genfns ~objfiles))
             in
-            ( linkenv,
-              full_paths,
-              ml_objfiles,
-              units_tolink,
-              cached_genfns_imports )
+            if Lazy.force Scan_prof.enabled
+            then
+              Scan_prof.plan_snapshot_bytes
+              := String.length (Linkenv.snapshot linkenv)
+                 + String.length (Marshal.to_string (full_paths, ml_objfiles) [])
+                 + String.length (Marshal.to_string units_tolink []);
+            linkenv, full_paths, ml_objfiles, units_tolink, cached_genfns_imports
           in
           match Link_plan_cache.cache_dir () with
           | None ->
@@ -386,93 +540,72 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
             let key = Link_plan_cache.compute_key ~objfiles in
             (match
                Profile.record_call "link/scan/plan_cache_load" (fun () ->
-                   Link_plan_cache.load ~dir key)
+                 Link_plan_cache.load ~dir key)
              with
-            | Some plan ->
-              Profile.record_call "link/scan/plan_cache_hit" (fun () -> ());
-              let linkenv = Linkenv.restore plan.linkenv_snapshot in
-              let genfns = Generic_fns.Tbl.of_fns plan.genfns_entries in
-              ( linkenv,
-                plan.full_paths,
-                plan.ml_objfiles,
-                plan.units_tolink,
-                plan.cached_genfns_imports,
-                genfns )
-            | None ->
-              let linkenv, fp, mo, ut, cgi = run_pass1 () in
-              Link_plan_cache.store ~dir key
-                { full_paths = fp;
-                  ml_objfiles = mo;
-                  units_tolink = ut;
-                  cached_genfns_imports = cgi;
-                  genfns_entries = Generic_fns.Tbl.entries genfns;
-                  linkenv_snapshot = Linkenv.snapshot linkenv
-                };
-              linkenv, fp, mo, ut, cgi, genfns)
+             | Some plan ->
+               Profile.record_call "link/scan/plan_cache_hit" (fun () -> ());
+               let linkenv = Linkenv.restore plan.linkenv_snapshot in
+               let genfns = Generic_fns.Tbl.of_fns plan.genfns_entries in
+               ( linkenv
+               , plan.full_paths
+               , plan.ml_objfiles
+               , plan.units_tolink
+               , plan.cached_genfns_imports
+               , genfns )
+             | None ->
+               let linkenv, fp, mo, ut, cgi = run_pass1 () in
+               Link_plan_cache.store
+                 ~dir
+                 key
+                 { full_paths = fp
+                 ; ml_objfiles = mo
+                 ; units_tolink = ut
+                 ; cached_genfns_imports = cgi
+                 ; genfns_entries = Generic_fns.Tbl.entries genfns
+                 ; linkenv_snapshot = Linkenv.snapshot linkenv
+                 };
+               linkenv, fp, mo, ut, cgi, genfns)
         in
         let uses_eval = !Clflags.uses_metaprogramming in
         if uses_eval && not Backend.supports_metaprogramming
-        then
-          raise
-            (Linkenv.Error
-               (Metaprogramming_not_supported_by_backend output_name));
+        then raise (Linkenv.Error (Metaprogramming_not_supported_by_backend output_name));
         let eval_support_files = Backend.support_files_for_eval () in
-        if uses_eval && not !Clflags.nopervasives
-        then Backend.set_load_path_for_eval ();
+        if uses_eval && not !Clflags.nopervasives then Backend.set_load_path_for_eval ();
         let full_paths_of_eval_support_files_already_provided_by_user =
           if not uses_eval
           then []
           else
-            (* Avoid double linking errors in the case where the user has
-               already passed one of the support files on the command line. The
-               equality used here is the full path as resolved by [Load_path]
-               (see also [scan_file], above). *)
+            (* Avoid double linking errors in the case where the user has already passed
+               one of the support files on the command line. The equality used here is the
+               full path as resolved by [Load_path] (see also [scan_file], above). *)
             List.filter_map
               (fun support_file ->
-                (* CR mshinwell: it's unclear that [Load_path] does anything
-                   along the lines of [realpath], so this equality might not be
-                   as good as we would like *)
+                (* CR mshinwell: it's unclear that [Load_path] does anything along the
+                   lines of [realpath], so this equality might not be as good as we would
+                   like *)
                 match Load_path.find support_file with
                 | full_path ->
                   if List.mem full_path full_paths then Some full_path else None
                 | exception Not_found ->
-                  (* An error will be reported by [scan_file], called below, in
-                     this case. (This is likely to be a compiler bug or a
-                     corrupted installation.) *)
+                  (* An error will be reported by [scan_file], called below, in this case.
+                     (This is likely to be a compiler bug or a corrupted installation.) *)
                   None)
               eval_support_files
         in
-        (* Unfortunately because of the need to determine [for_eval] in order to
-           decide whether we need to filter the list of input files, we have to
-           rerun the first [scan_file] pass here if we need to remove any
-           user-specified libraries. *)
-        (* CR mshinwell: another possibility might be to always move the eval
-           support files to the start of the command line whether or not they're
-           used, but this seems like the sort of thing that might cost someone a
-           lot of time one day *)
-        let ( linkenv,
-              _full_paths,
-              ml_objfiles,
-              units_tolink,
-              cached_genfns_imports,
-              genfns ) =
+        (* Unfortunately because of the need to determine [for_eval] in order to decide
+           whether we need to filter the list of input files, we have to rerun the first
+           [scan_file] pass here if we need to remove any user-specified libraries. *)
+        (* CR mshinwell: another possibility might be to always move the eval support
+           files to the start of the command line whether or not they're used, but this
+           seems like the sort of thing that might cost someone a lot of time one day *)
+        let linkenv, _full_paths, ml_objfiles, units_tolink, cached_genfns_imports, genfns
+          =
           match full_paths_of_eval_support_files_already_provided_by_user with
           | [] ->
-            ( linkenv,
-              full_paths,
-              ml_objfiles,
-              units_tolink,
-              cached_genfns_imports,
-              genfns )
+            linkenv, full_paths, ml_objfiles, units_tolink, cached_genfns_imports, genfns
           | _ :: _ when !Clflags.nopervasives ->
-            (* In this case we won't link any eval support files
-               automatically *)
-            ( linkenv,
-              full_paths,
-              ml_objfiles,
-              units_tolink,
-              cached_genfns_imports,
-              genfns )
+            (* In this case we won't link any eval support files automatically *)
+            linkenv, full_paths, ml_objfiles, units_tolink, cached_genfns_imports, genfns
           | _ :: _ ->
             assert uses_eval;
             let linkenv = Linkenv.create () in
@@ -484,7 +617,8 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
                   match Load_path.find file with
                   | full_path ->
                     not
-                      (List.mem full_path
+                      (List.mem
+                         full_path
                          full_paths_of_eval_support_files_already_provided_by_user)
                   | exception Not_found ->
                     (* Some kind of race has occurred, just ignore it. *)
@@ -493,14 +627,9 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
             in
             let _full_paths, ml_objfiles, units_tolink, cached_genfns_imports =
               Profile.record_call "link/scan/user_files_pass2" (fun () ->
-                  scan_user_supplied_files linkenv ~genfns ~objfiles)
+                scan_user_supplied_files linkenv ~genfns ~objfiles)
             in
-            ( linkenv,
-              _full_paths,
-              ml_objfiles,
-              units_tolink,
-              cached_genfns_imports,
-              genfns )
+            linkenv, _full_paths, ml_objfiles, units_tolink, cached_genfns_imports, genfns
         in
         let quoted_cmi = Linkenv.get_quoted_cmi linkenv in
         let quoted_cmx = Linkenv.get_quoted_cmx linkenv in
@@ -508,43 +637,69 @@ module Make (Backend : Optcomp_intf.Backend) : S = struct
           if !Clflags.nopervasives
           then []
           else
-            (* We can safely add all of the support files now without risking
-               double linking. *)
+            (* We can safely add all of the support files now without risking double
+               linking. *)
             stdlib :: (if uses_eval then eval_support_files else [])
         in
         let _full_paths, ml_objfiles, units_tolink, cached_genfns_imports =
-          (* This is just for any stdlib and eval support files which are
-             needed. *)
+          (* This is just for any stdlib and eval support files which are needed. *)
           Profile.record_call "link/scan/stdlib_and_eval_support" (fun () ->
-              List.fold_right
-                (scan_file linkenv ~shared:false genfns)
-                stdlib_and_support_files_for_eval
-                ([], ml_objfiles, units_tolink, cached_genfns_imports))
+            List.fold_right
+              (scan_file linkenv ~shared:false genfns)
+              stdlib_and_support_files_for_eval
+              ([], ml_objfiles, units_tolink, cached_genfns_imports))
         in
-        (if not shared
-         then
-           match Linkenv.extract_missing_globals linkenv with
-           | [] -> ()
-           | mg -> raise (Linkenv.Error (Missing_implementations mg)));
-        Clflags.ccobjs := !Clflags.ccobjs @ Linkenv.lib_ccobjs linkenv;
-        Clflags.all_ccopts := Linkenv.lib_ccopts linkenv @ !Clflags.all_ccopts;
-        (* put user's opts first *)
-        Backend.link linkenv ml_objfiles output_name ~ppf_dump ~genfns
-          ~units_tolink ~uses_eval ~quoted_cmi ~quoted_cmx
-          ~cached_genfns_imports)
+        if not shared
+        then (
+          match Linkenv.extract_missing_globals linkenv with
+          | [] -> ()
+          | mg -> raise (Linkenv.Error (Missing_implementations mg)));
+        Scan_prof.report ();
+        match !Oxcaml_flags.emit_link_plan with
+        | Some base ->
+          (* Standalone mode: pass 1 ran above; write the two plan artifacts and stop
+             before code emission / the final link. *)
+          let stable, volatile =
+            Link_plan.build
+              ~linkenv
+              ~units_tolink
+              ~ml_objfiles
+              ~genfns_entries:(Generic_fns.Tbl.entries genfns)
+              ~cached_imported_units:(Generic_fns.imported_units cached_genfns_imports)
+          in
+          Link_plan.write ~base stable volatile
+        | None ->
+          Clflags.ccobjs := !Clflags.ccobjs @ Linkenv.lib_ccobjs linkenv;
+          Clflags.all_ccopts := Linkenv.lib_ccopts linkenv @ !Clflags.all_ccopts;
+          (* put user's opts first *)
+          Backend.link
+            linkenv
+            ml_objfiles
+            output_name
+            ~ppf_dump
+            ~genfns
+            ~units_tolink
+            ~uses_eval
+            ~quoted_cmi
+            ~quoted_cmx
+            ~cached_genfns_imports)
+  ;;
 
   (* Exported version for Asmlibrarian / Asmpackager *)
   let check_consistency linkenv file_name u crc =
     let unit =
-      { file_name;
-        name = u.ui_unit;
-        defines = u.ui_defines;
-        crc;
-        imports_cmx = u.ui_imports_cmx;
-        dynunit = None
+      { file_name
+      ; name = u.ui_unit
+      ; defines = u.ui_defines
+      ; crc
+      ; imports_cmx = u.ui_imports_cmx
+      ; dynunit = None
       }
     in
-    Linkenv.check_consistency linkenv ~unit
+    Linkenv.check_consistency
+      linkenv
+      ~unit
       (Array.of_list u.ui_imports_cmi)
       (Array.of_list u.ui_imports_cmx)
+  ;;
 end

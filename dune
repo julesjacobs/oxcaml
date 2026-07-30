@@ -721,6 +721,8 @@
   complex_shape
   dwarf_type
   ;; optcomp/
+  cmxa_summary
+  link_plan
   linkenv
   optcompile
   optlibrarian
