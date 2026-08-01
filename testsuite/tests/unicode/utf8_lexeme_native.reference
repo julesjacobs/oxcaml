@@ -1,0 +1,16 @@
+normalize U+0141 U+0300          Ok c581cc80
+normalize U+0161 U+0301          Ok c5a1cc81
+uncapitalize U+0141 U+0300       Ok c581cc80
+normalize U+0100 U+0300          Ok c480cc80
+normalize U+898B U+0300          Ok e8a68bcc80
+normalize U+10FFFF U+0300        Ok f48fbfbfcc80
+normalize A U+0300               Ok c380
+normalize z U+030C               Ok c5be
+normalize helloA U+0300          Ok 68656c6c6fc380
+uncapitalize U+0160 eE U+0301    Ok c5a165c389
+uncapitalize U+1E9E x            Ok c39f78
+capitalize U+00FF x              Ok c5b878
+uncapitalize Hello               Ok 68656c6c6f
+capitalize hello                 Ok 48656c6c6f
+uncapitalize Hello backslash-255 Error 68656c6c6fefbfbd
+normalize U+FFFD                 Error efbfbd

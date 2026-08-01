@@ -783,6 +783,15 @@ module Utf8_lexeme = struct
 
   (* NFD to NFC conversion table for the letters above *)
 
+  (* [Uchar.unsafe_to_char] is [%identity], so for a base character outside
+     the ASCII range the scrutinee below holds a value above 255 and must
+     miss every branch. That is sound only because every base here is an
+     ASCII letter: the case values then span ['A','z'], a proper subrange of
+     the char domain, so the match compiles to an unsigned range check before
+     any table index. A table whose cases densely covered 0..255 would drop
+     that check and index out of bounds. The U+0141 and U+0161 cases in
+     testsuite/tests/unicode/utf8_lexeme.ml pin this: their low bytes are
+     'A' and 'a'. *)
   let get_known_pair c1 n2 =
     match Uchar.unsafe_to_char c1, Uchar.to_int n2 with
     | 'A', 0x300 -> Some 0xc0 (* À *)     | 'A', 0x301 -> Some 0xc1 (* Á *)
