@@ -1950,7 +1950,7 @@ static void cycle_major_heap_from_stw_single(
   work_completed_min_before_mark =
     work_completed_at_sweep_start + caml_small_heap_limit;
   CAML_GC_MESSAGE (MAJOR,
-                   "work completed: "F_U" at start of sweep",
+                   "work completed: "F_U" at start of sweep\n",
                    work_completed_at_sweep_start);
   atomic_store(&caml_gc_mark_phase_requested, 0);
   caml_atomic_counter_init(&ephe_round_info.num_domains_todo,
@@ -2260,13 +2260,12 @@ static void major_collection_slice(intnat howmuch,
     } else {
       intnat todo = diffmod (atomic_load (&total_work_incurred), wkcnt);
       todo = min2 (todo, idle);
-      CAML_GC_MESSAGE (SLICE, "Idle phase: "F_D"%s\n",
-                       todo, todo == idle ? " [finished]" : "");
       if (!atomic_compare_exchange_strong(&total_work_completed,
                                           &wkcnt, wkcnt + todo))
         goto retry_idle;
+      CAML_GC_MESSAGE (SLICE, "Idle phase: "F_D"%s\n",
+                       todo, todo == idle ? " [finished]" : "");
       account_work_completed(todo);
-      commit_major_slice_sweepwork (todo);
       if (todo == idle) request_mark_phase ();
     }
   }
