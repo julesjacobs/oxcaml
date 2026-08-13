@@ -236,7 +236,7 @@ typedef uint64_t uintnat;
 /* Default speed setting for the major GC.  The heap will grow until
    the dead objects and the free list represent this percentage of the
    total size of live objects. */
-#define Percent_free_def 80
+#define Percent_free_def 200
 
 /* The major GC adds an Idle phase when a cycle's sweeping work is
    smaller than this. */
