@@ -67,7 +67,21 @@ valuable part. The cases are not symmetric and each has a reason:
 - **Expected type refined** — do not strip. This is where a predicate is being
   demanded, so the refinement must survive into the tree for the later pass to
   turn into an obligation. Weakening here would silently discharge it.
-- **Expected type an unsolved variable** — see "Open decisions".
+- **Expected type an unsolved variable** — do not strip. **Settled:** we strip
+  only when the expectation is known. This does make the outcome depend on
+  inference order, and that is accepted rather than worked around: there is no
+  general fix, because the question "is this expectation refined" genuinely has
+  no answer yet at that point. Deferring is the honest response to an
+  undetermined expectation, and the alternatives are worse — stripping eagerly
+  decides a question that has not been asked, and rejecting turns every
+  not-yet-solved expectation into an error.
+
+  The practical consequence is worth stating so nobody treats it as a bug: in
+  `let y = if c then refined_thing else other`, whether the refinement reaches
+  `y` depends on when the variable for `y`'s type is solved. Annotate to make it
+  determinate. This is a known, bounded imprecision, not a soundness question —
+  a missed strip leaves a rigid refinement that fails loudly at the next
+  unification, it does not silently discharge anything.
 
 Critically, stripping rewrites *this occurrence*, never the declared type. The
 arrow keeps its refined domain, the record field keeps its refined type, the
@@ -196,6 +210,15 @@ gets the same rule — the join is the common payload — and each gets a test.
 - a scope check so a refinement cannot escape the scope of the program variables
   it names (`check_refinement_scope`, applied to function types). A predicate
   mentioning a parameter must not outlive the parameter
+- **occurrence-side stripping for values that arrive from a signature**
+  (`typecore.ml:9359`). **Settled: imports do not strip.** `Env.find_value`
+  keeps the signature's refined type, and the strip happens at the `Texp_ident`
+  occurrence instead. The reason is that inclusion checking needs the refined
+  signature type intact, so an import-time strip would have to keep a second,
+  unstripped copy anyway — two representations either way, and this way the
+  environment stays faithful to what the user wrote. vox2's comment describes the
+  same split: it "projects module-level refined values while leaving their
+  interface descriptions intact"
 
 **Leave:**
 
@@ -204,11 +227,14 @@ gets the same rule — the join is the common payload — and each gets a test.
   that is a design event, not a patch
 - the opt-in `~strip_refinement:false` default
 - asymmetric `if`/`else`
-- occurrence-side stripping as a *second* mechanism. vox2 strips at `Texp_ident`
-  as well as at the binder (`typecore.ml:9359`), because module-level values
-  arrive from a `.cmi` with refinements intact and never pass through the binder
-  path. That is a real gap, but the better fix is to strip on import so there is
-  one mechanism — see "Open decisions"
+
+Note that binder-side and occurrence-side stripping are *not* duplicate
+mechanisms, which was my first reading of vox2 and was wrong. They cover disjoint
+populations: the binder path handles names this compilation unit binds, the
+occurrence path handles names that arrive already typed from a signature and
+never pass through a binder. Both are needed. What we do add over vox2 is a test
+that pins which population each one serves, so a later change cannot quietly
+make one of them dead code.
 
 ## Scope of this piece
 
@@ -225,32 +251,17 @@ A consequence worth stating plainly, because it looks alarming and is intended:
 plumbing that a verifier reads; it is not a verifier, and pretending otherwise by
 adding a partial check here would be worse than the honest gap.
 
+## Settled decisions
+
+**Strip only when the expectation is known.** Recorded in the funnel above,
+including the accepted inference-order dependence.
+
+**Imports do not strip.** Recorded in the take-list above: the environment keeps
+the signature's refined type and the occurrence strips.
+
 ## Open decisions
 
-These need a ruling before implementation, not during it.
-
-**1. Expected type is an unsolved variable.** vox2 defers: it does not strip, and
-whatever happens next depends on inference order. That makes the behaviour of
-`let y = if c then refined else other` depend on when the variable is solved,
-which is exactly the kind of thing that produces bug reports nobody can
-reproduce. Options: (a) defer as vox2 does; (b) strip eagerly, treating an
-undetermined expectation as unrefined, on the grounds that refinements are never
-inferred so a variable can never legitimately become refined; (c) reject, which
-is safe but will reject reasonable programs. **I recommend (b)**: refinements
-being non-inferrable is already settled, so a type variable can only be solved to
-a refined type by unifying with a refined type, and that unification is itself a
-site that goes through the funnel. This wants a discriminating test either way.
-
-**2. Where `.cmi` values are stripped.** Strip on import, so there is one
-mechanism and `Env.find_value` never returns a refined type for a program value;
-or strip at the occurrence as vox2 does, keeping the environment faithful to the
-signature. Import-stripping is cleaner but the interface description must stay
-refined for inclusion checking, so the two representations have to be kept
-separate somewhere regardless. **I lean to occurrence-stripping** for that
-reason, contradicting my instinct above, and would like this decided by looking
-at what inclusion checking actually needs.
-
-**3. Does the arrow binder scope over obligations?** The type-formers piece put
+**Does the arrow binder scope over obligations?** The type-formers piece put
 an optional `Ident.t` on the arrow so `x:int{ x > 0 } -> int{ _ >= x }` can
 mention `x` in the codomain. When we emit an obligation for the codomain, `x`
 must be bound to the actual argument. That substitution is the later pass's job,
