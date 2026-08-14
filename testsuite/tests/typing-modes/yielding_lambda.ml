@@ -1,5 +1,5 @@
 (* TEST
-   flags = "-dlambda -dno-unique-ids -extension include_functor";
+   flags = "-dlambda -dno-unique-ids -dcanonical-ids -extension include_functor";
    expect;
 *)
 

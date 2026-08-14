@@ -1,5 +1,5 @@
 (* TEST
-   flags = "-dlambda -dno-locations -dno-unique-ids -extension layouts_alpha";
+   flags = "-dlambda -dno-locations -dno-unique-ids -dcanonical-ids -extension layouts_alpha";
    expect;
 *)
 
