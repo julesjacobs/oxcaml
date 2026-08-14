@@ -109,20 +109,21 @@ reviewer's version had only been validated against four test directories.
    modality (touches modality composition, zapping, inclusion, cmi format)
    or a special-cased representation-bearing marker; either is a piece of
    its own. Currently `@@ erased` is rejected, not ignored.
-2. **Flexible arrow modes zap to legacy, and for erasure the arrow mode is
-   the ABI.** `let id2 : ('a -> 'b) -> ('a -> 'b) = fun g -> g` applied to
-   `f : int @ erased -> int` gives `int -> int` — the erasure is dropped and
-   pinned Retained (re-ascribing `@ erased` fails), so calling it passes a
-   real word to a closure with the erased ABI and aborts at run time. The
-   locality analogue is rejected (measured), so this is erasure-specific:
-   zapping a flexible arrow argument mode to legacy only strengthens caller
-   obligations on the other axes, but for erasure it changes the calling
-   convention. Relatedly, a call site can infer an unannotated parameter's
-   erasure (`f (erased_ 5)` gives `f : 'a @ erased -> int`), against the
-   doc's "never inferred" rule. Fix criterion: an arrow's erasure component
-   must never move between definition and any view of the type — connect or
-   fail, never default. Mode-solver-level decision; repros in the design doc
-   and review reports.
+2. **[Resolved after this report was first written] Arrow-mode laundering.**
+   The queued RED test (`erasure_gaps.ml`) plus experiments identified the
+   mechanism: not `instance`, not moregen/subtyping, but the arrow-mode
+   loosening in `Typecore.type_argument` (`loosen_arrow_modes`), which gives
+   inferred function arguments contravariant/covariant mode subsumption —
+   safe for every pre-existing axis, ABI-changing for erasure. Fixed by
+   equating the erasure component instead of loosening it; all three
+   spellings (annotation, sealing, coercion) now agree, locality analogues
+   verified unchanged, full suite green. Erased optionals without a default
+   also now agree with their callers (retained convention on both sides).
+   **Still open (gap 2):** a call site can infer an unannotated parameter's
+   erasure within one structure (`h (erased_ 5)` gives
+   `h : 'a @ erased -> int`), against the doc's "never inferred" rule —
+   pinned in `erasure_gaps.ml`, needs a decision on fixing unannotated arrow
+   erasure at creation vs. rejecting erased arguments to flexible arrows.
 3. **Deferred, documented in `erasure.md`:** zero-width erased *returns*
    (currently a correct one-word placeholder), structure-level erased
    bindings (rejected; needs the same missing weakening-modality story as
