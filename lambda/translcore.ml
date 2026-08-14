@@ -1946,8 +1946,19 @@ and transl_function_without_attributes
      Typing restricts patterns for erased values to variables and aliases. *)
   List.iter
     (fun fp ->
+       let optional =
+         (* Optional parameters keep the retained convention on both sides
+            of a call; [Typeopt.function_arg_erasures] agrees on the caller
+            side. This covers both the defaulted (Tparam_optional_default)
+            and non-defaulted (Tparam_pat with an Optional label) forms. *)
+         match fp.fp_arg_label with
+         | Optional _ -> true
+         | Nolabel | Labelled _ | Position _ -> false
+       in
        match fp.fp_kind with
-       | Tparam_pat pat when Translmode.erased_mode_l fp.fp_mode.mode_modes ->
+       | Tparam_pat pat
+         when (not optional)
+              && Translmode.erased_mode_l fp.fp_mode.mode_modes ->
            mark_erased_ident fp.fp_param;
            mark_erased_pat pat
        | Tparam_pat _ | Tparam_optional_default _ -> ())

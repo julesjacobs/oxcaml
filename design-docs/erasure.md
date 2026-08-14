@@ -536,42 +536,49 @@ positions consume.
 - **Erased args to external primitives** keep the retained calling
   convention (no `%`-primitive has erased params today).
 
-### Known gap: flexible arrow modes zap to legacy, and for erasure the
-arrow mode is the ABI
+### Resolved gap: arrow-mode loosening laundered erasure; call-site
+inference remains
 
-Passing a function through a generic wrapper drops its erasure:
+Higher-order code used to drop erasure from arrows:
 
     let id2 : ('a -> 'b) -> ('a -> 'b) = fun g -> g
     let f (x : int @ erased) = 42
-    let laundered = id2 f     (* : int -> int — the @ erased is gone *)
+    let laundered = id2 f     (* was : int -> int; called, it aborted *)
 
-`laundered`'s arrow arg is not a flexible variable afterwards: ascribing it
-back to `int @ erased -> int` fails ("has type int -> int"), so the mode was
-pinned to Retained somewhere between instantiating `id2`'s scheme and
-publishing the application's type — arrow modes that are not tied to a
-monomorphic function's own type get zapped to legacy. Calling `laundered`
-then passes a real word to a closure compiled with the erased ABI, and the
-program aborts at run time.
+The mechanism was not `instance` (a lambda-bound function laundered the same
+way with no instantiation involved) and not moregen or `subtype_rec` (both
+enforce invariance): it was `loosen_arrow_modes` in `Typecore.type_argument`,
+which deliberately rebuilds an expected arrow with `newvar_above` on the
+argument mode and `newvar_below` on the return mode — built-in
+contravariant/covariant arrow-mode subsumption at every place an inferred
+function meets an arrow expectation. That loosening is the safe direction
+for every pre-existing axis; for erasure, "above" on the argument is toward
+Erased, so the actual function's erased ABI satisfied the loosened copy
+while the visible arrow stayed retained. Fixed by equating the erasure
+component of the loosened argument mode instead of loosening it, making this
+third subsumption path agree with the other two: an erased-parameter
+function cannot flow to a retained-parameter arrow expectation in either
+spelling. There is no single ABI serving both, and OCaml does not
+monomorphize, so generic HOFs cannot accept erased-parameter callbacks; the
+locality analogues were verified unaffected. `testsuite/tests/vox/
+erasure_gaps.ml` pins the before/after as a red/green pair.
 
-Measured control: the locality analogue is *rejected* (`id2 store` with a
-global-argument `store` refuses an ascription to `local -> unit`, and
-applying it to a `local_` value fails), so this is not a general
-instantiation-soundness hole. The general principle: zapping a flexible
-arrow *argument* mode to legacy is safe for every pre-existing axis, because
-legacy is the strongest caller obligation on those axes and over-delivering
-costs nothing when modes do not affect representation. Erasure is the first
-axis where the argument mode *is* the calling convention, so "flexible, then
-zapped" silently changes ABI. Relatedly, a call site can still infer an
-unannotated parameter's erasure (`let f x = 42` + `f (erased_ 5)` gives
-`f : 'a @ erased -> int`), against this doc's "never inferred" rule.
+Erased optional parameters without a default used to get the void layout on
+the callee side only (the caller and the defaulted form use the retained
+convention); the callee-side marking now skips Optional-labelled parameters,
+so all optional spellings agree on the retained convention. Rejecting erased
+optionals outright remains an alternative if the modally-erased-but-
+physically-passed combination proves confusing.
 
-The fix criterion is therefore: the erasure component of an arrow mode must
-never move between a function's definition and any view of its type — unify
-must connect or fail, never default. Whether that is done by preserving mode
-identity through `instance`/zapping, or by fixing unannotated arrow erasure
-to Retained at creation (rejecting `id2 f`), is a mode-solver-level decision
-this piece does not attempt; flagged for a decision. Repros:
-`~/tmp/erasure-triage/{e1,e2,loc1,loc2}.ml` and the review reports.
+Still open (gap 2 in `erasure_gaps.ml`): a call site can infer an
+unannotated parameter's erasure within one structure (`let h x = 42` plus
+`ignore (h (erased_ 5))` gives `h : 'a @ erased -> int`), against this doc's
+"never inferred" rule — the argument's mode raises the arrow's argument-mode
+variable before the binding's modes are zapped to legacy. Self-consistent
+per unit and across `.cmi`s, but a silent ABI change; the fix (fixing
+unannotated arrow erasure at creation, or rejecting erased arguments to
+flexible arrows) interacts with annotation processing order and stays
+flagged for a decision.
 
 ### Erasure and mode crossing
 

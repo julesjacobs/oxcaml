@@ -4,9 +4,18 @@
 
 (* Known conformance gaps on the erasure axis, found by review.
 
-   Each block records CURRENT behaviour, which is wrong. Fixing a gap means
-   re-promoting this file, so the expectation diff shows exactly what changed.
-   Do not "fix" a block by editing the expectation.
+   Each block records CURRENT behaviour. Blocks still marked GAP are wrong.
+   Fixing a gap means re-promoting this file, so the expectation diff shows
+   exactly what changed. Do not "fix" a block by editing the expectation.
+
+   Gaps 1a/1b/1d are FIXED: the laundering mechanism was the arrow-mode
+   loosening in [Typecore.type_argument] ([loosen_arrow_modes]), which grants
+   arrow arguments contravariant/covariant mode subsumption; the erasure
+   component of the argument mode is now equated instead of loosened, so all
+   three now agree with the explicit-coercion case. Gap 3 is FIXED by giving
+   non-defaulted erased optionals the retained convention on the callee side
+   too (matching the defaulted spelling and the caller), rather than the
+   rejection anticipated below. Gap 2 (call-site inference) remains open.
 
    Whether an argument is passed is ABI, so the design requires erasure to be
    invariant in argument position: an arrow whose parameter is erased must not
@@ -29,26 +38,31 @@ val f : int @ erased -> int -> int = <fun>
 |}]
 
 (* ------------------------------------------------------------------ *)
-(* GAP 1a: annotating a let-bound value drops the erasure. Referencing [f]
-   instantiates it, so this is also the arrow-mode instantiation route: the
-   generic arrow's modes are copied into fresh independent variables, which is
-   sound for locality but not for erasure. *)
+(* FIXED (was GAP 1a): annotating a let-bound value used to drop the
+   erasure. *)
 
 let a : int -> int -> int = f
 
 [%%expect {|
-val a : int -> int -> int = <fun>
+Line 1, characters 28-29:
+1 | let a : int -> int -> int = f
+                                ^
+Error: The value "f" has type "int @ erased -> int -> int"
+       but an expression was expected of type "int -> int -> int"
 |}]
 
-(* GAP 1b: the same laundering with no instantiation involved, which is what
-   shows the gap is not specific to [instance]. [p] is lambda-bound, its type
-   is fixed by the annotation, and returning it at a retained-parameter arrow
-   is still accepted. *)
+(* FIXED (was GAP 1b): the same laundering with no instantiation involved,
+   which is what showed the mechanism was the [type_argument] loosening and
+   not [instance]. *)
 
 let b (p : int @ erased -> int -> int) : int -> int -> int = p
 
 [%%expect {|
-val b : (int @ erased -> int -> int) -> int -> int -> int = <fun>
+Line 1, characters 61-62:
+1 | let b (p : int @ erased -> int -> int) : int -> int -> int = p
+                                                                 ^
+Error: The value "p" has type "int @ erased -> int -> int"
+       but an expression was expected of type "int -> int -> int"
 |}]
 
 (* The comparison case, and the reason the gap survived review: spelled as an
@@ -64,10 +78,10 @@ Line 1, characters 41-65:
 Error: Type "int @ erased -> int -> int" is not a subtype of "int -> int -> int"
 |}]
 
-(* GAP 1d: the same laundering through ordinary sealing of an ordinary
-   polymorphic higher-order function, with no mode annotation anywhere in the
-   generic code. This is the form that shows the footprint is not exotic: any
-   [('a -> int) -> 'a -> int] in a signature will do it. *)
+(* FIXED (was GAP 1d): the same laundering through an ordinary polymorphic
+   higher-order function. An erased-parameter function can no longer be
+   passed where a retained-parameter arrow is expected; there is no single
+   ABI that serves both, and OCaml does not monomorphize. *)
 
 module App : sig
   val app : ('a -> int) -> 'a -> int
@@ -81,7 +95,11 @@ let e = App.app d
 [%%expect {|
 module App : sig val app : ('a -> int) -> 'a -> int end
 val d : int @ erased -> int = <fun>
-val e : int -> int = <fun>
+Line 8, characters 16-17:
+8 | let e = App.app d
+                    ^
+Error: The value "d" has type "int @ erased -> int"
+       but an expression was expected of type "'a -> int"
 |}]
 
 (* ------------------------------------------------------------------ *)
@@ -137,10 +155,11 @@ module N : sig val h : 'a -> int end
    against (args_arity V x int)], SIGABRT, exit 134. The defaulted spelling
    runs correctly, which is what isolates the label as the cause.
 
-   Recorded here as the accepted declaration, because the fix is expected to
-   reject it the way externals with erased parameters are already rejected:
-   the erased optional convention does not exist. When that lands this block
-   becomes an error block, which is the diff a reviewer should see. *)
+   FIXED, by the other route than anticipated here: instead of rejecting the
+   declaration, the callee-side marking now skips Optional-labelled
+   parameters (like the caller side already did), so both spellings keep the
+   retained convention and agree. Rejection remains an option if accepting
+   modally-erased-but-physically-passed optionals proves confusing. *)
 
 let opt ?a:(a : int option @ erased) () = 1
 

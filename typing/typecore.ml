@@ -10330,7 +10330,17 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       when lv' = generic_level || not !Clflags.principal ->
       let ty_res', ty_res, changed = loosen_arrow_modes ty_res' ty_res in
       let mret, changed' = Alloc.newvar_below mret in
+      let marg0 = marg in
       let marg, changed'' = Alloc.newvar_above marg in
+      (* Erasure is invariant in argument position: whether an argument is
+         physically passed is ABI, so it must not be loosened away like the
+         other axes. Without this, passing f : t @ erased -> u to a generic
+         ('a -> 'b) parameter yields a retained-looking arrow over a closure
+         with the erased ABI. *)
+      if changed'' then
+        Erasure.equate_exn
+          (Alloc.proj_comonadic Erasure marg0)
+          (Alloc.proj_comonadic Erasure marg);
       if changed || changed' || changed'' then
         (* Each rebuilt arrow keeps its own binder: the refinements under
            it reference that ident. *)
