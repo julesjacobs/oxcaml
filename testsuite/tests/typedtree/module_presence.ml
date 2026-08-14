@@ -1,5 +1,5 @@
 (* TEST
- flags = "-dtypedtree -dno-locations";
+ flags = "-dtypedtree -dno-locations -dno-unique-ids";
  expect;
 *)
 
@@ -8,7 +8,7 @@ module X = struct end
 [
   structure_item
     Tstr_module (Present)
-    X/327
+    X
       module_expr
         Tmod_structure
         []
@@ -22,7 +22,7 @@ module X = struct end [@foo]
 [
   structure_item
     Tstr_module (Present)
-    X/328
+    X
       module_expr
         attribute "foo"
           []
@@ -38,9 +38,9 @@ module Y = X
 [
   structure_item
     Tstr_module (Absent)
-    Y/329
+    Y
       module_expr
-        Tmod_ident "X/328"
+        Tmod_ident "X"
 ]
 
 module Y = X
@@ -50,15 +50,15 @@ module type T = sig module Y = X end
 [%%expect{|
 [
   structure_item
-    Tstr_modtype "T/331"
+    Tstr_modtype "T"
       module_type
         Tmty_signature
         [
           signature_item
             Tsig_module (Absent)
-            Y/330
+            Y
               module_type
-                Tmty_alias "X/328"
+                Tmty_alias "X"
         ]
         join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,stateful)
         []
