@@ -20,7 +20,13 @@ val g_total : int -> int = <fun>
 - : int = 1
 |}]
 
-(* partial rejected where total is expected *)
+(* partial rejected where total is expected.  [g_partial]'s body could check
+   at total, but unannotated bindings at the interactive toplevel (which is
+   where expect-test phrases live) are pinned at legacy — partial here,
+   exactly as they are pinned nonportable on the portability axis.  Local
+   lets and module items are inferred instead: [let g = fun x -> x + 1 in
+   f g] and [module M = struct let g = fun x -> x + 1 end ... f M.g] are both
+   accepted. *)
 let g_partial = fun x -> x + 1
 let _ = f g_partial
 [%%expect{|
