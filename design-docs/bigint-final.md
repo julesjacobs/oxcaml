@@ -10,7 +10,7 @@ Branch `jujacobs/vox/bigint`, clean tree, full suite **2443 passed / 0 failed**:
   convention)
 - `d08334af83` the module: `stdlib/bigint.{ml,mli}` + wiring
   (`StdlibModules`, `stdlib.ml(i)`, `dune`, `.depend`) +
-  `testsuite/tests/lib-bigint/`
+  `testsuite/tests/vox/bigint/`
 - `65b952049f` re-promotes 6 ident-stamp-sensitive expectations (+1 stamp
   shift from adding a stdlib module; verified pure renumbering)
 - `175af84faf` review-driven test strengthening
