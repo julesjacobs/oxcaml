@@ -99,9 +99,32 @@ let unique_name = function
 
 let canonical_name i = if !Clflags.canonical_ids then name i else unique_name i
 
+let canonical_stamps = s_table Hashtbl.create 0
+let next_canonical_stamp = s_table Hashtbl.create 0
+
+let canonicalize name stamp =
+  try Hashtbl.find !canonical_stamps (name, stamp)
+  with Not_found ->
+    let canonical_stamp =
+      try Hashtbl.find !next_canonical_stamp name
+      with Not_found -> 0
+    in
+    Hashtbl.replace !next_canonical_stamp name
+      (canonical_stamp + 1);
+    Hashtbl.add !canonical_stamps (name, stamp)
+      canonical_stamp;
+    canonical_stamp
+
 let unique_toplevel_name = function
   | Local { name; stamp }
-  | Scoped { name; stamp } -> name ^ "/" ^ Int.to_string stamp
+  | Scoped { name; stamp } ->
+      (* Canonicalization keeps the names injective, so toplevel bindings
+         still get distinct keys; it makes -dlambda dumps of the toplevel
+         insensitive to global stamp drift (e.g. from stdlib growth). *)
+      let stamp =
+        if !Clflags.canonical_ids then canonicalize name stamp else stamp
+      in
+      name ^ "/" ^ Int.to_string stamp
   | Global name
   | Predef { name; _ } -> name
   | Global_with_args g -> global_name g
@@ -175,22 +198,6 @@ let to_global = function
   | Global head -> Some (Global_module.Name.create_no_args head)
   | Global_with_args g -> Some g
   | _ -> None
-
-let canonical_stamps = s_table Hashtbl.create 0
-let next_canonical_stamp = s_table Hashtbl.create 0
-
-let canonicalize name stamp =
-  try Hashtbl.find !canonical_stamps (name, stamp)
-  with Not_found ->
-    let canonical_stamp =
-      try Hashtbl.find !next_canonical_stamp name
-      with Not_found -> 0
-    in
-    Hashtbl.replace !next_canonical_stamp name
-      (canonical_stamp + 1);
-    Hashtbl.add !canonical_stamps (name, stamp)
-      canonical_stamp;
-    canonical_stamp
 
 let pp_stamped ppf (name, stamp) =
   let open Format_doc in
