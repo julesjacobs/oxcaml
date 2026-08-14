@@ -536,23 +536,42 @@ positions consume.
 - **Erased args to external primitives** keep the retained calling
   convention (no `%`-primitive has erased params today).
 
-### Known gap: instantiation treats arrow erasure as implicitly polymorphic
+### Known gap: flexible arrow modes zap to legacy, and for erasure the
+arrow mode is the ABI
 
-`instance` copies a generic arrow's modes into fresh, *independent*
-variables. For locality this loses only precision; for erasure it changes
-the ABI: `let id2 : ('a -> 'b) -> ('a -> 'b) = fun g -> g` applied to
-`f : int @ erased -> int` gives an application whose visible arrow reads
-retained while the underlying closure has the erased ABI, and the program
-aborts at run time (review finding, repro in the report). Relatedly, an
-unannotated function's parameter erasure can be inferred from a call site
-(`let f x = 42` + `f (erased_ 5)` gives `f : 'a @ erased -> int`), against
-this doc's "never inferred" rule — self-consistent per unit and across
-`.cmi`s, but a silent ABI change.
+Passing a function through a generic wrapper drops its erasure:
 
-Both have one root: arrow-mode instantiation must either preserve the
-erasure component's identity (no fresh copy) or fix it to Retained unless
-annotated. Each option needs mode-solver work that this piece does not
-attempt; flagged for a decision.
+    let id2 : ('a -> 'b) -> ('a -> 'b) = fun g -> g
+    let f (x : int @ erased) = 42
+    let laundered = id2 f     (* : int -> int — the @ erased is gone *)
+
+`laundered`'s arrow arg is not a flexible variable afterwards: ascribing it
+back to `int @ erased -> int` fails ("has type int -> int"), so the mode was
+pinned to Retained somewhere between instantiating `id2`'s scheme and
+publishing the application's type — arrow modes that are not tied to a
+monomorphic function's own type get zapped to legacy. Calling `laundered`
+then passes a real word to a closure compiled with the erased ABI, and the
+program aborts at run time.
+
+Measured control: the locality analogue is *rejected* (`id2 store` with a
+global-argument `store` refuses an ascription to `local -> unit`, and
+applying it to a `local_` value fails), so this is not a general
+instantiation-soundness hole. The general principle: zapping a flexible
+arrow *argument* mode to legacy is safe for every pre-existing axis, because
+legacy is the strongest caller obligation on those axes and over-delivering
+costs nothing when modes do not affect representation. Erasure is the first
+axis where the argument mode *is* the calling convention, so "flexible, then
+zapped" silently changes ABI. Relatedly, a call site can still infer an
+unannotated parameter's erasure (`let f x = 42` + `f (erased_ 5)` gives
+`f : 'a @ erased -> int`), against this doc's "never inferred" rule.
+
+The fix criterion is therefore: the erasure component of an arrow mode must
+never move between a function's definition and any view of its type — unify
+must connect or fail, never default. Whether that is done by preserving mode
+identity through `instance`/zapping, or by fixing unannotated arrow erasure
+to Retained at creation (rejecting `id2 f`), is a mode-solver-level decision
+this piece does not attempt; flagged for a decision. Repros:
+`~/tmp/erasure-triage/{e1,e2,loc1,loc2}.ml` and the review reports.
 
 ### Erasure and mode crossing
 
