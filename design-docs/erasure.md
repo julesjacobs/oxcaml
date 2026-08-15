@@ -614,6 +614,66 @@ unannotated arrow erasure at creation, or rejecting erased arguments to
 flexible arrows) interacts with annotation processing order and stays
 flagged for a decision.
 
+### Round-2 soundness review: four more laundering/observation paths closed
+
+A second review loop (two claude lenses + codex, soundness only) on the merged
+tip found four paths where an erased value was observed at run time or a
+caller/callee ABI disagreed, each with a reproduced segfault, silent wrong
+value, or compiler abort. All are fixed and pinned in `erasure_gaps.ml`.
+
+- **Coercion loosening.** `(e :> ty)` with a non-closed target does not go
+  through `subtype_rec`; it uses `Ctype.build_subtype`, whose `Tarrow` case
+  loosens the argument mode with `build_submode_neg` (`newvar_above`). That is
+  a *fourth* arrow-mode subsumption path — `moregen`, `subtype_rec`, `unify`
+  and `type_argument`'s `loosen_arrow_modes` were the three already made
+  invariant. It laundered an erased-parameter function into a retained arrow.
+  Fixed by equating the erasure component of the argument mode in
+  `build_subtype`. The lesson: erasure invariance in argument position has to
+  be asserted at *every* place arrow modes are related directionally; there is
+  no single chokepoint.
+
+- **Optional parameters cannot be erased.** An erased optional is a
+  contradiction: the type says erased, but an optional is physically passed as
+  an option, so codegen keeps it retained. The three sides of a call
+  (`function_arg_erasures`, the callee marking, the partial-application eta
+  wrapper) could not all honour it, and the disagreement leaked a placeholder
+  into a real slot. Rejected outright, at the definition site
+  (`split_function_ty`) and in written arrow types (`Typetexp`). This
+  supersedes the earlier per-side carve-outs, which are removed.
+
+- **External result arrows.** The erased-external-parameter check walked only
+  the arity spine, so an erased parameter in a *result* arrow (a stub
+  returning a closure) escaped. Replaced with a whole-type walk.
+
+- **Modules never store erased values.** A local module reached through
+  `let open struct ... end` stored an erased binding as a void operand in a
+  value block. Fixed at the root: a module allocation's erasure is capped to
+  Retained (a module is a runtime block), so the existing structure-item check
+  rejects erased items in local modules exactly as it already did for
+  compilation units.
+
+- **Splice and magic-staged quotation body** were raw `Value.max` read
+  positions accepting an erased code value the splice reads at
+  program-generation time (segfault); both now require retained, and the
+  overwrite cell mode is pinned retained as the last such position.
+
+Extensive negative results were recorded too: the ambient rule does not leak
+out of `erased_` through modules/objects/first-class modules; structural
+propagation, argument invariance through functors/first-class-modules/classes,
+the closure and `close_over` carve-outs, partial application and currying,
+`.cmi` round trips, and `%apply`/`%revapply` all held under compile-and-run in
+both backends.
+
+### Remaining non-soundness robustness gap
+
+`erased_` (or an erased occurrence) at a SIMD vector layout hits a
+`Misc.fatal_error` in `transl_erased` rather than a located user error — the
+type checker accepts the program and translation crashes. It is not a runtime
+soundness hole (no code is produced), and it needs `-extension simd` to reach.
+Vector layouts have no zero constant to use as a placeholder; the clean fix is
+to reject an erased occurrence at a vector layout during type checking, as
+erased externals are rejected. Left for a follow-up.
+
 ### Erasure and mode crossing
 
 No type crosses erasure, ever: an erased value does not exist, so treating

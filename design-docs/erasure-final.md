@@ -131,6 +131,35 @@ reviewer's version had only been validated against four test directories.
    (retained convention on both sides), erased array elements, and the
    `e @ total` requirement that ties into the totality piece.
 
+## Round-2 soundness review (second loop)
+
+A soundness-only review loop on the merged tip (two claude lenses + codex)
+found and closed four more paths where an erased value could be observed at
+run time or caller/callee ABIs could disagree — each reproduced (segfault,
+silent wrong value, or compiler abort) before fixing, each pinned in
+`erasure_gaps.ml`:
+
+1. `(e :> ty)` coercion with a non-closed target laundered an erased parameter
+   into a retained arrow via a fourth arrow-mode loosening path
+   (`Ctype.build_subtype`) that argument invariance had not reached — verified
+   silent garbage and a segfault. Fixed by equating erasure there.
+2. Erased optional parameters (type says erased, codegen keeps the option's
+   retained convention) leaked a placeholder into a real slot — now rejected
+   outright, at the definition site and in written arrow types.
+3. An external's *result* arrow could carry an erased parameter (a stub
+   returning a closure); the check now walks the whole type.
+4. A local module (`let open struct ... end`) stored an erased binding as a
+   void operand in a value block; fixed by capping a module allocation's
+   erasure to Retained. Splice and the magic-staged quotation body were raw
+   `Value.max` read positions accepting an erased code value (segfault); both
+   now require retained, as does the overwrite cell mode.
+
+Full suite green after the batch (only the two pre-existing dev-harness
+failures). One non-soundness robustness gap remains: an erased occurrence at a
+SIMD vector layout is a `Misc.fatal_error` in translation rather than a located
+type error (needs `-extension simd`; no code produced, so not a runtime
+hole) — flagged for follow-up.
+
 ## Tooling friction observed
 
 - The dev watcher's dune repeatedly wedges: `dune rpc build` hangs forever
