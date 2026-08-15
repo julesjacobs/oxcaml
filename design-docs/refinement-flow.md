@@ -18,13 +18,46 @@ tree this piece produces; the tree is the interface between the two pieces.
 
 ## The invariant
 
-**No expression node's `exp_type` has a refined head.**
+**The typechecker never gives an expression node a refined head.** Every site
+that turns a declared type into an expression's type strips the head first,
+and every site that checks against a refined head checks against the payload
+instead.
 
 Refined types live only where they were declared: value descriptions (the
 environment and the `.cmi`), arrow domains and codomains, type declarations,
 `pat_type` on patterns, and the obligation markers this piece adds. Nested
 refinements — `int{p} list`, an arrow with a refined domain — appear in
 `exp_type` freely; only the head is governed.
+
+This is a construction-time discipline, not a property the final tree can
+promise. The strips run when a node is built, but unification is global and
+time-extended: a node whose type is still an undetermined variable at
+construction carries the variable itself, and a *later* unification can solve
+that variable against a declared refined type after the strips have run. In
+`let f g = (g (), (g : unit -> int{p}))`, the apply node `g ()` is built while
+`g`'s codomain is `'b` — nothing to strip — and the annotation on the second
+component then solves `'b := int{p}`; the first component keeps the refined
+head, and `f` infers `... -> int{p} * (unit -> int{p})`. Swap the components
+and the strip fires and it infers `int`. So the honest global statement is:
+
+> A refined head on an expression node is always a type variable that was
+> later solved against a declared refinement. The typechecker never places
+> one directly, and one never originates from an expression.
+
+The residue this leaves is bounded and directional:
+
+- **Predicates are never invented.** Every refined head traces to a
+  refinement somebody wrote; variable solving is the only transport, and a
+  variable only meets a refined type by instantiating a declared one.
+- **Nothing is discharged silently.** Obligations exist only at marked sites
+  and apply nodes; a stale refined head meeting a bare concrete type is the
+  type-formers rigid clash — a rejection.
+- **Acceptance at the margin is order-dependent, conservatively.** With
+  `let y = g () in ...`: annotate `g` before using `y` and the occurrence
+  strip fires; use `y` at `int` first and a later refined annotation on `g`
+  is a clash. Both orders are sound; one is a rejection the other accepts.
+  This imprecision is accepted rather than worked around (see the decision
+  at the end).
 
 Head-only is deliberate and load-bearing. Stripping the head of the type of the
 value at hand is a projection: forgetting a fact about *this* value. Stripping
@@ -37,21 +70,22 @@ refinements flow compositionally instead: checking `[a; b]` against
 What the invariant buys:
 
 - **`ctype` gains no new arms.** Unification never meets a one-sided refined
-  head coming from the expression side, because expression types never carry
-  one. The type-formers rigid clash stays as the backstop, so a missed strip is
-  a loud type error at the use site — never a silent discharge of a predicate.
-  In particular there is no unify-time "weakening" rule anywhere: no hook in
-  `unify_exp`, `rue`, `moregen` or `subtype`. Everything happens in `Typecore`,
-  before unification.
-- **A refinement can never be inferred.** A type variable acquires a refined
-  type only by unifying with a *declared* type (instantiating
-  `val g : int{p} -> unit` against `'a -> 'b` solves `'a := int{p}` — that is
-  higher-order contract flow and is wanted). It can never acquire one from an
-  expression, because expressions don't have refined heads. So
+  head placed by an expression, because expressions never produce refined
+  heads. The type-formers rigid clash stays as the backstop, so a missed strip
+  is a loud type error at the use site — never a silent discharge of a
+  predicate. In particular there is no unify-time "weakening" rule anywhere:
+  no hook in `unify_exp`, `rue`, `moregen` or `subtype`. Everything happens in
+  `Typecore`, before unification.
+- **A refinement can never be invented by inference.** A type variable
+  acquires a refined type only by unifying with a *declared* type
+  (instantiating `val g : int{p} -> unit` against `'a -> 'b` solves
+  `'a := int{p}` — that is higher-order contract flow and is wanted). It can
+  never acquire one from an expression. So
   `let f c x = if c then x else v` with `v : int{p}` infers
-  `bool -> int -> int`, and no contract ever leaks into an inferred signature
-  or a `.cmi` unwritten.
-- **The invariant is machine-checkable** — see the probe below.
+  `bool -> int -> int`; a written contract can propagate into an inferred
+  type only through the variable-solving residue above.
+- **The tree is observable** — the probe below prints every refined head it
+  finds, so the residue is pinned in expected output rather than invisible.
 
 ## Introduction: the strip
 
@@ -181,17 +215,24 @@ problem, not typechecking's. This piece only fixes where the checks sit.
 Expect tests observe printed types, and a program that typechecks prints the
 same whether an interior node secretly carries `int{p}` or `int` — the
 deliverable of this piece is a property of the tree, not of the output. So the
-piece includes its own instrument: a flag-gated walk of the typed tree
-asserting the invariant (no `exp_type` with a refined head, alias expansion
-included), run by the vox test fixtures. A strip deleted by mutation then fails
-a test even when the program still typechecks.
+piece includes its own instrument: a flag-gated walk of the typed tree that
+*prints* every expression node whose `exp_type` has a refined head (alias
+expansion included), with its location. An observer, not an assertion: the
+legal variable-solving residue means an assertion would fail on valid
+programs, and distinguishing a solved variable from a missed strip by graph
+shape is fragile. Printing instead makes the expected output the judge — on
+the strip fixtures the probe's output is empty and a strip deleted by mutation
+adds lines to it; on the residue fixture the output documents exactly which
+nodes carry the leftover head, so any later tightening or regression shows as
+a diff.
 
 ## Failure modes, stated
 
 - A missed introduction strip meeting a concrete type is a rigid clash: loud,
   a wrong *rejection*, never a wrong acceptance. Meeting an undetermined
-  variable it can propagate silently — this is exactly what the probe exists
-  to catch, and why environment readers other than `Texp_ident` get audited
+  variable it propagates silently — indistinguishable after the fact from the
+  legal solving residue, which is exactly why the probe prints rather than
+  asserts, and why environment readers other than `Texp_ident` get audited
   during implementation.
 - A missed expectation site is also a rigid clash: the program is rejected,
   never accepted with a dropped predicate. Both directions fail conservative.
@@ -227,7 +268,11 @@ site alone is disabled:
   the fix
 - recursion: `let rec f (x : int{ _ > 0 }) : int = ...` calling itself
 - still rejected: dependent-arrow application, `(e :> int{p})`
-- the probe runs over every fixture above
+- the residue, pinned: `let f g = (g (), (g : unit -> int{p}))` infers a
+  refined first component and the probe reports its node; the swapped
+  `let f' g = ((g : unit -> int{p}), g ())` infers `int` there and the probe
+  is silent — the order-dependence is documented, not discovered
+- the probe runs over every fixture above, and is empty except where pinned
 
 ## Decisions taken
 
@@ -237,6 +282,19 @@ that each mechanism is implementable in this typechecker (its funnel,
 read); the routes below deliberately differ from vox2 where stated, and no code
 is copied.
 
+- **The variable-solving residue is accepted, not worked around.** A strict
+  global no-refined-head invariant is unattainable with undetermined
+  variables: the strips are construction-time and unification is not. The two
+  ways to force it were both rejected. Forbidding unification from solving a
+  variable to a refined head kills higher-order contracts — `List.map g l`
+  with `g : int{p} -> unit` needs `'a := int{p}`, and linking to the payload
+  instead would drop the contract silently, which is the one failure class
+  this design refuses. A post-typing re-strip sweep at generalization
+  boundaries can rewrite `exp_type` fields but cannot soundly tell a declared
+  refined pattern or environment type from a late-solved one, so it would
+  erase exactly what the probe should show. The residue is sound in both
+  directions (never invents, never discharges), order-dependent at the
+  margin, and pinned by fixture.
 - **Obligation nodes keep payload-headed `exp_type`**, with the refined type in
   the marker. vox2 rewrites `exp_type` back to the refined type, and
   consequently needs a covariant weakening rule at its unify wrapper plus
