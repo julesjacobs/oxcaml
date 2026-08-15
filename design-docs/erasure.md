@@ -551,7 +551,9 @@ data.
   modality direction as record fields.
 - **Erased optional parameters** were intended to keep the retained
   representation on both sides of a call, so that caller and callee agree.
-  **Only the caller does.** `Typeopt.function_arg_erasures` answers `false`
+  **Only the caller did** (fixed since this analysis was written: the
+  callee-side marking now skips Optional-labelled parameters, so both
+  spellings agree; the failing test is re-promoted green). `Typeopt.function_arg_erasures` answers `false`
   for `Optional _`, but `Translcore` marks any `Tparam_pat` whose mode is
   erased without consulting the label, and an optional *without* a default is
   a `Tparam_pat`. A defaulted optional is `Tparam_optional_default` and so
