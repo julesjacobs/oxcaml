@@ -197,14 +197,14 @@ module M = struct
   let x = erased_ 5
 end
 [%%expect{|
-File "_none_", line 1:
-Error: The structure is "erased"
-         because it contains the module "M" defined as the module at lines 1-3, characters 11-3
-         which is "erased"
-         because it contains the value "x" defined as the expression at line 2, characters 6-7
-         which is "erased".
-       However, the structure highlighted is expected to be "retained"
-         because it is a top-level clause and thus always at the legacy modes.
+Line 2, characters 6-7:
+2 |   let x = erased_ 5
+          ^
+Error: The expression is "erased"
+       but is expected to be "retained"
+         because it is the value "x" in the structure at line 2, characters 2-19
+         which is expected to be "retained"
+         because modules always need to be allocated on the heap.
 |}]
 
 (* Erasure does not cross: even immediates stay erased. If int crossed
@@ -503,9 +503,9 @@ Error: Signature mismatch:
    the FFI. *)
 external sink : int @ erased -> unit = "sink"
 [%%expect{|
-Line 1, characters 16-19:
+Line 1, characters 16-36:
 1 | external sink : int @ erased -> unit = "sink"
-                    ^^^
+                    ^^^^^^^^^^^^^^^^^^^^
 Error: External declarations cannot have erased parameters:
        nothing would be passed for them across the FFI.
 |}]

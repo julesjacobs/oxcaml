@@ -96,6 +96,7 @@ type error =
   | Repeated_tuple_label of string
   | Unsupported_extension : _ Language_extension.t -> error
   | Polymorphic_optional_param
+  | Erased_optional_param
   | Non_value of
       {vloc : value_loc; typ : type_expr; err : Jkind.Violation.t}
   | Non_sort of
@@ -1125,6 +1126,11 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
             else begin
               if not (Btype.tpoly_is_mono arg_ty) then
                 raise (Error (sarg.ptyp_loc, env, Polymorphic_optional_param));
+              (let modes : Mode.Alloc.Const.t = arg_mode.mode_modes in
+               match modes.erasure with
+               | Mode.Erasure.Const.Erased ->
+                 raise (Error (sarg.ptyp_loc, env, Erased_optional_param))
+               | Mode.Erasure.Const.Retained -> ());
               newmono
                 (newconstr Predef.path_option [Btype.tpoly_get_mono arg_ty])
             end
@@ -2366,6 +2372,11 @@ let report_error_doc loc env = function
          To enable it, pass the '-extension %s' flag@]" ext ext
   | Polymorphic_optional_param ->
       Location.errorf ~loc "Optional parameters cannot be polymorphic"
+  | Erased_optional_param ->
+      Location.errorf ~loc
+        "Optional parameters cannot be erased:@ there is no erased calling@ \
+         convention for an optional argument, which is physically passed@ \
+         as an option."
   | Non_value {vloc; typ; err} ->
     let s =
       match vloc with

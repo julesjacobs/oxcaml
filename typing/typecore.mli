@@ -221,6 +221,7 @@ type existential_binding =
 type mode_mismatch_kind = Parameter | Return
 
 type error =
+  | Erased_optional_parameter
   | Constructor_arity_mismatch of Longident.t * int * int
   | Label_mismatch of
       Data_types.record_form_packed * Longident.t * Errortrace.unification_error

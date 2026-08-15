@@ -7668,13 +7668,23 @@ let rec build_subtype env (visited : transient_expr list)
             mode-crossing more complete). *)
           let t1 = if posi then t1 else t1' in
           let posi_arg = not posi in
-          if posi_arg then begin
-            let a = cross_right_alloc env t1 a in
-            build_submode_pos a
-          end else begin
-            let a = cross_left_alloc env t1 a in
-            build_submode_neg a
-          end
+          let a', c3 =
+            if posi_arg then begin
+              let a = cross_right_alloc env t1 a in
+              build_submode_pos a
+            end else begin
+              let a = cross_left_alloc env t1 a in
+              build_submode_neg a
+            end
+          in
+          (* Erasure is invariant in argument position: whether an argument is
+             passed is ABI. [build_submode_*] loosens it like the other axes,
+             which would launder an erased-parameter function into a
+             retained-parameter arrow through a coercion; equate it back. *)
+          Mode.Erasure.equate_exn
+            (Alloc.proj_comonadic Erasure a')
+            (Alloc.proj_comonadic Erasure a);
+          a', c3
         end else a, Unchanged
       in
       let (r', c4) =

@@ -4506,6 +4506,21 @@ let prim_const_mode m =
   | Some Local -> Prim_local
   | None -> assert false
 
+(* No argument anywhere in an external's type may be erased: an erased
+   argument is not physically passed, and nothing on the C side can honour
+   that convention. This covers arrows nested in the result (a stub that
+   returns a closure), which the arity-spine walk does not reach. *)
+let rec check_no_erased_external_arg env loc ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tarrow ((_, marg, _), t1, t2, _) ->
+    (match Mode.Erasure.zap_to_floor (Mode.Alloc.proj_comonadic Erasure marg) with
+     | Erased -> raise (Error (loc, Erased_external_parameter))
+     | Retained -> ());
+    let t1 = match get_desc t1 with Tpoly (t, _) -> t | _ -> t1 in
+    check_no_erased_external_arg env loc t1;
+    check_no_erased_external_arg env loc t2
+  | _ -> ()
+
 let rec parse_native_repr_attributes env core_type ty rmode
         ~global_repr ~is_layout_poly =
   match core_type.ptyp_desc, get_desc ty,
@@ -4515,14 +4530,6 @@ let rec parse_native_repr_attributes env core_type ty rmode
     raise (Error (core_type.ptyp_loc, Cannot_unbox_or_untag_type kind))
   | Ptyp_arrow (_, ct1, ct2, _, _), Tarrow ((_,_,marg,mret), t1, t2, _), _
     when not (Builtin_attributes.has_curry core_type.ptyp_attributes) ->
-    (match
-       Mode.Erasure.zap_to_floor (Mode.Alloc.proj_comonadic Erasure marg)
-     with
-     | Erased ->
-       (* An external's parameters cross the FFI: there is no erased calling
-          convention on the C side. Fail closed. *)
-       raise (Error (ct1.ptyp_loc, Erased_external_parameter))
-     | Retained -> ());
     let t1, _ = Btype.tpoly_get_poly t1 in
     let repr_arg =
       make_native_repr
@@ -4808,6 +4815,7 @@ let transl_value_decl env loc ~modal ~why valdecl =
         parse_native_repr_attributes
           env valdecl.pval_type ty Prim_global ~global_repr ~is_layout_poly
       in
+      check_no_erased_external_arg env valdecl.pval_type.ptyp_loc ty;
       let prim =
         Primitive.parse_declaration valdecl
           ~native_repr_args

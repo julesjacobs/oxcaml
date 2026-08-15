@@ -165,6 +165,7 @@ type mutable_restriction =
 type mode_mismatch_kind = Parameter | Return
 
 type error =
+  | Erased_optional_parameter
   | Constructor_arity_mismatch of Longident.t * int * int
   | Label_mismatch of
       record_form_packed * Longident.t * Errortrace.unification_error
@@ -1383,7 +1384,9 @@ let mode_spliced =
   let hint_monadic = Spliced Monadic
   and hint_comonadic = Spliced Comonadic in
   let mode =
-    Value.Const.max
+    (* A splice reads its operand at program-generation time, so it must be
+       retained, like any other read position. *)
+    { Value.Const.max with erasure = Retained }
     |> Value.of_const ~hint_monadic ~hint_comonadic
   in
   mode_default mode
@@ -6454,6 +6457,19 @@ let split_function_ty
       end
     end
   in
+  (* An optional parameter cannot be erased: it is physically passed as an
+     option, so there is no erased calling convention for it, and letting the
+     type say erased while codegen keeps it retained leaks a placeholder into
+     a real slot. Reject at the definition site; written arrow types are
+     rejected in [Typetexp]. *)
+  (if Btype.is_optional arg_label
+   then
+     match
+       Mode.Erasure.zap_to_floor (Alloc.proj_comonadic Erasure arg_mode)
+     with
+     | Mode.Erasure.Const.Erased ->
+       raise (Error (loc, env, Erased_optional_parameter))
+     | Mode.Erasure.Const.Retained -> ());
   let arg_value_mode = alloc_to_value_l2r arg_mode in
   let expected_pat_mode = simple_pat_mode arg_value_mode in
   let type_sort ~why ty =
@@ -8917,10 +8933,12 @@ and type_expect_
         raise (Error (exp2.pexp_loc, env, Overwrite_of_invalid_term));
       let cell_mode, _ =
         (* The overwritten cell has to be unique
-           and should have the areality expected here: *)
+           and should have the areality expected here. It is written through
+           at run time, so it must be retained. *)
         Value.newvar_below
           (Value.meet [
-            Value.of_const {Value.Const.max with uniqueness = Unique};
+            Value.of_const
+              {Value.Const.max with uniqueness = Unique; erasure = Retained};
             Value.max_with_comonadic Areality
               (Value.proj_comonadic Areality expected_mode.mode)])
       in
@@ -8990,7 +9008,7 @@ and type_expect_
          (with magic_staged_modes), and we do not constrain the mode. *)
       let mode_quoted =
         if Builtin_attributes.has_magic_staged_modes sexp.pexp_attributes
-        then mode_default Value.max
+        then mode_default value_max_retained
         else mode_quoted
       in
       let arg = type_expect new_env mode_quoted exp (mk_expected ty) in
@@ -12932,6 +12950,11 @@ let msg = Fmt.doc_printf
 
 let report_error ~loc env =
   function
+  | Erased_optional_parameter ->
+      Location.errorf ~loc
+        "Optional parameters cannot be erased:@ there is no erased calling@ \
+         convention for an optional argument, which is physically passed@ \
+         as an option."
   | Constructor_arity_mismatch(lid, expected, provided) ->
       Location.errorf ~loc
        "@[The constructor %a@ expects %i argument(s),@ \

@@ -164,7 +164,12 @@ module N : sig val h : 'a -> int end
 let opt ?a:(a : int option @ erased) () = 1
 
 [%%expect {|
-val opt : ?a:int @ erased -> unit -> int = <fun>
+Line 1, characters 8-43:
+1 | let opt ?a:(a : int option @ erased) () = 1
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Optional parameters cannot be erased: there is no erased calling
+       convention for an optional argument, which is physically passed
+       as an option.
 |}]
 
 (* The defaulted spelling, which takes the other translation path and agrees
@@ -173,5 +178,103 @@ val opt : ?a:int @ erased -> unit -> int = <fun>
 let opt_defaulted ?(a : int @ erased = 0) () = 1
 
 [%%expect {|
-val opt_defaulted : ?a:int @ erased -> unit -> int = <fun>
+Line 1, characters 18-48:
+1 | let opt_defaulted ?(a : int @ erased = 0) () = 1
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Optional parameters cannot be erased: there is no erased calling
+       convention for an optional argument, which is physically passed
+       as an option.
+|}]
+
+(* ------------------------------------------------------------------ *)
+(* Round-2 soundness review: positions that used to launder or observe an
+   erased value at run time, now closed. Each was a VERIFIED repro (segfault,
+   silent wrong value, or a caller/callee ABI mismatch) before the fix. *)
+
+(* An [(e :> ty)] coercion whose target is not closed went through
+   [build_subtype], a fourth arrow-mode loosening path that erasure invariance
+   had not reached. It laundered an erased parameter into a retained arrow;
+   calling the result read a real word as the erased (absent) parameter. *)
+let f (s : string @ erased) (y : int) = y + 1
+let g = (f :> string -> int -> _)
+[%%expect{|
+val f : string @ erased -> int -> int = <fun>
+Line 2, characters 9-10:
+2 | let g = (f :> string -> int -> _)
+             ^
+Error: This expression cannot be coerced to type ""string -> int -> 'a"";
+       it has type "string @ erased -> int -> int" but is here used with type
+         "string -> int -> 'a"
+|}]
+
+let launder (f : 'a @ erased -> int) = (f :> 'a -> int)
+[%%expect{|
+Line 1, characters 40-41:
+1 | let launder (f : 'a @ erased -> int) = (f :> 'a -> int)
+                                            ^
+Error: This expression cannot be coerced to type ""'a0 -> int""; it has type
+         "'a @ erased -> int"
+       but is here used with type "'a -> int"
+|}]
+
+(* Object coercion is the idiomatic trigger of the same path (open row ->
+   not closed). *)
+let f (o : < m : string @ erased -> int; .. >) = (o :> < m : string -> int >)
+[%%expect{|
+Line 1, characters 50-51:
+1 | let f (o : < m : string @ erased -> int; .. >) = (o :> < m : string -> int >)
+                                                      ^
+Error: This expression cannot be coerced to type ""< m : string -> int >"";
+       it has type "< m : string @ erased -> int; .. >"
+       but is here used with type "< m : string -> int; .. >"
+       The method "m" has type "string @ erased -> int",
+       but the expected method type was "string -> int"
+|}]
+
+(* Optional parameters cannot be erased: an optional is physically passed as
+   an option, so there is no erased calling convention for it. Both the
+   definition site and a written signature are rejected. *)
+let opt ?(a : int @ erased = 0) () = 1
+[%%expect{|
+Line 1, characters 8-38:
+1 | let opt ?(a : int @ erased = 0) () = 1
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Optional parameters cannot be erased: there is no erased calling
+       convention for an optional argument, which is physically passed
+       as an option.
+|}]
+
+let opt2 ?a:(_ : int option @ erased) () = 1
+[%%expect{|
+Line 1, characters 9-44:
+1 | let opt2 ?a:(_ : int option @ erased) () = 1
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Optional parameters cannot be erased: there is no erased calling
+       convention for an optional argument, which is physically passed
+       as an option.
+|}]
+
+(* An external cannot have an erased parameter anywhere in its type, including
+   in a result arrow (a stub that returns a closure). *)
+external ext : unit -> (int @ erased -> int) = "caml_id"
+[%%expect{|
+Line 1, characters 15-44:
+1 | external ext : unit -> (int @ erased -> int) = "caml_id"
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: External declarations cannot have erased parameters:
+       nothing would be passed for them across the FFI.
+|}]
+
+(* A module is a runtime block, so an erased value cannot be stored in one,
+   including a local module reached through [let open struct ... end]. *)
+let f () = let open struct let x = erased_ 5 let y = 42 end in ignore x; y
+[%%expect{|
+Line 1, characters 31-32:
+1 | let f () = let open struct let x = erased_ 5 let y = 42 end in ignore x; y
+                                   ^
+Error: The expression is "erased"
+       but is expected to be "retained"
+         because it is the value "x" in the structure at line 1, characters 27-55
+         which is expected to be "retained"
+         because modules always need to be allocated on the heap.
 |}]
