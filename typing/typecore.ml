@@ -655,6 +655,18 @@ let value_max_retained =
 let mode_max =
   mode_default value_max_retained
 
+(* An erased field has no slot. Reading it fabricates a placeholder, which is
+   erased; the other axes are inherited from the record conservatively.
+   Writing it evaluates the expression and discards the value, so nothing is
+   required of it (statement-like). *)
+let erased_field_read_mode mode =
+  Value.join
+    [ Value.disallow_right mode;
+      Value.disallow_right
+        (Value.of_const { Value.Const.min with erasure = Erased }) ]
+
+let mode_erased_field_write () = mode_default Value.max
+
 let mode_with_position mode position =
   { (mode_default mode) with position }
 
@@ -3528,11 +3540,23 @@ and type_pat_aux
           apply_left_is_contained_by is_contained_by
             ~modalities:label.lbl_modalities alloc_mode.mode
         in
+        let mode =
+          if label.lbl_erased then erased_field_read_mode mode else mode
+        in
         let alloc_mode = simple_pat_mode mode in
         let ty_sort =
-          match label_sort record_form label sorts with
-          | `Sort s -> s
-          | `Same_as_record_sort -> record_sort
+          if label.lbl_erased then
+            (* The slot sort is Void; the pattern sees a placeholder at the
+               sort of the field's type. *)
+            match Ctype.type_sort ~why:Match ~fixed:false !!penv ty_arg with
+            | Ok s -> s
+            | Error err ->
+                raise (Error (label_lid.loc, !!penv,
+                              Field_value_not_rep (ty_arg, err)))
+          else
+            match label_sort record_form label sorts with
+            | `Sort s -> s
+            | `Same_as_record_sort -> record_sort
         in
         (label_lid, label, type_pat tps Value ~alloc_mode sarg ty_arg ty_sort)
       in
@@ -6912,8 +6936,10 @@ and type_expect_
             container = (loc, Expression) }
         in
         let argument_mode =
-          mode_is_contained_by is_contained_by ~modalities:label.lbl_modalities
-            record_mode
+          if label.lbl_erased then mode_erased_field_write ()
+          else
+            mode_is_contained_by is_contained_by
+              ~modalities:label.lbl_modalities record_mode
         in
         type_label_exp ~overwrite true env argument_mode loc ty_record x record_form
       in
@@ -6974,6 +7000,9 @@ and type_expect_
                 apply_left_is_contained_by is_contained_by
                   ~modalities:lbl.lbl_modalities mode
               in
+              let mode =
+                if lbl.lbl_erased then erased_field_read_mode mode else mode
+              in
               let mode = cross_left env lbl.lbl_arg mode in
               check_construct_mutability ~loc:record_loc ~env lbl.lbl_mut
                 ~ty:lbl.lbl_arg ~modalities:lbl.lbl_modalities record_mode;
@@ -6982,8 +7011,10 @@ and type_expect_
                   container = (record_loc, Expression) }
               in
               let argument_mode =
-                mode_is_contained_by is_contained_by
-                  ~modalities:lbl.lbl_modalities record_mode
+                if lbl.lbl_erased then mode_erased_field_write ()
+                else
+                  mode_is_contained_by is_contained_by
+                    ~modalities:lbl.lbl_modalities record_mode
               in
               submode ~loc:extended_expr_loc ~env mode argument_mode;
               Kept (ty_arg1, lbl.lbl_mut,
@@ -7751,6 +7782,9 @@ and type_expect_
       let mode =
         apply_left_is_contained_by is_contained_by
           ~modalities:label.lbl_modalities mode
+      in
+      let mode =
+        if label.lbl_erased then erased_field_read_mode mode else mode
       in
       let boxing : texp_field_boxing =
         let is_float_boxing =

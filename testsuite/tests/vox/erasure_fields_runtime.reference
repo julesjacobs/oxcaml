@@ -1,0 +1,16 @@
+size 2
+a=1 b=2
+field effect
+a=3 b=4
+a=5 b=6
+a=7 b=6
+update effect
+a=1 b=2
+a=1 b=2
+wrap effect
+is_int true
+is_int true
+len 2
+done
+stdlib is_int true
+stdlib done

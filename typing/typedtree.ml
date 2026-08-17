@@ -965,6 +965,7 @@ and label_declaration =
      ld_uid: Uid.t;
      ld_mutable: mutability;
      ld_modalities: modalities;
+     ld_erased: bool;
      ld_type: core_type;
      ld_loc: Location.t;
      ld_attributes: attribute list;

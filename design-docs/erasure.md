@@ -264,6 +264,39 @@ reverted: the kind machinery mixes readers, and pinning only some views made
 ordinary kind subsumption fail (672 testsuite failures). The
 construction-site pins keep every view consistent.
 
+### `@@ erased` implementation choices
+
+- **A flag, not a modality atom.** `ld_erased : bool` on the label
+  declaration (and `lbl_erased` on descriptions), parsed out of the modality
+  list in `transl_labels` for boxed-record fields only; everywhere else the
+  name stays in the list and `Typemode` rejects it ("Unrecognized modality"),
+  so constructor arguments, value descriptions and `[@@unboxed]` records fail
+  closed. Mutable erased fields are rejected with their own error. The
+  auto-derived unboxed (`#`) version of a record does not inherit erasedness:
+  it is an independent unboxed product, all of whose fields are manifest in
+  its layout.
+- **Representation rides the void machinery.** An erased label's `ld_sort`
+  is `Base Void` and its element classification is `Void`, so records with
+  erased fields become mixed blocks whose erased entries have zero width —
+  the same path void-typed fields already take. An all-erased record (which
+  the empty-record check now permits when the voidness comes from erasure)
+  compiles to the immediate `0`: construction sequences the field
+  expressions' effects and yields `0`, and `Typeopt.value_kind` reports it
+  as an immediate.
+- **Modes.** Reading an erased field joins Erased into the result mode
+  (other axes inherited from the record, conservatively). Writing one
+  expects nothing of the value (statement-like `Value.max` expectation):
+  nothing is stored, so no axis can be violated. The typed-tree field sort
+  for an erased field is the sort of the field's *type* (used to evaluate
+  the expression for effects); the slot sort is Void.
+- **Reads fabricate placeholders.** Projection translates to the record's
+  effects followed by `Lambda.placeholder_of_layout`; record patterns bind
+  placeholders (`matching.ml`); the toplevel printer prints `<erased>`
+  without reading memory.
+- **Signature matching is fail-closed in both directions** (`Erasedness`
+  label mismatch in `includecore`), and `mcomp` treats differently-erased
+  labels as incompatible.
+
 ### Call-site inference of parameter erasure
 
 Within one structure, a call site can raise an unannotated parameter's

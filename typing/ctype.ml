@@ -4691,6 +4691,7 @@ and mcomp_record_description type_pairs env =
         mcomp type_pairs env l1.ld_type l2.ld_type;
         if Ident.name l1.ld_id = Ident.name l2.ld_id &&
            l1.ld_mutable = l2.ld_mutable &&
+           l1.ld_erased = l2.ld_erased &&
            l1.ld_modalities = l2.ld_modalities
         then iter xs ys
         else raise Incompatible

@@ -443,6 +443,13 @@ let is_erased_exp e =
     (function (Texp_erased, _, _) -> true | _ -> false)
     e.exp_extra
 
+(* Erased record fields have no slot: their shape entry is [Void], the
+   operand passed for them is the empty unboxed product, and reads fabricate
+   a placeholder (see [transl_erased]). *)
+let layout_erased = Lambda.layout_unboxed_unit
+
+let void_value loc = Lprim (Pmake_unboxed_product [], [], loc)
+
 let rec transl_exp ~scopes layout e =
   transl_exp1 ~scopes ~in_new_scope:false layout e
 
@@ -473,34 +480,7 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
    ensures the placeholder is only ever consumed by erased positions, so it
    is never read. *)
 and transl_erased ~scopes (layout : Lambda.layout) e =
-  let loc () = of_location ~scopes e.exp_loc in
-  let rec placeholder (layout : Lambda.layout) =
-    match layout with
-    | Pvalue _ -> dummy_constant
-    | Punboxed_product layouts ->
-        Lprim (Pmake_unboxed_product layouts,
-               List.map placeholder layouts, loc ())
-    | Punboxed_float Unboxed_float64 ->
-        Lconst (Const_base (Const_unboxed_float "0."))
-    | Punboxed_float Unboxed_float32 ->
-        Lconst (Const_base (Const_unboxed_float32 "0."))
-    | Punboxed_or_untagged_integer Untagged_int ->
-        Lconst (Const_base (Const_untagged_int 0))
-    | Punboxed_or_untagged_integer Untagged_int8 ->
-        Lconst (Const_base (Const_untagged_int8 0))
-    | Punboxed_or_untagged_integer Untagged_int16 ->
-        Lconst (Const_base (Const_untagged_int16 0))
-    | Punboxed_or_untagged_integer Unboxed_int32 ->
-        Lconst (Const_base (Const_unboxed_int32 0l))
-    | Punboxed_or_untagged_integer Unboxed_int64 ->
-        Lconst (Const_base (Const_unboxed_int64 0L))
-    | Punboxed_or_untagged_integer Unboxed_nativeint ->
-        Lconst (Const_base (Const_unboxed_nativeint 0n))
-    | Punboxed_vector _ | Punboxed_mask | Ptop | Pbottom | Psplicevar _ ->
-        Misc.fatal_errorf "erased_ is not supported at layout %a"
-          Printlambda.layout layout
-  in
-  placeholder layout
+  Lambda.placeholder_of_layout (of_location ~scopes e.exp_loc) layout
 
 and transl_exp0_desc ~in_new_scope ~scopes (layout : Lambda.layout) e =
   match e.exp_desc with
@@ -879,6 +859,11 @@ and transl_exp0_desc ~in_new_scope ~scopes (layout : Lambda.layout) e =
       let arg_sort = Jkind.Sort.default_for_transl_and_get arg_sort in
       let arg_layout = layout_exp arg_sort arg in
       let targ = transl_exp ~scopes arg_layout arg in
+      if lbl.lbl_erased then
+        (* An erased field has no slot. The record is still evaluated; the
+           result is a placeholder, which the mode system keeps unread. *)
+        Lsequence (targ, transl_erased ~scopes layout e)
+      else
       let sem =
         if Types.is_mutable lbl.lbl_mut then Reads_vary else Reads_agree
       in
@@ -2441,6 +2426,10 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
           fatal_error
             "transl_record: update expr implicitly copies atomic field";
         cont
+      | Overridden (_lid, expr) when lbl.lbl_erased ->
+          (* No slot: the expression is evaluated for its effects only. *)
+          let field_layout = layout_exp lbl_sort expr in
+          Lsequence (transl_exp ~scopes field_layout expr, cont)
       | Overridden (_lid, expr) ->
           let upd =
             match repres with
@@ -2510,6 +2499,16 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
         (fun i (lbl, lbl_sort, definition) ->
            let lbl_sort = Jkind.Sort.default_for_transl_and_get lbl_sort in
            match definition with
+           | Kept _ when lbl.lbl_erased ->
+               (* No slot to copy from the extended record. *)
+               void_value (of_location ~scopes loc), layout_erased
+           | Overridden (_lid, expr) when lbl.lbl_erased ->
+               (* Evaluated for effects; nothing is stored. *)
+               let field_layout = layout_exp lbl_sort expr in
+               Lsequence
+                 (transl_exp ~scopes field_layout expr,
+                  void_value (of_location ~scopes loc)),
+               layout_erased
            | Kept (typ, mut, _) ->
                if Types.is_atomic lbl.lbl_mut then
                  fatal_error
@@ -2585,6 +2584,25 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
         fields
     in
     let ll, shape = List.split (Array.to_list lv) in
+    if Array.for_all (fun (lbl, _, _) -> lbl.Data_types.lbl_erased) fields
+    then begin
+      (* An all-erased record has no block: its value is the immediate 0.
+         Field expressions (and an extended expression) are still evaluated
+         for their effects. *)
+      let body =
+        List.fold_right (fun l acc -> Lsequence (l, acc)) ll
+          (Lconst (Const_base (Const_int 0)))
+      in
+      match opt_init_expr with
+      | None -> body
+      | Some (init_expr, init_expr_sort, _) ->
+          let init_expr_sort =
+            Jkind.Sort.default_for_transl_and_get init_expr_sort
+          in
+          let init_expr_layout = layout_exp init_expr_sort init_expr in
+          Lsequence (transl_exp ~scopes init_expr_layout init_expr, body)
+    end
+    else
     let mut : Lambda.mutable_flag =
       if Array.exists (fun (lbl, _, _) -> Types.is_mutable lbl.lbl_mut) fields
       then Mutable

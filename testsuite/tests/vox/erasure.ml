@@ -480,12 +480,8 @@ external sink : int @ erased -> unit = "sink"
 external sink : int @ erased -> unit = "sink"
 |}]
 
-(* The @@ erased modality is not supported yet (it would have to weaken,
-   and comonadic modalities strengthen); it is rejected, not ignored. *)
+(* The @@ erased field modality; erasure_fields.ml is the real coverage. *)
 type r = { x : int @@ erased; y : int }
 [%%expect{|
-Line 1, characters 22-28:
-1 | type r = { x : int @@ erased; y : int }
-                          ^^^^^^
-Error: Unrecognized modality erased.
+type r = { x : int @@ erased; y : int; }
 |}]

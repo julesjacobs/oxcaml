@@ -66,6 +66,8 @@ type 'a gen_label_description =
     lbl_arg: type_expr;                 (* Type of the argument *)
     lbl_mut: mutability;                (* Is this a mutable field? *)
     lbl_modalities: Mode.Modality.Const.t;(* Modalities on the field *)
+    lbl_erased: bool;                   (* Erased field: no slot; reads
+                                           fabricate a placeholder *)
     lbl_sort: Jkind_types.Sort.Const.t option; (* Sort of the argument *)
     lbl_pos: int;                       (* Position in type *)
     lbl_all: 'a gen_label_description array;   (* All the labels in this type *)
@@ -91,6 +93,7 @@ let label_declaration_of_label_description lbl =
     ld_id;
     ld_mutable = lbl.lbl_mut;
     ld_modalities = lbl.lbl_modalities;
+    ld_erased = lbl.lbl_erased;
     ld_type = lbl.lbl_arg;
     ld_sort = lbl.lbl_sort;
     ld_loc = lbl.lbl_loc;

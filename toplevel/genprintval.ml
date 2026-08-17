@@ -781,7 +781,7 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
           lbl_list pos obj rep =
         let rec tree_of_fields first pos = function
           | [] -> []
-          | {ld_id; ld_type; ld_sort} :: remainder ->
+          | {ld_id; ld_type; ld_sort; ld_erased} :: remainder ->
               let ty_arg = instantiate_type env type_params ty_list ld_type in
               let name = Ident.name ld_id in
               (* PR#5722: print full module path only
@@ -795,7 +795,9 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                 if first then tree_of_label env path name
                 else tree_of_name name
               and v =
-                if is_void then Oval_stuff "<void>"
+                (* An erased field has no slot to read. *)
+                if ld_erased then Oval_stuff "<erased>"
+                else if is_void then Oval_stuff "<void>"
                 else match rep with
                   | Outval_record_unboxed -> tree_of_val (depth - 1) obj ty_arg
                   | Outval_record_boxed ->

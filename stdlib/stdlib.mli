@@ -1414,6 +1414,7 @@ module Effect         = Effect
     "The Effect interface may change in incompatible ways in the future."
 ]
 module Either         = Either
+module Erased         = Erased
 module Ephemeron      = Ephemeron
 module Filename       = Filename
 module Float          = Float

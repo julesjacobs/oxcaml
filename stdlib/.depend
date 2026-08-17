@@ -327,6 +327,11 @@ stdlib__Either.cmo : either.ml \
 stdlib__Either.cmx : either.ml \
     stdlib__Either.cmi
 stdlib__Either.cmi : either.mli
+stdlib__Erased.cmo : erased.ml \
+    stdlib__Erased.cmi
+stdlib__Erased.cmx : erased.ml \
+    stdlib__Erased.cmi
+stdlib__Erased.cmi : erased.mli
 stdlib__Ephemeron.cmo : ephemeron.ml \
     stdlib__Sys.cmi \
     stdlib.cmi \

@@ -1469,6 +1469,33 @@ let const_unit = const_int 0
 
 let dummy_constant = tagged_immediate (0xBBBB / 2)
 
+let rec placeholder_of_layout loc (layout : layout) =
+  match layout with
+  | Pvalue _ -> dummy_constant
+  | Punboxed_product layouts ->
+      Lprim (Pmake_unboxed_product layouts,
+             List.map (placeholder_of_layout loc) layouts, loc)
+  | Punboxed_float Unboxed_float64 ->
+      Lconst (Const_base (Const_unboxed_float "0."))
+  | Punboxed_float Unboxed_float32 ->
+      Lconst (Const_base (Const_unboxed_float32 "0."))
+  | Punboxed_or_untagged_integer Untagged_int ->
+      Lconst (Const_base (Const_untagged_int 0))
+  | Punboxed_or_untagged_integer Untagged_int8 ->
+      Lconst (Const_base (Const_untagged_int8 0))
+  | Punboxed_or_untagged_integer Untagged_int16 ->
+      Lconst (Const_base (Const_untagged_int16 0))
+  | Punboxed_or_untagged_integer Unboxed_int32 ->
+      Lconst (Const_base (Const_unboxed_int32 0l))
+  | Punboxed_or_untagged_integer Unboxed_int64 ->
+      Lconst (Const_base (Const_unboxed_int64 0L))
+  | Punboxed_or_untagged_integer Unboxed_nativeint ->
+      Lconst (Const_base (Const_unboxed_nativeint 0n))
+  | Punboxed_vector _ | Punboxed_mask | Ptop | Pbottom | Psplicevar _ ->
+      Misc.fatal_error
+        "no erasure placeholder at this layout (vector, mask, top, bottom \
+         or splice)"
+
 let array_index_to_layout = function
   | Ptagged_int_index -> Pvalue { raw_kind = Pintval; nullable = Non_nullable }
   | Punboxed_or_untagged_integer_index Untagged_int ->

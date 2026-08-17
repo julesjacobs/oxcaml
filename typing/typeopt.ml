@@ -756,6 +756,10 @@ let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited (ty : type_expr)
             (_, (Record_variable | Record_inlined (_, Constructor_variable, _)),
              _) ->
           num_nodes_visited, non_nullable Pgenval
+        | Type_record (labels, _, _)
+          when List.for_all (fun lbl -> lbl.Types.ld_erased) labels ->
+          (* An all-erased record is the immediate 0; there is no block. *)
+          num_nodes_visited, non_nullable Pintval
         | Type_record (labels, rep, _) ->
           let depth = depth + 1 in
           fallback_if_missing_cmi

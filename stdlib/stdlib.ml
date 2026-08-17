@@ -638,6 +638,7 @@ module Dynarray       = Dynarray
 module Pqueue         = Pqueue
 module Effect         = Effect
 module Either         = Either
+module Erased         = Erased
 module Ephemeron      = Ephemeron
 module Filename       = Filename
 module Float          = Float
