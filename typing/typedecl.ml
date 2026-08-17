@@ -113,7 +113,6 @@ type error =
   | Unbound_type_var_ext of type_expr * extension_constructor
   | Val_in_structure
   | Multiple_native_repr_attributes
-  | Erased_external_parameter
   | Cannot_unbox_or_untag_type of native_repr_kind
   | Deep_unbox_or_untag_attribute of native_repr_kind
   | Jkind_mismatch_of_type of Env.t * type_expr * Jkind.Violation.t
@@ -4506,21 +4505,6 @@ let prim_const_mode m =
   | Some Local -> Prim_local
   | None -> assert false
 
-(* No argument anywhere in an external's type may be erased: an erased
-   argument is not physically passed, and nothing on the C side can honour
-   that convention. This covers arrows nested in the result (a stub that
-   returns a closure), which the arity-spine walk does not reach. *)
-let rec check_no_erased_external_arg env loc ty =
-  match get_desc (Ctype.expand_head env ty) with
-  | Tarrow ((_, marg, _), t1, t2, _) ->
-    (match Mode.Erasure.zap_to_floor (Mode.Alloc.proj_comonadic Erasure marg) with
-     | Erased -> raise (Error (loc, Erased_external_parameter))
-     | Retained -> ());
-    let t1 = match get_desc t1 with Tpoly (t, _) -> t | _ -> t1 in
-    check_no_erased_external_arg env loc t1;
-    check_no_erased_external_arg env loc t2
-  | _ -> ()
-
 let rec parse_native_repr_attributes env core_type ty rmode
         ~global_repr ~is_layout_poly =
   match core_type.ptyp_desc, get_desc ty,
@@ -4815,7 +4799,6 @@ let transl_value_decl env loc ~modal ~why valdecl =
         parse_native_repr_attributes
           env valdecl.pval_type ty Prim_global ~global_repr ~is_layout_poly
       in
-      check_no_erased_external_arg env valdecl.pval_type.ptyp_loc ty;
       let prim =
         Primitive.parse_declaration valdecl
           ~native_repr_args
@@ -5738,10 +5721,6 @@ let report_error ~loc = function
         Style.inline_code "[@@unboxed]"
         Style.inline_code "[@@untagged]"
         Style.inline_code "[@@unpacked]"
-  | Erased_external_parameter ->
-      Location.errorf ~loc
-        "External declarations cannot have erased parameters:@ \
-         nothing would be passed for them across the FFI."
   | Cannot_unbox_or_untag_type Unboxed ->
       Location.errorf ~loc
         "Don't know how to unbox this type.@ \

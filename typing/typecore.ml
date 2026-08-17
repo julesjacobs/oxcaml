@@ -165,7 +165,6 @@ type mutable_restriction =
 type mode_mismatch_kind = Parameter | Return
 
 type error =
-  | Erased_optional_parameter
   | Constructor_arity_mismatch of Longident.t * int * int
   | Label_mismatch of
       record_form_packed * Longident.t * Errortrace.unification_error
@@ -6457,19 +6456,6 @@ let split_function_ty
       end
     end
   in
-  (* An optional parameter cannot be erased: it is physically passed as an
-     option, so there is no erased calling convention for it, and letting the
-     type say erased while codegen keeps it retained leaks a placeholder into
-     a real slot. Reject at the definition site; written arrow types are
-     rejected in [Typetexp]. *)
-  (if Btype.is_optional arg_label
-   then
-     match
-       Mode.Erasure.zap_to_floor (Alloc.proj_comonadic Erasure arg_mode)
-     with
-     | Mode.Erasure.Const.Erased ->
-       raise (Error (loc, env, Erased_optional_parameter))
-     | Mode.Erasure.Const.Retained -> ());
   let arg_value_mode = alloc_to_value_l2r arg_mode in
   let expected_pat_mode = simple_pat_mode arg_value_mode in
   let type_sort ~why ty =
@@ -10348,17 +10334,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       when lv' = generic_level || not !Clflags.principal ->
       let ty_res', ty_res, changed = loosen_arrow_modes ty_res' ty_res in
       let mret, changed' = Alloc.newvar_below mret in
-      let marg0 = marg in
       let marg, changed'' = Alloc.newvar_above marg in
-      (* Erasure is invariant in argument position: whether an argument is
-         physically passed is ABI, so it must not be loosened away like the
-         other axes. Without this, passing f : t @ erased -> u to a generic
-         ('a -> 'b) parameter yields a retained-looking arrow over a closure
-         with the erased ABI. *)
-      if changed'' then
-        Erasure.equate_exn
-          (Alloc.proj_comonadic Erasure marg0)
-          (Alloc.proj_comonadic Erasure marg);
       if changed || changed' || changed'' then
         (* Each rebuilt arrow keeps its own binder: the refinements under
            it reference that ident. *)
@@ -12950,11 +12926,6 @@ let msg = Fmt.doc_printf
 
 let report_error ~loc env =
   function
-  | Erased_optional_parameter ->
-      Location.errorf ~loc
-        "Optional parameters cannot be erased:@ there is no erased calling@ \
-         convention for an optional argument, which is physically passed@ \
-         as an option."
   | Constructor_arity_mismatch(lid, expected, provided) ->
       Location.errorf ~loc
        "@[The constructor %a@ expects %i argument(s),@ \

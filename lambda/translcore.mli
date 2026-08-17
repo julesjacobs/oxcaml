@@ -25,10 +25,6 @@ val pure_module : module_expr -> let_kind
 
 (* Used for translating Alloc_heap values in classes and modules. *)
 val transl_exp: scopes:scopes -> Lambda.layout -> expression -> lambda
-
-(** Reset the per-unit table of erased identifiers. Ident stamps restart for
-    each unit, so the table must not survive across units. *)
-val reset_erased_ids: unit -> unit
 val transl_apply: scopes:scopes
                   -> ?tailcall:tailcall_attribute
                   -> ?inlined:inlined_attribute
@@ -36,7 +32,6 @@ val transl_apply: scopes:scopes
                   -> ?position:region_close
                   -> ?mode:return_mode
                   -> ?yielding:yielding_kind
-                  -> ?erased_args:bool list
                   -> result_layout:Lambda.layout
                   -> lambda
                   -> (arg_label * apply_arg) list

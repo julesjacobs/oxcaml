@@ -2,9 +2,11 @@
  expect;
 *)
 
-(* The erasure axis: Retained < Erased, legacy Retained. An erased value does
-   not exist at run time; it may only be used where an erased value is
-   expected. *)
+(* The erasure axis: Retained < Erased, legacy Retained. Erasure is an
+   information-flow property of the mode system, with no effect on the ABI:
+   an erased value may only be used where an erased value is expected, and
+   [erased_ e] deletes the evaluation of [e], producing a placeholder that
+   the discipline guarantees is never read. *)
 
 (* Defaults: unannotated code is retained and prints as today. *)
 let id x = x
@@ -122,8 +124,9 @@ val apply_it : (int @ erased -> int -> int) -> int -> int -> int = <fun>
 |}]
 
 (* Arguments are not erased silently: a retained argument is usable at an
-   erased parameter (evaluated for effect, dropped at the boundary), and an
-   erased argument passes as-is. *)
+   erased parameter (ordinary submoding; it is passed like any argument, the
+   callee just cannot read it), and an erased argument passes a
+   placeholder. *)
 let call () =
   let x = erased_ 5 in
   takes_erased_param x 1 + takes_erased_param 42 2
@@ -268,33 +271,21 @@ Error: Signature mismatch:
          "int -> int"
 |}]
 
-(* Sealing, argument position: invariance. A retained-parameter signature
-   over an erased-parameter implementation is the ABI-unsafe direction that
-   contravariance would otherwise permit. *)
-module Bad_abi : sig
+(* Sealing, argument position: ordinary contravariance. Erasure has no ABI
+   effect, so an erased-parameter implementation may hide behind a
+   retained-parameter signature: callers pass real values, and the
+   implementation is free to ignore them. *)
+module Ok_contra : sig
   val f : int -> unit
 end = struct
   let f (x : int @ erased) = ()
 end
 [%%expect{|
-Lines 3-5, characters 6-3:
-3 | ......struct
-4 |   let f (x : int @ erased) = ()
-5 | end
-Error: Signature mismatch:
-       Modules do not match:
-         sig val f : int @ erased -> unit end
-       is not included in
-         sig val f : int -> unit end
-       Values do not match:
-         val f : int @ erased -> unit
-       is not included in
-         val f : int -> unit
-       The type "int @ erased -> unit" is not compatible with the type
-         "int -> unit"
+module Ok_contra : sig val f : int -> unit end
 |}]
 
-(* ...and the reverse is rejected too, since the rule is invariance. *)
+(* The reverse is rejected: the signature promises callers may pass erased
+   values, but the implementation reads its argument. *)
 module Bad_rev : sig
   val f : int @ erased -> unit
 end = struct
@@ -321,12 +312,9 @@ Error: Signature mismatch:
 |}]
 
 (* The same directions through an explicit coercion. *)
-let bad (f : (int @ erased -> unit)) = (f :> int -> unit)
+let ok (f : (int @ erased -> unit)) = (f :> int -> unit)
 [%%expect{|
-Line 1, characters 39-57:
-1 | let bad (f : (int @ erased -> unit)) = (f :> int -> unit)
-                                           ^^^^^^^^^^^^^^^^^^
-Error: Type "int @ erased -> unit" is not a subtype of "int -> unit"
+val ok : (int @ erased -> unit) -> int -> unit = <fun>
 |}]
 
 let bad (f : int -> unit) = (f :> (int @ erased -> unit))
@@ -448,31 +436,16 @@ Error: This value is "erased"
          which is expected to be "retained".
 |}]
 
-(* Argument invariance also holds for arrows nested in argument position,
-   where the ambient variance has been negated: accepting either direction
-   would change the callback's ABI. *)
-module Bad_nested : sig
+(* Contravariance composes through arrows nested in argument position: a
+   callback that tolerates erased arguments may be used where one taking
+   retained arguments is expected. *)
+module Ok_nested : sig
   val g : (int @ erased -> unit) -> unit
 end = struct
   let g (f : int -> unit) = f 1
 end
 [%%expect{|
-Lines 3-5, characters 6-3:
-3 | ......struct
-4 |   let g (f : int -> unit) = f 1
-5 | end
-Error: Signature mismatch:
-       Modules do not match:
-         sig val g : (int -> unit) -> unit end
-       is not included in
-         sig val g : (int @ erased -> unit) -> unit end
-       Values do not match:
-         val g : (int -> unit) -> unit
-       is not included in
-         val g : (int @ erased -> unit) -> unit
-       The type "(int -> unit) -> unit" is not compatible with the type
-         "(int @ erased -> unit) -> unit"
-       Type "int -> unit" is not compatible with type "int @ erased -> unit"
+module Ok_nested : sig val g : (int @ erased -> unit) -> unit end
 |}]
 
 module Bad_nested_rev : sig
@@ -499,15 +472,12 @@ Error: Signature mismatch:
        Type "int @ erased -> unit" is not compatible with type "int -> unit"
 |}]
 
-(* Externals cannot have erased parameters: nothing would be passed across
-   the FFI. *)
+(* Externals may declare erased parameters: the argument is passed
+   physically like any other, and the mode only constrains OCaml-side
+   uses. *)
 external sink : int @ erased -> unit = "sink"
 [%%expect{|
-Line 1, characters 16-36:
-1 | external sink : int @ erased -> unit = "sink"
-                    ^^^^^^^^^^^^^^^^^^^^
-Error: External declarations cannot have erased parameters:
-       nothing would be passed for them across the FFI.
+external sink : int @ erased -> unit = "sink"
 |}]
 
 (* The @@ erased modality is not supported yet (it would have to weaken,

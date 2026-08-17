@@ -1,27 +1,55 @@
 # Vox erasure
 
-We add an erasure mode axis and a construct that produces values on it.
+We add an erasure mode axis, a construct that produces values on it, and a
+field modality that erases data from representations.
 
     erased_ e            -- e is deleted from compilation
-    @ erased             -- the value has no runtime representation
-    { x : t @@ erased }  -- an erased record field
+    @ erased             -- the value may only flow to erased positions
+    { x : t @@ erased }  -- an erased record field: occupies no slot
 
-An erased value does not exist at run time. An erased function parameter is not
-passed. An erased record field occupies no slot.
+The division of labour is deliberate and is the heart of the design:
+
+- The **mode** `@ erased` is an information-flow property and nothing else.
+  It has **no effect on the ABI**: an erased function parameter is passed
+  physically like any other, an erased local is an ordinary binding. What the
+  mode guarantees is that no retained computation ever reads an erased value,
+  so the value's *content* is unobservable and `erased_ e` may compile to a
+  placeholder without evaluating `e`.
+- The **modality** `@@ erased` on a record field is what changes
+  representation: the field occupies no slot in the record. Reading it
+  fabricates a placeholder ("null or an appropriate value of the field's
+  kind") at mode erased.
+- To erase something from an ABI, wrap it: `'a Erased.t`, defined in the
+  stdlib as `type 'a t = { erased : 'a @@ erased }`. Its zero-width field
+  means the wrapper carries no data.
+
+Additional conveniences are deferred until practice shows they are needed.
+
+## History
+
+The first iteration of this piece made `@ erased` itself ABI-bearing: an
+erased parameter was not passed (zero-width, down the void path). That
+entangled the mode with representation everywhere modes flow: erasure had to
+be *invariant* in argument position, and the invariance had to be asserted
+separately at every path that relates arrow modes directionally (`moregen`,
+`subtype`, `build_subtype`, the `type_argument` loosening — review found them
+one by one, each with a reproduced ABI mismatch). Optional parameters and
+externals had to be rejected, generic higher-order functions could not accept
+erased-parameter callbacks (no monomorphization, so no single ABI serves
+both), and codegen needed a per-unit table of erased identifiers. Moving the
+representation effect to a declaration-site modality removes the whole
+family: modes flow with ordinary variance, and representation is determined
+by types and declarations alone, as it is for everything else.
 
 ## Naming
 
-`erased`, not `ghost`. The compiler already uses `ghost` for a different kind of
-absence: `loc_ghost` (75 uses), `ghost_loc` (12) and `Location.ghost` (10)
+`erased`, not `ghost`. The compiler already uses `ghost` for a different kind
+of absence: `loc_ghost` (75 uses), `ghost_loc` (12) and `Location.ghost` (10)
 across 32 files in `typing`, `parsing` and `lambda`, and `loc_ghost` is part of
-the public parsetree surface. `erased` has no incumbent, only comments and one
-local `is_erased` in `typeclass.ml`.
+the public parsetree surface. `erased` has no incumbent.
 
-The stronger reason is that the mode guarantees a mechanism, not an intent.
-What it enforces is the absence of a runtime representation. "Ghost" names a use
-(specification-only), which is what logicality is for, and conflating the two
-words invites conflating the two axes. Say in user-facing documentation that
-this is what Why3 and Dafny call ghost code, so the term stays findable.
+Say in user-facing documentation that this is what Why3 and Dafny call ghost
+code, so the term stays findable.
 
 ## Lattice
 
@@ -29,20 +57,16 @@ this is what Why3 and Dafny call ghost code, so the term stays findable.
 |---|---|---|---|---|
 | Erasure | `Retained` | `Erased` | `Retained` | comonadic |
 
-`Retained <= Erased`. A real value may be used where an erased one is expected,
-since the context is going to discard it. The reverse cannot hold.
+`Retained <= Erased`. A real value may be used where an erased one is
+expected, since the context promises not to read it. The reverse cannot hold.
 
 Comonadic on the substantive test: a value's mode is bounded above by the meet
-of what its uses demand, so using a value anywhere retained forces it retained.
-That is what gives the discipline below. Capture behaves unusually, which is
-covered under Closures.
+of what its uses demand, so using a value anywhere retained forces it
+retained.
 
-## The rule
+## The information-flow rule
 
 ### Ambient erasure
-
-Two things have to be kept apart, and conflating them is how the design goes
-wrong.
 
 *What may be used* at a position is governed by the expected mode, through
 ordinary submoding. A value may be used only where the expected erasure is at
@@ -50,647 +74,200 @@ least its own.
 
 *What gets deleted* is governed by the expression's own erasure. `erased_ e`
 sets the expression to Erased, so it is deleted. An ordinary expression is
-Retained and is evaluated, whatever position it sits in.
-
-Deletion therefore never happens implicitly. It follows the source, not the
-context.
+Retained and is evaluated, whatever position it sits in. Deletion never
+happens implicitly; it follows the source, not the context.
 
 An expression is checked at ambient Erased in two places: the body of
-`erased_ e`, and the body of a closure that is itself erased. Everything else is
-retained.
-
-Because `Retained <= Erased`, real values are usable inside erased contexts,
-which is what specifications need. Erased values fail everywhere else. Most of
-the behaviour we want follows without further rules:
+`erased_ e`, and the body of a closure that is itself erased. Everything else
+is retained. Because `Retained <= Erased`, real values are usable inside
+erased contexts, which is what specifications need. Erased values fail
+everywhere else:
 
 - `x + y` in retained code requires both retained
-- `if x then _ else _` requires a retained condition, since branching reads a
-  runtime value
-- matching on an erased scrutinee fails in retained code and is allowed inside
-  `erased_`
-- `erased_ e` checks `e` at ambient Erased, so both retained and erased values
-  are usable there
+- `if`/`match`/`while`/`for`/guards/`assert` require retained scrutinees
+- destructuring patterns read; variables, wildcards and aliases bind without
+  reading, so `let x = erased_ e in ...` works
+- record field access and mutation require a retained record
+- the function position of an application requires retained (the call reads
+  the closure), independently of any erased *parameters* the function has
 
-### Application
-
-An erased function cannot be called, because there is no closure to jump to.
-`f x` with `f @ erased` must fail in retained code, and `erased_ (f x)` must
-succeed.
-
-That is the ambient rule again, with the function position counted as a use of
-`f`. It does not fall out on its own. OxCaml gives the function position of an
-application its own `funct_mode` rather than the application's expected mode,
-which is right for locality, since calling a local closure is fine, and wrong
-for erasure. So one explicit constraint has to be added: the erasure component
-of `funct_mode` is the ambient erasure.
-
-Keep this separate from an erased *parameter*. `f : int @ erased -> int` and
-`f @ erased : int -> int` are independent and both have to work.
+The permissive expected mode (`mode_max`) requires Retained on the erasure
+axis; erased-tolerant positions are a closed, spelled-out set: type-driven
+positions (an `@ erased` arrow argument, an erased return), erased contexts,
+and statement position (which discards the value).
 
 ### Arguments are not erased silently
 
-An `@ erased` parameter accepts both kinds of argument, and they behave
-differently on purpose:
+An `@ erased` parameter accepts both kinds of argument:
 
-    f (expensive ())            -- evaluated for effect, then dropped at the
-                                -- boundary. Retained <= Erased, so this is
-                                -- ordinary submoding.
-    f (erased_ (expensive ()))  -- never evaluated. The user asked for it.
-    let x = erased_ e in f x    -- x is already erased, nothing to write
+    f (expensive ())            -- evaluated and passed like any argument;
+                                -- the callee just cannot read it
+    f (erased_ (expensive ()))  -- never evaluated; a placeholder is passed
+    let x = erased_ e in f x    -- x is already a placeholder
 
-The argument position does not create an erased context. If it did, an ordinary
-call would silently drop its argument's effects with nothing in the source to
-show for it. Deleting an evaluation is something the programmer writes, not
-something a callee's signature does to them.
+The argument position does not create an erased context: an ordinary call
+must not silently drop its argument's effects. Deleting an evaluation is
+something the programmer writes.
 
-The cost is one evaluation the callee cannot observe. Once `e @ total` is
-required the two forms coincide, since a total expression's evaluation is
-unobservable, and at that point the non-evaluating form is simply faster.
+### Closures
 
-### Erasure propagates outward, modalities insulate
+Capture propagates nothing: a retained closure may capture erased values
+(the capture check meets the captured value's erasure down to Retained; body
+uses still see the true erasure). The same carve-out applies in `close_over`
+for partial application, so applying across an erased parameter does not
+erase the result.
 
-Erasure flows through structural types the way other modes do. A tuple with an
-erased component is an erased tuple, and a list with an erased element is an
-erased list. There is no ambiguity about which slot is missing, because the
-whole value is gone.
+A closure's body is checked at the closure's own erasure: `erased_ (fun y ->
+g y)` accepts `g @ erased` in its body. A lambda written directly at an
+`@ erased` argument position without `erased_` is retained and its body is a
+retained context — it is genuinely constructed and evaluated.
 
-To hold an erased value inside a retained structure, use a declaration site that
-carries a modality. Record fields have `ld_modalities` and constructor
-arguments have `ca_modalities`; tuples have none, since `Ttuple` is
-`(string option * type_expr) list`. So the idiom for a partially erased
-structure is a record, and a single-field `@@ erased` record is the wrapper for
-smuggling one erased value through a retained one. This is the same job `@@
-global` does for a global field in a local record.
+### Arrow modes: ordinary variance
 
-### Closures: capture
+With no ABI at stake, erasure follows the same rules as every other comonadic
+axis: contravariant in argument position, covariant in return position,
+equated by unification. In particular:
 
-Capture propagates nothing. A retained closure may capture erased values.
+- an erased-parameter implementation seals behind a retained-parameter
+  signature (it promises to read less), and the reverse is rejected
+- the same through `(e :> t)` coercions, on both the `subtype` and
+  `build_subtype` paths
+- generic higher-order functions accept erased-parameter callbacks
+- optional parameters and externals may be erased like anything else; the
+  argument is physically passed, and the mode constrains OCaml-side uses only
 
-    let x = erased_ e in
-    fun y -> f x y
+All four arrow-mode paths are pinned in both directions in
+`testsuite/tests/vox/erasure_subsumption.ml`.
 
-`f` takes its first argument `@ erased`, so nothing is passed, so the closure
-needs no slot for `x`. The closure is an ordinary runnable closure. Confirmed
-against the existing void machinery, which is the same situation:
+### Structures and modules
 
-    let mk (x : t) (n : int) = fun y -> f x (y + n)
-    -> camlC__mk_1_4_code (n/311: int) : val (alloc 3319 L:"camlC__fn..._code" ...)
+A module block's fields are legacy (retained), so an erased value cannot be
+stored in a structure — a compilation unit, a local module, a `let open
+struct ... end`. A module allocation's erasure is capped to Retained so the
+structure-item check rejects these uniformly. (`Erased.t` is the way to store
+an erased value.)
 
-So the usual comonadic join is wrong here. Under it a closure's mode is the join
-of its captures, and capturing an `Erased` value would force the closure to
-`Erased`.
+### Erasure and mode crossing
 
-Two framings give the behaviour we want, and they need deciding between:
+No type crosses erasure, ever: an erased value's content may be a
+placeholder, so treating it as retained is unsound regardless of the type —
+the whole property collapses on immediates first. Enforced at the places
+crossings are built (`Mod_bounds.min_crossable`, `cross_all_crossable`,
+`Crossing.always_constructed_at`, `Axis_lattice.create`, the bool-created
+crossings). `mod erased` / `mod retained` are rejected as kind modifiers and
+`mod everything` excludes erasure (precedent: staticity).
 
-- A modality. The closure environment is a record and an erased capture is a
-  field carrying `@@ erased`. With a constant modality,
-  `capture_mode <= modality(closure_mode)` holds unconditionally, so the capture
-  constrains nothing. This is how `@@ global` puts a global field in a local
-  record.
-- A carve-out. Erasure is excluded from the closure-lock join.
+## How `erased_ e` compiles
 
-Prefer the modality if the machinery supports it, since it reuses a mechanism
-rather than making an exception to one. Check first whether the closure lock can
-carry a per-capture modality or whether it applies uniformly across captures. If
-it is uniform, the carve-out is forced.
+`e` is type-checked and then deleted, effects included: `transl_erased` emits
+a placeholder of whatever layout the context requests (`dummy_constant` for
+values, zeros for unboxed numbers, recursively for unboxed products; vector
+layouts have no placeholder and remain a compiler error). The mode system
+guarantees no retained code reads the placeholder. There is no other codegen:
+no erased calling convention, no per-occurrence layout changes.
 
-### Closures: the body
+`erased_ (print_string "hi")` prints nothing. This is deliberate for now and
+is unsound as a specification mechanism; the fix is to require `e @ total`,
+deferred to keep this piece independent of totality.
 
-A closure's body is checked at the closure's own erasure.
+## The `@@ erased` field modality
 
-    erased_ (fun y -> g y)      -- g @ erased is fine here
+The one place erasure touches representation. `{ x : t @@ erased; ... }`
+declares a field that occupies no slot in the record:
 
-The lambda is erased, so it is deleted whole, so its body is an erased context.
-Without this rule the body would be checked at Retained and that example would
-fail, which would make `erased_` useless over anything containing a lambda. A
-retained closure's body is a retained context, so it can touch erased values
-only in erased sub-positions.
+- **Construction** `{ x = e; ... }` checks `e` at expected erasure Erased (so
+  both retained and erased values are accepted), evaluates a retained `e` for
+  its effects, and stores nothing.
+- **Projection** `r.x` has mode `erased` and fabricates a placeholder of the
+  field's kind — null / a dummy value; it never reads memory.
+- **Patterns** on the field bind placeholders at mode erased.
+- **Signature matching** is fail-closed: two sides of a module boundary must
+  agree on a field's erasure, since it decides the record's layout.
+- **Mutable erased fields are rejected**: writing would be a no-op.
+- The modality is recorded in the `.cmi` and printed back.
 
-This is a different rule from capture. Capture is about the environment, the
-body rule is about context, and the body rule is closer to a region than a lock
-because it changes an ambient rather than adjusting individual lookups.
+This is a comonadic *weakening* (`Join_const Erased`), which the modality
+machinery (`Meet_const` only) does not express; it is carried as a separate
+marker on the label declaration rather than widening the general modality
+algebra for one constant use.
 
-One consequence falls out rather than needing its own rule: an erased closure's
-body is an erased context, so an erased closure can capture anything.
+## `Stdlib.Erased`
 
-### Erasure is fixed top-down
+    type 'a t = { erased : 'a @@ erased }
 
-The body rule means a closure's erasure has to be known before its body is
-checked. It cannot be an inference variable that zaps later.
-
-That is satisfiable, because the expected mode supplies it: `erased_ (fun ...)`
-gives Erased, ordinary code gives Retained. It has to be taken from the expected
-mode rather than inferred, and the implementation should enforce that.
-
-The same constraint arrives independently from the ABI, since a function's
-calling convention depends on which parameters are erased. Both say the same
-thing. The erasure of a function is determined by its type and its position, and
-never inferred from its body.
-
-### Erasure is invariant in argument position
-
-Modes on arrows are treated three different ways, and only one of them is a
-problem. Measured on the baseline compiler with locality:
-
-| path | argument | return |
-|---|---|---|
-| `unify`, ordinary passing | equated | equated |
-| subsumption, module sealing | contravariant | covariant |
-| `(e :> t)` coercion | contravariant | covariant |
-
-`unify` calls `unify_alloc_mode_for Unify` on both the argument and the return
-mode (`ctype.ml:5136`), which submodes in both directions and so equates them.
-Sealing and coercion genuinely relate them: a local-returning implementation is
-rejected against a global-returning signature and accepted the other way, and an
-implementation needing a global argument is rejected against a signature
-promising only a local one.
-
-For erasure, the return direction is already safe, because the lattice matches
-the ABI:
-
-- implementation `Retained`, signature `Erased`: allowed. The callee writes a
-  result the caller ignores. Harmless.
-- implementation `Erased`, signature `Retained`: rejected by the order. The
-  caller would read a result nobody produced.
-
-Argument position has exactly one unsafe direction, and contravariance permits
-it:
-
-- signature `Erased`, implementation `Retained`: rejected by the order. Correct,
-  since the callee wants a value nobody passes.
-- signature `Retained`, implementation `Erased`: allowed, and it is an ABI
-  mismatch. The caller passes an argument the callee has no parameter for.
-
-So the rule is narrow. Erasure is invariant in argument position under
-subsumption and coercion, and keeps the ordinary covariant rule in return
-position. Nothing else needs changing, because unification already equates.
-
-The reason locality is safe in the same direction is that both modes have
-identical representation, so the coercion is a no-op. Erasure changes the
-parameter list.
-
-## How it compiles
-
-### The ABI already exists
-
-`Base Void` lowers to `layout_unboxed_product []` (`lambda.ml:3185`), and the
-backend drops zero-width things end to end. Measured against the baseline
-compiler with `type t : void`:
-
-    let f (x : t) (y : int) = y + 1
-    -> camlW__f_0_2_code (y/301: int) : int (+ y/301 2)
-
-The void parameter is absent, and the function has the same ABI as one written
-without it. Records behave the same way:
-
-    type r = { a : int; ghost : t; b : int }
-    let mk a b (g : t) = { a; ghost = g; b }
-    -> camlR__mk_0_3_code (a: int b: int) : val (alloc 2048 a b)
-
-Header 2048 is a two-word block, so the void field takes no slot.
-`mixed_product_bytes.ml:81` gives void fields zero bytes.
-
-Currying uses ABI arity rather than type arity, so partial application already
-works and the arities may diverge:
-
-    let f (x : t) (n : int) (m : int) = n + m
-    -> camlP__f_0_4_code (n: int m: int),  caml_curry_V_V
-    let use (x : t) = f x 1
-    -> camlP__use_1_5_code () : val ...
-
-Note that `use` compiles to a genuinely nullary function, since its only
-parameter was erased. A normal `f ()` passes unit as a real immediate, so this
-is a new shape and wants a test even though it works.
-
-The strategy is therefore to give an erased occurrence a zero-width
-representation and let the existing void path do the work. No new calling
-convention.
-
-### Getting the mode to codegen
-
-Locality is the precedent. The typechecker resolves the mode, stores it on the
-Typedtree node (`alloc_mode : Mode.Alloc.r`, `typedtree.mli:116`, carried by
-`Texp_tuple`, `Texp_construct`, `Texp_function` and others), and `translcore`
-reads it through `transl_alloc_mode` to emit `Alloc_heap` or `Alloc_local`.
-Erasure follows the same route.
-
-The mechanism differs even though the plumbing matches. Locality selects an
-allocator and the value is still one word in one register, so the ABI shape does
-not move. Erasure changes the shape.
-
-### The seam
-
-Representation is computed from the type alone. Every entry point in
-`typeopt.mli` takes a type and an environment and no mode: `layout`,
-`layout_of_sort`, `function_return_layout`, `value_kind`. Threading an
-occurrence's mode into representation selection is the main cost of this piece
-and the place where the mode and kind separation gets breached. Scope it before
-starting, since it decides whether the piece is a week or a month.
-
-Void gives the representation and nothing else. Void is a property of types and
-erasure is a property of occurrences, so there is no existing analogue of "may
-only be used in erased contexts". That part is new, and it is where review
-effort should go.
+`'a Erased.t` is how a value is erased from an ABI: the wrapper is a record
+none of whose fields occupy slots. `make` / combinators are deferred;
+construct and project directly.
 
 ## Constraints
 
-Erasure cannot be mode-polymorphic. OCaml does not monomorphize, so a parameter
-whose erasure varies per instantiation would need two ABIs.
-
-The `.cmi` has to record erasure, because callers generate the calling sequence
-from it.
-
-A signature must not be able to change a field's erasure, or the two sides of a
-module boundary disagree about layout. For parameters the rule is the argument
-invariance above; for fields, fail closed.
-
-Arrays reject void today. `Unsupported_void_in_array` fires at four sites in
-`typeopt.ml`, so erased array elements are out unless that is extended.
-
-## Scope of this piece
-
-`erased_ e` type-checks `e` and then deletes it, including any effects it would
-have had. `erased_ (print_string "hi")` prints nothing. This is deliberate for
-now and it is unsound as a specification mechanism, which is why Why3 requires
-ghost code to have no observable effect on non-ghost state.
-
-The fix is to require `e @ total`, tying this piece to the totality piece. That
-is deferred so the two can be built independently. Record the hazard in the
-documentation meanwhile, so nobody builds on the current behaviour.
-
-In scope: the axis and its lattice, `erased_`, the `@ erased` mode annotation,
-the `@@ erased` field modality, the ambient rule with its application and
-closure cases, zero-width representation for erased parameters, fields and
-returns, `.cmi` round-tripping, and printing.
-
-## Cases to pin before writing code
-
-- An erased value returned from a retained function. `let f x = erased_ (g x)`
-  gives `f : _ -> t @ erased`, where the call is retained and the result erased.
-- A record all of whose fields are erased, which is legitimately zero-width.
-- A constructor with erased arguments, the variant analogue of the field case.
-- An erased mutable field, where writing is a no-op. Probably reject.
-- Inference direction. Legacy is Retained and modes zap to legacy, so an
-  unannotated binding cannot drift to Erased and vanish. The failure mode is
-  invisible, so test it rather than reasoning about it.
+The `.cmi` records erasure on arrows (as it does every mode) and field
+erasure on records (it decides layout).
 
 ## Tests
 
-`testsuite/tests/vox/erasure.ml` for typing, plus codegen checks.
-
-Typing, the ambient rule:
-
-- a retained value accepted where erased is expected, an erased value rejected
-  where retained is expected
-- an erased value rejected as an `if` condition and as a match scrutinee in
-  retained code, accepted for both inside `erased_`
-- defaults: an unannotated value is retained and prints as it does today
-
-Typing, application:
-
-- `f x` rejected when `f @ erased`
-- `erased_ (f x)` accepted for the same `f`
-- an erased *parameter* and an erased *function* handled independently
-
-Typing, closures:
-
-- a closure capturing an erased value is retained, and calling it works
-- the same closure rejected when it uses the erased value at a retained
-  position, `fun y -> x + y`
-- `erased_ (fun y -> g y)` accepted with `g @ erased`, which is the body rule
-- an erased closure capturing a retained value, accepted
-
-Boundaries:
-
-- `.cmi` round-trip for an erased parameter and an erased field
-- sealing, argument position, both directions: a signature with a retained
-  parameter against an implementation with an erased one is rejected, which is
-  the ABI-unsafe direction contravariance would otherwise permit, and the
-  reverse is rejected too, since the rule is invariance
-- sealing, return position, both directions: a retained-returning implementation
-  against an erased-returning signature is accepted, the reverse rejected
-- the same four cases through an explicit `(e :> t)` coercion
-- a signature that changes a field's erasure is rejected
-
-A trap worth knowing before writing any of these. Mode subsumption tests are
-easy to write non-discriminatingly, because an unused parameter's mode is left
-unconstrained by inference and will unify with whatever the signature asks for.
-Testing locality this way accepted in *both* directions, which looks like "modes
-do not submode on arguments" and is really "the test proved nothing". Force the
-mode with a real use, such as letting the argument escape into a global
-reference, and check that the fixture fails when the rule is removed.
-
-Codegen, which is what this piece is really about, so check emitted code rather
-than only that it compiles:
-
-- an erased parameter is absent from the native function, and the ABI matches
-  the same function written without it
-- an erased record field takes no slot, checked against the allocation header
-- a function whose parameters are all erased compiles to a nullary function
-- partial application across an erased parameter uses the ABI arity
-- a closure capturing an erased value has no slot for it, and the enclosing
-  function's ABI is unchanged
-- an erased return produces a function returning nothing
-- the erased expression's effects are gone, pinning the deliberate unsoundness
-  so the later totality requirement shows up as a diff
+- `testsuite/tests/vox/erasure.ml` — the information-flow discipline
+- `testsuite/tests/vox/erasure_subsumption.ml` — arrow-mode variance on all
+  four paths, inference, optionals, externals, structures
+- `testsuite/tests/vox/erasure_runtime.ml` — runtime semantics: effect
+  deletion, placeholders, partial application, erased optionals
+- `testsuite/tests/vox/erasure_units.ml` — cross-unit `.cmi` round trip
 
 ## Deferred
 
-Requiring `e @ total` in `erased_ e`. Erased array elements. Interaction with
-refinement predicates, which is what erasure exists for.
+Requiring `e @ total` in `erased_ e`. Erased array elements. `erased_` at
+vector layouts (currently a compiler fatal error rather than a located user
+error; reachable only with `-extension simd`). `erased_` in quotations
+(rejected). Constructor-argument `@@ erased`. Convenience functions on
+`Erased.t`. Interaction with refinement predicates, which is what erasure
+exists for.
 
 ## Decisions taken during implementation
-
-Recorded per AGENTS.md: choices at points the doc left open or where reality
-disagreed with the doc, with alternatives considered.
 
 ### The ambient rule is an environment flag checked at the submode funnel
 
 "Checked at ambient Erased" is implemented as a flag on the typing
 environment (`Env.enter_erased_context`), consulted at the single point
 where every expression's mode meets its expectation (`Typecore.submode`):
-inside an erased context, the erasure axis simply is not checked, because
-the context is deleted from compilation. This is compositional — it covers
-variables, results of applications, nested `erased_`, everything — and it
-gives the closure body rule for `erased_ (fun ...)` for free (the flag is
-in the environment when the body is typed).
+inside an erased context the erasure axis is not checked, because the
+context is deleted from compilation. This is compositional and gives the
+closure body rule for `erased_ (fun ...)` for free.
 
-History: the first implementation was an environment *lock* that lowered
-the erasure of looked-up identifiers. Review found it non-compositional
-(an erased application result in a read position inside `erased_` was still
-rejected); the funnel formulation subsumes it and is smaller.
-
-### The default expectation requires retained; erased-tolerant positions are
-the exception
+### The default expectation requires retained
 
 `Erased` is the top of the axis, so an *unconstrained* expected mode would
 accept erased values — and "read position" is a semantic notion nobody can
-grep for. Review found exactly this hole (`while` and `for` used a raw
-`Value.max`). So the polarity is flipped: the permissive expected mode
-(`mode_max`) requires Retained on the erasure axis, and the erased-tolerant
-positions are the closed, spelled-out set:
+grep for. The polarity is therefore flipped: `mode_max` requires Retained on
+the erasure axis, and the erased-tolerant positions are the closed set listed
+above. Positions built from fresh mode variables still need an explicit
+constraint where they read (destructuring patterns, field access/mutation,
+the function position of an application, splice and quotation-overwrite
+cells).
 
-- type-driven positions (an `@ erased` arrow argument, an erased return);
-- erased contexts (the ambient rule above);
-- statement position (`e; ...`), which discards the value.
+### Closure carve-outs
 
-Positions built from fresh mode variables still need an explicit constraint
-where they read: destructuring patterns (constants, tuples, constructors,
-records, arrays, lazy, unpack, intervals — variables, wildcards and aliases
-bind without reading, so `let x = erased_ e in ...` works), record field
-access and mutation (`type_label_access`), and the function position of an
-application (there is no closure to jump to).
-
-### Closures: carve-outs in three places
-
-- `Env.closure_mode` / `const_closure_mode` (captures): the capture check
-  meets the captured value's erasure down to Retained; body uses still see
-  the true erasure.
-- `close_over` (partial application, both the mode and const versions): an
-  erased argument is not stored in the wrapper closure, so its erasure does
-  not join into the closure's mode. Without this, `use x` with an erased `x`
-  incorrectly made the result erased.
-- moregen (`moregen_alloc_mode`): erasure is equated in argument position in
-  *both* directions there, not one direction plus the ambient variance —
-  the ambient direction flips at each arrow nesting, and review produced a
-  sealed module whose callback ABI mismatched at run time through a doubly
-  nested arrow. The coercion path (`subtype_rec`) recurses with swapped
-  sides, so its single check per level already yields invariance.
-
-The doc offered a modality-based framing for captures; the machinery applies
-locks uniformly across captures, so the carve-out was the available route
-(as the doc anticipated).
+`Env.closure_mode` / `const_closure_mode` (captures) and `close_over`
+(partial application) meet the erasure component down to Retained rather than
+joining it into the closure's mode. The lock machinery applies uniformly
+across captures, so a per-capture modality was not available.
 
 ### Erasure is fixed top-down
 
 A lambda's body is an erased context exactly when the lambda is syntactically
-under `erased_`. A lambda written directly at an `@ erased` arg position
-without `erased_` is checked with a retained body.
+under `erased_`. A lambda at an `@ erased` argument position without
+`erased_` is retained, genuinely evaluated, and checked with a retained body.
 
-This is the correct rule, not an approximation of a laxer one. Such a lambda's
-own erasure is Retained, so it is genuinely constructed and evaluated, and
-merely dropped at the argument boundary — checking its body as though it were
-in an erased context, while still evaluating it, would be unsound. `erased_`
-is what makes the lambda itself erased, and wrapping in it is the way to ask
-for an erased body. An earlier draft of this section called the rule "stricter
-than the doc's rule" and invited someone to complete it; that would be a
-mistake.
+### Mode crossing pins are at construction sites
 
-Separately deferred, and genuinely a missing capability: reading "the
-expectation's erasure is constantly Erased" off a right-mode without zapping
-it needs solver support that does not exist.
+A review suggestion to pin at the two readers of stored bounds was tried and
+reverted: the kind machinery mixes readers, and pinning only some views made
+ordinary kind subsumption fail (672 testsuite failures). The
+construction-site pins keep every view consistent.
 
-### Codegen realized via the void layout
+### Call-site inference of parameter erasure
 
-Erased occurrences translate at `Punboxed_product []`:
-
-- function parameters whose arrow arg mode is erased (including
-  function-cases), marked before body translation;
-- variables let-bound to erased expressions (`erased_ e` or an alias of an
-  erased variable), including through `Matching.for_let` via a Void sort;
-- application arguments at erased arrow positions: erased arguments pass
-  zero-width; retained arguments are evaluated for effects and dropped
-  (`Lsequence`), pinning the doc's boundary semantics;
-- the eta-wrapper parameter for out-of-order partial applications;
-- over-applications of primitives thread the same per-position flags.
-
-The per-unit table of erased identifiers is reset from `Translmod.reset`:
-`Ident` stamps restart for every unit, so review showed a stale table giving
-*another unit's* like-named parameter the void layout.
-
-An erased expression at any other position translates to a placeholder of
-whatever layout the context requests (`dummy_constant` for values, zeros
-for unboxed numbers, recursively for unboxed products). This is what makes
-structural erasure total: a tuple with an erased component builds with a
-placeholder word and is then dropped at its erased boundary, instead of
-putting a void operand inside a value-layout block (review found a dozen
-compiler aborts of that shape). Vector layouts have no placeholder and
-remain a compiler error.
-
-Measured results match the doc's void experiments: erased params are absent
-from native functions, a function whose only param is erased compiles to a
-nullary symbol, and a closure whose only capture is erased becomes a static
-closure (no allocation at all).
-
-`erased_ e` at a retained-layout position (an erased value smuggled through
-a value binding whose erasure the analysis doesn't see) emits
-`Lambda.dummy_constant` — a recognizable placeholder that only other erased
-positions consume.
-
-### What the deferrals add up to
-
-Taken individually the items below are each a bounded gap, but two of them
-compose into the largest reduction in scope versus the design as settled, and
-it is worth stating outright rather than leaving to be inferred: with the field
-modality missing **and** structure-level erased bindings rejected, an erased
-value can only exist as a parameter annotated `@ erased` or as a local `let`
-inside a function. Nothing can *store* one, and there are no partially erased
-structures. Erasure is currently a property of arguments and locals, not of
-data.
-
-### Deferred beyond the doc's deferred list
-
-- **Erased record fields**: the doc's `@@ erased` mechanism does not exist.
-  Comonadic modalities are `Meet_const` only — they can strengthen a field
-  relative to the record (`@@ global` in a local record) but not weaken one,
-  and an erased field in a retained record is a weakening. `@@ erased` is
-  rejected outright — `Error: Unrecognized modality erased.` — which is the
-  right behaviour while the mechanism is missing: it fails closed rather than
-  accepting an annotation it would silently ignore. Options
-  are a comonadic `Join_const` modality (touches modality composition,
-  zapping, inclusion, cmi) or a special-cased representation-bearing marker;
-  both are big enough to be their own piece. **The doc's analogy to
-  `@@ global` is wrong in direction; this needs a design decision.**
-- **Erased returns**: typed correctly (`int -> int @ erased` infers and
-  round-trips) but represented as a value-layout placeholder, not
-  zero-width. Making them void requires translation-time knowledge of every
-  application's return erasure; the placeholder is correct, just one word.
-- **Structure-level erased bindings** (`let x = erased_ 5` at toplevel) are
-  rejected: the structure's mode is the join of its items' modes, and
-  compilation units are legacy. Insulating them needs the same missing
-  modality direction as record fields.
-- **Erased optional parameters** were intended to keep the retained
-  representation on both sides of a call, so that caller and callee agree.
-  **Only the caller did** (fixed since this analysis was written: the
-  callee-side marking now skips Optional-labelled parameters, so both
-  spellings agree; the failing test is re-promoted green). `Typeopt.function_arg_erasures` answers `false`
-  for `Optional _`, but `Translcore` marks any `Tparam_pat` whose mode is
-  erased without consulting the label, and an optional *without* a default is
-  a `Tparam_pat`. A defaulted optional is `Tparam_optional_default` and so
-  escapes the marking, which isolates the label as the cause: the defaulted
-  spelling runs correctly, while `let opt ?a:(a : int option @ erased) () = 1`
-  compiles and then aborts, flambda2 reporting
-  `params_arity (void x int)` against `args_arity (V x int)`. The fix is a
-  guard on `fp_arg_label`, or — better, since there is no erased optional
-  convention to make work — rejecting the declaration as erased externals
-  already are. Pinned as a failing test.
-- **Externals cannot take erased parameters** (rejected at declaration):
-  there is no erased calling convention across the FFI.
-- **`erased_` in quotations** is rejected.
-- **Erased args to external primitives** keep the retained calling
-  convention (no `%`-primitive has erased params today).
-
-### Resolved gap: arrow-mode loosening laundered erasure; call-site
-inference remains
-
-Higher-order code used to drop erasure from arrows:
-
-    let id2 : ('a -> 'b) -> ('a -> 'b) = fun g -> g
-    let f (x : int @ erased) = 42
-    let laundered = id2 f     (* was : int -> int; called, it aborted *)
-
-The mechanism was not `instance` (a lambda-bound function laundered the same
-way with no instantiation involved) and not moregen or `subtype_rec` (both
-enforce invariance): it was `loosen_arrow_modes` in `Typecore.type_argument`,
-which deliberately rebuilds an expected arrow with `newvar_above` on the
-argument mode and `newvar_below` on the return mode — built-in
-contravariant/covariant arrow-mode subsumption at every place an inferred
-function meets an arrow expectation. That loosening is the safe direction
-for every pre-existing axis; for erasure, "above" on the argument is toward
-Erased, so the actual function's erased ABI satisfied the loosened copy
-while the visible arrow stayed retained. Fixed by equating the erasure
-component of the loosened argument mode instead of loosening it, making this
-third subsumption path agree with the other two: an erased-parameter
-function cannot flow to a retained-parameter arrow expectation in either
-spelling. There is no single ABI serving both, and OCaml does not
-monomorphize, so generic HOFs cannot accept erased-parameter callbacks; the
-locality analogues were verified unaffected. `testsuite/tests/vox/
-erasure_gaps.ml` pins the before/after as a red/green pair.
-
-Erased optional parameters without a default used to get the void layout on
-the callee side only (the caller and the defaulted form use the retained
-convention); the callee-side marking now skips Optional-labelled parameters,
-so all optional spellings agree on the retained convention. Rejecting erased
-optionals outright remains an alternative if the modally-erased-but-
-physically-passed combination proves confusing.
-
-Still open (gap 2 in `erasure_gaps.ml`): a call site can infer an
-unannotated parameter's erasure within one structure (`let h x = 42` plus
-`ignore (h (erased_ 5))` gives `h : 'a @ erased -> int`), against this doc's
-"never inferred" rule — the argument's mode raises the arrow's argument-mode
-variable before the binding's modes are zapped to legacy. Self-consistent
-per unit and across `.cmi`s, but a silent ABI change; the fix (fixing
-unannotated arrow erasure at creation, or rejecting erased arguments to
-flexible arrows) interacts with annotation processing order and stays
-flagged for a decision.
-
-### Round-2 soundness review: four more laundering/observation paths closed
-
-A second review loop (two claude lenses + codex, soundness only) on the merged
-tip found four paths where an erased value was observed at run time or a
-caller/callee ABI disagreed, each with a reproduced segfault, silent wrong
-value, or compiler abort. All are fixed and pinned in `erasure_gaps.ml`.
-
-- **Coercion loosening.** `(e :> ty)` with a non-closed target does not go
-  through `subtype_rec`; it uses `Ctype.build_subtype`, whose `Tarrow` case
-  loosens the argument mode with `build_submode_neg` (`newvar_above`). That is
-  a *fourth* arrow-mode subsumption path — `moregen`, `subtype_rec`, `unify`
-  and `type_argument`'s `loosen_arrow_modes` were the three already made
-  invariant. It laundered an erased-parameter function into a retained arrow.
-  Fixed by equating the erasure component of the argument mode in
-  `build_subtype`. The lesson: erasure invariance in argument position has to
-  be asserted at *every* place arrow modes are related directionally; there is
-  no single chokepoint.
-
-- **Optional parameters cannot be erased.** An erased optional is a
-  contradiction: the type says erased, but an optional is physically passed as
-  an option, so codegen keeps it retained. The three sides of a call
-  (`function_arg_erasures`, the callee marking, the partial-application eta
-  wrapper) could not all honour it, and the disagreement leaked a placeholder
-  into a real slot. Rejected outright, at the definition site
-  (`split_function_ty`) and in written arrow types (`Typetexp`). This
-  supersedes the earlier per-side carve-outs, which are removed.
-
-- **External result arrows.** The erased-external-parameter check walked only
-  the arity spine, so an erased parameter in a *result* arrow (a stub
-  returning a closure) escaped. Replaced with a whole-type walk.
-
-- **Modules never store erased values.** A local module reached through
-  `let open struct ... end` stored an erased binding as a void operand in a
-  value block. Fixed at the root: a module allocation's erasure is capped to
-  Retained (a module is a runtime block), so the existing structure-item check
-  rejects erased items in local modules exactly as it already did for
-  compilation units.
-
-- **Splice and magic-staged quotation body** were raw `Value.max` read
-  positions accepting an erased code value the splice reads at
-  program-generation time (segfault); both now require retained, and the
-  overwrite cell mode is pinned retained as the last such position.
-
-Extensive negative results were recorded too: the ambient rule does not leak
-out of `erased_` through modules/objects/first-class modules; structural
-propagation, argument invariance through functors/first-class-modules/classes,
-the closure and `close_over` carve-outs, partial application and currying,
-`.cmi` round trips, and `%apply`/`%revapply` all held under compile-and-run in
-both backends.
-
-### Remaining non-soundness robustness gap
-
-`erased_` (or an erased occurrence) at a SIMD vector layout hits a
-`Misc.fatal_error` in `transl_erased` rather than a located user error — the
-type checker accepts the program and translation crashes. It is not a runtime
-soundness hole (no code is produced), and it needs `-extension simd` to reach.
-Vector layouts have no zero constant to use as a placeholder; the clean fix is
-to reject an erased occurrence at a vector layout during type checking, as
-erased externals are rejected. Left for a follow-up.
-
-### Erasure and mode crossing
-
-No type crosses erasure, ever: an erased value does not exist, so treating
-it as retained is unsound regardless of the type. Enforced at the places
-crossings are built: `Mod_bounds.min_crossable` for bounds stored as actual
-kinds (unboxed products, abbreviations), the pinned `cross_all_crossable`
-for the builtin data kinds, `Crossing.always_constructed_at`,
-`Axis_lattice.create` (the ikind constants), and `~erasure:false` at the
-bool-created crossings. `mod erased` / `mod retained` are rejected as kind
-modifiers and `mod everything` excludes erasure (precedent: staticity).
-
-A review suggestion to replace the construction-site pins with pins at the
-two readers of stored bounds was tried and *reverted*: the kind machinery
-mixes readers (`Mod_bounds.crossing`, the raw lattice bits in ldd, raw
-equality) and pinning only some views made ordinary kind subsumption fail —
-672 testsuite failures, e.g. format strings no longer subkinds of value.
-The construction-site pins keep every view consistent. Verified by the full
-suite; the reviewer's version had only been checked against four test
-directories. Zero-width types could in principle cross erasure soundly; not
-exploited.
+Within one structure, a call site can raise an unannotated parameter's
+erasure before the binding's modes are zapped (`let h x = 42` plus
+`ignore (h (erased_ 5))` gives `h : 'a @ erased -> int`). Under the first
+design this was a silent ABI change and flagged as a gap; with no ABI it is
+ordinary, sound mode inference and is pinned as such.

@@ -6426,24 +6426,7 @@ let submode_with_cross env ~is_ret ty l r =
   Alloc.submode l r'
 
 let moregen_alloc_mode env ~is_ret ty v a1 a2 =
-  (* Erasure is invariant in argument position: whether an argument is passed
-     is ABI, so the two sides must agree exactly. Contravariance would allow
-     an erased-parameter implementation behind a retained-parameter
-     signature, and callers would pass an argument the callee has no
-     parameter for. Both directions are checked here because the ambient
-     variance only supplies one, and which one flips at every nesting depth.
-     Return position keeps the ordinary rule. *)
-  let erasure_invariant () =
-    if is_ret then Ok ()
-    else
-      let e1 = Alloc.proj_comonadic Erasure a1 in
-      let e2 = Alloc.proj_comonadic Erasure a2 in
-      Result.bind (Mode.Erasure.submode e1 e2) (fun () ->
-          Mode.Erasure.submode e2 e1)
-      |> Result.map_error ignore
-  in
   match
-    Result.bind (erasure_invariant ()) (fun () ->
     match v with
     | Invariant ->
         Result.bind (submode_with_cross env ~is_ret ty a1 a2)
@@ -6451,7 +6434,7 @@ let moregen_alloc_mode env ~is_ret ty v a1 a2 =
         |> Result.map_error ignore
     | Covariant -> Result.map_error ignore (submode_with_cross env ~is_ret ty a1 a2)
     | Contravariant -> Result.map_error ignore (submode_with_cross env ~is_ret ty a2 a1)
-    | Bivariant -> Ok ())
+    | Bivariant -> Ok ()
   with
   | Ok () -> ()
   | Error _  -> raise_unexplained_for Moregen
@@ -7677,13 +7660,6 @@ let rec build_subtype env (visited : transient_expr list)
               build_submode_neg a
             end
           in
-          (* Erasure is invariant in argument position: whether an argument is
-             passed is ABI. [build_submode_*] loosens it like the other axes,
-             which would launder an erased-parameter function into a
-             retained-parameter arrow through a coercion; equate it back. *)
-          Mode.Erasure.equate_exn
-            (Alloc.proj_comonadic Erasure a')
-            (Alloc.proj_comonadic Erasure a);
           a', c3
         end else a, Unchanged
       in
@@ -7950,16 +7926,6 @@ let rec subtype_rec env trace t1 t2 cstrs =
             t2 t1
             cstrs
         in
-        (* Erasure is invariant in argument position; see
-           [moregen_alloc_mode]. Checked on the arrow's own modes: crossing
-           never applies to erasure. *)
-        (match
-           Mode.Erasure.submode
-             (Alloc.proj_comonadic Erasure a1)
-             (Alloc.proj_comonadic Erasure a2)
-         with
-         | Ok () -> ()
-         | Error _ -> subtype_error ~env ~trace ~unification_trace:[]);
         let a2 = cross_left_alloc env t2 a2 in
         subtype_alloc_mode env trace a2 a1;
         let r2 = cross_right_alloc_ret env u2 r2 in
