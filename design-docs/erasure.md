@@ -209,8 +209,11 @@ erasure on records (it decides layout).
 - `testsuite/tests/vox/erasure.ml` — the information-flow discipline
 - `testsuite/tests/vox/erasure_subsumption.ml` — arrow-mode variance on all
   four paths, inference, optionals, externals, structures
-- `testsuite/tests/vox/erasure_runtime.ml` — runtime semantics: effect
-  deletion, placeholders, partial application, erased optionals
+- `testsuite/tests/vox/erasure_fields.ml` — the `@@ erased` field modality
+- `testsuite/tests/vox/erasure_runtime.ml`,
+  `erasure_fields_runtime.ml` — runtime semantics: effect deletion,
+  placeholders, partial application, erased optionals, slot elision, the
+  immediate-0 wrapper
 - `testsuite/tests/vox/erasure_units.ml` — cross-unit `.cmi` round trip
 
 ## Deferred
