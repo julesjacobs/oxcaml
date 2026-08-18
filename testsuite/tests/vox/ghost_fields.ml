@@ -218,3 +218,29 @@ Line 2, characters 0-20:
     ^^^^^^^^^^^^^^^^^^^^
 Error: Records must contain at least one runtime value.
 |}]
+
+(* Block indices have no route to a ghost field: there is no slot to
+   index, and a fabricated index would bypass the ghost read mode (found
+   by review: the accessor typed at real mode and computed an
+   out-of-bounds offset). On an all-ghost record the void kind already
+   forbids the base type. *)
+type ir = { ia : int; ip : string @@ ghost; ib : int }
+let bad = (.ip)
+[%%expect{|
+type ir = { ia : int; ip : string @@ ghost; ib : int; }
+val bad : (ir, string) idx_imm = <abstr>
+|}]
+
+let bad = (.ghost)
+[%%expect{|
+Line 1, characters 12-17:
+1 | let bad = (.ghost)
+                ^^^^^
+Error: This expression has type "('a : value_or_null)"
+       but an expression was expected of type "'b box"
+       The layout of 'a box is void
+         because of the definition of box at line 1, characters 0-37.
+       But the layout of 'a box must be a value layout
+         because it's the base type (the first type parameter) for a
+         block index (idx or mut_idx).
+|}]
