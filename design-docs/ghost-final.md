@@ -15,8 +15,9 @@ value may only flow to ghost positions, so its content is unobservable, and
 never read. Representation-affecting ghostliness lives in exactly one place: the
 `@@ ghost` record-field modality, whose field occupies no slot; reading such
 a field fabricates a placeholder ("null") at mode ghost. `Stdlib.Ghost`
-(`type 'a t = { ghost : 'a @@ ghost }`) is the wrapper this enables: the
-immediate `0` at run time, whatever it wraps.
+(`type 'a t = { ghost : 'a @@ ghost }`) is the wrapper this enables: kind
+void, so absent from ABIs entirely — no register, no slot — whatever it
+wraps.
 
 ## What landed
 
@@ -47,8 +48,8 @@ optionals and externals may be ghost. All pinned in both directions in
 **`@@ ghost` fields**: `ld_ghost` flag on label declarations (not a
 modality atom); representation rides the void machinery (Void element in a
 mixed block, zero width natively; bytecode keeps a placeholder word, as it
-does for void-typed fields). All-ghost records are legal and compile to the
-immediate `0`. Construction evaluates real field expressions for effects
+does for void-typed fields). All-ghost records are legal and have kind
+void: no value exists at run time. Construction evaluates real field expressions for effects
 only (statement-like expected mode: nothing is stored, nothing is required);
 projection and patterns fabricate placeholders at mode ghost; the toplevel
 printer shows `<ghost>` without reading memory. Signature matching is
@@ -66,8 +67,8 @@ directly. Deferred conveniences until practice demands them.
 - `ghost_fields.ml` — the field modality: modes, matching, rejections,
   all-ghost records, fail-closed signatures
 - `ghost_runtime.ml`, `ghost_fields_runtime.ml` — effect deletion,
-  placeholder passing, slot elision (`Obj.size`), the immediate-0 wrapper
-  (`Obj.is_int`), functional update, `Stdlib.Ghost` (native reference;
+  placeholder passing, slot elision (`Obj.size`), the void-kinded wrapper,
+  functional update, `Stdlib.Ghost` (native reference;
   bytecode keeps a word per ghost field and has its own reference)
 - `ghost_units.ml` — cross-unit `.cmi` round trip
 

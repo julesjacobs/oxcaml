@@ -8,9 +8,8 @@ update effect
 a=1 b=2
 a=1 b=2
 wrap effect
-is_int true
-is_int true
-len 2
+holder size 1
+id 9
+use 2
 done
-stdlib is_int true
 stdlib done

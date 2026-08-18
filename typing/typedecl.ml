@@ -1211,6 +1211,11 @@ let transl_declaration env sdecl (id, uid) =
             if unbox then
               Record_unboxed,
               Jkind.Builtin.any ~why:Old_style_unboxed_type
+            else if List.for_all (fun l -> l.Types.ld_ghost) lbls' then
+              (* An all-ghost record has kind void (nothing exists at run
+                 time); see [compute_record_kind]. *)
+              Record_dummy { represent_as_float_array; flatten_floats },
+              Jkind.Builtin.void ~why:Ghost_record
             else
               (* See Note [Record_dummy] in [typing/types.mli] *)
               Record_dummy { represent_as_float_array; flatten_floats },
@@ -2377,10 +2382,17 @@ let compute_record_kind (type rep) env loc (form : rep record_form)
     let jkind =
       match form with
       | Legacy ->
-          let lbls_with_sorts =
-            List.map2 (fun (lbl, ty) sort -> (lbl, ty, sort)) lbls sorts
-          in
-          Jkind.for_boxed_record_with_updates lbls_with_sorts
+          if List.for_all (fun (lbl, _) -> lbl.Types.ld_ghost) lbls then
+            (* An all-ghost record has no runtime representation at all: its
+               kind is void, so it vanishes from ABIs (no register, no slot)
+               like any other void value. This is what makes ['a Ghost.t]
+               erase what it wraps. *)
+            Jkind.Builtin.void ~why:Ghost_record
+          else
+            let lbls_with_sorts =
+              List.map2 (fun (lbl, ty) sort -> (lbl, ty, sort)) lbls sorts
+            in
+            Jkind.for_boxed_record_with_updates lbls_with_sorts
       | Unboxed_product ->
         let lbls_with_layouts =
           List.map2

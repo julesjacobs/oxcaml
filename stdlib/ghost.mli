@@ -14,9 +14,13 @@
 
 (** Ghost values.
 
-    ['a Ghost.t] erases a value from the runtime representation: the
-    [ghost] field occupies no slot, so the wrapper is the immediate [0]
-    whatever it was built from, and the wrapped value is never stored.
+    ['a Ghost.t] erases a value from the runtime representation entirely:
+    the [ghost] field occupies no slot, so the wrapper has kind [void] —
+    no register, no block slot, nothing at run time. A function taking an
+    ['a Ghost.t] parameter has the same calling convention as one without
+    it, and a record field of type ['a Ghost.t] occupies no space. (Being
+    void, it cannot inhabit value-polymorphic containers such as ['a list];
+    store it as a record field instead.)
 
     Construct and project directly: [{ Ghost.ghost = v }] evaluates [v]
     and discards it (write [ghost_ v] to skip the evaluation too); reading

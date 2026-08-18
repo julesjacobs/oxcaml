@@ -3198,7 +3198,9 @@ module Format_history = struct
       format_immediate_or_null_creation_reason ppf immediate
     | Scannable_creation scannable ->
       format_scannable_creation_reason ppf scannable
-    | Void_creation _ -> .
+    | Void_creation Ghost_record ->
+      fprintf ppf
+        "it is a record all of whose fields are ghost, which is void"
     | Value_or_null_creation value ->
       format_value_or_null_creation_reason ppf value ~layout_or_kind
     | Value_creation value ->
@@ -4200,7 +4202,7 @@ module Debug_printers = struct
         value
     | Value_creation value ->
       fprintf ppf "Value_creation %a" value_creation_reason value
-    | Void_creation _ -> .
+    | Void_creation Ghost_record -> fprintf ppf "Void_creation Ghost_record"
     | Product_creation product ->
       fprintf ppf "Product_creation %a" product_creation_reason product
     | Concrete_creation concrete ->

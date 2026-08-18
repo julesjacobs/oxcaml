@@ -2586,12 +2586,12 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
     let ll, shape = List.split (Array.to_list lv) in
     if Array.for_all (fun (lbl, _, _) -> lbl.Data_types.lbl_ghost) fields
     then begin
-      (* An all-ghost record has no block: its value is the immediate 0.
+      (* An all-ghost record has kind void: no value exists at run time.
          Field expressions (and an extended expression) are still evaluated
          for their effects. *)
       let body =
         List.fold_right (fun l acc -> Lsequence (l, acc)) ll
-          (Lconst (Const_base (Const_int 0)))
+          (void_value (of_location ~scopes loc))
       in
       match opt_init_expr with
       | None -> body

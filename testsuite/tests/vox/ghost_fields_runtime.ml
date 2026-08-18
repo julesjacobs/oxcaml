@@ -41,17 +41,20 @@ let () =
   let { a; p = _; b } = r in
   Printf.printf "a=%d b=%d\n" a b
 
-(* the all-ghost wrapper is the immediate 0 *)
+(* the all-ghost wrapper has kind void: no value exists at run time *)
 type 'a box = { ghost : 'a @@ ghost }
+type holder = { id : int; hidden : string box }
 
 let () =
   let b = { ghost = (print_string "wrap effect\n"; "payload") } in
-  Printf.printf "is_int %b\n" (Obj.is_int (Obj.repr b));
   let b2 = { ghost = (ghost_ (failwith "never")) } in
-  Printf.printf "is_int %b\n" (Obj.is_int (Obj.repr b2));
-  (* wrappers are ordinary values: they go in data structures *)
-  let l = [ b; b2 ] in
-  Printf.printf "len %d\n" (List.length l);
+  (* a void-typed field takes no slot, with no modality on the field *)
+  let h = { id = 9; hidden = b } in
+  Printf.printf "holder size %d\n" (Obj.size (Obj.repr h));
+  Printf.printf "id %d\n" h.id;
+  (* void parameters vanish from the calling convention *)
+  let use (_x : string box) (n : int) = n + 1 in
+  Printf.printf "use %d\n" (use b2 1);
   (* projection at a ghost position; the placeholder is never read *)
   let _hidden = ghost_ (String.length b.ghost) in
   print_string "done\n"
@@ -59,7 +62,6 @@ let () =
 (* Stdlib.Ghost *)
 let () =
   let e : int Ghost.t = { ghost = 42 } in
-  Printf.printf "stdlib is_int %b\n" (Obj.is_int (Obj.repr e));
   (* statement position discards the value, so a ghost projection is fine
      there; [ignore] is not, since its parameter is real *)
   (ghost_ (ignore e.Ghost.ghost));

@@ -758,7 +758,9 @@ let rec value_kind env ~loc ~visited ~depth ~num_nodes_visited (ty : type_expr)
           num_nodes_visited, non_nullable Pgenval
         | Type_record (labels, _, _)
           when List.for_all (fun lbl -> lbl.Types.ld_ghost) labels ->
-          (* An all-ghost record is the immediate 0; there is no block. *)
+          (* An all-ghost record has kind void, so it should never reach
+             [value_kind]; answer defensively rather than walking a block
+             shape that does not exist. *)
           num_nodes_visited, non_nullable Pintval
         | Type_record (labels, rep, _) ->
           let depth = depth + 1 in

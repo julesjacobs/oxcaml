@@ -20,8 +20,13 @@ The division of labour is deliberate and is the heart of the design:
   fabricates a placeholder ("null or an appropriate value of the field's
   kind") at mode ghost.
 - To erase something from an ABI, wrap it: `'a Ghost.t`, defined in the
-  stdlib as `type 'a t = { ghost : 'a @@ ghost }`. Its zero-width field
-  means the wrapper carries no data.
+  stdlib as `type 'a t = { ghost : 'a @@ ghost }`. An all-ghost record has
+  **kind void**, so the wrapper is not merely dataless but entirely absent
+  from ABIs: a `Ghost.t` parameter occupies no register, and a field of a
+  void type occupies no slot — with no modality needed at the use site,
+  since the type alone carries it. (Being void, `Ghost.t` cannot inhabit
+  value-polymorphic containers such as `'a list`; store it as a record
+  field instead.)
 
 Additional conveniences are deferred until practice shows they are needed.
 
@@ -221,7 +226,7 @@ ghostliness on records (it decides layout).
 - `testsuite/tests/vox/ghost_runtime.ml`,
   `ghost_fields_runtime.ml` — runtime semantics: effect deletion,
   placeholders, partial application, ghost optionals, slot elision, the
-  immediate-0 wrapper
+  void-kinded wrapper
 - `testsuite/tests/vox/ghost_units.ml` — cross-unit `.cmi` round trip
 
 ## Deferred
@@ -290,10 +295,12 @@ construction-site pins keep every view consistent.
   is `Base Void` and its element classification is `Void`, so records with
   ghost fields become mixed blocks whose ghost entries have zero width —
   the same path void-typed fields already take. An all-ghost record (which
-  the empty-record check now permits when the voidness comes from ghostliness)
-  compiles to the immediate `0`: construction sequences the field
-  expressions' effects and yields `0`, and `Typeopt.value_kind` reports it
-  as an immediate.
+  the empty-record check now permits when the voidness comes from
+  ghostliness) has kind void: construction sequences the field expressions'
+  effects and yields the empty unboxed product, and the value never exists.
+  The first version of this design made all-ghost records the immediate `0`
+  (kind value), which kept them usable in `'a list` but still spent a
+  register per parameter and a slot per field; full erasure won.
 - **Modes.** Reading a ghost field joins Ghost into the result mode
   (other axes inherited from the record, conservatively). Writing one
   expects nothing of the value (statement-like `Value.max` expectation):

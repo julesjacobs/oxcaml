@@ -102,18 +102,41 @@ Line 2, characters 17-22:
 Error: Unrecognized modality ghost.
 |}]
 
-(* An all-ghost record is legal: its value is the immediate 0 and it has
-   kind value, so it can go in ordinary data structures. This is what makes
-   the Ghost.t wrapper work. *)
+(* An all-ghost record has kind void: nothing exists at run time, so it
+   vanishes from ABIs — no register, no slot. This is what makes the
+   Ghost.t wrapper erase what it wraps. *)
 type 'a box = { ghost : 'a @@ ghost }
 let wrap x = { ghost = x }
 let unwrap b = ghost_ b.ghost
-let boxes = [ wrap 1; wrap 2 ]
 [%%expect{|
 type 'a box = { ghost : 'a @@ ghost; }
 val wrap : 'a -> 'a box = <fun>
 val unwrap : 'a box -> 'a @ ghost = <fun>
-val boxes : int box list = [{ghost = <ghost>}; {ghost = <ghost>}]
+|}]
+
+(* Being void, it cannot inhabit value-polymorphic containers... *)
+let bad = [ wrap 1; wrap 2 ]
+[%%expect{|
+Line 1, characters 12-18:
+1 | let bad = [ wrap 1; wrap 2 ]
+                ^^^^^^
+Error: This expression has type "int box"
+       but an expression was expected of type "('a : value_or_null)"
+       The layout of int box is void
+         because of the definition of box at line 1, characters 0-37.
+       But the layout of int box must be a value layout
+         because the type argument of list has layout value_or_null.
+|}]
+
+(* ...but a record field of a void type needs no modality and takes no
+   slot: the type alone erases it. *)
+type holder = { id : int; hidden : string box }
+let mk id s = { id; hidden = wrap s }
+let get h = h.id
+[%%expect{|
+type holder = { id : int; hidden : string box; }
+val mk : int -> string -> holder = <fun>
+val get : holder -> int = <fun>
 |}]
 
 (* A ghost value can be stored through the wrapper. The construction
