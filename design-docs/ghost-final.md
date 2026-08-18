@@ -1,7 +1,7 @@
 # Vox ghost code — final report
 
-State of the piece after the information-flow redesign, on branch
-`jujacobs/vox/ghostliness-red` (tip `721b475c7b`). The design doc proper is
+State of the piece after the information-flow redesign and the rename to
+ghost vocabulary, on branch `jujacobs/vox/ghost`. The design doc proper is
 `ghostliness.md` next to this file; its "Decisions taken during implementation"
 section records each choice and the alternatives. The report for the first,
 ABI-bearing iteration is in the history of this file; the doc's History
@@ -78,5 +78,6 @@ directly. Deferred conveniences until practice demands them.
 - `ghost_` in quotations is rejected.
 - Ghost fields' types still contribute conservatively to their record's
   kind bounds (fewer crossings than the ghost semantics would justify).
-- The `jujacobs/vox/ghostliness-abi` branch (emitted-code ABI pins) is
+- The `jujacobs/vox/erasure-abi` branch (emitted-code ABI pins, named for
+  the feature's first vocabulary) is
   superseded by this redesign: `@ ghost` no longer has an ABI to pin.
