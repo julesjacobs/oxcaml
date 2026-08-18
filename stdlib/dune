@@ -118,8 +118,8 @@
   dynarray.mli
   either.ml
   either.mli
-  erased.ml
-  erased.mli
+  ghost.ml
+  ghost.mli
   ephemeron.ml
   ephemeron.mli
   filename.ml
@@ -327,11 +327,11 @@
   .stdlib.objs/byte/stdlib__Either.cmsi
   .stdlib.objs/byte/stdlib__Either.cmt
   .stdlib.objs/byte/stdlib__Either.cmti
-  .stdlib.objs/byte/stdlib__Erased.cmi
-  .stdlib.objs/byte/stdlib__Erased.cms
-  .stdlib.objs/byte/stdlib__Erased.cmsi
-  .stdlib.objs/byte/stdlib__Erased.cmt
-  .stdlib.objs/byte/stdlib__Erased.cmti
+  .stdlib.objs/byte/stdlib__Ghost.cmi
+  .stdlib.objs/byte/stdlib__Ghost.cms
+  .stdlib.objs/byte/stdlib__Ghost.cmsi
+  .stdlib.objs/byte/stdlib__Ghost.cmt
+  .stdlib.objs/byte/stdlib__Ghost.cmti
   .stdlib.objs/byte/stdlib__Ephemeron.cmi
   .stdlib.objs/byte/stdlib__Ephemeron.cms
   .stdlib.objs/byte/stdlib__Ephemeron.cmsi
@@ -695,7 +695,7 @@
   .stdlib.objs/native/stdlib__Dynamic.cmx
   .stdlib.objs/native/stdlib__Effect.cmx
   .stdlib.objs/native/stdlib__Either.cmx
-  .stdlib.objs/native/stdlib__Erased.cmx
+  .stdlib.objs/native/stdlib__Ghost.cmx
   .stdlib.objs/native/stdlib__In_channel.cmx
   .stdlib.objs/native/stdlib__Out_channel.cmx
   .stdlib.objs/native/stdlib__Pair.cmx

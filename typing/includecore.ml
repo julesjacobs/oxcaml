@@ -351,7 +351,7 @@ type label_mismatch =
   | Type of Errortrace.equality_error
   | Mutability of position
   | Atomicity of position
-  | Erasedness of position
+  | Ghostliness of position
   | Modality of Modality.equate_error
 
 type record_change =
@@ -570,9 +570,9 @@ let report_label_mismatch first second env ppf err =
       Format_doc.fprintf ppf "%s is atomic and %s is not."
         (String.capitalize_ascii (choose ord first second))
         (choose_other ord first second)
-  | Erasedness ord ->
+  | Ghostliness ord ->
       Format_doc.fprintf ppf
-        "%s is erased and %s is not.@ Erasedness decides the record's \
+        "%s is ghost and %s is not.@ Ghostliness decides the record's \
          layout, so both sides must agree."
         (String.capitalize_ascii (choose ord first second))
         (choose_other ord first second)
@@ -908,11 +908,11 @@ module Record_diffing = struct
           match err with
           | Some _ -> err
           | None ->
-            (* Erasedness decides the record's layout, so the two sides of a
+            (* Ghostliness decides the record's layout, so the two sides of a
                boundary must agree exactly. *)
-            match ld1.ld_erased, ld2.ld_erased with
-            | true, false -> Some (Erasedness First)
-            | false, true -> Some (Erasedness Second)
+            match ld1.ld_ghost, ld2.ld_ghost with
+            | true, false -> Some (Ghostliness First)
+            | false, true -> Some (Ghostliness Second)
             | true, true | false, false -> None
         in
         begin match err with

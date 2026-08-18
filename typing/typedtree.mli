@@ -418,8 +418,8 @@ and exp_extra =
         them here, as the cost of tracking this additional information is minimal. *)
   | Texp_stack
         (** stack_ E *)
-  | Texp_erased
-        (** erased_ E: the expression is deleted from compilation *)
+  | Texp_ghost
+        (** ghost_ E: the expression is deleted from compilation *)
   | Texp_mode of Mode.Alloc.Const.Option.t modes
         (** E : _ @@ M  *)
   | Texp_inspected_type of [ `exp ] type_inspection
@@ -1415,7 +1415,7 @@ and label_declaration =
      ld_uid: Uid.t;
      ld_mutable: Types.mutability;
      ld_modalities: modalities;
-     ld_erased: bool;
+     ld_ghost: bool;
      ld_type: core_type;
      ld_loc: Location.t;
      ld_attributes: attributes;

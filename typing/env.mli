@@ -609,11 +609,11 @@ val add_const_closure_lock : ?ghost:bool -> Mode.Hint.pinpoint ->
 
 val add_region_lock : t -> t
 
-(** Mark the environment as an erased context: the context is deleted from
-    compilation, so nothing is checked on the erasure axis inside it. *)
-val enter_erased_context : t -> t
+(** Mark the environment as a ghost context: the context is deleted from
+    compilation, so nothing is checked on the ghostliness axis inside it. *)
+val enter_ghost_context : t -> t
 
-val in_erased_context : t -> bool
+val in_ghost_context : t -> bool
 val add_exclave_lock : t -> t
 val add_unboxed_lock : t -> t
 val enter_quote : t -> t

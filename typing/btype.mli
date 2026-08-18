@@ -379,7 +379,7 @@ module Jkind0 : sig
 
     val min : t
 
-    (** [min] with erasure pinned to no-crossing; see the implementation.
+    (** [min] with ghostliness pinned to no-crossing; see the implementation.
         Use this, not [min], for bounds stored as an actual kind. *)
     val min_crossable : t
     val max : t

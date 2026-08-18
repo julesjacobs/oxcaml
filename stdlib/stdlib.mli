@@ -1414,13 +1414,13 @@ module Effect         = Effect
     "The Effect interface may change in incompatible ways in the future."
 ]
 module Either         = Either
-module Erased         = Erased
 module Ephemeron      = Ephemeron
 module Filename       = Filename
 module Float          = Float
 module Format         = Format
 module Fun            = Fun
 module Gc             = Gc
+module Ghost          = Ghost
 module Hashtbl        = Hashtbl
 module Iarray         = Iarray
 module In_channel     = In_channel

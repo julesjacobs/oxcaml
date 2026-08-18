@@ -1346,7 +1346,7 @@ val mixed_block_element_with_locality_mode_for_module :
     bit pattern (currently 0xBBBB in its tagged form) *)
 val dummy_constant: lambda
 
-(** A placeholder of the given layout, for erased values: [dummy_constant]
+(** A placeholder of the given layout, for ghost values: [dummy_constant]
     for values, zeros for unboxed numbers, recursively for unboxed products.
     Vector layouts have no placeholder and are a fatal error. *)
 val placeholder_of_layout: scoped_location -> layout -> lambda

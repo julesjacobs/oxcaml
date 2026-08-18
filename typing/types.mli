@@ -1116,9 +1116,9 @@ and label_declaration =
     ld_id: Ident.t;
     ld_mutable: mutability;
     ld_modalities: Mode.Modality.Const.t;
-    ld_erased: bool;
-    (* The field is erased: it occupies no slot in the record, and reading
-       it fabricates a placeholder at mode erased. Written [@@ erased]. *)
+    ld_ghost: bool;
+    (* The field is ghost: it occupies no slot in the record, and reading
+       it fabricates a placeholder at mode ghost. Written [@@ ghost]. *)
     ld_type: type_expr;
     ld_sort: Jkind_types.Sort.Const.t option;
     ld_loc: Location.t;

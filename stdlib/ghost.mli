@@ -12,4 +12,15 @@
 (*                                                                        *)
 (**************************************************************************)
 
-type 'a t = { erased : 'a @@ erased }
+(** Ghost values.
+
+    ['a Ghost.t] erases a value from the runtime representation: the
+    [ghost] field occupies no slot, so the wrapper is the immediate [0]
+    whatever it was built from, and the wrapped value is never stored.
+
+    Construct and project directly: [{ Ghost.ghost = v }] evaluates [v]
+    and discards it (write [ghost_ v] to skip the evaluation too); reading
+    [x.Ghost.ghost] gives a placeholder at mode [ghost], usable only in
+    ghost positions such as under [ghost_]. *)
+
+type 'a t = { ghost : 'a @@ ghost }

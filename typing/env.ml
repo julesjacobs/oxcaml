@@ -662,7 +662,7 @@ type type_descr_kind =
 type type_descriptions = type_descr_kind
 
 let in_signature_flag = 0x01
-let erased_context_flag = 0x02
+let ghost_context_flag = 0x02
 
 type t = {
   values: (lock_or_stage, value_entry, value_data) IdTbl.t;
@@ -1003,12 +1003,12 @@ let in_signature b env =
 
 let is_in_signature env = env.flags land in_signature_flag <> 0
 
-(* An erased context is deleted from compilation, so nothing is checked on
-   the erasure axis inside it; see [Typecore.submode]. *)
-let enter_erased_context env =
-  { env with flags = env.flags lor erased_context_flag }
+(* A ghost context is deleted from compilation, so nothing is checked on
+   the ghostliness axis inside it; see [Typecore.submode]. *)
+let enter_ghost_context env =
+  { env with flags = env.flags lor ghost_context_flag }
 
-let in_erased_context env = env.flags land erased_context_flag <> 0
+let in_ghost_context env = env.flags land ghost_context_flag <> 0
 
 let has_local_constraints env =
   not (StagedPath.Map.is_empty env.local_constraints)
@@ -3713,11 +3713,11 @@ let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0 =
   let hint_comonadic : _ Mode.Hint.morph =
     Is_closed_by (Comonadic, {closure = closure_context; closed = pp})
   in
-  (* Erasure is excluded from the closure lock: capturing an erased value
+  (* Ghostliness is excluded from the closure lock: capturing a ghost value
      constrains the closure not at all, because nothing is stored for it.
-     Uses of the capture inside the body still see its true erasure. *)
+     Uses of the capture inside the body still see its true ghostliness. *)
   Mode.Value.Comonadic.submode_err pp
-    (Mode.Value.meet_const_with Erasure Mode.Erasure.Const.Retained
+    (Mode.Value.meet_const_with Ghostliness Mode.Ghostliness.Const.Real
        {Mode.monadic; comonadic}).comonadic
     (Mode.Value.Comonadic.apply_hint hint_comonadic comonadic0);
   let hint_monadic : _ Mode.Hint.morph =
@@ -3732,9 +3732,9 @@ let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0 =
 
 let const_closure_mode pp {Mode.monadic; comonadic}
   closure_context comonadic0 =
-  (* Erasure is excluded from the closure lock; see [closure_mode]. *)
+  (* Ghostliness is excluded from the closure lock; see [closure_mode]. *)
   Mode.Value.Comonadic.(submode_err pp
-    (Mode.Value.meet_const_with Erasure Mode.Erasure.Const.Retained
+    (Mode.Value.meet_const_with Ghostliness Mode.Ghostliness.Const.Real
        {Mode.monadic; comonadic}).Mode.comonadic
     (of_const ~hint:(Is_used_in closure_context) comonadic0));
   let monadic =

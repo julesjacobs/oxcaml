@@ -63,7 +63,7 @@ let all_keywords =
     "effect", EFFECT, v5_3;
     "else", ELSE, always;
     "end", END, always;
-    "erased_", ERASED, oxcaml;
+    "ghost_", GHOST, oxcaml;
     "exception", EXCEPTION, always;
     "exclave_", EXCLAVE, oxcaml;
     "external", EXTERNAL, always;

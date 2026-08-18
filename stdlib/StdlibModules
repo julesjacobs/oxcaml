@@ -38,7 +38,7 @@ STDLIB_MODULE_BASENAMES = \
   camlinternalAtomic \
   stdlib \
   either \
-  erased \
+  ghost \
   sys \
   obj \
   type \

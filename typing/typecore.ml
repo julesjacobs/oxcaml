@@ -646,31 +646,31 @@ let enter_region_if cond ?region env expected_mode =
     env, expected_mode, []
 
 (* The most permissive expected mode. It still requires the value to be
-   retained on the erasure axis: an erased value does not exist at run time,
-   so the positions that accept one are spelled out explicitly (erased
+   real on the ghostliness axis: a ghost value does not exist at run time,
+   so the positions that accept one are spelled out explicitly (ghost
    contexts, and statement position, which discards the value). *)
-let value_max_retained =
-  Value.of_const { Value.Const.max with erasure = Retained }
+let value_max_real =
+  Value.of_const { Value.Const.max with ghostliness = Real }
 
 let mode_max =
-  mode_default value_max_retained
+  mode_default value_max_real
 
-(* An erased field has no slot. Reading it fabricates a placeholder, which is
-   erased; the other axes are inherited from the record conservatively.
+(* A ghost field has no slot. Reading it fabricates a placeholder, which is
+   ghost; the other axes are inherited from the record conservatively.
    Writing it evaluates the expression and discards the value, so nothing is
    required of it (statement-like). *)
-let erased_field_read_mode mode =
+let ghost_field_read_mode mode =
   Value.join
     [ Value.disallow_right mode;
       Value.disallow_right
-        (Value.of_const { Value.Const.min with erasure = Erased }) ]
+        (Value.of_const { Value.Const.min with ghostliness = Ghost }) ]
 
-let mode_erased_field_write () = mode_default Value.max
+let mode_ghost_field_write () = mode_default Value.max
 
 let mode_with_position mode position =
   { (mode_default mode) with position }
 
-(* Statement position discards the value, so even an erased one is
+(* Statement position discards the value, so even a ghost one is
    admissible: nothing of it survives compilation. *)
 let mode_statement_with_position position =
   { (mode_default Value.max) with position }
@@ -749,7 +749,7 @@ let mode_lazy expected_mode =
       ~totality:false ~logicality:false
       ~regionality:false ~uniqueness:false ~contention:false ~statefulness:false
       ~visibility:false ~forkable:false ~yielding:false ~staticity:false
-      ~erasure:false
+      ~ghostliness:false
   in
   let closure_mode =
     expected_mode |> as_single_mode |> Crossing.apply_right mode_crossing
@@ -825,11 +825,11 @@ let mode_argument ~funct ~index ~position_and_mode ~partial_app marg =
    shared_context explains why mode.uniqueness is high *)
 let submode ~loc ~env ?(reason = Other) mode expected_mode =
   let mode =
-    (* Inside an erased context nothing is checked on the erasure axis: the
+    (* Inside a ghost context nothing is checked on the ghostliness axis: the
        context is deleted from compilation, so a value's absence at run time
        cannot be observed. This is the ambient rule. *)
-    if Env.in_erased_context env
-    then Value.meet_const_with Erasure Erasure.Const.Retained mode
+    if Env.in_ghost_context env
+    then Value.meet_const_with Ghostliness Ghostliness.Const.Real mode
     else Value.disallow_right mode
   in
   let res =
@@ -1396,8 +1396,8 @@ let mode_spliced =
   and hint_comonadic = Spliced Comonadic in
   let mode =
     (* A splice reads its operand at program-generation time, so it must be
-       retained, like any other read position. *)
-    { Value.Const.max with erasure = Retained }
+       real, like any other read position. *)
+    { Value.Const.max with ghostliness = Real }
     |> Value.of_const ~hint_monadic ~hint_comonadic
   in
   mode_default mode
@@ -3541,11 +3541,11 @@ and type_pat_aux
             ~modalities:label.lbl_modalities alloc_mode.mode
         in
         let mode =
-          if label.lbl_erased then erased_field_read_mode mode else mode
+          if label.lbl_ghost then ghost_field_read_mode mode else mode
         in
         let alloc_mode = simple_pat_mode mode in
         let ty_sort =
-          if label.lbl_erased then
+          if label.lbl_ghost then
             (* The slot sort is Void; the pattern sees a placeholder at the
                sort of the field's type. *)
             match Ctype.type_sort ~why:Match ~fixed:false !!penv ty_arg with
@@ -3603,9 +3603,9 @@ and type_pat_aux
       rvp @@ solve_expected (make_record_pat sorts rep lbl_a_list ambiguity)
   in
   (* Destructuring reads the matched value at run time, so it must be
-     retained: an erased value does not exist at run time. Patterns that bind
-     without reading (wildcards, variables, aliases) leave erasure alone, so
-     [let x = erased_ e in ...] works. Or-patterns, constraints and other
+     real: a ghost value does not exist at run time. Patterns that bind
+     without reading (wildcards, variables, aliases) leave ghostliness alone, so
+     [let x = ghost_ e in ...] works. Or-patterns, constraints and other
      wrappers recurse with the same mode, so their sub-patterns decide. *)
   (match sp.ppat_desc with
    | Ppat_any | Ppat_var _ | Ppat_alias _ | Ppat_or _ | Ppat_constraint _
@@ -6936,7 +6936,7 @@ and type_expect_
             container = (loc, Expression) }
         in
         let argument_mode =
-          if label.lbl_erased then mode_erased_field_write ()
+          if label.lbl_ghost then mode_ghost_field_write ()
           else
             mode_is_contained_by is_contained_by
               ~modalities:label.lbl_modalities record_mode
@@ -7001,7 +7001,7 @@ and type_expect_
                   ~modalities:lbl.lbl_modalities mode
               in
               let mode =
-                if lbl.lbl_erased then erased_field_read_mode mode else mode
+                if lbl.lbl_ghost then ghost_field_read_mode mode else mode
               in
               let mode = cross_left env lbl.lbl_arg mode in
               check_construct_mutability ~loc:record_loc ~env lbl.lbl_mut
@@ -7011,7 +7011,7 @@ and type_expect_
                   container = (record_loc, Expression) }
               in
               let argument_mode =
-                if lbl.lbl_erased then mode_erased_field_write ()
+                if lbl.lbl_ghost then mode_ghost_field_write ()
                 else
                   mode_is_contained_by is_contained_by
                     ~modalities:lbl.lbl_modalities record_mode
@@ -7468,9 +7468,9 @@ and type_expect_
       check_dynamic (loc, Expression) (Always_dynamic Application)
         expected_mode;
       let pm = position_and_mode env expected_mode sexp in
-      (* The function position requires a retained function: an erased
-         function has no closure to jump to. (Inside an erased context
-         [submode] does not check the erasure axis.) *)
+      (* The function position requires a real function: a ghost
+         function has no closure to jump to. (Inside a ghost context
+         [submode] does not check the ghostliness axis.) *)
       let funct_mode =
         match pm.apply_position with
         | Tail ->
@@ -7481,10 +7481,10 @@ and type_expect_
           in
           (* Separate and unhinted, so the error reads the same in tail and
              non-tail positions. *)
-          Value.submode_exn mode value_max_retained;
+          Value.submode_exn mode value_max_real;
           mode
         | Nontail | Default ->
-          let mode, _ = Value.newvar_below value_max_retained in
+          let mode, _ = Value.newvar_below value_max_real in
           mode
       in
       let funct_expected_mode = mode_default funct_mode in
@@ -7784,7 +7784,7 @@ and type_expect_
           ~modalities:label.lbl_modalities mode
       in
       let mode =
-        if label.lbl_erased then erased_field_read_mode mode else mode
+        if label.lbl_ghost then ghost_field_read_mode mode else mode
       in
       let boxing : texp_field_boxing =
         let is_float_boxing =
@@ -8134,8 +8134,8 @@ and type_expect_
           {Value.Comonadic.Const.max with linearity = Many} env
       in
       let cond_env = Env.add_region_lock env in
-      (* The condition is read at run time, so it must be retained. *)
-      let mode = mode_region value_max_retained in
+      (* The condition is read at run time, so it must be real. *)
+      let mode = mode_region value_max_real in
       let wh_cond =
         type_expect cond_env mode scond
           (mk_expected ~explanation:While_loop_conditional Predef.type_bool)
@@ -8161,11 +8161,11 @@ and type_expect_
   | Pexp_for(param, slow, shigh, dir, sbody) ->
       constrain_enclosing_totality ~loc env;
       let for_from =
-        type_expect env (mode_region value_max_retained) slow
+        type_expect env (mode_region value_max_real) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
       in
       let for_to =
-        type_expect env (mode_region value_max_retained) shigh
+        type_expect env (mode_region value_max_real) shigh
           (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
       in
       let env =
@@ -8924,18 +8924,18 @@ and type_expect_
       end;
       let exp_extra = (Texp_stack, loc, []) :: exp.exp_extra in
       {exp with exp_extra}
-  | Pexp_erased e ->
-      (* [erased_ e] deletes [e] from compilation. The expression itself is
-         erased, so the context must expect an erased value: only the erasure
-         axis is constrained here. Inside, every value appears retained (the
-         ambient rule), implemented by [Env.enter_erased_context] and the
-         erasure carve-out in [submode]. *)
+  | Pexp_ghost e ->
+      (* [ghost_ e] deletes [e] from compilation. The expression itself is
+         ghost, so the context must expect a ghost value: only the ghostliness
+         axis is constrained here. Inside, every value appears real (the
+         ambient rule), implemented by [Env.enter_ghost_context] and the
+         ghostliness carve-out in [submode]. *)
       submode ~loc ~env
-        (Value.of_const { Value.Const.min with erasure = Erased })
+        (Value.of_const { Value.Const.min with ghostliness = Ghost })
         expected_mode;
-      let env = Env.enter_erased_context env in
+      let env = Env.enter_ghost_context env in
       let exp = type_expect env expected_mode e ty_expected_explained in
-      let exp_extra = (Texp_erased, loc, []) :: exp.exp_extra in
+      let exp_extra = (Texp_ghost, loc, []) :: exp.exp_extra in
       {exp with exp_extra}
   | Pexp_comprehension comp ->
       Language_extension.assert_enabled ~loc Comprehensions ();
@@ -8954,11 +8954,11 @@ and type_expect_
       let cell_mode, _ =
         (* The overwritten cell has to be unique
            and should have the areality expected here. It is written through
-           at run time, so it must be retained. *)
+           at run time, so it must be real. *)
         Value.newvar_below
           (Value.meet [
             Value.of_const
-              {Value.Const.max with uniqueness = Unique; erasure = Retained};
+              {Value.Const.max with uniqueness = Unique; ghostliness = Real};
             Value.max_with_comonadic Areality
               (Value.proj_comonadic Areality expected_mode.mode)])
       in
@@ -9028,7 +9028,7 @@ and type_expect_
          (with magic_staged_modes), and we do not constrain the mode. *)
       let mode_quoted =
         if Builtin_attributes.has_magic_staged_modes sexp.pexp_attributes
-        then mode_default value_max_retained
+        then mode_default value_max_real
         else mode_quoted
       in
       let arg = type_expect new_env mode_quoted exp (mk_expected ty) in
@@ -9955,9 +9955,9 @@ and type_label_access
   = fun record_form env srecord usage lid ->
   let mode = Value.newvar () in
   (* Reading or writing a field is a runtime access of the record, so it
-     must be retained. (Inside an erased context [submode] does not check
-     the erasure axis.) *)
-  Value.submode_exn mode value_max_retained;
+     must be real. (Inside a ghost context [submode] does not check
+     the ghostliness axis.) *)
+  Value.submode_exn mode value_max_real;
   let record_jkind, record_sort =
     Jkind.of_new_sort_var ~why:Record_projection
       ~level:(Ctype.get_current_level ())

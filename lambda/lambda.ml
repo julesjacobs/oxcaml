@@ -1493,7 +1493,7 @@ let rec placeholder_of_layout loc (layout : layout) =
       Lconst (Const_base (Const_unboxed_nativeint 0n))
   | Punboxed_vector _ | Punboxed_mask | Ptop | Pbottom | Psplicevar _ ->
       Misc.fatal_error
-        "no erasure placeholder at this layout (vector, mask, top, bottom \
+        "no ghost placeholder at this layout (vector, mask, top, bottom \
          or splice)"
 
 let array_index_to_layout = function

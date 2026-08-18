@@ -31,7 +31,7 @@
    9. Statefulness: Stateless -> Writing / Reading -> Stateful
    10. Visibility (monadic): Immutable -> Read / Write -> Read_write
    11. Staticity (monadic): Dynamic -> Static
-   12. Erasure: Retained -> Erased
+   12. Ghostliness: Real -> Ghost
    13. Externality: External -> External64 -> Internal
 
    Axes 0-12 are modal axes (affect mode-crossing).
@@ -77,7 +77,7 @@ let axis_shapes =
       | Modal (Comonadic Statefulness) -> Diamond4
       | Modal (Monadic Visibility) -> Diamond4
       | Modal (Monadic Staticity) -> Chain2
-      | Modal (Comonadic Erasure) -> Chain2
+      | Modal (Comonadic Ghostliness) -> Chain2
       | Nonmodal Externality -> Chain3)
     axis_by_number
 
@@ -297,8 +297,8 @@ module Levels = struct
   let level_of_externality (x : Jkind_axis.Externality.t) : int =
     match x with External -> 0 | External64 -> 1 | Internal -> 2
 
-  let level_of_erasure (x : Mode.Erasure.Const.t) : int =
-    match x with Mode.Erasure.Const.Retained -> 0 | Mode.Erasure.Const.Erased -> 1
+  let level_of_ghostliness (x : Mode.Ghostliness.Const.t) : int =
+    match x with Mode.Ghostliness.Const.Real -> 0 | Mode.Ghostliness.Const.Ghost -> 1
 
   let areality_of_level = function
     | 0 -> Mode.Regionality.Const.Global
@@ -369,10 +369,10 @@ module Levels = struct
     | 1 -> Mode.Staticity.Static
     | _ -> invalid_arg "Axis_lattice.staticity_of_level_monadic"
 
-  let erasure_of_level = function
-    | 0 -> Mode.Erasure.Const.Retained
-    | 1 -> Mode.Erasure.Const.Erased
-    | _ -> invalid_arg "Axis_lattice.erasure_of_level"
+  let ghostliness_of_level = function
+    | 0 -> Mode.Ghostliness.Const.Real
+    | 1 -> Mode.Ghostliness.Const.Ghost
+    | _ -> invalid_arg "Axis_lattice.ghostliness_of_level"
 
   let externality_of_level = function
     | 0 -> Jkind_axis.Externality.External
@@ -417,8 +417,8 @@ let visibility (x : t) : Mode.Visibility.Const.t =
 let staticity (x : t) : Mode.Staticity.const =
   Levels.staticity_of_level_monadic (get_axis x ~axis:11)
 
-let erasure (x : t) : Mode.Erasure.Const.t =
-  Levels.erasure_of_level (get_axis x ~axis:12)
+let ghostliness (x : t) : Mode.Ghostliness.Const.t =
+  Levels.ghostliness_of_level (get_axis x ~axis:12)
 
 let externality (x : t) : Jkind_axis.Externality.t =
   Levels.externality_of_level (get_axis x ~axis:13)
@@ -459,8 +459,8 @@ let set_visibility (v : Mode.Visibility.Const.t) (x : t) : t =
 let set_staticity (s : Mode.Staticity.const) (x : t) : t =
   set_axis x ~axis:11 ~level:(Levels.level_of_staticity_monadic s)
 
-let set_erasure (e : Mode.Erasure.Const.t) (x : t) : t =
-  set_axis x ~axis:12 ~level:(Levels.level_of_erasure e)
+let set_ghostliness (e : Mode.Ghostliness.Const.t) (x : t) : t =
+  set_axis x ~axis:12 ~level:(Levels.level_of_ghostliness e)
 
 let set_externality (e : Jkind_axis.Externality.t) (x : t) : t =
   set_axis x ~axis:13 ~level:(Levels.level_of_externality e)
@@ -508,16 +508,16 @@ let to_mode_crossing (x : t) : Mode.Crossing.t =
       ~statefulness:
         (Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const (statefulness x)))
-      ~erasure:
+      ~ghostliness:
         (Comonadic.Atom.Modality
-           (Mode.Modality.Comonadic.Atom.Meet_const (erasure x)))
+           (Mode.Modality.Comonadic.Atom.Meet_const (ghostliness x)))
   in
   { monadic; comonadic }
 
 let create ~areality ~linearity ~uniqueness ~portability ~contention ~totality
     ~logicality ~forkable ~yielding ~statefulness ~visibility ~staticity
     ~externality =
-  (* Erasure is always at its top: no type crosses erasure, because an erased
+  (* Ghostliness is always at its top: no type crosses ghostliness, because a ghost
      value has no runtime representation. *)
   bot |> set_areality areality |> set_uniqueness uniqueness
   |> set_linearity linearity |> set_contention contention
@@ -526,7 +526,7 @@ let create ~areality ~linearity ~uniqueness ~portability ~contention ~totality
   |> set_yielding yielding
   |> set_statefulness statefulness
   |> set_visibility visibility |> set_staticity staticity
-  |> set_erasure Mode.Erasure.Const.Erased
+  |> set_ghostliness Mode.Ghostliness.Const.Ghost
   |> set_externality externality
 
 (* Canonical lattice constants used by ikinds. *)
@@ -613,7 +613,7 @@ let object_legacy : t =
          forkable;
          yielding;
          statefulness;
-         erasure = _
+         ghostliness = _
        }
         : Mode.Value.Comonadic.Const.t) =
     Mode.Value.Comonadic.Const.legacy

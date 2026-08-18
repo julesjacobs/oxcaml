@@ -2033,7 +2033,7 @@ let tree_of_label l =
   in
   let ld_modalities = tree_of_modalities l.ld_mutable l.ld_modalities in
   let ld_modalities =
-    if l.ld_erased then "erased" :: ld_modalities else ld_modalities
+    if l.ld_ghost then "ghost" :: ld_modalities else ld_modalities
   in
   {
     olab_name = Ident.name l.ld_id;

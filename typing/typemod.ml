@@ -117,12 +117,12 @@ let new_mode_var_from_annots (m : Alloc.Const.Option.t) =
 
 let register_allocation loc : Alloc.lr * Value.lr =
   let upper_bound =
-    (* A module is a runtime block, so it is always retained: an erased item
-       cannot be stored in it. This makes [infer_modalities] reject an erased
+    (* A module is a runtime block, so it is always real: a ghost item
+       cannot be stored in it. This makes [infer_modalities] reject a ghost
        structure item, for local modules as well as compilation units. *)
     Alloc.of_const
       ~hint_comonadic:Module_allocated_on_heap
-      { Alloc.Const.max with areality = Global; erasure = Retained }
+      { Alloc.Const.max with areality = Global; ghostliness = Real }
   in
   let alloc_mode, _ = Alloc.newvar_below upper_bound in
   let closed_over_mode =
