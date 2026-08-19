@@ -326,10 +326,10 @@ val l : s list = []
 
 (* Type variables inside a predicate are live in the type graph:
    instantiating the declaration substitutes them *)
-type 'a t = int{ (_ : 'a list) = [] }
-let l : int t list = ([] : int{ (_ : int list) = [] } list);;
+type 'a t = 'a list{ (_ : 'a list) = [] }
+let l : int t list = ([] : int list{ (_ : int list) = [] } list);;
 [%%expect{|
-type 'a t = int{ (_ : 'a list) = [] }
+type 'a t = 'a list{ (_ : 'a list) = [] }
 val l : int t list = []
 |}]
 
