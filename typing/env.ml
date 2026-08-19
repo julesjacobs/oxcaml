@@ -3713,8 +3713,9 @@ let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0 =
   let hint_comonadic : _ Mode.Hint.morph =
     Is_closed_by (Comonadic, {closure = closure_context; closed = pp})
   in
-  (* Ghostliness is excluded from the closure lock: capturing a ghost value
-     constrains the closure not at all, because nothing is stored for it.
+  (* Ghostliness is excluded from the closure lock: a captured ghost value
+     is stored physically (possibly as a placeholder), but its content can
+     never be read as real, so the capture does not taint the closure.
      Uses of the capture inside the body still see its true ghostliness. *)
   Mode.Value.Comonadic.submode_err pp
     (Mode.Value.meet_const_with Ghostliness Mode.Ghostliness.Const.Real

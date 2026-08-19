@@ -17,8 +17,8 @@ The division of labour is deliberate and is the heart of the design:
   placeholder without evaluating `e`.
 - The **modality** `@@ ghost` on a record field is what changes
   representation: the field occupies no slot in the record. Reading it
-  fabricates a placeholder ("null or an appropriate value of the field's
-  kind") at mode ghost.
+  fabricates a placeholder (a dummy value of the field's kind) at mode
+  ghost.
 - To erase something from an ABI, wrap it: `'a Ghost.t`, defined in the
   stdlib as `type 'a t = { ghost : 'a @@ ghost }`. An all-ghost record has
   **kind void**, so the wrapper is not merely dataless but entirely absent
@@ -192,7 +192,8 @@ declares a field that occupies no slot in the record:
   both real and ghost values are accepted), evaluates a real `e` for
   its effects, and stores nothing.
 - **Projection** `r.x` has mode `ghost` and fabricates a placeholder of the
-  field's kind — null / a dummy value; it never reads memory.
+  field's kind — a recognizable dummy for values, zeros for unboxed
+  numbers; it never reads memory.
 - **Patterns** on the field bind placeholders at mode ghost.
 - **Signature matching** is fail-closed: two sides of a module boundary must
   agree on a field's ghostliness, since it decides the record's layout.
@@ -234,7 +235,7 @@ ghostliness on records (it decides layout).
 Requiring `e @ total` in `ghost_ e`. Ghost array elements. `ghost_` at
 vector layouts (currently a compiler fatal error rather than a located user
 error; reachable only with `-extension simd`). `ghost_` in quotations
-(rejected). Constructor-argument `@@ ghost`. Convenience functions on
+(a compiler fatal error, same caveat). Constructor-argument `@@ ghost`. Convenience functions on
 `Ghost.t`. Interaction with refinement predicates, which is what ghostliness
 exists for.
 

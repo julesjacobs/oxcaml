@@ -2275,10 +2275,10 @@ let compute_record_repr
   | ~values:false, ~floats:false, ~atomic_floats:false,
       ~float64s:false, ~non_float64_unboxed_fields:false,
       ~voids:true, ~atomic_fields:_, ~first_any:None, .. ->
-    (* All fields ghost (or void): only reachable through ghost fields,
-       which keep the empty-record check from firing. The value is the
-       immediate 0 (see [Translcore.transl_record]); the all-void mixed
-       shape records that no field has a slot. *)
+    (* All fields ghost: only reachable through ghost fields, which keep
+       the empty-record check from firing. The record has kind void (see
+       [compute_record_kind]) and no value exists; the all-void mixed shape
+       records that no field has a slot. *)
     mixed_record ()
   | ~values:false, ~floats:false, ~atomic_floats:false,
       ~float64s:false, ~non_float64_unboxed_fields:false,

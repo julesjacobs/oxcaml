@@ -1389,8 +1389,9 @@ module Jkind0 = struct
         }
 
       (* Mode crossing that crosses everything crossable: everything except
-         staticity and ghostliness. Ghostliness is never crossed: a ghost value has
-         no runtime representation, so it can never be used as real. *)
+         staticity and ghostliness. Ghostliness is never crossed: a ghost
+         value's content may be a fabricated placeholder, so it can never be
+         used as real. *)
       let cross_all_crossable =
         let st : _ Mode.Crossing.Axis.t = Monadic Staticity in
         let er : _ Mode.Crossing.Axis.t = Comonadic Ghostliness in
@@ -2328,8 +2329,13 @@ module Jkind0 = struct
 
     let add_labels_as_with_bounds lbls jkind =
       List.fold_right
-        (fun ((lbl : label_declaration), ld_type, _sort) ->
-          add_with_bounds ~type_expr:ld_type ~modality:lbl.ld_modalities)
+        (fun ((lbl : label_declaration), ld_type, _sort) jkind ->
+          (* A ghost field stores nothing, so its type contributes no bounds
+             to the record's kind. *)
+          if lbl.ld_ghost then jkind
+          else
+            add_with_bounds ~type_expr:ld_type ~modality:lbl.ld_modalities
+              jkind)
         lbls jkind
 
     let for_boxed_record_with_updates lbls =

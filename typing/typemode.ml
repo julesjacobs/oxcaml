@@ -559,8 +559,8 @@ let everything_modality =
     (fun acc -> function
       | Value.Axis.P (Monadic Staticity) -> acc
       | Value.Axis.P (Comonadic Ghostliness) ->
-        (* Types never cross ghostliness: a ghost value has no runtime
-           representation, so it can never be used as real. *)
+        (* Types never cross ghostliness: a ghost value's content may be a
+           fabricated placeholder, so it can never be used as real. *)
         acc
       | Value.Axis.P (Comonadic axis) -> (
         match Per_axis.min (Modal (Comonadic axis)) with

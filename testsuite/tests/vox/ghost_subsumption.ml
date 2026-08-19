@@ -83,6 +83,22 @@ let obj (o : < m : string @ ghost -> int; .. >) = (o :> < m : string -> int >)
 val obj : < m : string @ ghost -> int; .. > -> < m : string -> int > = <fun>
 |}]
 
+(* ...and the reject direction on the same [build_subtype] path. *)
+
+let obj_rev (o : < m : string -> int; .. >) = (o :> < m : string @ ghost -> int >)
+
+[%%expect {|
+Line 1, characters 47-48:
+1 | let obj_rev (o : < m : string -> int; .. >) = (o :> < m : string @ ghost -> int >)
+                                                   ^
+Error: This expression cannot be coerced to type
+         ""< m : string @ ghost -> int >"";
+       it has type "< m : string -> int; .. >" but is here used with type
+         "< m : string @ ghost -> int; .. >"
+       The method "m" has type "string -> int", but the expected method type was
+       "string @ ghost -> int"
+|}]
+
 (* A generic higher-order function accepts a ghost-parameter callback:
    there is no ABI to disagree about, and [app] passing a real value to
    a callback that will not read it is ordinary submoding. *)

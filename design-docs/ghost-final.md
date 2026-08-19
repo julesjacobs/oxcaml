@@ -2,7 +2,7 @@
 
 State of the piece after the information-flow redesign and the rename to
 ghost vocabulary, on branch `jujacobs/vox/ghost`. The design doc proper is
-`ghostliness.md` next to this file; its "Decisions taken during implementation"
+`ghost.md` next to this file; its "Decisions taken during implementation"
 section records each choice and the alternatives. The report for the first,
 ABI-bearing iteration is in the history of this file; the doc's History
 section explains why that design was replaced.
@@ -14,7 +14,8 @@ value may only flow to ghost positions, so its content is unobservable, and
 `ghost_ e` deletes the evaluation of `e`, compiling to a placeholder that is
 never read. Representation-affecting ghostliness lives in exactly one place: the
 `@@ ghost` record-field modality, whose field occupies no slot; reading such
-a field fabricates a placeholder ("null") at mode ghost. `Stdlib.Ghost`
+a field fabricates a placeholder (a recognizable dummy for values, zeros
+for unboxed numbers) at mode ghost. `Stdlib.Ghost`
 (`type 'a t = { ghost : 'a @@ ghost }`) is the wrapper this enables: kind
 void, so absent from ABIs entirely — no register, no slot — whatever it
 wraps.
@@ -76,7 +77,8 @@ directly. Deferred conveniences until practice demands them.
 
 - `ghost_` (or a ghost occurrence) at a SIMD vector layout is a compiler
   fatal error rather than a located user error (needs `-extension simd`).
-- `ghost_` in quotations is rejected.
+- `ghost_` in quotations is a compiler fatal error, like the vector-layout
+  gap, not a located user error.
 - Ghost fields' types still contribute conservatively to their record's
   kind bounds (fewer crossings than the ghost semantics would justify).
 - The `jujacobs/vox/erasure-abi` branch (emitted-code ABI pins, named for

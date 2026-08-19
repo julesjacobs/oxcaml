@@ -2404,13 +2404,18 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
   (* Determine if there are "enough" fields (only relevant if this is a
      functional-style record update *)
   let size = Array.length fields in
+  let all_ghost =
+    (* An all-ghost record has kind void: there is no block to copy, so the
+       large-update path below (Pduprecord) must not fire for it. *)
+    Array.for_all (fun (lbl, _, _) -> lbl.Data_types.lbl_ghost) fields
+  in
   let on_heap = match mode with
     | None -> false (* unboxed is not on heap *)
     | Some m -> is_heap_mode m
   in
   match opt_init_expr with
   | Some (init_expr, init_expr_sort, _)
-    when on_heap && size >= Config.max_young_wosize ->
+    when (not all_ghost) && on_heap && size >= Config.max_young_wosize ->
     (* Take a shallow copy of the init record, then mutate the fields
        of the copy *)
     let copy_id = Ident.create_local "newrecord" in
@@ -2584,7 +2589,7 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
         fields
     in
     let ll, shape = List.split (Array.to_list lv) in
-    if Array.for_all (fun (lbl, _, _) -> lbl.Data_types.lbl_ghost) fields
+    if all_ghost
     then begin
       (* An all-ghost record has kind void: no value exists at run time.
          Field expressions (and an extended expression) are still evaluated

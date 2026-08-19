@@ -258,3 +258,25 @@ Line 1, characters 0-67:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Records must contain at least one runtime value.
 |}]
+
+(* The toplevel printer shows ghost fields without reading memory. *)
+let shown = { a = 10; p = "unseen"; b = 20 }
+[%%expect{|
+val shown : r = {a = 10; p = <ghost>; b = 20}
+|}]
+
+(* A ghost read owes nothing to the record: the result is a fabricated
+   constant, minimal on every axis but ghostliness. *)
+let project (x : r @ local) : string @ global ghost = x.p
+[%%expect{|
+val project : r @ local -> string @ ghost = <fun>
+|}]
+
+(* A ghost field's type contributes no bounds to the record's kind:
+   nothing of it is stored. *)
+type opaque
+type crossing : value mod portable = { live : int; hidden : opaque @@ ghost }
+[%%expect{|
+type opaque
+type crossing = { live : int; hidden : opaque @@ ghost; }
+|}]

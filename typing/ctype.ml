@@ -7652,16 +7652,13 @@ let rec build_subtype env (visited : transient_expr list)
             mode-crossing more complete). *)
           let t1 = if posi then t1 else t1' in
           let posi_arg = not posi in
-          let a', c3 =
-            if posi_arg then begin
-              let a = cross_right_alloc env t1 a in
-              build_submode_pos a
-            end else begin
-              let a = cross_left_alloc env t1 a in
-              build_submode_neg a
-            end
-          in
-          a', c3
+          if posi_arg then begin
+            let a = cross_right_alloc env t1 a in
+            build_submode_pos a
+          end else begin
+            let a = cross_left_alloc env t1 a in
+            build_submode_neg a
+          end
         end else a, Unchanged
       in
       let (r', c4) =

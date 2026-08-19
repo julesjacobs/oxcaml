@@ -1,4 +1,5 @@
 (* TEST
+ flags = "-extension comprehensions";
  expect;
 *)
 
@@ -270,60 +271,6 @@ Error: Signature mismatch:
        The type "int -> int @ ghost" is not compatible with the type "int -> int"
 |}]
 
-(* Sealing, argument position: ordinary contravariance. Ghostliness has no ABI
-   effect, so a ghost-parameter implementation may hide behind a
-   real-parameter signature: callers pass real values, and the
-   implementation is free to ignore them. *)
-module Ok_contra : sig
-  val f : int -> unit
-end = struct
-  let f (x : int @ ghost) = ()
-end
-[%%expect{|
-module Ok_contra : sig val f : int -> unit end
-|}]
-
-(* The reverse is rejected: the signature promises callers may pass ghost
-   values, but the implementation reads its argument. *)
-module Bad_rev : sig
-  val f : int @ ghost -> unit
-end = struct
-  let r = ref 0
-  let f (x : int) = r := x
-end
-[%%expect{|
-Lines 3-6, characters 6-3:
-3 | ......struct
-4 |   let r = ref 0
-5 |   let f (x : int) = r := x
-6 | end
-Error: Signature mismatch:
-       Modules do not match:
-         sig val r : int ref val f : int -> unit end
-       is not included in
-         sig val f : int @ ghost -> unit end
-       Values do not match:
-         val f : int -> unit
-       is not included in
-         val f : int @ ghost -> unit
-       The type "int -> unit" is not compatible with the type
-         "int @ ghost -> unit"
-|}]
-
-(* The same directions through an explicit coercion. *)
-let ok (f : (int @ ghost -> unit)) = (f :> int -> unit)
-[%%expect{|
-val ok : (int @ ghost -> unit) -> int -> unit = <fun>
-|}]
-
-let bad (f : int -> unit) = (f :> (int @ ghost -> unit))
-[%%expect{|
-Line 1, characters 28-56:
-1 | let bad (f : int -> unit) = (f :> (int @ ghost -> unit))
-                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Type "int -> unit" is not a subtype of "int @ ghost -> unit"
-|}]
-
 (* Return position through coercion: real-returning to ghost-returning
    is accepted, the reverse rejected. *)
 let ok (f : int -> int) = (f :> (int -> int @ ghost))
@@ -376,10 +323,10 @@ Error: This value is "ghost" but is expected to be "real".
 
 let bad () = let hi = ghost_ 3 in [| x for x = 0 to hi |]
 [%%expect{|
-Line 1, characters 34-57:
+Line 1, characters 52-54:
 1 | let bad () = let hi = ghost_ 3 in [| x for x = 0 to hi |]
-                                      ^^^^^^^^^^^^^^^^^^^^^^^
-Error: The extension "comprehensions" is disabled and cannot be used
+                                                        ^^
+Error: This value is "ghost" but is expected to be "real".
 |}]
 
 (* Reading or writing a field is a runtime access of the record. *)
@@ -471,16 +418,14 @@ Error: Signature mismatch:
        Type "int @ ghost -> unit" is not compatible with type "int -> unit"
 |}]
 
-(* Externals may declare ghost parameters: the argument is passed
-   physically like any other, and the mode only constrains OCaml-side
-   uses. *)
-external sink : int @ ghost -> unit = "sink"
-[%%expect{|
-external sink : int @ ghost -> unit = "sink"
-|}]
-
 (* The @@ ghost field modality; ghost_fields.ml is the real coverage. *)
 type r = { x : int @@ ghost; y : int }
 [%%expect{|
 type r = { x : int @@ ghost; y : int; }
+|}]
+
+(* ghost_ at a non-value layout fabricates a zero of that layout. *)
+let f () : float# = ghost_ #1.0
+[%%expect{|
+val f : unit -> float# @ ghost = <fun>
 |}]

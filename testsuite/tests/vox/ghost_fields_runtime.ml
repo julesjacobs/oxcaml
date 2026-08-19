@@ -11,13 +11,13 @@
 (* Runtime behaviour of ghost record fields: the field occupies no slot,
    construction evaluates real field expressions for their effects only,
    ghost_ expressions in fields are not evaluated, and an all-ghost record
-   is the immediate 0.
+   has kind void: no value exists at run time.
 
    The slot elision is a native-code guarantee: bytecode represents mixed
    records as ordinary blocks and keeps a placeholder word per ghost field
    (exactly as it does for void-typed fields), hence the separate reference
-   for the block size below. The all-ghost record is the immediate 0 in
-   both backends. *)
+   for the block sizes below. An all-ghost record has kind void in both
+   backends: no value exists at run time. *)
 
 type r = { a : int; p : string @@ ghost; b : int }
 
@@ -40,6 +40,12 @@ let () =
   (* pattern matching binds placeholders without reading *)
   let { a; p = _; b } = r in
   Printf.printf "a=%d b=%d\n" a b
+  ;
+  (* the record operand of a ghost-field projection in real code is still
+     evaluated; the ghost result is bound without being read *)
+  let mk_r () = print_string "proj operand\n"; r in
+  let _placeholder = (mk_r ()).p in
+  ()
 
 (* the all-ghost wrapper has kind void: no value exists at run time *)
 type 'a box = { ghost : 'a @@ ghost }

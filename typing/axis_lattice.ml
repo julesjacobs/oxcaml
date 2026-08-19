@@ -517,8 +517,9 @@ let to_mode_crossing (x : t) : Mode.Crossing.t =
 let create ~areality ~linearity ~uniqueness ~portability ~contention ~totality
     ~logicality ~forkable ~yielding ~statefulness ~visibility ~staticity
     ~externality =
-  (* Ghostliness is always at its top: no type crosses ghostliness, because a ghost
-     value has no runtime representation. *)
+  (* Ghostliness is always at its top: no type crosses ghostliness, because
+     a ghost value's content may be a fabricated placeholder, so treating it
+     as real is never sound. *)
   bot |> set_areality areality |> set_uniqueness uniqueness
   |> set_linearity linearity |> set_contention contention
   |> set_portability portability

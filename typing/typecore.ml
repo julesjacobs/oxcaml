@@ -646,24 +646,23 @@ let enter_region_if cond ?region env expected_mode =
     env, expected_mode, []
 
 (* The most permissive expected mode. It still requires the value to be
-   real on the ghostliness axis: a ghost value does not exist at run time,
-   so the positions that accept one are spelled out explicitly (ghost
-   contexts, and statement position, which discards the value). *)
+   real on the ghostliness axis: a ghost value's content may be a fabricated
+   placeholder, so the positions that accept one are spelled out explicitly
+   (ghost contexts, and statement position, which discards the value). *)
 let value_max_real =
   Value.of_const { Value.Const.max with ghostliness = Real }
 
 let mode_max =
   mode_default value_max_real
 
-(* A ghost field has no slot. Reading it fabricates a placeholder, which is
-   ghost; the other axes are inherited from the record conservatively.
-   Writing it evaluates the expression and discards the value, so nothing is
-   required of it (statement-like). *)
-let ghost_field_read_mode mode =
-  Value.join
-    [ Value.disallow_right mode;
-      Value.disallow_right
-        (Value.of_const { Value.Const.min with ghostliness = Ghost }) ]
+(* A ghost field has no slot. Reading it fabricates a fresh placeholder
+   constant, so the result owes nothing to the record on any axis: it is
+   ghost, and minimal everywhere else (like [ghost_ e] itself). Writing one
+   evaluates the expression and discards the value, so nothing is required
+   of it (statement-like). *)
+let ghost_field_read_mode () =
+  Value.disallow_right
+    (Value.of_const { Value.Const.min with ghostliness = Ghost })
 
 let mode_ghost_field_write () = mode_default Value.max
 
@@ -3541,7 +3540,7 @@ and type_pat_aux
             ~modalities:label.lbl_modalities alloc_mode.mode
         in
         let mode =
-          if label.lbl_ghost then ghost_field_read_mode mode else mode
+          if label.lbl_ghost then ghost_field_read_mode () else mode
         in
         let alloc_mode = simple_pat_mode mode in
         let ty_sort =
@@ -3603,7 +3602,8 @@ and type_pat_aux
       rvp @@ solve_expected (make_record_pat sorts rep lbl_a_list ambiguity)
   in
   (* Destructuring reads the matched value at run time, so it must be
-     real: a ghost value does not exist at run time. Patterns that bind
+     real: a ghost value's content may be a fabricated placeholder. Patterns
+     that bind
      without reading (wildcards, variables, aliases) leave ghostliness alone, so
      [let x = ghost_ e in ...] works. Or-patterns, constraints and other
      wrappers recurse with the same mode, so their sub-patterns decide. *)
@@ -7001,7 +7001,7 @@ and type_expect_
                   ~modalities:lbl.lbl_modalities mode
               in
               let mode =
-                if lbl.lbl_ghost then ghost_field_read_mode mode else mode
+                if lbl.lbl_ghost then ghost_field_read_mode () else mode
               in
               let mode = cross_left env lbl.lbl_arg mode in
               check_construct_mutability ~loc:record_loc ~env lbl.lbl_mut
@@ -7784,7 +7784,7 @@ and type_expect_
           ~modalities:label.lbl_modalities mode
       in
       let mode =
-        if label.lbl_ghost then ghost_field_read_mode mode else mode
+        if label.lbl_ghost then ghost_field_read_mode () else mode
       in
       let boxing : texp_field_boxing =
         let is_float_boxing =

@@ -4568,7 +4568,7 @@ module Lattices_mono = struct
   let morphs_to_totality = morphs_to_obj Totality
 
   let morphs_to_forkable = morphs_to_obj Forkable
-  let morphs_to_erasure = morphs_to_obj Ghostliness
+  let morphs_to_ghostliness = morphs_to_obj Ghostliness
 
   let morphs_to_yielding = morphs_to_obj Yielding
 
@@ -4598,7 +4598,7 @@ module Lattices_mono = struct
     | Portability -> force_by_coverage ~full morphs_to_portability
     | Totality -> force_by_coverage ~full morphs_to_totality
     | Forkable -> force_by_coverage ~full morphs_to_forkable
-    | Ghostliness -> force_by_coverage ~full morphs_to_erasure
+    | Ghostliness -> force_by_coverage ~full morphs_to_ghostliness
     | Yielding -> force_by_coverage ~full morphs_to_yielding
     | Statefulness -> force_by_coverage ~full morphs_to_statefulness
     | Contention_op -> force_by_coverage ~full morphs_to_contention_op
