@@ -842,6 +842,22 @@ A green z3 fixture is silent, so greens alone would not discriminate "all
 proved" from "pass disabled"; the interleaved Refuted/Unknown fixtures and
 the printing baselines carry that discrimination between them.
 
+**Both tracks are mandatory validation, not alternatives** (owner-directed).
+The printing track pins the emitted bytes; the z3 track pins the verdicts a
+real solver returns for those bytes; each catches what the other cannot (a
+lowering change that keeps the query provable is invisible to z3 but a
+printing diff; a sign error in the query polarity prints plausibly but
+inverts every verdict). The development environment satisfies the gate (a
+pinned z3 4.8.5 exists at the path `has_z3.sh` names), so an implementation
+of this piece is not validated until `vc-z3.ml` has RUN — its verdicts
+promoted from a live solver, not hand-written — and both files are green
+under `make dev-test DIR=vox` with the gate passing, alongside the full
+suite. A skipped z3 test is a valid CI outcome on machines without a
+solver; it is not a valid state for this piece's own development. Every
+verdict-bearing fixture in `vc-z3.ml` whose lowering shape is not already
+pinned by `vc-printing.ml` gets its query added there too, so the corpus
+cross-checks bytes against verdicts fixture by fixture.
+
 ## Out of scope
 
 Each recorded, most with the vox2 mechanism named for the eventual piece:
