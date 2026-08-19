@@ -177,6 +177,9 @@ val dump_parsetree : bool ref
 val dump_typedtree : bool ref
 val dump_shape : bool ref
 val dump_refinements : bool ref
+val vox_backend : string ref
+val vox_z3 : string option ref
+val vox_timeout : float ref
 val dump_tlambda : bool ref
 val dump_slambda : bool ref
 val dump_matchcomp : bool ref

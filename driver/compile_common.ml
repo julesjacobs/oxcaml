@@ -168,6 +168,30 @@ let parse_impl i =
   |> Parse_result.map_ast
        ~f:(print_if i.ppf_dump Clflags.dump_source Pprintast.structure)
 
+(* Refinement verification (see Vox_verify), behind [-vox-backend]; the
+   default [none] short-circuits before the walk, so obligations stay
+   recorded-and-accepted and the compile is unchanged. *)
+let vox_verify (typed : Typedtree.implementation) =
+  match !Clflags.vox_backend with
+  | "none" -> ()
+  | backend_name ->
+    let config =
+      { Vox_backend.Config.timeout_seconds = Some !Clflags.vox_timeout
+      ; z3_command = !Clflags.vox_z3
+        (* [None]: resolution in the test gate's order (has_z3.sh) is not
+           yet implemented *)
+      }
+    in
+    (match Vox_backend.plan ~backend_name ~config with
+     | Error message -> Compenv.fatal message
+     | Ok No_discharge -> ()
+     | Ok (Dump backend) ->
+       Vox_verify.implementation ~backend ~dump_only:true ~config
+         typed.structure
+     | Ok (Discharge backend) ->
+       Vox_verify.implementation ~backend ~dump_only:false ~config
+         typed.structure)
+
 let typecheck_impl i parsetree =
   parsetree
   |> Profile.(
@@ -185,6 +209,7 @@ let typecheck_impl i parsetree =
        Refinement_probe.implementation fmt structure)
   |> print_if i.ppf_dump Clflags.dump_shape
     (fun fmt {Typedtree.shape; _} -> Shape.print fmt shape)
+  |> fun typed -> vox_verify typed; typed
 
 let implementation ~hook_parse_tree ~hook_typed_tree info ~backend =
   Profile.(record_call (annotate_file_name (

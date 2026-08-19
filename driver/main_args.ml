@@ -722,6 +722,19 @@ let mk_vmthread f =
 let mk_vnum f =
   "-vnum", Arg.Unit f, " Print version number and exit"
 
+let mk_vox_backend f =
+  "-vox-backend", Arg.String f,
+  "<name>  Discharge refinement obligations with the named solver backend\n\
+  \     (default: none — refined types are recorded, unverified claims)"
+
+let mk_vox_z3 f =
+  "-vox-z3", Arg.String f,
+  "<command>  Run z3 as <command> (default: resolve as the test gate does)"
+
+let mk_vox_timeout f =
+  "-vox-timeout", Arg.Float f,
+  "<seconds>  Time budget per solver query (default: 10)"
+
 let mk_w f =
   "-w", Arg.String f,
   Printf.sprintf
@@ -1223,6 +1236,9 @@ module type Core_options = sig
   val _dtypedtree : unit -> unit
   val _dshape : unit -> unit
   val _drefinements : unit -> unit
+  val _vox_backend : string -> unit
+  val _vox_z3 : string -> unit
+  val _vox_timeout : float -> unit
   val _dtlambda : unit -> unit
   val _dslambda : unit -> unit
   val _dmatchcomp : unit -> unit
@@ -1623,6 +1639,9 @@ struct
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
     mk_drefinements F._drefinements;
+    mk_vox_backend F._vox_backend;
+    mk_vox_z3 F._vox_z3;
+    mk_vox_timeout F._vox_timeout;
     mk_dmatchcomp F._dmatchcomp;
     mk_drawlambda F._drawlambda;
     mk_dtlambda F._dtlambda;
@@ -1733,6 +1752,9 @@ struct
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
     mk_drefinements F._drefinements;
+    mk_vox_backend F._vox_backend;
+    mk_vox_z3 F._vox_z3;
+    mk_vox_timeout F._vox_timeout;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_dmatchcomp F._dmatchcomp;
@@ -1918,6 +1940,9 @@ struct
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
     mk_drefinements F._drefinements;
+    mk_vox_backend F._vox_backend;
+    mk_vox_z3 F._vox_z3;
+    mk_vox_timeout F._vox_timeout;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_dmatchcomp F._dmatchcomp;
@@ -2084,6 +2109,9 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
     mk_drefinements F._drefinements;
+    mk_vox_backend F._vox_backend;
+    mk_vox_z3 F._vox_z3;
+    mk_vox_timeout F._vox_timeout;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_dmatchcomp F._dmatchcomp;
@@ -2231,6 +2259,9 @@ struct
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
     mk_drefinements F._drefinements;
+    mk_vox_backend F._vox_backend;
+    mk_vox_z3 F._vox_z3;
+    mk_vox_timeout F._vox_timeout;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_drawlambda F._drawlambda;
@@ -2476,6 +2507,9 @@ module Default = struct
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape
     let _drefinements = set dump_refinements
+    let _vox_backend name = vox_backend := name
+    let _vox_z3 command = vox_z3 := Some command
+    let _vox_timeout seconds = vox_timeout := seconds
     let _dmatchcomp = set dump_matchcomp
     let _dunique_ids = set unique_ids
     let _dno_unique_ids = clear unique_ids
