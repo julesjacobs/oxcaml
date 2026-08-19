@@ -176,6 +176,7 @@ val dump_source : bool ref
 val dump_parsetree : bool ref
 val dump_typedtree : bool ref
 val dump_shape : bool ref
+val dump_refinements : bool ref
 val dump_tlambda : bool ref
 val dump_slambda : bool ref
 val dump_matchcomp : bool ref

@@ -369,14 +369,11 @@ type esc = ~x:int -> int{ x > 0 }
 
 (* --- Inertness ------------------------------------------------------- *)
 
-(* No introduction rule: a refined type cannot be consumed or produced *)
+(* Type-formers had no introduction rule; the refinement-flow piece added
+   one, so the parameter is used at its payload and this typechecks. *)
 let f (x : int{ _ > 0 }) = x + 1;;
 [%%expect{|
-Line 1, characters 27-28:
-1 | let f (x : int{ _ > 0 }) = x + 1;;
-                               ^
-Error: The value "x" has type "int{ _ > 0 }"
-       but an expression was expected of type "int"
+val f : int{ _ > 0 } -> int = <fun>
 |}]
 
 (* Partial application preserves the binder of an omitted argument *)

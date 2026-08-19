@@ -496,6 +496,7 @@ let execute_phrase print_outcome ppf phr =
         Typemod.type_toplevel_phrase oldenv oldsig sstr
       in
       if !Clflags.dump_typedtree then Printtyped.implementation ppf str;
+      if !Clflags.dump_refinements then Refinement_probe.implementation ppf str;
       let sg' = Typemod.Signature_names.simplify newenv names sg in
       let modes = Includemod.modes_toplevel in
       let coercion =

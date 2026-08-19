@@ -277,6 +277,7 @@
   type_shape
   tast_iterator
   tast_mapper
+  refinement_probe
   signature_group
   cmt_format
   cms_format

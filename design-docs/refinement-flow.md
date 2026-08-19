@@ -134,8 +134,12 @@ must stay declared (module-level, imports, mutable). Recursive definitions
 need no exemption under head-only stripping: a recursive *function*'s type is
 an arrow — not refined-headed, so the binder strip is a no-op on it — and its
 domain/codomain contracts are handled at application and by the expectation
-funnel; refined-headed recursive values are ruled out by the `let rec`
-right-hand-side restriction.
+funnel. Refined-headed recursive *values* are not ruled out (the `let rec`
+right-hand-side restriction admits e.g. `let rec rv : int{ _ > 0 } = 5` — a
+constant is a legal recursive right-hand side); they need no special rule
+either: the same binder rules apply — module-level exemption plus occurrence
+strip at the module level, the binder strip locally — and the right-hand side
+meets the annotation funnel like any other annotated binding.
 
 ## Expectation: the obligation
 
@@ -234,6 +238,15 @@ problem, not typechecking's. This piece only fixes where the checks sit.
 - **Class and object types.** A refined method type meets the rigid clash. If
   a strip at `Texp_send` results turns out to be one line, take it; otherwise
   the loud rejection stands, matching type-formers' treatment of class types.
+  The loud rejection covers *direct* uses only: a `let`-detour
+  (`let z = obj#m in z + 1`) binds the refined result — a late-solved binder
+  the strip runs too early to see, so `z`'s entry stays refined (probe line) —
+  and the occurrence strip then makes every use of `z` an ordinary
+  payload-typed value. A sound, fact-true acceptance (the method's declared
+  type keeps the refinement), pinned by fixture. Refined
+  *instance-variable* annotations are rejected with a dedicated error rather
+  than silently stripped: stripping would obligate the initialiser but leave
+  every later write to the variable unchecked.
 - **`assume`/admitted obligations.** Solver-adjacent; later.
 
 ## The probe
@@ -243,7 +256,10 @@ same whether an interior node secretly carries `int{p}` or `int` — the
 deliverable of this piece is a property of the tree, not of the output. So the
 piece includes its own instrument: a flag-gated walk of the typed tree that
 *prints* every expression node whose `exp_type` has a refined head (alias
-expansion included), with its location. The walk also prints every
+expansion included), with its location. The walk also prints one line per
+recorded `Texp_refinement_obligation` marker, tagged "refinement obligation"
+— the complete obligation map, making the funnel's records (and any double
+record) observable. And it prints every
 pattern-bound variable whose *environment entry* (looked up in the enclosing
 expression's `exp_env`) has a refined head, tagged distinctly — this is what
 makes the binder strip observable: on the fixtures, local immutable binders
@@ -298,9 +314,13 @@ site alone is disabled:
 - higher-order: `List.map f l` with `f : int{p} -> int` and
   `l : int{p} list`
 - mutability: `let mutable` init, write, read; the `ref` round trip
-  `let r : int{p} ref = ref 5 in r := 6; !r + 1`; a mutable record field
-- destructuring: `let (a, b) : (int * int){p} = e in a + b`, and the refined
-  `pat_type` fact observed via the probe
+  `let r : int{p} ref = { contents = 5 } in r := 6; !r + 1` — the record
+  literal reaches the field through the funnel, whereas the `ref 5` spelling
+  stays a rigid clash, pinned as the order-dependent margin (see the
+  decision below); a mutable record field
+- destructuring: `let (a, b) : (int * int){p} = e in a + b`, with the refined
+  `pat_type` fact kept on the pattern (observable with `-dtypedtree`; the
+  probe deliberately does not report `pat_type`s — see the decision below)
 - export: module-level `let v : int{p} = 5` prints `val v : int{p}`; `.mli`
   identity inclusion; bare definition vs refined signature is an error naming
   the fix
@@ -310,7 +330,13 @@ site alone is disabled:
   refined first component and the probe reports its node; the swapped
   `let f' g = ((g : unit -> int{p}), g ())` infers `int` there and the probe
   is silent — the order-dependence is documented, not discovered
-- the probe runs over every fixture above, and is empty except where pinned
+- the probe runs over every fixture above; besides the obligation lines (one
+  per recorded marker — the complete obligation map), the refined-head and
+  environment reports are empty except at the pinned exemptions and the
+  sanctioned residue classes: expression nodes and binder entries whose type
+  variable was solved late against a declared refined type (the `f`/`f'`
+  residue), and let-bound reads of out-of-scope forms (a method result bound
+  through a `let`) — each pinned where a fixture exercises it
 
 ## Decisions taken
 
@@ -368,3 +394,42 @@ is copied.
 - **Signature inclusion is out of scope** rather than half-supported: identity
   matching already works via type-formers, and the strengthening rule needs a
   side channel that would compromise "the typed tree is the whole interface".
+- **`ref 5` lands on the rigid-clash side of the margin** (adjudicated during
+  implementation). In `let r : int{p} ref = ref 5 in ...` the application
+  solves the ref's parameter to `int` before the result meets the refined
+  expectation, and `int ref` vs `int{p} ref` is the type-formers clash —
+  exactly the order-dependence documented under "The invariant"; admitting
+  this spelling would take a unify-time rule, which this design rejects. The
+  record-literal spelling `{ contents = 5 }` reaches the field through the
+  expectation funnel and is the accepted round trip. The Tests bullet above
+  was corrected accordingly; the fixture pins the clash.
+- **The probe flag is `-drefinements`**, wired like the other `-d` dump flags
+  (`Core_options`, so the batch compilers and both toplevels accept it) and
+  printing right after type-checking: `typecheck_phrase` in the toplevels,
+  `typecheck_impl` in the compilers. The environment report covers `let`
+  bodies, `let mutable` bodies, case right-hand sides, and structure-level
+  bindings (looked up in the structure's final environment). The probe
+  prints refined heads of expression types and of pattern-bound environment
+  entries, and deliberately not `pat_type`s: a pattern keeping the refined
+  type is the sanctioned fact record, so reporting it would put a line on
+  every annotated binder and lose the property that probe output is empty
+  except at the pinned exemptions and the residue (`-dtypedtree` already
+  shows `pat_type`s). The probe additionally prints one line per recorded
+  `Texp_refinement_obligation` marker ("refinement obligation:", the marker's
+  location and the recorded refined type): the fixture output pins the
+  complete obligation map, and a double record at a site shows up as a
+  duplicated line.
+- **One obligation record per site, where a site is (node, obligation
+  type).** An annotated binding would otherwise record its obligation twice:
+  `vb_exp_constraint` rewraps the right-hand side as a ghost
+  `Pexp_constraint`, so the same annotation funnels once inside the
+  constraint arm and once as the pattern-side expectation, both landing on
+  the same node. The funnel therefore skips its marker when the node already
+  carries an obligation of an *equal* type (`Ctype.is_equal` — predicates
+  alpha-equivalent); distinct stacked annotations each record (in
+  `let dbl : int{p} = (5 : int{q})` the node records both `q` from the inner
+  annotation and `p` from the binding's, pinned by fixture). Ghostliness was
+  rejected as the dedup key: the parser also ghost-marks user-written
+  constraint spellings, and keying on it silently dropped the binding-side
+  obligation of exactly that nested case — an obligation loss, caught by the
+  probe's obligation map during synthesis.

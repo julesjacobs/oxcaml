@@ -1,5 +1,5 @@
 (* TEST
- flags = "-extension layouts_beta";
+ flags = "-extension layouts_beta -drefinements";
  expect;
 *)
 
@@ -16,39 +16,24 @@ type product = #{ refined : int{ _ > 0 }; plain : int; }
 
 let pr = #{ refined = 5; plain = 1 };;
 [%%expect{|
-Line 1, characters 22-23:
-1 | let pr = #{ refined = 5; plain = 1 };;
-                          ^
-Error: The constant "5" has type "int" but an expression was expected of type
-         "int{ _ > 0 }"
+Line 1, characters 22-23: refinement obligation: int{ _ > 0 }
+val pr : product = #{refined = 5; plain = 1}
 |}]
 
 let use_pr (p : product) = p.#refined + 1;;
 [%%expect{|
-Line 1, characters 27-37:
-1 | let use_pr (p : product) = p.#refined + 1;;
-                               ^^^^^^^^^^
-Error: This expression has type "int{ _ > 0 }"
-       but an expression was expected of type "int"
+val use_pr : product -> int = <fun>
 |}]
 
 (* unboxed boolean literal pattern against a refined expectation: the
    pattern recurses at the payload *)
 let (#true : (bool#){ true }) = #true;;
 [%%expect{|
-Line 1, characters 5-10:
-1 | let (#true : (bool#){ true }) = #true;;
-         ^^^^^
-Error: This pattern matches values of type "bool#"
-       but a pattern was expected which matches values of type "bool#{ true }"
+Line 1, characters 32-37: refinement obligation: bool#{ true }
 |}]
 
 (* unboxed unit pattern likewise *)
 let (#() : (unit#){ true }) = #();;
 [%%expect{|
-Line 1, characters 5-8:
-1 | let (#() : (unit#){ true }) = #();;
-         ^^^
-Error: This pattern matches values of type "unit#"
-       but a pattern was expected which matches values of type "unit#{ true }"
+Line 1, characters 30-33: refinement obligation: unit#{ true }
 |}]

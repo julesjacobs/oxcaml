@@ -442,6 +442,11 @@ and exp_extra =
         (* NB. If an expression has both [Texp_borrowed] and
         [Texp_ghost_region], we assume the [Texp_borrowed] is inner than
         [Texp_ghost_region]. Currently it's impossible. *)
+  | Texp_refinement_obligation of Types.type_expr
+        (** This expression was checked against an expectation whose head is
+            the recorded refined type; it was checked at the payload, and the
+            refined type is the obligation VC generation will discharge.
+            [exp_type] stays payload-headed. *)
 
 and arg_label = Types.arg_label =
   | Nolabel
