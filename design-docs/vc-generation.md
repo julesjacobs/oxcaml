@@ -11,12 +11,13 @@ just recorded.
 
 The pass is a pure consumer. It adds no typing rules, no new `ctype` arms, no
 side tables and no changes to what refinement-flow records: its inputs are
-exactly the contract that doc states under "What VC generation will read" —
-facts on `pat_type`, value descriptions and apply arrows; obligations as
-`Texp_refinement_obligation` markers plus apply arrow domains — and its output
-is exactly `Vox_logic.Obligation.t` handed to `Vox_backend.discharge`. Where
-this doc and those two docs disagree, those docs win; none was found while
-writing this one.
+the durable records refinement-flow keeps — facts on `pat_type`, value
+descriptions, apply arrows, and `Texp_field`'s retained label description;
+obligations as `Texp_refinement_obligation` markers plus apply arrow domains
+— and its output is exactly `Vox_logic.Obligation.t` handed to
+`Vox_backend.discharge`. One further durable record the tree keeps,
+`Texp_letop.bop_op_type`, is knowingly deferred (see the fact sources
+below). Where this doc and those two docs disagree, those docs win.
 
 vox2's VC subsystem (mapped in the research lane's report; spot-verified
 against `~/oxcamls/vox2/main` at the lines cited below) is the evidence that
@@ -60,10 +61,14 @@ deliberately left for this piece to expose:
   the pass does not run at all, obligations stay recorded-and-accepted, and
   the compile is byte-identical to today. This is the type-only escape, and
   it is the *default* — see the decision below.
-- `-vox-z3 CMD`, default: `$VOX_Z3` if set, else `z3`. Fills
-  `Config.z3_command`; availability is checked once at selection
-  (`Vox_backend.plan` already does this) and the failure message names
-  `-vox-backend none`.
+- `-vox-z3 CMD`, explicit override. When absent, the driver resolves the
+  command exactly as the solver piece's test gate does
+  (`testsuite/tests/vox-solver/has_z3.sh:5-8`): `$VOX_TEST_Z3` if set, else
+  `z3` on `PATH`, else the pinned install the gate names — same checks,
+  same order, so a gate skip decision and a driver run decision can never
+  disagree. The result fills `Config.z3_command`; availability is checked
+  once at selection (`Vox_backend.plan` already does this) and the failure
+  message names `-vox-backend none`.
 - `-vox-timeout SECONDS`, default 10, filling `Config.timeout_seconds`.
 
 All three are `Core_options`-registered like `-drefinements`, so the batch
@@ -79,12 +84,17 @@ belongs to this piece) grows a third arm:
 
     type plan =
       | No_discharge
-      | Dump of (module BACKEND)       (* printing: emit, never refuse *)
+      | Dump of (module BACKEND)       (* printing: emit; only its
+                                          expected Unknown is suppressed *)
       | Discharge of (module BACKEND)  (* z3 and future backends: verify *)
 
 Dump mode runs the whole pass — collection, facts, lowering, and
-`discharge`, whose printing implementation emits the bytes — but its
-non-verdicts do not count against the unit. This is a driver-policy
+`discharge`, whose printing implementation emits the bytes — and suppresses
+exactly the non-verdict the printing contract promises: `Ok (Unknown ...)`.
+A `discharge` that returns `Error` — the shared renderer refusing an
+ill-formed obligation (`typing/vox_backend.ml:98-103`) — is a defect in
+this pass's output, not an expected non-verdict; it is reported and refuses
+the unit in Dump mode exactly as in Discharge mode. This is a driver-policy
 distinction, not a backend capability, which is why it lives in `plan` and
 not in `BACKEND`.
 
@@ -135,7 +145,8 @@ The walker normalises the two shapes into the single `pending` stream:
 - Every marker on a node yields one pending obligation with that node as
   subject and the marker's type as imposed. Refinement-flow's dedup rule (one
   record per (node, type up to `Ctype.is_equal`), `typing/typecore.ml:6916`)
-  already guarantees no duplicate markers, so the walker does not re-dedup.
+  guarantees no duplicate *markers*; duplicates across sources are handled
+  below.
 - Every `Texp_apply` yields one pending obligation per supplied argument
   whose domain is refined: walk the funct's `exp_type` arrow spine
   (`expand_head` at each step — the alias gate) in parallel with the args
@@ -148,19 +159,37 @@ The walker normalises the two shapes into the single `pending` stream:
   supplies the argument is itself a `Texp_apply` whose funct arrow carries
   the contract, and the obligation fires there.
 
-The two sources are disjoint by construction — a marker exists exactly where
-the funnel fired, and the funnel never fires for a `Known_arg` because the
-expectation was pre-stripped; an optional parameter's domain is
-option-headed, not refined-headed, so the arrow walk skips exactly the
-positions the markers cover. No pending obligation is ever produced twice.
+The two sources overlap, so the walker deduplicates. Disjointness fails in
+at least two compiled shapes: an annotated argument — `f1 (5 : int{ _ > 0 })`
+— gets a funnel marker from the annotation *and* an arrow-domain pairing
+from the apply; and `%ignore`'s special application path types its argument
+against the unstripped arrow domain directly
+(`typing/typecore.ml:10861-10889`), so
+`external drop : int{ _ > 0 } -> unit = "%ignore"` applied to `0` yields a
+marker *and* a retained refined domain. The rule is refinement-flow's own
+dedup rule extended across sources at the consumer: one pending obligation
+per (subject node, imposed type up to `Ctype.is_equal`); a later production
+for a pair already in the stream is dropped. Both shapes are fixtures
+(`dedup-annotated-arg`, `dedup-ignore`).
 
 Reading the *solved* arrow makes the walker strictly more complete than the
-funnel was at typechecking time: in `let app x f = f x in app 0 f1` with
-`f1 : int{ _ > 0 } -> int`, the argument `0` was checked against an
-undetermined variable (no marker possible), but by the time this pass runs
-the variable is solved and the outer apply's arrow domain is refined, so the
-obligation is collected anyway. That is the tree-reading direction of
-refinement-flow's "nothing is discharged silently".
+funnel was at typechecking time. In `let app f x = f x in app f1 0` with
+`f1 : int{ _ > 0 } -> int`, `f1` solves `app`'s type variable to the refined
+domain before `0` is typed, so `0` is a `Known_arg` whose expectation was
+pre-stripped — no marker anywhere — and the only durable record is the
+refined domain on the apply's instantiated arrow, which the walk above
+collects. (Argument order matters: `let app x f = f x in app 0 f1` is
+*rejected* by the typechecker — arguments are typed in arrow order,
+`typing/typecore.ml:10932-10937`, so `0` fixes the shared domain to bare
+`int` and `f1` then clashes with it.) The genuinely late-solved shape keeps
+the variable open past the argument: in
+`let h y = let app x f = f x in app y f1`, `y` is checked against a still
+undetermined variable, `f1` solves it afterwards, and `y`'s occurrence is
+left carrying refined-head residue on `exp_type` — which the fact rules
+below deliberately ignore, while the arrow walk still collects the
+obligation. Both are fixtures (`late-solved-arrow`, `late-solved-residue`).
+That is the tree-reading direction of refinement-flow's "nothing is
+discharged silently".
 
 **Fail-closed check.** vox2 hard-errors on refinement-typed applications
 missing their `rap` metadata (vox2 `vox_verify.ml:4661-4677`). We have no
@@ -168,11 +197,23 @@ side metadata to go missing, so the analogous defect is a pairing failure:
 more `Arg`s than the funct's visible arrow spine, or a domain the walker
 cannot classify after expansion. Both are internal errors
 (`Misc.fatal_error` with the location), never a silent skip — a walker
-defect must not become a dropped obligation. A dependent arrow reaching an
-application cannot occur (consumption is rejected upstream,
-`Unsupported_dependent_arrow`, pinned at `refinement-flow.ml:364-372`), so
-the walker also hard-errors if it meets one: that is a broken invariant, not
-a program error.
+defect must not become a dropped obligation.
+
+**Dependent arrows can reach the walker, from valid source.** The upstream
+rejection (`Unsupported_dependent_arrow`, pinned at
+`refinement-flow.ml:364-372`) fires only where the binder is visible at the
+application; higher-order solving gets past it. With the corpus's
+`external d : m:int{ m > 0 } -> int = "%identity"` (`refinement-flow.ml:359`),
+`let app f x = f x in app d 5` compiles: typing the unknown call mints a
+binderless arrow (`typing/typecore.ml:5127-5145`) and unification never
+reconciles a one-sided arrow binder, so the arrow this pass reads off the
+instantiated apply carries a refined domain whose `Rexp_var` binder lives
+inside the first argument's type, not in scope over the domain. That is a
+program the user wrote, not a broken invariant, so meeting a dependent
+arrow — in the spine walk here or as an `Rexp_var` at instantiation below —
+is a located rejection in tier 2's shape ("this application involves a
+dependent function type that cannot yet be verified"), never a fatal error.
+Fixture: `dependent-arrow-escape`.
 
 **Result positions.** An obligation whose subject is a control expression is
 pushed into its result positions before lowering, as vox2 does with
@@ -193,9 +234,18 @@ refined match result would be an opaque constant and every such obligation
     (* typing/vox_fact.mli *)
     type t
     val empty : t
-    val add : t -> Vox_logic.Term.t -> label:string -> loc:Location.t -> t
+    val add : t -> Vox_lower.Ir.t -> label:string -> loc:Location.t -> t
     val hypotheses :
       t -> Vox_logic.Obligation.hypothesis list   (* ids in add order *)
+
+Facts are stored as terms of the sorted IR below and cross the one emitter
+when an obligation snapshots them. Beside the fact environment the walk
+threads one more piece of state: the symbol table — every symbol the
+lowering mints or resolves, with its sort and any function or datatype
+declaration it pulls in — which is what signature assembly reads when it
+closes an obligation over the symbols its terms (facts included) mention.
+The table is bookkeeping, not soundness: it never decides what is true,
+only what must be declared.
 
 Persistent, not mutable. vox2 threads one mutable `Fact_env` with explicit
 `restrict` at scope exits and `intersect` at joins (vox2
@@ -233,9 +283,13 @@ must be stated precisely, because the obvious place is wrong:
 - **Patterns, via `pat_type`** — never the environment entry. A local
   immutable binder's environment entry is payload-typed (the binder strip,
   `typing/typecore.ml:1816-1830`); the pattern keeps the refined type as the
-  designated fact record. This covers `let`, `let mutable`, function
-  parameters and match cases; for destructuring patterns the refined
-  `pat_type` sits on the sub-pattern the annotation reached.
+  designated fact record. This covers `let`, function parameters and match
+  cases (`let mutable` has its own rule below); for destructuring patterns
+  the refined `pat_type` sits on the sub-pattern the annotation reached,
+  and a fact is deposited only when that sub-pattern is a variable or alias
+  pattern — the name is the fact's subject. A refined head landing on a
+  wildcard, constant, constructor or or-pattern binds no single name and
+  deposits nothing day one: fail-open, a recorded completeness gap.
 - **Module-level bindings** also keep refined `pat_type` on their patterns
   (`Tstr_value`), so the same rule covers them; their environment entries
   are *also* refined (the exemption), which the next source relies on.
@@ -257,6 +311,23 @@ must be stated precisely, because the obvious place is wrong:
   let-equality below, `let x = g ()` for `g : unit -> int{ _ > 0 }` gives
   `p(c)` and `x = c` for the call's opaque constant `c`, i.e. the contract
   reaches `x`.
+- **Immutable field reads, via the label description.** `Texp_field` keeps
+  the label's declared type while the read's result is carrier-typed (the
+  field strip, `typing/typecore.ml:7913-7925`; the retained label,
+  `typing/typedtree.mli:653-661`). When the lowering meets a read of an
+  *immutable* field whose declared type has a refined head, it deposits the
+  instantiated predicate as a fact about the read — sound because every
+  value that entered the field met the predicate as an obligation at
+  construction, and immutability means nothing entered since. Mutable
+  fields deposit nothing until the mutable-state policy below says more
+  than per-read snapshots. Fixture: `field-fact`. The one other durable
+  contract record the tree keeps — `Texp_letop`'s `bop_op_type`
+  (`typing/typedtree.mli:896-907`, retained by
+  `typing/typecore.ml:8897-8901`) — is *not* consumed day one: letop
+  obligations are already collected via the markers; only the fact that a
+  letop's *result* meets the operator's refined codomain is deferred, so a
+  goal leaning on it is `Unknown`, never unsound. Recorded under out of
+  scope.
 
 The walker never reads refined heads off `exp_type`. Those are the
 variable-solving residue refinement-flow pins (`refinement-flow.ml:387-392`);
@@ -264,14 +335,58 @@ everything they could say is already said by a declared source, and treating
 residue as fact would make fact coverage order-dependent in exactly the way
 the flow doc confines to the acceptance margin.
 
-Mutable binders get binder facts too — their patterns keep the refined type
-like any other — and this is sound for the same reason refinement-flow's
-write rule makes it sound: every write re-establishes the predicate as an
-obligation, so "some write established `p`" holds at every read. What the
-fact does *not* claim is temporal stability under aliasing and interleaving
-between the read and any use of the fact; day one this piece accepts the
-claim as vox2 does, and the fixture `mutable-fact` below pins the behaviour
-so the day the memory model tightens it, the change is a visible diff.
+### Mutable variables — per-read subjects, per-read facts
+
+A mutable binder's read is its own node — `Texp_mutvar`
+(`typing/typedtree.mli:714`, minted at `typing/typecore.ml:7333-7345`) —
+and no stable symbol can stand for "the current value of `x`": two reads
+separated by a write denote different values, and any lowering that gives
+both reads one symbol proves false equalities —
+`let w : int{ _ = 0 } = ((x <- x + 1); x) - x` would prove `w = 0` and
+evaluate to `1`. So:
+
+- **Each read is a fresh subject.** A `Texp_mutvar` read lowers to a fresh
+  opaque constant per read site, tier 1's mechanism (reads are nodes, so
+  per-node memoisation *is* per-read).
+- **Each read deposits the declared predicate.** When the binder's declared
+  type has a refined head, every read deposits the predicate instantiated
+  at that read's constant. This is refinement-flow's write rule cashed in:
+  the initialiser and every `x <- e` met the predicate as an obligation, so
+  "the value just read satisfies `p`" holds at every read. What is *not*
+  claimed — deliberately — is cross-read identity: two reads yield two
+  constants the solver cannot equate, which is exactly what interleaved
+  writes require. The pattern itself deposits no fact (there is no stable
+  symbol for it to be about).
+- **Mutable binders are excluded from the let-equality rule** below
+  (`Texp_letmutable`): an equality with the initialiser is stale after the
+  first write.
+
+The `mutable-fact` fixture is specified accordingly: a read of a
+`let mutable x : int{ _ > 0 }` proves a `_ > 0` goal through the per-read
+fact, and its sentinel twin `mutvar-reads-distinct` pins that
+`((x <- x + 1); x) - x` against `int{ _ = 0 }` is `Unknown`, not `Proved`.
+vox2, for comparison, has no mutable-variable story: it marks `Val_mut`
+idents unstable (vox2 `vox_verify.ml:1280`) and rejects `Texp_mutvar`
+subjects outright (vox2 `vox_verify.ml:1590`); the per-read scheme is
+strictly more complete and no less sound.
+
+### Predicates over mutable state — rejected
+
+The predicate-language filter is syntactic: `typetexp` rejects `ref`, `:=`
+and `!` by spelling and beyond name resolution checks nothing
+(`typing/typetexp.ml:1466-1472`, rejections at `:1505-1510`), so
+`int{ _ = y }` with `y` mutable compiles today — and no fact or goal built
+from it has one meaning, because nothing says which read of `y` the
+predicate denotes. Day one this piece fails closed: an obligation or fact
+whose predicate mentions a free value that is a mutable variable, or whose
+declared type does not cross logicality (mutable parts,
+`design-docs/totality.md:82-87`), is rejected with a located error at VC
+time — "this predicate reads mutable state, which cannot yet be verified".
+Small, and it keeps every admitted predicate denoting the same value at
+every mention. A later relaxation may give such predicates per-read
+snapshot semantics (instantiate against a snapshot constant taken where
+the predicate binds); nothing here forecloses that. Fixture:
+`mutable-in-predicate`.
 
 ### Path conditions — gated
 
@@ -293,8 +408,10 @@ else mentions is dead weight; vox2 skips these (vox2
 
 ### Let equalities
 
-`let x = e in body`, `x` a variable pattern, `e` an expression that lowers
-(either tier): add `x = subject(e)` to the body's facts. Unlike path
+`let x = e in body`, `x` a variable pattern bound immutably
+(`Texp_letmutable` is excluded, per the mutable-variables rule above), `e`
+an expression that lowers (either tier): add `x = subject(e)` to the body's
+facts. Unlike path
 conditions, the opaque tier is admitted here, because the equality is about
 *this one evaluation*: a `let` right-hand side evaluates exactly once per
 entry into the scope where the fact lives, and the per-node constant the
@@ -338,12 +455,22 @@ What `total` gives (`design-docs/totality.md`): terminates, no effects, and
 the logicality bump stops it reading mutable state through captures. Two
 gaps:
 
-1. **Function-typed arguments.** The capture-based contract deliberately
-   lets a total function call a partial *parameter*, so `f g` with `f`
-   total is not deterministic when `g` is an impure function. The gate
-   therefore requires the funct's totality projection to be `Total` *and*
-   every argument's type to cross totality (contain no arrows). Total
-   function arguments could be admitted later; day one, conservative.
+1. **Arguments the callee can observe changing.** The capture-based
+   contract deliberately exempts *parameters*: a total function may call a
+   partial parameter — so `f g` with `f` total is not deterministic when
+   `g` is impure — and it may read mutable state through a parameter:
+   `let reads_param @ total = fun (r : int ref) -> r.contents` is accepted
+   (`testsuite/tests/vox/totality.ml:425`), and `int ref` crosses totality
+   (no arrows) while not crossing logicality (mutable parts,
+   `design-docs/totality.md:82-87`). Lowering two `reads_param r` calls
+   that straddle a write to `r.contents` as one `Call` term would prove
+   the second read unchanged. The gate therefore requires the funct's
+   totality projection to be `Total` *and* every argument's type to cross
+   both totality (no arrows — the impure-parameter case) and logicality
+   (no mutable parts — the mutable-read case). Total function arguments
+   could be admitted later; day one, conservative. The `unknown-opaque`
+   fixture pins the partial-parameter half; `stability-mutable-arg` pins
+   the logicality half.
 2. **Comparisons are not in the totality allowlist** — deliberately, since
    polymorphic compare can raise on functions and diverge on cyclic values
    (`typing/typecore.ml:699-717`). If the gate were only the axis, `y <= 1`
@@ -358,33 +485,72 @@ So the gate, precisely: an application is stable iff it lowers entirely to
 interpreted operators, or its funct is a path whose totality projection at
 the occurrence is `Total` (module-level `@@ total` modality on the value
 description; for locals, the binder's recorded mode) and every argument
-type crosses totality. Two trust boundaries ride on the axis and are
+type crosses totality and logicality. Two trust boundaries ride on the axis and are
 inherited knowingly, both pinned in the totality piece's own report:
 `external ... @@ total` is an unchecked claim, and the `module rec`
 self-justification gap. Both mean a wrong totality claim can make a wrong
 proof; that is the axis's contract to tighten, not this piece's.
 
-## Lowering: one intermediate language
+## Lowering: one sorted language
 
-Two things need to become `Vox_logic.Term.t`: predicates, which are
+Two things must reach `Vox_logic.Term.t`: predicates, which are
 `Types.refinement_expression` (the `Rexp_*` forms, `typing/types.mli:315-354`
 — resolved paths, no types except `Rexp_constraint`, per type-formers'
 "resolved, not typed" decision), and subjects, which are
 `Typedtree.expression`. The avoid-dual-translations lesson (vox2 maintained
 two SMT emitters and measured a near-miss between them, vox2
-`vox_smt.ml:1-14`) rules out two independent paths to `Term`. So:
+`vox_smt.ml:1-14`) rules out two independent paths to `Term`. But the two
+inputs arrive with opposite amounts of typing. A subject carries a full
+type on every node. A rexp is untyped — its let, function and match binders
+carry no types — and nothing upstream checks predicate sorts: the typetexp
+filter is name resolution plus a syntactic total-subset check
+(`typing/typetexp.ml:1466-1472`), so `let accepted : int{ 1 + true } = 0`
+compiles today and records an obligation; the backend cannot catch it
+either, its well-formedness pass checking declarations and arities, never
+sorts (`design-docs/solver-interface.md:400-405`). And `Term.t` has no let,
+lambda or match (`typing/vox_logic.mli:103-123`) while rexp has all three,
+so predicates need normalisation, not just mapping.
 
-    subject : Typedtree.expression -> Types.refinement_expression   (* shallow *)
-    term    : sort context -> Types.refinement_expression -> Vox_logic.Term.t
+So the shared language is a small *sorted* VC IR, private to `vox_lower`:
+terms in `Term`'s shape with sorts assigned, plus the binder forms that
+normalisation removes before emission. Two front ends produce it; one
+emitter consumes it:
 
-Subjects convert *into* the predicate language — vox2's route, and the
-reason facts, goals, subjects and predicates all end up in one language
-where instantiation is substitution. The conversion is shallow and total on
-the supported forms: idents, constants, applications, tuples, constructors,
-immutable record fields and field reads, `ite`, and the transparent wrappers
-(sequence, `open`, `letmodule`); it does not descend into forms the walk
-already handled structurally (result-position pushing consumed
-`if`/`match`-as-subject before lowering sees them).
+- **Subjects: typedtree → IR.** Shallow and total on the supported forms:
+  idents, constants, applications, tuples, constructors, immutable record
+  fields and field reads, `ite`, and the transparent wrappers (sequence,
+  `open`, `letmodule`); it does not descend into forms the walk already
+  handled structurally (result-position pushing consumed
+  `if`/`match`-as-subject before lowering sees them). Sorts are read
+  straight off `exp_type`: the types the typechecker established are used,
+  not discarded and reconstructed.
+- **Predicates: rexp → IR.** This front end is a real, located sort
+  checker. The hole and the dependent binders get the payload sort from
+  the refined type; free paths get their `val_type` (resolved in the
+  node's `exp_env` — the *translation* may consult `Env`; closedness means
+  the *backend* never does, and every resolved symbol lands in the
+  signature); constants have manifest sorts; interpreted operators
+  constrain their operands; predicate-local binders take their bound
+  expression's inferred sort. A clash is a located error at the
+  obligation's site — `int{ 1 + true }` dies here, as a sort error the
+  user can read, not inside a solver. The same front end normalises to the
+  quantifier-free fragment: predicate `let`s are substituted, supported
+  lambdas beta-reduced, `match` lowered to `Ite`/`Test`/`Select`, and any
+  residual binder form (an unapplied lambda, a match the translation
+  cannot lower) is a located rejection in tier 2's shape. Fixture:
+  `predicate-sort-error`.
+- **One emitter: IR → `Term.t`**, trivial by construction — the IR is
+  sorted and binder-free by the time it emits. Every fact, goal, subject
+  and predicate crosses this one emitter, so there is exactly one meaning
+  assigned to each construct; the front ends share the sort vocabulary and
+  the operator table below, and instantiation stays substitution, inside
+  the IR.
+
+The sort vocabulary maps known OCaml types onto `Sort.t`: `bool → Bool`,
+`int → Bitvec 63`, `Bigint.t → Int`, concrete datatypes → `Datatype`,
+abstract types → `Uninterpreted`, anything else → tier 2. `float` maps to
+an uninterpreted sort with opaque operations day one — comparisons on it
+are unstable anyway (NaN breaks reflexivity, vox2 `vox_vc.ml:195-266`).
 
 **Two-tier fallback**, vox2's shape (vox2 `vox_verify.ml:1448-1591`),
 because the failure mode it prevents — silently dropping — is the one this
@@ -396,9 +562,10 @@ design refuses:
   node's sort. Sound: the constant names the value this node's single
   evaluation in the current fact scope produced, and no hypothesis about it
   exists unless a declared source (apply codomain, binder fact) adds one.
-  Reads of mutable state arrive here for free — `!r` is an application of a
-  partial function. Abstraction is also the fallback for any *value-sorted*
-  form the conversion does not support.
+  Reads of mutable state through functions arrive here for free — `!r` is
+  an application of a partial function — and `Texp_mutvar` reads land in
+  the same tier by the per-read rule above. Abstraction is also the
+  fallback for any *value-sorted* form the conversion does not support.
 - **Tier 2, loud rejection.** A subject whose *sort* is unrepresentable —
   function-typed, first-class module, object, an unsolved type variable —
   is a located error, vox2's message shape: "this expression cannot yet be
@@ -406,27 +573,31 @@ design refuses:
   Never a silent drop: the user wrote an obligation the tool cannot state,
   and must hear so.
 
-**Sort assignment.** Our `refinement_expression` carries no types, so `term`
-runs a small sort-assignment pass: the hole/binder gets the payload sort;
-free paths get their `val_type` (resolved in the node's `exp_env` — the
-*translation* may consult `Env`; closedness means the *backend* never does,
-and every resolved symbol lands in the signature); constants have manifest
-sorts; interpreted operators constrain their operands. This is not type
-inference — the expression already typechecked (predicates by type-formers'
-translation, subjects by the typechecker); the pass only maps known OCaml
-types onto `Sort.t`: `bool → Bool`, `int → Bitvec 63`, `Bigint.t → Int`,
-concrete datatypes → `Datatype`, abstract types → `Uninterpreted`, anything
-else → tier 2. `float` maps to an uninterpreted sort with opaque operations
-day one — comparisons on it are unstable anyway (NaN breaks reflexivity,
-vox2 `vox_vc.ml:195-266`).
+**The operator table** maps (resolved path, operand sort) to `Op`, drawn
+from the `primitive_is_total` set (`typing/typecore.ml:705`) intersected
+with what `Op` expresses:
 
-**The operator table** maps (resolved path, operand sort) to `Op`:
-comparisons and equality at `int` and `bool`; `+`, `-`, `*`, unary `-`,
-`land`/`lor`/`lxor`/`lsl`/`lsr`/`asr` at `int` (the `primitive_is_total`
-set, `typing/typecore.ml:705`, intersected with what `Op` expresses);
-`not`/`&&`/`||` at `bool`. `/` and `mod` are deliberately absent — they
-raise on zero, vox2 models them with fixed opaque partial-op functions
-(vox2 `vox_smt.ml:184-212`), deferred. Bigint rows are deferred with them:
+- comparisons and equality at `int`; `+`, `-`, `*`, unary `-`,
+  `land`/`lor`/`lxor` at `int`; `not`/`&&`/`||` at `bool`;
+- equality at `bool` (`Eq`/`Distinct`) — but *not* Boolean ordering: `Op`
+  has no Boolean ordering operator (`typing/vox_logic.mli:49-87`), and
+  rather than invent encoding formulas for a row no corpus needs, a `<` at
+  `bool` falls through to the stability gate like any other polymorphic
+  comparison and abstracts;
+- the shifts `lsl`/`lsr`/`asr` at `int`, guarded: OCaml leaves
+  out-of-range counts unspecified while the SMT shift primitives are
+  total, and encoding the range is explicitly this translation's job
+  (`typing/vox_logic.mli:46-48`). `x lsl n` lowers to
+  `Ite (0 <= n && n <= 62, Bv_shl x n, c)` with `c` a fresh per-node
+  opaque constant, and likewise `lsr`/`asr` with `Bv_lshr`/`Bv_ashr`:
+  interpreted exactly where the two semantics provably coincide, opaque
+  outside it — the same shape as vox2's partial-op treatment (vox2
+  `vox_smt.ml:184-212`). Boundary fixture: `shift-bounds` (a count of 62
+  proves; 63 and negative counts are opaque).
+
+`/` and `mod` are deliberately absent — they raise on zero, vox2 models
+them with fixed opaque partial-op functions (vox2 `vox_smt.ml:184-212`),
+deferred. Bigint rows are deferred with them:
 `Bigint.of_int` needs the `bv2int` conversion solver-interface explicitly
 deferred to this translation, and the first corpus has no Bigint fixture, so
 adding the rows without the conversion would be untestable surface. `Int`
@@ -435,27 +606,67 @@ wraps, so `x >= 0 ⊬ x + 1 >= 0`, and the corpus pins this (`bitvec-wrap`
 below) so the first user to hit it finds a fixture, not a mystery.
 
 **Instantiation.** The imposed type's head is `Trefine { ref_payload;
-ref_pred }`; the goal is `ref_pred` with the subject substituted for
-`Rexp_hole`. Substitution is capture-free by construction: predicate-local
-binders are stamped `Ident.t`s distinct from every program ident.
-Top-level heads only — nested refinements (`int{p} list`) are never
+ref_pred }`; the goal is `ref_pred`'s IR with the subject's IR term
+substituted for the hole. Substitution is capture-free by construction:
+predicate-local binders are stamped `Ident.t`s distinct from every program
+ident. Top-level heads only — nested refinements (`int{p} list`) are never
 decomposed structurally, matching vox2's load-bearing corpus finding (its
 refinement-corpus report) and refinement-flow's head-only discipline;
 components matched out of a structure regain their predicates as binder
-facts from pattern types. An `Rexp_var` referring to an *arrow* binder
-cannot reach instantiation while dependent-arrow consumption is rejected
-upstream; meeting one is a fail-closed internal error, and the
+facts from pattern types. An `Rexp_var` referring to an *arrow* binder can
+reach the lowering through the higher-order escape above and gets the same
+located unsupported rejection there — never an internal error — and the
 consecutive-heads question (`int{p}{q}`, currently rejected, single-head
 semantics carried) is an open owner-level dependency this piece inherits
 and does not decide — the lowering assumes exactly one head.
 
-**Naming.** Program variables render as `Ident.unique_name` (`x/278`);
-opaque constants as `result/<fresh stamp>`; uninterpreted functions from
-stable calls as the path's string (`M.f`). Slash- and dot-bearing names are
-`|quoted|` by the renderer; none can collide with SMT-LIB builtins or the
-`h<id>` hypothesis labels (neither contains `/` or `.`; plain unstamped
-spellings never occur). This discharges the name-generation duty
-solver-interface's builtin-rejection rule assigns to the translation.
+**Naming.** One symbol allocator names everything the signature declares —
+variables, uninterpreted functions, uninterpreted sorts, constructors and
+selectors, which all share the solver's single namespace
+(`typing/vox_smtlib.ml:156-165`; duplicates are renderer errors, `:163`,
+and duplicate sorts `:140`). A symbol's key is its *resolved identity*
+plus, for functions, the ground sort signature of this use:
+
+- Identity is the stamped ident, never the bare spelling: locals and
+  `Pident` paths render as `Ident.unique_name` — `name ^ "_" ^ stamp`
+  (`typing/ident.ml:86-88`) — because `Path.name` drops the stamp
+  (`typing/path.ml:115`) and two shadowed local `f`s would otherwise
+  collapse into one `Call` symbol. Module paths render as their dotted
+  spelling (`M.f`), which is already unambiguous.
+- A polymorphic function used at two ground instantiations needs two
+  declarations, and the signature gives each name exactly one ground
+  signature (`typing/vox_logic.mli:176-185`) — so the allocator mangles
+  the instance sorts into the name using `Sort.key`
+  (`typing/vox_logic.mli:41-43`, built for exactly this), in the
+  `name<key,...>` shape `Signature.instantiate` already uses for datatype
+  instances (`typing/vox_logic.ml:148`): a total polymorphic `id` used at
+  `int` and at `bool` in one obligation becomes two symbols, `id_3<Bv63>`
+  and `id_3<Bool>`. Sorts, constructors and selectors of instantiated
+  datatypes get exactly `instantiate`'s mangling — one convention, two
+  producers.
+- Opaque constants mint as `result/<counter>`; hypothesis labels are
+  `h<id>`.
+
+Collisions cannot occur: every local carries a `_<stamp>` suffix, every
+mangled instance angle brackets, every module path a `.`, every minted
+constant a `/` — and the `h1, h2, ...` hypothesis labels and the SMT-LIB
+builtins contain no stamp suffix, bracket, dot or slash. Names needing it
+are `|quoted|` by the renderer.
+This discharges the name-generation duty solver-interface's
+builtin-rejection rule assigns to the translation, in one place. Fixtures:
+`poly-instances` (one obligation using a total polymorphic `id` at two
+sorts: two declarations in the printed signature) and `shadowed-local`
+(two shadowed local total `f`s: two distinct symbols).
+
+**Stable baselines.** Stamped names would make every printing baseline
+churn whenever an unrelated edit shifts `Ident` stamps. So obligations are
+canonicalised before rendering: per obligation, symbols are renumbered
+deterministically in first-occurrence order — a function of the source
+text alone — consistently across terms and signature. The z3 and printing
+backends receive the same canonicalised bytes, preserving "the baselines
+are the bytes z3 receives". (A process-wide `Clflags.canonical_ids`-style
+flip was rejected: it is global and would fight the stamped-identity rule
+above.)
 
 ## Signature assembly and datatypes
 
@@ -466,19 +677,32 @@ operations), and the datatype declarations reachable from any mentioned
 sort, run through `Signature.instantiate` for monomorphisation.
 
 Concrete-vs-abstract follows solver-interface's rule with the deciding
-environment pinned: a type whose declaration (via the subject's `exp_env`)
-has a visible definition becomes a `Datatype.decl` — constructors,
-selectors, testers; records and tuples as single-constructor datatypes — and
-a type abstract in that environment becomes an uninterpreted sort whose
-operations are the uninterpreted function symbols the terms mention. Using
-the obligation site's own environment is what makes the same type concrete
-inside its defining module and abstract outside it, so client proofs cannot
-lean on a hidden representation. Mutually recursive groups and the
+environment pinned and the concrete subset stated. A type whose declaration
+(via the subject's `exp_env`) has a visible definition *and* is a regular
+closed variant with at least one constructor, a record, or a tuple becomes
+a `Datatype.decl` — constructors, selectors, testers; records and tuples as
+single-constructor datatypes. A visible definition outside that subset is a
+located rejection day one: `Type_open` declarations
+(`typing/types.mli:979`) have no finite constructor list to close, an
+empty variant is a renderer error (`typing/vox_smtlib.ml:181-182`), and the
+remaining kinds (unboxed products, GADT constructors, ...) earn translation
+rules when a corpus demands them — rejection rather than silent
+abstraction, because the user wrote an obligation over a representation the
+tool cannot state, and must hear so. A type abstract in the deciding
+environment becomes an uninterpreted sort whose operations are the
+uninterpreted function symbols the terms mention. Using the obligation
+site's own environment is what makes the same type concrete inside its
+defining module and abstract outside it, so client proofs cannot lean on a
+hidden representation. Mutually recursive groups and the
 non-regular/function-field rejections are `Signature.instantiate`'s job,
 already built and tested in the solver piece; this piece only feeds it
 declarations. The first corpus exercises little of this machinery (its
 predicates are arithmetic; its one structured subject is a tuple), which is
-accepted: the datatype path is pinned by one fixture, not explored.
+accepted: the datatype path is pinned by `tuple-datatype` plus one
+environment-sensitivity fixture — `sealed-datatype`, the same type printed
+concrete inside its defining module and as an uninterpreted sort behind its
+sealed signature — and one rejection fixture (`open-datatype-reject`), not
+explored.
 
 ## Discharge and reporting
 
@@ -497,9 +721,10 @@ measured there and found worse:
 - **The unit is refused at exit** if any obligation failed. This is what
   carries the soundness the previous point deliberately spent: an
   obligation proved after a failure may rest on a spec nothing established,
-  and the refusal is why that cannot escape the unit. The refusal is a
-  located error naming the count: "N refinement obligations were not
-  verified".
+  and the refusal is why that cannot escape the unit — a *within-unit*
+  guarantee; what a verdict means to other units is the provenance section
+  below. The refusal is a located error naming the count: "N refinement
+  obligations were not verified".
 
 Per-obligation reporting, by outcome:
 
@@ -523,6 +748,33 @@ Failures are emitted as they are found (each a formatted located report, as
 vox2 does), so the editor's readout shows the state of the buffer; the final
 refusal error is what fails the build. In the toplevel the same runs per
 phrase.
+
+### What a verdict means across units
+
+`-vox-backend none` is the default, so any imported unit may have been
+compiled with its refined claims recorded and unverified — and even a fully
+verified import chain bottoms out in externals and `.mli`-only declarations
+that nothing checked. A `Proved` here is therefore *conditional*: it
+certifies this unit's obligations given every imported refined contract as
+a hypothesis. Three rules make that stance explicit rather than silent:
+
+- **Imported refined value descriptions are hypotheses, not certified
+  facts.** The value-description fact rule above uses them inside proofs;
+  the conditionality is the stated meaning of the verdict, not a leak in
+  it.
+- **Refined externals and interface-only declarations are axioms, and are
+  reported.** At unit exit, discharge mode prints a short admission
+  report listing the imported refined contracts and axioms the unit's
+  obligations were discharged under — the minimal cousin of vox2's
+  admission reporting, which had to report refined-result externals for
+  exactly this reason (`vc-research-map.md:177-183`). Nothing fails; the
+  trust surface becomes visible output.
+- **Verification provenance in the CMI** — recording whether a unit's own
+  claims were discharged, so a consumer can distinguish verified imports
+  from merely recorded ones and tighten the conditional verdict into a
+  certified one — is a named later piece (out of scope below). The
+  admission report is sized to be its seam: what it prints today is what
+  provenance will discharge tomorrow.
 
 ## What the first corpus proves
 
@@ -573,15 +825,18 @@ would make "everything green" indistinguishable from "nothing ran":
   Dump mode does not refuse units, so the `val` lines print alongside the
   queries.
 - `vox/vc-z3.ml`, flags `-vox-backend z3`, gated exactly like the solver
-  piece's z3 tests (`testsuite/tests/vox-solver/has_z3.sh`: skip 125 unless
-  z3 is resolvable; if the `script` gate turns out not to compose with the
-  `expect` action, the fallback is the solver piece's own shape — a compiled
-  test with a `.reference` file): the full corpus with verdicts in the
-  expected output —
-  failures print located errors in their blocks, successes print their
-  ordinary `val` lines. The gate script and the driver's z3 resolution
-  (`-vox-z3`, then `$VOX_Z3`, then `z3` on `PATH`) check the same things in
-  the same order, so a skip decision and a run decision can never disagree.
+  piece's z3 tests: the TEST block carries the gate lines from
+  `testsuite/tests/vox-solver/z3_backend.ml:1-15` — `readonly_files`
+  naming `has_z3.sh`, `script` running it, skip on its exit 125 — followed
+  by the `expect` action. `script` composing with `expect` is in-tree
+  precedent
+  (`testsuite/tests/typing-jkind-bounds/poly-variant-limit/test.ml:1-13`),
+  not a hope. The file holds the full corpus with verdicts in the expected
+  output — failures print located errors in their blocks, successes print
+  their ordinary `val` lines. The gate (`has_z3.sh:5-8`) and the driver
+  resolve z3 identically — `$VOX_TEST_Z3`, then `z3` on `PATH`, then the
+  pinned install — so a skip decision and a run decision can never
+  disagree.
 
 A green z3 fixture is silent, so greens alone would not discriminate "all
 proved" from "pass disabled"; the interleaved Refuted/Unknown fixtures and
@@ -622,9 +877,21 @@ Each recorded, most with the vox2 mechanism named for the eventual piece:
   (vox2 runs separately-budgeted queries for both; our `BACKEND` already
   returns unused hypotheses and models, so this is reporting work, not
   protocol work).
-- **Dependent-arrow substitution** — upstream rejects consumption; when a
-  later piece admits it, argument-to-binder substitution lands in the
-  instantiation seam built here.
+- **Dependent-arrow substitution** — upstream rejects direct consumption
+  and this pass rejects the higher-order escape with a located error; when
+  a later piece admits dependency, argument-to-binder substitution lands
+  in the instantiation seam built here.
+- **Letop result facts.** `Texp_letop`'s retained `bop_op_type` is a
+  durable contract record this piece reads for nothing: letop obligations
+  are collected via the markers; the fact that a letop *result* meets the
+  operator's refined codomain waits for the piece that gives `Texp_letop`
+  the apply-codomain treatment. Cost: such a goal is `Unknown`.
+- **CMI verification provenance** — recording whether a unit's refined
+  claims were themselves discharged, upgrading the conditional verdict of
+  the provenance section into a certified one; the admission report is
+  its seam.
+- **Per-read snapshot semantics for predicates over mutable state** — the
+  possible relaxation of the day-one rejection, noted there.
 
 ## Tests
 
@@ -643,31 +910,78 @@ mechanism alone is disabled:
   shapes of the argument normalisation.
 - `partial-application` — `(f3 ~b:2) ~a:5`: the `Omitted`-then-supplied
   path; the obligation fires at the second apply.
-- `late-solved-arrow` — `let app x f = f x in app 0 f1`: collection from
-  the solved arrow where no funnel marker was possible.
+- `late-solved-arrow` — `let app f x = f x in app f1 0`: collection from
+  the solved arrow where no funnel marker exists (the argument was
+  pre-stripped as a `Known_arg`); `late-solved-residue` —
+  `let h y = let app x f = f x in app y f1`: the argument typed before the
+  domain was determined, leaving `exp_type` residue the fact rules ignore
+  while the arrow walk still collects.
+- `dedup-annotated-arg` — `f1 (5 : int{ _ > 0 })`: marker and arrow domain
+  coincide; the printing baseline shows exactly one query.
+- `dedup-ignore` — `external drop : int{ _ > 0 } -> unit = "%ignore"` and
+  `drop 0`: the `%ignore` special path; one failure reported, not two.
+- `dependent-arrow-escape` — `let app f x = f x in app d 5`: the
+  higher-order escape; a located unsupported error, pinned so it never
+  degrades into a crash or a silent skip.
 - `fact-binder-and-path` — the `fact` fixture: binder fact + path condition
   + bitvec arithmetic; the centrepiece.
-- `ident-fact` — `[5; v]`: value-description facts; its unsat core names
-  the `v > 0` hypothesis, pinning hypothesis ids.
-- `push-to-arms` — `k`: result-position pushing.
+- `ident-fact` — `[5; v]`: value-description facts. The discriminator is
+  `Proved` versus `Unknown` with the value-description source disabled — a
+  `Proved` is silent and unused-hypothesis reporting is carried, not
+  printed, so nothing observable names the hypothesis itself.
+- `push-to-arms` — `k`: result-position pushing through `if`; and
+  `match-push` — a refined `match` result pushed to its arms, the case the
+  section above calls load-bearing (a match result does not lower as a
+  term at all).
+- `short-circuit` — a `&&` left-operand (or `assert`) path condition
+  discharging a goal in its right operand: the non-`if` arm of the
+  path-condition rule, which would otherwise ship untested.
+- `eta-domain` — an eta-expansion whose *domain* is refined (the existing
+  corpus's eta fixture is codomain-only): the synthetic apply's argument
+  obligation.
+- `field-fact` — a read of an immutable record field declared
+  `int{ _ > 0 }` proving a goal: the label-description fact source.
+- `stability-mutable-arg` — two `reads_param r` calls around a write to
+  `r.contents`: the calls abstract (argument fails logicality crossing),
+  so the false equality is unprovable; `Unknown`, pinned.
+- `poly-instances`, `shadowed-local` — the allocator fixtures above.
+- `mutable-in-predicate` — `int{ _ = y }` with `y` mutable: the located
+  "predicate reads mutable state" rejection.
+- `predicate-sort-error` — `int{ 1 + true }`: the located predicate sort
+  error.
+- `shift-bounds` — the guarded shift rows at their boundaries.
 - `let-equality-opaque` — `let x = g () in (x : int{ _ > 0 })` with
   `g : unit -> int{ _ > 0 }`: apply-codomain fact + opaque-constant
   equality; `Proved` only if both fire.
-- `mutable-fact` — read of a `let mutable x : int{ _ > 0 }` used to prove a
-  goal: pins the stability-under-mutation stance.
+- `mutable-fact` — a read of a `let mutable x : int{ _ > 0 }` proves a
+  `_ > 0` goal through the per-read fact; its sentinel twin
+  `mutvar-reads-distinct` pins that `((x <- x + 1); x) - x` against
+  `int{ _ = 0 }` is `Unknown` — the per-read subjects are what make the
+  false equality unprovable.
 - `refuted-const`, `unknown-opaque`, `bitvec-wrap` — the three non-green
   verdicts, as above.
 - `tuple-datatype` — a predicate projecting a tuple subject: one datatype
-  through `Signature.instantiate`.
+  through `Signature.instantiate`; `sealed-datatype` — the same type
+  concrete inside its module, an uninterpreted sort outside;
+  `open-datatype-reject` — a `Type_open` subject's located rejection.
 - `alias` — the `nat` fixtures: expansion in the collection gate and the
   lowering.
 - `unrepresentable` — a refined annotation on a function-typed value:
   tier 2's located error, pinned so it never degrades into silence.
 - `continue-past-failure` — two independent defects in one unit: both
   reported, unit refused once; and a proof *after* a failure that leans on
-  the failed spec, documenting the trade.
+  the failed spec, documenting the trade. Both defects are variable-free
+  (`refuted-const`-shaped), because a counterexample model over variables
+  prints z3-version-dependent text and the fixture must pin behaviour, not
+  a solver build.
 - driver: `-vox-backend none` compiles the whole corpus silently;
-  `-vox-backend nonsense` and an unconfigured z3 fail once, at selection.
+  `-vox-backend nonsense` and an unconfigured z3 fail once, at selection;
+  and one malformed-signature test — a compiled driver test (the solver
+  piece's `z3_backend.ml` shape) feeding the Dump path an ill-formed
+  obligation, pinning that a renderer `Error` reports and refuses even in
+  Dump mode. Compiled, because once the allocator above exists, source
+  programs cannot produce an ill-formed signature — which is exactly why
+  the path needs a synthetic test to stay covered.
 
 Validation harness note: the `-drefinements` obligation map is the
 cross-check for collection — every marker line in `refinement-flow.ml`'s
@@ -702,26 +1016,32 @@ Recorded per AGENTS.md: real forks, the route, and why.
   solver-interface put driver policy; the flag wiring was explicitly left
   to this piece, so finishing `plan`'s contract here is in-bounds.
 - **(a) Obligation normalisation**: markers and apply-arrow domains merge
-  into one pending stream; the two sources are disjoint by construction
-  (pre-strip means no marker where the arrow records; option-headed and
-  letop domains mean no arrow record where markers exist), so no dedup
-  beyond refinement-flow's own (node, type) rule. The fail-closed analogue
-  of vox2's missing-metadata error is the arrow-pairing internal error plus
-  the dependent-arrow and arrow-binder invariant checks — a walker defect
-  is a crash, never a dropped obligation.
-- **(b) Facts come from declared positions only** — `pat_type` on patterns,
-  value descriptions at occurrences, apply arrows — never from `exp_type`
-  refined heads (residue) and never from local environment entries (binder
-  strip made them payload-typed). Stated as the precise reading of
-  refinement-flow's contract rather than a choice; the fork was whether
-  residue heads count as facts, and they do not, to keep fact coverage
-  order-independent.
+  into one pending stream, deduplicated at the consumer per (subject node,
+  imposed type up to `Ctype.is_equal`) — refinement-flow's own rule,
+  extended across sources, because the sources overlap (annotated
+  arguments; the `%ignore` path). The fail-closed analogue of vox2's
+  missing-metadata error is the arrow-pairing internal error — a walker
+  defect is a crash, never a dropped obligation — while dependent arrows,
+  reachable from valid source via higher-order solving, are a located
+  rejection, not a crash.
+- **(b) Facts come from declared positions only** — `pat_type` on variable
+  and alias patterns, value descriptions at occurrences, apply arrows,
+  immutable `Texp_field` labels — never from `exp_type` refined heads
+  (residue) and never from local environment entries (binder strip made
+  them payload-typed). Stated as the precise reading of refinement-flow's
+  contract rather than a choice; the fork was whether residue heads count
+  as facts, and they do not, to keep fact coverage order-independent.
+  Mutable variables get per-read subjects with per-read facts, and
+  predicates that read mutable state are rejected outright — the one place
+  the doc chooses fail-closed for a *fact*, because a fact with no single
+  denotation is not conservative, it is wrong.
 - **(c) Stability = interpreted-operator lowering, else totality projection
-  with totality-crossing arguments.** The axis alone is insufficient
-  (comparisons deliberately unlisted; partial parameters callable from
-  total functions); the operator table alone would never admit user
-  functions. The union is exactly vox2's "recognised builtin or known
-  total" split, re-derived on our axis. The axis's two trust boundaries
+  with arguments crossing totality *and* logicality.** The axis alone is
+  insufficient (comparisons deliberately unlisted; partial parameters
+  callable from total functions; mutable state readable through
+  parameters); the operator table alone would never admit user functions.
+  The union is exactly vox2's "recognised builtin or known total" split,
+  re-derived on our axes. The axis's two trust boundaries
   (`external @@ total`, `module rec`) are inherited and named.
 - **(d) The corpus is the refinement-flow fixture set plus the three
   non-green verdicts**, with the SMT-LIB bytes pinned through the printing
@@ -732,15 +1052,21 @@ Recorded per AGENTS.md: real forks, the route, and why.
   fact, unit refused at exit — vox2's measured trade, adopted with its
   rationale quoted rather than rediscovered. Per-obligation reports print
   as found; one final located error refuses the unit.
-- **(f) One intermediate language**: subjects convert into
-  `refinement_expression` and a single `term` emitter serves predicates,
-  subjects, facts and goals, with a local sort-assignment pass because our
-  rexp is untyped (type-formers' "resolved, not typed"). The alternatives —
+- **(f) One sorted VC IR, two front ends, one emitter**: subjects
+  (typedtree, fully typed) and predicates (rexp, untyped — type-formers'
+  "resolved, not typed") each get a small front end into a private sorted
+  IR; the predicate front end is a real located sort checker with
+  quantifier-free normalisation, because nothing upstream or downstream
+  checks predicate sorts and `Term` has no binder forms; a single trivial
+  emitter serves predicates, subjects, facts and goals. The alternatives —
   lowering typedtree directly to `Term` beside a rexp lowering (two
-  translations of one semantics; vox2 measured that near-miss), or adding
-  types to rexp (reopens a type-formers decision for no consumer but us) —
-  both lose. Facts and goals are boolean terms asserted true; and/or/not
-  are the OCaml booleans; one language end to end.
+  translations of one semantics; vox2 measured that near-miss), converting
+  subjects *into* untyped rexp first (discards the typechecker's types and
+  reconstructs them, and leaves the sort checker with no place to stand),
+  or adding types to rexp (reopens a type-formers decision for no consumer
+  but us) — all lose. Facts and goals are boolean terms asserted true;
+  and/or/not are the OCaml booleans; one meaning per construct end to end,
+  enforced at the emitter.
 - **(g) Consecutive refinement heads**: `int{p}{q}` is currently rejected
   upstream and an owner-level question is open on its semantics. The
   lowering assumes exactly one head and fail-closed-errors on stacked
@@ -761,9 +1087,86 @@ Recorded per AGENTS.md: real forks, the route, and why.
 - **Joins drop branch facts; no completion analysis** — recorded as the
   day-one completeness floor, with vox2's intersection + `may_complete`
   machinery named as the follow-up shape when a corpus demands it.
-- **Module layout**: `typing/vox_fact` (fact environment),
-  `typing/vox_lower` (subject conversion, sort assignment, operator table,
-  instantiation, signature assembly), `typing/vox_verify` (walk,
-  collection, discharge, reporting), following the solver piece's precedent
-  that vox modules live in `typing/`. Three modules, one dependency
-  direction, no cycles with `Typecore`.
+- **Module layout**: `typing/vox_lower` (the sorted IR, both front ends,
+  the predicate sort checker, operator table, symbol allocator,
+  instantiation, canonicalisation, signature assembly), `typing/vox_fact`
+  (fact environment over IR terms), `typing/vox_verify` (walk, collection,
+  discharge, reporting), following the solver piece's precedent that vox
+  modules live in `typing/`. Three modules, one dependency direction
+  (`vox_verify → vox_fact → vox_lower`), no cycles with `Typecore`.
+
+### Amended after the review round
+
+Two independent reviews (both compiled their counterexamples; every item
+below was verified against this worktree or vox2 before adoption). What
+changed, and why, one line each:
+
+- **Stability requires logicality-crossing arguments** — `int ref` crosses
+  totality but a total callee may read through it, so `Call`-equality over
+  such arguments proved a stale read (the `reads_param` counterexample).
+- **Mutable variables: per-read opaque subjects + per-read declared
+  facts; `Texp_letmutable` excluded from let-equalities** — any stable
+  symbol for a mutable variable proves false equalities across writes;
+  the doc had also misdescribed vox2, which rejects `Texp_mutvar` subjects
+  rather than trusting them (vox2 `vox_verify.ml:1280`, `:1590`).
+- **Predicates reading mutable state are rejected at VC time** — the
+  predicate filter is syntactic only, so `int{ _ = y }` with mutable `y`
+  compiles and has no single denotation; fail-closed beats assigning one
+  silently, and per-read snapshots remain a stated relaxation.
+- **Verdicts are conditional across units; axioms are reported** — the
+  default-off flag exports unverified claims, so a `Proved` certifies this
+  unit modulo imported contracts; the admission report makes the trust
+  surface visible and CMI provenance is the named follow-up.
+- **The sort-assignment pass became a located predicate sort checker over
+  a private sorted IR** — rexp is untyped, `int{ 1 + true }` compiles
+  today, `Term` has no binder forms, and no other layer can catch any of
+  it; the reviewer's two-front-ends/one-emitter architecture was adopted
+  as the simplest shape that keeps one semantics.
+- **The dependent-arrow "cannot occur" invariant was false** — higher-order
+  solving instantiates dependent arrows into applications (`app d 5`
+  compiles), so the planned internal error became a located unsupported
+  rejection with a fixture.
+- **One symbol allocator keyed on stamped identity plus ground sort
+  signature** — bare path strings collide for shadowed locals and cannot
+  give a polymorphic function its two ground declarations; sorts,
+  constructors and selectors share the namespace and the discipline.
+- **Obligation sources deduplicate at the consumer** — the claimed
+  disjointness fails for annotated arguments and the `%ignore` path, both
+  compiled; the (node, imposed type) rule extends refinement-flow's own.
+- **The late-solved fixture was replaced** — the doc's `app 0 f1` witness
+  is rejected by the typechecker (arrow-order argument typing); the
+  working witness and a residue-showing variant took its place and the
+  prose now says what actually happens.
+- **Texp_field became a fact source; letop result facts were deferred
+  honestly** — the tree keeps two durable records the fact rules omitted;
+  immutable field reads are small and sound to consume now, the letop
+  result fact is deferred with its cost stated.
+- **Dump mode suppresses only its expected non-verdict** — a renderer
+  `Error` under Dump was silently swallowed by "never refuse"; failures
+  now report and refuse in both modes, pinned by a synthetic driver test.
+- **Boolean ordering rows dropped; shifts guarded** — `Op` has no Boolean
+  ordering, and SMT shifts total what OCaml leaves unspecified, so the
+  rows now state semantics the table can actually deliver (out-of-range
+  shift counts are opaque, vox2's partial-op shape).
+- **Datatype scope narrowed to closed variants, records, tuples** —
+  `Type_open` cannot close into a constructor list and the renderer
+  rejects empty datatypes; the rest is located rejection until a corpus
+  earns the rules, with sealed-module environment sensitivity now pinned
+  by a fixture.
+- **The z3 gate and driver resolve the solver identically; the expect
+  hedge is gone** — `script` + `expect` composes in-tree, so the fallback
+  paragraph was replaced by the working stanza, and the driver adopted
+  the gate's resolution order rather than a near-miss of it.
+- **Binder facts restricted to variable and alias patterns** — a refined
+  head on a wildcard or or-pattern names no single value; fail-open
+  restriction, recorded as a completeness gap.
+- **Printing baselines canonicalise symbols per obligation** — stamped
+  names are load-bearing for correctness but would churn every baseline
+  on unrelated edits; deterministic first-occurrence renumbering keeps
+  the baselines the bytes z3 receives.
+- **The ident-fact discriminator was corrected** — unsat cores are not
+  observable output; the fixture discriminates by `Proved` versus
+  `Unknown` with the fact source disabled.
+- **Continue-past-failure defects are variable-free** — counterexample
+  model text varies across z3 versions; constants keep the fixture about
+  the protocol, not the solver build.
