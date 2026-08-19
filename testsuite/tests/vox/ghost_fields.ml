@@ -228,7 +228,10 @@ type ir = { ia : int; ip : string @@ ghost; ib : int }
 let bad = (.ip)
 [%%expect{|
 type ir = { ia : int; ip : string @@ ghost; ib : int; }
-val bad : (ir, string) idx_imm = <abstr>
+Line 2, characters 12-14:
+2 | let bad = (.ip)
+                ^^
+Error: Block indices do not support ghost fields in records.
 |}]
 
 let bad = (.ghost)

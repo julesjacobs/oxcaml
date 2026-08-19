@@ -9109,6 +9109,11 @@ and type_block_access env expected_base_ty principal
     let bad_record_error reason =
       raise (Error (lid.loc, env, Block_access_bad_record reason))
     in
+    (* A ghost field has no slot, so there is no block index for it; and a
+       fabricated index would also bypass [ghost_field_read_mode], handing
+       the field's value to real code. Reject like the other unsupported
+       representations. *)
+    if label.lbl_ghost then bad_record_error "ghost fields in";
     (match label.lbl_repres with
      | Record_boxed | Record_variable -> ()
      | Record_mixed shape ->
