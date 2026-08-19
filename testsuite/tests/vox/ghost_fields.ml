@@ -247,3 +247,11 @@ Error: This expression has type "('a : value_or_null)"
          because it's the base type (the first type parameter) for a
          block index (idx or mut_idx).
 |}]
+
+(* A record mixing ghost fields with ordinary void-typed fields is not
+   all-ghost: it still needs at least one runtime value (found by review:
+   [List.exists] where the rule says all fields). *)
+type hybrid = { marker : int @@ ghost; ordinary_void : string box }
+[%%expect{|
+type hybrid = { marker : int @@ ghost; ordinary_void : string box; }
+|}]
