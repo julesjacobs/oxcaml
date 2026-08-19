@@ -253,5 +253,8 @@ Error: This expression has type "('a : value_or_null)"
    [List.exists] where the rule says all fields). *)
 type hybrid = { marker : int @@ ghost; ordinary_void : string box }
 [%%expect{|
-type hybrid = { marker : int @@ ghost; ordinary_void : string box; }
+Line 1, characters 0-67:
+1 | type hybrid = { marker : int @@ ghost; ordinary_void : string box }
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Records must contain at least one runtime value.
 |}]

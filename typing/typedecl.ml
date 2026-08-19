@@ -1892,9 +1892,10 @@ let update_label_sorts (type rep) env loc types ~(form : rep record_form) =
   let allow_all_void =
     match form with
     | Legacy ->
-        (* An all-ghost record is legal and is represented as the
-           immediate 0; an all-void one without ghostliness is still not. *)
-        List.exists fst types
+        (* An all-ghost record is legal (it has kind void); an all-void one
+           whose voidness does not come entirely from ghost fields is still
+           not. *)
+        List.for_all fst types
     | Unboxed_product -> true
   in
   let is_all_void () = List.for_all all_void_sort_option sorts in
