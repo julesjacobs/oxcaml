@@ -45,10 +45,12 @@ ordinary error messages located at the offending subterm — is inherited
 rather than reproduced.
 
 Because the typer is Typecore, predicates follow **refinement-flow's
-occurrence rules exactly and automatically**: head-only, contextual
-stripping of refined heads at identifier occurrences and application
-results (never a deep strip — `int{p} list` stays distinct from
-`int list`), alias-expansion rollback included. `x : int{q}` used in a
+occurrence rules exactly and automatically** — head-only, contextual
+stripping at every site refinement-flow strips (identifier occurrences,
+application results, field reads, destructuring patterns; the
+implementation's list is authoritative), never a deep strip —
+`int{p} list` stays distinct from `int list` — alias-expansion rollback
+included. `x : int{q}` used in a
 predicate as `x + 1` works because the occurrence strips the head, the
 same way it does in program code. Refinement obligations recorded by
 Typecore *inside* a predicate are discarded with the frame: a refined
@@ -56,68 +58,122 @@ constraint in a predicate checks against its payload but records no
 obligation (predicates are specs; giving their interior constraints
 solver-facing meaning is a later piece's decision — recorded restriction).
 
-### The transient frame
+### The reentry transaction
 
-The reentry runs under `Fun.protect` saving and restoring the typing
-state Typecore mutates: delayed checks, allocation bookkeeping, levels
-(the vox2 frame at its typecore.ml:4869-4893 is the hazard map; each item
-gets a comment naming why it is saved). Predicate typing may constrain
-ambient type variables (the payload's, an enclosing declaration's): that
-is ordinary inference and is wanted — `'a{ _ = 0 }` pins `'a = int`.
-Type-variable scope is reentrant (predicates may use the enclosing
-declaration's variables; they introduce none of their own — no
-`'a.`-binders in predicates).
+The reentry is a transaction over Typecore's ambient state, not just a
+`Fun.protect` over a few refs. Its contracts:
 
-### Binder types
+- **The hole bridge.** Ordinary `type_expect` raises `Unexpected_hole` on
+  `Pexp_hole`. Before reentry, the predicate's holes are rewritten
+  (capture-avoidingly, not descending into constraint *types* — a nested
+  refinement owns its own holes) to one fresh synthetic value bound at
+  the payload type; the mirror build maps that ident back to
+  `Rexp_hole`.
+- **Mode boundary.** Predicates are erased specs: reading a value inside
+  one must not constrain the enclosing program's closure locks, totality
+  or other modes (a partial call in a predicate must not make the
+  enclosing closure partial). The reentry env presents no ambient locks,
+  and mode constraints arising inside the predicate are confined to the
+  frame. This piece checks types only.
+- **Type variables.** A complete reentrant `TyVarEnv` frame: the
+  enclosing declaration's named variables remain visible (`'a{ _ = 0 }`
+  pins `'a = int` — ordinary inference, wanted); new named type
+  variables may not be introduced by a predicate. Interior
+  `transl_simple_type` calls (constraint types) must not clear the
+  enclosing bookkeeping.
+- **Rollback.** Unification links are destructive: the frame takes a
+  `Btype` snapshot, backtracks it on *any* failure through the end of
+  mirror construction, and commits on success (so successful ambient
+  constraints stick). Delayed checks and allocation bookkeeping are
+  isolated, run for the predicate, and restored. Typecore's cmt saved
+  expressions produced under the frame are discarded (predicates are not
+  program expressions; the mirror is their record).
+
+### Binder types: two-phase domain formation
 
 A dependent binder scopes over its *own domain* (`x:(int{ x > 0 } * int)`
 is a fixture today), so its type cannot be known before the domain
-translates. The binder therefore enters the environment at a **fresh type
-variable placeholder**; when its domain finishes translating, the
-placeholder is unified with the domain's payload type. Predicates typed
-inside the domain constrain the placeholder; the reconciliation surfaces
-errors at the unification site. Consequences, both wanted:
+translates. A fresh-placeholder scheme fails here (review round 2): a
+predicate typed before the domain completes solves the placeholder to a
+bare shape, and reconciliation against the completed domain then hits the
+rigid refined/bare mismatch — and an own-domain binder's stored node type
+would contain the very predicate that contains it.
+
+So domains form in **two phases**: the domain type translates first, with
+every predicate encountered inside it *queued* (its gated parsetree plus
+its binder-scope snapshot) rather than typed; when the domain type is
+complete, the queued predicates are typed with each binder bound to its
+completed declared (payload-headed) type — Typecore's occurrence rules
+then strip heads at uses, as everywhere. Predicates in a codomain (all
+binders already completed) type eagerly; a predicate with no dependent
+binders in scope types immediately. Consequences, both wanted:
 
 - `x:(int{ x > 0 } * int)` becomes a type error (`x` is the whole tuple,
-  not an int) — the current fixtures that accept it flip in the RED/GREEN
+  not an int) — current fixtures that accept it flip in the RED/GREEN
   diff;
 - `x:(int{ fst x > 0 } * int)` types: `fst x`'s application result strips
-  its head per the occurrence rule.
+  its head per the occurrence rule, and the binder's type was complete
+  before the predicate was typed. The order-sensitivity pair
+  (early-annotation accepted / late-annotation rejected) from the review
+  is pinned as a fixture.
+
+**No stored type on `Rexp_var` or `Rexp_hole`.** Their types are
+contextual — the binder's declared type and the innermost payload — and
+storing them would create a metadata cycle for own-domain binders (the
+domain contains the predicate contains the node whose type is the
+domain), which `Btype`'s occur-check traversal must never meet. Every
+other node stores `rexp_type`.
 
 ### What is stored
 
-`Types.refinement_expression` becomes a **typed mirror**, built from
-Typecore's typedtree output rather than from the parsetree:
+`Types.refinement_expression` becomes a **typed mirror**. The parsetree
+is the *shape* authority and Typecore's typedtree the *annotation*
+authority, joined by an explicit correspondence (the trees are not
+isomorphic: source constraints are `exp_extra`s, one `Texp_function`
+carries all parameters where the mirror nests unary `Rexp_fun`s,
+`Texp_construct` flattens argument tuples, and application arguments are
+reordered into function-type order). Concretely: the mirror keeps source
+shape, order, constants, grouping and locations from the gated parsetree
+exactly as today; the correspondence walk supplies, per source node, the
+type, the selected constructor/field identity, and binder `Ident.t`s.
+Typedtree forms with no faithful preimage are rejected with a located
+"not supported in a refinement predicate": applications the typechecker
+completes or reorders beyond the source (required-label omission —
+`Omitted` arguments), `Optional`/`Position` arrows anywhere in an applied
+callee's type (all four spellings: `~opt:v`, `?opt:o`, omitted-optional
+synthesis, implicit `%call_pos`), `%apply`/`%revapply` and format-string
+rewrites, and GADT / existential-introducing constructors in patterns.
+Polymorphic `let` inside predicates is **allowed** (ordinary Typecore
+generalization; each use site's mirror node carries its instance).
 
-- every node carries `rexp_type : type_expr` (in the type graph:
-  `Btype`/`Subst`/freshening traverse it, `.cmi`s carry it);
-- constructors and fields carry the identity **Typecore selected**
-  (post-disambiguation), as substitutable paths — this closes the
-  type-formers-era gaps: `Rexp_field`'s unresolved longident, and
-  constructor identity frozen before the expected type was known;
-- mirror **equality stays syntactic**: derived node types are ignored by
-  `Vox_rexp.equal` (they are determined by the syntax plus the enclosing
-  type; comparing them would be redundant work and a fresh source of
-  false inequality) — written `Rexp_constraint` types keep participating
-  as today.
+Stored annotations:
 
-Building the mirror from the typedtree replaces the parsetree resolver in
-`transl_refinement_predicate`; the *syntactic gate* (totality by
-construction, unsupported-forms rejection) stays as a pre-pass over the
-parsetree, unchanged in behavior, so gate errors keep their current
-messages and nothing effectful ever reaches Typecore.
+- `rexp_type : type_expr` on every node except `Rexp_var`/`Rexp_hole`
+  (see "Binder types"); in the type graph: `Btype`/`Subst`/freshening
+  traverse it, `.cmi`s carry it. **Traversal becomes binder-context-aware**:
+  `Vox_rexp.map`'s type callback receives the current rename map, so a
+  predicate-local binder occurring in a nested refinement's stored types
+  freshens with its binder — the existing callback closes over only the
+  outer map, which this piece fixes (with a `.cmi`/functor-copy fixture
+  for exactly that shape).
+- Constructor identity as today's substitutable path form, but selected
+  by Typecore (post-disambiguation).
+- **Field identity as `(parent record type path, label name)`** — `Path.t`
+  has no field constructor, so the pair is the concrete substitutable
+  key; the parent path rewrites under `Subst.type_path`, and the key
+  joins mirror equality and the free-path/dependency scans. This closes
+  the type-formers-era functor-parameter-record gap.
+- Mirror **equality stays syntactic** over shape + written constraint
+  types + the identity keys; derived node types are ignored by
+  `Vox_rexp.equal`.
 
-Where the typedtree contains what the mirror cannot say, the build
-rejects with a located "not supported in a refinement predicate":
-`Optional`/`Position` arrows anywhere in an applied callee's type
-(covering `~opt:v`, `?opt:o`, omitted-optional synthesis, and implicit
-`%call_pos` — the mirror will not represent argument synthesis), GADT /
-existential-introducing constructors in patterns, and anything else
-outside the mirror grammar. Polymorphic `let` inside predicates is
-**allowed** (it is ordinary Typecore generalization; each use site's
-mirror node carries its instance) — the first draft's monomorphic-`let`
-restriction existed only to keep a hand-rolled typer small and dies with
-that typer.
+The *syntactic gate* (totality by construction, unsupported-forms
+rejection) stays as a pre-pass over the parsetree, unchanged in behavior,
+so gate errors keep their current messages and **no syntactically
+rejected form reaches Typecore** (effectful-by-type expressions — a
+well-typed call to a partial function, a qualified mutable access — do
+reach it and are accepted by this piece; the mode piece decides their
+fate later).
 
 ### Recursive declarations and signatures
 
@@ -209,8 +265,15 @@ hygiene and full-suite reference churn are expected.
   (probe via -drefinements).
 - Ambient-variable constraint: `'a{ _ = 0 }` pins `'a`; principal-mode
   double-take fixtures for the disambiguation cases.
-- Recursive groups: same-group constructor mention errors (structure and
-  signature); non-group mentions fine.
+- Recursive groups: same-group constructor AND field mention errors
+  (structure and signature); non-group mentions fine.
+- GADT/existential constructor pattern in a predicate match: located
+  rejection.
+- Binder order-sensitivity: the early-annotation/late-annotation pair
+  from the review (annotation after a constraining use is a clean
+  error, not an incidental unification mystery).
+- A predicate-local binder occurring in a nested refinement, exported
+  and freshened across `.cmi`/functor copy.
 - Cross-module: refined type in an `.mli` consumed from another unit;
   `.cmi` round trip of node types and selected identities (a
   disambiguated field keeps its producer-side identity under the
