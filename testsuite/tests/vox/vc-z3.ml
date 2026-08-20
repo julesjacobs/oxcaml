@@ -1140,3 +1140,61 @@ Line 1, characters 33-58:
                                      ^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: 1 refinement obligation was not verified.
 |}]
+
+(* --- datatype-rejection-classes: the three register_datatype refusals ------ *)
+(* [register_datatype]'s located rejections, one phrase each so each message
+   is observed (an unrepresentable obligation is a tier-2 error: the first
+   one refuses the unit, so they cannot share a phrase).  The registration
+   validates before it memoizes, so a rejected declaration leaves no table
+   entry behind — the GADT phrase's two obligations both collect, and a
+   re-registration attempt would reject identically rather than find the
+   type marked already built. *)
+
+type _ gadt_box = Gadt_box : int -> int gadt_box;;
+[%%expect{|
+type _ gadt_box = Gadt_box : int -> int gadt_box
+|}]
+
+let gadt_reject (g : int gadt_box) =
+  let a : int gadt_box{ true } = g in
+  let b : int gadt_box{ true } = g in
+  ignore a; ignore b;;
+[%%expect{|
+Line 2, characters 33-34: refinement obligation: int gadt_box{ true }
+Line 3, characters 33-34: refinement obligation: int gadt_box{ true }
+Line 2, characters 33-34:
+2 |   let a : int gadt_box{ true } = g in
+                                     ^
+Error: This expression cannot yet be represented in a verification condition:
+       its type has a GADT constructor.
+|}]
+
+type inline_box = Inline_box of { contents : int };;
+[%%expect{|
+type inline_box = Inline_box of { contents : int; }
+|}]
+
+let inline_reject (i : inline_box) : inline_box{ true } = i;;
+[%%expect{|
+Line 1, characters 58-59: refinement obligation: inline_box{ true }
+Line 1, characters 58-59:
+1 | let inline_reject (i : inline_box) : inline_box{ true } = i;;
+                                                              ^
+Error: This expression cannot yet be represented in a verification condition:
+       its type has an inline-record constructor.
+|}]
+
+type empty_variant = |;;
+[%%expect{|
+type empty_variant = |
+|}]
+
+let empty_reject (e : empty_variant) : empty_variant{ true } = e;;
+[%%expect{|
+Line 1, characters 63-64: refinement obligation: empty_variant{ true }
+Line 1, characters 63-64:
+1 | let empty_reject (e : empty_variant) : empty_variant{ true } = e;;
+                                                                   ^
+Error: This expression cannot yet be represented in a verification condition:
+       its type is an empty variant.
+|}]
