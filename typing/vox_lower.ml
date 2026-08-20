@@ -184,6 +184,52 @@ let is_bigint env p =
   | _ -> false
   | exception Not_found -> false
 
+(* SMT datatypes must be well-founded: every declared sort needs a value
+   built from finitely many constructor applications, so a recursive
+   variant group with no reachable base constructor ([type t = C of t]) is
+   a declaration the solver rejects — and a strictly inductive reading
+   would make the sort empty, turning every fact about its values vacuous.
+   The OCaml type is inhabited (via cycles), so such a group lowers to a
+   declared uninterpreted sort instead: its values stay sound opaque
+   constants, and constructor reasoning over cyclic data is deferred with
+   the rest of cyclic-data reasoning.  The check is a fixpoint over the
+   registered declarations: a declaration is well-founded once some
+   constructor has every field at an already-well-founded type.  A name
+   with no registered declaration counts as well-founded — it is either
+   not a datatype at all or a back-reference inside the group being
+   registered, and the first query after registration completes settles
+   the group for every caller that can mention it in a term. *)
+let well_founded st name =
+  match Hashtbl.find_opt st.Symbols.datatype_decls name with
+  | None -> true
+  | Some _ ->
+    let wf : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+    let ty_wf : Vox_logic.Datatype.ty -> bool = function
+      | Bool | Int | Bitvec _ | Uninterpreted _ | Param _ | Arrow _ -> true
+      | Apply (n, _) ->
+        Hashtbl.mem wf n
+        || not (Hashtbl.mem st.Symbols.datatype_decls n)
+    in
+    let grounded (d : Vox_logic.Datatype.decl) =
+      List.exists
+        (fun (c : Vox_logic.Datatype.constructor) ->
+           List.for_all (fun (_, ty) -> ty_wf ty) c.fields)
+        d.constructors
+    in
+    let changed = ref true in
+    while !changed do
+      changed := false;
+      Hashtbl.iter
+        (fun n d ->
+           if not (Hashtbl.mem wf n) && grounded d
+           then begin
+             Hashtbl.add wf n ();
+             changed := true
+           end)
+        st.Symbols.datatype_decls
+    done;
+    Hashtbl.mem wf name
+
 let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
   let ty = Ctype.expand_head env ty in
   match Types.get_desc ty with
@@ -199,12 +245,16 @@ let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
        Uninterpreted (mangle name (arg_sorts ()))
      | { type_kind = Type_variant _ | Type_record _; _ } as decl ->
        register_datatype st ~loc env p decl;
-       let sorts = arg_sorts () in
-       let instance = mangle name sorts in
-       record_root st instance name
-         (List.map (datatype_ty st ~loc env ~params:[]) args)
-         sorts;
-       Datatype instance
+       if not (well_founded st name)
+       then Uninterpreted (mangle name (arg_sorts ()))
+       else begin
+         let sorts = arg_sorts () in
+         let instance = mangle name sorts in
+         record_root st instance name
+           (List.map (datatype_ty st ~loc env ~params:[]) args)
+           sorts;
+         Datatype instance
+       end
      | { type_kind = Type_abstract _; _ } ->
        Uninterpreted (mangle name (arg_sorts ()))
      | { type_kind = Type_open; _ } ->
@@ -342,12 +392,44 @@ and datatype_ty st ~loc env ~params ty : Vox_logic.Datatype.ty =
          "its type has a mutable field at a type parameter"
      | { type_kind = Type_variant _ | Type_record _; _ } as decl ->
        register_datatype st ~loc env p decl;
-       Apply
-         (Symbols.symbol_of_path p,
-          List.map (datatype_ty st ~loc env ~params) args)
+       if well_founded st (Symbols.symbol_of_path p)
+       then
+         Apply
+           (Symbols.symbol_of_path p,
+            List.map (datatype_ty st ~loc env ~params) args)
+       else
+         (* the non-well-founded field type falls to the sort vocabulary,
+            which grounds it as an uninterpreted sort (or rejects it,
+            located, when its arguments mention the enclosing parameters) *)
+         ty_of_sort st (sort_of_type st ~loc env ty)
      | _ -> ty_of_sort st (sort_of_type st ~loc env ty)
      | exception Not_found -> ty_of_sort st (sort_of_type st ~loc env ty))
   | _ -> ty_of_sort st (sort_of_type st ~loc env ty)
+
+(* Value symbols are sort-sensitive, the discipline function symbols
+   already follow: a polymorphic value used at two ground sorts in one
+   obligation must be two SMT constants — declaring [nil] once at
+   [list<Bv63>] and using it at [list<Bool>] is a query the solver
+   rejects.  A value whose declared type already grounds to the
+   occurrence's sort keeps its bare stamped name: the binder-fact and
+   let-equality sites build exactly that name from the declared type, so
+   the identities agree.  Only an occurrence the declaration cannot name
+   on its own (an instantiated type variable) mangles the occurrence sort
+   in, [Symbols.func]-style.  The declared type is read from the
+   environment: an occurrence's own description is already instantiated
+   at the use's type and cannot tell the two cases apart. *)
+let value_symbol st ~loc env path sort =
+  let name = Symbols.value path in
+  let declares_sort =
+    match
+      sort_of_type st ~loc env
+        (Subst.Lazy.force_value_description (Env.find_value path env))
+          .val_type
+    with
+    | declared -> Vox_logic.Sort.equal declared sort
+    | exception (Unsupported _ | Not_found) -> false
+  in
+  if declares_sort then name else mangle name [sort]
 
 (* Close an obligation's signature over exactly the symbols its terms
    mention, in first-occurrence order (hypotheses, then goal), plus the
@@ -567,7 +649,9 @@ let lower_subject symbols ?on_resolved ?(is_total_local = fun _ -> false)
     match e.exp_desc with
     | Texp_ident { path; desc; _ } ->
       let sort = node_sort () in
-      let t = ir (Ir.Var (Symbols.value path)) sort loc in
+      let t =
+        ir (Ir.Var (value_symbol symbols ~loc e.exp_env path sort)) sort loc
+      in
       resolved (Resolved_ident (path, desc)) t;
       t
     | Texp_constant (Const_int n) -> const_int n loc
@@ -777,7 +861,9 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
             if not (crosses_logicality env vd.val_type)
             then raise (Reads_mutable_state { loc });
             let sort = sort_of_type symbols ~loc env vd.val_type in
-            let t = ir (Ir.Var (Symbols.value path)) sort loc in
+            let t =
+              ir (Ir.Var (value_symbol symbols ~loc env path sort)) sort loc
+            in
             (* the same deposit rule as the subject front end: resolving a
                free ident whose declared type is refined deposits the
                instantiated fact — a goal's predicate may lean on a
@@ -1070,6 +1156,29 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
     | '.' | '<' | '>' | ',' | '(' | ')' | '#' -> true
     | _ -> false
   in
+  (* The delimiter characters also occur inside operator identifiers
+     ([let ( +> ) ...] lowers to [+>_319<Bv63,Bv63,Bv63>]), where they are
+     name material, not structure.  A delimiter is structural only where
+     the grammar of generated names can put one: after a completed token —
+     a segment of name/key characters, or a segment ending in a [_stamp]
+     (which admits an operator base) — or directly after a closing
+     [> ) #] (nested suffixes, functor applications).  Anywhere else
+     ([+>], [.>>=_2], the leading [<] of [( < )]'s symbol) the character
+     belongs to an operator identifier and stays in its segment, so the
+     stamp that follows renumbers with its base instead of leaking raw. *)
+  let is_closer = function '>' | ')' | '#' -> true | _ -> false in
+  let token_char = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '/' -> true
+    | _ -> false
+  in
+  let ends_with_stamp s =
+    match String.rindex_opt s '_' with
+    | Some i ->
+      i > 0
+      && i < String.length s - 1
+      && is_digits (String.sub s (i + 1) (String.length s - i - 1))
+    | None -> false
+  in
   let rename name =
     match Hashtbl.find_opt renames name with
     | Some r -> r
@@ -1089,13 +1198,36 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
               (rename_segment (String.sub name start (stop - start)))
           in
           let start = ref 0 in
+          let previous_delimiter = ref None in
           String.iteri
             (fun i c ->
                if is_delimiter c
                then begin
-                 flush !start i;
-                 Buffer.add_char buf c;
-                 start := i + 1
+                 let structural =
+                   if i > !start
+                   then begin
+                     let segment = String.sub name !start (i - !start) in
+                     String.for_all token_char segment
+                     (* the two operator-named datatype members ([::] and
+                        [[]], the list constructors) are completed tokens
+                        too: their instance suffix is structural and its
+                        keys may hold stamps of their own *)
+                     || String.equal segment "::"
+                     || String.equal segment "[]"
+                     || ends_with_stamp segment
+                   end
+                   else
+                     match !previous_delimiter with
+                     | Some d -> is_closer d
+                     | None -> false
+                 in
+                 if structural
+                 then begin
+                   flush !start i;
+                   Buffer.add_char buf c;
+                   previous_delimiter := Some c;
+                   start := i + 1
+                 end
                end)
             name;
           flush !start (String.length name);

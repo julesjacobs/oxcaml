@@ -11,21 +11,50 @@
    would run (or the reverse) would let a fixture's verdict come from
    nothing.  Each scenario rewrites PATH to a scratch directory holding a
    decoy — a directory named z3, a non-executable file named z3 — plus the
-   empty and set shapes of VOX_TEST_Z3, and compares the two decisions.
-   Only agreement is printed: whether the pinned install exists is a
-   property of the machine, so the decisions themselves are not stable
-   output. *)
+   empty and set shapes of VOX_TEST_Z3, and checks both decisions against
+   the scenario's ground truth: WHICH command must be selected (computed
+   from first principles — the env override, or the pinned install when it
+   exists, and never a decoy), not merely whether something was found.  A
+   selected command must also actually execute: a resolver that picks up a
+   directory or a non-executable file agrees with the gate on availability
+   (both fall through to the pinned install's existence) yet hands the
+   driver a command that cannot run — availability parity alone cannot
+   catch it.  Only agreement is printed: whether the pinned install exists
+   is a property of the machine, so the decisions themselves are not
+   stable output. *)
+
+let pinned = "/j/office/app/z3/prod/4.8.5/install/bin/z3"
 
 let gate () = Sys.command "/bin/sh has_z3.sh" = 0
 
-let resolver () = Option.is_some (Vox_backend.resolve_z3 ())
+(* The selected command runs with a trivial argument; a directory or a
+   non-executable file fails here (126/127) where an executable answers. *)
+let executable command =
+  Sys.command (Filename.quote command ^ " -version > /dev/null 2>&1") = 0
 
-let scenario label =
+(* For the mismatch diagnostic only. *)
+let describe = function
+  | None -> "none"
+  | Some command ->
+    if String.equal command pinned then "pinned"
+    else if String.equal command "z3" then "path"
+    else "command " ^ command
+
+let scenario label ~expected =
   let g = gate () in
-  let r = resolver () in
-  if Bool.equal g r
+  let r = Vox_backend.resolve_z3 () in
+  let ok =
+    match r, expected with
+    | None, None -> not g
+    | Some command, Some expected_command ->
+      g && String.equal command expected_command && executable command
+    | None, Some _ | Some _, None -> false
+  in
+  if ok
   then Printf.printf "%s: agree\n" label
-  else Printf.printf "%s: DISAGREE (gate %b, resolver %b)\n" label g r
+  else
+    Printf.printf "%s: DISAGREE (gate %b, resolver %s, expected %s)\n" label
+      g (describe r) (describe expected)
 
 (* [Unix.putenv] cannot unset; both readers treat an empty VOX_TEST_Z3 as
    unset, so restoring an absent variable as "" is faithful. *)
@@ -48,11 +77,18 @@ let () =
   let oc = open_out (Filename.concat file_decoy "z3") in
   output_string oc "#!/bin/sh\n";
   close_out oc;
+  (* With no usable z3 on PATH, the one correct selection is the pinned
+     install when it is executable, and nothing otherwise. *)
+  let fallback =
+    if Sys.command ("test -x " ^ Filename.quote pinned) = 0
+    then Some pinned
+    else None
+  in
   with_env ["VOX_TEST_Z3", ""; "PATH", dir_decoy] (fun () ->
-    scenario "directory named z3 on PATH");
+    scenario "directory named z3 on PATH" ~expected:fallback);
   with_env ["VOX_TEST_Z3", ""; "PATH", file_decoy] (fun () ->
-    scenario "non-executable z3 on PATH");
+    scenario "non-executable z3 on PATH" ~expected:fallback);
   with_env ["VOX_TEST_Z3", ""; "PATH", decoys] (fun () ->
-    scenario "no z3 on PATH");
+    scenario "no z3 on PATH" ~expected:fallback);
   with_env ["VOX_TEST_Z3", "/bin/true"] (fun () ->
-    scenario "VOX_TEST_Z3 set")
+    scenario "VOX_TEST_Z3 set" ~expected:(Some "/bin/true"))

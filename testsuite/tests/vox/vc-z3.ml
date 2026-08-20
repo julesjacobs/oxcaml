@@ -752,6 +752,30 @@ Refinement verdicts are conditional on 1 assumed contract:
 val admission : int{ _ > 0 } = 0
 |}]
 
+(* --- admission-generic: a polymorphic axiom reports its declared scheme ----- *)
+(* ax_poly deposits at two ground instantiations in one phrase; the report
+   names the generic declaration — the whole trust surface in one line —
+   not whichever specialization happened to deposit first (which would be
+   source-order-dependent). *)
+
+external ax_poly : 'a -> int{ _ > 0 } = "%identity";;
+[%%expect{|
+external ax_poly : 'a -> int{ _ > 0 } = "%identity"
+|}]
+
+let admission_generic : int{ _ > 0 } =
+  let u = ax_poly true in
+  let v = ax_poly () in
+  ignore u; ignore v; 1;;
+[%%expect{|
+Line 1, characters 4-21: refined environment entry: admission_generic :
+  int{ _ > 0 }
+Lines 2-4, characters 2-23: refinement obligation: int{ _ > 0 }
+Refinement verdicts are conditional on 1 assumed contract:
+  ax_poly : 'a -> int{ _ > 0 }
+val admission_generic : int{ _ > 0 } = 1
+|}]
+
 (* --- recursive-knot-hole: a RECORDED KNOWN HOLE, pinned -------------------- *)
 (* KNOWN HOLE (owner-deferred to a later piece): a recursive value binding
    self-justifies its declared predicate — lowering the right-hand side
@@ -763,11 +787,14 @@ val admission : int{ _ > 0 } = 0
    carry (design-docs/vc-generation.md, Known holes).  These fixtures pin
    the CURRENT accepting behaviour so the later piece has a discriminating
    test to flip; if either block stops accepting, the hole moved —
-   re-record it there, not here. *)
+   re-record it there, not here.  The type carries a base constructor so
+   the hole rides a well-founded datatype: a baseless recursive variant
+   lowers to an uninterpreted sort, whose opaque subjects never resolve
+   the ident and so cannot exhibit the deposit. *)
 
-type knot = K of knot;;
+type knot = Stop | K of knot;;
 [%%expect{|
-type knot = K of knot
+type knot = Stop | K of knot
 |}]
 
 let rec knot_false : knot{ false } = K knot_false;;
@@ -783,6 +810,38 @@ let knot_boom : int{ 0 > 1 } = let _ = knot_false in 0;;
 Line 1, characters 4-13: refined environment entry: knot_boom : int{ 0 > 1 }
 Line 1, characters 31-54: refinement obligation: int{ 0 > 1 }
 val knot_boom : int{ 0 > 1 } = 0
+|}]
+
+(* --- local-knot: the local let-rec route does NOT self-justify ------------- *)
+(* A local group's recursive occurrences carry the unrefined payload type in
+   the right-hand sides' environment, so no self-deposit fires there: each
+   rhs obligation is the bare goal [false] and is REFUTED, where the
+   module-level knot above self-justifies and accepts (queries pinned in
+   vc-printing.ml).  If this fixture ever starts accepting, the
+   self-justification hole has spread to the local route — re-record it in
+   the design doc's known-holes entry. *)
+
+let local_knot : int{ 0 > 1 } =
+  let rec a : knot{ false } = K b
+  and b : knot{ false } = K a in
+  let _ = a in 0;;
+[%%expect{|
+Line 1, characters 4-14: refined environment entry: local_knot : int{ 0 > 1 }
+Lines 2-4, characters 2-16: refinement obligation: int{ 0 > 1 }
+Line 2, characters 30-33: refinement obligation: knot{ false }
+Line 3, characters 26-29: refinement obligation: knot{ false }
+Line 2, characters 30-33:
+2 |   let rec a : knot{ false } = K b
+                                  ^^^
+Error: Refinement verification failed: the predicate is refutable.
+Line 3, characters 26-29:
+3 |   and b : knot{ false } = K a in
+                              ^^^
+Error: Refinement verification failed: the predicate is refutable.
+Line 2, characters 30-33:
+2 |   let rec a : knot{ false } = K b
+                                  ^^^
+Error: 2 refinement obligations were not verified.
 |}]
 
 (* --- cross-obligation: two obligations on one subject, one shared ident --- *)
@@ -825,4 +884,68 @@ Line 1, characters 4-20: refined environment entry: shadowed_modules :
   int{ _ > 0 }
 Lines 2-6, characters 2-23: refinement obligation: int{ _ > 0 }
 val shadowed_modules : int{ _ > 0 } = 1
+|}]
+
+(* --- poly-value-sorts: one polymorphic value at two ground sorts ----------- *)
+(* Value symbols are sort-sensitive: [nil] read at [int list] and at
+   [bool list] in one obligation is two constants, never one name declared
+   at the first sort and reused ill-sorted at the second — which the solver
+   rejects, refusing valid source.  GREEN: Proved (query pinned in
+   vc-printing.ml); the module-imported shape rides the same rule. *)
+
+let nil = [];;
+[%%expect{|
+val nil : 'a list = []
+|}]
+
+let poly_value_sorts : int{ _ > 0 } =
+  let a = (nil : int list) in
+  let b = (nil : bool list) in
+  ignore a; ignore b; 1;;
+[%%expect{|
+Line 1, characters 4-20: refined environment entry: poly_value_sorts :
+  int{ _ > 0 }
+Lines 2-4, characters 2-23: refinement obligation: int{ _ > 0 }
+val poly_value_sorts : int{ _ > 0 } = 1
+|}]
+
+module Poly_source = struct let none = None end;;
+[%%expect{|
+module Poly_source : sig val none : 'a option end
+|}]
+
+let poly_value_module : int{ _ > 0 } =
+  let a = (Poly_source.none : int option) in
+  let b = (Poly_source.none : bool option) in
+  ignore a; ignore b; 1;;
+[%%expect{|
+Line 1, characters 4-21: refined environment entry: poly_value_module :
+  int{ _ > 0 }
+Lines 2-4, characters 2-23: refinement obligation: int{ _ > 0 }
+val poly_value_module : int{ _ > 0 } = 1
+|}]
+
+(* --- selfish-cycle: a baseless recursive variant is an uninterpreted sort -- *)
+(* As an SMT datatype [selfish] would be rejected as non-well-founded, so a
+   benign program touching the type could never verify (and a strictly
+   inductive solver would read the sort as empty, vacating facts over its
+   values).  It lowers to a declared uninterpreted sort instead
+   (declaration pinned in vc-printing.ml).  GREEN: Proved. *)
+
+type selfish = C of selfish;;
+[%%expect{|
+type selfish = C of selfish
+|}]
+
+let rec selfish_cycle : selfish = C selfish_cycle;;
+[%%expect{|
+val selfish_cycle : selfish = C <cycle>
+|}]
+
+let selfish_benign : int{ _ > 0 } = let y = selfish_cycle in ignore y; 1;;
+[%%expect{|
+Line 1, characters 4-18: refined environment entry: selfish_benign :
+  int{ _ > 0 }
+Line 1, characters 36-72: refinement obligation: int{ _ > 0 }
+val selfish_benign : int{ _ > 0 } = 1
 |}]

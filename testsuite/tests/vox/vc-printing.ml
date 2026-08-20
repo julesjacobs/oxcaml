@@ -1079,11 +1079,14 @@ val sd_env_out : int{ _ > 0 } = 2
    establish (design-docs/vc-generation.md, Known holes; verdicts pinned in
    vc-z3.ml).  This baseline pins the self-justifying query so the later
    piece has a discriminating test to flip: the corrected behaviour is this
-   query with no hypothesis line. *)
+   query with no hypothesis line.  The type carries a base constructor so
+   the hole rides a well-founded datatype: a baseless recursive variant
+   lowers to an uninterpreted sort, whose opaque subjects never resolve
+   the ident and so cannot exhibit the deposit. *)
 
-type knot = K of knot;;
+type knot = Stop | K of knot;;
 [%%expect{|
-type knot = K of knot
+type knot = Stop | K of knot
 |}]
 
 let rec knot_false : knot{ false } = K knot_false;;
@@ -1100,6 +1103,50 @@ Line 1, characters 37-49: refinement obligation: knot{ false }
 (get-model)
 (get-info :reason-unknown)
 val knot_false : knot{ false } = K <cycle>
+|}]
+
+(* --- local-knot: the local let-rec route does NOT self-justify -------------- *)
+(* A local group's recursive occurrences carry the unrefined payload type in
+   the right-hand sides' environment, so no self-deposit fires: each rhs
+   obligation below is the bare goal (no hypothesis line), where the
+   module-level knot above shows h1.  The body still receives the binder
+   facts (the group's declared predicates).  If a hypothesis line ever
+   appears on the rhs queries, the self-justification hole has spread to
+   the local route — re-record it in the design doc's known-holes entry. *)
+
+let local_knot : int{ 0 > 1 } =
+  let rec a : knot{ false } = K b
+  and b : knot{ false } = K a in
+  let _ = a in 0;;
+[%%expect{|
+Line 1, characters 4-14: refined environment entry: local_knot : int{ 0 > 1 }
+Lines 2-4, characters 2-16: refinement obligation: int{ 0 > 1 }
+Line 2, characters 30-33: refinement obligation: knot{ false }
+Line 3, characters 26-29: refinement obligation: knot{ false }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (not false))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (not false))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (! false :named h1))
+(assert (! false :named h2))
+(assert (not (bvsgt (_ bv0 63) (_ bv1 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val local_knot : int{ 0 > 1 } = 0
 |}]
 
 (* --- cross-obligation: both queries carry the shared-ident hypothesis ------ *)
@@ -1225,4 +1272,147 @@ Lines 2-3, characters 2-13: refinement obligation: int{ _ > 0 }
 (get-model)
 (get-info :reason-unknown)
 val nested_instance : int{ _ > 0 } = 1
+|}]
+
+(* --- operator-stamp: delimiter characters inside an operator's own name ----- *)
+(* The canonical renumbering knows [< > .] are name material inside an
+   operator identifier: the stamp in [+>_n<...>] renumbers with its base
+   instead of leaking raw.  The unrelated declaration above the operator is
+   the point of the fixture — pre-fix, its presence shifted the leaked
+   stamp, so this baseline is byte-stable exactly because the scanner now
+   renumbers it. *)
+
+let op_unrelated = 0;;
+[%%expect{|
+val op_unrelated : int = 0
+|}]
+
+let ( +> ) @ total = fun x y -> x + y;;
+[%%expect{|
+val ( +> ) : int -> int -> int = <fun>
+|}]
+
+let op_stamp : int{ _ > 0 } = 1 +> 2;;
+[%%expect{|
+Line 1, characters 4-12: refined environment entry: op_stamp : int{ _ > 0 }
+Line 1, characters 30-36: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-fun |+>_1<Bv63,Bv63,Bv63>| ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))
+(assert (not (bvsgt (|+>_1<Bv63,Bv63,Bv63>| (_ bv1 63) (_ bv2 63)) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val op_stamp : int{ _ > 0 } = 3
+|}]
+
+(* --- poly-value-sorts: one polymorphic value at two ground sorts ------------ *)
+(* Value symbols are sort-sensitive, the discipline function symbols follow:
+   [nil] read at [int list] and at [bool list] in one obligation is two
+   constants ([nil_1<list<Bv63>>], [nil_1<list<Bool>>]), never one name
+   declared at the first sort and reused ill-sorted at the second (which
+   the solver rejects).  Verdict in vc-z3.ml. *)
+
+let nil = [];;
+[%%expect{|
+val nil : 'a list = []
+|}]
+
+let poly_value_sorts : int{ _ > 0 } =
+  let a = (nil : int list) in
+  let b = (nil : bool list) in
+  ignore a; ignore b; 1;;
+[%%expect{|
+Line 1, characters 4-20: refined environment entry: poly_value_sorts :
+  int{ _ > 0 }
+Lines 2-4, characters 2-23: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((list<Bv63> 0)) (
+  ((|list.[]<Bv63>|) (|list.::<Bv63>| (|list.::.0<Bv63>| (_ BitVec 63)) (|list.::.1<Bv63>| list<Bv63>)))))
+(declare-datatypes ((list<Bool> 0)) (
+  ((|list.[]<Bool>|) (|list.::<Bool>| (|list.::.0<Bool>| Bool) (|list.::.1<Bool>| list<Bool>)))))
+(declare-const a_1 list<Bv63>)
+(declare-const nil_1<list<Bv63>> list<Bv63>)
+(declare-const b_1 list<Bool>)
+(declare-const nil_1<list<Bool>> list<Bool>)
+(assert (! (= a_1 nil_1<list<Bv63>>) :named h1))
+(assert (! (= b_1 nil_1<list<Bool>>) :named h2))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val poly_value_sorts : int{ _ > 0 } = 1
+|}]
+
+(* --- selfish-cycle: a baseless recursive variant is an uninterpreted sort --- *)
+(* [type selfish = C of selfish] has no reachable base constructor, so as an
+   SMT datatype it would be rejected as non-well-founded (and a strictly
+   inductive reading would make the sort empty, vacating every fact over
+   its values).  The OCaml type is inhabited via cycles, so it lowers to a
+   declared uninterpreted sort: opaque values, constructor reasoning
+   deferred with cyclic data (design-docs/vc-generation.md, Signature
+   assembly and datatypes).  Verdict in vc-z3.ml. *)
+
+type selfish = C of selfish;;
+[%%expect{|
+type selfish = C of selfish
+|}]
+
+let rec selfish_cycle : selfish = C selfish_cycle;;
+[%%expect{|
+val selfish_cycle : selfish = C <cycle>
+|}]
+
+let selfish_benign : int{ _ > 0 } = let y = selfish_cycle in ignore y; 1;;
+[%%expect{|
+Line 1, characters 4-18: refined environment entry: selfish_benign :
+  int{ _ > 0 }
+Line 1, characters 36-72: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-sort selfish_1 0)
+(declare-const y_1 selfish_1)
+(declare-const selfish_cycle_1 selfish_1)
+(assert (! (= y_1 selfish_cycle_1) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val selfish_benign : int{ _ > 0 } = 1
+|}]
+
+(* --- mutual-datatype: a mutual group WITH a base case stays a datatype ------ *)
+(* Well-foundedness is a property of the group, not the single declaration:
+   [odd] has no nullary constructor but grounds through [even]'s [Zero], so
+   the pair declares as one datatype group. *)
+
+type even = Zero | Succ_e of odd
+and odd = Succ_o of even;;
+[%%expect{|
+type even = Zero | Succ_e of odd
+and odd = Succ_o of even
+|}]
+
+let mutual_datatype : int{ _ > 0 } = let v = Succ_o Zero in ignore v; 1;;
+[%%expect{|
+Line 1, characters 4-19: refined environment entry: mutual_datatype :
+  int{ _ > 0 }
+Line 1, characters 37-71: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((even_1 0) (odd_1 0)) (
+  ((even_1.Zero) (even_1.Succ_e (even_1.Succ_e.0 odd_1)))
+  ((odd_1.Succ_o (odd_1.Succ_o.0 even_1)))))
+(declare-const v_1 odd_1)
+(assert (! (= v_1 (odd_1.Succ_o even_1.Zero)) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val mutual_datatype : int{ _ > 0 } = 1
 |}]

@@ -206,10 +206,21 @@ let is_axiom_source path (vd : Types.value_description) =
   (match vd.val_kind with Val_prim _ -> true | _ -> false)
   || Ident.is_global_or_predef (Path.head path)
 
-let record_admission st path (vd : Types.value_description) =
+let record_admission st ~env path (vd : Types.value_description) =
   if is_axiom_source path vd
      && not (List.exists (fun (p, _) -> Path.same p path) st.admissions)
-  then st.admissions <- (path, vd.val_type) :: st.admissions
+  then begin
+    (* an occurrence's description instantiates the scheme at the use's
+       ground type; the report names the generic declaration — one line
+       describing the whole trust surface, instead of whichever
+       specialization happened to deposit first *)
+    let declared =
+      match Env.find_value path env with
+      | vd -> (Subst.Lazy.force_value_description vd).val_type
+      | exception Not_found -> vd.val_type
+    in
+    st.admissions <- (path, declared) :: st.admissions
+  end
 
 (* The declaration behind an application's funct, when it is one. *)
 let funct_declaration (e : Typedtree.expression) =
@@ -248,7 +259,7 @@ let make_deposit st scope ~env ?(seen_idents = ref []) facts_ref =
              ~label:("value " ^ Path.name path)
              ~loc:ir.Ir.loc vd.val_type ~subject_ir:ir ~on_resolved:deposit
              facts_ref
-        then record_admission st path vd
+        then record_admission st ~env path vd
       end
     | Resolved_apply e ->
       (match apply_codomain e with
@@ -258,7 +269,7 @@ let make_deposit st scope ~env ?(seen_idents = ref []) facts_ref =
               facts_ref
          then (
            match funct_declaration e with
-           | Some (path, vd) -> record_admission st path vd
+           | Some (path, vd) -> record_admission st ~env path vd
            | None -> ())
        | None -> ())
     | Resolved_field (e, lbl) ->

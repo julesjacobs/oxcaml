@@ -717,7 +717,20 @@ a datatype's constructor is extensional, so `mk r.a r.b = mk r.a' r.b'`
 would equate two states of the record that differ only across a write —
 it becomes an uninterpreted sort instead (its reads already abstract), a
 completeness loss where a datatype would be a soundness loss. Fixture:
-`mutable-record` (the printed baseline is a `declare-sort`). A visible
+`mutable-record` (the printed baseline is a `declare-sort`). The same
+uninterpreted-sort translation applies to a recursive variant group with
+no reachable base constructor (`type t = C of t`): SMT datatypes must be
+well-founded — some constructor whose fields are all at
+already-well-founded types must be reachable — so the solver rejects the
+declaration outright, and a strictly inductive reading would make the
+sort empty, turning every fact over its values vacuous. The OCaml type
+is inhabited (via cycles), so the sound translation is a declared
+uninterpreted sort: values stay opaque constants, and constructor
+reasoning over cyclic data is deferred with the rest of cyclic-data
+reasoning. Mutually recursive groups *with* a base case stay datatypes.
+Fixtures: `selfish-cycle` (the printed baseline is a `declare-sort`, and
+a benign program touching the type proves), `mutual-datatype` (the
+even/odd group declared as one datatype group). A visible
 definition outside that subset is a
 located rejection day one: `Type_open` declarations
 (`typing/types.mli:979`) have no finite constructor list to close, an
@@ -805,7 +818,12 @@ a hypothesis. Three rules make that stance explicit rather than silent:
   obligations were discharged under — the minimal cousin of vox2's
   admission reporting, which had to report refined-result externals for
   exactly this reason (`vc-research-map.md:177-183`). Nothing fails; the
-  trust surface becomes visible output.
+  trust surface becomes visible output. Each admission is reported at its
+  *generic* declaration (the declared scheme from the environment, not an
+  occurrence's instantiation): a polymorphic axiom used at two ground
+  types is one line naming the whole contract that was trusted, where
+  reporting an instantiation would name a source-order-dependent
+  specialization and understate the surface.
 - **Verification provenance in the CMI** — recording whether a unit's own
   claims were discharged, so a consumer can distinguish verified imports
   from merely recorded ones and tighten the conditional verdict into a
@@ -916,7 +934,16 @@ Each recorded, most with the vox2 mechanism named for the eventual piece:
   line, and in `vc-z3.ml`, whose verdicts accept), so the later piece has
   a discriminating test to flip and the hole cannot silently vanish or
   worsen; the deposit site carries the matching comment
-  (`typing/vox_verify.ml`, `make_deposit`).
+  (`typing/vox_verify.ml`, `make_deposit`). The sentinel type carries a
+  base constructor (`type knot = Stop | K of knot`) so the hole rides a
+  well-founded datatype: a baseless recursive variant now lowers to an
+  uninterpreted sort, whose opaque subjects never resolve the ident and
+  so cannot exhibit the deposit. The hole is a module-level-binding
+  behaviour: a *local* `let rec` group's recursive occurrences carry the
+  unrefined payload type in the right-hand sides' environment, so no
+  self-deposit fires there and the local knot's own obligations are
+  refuted — pinned by the `local-knot` fixture in both tracks, which
+  flips if the local route ever starts self-justifying.
 - **Termination measures** (`[@vox.decreases]`, lexicographic-descent VCs,
   the post-walk completeness re-check). Recursive calls are ordinary
   applications here; totality claims ride the axis.
