@@ -189,10 +189,19 @@ Error: The constant "0" has type "int" but an expression was expected of type
 |}]
 
 (* A [fun] parameter in the predicate shadows the name, so [x] stays a
-   label *)
-type still_label = x:int list{ List.for_all (fun x -> x > 0) _ } -> unit;;
+   label.  The local [x] is used, so this pin is not vacuous. *)
+type still_label = x:int list{ (fun x -> x > 0) 1 } -> unit;;
 [%%expect{|
-type still_label = x:int list{ List.for_all (fun x -> x > 0) _ } -> unit
+type still_label = x:int list{ (fun x -> x > 0) 1 } -> unit
+|}]
+
+(* Retain the original partial-call fixture unchanged across RED and GREEN:
+   RED admits it and GREEN's Total judgment rejects [List.for_all]. *)
+type still_label_partial =
+  x:int list{ List.for_all (fun x -> x > 0) _ } -> unit;;
+[%%expect{|
+type still_label_partial =
+    x:int list{ List.for_all (fun x -> x > 0) _ } -> unit
 |}]
 
 (* A predicate-local binder is in scope in nested refinements through a
@@ -220,14 +229,25 @@ type mixed = x:int -> y:int -> int{ _ >= x }
 
 (* Predicates are ordinary expressions: applications, field access,
    let, fun, match, if, tuples, constants, constructors *)
-type pred_apply = s:string -> int{ _ < String.length s } -> char;;
+let total_length @ total = fun (_ : string) -> 0;;
 [%%expect{|
-type pred_apply = s:string -> int{ _ < (String.length s) } -> char
+val total_length : string -> int = <fun>
+|}]
+
+type pred_apply = s:string -> int{ _ < total_length s } -> char;;
+[%%expect{|
+type pred_apply = s:string -> int{ _ < (total_length s) } -> char
 |}]
 
 type pred_fun = int list{ List.for_all (fun x -> x > 0) _ };;
 [%%expect{|
 type pred_fun = int list{ List.for_all (fun x -> x > 0) _ }
+|}]
+
+(* A Total function-literal control keeps the accepted function form covered. *)
+type pred_fun_total = int list{ (fun _xs -> true) _ };;
+[%%expect{|
+type pred_fun_total = int list{ (fun _xs -> true) _ }
 |}]
 
 type pred_if = int{ if _ > 0 then _ < 10 else _ > -10 };;
@@ -309,7 +329,7 @@ type nat = int{ _ >= 0 }
 (* A recursive declaration whose predicate mentions the type being
    defined, through an interior type *)
 type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
-let well_formed (_ : 'a tree) = true;;
+let well_formed @ total = fun (_ : 'a tree) -> true;;
 [%%expect{|
 type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
 val well_formed : 'a tree -> bool = <fun>
@@ -322,33 +342,35 @@ type wft = t tree{ well_formed (_ : t tree) }
 and t = int
 |}]
 
-(* String constants compare by contents, not by where they were
-   written *)
-type s = string{ _ = "a" }
-let l : s list = ([] : string{ _ = "a" } list);;
+(* String constants compare by contents, not by where they were written. *)
+let accepts_string_constant @ total = fun (_ : string) -> true
+type s = string{ accepts_string_constant "a" }
+let l : s list = ([] : string{ accepts_string_constant "a" } list);;
 [%%expect{|
-type s = string{ _ = "a" }
+val accepts_string_constant : string -> bool = <fun>
+type s = string{ accepts_string_constant "a" }
 val l : s list = []
 |}]
 
 (* Type variables inside a predicate are live in the type graph:
    instantiating the declaration substitutes them *)
-type 'a t = 'a list{ (_ : 'a list) = [] }
-let l : int t list = ([] : int list{ (_ : int list) = [] } list);;
+type 'a t = 'a list{ let _xs : 'a list = _ in true }
+let l : int t list =
+  ([] : int list{ let _xs : int list = _ in true } list);;
 [%%expect{|
-type 'a t = 'a list{ (_ : 'a list) = [] }
+type 'a t = 'a list{ let _xs = (_ : 'a list) in true }
 val l : int t list = []
 |}]
 
 (* A self-referential predicate, to pin what the occur check does *)
-type u = int{ (_ : u) = _ };;
+type u = int{ let _x : u = _ in true };;
 [%%expect{|
-Line 1, characters 0-27:
-1 | type u = int{ (_ : u) = _ };;
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 1, characters 0-38:
+1 | type u = int{ let _x : u = _ in true };;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The type abbreviation "u" is cyclic:
-         "u" = "int{ (_ : u) = _ }",
-         "int{ (_ : u) = _ }" contains "u"
+         "u" = "int{ let _x = (_ : u) in true }",
+         "int{ let _x = (_ : u) in true }" contains "u"
 |}]
 
 (* Predicates print resolved names: a functor application substitutes the

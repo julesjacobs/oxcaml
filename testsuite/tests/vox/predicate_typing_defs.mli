@@ -6,11 +6,16 @@ type selected_field = int_record{ _.selected > 0 }
 type int_variant = Selected of int
 type string_variant = Selected of string
 
-type selected_constructor = int_variant{ _ = Selected 0 }
+type selected_constructor =
+  int_variant{ let _v = if true then _ else Selected 0 in true }
 
 type selected_application = int{ (fun n -> n + 1) _ > 0 }
 
-type dependent_hole = (x:int -> int{ _ >= x }){ _ = _ }
+type dependent_hole =
+  (x:int -> int{ _ >= x }){
+    let _f = if true then _ else _ in
+    true
+  }
 
 type generic_own_domain =
   x:(int{ fst x > 0 } * int) -> unit

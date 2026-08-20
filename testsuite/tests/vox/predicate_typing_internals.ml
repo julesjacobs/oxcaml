@@ -158,6 +158,81 @@ let duplicate_locations_preserve_application_correspondence =
 val duplicate_locations_preserve_application_correspondence : bool = true
 |}]
 
+(* A PPX may erase every source location while using positional syntax for a
+   labelled function.  RED's legacy completeness heuristic rejects first;
+   GREEN identifies the ambiguous source/typed argument pairing.  Both paths
+   must be located errors, never fatal correspondence failures. *)
+let duplicate_locations_ambiguous_application_is_located =
+  let env = Lazy.force Env.initial in
+  let total_mode =
+    Mode.Alloc.of_const
+      { Mode.Alloc.Const.legacy with
+        totality = Mode.Totality.Const.Total }
+  in
+  let arrow label argument result =
+    Ctype.newty
+      (Tarrow
+         ((label, None, total_mode, total_mode),
+          Ctype.newmono argument, result, Types.commu_ok))
+  in
+  let fn_type =
+    arrow (Types.Labelled "x") Predef.type_int
+      (arrow (Types.Labelled "y") Predef.type_bool Predef.type_bool)
+  in
+  let sort =
+    match Ctype.type_sort ~why:Let_binding ~fixed:false env fn_type with
+    | Ok sort -> sort
+    | Error _ -> assert false
+  in
+  let fn_id = Ident.create_local "f" in
+  let fn_desc =
+    { val_type = fn_type;
+      val_kind = Val_reg sort;
+      val_lpoly = Lpoly.determined [];
+      val_attributes = [];
+      val_zero_alloc = Zero_alloc.default;
+      val_modalities = Mode.Modality.undefined;
+      val_loc = Location.none;
+      val_uid = Uid.mk ~current_unit:(Env.get_current_unit ()) }
+  in
+  let fn_mode =
+    Mode.Value.of_const
+      { Mode.Value.Const.legacy with
+        totality = Mode.Totality.Const.Total }
+  in
+  let env = Env.add_value ~mode:fn_mode fn_id fn_desc env in
+  let predicate = Parse.expression (Lexing.from_string "f 0 true") in
+  let remove_locations =
+    let open Ast_mapper in
+    { default_mapper with
+      location = (fun _mapper _location -> Location.none) }
+  in
+  let predicate = remove_locations.expr remove_locations predicate in
+  match
+    Typecore.type_refinement_predicate
+      env ~loc:predicate.pexp_loc ~payload:Predef.type_unit ~binders:[]
+      predicate
+  with
+  | _ -> false
+  | exception exn ->
+      begin match Location.error_of_exn exn with
+      | Some (`Ok error) ->
+          Format.asprintf "%a" Location.print_report error
+          |> Misc.Stdlib.String.is_substring
+               ~substring:
+                 "This application is complete, but surplus arguments were \
+                  provided afterwards."
+      | Some `Already_displayed | None -> false
+      end
+;;
+
+[%%expect{|
+File "_none_", line 1:
+Warning 6 [labels-omitted]: labels x, y were omitted in the application of
+  this function.
+val duplicate_locations_ambiguous_application_is_located : bool = true
+|}]
+
 (* Drive the real queue through its public predicate-typer hook.  Synthetic
    mirrors make progress observable without relying on a fragile source-level
    inference accident. *)
@@ -612,9 +687,16 @@ let imported_mirror_contract =
     root_is_bool outer_hole_predicate
     && begin
          match outer_hole_predicate.rexp_desc with
-         | Rexp_apply
-             (_, [(_, { rexp_desc = Rexp_hole; rexp_type = None; _ });
-                   (_, { rexp_desc = Rexp_hole; rexp_type = None; _ })]) ->
+         | Rexp_let
+             ({ rb_expr =
+                  { rexp_desc =
+                      Rexp_ifthenelse
+                        (_, { rexp_desc = Rexp_hole; rexp_type = None; _ },
+                         Some
+                           { rexp_desc = Rexp_hole; rexp_type = None; _ });
+                    _ };
+                _ },
+              _) ->
              true
          | _ -> false
        end

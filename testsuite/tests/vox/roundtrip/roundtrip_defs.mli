@@ -5,7 +5,9 @@ type nat = int{ _ >= 0 }
 
 type dep = x:int{ x > 0 } -> int{ _ >= x }
 
-val sub : s:string -> int{ _ < String.length s } -> char
+val total_length : string -> int @@ total
+
+val sub : s:string -> int{ _ < total_length s } -> char
 
 val labelled : ~x:int{ x > 0 } -> unit
 
@@ -15,7 +17,7 @@ type pos = Pos of int{ _ > 0 }
 
 (* A predicate referencing a value of the same signature: import must
    rewrite the path. *)
-val positive : int -> bool
+val positive : int -> bool @@ total
 
 type p = int{ positive _ }
 
@@ -29,4 +31,4 @@ type fr2 = { sel : bool }
 type selected = fr1{ _.sel > 0 }
 type fv1 = C of int
 type fv2 = C of bool
-type chosen = fv1{ _ = C 1 }
+type chosen = fv1{ let _v = if true then _ else C 1 in true }

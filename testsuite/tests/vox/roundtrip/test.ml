@@ -1,8 +1,8 @@
 (* TEST
  readonly_files = "roundtrip_defs.mli";
- setup-ocamlc.byte-build-env;
+ setup-ocamlc.opt-build-env;
  module = "roundtrip_defs.mli";
- ocamlc.byte;
+ ocamlc.opt;
  expect;
 *)
 
@@ -10,7 +10,7 @@
    guards printed written structure and identity keys.  Stored node types are
    intentionally absent from printing and are checked by the raw-CMI test. *)
 
-#directory "ocamlc.byte";;
+#directory "ocamlc.opt";;
 
 #show Roundtrip_defs;;
 [%%expect{|
@@ -18,18 +18,19 @@ module Roundtrip_defs :
   sig
     type nat = int{ _ >= 0 }
     type dep = x:int{ x > 0 } -> int{ _ >= x }
-    val sub : s:string -> int{ _ < (String.length s) } -> char
+    val total_length : string -> int @@ total
+    val sub : s:string -> int{ _ < (total_length s) } -> char
     val labelled : ~x:int{ x > 0 } -> unit
     type wf = { size : int{ _ >= 0 }; }
     type pos = Pos of int{ _ > 0 }
-    val positive : int -> bool
+    val positive : int -> bool @@ total
     type p = int{ positive _ }
     type fr1 = { sel : int; }
     type fr2 = { sel : bool; }
     type selected = fr1{ _.sel > 0 }
     type fv1 = C of int
     type fv2 = C of bool
-    type chosen = fv1{ _ = (C 1) }
+    type chosen = fv1{ let _v = if true then _ else C 1 in true }
   end
 |}]
 
@@ -70,11 +71,14 @@ val l : Roundtrip_defs.selected list = []
 |}]
 
 let l : Roundtrip_defs.chosen list =
-  ([] : Roundtrip_defs.fv1{ _ = C 1 } list);;
+  ([] : Roundtrip_defs.fv1{
+    let _v = if true then _ else C 1 in
+    true
+  } list);;
 [%%expect{|
-Line 2, characters 32-33:
-2 |   ([] : Roundtrip_defs.fv1{ _ = C 1 } list);;
-                                    ^
+Line 3, characters 33-34:
+3 |     let _v = if true then _ else C 1 in
+                                     ^
 Warning 18 [not-principal]: this type-based constructor disambiguation is not
   principal.
 

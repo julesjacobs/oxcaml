@@ -1,5 +1,5 @@
 (* TEST
- flags = "-drefinements -extension let_mutable";
+ flags = "-drefinements -extension let_mutable -extension layout_poly_alpha";
  expect;
 *)
 
@@ -35,11 +35,16 @@ Error: This constant has type "string" but an expression was expected of type
 
 (* The hole is a string, so the application itself is well-typed; its
    [int] result is what must be rejected against the expected [bool]. *)
-type c = string{ String.length _ };;
+let total_length @ total = fun (_ : string) -> 0;;
 [%%expect{|
-Line 1, characters 17-32:
-1 | type c = string{ String.length _ };;
-                     ^^^^^^^^^^^^^^^
+val total_length : string -> int = <fun>
+|}]
+
+type c = string{ total_length _ };;
+[%%expect{|
+Line 1, characters 17-31:
+1 | type c = string{ total_length _ };;
+                     ^^^^^^^^^^^^^^
 Error: This expression has type "int" but an expression was expected of type
          "bool"
 |}]
@@ -69,18 +74,21 @@ type h1 = int{ (_ > 0) && (_ < 10) }
 
 (* nested refinement: each hole means the innermost enclosing refinement's
    value — the inner hole is a string, the outer an int *)
-type h2 = int{ (("s" : string{ String.length _ > 0 }) = "s") && _ > 0 };;
+type h2 = int{
+  let _s = ("s" : string{ total_length _ > 0 }) in
+  _ > 0
+};;
 [%%expect{|
-type h2 = int{ (("s" : string{ (String.length _) > 0 }) = "s") && (_ > 0) }
+type h2 = int{ let _s = ("s" : string{ (total_length _) > 0 }) in _ > 0 }
 |}]
 
 (* the inner hole is *not* the outer int: [_ > 0] at payload string must
    reject *)
-type h3 = int{ (("s" : string{ _ > 0 }) = "s") && _ > 0 };;
+type h3 = int{ let _s = ("s" : string{ _ > 0 }) in _ > 0 };;
 [%%expect{|
-Line 1, characters 35-36:
-1 | type h3 = int{ (("s" : string{ _ > 0 }) = "s") && _ > 0 };;
-                                       ^
+Line 1, characters 43-44:
+1 | type h3 = int{ let _s = ("s" : string{ _ > 0 }) in _ > 0 };;
+                                               ^
 Error: The constant "0" has type "int" but an expression was expected of type
          "string"
 |}]
@@ -125,11 +133,16 @@ type b2 = ~x:int{ x > 0 } -> unit
 |}]
 
 (* an ill-typed use of the binder *)
-type b3 = n:int{ n ^ "" = "" } -> unit;;
+let accepts_string @ total = fun (_ : string) -> true;;
 [%%expect{|
-Line 1, characters 17-18:
-1 | type b3 = n:int{ n ^ "" = "" } -> unit;;
-                     ^
+val accepts_string : string -> bool = <fun>
+|}]
+
+type b3 = n:int{ accepts_string n } -> unit;;
+[%%expect{|
+Line 1, characters 32-33:
+1 | type b3 = n:int{ accepts_string n } -> unit;;
+                                    ^
 Error: The value "n" has type "int" but an expression was expected of type "string"
 |}]
 
@@ -188,32 +201,52 @@ type b8_codomain = x:int{ (fst x) > 0 } * int -> bool{ (snd x) = 0 }
 
 (* A hole at a dependent-arrow payload must remain equal to its own copied
    type; binder freshening may not desynchronize the nested predicate. *)
-type dependent_hole = (x:int -> int{ _ >= x }){ _ = _ };;
+type dependent_hole =
+  (x:int -> int{ _ >= x }){
+    let _f = if true then _ else _ in
+    true
+  };;
 [%%expect{|
-type dependent_hole = (x:int -> int{ _ >= x }){ _ = _ }
+type dependent_hole =
+    (x:int -> int{ _ >= x }){ let _f = if true then _ else _ in true }
 |}]
 
 module type Dependent_hole_signature = sig
-  type t = (x:int -> int{ _ >= x }){ _ = _ }
+  type t = (x:int -> int{ _ >= x }){
+    let _f = if true then _ else _ in
+    true
+  }
 end;;
 [%%expect{|
 module type Dependent_hole_signature =
-  sig type t = (x:int -> int{ _ >= x }){ _ = _ } end
+  sig
+    type t =
+        (x:int -> int{ _ >= x }){ let _f = if true then _ else _ in true }
+  end
 |}]
 
 module Dependent_hole_source = struct
-  type t = (x:int -> int{ _ >= x }){ _ = _ }
+  type t = (x:int -> int{ _ >= x }){
+    let _f = if true then _ else _ in
+    true
+  }
 end;;
 [%%expect{|
 module Dependent_hole_source :
-  sig type t = (x:int -> int{ _ >= x }){ _ = _ } end
+  sig
+    type t =
+        (x:int -> int{ _ >= x }){ let _f = if true then _ else _ in true }
+  end
 |}]
 
 module Dependent_hole_copy (X : Dependent_hole_signature) = X;;
 [%%expect{|
 module Dependent_hole_copy :
   functor (X : Dependent_hole_signature) ->
-    sig type t = (x:int -> int{ _ >= x }){ _ = _ } end
+    sig
+      type t =
+          (x:int -> int{ _ >= x }){ let _f = if true then _ else _ in true }
+    end
 |}]
 
 module Dependent_hole_result : Dependent_hole_signature =
@@ -224,17 +257,20 @@ module Dependent_hole_result : Dependent_hole_signature
 
 (* Derived node annotations are metadata and must not add variance
    occurrences to the written declaration. *)
-type -'a contravariant = x:'a -> int{ x = x };;
+type -'a contravariant = x:'a -> int{
+  let _y = if true then x else x in
+  true
+};;
 [%%expect{|
-type 'a contravariant = x:'a -> int{ x = x }
+type 'a contravariant = x:'a -> int{ let _y = if true then x else x in true }
 |}]
 
 (* Predicate typing must not rewrite the written abbreviation spelling in a
    refined binder payload. *)
 type refined_string_binder =
-  s:string{ String.length s > 0 } -> unit;;
+  s:string{ total_length s > 0 } -> unit;;
 [%%expect{|
-type refined_string_binder = s:string{ (String.length s) > 0 } -> unit
+type refined_string_binder = s:string{ (total_length s) > 0 } -> unit
 |}]
 
 (* Frame views copy object and unboxed-tuple payload spines too: typing the
@@ -248,7 +284,7 @@ type object_control = < value : string >
 type unboxed_control = #(int * string)
 |}]
 
-let check_object (_ : < value : string_alias >) = true;;
+let check_object @ total = fun (_ : < value : string_alias >) -> true;;
 type object_payload =
   < value : string >{ check_object (_ : < value : string_alias >) };;
 [%%expect{|
@@ -257,7 +293,7 @@ type object_payload =
     < value : string >{ check_object (_ : < value: string_alias   > ) }
 |}]
 
-let check_unboxed (_ : #(int * string_alias)) = true;;
+let check_unboxed @ total = fun (_ : #(int * string_alias)) -> true;;
 type unboxed_payload =
   #(int * string){ check_unboxed (_ : #(int * string_alias)) };;
 [%%expect{|
@@ -275,7 +311,7 @@ type variant_alias = [ `A of string ]
 type variant_control = [ `A of string ]
 |}]
 
-let check_variant (_ : variant_alias) = true;;
+let check_variant @ total = fun (_ : variant_alias) -> true;;
 type variant_payload =
   [ `A of string ]{ check_variant (_ : variant_alias) };;
 [%%expect{|
@@ -292,7 +328,7 @@ module type Package_alias = Package_source
 type package_control = (module Package_source)
 |}]
 
-let check_package (_ : (module Package_alias)) = true;;
+let check_package @ total = fun (_ : (module Package_alias)) -> true;;
 type package_payload =
   (module Package_source){ check_package (_ : (module Package_alias)) };;
 [%%expect{|
@@ -381,7 +417,7 @@ module Queue_string : sig type t = { shared : string; } end
 |}]
 
 type queue_wanted = Queue_int.t{ _.shared > 0 };;
-let accepts_queue_wanted (_ : queue_wanted list) = true;;
+let accepts_queue_wanted @ total = fun (_ : queue_wanted list) -> true;;
 [%%expect{|
 type queue_wanted = Queue_int.t{ _.Queue_int.shared > 0 }
 val accepts_queue_wanted : queue_wanted list -> bool = <fun>
@@ -427,15 +463,15 @@ type v1 = A of int
 type v2 = A of bool
 |}]
 
-type dv = v1{ _ = A 1 };;
+type dv = v1{ let _v = if true then _ else A 1 in true };;
 [%%expect{|
-Line 1, characters 18-19:
-1 | type dv = v1{ _ = A 1 };;
-                      ^
+Line 1, characters 43-44:
+1 | type dv = v1{ let _v = if true then _ else A 1 in true };;
+                                               ^
 Warning 18 [not-principal]: this type-based constructor disambiguation is not
   principal.
 
-type dv = v1{ _ = (A 1) }
+type dv = v1{ let _v = if true then _ else A 1 in true }
 |}]
 
 type dv2 = v1{ match _ with A n -> n > 0 };;
@@ -452,19 +488,72 @@ Line 1, characters 35-36:
 Error: The value "n" has type "int" but an expression was expected of type "bool"
 |}]
 
+(* Typecore changes the source shape of a wildcard constructor argument when
+   the selected constructor's arity is not one.  RED's correspondence walk
+   rejects with a located error; GREEN rejects in the predicate judgment before
+   mirror construction. *)
+type predicate_pair = Predicate_pair of int * int;;
+type multi_arity_constructor_wildcard = bool{
+  match Predicate_pair (1, 2) with
+  | Predicate_pair _ -> true
+};;
+[%%expect{|
+type predicate_pair = Predicate_pair of int * int
+Line 4, characters 4-20:
+4 |   | Predicate_pair _ -> true
+        ^^^^^^^^^^^^^^^^
+Error: An elaborated constructor pattern is not supported in a refinement predicate.
+|}]
+
+type predicate_nullary = Predicate_nullary;;
+type nullary_constructor_wildcard = bool{
+  match Predicate_nullary with
+  | Predicate_nullary _ -> true
+};;
+[%%expect{|
+type predicate_nullary = Predicate_nullary
+Line 4, characters 22-23:
+4 |   | Predicate_nullary _ -> true
+                          ^
+Warning 28 [wildcard-arg-to-constant-constr]: wildcard pattern given as argument to a constant constructor
+
+Line 4, characters 4-23:
+4 |   | Predicate_nullary _ -> true
+        ^^^^^^^^^^^^^^^^^^^
+Error: An elaborated constructor pattern is not supported in a refinement predicate.
+|}]
+
 (* --- Application -------------------------------------------------------- *)
 
-module App = struct
-  let labelled ~x ~y = x > 0 && y
-  let optional ?(o = 0) () = o > 0
-  let positional ~(p : [%call_pos]) () = p.Lexing.pos_lnum > 0
+module App : sig
+  val labelled : x:'a @ total -> y:'b @ total -> 'b @ total @@ total
+  val optional : ?o:int @ total -> unit @ total -> bool @ total @@ total
+  val optional_labelled :
+    ?o:'a @ total -> y:'b @ total -> 'b @ total @@ total
+  val positional :
+    p:[%call_pos] @ total -> unit @ total -> bool @ total @@ total
+  val positional_labelled :
+    p:[%call_pos] @ total -> y:bool @ total -> bool @ total @@ total
+  val id : 'a @ total -> 'a @ total @@ total
+end = struct
+  let labelled @ total = fun ~x:_ ~y -> y
+  let optional @ total = fun ?(o = 0) () -> true
+  let optional_labelled @ total = fun ?o:_ ~y -> y
+  let positional @ total = fun ~(p : [%call_pos]) () -> true
+  let positional_labelled @ total = fun ~(p : [%call_pos]) ~y -> y
+  let id @ total = fun x -> x
 end;;
 [%%expect{|
 module App :
   sig
-    val labelled : x:int -> y:bool -> bool
-    val optional : ?o:int -> unit -> bool
-    val positional : p:[%call_pos] -> unit -> bool
+    val labelled : x:'a @ total -> y:'b @ total -> 'b @ total @@ total
+    val optional : ?o:int @ total -> unit @ total -> bool @ total @@ total
+    val optional_labelled : ?o:'a @ total -> y:'b @ total -> 'b @ total @@
+      total
+    val positional : p:[%call_pos] -> unit @ total -> bool @ total @@ total
+    val positional_labelled : p:[%call_pos] -> y:bool @ total -> bool @ total
+      @@ total
+    val id : 'a @ total -> 'a @ total @@ total
   end
 |}]
 
@@ -526,6 +615,33 @@ Line 1, characters 16-33:
 Error: An application of a function with optional or position parameters is not supported in a refinement predicate.
 |}]
 
+(* An optional parameter can itself be retained as [Omitted] by a partial
+   application, separately from the defaulted [None] synthesized by [ap5]. *)
+type ap6b = bool{
+  let f = App.optional_labelled ~y:true in
+  f ?o:None
+};;
+[%%expect{|
+Line 2, characters 10-39:
+2 |   let f = App.optional_labelled ~y:true in
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: An application of a function with optional or position parameters is not supported in a refinement predicate.
+|}]
+
+(* A position parameter can be retained as [Omitted] by a partial
+   application.  This is distinct from the synthesized call position in
+   [ap6]. *)
+type ap6c = bool{
+  let _f = App.positional_labelled ~y:true in
+  true
+};;
+[%%expect{|
+Line 2, characters 11-42:
+2 |   let _f = App.positional_labelled ~y:true in
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: An application of a function with optional or position parameters is not supported in a refinement predicate.
+|}]
+
 (* The clean spelling: the omission is well-typed on its own, so the located
    rejection is the mirror's. *)
 type ap7b = bool{ let g = App.labelled ~y:true in g ~x:1 };;
@@ -537,36 +653,238 @@ Error: A partial application that omits a labelled argument is not supported in 
 |}]
 
 (* %apply / %revapply rewrites have no faithful preimage *)
-type ap8 = int{ (fun n -> n > 0) @@ _ };;
+type ap8 = int{ (fun n -> true) @@ _ };;
 [%%expect{|
-Line 1, characters 16-37:
-1 | type ap8 = int{ (fun n -> n > 0) @@ _ };;
-                    ^^^^^^^^^^^^^^^^^^^^^
+Line 1, characters 16-36:
+1 | type ap8 = int{ (fun n -> true) @@ _ };;
+                    ^^^^^^^^^^^^^^^^^^^^
 Error: An application rewritten by the typechecker is not supported in a refinement predicate.
 |}]
 
-type ap9 = int{ _ |> fun n -> n > 0 };;
+type ap9 = int{ _ |> fun n -> true };;
 [%%expect{|
-type ap9 = int{ _ |> (fun n -> n > 0) }
+type ap9 = int{ _ |> (fun n -> true) }
 |}]
 
 (* An inferred RHS is genuinely rewritten as [%revapply], unlike the lambda
    control above, and therefore has no faithful mirror preimage. *)
-type ap9b = bool{ true |> Fun.id };;
+type ap9b = bool{ true |> App.id };;
 [%%expect{|
 Line 1, characters 18-32:
-1 | type ap9b = bool{ true |> Fun.id };;
+1 | type ap9b = bool{ true |> App.id };;
                       ^^^^^^^^^^^^^^
 Error: An application rewritten by the typechecker is not supported in a refinement predicate.
 |}]
 
-(* a format-string rewrite has no faithful preimage *)
-type ap10 = int{ (Printf.sprintf "%d" _) = "0" };;
+(* RED pins both source-shaped operators at a non-crossing operand type. *)
+let (accepts_logical_ref @ total)
+    : int ref @ logical -> bool @ total
+  =
+  fun _ -> true;;
 [%%expect{|
-Line 1, characters 33-37:
-1 | type ap10 = int{ (Printf.sprintf "%d" _) = "0" };;
-                                     ^^^^
+val accepts_logical_ref : int ref @ logical -> bool @ total = <fun>
+|}]
+
+type ap9c = (int ref){ accepts_logical_ref @@ _ };;
+[%%expect{|
+Line 1, characters 23-47:
+1 | type ap9c = (int ref){ accepts_logical_ref @@ _ };;
+                           ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+type ap9d = (int ref){ _ |> accepts_logical_ref };;
+[%%expect{|
+Line 1, characters 23-47:
+1 | type ap9d = (int ref){ _ |> accepts_logical_ref };;
+                           ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+type apply_partial_callback = (bool -> bool){ _ @@ true };;
+[%%expect{|
+Line 1, characters 46-55:
+1 | type apply_partial_callback = (bool -> bool){ _ @@ true };;
+                                                  ^^^^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+type revapply_partial_callback = (bool -> bool){ true |> _ };;
+[%%expect{|
+Line 1, characters 49-58:
+1 | type revapply_partial_callback = (bool -> bool){ true |> _ };;
+                                                     ^^^^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+(* A dependent binder declared Total must keep that mode through predicate
+   reentry.  RED rejects the operator spellings only because their typedtree
+   rewrites are not represented yet. *)
+type direct_total_binder =
+  f:(int -> bool) @ total -> bool{ f 0 };;
+[%%expect{|
+type direct_total_binder = f:(int -> bool) @ total -> bool{ f 0 }
+|}]
+
+type apply_total_binder =
+  f:(int -> bool) @ total -> bool{ f @@ 0 };;
+[%%expect{|
+Line 2, characters 35-41:
+2 |   f:(int -> bool) @ total -> bool{ f @@ 0 };;
+                                       ^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+type revapply_total_binder =
+  f:(int -> bool) @ total -> bool{ 0 |> f };;
+[%%expect{|
+Line 2, characters 35-41:
+2 |   f:(int -> bool) @ total -> bool{ 0 |> f };;
+                                       ^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+(* Keep the direct-call control and the two operator cases in separate phrases:
+   RED's first translation failure must not hide the other operator. *)
+module type Direct_partial_result = sig
+  val returns_partial :
+    unit @ total -> (unit -> bool) @ partial @@ total
+
+  type direct = bool{ let _f = returns_partial () in true }
+end;;
+[%%expect{|
+module type Direct_partial_result =
+  sig
+    val returns_partial : unit @ total -> unit -> bool @@ total
+    type direct = bool{ let _f = returns_partial () in true }
+  end
+|}]
+
+module type Apply_partial_result = sig
+  val returns_partial :
+    unit @ total -> (unit -> bool) @ partial @@ total
+
+  type apply = bool{ let _f = returns_partial @@ () in true }
+end;;
+[%%expect{|
+Line 5, characters 30-51:
+5 |   type apply = bool{ let _f = returns_partial @@ () in true }
+                                  ^^^^^^^^^^^^^^^^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+module type Revapply_partial_result = sig
+  val returns_partial :
+    unit @ total -> (unit -> bool) @ partial @@ total
+
+  type revapply = bool{ let _f = () |> returns_partial in true }
+end;;
+[%%expect{|
+Line 5, characters 33-54:
+5 |   type revapply = bool{ let _f = () |> returns_partial in true }
+                                     ^^^^^^^^^^^^^^^^^^^^^
+Error: An application rewritten by the typechecker is not supported in a refinement predicate.
+|}]
+
+(* Noncanonical externals that reuse the primitive names stay on the generic
+   application path.  Pin this on both sides of the RED/GREEN boundary. *)
+external malformed_predicate_apply :
+  int @ total -> int @ total -> bool @ total = "%apply";;
+external malformed_predicate_revapply :
+  int @ total -> int @ total -> bool @ total = "%revapply";;
+[%%expect{|
+external malformed_predicate_apply :
+  int @ total -> int @ total -> bool @ total = "%apply"
+external malformed_predicate_revapply :
+  int @ total -> int @ total -> bool @ total = "%revapply"
+|}]
+
+type ap9e = bool{ malformed_predicate_apply 1 2 };;
+type ap9f = bool{ malformed_predicate_revapply 1 2 };;
+[%%expect{|
+type ap9e = bool{ malformed_predicate_apply 1 2 }
+type ap9f = bool{ malformed_predicate_revapply 1 2 }
+|}]
+
+(* a format-string rewrite has no faithful preimage *)
+let accepts_format @ total =
+  fun (_ : (int -> string, unit, string) format) -> true;;
+[%%expect{|
+val accepts_format : (int -> string, unit, string) format -> bool = <fun>
+|}]
+
+type ap10 = int{ accepts_format "%d" };;
+[%%expect{|
+Line 1, characters 32-36:
+1 | type ap10 = int{ accepts_format "%d" };;
+                                    ^^^^
 Error: A format string is not supported in a refinement predicate.
+|}]
+
+(* Optional/position function coercions synthesize an eta wrapper even though
+   the source is only an identifier.  RED pins the typedtree-only rewrite's
+   current rejection. *)
+let accepts_total_unit_function @ total =
+  fun (_ : (unit @ total -> bool @ total) @ total) -> true;;
+[%%expect{|
+val accepts_total_unit_function :
+  (unit @ total -> bool @ total) @ total -> bool = <fun>
+|}]
+
+type ap11 = bool{ accepts_total_unit_function App.optional };;
+[%%expect{|
+Line 1, characters 46-58:
+1 | type ap11 = bool{ accepts_total_unit_function App.optional };;
+                                                  ^^^^^^^^^^^^
+Error: An elaborated identifier is not supported in a refinement predicate.
+|}]
+
+type ap12 = bool{ accepts_total_unit_function App.positional };;
+[%%expect{|
+Line 1, characters 46-60:
+1 | type ap12 = bool{ accepts_total_unit_function App.positional };;
+                                                  ^^^^^^^^^^^^^^
+Error: An elaborated identifier is not supported in a refinement predicate.
+|}]
+
+(* The two synthesized [%call_pos] locations differ between these declarations.
+   RED pins the current translation-time rejection before GREEN makes location
+   metadata irrelevant to predicate identity. *)
+module type Positional_predicate = sig
+  type t = bool{ App.positional () }
+end;;
+[%%expect{|
+Line 2, characters 17-34:
+2 |   type t = bool{ App.positional () }
+                     ^^^^^^^^^^^^^^^^^
+Error: An application of a function with optional or position parameters is not supported in a refinement predicate.
+|}]
+
+module Positional_predicate_impl : Positional_predicate = struct
+  type t = bool{ App.positional () }
+end;;
+[%%expect{|
+Line 2, characters 17-34:
+2 |   type t = bool{ App.positional () }
+                     ^^^^^^^^^^^^^^^^^
+Error: An application of a function with optional or position parameters is not supported in a refinement predicate.
+|}]
+
+(* An ordinary layout-polymorphic value (not the wrapper-free primitive path)
+   introduces [Texp_apply_layout], which RED cannot mirror. *)
+module Layout_predicate
+    (M : sig
+       val id :
+         layout_ x. ('a : x). 'a @ total -> 'a @ total @@ total
+     end @ static) =
+struct
+  type ap13 = bool{ M.id true }
+end;;
+[%%expect{|
+Line 7, characters 20-24:
+7 |   type ap13 = bool{ M.id true }
+                        ^^^^
+Error: A layout-polymorphic use is not supported in a refinement predicate.
 |}]
 
 (* --- Polymorphic let inside a predicate --------------------------------- *)
@@ -583,14 +901,28 @@ type pla = int{ let y : int = _ in y > 0 };;
 type pla = int{ let y = (_ : int) in y > 0 }
 |}]
 
+(* An explicit polymorphic binding annotation has no faithful expression
+   constraint node.  RED's correspondence walk rejects it; GREEN rejects it
+   earlier in the syntactic judgment, and neither path may be fatal. *)
+type polymorphic_binding_annotation = bool{
+  let id : 'a. 'a -> 'a = fun x -> x in
+  id true
+};;
+[%%expect{|
+Lines 2-3, characters 2-9:
+2 | ..let id : 'a. 'a -> 'a = fun x -> x in
+3 |   id true
+Error: An elaborated binding annotation is not supported in a refinement predicate.
+|}]
+
 (* --- Occurrence strips inside predicates --------------------------------- *)
 
 module Occ = struct
-  let g : unit -> int{ _ > 0 } = fun () -> 1
+  let (g @ total) : unit -> int{ _ > 0 } = fun () -> 1
   let l : int{ _ > 0 } list = [1]
 end;;
 [%%expect{|
-Line 2, characters 43-44: refinement obligation: int{ _ > 0 }
+Line 2, characters 53-54: refinement obligation: int{ _ > 0 }
 Line 3, characters 31-32: refinement obligation: int{ _ > 0 }
 module Occ : sig val g : unit -> int{ _ > 0 } val l : int{ _ > 0 } list end
 |}]
@@ -602,12 +934,15 @@ type oc1 = bool{ ((Occ.g ()) + 1) > 0 }
 |}]
 
 (* nested heads stay intact: int{p} list is not int list *)
-type oc2 = bool{ Occ.l = [1] };;
+type oc2 = bool{
+  let _xs : int{ _ > 0 } list = Occ.l in
+  true
+};;
 [%%expect{|
-type oc2 = bool{ Occ.l = [1] }
+type oc2 = bool{ let _xs = (Occ.l : int{ _ > 0 } list) in true }
 |}]
 
-let accepts_plain_int_list (_ : int list) = true;;
+let accepts_plain_int_list @ total = fun (_ : int list) -> true;;
 [%%expect{|
 val accepts_plain_int_list : int list -> bool = <fun>
 |}]
@@ -625,9 +960,21 @@ Error: The value "Occ.l" has type "int{ _ > 0 } list"
 |}]
 
 (* element projection strips the element's head *)
-type oc3 = bool{ List.hd Occ.l > 0 };;
+let (head_refined @ total)
+    : int{ _ > 0 } list -> int{ _ > 0 }
+  =
+  fun (xs : int{ _ > 0 } list) ->
+    match xs with
+    | [] -> 0
+    | x :: _ -> x;;
 [%%expect{|
-type oc3 = bool{ (List.hd Occ.l) > 0 }
+Lines 5-7, characters 4-17: refinement obligation: int{ _ > 0 }
+val head_refined : int{ _ > 0 } list -> int{ _ > 0 } = <fun>
+|}]
+
+type oc3 = bool{ head_refined Occ.l > 0 };;
+[%%expect{|
+type oc3 = bool{ (head_refined Occ.l) > 0 }
 |}]
 
 (* a well-typed call to a partial function is accepted by this piece
@@ -643,6 +990,180 @@ type oc5 = bool{ Mut.cell.contents = 0 };;
 [%%expect{|
 module Mut : sig val cell : int ref end
 type oc5 = bool{ Mut.cell.Stdlib.contents = 0 }
+|}]
+
+(* --- Round 4 mode-discipline RED2 baseline ------------------------------- *)
+
+(* A function-valued spec entity defaults to legacy Partial.  RED admits
+   direct calls through the hole, aliases and indirect callback parameters;
+   GREEN requires the callee itself to be established Total. *)
+type direct_partial_hole = (int -> bool){ _ 0 };;
+[%%expect{|
+type direct_partial_hole = (int -> bool){ _ 0 }
+|}]
+
+type aliased_partial_hole = (int -> bool){ let f = _ in f 0 };;
+[%%expect{|
+type aliased_partial_hole = (int -> bool){ let f = _ in f 0 }
+|}]
+
+type indirect_partial_hole = (int -> bool){ (fun f -> f 0) _ };;
+[%%expect{|
+type indirect_partial_hole = (int -> bool){ (fun f -> f 0) _ }
+|}]
+
+(* RED treats a Total primitive as covering an overapplied stage.  GREEN checks
+   the Partial function returned by that primitive before calling it. *)
+type overapplied_total_primitive = (int -> bool){ Fun.id _ 0 };;
+[%%expect{|
+type overapplied_total_primitive = (int -> bool){ Fun.id _ 0 }
+|}]
+
+(* The same default and an explicit Partial mode apply to dependent binders. *)
+type direct_default_binder =
+  f:(int -> bool) -> bool{ f 0 };;
+[%%expect{|
+type direct_default_binder = f:(int -> bool) -> bool{ f 0 }
+|}]
+
+type direct_partial_binder =
+  f:(int -> bool) @ partial -> bool{ f 0 };;
+[%%expect{|
+type direct_partial_binder = f:(int -> bool) -> bool{ f 0 }
+|}]
+
+(* An explicitly Total payload context is the positive hole control. *)
+type total_hole_context = ((int -> bool){ _ 0 }) @ total -> unit;;
+[%%expect{|
+type total_hole_context = (int -> bool){ _ 0 } @ total -> unit
+|}]
+
+(* Pin the soundness consequence: a genuinely diverging Partial function
+   cannot inhabit a refinement whose predicate calls the hole. *)
+let rec diverging_function (_ : int) : bool = diverging_function 0;;
+let diverging_refined_value : (int -> bool){ _ 0 } = diverging_function;;
+[%%expect{|
+val diverging_function : int -> bool = <fun>
+Line 2, characters 4-27: refined environment entry: diverging_refined_value :
+  (int -> bool){ _ 0 }
+Line 2, characters 53-71: refinement obligation: (int -> bool){ _ 0 }
+val diverging_refined_value : (int -> bool){ _ 0 } = <fun>
+|}]
+
+(* Every consumed stage of a curried call must be Total.  Merely producing an
+   unused Partial result remains accepted in [Direct_partial_result] above. *)
+module type Calls_partial_result = sig
+  val returns_partial :
+    unit @ total -> (unit -> bool) @ partial @@ total
+  type called = bool{ returns_partial () () }
+end;;
+[%%expect{|
+module type Calls_partial_result =
+  sig
+    val returns_partial : unit @ total -> unit -> bool @@ total
+    type called = bool{ returns_partial () () }
+  end
+|}]
+
+module type Calls_total_curried = sig
+  val total_curried :
+    unit @ total -> (unit @ total -> bool @ total) @ total @@ total
+  type called = bool{ total_curried () () }
+end;;
+[%%expect{|
+Line 4, characters 22-38:
+4 |   type called = bool{ total_curried () () }
+                          ^^^^^^^^^^^^^^^^
+Error: This application is complete, but surplus arguments were provided afterwards.
+       When passing or calling partial values, extra arguments are passed in a separate application.
+Hint: Try wrapping the marked application in parentheses.
+|}]
+
+(* Predicate-admitted primitives retain Total intermediate stages when
+   aliased locally. *)
+type predicate_comparison_alias = int{
+  let greater = (>) in
+  greater _ 0
+};;
+[%%expect{|
+type predicate_comparison_alias = int{ let greater = (>) in greater _ 0 }
+|}]
+
+(* Integer comparison is already admitted by the predicate language; the
+   round-4 judgment keeps this case accepted while making admission depend on
+   the operand type. *)
+type mode_int_comparison = int{ _ > 0 };;
+[%%expect{|
+type mode_int_comparison = int{ _ > 0 }
+|}]
+
+(* Comparison admission is scoped to the predicate judgment.  The same
+   primitive remains partial in an ordinary total closure. *)
+let global_int_comparison_stays_partial @ total =
+  fun (x : int) -> x > 0;;
+[%%expect{|
+Line 2, characters 21-22:
+2 |   fun (x : int) -> x > 0;;
+                         ^
+Error: The value "(>)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 2, characters 2-24
+         which is expected to be "total".
+|}]
+
+(* A non-immediate comparison is currently accepted because predicate reentry
+   runs at the legacy mode.  GREEN2 rejects it. *)
+type mode_string_comparison = string{ _ = "x" };;
+[%%expect{|
+type mode_string_comparison = string{ _ = "x" }
+|}]
+
+(* Division and modulo remain partial even though integer comparisons become
+   predicate-scoped total operations. *)
+type mode_division = int{ 10 / _ > 0 };;
+[%%expect{|
+type mode_division = int{ (10 / _) > 0 }
+|}]
+
+type mode_modulo = int{ 10 mod _ > 0 };;
+[%%expect{|
+type mode_modulo = int{ (10 mod _) > 0 }
+|}]
+
+(* The helper is total, so GREEN2 can isolate the logicality of the hole: an
+   [int ref] does not cross logicality and cannot flow to a physical argument. *)
+let accepts_physical_ref @ total =
+  fun (_ : int ref @ physical) -> true;;
+[%%expect{|
+val accepts_physical_ref : int ref -> bool = <fun>
+|}]
+
+type mode_logical_hole = (int ref){ accepts_physical_ref _ };;
+[%%expect{|
+type mode_logical_hole = int ref{ accepts_physical_ref _ }
+|}]
+
+(* Dependent binders are spec entities too, and GREEN2 gives them the same
+   logical mode as the hole. *)
+type mode_logical_binder =
+  x:(int ref){ accepts_physical_ref x } -> unit;;
+[%%expect{|
+type mode_logical_binder = x:int ref{ accepts_physical_ref x } -> unit
+|}]
+
+(* Hereditary totality reaches a function literal even when it is merely
+   bound and its partial body is never called. *)
+type mode_nested_fun = bool{
+  let unused = fun ignored -> List.hd [] in
+  true
+};;
+[%%expect{|
+Line 2, characters 6-12:
+2 |   let unused = fun ignored -> List.hd [] in
+          ^^^^^^
+Warning 26 [unused-var]: unused variable "unused".
+
+type mode_nested_fun = bool{ let unused ignored = List.hd [] in true }
 |}]
 
 (* --- Refined interior constraint: payload-checked, no obligation -------- *)
@@ -750,10 +1271,13 @@ Error: Unbound record field "g"
 
 (* non-group mentions are fine *)
 type earlier = B of int;;
-type later = int{ (B _ : earlier) = B 0 };;
+type later = int{
+  let _v = if true then (B _ : earlier) else B 0 in
+  true
+};;
 [%%expect{|
 type earlier = B of int
-type later = int{ (B _ : earlier) = (B 0) }
+type later = int{ let _v = if true then (B _ : earlier) else B 0 in true }
 |}]
 
 (* --- GADT / existential constructor patterns ------------------------------- *)
@@ -784,6 +1308,46 @@ Line 1, characters 31-34:
 Error: A GADT or existential-introducing constructor pattern is not supported in a refinement predicate.
 |}]
 
+type ex_pair = Ex_pair : 'a * int -> ex_pair;;
+[%%expect{|
+type ex_pair = Ex_pair : 'a * int -> ex_pair
+|}]
+
+(* Split these phrases so RED records both safe value-binder shapes rather than
+   stopping at the first broad existential-pattern rejection. *)
+type ex_safe = bool{
+  match Ex_pair ((), 1) with
+  | Ex_pair (_, n) -> n = n
+};;
+[%%expect{|
+Line 3, characters 4-18:
+3 |   | Ex_pair (_, n) -> n = n
+        ^^^^^^^^^^^^^^
+Error: A GADT or existential-introducing constructor pattern is not supported in a refinement predicate.
+|}]
+
+type ex_unused = bool{ match E 1 with E _x -> true };;
+[%%expect{|
+Line 1, characters 38-42:
+1 | type ex_unused = bool{ match E 1 with E _x -> true };;
+                                          ^^^^
+Error: A GADT or existential-introducing constructor pattern is not supported in a refinement predicate.
+|}]
+
+(* RED rejects all existential constructor patterns.  GREEN narrows this
+   rejection to a value binder whose arm-local type could reach persisted
+   annotations. *)
+type ex_bound = bool{
+  match E 1 with
+  | E x -> (fun _ignored -> true) x
+};;
+[%%expect{|
+Line 3, characters 4-7:
+3 |   | E x -> (fun _ignored -> true) x
+        ^^^
+Error: A GADT or existential-introducing constructor pattern is not supported in a refinement predicate.
+|}]
+
 (* --- Frame hygiene ------------------------------------------------------ *)
 
 (* a failing predicate inside a signature does not corrupt subsequent
@@ -805,62 +1369,15 @@ let after_hyg = 1 + 1;;
 val after_hyg : int = 2
 |}]
 
-(* commit: a predicate's successful ambient constraints stick — the
-   predicate pins the weak variable of [r] to int *)
-let commit_r = ref [];;
+(* RED2 pins the former mode-confinement boundary: the predicate commits the
+   arrow shape of [f], but its totality constraint is currently rolled back.
+   GREEN2 removes that confinement, so [f] is inferred [@ total]. *)
+let predicate_mode_commit f =
+  let (_ : bool{ f 0 }) = true in
+  f;;
 [%%expect{|
-val commit_r : '_weak1 list ref = {contents = []}
-|}]
-
-type commit_probe = bool{ commit_r.contents = [ 1 ] };;
-[%%expect{|
-type commit_probe = bool{ commit_r.Stdlib.contents = [1] }
-|}]
-
-let commit_after = commit_r := [ "s" ];;
-[%%expect{|
-Line 1, characters 33-36:
-1 | let commit_after = commit_r := [ "s" ];;
-                                     ^^^
-Error: This constant has type "string" but an expression was expected of type
-         "int"
-|}]
-
-(* Predicate typing commits the weak variable's arrow shape but rolls back
-   predicate-local mode constraints.  The unconstrained arrow modes therefore
-   default conservatively, and a later local-argument demand is rejected. *)
-let mode_commit_r = ref None;;
-[%%expect{|
-val mode_commit_r : '_weak2 option ref = {contents = None}
-|}]
-
-type mode_commit_probe = bool{
-  match mode_commit_r.contents with
-  | None -> true
-  | Some f -> f 0 = 0
-};;
-[%%expect{|
-type mode_commit_probe =
-    bool{ match mode_commit_r.Stdlib.contents with
-          | None -> true
-          | Some f -> (f 0) = 0 }
-|}]
-
-let wants_local_argument (f : local_ int -> int) = f 0;;
-[%%expect{|
-val wants_local_argument : (int @ local -> int) -> int = <fun>
-|}]
-
-let mode_commit_after () =
-  match mode_commit_r.contents with
-  | None -> 0
-  | Some f -> wants_local_argument f;;
-[%%expect{|
-Line 4, characters 35-36:
-4 |   | Some f -> wants_local_argument f;;
-                                       ^
-Error: The value "f" has type "int -> int" but an expression was expected of type
-         "int @ local -> int"
+Line 2, characters 26-30: refinement obligation: bool{ f 0 }
+val predicate_mode_commit : (int -> bool) -> int -> bool = <fun>
 |}]
 
 (* mode boundary: a partial call inside a predicate must not make the
@@ -895,6 +1412,35 @@ let mode_wall3 () =
   mw <- 2;;
 [%%expect{|
 val mode_wall3 : unit -> unit = <fun>
+|}]
+
+(* Instance-variable reads have distinct typedtree forms.  RED pins both the
+   immutable and mutable cases before the mirror represents the former and
+   mode checking diagnoses the latter. *)
+class immutable_instance_predicate = object
+  val x = 1
+  method check =
+    ignore (fun (_ : bool{ x = x }) -> ());
+    true
+end;;
+[%%expect{|
+Line 4, characters 27-28:
+4 |     ignore (fun (_ : bool{ x = x }) -> ());
+                               ^
+Error: An elaborated identifier is not supported in a refinement predicate.
+|}]
+
+class mutable_instance_predicate = object
+  val mutable x = 1
+  method check =
+    ignore (fun (_ : bool{ x = x }) -> ());
+    true
+end;;
+[%%expect{|
+Line 4, characters 27-28:
+4 |     ignore (fun (_ : bool{ x = x }) -> ());
+                               ^
+Error: An elaborated identifier is not supported in a refinement predicate.
 |}]
 
 (* --- Predicate-local binder in a nested refinement, freshened ------------- *)
