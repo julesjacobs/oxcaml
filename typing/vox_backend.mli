@@ -93,9 +93,17 @@ val select : string -> ((module BACKEND), string) result
 
     For any other name, selects the backend and checks [configured], so an
     unusable configuration fails once, with one message, rather than once
-    per obligation. *)
+    per obligation.
+
+    Whether a non-verdict refuses the unit is also driver policy, decided
+    here: the printing backend's contract is to emit the query and
+    discharge nothing, so it gets the [Dump] arm, under which only its
+    expected non-verdict — [Ok (Unknown _)] — is suppressed.  A
+    [discharge] error still refuses the unit in [Dump] exactly as in
+    [Discharge]. *)
 type plan =
   | No_discharge
-  | Discharge of (module BACKEND)
+  | Dump of (module BACKEND)  (** printing: emit, expect no verdicts *)
+  | Discharge of (module BACKEND)  (** z3 and future backends: verify *)
 
 val plan : backend_name:string -> config:Config.t -> (plan, string) result

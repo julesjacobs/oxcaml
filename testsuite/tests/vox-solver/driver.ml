@@ -35,6 +35,9 @@ let run backend_name config =
   match plan ~backend_name ~config with
   | Result.Error message -> Format.printf "selection failed: %s@." message
   | Ok No_discharge -> Format.printf "not discharged@."
+  | Ok (Dump (module Backend)) ->
+    Format.printf "dumping with %s:@." Backend.name;
+    Format.printf "%s@." (describe (Backend.discharge ~config (obligation ())))
   | Ok (Discharge (module Backend)) ->
     Format.printf "discharging with %s:@." Backend.name;
     Format.printf "%s@." (describe (Backend.discharge ~config (obligation ())))
@@ -60,7 +63,7 @@ not discharged
 let () = run "printing" { Config.default with timeout_seconds = None }
 
 [%%expect{|
-discharging with printing:
+dumping with printing:
 (set-option :produce-unsat-cores true)
 (declare-const n Int)
 (assert (! (>= n 0) :named h0))
