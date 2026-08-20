@@ -17,13 +17,17 @@ suitable autoconf and configures with `--prefix="$PWD/_install"`; do that by han
 only if you need different flags.
 
 ## Development loop
+
+The loop is **synchronous**: every command runs one direct dune build and
+returns when it is done. There is no background watcher and no RPC (the
+watcher this replaced wedged under load; see
+`design-docs/dev-loop-sync.md` for the investigation and measurements).
+Timings on a warm tree: `make dev` no-op ~1.5s; after editing a compiler
+module ~5s; `make dev-test DIR=vox` on an already-built tree ~5s.
+
 ```sh
-# edit compiler code, then typecheck/build:
+# edit compiler code, then build (this IS the error loop: ~1.5-5s):
 make dev
-# fresh errors from the running watcher, with no build round trip (fastest loop):
-make dev-errors
-# watch a long build's progress:
-make dev-log
 # edit compiler code or a test, then build & run a test:
 make dev-test TEST=typing-local/regression_class_type.ml
 # edit again, test an entire dir:
@@ -38,6 +42,22 @@ make dev-ocamlopt ARGS='file.ml -o file.exe'
 # run the full compiler test suite
 make dev-test-all
 ```
+
+### Which build is needed for what
+
+The tree builds three different ways; the loop only ever needs the first
+two, and the third only twice per worktree lifetime.
+
+| build | command | takes | produces | needed when |
+|---|---|---|---|---|
+| boot workspace (no bootstrap: the host/opam compiler builds this tree's compiler directly) | `make dev` | seconds | `_build/dev-dune/default/main_native.exe`, `main.bc`, ocamltest, tools | every compiler edit; this is the loop |
+| runtime+stdlib workspace (the boot-built compiler builds the runtime and stdlib) | `make dev-refresh-stdlib` (automatic when needed) | ~2-4 min | `_build/runtime_stdlib_install/...` — the stdlib the dev tests compile against | after editing `runtime/`, `stdlib/`, `otherlibs/` (auto-detected by `dev-runtime`), or after a compiler change that alters marshaled `.cmi` shapes (auto-detected by the stale-stdlib probe, which now refreshes automatically) |
+| main workspace (full bootstrap: stage-2 compiler, all libraries, installed tree) | `make install_for_test` | ~15 min | `_install`, `_runtest` | once at worktree setup (`dev-setup` does it), and it is what `make dev-test-all` runs against. **Never needed in the inner loop** — `dev-test` runs the boot compiler against the runtime_stdlib output |
+
+Corollary: a change to `typing/types.ml` that alters marshaled shapes costs
+one automatic ~3-minute stdlib refresh, not a 15-minute reinstall. If an
+agent or a doc tells you to run `install_for_test` after a Types change,
+it is describing the pre-synchronous loop; don't.
 
 Promote with `make dev-promote`, **never** by copying a `.corrected` file. The
 expect harness runs twice, plain and `-principal`; the second pass writes
@@ -55,20 +75,14 @@ below.
 
 ### When things go wrong
 
-- **A build that seems to hang.** `make dev` reports progress every 30s and names
-  `make dev-log`. The watcher's rpc has been seen to wedge — alive, answering
-  pings, never starting the build — so the build is bounded by
-  `DEV_RPC_TIMEOUT` (default 1800s), after which the watcher is restarted and the
-  build retried once, then run directly without the watcher. `make dev-status`
-  shows whether the watcher is idle.
 - **The compiler segfaults, or tests crash for no reason, after a compiler
   change.** A change to marshaled `.cmi` shapes leaves the previously built
-  stdlib unreadable. `make dev` detects this and tells you to run
-  `make dev-refresh-stdlib`.
-- **A restricted environment where the watcher cannot start** (dune's RPC socket
-  cannot be created, e.g. `bind(): Operation not permitted` in a sandbox): use
-  `make dev NOWATCH=1`, which skips the watcher and rpc entirely. Slower per
-  invocation, works anywhere, and applies to the other `dev-*` targets too.
+  stdlib unreadable. `make dev` detects this with a one-line probe and
+  refreshes the stdlib automatically (~3 min); set `DEV_NO_AUTO_STDLIB=1`
+  to make it an error instead.
+- **A worktree that used the old watcher-based loop.** `make dev-stop`
+  stops a leftover watcher process; everything else needs no migration.
+  `NOWATCH=1` is accepted and ignored, so older scripts keep working.
 - **An `expect.opt` test whose result looks too good.** `dev-test` rebuilds an
   expect-test runner when the selected tests ask for it, and you can check that
   decision directly:

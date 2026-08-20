@@ -508,17 +508,15 @@ promote-one-no-rebuild:
 hacking: _build/_bootinstall
 	$(dune) build $(ws_boot) -w @merlin-support $(boot_targets)
 
-# The development watcher starts eagerly, but is managed as a worktree-local
-# background process. All public dev commands renew its idle lease and wait
-# for the latest compiler build before using its outputs.
-DEV_IDLE_TIMEOUT ?= 1800
-# How long to wait for a single watcher build before deciding it is wedged.
-# Generous: a cold world-rebuild of the compiler is legitimately many minutes.
-DEV_RPC_TIMEOUT ?= 1800
-# How often to report that a build is still running.
-DEV_HEARTBEAT ?= 30
-# Set NOWATCH=1 to bypass the watcher entirely. Slower, but works where dune's
-# RPC socket cannot be created at all, such as a restricted sandbox.
+# The dev loop is synchronous: every command runs one direct dune build and
+# returns when it is done. There is no background watcher and no RPC. Dune's
+# own incrementality makes this fast — measured on this tree: a no-op build of
+# the full dev target set is ~2s, and an edit to typing/typecore.ml rebuilds
+# main_native.exe in ~4s. The watcher this replaced wedged its RPC under load
+# (builds hung for minutes with the watcher alive and pinging); a synchronous
+# loop cannot wedge, and NOWATCH-style escape hatches are no longer needed.
+# NOWATCH is accepted and ignored so older muscle memory and scripts keep
+# working.
 NOWATCH ?=
 ARGS ?=
 dev_watcher = python3 tools/dev-watcher.py
@@ -527,25 +525,21 @@ dev_build_flag = --build-dir=$(CURDIR)/$(dev_build)
 dev_boot_targets = $(boot_targets) main.bc
 dev_stdlib = _build/runtime_stdlib_install/lib/ocaml_runtime_stdlib
 dev_compiler = $(dev_build)/default/main_native.exe
-dev_watch_command = $(dune) build $(ws_boot) $(dev_build_flag) -w \
-  --display=short @merlin-support $(dev_boot_targets)
-# The same build, without the watcher: the NOWATCH path and the recovery path
-# taken when the watcher cannot be used.
 dev_direct_command = $(dune) build $(ws_boot) $(dev_build_flag) \
   --display=short @merlin-support $(dev_boot_targets)
 
-.PHONY: dev dev-start dev-setup dev-runtime dev-check
+.PHONY: dev dev-setup dev-runtime dev-check
 .PHONY: dev-test dev-test-all dev-promote
 .PHONY: dev-ocamlc dev-ocamlopt
 .PHONY: dev-expect-runners
-.PHONY: dev-status dev-log dev-stop dev-errors dev-diff
+.PHONY: dev-stop dev-errors dev-diff
 .PHONY: dev-stdlib-check dev-refresh-stdlib dev-configure dev-selftest
 .PHONY: dev-runners-needed dev-report-skips
 
-dev-start: _build/_bootinstall
-	@if [ -n "$(NOWATCH)" ]; then exit 0; fi; \
-	 $(dev_watcher) start --idle-timeout $(DEV_IDLE_TIMEOUT) -- \
-	   $(dev_watch_command)
+# The loop is watcherless; this stops a watcher left running by an earlier
+# version of the loop in this worktree, and is otherwise a no-op.
+dev-stop:
+	-@$(dev_watcher) stop 2>/dev/null || true
 
 # configure is not tracked in git and configure.ac needs autoconf >= 2.71, which
 # is newer than the autoconf on many systems, so a fresh worktree reliably fails
@@ -586,7 +580,7 @@ dev-setup:
 	  if [ ! -x _install/bin/ocamlopt.opt ] || \
 	     [ ! -f _runtest/testsuite/Makefile ]; then \
 	    echo "dev: preparing the initial compiler and test installation"; \
-	    $(dev_watcher) stop; \
+	    $(dev_watcher) stop 2>/dev/null || true; \
 	    $(MAKE) --no-print-directory install_for_test; \
 	  fi
 
@@ -600,25 +594,12 @@ dev-runtime:
 	       \( -type d \( -name test -o -name tests \) -prune \) -o \
 	       \( -type f -newer $$artifact -print -quit \) | grep -q .; then \
 	    echo "dev: refreshing the runtime and standard library"; \
-	    $(dev_watcher) stop; \
+	    $(dev_watcher) stop 2>/dev/null || true; \
 	    $(MAKE) runtime-stdlib; \
 	  fi
 
-dev-check: dev-setup dev-runtime dev-start
-	@set -eu; \
-	  if [ -n "$(NOWATCH)" ]; then \
-	    echo "dev: building directly (NOWATCH is set; no watcher, no rpc)"; \
-	    $(dev_direct_command); \
-	  else \
-	    $(dev_watcher) build \
-	      --timeout $(DEV_RPC_TIMEOUT) \
-	      --heartbeat $(DEV_HEARTBEAT) \
-	      --ping "$(dune) rpc ping --root=. $(dev_build_flag)" \
-	      --fallback "$(dev_direct_command)" \
-	      --diagnostics "$(dune) diagnostics --root=. $(dev_build_flag)" \
-	      -- $(dune) rpc build $(ws_boot) $(dev_build_flag) \
-	           $(dev_boot_targets); \
-	  fi
+dev-check: dev-setup dev-runtime _build/_bootinstall
+	@$(dev_direct_command)
 	@$(MAKE) --no-print-directory dev-stdlib-check
 
 # A compiler change can alter the shape of marshaled .cmi files without a magic
@@ -629,6 +610,9 @@ dev-check: dev-setup dev-runtime dev-start
 # mtimes would rebuild the stdlib on nearly every edit, so detect it instead --
 # compiling one line against the installed stdlib is enough to provoke it.
 DEV_SKIP_STDLIB_CHECK ?=
+# Set to make a stale-stdlib detection an error instead of an automatic
+# runtime-stdlib rebuild.
+DEV_NO_AUTO_STDLIB ?=
 
 # The dev test root cannot supply a runnable bytecode compiler, so ocamlc.byte and
 # ocamlopt.byte actions skip rather than fail (see design-docs). Clear this to run
@@ -656,8 +640,24 @@ dev-stdlib-check:
 	  if [ $$status -gt 128 ]; then \
 	    echo "dev: the compiler died on signal $$(($$status - 128)) reading the" >&2; \
 	    echo "dev: installed standard library, which is what a stale marshaled" >&2; \
-	    echo "dev: .cmi looks like: a compiler change may have altered .cmi" >&2; \
-	    echo "dev: shapes. Run \`make dev-refresh-stdlib\` to rebuild it." >&2; \
+	    echo "dev: .cmi looks like: a compiler change altered .cmi shapes." >&2; \
+	    if [ -n "$(DEV_NO_AUTO_STDLIB)" ]; then \
+	      echo "dev: DEV_NO_AUTO_STDLIB is set; run \`make dev-refresh-stdlib\`." >&2; \
+	      exit 1; \
+	    fi; \
+	    echo "dev: refreshing the standard library automatically (a few" >&2; \
+	    echo "dev: minutes; set DEV_NO_AUTO_STDLIB=1 to make this an error)." >&2; \
+	    $(MAKE) --no-print-directory dev-refresh-stdlib; \
+	    status=0; \
+	    ( ulimit -c 0; \
+	      OCAMLLIB="$$(pwd)/$(dev_stdlib)" TMPDIR="$$(pwd)/$$scratch" \
+	        $(dev_compiler) -c -o $$scratch/probe.cmo $$scratch/probe.ml \
+	        >$$scratch/probe.log 2>&1 \
+	    ) 2>/dev/null || status=$$?; \
+	    if [ $$status = 0 ]; then rm -rf $$scratch; exit 0; fi; \
+	    sed 's/^/dev: /' $$scratch/probe.log >&2; \
+	    echo "dev: still failing after a stdlib refresh; this is likely your" >&2; \
+	    echo "dev: change rather than staleness." >&2; \
 	    exit 1; \
 	  fi; \
 	  echo "dev: warning: the compiler failed on a one-line program. That is" >&2; \
@@ -666,7 +666,7 @@ dev-stdlib-check:
 	  exit 0
 
 dev-refresh-stdlib:
-	+@$(dev_watcher) stop; \
+	+@$(dev_watcher) stop 2>/dev/null || true; \
 	  $(MAKE) --no-print-directory runtime-stdlib
 
 # Which expect-test runners a selection's tests ask for, decided by the token in
@@ -689,7 +689,6 @@ dev-runners-needed:
 # Check the watcher's own recovery logic against a stub dune. Needs no compiler,
 # so it runs in seconds and does not touch this worktree's watcher.
 dev-selftest:
-	@sh tools/dev-watcher-test.sh
 	@set -eu; \
 	  echo "== the runners a selection needs come from its TEST-block tokens"; \
 	  failures=0; \
@@ -709,8 +708,11 @@ dev-selftest:
 
 # Fresh diagnostics straight from the running watcher, without a build round
 # trip. This is the tightest error loop the watcher supports.
-dev-errors:
-	@$(dune) diagnostics --root=. $(dev_build_flag)
+# With the synchronous loop, the error loop IS the build: a no-op is ~1.5s
+# and an edited compiler module rebuilds in ~5s, so dev-errors is the same
+# direct build (kept as a target because fingers know it).
+dev-errors: _build/_bootinstall
+	@$(dev_direct_command)
 
 dev: dev-check
 
@@ -718,11 +720,8 @@ DEV_RUNNERS ?=
 dev-expect-runners:
 	@test -n "$(DEV_RUNNERS)" || \
 	  { echo "dev: no expect-test runner selected" >&2; exit 2; }
-	@$(dev_watcher) stop
 	$(dune) build $(ws_main) \
 	  $(addprefix oxcaml/testsuite/tools/,$(addsuffix .exe,$(DEV_RUNNERS)))
-	@$(MAKE) --no-print-directory dev-start \
-	  DEV_IDLE_TIMEOUT=$(DEV_IDLE_TIMEOUT)
 
 dev-test: dev-check
 	+@set -eu; \
@@ -807,12 +806,7 @@ dev-test-all: dev-check
 	    echo "dev: GNU Parallel is required for dev-test-all" >&2; \
 	    exit 2; \
 	  fi; \
-	  $(dev_watcher) stop; \
-	  restart_watcher() { \
-	    $(MAKE) --no-print-directory dev-start \
-	      DEV_IDLE_TIMEOUT=$(DEV_IDLE_TIMEOUT) >/dev/null || true; \
-	  }; \
-	  trap restart_watcher EXIT; \
+	  $(dev_watcher) stop 2>/dev/null || true; \
 	  export TMPDIR="$${TMPDIR:-$$(pwd)/_build/dev/tmp}"; \
 	  mkdir -p "$$TMPDIR"; \
 	  echo "dev: building the final compiler for the full test suite"; \
@@ -917,19 +911,6 @@ dev-ocamlopt: dev-check
 	@echo "dev: stdlib   = _build/runtime_stdlib_install/lib/ocaml_runtime_stdlib"
 	@OCAMLLIB="$$(pwd)/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib" \
 	  $(dev_build)/default/boot_ocamlopt.exe $(ARGS)
-
-dev-status:
-	@$(dev_watcher) status
-
-dev-log:
-	@if [ -f _build/dev/watcher.log ]; then \
-	  tail -n 100 _build/dev/watcher.log; \
-	else \
-	  echo "dev: no watcher log"; \
-	fi
-
-dev-stop:
-	@$(dev_watcher) stop
 
 # The `hacking-emacs-poller` and `hacking-emacs-builder` targets make it
 # possible to run the polling build with Emacs's `M-x compile`.  You should run
