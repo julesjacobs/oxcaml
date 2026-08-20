@@ -94,6 +94,18 @@ let rhs_annotated_total (e : Typedtree.expression) =
 let is_total_local scope id =
   List.exists (Ident.same id) scope.total_locals
 
+(* The annotated-total binders of a binding group, folded into a scope:
+   used by [walk_bindings] at a [let] and by [walk_structure] across
+   items. *)
+let add_total_binders scope vbs =
+  List.fold_left
+    (fun scope (vb : value_binding) ->
+       match vb.vb_pat.pat_desc with
+       | Tpat_var { id; _ } when rhs_annotated_total vb.vb_expr ->
+         { scope with total_locals = id :: scope.total_locals }
+       | _ -> scope)
+    scope vbs
+
 let mono ty =
   match Types.get_desc ty with
   | Tpoly _ -> Btype.tpoly_get_mono ty
@@ -640,6 +652,15 @@ and walk_case :
    (notably the apply-codomain fact) landing in the same scope is how a
    codomain contract reaches the bound name. *)
 and walk_bindings st scope rec_flag vbs =
+  (* a recursive peer may call an annotated-total binder of its own group,
+     so a recursive group's evidence is folded in before its right-hand
+     sides are walked and lowered; a nonrecursive right-hand side sees only
+     the outer scope, where the group's binders do not exist *)
+  let scope =
+    match (rec_flag : Asttypes.rec_flag) with
+    | Recursive -> add_total_binders scope vbs
+    | Nonrecursive -> scope
+  in
   List.iter (fun vb -> walk_expr st scope ~imposed:[] vb.vb_expr) vbs;
   List.fold_left
     (fun sc vb ->
@@ -697,25 +718,28 @@ and walk_module_expr st scope mexpr =
    from their mode (the annotation caps the checking mode without pinning
    a rec binder's mode variable; the toplevel pins bindings at phrase end,
    the batch compiler does not), so the recorded [Texp_mode] extra is the
-   only evidence, exactly as in [walk_bindings].  Facts and let equalities
-   deliberately stay per-item: module-level equalities are a recorded
-   completeness gap. *)
+   only evidence, exactly as in [walk_bindings].  A recursive item is
+   visited with its own group's evidence already folded in, for the same
+   reason as in [walk_bindings]: a peer's right-hand side may call the
+   group's total binder.  Facts and let equalities deliberately stay
+   per-item: module-level equalities are a recorded completeness gap. *)
 and walk_structure st scope (s : structure) =
   ignore
     (List.fold_left
        (fun scope (item : structure_item) ->
-          let it : Tast_iterator.iterator = iterator st scope in
+          let scope_after =
+            match item.str_desc with
+            | Tstr_value (_, vbs) -> add_total_binders scope vbs
+            | _ -> scope
+          in
+          let scope_during =
+            match item.str_desc with
+            | Tstr_value (Recursive, _) -> scope_after
+            | _ -> scope
+          in
+          let it : Tast_iterator.iterator = iterator st scope_during in
           it.structure_item it item;
-          match item.str_desc with
-          | Tstr_value (_, vbs) ->
-            List.fold_left
-              (fun scope vb ->
-                 match vb.vb_pat.pat_desc with
-                 | Tpat_var { id; _ } when rhs_annotated_total vb.vb_expr ->
-                   { scope with total_locals = id :: scope.total_locals }
-                 | _ -> scope)
-              scope vbs
-          | _ -> scope)
+          scope_after)
        scope s.str_items
      : scope)
 

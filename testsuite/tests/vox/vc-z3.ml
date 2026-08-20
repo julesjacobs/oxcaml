@@ -419,6 +419,59 @@ Error: This expression cannot yet be represented in a verification condition:
        a value with a polymorphic type cannot yet appear in a predicate.
 |}]
 
+(* --- weak-in-predicate: a value-restriction variable keeps the crossing's
+   own diagnosis ------------------------------------------------------------ *)
+(* [weak_ref]'s type has a free variable only because [ref []] is expansive;
+   grounding the variable does not make [_ list ref] cross logicality, so
+   the failure is the [ref]'s, not the variable's, and the mutable-state
+   rejection stands — not the polymorphic one above. *)
+
+let weak_in_predicate () =
+  let weak_ref = ref [] in
+  let q : int{ _ > 0 && weak_ref = weak_ref } = 5 in
+  q;;
+[%%expect{|
+Line 3, characters 48-49: refinement obligation:
+  int{ (_ > 0) && (weak_ref = weak_ref) }
+Line 3, characters 24-32:
+3 |   let q : int{ _ > 0 && weak_ref = weak_ref } = 5 in
+                            ^^^^^^^^
+Error: This predicate reads mutable state, which cannot yet be verified.
+|}]
+
+(* --- weak-top-in-predicate: a variable still weak at walk time ------------- *)
+(* At the toplevel a weak variable persists across phrases, so [instance]
+   would share it rather than copy it and the grounding probe would pin
+   the user's type: such a variable skips the probe outright and keeps the
+   crossing's diagnosis.  The two phrases after the rejection pin the
+   non-pinning: [weak_top] still unifies with [bool list ref]. *)
+
+let weak_top = ref [];;
+[%%expect{|
+val weak_top : '_weak1 list ref = {contents = []}
+|}]
+
+let qt : int{ _ > 0 && weak_top = weak_top } = 5;;
+[%%expect{|
+Line 1, characters 4-6: refined environment entry: qt :
+  int{ (_ > 0) && (weak_top = weak_top) }
+Line 1, characters 47-48: refinement obligation:
+  int{ (_ > 0) && (weak_top = weak_top) }
+Line 1, characters 23-31:
+1 | let qt : int{ _ > 0 && weak_top = weak_top } = 5;;
+                           ^^^^^^^^
+Error: This predicate reads mutable state, which cannot yet be verified.
+|}]
+
+let () = weak_top := [true];;
+[%%expect{|
+|}]
+
+let readback = !weak_top;;
+[%%expect{|
+val readback : bool list = [true]
+|}]
+
 (* --- predicate-sort-error: the located predicate sort checker ------------ *)
 (* Nothing upstream checks predicate sorts: this compiles today.  GREEN: a
    located sort error at the obligation's site, not a solver failure. *)
@@ -1022,4 +1075,68 @@ Line 1, characters 4-15: refined environment entry: good_ground :
   int good{ true }
 Line 1, characters 39-43: refinement obligation: int good{ true }
 val good_ground : int good{ true } = Good
+|}]
+
+(* --- bar-operator: an encoded '|' symbol is accepted by the solver ---------- *)
+(* The [{bar}] encoding (bytes pinned in vc-printing.ml) must also be a
+   symbol the live solver admits inside [|...|]: the obligation proves. *)
+
+let ( /|> ) @ total = fun x y -> x + y;;
+[%%expect{|
+val ( /|> ) : int -> int -> int = <fun>
+|}]
+
+let bar_op : int{ _ = 0 } = (1 /|> 2) - (1 /|> 2);;
+[%%expect{|
+Line 1, characters 4-10: refined environment entry: bar_op : int{ _ = 0 }
+Line 1, characters 28-49: refinement obligation: int{ _ = 0 }
+val bar_op : int{ _ = 0 } = 0
+|}]
+
+(* --- module-total-boundary: recorded evidence stops at module boundaries ---- *)
+(* The recorded-annotation route is item-local and Ident-keyed, so a total
+   binder inside an unsigned module is not visible at Pdot occurrences:
+   fail-closed refusals, pinned so the boundary cannot silently move.  The
+   supported route for module-interior totals is a signature carrying
+   [@@ total].  On the toplevel route below BOTH shapes refuse; the batch
+   route diverges for the NONRECURSIVE shape, which proves there via the
+   occurrence mode (pinned in vc_batch_total.ml). *)
+
+module M = struct let rec m_add @ total = fun x y -> x + y end;;
+[%%expect{|
+module M : sig val m_add : int -> int -> int end
+|}]
+
+let pdot_rec : int{ _ = 0 } = M.m_add 1 2 - M.m_add 1 2;;
+[%%expect{|
+Line 1, characters 4-12: refined environment entry: pdot_rec : int{ _ = 0 }
+Line 1, characters 30-55: refinement obligation: int{ _ = 0 }
+Line 1, characters 30-55:
+1 | let pdot_rec : int{ _ = 0 } = M.m_add 1 2 - M.m_add 1 2;;
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 30-55:
+1 | let pdot_rec : int{ _ = 0 } = M.m_add 1 2 - M.m_add 1 2;;
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: 1 refinement obligation was not verified.
+|}]
+
+module N = struct let n_add @ total = fun x y -> x + y end;;
+[%%expect{|
+module N : sig val n_add : int -> int -> int end
+|}]
+
+let pdot_nonrec : int{ _ = 0 } = N.n_add 1 2 - N.n_add 1 2;;
+[%%expect{|
+Line 1, characters 4-15: refined environment entry: pdot_nonrec :
+  int{ _ = 0 }
+Line 1, characters 33-58: refinement obligation: int{ _ = 0 }
+Line 1, characters 33-58:
+1 | let pdot_nonrec : int{ _ = 0 } = N.n_add 1 2 - N.n_add 1 2;;
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 33-58:
+1 | let pdot_nonrec : int{ _ = 0 } = N.n_add 1 2 - N.n_add 1 2;;
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: 1 refinement obligation was not verified.
 |}]

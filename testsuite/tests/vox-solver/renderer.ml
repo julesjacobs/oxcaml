@@ -429,8 +429,11 @@ let () =
 ill-formed: duplicate symbol h3 (as hypothesis label)
 |}]
 
-(* A symbol SMT-LIB cannot spell simply is quoted; one it cannot spell at
-   all is an error. *)
+(* A symbol SMT-LIB cannot spell simply is quoted; the two characters a
+   quoted symbol cannot hold are encoded — [|] as [{bar}], [\] as
+   [{backslash}] — and [{] itself as [{lbrace}], so every name renders and
+   the encoding is injective (a literal [{] is never emitted, so every [{]
+   opens exactly one code). *)
 
 let () =
   render Prove
@@ -455,7 +458,37 @@ let () =
        (Var "bad|bar"))
 
 [%%expect{|
-ill-formed: symbol "bad|bar" cannot be represented in SMT-LIB
+(set-option :produce-unsat-cores true)
+(declare-const |bad{bar}bar| Bool)
+(assert (not |bad{bar}bar|))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+|}]
+
+(* The injectivity pin: a name spelt with a literal [|] and a name spelt
+   with the literal characters [{bar}] must render as two distinct
+   symbols, or a signature holding both would collapse them. *)
+
+let () =
+  render Prove
+    (obligation
+       ~signature:
+         { Signature.empty with
+           variables = ["a|b", Sort.Bool; "a{bar}b", Sort.Bool]
+         }
+       (App (And, [Var "a|b"; Var "a{bar}b"])))
+
+[%%expect{|
+(set-option :produce-unsat-cores true)
+(declare-const |a{bar}b| Bool)
+(declare-const |a{lbrace}bar}b| Bool)
+(assert (not (and |a{bar}b| |a{lbrace}bar}b|)))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
 |}]
 
 (* Renderer-generated hypothesis labels live in the same solver namespace as

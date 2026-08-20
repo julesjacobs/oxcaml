@@ -25,7 +25,15 @@ let error fmt = Format.kasprintf (fun message -> raise (Ill_formed message)) fmt
 (* SMT-LIB symbols.  A simple symbol is a nonempty sequence of letters,
    digits and [~ ! @ $ % ^ & * _ - + = < > . ? /] that does not start with a
    digit; anything else must be written [|quoted|], which cannot contain [|]
-   or [\].  Reserved words are legal only when quoted.
+   or [\].  Those two are encoded as [{bar}] and [{backslash}], and [{]
+   itself as [{lbrace}], so the encoding is injective on all strings with
+   no assumption about what names reach it: a literal [{] is never
+   emitted, so every [{] in an encoded body opens exactly one of the three
+   codes (closed at the first [}]) and decoding is unambiguous — two
+   distinct names cannot render alike.  (No OCaml identifier, operator or
+   generated suffix actually contains a brace; the [{lbrace}] arm exists so
+   that fact carries no correctness weight.)  Reserved words are legal only
+   when quoted.
 
    Quoting is purely lexical — [|not|] is the same symbol as [not] — so a
    name that collides with a builtin this renderer itself emits cannot be
@@ -56,9 +64,19 @@ let symbol name =
   in
   if simple
   then name
-  else if String.exists (function '|' | '\\' -> true | _ -> false) name
-  then error "symbol %S cannot be represented in SMT-LIB" name
-  else "|" ^ name ^ "|"
+  else begin
+    let buf = Buffer.create (String.length name + 2) in
+    Buffer.add_char buf '|';
+    String.iter
+      (function
+        | '|' -> Buffer.add_string buf "{bar}"
+        | '\\' -> Buffer.add_string buf "{backslash}"
+        | '{' -> Buffer.add_string buf "{lbrace}"
+        | c -> Buffer.add_char buf c)
+      name;
+    Buffer.add_char buf '|';
+    Buffer.contents buf
+  end
 
 let sort = function
   | Sort.Bool -> "Bool"

@@ -385,16 +385,25 @@ declared type does not cross logicality (mutable parts,
 `design-docs/totality.md:82-87`), is rejected with a located error at VC
 time — "this predicate reads mutable state, which cannot yet be verified".
 Small, and it keeps every admitted predicate denoting the same value at
-every mention. One carve-out keeps the message honest: a free value whose
-declared type is a generic scheme fails the crossing conservatively (its
-variables promise nothing) without reading any mutable state, so it gets
-its own located rejection — "a value with a polymorphic type cannot yet
-appear in a predicate" — not the mutable-state one. Instantiating the
+every mention. One carve-out keeps the message honest: a crossing
+failure is attributed to its actual cause. A generic scheme fails only
+because its variables promise nothing — grounding them (an instance with
+every free variable unified to `int`) lets the type cross — and such a
+value gets its own located rejection, "a value with a polymorphic type
+cannot yet appear in a predicate", not the mutable-state one. A type that
+still fails when grounded is itself the obstacle, so the crossing's
+diagnosis stands: a value-restriction variable (indistinguishable from a
+generic one once its item is generalized) does not turn its `ref`'s
+rejection into the polymorphic message. Instantiating the
 scheme instead is foreclosed for now by rexp being untyped: a predicate
 occurrence has no occurrence type to instantiate at. A later relaxation
 may give such predicates per-read snapshot semantics (instantiate against
 a snapshot constant taken where the predicate binds); nothing here
-forecloses that. Fixtures: `mutable-in-predicate`, `poly-in-predicate`.
+forecloses that. The grounding probe itself never mutates a user type: a
+variable still weak at the walk (a toplevel weak, which an instance would
+share rather than copy) skips the probe and keeps the crossing's
+diagnosis. Fixtures: `mutable-in-predicate`, `poly-in-predicate`,
+`weak-in-predicate`, `weak-top-in-predicate`.
 
 ### Path conditions — gated
 
@@ -505,7 +514,16 @@ mode never reads `Total` because the annotation caps the checking mode
 without pinning the binder's mode variable, and the batch compiler,
 unlike the toplevel, leaves it unpinned at walk time, so the recorded
 annotation is threaded across structure items exactly as across local
-bindings; fixtures `rec-total` and `vc_batch_total`) and every argument
+bindings, and a recursive group's evidence is in scope while the group's
+own right-hand sides are walked — a peer may call the group's total
+binder.  The recorded-annotation route is item-local and Ident-keyed: it
+never crosses a module boundary, so a total binder inside an unsigned
+module is conservatively refused at Pdot occurrences (the supported
+route for module-interior totals is a signature carrying `@@ total`; the
+one unsigned shape that proves is the batch route's nonrecursive case,
+via the occurrence mode).  Fixtures `rec-total`, `vc_batch_total`,
+`rec-group-total`, `local-rec-group-total` and
+`module-total-boundary`) and every argument
 type crosses totality and logicality. Two trust boundaries ride on the axis and are
 inherited knowingly, both pinned in the totality piece's own report:
 `external ... @@ total` is an unchecked claim, and the `module rec`
@@ -693,7 +711,11 @@ Collisions cannot occur: every local carries a `_<stamp>` suffix, every
 mangled instance angle brackets, every module path a `.`, every minted
 constant a `/` — and the `h1, h2, ...` hypothesis labels and the SMT-LIB
 builtins contain no stamp suffix, bracket, dot or slash. Names needing it
-are `|quoted|` by the renderer.
+are `|quoted|` by the renderer; the two characters a quoted symbol cannot
+hold are encoded — `|` as `{bar}`, `\` as `{backslash}`, and `{` itself
+as `{lbrace}`, so the encoding is injective on all names with no
+assumption about which names reach it — keeping valid operators like
+`( /|> )` representable (fixture `bar-operator`).
 This discharges the name-generation duty solver-interface's
 builtin-rejection rule assigns to the translation, in one place. Fixtures:
 `poly-instances` (one obligation using a total polymorphic `id` at two

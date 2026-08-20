@@ -1558,3 +1558,92 @@ Line 2, characters 31-56: refinement obligation: int{ _ = 0 }
 (get-info :reason-unknown)
 val rec_total : int{ _ = 0 } = 0
 |}]
+
+(* --- rec-group-total: total evidence inside its own binding group ----------- *)
+(* A recursive peer may call the group's annotated-total binder from its own
+   right-hand side, so the group's [Texp_mode] evidence is folded into scope
+   before the right-hand sides are walked: both calls resolve as the one
+   total Call and the difference proves.  Pre-fix each call lowered to its
+   own opaque (result/1 - result/2) and the obligation was Unknown.  Batch
+   verdict: vc_batch_total.ml's second group. *)
+
+let rec rg_use =
+  fun x ->
+    let a = rg_tot x in
+    let b = rg_tot x in
+    (a - b : int{ _ = 0 })
+and rg_tot @ total = fun x -> x;;
+[%%expect{|
+Line 5, characters 5-10: refinement obligation: int{ _ = 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const a_1 (_ BitVec 63))
+(declare-const x_1 (_ BitVec 63))
+(declare-const b_1 (_ BitVec 63))
+(declare-fun |rg_tot_1<Bv63,Bv63>| ((_ BitVec 63)) (_ BitVec 63))
+(assert (! (= a_1 (|rg_tot_1<Bv63,Bv63>| x_1)) :named h1))
+(assert (! (= b_1 (|rg_tot_1<Bv63,Bv63>| x_1)) :named h2))
+(assert (not (= (bvsub a_1 b_1) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val rg_use : int -> int = <fun>
+val rg_tot : int -> int = <fun>
+|}]
+
+(* --- local-rec-group-total: the same rule on the local let-rec route -------- *)
+(* [walk_bindings] is a separate visit from the structure fold, so the local
+   route carries its own pre-seeding of a recursive group's evidence. *)
+
+let local_rec_group =
+  let rec f = fun x -> let a = g x in let b = g x in (a - b : int{ _ = 0 })
+  and g @ total = fun x -> x in
+  ignore (f 7); 0;;
+[%%expect{|
+Line 2, characters 54-59: refinement obligation: int{ _ = 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const a_1 (_ BitVec 63))
+(declare-const x_1 (_ BitVec 63))
+(declare-const b_1 (_ BitVec 63))
+(declare-fun |g_1<Bv63,Bv63>| ((_ BitVec 63)) (_ BitVec 63))
+(assert (! (= a_1 (|g_1<Bv63,Bv63>| x_1)) :named h1))
+(assert (! (= b_1 (|g_1<Bv63,Bv63>| x_1)) :named h2))
+(assert (not (= (bvsub a_1 b_1) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val local_rec_group : int = 0
+|}]
+
+(* --- bar-operator-encoding: '|' in a name is encoded, never rejected -------- *)
+(* [( /|> )] is a valid operator whose name a quoted SMT-LIB symbol cannot
+   hold ('|' and '\' are the two excluded characters).  The renderer encodes
+   [|] as [{bar}], [\] as [{backslash}] and [{] itself as [{lbrace}], so the
+   encoding is injective on all names with no assumption about which names
+   reach it (a literal '{' is never emitted, so every '{' opens exactly one
+   code).  Pre-fix this obligation was refused as an ill-formed symbol.  The
+   canonicalised [_1] stamp keeps the bytes stable under the unrelated
+   declarations above.  Verdict in vc-z3.ml. *)
+
+let ( /|> ) @ total = fun x y -> x + y;;
+[%%expect{|
+val ( /|> ) : int -> int -> int = <fun>
+|}]
+
+let bar_op : int{ _ = 0 } = (1 /|> 2) - (1 /|> 2);;
+[%%expect{|
+Line 1, characters 4-10: refined environment entry: bar_op : int{ _ = 0 }
+Line 1, characters 28-49: refinement obligation: int{ _ = 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-fun |/{bar}>_1<Bv63,Bv63,Bv63>| ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))
+(assert (not (= (bvsub (|/{bar}>_1<Bv63,Bv63,Bv63>| (_ bv1 63) (_ bv2 63)) (|/{bar}>_1<Bv63,Bv63,Bv63>| (_ bv1 63) (_ bv2 63))) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val bar_op : int{ _ = 0 } = 0
+|}]

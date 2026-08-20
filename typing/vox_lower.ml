@@ -919,20 +919,59 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
          (match vd.val_kind with
           | Val_mut _ -> raise (Reads_mutable_state { loc })
           | _ ->
-            (* the polymorphism check comes first: a generic scheme fails
-               the logicality crossing conservatively (its variables promise
-               nothing), and "reads mutable state" would be a false
-               diagnosis of an immutable value like [let nil = []].  A
-               predicate has no occurrence type to instantiate the scheme
-               at (rexp is untyped), so this is a located rejection, not a
-               grounding *)
-            if Ctype.free_variables ~env vd.val_type <> []
-            then
-              unsupported ~loc
-                "a value with a polymorphic type cannot yet appear in a \
-                 predicate";
+            (* a logicality-crossing failure is attributed to its actual
+               cause.  A generic scheme fails only because its variables
+               promise nothing — grounding them (an instance with every
+               free variable unified to [int]) lets the type cross — and
+               "reads mutable state" would be a false diagnosis of an
+               immutable value like [let nil = []], so it gets its own
+               located rejection: rexp is untyped, so there is no
+               occurrence type to instantiate the scheme at.  A type that
+               still fails when grounded is itself the obstacle (a [ref],
+               say), so the crossing's own diagnosis stands — a weak
+               (value-restriction) variable is indistinguishable from a
+               generic one here (both sit at generic level once the item
+               is generalized), and this split keeps its host type's
+               mutability the message.  A variable that refuses [int]
+               (a non-value layout) also keeps the crossing's diagnosis. *)
             if not (crosses_logicality env vd.val_type)
-            then raise (Reads_mutable_state { loc });
+            then begin
+              let variables_blocked_crossing =
+                match Ctype.free_variables ~env vd.val_type with
+                | [] -> false
+                | _ :: _ as fvs
+                  when List.exists
+                         (fun v ->
+                            Types.get_level v <> Btype.generic_level)
+                         fvs ->
+                  (* a variable still non-generic at walk time (a toplevel
+                     weak) is shared, not copied, by [instance], so probing
+                     would pin the user's type; such a value is monomorphic
+                     in its scope and keeps the crossing's diagnosis *)
+                  false
+                | _ :: _ ->
+                  (* the probe instance is re-generalized so the crossing
+                     reads it in -principal mode too (crossing_of_ty treats
+                     a non-generic type as crossing nothing) *)
+                  (match
+                     Ctype.with_local_level ~post:Ctype.generalize
+                       (fun () ->
+                          let inst = Ctype.instance vd.val_type in
+                          List.iter
+                            (fun v -> Ctype.unify env v Predef.type_int)
+                            (Ctype.free_variables ~env inst);
+                          inst)
+                   with
+                   | inst -> crosses_logicality env inst
+                   | exception Ctype.Unify _ -> false)
+              in
+              if variables_blocked_crossing
+              then
+                unsupported ~loc
+                  "a value with a polymorphic type cannot yet appear in a \
+                   predicate"
+              else raise (Reads_mutable_state { loc })
+            end;
             let sort = sort_of_type symbols ~loc env vd.val_type in
             let t =
               ir (Ir.Var (value_symbol symbols ~loc env path sort)) sort loc
