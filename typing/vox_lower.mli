@@ -40,38 +40,32 @@ module Ir : sig
     | Ite of t * t * t
     | Construct of string * t list
     | Select of string * int * t
-    | Test of string * t
     | Hole
         (** [_], the value under obligation; removed by
-            {!val:substitute_hole} before emission. *)
-    | Let of string * t * t
-        (** Predicate-local [let]; removed by substitution.  Binders bind
-            allocated symbol names, unique by construction, so
-            substitution is capture-free. *)
-    | Lambda of string list * t
-        (** Predicate-local [fun]; removed by beta reduction where
-            applied, a located rejection where not.  [Rexp_match] has no
-            IR form: the predicate front end lowers it to
-            [Ite]/[Test]/[Select] directly. *)
+            {!val:substitute_hole} before emission.  The binder forms of
+            the predicate language have no IR shape: predicate [let]s
+            substitute and applied lambdas beta-reduce in the front end
+            (unapplied ones are located rejections), and [Rexp_match]
+            lowers to [Ite]/[Select] with equality tests — the day-one
+            matchable subjects (tuples, integer and Boolean patterns) need
+            no [Term.Test]. *)
 end
 
 module Symbols : sig
-  (** The symbol allocator and table: every symbol the lowering mints or
-      resolves — variables, uninterpreted functions, uninterpreted sorts,
-      constructors and selectors — with its sort and any function or
-      datatype declaration it pulls in.  A symbol's key is its resolved
-      identity (stamped ident, or dotted module path) plus, for functions,
-      the ground sort signature of the use.  The table is bookkeeping, not
-      soundness: it never decides what is true, only what must be
-      declared. *)
+  (** The symbol allocator, plus the lowering's per-unit state (the
+      per-node opaque memo and the datatype registry).  A symbol's key is
+      its resolved identity (stamped ident, or dotted module path) plus,
+      for functions, the ground sort signature of the use.  Declarations
+      are not tabulated here: signature assembly ({!val:to_signature})
+      closes over exactly the symbols an obligation's terms mention. *)
   type t
 
   val create : unit -> t
 
   (** The symbol for a value path: [Ident.unique_name] for locals (the
       stamp keeps shadowed locals distinct), the dotted spelling for
-      module paths.  Records the variable for signature assembly. *)
-  val value : t -> Path.t -> sort:Vox_logic.Sort.t -> string
+      module paths. *)
+  val value : Path.t -> string
 
   (** The symbol for an uninterpreted function at one ground
       instantiation; the key includes the sort signature, so a polymorphic
@@ -79,13 +73,13 @@ module Symbols : sig
       mangled in {!Vox_logic.Signature.instantiate}'s [name<key,...>]
       shape. *)
   val func :
-    t -> Path.t -> params:Vox_logic.Sort.t list ->
+    Path.t -> params:Vox_logic.Sort.t list ->
     result:Vox_logic.Sort.t -> string
 
   (** A fresh opaque constant, [result/<counter>]: tier-1 abstraction of a
       call that fails the stability gate, a per-read mutable subject, or a
       guarded shift fallback. *)
-  val fresh_opaque : t -> sort:Vox_logic.Sort.t -> string
+  val fresh_opaque : t -> string
 end
 
 (** A located rejection: the subject or predicate cannot be stated in the
@@ -163,10 +157,14 @@ val lower_subject :
     untyped and nothing upstream or downstream checks predicate sorts —
     and a normaliser to the quantifier-free fragment.  [hole_sort] is the
     refined type's payload sort; free paths resolve in [env] (the
-    obligation site's environment).  A sort clash or residual binder form
-    is a located error at the obligation's site. *)
+    obligation site's environment), and resolving one reports
+    [Resolved_ident] through [on_resolved] exactly as the subject front
+    end does — the deposit rule is one rule, whichever front end resolves
+    the ident.  A sort clash or residual binder form is a located error at
+    the obligation's site. *)
 val lower_predicate :
   Symbols.t ->
+  ?on_resolved:(resolved -> Ir.t -> unit) ->
   env:Env.t ->
   hole_sort:Vox_logic.Sort.t ->
   Types.refinement_expression ->
@@ -178,9 +176,8 @@ val lower_predicate :
 val substitute_hole : Ir.t -> hole:Ir.t -> Ir.t
 
 (** The one emitter: IR -> {!Vox_logic.Term}, trivial by construction —
-    the IR is sorted, hole-free and binder-free by the time it emits.  A
-    residual [Hole], [Let] or [Lambda] is an internal defect, never a
-    located user error. *)
+    the IR is sorted and hole-free by the time it emits.  A residual
+    [Hole] is an internal defect, never a located user error. *)
 val emit : Ir.t -> Vox_logic.Term.t
 
 (** Renumber an obligation's symbols deterministically in

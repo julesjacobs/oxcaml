@@ -37,11 +37,13 @@ val implementation :
   unit
 
 (** The driver glue behind [-vox-backend], shared by the batch compilers
-    ({!Compile_common}) and the toplevels ({!Topcommon}): reads the flags,
-    resolves z3 in the test gate's order when [-vox-z3] is absent, selects
-    the backend through {!Vox_backend.plan} (an unusable selection fails
-    once, as a located error), and runs {!implementation}.  Under the
-    default ([-vox-backend none]) it does nothing at all. *)
+    ({!Compile_common}) and the toplevels ({!Topcommon}): validates the
+    backend name, resolves z3 in the test gate's order when [-vox-z3] is
+    absent (and only for the z3 backend), selects the backend through
+    {!Vox_backend.plan} (an unusable selection fails once, at the unit's
+    file-level ghost location — a configuration error has no source
+    position), and runs {!implementation}.  Under the default
+    ([-vox-backend none]) it does nothing at all. *)
 val run_if_enabled : Typedtree.structure -> unit
 
 (** Driver policy on one discharge outcome: report and count ([true]) or

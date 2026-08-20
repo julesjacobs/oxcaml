@@ -36,6 +36,11 @@ type pending =
   ; subject_ir : Ir.t
   ; imposed : Types.type_expr  (* refined; head = the predicate *)
   ; facts : Vox_fact.t  (* in scope at the subject *)
+  ; seen_idents : Path.t list ref
+        (* the idents whose value-description facts this obligation
+           already holds (deposited while the subject lowered); goal
+           assembly deposits through the same set, so a predicate and a
+           subject mentioning one ident yield one fact *)
   ; loc : Location.t
   }
 
@@ -148,11 +153,14 @@ let check_imposable env ty loc =
     Misc.fatal_error "Vox_verify: imposed type without a refined head"
 
 (* Fail-open predicate fact: instantiate a declared refined type's
-   predicate at a subject term.  A source declines what it cannot lower
-   (a completeness gap, never a soundness gap) — except a predicate over
-   mutable state, which has no single denotation and propagates as a
-   located rejection. *)
-let add_predicate_fact st ~env ~label ~loc ty ~subject_ir facts =
+   predicate at a subject term, extending [facts_ref]; [true] when a fact
+   was deposited.  A source declines what it cannot lower (a completeness
+   gap, never a soundness gap) — except a predicate over mutable state,
+   which has no single denotation and propagates as a located rejection.
+   [on_resolved] receives the idents the predicate's own lowering
+   resolves, so nested declared facts ride the same rule. *)
+let add_predicate_fact st ~env ~label ~loc ty ~subject_ir ~on_resolved
+    facts_ref =
   match Types.get_desc (Ctype.expand_head env ty) with
   | Trefine { ref_payload; ref_pred } ->
     (try
@@ -160,42 +168,16 @@ let add_predicate_fact st ~env ~label ~loc ty ~subject_ir facts =
          Vox_lower.sort_of_type st.symbols ~loc env ref_payload
        in
        let pred =
-         Vox_lower.lower_predicate st.symbols ~env ~hole_sort ref_pred
+         Vox_lower.lower_predicate st.symbols ~on_resolved ~env ~hole_sort
+           ref_pred
        in
-       Vox_fact.add facts
-         (Vox_lower.substitute_hole pred ~hole:subject_ir)
-         ~label ~loc
-     with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> facts)
-  | _ -> facts
-
-(* Binder facts, unconditional: every bound ident whose recorded pattern
-   type has a refined head deposits the instantiated predicate.  Variable
-   and alias (sub-)patterns are exactly the idents [pat_bound_idents_full]
-   reports; a refined head on a wildcard, constant, constructor or
-   or-pattern node binds no single name and deposits nothing. *)
-let add_binder_facts st ~env pat facts =
-  List.fold_left
-    (fun facts (id, (name : string Location.loc), ty, _, _) ->
-       (* arrow domains are [Tpoly]-wrapped, and synthetic binders (the
-          optional-elimination eta pattern) record them unmono'ed *)
-       let ty = mono ty in
-       match Types.get_desc (Ctype.expand_head env ty) with
-       | Trefine _ ->
-         (try
-            let sort =
-              Vox_lower.sort_of_type st.symbols ~loc:name.loc env ty
-            in
-            let sym =
-              Vox_lower.Symbols.value st.symbols (Path.Pident id) ~sort
-            in
-            let subject_ir = { Ir.desc = Var sym; sort; loc = name.loc } in
-            add_predicate_fact st ~env
-              ~label:("binder " ^ Ident.name id)
-              ~loc:name.loc ty ~subject_ir facts
-          with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> facts)
-       | _ -> facts)
-    facts
-    (pat_bound_idents_full pat)
+       facts_ref :=
+         Vox_fact.add !facts_ref
+           (Vox_lower.substitute_hole pred ~hole:subject_ir)
+           ~label ~loc;
+       true
+     with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> false)
+  | _ -> false
 
 (* The codomain contract of an application: the funct's solved arrow spine
    after the supplied arguments.  Reading the spine (a declared source)
@@ -236,57 +218,91 @@ let funct_declaration (e : Typedtree.expression) =
      | _ -> None)
   | _ -> None
 
-(* The fact sources that ride on the subject lowering.  Deposits go to
-   [facts_ref]: the obligation's own snapshot at finalization, or the
-   scope under construction for a let equality / path condition. *)
-let make_deposit st scope ~env facts_ref =
-  let seen_idents = ref [] in
-  fun (r : Vox_lower.resolved) (ir : Ir.t) ->
+(* The fact sources that ride on lowering — either front end's.  Deposits
+   go to [facts_ref]: the obligation's own snapshot at finalization and
+   goal assembly, or the scope under construction for a let equality /
+   path condition.  [seen_idents] makes value-description facts
+   once-per-obligation; finalization and goal assembly share one set
+   through the pending record. *)
+let make_deposit st scope ~env ?(seen_idents = ref []) facts_ref =
+  let rec deposit (r : Vox_lower.resolved) (ir : Ir.t) =
     match r with
-    | Resolved_ident (path, vd) ->
+    | Vox_lower.Resolved_ident (path, vd) ->
       (* module-level and imported values: the occurrence is
          payload-typed, the value description still declares the refined
          type; once per obligation *)
       if not (List.exists (Path.same path) !seen_idents)
       then begin
         seen_idents := path :: !seen_idents;
-        let facts =
-          add_predicate_fact st ~env
-            ~label:("value " ^ Path.name path)
-            ~loc:ir.Ir.loc vd.val_type ~subject_ir:ir !facts_ref
-        in
-        if facts != !facts_ref then record_admission st path vd;
-        facts_ref := facts
+        if add_predicate_fact st ~env
+             ~label:("value " ^ Path.name path)
+             ~loc:ir.Ir.loc vd.val_type ~subject_ir:ir ~on_resolved:deposit
+             facts_ref
+        then record_admission st path vd
       end
     | Resolved_apply e ->
       (match apply_codomain e with
        | Some cod ->
-         let facts =
-           add_predicate_fact st ~env ~label:"apply codomain"
-             ~loc:e.exp_loc cod ~subject_ir:ir !facts_ref
-         in
-         (if facts != !facts_ref
-          then
-            match funct_declaration e with
-            | Some (path, vd) -> record_admission st path vd
-            | None -> ());
-         facts_ref := facts
+         if add_predicate_fact st ~env ~label:"apply codomain"
+              ~loc:e.exp_loc cod ~subject_ir:ir ~on_resolved:deposit
+              facts_ref
+         then (
+           match funct_declaration e with
+           | Some (path, vd) -> record_admission st path vd
+           | None -> ())
        | None -> ())
     | Resolved_field (e, lbl) ->
-      facts_ref :=
-        add_predicate_fact st ~env
-          ~label:("field " ^ lbl.lbl_name)
-          ~loc:e.exp_loc lbl.lbl_arg ~subject_ir:ir !facts_ref
+      ignore
+        (add_predicate_fact st ~env
+           ~label:("field " ^ lbl.lbl_name)
+           ~loc:e.exp_loc lbl.lbl_arg ~subject_ir:ir ~on_resolved:deposit
+           facts_ref
+         : bool)
     | Resolved_mutvar id ->
       (match
          List.find_opt (fun (i, _) -> Ident.same i id) scope.mutable_decls
        with
        | Some (_, ty) ->
-         facts_ref :=
-           add_predicate_fact st ~env
-             ~label:("read of " ^ Ident.name id)
-             ~loc:ir.Ir.loc ty ~subject_ir:ir !facts_ref
+         ignore
+           (add_predicate_fact st ~env
+              ~label:("read of " ^ Ident.name id)
+              ~loc:ir.Ir.loc ty ~subject_ir:ir ~on_resolved:deposit
+              facts_ref
+            : bool)
        | None -> ())
+  in
+  deposit
+
+(* Binder facts, unconditional: every bound ident whose recorded pattern
+   type has a refined head deposits the instantiated predicate.  Variable
+   and alias (sub-)patterns are exactly the idents [pat_bound_idents_full]
+   reports; a refined head on a wildcard, constant, constructor or
+   or-pattern node binds no single name and deposits nothing. *)
+let add_binder_facts st scope ~env pat facts =
+  let facts_ref = ref facts in
+  let deposit = make_deposit st scope ~env facts_ref in
+  List.iter
+    (fun (id, (name : string Location.loc), ty, _, _) ->
+       (* arrow domains are [Tpoly]-wrapped, and synthetic binders (the
+          optional-elimination eta pattern) record them unmono'ed *)
+       let ty = mono ty in
+       match Types.get_desc (Ctype.expand_head env ty) with
+       | Trefine _ ->
+         (try
+            let sort =
+              Vox_lower.sort_of_type st.symbols ~loc:name.loc env ty
+            in
+            let sym = Vox_lower.Symbols.value (Path.Pident id) in
+            let subject_ir = { Ir.desc = Var sym; sort; loc = name.loc } in
+            ignore
+              (add_predicate_fact st ~env
+                 ~label:("binder " ^ Ident.name id)
+                 ~loc:name.loc ty ~subject_ir ~on_resolved:deposit facts_ref
+               : bool)
+          with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> ())
+       | _ -> ())
+    (pat_bound_idents_full pat);
+  !facts_ref
 
 (* Transparency for path conditions: the condition lowered without
    abstracting anything to an opaque constant.  Minted constants are the
@@ -300,9 +316,7 @@ let rec has_opaque (ir : Ir.t) =
   | App (_, args) | Call (_, args) | Construct (_, args) ->
     List.exists has_opaque args
   | Ite (a, b, c) -> has_opaque a || has_opaque b || has_opaque c
-  | Select (_, _, t) | Test (_, t) -> has_opaque t
-  | Let (_, a, b) -> has_opaque a || has_opaque b
-  | Lambda (_, t) -> has_opaque t
+  | Select (_, _, t) -> has_opaque t
 
 (* Lower a condition for a path-condition fact.  [None] when the gate
    declines: not transparently lowerable (or not Bool-sorted, which
@@ -367,9 +381,11 @@ let finalize st scope ~imposed (e : Typedtree.expression) =
   | [] -> ()
   | imposed ->
     let facts_ref = ref scope.facts in
+    let seen_idents = ref [] in
     (match
        Vox_lower.lower_subject st.symbols
-         ~on_resolved:(make_deposit st scope ~env:e.exp_env facts_ref)
+         ~on_resolved:(make_deposit st scope ~env:e.exp_env ~seen_idents
+                         facts_ref)
          ~is_total_local:(is_total_local scope) e
      with
      | subject_ir ->
@@ -380,6 +396,7 @@ let finalize st scope ~imposed (e : Typedtree.expression) =
               ; subject_ir
               ; imposed = ty
               ; facts = !facts_ref
+              ; seen_idents
               ; loc
               }
               :: st.pendings)
@@ -440,9 +457,24 @@ let rec walk_expr st scope ~imposed (e : Typedtree.expression) : unit =
     let scope =
       match e1.exp_desc with
       | Texp_assert (cond, _) ->
-        (match transparent_condition st scope cond with
-         | Some cf -> add_condition scope cf ~sense:true ~loc:cond.exp_loc
-         | None -> scope)
+        (* under -noassert, translcore erases the assert
+           (lambda/translcore.ml, [Texp_assert]) — except syntactic
+           [assert false], which it keeps raising — so a fact from a test
+           that never runs would be unsound and the arm is gated on the
+           flag, mirroring translcore's own syntactic split *)
+        let erased_under_noassert =
+          !Clflags.noassert
+          && (match cond.exp_desc with
+              | Texp_construct (_, { cstr_name = "false"; _ }, _, _, _) ->
+                false
+              | _ -> true)
+        in
+        if erased_under_noassert
+        then scope
+        else (
+          match transparent_condition st scope cond with
+          | Some cf -> add_condition scope cf ~sense:true ~loc:cond.exp_loc
+          | None -> scope)
       | _ -> scope
     in
     walk_expr st scope ~imposed:(retarget imposed e2) e2
@@ -522,13 +554,15 @@ let rec walk_expr st scope ~imposed (e : Typedtree.expression) : unit =
            | Tparam_pat pat ->
              { fscope with
                facts =
-                 add_binder_facts st ~env:pat.pat_env pat fscope.facts
+                 add_binder_facts st fscope ~env:pat.pat_env pat
+                   fscope.facts
              }
            | Tparam_optional_default (pat, default, _) ->
              walk_expr st fscope ~imposed:[] default;
              { fscope with
                facts =
-                 add_binder_facts st ~env:pat.pat_env pat fscope.facts
+                 add_binder_facts st fscope ~env:pat.pat_env pat
+                   fscope.facts
              })
         fscope params
     in
@@ -564,18 +598,23 @@ and walk_case :
   fun st scope ~imposed c ->
   let scope =
     { scope with
-      facts = add_binder_facts st ~env:c.c_rhs.exp_env c.c_lhs scope.facts
+      facts =
+        add_binder_facts st scope ~env:c.c_rhs.exp_env c.c_lhs scope.facts
     }
   in
   Option.iter (walk_expr st scope ~imposed:[]) c.c_guard;
   walk_expr st scope ~imposed:(retarget imposed c.c_rhs) c.c_rhs
 
 (* Bindings: rhs walked in the outer scope; the returned scope carries the
-   binder facts and (immutable variable patterns only) the let equality.
-   The equality admits the opaque tier -- the constant names exactly this
-   evaluation, and the fact dies with the scope -- and its lowering's
-   deposits (notably the apply-codomain fact) land in the same scope,
-   which is how a codomain contract reaches the bound name. *)
+   binder facts, the deposits the rhs lowering makes, and (immutable
+   variable patterns only) the let equality.  The rhs is lowered for every
+   binding pattern — a wildcard read [let _ = w in ...] deposits w's
+   declared fact exactly as a named read does — while the equality
+   additionally needs a stable symbol, which only a variable pattern
+   binds.  The equality admits the opaque tier: the constant names exactly
+   this evaluation, and the fact dies with the scope; the deposits
+   (notably the apply-codomain fact) landing in the same scope is how a
+   codomain contract reaches the bound name. *)
 and walk_bindings st scope rec_flag vbs =
   List.iter (fun vb -> walk_expr st scope ~imposed:[] vb.vb_expr) vbs;
   List.fold_left
@@ -587,35 +626,35 @@ and walk_bindings st scope rec_flag vbs =
          | _ -> sc
        in
        let facts =
-         add_binder_facts st ~env:vb.vb_pat.pat_env vb.vb_pat sc.facts
+         add_binder_facts st sc ~env:vb.vb_pat.pat_env vb.vb_pat sc.facts
        in
        let facts =
-         match vb.vb_pat.pat_desc, rec_flag with
-         | Tpat_var { id; _ }, Asttypes.Nonrecursive ->
-           (try
-              let facts_ref = ref facts in
-              let rhs_ir =
-                Vox_lower.lower_subject st.symbols
-                  ~on_resolved:
-                    (make_deposit st sc ~env:vb.vb_expr.exp_env facts_ref)
-                  ~is_total_local:(is_total_local sc) vb.vb_expr
-              in
-              let sort = rhs_ir.Ir.sort in
-              let sym =
-                Vox_lower.Symbols.value st.symbols (Path.Pident id) ~sort
-              in
-              let x : Ir.t =
-                { desc = Var sym; sort; loc = vb.vb_pat.pat_loc }
-              in
-              Vox_fact.add !facts_ref
-                { desc = App (Eq, [x; rhs_ir])
-                ; sort = Bool
-                ; loc = vb.vb_pat.pat_loc
-                }
-                ~label:("let " ^ Ident.name id)
-                ~loc:vb.vb_pat.pat_loc
-            with Vox_lower.Unsupported _ -> facts)
-         | _ -> facts
+         let facts_ref = ref facts in
+         (match
+            Vox_lower.lower_subject st.symbols
+              ~on_resolved:
+                (make_deposit st sc ~env:vb.vb_expr.exp_env facts_ref)
+              ~is_total_local:(is_total_local sc) vb.vb_expr
+          with
+          | exception Vox_lower.Unsupported _ -> ()
+          | rhs_ir ->
+            (match vb.vb_pat.pat_desc, rec_flag with
+             | Tpat_var { id; _ }, Asttypes.Nonrecursive ->
+               let sort = rhs_ir.Ir.sort in
+               let sym = Vox_lower.Symbols.value (Path.Pident id) in
+               let x : Ir.t =
+                 { desc = Var sym; sort; loc = vb.vb_pat.pat_loc }
+               in
+               facts_ref :=
+                 Vox_fact.add !facts_ref
+                   { desc = App (Eq, [x; rhs_ir])
+                   ; sort = Bool
+                   ; loc = vb.vb_pat.pat_loc
+                   }
+                   ~label:("let " ^ Ident.name id)
+                   ~loc:vb.vb_pat.pat_loc
+             | _ -> ()));
+         !facts_ref
        in
        { sc with facts })
     scope vbs
@@ -750,19 +789,34 @@ let discharge_outcome ~dump_only ~loc (outcome : Vox_backend.outcome) =
     true
 
 (* Goal assembly: the imposed head's predicate, lowered and instantiated
-   at the subject.  Obligations fail closed: anything the front end
-   rejects is a located user error here. *)
+   at the subject.  The predicate lowering deposits through the same hook
+   as the subject's did (sharing the pending's once-per-obligation ident
+   set), so a goal may lean on a declared value only its predicate
+   mentions.  Obligations fail closed: anything the front end rejects is a
+   located user error here. *)
 let assemble st (p : pending) : Vox_logic.Obligation.t =
   let env = p.subject.exp_env in
   match Types.get_desc (Ctype.expand_head env p.imposed) with
   | Trefine { ref_payload; ref_pred } ->
+    let facts_ref = ref p.facts in
+    (* only [Resolved_ident] can fire from the predicate front end (a
+       mutable read in a predicate is a rejection, applications and field
+       reads do not lower there), so the scope is inert *)
+    let assembly_scope =
+      { facts = Vox_fact.empty; mutable_decls = []; total_locals = [] }
+    in
+    let deposit =
+      make_deposit st assembly_scope ~env ~seen_idents:p.seen_idents
+        facts_ref
+    in
     let goal_ir =
       try
         let hole_sort =
           Vox_lower.sort_of_type st.symbols ~loc:p.loc env ref_payload
         in
         let pred =
-          Vox_lower.lower_predicate st.symbols ~env ~hole_sort ref_pred
+          Vox_lower.lower_predicate st.symbols ~on_resolved:deposit ~env
+            ~hole_sort ref_pred
         in
         Vox_lower.substitute_hole pred ~hole:p.subject_ir
       with
@@ -771,16 +825,17 @@ let assemble st (p : pending) : Vox_logic.Obligation.t =
       | Vox_lower.Ill_sorted { loc; message } ->
         raise (Error (loc, Predicate_ill_sorted message))
     in
+    let facts = !facts_ref in
     let signature =
       try
         Vox_lower.to_signature st.symbols ~loc:p.loc
-          ~terms:(Vox_fact.terms p.facts @ [goal_ir])
+          ~terms:(Vox_fact.terms facts @ [goal_ir])
       with Vox_lower.Unsupported { loc; reason } ->
         raise (Error (loc, Unrepresentable reason))
     in
     Vox_lower.canonicalise
       { signature
-      ; hypotheses = Vox_fact.hypotheses p.facts
+      ; hypotheses = Vox_fact.hypotheses facts
       ; goal = Vox_lower.emit goal_ir
       ; location = p.loc
       }
@@ -847,23 +902,39 @@ let implementation ~backend:(module B : Vox_backend.BACKEND) ~dump_only
    ([none]) the pass does not run at all; otherwise the flags build the
    config -- [-vox-z3] falling back to the resolution order the test gate
    uses -- and [Vox_backend.plan] selects the backend, failing once, at
-   selection, as a located error. *)
+   selection.  A selection or configuration error has no source position:
+   it reports at the unit's file-level ghost location ([Location.in_file],
+   the convention of other whole-unit errors), never at a fabricated
+   [_none_] position. *)
 let run_if_enabled (str : Typedtree.structure) =
   match !Clflags.vox_backend with
   | "none" -> ()
   | backend_name ->
-    let config =
-      { Vox_backend.Config.timeout_seconds = Some !Clflags.vox_timeout
-      ; z3_command =
-          (match !Clflags.vox_z3 with
-           | Some _ as command -> command
-           | None -> Vox_backend.resolve_z3 ())
-      }
+    let fail message =
+      raise
+        (Error (Location.in_file !Location.input_name, Plan_error message))
     in
-    (match Vox_backend.plan ~backend_name ~config with
-     | Error message -> raise (Error (Location.none, Plan_error message))
-     | Ok No_discharge -> ()
-     | Ok (Dump backend) ->
-       implementation ~backend ~dump_only:true ~config str
-     | Ok (Discharge backend) ->
-       implementation ~backend ~dump_only:false ~config str)
+    (* the name is validated before any solver-command resolution: a PATH
+       search on behalf of a backend that does not exist, or that never
+       reads the command, is work and failure surface for nothing *)
+    (match Vox_backend.select backend_name with
+     | Error message -> fail message
+     | Ok (module Backend : Vox_backend.BACKEND) ->
+       let config =
+         { Vox_backend.Config.timeout_seconds = Some !Clflags.vox_timeout
+         ; z3_command =
+             (match !Clflags.vox_z3 with
+              | Some _ as command -> command
+              | None ->
+                if String.equal Backend.name "z3"
+                then Vox_backend.resolve_z3 ()
+                else None)
+         }
+       in
+       (match Vox_backend.plan ~backend_name ~config with
+        | Error message -> fail message
+        | Ok No_discharge -> ()
+        | Ok (Dump backend) ->
+          implementation ~backend ~dump_only:true ~config str
+        | Ok (Discharge backend) ->
+          implementation ~backend ~dump_only:false ~config str))

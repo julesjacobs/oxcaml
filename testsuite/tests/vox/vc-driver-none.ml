@@ -4,27 +4,14 @@
 *)
 
 (* The default driver policy: -vox-backend none short-circuits before the
-   walk, so a unit full of refined claims — including one that a solver
-   would refute — compiles silently, byte-identical to today
-   (design-docs/vc-generation.md, "Where the pass sits").  Under this
-   default, refined types are recorded, unverified claims. *)
+   walk (design-docs/vc-generation.md, "Where the pass sits").  The control
+   is the unrepresentable shape: under any running backend it is a located
+   tier-2 error raised by the WALK itself (vc-z3.ml's `unrepresentable`),
+   so its silent compilation here pins that the pass does not run at all —
+   not merely that nothing is discharged.  Under this default, refined
+   types are recorded, unverified claims. *)
 
-let v : int{ _ > 0 } = 5;;
+let unrepresentable_control : (int -> int){ true } = fun x -> x;;
 [%%expect{|
-val v : int{ _ > 0 } = 5
-|}]
-
-let refuted_but_not_run : int{ _ > 0 } = 0;;
-[%%expect{|
-val refuted_but_not_run : int{ _ > 0 } = 0
-|}]
-
-let f1 : int{ _ > 0 } -> int = fun y -> y;;
-[%%expect{|
-val f1 : int{ _ > 0 } -> int = <fun>
-|}]
-
-let arrow_domain = f1 5;;
-[%%expect{|
-val arrow_domain : int = 5
+val unrepresentable_control : (int -> int){ true } = <fun>
 |}]

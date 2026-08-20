@@ -11,6 +11,6 @@
 
 let v : int{ _ > 0 } = 5;;
 [%%expect{|
-File "_none_", line 1:
+Line 1:
 Error: z3 backend: solver command false failed (exit code 1):
 |}]

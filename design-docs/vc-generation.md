@@ -64,8 +64,10 @@ deliberately left for this piece to expose:
 - `-vox-z3 CMD`, explicit override. When absent, the driver resolves the
   command exactly as the solver piece's test gate does
   (`testsuite/tests/vox-solver/has_z3.sh:5-8`): `$VOX_TEST_Z3` if set, else
-  `z3` on `PATH`, else the pinned install the gate names — same checks,
-  same order, so a gate skip decision and a driver run decision can never
+  `z3` on `PATH`, else the pinned install the gate names — same checks
+  with the gate's executable-aware semantics (`command -v` / `test -x`:
+  a directory or non-executable file named z3 is never selected), same
+  order, so a gate skip decision and a driver run decision can never
   disagree. The result fills `Config.z3_command`; availability is checked
   once at selection (`Vox_backend.plan` already does this) and the failure
   message names `-vox-backend none`.
@@ -395,7 +397,14 @@ the predicate binds); nothing here forecloses that. Fixture:
 *transparently* (next section). `&&`/`||` left operands and `assert` are the
 same rule and land day one only if free (they are the same code path);
 `while` conditions, match guards and comprehension guards are deferred with
-the match facts.
+the match facts. The `assert` arm is additionally gated on `-noassert`:
+translcore erases `assert e` under the flag
+(`lambda/translcore.ml`, `Texp_assert`), so a fact from the erased test
+would claim what nothing checked at run time — except syntactic
+`assert false`, which translcore keeps raising and whose fact therefore
+stays, ungated. Fixtures: `assert-fact` (the fact proves the sequence
+tail's goal), and `vc-z3-noassert.ml` (the same shape refuses under
+`-noassert`; `assert false` is its ungated positive control).
 
 The gate is about which lowering the condition gets, not about soundness of
 the branch fact as such: a condition that lowers to interpreted operators
@@ -529,13 +538,21 @@ emitter consumes it:
   the refined type; free paths get their `val_type` (resolved in the
   node's `exp_env` — the *translation* may consult `Env`; closedness means
   the *backend* never does, and every resolved symbol lands in the
-  signature); constants have manifest sorts; interpreted operators
+  signature — and resolving a free ident whose declared type is refined
+  deposits the instantiated declared fact through the same hook the
+  subject front end uses, so a goal may lean on a declared value only its
+  predicate mentions; fixtures `predicate-ident-fact` and
+  `wildcard-read`); constants have manifest sorts; interpreted operators
   constrain their operands; predicate-local binders take their bound
   expression's inferred sort. A clash is a located error at the
   obligation's site — `int{ 1 + true }` dies here, as a sort error the
   user can read, not inside a solver. The same front end normalises to the
   quantifier-free fragment: predicate `let`s are substituted, supported
-  lambdas beta-reduced, `match` lowered to `Ite`/`Test`/`Select`, and any
+  lambdas beta-reduced, `match` lowered to `Ite`/`Select` with equality
+  tests (the day-one matchable subjects — tuples, integer and Boolean
+  patterns — need no `Term.Test`, so the IR carries no tester or binder
+  forms; `Test` earns its IR form with the first constructor-pattern
+  corpus), and any
   residual binder form (an unapplied lambda, a match the translation
   cannot lower) is a located rejection in tier 2's shape. Fixture:
   `predicate-sort-error`.
@@ -639,11 +656,21 @@ plus, for functions, the ground sort signature of this use:
   the instance sorts into the name using `Sort.key`
   (`typing/vox_logic.mli:41-43`, built for exactly this), in the
   `name<key,...>` shape `Signature.instantiate` already uses for datatype
-  instances (`typing/vox_logic.ml:148`): a total polymorphic `id` used at
-  `int` and at `bool` in one obligation becomes two symbols, `id_3<Bv63>`
-  and `id_3<Bool>`. Sorts, constructors and selectors of instantiated
-  datatypes get exactly `instantiate`'s mangling — one convention, two
-  producers.
+  instances (`typing/vox_logic.ml:148`); the mangled signature is the full
+  ground signature of the use — argument sorts and result sort — so a
+  total polymorphic `id` used at `int` and at `bool` in one obligation
+  becomes two symbols, `id_3<Bv63,Bv63>` and `id_3<Bool,Bool>`. Sorts,
+  constructors and selectors of instantiated datatypes get exactly
+  `instantiate`'s mangling — one convention, two producers — and every
+  datatype member (constructor or selector) is *qualified with the stamped
+  declaration name* (`box_1.first_pos`, `ab_1.A`, the tuple-selector
+  pattern): members of all datatypes share the solver's one namespace, so
+  a bare constructor or label name would make two declarations sharing it
+  an ill-formed obligation on valid source. Term-side constructor uses
+  carry the same qualified, instance-mangled name (`option.Some<Bv63>`),
+  so terms and instantiated declarations agree. Fixtures:
+  `member-namespace` (duplicate constructor names, duplicate labels, a
+  parametric constructor in a subject).
 - Opaque constants mint as `result/<counter>`; hypothesis labels are
   `h<id>`.
 
@@ -679,9 +706,16 @@ sort, run through `Signature.instantiate` for monomorphisation.
 Concrete-vs-abstract follows solver-interface's rule with the deciding
 environment pinned and the concrete subset stated. A type whose declaration
 (via the subject's `exp_env`) has a visible definition *and* is a regular
-closed variant with at least one constructor, a record, or a tuple becomes
-a `Datatype.decl` — constructors, selectors, testers; records and tuples as
-single-constructor datatypes. A visible definition outside that subset is a
+closed variant with at least one constructor, a record whose fields are all
+immutable, or a tuple becomes a `Datatype.decl` — constructors, selectors,
+testers; records and tuples as single-constructor datatypes. A record with
+a mutable field is *not* a datatype even though its definition is visible:
+a datatype's constructor is extensional, so `mk r.a r.b = mk r.a' r.b'`
+would equate two states of the record that differ only across a write —
+it becomes an uninterpreted sort instead (its reads already abstract), a
+completeness loss where a datatype would be a soundness loss. Fixture:
+`mutable-record` (the printed baseline is a `declare-sort`). A visible
+definition outside that subset is a
 located rejection day one: `Type_open` declarations
 (`typing/types.mli:979`) have no finite constructor list to close, an
 empty variant is a renderer error (`typing/vox_smtlib.ml:181-182`), and the
@@ -990,9 +1024,15 @@ mechanism alone is disabled:
   (`refuted-const`-shaped), because a counterexample model over variables
   prints z3-version-dependent text and the fixture must pin behaviour, not
   a solver build.
-- driver: `-vox-backend none` compiles the whole corpus silently;
-  `-vox-backend nonsense` and an unconfigured z3 fail once, at selection;
-  and one malformed-signature test — a compiled driver test (the solver
+- driver: `-vox-backend none` compiles the unrepresentable control
+  (`(int -> int){ true }`, a walk-time located error under any running
+  backend) silently, pinning that `none` short-circuits *before the walk*,
+  not merely before discharge; `-vox-backend nonsense` and an unconfigured
+  z3 fail once, at selection; one fixture runs as a batch `ocamlc` action
+  over an unrefined phrase, covering the `Compile_common` hook (every
+  expect fixture exercises only the `Topcommon` hook) and
+  selection-before-obligations for a zero-obligation unit; and one
+  malformed-signature test — a compiled driver test (the solver
   piece's `z3_backend.ml` shape) feeding the Dump path an ill-formed
   obligation, pinning that a renderer `Error` reports and refuses even in
   Dump mode. Compiled, because once the allocator above exists, source
@@ -1186,3 +1226,64 @@ changed, and why, one line each:
 - **Continue-past-failure defects are variable-free** — counterexample
   model text varies across z3 versions; constants keep the fixture about
   the protocol, not the solver build.
+
+### Amended after round 1 of implementation review
+
+Two grounded reviews of the implementation (each finding reproduced with a
+compiled program before adoption). What changed, one line each:
+
+- **Assert path conditions are gated on `-noassert`** — translcore erases
+  the assert the fact claims was checked (syntactic `assert false`
+  excepted); the path-conditions section states the gate and
+  `vc-z3-noassert.ml` pins it.
+- **Datatype members are qualified with the stamped declaration name and
+  term constructors carry the instantiated name** — bare members made two
+  datatypes sharing a constructor or label an ill-formed-obligation
+  refusal on valid source, and a bare `Some` disagreed with
+  `Signature.instantiate`'s mangled declaration; the renderer's concise
+  reason now also rides in `failure.cause` instead of only the raw
+  payload.
+- **The driver resolves z3 with the gate's executable-aware checks**
+  (`command -v` / `test -x`) — `Sys.file_exists` selected a directory or
+  non-executable named z3 that the gate skips, so the two decisions could
+  disagree on one machine.
+- **`Stdlib.Bigint.t` maps to `Int`** as the sort vocabulary always said
+  (resolved through `Env.normalize_type_path` so the alias and the unit
+  spelling agree); it had fallen to `Uninterpreted`.
+- **Both front ends deposit declared facts through one hook** — the
+  predicate front end resolved refined free idents without depositing, so
+  a goal whose predicate mentions a declared value the subject never
+  touches was `Unknown`; goal assembly now deposits through the pending's
+  own once-per-obligation set.
+- **Every binding rhs is lowered, whatever its pattern** — only
+  `Tpat_var` rhs were lowered, so `let _ = w in ...` contributed no facts
+  while `let u = w in ...` proved; the let *equality* still needs the
+  stable symbol only a variable pattern binds.
+- **Driver-glue placement kept in `Vox_verify.run_if_enabled`, with the
+  contract stated** — the doc's "the caller builds the arguments" is
+  realized as one shared helper both drivers call rather than
+  duplicated caller-side construction (one raise serves batch and
+  toplevel); the smaller honest fix over extracting a driver-side seam.
+  Selection and configuration errors report at the unit's file-level
+  ghost location (`Location.in_file`, the convention of other whole-unit
+  errors such as inconsistent-assumption reports) instead of a fabricated
+  `File "_none_", line 1` header, and the backend name is validated
+  before any solver-command resolution.
+- **Mutable-field records stay uninterpreted sorts** — stated as the
+  datatype rule's own boundary (a constructor's extensional equality
+  would equate two states straddling a write), with the `mutable-record`
+  fixture pinning the `declare-sort`.
+- **The IR carries no `Test`, `Let` or `Lambda` forms and the allocator
+  keeps no symbol tables** — predicate lets/lambdas normalise away before
+  the IR and the day-one matchable subjects need no tester, so the
+  variants were unconstructible; signature assembly closes over the
+  obligation's terms, so the tables were unread.  `Term.Test` remains in
+  the solver language for the first constructor-pattern corpus.
+- **The allocator example shows the full ground signature**
+  (`id_3<Bv63,Bv63>`), which is what the implemented rule mangles.
+- **Test polish** — the sealed-datatype pair kept only its discriminating
+  half (`sd_env`/`sd_env_out`); `dump_policy.ml` prints the renderer
+  result and the four policy booleans instead of value dumps; the
+  poly-instances narration states the then-arm is `Unknown`; the
+  default-`none` fixture's control is the unrepresentable shape, pinning
+  skip-before-walk.

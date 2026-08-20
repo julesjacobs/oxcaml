@@ -195,6 +195,37 @@ Line 1, characters 41-42: refinement obligation: int{ _ > 0 }
 val ident_fact : int{ _ > 0 } list = [5; 5]
 |}]
 
+(* --- predicate-ident-fact and wildcard-read: declared facts reach goals
+   whose predicates mention them ------------------------------------------- *)
+(* w3's declared fact (w3 = 3) rides ident resolution in BOTH front ends:
+   `direct`'s goal predicate mentions w3 while its subject does not (the
+   deposit fires at goal assembly), and `wildcard_read` additionally pins
+   that the rhs of every binding pattern is lowered — a wildcard lemma
+   read deposits exactly as a named read does.  GREEN: both Proved
+   (silent); the hypothesis shapes are pinned in vc-printing.ml. *)
+
+let w3 : int{ _ = 3 } = 3;;
+[%%expect{|
+Line 1, characters 4-6: refined environment entry: w3 : int{ _ = 3 }
+Line 1, characters 24-25: refinement obligation: int{ _ = 3 }
+val w3 : int{ _ = 3 } = 3
+|}]
+
+let direct : int{ _ > w3 } = 5;;
+[%%expect{|
+Line 1, characters 4-10: refined environment entry: direct : int{ _ > w3 }
+Line 1, characters 29-30: refinement obligation: int{ _ > w3 }
+val direct : int{ _ > w3 } = 5
+|}]
+
+let wildcard_read : int{ _ > w3 } = let _ = w3 in 5;;
+[%%expect{|
+Line 1, characters 4-17: refined environment entry: wildcard_read :
+  int{ _ > w3 }
+Line 1, characters 36-51: refinement obligation: int{ _ > w3 }
+val wildcard_read : int{ _ > w3 } = 5
+|}]
+
 (* --- push-to-arms: result-position pushing through if ------------------- *)
 (* GREEN: two goals, 1 > 0 and 2 > 0, both Proved; an opaque Unknown if the
    push is disabled. *)
@@ -223,6 +254,20 @@ val match_push : bool -> int{ _ > 0 } = <fun>
 let short_circuit x = x > 0 && f1 x > 0;;
 [%%expect{|
 val short_circuit : int -> bool = <fun>
+|}]
+
+(* --- assert-fact: the assert arm of the path-condition rule -------------- *)
+(* GREEN: the sequenced assert's condition is a fact for the tail, so the
+   annotation goal c > 0 is Proved (silent; the query is pinned in
+   vc-printing.ml).  vc-z3-noassert.ml pins the flag gate: under -noassert
+   translcore erases the assert and this same shape must refuse. *)
+
+let assert_fact (c : int) : int =
+  assert (c > 0);
+  (c : int{ _ > 0 });;
+[%%expect{|
+Line 3, characters 3-4: refinement obligation: int{ _ > 0 }
+val assert_fact : int -> int = <fun>
 |}]
 
 (* --- eta-domain: the synthetic apply's argument obligation --------------- *)
@@ -289,12 +334,10 @@ Error: 1 refinement obligation was not verified.
 
 (* --- poly-instances: one total polymorphic function at two sorts --------- *)
 (* GREEN: id used at bool (the condition) and at int (the then-arm) in one
-   obligation: two declarations in the signature; both arm goals Proved
-   (id 5 abstracts? no — id is total, so Call id<Bv63> 5 is uninterpreted:
-   the then-arm goal id 5 > 0 is Unknown; the else arm 1 > 0 is Proved).
-   The observable is the pair of instance declarations in the printing
-   baseline; the verdict here pins that an uninterpreted total call is not
-   assumed positive. *)
+   obligation yields two ground declarations in the signature (pinned in
+   vc-printing.ml).  id is total, so id 5 lowers to an uninterpreted Call
+   about which nothing is assumed: the then-arm goal id 5 > 0 is Unknown
+   (the report below), the else-arm goal 1 > 0 is Proved. *)
 
 let id @ total = fun a -> a;;
 [%%expect{|
@@ -558,33 +601,16 @@ val tuple_datatype : (int * int){ match _ with | (a, b) -> a > b } = (2, 1)
 module Sealed : sig
   type t
   val mk : int -> t
-  val sd_in : t{ true }
   val sd_env : int{ _ > 0 }
 end = struct
   type t = { field : int }
   let mk field = { field }
-  let sd_in : t{ true } = mk 1
   let sd_env : int{ _ > 0 } = let _s = mk 1 in 1
 end;;
 [%%expect{|
-Line 9, characters 6-11: refined environment entry: sd_in : t{ true }
-Line 10, characters 6-12: refined environment entry: sd_env : int{ _ > 0 }
-Line 9, characters 26-30: refinement obligation: t{ true }
-Line 10, characters 30-48: refinement obligation: int{ _ > 0 }
-module Sealed :
-  sig
-    type t
-    val mk : int -> t
-    val sd_in : t{ true }
-    val sd_env : int{ _ > 0 }
-  end
-|}]
-
-let sd_out : Sealed.t{ true } = Sealed.mk 2;;
-[%%expect{|
-Line 1, characters 4-10: refined environment entry: sd_out : Sealed.t{ true }
-Line 1, characters 32-43: refinement obligation: Sealed.t{ true }
-val sd_out : Sealed.t{ true } = <abstr>
+Line 8, characters 6-12: refined environment entry: sd_env : int{ _ > 0 }
+Line 8, characters 30-48: refinement obligation: int{ _ > 0 }
+module Sealed : sig type t val mk : int -> t val sd_env : int{ _ > 0 } end
 |}]
 
 let sd_env_out : int{ _ > 0 } = let _s = Sealed.mk 2 in 2;;

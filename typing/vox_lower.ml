@@ -27,10 +27,7 @@ module Ir = struct
     | Ite of t * t * t
     | Construct of string * t list
     | Select of string * int * t
-    | Test of string * t
     | Hole
-    | Let of string * t * t
-    | Lambda of string list * t
 end
 
 exception Unsupported of { loc : Location.t; reason : string }
@@ -53,8 +50,6 @@ type resolved =
 module Symbols = struct
   type t =
     { mutable next_opaque : int
-    ; variables : (string, Vox_logic.Sort.t) Hashtbl.t
-    ; functions : (string, Vox_logic.Sort.t list * Vox_logic.Sort.t) Hashtbl.t
     ; mutable node_memo : (Typedtree.expression * Ir.t) list
           (* tier-1 opaque constants, memoized per node (physical identity):
              re-lowering a node yields the constant its first lowering
@@ -65,10 +60,14 @@ module Symbols = struct
           (* parametric declarations by declaration name, fed to
              [Signature.instantiate] at signature assembly *)
     ; datatype_roots :
-        (string, string * Vox_logic.Datatype.ty list) Hashtbl.t
-          (* ground instance name -> (declaration name, arguments): how a
-             [Sort.Datatype] mentioned by a term recovers its root for
-             [Signature.instantiate] *)
+        (string,
+         string * Vox_logic.Datatype.ty list * Vox_logic.Sort.t list)
+          Hashtbl.t
+          (* ground instance name -> (declaration name, arguments, argument
+             sorts): how a [Sort.Datatype] mentioned by a term recovers its
+             root for [Signature.instantiate], and how a constructor use
+             recovers the instance suffix [instantiate] mangles into member
+             names *)
     ; mutable registering : string list
           (* declaration names whose fields are being built: a recursive
              field reference must not re-enter *)
@@ -76,8 +75,6 @@ module Symbols = struct
 
   let create () =
     { next_opaque = 0
-    ; variables = Hashtbl.create 16
-    ; functions = Hashtbl.create 16
     ; node_memo = []
     ; datatype_decls = Hashtbl.create 16
     ; datatype_roots = Hashtbl.create 16
@@ -92,29 +89,20 @@ module Symbols = struct
     | Pident id -> Ident.unique_name id
     | _ -> Path.name path
 
-  let value t path ~sort =
-    let name = symbol_of_path path in
-    Hashtbl.replace t.variables name sort;
-    name
+  let value path = symbol_of_path path
 
   (* The key is identity plus the ground sort signature of the use, so a
      polymorphic function used at two ground instantiations yields two
      declarations; the signature is mangled into the name in
      [Signature.instantiate]'s [name<key,...>] shape. *)
-  let func t path ~params ~result =
+  let func path ~params ~result =
     let keys = List.map Vox_logic.Sort.key (params @ [result]) in
-    let name =
-      Printf.sprintf "%s<%s>" (symbol_of_path path) (String.concat "," keys)
-    in
-    Hashtbl.replace t.functions name (params, result);
-    name
+    Printf.sprintf "%s<%s>" (symbol_of_path path) (String.concat "," keys)
 
-  let fresh_opaque t ~sort =
+  let fresh_opaque t =
     let n = t.next_opaque in
     t.next_opaque <- n + 1;
-    let name = Printf.sprintf "result/%d" n in
-    Hashtbl.replace t.variables name sort;
-    name
+    Printf.sprintf "result/%d" n
 end
 
 let bv63 : Vox_logic.Sort.t = Bitvec 63
@@ -142,15 +130,28 @@ let ty_of_sort st (s : Vox_logic.Sort.t) : Vox_logic.Datatype.ty =
   | Uninterpreted n -> Uninterpreted n
   | Datatype n ->
     (match Hashtbl.find_opt st.Symbols.datatype_roots n with
-     | Some (decl, args) -> Apply (decl, args)
+     | Some (decl, args, _) -> Apply (decl, args)
      | None ->
        Misc.fatal_error
          ("Vox_lower: datatype sort without a registered root: " ^ n))
 
-let record_root st instance_name decl_name args =
+let record_root st instance_name decl_name args arg_sorts =
   if not (Hashtbl.mem st.Symbols.datatype_roots instance_name)
   then Hashtbl.replace st.Symbols.datatype_roots instance_name
-         (decl_name, args)
+         (decl_name, args, arg_sorts)
+
+(* The member (constructor or selector) of a datatype instance, named the
+   way [Signature.instantiate] names it: the member is qualified with the
+   stamped declaration name — members of two datatypes share the solver's
+   one namespace, so a bare [A] or a bare label would collide across
+   declarations — and mangled with the instance's argument sorts. *)
+let instance_member st ~instance member =
+  match Hashtbl.find_opt st.Symbols.datatype_roots instance with
+  | Some (decl_name, _, arg_sorts) ->
+    mangle (decl_name ^ "." ^ member) arg_sorts
+  | None ->
+    Misc.fatal_error
+      ("Vox_lower: datatype sort without a registered root: " ^ instance)
 
 (* A record whose every value can change under a datatype's extensional
    equality is not one: a mutable record becomes an uninterpreted sort
@@ -164,11 +165,20 @@ let record_is_immutable (labels : Types.label_declaration list) =
        | Mutable _ -> false)
     labels
 
+(* The resolved identity of [Stdlib.Bigint.t]; [normalize_type_path]
+   resolves module aliases, so the alias and the compilation-unit spelling
+   agree. *)
+let is_bigint env p =
+  match Env.normalize_type_path None env p with
+  | p -> String.equal (Path.name p) "Stdlib__Bigint.t"
+  | exception Not_found -> false
+
 let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
   let ty = Ctype.expand_head env ty in
   match Types.get_desc ty with
   | Tconstr (p, _, _) when Path.same p Predef.path_bool -> Bool
   | Tconstr (p, _, _) when Path.same p Predef.path_int -> Bitvec 63
+  | Tconstr (p, [], _) when is_bigint env p -> Int
   | Tconstr (p, args, _) ->
     let name = Symbols.symbol_of_path p in
     let arg_sorts () = List.map (sort_of_type st ~loc env) args in
@@ -178,9 +188,11 @@ let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
        Uninterpreted (mangle name (arg_sorts ()))
      | { type_kind = Type_variant _ | Type_record _; _ } as decl ->
        register_datatype st ~loc env p decl;
-       let instance = mangle name (arg_sorts ()) in
+       let sorts = arg_sorts () in
+       let instance = mangle name sorts in
        record_root st instance name
-         (List.map (datatype_ty st ~loc env ~params:[]) args);
+         (List.map (datatype_ty st ~loc env ~params:[]) args)
+         sorts;
        Datatype instance
      | { type_kind = Type_abstract _; _ } ->
        Uninterpreted (mangle name (arg_sorts ()))
@@ -223,7 +235,7 @@ and tuple_sort st ~loc (sorts : Vox_logic.Sort.t list) : Vox_logic.Sort.t =
                   sorts
             } ]
       };
-  record_root st name name [];
+  record_root st name name [] [];
   ignore loc;
   Datatype name
 
@@ -249,6 +261,11 @@ and register_datatype st ~loc env p (decl : Types.type_declaration) =
              decl.type_params
          in
          let field_ty = datatype_ty st ~loc env ~params in
+         (* Members (constructors, selectors) share the solver's one
+            namespace across all datatypes, so every member is qualified
+            with the stamped declaration name — the tuple-selector pattern
+            — rather than emitted bare: two datatypes sharing a
+            constructor or label name must not collide. *)
          let constructors =
            match decl.type_kind with
            | Type_record (labels, _, _) ->
@@ -256,7 +273,8 @@ and register_datatype st ~loc env p (decl : Types.type_declaration) =
                ; fields =
                    List.map
                      (fun (l : Types.label_declaration) ->
-                        Ident.name l.ld_id, field_ty l.ld_type)
+                        name ^ "." ^ Ident.name l.ld_id,
+                        field_ty l.ld_type)
                      labels
                } ]
            | Type_variant ([], _, _) ->
@@ -268,7 +286,7 @@ and register_datatype st ~loc env p (decl : Types.type_declaration) =
                    | Some _ ->
                      unsupported ~loc "its type has a GADT constructor"
                    | None -> ());
-                  let cname = Ident.name cd.cd_id in
+                  let cname = name ^ "." ^ Ident.name cd.cd_id in
                   let fields =
                     match cd.cd_args with
                     | Cstr_tuple args ->
@@ -347,7 +365,7 @@ let to_signature st ~loc ~(terms : Ir.t list) : Vox_logic.Signature.t =
       then begin
         Hashtbl.add seen_sort n ();
         match Hashtbl.find_opt st.Symbols.datatype_roots n with
-        | Some root -> roots := root :: !roots
+        | Some (decl, args, _) -> roots := (decl, args) :: !roots
         | None ->
           Misc.fatal_error
             ("Vox_lower: datatype sort without a registered root: " ^ n)
@@ -375,8 +393,7 @@ let to_signature st ~loc ~(terms : Ir.t list) : Vox_logic.Signature.t =
       List.iter walk args
     | App (_, args) | Construct (_, args) -> List.iter walk args
     | Ite (a, b, c) -> walk a; walk b; walk c
-    | Select (_, _, x) | Test (_, x) | Lambda (_, x) -> walk x
-    | Let (_, a, b) -> walk a; walk b
+    | Select (_, _, x) -> walk x
   in
   List.iter walk terms;
   let decls =
@@ -460,7 +477,7 @@ let interpreted symbols ~prim ~(args : Ir.t list) ~result ~loc :
         Sort.Bool loc
     in
     let out_of_range =
-      ir (Ir.Var (Symbols.fresh_opaque symbols ~sort:bv63)) bv63 loc
+      ir (Ir.Var (Symbols.fresh_opaque symbols)) bv63 loc
     in
     Some (ir (Ir.Ite (in_range, ir (Ir.App (op, args)) bv63 loc, out_of_range))
             bv63 loc)
@@ -532,14 +549,14 @@ let lower_subject symbols ?on_resolved ?(is_total_local = fun _ -> false)
       | Some (_, t) -> t
       | None ->
         let sort = node_sort () in
-        let t = ir (Ir.Var (Symbols.fresh_opaque symbols ~sort)) sort loc in
+        let t = ir (Ir.Var (Symbols.fresh_opaque symbols)) sort loc in
         symbols.Symbols.node_memo <- (e, t) :: symbols.Symbols.node_memo;
         t
     in
     match e.exp_desc with
     | Texp_ident { path; desc; _ } ->
       let sort = node_sort () in
-      let t = ir (Ir.Var (Symbols.value symbols path ~sort)) sort loc in
+      let t = ir (Ir.Var (Symbols.value path)) sort loc in
       resolved (Resolved_ident (path, desc)) t;
       t
     | Texp_constant (Const_int n) -> const_int n loc
@@ -548,10 +565,17 @@ let lower_subject symbols ?on_resolved ?(is_total_local = fun _ -> false)
       ir (Ir.Const (Vox_logic.Literal.Bool (String.equal cstr.cstr_name "true")))
         Bool loc
     | Texp_construct (_, cstr, _, args, _) ->
-      let sort = node_sort () in
-      ir
-        (Ir.Construct (cstr.cstr_name, List.map (fun (_, a) -> lower a) args))
-        sort loc
+      (* the constructor is named as the instantiated declaration names it
+         (qualified, instance-mangled), so the term and the signature
+         agree *)
+      (match node_sort () with
+       | Datatype instance as sort ->
+         ir
+           (Ir.Construct
+              (instance_member symbols ~instance cstr.cstr_name,
+               List.map (fun (_, a) -> lower a) args))
+           sort loc
+       | _ -> opaque ())
     | Texp_tuple (comps, _) ->
       (match node_sort () with
        | Datatype name as sort ->
@@ -616,7 +640,7 @@ let lower_subject symbols ?on_resolved ?(is_total_local = fun _ -> false)
          let call path lowered =
            let params = List.map (fun (a : Ir.t) -> a.Ir.sort) lowered in
            let sort = node_sort () in
-           let name = Symbols.func symbols path ~params ~result:sort in
+           let name = Symbols.func path ~params ~result:sort in
            ir (Ir.Call (name, lowered)) sort loc
          in
          let t =
@@ -658,13 +682,17 @@ let sort_key = Vox_logic.Sort.key
    untyped and nothing upstream or downstream checks predicate sorts) and
    a normaliser to the quantifier-free fragment: [let]s substitute (as
    binder-environment entries), applied lambdas beta-reduce, [match]
-   lowers to [Ite]/[Test]/[Select]; any residual binder form is a located
-   rejection.  A free mention of a mutable variable, or of a value whose
+   lowers to [Ite]/[Select] with equality tests (the day-one matchable
+   subjects — tuples, integer and Boolean patterns — need no
+   [Term.Test]); any residual binder form is a located rejection.  A free mention of a mutable variable, or of a value whose
    type does not cross logicality, is [Reads_mutable_state]: no predicate
    over mutable state has one denotation, so this rejection is fail-closed
    even for facts. *)
-let lower_predicate symbols ~env ~hole_sort
+let lower_predicate symbols ?on_resolved ~env ~hole_sort
     (rexp : Types.refinement_expression) : Ir.t =
+  let resolved r t =
+    match on_resolved with None -> () | Some f -> f r t
+  in
   let require_sort ~loc ~what (t : Ir.t) sort =
     if not (Vox_logic.Sort.equal t.Ir.sort sort)
     then
@@ -685,7 +713,7 @@ let lower_predicate symbols ~env ~hole_sort
         "matching on this subject is not yet supported in predicates"
     in
     match Hashtbl.find_opt symbols.Symbols.datatype_roots name with
-    | Some (decl_name, []) ->
+    | Some (decl_name, [], _) ->
       (match Hashtbl.find_opt symbols.Symbols.datatype_decls decl_name with
        | Some { params = []; constructors; _ } ->
          List.map
@@ -738,7 +766,13 @@ let lower_predicate symbols ~env ~hole_sort
             if not (crosses_logicality env vd.val_type)
             then raise (Reads_mutable_state { loc });
             let sort = sort_of_type symbols ~loc env vd.val_type in
-            ir (Ir.Var (Symbols.value symbols path ~sort)) sort loc)
+            let t = ir (Ir.Var (Symbols.value path)) sort loc in
+            (* the same deposit rule as the subject front end: resolving a
+               free ident whose declared type is refined deposits the
+               instantiated fact — a goal's predicate may lean on a
+               declared value the subject never mentions *)
+            resolved (Resolved_ident (path, vd)) t;
+            t)
        | exception Not_found ->
          unsupported ~loc "this name cannot be resolved at verification time")
     | Rexp_constant { pconst_desc = Pconst_integer (digits, None); _ } ->
@@ -959,9 +993,6 @@ let rec substitute_hole (ir : Ir.t) ~hole =
     | Ite (c, a, b) -> Ite (subst c, subst a, subst b)
     | Construct (c, args) -> Construct (c, List.map subst args)
     | Select (c, i, t) -> Select (c, i, subst t)
-    | Test (c, t) -> Test (c, subst t)
-    | Let (x, e, body) -> Let (x, subst e, subst body)
-    | Lambda (xs, body) -> Lambda (xs, subst body)
   in
   { ir with desc }
 
@@ -974,20 +1005,19 @@ let rec emit (ir : Ir.t) : Vox_logic.Term.t =
   | Ite (c, a, b) -> Ite (emit c, emit a, emit b)
   | Construct (c, args) -> Construct (c, List.map emit args)
   | Select (c, i, t) -> Select (c, i, emit t)
-  | Test (c, t) -> Test (c, emit t)
   | Hole -> Misc.fatal_error "Vox_lower.emit: residual hole"
-  | Let _ -> Misc.fatal_error "Vox_lower.emit: residual let binder"
-  | Lambda _ -> Misc.fatal_error "Vox_lower.emit: residual lambda binder"
 
 (* Renumber an obligation's symbols deterministically so baselines do not
    churn when unrelated edits shift [Ident] stamps: [base_<stamp>] (with an
    optional [<...>] instance suffix) becomes [base_<n>] with [n] assigned
    per base in first-occurrence order (the same stamp keeps one [n] across
    its instance suffixes), and [result/<counter>] renumbers in
-   first-occurrence order.  Unstamped names (module paths, selectors,
-   tuple instances) are already stable and pass through.  Occurrence order
-   is hypotheses, then goal, then the signature — which is itself in
-   first-occurrence term order, so the two agree. *)
+   first-occurrence order.  Dotted names renumber per [.]-separated
+   segment, so a qualified datatype member ([box_<stamp>.first_pos]) stays
+   consistent with its datatype's own renaming; unstamped names (module
+   paths, tuple instances) are already stable and pass through.
+   Occurrence order is hypotheses, then goal, then the signature — which
+   is itself in first-occurrence term order, so the two agree. *)
 let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
   let renames : (string, string) Hashtbl.t = Hashtbl.create 16 in
   let stamp_numbers : (string, int) Hashtbl.t = Hashtbl.create 16 in
@@ -995,6 +1025,38 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
   let opaque_counter = ref 0 in
   let is_digits s =
     s <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) s
+  in
+  let rename_segment segment =
+    let prefix, suffix =
+      match String.index_opt segment '<' with
+      | Some i ->
+        String.sub segment 0 i, String.sub segment i (String.length segment - i)
+      | None -> segment, ""
+    in
+    match String.rindex_opt prefix '_' with
+    | Some i
+      when i > 0
+           && is_digits
+                (String.sub prefix (i + 1)
+                   (String.length prefix - i - 1)) ->
+      let base = String.sub prefix 0 i in
+      let stamp = String.sub prefix i (String.length prefix - i) in
+      let key = base ^ "\000" ^ stamp in
+      let n =
+        match Hashtbl.find_opt stamp_numbers key with
+        | Some n -> n
+        | None ->
+          let n =
+            1
+            + (Option.value ~default:0
+                 (Hashtbl.find_opt base_counters base))
+          in
+          Hashtbl.replace base_counters base n;
+          Hashtbl.add stamp_numbers key n;
+          n
+      in
+      Printf.sprintf "%s_%d%s" base n suffix
+    | _ -> segment
   in
   let rename name =
     match Hashtbl.find_opt renames name with
@@ -1008,38 +1070,9 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
           incr opaque_counter;
           Printf.sprintf "result/%d" !opaque_counter
         end
-        else begin
-          let prefix, suffix =
-            match String.index_opt name '<' with
-            | Some i ->
-              String.sub name 0 i, String.sub name i (String.length name - i)
-            | None -> name, ""
-          in
-          match String.rindex_opt prefix '_' with
-          | Some i
-            when i > 0
-                 && is_digits
-                      (String.sub prefix (i + 1)
-                         (String.length prefix - i - 1)) ->
-            let base = String.sub prefix 0 i in
-            let stamp = String.sub prefix i (String.length prefix - i) in
-            let key = base ^ "\000" ^ stamp in
-            let n =
-              match Hashtbl.find_opt stamp_numbers key with
-              | Some n -> n
-              | None ->
-                let n =
-                  1
-                  + (Option.value ~default:0
-                       (Hashtbl.find_opt base_counters base))
-                in
-                Hashtbl.replace base_counters base n;
-                Hashtbl.add stamp_numbers key n;
-                n
-            in
-            Printf.sprintf "%s_%d%s" base n suffix
-          | _ -> name
-        end
+        else
+          String.concat "."
+            (List.map rename_segment (String.split_on_char '.' name))
       in
       Hashtbl.add renames name renamed;
       renamed

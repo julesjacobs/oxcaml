@@ -300,6 +300,61 @@ Line 1, characters 41-42: refinement obligation: int{ _ > 0 }
 val ident_fact : int{ _ > 0 } list = [5; 5]
 |}]
 
+(* --- predicate-ident-fact / wildcard-read: declared facts for idents the
+   goal's predicate mentions ------------------------------------------------ *)
+(* `direct`'s single hypothesis is deposited at goal assembly (the
+   predicate front end resolving w3); `wildcard_read` carries it twice —
+   once from the wildcard binding's rhs lowering (the scope fact), once
+   from assembly — so each mechanism is one hypothesis line here. *)
+
+let w3 : int{ _ = 3 } = 3;;
+[%%expect{|
+Line 1, characters 4-6: refined environment entry: w3 : int{ _ = 3 }
+Line 1, characters 24-25: refinement obligation: int{ _ = 3 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (not (= (_ bv3 63) (_ bv3 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val w3 : int{ _ = 3 } = 3
+|}]
+
+let direct : int{ _ > w3 } = 5;;
+[%%expect{|
+Line 1, characters 4-10: refined environment entry: direct : int{ _ > w3 }
+Line 1, characters 29-30: refinement obligation: int{ _ > w3 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const w3_1 (_ BitVec 63))
+(assert (! (= w3_1 (_ bv3 63)) :named h1))
+(assert (not (bvsgt (_ bv5 63) w3_1)))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val direct : int{ _ > w3 } = 5
+|}]
+
+let wildcard_read : int{ _ > w3 } = let _ = w3 in 5;;
+[%%expect{|
+Line 1, characters 4-17: refined environment entry: wildcard_read :
+  int{ _ > w3 }
+Line 1, characters 36-51: refinement obligation: int{ _ > w3 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const w3_1 (_ BitVec 63))
+(assert (! (= w3_1 (_ bv3 63)) :named h1))
+(assert (! (= w3_1 (_ bv3 63)) :named h2))
+(assert (not (bvsgt (_ bv5 63) w3_1)))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val wildcard_read : int{ _ > w3 } = 5
+|}]
+
 (* --- push-to-arms / match-push: one obligation, one query per arm -------- *)
 
 let push_to_arms c : int{ _ > 0 } = if c then 1 else 2;;
@@ -347,7 +402,25 @@ Line 2, characters 2-37: refinement obligation: int{ _ > 0 }
 val match_push : bool -> int{ _ > 0 } = <fun>
 |}]
 
-(* --- short-circuit: the && left-operand hypothesis ------------------------ *)
+(* --- assert-fact / short-circuit: the non-if arms of the path-condition
+   rule (assert is gated on -noassert; vc-z3-noassert.ml pins the gate) --- *)
+
+let assert_fact (c : int) : int =
+  assert (c > 0);
+  (c : int{ _ > 0 });;
+[%%expect{|
+Line 3, characters 3-4: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const c_1 (_ BitVec 63))
+(assert (! (bvsgt c_1 (_ bv0 63)) :named h1))
+(assert (not (bvsgt c_1 (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val assert_fact : int -> int = <fun>
+|}]
 
 let short_circuit x = x > 0 && f1 x > 0;;
 [%%expect{|
@@ -376,10 +449,10 @@ Line 1, characters 42-53: refinement obligation: int{ _ > 0 }
 (set-option :timeout 10000)
 (set-option :produce-unsat-cores true)
 (declare-datatypes ((box_1 0)) (
-  ((mk_box_1 (first_pos (_ BitVec 63)) (second (_ BitVec 63))))))
+  ((mk_box_1 (box_1.first_pos (_ BitVec 63)) (box_1.second (_ BitVec 63))))))
 (declare-const b_1 box_1)
-(assert (! (bvsgt (first_pos b_1) (_ bv0 63)) :named h1))
-(assert (not (bvsgt (first_pos b_1) (_ bv0 63))))
+(assert (! (bvsgt (box_1.first_pos b_1) (_ bv0 63)) :named h1))
+(assert (not (bvsgt (box_1.first_pos b_1) (_ bv0 63))))
 (check-sat)
 (get-unsat-core)
 (get-model)
@@ -769,40 +842,180 @@ Line 1, characters 67-73: refinement obligation:
 val tuple_datatype : (int * int){ match _ with | (a, b) -> a > b } = (2, 1)
 |}]
 
-(* --- sealed-datatype: concrete inside, uninterpreted sort outside ---------- *)
-(* The sd_env pair is what makes the two baselines differ: a t-sorted value
-   reaches the signature through the let equality, printing a
-   declare-datatypes inside the module and a declare-sort outside it.  The
-   t{ true } impositions pin acceptance but their goals mention no symbol,
-   so their queries carry no signature at all. *)
+(* --- member-namespace: datatype members are qualified and instance-mangled  *)
+(* Constructors and selectors share the solver's one namespace, so members
+   are qualified with the stamped declaration name (ab_1.A vs cd_1.A;
+   r1_1.shared vs r2_1.shared) — two datatypes sharing a constructor or
+   label name in one obligation is valid source, not an ill-formed
+   obligation — and a parametric constructor in a term carries the
+   instance suffix its instantiated declaration carries (option.Some<Bv63>). *)
 
-module Sealed : sig
-  type t
-  val mk : int -> t
-  val sd_in : t{ true }
-  val sd_env : int{ _ > 0 }
-end = struct
-  type t = { field : int }
-  let mk field = { field }
-  let sd_in : t{ true } = mk 1
-  let sd_env : int{ _ > 0 } = let _s = mk 1 in 1
-end;;
+type ab = A | B;;
 [%%expect{|
-Line 9, characters 6-11: refined environment entry: sd_in : t{ true }
-Line 10, characters 6-12: refined environment entry: sd_env : int{ _ > 0 }
-Line 9, characters 26-30: refinement obligation: t{ true }
-Line 10, characters 30-48: refinement obligation: int{ _ > 0 }
+type ab = A | B
+|}]
+
+type cd = A | C;;
+[%%expect{|
+type cd = A | C
+|}]
+
+let dup_constructor : int{ _ > 0 } =
+  let p : ab = A in
+  let q : cd = A in
+  ignore p; ignore q; 1;;
+[%%expect{|
+Line 1, characters 4-19: refined environment entry: dup_constructor :
+  int{ _ > 0 }
+Lines 2-4, characters 2-23: refinement obligation: int{ _ > 0 }
 (set-option :timeout 10000)
 (set-option :produce-unsat-cores true)
-(assert (not true))
+(declare-datatypes ((ab_1 0)) (
+  ((ab_1.A) (ab_1.B))))
+(declare-datatypes ((cd_1 0)) (
+  ((cd_1.A) (cd_1.C))))
+(declare-const p_1 ab_1)
+(declare-const q_1 cd_1)
+(assert (! (= p_1 ab_1.A) :named h1))
+(assert (! (= q_1 cd_1.A) :named h2))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
 (check-sat)
 (get-unsat-core)
 (get-model)
 (get-info :reason-unknown)
+val dup_constructor : int{ _ > 0 } = 1
+|}]
+
+type r1 = { shared : int };;
+[%%expect{|
+type r1 = { shared : int; }
+|}]
+
+type r2 = { shared : bool };;
+[%%expect{|
+type r2 = { shared : bool; }
+|}]
+
+let dup_label : int{ _ > 0 } =
+  let a : r1 = { shared = 1 } in
+  let b : r2 = { shared = true } in
+  ignore a; ignore b; 1;;
+[%%expect{|
+Line 1, characters 4-13: refined environment entry: dup_label : int{ _ > 0 }
+Lines 2-4, characters 2-23: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((r1_1 0)) (
+  ((mk_r1_1 (r1_1.shared (_ BitVec 63))))))
+(declare-datatypes ((r2_1 0)) (
+  ((mk_r2_1 (r2_1.shared Bool)))))
+(declare-const a_1 r1_1)
+(declare-const result/1 r1_1)
+(declare-const b_1 r2_1)
+(declare-const result/2 r2_1)
+(assert (! (= a_1 result/1) :named h1))
+(assert (! (= b_1 result/2) :named h2))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val dup_label : int{ _ > 0 } = 1
+|}]
+
+let parametric_constructor : int{ _ >= 0 } =
+  let sx = Some 1 in
+  ignore sx; 0;;
+[%%expect{|
+Line 1, characters 4-26: refined environment entry: parametric_constructor :
+  int{ _ >= 0 }
+Lines 2-3, characters 2-14: refinement obligation: int{ _ >= 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((option<Bv63> 0)) (
+  ((option.None<Bv63>) (option.Some<Bv63> (option.Some.0<Bv63> (_ BitVec 63))))))
+(declare-const sx_1 option<Bv63>)
+(assert (! (= sx_1 (option.Some<Bv63> (_ bv1 63))) :named h1))
+(assert (not (bvsge (_ bv0 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val parametric_constructor : int{ _ >= 0 } = 0
+|}]
+
+(* --- bigint-sort: Stdlib.Bigint.t is the mathematical Int sort ------------- *)
+
+let bigint_sort (b : Stdlib.Bigint.t) : int{ _ > 0 } =
+  let _same = b in
+  1;;
+[%%expect{|
+Lines 2-3, characters 2-3: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const _same_1 Int)
+(declare-const b_1 Int)
+(assert (! (= _same_1 b_1) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val bigint_sort : Bigint.t -> int{ _ > 0 } = <fun>
+|}]
+
+(* --- mutable-record: an uninterpreted sort, never a datatype --------------- *)
+(* A datatype's constructor would equate two states of the record that
+   differ only across a write (extensional equality); opacity merely loses
+   completeness, so a record with a mutable field declares as a sort. *)
+
+type mrec = { mutable cur : int };;
+[%%expect{|
+type mrec = { mutable cur : int; }
+|}]
+
+let mutable_record : int{ _ > 0 } =
+  let mr = { cur = 1 } in
+  ignore mr; 1;;
+[%%expect{|
+Line 1, characters 4-18: refined environment entry: mutable_record :
+  int{ _ > 0 }
+Lines 2-3, characters 2-14: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-sort mrec_1 0)
+(declare-const mr_1 mrec_1)
+(declare-const result/1 mrec_1)
+(assert (! (= mr_1 result/1) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val mutable_record : int{ _ > 0 } = 1
+|}]
+
+(* --- sealed-datatype: concrete inside, uninterpreted sort outside ---------- *)
+(* The sd_env pair makes the two baselines differ: a t-sorted value reaches
+   the signature through the let equality, printing a declare-datatypes
+   inside the module and a declare-sort outside it. *)
+
+module Sealed : sig
+  type t
+  val mk : int -> t
+  val sd_env : int{ _ > 0 }
+end = struct
+  type t = { field : int }
+  let mk field = { field }
+  let sd_env : int{ _ > 0 } = let _s = mk 1 in 1
+end;;
+[%%expect{|
+Line 8, characters 6-12: refined environment entry: sd_env : int{ _ > 0 }
+Line 8, characters 30-48: refinement obligation: int{ _ > 0 }
 (set-option :timeout 10000)
 (set-option :produce-unsat-cores true)
 (declare-datatypes ((t_1 0)) (
-  ((mk_t_1 (field (_ BitVec 63))))))
+  ((mk_t_1 (t_1.field (_ BitVec 63))))))
 (declare-const _s_1 t_1)
 (declare-const result/1 t_1)
 (assert (! (= _s_1 result/1) :named h1))
@@ -811,27 +1024,7 @@ Line 10, characters 30-48: refinement obligation: int{ _ > 0 }
 (get-unsat-core)
 (get-model)
 (get-info :reason-unknown)
-module Sealed :
-  sig
-    type t
-    val mk : int -> t
-    val sd_in : t{ true }
-    val sd_env : int{ _ > 0 }
-  end
-|}]
-
-let sd_out : Sealed.t{ true } = Sealed.mk 2;;
-[%%expect{|
-Line 1, characters 4-10: refined environment entry: sd_out : Sealed.t{ true }
-Line 1, characters 32-43: refinement obligation: Sealed.t{ true }
-(set-option :timeout 10000)
-(set-option :produce-unsat-cores true)
-(assert (not true))
-(check-sat)
-(get-unsat-core)
-(get-model)
-(get-info :reason-unknown)
-val sd_out : Sealed.t{ true } = <abstr>
+module Sealed : sig type t val mk : int -> t val sd_env : int{ _ > 0 } end
 |}]
 
 let sd_env_out : int{ _ > 0 } = let _s = Sealed.mk 2 in 2;;

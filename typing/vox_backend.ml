@@ -495,29 +495,21 @@ let select name =
          name
          (String.concat ", " backend_names))
 
-(* Mirrors testsuite/tests/vox-solver/has_z3.sh: $VOX_TEST_Z3 if set, else
-   z3 on PATH, else the pinned install the gate names — same checks, same
-   order, so a gate skip decision and a driver run decision can never
-   disagree. *)
+(* Mirrors testsuite/tests/vox-solver/has_z3.sh (vox/has_z3.sh is kept
+   byte-identical): $VOX_TEST_Z3 if set, else z3 on PATH, else the pinned
+   install the gate names — same checks, same order, and the gate's own
+   executable-aware semantics ([command -v], [test -x]), so a directory or
+   a non-executable file named z3 is never selected and a gate skip
+   decision and a driver run decision can never disagree. *)
 let pinned_z3 = "/j/office/app/z3/prod/4.8.5/install/bin/z3"
 
 let resolve_z3 () =
   match Sys.getenv_opt "VOX_TEST_Z3" with
   | Some command when not (String.equal command "") -> Some command
   | Some _ | None ->
-    let on_path =
-      match Sys.getenv_opt "PATH" with
-      | None -> false
-      | Some path ->
-        List.exists
-          (fun dir ->
-             (not (String.equal dir ""))
-             && Sys.file_exists (Filename.concat dir "z3"))
-          (String.split_on_char ':' path)
-    in
-    if on_path
+    if Sys.command "command -v z3 > /dev/null 2>&1" = 0
     then Some "z3"
-    else if Sys.file_exists pinned_z3
+    else if Sys.command ("test -x " ^ Filename.quote pinned_z3) = 0
     then Some pinned_z3
     else None
 
