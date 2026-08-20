@@ -85,6 +85,13 @@ val backends : (module BACKEND) list
 (** Look up a backend by name.  The error message lists the valid names. *)
 val select : string -> ((module BACKEND), string) result
 
+(** How the driver finds z3 when [-vox-z3] is absent, mirroring the test
+    gate (testsuite/tests/vox-solver/has_z3.sh): [$VOX_TEST_Z3] if set,
+    else [z3] on [PATH], else the pinned install the gate names — same
+    checks, same order, so a gate skip decision and a driver run decision
+    can never disagree.  [None] when none of the three is available. *)
+val resolve_z3 : unit -> string option
+
 (** Driver policy for [-vox-backend].  ["none"] is not a backend: a backend
     answering every obligation with [Unknown] would report every obligation
     as unproved, and one answering [Unavailable] would report every unit as

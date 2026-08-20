@@ -19,7 +19,10 @@ type error =
   | Unrepresentable of string
   | Dependent_arrow
   | Stacked_refinement_heads
-  | Discharge_not_implemented of int
+  | Predicate_ill_sorted of string
+  | Predicate_reads_mutable
+  | Not_verified of int
+  | Plan_error of string
 
 exception Error of Location.t * error
 
@@ -35,7 +38,6 @@ type pending =
   ; facts : Vox_fact.t  (* in scope at the subject *)
   ; loc : Location.t
   }
-[@@warning "-69"] (* [subject]/[subject_ir] feed the goal (next stage) *)
 
 type state =
   { symbols : Vox_lower.Symbols.t
@@ -44,6 +46,11 @@ type state =
         (* consumer-side dedup: one pending per (subject node, imposed type
            up to [Ctype.is_equal]) -- markers and apply-arrow domains
            overlap (annotated arguments, the %ignore path) *)
+  ; mutable admissions : (Path.t * Types.type_expr) list
+        (* newest first, deduplicated by path: the refined contracts of
+           externals and imported declarations that deposited facts --
+           axioms nothing in this unit checked, reported at exit so a
+           Proved is visibly conditional on them *)
   }
 
 (* The walk threads a scope value down, so branch scoping is the data
@@ -55,7 +62,30 @@ type scope =
         (* [let mutable] binders in scope, with their declared types: a
            [Texp_mutvar] read deposits the declared predicate at its
            per-read constant *)
+  ; total_locals : Ident.t list
+        (* local binders whose right-hand side was checked at totality
+           Total (the recorded [Texp_mode] annotation of [let f @ total]):
+           the stability gate's occurrence read cannot see this — the
+           annotation caps the checking mode without pinning the binder's
+           mode variable *)
   }
+
+(* Whether a binding's right-hand side carries a [@ total] mode
+   annotation (recorded as a [Texp_mode] extra by the constraint
+   desugaring). *)
+let rhs_annotated_total (e : Typedtree.expression) =
+  List.exists
+    (fun (extra, _, _) ->
+       match extra with
+       | Texp_mode modes ->
+         (match modes.mode_modes.totality with
+          | Some Mode.Totality.Const.Total -> true
+          | Some Partial | None -> false)
+       | _ -> false)
+    e.exp_extra
+
+let is_total_local scope id =
+  List.exists (Ident.same id) scope.total_locals
 
 let mono ty =
   match Types.get_desc ty with
@@ -118,21 +148,24 @@ let check_imposable env ty loc =
     Misc.fatal_error "Vox_verify: imposed type without a refined head"
 
 (* Fail-open predicate fact: instantiate a declared refined type's
-   predicate at a subject term.  Needs the rexp front end, which is not
-   yet implemented, so every source built on this declines today; the
-   rules and their call sites are what this stage pins down. *)
+   predicate at a subject term.  A source declines what it cannot lower
+   (a completeness gap, never a soundness gap) — except a predicate over
+   mutable state, which has no single denotation and propagates as a
+   located rejection. *)
 let add_predicate_fact st ~env ~label ~loc ty ~subject_ir facts =
   match Types.get_desc (Ctype.expand_head env ty) with
   | Trefine { ref_payload; ref_pred } ->
     (try
-       let hole_sort = Vox_lower.sort_of_type ~loc env ref_payload in
+       let hole_sort =
+         Vox_lower.sort_of_type st.symbols ~loc env ref_payload
+       in
        let pred =
          Vox_lower.lower_predicate st.symbols ~env ~hole_sort ref_pred
        in
        Vox_fact.add facts
          (Vox_lower.substitute_hole pred ~hole:subject_ir)
          ~label ~loc
-     with Vox_lower.Unsupported _ -> facts)
+     with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> facts)
   | _ -> facts
 
 (* Binder facts, unconditional: every bound ident whose recorded pattern
@@ -143,10 +176,15 @@ let add_predicate_fact st ~env ~label ~loc ty ~subject_ir facts =
 let add_binder_facts st ~env pat facts =
   List.fold_left
     (fun facts (id, (name : string Location.loc), ty, _, _) ->
+       (* arrow domains are [Tpoly]-wrapped, and synthetic binders (the
+          optional-elimination eta pattern) record them unmono'ed *)
+       let ty = mono ty in
        match Types.get_desc (Ctype.expand_head env ty) with
        | Trefine _ ->
          (try
-            let sort = Vox_lower.sort_of_type ~loc:name.loc env ty in
+            let sort =
+              Vox_lower.sort_of_type st.symbols ~loc:name.loc env ty
+            in
             let sym =
               Vox_lower.Symbols.value st.symbols (Path.Pident id) ~sort
             in
@@ -154,7 +192,7 @@ let add_binder_facts st ~env pat facts =
             add_predicate_fact st ~env
               ~label:("binder " ^ Ident.name id)
               ~loc:name.loc ty ~subject_ir facts
-          with Vox_lower.Unsupported _ -> facts)
+          with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> facts)
        | _ -> facts)
     facts
     (pat_bound_idents_full pat)
@@ -176,6 +214,28 @@ let apply_codomain (e : Typedtree.expression) =
     spine funct.exp_type args
   | _ -> None
 
+(* An assumed contract: a refined declaration nothing in this unit
+   checked — an external's, or an imported unit's.  Same-unit
+   declarations had their own obligations discharged here (or refused
+   with the unit), so they are not axioms. *)
+let is_axiom_source path (vd : Types.value_description) =
+  (match vd.val_kind with Val_prim _ -> true | _ -> false)
+  || Ident.is_global_or_predef (Path.head path)
+
+let record_admission st path (vd : Types.value_description) =
+  if is_axiom_source path vd
+     && not (List.exists (fun (p, _) -> Path.same p path) st.admissions)
+  then st.admissions <- (path, vd.val_type) :: st.admissions
+
+(* The declaration behind an application's funct, when it is one. *)
+let funct_declaration (e : Typedtree.expression) =
+  match e.exp_desc with
+  | Texp_apply (funct, _, _, _, _, _) ->
+    (match funct.exp_desc with
+     | Texp_ident { path; desc; _ } -> Some (path, desc)
+     | _ -> None)
+  | _ -> None
+
 (* The fact sources that ride on the subject lowering.  Deposits go to
    [facts_ref]: the obligation's own snapshot at finalization, or the
    scope under construction for a let equality / path condition. *)
@@ -190,17 +250,27 @@ let make_deposit st scope ~env facts_ref =
       if not (List.exists (Path.same path) !seen_idents)
       then begin
         seen_idents := path :: !seen_idents;
-        facts_ref :=
+        let facts =
           add_predicate_fact st ~env
             ~label:("value " ^ Path.name path)
             ~loc:ir.Ir.loc vd.val_type ~subject_ir:ir !facts_ref
+        in
+        if facts != !facts_ref then record_admission st path vd;
+        facts_ref := facts
       end
     | Resolved_apply e ->
       (match apply_codomain e with
        | Some cod ->
-         facts_ref :=
+         let facts =
            add_predicate_fact st ~env ~label:"apply codomain"
              ~loc:e.exp_loc cod ~subject_ir:ir !facts_ref
+         in
+         (if facts != !facts_ref
+          then
+            match funct_declaration e with
+            | Some (path, vd) -> record_admission st path vd
+            | None -> ());
+         facts_ref := facts
        | None -> ())
     | Resolved_field (e, lbl) ->
       facts_ref :=
@@ -243,7 +313,7 @@ let transparent_condition st scope (cond : Typedtree.expression) =
   match
     Vox_lower.lower_subject st.symbols
       ~on_resolved:(make_deposit st scope ~env:cond.exp_env facts_ref)
-      cond
+      ~is_total_local:(is_total_local scope) cond
   with
   | exception Vox_lower.Unsupported _ -> None
   | ci ->
@@ -300,7 +370,7 @@ let finalize st scope ~imposed (e : Typedtree.expression) =
     (match
        Vox_lower.lower_subject st.symbols
          ~on_resolved:(make_deposit st scope ~env:e.exp_env facts_ref)
-         e
+         ~is_total_local:(is_total_local scope) e
      with
      | subject_ir ->
        List.iter
@@ -510,6 +580,12 @@ and walk_bindings st scope rec_flag vbs =
   List.iter (fun vb -> walk_expr st scope ~imposed:[] vb.vb_expr) vbs;
   List.fold_left
     (fun sc vb ->
+       let sc =
+         match vb.vb_pat.pat_desc with
+         | Tpat_var { id; _ } when rhs_annotated_total vb.vb_expr ->
+           { sc with total_locals = id :: sc.total_locals }
+         | _ -> sc
+       in
        let facts =
          add_binder_facts st ~env:vb.vb_pat.pat_env vb.vb_pat sc.facts
        in
@@ -522,7 +598,7 @@ and walk_bindings st scope rec_flag vbs =
                 Vox_lower.lower_subject st.symbols
                   ~on_resolved:
                     (make_deposit st sc ~env:vb.vb_expr.exp_env facts_ref)
-                  vb.vb_expr
+                  ~is_total_local:(is_total_local sc) vb.vb_expr
               in
               let sort = rhs_ir.Ir.sort in
               let sym =
@@ -575,43 +651,219 @@ let report_error ~loc = function
   | Stacked_refinement_heads ->
     Location.errorf ~loc
       "Consecutive refinement heads cannot yet be verified."
-  | Discharge_not_implemented n ->
+  | Predicate_ill_sorted message ->
+    Location.errorf ~loc "This refinement predicate is ill-sorted:@ %s."
+      message
+  | Predicate_reads_mutable ->
     Location.errorf ~loc
-      "Refinement verification is not yet implemented:@ %d refinement \
-       obligation%s collected but not discharged."
-      n
-      (if n = 1 then "" else "s")
+      "This predicate reads mutable state, which cannot yet be verified."
+  | Not_verified n ->
+    Location.errorf ~loc
+      "%d refinement obligation%s not verified." n
+      (if n = 1 then " was" else "s were")
+  | Plan_error message -> Location.errorf ~loc "%s" message
 
 let () =
   Location.register_error_of_exn (function
     | Error (loc, err) -> Some (report_error ~loc err)
     | _ -> None)
 
-let implementation ~backend:_ ~dump_only ~config:_
-    (str : Typedtree.structure) =
-  let st =
-    { symbols = Vox_lower.Symbols.create (); pendings = []; seen = [] }
-  in
-  let base = { facts = Vox_fact.empty; mutable_decls = [] } in
-  let it = iterator st base in
-  it.structure it str;
-  let pendings = List.rev st.pendings in
-  if dump_only
-  then
-    (* Scaffolding output: the pending stream and each obligation's
-       hypothesis snapshot, replaced by the real query dump when the
-       predicate front end and discharge land (next stage). *)
+(* A best-effort rendering of counterexample values (term-valued models,
+   see [Vox_backend.model]); [Bitvec] literals print as the OCaml ints
+   they are. *)
+let rec term_to_string : Vox_logic.Term.t -> string = function
+  | Var name -> name
+  | Const (Bool b) -> string_of_bool b
+  | Const (Int digits) -> digits
+  | Const (Bitvec { width; value }) ->
+    let signed =
+      if width >= 64
+      then value
+      else
+        let m = Int64.shift_left 1L width in
+        let masked = Int64.logand value (Int64.sub m 1L) in
+        if Int64.equal (Int64.logand masked (Int64.shift_left 1L (width - 1)))
+             0L
+        then masked
+        else Int64.sub masked m
+    in
+    Int64.to_string signed
+  | Construct (c, []) -> c
+  | Construct (c, args) ->
+    Printf.sprintf "%s (%s)" c (String.concat ", " (List.map term_to_string args))
+  | (App _ | Call _ | Ite _ | Select _ | Test _) as t ->
+    (* not literal-shaped; models should not contain these, but a reader
+       deserves something over nothing *)
+    (match t with
+     | App (_, args) | Call (_, args) ->
+       Printf.sprintf "(%s)" (String.concat " " (List.map term_to_string args))
+     | _ -> "<term>")
+
+(* Per-obligation failure reports are emitted as they are found, so the
+   editor's readout shows the state of the buffer; the one final refusal
+   error is what fails the build. *)
+let print_failure ~loc fmt =
+  Format.kasprintf
+    (fun message ->
+       Location.print_report Format.std_formatter
+         (Location.error ~loc message))
+    fmt
+
+let model_lines = function
+  | None | Some [] -> ""
+  | Some assignments ->
+    String.concat ""
+      (List.map
+         (fun (name, term) ->
+            Printf.sprintf "\n  %s = %s" name (term_to_string term))
+         assignments)
+
+(* One obligation through the backend: [true] when it failed.  In [Dump]
+   the printing backend's expected non-verdict ([Ok (Unknown _)]) is
+   suppressed; everything else — including a renderer [Error], a defect in
+   this pass's output — reports and counts in both modes. *)
+let discharge_outcome ~dump_only ~loc (outcome : Vox_backend.outcome) =
+  match outcome with
+  | Ok (Proved _) -> false
+  | Ok (Unknown _) when dump_only -> false
+  | Ok (Refuted model) ->
+    print_failure ~loc
+      "Refinement verification failed: the predicate is refutable.%s"
+      (model_lines model);
+    true
+  | Ok (Unknown Timeout) ->
+    print_failure ~loc
+      "This refinement obligation could not be verified: the solver \
+       timed out.";
+    true
+  | Ok (Unknown (Incomplete reason)) ->
+    print_failure ~loc
+      "This refinement obligation could not be verified (%s)." reason;
+    true
+  | Error (Unavailable message) ->
+    (* cannot occur per obligation -- availability was checked at
+       selection -- but a failure to run is still a failure *)
+    print_failure ~loc "The solver backend is unavailable: %s." message;
+    true
+  | Error (Error { cause; raw = _ }) ->
+    print_failure ~loc "The solver backend failed: %s." cause;
+    true
+
+(* Goal assembly: the imposed head's predicate, lowered and instantiated
+   at the subject.  Obligations fail closed: anything the front end
+   rejects is a located user error here. *)
+let assemble st (p : pending) : Vox_logic.Obligation.t =
+  let env = p.subject.exp_env in
+  match Types.get_desc (Ctype.expand_head env p.imposed) with
+  | Trefine { ref_payload; ref_pred } ->
+    let goal_ir =
+      try
+        let hole_sort =
+          Vox_lower.sort_of_type st.symbols ~loc:p.loc env ref_payload
+        in
+        let pred =
+          Vox_lower.lower_predicate st.symbols ~env ~hole_sort ref_pred
+        in
+        Vox_lower.substitute_hole pred ~hole:p.subject_ir
+      with
+      | Vox_lower.Unsupported { loc; reason } ->
+        raise (Error (loc, Unrepresentable reason))
+      | Vox_lower.Ill_sorted { loc; message } ->
+        raise (Error (loc, Predicate_ill_sorted message))
+    in
+    let signature =
+      try
+        Vox_lower.to_signature st.symbols ~loc:p.loc
+          ~terms:(Vox_fact.terms p.facts @ [goal_ir])
+      with Vox_lower.Unsupported { loc; reason } ->
+        raise (Error (loc, Unrepresentable reason))
+    in
+    Vox_lower.canonicalise
+      { signature
+      ; hypotheses = Vox_fact.hypotheses p.facts
+      ; goal = Vox_lower.emit goal_ir
+      ; location = p.loc
+      }
+  | _ ->
+    Misc.fatal_error "Vox_verify: imposed type lost its refined head"
+
+let print_admissions st =
+  match List.rev st.admissions with
+  | [] -> ()
+  | admissions ->
+    Format.printf
+      "Refinement verdicts are conditional on %d assumed contract%s:@."
+      (List.length admissions)
+      (if List.length admissions = 1 then "" else "s");
     List.iter
+      (fun (path, ty) ->
+         Format.printf "  %s : %a@." (Path.name path) Printtyp.type_expr ty)
+      admissions
+
+let implementation ~backend:(module B : Vox_backend.BACKEND) ~dump_only
+    ~config (str : Typedtree.structure) =
+  let st =
+    { symbols = Vox_lower.Symbols.create ()
+    ; pendings = []
+    ; seen = []
+    ; admissions = []
+    }
+  in
+  let base =
+    { facts = Vox_fact.empty; mutable_decls = []; total_locals = [] }
+  in
+  (try
+     let it = iterator st base in
+     it.structure it str
+   with Vox_lower.Reads_mutable_state { loc } ->
+     raise (Error (loc, Predicate_reads_mutable)));
+  let pendings = List.rev st.pendings in
+  (* Sequentially, in source order; the walk continues past a failure (a
+     failed goal's spec already became a fact at walk time -- fact sources
+     read declarations, not verdicts) and the unit is refused at exit,
+     which is what carries the soundness that localisation spent. *)
+  let failures =
+    List.filter_map
       (fun (p : pending) ->
-         Format.printf "@[<2>%a:@ pending obligation:@ %a@]@."
-           Location.print_loc p.loc Printtyp.type_expr p.imposed;
-         List.iter
-           (fun (h : Vox_logic.Obligation.hypothesis) ->
-              Format.printf "  h%d: %s@." h.id h.origin.label)
-           (Vox_fact.hypotheses p.facts))
+         let obligation =
+           try assemble st p
+           with Vox_lower.Reads_mutable_state { loc } ->
+             raise (Error (loc, Predicate_reads_mutable))
+         in
+         if discharge_outcome ~dump_only ~loc:p.loc
+              (B.discharge ~config obligation)
+         then Some p.loc
+         else None)
       pendings
-  else
-    match pendings with
-    | [] -> ()
-    | { loc; _ } :: _ ->
-      raise (Error (loc, Discharge_not_implemented (List.length pendings)))
+  in
+  if not dump_only then print_admissions st;
+  match failures with
+  | [] -> ()
+  | first_loc :: _ ->
+    raise (Error (first_loc, Not_verified (List.length failures)))
+
+(* The driver glue behind [-vox-backend], shared by the batch compilers
+   (Compile_common) and the toplevels (Topcommon): under the default
+   ([none]) the pass does not run at all; otherwise the flags build the
+   config -- [-vox-z3] falling back to the resolution order the test gate
+   uses -- and [Vox_backend.plan] selects the backend, failing once, at
+   selection, as a located error. *)
+let run_if_enabled (str : Typedtree.structure) =
+  match !Clflags.vox_backend with
+  | "none" -> ()
+  | backend_name ->
+    let config =
+      { Vox_backend.Config.timeout_seconds = Some !Clflags.vox_timeout
+      ; z3_command =
+          (match !Clflags.vox_z3 with
+           | Some _ as command -> command
+           | None -> Vox_backend.resolve_z3 ())
+      }
+    in
+    (match Vox_backend.plan ~backend_name ~config with
+     | Error message -> raise (Error (Location.none, Plan_error message))
+     | Ok No_discharge -> ()
+     | Ok (Dump backend) ->
+       implementation ~backend ~dump_only:true ~config str
+     | Ok (Discharge backend) ->
+       implementation ~backend ~dump_only:false ~config str)

@@ -1,21 +1,25 @@
 (* TEST
- flags = "-extension let_mutable -drefinements";
+ readonly_files = "has_z3.sh";
+ script = "sh ${test_source_directory}/has_z3.sh";
+ script;
+ flags = "-extension let_mutable -drefinements -vox-backend z3";
  expect;
 *)
 
 (* Vox VC generation: the full verdict corpus, discharged through the z3
-   backend (design-docs/vc-generation.md, Tests).
+   backend (design-docs/vc-generation.md, Tests); skipped when no solver is
+   installed (has_z3.sh exits 125), exactly like the solver piece's z3
+   tests.  The gate and the driver resolve z3 identically ($VOX_TEST_Z3,
+   then PATH, then the pinned install), so a skip decision and a run
+   decision can never disagree.
 
-   RED state: the vox driver flags do not exist yet, so this runs as a plain
-   expect test with the -drefinements probe.  Every fixture compiles with its
-   obligations recorded — the probe lines below are the obligation map — and
-   nothing is discharged: no verdict, no refusal, no located verification
-   error appears anywhere in this file.  GREEN adds the z3 gate stanza
-   (script has_z3.sh, skip on exit 125, per vox-solver/z3_backend.ml) and
-   -vox-backend z3 to this TEST block and re-promotes, so the RED-to-GREEN
-   diff of the expectations is exactly the set of verdicts a live solver
-   returns: located failure reports for the Refuted/Unknown fixtures and the
-   located rejections, and unchanged val lines for the Proved ones. *)
+   Every verdict below was promoted from a live solver run (z3 4.8.5), never
+   hand-written.  The -drefinements probe lines are the obligation map;
+   Proved obligations are silent, so their fixtures keep bare val lines —
+   their query bytes are pinned in vc-printing.ml — while the
+   Refuted/Unknown fixtures and the located rejections carry their reports
+   in the blocks, followed by the one refusal error naming the count, which
+   also suppresses the phrase's val line. *)
 
 (* --- proved-const: the end-to-end spine -------------------------------- *)
 (* GREEN: goal 5 > 0, no hypotheses: Proved (silent). *)
@@ -87,13 +91,24 @@ val partial_application : int = 7
 
 let late_solved_arrow = let app f x = f x in app f1 0;;
 [%%expect{|
-val late_solved_arrow : int = 0
+Line 1, characters 52-53:
+1 | let late_solved_arrow = let app f x = f x in app f1 0;;
+                                                        ^
+Error: Refinement verification failed: the predicate is refutable.
+Line 1, characters 52-53:
+1 | let late_solved_arrow = let app f x = f x in app f1 0;;
+                                                        ^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- late-solved-residue: argument typed before the domain solved ------ *)
 (* y is checked against a still-open variable; f1 solves it afterwards,
    leaving exp_type residue the fact rules ignore while the arrow walk still
-   collects.  GREEN: goal y > 0, no hypothesis about y: Unknown. *)
+   collects.  Late solving also refines y's pattern type and its environment
+   entry (the strips ran before the domain was determined), so the binder
+   fact and the value-description fact each supply the goal: Proved
+   (silent).  The duplicate hypothesis is the fingerprint, pinned in
+   vc-printing.ml. *)
 
 let late_solved_residue y = let app x f = f x in app y f1;;
 [%%expect{|
@@ -123,7 +138,14 @@ external drop : int{ _ > 0 } -> unit = "%ignore"
 let dedup_ignore = drop 0;;
 [%%expect{|
 Line 1, characters 24-25: refinement obligation: int{ _ > 0 }
-val dedup_ignore : unit = ()
+Line 1, characters 24-25:
+1 | let dedup_ignore = drop 0;;
+                            ^
+Error: Refinement verification failed: the predicate is refutable.
+Line 1, characters 24-25:
+1 | let dedup_ignore = drop 0;;
+                            ^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- dependent-arrow-escape: higher-order solving past the rejection --- *)
@@ -139,7 +161,10 @@ external d : m:int{ m > 0 } -> int = "%identity"
 
 let dependent_arrow_escape = let app f x = f x in app d 5;;
 [%%expect{|
-val dependent_arrow_escape : int = 5
+Line 1, characters 56-57:
+1 | let dependent_arrow_escape = let app f x = f x in app d 5;;
+                                                            ^
+Error: This application involves a dependent function type that cannot yet be verified.
 |}]
 
 (* --- fact-binder-and-path: the centrepiece ------------------------------ *)
@@ -252,7 +277,14 @@ let stability_mutable_arg (r : int ref) : int{ _ = 0 } =
   reads_param r - a;;
 [%%expect{|
 Lines 2-4, characters 2-19: refinement obligation: int{ _ = 0 }
-val stability_mutable_arg : int ref -> int{ _ = 0 } = <fun>
+Line 4, characters 2-19:
+4 |   reads_param r - a;;
+      ^^^^^^^^^^^^^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 4, characters 2-19:
+4 |   reads_param r - a;;
+      ^^^^^^^^^^^^^^^^^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- poly-instances: one total polymorphic function at two sorts --------- *)
@@ -274,7 +306,14 @@ let poly_instances : int{ _ > 0 } = if id true then id 5 else 1;;
 Line 1, characters 4-18: refined environment entry: poly_instances :
   int{ _ > 0 }
 Line 1, characters 36-63: refinement obligation: int{ _ > 0 }
-val poly_instances : int{ _ > 0 } = 5
+Line 1, characters 52-56:
+1 | let poly_instances : int{ _ > 0 } = if id true then id 5 else 1;;
+                                                        ^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 52-56:
+1 | let poly_instances : int{ _ > 0 } = if id true then id 5 else 1;;
+                                                        ^^^^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- shadowed-local: stamped identity in the symbol allocator ------------ *)
@@ -306,7 +345,10 @@ let mutable_in_predicate () =
   q + y;;
 [%%expect{|
 Line 3, characters 25-26: refinement obligation: int{ _ = y }
-val mutable_in_predicate : unit -> int = <fun>
+Line 3, characters 19-20:
+3 |   let q : int{ _ = y } = 1 in
+                       ^
+Error: This predicate reads mutable state, which cannot yet be verified.
 |}]
 
 (* --- predicate-sort-error: the located predicate sort checker ------------ *)
@@ -318,7 +360,11 @@ let predicate_sort_error : int{ 1 + true } = 0;;
 Line 1, characters 4-24: refined environment entry: predicate_sort_error :
   int{ 1 + true }
 Line 1, characters 45-46: refinement obligation: int{ 1 + true }
-val predicate_sort_error : int{ 1 + true } = 0
+Line 1, characters 32-40:
+1 | let predicate_sort_error : int{ 1 + true } = 0;;
+                                    ^^^^^^^^
+Error: This refinement predicate is ill-sorted:
+       Stdlib.+ is applied to operand(s) of sort Bv63, Bool.
 |}]
 
 (* --- shift-bounds: the guarded shift rows at their boundaries ------------ *)
@@ -343,13 +389,27 @@ val shift_boundary : int{ _ = 62 } -> int{ _ < 0 } = <fun>
 let shift_over (n : int{ _ = 63 }) : int{ _ = 0 } = 1 lsl n;;
 [%%expect{|
 Line 1, characters 52-59: refinement obligation: int{ _ = 0 }
-val shift_over : int{ _ = 63 } -> int{ _ = 0 } = <fun>
+Line 1, characters 52-59:
+1 | let shift_over (n : int{ _ = 63 }) : int{ _ = 0 } = 1 lsl n;;
+                                                        ^^^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 52-59:
+1 | let shift_over (n : int{ _ = 63 }) : int{ _ = 0 } = 1 lsl n;;
+                                                        ^^^^^^^
+Error: 1 refinement obligation was not verified.
 |}]
 
 let shift_negative (n : int{ _ = -1 }) : int{ _ = 0 } = 1 lsl n;;
 [%%expect{|
 Line 1, characters 56-63: refinement obligation: int{ _ = 0 }
-val shift_negative : int{ _ = (-1) } -> int{ _ = 0 } = <fun>
+Line 1, characters 56-63:
+1 | let shift_negative (n : int{ _ = -1 }) : int{ _ = 0 } = 1 lsl n;;
+                                                            ^^^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 56-63:
+1 | let shift_negative (n : int{ _ = -1 }) : int{ _ = 0 } = 1 lsl n;;
+                                                            ^^^^^^^
+Error: 1 refinement obligation was not verified.
 |}]
 
 let shift_lsr (x : int{ _ > 0 }) : int{ _ >= 0 } = x lsr 1;;
@@ -407,7 +467,18 @@ Lines 2-3, characters 2-23: refinement obligation: int{ _ = 0 }
 Line 2, characters 14-15: refined environment entry: x : int{ _ > 0 }
 Line 2, characters 33-34: refinement obligation: int{ _ > 0 }
 Line 3, characters 9-14: refinement obligation: int{ _ > 0 }
-val mutvar_reads_distinct : unit -> int{ _ = 0 } = <fun>
+Line 3, characters 2-23:
+3 |   ((x <- x + 1); x) - x;;
+      ^^^^^^^^^^^^^^^^^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 3, characters 9-14:
+3 |   ((x <- x + 1); x) - x;;
+             ^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 3, characters 2-23:
+3 |   ((x <- x + 1); x) - x;;
+      ^^^^^^^^^^^^^^^^^^^^^
+Error: 2 refinement obligations were not verified.
 |}]
 
 (* --- refuted-const: the trustworthy negative verdict --------------------- *)
@@ -419,7 +490,14 @@ let refuted_const : int{ _ > 0 } = 0;;
 Line 1, characters 4-17: refined environment entry: refuted_const :
   int{ _ > 0 }
 Line 1, characters 35-36: refinement obligation: int{ _ > 0 }
-val refuted_const : int{ _ > 0 } = 0
+Line 1, characters 35-36:
+1 | let refuted_const : int{ _ > 0 } = 0;;
+                                       ^
+Error: Refinement verification failed: the predicate is refutable.
+Line 1, characters 35-36:
+1 | let refuted_const : int{ _ > 0 } = 0;;
+                                       ^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- unknown-opaque: the partial-parameter half of the stability gate ---- *)
@@ -429,7 +507,14 @@ val refuted_const : int{ _ > 0 } = 0
 let unknown_opaque (h : unit -> int) : int{ _ >= 0 } = h ();;
 [%%expect{|
 Line 1, characters 55-59: refinement obligation: int{ _ >= 0 }
-val unknown_opaque : (unit -> int) -> int{ _ >= 0 } = <fun>
+Line 1, characters 55-59:
+1 | let unknown_opaque (h : unit -> int) : int{ _ >= 0 } = h ();;
+                                                           ^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 55-59:
+1 | let unknown_opaque (h : unit -> int) : int{ _ >= 0 } = h ();;
+                                                           ^^^^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- bitvec-wrap: machine arithmetic is not the integers ----------------- *)
@@ -440,7 +525,14 @@ val unknown_opaque : (unit -> int) -> int{ _ >= 0 } = <fun>
 let bitvec_wrap (x : int{ _ >= 0 }) : int{ _ >= 0 } = x + 1;;
 [%%expect{|
 Line 1, characters 54-59: refinement obligation: int{ _ >= 0 }
-val bitvec_wrap : int{ _ >= 0 } -> int{ _ >= 0 } = <fun>
+Line 1, characters 54-59:
+1 | let bitvec_wrap (x : int{ _ >= 0 }) : int{ _ >= 0 } = x + 1;;
+                                                          ^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 54-59:
+1 | let bitvec_wrap (x : int{ _ >= 0 }) : int{ _ >= 0 } = x + 1;;
+                                                          ^^^^^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- tuple-datatype: one datatype through Signature.instantiate ---------- *)
@@ -467,15 +559,25 @@ module Sealed : sig
   type t
   val mk : int -> t
   val sd_in : t{ true }
+  val sd_env : int{ _ > 0 }
 end = struct
   type t = { field : int }
   let mk field = { field }
   let sd_in : t{ true } = mk 1
+  let sd_env : int{ _ > 0 } = let _s = mk 1 in 1
 end;;
 [%%expect{|
-Line 8, characters 6-11: refined environment entry: sd_in : t{ true }
-Line 8, characters 26-30: refinement obligation: t{ true }
-module Sealed : sig type t val mk : int -> t val sd_in : t{ true } end
+Line 9, characters 6-11: refined environment entry: sd_in : t{ true }
+Line 10, characters 6-12: refined environment entry: sd_env : int{ _ > 0 }
+Line 9, characters 26-30: refinement obligation: t{ true }
+Line 10, characters 30-48: refinement obligation: int{ _ > 0 }
+module Sealed :
+  sig
+    type t
+    val mk : int -> t
+    val sd_in : t{ true }
+    val sd_env : int{ _ > 0 }
+  end
 |}]
 
 let sd_out : Sealed.t{ true } = Sealed.mk 2;;
@@ -483,6 +585,13 @@ let sd_out : Sealed.t{ true } = Sealed.mk 2;;
 Line 1, characters 4-10: refined environment entry: sd_out : Sealed.t{ true }
 Line 1, characters 32-43: refinement obligation: Sealed.t{ true }
 val sd_out : Sealed.t{ true } = <abstr>
+|}]
+
+let sd_env_out : int{ _ > 0 } = let _s = Sealed.mk 2 in 2;;
+[%%expect{|
+Line 1, characters 4-14: refined environment entry: sd_env_out : int{ _ > 0 }
+Line 1, characters 32-57: refinement obligation: int{ _ > 0 }
+val sd_env_out : int{ _ > 0 } = 2
 |}]
 
 (* --- open-datatype-reject: no finite constructor list to close ----------- *)
@@ -504,7 +613,11 @@ let open_datatype_reject : ext{ true } = Ext_case;;
 Line 1, characters 4-24: refined environment entry: open_datatype_reject :
   ext{ true }
 Line 1, characters 41-49: refinement obligation: ext{ true }
-val open_datatype_reject : ext{ true } = Ext_case
+Line 1, characters 41-49:
+1 | let open_datatype_reject : ext{ true } = Ext_case;;
+                                             ^^^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       its type is an open (extensible) variant.
 |}]
 
 (* --- alias: expansion in the collection gate and the lowering ------------ *)
@@ -542,24 +655,73 @@ let unrepresentable : (int -> int){ true } = fun a -> a;;
 Line 1, characters 4-19: refined environment entry: unrepresentable :
   (int -> int){ true }
 Line 1, characters 45-55: refinement obligation: (int -> int){ true }
-val unrepresentable : (int -> int){ true } = <fun>
+Line 1, characters 45-55:
+1 | let unrepresentable : (int -> int){ true } = fun a -> a;;
+                                                 ^^^^^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       it has a function type.
 |}]
 
 (* --- continue-past-failure: the failure protocol -------------------------- *)
 (* Two independent variable-free defects (0 > 0 and 1 < 0) in one unit: both
-   reported, the unit refused once, and the c obligation *after* the first
-   failure proves by leaning on a's failed spec — the localisation trade,
-   documented.  GREEN: two located failures plus one refusal naming the
+   reported, the unit refused once, and the cpf_c obligation *after* the
+   first failure proves by leaning on cpf_a's failed spec (its
+   value-description fact) — the localisation trade, documented.  The three
+   bindings are sibling structure items, not a nested let chain: a failed
+   spec's binder fact plus its let equality are contradictory hypotheses,
+   so anything downstream in the same *expression* fact scope would prove
+   vacuously and the second defect would go unreported; structure items
+   record no let equality, which keeps the defects independent.  The module
+   wrapper makes the three items one toplevel phrase — the expect runner
+   runs each top-level structure item as its own phrase and stops the block
+   at its first error, so unwrapped siblings would show only the first
+   defect (batch compilation of the unwrapped siblings gives exactly the
+   output below).  GREEN: two located failures plus one refusal naming the
    count. *)
 
-let continue_past_failure =
-  let a : int{ _ > 0 } = 0 in
-  let b : int{ _ < 0 } = 1 in
-  let c : int{ _ > 0 } = a in
-  a + b + c;;
+module Cpf = struct
+  let cpf_a : int{ _ > 0 } = 0
+  let cpf_b : int{ _ < 0 } = 1
+  let cpf_c : int{ _ > 0 } = cpf_a
+end;;
 [%%expect{|
-Line 2, characters 25-26: refinement obligation: int{ _ > 0 }
-Line 3, characters 25-26: refinement obligation: int{ _ < 0 }
-Line 4, characters 25-26: refinement obligation: int{ _ > 0 }
-val continue_past_failure : int = 1
+Line 2, characters 6-11: refined environment entry: cpf_a : int{ _ > 0 }
+Line 3, characters 6-11: refined environment entry: cpf_b : int{ _ < 0 }
+Line 4, characters 6-11: refined environment entry: cpf_c : int{ _ > 0 }
+Line 2, characters 29-30: refinement obligation: int{ _ > 0 }
+Line 3, characters 29-30: refinement obligation: int{ _ < 0 }
+Line 4, characters 29-34: refinement obligation: int{ _ > 0 }
+Line 2, characters 29-30:
+2 |   let cpf_a : int{ _ > 0 } = 0
+                                 ^
+Error: Refinement verification failed: the predicate is refutable.
+Line 3, characters 29-30:
+3 |   let cpf_b : int{ _ < 0 } = 1
+                                 ^
+Error: Refinement verification failed: the predicate is refutable.
+Line 2, characters 29-30:
+2 |   let cpf_a : int{ _ > 0 } = 0
+                                 ^
+Error: 2 refinement obligations were not verified.
+|}]
+
+(* --- admission-report: assumed contracts are visible output ---------------- *)
+(* ax_source is an external whose refined codomain nothing checked: using its
+   codomain contract as a fact makes the verdict conditional, and discharge
+   mode says so in the admission report.  The %identity coercion from unit is
+   sort-guarded out of the operator table, so the call abstracts to an opaque
+   constant carrying the codomain fact. *)
+
+external ax_source : unit -> int{ _ > 0 } = "%identity";;
+[%%expect{|
+external ax_source : unit -> int{ _ > 0 } = "%identity"
+|}]
+
+let admission : int{ _ > 0 } = ax_source ();;
+[%%expect{|
+Line 1, characters 4-13: refined environment entry: admission : int{ _ > 0 }
+Line 1, characters 31-43: refinement obligation: int{ _ > 0 }
+Refinement verdicts are conditional on 1 assumed contract:
+  ax_source : unit -> int{ _ > 0 }
+val admission : int{ _ > 0 } = 0
 |}]

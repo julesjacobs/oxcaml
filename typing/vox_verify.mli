@@ -35,3 +35,21 @@ val implementation :
   config:Vox_backend.Config.t ->
   Typedtree.structure ->
   unit
+
+(** The driver glue behind [-vox-backend], shared by the batch compilers
+    ({!Compile_common}) and the toplevels ({!Topcommon}): reads the flags,
+    resolves z3 in the test gate's order when [-vox-z3] is absent, selects
+    the backend through {!Vox_backend.plan} (an unusable selection fails
+    once, as a located error), and runs {!implementation}.  Under the
+    default ([-vox-backend none]) it does nothing at all. *)
+val run_if_enabled : Typedtree.structure -> unit
+
+(** Driver policy on one discharge outcome: report and count ([true]) or
+    stay silent ([false]).  In [Dump] only the printing backend's expected
+    non-verdict ([Ok (Unknown _)]) is suppressed; a [discharge] error — a
+    defect in this pass's output — reports and refuses in both modes.
+    Exposed because source programs cannot produce an ill-formed
+    obligation once the symbol allocator exists, so the policy needs a
+    synthetic (compiled) test to stay covered. *)
+val discharge_outcome :
+  dump_only:bool -> loc:Location.t -> Vox_backend.outcome -> bool

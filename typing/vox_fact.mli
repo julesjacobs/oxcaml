@@ -34,3 +34,7 @@ val add : t -> Vox_lower.Ir.t -> label:string -> loc:Location.t -> t
     unsat-core currency.  Terms cross the one emitter
     ({!Vox_lower.emit}). *)
 val hypotheses : t -> Vox_logic.Obligation.hypothesis list
+
+(** The fact terms in insertion order, for signature assembly (which walks
+    IR, where sorts live). *)
+val terms : t -> Vox_lower.Ir.t list

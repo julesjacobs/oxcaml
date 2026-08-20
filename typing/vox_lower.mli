@@ -86,11 +86,6 @@ module Symbols : sig
       call that fails the stability gate, a per-read mutable subject, or a
       guarded shift fallback. *)
   val fresh_opaque : t -> sort:Vox_logic.Sort.t -> string
-
-  (** Close over the table: the declared variables and functions, plus the
-      datatype declarations reachable from any mentioned sort, run through
-      {!Vox_logic.Signature.instantiate}. *)
-  val to_signature : t -> Vox_logic.Signature.t
 end
 
 (** A located rejection: the subject or predicate cannot be stated in the
@@ -100,6 +95,19 @@ end
     turns this into a located user error.  Facts fail open: a fact source
     catches it and declines. *)
 exception Unsupported of { loc : Location.t; reason : string }
+
+(** A located predicate sort error: rexp is untyped and nothing upstream
+    or downstream checks predicate sorts, so [int{ 1 + true }] compiles and
+    dies here, as a sort error the user can read.  Obligations fail closed
+    (a located user error); fact sources decline fail-open. *)
+exception Ill_sorted of { loc : Location.t; message : string }
+
+(** A predicate mentions a free value that is a mutable variable, or whose
+    declared type does not cross logicality (mutable parts): no such
+    predicate has one denotation, so this rejection is fail-closed even
+    for facts — a fact with no single denotation is not conservative, it
+    is wrong. *)
+exception Reads_mutable_state of { loc : Location.t }
 
 (** What the subject front end resolved while lowering, reported to the
     caller as it happens: the fact sources that ride on lowering
@@ -118,18 +126,37 @@ type resolved =
       (** a [Texp_mutvar] read, lowered to its per-read opaque constant *)
 
 (** Map an OCaml type onto a sort: [bool -> Bool], [int -> Bitvec 63],
-    [Bigint.t -> Int], concrete datatypes -> [Datatype], abstract types ->
-    [Uninterpreted].  A sort the language cannot represent (functions,
-    first-class modules, objects, unsolved variables) is a located
-    rejection (tier 2), never a silent drop. *)
-val sort_of_type : loc:Location.t -> Env.t -> Types.type_expr -> Vox_logic.Sort.t
+    [Bigint.t -> Int], concrete datatypes -> [Datatype] (registering their
+    declarations for signature assembly), abstract types (and records with
+    mutable fields, whose datatype extensionality would equate two
+    states) -> [Uninterpreted].  A sort the language cannot represent
+    (functions, first-class modules, objects, unsolved variables, open or
+    unboxed definitions) is a located rejection (tier 2), never a silent
+    drop. *)
+val sort_of_type :
+  Symbols.t -> loc:Location.t -> Env.t -> Types.type_expr ->
+  Vox_logic.Sort.t
+
+(** Close an obligation's signature over exactly the symbols its terms
+    (facts first, then the goal) mention, in first-occurrence order, plus
+    the datatype declarations reachable from any mentioned sort, run
+    through {!Vox_logic.Signature.instantiate}.  An [instantiate]
+    rejection (non-regular recursion, function-valued fields) raises
+    {!Unsupported} at [loc]. *)
+val to_signature :
+  Symbols.t -> loc:Location.t -> terms:Ir.t list -> Vox_logic.Signature.t
 
 (** Subject front end: typedtree -> IR.  Shallow and total on the
     supported forms; sorts are read off [exp_type], never reconstructed.
     A value-sorted form it does not support abstracts to a fresh opaque
-    constant (tier 1), memoized per node. *)
+    constant (tier 1), memoized per node.  [is_total_local] supplements
+    the stability gate's occurrence-totality read for local binders,
+    whose [@ total] annotation caps the checking mode without pinning the
+    binder's mode variable — the walker supplies it from the binding's
+    recorded [Texp_mode] annotation. *)
 val lower_subject :
   Symbols.t -> ?on_resolved:(resolved -> Ir.t -> unit) ->
+  ?is_total_local:(Ident.t -> bool) ->
   Typedtree.expression -> Ir.t
 
 (** Predicate front end: rexp -> IR.  A located sort checker — rexp is

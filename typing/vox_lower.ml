@@ -37,6 +37,13 @@ exception Unsupported of { loc : Location.t; reason : string }
 
 let unsupported ~loc reason = raise (Unsupported { loc; reason })
 
+exception Ill_sorted of { loc : Location.t; message : string }
+
+let ill_sorted ~loc fmt =
+  Format.kasprintf (fun message -> raise (Ill_sorted { loc; message })) fmt
+
+exception Reads_mutable_state of { loc : Location.t }
+
 type resolved =
   | Resolved_ident of Path.t * Types.value_description
   | Resolved_apply of Typedtree.expression
@@ -54,6 +61,17 @@ module Symbols = struct
              minted, which is what lets a codomain fact and a let equality
              agree on one constant.  Reads of mutable variables are their
              own nodes, so per-node is per-read. *)
+    ; datatype_decls : (string, Vox_logic.Datatype.decl) Hashtbl.t
+          (* parametric declarations by declaration name, fed to
+             [Signature.instantiate] at signature assembly *)
+    ; datatype_roots :
+        (string, string * Vox_logic.Datatype.ty list) Hashtbl.t
+          (* ground instance name -> (declaration name, arguments): how a
+             [Sort.Datatype] mentioned by a term recovers its root for
+             [Signature.instantiate] *)
+    ; mutable registering : string list
+          (* declaration names whose fields are being built: a recursive
+             field reference must not re-enter *)
     }
 
   let create () =
@@ -61,6 +79,9 @@ module Symbols = struct
     ; variables = Hashtbl.create 16
     ; functions = Hashtbl.create 16
     ; node_memo = []
+    ; datatype_decls = Hashtbl.create 16
+    ; datatype_roots = Hashtbl.create 16
+    ; registering = []
     }
 
   (* Resolved identity: the stamp keeps shadowed locals distinct
@@ -94,9 +115,6 @@ module Symbols = struct
     let name = Printf.sprintf "result/%d" n in
     Hashtbl.replace t.variables name sort;
     name
-
-  let to_signature _t =
-    Misc.fatal_error "Vox_lower.Symbols.to_signature: not yet implemented"
 end
 
 let bv63 : Vox_logic.Sort.t = Bitvec 63
@@ -105,46 +123,288 @@ let ir desc sort loc : Ir.t = { Ir.desc; sort; loc }
 
 let const_int n loc = ir (Ir.Const (Vox_logic.Literal.ocaml_int n)) bv63 loc
 
-let rec sort_of_type ~loc env ty : Vox_logic.Sort.t =
+(* [Signature.instantiate]'s [name<key,...>] shape: one convention, two
+   producers (the allocator here, [instantiate] for datatype instances). *)
+let mangle name (sorts : Vox_logic.Sort.t list) =
+  match sorts with
+  | [] -> name
+  | sorts ->
+    Printf.sprintf "%s<%s>" name
+      (String.concat "," (List.map Vox_logic.Sort.key sorts))
+
+(* A ground [Datatype.ty] back from a sort; datatype sorts recover their
+   root from the registry. *)
+let ty_of_sort st (s : Vox_logic.Sort.t) : Vox_logic.Datatype.ty =
+  match s with
+  | Bool -> Bool
+  | Int -> Int
+  | Bitvec w -> Bitvec w
+  | Uninterpreted n -> Uninterpreted n
+  | Datatype n ->
+    (match Hashtbl.find_opt st.Symbols.datatype_roots n with
+     | Some (decl, args) -> Apply (decl, args)
+     | None ->
+       Misc.fatal_error
+         ("Vox_lower: datatype sort without a registered root: " ^ n))
+
+let record_root st instance_name decl_name args =
+  if not (Hashtbl.mem st.Symbols.datatype_roots instance_name)
+  then Hashtbl.replace st.Symbols.datatype_roots instance_name
+         (decl_name, args)
+
+(* A record whose every value can change under a datatype's extensional
+   equality is not one: a mutable record becomes an uninterpreted sort
+   (its reads already abstract), never a datatype whose constructor would
+   equate two states. *)
+let record_is_immutable (labels : Types.label_declaration list) =
+  List.for_all
+    (fun (l : Types.label_declaration) ->
+       match l.ld_mutable with
+       | Immutable -> true
+       | Mutable _ -> false)
+    labels
+
+let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
   let ty = Ctype.expand_head env ty in
   match Types.get_desc ty with
   | Tconstr (p, _, _) when Path.same p Predef.path_bool -> Bool
   | Tconstr (p, _, _) when Path.same p Predef.path_int -> Bitvec 63
   | Tconstr (p, args, _) ->
-    let name =
-      match args with
-      | [] -> Symbols.symbol_of_path p
-      | args ->
-        let keys =
-          List.map
-            (fun a -> Vox_logic.Sort.key (sort_of_type ~loc env a))
-            args
-        in
-        Printf.sprintf "%s<%s>" (Symbols.symbol_of_path p)
-          (String.concat "," keys)
-    in
+    let name = Symbols.symbol_of_path p in
+    let arg_sorts () = List.map (sort_of_type st ~loc env) args in
     (match Env.find_type p env with
-     | { type_kind = Type_variant _ | Type_record _; _ } -> Datatype name
-     | { type_kind = Type_abstract _; _ } -> Uninterpreted name
+     | { type_kind = Type_record (labels, _, _); _ }
+       when not (record_is_immutable labels) ->
+       Uninterpreted (mangle name (arg_sorts ()))
+     | { type_kind = Type_variant _ | Type_record _; _ } as decl ->
+       register_datatype st ~loc env p decl;
+       let instance = mangle name (arg_sorts ()) in
+       record_root st instance name
+         (List.map (datatype_ty st ~loc env ~params:[]) args);
+       Datatype instance
+     | { type_kind = Type_abstract _; _ } ->
+       Uninterpreted (mangle name (arg_sorts ()))
      | { type_kind = Type_open; _ } ->
        unsupported ~loc "its type is an open (extensible) variant"
      | { type_kind = Type_record_unboxed_product _; _ } ->
        unsupported ~loc "its type is an unboxed record"
-     | exception Not_found -> Uninterpreted name)
+     | exception Not_found -> Uninterpreted (mangle name (arg_sorts ())))
   | Ttuple elts ->
-    let keys =
-      List.map
-        (fun (_, t) -> Vox_logic.Sort.key (sort_of_type ~loc env t))
-        elts
-    in
-    Datatype (Printf.sprintf "tuple<%s>" (String.concat "," keys))
-  | Trefine { ref_payload; _ } -> sort_of_type ~loc env ref_payload
-  | Tpoly _ -> sort_of_type ~loc env (Btype.tpoly_get_mono ty)
+    (match
+       List.find_opt (fun (lbl, _) -> Option.is_some lbl) elts
+     with
+     | Some _ -> unsupported ~loc "its type is a labeled tuple"
+     | None ->
+       tuple_sort st ~loc
+         (List.map (fun (_, t) -> sort_of_type st ~loc env t) elts))
+  | Trefine { ref_payload; _ } -> sort_of_type st ~loc env ref_payload
+  | Tpoly _ -> sort_of_type st ~loc env (Btype.tpoly_get_mono ty)
   | Tarrow _ -> unsupported ~loc "it has a function type"
   | Tvar _ | Tunivar _ -> unsupported ~loc "its type is not fully determined"
   | Tpackage _ -> unsupported ~loc "it has a first-class module type"
   | Tobject _ | Tfield _ | Tnil -> unsupported ~loc "it has an object type"
   | _ -> unsupported ~loc "its type cannot yet be given a sort"
+
+(* Tuples are single-constructor datatypes, registered ground: the decl
+   [tuple<keys>] with constructor [mk_tuple<keys>] and selectors
+   [tuple<keys>.<i>]. *)
+and tuple_sort st ~loc (sorts : Vox_logic.Sort.t list) : Vox_logic.Sort.t =
+  let name = mangle "tuple" sorts in
+  if not (Hashtbl.mem st.Symbols.datatype_decls name)
+  then
+    Hashtbl.replace st.Symbols.datatype_decls name
+      { Vox_logic.Datatype.decl_name = name
+      ; params = []
+      ; constructors =
+          [ { constructor_name = "mk_" ^ name
+            ; fields =
+                List.mapi
+                  (fun i s -> Printf.sprintf "%s.%d" name i, ty_of_sort st s)
+                  sorts
+            } ]
+      };
+  record_root st name name [];
+  ignore loc;
+  Datatype name
+
+(* The parametric declaration for a concrete variant or (immutable)
+   record, fed to [Signature.instantiate] at signature assembly.  The
+   subset is the doc's: regular closed variants with at least one
+   constructor, records, tuples; the rest (GADT constructors, inline
+   records, empty variants) is a located rejection, never a silent
+   abstraction. *)
+and register_datatype st ~loc env p (decl : Types.type_declaration) =
+  let name = Symbols.symbol_of_path p in
+  if not (Hashtbl.mem st.Symbols.datatype_decls name)
+     && not (List.mem name st.Symbols.registering)
+  then begin
+    st.Symbols.registering <- name :: st.Symbols.registering;
+    Fun.protect
+      ~finally:(fun () ->
+        st.Symbols.registering <- List.tl st.Symbols.registering)
+      (fun () ->
+         let params =
+           List.mapi
+             (fun i ty -> Types.get_id ty, Printf.sprintf "a%d" i)
+             decl.type_params
+         in
+         let field_ty = datatype_ty st ~loc env ~params in
+         let constructors =
+           match decl.type_kind with
+           | Type_record (labels, _, _) ->
+             [ { Vox_logic.Datatype.constructor_name = "mk_" ^ name
+               ; fields =
+                   List.map
+                     (fun (l : Types.label_declaration) ->
+                        Ident.name l.ld_id, field_ty l.ld_type)
+                     labels
+               } ]
+           | Type_variant ([], _, _) ->
+             unsupported ~loc "its type is an empty variant"
+           | Type_variant (cstrs, _, _) ->
+             List.map
+               (fun (cd : Types.constructor_declaration) ->
+                  (match cd.cd_res with
+                   | Some _ ->
+                     unsupported ~loc "its type has a GADT constructor"
+                   | None -> ());
+                  let cname = Ident.name cd.cd_id in
+                  let fields =
+                    match cd.cd_args with
+                    | Cstr_tuple args ->
+                      List.mapi
+                        (fun i (ca : Types.constructor_argument) ->
+                           Printf.sprintf "%s.%d" cname i,
+                           field_ty ca.ca_type)
+                        args
+                    | Cstr_record _ ->
+                      unsupported ~loc
+                        "its type has an inline-record constructor"
+                  in
+                  { Vox_logic.Datatype.constructor_name = cname; fields })
+               cstrs
+           | Type_abstract _ | Type_open | Type_record_unboxed_product _ ->
+             assert false
+         in
+         Hashtbl.replace st.Symbols.datatype_decls name
+           { Vox_logic.Datatype.decl_name = name
+           ; params = List.map snd params
+           ; constructors
+           })
+  end
+
+(* Field types of a declaration under registration: type parameters map to
+   [Param]; arrows are represented only so [Signature.instantiate] can
+   reject them; anything ground goes through the sort vocabulary. *)
+and datatype_ty st ~loc env ~params ty : Vox_logic.Datatype.ty =
+  let ty = Ctype.expand_head env ty in
+  match Types.get_desc ty with
+  | Tvar _ ->
+    (match List.assoc_opt (Types.get_id ty) params with
+     | Some name -> Param name
+     | None -> unsupported ~loc "its type is not fully determined")
+  | Trefine { ref_payload; _ } -> datatype_ty st ~loc env ~params ref_payload
+  | Tarrow _ -> Arrow (Bool, Bool)
+  | Tconstr (p, args, _) when args <> [] && params <> [] ->
+    (match Env.find_type p env with
+     | { type_kind = Type_record (labels, _, _); _ }
+       when not (record_is_immutable labels) ->
+       unsupported ~loc
+         "its type has a mutable field at a type parameter"
+     | { type_kind = Type_variant _ | Type_record _; _ } as decl ->
+       register_datatype st ~loc env p decl;
+       Apply
+         (Symbols.symbol_of_path p,
+          List.map (datatype_ty st ~loc env ~params) args)
+     | _ -> ty_of_sort st (sort_of_type st ~loc env ty)
+     | exception Not_found -> ty_of_sort st (sort_of_type st ~loc env ty))
+  | _ -> ty_of_sort st (sort_of_type st ~loc env ty)
+
+(* Close an obligation's signature over exactly the symbols its terms
+   mention, in first-occurrence order (hypotheses, then goal), plus the
+   datatype declarations reachable from any mentioned sort, run through
+   [Signature.instantiate].  Determinism matters: the declaration order in
+   the rendered script is this order. *)
+let to_signature st ~loc ~(terms : Ir.t list) : Vox_logic.Signature.t =
+  let vars = ref [] in
+  let funcs = ref [] in
+  let uninterp = ref [] in
+  let roots = ref [] in
+  let seen : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let seen_sort : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let note_uninterpreted n =
+    if not (Hashtbl.mem seen_sort n)
+    then begin
+      Hashtbl.add seen_sort n ();
+      uninterp := n :: !uninterp
+    end
+  in
+  let note_sort (s : Vox_logic.Sort.t) =
+    match s with
+    | Uninterpreted n -> note_uninterpreted n
+    | Datatype n ->
+      if not (Hashtbl.mem seen_sort n)
+      then begin
+        Hashtbl.add seen_sort n ();
+        match Hashtbl.find_opt st.Symbols.datatype_roots n with
+        | Some root -> roots := root :: !roots
+        | None ->
+          Misc.fatal_error
+            ("Vox_lower: datatype sort without a registered root: " ^ n)
+      end
+    | Bool | Int | Bitvec _ -> ()
+  in
+  let rec walk (t : Ir.t) =
+    note_sort t.sort;
+    match t.desc with
+    | Var name ->
+      if not (Hashtbl.mem seen name)
+      then begin
+        Hashtbl.add seen name ();
+        vars := (name, t.sort) :: !vars
+      end
+    | Const _ | Hole -> ()
+    | Call (name, args) ->
+      if not (Hashtbl.mem seen name)
+      then begin
+        Hashtbl.add seen name ();
+        funcs :=
+          (name, List.map (fun (a : Ir.t) -> a.Ir.sort) args, t.sort)
+          :: !funcs
+      end;
+      List.iter walk args
+    | App (_, args) | Construct (_, args) -> List.iter walk args
+    | Ite (a, b, c) -> walk a; walk b; walk c
+    | Select (_, _, x) | Test (_, x) | Lambda (_, x) -> walk x
+    | Let (_, a, b) -> walk a; walk b
+  in
+  List.iter walk terms;
+  let decls =
+    Hashtbl.fold (fun _ d acc -> d :: acc) st.Symbols.datatype_decls []
+  in
+  match Vox_logic.Signature.instantiate decls (List.rev !roots) with
+  | Error message -> unsupported ~loc message
+  | Ok (datatypes, _) ->
+    (* uninterpreted sorts reachable only through datatype fields still
+       need declaring; instantiate already produced every reachable
+       datatype *)
+    List.iter
+      (fun (d : Vox_logic.Signature.datatype) ->
+         List.iter
+           (fun (c : Vox_logic.Signature.constructor) ->
+              List.iter
+                (fun (_, s) ->
+                   match (s : Vox_logic.Sort.t) with
+                   | Uninterpreted n -> note_uninterpreted n
+                   | _ -> ())
+                c.fields)
+           d.constructors)
+      datatypes;
+    { sorts = List.rev !uninterp
+    ; datatypes
+    ; variables = List.rev !vars
+    ; functions = List.rev !funcs
+    }
 
 (* The interpreted-operator table: (primitive, operand sorts) -> [Op].
    Drawn from the [primitive_is_total] set intersected with what [Op]
@@ -161,8 +421,14 @@ let interpreted symbols ~prim ~(args : Ir.t list) ~result ~loc :
   let app op args sort = Some (ir (Ir.App (op, args)) sort loc) in
   match prim, args with
   (* the sort guard keeps an identity that coerces (an [Obj.magic]-like
-     use) out of the table; it falls to the gate like anything else *)
-  | "%identity", [a] when Sort.equal a.sort result -> Some a
+     use) out of the table; it falls to the gate like anything else.
+     [result] is [None] in the predicate front end, which has no expected
+     result sort to guard with. *)
+  | "%identity", [a]
+    when (match result with
+          | Some r -> Sort.equal a.sort r
+          | None -> false) ->
+    Some a
   | "%boolnot", [a] when is_bool a -> app Op.Not args Sort.Bool
   | "%sequand", [a; b] when is_bool a && is_bool b -> app Op.And args Sort.Bool
   | "%sequor", [a; b] when is_bool a && is_bool b -> app Op.Or args Sort.Bool
@@ -214,37 +480,51 @@ let interpreted symbols ~prim ~(args : Ir.t list) ~result ~loc :
 (* The stability gate's occurrence half: the funct is a path whose totality
    projection at this occurrence is [Total].  Conservative reading, no
    constraining: an unresolved totality is an absence of promise. *)
-let occurrence_is_total (funct : Typedtree.expression) =
+(* Local [let f @ total] bindings do not pin the binder's mode variable
+   (the annotation caps the expected mode the right-hand side is checked
+   at), so their occurrences never read Total conservatively; the walker
+   supplies [is_total_local] from the binding's recorded [Texp_mode]
+   annotation instead. *)
+let occurrence_is_total ~is_total_local (funct : Typedtree.expression) =
   match funct.exp_desc with
-  | Texp_ident { mode; _ } ->
+  | Texp_ident { path; mode; _ } ->
     (match
        Mode.Totality.Guts.check_const_conservative
          (Mode.Value.proj_comonadic Totality mode)
      with
      | Some Total -> true
-     | Some Partial | None -> false)
+     | Some Partial | None ->
+       (match path with
+        | Pident id -> is_total_local id
+        | _ -> false))
   | _ -> false
 
 (* The gate's argument half: every argument type crosses totality (no
    arrows -- the impure-parameter case) and logicality (no mutable parts --
    the mutable-read case).  A [Call] over an argument failing either could
    equate two calls straddling a write or an effect. *)
-let crosses_totality_and_logicality env ty =
+(* In the crossing lattice, smaller means more crossing (typing/mode.ml,
+   [Crossing]): a type fully crosses an axis iff its projection is [min]. *)
+let crosses_axis (type a) env ty (ax : a Mode.Crossing.Axis.t) =
   let crossing = Ctype.crossing_of_ty env ty in
-  let crosses (type a) (ax : a Mode.Crossing.Axis.t) =
-    Mode.Crossing.Per_axis.le ax
-      (Mode.Crossing.Per_axis.max ax)
-      (Mode.Crossing.proj ax crossing)
-  in
-  crosses (Comonadic Totality) && crosses (Monadic Logicality)
+  Mode.Crossing.Per_axis.le ax
+    (Mode.Crossing.proj ax crossing)
+    (Mode.Crossing.Per_axis.min ax)
 
-let lower_subject symbols ?on_resolved (expr : Typedtree.expression) : Ir.t =
+let crosses_totality_and_logicality env ty =
+  crosses_axis env ty (Comonadic Totality)
+  && crosses_axis env ty (Monadic Logicality)
+
+let crosses_logicality env ty = crosses_axis env ty (Monadic Logicality)
+
+let lower_subject symbols ?on_resolved ?(is_total_local = fun _ -> false)
+    (expr : Typedtree.expression) : Ir.t =
   let resolved r t =
     match on_resolved with None -> () | Some f -> f r t
   in
   let rec lower (e : Typedtree.expression) : Ir.t =
     let loc = e.exp_loc in
-    let node_sort () = sort_of_type ~loc e.exp_env e.exp_type in
+    let node_sort () = sort_of_type symbols ~loc e.exp_env e.exp_type in
     let opaque () =
       match
         List.find_opt (fun (n, _) -> n == e) symbols.Symbols.node_memo
@@ -285,7 +565,8 @@ let lower_subject symbols ?on_resolved (expr : Typedtree.expression) : Ir.t =
        | Mutable _ -> opaque ()
        | Immutable ->
          (match
-            sort_of_type ~loc:record.exp_loc record.exp_env record.exp_type
+            sort_of_type symbols ~loc:record.exp_loc record.exp_env
+              record.exp_type
           with
           | Datatype record_name ->
             let t =
@@ -326,7 +607,7 @@ let lower_subject symbols ?on_resolved (expr : Typedtree.expression) : Ir.t =
        | None -> opaque ()
        | Some arg_exprs ->
          let stable () =
-           occurrence_is_total funct
+           occurrence_is_total ~is_total_local funct
            && List.for_all
                 (fun (a : Typedtree.expression) ->
                    crosses_totality_and_logicality a.exp_env a.exp_type)
@@ -344,7 +625,7 @@ let lower_subject symbols ?on_resolved (expr : Typedtree.expression) : Ir.t =
              let lowered = List.map lower arg_exprs in
              (match
                 interpreted symbols ~prim:p.prim_name ~args:lowered
-                  ~result:(node_sort ()) ~loc
+                  ~result:(Some (node_sort ())) ~loc
               with
               | Some t -> t
               | None -> if stable () then call path lowered else opaque ())
@@ -361,13 +642,311 @@ let lower_subject symbols ?on_resolved (expr : Typedtree.expression) : Ir.t =
   in
   lower expr
 
-let lower_predicate _symbols ~env:_ ~hole_sort:_
-    (rexp : Types.refinement_expression) =
-  (* The rexp front end (the located predicate sort checker) is the next
-     stage; a located rejection keeps obligations fail-closed and lets
-     fact sources decline fail-open until it lands. *)
-  unsupported ~loc:rexp.rexp_loc
-    "predicate lowering is not yet implemented"
+(* The primitives the operator table knows: an application of one of these
+   whose operand sorts fit no row is a predicate sort error ([int{ 1 + true }]
+   dies here, as an error the user can read), while a primitive outside the
+   table is an unsupported-construct rejection. *)
+let table_prims =
+  [ "%boolnot"; "%sequand"; "%sequor"; "%negint"; "%succint"; "%predint"
+  ; "%addint"; "%subint"; "%mulint"; "%andint"; "%orint"; "%xorint"
+  ; "%lslint"; "%lsrint"; "%asrint"; "%equal"; "%notequal"; "%lessthan"
+  ; "%lessequal"; "%greaterthan"; "%greaterequal" ]
+
+let sort_key = Vox_logic.Sort.key
+
+(* Predicate front end: rexp -> IR.  A located sort checker (rexp is
+   untyped and nothing upstream or downstream checks predicate sorts) and
+   a normaliser to the quantifier-free fragment: [let]s substitute (as
+   binder-environment entries), applied lambdas beta-reduce, [match]
+   lowers to [Ite]/[Test]/[Select]; any residual binder form is a located
+   rejection.  A free mention of a mutable variable, or of a value whose
+   type does not cross logicality, is [Reads_mutable_state]: no predicate
+   over mutable state has one denotation, so this rejection is fail-closed
+   even for facts. *)
+let lower_predicate symbols ~env ~hole_sort
+    (rexp : Types.refinement_expression) : Ir.t =
+  let require_sort ~loc ~what (t : Ir.t) sort =
+    if not (Vox_logic.Sort.equal t.Ir.sort sort)
+    then
+      ill_sorted ~loc "%s has sort %s where %s was expected" what
+        (sort_key t.Ir.sort) (sort_key sort)
+  in
+  let conjunction ~loc = function
+    | [] -> ir (Ir.Const (Vox_logic.Literal.Bool true)) Bool loc
+    | [c] -> c
+    | cs -> ir (Ir.App (And, cs)) Bool loc
+  in
+  (* The ground constructors of a datatype a predicate matches on;
+     day one only ground declarations (tuples, monomorphic records and
+     variants) are matchable. *)
+  let ground_constructors ~loc name =
+    let fail () =
+      unsupported ~loc
+        "matching on this subject is not yet supported in predicates"
+    in
+    match Hashtbl.find_opt symbols.Symbols.datatype_roots name with
+    | Some (decl_name, []) ->
+      (match Hashtbl.find_opt symbols.Symbols.datatype_decls decl_name with
+       | Some { params = []; constructors; _ } ->
+         List.map
+           (fun (c : Vox_logic.Datatype.constructor) ->
+              ( c.constructor_name,
+                List.map
+                  (fun (sel, ty) ->
+                     let sort : Vox_logic.Sort.t =
+                       match (ty : Vox_logic.Datatype.ty) with
+                       | Bool -> Bool
+                       | Int -> Int
+                       | Bitvec w -> Bitvec w
+                       | Uninterpreted n -> Uninterpreted n
+                       | Apply (n, []) -> Datatype n
+                       | Apply _ | Param _ | Arrow _ -> fail ()
+                     in
+                     sel, sort)
+                  c.fields ))
+           constructors
+       | Some _ | None -> fail ())
+    | Some _ | None -> fail ()
+  in
+  let bool_constructor path =
+    match (path : Path.t) with
+    | Pextra_ty (p, Pcstr_ty name) when Path.same p Predef.path_bool ->
+      Some (String.equal name "true")
+    | _ -> None
+  in
+  let rec lower binders (r : Types.refinement_expression) : Ir.t =
+    let loc = r.rexp_loc in
+    match r.rexp_desc with
+    | Rexp_hole -> ir Ir.Hole hole_sort loc
+    | Rexp_var id ->
+      (match
+         List.find_opt (fun (i, _) -> Ident.same i id) binders
+       with
+       | Some (_, t) -> t
+       | None ->
+         (* an arrow binder that escaped the upstream rejection through
+            higher-order solving; the caller words the dependent-arrow
+            error, this is only reached from fact sources *)
+         unsupported ~loc
+           "this predicate depends on a function-argument binder")
+    | Rexp_ident (path, _) ->
+      (match Subst.Lazy.force_value_description (Env.find_value path env) with
+       | vd ->
+         (match vd.val_kind with
+          | Val_mut _ -> raise (Reads_mutable_state { loc })
+          | _ ->
+            if not (crosses_logicality env vd.val_type)
+            then raise (Reads_mutable_state { loc });
+            let sort = sort_of_type symbols ~loc env vd.val_type in
+            ir (Ir.Var (Symbols.value symbols path ~sort)) sort loc)
+       | exception Not_found ->
+         unsupported ~loc "this name cannot be resolved at verification time")
+    | Rexp_constant { pconst_desc = Pconst_integer (digits, None); _ } ->
+      (match int_of_string_opt digits with
+       | Some n -> const_int n loc
+       | None -> unsupported ~loc "this integer literal cannot be read")
+    | Rexp_constant _ ->
+      unsupported ~loc "this literal cannot yet appear in a predicate"
+    | Rexp_apply (f, args) ->
+      let args =
+        List.map
+          (fun ((lbl : Asttypes.arg_label), a) ->
+             match lbl with
+             | Nolabel -> a
+             | Labelled _ | Optional _ ->
+               unsupported ~loc:a.Types.rexp_loc
+                 "labeled arguments cannot yet appear in a predicate")
+          args
+      in
+      (match f.rexp_desc with
+       | Rexp_fun _ ->
+         let lowered = List.map (lower binders) args in
+         let rec beta binders (f : Types.refinement_expression) = function
+           | [] -> lower binders f
+           | a :: rest ->
+             (match f.rexp_desc with
+              | Rexp_fun (id, body) -> beta ((id, a) :: binders) body rest
+              | _ ->
+                unsupported ~loc
+                  "this application cannot yet be verified")
+         in
+         beta binders f lowered
+       | Rexp_ident (path, _) ->
+         (match
+            Subst.Lazy.force_value_description (Env.find_value path env)
+          with
+          | { val_kind = Val_prim p; _ } ->
+            let lowered = List.map (lower binders) args in
+            (match
+               interpreted symbols ~prim:p.prim_name ~args:lowered
+                 ~result:None ~loc
+             with
+             | Some t -> t
+             | None ->
+               if List.mem p.prim_name table_prims
+               then
+                 ill_sorted ~loc "%s is applied to operand(s) of sort %s"
+                   (Path.name path)
+                   (String.concat ", "
+                      (List.map
+                         (fun (a : Ir.t) -> sort_key a.Ir.sort)
+                         lowered))
+               else
+                 unsupported ~loc
+                   (Printf.sprintf
+                      "the primitive %s cannot yet appear in a predicate"
+                      (Path.name path)))
+          | _ ->
+            unsupported ~loc
+              "calling a function in a predicate is not yet supported"
+          | exception Not_found ->
+            unsupported ~loc
+              "this name cannot be resolved at verification time")
+       | _ -> unsupported ~loc "this application cannot yet be verified")
+    | Rexp_tuple comps ->
+      let comps =
+        List.map
+          (fun (lbl, c) ->
+             match lbl with
+             | None -> c
+             | Some _ ->
+               unsupported ~loc "labeled tuples cannot yet appear here")
+          comps
+      in
+      let lowered = List.map (lower binders) comps in
+      let sort =
+        tuple_sort symbols ~loc (List.map (fun (t : Ir.t) -> t.Ir.sort) lowered)
+      in
+      let name =
+        match (sort : Vox_logic.Sort.t) with
+        | Datatype n -> n
+        | _ -> assert false
+      in
+      ir (Ir.Construct ("mk_" ^ name, lowered)) sort loc
+    | Rexp_construct (path, _, None) ->
+      (match bool_constructor path with
+       | Some b -> ir (Ir.Const (Vox_logic.Literal.Bool b)) Bool loc
+       | None ->
+         unsupported ~loc
+           "constructors cannot yet appear in a predicate")
+    | Rexp_construct _ ->
+      unsupported ~loc "constructors cannot yet appear in a predicate"
+    | Rexp_field _ ->
+      unsupported ~loc "field access cannot yet appear in a predicate"
+    | Rexp_ifthenelse (c, a, Some b) ->
+      let ci = lower binders c in
+      require_sort ~loc ~what:"this condition" ci Bool;
+      let ai = lower binders a in
+      let bi = lower binders b in
+      require_sort ~loc ~what:"the else branch" bi ai.Ir.sort;
+      ir (Ir.Ite (ci, ai, bi)) ai.Ir.sort loc
+    | Rexp_ifthenelse (_, _, None) ->
+      unsupported ~loc "an if without an else cannot appear in a predicate"
+    | Rexp_let ({ rb_ident; rb_expr }, body) ->
+      lower ((rb_ident, lower binders rb_expr) :: binders) body
+    | Rexp_fun _ ->
+      unsupported ~loc
+        "an unapplied function cannot appear in a verification condition"
+    | Rexp_match (scrut, cases) ->
+      let s = lower binders scrut in
+      let rec case_chain = function
+        | [] ->
+          unsupported ~loc "this predicate match may be inexhaustive"
+        | (c : Types.refinement_case) :: rest ->
+          let conds, bindings = lower_pattern s c.rc_lhs in
+          let binders = bindings @ binders in
+          let conds =
+            conds
+            @ (match c.rc_guard with
+               | None -> []
+               | Some g ->
+                 let gi = lower binders g in
+                 require_sort ~loc:g.rexp_loc ~what:"this guard" gi Bool;
+                 [gi])
+          in
+          let rhs = lower binders c.rc_rhs in
+          (match conds with
+           | [] -> rhs (* irrefutable, unguarded: later cases unreachable *)
+           | conds ->
+             let rest_ir = case_chain rest in
+             require_sort ~loc ~what:"this match case" rest_ir rhs.Ir.sort;
+             ir (Ir.Ite (conjunction ~loc conds, rhs, rest_ir))
+               rhs.Ir.sort loc)
+      in
+      case_chain cases
+    | Rexp_constraint (r, ty) ->
+      let t = lower binders r in
+      let sort = sort_of_type symbols ~loc env ty in
+      require_sort ~loc ~what:"this constrained expression" t sort;
+      t
+  (* A pattern against a scrutinee term: the tests that select the case
+     and the binder instantiations it makes, both as terms about the one
+     scrutinee. *)
+  and lower_pattern (scrut : Ir.t) (p : Types.refinement_pattern) :
+    Ir.t list * (Ident.t * Ir.t) list =
+    let loc = p.rpat_loc in
+    match p.rpat_desc with
+    | Rpat_any -> [], []
+    | Rpat_var id -> [], [id, scrut]
+    | Rpat_alias (p, id) ->
+      let conds, bindings = lower_pattern scrut p in
+      conds, (id, scrut) :: bindings
+    | Rpat_constant { pconst_desc = Pconst_integer (digits, None); _ } ->
+      require_sort ~loc ~what:"this pattern's subject" scrut bv63;
+      (match int_of_string_opt digits with
+       | Some n ->
+         [ir (Ir.App (Eq, [scrut; const_int n loc])) Bool loc], []
+       | None -> unsupported ~loc "this integer literal cannot be read")
+    | Rpat_constant _ ->
+      unsupported ~loc "this pattern cannot yet appear in a predicate"
+    | Rpat_tuple ps ->
+      let ps =
+        List.map
+          (fun (lbl, p) ->
+             match lbl with
+             | None -> p
+             | Some _ ->
+               unsupported ~loc "labeled tuples cannot yet appear here")
+          ps
+      in
+      (match (scrut.Ir.sort : Vox_logic.Sort.t) with
+       | Datatype name ->
+         (match ground_constructors ~loc name with
+          | [(cname, fields)] when List.length fields = List.length ps ->
+            List.fold_left2
+              (fun (conds, bindings) (i, (_, field_sort)) p ->
+                 let sub =
+                   ir (Ir.Select (cname, i, scrut)) field_sort loc
+                 in
+                 let c, b = lower_pattern sub p in
+                 conds @ c, bindings @ b)
+              ([], [])
+              (List.mapi (fun i f -> i, f) fields)
+              ps
+          | _ ->
+            ill_sorted ~loc
+              "a tuple pattern is matched against a subject of sort %s"
+              (sort_key scrut.Ir.sort))
+       | _ ->
+         ill_sorted ~loc
+           "a tuple pattern is matched against a subject of sort %s"
+           (sort_key scrut.Ir.sort))
+    | Rpat_construct (path, _, arg) ->
+      (match bool_constructor path, arg with
+       | Some b, None ->
+         require_sort ~loc ~what:"this pattern's subject" scrut Bool;
+         ( [ ir
+               (Ir.App
+                  (Eq, [scrut; ir (Ir.Const (Bool b)) Bool loc]))
+               Bool loc ],
+           [] )
+       | _ ->
+         unsupported ~loc
+           "constructor patterns cannot yet appear in a predicate")
+  in
+  let t = lower [] rexp in
+  require_sort ~loc:rexp.rexp_loc ~what:"this predicate" t Bool;
+  t
 
 let rec substitute_hole (ir : Ir.t) ~hole =
   let subst t = substitute_hole t ~hole in
@@ -400,5 +979,121 @@ let rec emit (ir : Ir.t) : Vox_logic.Term.t =
   | Let _ -> Misc.fatal_error "Vox_lower.emit: residual let binder"
   | Lambda _ -> Misc.fatal_error "Vox_lower.emit: residual lambda binder"
 
-let canonicalise _obligation =
-  Misc.fatal_error "Vox_lower.canonicalise: not yet implemented"
+(* Renumber an obligation's symbols deterministically so baselines do not
+   churn when unrelated edits shift [Ident] stamps: [base_<stamp>] (with an
+   optional [<...>] instance suffix) becomes [base_<n>] with [n] assigned
+   per base in first-occurrence order (the same stamp keeps one [n] across
+   its instance suffixes), and [result/<counter>] renumbers in
+   first-occurrence order.  Unstamped names (module paths, selectors,
+   tuple instances) are already stable and pass through.  Occurrence order
+   is hypotheses, then goal, then the signature — which is itself in
+   first-occurrence term order, so the two agree. *)
+let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
+  let renames : (string, string) Hashtbl.t = Hashtbl.create 16 in
+  let stamp_numbers : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  let base_counters : (string, int) Hashtbl.t = Hashtbl.create 16 in
+  let opaque_counter = ref 0 in
+  let is_digits s =
+    s <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) s
+  in
+  let rename name =
+    match Hashtbl.find_opt renames name with
+    | Some r -> r
+    | None ->
+      let renamed =
+        if String.length name > 7
+           && String.equal (String.sub name 0 7) "result/"
+           && is_digits (String.sub name 7 (String.length name - 7))
+        then begin
+          incr opaque_counter;
+          Printf.sprintf "result/%d" !opaque_counter
+        end
+        else begin
+          let prefix, suffix =
+            match String.index_opt name '<' with
+            | Some i ->
+              String.sub name 0 i, String.sub name i (String.length name - i)
+            | None -> name, ""
+          in
+          match String.rindex_opt prefix '_' with
+          | Some i
+            when i > 0
+                 && is_digits
+                      (String.sub prefix (i + 1)
+                         (String.length prefix - i - 1)) ->
+            let base = String.sub prefix 0 i in
+            let stamp = String.sub prefix i (String.length prefix - i) in
+            let key = base ^ "\000" ^ stamp in
+            let n =
+              match Hashtbl.find_opt stamp_numbers key with
+              | Some n -> n
+              | None ->
+                let n =
+                  1
+                  + (Option.value ~default:0
+                       (Hashtbl.find_opt base_counters base))
+                in
+                Hashtbl.replace base_counters base n;
+                Hashtbl.add stamp_numbers key n;
+                n
+            in
+            Printf.sprintf "%s_%d%s" base n suffix
+          | _ -> name
+        end
+      in
+      Hashtbl.add renames name renamed;
+      renamed
+  in
+  let sort (s : Vox_logic.Sort.t) : Vox_logic.Sort.t =
+    match s with
+    | Uninterpreted n -> Uninterpreted (rename n)
+    | Datatype n -> Datatype (rename n)
+    | Bool | Int | Bitvec _ -> s
+  in
+  let rec term (t : Vox_logic.Term.t) : Vox_logic.Term.t =
+    match t with
+    | Var n -> Var (rename n)
+    | Const _ -> t
+    | App (op, args) -> App (op, List.map term args)
+    | Call (f, args) -> Call (rename f, List.map term args)
+    | Ite (a, b, c) -> Ite (term a, term b, term c)
+    | Construct (c, args) -> Construct (rename c, List.map term args)
+    | Select (c, i, x) -> Select (rename c, i, term x)
+    | Test (c, x) -> Test (rename c, term x)
+  in
+  let hypotheses =
+    List.map
+      (fun (h : Vox_logic.Obligation.hypothesis) ->
+         { h with term = term h.term })
+      ob.hypotheses
+  in
+  let goal = term ob.goal in
+  let signature =
+    { Vox_logic.Signature.sorts = List.map rename ob.signature.sorts
+    ; datatypes =
+        List.map
+          (fun (d : Vox_logic.Signature.datatype) ->
+             { Vox_logic.Signature.datatype_name = rename d.datatype_name
+             ; constructors =
+                 List.map
+                   (fun (c : Vox_logic.Signature.constructor) ->
+                      { Vox_logic.Signature.constructor_name =
+                          rename c.constructor_name
+                      ; fields =
+                          List.map
+                            (fun (sel, s) -> rename sel, sort s)
+                            c.fields
+                      })
+                   d.constructors
+             })
+          ob.signature.datatypes
+    ; variables =
+        List.map (fun (n, s) -> rename n, sort s) ob.signature.variables
+    ; functions =
+        List.map
+          (fun (n, params, result) ->
+             rename n, List.map sort params, sort result)
+          ob.signature.functions
+    }
+  in
+  { ob with signature; hypotheses; goal }

@@ -32,3 +32,5 @@ let hypotheses t =
     ; term = Vox_lower.emit term
     ; origin = { Vox_logic.Origin.label; location = loc }
     })
+
+let terms t = List.rev_map (fun { term; _ } -> term) t
