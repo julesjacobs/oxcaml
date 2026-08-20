@@ -491,6 +491,32 @@ let () =
 (get-info :reason-unknown)
 |}]
 
+(* The {backslash} arm of the same coding, pinned here because no OCaml
+   identifier, operator or generated suffix can reach it (backslash is not
+   an operator character): without this pin the injectivity argument's
+   third code would rest on unexecuted text.  Same shape as the [{bar}]
+   pin: the encoded name and the literal spelling stay distinct. *)
+
+let () =
+  render Prove
+    (obligation
+       ~signature:
+         { Signature.empty with
+           variables = ["a\\b", Sort.Bool; "a{backslash}b", Sort.Bool]
+         }
+       (App (And, [Var "a\\b"; Var "a{backslash}b"])))
+
+[%%expect{|
+(set-option :produce-unsat-cores true)
+(declare-const |a{backslash}b| Bool)
+(declare-const |a{lbrace}backslash}b| Bool)
+(assert (not (and |a{backslash}b| |a{lbrace}backslash}b|)))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+|}]
+
 (* Renderer-generated hypothesis labels live in the same solver namespace as
    the signature's symbols.  A variable named like a label must therefore be
    ill-formed: z3 4.8.5 otherwise drops the colliding assertion with an
