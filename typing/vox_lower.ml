@@ -192,43 +192,72 @@ let is_bigint env p =
    The OCaml type is inhabited (via cycles), so such a group lowers to a
    declared uninterpreted sort instead: its values stay sound opaque
    constants, and constructor reasoning over cyclic data is deferred with
-   the rest of cyclic-data reasoning.  The check is a fixpoint over the
-   registered declarations: a declaration is well-founded once some
-   constructor has every field at an already-well-founded type.  A name
+   the rest of cyclic-data reasoning.
+
+   Well-foundedness is a property of GROUND INSTANCES, not of declaration
+   names: [type t = C of t box] is baseless even though [box]'s
+   declaration has a Param-only constructor, because the instance
+   [box<t>]'s one field is [t] itself.  So the decision substitutes the
+   instance's arguments into the constructor fields — concretely, both
+   deciders below work on the ground instance group [Signature.instantiate]
+   expands (whose termination discipline, the non-regular-recursion
+   rejection, bounds the instance set): an instance is well-founded once
+   some constructor has every field at an already-well-founded sort, by
+   fixpoint over the group.  A field sort outside the group (uninterpreted,
+   or a primitive) is well-founded by fiat. *)
+let group_wf (group : Vox_logic.Signature.datatype list) =
+  let declared : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (d : Vox_logic.Signature.datatype) ->
+       Hashtbl.replace declared d.datatype_name ())
+    group;
+  let wf : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+  let sort_wf : Vox_logic.Sort.t -> bool = function
+    | Bool | Int | Bitvec _ | Uninterpreted _ -> true
+    | Datatype n -> Hashtbl.mem wf n || not (Hashtbl.mem declared n)
+  in
+  let grounded (d : Vox_logic.Signature.datatype) =
+    List.exists
+      (fun (c : Vox_logic.Signature.constructor) ->
+         List.for_all (fun (_, s) -> sort_wf s) c.fields)
+      d.constructors
+  in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter
+      (fun (d : Vox_logic.Signature.datatype) ->
+         if not (Hashtbl.mem wf d.datatype_name) && grounded d
+         then begin
+           Hashtbl.add wf d.datatype_name ();
+           changed := true
+         end)
+      group
+  done;
+  wf
+
+(* Whether the ground instance [name] at [args] is well-founded.  A name
    with no registered declaration counts as well-founded — it is either
    not a datatype at all or a back-reference inside the group being
    registered, and the first query after registration completes settles
-   the group for every caller that can mention it in a term. *)
-let well_founded st name =
-  match Hashtbl.find_opt st.Symbols.datatype_decls name with
-  | None -> true
-  | Some _ ->
-    let wf : (string, unit) Hashtbl.t = Hashtbl.create 16 in
-    let ty_wf : Vox_logic.Datatype.ty -> bool = function
-      | Bool | Int | Bitvec _ | Uninterpreted _ | Param _ | Arrow _ -> true
-      | Apply (n, _) ->
-        Hashtbl.mem wf n
-        || not (Hashtbl.mem st.Symbols.datatype_decls n)
+   the group for every caller that can mention it in a term.  An
+   instantiation error (non-regular recursion, a function-valued field)
+   also counts: the same error resurfaces, located, when signature
+   assembly runs the same instantiation. *)
+let well_founded st name (args : Vox_logic.Datatype.ty list) =
+  if not (Hashtbl.mem st.Symbols.datatype_decls name)
+  then true
+  else begin
+    let decls =
+      Hashtbl.fold (fun _ d acc -> d :: acc) st.Symbols.datatype_decls []
     in
-    let grounded (d : Vox_logic.Datatype.decl) =
-      List.exists
-        (fun (c : Vox_logic.Datatype.constructor) ->
-           List.for_all (fun (_, ty) -> ty_wf ty) c.fields)
-        d.constructors
-    in
-    let changed = ref true in
-    while !changed do
-      changed := false;
-      Hashtbl.iter
-        (fun n d ->
-           if not (Hashtbl.mem wf n) && grounded d
-           then begin
-             Hashtbl.add wf n ();
-             changed := true
-           end)
-        st.Symbols.datatype_decls
-    done;
-    Hashtbl.mem wf name
+    match Vox_logic.Signature.instantiate decls [name, args] with
+    | Error _ -> true
+    | Ok (group, roots) ->
+      (match roots with
+       | [Datatype n] -> Hashtbl.mem (group_wf group) n
+       | _ -> true)
+  end
 
 let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
   let ty = Ctype.expand_head env ty in
@@ -245,14 +274,13 @@ let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
        Uninterpreted (mangle name (arg_sorts ()))
      | { type_kind = Type_variant _ | Type_record _; _ } as decl ->
        register_datatype st ~loc env p decl;
-       if not (well_founded st name)
-       then Uninterpreted (mangle name (arg_sorts ()))
+       let sorts = arg_sorts () in
+       let args_ty = List.map (datatype_ty st ~loc env ~params:[]) args in
+       if not (well_founded st name args_ty)
+       then Uninterpreted (mangle name sorts)
        else begin
-         let sorts = arg_sorts () in
          let instance = mangle name sorts in
-         record_root st instance name
-           (List.map (datatype_ty st ~loc env ~params:[]) args)
-           sorts;
+         record_root st instance name args_ty sorts;
          Datatype instance
        end
      | { type_kind = Type_abstract _; _ } ->
@@ -392,16 +420,15 @@ and datatype_ty st ~loc env ~params ty : Vox_logic.Datatype.ty =
          "its type has a mutable field at a type parameter"
      | { type_kind = Type_variant _ | Type_record _; _ } as decl ->
        register_datatype st ~loc env p decl;
-       if well_founded st (Symbols.symbol_of_path p)
-       then
-         Apply
-           (Symbols.symbol_of_path p,
-            List.map (datatype_ty st ~loc env ~params) args)
-       else
-         (* the non-well-founded field type falls to the sort vocabulary,
-            which grounds it as an uninterpreted sort (or rejects it,
-            located, when its arguments mention the enclosing parameters) *)
-         ty_of_sort st (sort_of_type st ~loc env ty)
+       (* always [Apply], even when some ground instances of the referenced
+          declaration are baseless: with the arguments still mentioning the
+          enclosing parameters, well-foundedness is not decidable here —
+          the ground instance is scored where it is grounded ([sort_of_type]
+          for subject sorts, the [group_wf] filter in [to_signature] for
+          instantiated fields) *)
+       Apply
+         (Symbols.symbol_of_path p,
+          List.map (datatype_ty st ~loc env ~params) args)
      | _ -> ty_of_sort st (sort_of_type st ~loc env ty)
      | exception Not_found -> ty_of_sort st (sort_of_type st ~loc env ty))
   | _ -> ty_of_sort st (sort_of_type st ~loc env ty)
@@ -495,6 +522,40 @@ let to_signature st ~loc ~(terms : Ir.t list) : Vox_logic.Signature.t =
   match Vox_logic.Signature.instantiate decls (List.rev !roots) with
   | Error message -> unsupported ~loc message
   | Ok (datatypes, _) ->
+    (* [instantiate] expands every reachable instance, including baseless
+       ones a well-founded root reaches only through a constructor field
+       ([type 'a good = Good | Wrap of 'a bad] at a ground use): those are
+       dropped from the group and the fields naming them become
+       uninterpreted field sorts, exactly the sort [sort_of_type] gives a
+       subject at such an instance, so terms and signature agree.  Roots
+       are well-founded by construction (they come from term sorts). *)
+    let wf = group_wf datatypes in
+    let ground_field (s : Vox_logic.Sort.t) : Vox_logic.Sort.t =
+      match s with
+      | Datatype n when not (Hashtbl.mem wf n) -> Uninterpreted n
+      | s -> s
+    in
+    let datatypes =
+      List.filter_map
+        (fun (d : Vox_logic.Signature.datatype) ->
+           if not (Hashtbl.mem wf d.datatype_name)
+           then None
+           else
+             Some
+               { d with
+                 constructors =
+                   List.map
+                     (fun (c : Vox_logic.Signature.constructor) ->
+                        { c with
+                          fields =
+                            List.map
+                              (fun (sel, s) -> sel, ground_field s)
+                              c.fields
+                        })
+                     d.constructors
+               })
+        datatypes
+    in
     (* uninterpreted sorts reachable only through datatype fields still
        need declaring; instantiate already produced every reachable
        datatype *)
@@ -858,6 +919,18 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
          (match vd.val_kind with
           | Val_mut _ -> raise (Reads_mutable_state { loc })
           | _ ->
+            (* the polymorphism check comes first: a generic scheme fails
+               the logicality crossing conservatively (its variables promise
+               nothing), and "reads mutable state" would be a false
+               diagnosis of an immutable value like [let nil = []].  A
+               predicate has no occurrence type to instantiate the scheme
+               at (rexp is untyped), so this is a located rejection, not a
+               grounding *)
+            if Ctype.free_variables ~env vd.val_type <> []
+            then
+              unsupported ~loc
+                "a value with a polymorphic type cannot yet appear in a \
+                 predicate";
             if not (crosses_logicality env vd.val_type)
             then raise (Reads_mutable_state { loc });
             let sort = sort_of_type symbols ~loc env vd.val_type in
@@ -1167,8 +1240,14 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
      belongs to an operator identifier and stays in its segment, so the
      stamp that follows renumbers with its base instead of leaking raw. *)
   let is_closer = function '>' | ')' | '#' -> true | _ -> false in
+  (* '/' is not a token character: the only generated names containing it
+     are the [result/<counter>] opaques, special-cased whole above, so in
+     the scanner a '/' is always operator-identifier material ([/>], [/.])
+     and must not complete a token — otherwise the delimiter that follows
+     it would be taken as structural and the operator's stamp would leak
+     unrenumbered. *)
   let token_char = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '/' -> true
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' -> true
     | _ -> false
   in
   let ends_with_stamp s =

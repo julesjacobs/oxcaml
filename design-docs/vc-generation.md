@@ -385,10 +385,16 @@ declared type does not cross logicality (mutable parts,
 `design-docs/totality.md:82-87`), is rejected with a located error at VC
 time — "this predicate reads mutable state, which cannot yet be verified".
 Small, and it keeps every admitted predicate denoting the same value at
-every mention. A later relaxation may give such predicates per-read
-snapshot semantics (instantiate against a snapshot constant taken where
-the predicate binds); nothing here forecloses that. Fixture:
-`mutable-in-predicate`.
+every mention. One carve-out keeps the message honest: a free value whose
+declared type is a generic scheme fails the crossing conservatively (its
+variables promise nothing) without reading any mutable state, so it gets
+its own located rejection — "a value with a polymorphic type cannot yet
+appear in a predicate" — not the mutable-state one. Instantiating the
+scheme instead is foreclosed for now by rexp being untyped: a predicate
+occurrence has no occurrence type to instantiate at. A later relaxation
+may give such predicates per-read snapshot semantics (instantiate against
+a snapshot constant taken where the predicate binds); nothing here
+forecloses that. Fixtures: `mutable-in-predicate`, `poly-in-predicate`.
 
 ### Path conditions — gated
 
@@ -493,7 +499,13 @@ gaps:
 So the gate, precisely: an application is stable iff it lowers entirely to
 interpreted operators, or its funct is a path whose totality projection at
 the occurrence is `Total` (module-level `@@ total` modality on the value
-description; for locals, the binder's recorded mode) and every argument
+description; for locals and unsigned structure-level bindings, the
+binder's recorded `Texp_mode` annotation — a recursive binder's occurrence
+mode never reads `Total` because the annotation caps the checking mode
+without pinning the binder's mode variable, and the batch compiler,
+unlike the toplevel, leaves it unpinned at walk time, so the recorded
+annotation is threaded across structure items exactly as across local
+bindings; fixtures `rec-total` and `vc_batch_total`) and every argument
 type crosses totality and logicality. Two trust boundaries ride on the axis and are
 inherited knowingly, both pinned in the totality piece's own report:
 `external ... @@ total` is an unchecked claim, and the `module rec`
@@ -727,10 +739,25 @@ sort empty, turning every fact over its values vacuous. The OCaml type
 is inhabited (via cycles), so the sound translation is a declared
 uninterpreted sort: values stay opaque constants, and constructor
 reasoning over cyclic data is deferred with the rest of cyclic-data
-reasoning. Mutually recursive groups *with* a base case stay datatypes.
+reasoning. Well-foundedness is decided per GROUND INSTANCE, with the
+instance's arguments substituted into the constructor fields — a
+declaration name is not enough: `type t = C of t box` is baseless even
+though `'a box`'s declaration has a parameter-only constructor, because
+the instance `box<t>`'s one field is `t` itself. Concretely both
+deciders score the ground group `Signature.instantiate` expands (whose
+non-regular-recursion rejection bounds the instance set): the subject
+front end when it sorts a type, and signature assembly when it grounds
+instantiated fields — a well-founded instance that reaches a baseless
+one only through a constructor field (`'a good = Good | Wrap of 'a bad`
+with `'a bad = Bad of 'a bad`, used ground) stays a datatype whose
+offending field is at the uninterpreted sort the baseless instance
+lowers to. Mutually recursive groups *with* a base case stay datatypes.
 Fixtures: `selfish-cycle` (the printed baseline is a `declare-sort`, and
 a benign program touching the type proves), `mutual-datatype` (the
-even/odd group declared as one datatype group). A visible
+even/odd group declared as one datatype group), `wf-box` (the
+parameter-carried knot above: benign goal proves, `declare-sort` pinned),
+`good-bad` (the grounded use compiles and proves; the printed baseline
+shows the datatype whose field is a declared uninterpreted sort). A visible
 definition outside that subset is a
 located rejection day one: `Type_open` declarations
 (`typing/types.mli:979`) have no finite constructor list to close, an

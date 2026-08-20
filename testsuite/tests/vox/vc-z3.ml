@@ -394,6 +394,31 @@ Line 3, characters 19-20:
 Error: This predicate reads mutable state, which cannot yet be verified.
 |}]
 
+(* --- poly-in-predicate: an honest rejection for an immutable value -------- *)
+(* A generic scheme fails the logicality crossing conservatively (its
+   variables promise nothing), so [pnil] used to be misdiagnosed as "reads
+   mutable state"; rexp is untyped, so there is no occurrence type to
+   instantiate the scheme at.  GREEN: a located polymorphic-value
+   rejection. *)
+
+let pnil = [];;
+[%%expect{|
+val pnil : 'a list = []
+|}]
+
+let poly_in_predicate : int{ _ > 0 && pnil = pnil } = 5;;
+[%%expect{|
+Line 1, characters 4-21: refined environment entry: poly_in_predicate :
+  int{ (_ > 0) && (pnil = pnil) }
+Line 1, characters 54-55: refinement obligation:
+  int{ (_ > 0) && (pnil = pnil) }
+Line 1, characters 38-42:
+1 | let poly_in_predicate : int{ _ > 0 && pnil = pnil } = 5;;
+                                          ^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       a value with a polymorphic type cannot yet appear in a predicate.
+|}]
+
 (* --- predicate-sort-error: the located predicate sort checker ------------ *)
 (* Nothing upstream checks predicate sorts: this compiles today.  GREEN: a
    located sort error at the obligation's site, not a solver failure. *)
@@ -948,4 +973,53 @@ Line 1, characters 4-18: refined environment entry: selfish_benign :
   int{ _ > 0 }
 Line 1, characters 36-72: refinement obligation: int{ _ > 0 }
 val selfish_benign : int{ _ > 0 } = 1
+|}]
+
+(* --- wf-box: well-foundedness is decided per ground instance --------------- *)
+(* [wbox]'s declaration alone looks well-founded (its constructor's field is
+   the parameter), but the instance [wbox<wfb>] carries [wfb] itself: the
+   group has no base constructor anywhere, and as an SMT datatype group the
+   solver rejects it — this fixture failed with "the solver rejected the
+   query" under a declaration-name score.  Scoring the ground instance
+   lowers [wfb] to a declared uninterpreted sort (pinned in vc-printing.ml)
+   and the benign goal proves.  GREEN: Proved. *)
+
+type 'a wbox = Box of 'a
+type wfb = Knot of wfb wbox;;
+[%%expect{|
+type 'a wbox = Box of 'a
+type wfb = Knot of wfb wbox
+|}]
+
+let rec wfb_cycle : wfb = Knot (Box wfb_cycle);;
+[%%expect{|
+val wfb_cycle : wfb = Knot (Box <cycle>)
+|}]
+
+let wfb_benign : int{ _ > 0 } = let y = Knot (Box wfb_cycle) in ignore y; 1;;
+[%%expect{|
+Line 1, characters 4-14: refined environment entry: wfb_benign : int{ _ > 0 }
+Line 1, characters 32-75: refinement obligation: int{ _ > 0 }
+val wfb_benign : int{ _ > 0 } = 1
+|}]
+
+(* --- good-bad: a well-founded instance reaching a baseless one ------------- *)
+(* [int good] is well-founded via [Good]; its [Wrap] field is at the baseless
+   [int bad], which lowers to an uninterpreted sort (rendering pinned in
+   vc-printing.ml).  A declaration-name score rejected this grounded use
+   with "its type is not fully determined".  GREEN: Proved. *)
+
+type 'a bad = Bad of 'a bad
+type 'a good = Good | Wrap of 'a bad;;
+[%%expect{|
+type 'a bad = Bad of 'a bad
+type 'a good = Good | Wrap of 'a bad
+|}]
+
+let good_ground : (int good){ true } = Good;;
+[%%expect{|
+Line 1, characters 4-15: refined environment entry: good_ground :
+  int good{ true }
+Line 1, characters 39-43: refinement obligation: int good{ true }
+val good_ground : int good{ true } = Good
 |}]

@@ -691,6 +691,34 @@ and walk_module_expr st scope mexpr =
   let it = iterator st scope in
   Tast_iterator.default_iterator.module_expr it mexpr
 
+(* Structure items are walked left to right with total-binder evidence
+   threaded across items — the one piece of a binding's scope a later item
+   needs: a recursive [let rec f @ total]'s occurrences cannot read Total
+   from their mode (the annotation caps the checking mode without pinning
+   a rec binder's mode variable; the toplevel pins bindings at phrase end,
+   the batch compiler does not), so the recorded [Texp_mode] extra is the
+   only evidence, exactly as in [walk_bindings].  Facts and let equalities
+   deliberately stay per-item: module-level equalities are a recorded
+   completeness gap. *)
+and walk_structure st scope (s : structure) =
+  ignore
+    (List.fold_left
+       (fun scope (item : structure_item) ->
+          let it : Tast_iterator.iterator = iterator st scope in
+          it.structure_item it item;
+          match item.str_desc with
+          | Tstr_value (_, vbs) ->
+            List.fold_left
+              (fun scope vb ->
+                 match vb.vb_pat.pat_desc with
+                 | Tpat_var { id; _ } when rhs_annotated_total vb.vb_expr ->
+                   { scope with total_locals = id :: scope.total_locals }
+                 | _ -> scope)
+              scope vbs
+          | _ -> scope)
+       scope s.str_items
+     : scope)
+
 (* The generic descent: everything the explicit arms do not shape
    (modules, classes, comprehensions, ...) is still visited, so an
    obligation can never be skipped by omission; only fact precision is
@@ -699,6 +727,7 @@ and iterator st scope =
   { Tast_iterator.default_iterator with
     expr = (fun _ ce -> walk_expr st scope ~imposed:[] ce)
   ; case = (fun (type k) _ (c : k case) -> walk_case st scope ~imposed:[] c)
+  ; structure = (fun _ s -> walk_structure st scope s)
   }
 
 let report_error ~loc = function

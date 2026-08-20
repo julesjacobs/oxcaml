@@ -1307,6 +1307,54 @@ Line 1, characters 30-36: refinement obligation: int{ _ > 0 }
 val op_stamp : int{ _ > 0 } = 3
 |}]
 
+(* --- slash-operator-stamp: '/' is operator material, not a token ------------ *)
+(* The one generated-name family containing '/' is [result/<counter>],
+   special-cased whole before the scanner, so a '/' in a scanned name is
+   always part of an operator identifier: [/>] and [/.] stay one segment up
+   to their stamp, which renumbers with its base.  Pre-fix the '/' completed
+   a token, the delimiter after it was taken as structural, and the raw
+   stamp leaked — shifting with the unrelated declaration above. *)
+
+let ( /> ) @ total = fun x y -> x + y;;
+[%%expect{|
+val ( /> ) : int -> int -> int = <fun>
+|}]
+
+let slash_op : int{ _ > 0 } = 1 /> 2;;
+[%%expect{|
+Line 1, characters 4-12: refined environment entry: slash_op : int{ _ > 0 }
+Line 1, characters 30-36: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-fun |/>_1<Bv63,Bv63,Bv63>| ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))
+(assert (not (bvsgt (|/>_1<Bv63,Bv63,Bv63>| (_ bv1 63) (_ bv2 63)) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val slash_op : int{ _ > 0 } = 3
+|}]
+
+let ( /. ) @ total = fun x y -> x + y;;
+[%%expect{|
+val ( /. ) : int -> int -> int = <fun>
+|}]
+
+let slash_dot : int{ _ > 0 } = 1 /. 2;;
+[%%expect{|
+Line 1, characters 4-13: refined environment entry: slash_dot : int{ _ > 0 }
+Line 1, characters 31-37: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-fun |/._1<Bv63,Bv63,Bv63>| ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))
+(assert (not (bvsgt (|/._1<Bv63,Bv63,Bv63>| (_ bv1 63) (_ bv2 63)) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val slash_dot : int{ _ > 0 } = 3
+|}]
+
 (* --- poly-value-sorts: one polymorphic value at two ground sorts ------------ *)
 (* Value symbols are sort-sensitive, the discipline function symbols follow:
    [nil] read at [int list] and at [bool list] in one obligation is two
@@ -1415,4 +1463,98 @@ Line 1, characters 37-71: refinement obligation: int{ _ > 0 }
 (get-model)
 (get-info :reason-unknown)
 val mutual_datatype : int{ _ > 0 } = 1
+|}]
+
+(* --- wf-box: the parameter-carried knot is an uninterpreted sort ------------ *)
+(* Instance-level well-foundedness: [wbox]'s declaration alone looks
+   well-founded (its constructor's field is the parameter), but the instance
+   [wbox<wfb>] carries [wfb] itself, so the group is baseless — [wfb] lowers
+   to a declared uninterpreted sort, the construct subject to an opaque
+   constant, and the let equality still fires over it. *)
+
+type 'a wbox = Box of 'a
+type wfb = Knot of wfb wbox;;
+[%%expect{|
+type 'a wbox = Box of 'a
+type wfb = Knot of wfb wbox
+|}]
+
+let rec wfb_cycle : wfb = Knot (Box wfb_cycle);;
+[%%expect{|
+val wfb_cycle : wfb = Knot (Box <cycle>)
+|}]
+
+let wfb_benign : int{ _ > 0 } = let y = Knot (Box wfb_cycle) in ignore y; 1;;
+[%%expect{|
+Line 1, characters 4-14: refined environment entry: wfb_benign : int{ _ > 0 }
+Line 1, characters 32-75: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-sort wfb_1 0)
+(declare-const y_1 wfb_1)
+(declare-const result/1 wfb_1)
+(assert (! (= y_1 result/1) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val wfb_benign : int{ _ > 0 } = 1
+|}]
+
+(* --- good-bad: a datatype whose field is at a baseless instance ------------- *)
+(* [good<Bv63>] is well-founded via [Good] and declares as a datatype; its
+   [Wrap] field is at the baseless [bad<Bv63>], which is dropped from the
+   instantiated group and declared as an uninterpreted sort — the field and
+   the dropped instance agree on the one name. *)
+
+type 'a bad = Bad of 'a bad
+type 'a good = Good | Wrap of 'a bad;;
+[%%expect{|
+type 'a bad = Bad of 'a bad
+type 'a good = Good | Wrap of 'a bad
+|}]
+
+let good_render : int{ _ > 0 } = let g = (Good : int good) in ignore g; 1;;
+[%%expect{|
+Line 1, characters 4-15: refined environment entry: good_render :
+  int{ _ > 0 }
+Line 1, characters 33-73: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-sort bad_1<Bv63> 0)
+(declare-datatypes ((good_1<Bv63> 0)) (
+  ((good_1.Good<Bv63>) (good_1.Wrap<Bv63> (good_1.Wrap.0<Bv63> bad_1<Bv63>)))))
+(declare-const g_1 good_1<Bv63>)
+(assert (! (= g_1 good_1.Good<Bv63>) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val good_render : int{ _ > 0 } = 1
+|}]
+
+(* --- rec-total: a recursive total binder keeps one Call symbol -------------- *)
+(* Two structure items in ONE phrase: the rec binder's occurrences in the
+   later item resolve as the same total Call, so the difference proves.  On
+   this (toplevel) route the binder's mode is pinned at phrase end; the
+   batch route needs the threaded [Texp_mode] evidence — its verdict is
+   pinned by vc_batch_total.ml. *)
+
+let rec rec_add @ total = fun x y -> x + y
+let rec_total : int{ _ = 0 } = rec_add 1 2 - rec_add 1 2;;
+[%%expect{|
+val rec_add : int -> int -> int = <fun>
+Line 2, characters 4-13: refined environment entry: rec_total : int{ _ = 0 }
+Line 2, characters 31-56: refinement obligation: int{ _ = 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-fun |rec_add_1<Bv63,Bv63,Bv63>| ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))
+(assert (not (= (bvsub (|rec_add_1<Bv63,Bv63,Bv63>| (_ bv1 63) (_ bv2 63)) (|rec_add_1<Bv63,Bv63,Bv63>| (_ bv1 63) (_ bv2 63))) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val rec_total : int{ _ = 0 } = 0
 |}]

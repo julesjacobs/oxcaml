@@ -1,4 +1,5 @@
 directory named z3 on PATH: agree
 non-executable z3 on PATH: agree
+executable z3 on PATH: agree
 no z3 on PATH: agree
 VOX_TEST_Z3 set: agree

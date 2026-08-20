@@ -10,11 +10,13 @@
    same decision in any environment: a gate that skips where the driver
    would run (or the reverse) would let a fixture's verdict come from
    nothing.  Each scenario rewrites PATH to a scratch directory holding a
-   decoy — a directory named z3, a non-executable file named z3 — plus the
-   empty and set shapes of VOX_TEST_Z3, and checks both decisions against
-   the scenario's ground truth: WHICH command must be selected (computed
-   from first principles — the env override, or the pinned install when it
-   exists, and never a decoy), not merely whether something was found.  A
+   decoy — a directory named z3, a non-executable file named z3, an
+   executable script named z3 — plus the empty and set shapes of
+   VOX_TEST_Z3, and checks both decisions against the scenario's ground
+   truth: WHICH command must be selected (computed from first principles —
+   the env override, the PATH command when it is genuinely executable, or
+   the pinned install when it exists, and never a decoy that cannot run),
+   not merely whether something was found.  A
    selected command must also actually execute: a resolver that picks up a
    directory or a non-executable file agrees with the gate on availability
    (both fall through to the pinned install's existence) yet hands the
@@ -70,6 +72,7 @@ let () =
   let decoys = Filename.concat (Sys.getcwd ()) "decoys" in
   let dir_decoy = Filename.concat decoys "dir" in
   let file_decoy = Filename.concat decoys "file" in
+  let exec_decoy = Filename.concat decoys "exec" in
   Unix.mkdir decoys 0o755;
   Unix.mkdir dir_decoy 0o755;
   Unix.mkdir (Filename.concat dir_decoy "z3") 0o755;
@@ -77,6 +80,18 @@ let () =
   let oc = open_out (Filename.concat file_decoy "z3") in
   output_string oc "#!/bin/sh\n";
   close_out oc;
+  (* An executable z3 on PATH is the one scenario where the correct
+     selection IS the PATH command: a resolver that skips the [command -v]
+     step entirely still agrees with the gate on every decoy scenario
+     (both fall through to the pinned install), so only this scenario
+     discriminates it — it would select the pinned install (or nothing)
+     where "z3" is required. *)
+  Unix.mkdir exec_decoy 0o755;
+  let exec_z3 = Filename.concat exec_decoy "z3" in
+  let oc = open_out exec_z3 in
+  output_string oc "#!/bin/sh\n[ \"$1\" = -version ] && echo decoy-z3\nexit 0\n";
+  close_out oc;
+  Unix.chmod exec_z3 0o755;
   (* With no usable z3 on PATH, the one correct selection is the pinned
      install when it is executable, and nothing otherwise. *)
   let fallback =
@@ -88,6 +103,8 @@ let () =
     scenario "directory named z3 on PATH" ~expected:fallback);
   with_env ["VOX_TEST_Z3", ""; "PATH", file_decoy] (fun () ->
     scenario "non-executable z3 on PATH" ~expected:fallback);
+  with_env ["VOX_TEST_Z3", ""; "PATH", exec_decoy] (fun () ->
+    scenario "executable z3 on PATH" ~expected:(Some "z3"));
   with_env ["VOX_TEST_Z3", ""; "PATH", decoys] (fun () ->
     scenario "no z3 on PATH" ~expected:fallback);
   with_env ["VOX_TEST_Z3", "/bin/true"] (fun () ->
