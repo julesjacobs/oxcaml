@@ -253,21 +253,35 @@ cannot fail. Concretely:
    Typecore reentry at `bool @ total` with logical spec entities. Every
    totality, logicality, and type rejection is a located error of this
    phase, and the rollback snapshot's scope is exactly this phase.
-2. **Translation (total over the supported core)**: `mirror_of_typedtree`
-   — the parsetree-shape/typedtree-annotation correspondence — cannot
-   fail on anything the judgment admits in ordinary use. A small
-   enumerated set of exotic typedtree forms keeps located
-   translation-time rejections as an **accepted intermediate state**:
-   `Optional`/`Position` arrows in an applied callee's type (including
-   omitted-optional and `%call_pos` synthesis), `Omitted` required
-   labels, `%apply`/`%revapply` and format-string rewrites, and GADT /
-   existential-introducing constructors in patterns. These are typing
-   facts orthogonal to totality; migrating them into the judgment (or
-   representing them) is deliberate follow-up work, not a blocker.
+2. **Translation (total)**: `mirror_of_typedtree` — the
+   parsetree-shape/typedtree-annotation correspondence — cannot fail on
+   anything the judgment admits. The formerly rejected typedtree forms
+   are **represented** rather than rejected:
+   - application argument synthesis gets explicit mirror forms — an
+     omitted optional, a defaulted optional, an `%call_pos` argument and
+     an `Omitted` required label are distinct argument entries alongside
+     ordinary source arguments, so source order and the callee's
+     completion are both recorded;
+   - `%apply`/`%revapply` keep their source shape with the primitive as
+     the applied identity; format-string typing records the rewritten
+     application the way the typedtree has it, anchored to the source
+     literal;
+   - GADT and existential-introducing constructors appear in patterns as
+     ordinary constructor patterns; existential types introduced by an
+     arm are scoped to that arm's stored types. If existential scoping in
+     the persisted mirror proves disproportionate to implement, the
+     implementor may keep a narrow judgment-phase rejection for exactly
+     that case, recorded as a decision — the principle is represent,
+     don't reject.
+
+   The *solver translation* (a later piece) is where per-obligation
+   "unsupported feature — will be supported in the future" reports live:
+   the mirror is a faithful record; modelability is the backend's
+   judgment, made per obligation and fail-closed.
 
 With totality checked up front, "checked predicate" entails "mirror
-exists" for the whole supported core; the exotic remainder fails closed
-with located errors rather than silently mistranslating.
+exists", unconditionally; nothing downstream ever holds a checked
+predicate it cannot at least record.
 
 ## Deliberately out of scope
 
