@@ -503,6 +503,12 @@ let execute_phrase print_outcome ppf phr =
         Includemod.signatures oldenv ~mark:true ~modes sg sg'
       in
       Typecore.force_delayed_checks ();
+      (* Refinement verification (see Vox_verify), behind [-vox-backend]:
+         this loop never reaches [Topcommon.typecheck_phrase], so it runs
+         the same per-phrase pass itself — after the delayed checks, which
+         pin binding modes at phrase end, and before the phrase is
+         rewritten for evaluation. *)
+      Vox_verify.run_if_enabled str;
       let str, sg', rewritten =
         match str.str_items with
         | [ { str_desc = Tstr_eval (e, sort, attrs) ; str_loc = loc } ]
