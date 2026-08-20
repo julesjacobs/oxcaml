@@ -250,28 +250,24 @@ Everything that can reject lives in one phase; the mirror translation
 cannot fail. Concretely:
 
 1. **Judgment (fallible)**: the syntactic gate; hole rewriting; the
-   Typecore reentry at `bool @ total` with logical spec entities; and a
-   **representability validation** over the resulting typedtree, which
-   owns the rejections that are typing facts rather than syntax and are
-   orthogonal to totality: `Optional`/`Position` arrows anywhere in an
-   applied callee's type (all four spellings, including omitted-optional
-   and `%call_pos` synthesis), applications the typechecker completes or
-   reorders beyond the source (`Omitted` required labels),
-   `%apply`/`%revapply` and format-string rewrites, and GADT /
-   existential-introducing constructors in patterns. All are located
-   errors of the judgment. The rollback snapshot's scope is exactly this
-   phase.
-2. **Translation (total)**: `mirror_of_typedtree` — the
-   parsetree-shape/typedtree-annotation correspondence — has **no error
-   paths**. Every input reaching it has passed the gate, the mode-checked
-   typing, and representability; anything unrepresentable at this point
-   is an invariant break (assert), not a user error. It runs after the
-   judgment commits.
+   Typecore reentry at `bool @ total` with logical spec entities. Every
+   totality, logicality, and type rejection is a located error of this
+   phase, and the rollback snapshot's scope is exactly this phase.
+2. **Translation (total over the supported core)**: `mirror_of_typedtree`
+   — the parsetree-shape/typedtree-annotation correspondence — cannot
+   fail on anything the judgment admits in ordinary use. A small
+   enumerated set of exotic typedtree forms keeps located
+   translation-time rejections as an **accepted intermediate state**:
+   `Optional`/`Position` arrows in an applied callee's type (including
+   omitted-optional and `%call_pos` synthesis), `Omitted` required
+   labels, `%apply`/`%revapply` and format-string rewrites, and GADT /
+   existential-introducing constructors in patterns. These are typing
+   facts orthogonal to totality; migrating them into the judgment (or
+   representing them) is deliberate follow-up work, not a blocker.
 
-This is the reason the mode discipline belongs in this piece rather than
-after it: with totality checked and representability validated up front,
-"checked predicate" entails "mirror exists", and no consumer ever holds
-a typed predicate that cannot be translated.
+With totality checked up front, "checked predicate" entails "mirror
+exists" for the whole supported core; the exotic remainder fails closed
+with located errors rather than silently mistranslating.
 
 ## Deliberately out of scope
 
