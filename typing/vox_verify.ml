@@ -40,7 +40,9 @@ type pending =
         (* the idents whose value-description facts this obligation
            already holds (deposited while the subject lowered); goal
            assembly deposits through the same set, so a predicate and a
-           subject mentioning one ident yield one fact *)
+           subject mentioning one ident yield one fact.  Each pending owns
+           its ref: two obligations on one subject share the lowering's
+           history but not each other's assembly-time deposits *)
   ; loc : Location.t
   }
 
@@ -230,7 +232,15 @@ let make_deposit st scope ~env ?(seen_idents = ref []) facts_ref =
     | Vox_lower.Resolved_ident (path, vd) ->
       (* module-level and imported values: the occurrence is
          payload-typed, the value description still declares the refined
-         type; once per obligation *)
+         type; once per obligation.  KNOWN HOLE (owner-deferred to a later
+         piece): a recursive value binding resolves its own ident here
+         while its right-hand side lowers, so its declared predicate
+         becomes a hypothesis of its own obligation — [let rec x :
+         t{ false } = C x] self-justifies, and the false fact then
+         propagates through later deposits.  Excluding the recursive
+         group's own idents needs recursive-group infrastructure this
+         piece does not carry; the sentinel fixtures in vc-printing.ml and
+         vc-z3.ml (recursive-knot-hole) pin the accepting behaviour. *)
       if not (List.exists (Path.same path) !seen_idents)
       then begin
         seen_idents := path :: !seen_idents;
@@ -396,7 +406,10 @@ let finalize st scope ~imposed (e : Typedtree.expression) =
               ; subject_ir
               ; imposed = ty
               ; facts = !facts_ref
-              ; seen_idents
+                (* an independent snapshot per pending: assembly mutates
+                   the set, and a second obligation on the same subject
+                   must still deposit the facts its own goal needs *)
+              ; seen_idents = ref !seen_idents
               ; loc
               }
               :: st.pendings)

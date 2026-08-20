@@ -648,8 +648,11 @@ plus, for functions, the ground sort signature of this use:
   `Pident` paths render as `Ident.unique_name` — `name ^ "_" ^ stamp`
   (`typing/ident.ml:86-88`) — because `Path.name` drops the stamp
   (`typing/path.ml:115`) and two shadowed local `f`s would otherwise
-  collapse into one `Call` symbol. Module paths render as their dotted
-  spelling (`M.f`), which is already unambiguous.
+  collapse into one `Call` symbol. Dotted paths stamp their head ident
+  the same way (a local module `M`'s type renders `M_<stamp>.t`), because
+  two shadowed local modules would otherwise collapse their members into
+  one declaration; compilation-unit heads carry `Ident.unique_name`'s
+  fake `_0` stamp and renumber canonically like any other stamp.
 - A polymorphic function used at two ground instantiations needs two
   declarations, and the signature gives each name exactly one ground
   signature (`typing/vox_logic.mli:176-185`) — so the allocator mangles
@@ -896,6 +899,24 @@ cross-checks bytes against verdicts fixture by fixture.
 
 Each recorded, most with the vox2 mechanism named for the eventual piece:
 
+- **KNOWN HOLE (soundness, owner-deferred): recursive value bindings can
+  self-justify their declared predicate.** Lowering a recursive binding's
+  right-hand side resolves the binding's own ident, and the
+  value-description deposit adds the declared predicate as a hypothesis of
+  the very obligation meant to establish it — `let rec x : t{ false } =
+  C x` is accepted (hypothesis false ⊢ goal false), and the false fact
+  then propagates through later deposits (`let boom : int{ 0 > 1 } =
+  let _ = x in 0` verifies). The fix — excluding a recursive group's own
+  idents from value-description deposits while the group's right-hand
+  sides are walked and its goals assembled — needs recursive-group
+  infrastructure this piece should not carry, and is owner-deferred to a
+  later piece together with cyclic-data reasoning. The accepting behaviour
+  is pinned by sentinel fixtures in both tracks (`recursive-knot-hole` in
+  `vc-printing.ml`, whose baseline shows the self-justifying hypothesis
+  line, and in `vc-z3.ml`, whose verdicts accept), so the later piece has
+  a discriminating test to flip and the hole cannot silently vanish or
+  worsen; the deposit site carries the matching comment
+  (`typing/vox_verify.ml`, `make_deposit`).
 - **Termination measures** (`[@vox.decreases]`, lexicographic-descent VCs,
   the post-walk completeness re-check). Recursive calls are ordinary
   applications here; totality claims ride the axis.

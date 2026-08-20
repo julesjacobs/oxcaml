@@ -964,6 +964,33 @@ Lines 2-3, characters 2-3: refinement obligation: int{ _ > 0 }
 val bigint_sort : Bigint.t -> int{ _ > 0 } = <fun>
 |}]
 
+(* --- bigint-shadow: recognition is by unit identity, not spelling ---------- *)
+(* A module literally named Stdlib__Bigint is not Stdlib.Bigint: its variant
+   declares as its own datatype, never the mathematical Int (the control is
+   bigint-sort above, whose sorts stay Int). *)
+
+let bigint_shadow : int{ _ > 0 } =
+  let module Stdlib__Bigint = struct type t = Zero | One end in
+  let v = Stdlib__Bigint.Zero in
+  ignore v; 1;;
+[%%expect{|
+Line 1, characters 4-17: refined environment entry: bigint_shadow :
+  int{ _ > 0 }
+Lines 2-4, characters 2-13: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((Stdlib__Bigint_1.t 0)) (
+  ((Stdlib__Bigint_1.t.Zero) (Stdlib__Bigint_1.t.One))))
+(declare-const v_1 Stdlib__Bigint_1.t)
+(assert (! (= v_1 Stdlib__Bigint_1.t.Zero) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val bigint_shadow : int{ _ > 0 } = 1
+|}]
+
 (* --- mutable-record: an uninterpreted sort, never a datatype --------------- *)
 (* A datatype's constructor would equate two states of the record that
    differ only across a write (extensional equality); opacity merely loses
@@ -1033,9 +1060,9 @@ Line 1, characters 4-14: refined environment entry: sd_env_out : int{ _ > 0 }
 Line 1, characters 32-57: refinement obligation: int{ _ > 0 }
 (set-option :timeout 10000)
 (set-option :produce-unsat-cores true)
-(declare-sort Sealed.t 0)
-(declare-const _s_1 Sealed.t)
-(declare-const result/1 Sealed.t)
+(declare-sort Sealed_1.t 0)
+(declare-const _s_1 Sealed_1.t)
+(declare-const result/1 Sealed_1.t)
 (assert (! (= _s_1 result/1) :named h1))
 (assert (not (bvsgt (_ bv2 63) (_ bv0 63))))
 (check-sat)
@@ -1043,4 +1070,159 @@ Line 1, characters 32-57: refinement obligation: int{ _ > 0 }
 (get-model)
 (get-info :reason-unknown)
 val sd_env_out : int{ _ > 0 } = 2
+|}]
+
+(* --- recursive-knot-hole: a RECORDED KNOWN HOLE, pinned --------------------- *)
+(* KNOWN HOLE (owner-deferred to a later piece): the h1 hypothesis below IS
+   the goal — the right-hand side's lowering resolves knot_false at its own
+   declared refined type and deposits the predicate the obligation must
+   establish (design-docs/vc-generation.md, Known holes; verdicts pinned in
+   vc-z3.ml).  This baseline pins the self-justifying query so the later
+   piece has a discriminating test to flip: the corrected behaviour is this
+   query with no hypothesis line. *)
+
+type knot = K of knot;;
+[%%expect{|
+type knot = K of knot
+|}]
+
+let rec knot_false : knot{ false } = K knot_false;;
+[%%expect{|
+Line 1, characters 8-18: refined environment entry: knot_false :
+  knot{ false }
+Line 1, characters 37-49: refinement obligation: knot{ false }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (! false :named h1))
+(assert (not false))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val knot_false : knot{ false } = K <cycle>
+|}]
+
+(* --- cross-obligation: both queries carry the shared-ident hypothesis ------ *)
+(* Marker and arrow domain impose on the same subject; each pending owns its
+   seen-idents snapshot, so assembling the first goal (which resolves w3)
+   does not rob the second of its (= w3 3) hypothesis. *)
+
+let w3 : int{ _ = 3 } = 3;;
+[%%expect{|
+Line 1, characters 4-6: refined environment entry: w3 : int{ _ = 3 }
+Line 1, characters 24-25: refinement obligation: int{ _ = 3 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (not (= (_ bv3 63) (_ bv3 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val w3 : int{ _ = 3 } = 3
+|}]
+
+let cross_f (x : int{ _ > w3 }) = x;;
+[%%expect{|
+val cross_f : int{ _ > w3 } -> int = <fun>
+|}]
+
+let cross_probe = cross_f (5 : int{ _ > w3 - 1 });;
+[%%expect{|
+Line 1, characters 27-28: refinement obligation: int{ _ > (w3 - 1) }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const w3_1 (_ BitVec 63))
+(assert (! (= w3_1 (_ bv3 63)) :named h1))
+(assert (not (bvsgt (_ bv5 63) (bvsub w3_1 (_ bv1 63)))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-const w3_1 (_ BitVec 63))
+(assert (! (= w3_1 (_ bv3 63)) :named h1))
+(assert (not (bvsgt (_ bv5 63) w3_1)))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val cross_probe : int = 5
+|}]
+
+(* --- shadowed-modules: dotted paths keep the head's stamp ------------------- *)
+(* Two local modules M with distinct t in one obligation: the symbol
+   allocator stamps the head of a dotted path, so they declare as two
+   datatypes (canonically M_1.t and M_2.t) instead of colliding into one
+   declaration with an undeclared constructor. *)
+
+let shadowed_modules : int{ _ > 0 } =
+  let module M = struct type t = A end in
+  let p = M.A in
+  let module M = struct type t = B end in
+  let q = M.B in
+  ignore p; ignore q; 1;;
+[%%expect{|
+Line 1, characters 4-20: refined environment entry: shadowed_modules :
+  int{ _ > 0 }
+Lines 2-6, characters 2-23: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((M_1.t 0)) (
+  ((M_1.t.A))))
+(declare-datatypes ((M_2.t 0)) (
+  ((M_2.t.B))))
+(declare-const p_1 M_1.t)
+(declare-const q_1 M_2.t)
+(assert (! (= p_1 M_1.t.A) :named h1))
+(assert (! (= q_1 M_2.t.B) :named h2))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val shadowed_modules : int{ _ > 0 } = 1
+|}]
+
+(* --- nested-instance: canonical stamps inside instance suffixes ------------- *)
+(* The unrelated preceding binding shifts the raw Ident stamps; the instance
+   suffix renumbers with the sort it names, so the pinned query carries
+   wrap_1<leaf_1> and is byte-stable against unrelated edits above it. *)
+
+type leaf = L;;
+[%%expect{|
+type leaf = L
+|}]
+
+type 'a wrap = W of 'a;;
+[%%expect{|
+type 'a wrap = W of 'a
+|}]
+
+let nested_unrelated = 0;;
+[%%expect{|
+val nested_unrelated : int = 0
+|}]
+
+let nested_instance : int{ _ > 0 } =
+  let v : leaf wrap = W L in
+  ignore v; 1;;
+[%%expect{|
+Line 1, characters 4-19: refined environment entry: nested_instance :
+  int{ _ > 0 }
+Lines 2-3, characters 2-13: refinement obligation: int{ _ > 0 }
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(declare-datatypes ((leaf_1 0)) (
+  ((leaf_1.L))))
+(declare-datatypes ((wrap_1<leaf_1> 0)) (
+  ((wrap_1.W<leaf_1> (wrap_1.W.0<leaf_1> leaf_1)))))
+(declare-const v_1 wrap_1<leaf_1>)
+(assert (! (= v_1 (wrap_1.W<leaf_1> leaf_1.L)) :named h1))
+(assert (not (bvsgt (_ bv1 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val nested_instance : int{ _ > 0 } = 1
 |}]

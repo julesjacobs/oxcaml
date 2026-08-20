@@ -751,3 +751,78 @@ Refinement verdicts are conditional on 1 assumed contract:
   ax_source : unit -> int{ _ > 0 }
 val admission : int{ _ > 0 } = 0
 |}]
+
+(* --- recursive-knot-hole: a RECORDED KNOWN HOLE, pinned -------------------- *)
+(* KNOWN HOLE (owner-deferred to a later piece): a recursive value binding
+   self-justifies its declared predicate — lowering the right-hand side
+   resolves knot_false at its own declared refined type and the
+   value-description deposit adds the very fact the obligation must
+   establish (hypothesis false |- goal false), and the false fact then
+   propagates (knot_boom verifies 0 > 1).  Excluding a recursive group's
+   own idents needs recursive-group infrastructure this piece does not
+   carry (design-docs/vc-generation.md, Known holes).  These fixtures pin
+   the CURRENT accepting behaviour so the later piece has a discriminating
+   test to flip; if either block stops accepting, the hole moved —
+   re-record it there, not here. *)
+
+type knot = K of knot;;
+[%%expect{|
+type knot = K of knot
+|}]
+
+let rec knot_false : knot{ false } = K knot_false;;
+[%%expect{|
+Line 1, characters 8-18: refined environment entry: knot_false :
+  knot{ false }
+Line 1, characters 37-49: refinement obligation: knot{ false }
+val knot_false : knot{ false } = K <cycle>
+|}]
+
+let knot_boom : int{ 0 > 1 } = let _ = knot_false in 0;;
+[%%expect{|
+Line 1, characters 4-13: refined environment entry: knot_boom : int{ 0 > 1 }
+Line 1, characters 31-54: refinement obligation: int{ 0 > 1 }
+val knot_boom : int{ 0 > 1 } = 0
+|}]
+
+(* --- cross-obligation: two obligations on one subject, one shared ident --- *)
+(* The marker (annotation) and the arrow domain impose on the same subject;
+   each pending owns its seen-idents snapshot, so the second obligation
+   still deposits the w3 fact its own goal needs (the queries are pinned in
+   vc-printing.ml).  GREEN: all Proved. *)
+
+let w3 : int{ _ = 3 } = 3;;
+[%%expect{|
+Line 1, characters 4-6: refined environment entry: w3 : int{ _ = 3 }
+Line 1, characters 24-25: refinement obligation: int{ _ = 3 }
+val w3 : int{ _ = 3 } = 3
+|}]
+
+let cross_f (x : int{ _ > w3 }) = x;;
+[%%expect{|
+val cross_f : int{ _ > w3 } -> int = <fun>
+|}]
+
+let cross_probe = cross_f (5 : int{ _ > w3 - 1 });;
+[%%expect{|
+Line 1, characters 27-28: refinement obligation: int{ _ > (w3 - 1) }
+val cross_probe : int = 5
+|}]
+
+(* --- shadowed-modules: two local Ms with distinct t in one query ----------- *)
+(* The symbol allocator stamps the head of a dotted path, so the two [M.t]s
+   are two datatypes ([M_1.t], [M_2.t]) rather than one declaration whose
+   second constructor is undeclared.  GREEN: Proved. *)
+
+let shadowed_modules : int{ _ > 0 } =
+  let module M = struct type t = A end in
+  let p = M.A in
+  let module M = struct type t = B end in
+  let q = M.B in
+  ignore p; ignore q; 1;;
+[%%expect{|
+Line 1, characters 4-20: refined environment entry: shadowed_modules :
+  int{ _ > 0 }
+Lines 2-6, characters 2-23: refinement obligation: int{ _ > 0 }
+val shadowed_modules : int{ _ > 0 } = 1
+|}]

@@ -81,13 +81,20 @@ module Symbols = struct
     ; registering = []
     }
 
-  (* Resolved identity: the stamp keeps shadowed locals distinct
-     ([Path.name] would drop it); module paths are already unambiguous as
-     their dotted spelling. *)
-  let symbol_of_path (path : Path.t) =
+  (* Resolved identity: the stamp keeps shadowed idents distinct where
+     [Path.name] would drop it — the head of a dotted path included, so
+     two local modules [M] with different [t]s stay two symbols.  Globals
+     carry [Ident.unique_name]'s fake [_0] stamp; the canonical
+     renumbering gives locals and globals alike their per-obligation
+     number. *)
+  let rec symbol_of_path (path : Path.t) =
     match path with
     | Pident id -> Ident.unique_name id
-    | _ -> Path.name path
+    | Pdot (p, s) | Pextra_ty (p, Pcstr_ty s) -> symbol_of_path p ^ "." ^ s
+    | Papply (p1, p2) ->
+      symbol_of_path p1 ^ "(" ^ symbol_of_path p2 ^ ")"
+    | Pextra_ty (p, Pext_ty) -> symbol_of_path p
+    | Pextra_ty (p, Punboxed_ty) -> symbol_of_path p ^ "#"
 
   let value path = symbol_of_path path
 
@@ -165,12 +172,16 @@ let record_is_immutable (labels : Types.label_declaration list) =
        | Mutable _ -> false)
     labels
 
-(* The resolved identity of [Stdlib.Bigint.t]; [normalize_type_path]
-   resolves module aliases, so the alias and the compilation-unit spelling
-   agree. *)
+(* The resolved identity of [Stdlib.Bigint.t]: the head of the normalized
+   path must be the [Stdlib__Bigint] compilation unit itself
+   ([normalize_type_path] resolves the [Stdlib.Bigint] alias to it).  A
+   spelling comparison would also catch a user module literally named
+   [Stdlib__Bigint], whose [t] is not this type. *)
 let is_bigint env p =
   match Env.normalize_type_path None env p with
-  | p -> String.equal (Path.name p) "Stdlib__Bigint.t"
+  | Pdot (Pident id, "t") ->
+    Ident.is_global id && String.equal (Ident.name id) "Stdlib__Bigint"
+  | _ -> false
   | exception Not_found -> false
 
 let rec sort_of_type st ~loc env ty : Vox_logic.Sort.t =
@@ -1012,12 +1023,15 @@ let rec emit (ir : Ir.t) : Vox_logic.Term.t =
    optional [<...>] instance suffix) becomes [base_<n>] with [n] assigned
    per base in first-occurrence order (the same stamp keeps one [n] across
    its instance suffixes), and [result/<counter>] renumbers in
-   first-occurrence order.  Dotted names renumber per [.]-separated
-   segment, so a qualified datatype member ([box_<stamp>.first_pos]) stays
-   consistent with its datatype's own renaming; unstamped names (module
-   paths, tuple instances) are already stable and pass through.
-   Occurrence order is hypotheses, then goal, then the signature — which
-   is itself in first-occurrence term order, so the two agree. *)
+   first-occurrence order.  Names renumber per delimiter-separated
+   segment — dots, and the [< > , ( ) #] of instance suffixes and functor
+   paths — so a qualified datatype member ([box_<stamp>.first_pos]) stays
+   consistent with its datatype's own renaming, and a stamp inside an
+   instance suffix ([wrap_<n><leaf_<stamp>>]) renumbers with the sort it
+   names; unstamped segments (predef names, tuple instances, sort keys)
+   pass through.  Occurrence order is hypotheses, then goal, then the
+   signature — which is itself in first-occurrence term order, so the two
+   agree. *)
 let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
   let renames : (string, string) Hashtbl.t = Hashtbl.create 16 in
   let stamp_numbers : (string, int) Hashtbl.t = Hashtbl.create 16 in
@@ -1027,20 +1041,14 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
     s <> "" && String.for_all (function '0' .. '9' -> true | _ -> false) s
   in
   let rename_segment segment =
-    let prefix, suffix =
-      match String.index_opt segment '<' with
-      | Some i ->
-        String.sub segment 0 i, String.sub segment i (String.length segment - i)
-      | None -> segment, ""
-    in
-    match String.rindex_opt prefix '_' with
+    match String.rindex_opt segment '_' with
     | Some i
       when i > 0
            && is_digits
-                (String.sub prefix (i + 1)
-                   (String.length prefix - i - 1)) ->
-      let base = String.sub prefix 0 i in
-      let stamp = String.sub prefix i (String.length prefix - i) in
+                (String.sub segment (i + 1)
+                   (String.length segment - i - 1)) ->
+      let base = String.sub segment 0 i in
+      let stamp = String.sub segment i (String.length segment - i) in
       let key = base ^ "\000" ^ stamp in
       let n =
         match Hashtbl.find_opt stamp_numbers key with
@@ -1055,8 +1063,12 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
           Hashtbl.add stamp_numbers key n;
           n
       in
-      Printf.sprintf "%s_%d%s" base n suffix
+      Printf.sprintf "%s_%d" base n
     | _ -> segment
+  in
+  let is_delimiter = function
+    | '.' | '<' | '>' | ',' | '(' | ')' | '#' -> true
+    | _ -> false
   in
   let rename name =
     match Hashtbl.find_opt renames name with
@@ -1070,9 +1082,25 @@ let canonicalise (ob : Vox_logic.Obligation.t) : Vox_logic.Obligation.t =
           incr opaque_counter;
           Printf.sprintf "result/%d" !opaque_counter
         end
-        else
-          String.concat "."
-            (List.map rename_segment (String.split_on_char '.' name))
+        else begin
+          let buf = Buffer.create (String.length name) in
+          let flush start stop =
+            Buffer.add_string buf
+              (rename_segment (String.sub name start (stop - start)))
+          in
+          let start = ref 0 in
+          String.iteri
+            (fun i c ->
+               if is_delimiter c
+               then begin
+                 flush !start i;
+                 Buffer.add_char buf c;
+                 start := i + 1
+               end)
+            name;
+          flush !start (String.length name);
+          Buffer.contents buf
+        end
       in
       Hashtbl.add renames name renamed;
       renamed
