@@ -1,0 +1,14 @@
+x >= 0 |- x + 1 >= 0: unknown (prove query: sat; disprove query: sat)
+x >= 0, x < max_int, x < 100 |- x + 1 >= 1: proved (unused hypotheses: 1)
+x > 5 |- x < 3: refuted, e.g. x = 2305843009213693954:bv63
+|- x > 5: unknown (prove query: sat; disprove query: sat)
+xs = Cons(42, Nil) |- is-Nil xs: refuted, e.g. xs = (Cons<Int> 42 Nil<Int>)
+factoring, briefly: unknown (timeout)
+insert law at x |- member x (insert x s): proved (no unused hypotheses found)
+x > 0 |- x = x: proved (unused hypotheses: 0)
+not (member x s) |- member x s: refuted, e.g. s = int_set!val!0, x = 0
+f |- f: proved (no unused hypotheses found)
+h0 : bool, hypothesis false |- false: error: ill-formed obligation: duplicate symbol h0 (as hypothesis label)
+x : (an abstract sort named Int) |- x >= x: error: ill-formed obligation: sort name Int collides with an SMT-LIB builtin sort
+n = b (ill-sorted) |- n > 0 && n < 0: error: the solver rejected the query
+wedged solver: unknown (timeout)
