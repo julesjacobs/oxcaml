@@ -93,18 +93,44 @@ module Symbols : sig
   val to_signature : t -> Vox_logic.Signature.t
 end
 
+(** A located rejection: the subject or predicate cannot be stated in the
+    term language (tier 2 — function-sorted, first-class module, object,
+    unsolved variable, an unclosable datatype), or meets a construct this
+    translation does not yet support.  Obligations fail closed: the walk
+    turns this into a located user error.  Facts fail open: a fact source
+    catches it and declines. *)
+exception Unsupported of { loc : Location.t; reason : string }
+
+(** What the subject front end resolved while lowering, reported to the
+    caller as it happens: the fact sources that ride on lowering
+    (value descriptions at occurrences, apply codomains, immutable field
+    labels, per-read mutable subjects) hang off these, keeping the fact
+    rules in {!Vox_verify} without a second traversal.  The callback fires
+    on every lowering of the node, memoized or not: each obligation
+    snapshot decides for itself what a resolution deposits. *)
+type resolved =
+  | Resolved_ident of Path.t * Types.value_description
+  | Resolved_apply of Typedtree.expression
+      (** an application lowered as a stable [Call] or abstracted opaque *)
+  | Resolved_field of Typedtree.expression * Data_types.label_description
+      (** an immutable field read; the label carries the declared type *)
+  | Resolved_mutvar of Ident.t
+      (** a [Texp_mutvar] read, lowered to its per-read opaque constant *)
+
 (** Map an OCaml type onto a sort: [bool -> Bool], [int -> Bitvec 63],
     [Bigint.t -> Int], concrete datatypes -> [Datatype], abstract types ->
     [Uninterpreted].  A sort the language cannot represent (functions,
     first-class modules, objects, unsolved variables) is a located
     rejection (tier 2), never a silent drop. *)
-val sort_of_type : Env.t -> Types.type_expr -> Vox_logic.Sort.t
+val sort_of_type : loc:Location.t -> Env.t -> Types.type_expr -> Vox_logic.Sort.t
 
 (** Subject front end: typedtree -> IR.  Shallow and total on the
     supported forms; sorts are read off [exp_type], never reconstructed.
     A value-sorted form it does not support abstracts to a fresh opaque
     constant (tier 1), memoized per node. *)
-val lower_subject : Symbols.t -> Typedtree.expression -> Ir.t
+val lower_subject :
+  Symbols.t -> ?on_resolved:(resolved -> Ir.t -> unit) ->
+  Typedtree.expression -> Ir.t
 
 (** Predicate front end: rexp -> IR.  A located sort checker — rexp is
     untyped and nothing upstream or downstream checks predicate sorts —
