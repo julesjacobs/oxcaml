@@ -34,7 +34,30 @@ where `Γ` extends the ambient typing environment `E` with:
 - the predicate's own binders (`let`, `fun`, `match`) as ordinary
   bindings, by ordinary inference.
 
-**The judgment is Typecore's.** Predicate expressions are typed by the
+**The judgment is Typecore's, at mode total, over logical spec entities.**
+The predicate is checked against `bool` at an expected mode requiring
+`Total` on the totality axis (legacy is Partial, so this is a real
+constraint): a call to a partial function inside a predicate is a mode
+error, a `fun` inside a predicate is a total closure, and mutable access
+fails exactly as the totality piece specifies. The hole and the dependent
+binders enter the environment `@ logical` (monadic Logicality): spec
+entities, usable in logical positions, unable to leak into physical ones.
+
+**Comparison admission (predicate-scoped).** The totality allowlist
+excludes comparisons (polymorphic compare raises on functions, diverges
+on cyclic values), which would reject `int{ _ > 0 }`. Inside the
+predicate judgment, comparison primitives are admitted as total when
+their operand type is immediate — vox2's rule, which the totality
+piece's decision log names as the unported follow-up, and which matches
+the solver-modeled set. Stated plainly: `string{ _ = "x" }` is rejected
+until the modeled set grows, and `/` / `mod` remain partial in
+predicates. The admission lives in this judgment, not the global
+allowlist. (Chosen over kind-constrained total comparison externals —
+the principled long-term unlock, a piece of its own — and over a spec
+prelude of wrappers, which would make `Stdlib.(>)` unusable in
+predicates.)
+
+**The judgment is Typecore's**, in the ordinary sense: Predicate expressions are typed by the
 real expression typer, re-entered through a forward-declared hook
 (`Typetexp.type_refinement_predicate`, installed by `Typemod` — the
 `type_open`/vox2 precedent), against expected type `bool`, inside a
@@ -69,12 +92,11 @@ The reentry is a transaction over Typecore's ambient state, not just a
   refinement owns its own holes) to one fresh synthetic value bound at
   the payload type; the mirror build maps that ident back to
   `Rexp_hole`.
-- **Mode boundary.** Predicates are erased specs: reading a value inside
-  one must not constrain the enclosing program's closure locks, totality
-  or other modes (a partial call in a predicate must not make the
-  enclosing closure partial). The reentry env presents no ambient locks,
-  and mode constraints arising inside the predicate are confined to the
-  frame. This piece checks types only.
+- **Modes are checked for real.** There is no mode-isolation carve-out:
+  the reentry presents the true environment and the expected mode carries
+  Total; a predicate reading ambient values walks the ordinary locks. The
+  earlier draft's isolation existed only because mode discipline was
+  deferred; it is deleted, not generalized.
 - **Type variables.** A complete reentrant `TyVarEnv` frame: the
   enclosing declaration's named variables remain visible (`'a{ _ = 0 }`
   pins `'a = int` — ordinary inference, wanted); new named type
@@ -141,15 +163,12 @@ rejected. Concretely, the mirror
 keeps source shape, order, constants, grouping and locations from the gated
 parsetree exactly as today; the correspondence walk supplies, per source node,
 the type, the selected constructor/field identity, and binder `Ident.t`s.
-Typedtree forms with no faithful preimage are rejected with a located
-"not supported in a refinement predicate": applications the typechecker
-completes or reorders beyond the source (required-label omission —
-`Omitted` arguments), `Optional`/`Position` arrows anywhere in an applied
-callee's type (all four spellings: `~opt:v`, `?opt:o`, omitted-optional
-synthesis, implicit `%call_pos`), `%apply`/`%revapply` and format-string
-rewrites, and GADT / existential-introducing constructors in patterns.
-Polymorphic `let` inside predicates is **allowed** (ordinary Typecore
-generalization; each use site's mirror node carries its instance).
+
+Where the typedtree contains what the mirror cannot say, the
+*judgment's* representability validation has already rejected it (see
+"Two phases"); the build itself is total. Polymorphic `let` inside
+predicates is **allowed** (ordinary Typecore generalization; each use
+site's mirror node carries its instance).
 
 Stored annotations:
 
@@ -225,15 +244,37 @@ least once while stabilizing, and once for authoritative warning replay; the
 defensive worst case is quadratic in the number of predicates in one
 binder-carrying domain.
 
+## Two phases: a fallible judgment, then a total translation
+
+Everything that can reject lives in one phase; the mirror translation
+cannot fail. Concretely:
+
+1. **Judgment (fallible)**: the syntactic gate; hole rewriting; the
+   Typecore reentry at `bool @ total` with logical spec entities; and a
+   **representability validation** over the resulting typedtree, which
+   owns the rejections that are typing facts rather than syntax and are
+   orthogonal to totality: `Optional`/`Position` arrows anywhere in an
+   applied callee's type (all four spellings, including omitted-optional
+   and `%call_pos` synthesis), applications the typechecker completes or
+   reorders beyond the source (`Omitted` required labels),
+   `%apply`/`%revapply` and format-string rewrites, and GADT /
+   existential-introducing constructors in patterns. All are located
+   errors of the judgment. The rollback snapshot's scope is exactly this
+   phase.
+2. **Translation (total)**: `mirror_of_typedtree` — the
+   parsetree-shape/typedtree-annotation correspondence — has **no error
+   paths**. Every input reaching it has passed the gate, the mode-checked
+   typing, and representability; anything unrepresentable at this point
+   is an invariant break (assert), not a user error. It runs after the
+   judgment commits.
+
+This is the reason the mode discipline belongs in this piece rather than
+after it: with totality checked and representability validated up front,
+"checked predicate" entails "mirror exists", and no consumer ever holds
+a typed predicate that cannot be translated.
+
 ## Deliberately out of scope
 
-- **Mode discipline** (predicates checked total + logical; comparison
-  admission tied to the solver-modeled set): its own piece, blocked on
-  the comparison-admission and ghost-interaction rulings. This piece
-  checks types only; the syntactic totality gate stays. Well-typed must
-  not be read as solver-admissible: positive fixtures pin a well-typed
-  call to a partial function and a qualified mutable access as accepted
-  *by this piece*, so a later mode policy shows up as a diff.
 - **Obligations inside predicates** (refined interior constraints are
   payload-checked, nothing recorded) — revisit with the translation
   piece.
@@ -276,6 +317,10 @@ hygiene and full-suite reference churn are expected.
   (probe via -drefinements).
 - Ambient-variable constraint: `'a{ _ = 0 }` pins `'a`; principal-mode
   double-take fixtures for the disambiguation cases.
+- Mode discipline: a partial call in a predicate rejected; a mutable
+  access rejected; comparison acceptance at int / rejection at string;
+  `/` and `mod` rejected unguarded; a logical hole flowing to a physical
+  argument rejected; a nested `fun` checked total.
 - Recursive groups: same-group constructor AND field mention errors
   (structure and signature); non-group mentions fine.
 - GADT/existential constructor pattern in a predicate match: located
