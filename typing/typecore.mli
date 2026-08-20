@@ -144,15 +144,16 @@ val type_expression:
         Env.t -> Parsetree.expression -> Typedtree.expression
 
 (** Type a refinement predicate against [bool] by Typecore reentry, inside
-    a protected transient frame, and build its typed mirror.  [payload] is
-    the refinement's payload type (the hole's type); [binders] are the
-    dependent-arrow binders in scope, each at its completed declared type.
-    Their list order is not semantically significant.  Installed into
+    a protected transient frame, and build its typed mirror.  [payload] and
+    [payload_mode] are the refinement hole's type and declared mode; [binders]
+    are the dependent-arrow binders in scope, each at its completed declared
+    type and mode.  Their list order is not semantically significant.  Installed into
     [Typetexp.type_refinement_predicate] by [Typemod].
     See design-docs/predicate-typing.md. *)
 val type_refinement_predicate:
         Env.t -> loc:Location.t -> payload:type_expr ->
-        binders:(Ident.t * type_expr) list ->
+        payload_mode:Mode.Alloc.Const.t ->
+        binders:(Ident.t * type_expr * Mode.Alloc.Const.t) list ->
         Parsetree.expression -> Types.refinement_expression
 val type_representable_expression:
         why:Jkind.History.concrete_creation_reason ->

@@ -163,11 +163,19 @@ Error: Unbound value "x"
 (* [~x:] scopes over the whole argument, and only the argument *)
 type tilde_tuple = ~x:(int{ x > 0 } * int) -> unit;;
 [%%expect{|
-Line 1, characters 32-33:
+Line 1, characters 28-29:
 1 | type tilde_tuple = ~x:(int{ x > 0 } * int) -> unit;;
-                                    ^
-Error: The constant "0" has type "int" but an expression was expected of type
-         "int{ _ } * int"
+                                ^
+Error: The value "x" has type "int{ _ } * int"
+       but an expression was expected of type "('a : immediate)"
+       The layout of int{ _ } * int is value non_float
+         because it's a tuple type.
+       But the layout of int{ _ } * int must be a sublayout of
+           value non_pointer
+         because it is the primitive immediate type >.
+       Note: The layout of immediate is value non_pointer.
+       Note: The kinds mutable_data, immutable_data, and sync_data have
+       the layout value non_float.
 |}]
 
 type bad = ~x:int -> int{ _ >= x };;
@@ -181,11 +189,19 @@ Error: Unbound value "x"
 (* A positional binder scopes over refinements anywhere in its domain *)
 type nested_domain = x:(int{ x > 0 } * int) -> unit;;
 [%%expect{|
-Line 1, characters 33-34:
+Line 1, characters 29-30:
 1 | type nested_domain = x:(int{ x > 0 } * int) -> unit;;
-                                     ^
-Error: The constant "0" has type "int" but an expression was expected of type
-         "int{ _ } * int"
+                                 ^
+Error: The value "x" has type "int{ _ } * int"
+       but an expression was expected of type "('a : immediate)"
+       The layout of int{ _ } * int is value non_float
+         because it's a tuple type.
+       But the layout of int{ _ } * int must be a sublayout of
+           value non_pointer
+         because it is the primitive immediate type >.
+       Note: The layout of immediate is value non_pointer.
+       Note: The kinds mutable_data, immutable_data, and sync_data have
+       the layout value non_float.
 |}]
 
 (* A [fun] parameter in the predicate shadows the name, so [x] stays a
@@ -200,8 +216,12 @@ type still_label = x:int list{ (fun x -> x > 0) 1 } -> unit
 type still_label_partial =
   x:int list{ List.for_all (fun x -> x > 0) _ } -> unit;;
 [%%expect{|
-type still_label_partial =
-    x:int list{ List.for_all (fun x -> x > 0) _ } -> unit
+Line 2, characters 14-26:
+2 |   x:int list{ List.for_all (fun x -> x > 0) _ } -> unit;;
+                  ^^^^^^^^^^^^
+Error: The value "List.for_all" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 2, characters 14-45).
 |}]
 
 (* A predicate-local binder is in scope in nested refinements through a
@@ -241,7 +261,12 @@ type pred_apply = s:string -> int{ _ < (total_length s) } -> char
 
 type pred_fun = int list{ List.for_all (fun x -> x > 0) _ };;
 [%%expect{|
-type pred_fun = int list{ List.for_all (fun x -> x > 0) _ }
+Line 1, characters 26-38:
+1 | type pred_fun = int list{ List.for_all (fun x -> x > 0) _ };;
+                              ^^^^^^^^^^^^
+Error: The value "List.for_all" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 26-57).
 |}]
 
 (* A Total function-literal control keeps the accepted function form covered. *)
@@ -329,10 +354,10 @@ type nat = int{ _ >= 0 }
 (* A recursive declaration whose predicate mentions the type being
    defined, through an interior type *)
 type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
-let well_formed @ total = fun (_ : 'a tree) -> true;;
+let well_formed @ total = fun (_ : 'a tree @ logical) -> true;;
 [%%expect{|
 type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
-val well_formed : 'a tree -> bool = <fun>
+val well_formed : 'a tree @ logical -> bool = <fun>
 |}]
 
 type wft = t tree{ well_formed (_ : t tree) }

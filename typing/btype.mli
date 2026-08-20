@@ -739,6 +739,9 @@ module Jkind0 : sig
 
     val for_non_float : why:Jkind_intf.History.value_creation_reason -> 'd jkind
 
+    val for_immediate :
+      why:Jkind_intf.History.immediate_creation_reason -> 'd jkind
+
     val for_boxed_record : label_declaration list -> jkind_l
 
     val for_boxed_record_with_updates :

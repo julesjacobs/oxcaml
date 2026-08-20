@@ -23,10 +23,11 @@ let fold_types_gen ~include_stored f acc rexp =
     in
     match rexp.rexp_desc with
     | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> acc
-    | Rexp_apply (fn, args) ->
+    | Rexp_apply (fn, { rapp_source_args = args; rapp_completion = _ }) ->
         List.fold_left
           (fun acc (_, arg) -> fold acc arg)
           (fold acc fn) args
+    | Rexp_format (_, expansion) -> fold acc expansion
     | Rexp_tuple components ->
         List.fold_left
           (fun acc (_, component) -> fold acc component)
@@ -95,10 +96,12 @@ let map ?(rename = Ident.Map.empty) ?(freshen = false) ?value_path
   let rec preallocate_rexp_binders rename rexp =
     match rexp.rexp_desc with
     | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> rename
-    | Rexp_apply (fn, args) ->
+    | Rexp_apply (fn, { rapp_source_args = args; rapp_completion = _ }) ->
         List.fold_left
           (fun rename (_, arg) -> preallocate_rexp_binders rename arg)
           (preallocate_rexp_binders rename fn) args
+    | Rexp_format (_, expansion) ->
+        preallocate_rexp_binders rename expansion
     | Rexp_tuple components ->
         List.fold_left
           (fun rename (_, component) ->
@@ -161,10 +164,16 @@ let map ?(rename = Ident.Map.empty) ?(freshen = false) ?value_path
           in
           Rexp_ident (path, lid)
       | Rexp_constant _ as desc -> desc
-      | Rexp_apply (fn, args) ->
+      | Rexp_apply (fn, app) ->
           Rexp_apply
             ( map_rexp rename fn,
-              List.map (fun (lbl, arg) -> lbl, map_rexp rename arg) args )
+              { app with
+                rapp_source_args =
+                  List.map
+                    (fun (lbl, arg) -> lbl, map_rexp rename arg)
+                    app.rapp_source_args } )
+      | Rexp_format (literal, expansion) ->
+          Rexp_format (literal, map_rexp rename expansion)
       | Rexp_tuple components ->
           Rexp_tuple
             (List.map (fun (lbl, c) -> lbl, map_rexp rename c) components)
@@ -247,6 +256,26 @@ let constant_equal (c1 : Parsetree.constant) (c2 : Parsetree.constant) =
       String.equal s1 s2 && Option.equal String.equal d1 d2
   | desc1, desc2 -> desc1 = desc2
 
+let application_arg_equal
+    (arg1 : refinement_application_arg)
+    (arg2 : refinement_application_arg) =
+  arg1.rarg_label = arg2.rarg_label
+  &&
+  match arg1.rarg_desc, arg2.rarg_desc with
+  | Rarg_source index1, Rarg_source index2
+  | Rarg_optional_wrapper index1, Rarg_optional_wrapper index2 ->
+      Int.equal index1 index2
+  | Rarg_optional_default, Rarg_optional_default
+  | Rarg_call_pos _, Rarg_call_pos _
+  | Rarg_omitted_optional, Rarg_omitted_optional
+  | Rarg_omitted_position, Rarg_omitted_position
+  | Rarg_omitted_required, Rarg_omitted_required ->
+      true
+  | ( ( Rarg_source _ | Rarg_optional_wrapper _ | Rarg_optional_default
+      | Rarg_call_pos _ | Rarg_omitted_optional | Rarg_omitted_position
+      | Rarg_omitted_required ), _ ) ->
+      false
+
 let equal ~type_eq ~pairs rexp1 rexp2 =
   (* [pairs] pairs the binders of the left predicate with the binders of
      the right one, innermost first. *)
@@ -266,12 +295,18 @@ let equal ~type_eq ~pairs rexp1 rexp2 =
     | Rexp_var id1, Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_ident (p1, _), Rexp_ident (p2, _) -> Path.same p1 p2
     | Rexp_constant c1, Rexp_constant c2 -> constant_equal c1 c2
-    | Rexp_apply (f1, args1), Rexp_apply (f2, args2) ->
+    | Rexp_apply (f1, app1), Rexp_apply (f2, app2) ->
         eq pairs f1 f2
-        && List.compare_lengths args1 args2 = 0
+        && List.compare_lengths app1.rapp_source_args app2.rapp_source_args = 0
         && List.for_all2
              (fun (l1, a1) (l2, a2) -> l1 = l2 && eq pairs a1 a2)
-             args1 args2
+             app1.rapp_source_args app2.rapp_source_args
+        && List.compare_lengths app1.rapp_completion app2.rapp_completion = 0
+        && List.for_all2 application_arg_equal
+             app1.rapp_completion app2.rapp_completion
+    | Rexp_format (literal1, expansion1),
+      Rexp_format (literal2, expansion2) ->
+        constant_equal literal1 literal2 && eq pairs expansion1 expansion2
     | Rexp_tuple c1, Rexp_tuple c2 ->
         List.compare_lengths c1 c2 = 0
         && List.for_all2
@@ -299,7 +334,8 @@ let equal ~type_eq ~pairs rexp1 rexp2 =
     | Rexp_constraint (e1, ty1), Rexp_constraint (e2, ty2) ->
         eq pairs e1 e2 && type_eq ~pairs ty1 ty2
     | ( ( Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _
-        | Rexp_apply _ | Rexp_tuple _ | Rexp_construct _ | Rexp_field _
+        | Rexp_apply _ | Rexp_format _ | Rexp_tuple _ | Rexp_construct _
+        | Rexp_field _
         | Rexp_ifthenelse _ | Rexp_let _ | Rexp_fun _ | Rexp_match _
         | Rexp_constraint _ ), _ ) ->
         false
@@ -357,9 +393,15 @@ let untype ~var_name ~value_ident ~constructor_ident ~field_ident ~core_type
            path. *)
         Exp.ident ~loc (value_ident path)
     | Rexp_constant const -> Exp.constant ~loc const
-    | Rexp_apply (fn, args) ->
+    | Rexp_apply
+        (fn, { rapp_source_args = []; rapp_completion = _ :: _ }) ->
+        (* An omittable-function coercion is represented by the application
+           completion it synthesized, but has no application in the source. *)
+        untype_rexp fn
+    | Rexp_apply (fn, { rapp_source_args = args; rapp_completion = _ }) ->
         Exp.apply ~loc (untype_rexp fn)
           (List.map (fun (lbl, arg) -> lbl, untype_rexp arg) args)
+    | Rexp_format (literal, _) -> Exp.constant ~loc literal
     | Rexp_tuple components ->
         Exp.tuple ~loc
           (List.map (fun (lbl, c) -> lbl, untype_rexp c) components)
@@ -422,9 +464,10 @@ let exists_rexp pred rexp =
     if pred rexp then raise Found;
     match rexp.rexp_desc with
     | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> ()
-    | Rexp_apply (fn, args) ->
+    | Rexp_apply (fn, { rapp_source_args = args; rapp_completion = _ }) ->
         walk fn;
         List.iter (fun (_, arg) -> walk arg) args
+    | Rexp_format (_, expansion) -> walk expansion
     | Rexp_tuple components -> List.iter (fun (_, c) -> walk c) components
     | Rexp_construct (_, _, arg) -> Option.iter walk arg
     | Rexp_field (e, _, _, _) -> walk e
@@ -483,8 +526,14 @@ let rec promote_locals locals rexp =
         Rexp_var id
     | (Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _) as desc ->
         desc
-    | Rexp_apply (fn, args) ->
-        Rexp_apply (promote fn, List.map (fun (l, a) -> l, promote a) args)
+    | Rexp_apply (fn, app) ->
+        Rexp_apply
+          ( promote fn,
+            { app with
+              rapp_source_args =
+                List.map (fun (l, a) -> l, promote a) app.rapp_source_args } )
+    | Rexp_format (literal, expansion) ->
+        Rexp_format (literal, promote expansion)
     | Rexp_tuple components ->
         Rexp_tuple (List.map (fun (l, c) -> l, promote c) components)
     | Rexp_construct (path, lid, arg) ->

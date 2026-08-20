@@ -37,18 +37,23 @@ where `Γ` extends the ambient typing environment `E` with:
 **The judgment is Typecore's, at mode total, over logical spec entities.**
 The predicate is checked against `bool` at an expected mode requiring
 `Total` on the totality axis (legacy is Partial, so this is a real
-constraint): a call to a partial function inside a predicate is a mode
-error, a `fun` inside a predicate is a total closure, and mutable access
-fails exactly as the totality piece specifies. The hole and the dependent
-binders enter the environment `@ logical` (monadic Logicality): spec
-entities, usable in logical positions, unable to leak into physical ones.
+constraint). In addition, every application typed during predicate reentry
+requires its callee to be Total. This predicate-specific rule reaches calls
+through the hole, dependent and predicate-local binders, aliases, and every
+consumed stage of a curried call; a `fun` inside a predicate is a total
+closure, and mutable access fails exactly as the totality piece specifies.
+The hole and dependent binders retain their declared value modes (legacy
+Partial when no mode is written), with the Logicality axis forced to
+`Logical`: spec entities are usable in logical positions and unable to leak
+into physical ones. A function-valued hole or binder is therefore callable
+only when its payload or binder context establishes Total.
 
 **Comparison admission (predicate-scoped).** The totality allowlist
 excludes comparisons (polymorphic compare raises on functions, diverges
 on cyclic values), which would reject `int{ _ > 0 }`. Inside the
 predicate judgment, comparison primitives are admitted as total when
-their operand type is immediate — vox2's rule, which the totality
-piece's decision log names as the unported follow-up, and which matches
+their operand type is immediate — the rule named by the totality
+piece's decision log as the unported follow-up, and which matches
 the solver-modeled set. Stated plainly: `string{ _ = "x" }` is rejected
 until the modeled set grows, and `/` / `mod` remain partial in
 predicates. The admission lives in this judgment, not the global
@@ -60,7 +65,7 @@ predicates.)
 **The judgment is Typecore's**, in the ordinary sense: Predicate expressions are typed by the
 real expression typer, re-entered through a forward-declared hook
 (`Typetexp.type_refinement_predicate`, installed by `Typemod` — the
-`type_open`/vox2 precedent), against expected type `bool`, inside a
+`type_open` precedent), against expected type `bool`, inside a
 protected transient frame. Everything that makes expression typing
 correct — type-directed constructor and field disambiguation, labelled
 application with commuting, principal-mode behavior, level discipline,
@@ -158,17 +163,20 @@ carries all parameters where the mirror nests unary `Rexp_fun`s,
 reordered into function-type order). Application correspondence consumes
 same-label, same-anchor matches in source occurrence order; a unique anchor is
 the fallback when label representations differ. Colliding locations such as
-repeated `Location.none` are never reusable keys, and ambiguous pairings are
-rejected. Concretely, the mirror
+repeated `Location.none` are never reusable keys. When omitted labels and
+colliding anchors make the pairing ambiguous, the Typecore judgment rejects
+the application before mirror construction. Concretely, the mirror
 keeps source shape, order, constants, grouping and locations from the gated
 parsetree exactly as today; the correspondence walk supplies, per source node,
 the type, the selected constructor/field identity, and binder `Ident.t`s.
 
 Where the typedtree contains what the mirror cannot say, the
 *judgment's* representability validation has already rejected it (see
-"Two phases"); the build itself is total. Polymorphic `let` inside
-predicates is **allowed** (ordinary Typecore generalization; each use
-site's mirror node carries its instance).
+"Two phases"); the build itself is total for parser-produced input.
+Inferred polymorphic `let` inside predicates is **allowed** (ordinary Typecore
+generalization; each use site's mirror node carries its instance). An explicit
+polymorphic binding annotation has no faithful expression-constraint preimage
+and is rejected by the syntactic judgment with a located error.
 
 Stored annotations:
 
@@ -193,14 +201,14 @@ Stored annotations:
   types + the identity keys; derived node types are ignored by
   `Vox_rexp.equal`.
 
-The *syntactic gate* (totality by construction, unsupported-forms rejection)
-stays as a pre-pass over the parsetree, so **no syntactically rejected form
-reaches Typecore**. The consolidated gate admits simple predicate-`let`
-annotations that have a faithful constraint preimage and continues to reject
-the other annotation forms (effectful-by-type expressions — a
-well-typed call to a partial function, a qualified mutable access — do
-reach it and are accepted by this piece; the mode piece decides their
-fate later).
+The *syntactic gate* stays as a pre-pass over the parsetree, so **no
+syntactically rejected form reaches Typecore**. The consolidated gate admits
+simple monomorphic predicate-`let` annotations that have a faithful constraint
+preimage and rejects explicit polymorphic binding annotations and the other
+unrepresentable annotation forms. Effectful-by-type
+expressions do reach Typecore: the total/logical judgment rejects a call to a
+partial function and a mutable access through a logical value there, with the
+ordinary mode diagnostic.
 
 ### Recursive declarations and signatures
 
@@ -232,7 +240,7 @@ nothing, was drafted and review-looped. It fails on facts of this tree:
 - rerun determinism is not structural: recursive-group temporaries,
   principal-mode sensitivity, and signature-local scope all make "same
   code, same verdict" a semantic obligation the design could not meet;
-- the claimed performance motivation (vox2's 31% profile line) measures
+- the cited 31% profile line measures
   syntactic alpha-equivalence, which an untyped mirror pays too — it
   does not measure typed storage.
 
@@ -246,17 +254,20 @@ binder-carrying domain.
 
 ## Two phases: a fallible judgment, then a total translation
 
-Everything that can reject lives in one phase; the mirror translation
-cannot fail. Concretely:
+For parser-produced input, everything that can reject lives in one phase and
+the mirror translation cannot fail. Concretely:
 
 1. **Judgment (fallible)**: the syntactic gate; hole rewriting; the
-   Typecore reentry at `bool @ total` with logical spec entities. Every
-   totality, logicality, and type rejection is a located error of this
-   phase, and the rollback snapshot's scope is exactly this phase.
+   Typecore reentry at `bool @ total` with logical spec entities. This phase
+   also rejects source patterns whose constructor-wildcard argument would be
+   erased or replicated by Typecore, and omitted-label PPX applications whose
+   colliding locations make source/typed argument pairing ambiguous. Every
+   totality, logicality, type, and representability rejection is a located
+   error, and the rollback snapshot's scope is exactly this phase.
 2. **Translation (total)**: `mirror_of_typedtree` — the
    parsetree-shape/typedtree-annotation correspondence — cannot fail on
-   anything the judgment admits. The formerly rejected typedtree forms
-   are **represented** rather than rejected:
+   parser-produced input that the judgment admits. The formerly rejected
+   typedtree forms are **represented** rather than rejected:
    - application argument synthesis gets explicit mirror forms — an
      omitted optional, a defaulted optional, an `%call_pos` argument and
      an `Omitted` required label are distinct argument entries alongside
@@ -267,12 +278,16 @@ cannot fail. Concretely:
      application the way the typedtree has it, anchored to the source
      literal;
    - GADT and existential-introducing constructors appear in patterns as
-     ordinary constructor patterns; existential types introduced by an
-     arm are scoped to that arm's stored types. If existential scoping in
-     the persisted mirror proves disproportionate to implement, the
-     implementor may keep a narrow judgment-phase rejection for exactly
-     that case, recorded as a decision — the principle is represent,
-     don't reject.
+     ordinary constructor patterns; existential types introduced by an arm are
+     scoped to that arm's stored types. If existential scoping in the persisted
+     mirror proves disproportionate to implement, the implementor may keep a
+     narrow judgment-phase rejection for exactly that case, recorded as a
+     decision — the principle is represent, don't reject.
+
+   Parser-produced admitted input has no remaining correspondence mismatch.
+   A PPX can still erase or duplicate source metadata in ways the parser
+   cannot produce; defensive correspondence fallbacks report located errors
+   rather than aborting the compiler.
 
    The *solver translation* (a later piece) is where per-obligation
    "unsupported feature — will be supported in the future" reports live:
@@ -307,20 +322,33 @@ hygiene and full-suite reference churn are expected.
 
 `testsuite/tests/vox/predicate_typing.ml` (expect):
 
-- Rejections, located: `int{ 42 }`, `int{ _ + "x" }`,
-  `string{ String.length _ }`; acceptance: `int{ _ > 0 }`.
+- Rejections, located: `int{ 42 }`, `int{ _ + "x" }`, and a Total helper
+  returning `int` in `string{ total_length _ }`; acceptance:
+  `int{ _ > 0 }`.
 - Holes: multiple occurrences, nested refinements (innermost payload),
-  under `let`/`match`/`fun`.
+  under `let`/`match`/`fun`; function-valued holes default Partial, reject
+  direct, aliased, and indirect calls, and accept when their payload context
+  is explicitly Total. A diverging function pins the soundness consequence.
 - Binders: bare and `~x:` labelled at payload; refined binder head-strip
   (`x:int{q} -> int{ _ > x }`); binder-in-own-domain flips; predicate
-  binders shadowing arrow binders.
+  binders shadowing arrow binders; default/explicit Partial function binders
+  reject calls while an explicitly Total binder accepts direct, `%apply`, and
+  `%revapply` spellings.
 - Disambiguation: two records sharing a label name, two variants sharing
   a constructor, selected by expected type inside a predicate — the
   fixtures that a first-candidate resolver gets wrong.
-- Application: labelled commuting, partial application of a labelled
-  function, `Optional`/`Position` callee rejection (all four spellings).
-- Polymorphic `let` inside a predicate (`let id = fun x -> x in
-  id 0 = 0 && id true` accepts — pins Typecore generalization).
+- Application: labelled commuting; source-order and callee-order completion
+  for partial, optional/defaulted, and `[%call_pos]` arguments, including a
+  dedicated omitted-position RED2-to-GREEN2 flip;
+  `%apply`/`%revapply`; format expansion; optional/position eta coercions; and
+  a genuine ordinary-value layout-polymorphic identifier wrapper. The
+  operator-mode fixtures compare
+  direct, `%apply`, and `%revapply` calls returning an unused Partial function;
+  malformed user externals reusing the primitive names stay on the generic
+  application path rather than crashing the specialized reconstruction.
+- Inferred polymorphic `let` inside a predicate (`let id = fun x -> x in
+  id 0 = 0 && id true` accepts — pins Typecore generalization); an explicit
+  polymorphic binding annotation rejects with a located syntactic error.
 - Occurrence strip inside predicates: application-result head strip,
   nested heads intact (`int{p} list` element projection).
 - Refined interior constraint: payload-checked, no obligation recorded
@@ -330,11 +358,18 @@ hygiene and full-suite reference churn are expected.
 - Mode discipline: a partial call in a predicate rejected; a mutable
   access rejected; comparison acceptance at int / rejection at string;
   `/` and `mod` rejected unguarded; a logical hole flowing to a physical
-  argument rejected; a nested `fun` checked total.
+  argument rejected; a nested `fun` checked total. Immutable instance-variable
+  reads are mirrored, while mutable instance-variable reads are rejected by
+  the implicit self capture through the ordinary locks.
 - Recursive groups: same-group constructor AND field mention errors
   (structure and signature); non-group mentions fine.
-- GADT/existential constructor pattern in a predicate match: located
-  rejection.
+- GADT and existential constructor patterns represented and persisted,
+  including value binders whose arm stores no existential type; only an arm
+  whose written or derived mirror annotation actually retains its local
+  existential gets the narrow located persistence rejection recorded below.
+- Constructor wildcard arguments are represented for unary constructors and
+  rejected with a located judgment error for nullary or multi-arity
+  constructors, where Typecore would erase or replicate the source pattern.
 - Binder order-sensitivity: the early-annotation/late-annotation pair
   from the review (annotation after a constraining use is a clean
   error, not an incidental unification mystery).
@@ -382,13 +417,13 @@ build discipline.
   generalization, and persistence also visit stored node annotations.
 - **Predicate reentry is fully transactional.** Every failure through mirror
   construction freezes its diagnostic before `Btype` rollback; delayed checks,
-  allocation state, saved cmt expressions, warning state, and mode-solver
-  changes are framed. The type-only boundary enters ghost context. Successful
-  ambient type constraints still commit. Mode constraints from the transient
-  frame roll back; if a committed weak variable becomes an arrow, its otherwise
-  unconstrained modes default conservatively at the phrase boundary. The
-  local-argument fixture pins that observable conservative boundary; it does
-  not independently isolate the mode-rollback implementation.
+  allocation state, saved cmt expressions, and warning state are framed. The
+  type-only boundary enters ghost context. `Btype` snapshots already log mode
+  solver changes, so failure rolls back both type and mode constraints while a
+  successful judgment commits both. The earlier unconditional
+  `Mode.with_rollback` confinement and refinement lock cutoff are removed; the
+  now-unused rollback helper is deleted as well, leaving the ordinary `Btype`
+  transaction as the single rollback mechanism.
 - **Frame views copy every non-variable spine.** This includes polymorphic
   variants and first-class packages, object field/poly spines, and unboxed
   tuples as well as constructors, arrows, boxed tuples, and refinements.
@@ -406,3 +441,60 @@ limitation is accepted. Successful stored mirrors are unaffected.
 - **The shared artifact magic version advances from 583 to 584.** The Types
   representation change affects marshaled CMI/CMT data; the common version
   source intentionally changes all generated artifact magic strings together.
+- **Round 4 uses the ordinary total/logical mode frame plus predicate callee
+  checking.** The predicate is expected at `bool @ total`, a normal Total
+  closure lock exposes ambient captures, and every application requires its
+  callee to be Total. Hole and dependent-binder entries retain their declared
+  modes, defaulting to legacy Partial, with Logicality forced to Logical. This
+  preserves ordinary capture-based totality outside predicates while closing
+  direct, aliased, indirect, and curried calls through Partial spec entities.
+- **Comparison admission is occurrence-local.** Each of the six comparison
+  primitive instances used by a predicate gets one shared immediate operand
+  jkind, Logical argument modes, and a Total value mode. The global primitive
+  allowlist is unchanged; strings, `/`, and `mod` remain rejected. Recognition
+  trusts the compiler's comparison primitive identities and arity contract.
+  Unlike the `%apply` reconstruction, it does not structurally reinterpret a
+  callback type, so adding a separate policy for forged noncanonical external
+  declarations would not protect any valid program and is deliberately
+  omitted.
+- **Application completion is persistent syntax.** `Rexp_apply` keeps source
+  arguments in source order and a callee-order completion containing source
+  indexes, optional wrapping/defaulting, call positions, and omitted
+  optional/position/required labels. `%apply` and `%revapply` remain
+  source-shaped during predicate typing. For canonical primitive types, fresh
+  shared modes reproduce the direct call's callback-domain/value-operand and
+  callback-result/operator-result relations, including under `-principal`;
+  the shared result mode is not independently forced Total. A user external
+  that reuses either primitive name with a noncanonical type stays on the
+  generic application path. Synthesized call-position locations are retained
+  as metadata but ignored by mirror equality.
+- **Typedtree-only rewrites are represented.** Format literals retain their
+  literal plus the typed expansion; optional/position function coercions use a
+  zero-source application completion and print as the original expression;
+  `Texp_apply_layout` is transparent around its source identifier. Immutable
+  instance-variable identifiers are represented as value identities too;
+  mutable instance variables first capture their implicit self through the
+  normal mode locks and therefore fail the Total predicate judgment.
+- **Explicit polymorphic binding annotations are outside the predicate
+  language.** Inferred polymorphic `let` remains supported. The explicit
+  annotation has no faithful expression-constraint mirror node, so the
+  syntactic gate rejects it with a located error before Typecore reentry.
+- **Existential persistence has one narrow judgment rejection.** Ordinary GADT
+  and existential constructor patterns are represented, including unrelated
+  or unused value binders. Persistence validation collects the arm-local
+  existential identities from typed binders and rejects only if a written or
+  derived type actually stored by the provisional mirror retains one; that
+  type has no definition outside the typedtree arm and would make CMI writing
+  fail. Explicit named existential type binders remain rejected by the
+  syntactic gate. Persisting scoped existential definitions would require a
+  new mirror scope representation and is disproportionate for this round.
+- **Mirror correspondence is total for parser-produced admitted input.** The
+  gate, Typecore judgment, and the explicit existential-persistence check own
+  ordinary parser-program errors. The judgment includes the narrow checks for
+  arity-changing constructor wildcards and ambiguous all-ghost omitted-label
+  applications. Residual correspondence mismatches possible only through
+  PPX-shaped input are defensive located errors, never compiler-fatal paths.
+- **Round 4 keeps artifact magic 584.** The branch-wide unreleased magic bump
+  already covers the typed-mirror representation; the additional completion
+  and format variants land in the same RED/GREEN stack and do not consume a
+  second version.

@@ -78,7 +78,8 @@ val type_open:
     (design-docs/predicate-typing.md). *)
 val type_refinement_predicate:
   (Env.t -> loc:Location.t -> payload:Types.type_expr ->
-   binders:(Ident.t * Types.type_expr) list ->
+   payload_mode:Mode.Alloc.Const.t ->
+   binders:(Ident.t * Types.type_expr * Mode.Alloc.Const.t) list ->
    Parsetree.expression -> Types.refinement_expression)
     ref
 

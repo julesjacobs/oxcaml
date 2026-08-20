@@ -970,21 +970,23 @@ let refinement_constructor_path (cstr : Data_types.constructor_description) =
             "Typetexp.refinement_constructor_path: malformed constructor")
 
 (* Dependent-arrow binders currently in scope, each with its declared
-   type, filled when the binder's domain finishes translating (see the
+   mode and type, the latter filled when the binder's domain finishes
+   translating (see the
    two-phase domain formation below).  The dynamic extent of translating
    an arrow's domain and codomain is exactly the binder's lexical scope,
    so a [protect_refs]-managed reference suffices; compare [TyVarEnv]. *)
 let refinement_scope
-  : (Ident.t * type_expr option ref) Misc.Stdlib.String.Map.t ref =
+  : (Ident.t * Mode.Alloc.Const.t * type_expr option ref)
+      Misc.Stdlib.String.Map.t ref =
   ref Misc.Stdlib.String.Map.empty
 
 let with_refinement_binder binder f =
   match binder with
   | None -> f ()
-  | Some (name, id, ty_ref) ->
+  | Some (name, id, mode, ty_ref) ->
       Misc.protect_refs
         [ Misc.R (refinement_scope,
-                  Misc.Stdlib.String.Map.add name (id, ty_ref)
+                  Misc.Stdlib.String.Map.add name (id, mode, ty_ref)
                     !refinement_scope) ]
         f
 
@@ -1001,7 +1003,10 @@ let with_refinement_binder binder f =
 type pending_predicate =
   { pp_env : Env.t;
     pp_payload : type_expr;
-    pp_scope : (Ident.t * type_expr option ref) Misc.Stdlib.String.Map.t;
+    pp_payload_mode : Mode.Alloc.Const.t;
+    pp_scope :
+      (Ident.t * Mode.Alloc.Const.t * type_expr option ref)
+        Misc.Stdlib.String.Map.t;
     pp_pred : Parsetree.expression;
     pp_target : refinement_desc }
 
@@ -1013,17 +1018,18 @@ let pending_domain_depth = ref 0
    typed mirror. *)
 let type_refinement_predicate :
   (Env.t -> loc:Location.t -> payload:type_expr ->
-   binders:(Ident.t * type_expr) list ->
+   payload_mode:Mode.Alloc.Const.t ->
+   binders:(Ident.t * type_expr * Mode.Alloc.Const.t) list ->
    Parsetree.expression -> refinement_expression)
     ref =
-  ref (fun _ ~loc:_ ~payload:_ ~binders:_ _ ->
+  ref (fun _ ~loc:_ ~payload:_ ~payload_mode:_ ~binders:_ _ ->
     Misc.fatal_error "Typetexp.type_refinement_predicate is not installed")
 
 let refinement_scope_binders scope =
   Misc.Stdlib.String.Map.fold
-    (fun _name (id, ty_ref) acc ->
+    (fun _name (id, mode, ty_ref) acc ->
       match !ty_ref with
-      | Some ty -> (id, ty) :: acc
+      | Some ty -> (id, ty, mode) :: acc
       | None ->
           Misc.fatal_error
             "Typetexp: refinement binder typed before its domain completed")
@@ -1036,6 +1042,7 @@ let type_pending_predicate pp =
   Misc.protect_refs [ Misc.R (refinement_scope, pp.pp_scope) ] @@ fun () ->
   !type_refinement_predicate pp.pp_env ~loc:pp.pp_pred.pexp_loc
     ~payload:pp.pp_payload
+    ~payload_mode:pp.pp_payload_mode
     ~binders:(refinement_scope_binders pp.pp_scope)
     pp.pp_pred
 
@@ -1140,9 +1147,10 @@ let rec gate_refinement_predicate env locals (sexp : Parsetree.expression) =
   let not_total form =
     raise (Error (loc, env, Refinement_predicate_not_total form))
   in
-  let unsupported what =
+  let unsupported_at loc what =
     raise (Error (loc, env, Refinement_predicate_unsupported what))
   in
+  let unsupported what = unsupported_at loc what in
   let gate locals sexp = gate_refinement_predicate env locals sexp in
   match sexp.pexp_desc with
   | Pexp_hole -> ()
@@ -1176,7 +1184,12 @@ let rec gate_refinement_predicate env locals (sexp : Parsetree.expression) =
       match vb.pvb_pat.ppat_desc with
       | Ppat_var name ->
           (match vb.pvb_constraint with
-           | None
+           | None -> ()
+           | Some
+               (Pvc_constraint
+                  { locally_abstract_univars = [];
+                    typ = { ptyp_desc = Ptyp_poly _; ptyp_loc; _ } }) ->
+               unsupported_at ptyp_loc "This form of binding annotation"
            | Some (Pvc_constraint { locally_abstract_univars = []; _ }) -> ()
            | Some _ -> unsupported "This form of binding annotation");
           gate locals vb.pvb_expr;
@@ -1458,7 +1471,10 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           in
           let binder_ident = Option.map (fun (_, id, _, _) -> id) binder in
           let in_scope =
-            Option.map (fun (name, id, ty_ref, _) -> name, id, ty_ref) binder
+            Option.map
+              (fun (name, id, ty_ref, _) ->
+                name, id, arg_mode.mode_modes, ty_ref)
+              binder
           in
           let translate_domain () =
             with_refinement_binder in_scope @@ fun () ->
@@ -1488,7 +1504,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           let in_scope_of_rest =
             match binder with
             | Some (name, id, ty_ref, `Domain_and_codomain) ->
-                Some (name, id, ty_ref)
+                Some (name, id, arg_mode.mode_modes, ty_ref)
             | Some (_, _, _, `Domain_only) | None -> None
           in
           let ret_cty =
@@ -1846,6 +1862,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       in
       let pp =
         { pp_env = env; pp_payload = payload_cty.ctyp_type;
+          pp_payload_mode = mode;
           pp_scope = !refinement_scope; pp_pred = spred; pp_target = desc }
       in
       if !pending_domain_depth > 0 then

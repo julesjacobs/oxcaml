@@ -54,6 +54,7 @@ type pinpoint = Location.t * pinpoint_desc
 
 type mutable_part =
   | Record_field of string
+  | Instance_variable of string
   | Array_elements
 
 type always_dynamic =

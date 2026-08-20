@@ -2387,6 +2387,10 @@ module Jkind0 = struct
         }
         ~annotation:None ~why:(Value_creation why)
 
+    let for_immediate ~(why : Jkind_intf.History.immediate_creation_reason) =
+      fresh_jkind Jkind_desc.Builtin.immediate
+        ~annotation:None ~why:(Immediate_creation why)
+
   (* Note [With-bounds for GADTs]
      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

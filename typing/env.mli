@@ -609,13 +609,6 @@ val add_const_closure_lock : ?ghost:bool -> Mode.Hint.pinpoint ->
 
 val add_region_lock : t -> t
 
-(** The boundary of a refinement-predicate typing frame: predicates are
-    erased specs, so a value read inside one is not captured by — and must
-    not constrain — any enclosing closure.  Lock walks stop at this lock;
-    the enclosing program's locks are not applied.
-    See design-docs/predicate-typing.md. *)
-val add_refinement_frame_lock : t -> t
-
 (** Mark the environment as a ghost context: the context is deleted from
     compilation, so nothing is checked on the ghostliness axis inside it. *)
 val enter_ghost_context : t -> t

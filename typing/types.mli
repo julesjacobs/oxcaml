@@ -336,8 +336,14 @@ and refinement_expression_desc =
   (** A free name, resolved when the type was translated.  The longident
       is kept for printing. *)
   | Rexp_constant of Parsetree.constant
-  | Rexp_apply of
-      refinement_expression * (Asttypes.arg_label * refinement_expression) list
+  | Rexp_apply of refinement_expression * refinement_application
+  (** An application keeps its arguments twice, without duplicating their
+      expressions: [rapp_source_args] is exact source order and
+      [rapp_completion] is callee order, indexing source arguments and
+      recording arguments synthesized or omitted by application typing. *)
+  | Rexp_format of Parsetree.constant * refinement_expression
+  (** A format literal and the typed expansion produced for it.  Printing
+      uses the literal; traversal and persistence retain the expansion. *)
   | Rexp_tuple of (string option * refinement_expression) list
   | Rexp_construct of Path.t * Longident.t loc * refinement_expression option
   (** The path is [Pextra_ty (type_path, Pcstr_ty name)] for an ordinary
@@ -359,6 +365,32 @@ and refinement_expression_desc =
   (** [fun x -> e]; only single, unlabelled variable parameters. *)
   | Rexp_match of refinement_expression * refinement_case list
   | Rexp_constraint of refinement_expression * type_expr
+
+and refinement_application =
+  { rapp_source_args :
+      (Asttypes.arg_label * refinement_expression) list;
+    rapp_completion : refinement_application_arg list }
+
+and refinement_application_arg =
+  { rarg_label : arg_label;
+    rarg_desc : refinement_application_arg_desc }
+
+and refinement_application_arg_desc =
+  | Rarg_source of int
+  (** The typed argument is source argument [i]. *)
+  | Rarg_optional_wrapper of int
+  (** Source argument [i] was written with a labelled argument and wrapped
+      in [Some] for an optional parameter. *)
+  | Rarg_optional_default
+  (** Application typing supplied [None] for an optional parameter. *)
+  | Rarg_call_pos of Location.t
+  (** Application typing supplied the call position at this location. *)
+  | Rarg_omitted_optional
+  (** A partial application retained an optional parameter. *)
+  | Rarg_omitted_position
+  (** A partial application has not yet supplied its implicit call position. *)
+  | Rarg_omitted_required
+  (** A partial application retained a required labelled parameter. *)
 
 and refinement_binding =
   { rb_ident : Ident.t;

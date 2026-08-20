@@ -720,8 +720,22 @@ let primitive_is_total = function
   | "%apply" | "%revapply" -> true
   | _ -> false
 
+let primitive_is_predicate_comparison = function
+  | "%equal" | "%notequal"
+  | "%lessthan" | "%lessequal"
+  | "%greaterthan" | "%greaterequal" ->
+      true
+  | _ -> false
+
 let total_primitive_mode mode =
   mode |> Value.meet_const_with Totality Totality.Const.Total
+
+let in_refinement_predicate = ref false
+
+let with_refinement_predicate_context f =
+  let outer = !in_refinement_predicate in
+  in_refinement_predicate := true;
+  Fun.protect f ~finally:(fun () -> in_refinement_predicate := outer)
 
 (* Syntactic effect forms ([while], [for], mutable assignment, forcing a lazy)
    have no partial value to capture, so each constrains the totality of every
@@ -3915,6 +3929,16 @@ and type_pat_aux
         | Some (_, sp) ->
             raise (Error (sp.ppat_loc, !!penv, Missing_type_constraint))
       in
+      (match sarg' with
+       | Some { ppat_desc = Ppat_any; _ }
+         when !in_refinement_predicate && constr.cstr_arity <> 1 ->
+           raise
+             (Error
+                ( loc,
+                  !!penv,
+                  Refinement_predicate_form_unsupported
+                    "An elaborated constructor pattern" ))
+       | None | Some _ -> ());
       let sargs =
         match sarg' with
           None -> []
@@ -4951,6 +4975,30 @@ let is_partial_apply args =
        | Arg _ -> false)
     args
 
+(* A source application may consume several curried arrows at once.  The
+   function-position expectation checks the first closure; check each later
+   closure that is actually called as well.  An omitted parameter only builds
+   a partial application, so its function mode is deliberately not forced. *)
+let check_refinement_application_totality ~env ~app_loc args =
+  if !in_refinement_predicate then begin
+    let expected_mode =
+      Value.of_const
+        { Value.Const.max with totality = Totality.Const.Total }
+      |> mode_default
+    in
+    List.iteri
+      (fun index (_, arg) ->
+        if index > 0 then
+          match arg with
+          | Arg ( Known_arg { mode_fun; _ }
+                | Unknown_arg { mode_fun; _ }
+                | Eliminated_optional_arg { mode_fun; _ }) ->
+              submode ~loc:app_loc ~env (alloc_as_value mode_fun)
+                expected_mode
+          | Omitted _ -> ())
+      args
+  end
+
 (** Within a single application, constrain the curried arrow type as given by
    [close_over] and [partial_apply]. This constraint is not required for
    soundness, but useful in the lack of a signature, in which case the
@@ -5390,6 +5438,29 @@ let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
              let args = (lbl, arg, None) :: args in
              (ty_ret, mode_closure, open_args, closed_args, args))
       (ty_ret, mode_ret, [], [], []) (List.rev args)
+  in
+  let mode_ret =
+    if !in_refinement_predicate
+       && List.exists
+            (function _, Omitted _, _ -> true | _, Arg _, _ -> false)
+            args
+    then begin
+      (* The predicate judgment has required the original callee and every
+         consumed stage to be Total.  The synthesized partial-application
+         wrapper is therefore Total too; retain all its other inferred axes.
+         Later calls still check the modes of the reconstructed arrow stages. *)
+      let total_cap =
+        Alloc.Comonadic.max_with Totality
+          (Totality.of_const Totality.Const.Total)
+      in
+      let comonadic, _ =
+        Alloc.Comonadic.newvar_below
+          (Alloc.Comonadic.meet
+             [ Alloc.Comonadic.disallow_left mode_ret.comonadic;
+               total_cap ])
+      in
+      { mode_ret with comonadic }
+    end else mode_ret
   in
   ty_ret, mode_ret, args
 
@@ -7323,12 +7394,27 @@ and type_expect_
       in
       let exp_desc =
         match desc.val_kind with
-        | Val_ivar (_, cl_num) ->
+        | Val_ivar (mutability, cl_num) ->
             if not (List.is_empty layout_args) then
               Misc.fatal_error "type_expect_: Val_ivar with layout args";
-            let (self_path, _) =
-              Env.find_value_by_name_lazy
-                (Longident.Lident ("self-" ^ cl_num)) env
+            let self_lid =
+              { txt = Longident.Lident ("self-" ^ cl_num); loc = lid.loc }
+            in
+            let self_path =
+              match mutability with
+              | Immutable ->
+                  fst (Env.find_value_by_name_lazy self_lid.txt env)
+              | Mutable ->
+                  let self_path, self_mode, self_layout_args, _, _ =
+                    type_ident env ~display_lid:lid.txt self_lid
+                  in
+                  if not (List.is_empty self_layout_args) then
+                    Misc.fatal_error
+                      "type_expect_: Val_self with layout args";
+                  submode ~loc:lid.loc ~env self_mode
+                    (mode_project_mutable
+                       (Instance_variable (Longident.last lid.txt)));
+                  self_path
             in
             Texp_instvar(self_path, path,
                          match lid.txt with
@@ -7630,6 +7716,10 @@ and type_expect_
           let mode, _ = Value.newvar_below value_max_real in
           mode
       in
+      if !in_refinement_predicate then
+        Totality.submode_exn
+          (Value.proj_comonadic Totality funct_mode)
+          (Totality.of_const Totality.Const.Total);
       let funct_expected_mode = mode_default funct_mode in
       let outer_level = get_current_level () in
       let outer_level_var () =
@@ -7672,33 +7762,80 @@ and type_expect_
       in
       let (rt, funct), sargs =
         let rt, funct = type_sfunct sfunct in
-        match funct.exp_desc, sargs with
-        | Texp_ident { desc = {val_kind = Val_prim {prim_name = "%revapply"};
-                               val_type};
-                       kind = Id_prim _; _ },
-          [Nolabel, sarg; Nolabel, actual_sfunct]
-          when is_inferred actual_sfunct
-            && check_apply_prim_type Revapply val_type ->
-            type_sfunct_args actual_sfunct [Nolabel, sarg]
-        | Texp_ident { desc = {val_kind = Val_prim {prim_name = "%apply"};
-                               val_type};
-                       kind = Id_prim _; _ },
-          [Nolabel, actual_sfunct; Nolabel, sarg]
-          when check_apply_prim_type Apply val_type ->
-            type_sfunct_args actual_sfunct [Nolabel, sarg]
-        | _ ->
-            (rt, funct), sargs
+        if !in_refinement_predicate then (rt, funct), sargs
+        else
+          match funct.exp_desc, sargs with
+          | Texp_ident
+              { desc =
+                  { val_kind = Val_prim { prim_name = "%revapply" };
+                    val_type };
+                kind = Id_prim _;
+                _ },
+            [ Nolabel, sarg; Nolabel, actual_sfunct ]
+            when is_inferred actual_sfunct
+                 && check_apply_prim_type Revapply val_type ->
+              type_sfunct_args actual_sfunct [ Nolabel, sarg ]
+          | Texp_ident
+              { desc =
+                  { val_kind = Val_prim { prim_name = "%apply" };
+                    val_type };
+                kind = Id_prim _;
+                _ },
+            [ Nolabel, actual_sfunct; Nolabel, sarg ]
+            when check_apply_prim_type Apply val_type ->
+              type_sfunct_args actual_sfunct [ Nolabel, sarg ]
+          | _ -> (rt, funct), sargs
+      in
+      let predicate_apply_prim =
+        if not !in_refinement_predicate then None
+        else
+          match funct.exp_desc with
+          | Texp_ident { desc = { val_type; _ }; _ }
+            when check_apply_prim_type Apply val_type ->
+              Some Apply
+          | Texp_ident { desc = { val_type; _ }; _ }
+            when check_apply_prim_type Revapply val_type ->
+              Some Revapply
+          | _ -> None
       in
       let (args, ty_ret, mode_ret, pm, ap_yielding) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
       in
+      let rec callback_codomain ty =
+        match get_desc (Ctype.expand_head env ty) with
+        | Tpoly (ty, _) -> callback_codomain ty
+        | Tarrow (_, _, ret, _) -> Some ret
+        | _ -> None
+      in
+      let predicate_apply_callback =
+        match predicate_apply_prim, args with
+        | Some Apply,
+          [ _, Typedtree.Arg (callback, _), _; _, _, _ ] ->
+            Some callback
+        | Some Revapply,
+          [ _, _, _; _, Typedtree.Arg (callback, _), _ ] ->
+            Some callback
+        | _ -> None
+      in
+      let result_crossing_ty =
+        Option.bind predicate_apply_callback
+          (fun callback -> callback_codomain callback.exp_type)
+        |> Option.value ~default:ty_ret
+        |> strip_refined_head env
+      in
       (* Application results are carrier-typed: the head of the instantiated
          codomain is stripped at the apply node.  The funct's arrow keeps the
-         refined codomain — that is the fact record for VC gen. *)
+         refined codomain — that is the fact record for VC gen.  For
+         source-shaped [%apply]/[%revapply] and their canonical aliases, cross
+         the result mode using the typed callback's codomain, as the ordinary
+         flattened call does.  The polymorphic result variable is not
+         principal enough to determine this crossing under [-principal]. *)
       let ty_ret = strip_refined_head env ty_ret in
       let mode_ret = Alloc.disallow_right mode_ret in
       let ap_mode = Alloc.proj_comonadic Areality mode_ret in
-      let mode_ret = cross_left env ty_ret (alloc_as_value mode_ret) in
+      let mode_ret =
+        cross_left env result_crossing_ty (alloc_as_value mode_ret)
+      in
       let zero_alloc =
         Builtin_attributes.get_zero_alloc_attribute ~in_signature:false
           ~on_application:true
@@ -9541,10 +9678,36 @@ and type_newtype
   end
    ~before_generalize:(fun (_,ety,_,_) -> enforce_current_level env ety)
 
-and type_ident env ?(recarg=Rejected) lid =
+and type_ident env ?(recarg=Rejected) ?display_lid lid =
+  let display_lid = Option.value display_lid ~default:lid.txt in
   (* CR zqian: [lookup_value] should close over the memaddr of all prefix
-  modules.  *)
+     modules.  *)
   let path, desc, (mode, locks) = Env.lookup_value ~loc:lid.loc lid.txt env in
+  let predicate_apply_prim =
+    match desc.val_kind with
+    | Val_prim { prim_name = "%apply"; prim_arity = 2; _ }
+      when !in_refinement_predicate
+           && check_apply_prim_type Apply desc.val_type ->
+        Some Apply
+    | Val_prim { prim_name = "%revapply"; prim_arity = 2; _ }
+      when !in_refinement_predicate
+           && check_apply_prim_type Revapply desc.val_type ->
+        Some Revapply
+    | Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _
+    | Val_anc _ ->
+        None
+  in
+  let predicate_comparison =
+    match desc.val_kind with
+    | Val_prim prim
+      when !in_refinement_predicate
+           && primitive_is_predicate_comparison prim.prim_name
+           && prim.prim_arity = 2 ->
+        true
+    | Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _
+    | Val_anc _ ->
+        false
+  in
   (* We cross modes when typing [Ppat_ident], before adding new variables into
   the environment. Therefore, one might think all values in the environment are
   already mode-crossed. That is not true for several reasons:
@@ -9561,6 +9724,8 @@ and type_ident env ?(recarg=Rejected) lid =
   let mode =
     match desc.val_kind with
     | Val_prim { prim_name; _ } when primitive_is_total prim_name ->
+        total_primitive_mode mode
+    | Val_prim _ when predicate_comparison ->
         total_primitive_mode mode
     | Val_reg _ | Val_mut _ | Val_prim _ | Val_ivar _ | Val_self _
     | Val_anc _ -> mode
@@ -9592,7 +9757,8 @@ and type_ident env ?(recarg=Rejected) lid =
   *)
   (* CR modes: codify the above per-axis argument. *)
   let actual_mode =
-    Env.walk_locks ~env ~loc:lid.loc lid.txt ~item:Value (Some desc.val_type)
+    Env.walk_locks ~env ~loc:lid.loc display_lid ~item:Value
+      (Some desc.val_type)
       (mode, locks)
   in
   (* We need to cross again, because the monadic fragment might have been
@@ -9622,6 +9788,139 @@ and type_ident env ?(recarg=Rejected) lid =
          Misc.fatal_error "type_ident: Val_prim with non-empty val_lpoly";
        let ty, mode, _, sort = instance_prim env prim desc.val_type in
        let ty = instance ty in
+       (* Predicate applications keep [%apply]/[%revapply] source-shaped,
+          rather than taking the ordinary flattening path.  Recreate the mode
+          relation that flattening gets from the direct call: the callback is
+          total, its domain is the value operand's mode, and its total result
+          is the operator's result. *)
+       Option.iter
+         (fun apply_prim ->
+           let prim_name =
+             match apply_prim with
+             | Apply -> "%apply"
+             | Revapply -> "%revapply"
+           in
+           let malformed () =
+             Misc.fatal_errorf
+               "Typecore: malformed %s primitive in a refinement predicate"
+               prim_name
+           in
+           let fresh_total_mode () =
+             let mode = Alloc.newvar () in
+             Totality.submode_exn
+               (Alloc.proj_comonadic Totality mode)
+               (Totality.of_const Totality.Const.Total);
+             mode
+           in
+           let rec arrow ty =
+             let ty = Ctype.expand_head env ty in
+             match get_desc ty with
+             | Tpoly (ty, _) -> arrow ty
+             | Tarrow (modes, arg, ret, commu) ->
+                 ty, modes, arg, ret, commu
+             | _ -> malformed ()
+           in
+           let update ty (label, binder, _, _) arg ret commu
+               ~arg_mode ~ret_mode =
+             set_type_desc ty
+               (Tarrow ((label, binder, arg_mode, ret_mode), arg, ret, commu))
+           in
+           let domain_mode = Alloc.newvar () in
+           let callback_value_mode = fresh_total_mode () in
+           let result_mode = Alloc.newvar () in
+           let op1_ty, op1_modes, op1_arg, op1_ret, op1_commu = arrow ty in
+           let op2_ty, op2_modes, op2_arg, op2_ret, op2_commu =
+             arrow op1_ret
+           in
+           let callback_ty =
+             match apply_prim with
+             | Apply -> op1_arg
+             | Revapply -> op2_arg
+           in
+           let callback_ty, callback_modes, callback_arg, callback_ret,
+               callback_commu =
+             arrow callback_ty
+           in
+           let _, _, _, op1_ret_mode = op1_modes in
+           begin match apply_prim with
+           | Apply ->
+               update op1_ty op1_modes op1_arg op1_ret op1_commu
+                 ~arg_mode:callback_value_mode ~ret_mode:op1_ret_mode;
+               update op2_ty op2_modes op2_arg op2_ret op2_commu
+                 ~arg_mode:domain_mode ~ret_mode:result_mode
+           | Revapply ->
+               update op1_ty op1_modes op1_arg op1_ret op1_commu
+                 ~arg_mode:domain_mode ~ret_mode:op1_ret_mode;
+               update op2_ty op2_modes op2_arg op2_ret op2_commu
+                 ~arg_mode:callback_value_mode ~ret_mode:result_mode
+           end;
+           update callback_ty callback_modes callback_arg callback_ret
+             callback_commu ~arg_mode:domain_mode ~ret_mode:result_mode)
+         predicate_apply_prim;
+       if predicate_comparison then begin
+         let immediate =
+           newvar
+             (Jkind.for_immediate
+                ~why:(Jkind.History.Primitive
+                        (Ident.create_local (Longident.last lid.txt))))
+         in
+         let logical_arg_mode =
+           Mode.Alloc.of_const
+             { Mode.Alloc.Const.legacy with
+               logicality = Logicality.Const.Logical }
+         in
+         let rec constrain_operands count ty =
+           if count > 0 then
+             let ty = Ctype.expand_head env ty in
+             match get_desc ty with
+             | Tpoly (ty, _) -> constrain_operands count ty
+             | Tarrow ((label, binder, _, ret_mode), arg, rest, commu) ->
+                 set_type_desc ty
+                   (Tarrow
+                      ((label, binder, logical_arg_mode, ret_mode),
+                       arg, rest, commu));
+                 unify_exp_types lid.loc env arg immediate;
+                 constrain_operands (count - 1) rest
+             | _ -> assert false
+         in
+         constrain_operands 2 ty
+       end;
+       if !in_refinement_predicate
+          && (primitive_is_total prim.prim_name || predicate_comparison)
+       then begin
+         (* Predicate applications check every closure they actually call.
+            A trusted primitive of arity [n] is total at its [n - 1]
+            intermediate function results as well as at the outer value.  Use
+            a fresh comonadic view, rather than constraining the legacy
+            declaration, so aliases retain that fact without changing the
+            final result mode or the other mode axes. *)
+         let rec totalize_intermediate_results remaining ty =
+           if remaining > 1 then begin
+             let ty = Ctype.expand_head env ty in
+             match get_desc ty with
+             | Tpoly (ty, _) ->
+                 totalize_intermediate_results remaining ty
+             | Tarrow ((label, binder, arg_mode, ret_mode), arg, ret, commu) ->
+                 let total_cap =
+                   Alloc.Comonadic.max_with Totality
+                     (Totality.of_const Totality.Const.Total)
+                 in
+                 let comonadic, _ =
+                   Alloc.Comonadic.newvar_below
+                     (Alloc.Comonadic.meet
+                        [ Alloc.Comonadic.disallow_left ret_mode.comonadic;
+                          total_cap ])
+                 in
+                 let ret_mode = { ret_mode with comonadic } in
+                 set_type_desc ty
+                   (Tarrow
+                      ((label, binder, arg_mode, ret_mode), arg, ret, commu));
+                 totalize_intermediate_results (remaining - 1) ret
+             | _ -> ()
+           end
+         in
+         totalize_intermediate_results prim.prim_arity ty
+       end;
        begin match prim.prim_native_repr_res, mode with
        (* if the locality of returned value of the primitive is poly
           we then register allocation for further optimization *)
@@ -10894,23 +11193,47 @@ and type_application env app_loc expected_mode position_and_mode
   | _ ->
     (* See Note [Type-checking applications] for an overview *)
       let ty = funct.exp_type in
-      let ignore_labels =
-        !Clflags.classic ||
-        begin
-          let ls, tvar = list_labels env funct.exp_type in
-          not tvar &&
-          let labels = List.filter (fun l -> not (is_omittable l)) ls in
-          List.length labels = List.length sargs &&
-          List.for_all (fun (l,_) -> l = Parsetree.Nolabel) sargs &&
-          List.exists (fun l -> l <> Nolabel) labels &&
-          (Location.prerr_warning
-             funct.exp_loc
-             (Warnings.Labels_omitted
-                (List.map Printtyp.string_of_label
-                          (List.filter ((<>) Nolabel) labels)));
-           true)
-        end
+      let labels_omitted =
+        let ls, tvar = list_labels env funct.exp_type in
+        let labels = List.filter (fun l -> not (is_omittable l)) ls in
+        let omitted =
+          not tvar
+          && List.length labels = List.length sargs
+          && List.for_all (fun (l,_) -> l = Parsetree.Nolabel) sargs
+          && List.exists (fun l -> l <> Nolabel) labels
+        in
+        if omitted && not !Clflags.classic then
+          Location.prerr_warning
+            funct.exp_loc
+            (Warnings.Labels_omitted
+               (List.map Printtyp.string_of_label
+                  (List.filter ((<>) Nolabel) labels)));
+        omitted
       in
+      let ignore_labels = !Clflags.classic || labels_omitted in
+      if !in_refinement_predicate && labels_omitted then begin
+        let rec source_anchor (sexp : Parsetree.expression) =
+          match sexp.pexp_desc with
+          | Pexp_constraint (inner, _, _) -> source_anchor inner
+          | _ -> sexp.pexp_loc
+        in
+        let rec has_duplicate_anchor = function
+          | [] -> false
+          | (_, arg) :: rest ->
+              List.exists
+                (fun (_, other) -> source_anchor arg = source_anchor other)
+                rest
+              || has_duplicate_anchor rest
+        in
+        if has_duplicate_anchor sargs then
+          raise
+            (Error
+               ( app_loc,
+                 env,
+                 Refinement_predicate_form_unsupported
+                   "An argument the typechecker reordered, synthesized, or \
+                    made ambiguous" ))
+      end;
       let ty_ret, mode_ret, args, position_and_mode, ap_yielding =
         with_local_level_generalize_structure_if_principal begin fun () ->
           (* Consider for example the application
@@ -10966,7 +11289,13 @@ and type_application env app_loc expected_mode position_and_mode
             type_omitted_parameters_and_build_result_type expected_mode env
               app_loc ty_ret mode_ret args
           in
-          check_curried_application_complete ~env ~app_loc untyped_args;
+          (* Predicate applications have the stronger, soundness-relevant
+             per-stage Total check below.  The ordinary completeness check is
+             only a mode-defaulting heuristic, and rejects an explicitly
+             Total intermediate closure as if it were Partial. *)
+          if not !in_refinement_predicate then
+            check_curried_application_complete ~env ~app_loc untyped_args;
+          check_refinement_application_totality ~env ~app_loc untyped_args;
           (* example:
              [ty_ret] becomes [a:bar -> unit]
              [args] becomes [(Label "a", Omitted ());
@@ -12956,9 +13285,10 @@ let rewrite_refinement_holes sexp =
   let sexp = walk sexp in
   sexp, !found
 
-(* The correspondence walk: the gated parsetree is the shape authority,
-   the typedtree the annotation authority.  Typedtree forms with no
-   faithful preimage are rejected with a located error. *)
+(* The correspondence walk: the gated parsetree is the shape authority and
+   the typedtree the annotation authority.  Parser-produced admitted input
+   has matching shapes; defensive mismatches from PPX-generated input remain
+   located user errors rather than compiler-fatal assertions. *)
 
 type mirror_context =
   { mc_env : Env.t;
@@ -12968,24 +13298,82 @@ type mirror_context =
 let unsupported_in_predicate env loc what =
   raise (Error (loc, env, Refinement_predicate_form_unsupported what))
 
-(* Any [Optional] or [Position] arrow anywhere in an applied callee's type
-   makes the application unfaithful to source (omitted-optional synthesis,
-   [Some]-wrapping, implicit [%call_pos]), so it is rejected whole. *)
-let callee_type_has_unsupported_arrow env ty =
-  let rec scan visited ty =
-    let ty = Ctype.expand_head env ty in
-    if List.memq (get_id ty) visited then false
-    else
-      let visited = get_id ty :: visited in
-      match get_desc ty with
-      | Tarrow ((l, _, _, _), _, ret, _) -> (
-          match l with
-          | Optional _ | Position _ -> true
-          | Nolabel | Labelled _ -> scan visited ret)
-      | Tpoly (ty, _) -> scan visited ty
-      | _ -> false
+let iter_refinement_type_paths f ty =
+  Types.with_type_mark (fun mark ->
+      let rec visit ty =
+        if Types.try_mark_node mark ty then begin
+          (match get_desc ty with
+           | Tconstr (path, _, _) -> f path
+           | _ -> ());
+          Btype.iter_type_expr visit ty
+        end
+      in
+      visit ty)
+
+let refinement_existential_ids env ty =
+  let ids = ref Ident.Set.empty in
+  iter_refinement_type_paths
+    (fun path ->
+      match path with
+      | Path.Pident id -> (
+          match Btype.type_origin (Env.find_type path env) with
+          | Existential _ -> ids := Ident.Set.add id !ids
+          | Definition | Rec_check_regularity -> ()
+          | exception Not_found -> ())
+      | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> ())
+    ty;
+  !ids
+
+let refinement_type_mentions_ids ids ty =
+  let found = ref false in
+  iter_refinement_type_paths
+    (function
+      | Path.Pident id when Ident.Set.mem id ids -> found := true
+      | Path.Pident _ | Path.Pdot _ | Path.Papply _ | Path.Pextra_ty _ -> ())
+    ty;
+  !found
+
+(* A constructor's existential variables are scoped to its match arm.  The
+   mirror can persist the constructor pattern and contextual variable nodes;
+   reject only when a type actually stored in the mirror retains one of the
+   arm-local abstract type constructors. *)
+let validate_refinement_predicate_persistence env predicate mirror =
+  let scopes = ref [] in
+  let pat : type k.
+      Tast_iterator.iterator -> k Typedtree.general_pattern -> unit =
+    fun iterator pat ->
+      (match pat.pat_desc with
+       | Tpat_construct (_, cstr, _, args, _)
+         when not (List.is_empty cstr.cstr_existentials) ->
+           let ids =
+             List.fold_left
+               (fun ids (_, arg) ->
+                 List.fold_left
+                   (fun ids (_, _, ty, _, _) ->
+                     Ident.Set.union ids
+                       (refinement_existential_ids arg.pat_env ty))
+                   ids (Typedtree.pat_bound_idents_full arg))
+               Ident.Set.empty args
+           in
+           if not (Ident.Set.is_empty ids) then
+             scopes := (pat.pat_loc, ids) :: !scopes
+       | _ -> ());
+      Tast_iterator.default_iterator.pat iterator pat
   in
-  scan [] ty
+  let iterator = { Tast_iterator.default_iterator with pat } in
+  iterator.expr iterator predicate;
+  List.iter
+    (fun (loc, ids) ->
+      let persists = ref false in
+      Vox_rexp.iter_types
+        (fun ty ->
+          if refinement_type_mentions_ids ids ty then persists := true)
+        mirror;
+      if !persists then
+        unsupported_in_predicate env loc
+          "An existential constructor pattern with a persisted existential \
+           type")
+    !scopes
 
 let rec refinement_fun_codomain env ty =
   match get_desc (Ctype.expand_head env ty) with
@@ -13051,12 +13439,87 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
     in
     pop [] texp.Typedtree.exp_extra
   in
+  (* When an expression with leading optional or position parameters is used
+     where an unlabelled function is expected, [type_argument] eta-expands it
+     to [let f = source in fun x -> f ?optional:None ~position x].  Record the
+     synthesized prefix as an application with no source arguments; the
+     original binding expression remains the source-shaped function node. *)
+  let omittable_function_coercion (texp : Typedtree.expression) =
+    let is_ident id (exp : Typedtree.expression) =
+      match exp.exp_desc with
+      | Texp_ident { path = Path.Pident id'; _ } -> Ident.same id id'
+      | _ -> false
+    in
+    let rec completion rev_entries = function
+      | [] -> Some (List.rev rev_entries)
+      | ( (Optional _ as rarg_label),
+          Typedtree.Arg
+            ( ({ exp_desc =
+                   Texp_construct (_, cstr, _, [], _);
+                 _ } : Typedtree.expression),
+              _ ) )
+        :: rest
+        when String.equal cstr.cstr_name "None"
+             && Path.same
+                  (Data_types.cstr_res_type_path cstr)
+                  Predef.path_option ->
+          completion
+            ({ rarg_label; rarg_desc = Rarg_optional_default } :: rev_entries)
+            rest
+      | ( (Position _ as rarg_label),
+          Typedtree.Arg
+            ( ({ exp_desc = Texp_src_pos; exp_loc; _ } : Typedtree.expression),
+              _ ) )
+        :: rest ->
+          completion
+            ({ rarg_label; rarg_desc = Rarg_call_pos exp_loc } :: rev_entries)
+            rest
+      | _ -> None
+    in
+    match texp.exp_desc with
+    | Texp_let (Nonrecursive, [ binding ], body) -> (
+        match binding.vb_pat.pat_desc, body.exp_desc with
+        | Tpat_var { id = function_id; _ },
+          Texp_function
+            { params = [];
+              body = Tfunction_cases { fc_cases = [ case ]; _ };
+              _ } -> (
+            match
+              case.c_lhs.pat_desc, case.c_guard, case.c_rhs.exp_desc
+            with
+            | Tpat_var { id = argument_id; _ }, None, Texp_exclave apply -> (
+                match apply.exp_desc with
+                | Texp_apply (fn, args, _, _, _, _)
+                  when is_ident function_id fn -> (
+                    match List.rev args with
+                    | (Nolabel, Typedtree.Arg (argument, _)) :: rev_prefix
+                      when is_ident argument_id argument ->
+                        Option.map
+                          (fun completion -> binding.vb_expr, completion)
+                          (completion [] (List.rev rev_prefix))
+                    | _ -> None)
+                | _ -> None)
+            | _ -> None)
+        | _ -> None)
+    | _ -> None
+  in
   let rec mirror locals (sexp : Parsetree.expression)
       (texp : Typedtree.expression) =
     let loc = sexp.pexp_loc in
     let ty = texp.exp_type in
-    let fail what = unsupported_in_predicate env loc what in
-    match sexp.pexp_desc with
+    let fail = unsupported_in_predicate ctx.mc_env loc in
+    let coercion =
+      match sexp.pexp_desc with
+      | Pexp_constraint _ -> None
+      | _ -> omittable_function_coercion texp
+    in
+    match coercion with
+    | Some (source, rapp_completion) ->
+        mk locals ~ty sexp
+          (Rexp_apply
+             ( mirror locals sexp source,
+               { rapp_source_args = []; rapp_completion } ))
+    | None -> begin match sexp.pexp_desc with
     | Pexp_constraint (se, Some _, []) -> (
         match pop_constraint_extra ~loc texp with
         | Some (cty, inner) ->
@@ -13090,28 +13553,27 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
             (* A mutable variable read: an ordinary occurrence of a program
                value (the mode piece decides its fate later). *)
             mk locals ~ty sexp (Rexp_ident (Path.Pident id, lid))
-        | Texp_apply_layout _ -> fail "A layout-polymorphic use"
+        | Texp_instvar (_, path, _) ->
+            mk locals ~ty sexp (Rexp_ident (path, lid))
+        | Texp_apply_layout (inner, _) -> mirror locals sexp inner
         | _ -> fail "An elaborated identifier")
     | Pexp_constant const -> (
         match texp.exp_desc with
         | Texp_constant _ -> mk locals ~ty sexp (Rexp_constant const)
-        | _ -> fail "A format string")
+        | _ -> (
+            match const.pconst_desc with
+            | Pconst_string (contents, _, _) ->
+                let expansion =
+                  { (type_format loc contents env) with pexp_loc = loc }
+                in
+                mk locals ~ty sexp
+                  (Rexp_format (const, mirror locals expansion texp))
+            | _ -> fail "An elaborated constant"))
     | Pexp_apply (sfn, sargs) -> (
         match texp.exp_desc with
         | Texp_apply (tfn, targs, _, _, _, _) ->
             if tfn.exp_loc <> source_anchor sfn then
               fail "An application rewritten by the typechecker";
-            if callee_type_has_unsupported_arrow env tfn.exp_type then
-              fail
-                "An application of a function with optional or position \
-                 parameters";
-            if
-              List.exists
-                (function _, Typedtree.Omitted _ -> true | _ -> false)
-                targs
-            then
-              fail
-                "A partial application that omits a labelled argument";
             let arg_nodes =
               List.filter_map
                 (function
@@ -13133,7 +13595,8 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
                anchor is the fallback for label-kind translations.  In
                particular, locations are never reusable keys: PPXs commonly
                give several sibling arguments [Location.none]. *)
-            let take_arg remaining (lbl, (sarg : Parsetree.expression)) =
+            let take_arg remaining
+                (source_index, (lbl, (sarg : Parsetree.expression))) =
               let anchor = source_anchor sarg in
               let source_label_name : Asttypes.arg_label -> string = function
                 | Nolabel -> ""
@@ -13144,9 +13607,21 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
                   (source_label_name lbl) (Btype.label_name typed_lbl)
                 && e.exp_loc = anchor
               in
+              let finish typed_label e remaining =
+                let source_texp =
+                  match typed_label, lbl, e.Typedtree.exp_desc with
+                  | Types.Optional _, Asttypes.Labelled _,
+                    Texp_construct (_, _, _, [ (_, inner) ], _) ->
+                      inner
+                  | _ -> e
+                in
+                ( remaining,
+                  ( (lbl, mirror locals sarg source_texp),
+                    (e, lbl, source_index) ) )
+              in
               match take_first same_label [] remaining with
-              | Some ((_, e), remaining) ->
-                  remaining, (lbl, mirror locals sarg e)
+              | Some ((typed_label, e), remaining) ->
+                  finish typed_label e remaining
               | None ->
                   let anchored =
                     List.filter
@@ -13161,22 +13636,59 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
                           (fun (_, (e : Typedtree.expression)) -> e == unique)
                           [] remaining
                       with
-                      | Some ((_, e), remaining) ->
-                          remaining, (lbl, mirror locals sarg e)
+                      | Some ((typed_label, e), remaining) ->
+                          finish typed_label e remaining
                       | None -> assert false
                       end
                   | [] | _ :: _ :: _ ->
-                      unsupported_in_predicate env sarg.pexp_loc
+                      fail
                         "An argument the typechecker reordered, synthesized, \
                          or made ambiguous"
                   end
             in
-            let remaining, args =
-              List.fold_left_map take_arg arg_nodes sargs
+            let remaining, paired_args =
+              List.fold_left_map take_arg arg_nodes
+                (List.mapi (fun index arg -> index, arg) sargs)
             in
-            if remaining <> [] then
-              fail "An argument the typechecker reordered or synthesized";
-            mk locals ~ty sexp (Rexp_apply (mirror locals sfn tfn, args))
+            let source_args, matched_args = List.split paired_args in
+            let completion =
+              List.map
+                (fun (rarg_label, typed_arg) ->
+                  let rarg_desc =
+                    match typed_arg with
+                    | Typedtree.Omitted _ -> (
+                        match rarg_label with
+                        | Optional _ -> Rarg_omitted_optional
+                        | Position _ -> Rarg_omitted_position
+                        | Nolabel | Labelled _ ->
+                            Rarg_omitted_required)
+                    | Typedtree.Arg (arg, _) -> (
+                        match
+                          List.find_opt
+                            (fun (matched, _, _) -> matched == arg)
+                            matched_args
+                        with
+                        | Some (_, source_label, source_index) -> (
+                            match rarg_label, source_label with
+                            | Types.Optional _, Asttypes.Labelled _ ->
+                                Rarg_optional_wrapper source_index
+                            | _ -> Rarg_source source_index)
+                        | None -> (
+                            match rarg_label with
+                            | Optional _ -> Rarg_optional_default
+                            | Position _ -> Rarg_call_pos arg.exp_loc
+                            | Nolabel | Labelled _ ->
+                                fail "A synthesized required argument"))
+                  in
+                  { rarg_label; rarg_desc })
+                targs
+            in
+            ignore remaining;
+            mk locals ~ty sexp
+              (Rexp_apply
+                 ( mirror locals sfn tfn,
+                   { rapp_source_args = source_args;
+                     rapp_completion = completion } ))
         | _ -> fail "An application rewritten by the typechecker")
     | Pexp_tuple scomps -> (
         match texp.exp_desc with
@@ -13333,14 +13845,14 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
               (Rexp_match (mirror locals sscrut tscrut, cases))
         | _ -> fail "An elaborated match")
     | _ -> fail "This expression form"
+    end
   and mirror_case locals (scase : Parsetree.case)
       (tcase : Typedtree.computation Typedtree.case) =
+    let fail = unsupported_in_predicate ctx.mc_env scase.pc_lhs.ppat_loc in
     let tpat =
       match tcase.c_lhs.pat_desc with
       | Tpat_value tv -> (tv :> Typedtree.pattern)
-      | _ ->
-          unsupported_in_predicate env scase.pc_lhs.ppat_loc
-            "An elaborated pattern"
+      | _ -> fail "An elaborated pattern"
     in
     let locals, rc_lhs = mirror_pat locals scase.pc_lhs tpat in
     { rc_lhs;
@@ -13348,14 +13860,12 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
         (match scase.pc_guard, tcase.c_guard with
          | Some sg, Some tg -> Some (mirror locals sg tg)
          | None, None -> None
-         | _ ->
-             unsupported_in_predicate env scase.pc_lhs.ppat_loc
-               "An elaborated guard");
+         | _ -> fail "An elaborated guard");
       rc_rhs = mirror locals scase.pc_rhs tcase.c_rhs }
   and mirror_pat locals (spat : Parsetree.pattern)
       (tpat : Typedtree.pattern) =
     let loc = spat.ppat_loc in
-    let fail what = unsupported_in_predicate env loc what in
+    let fail = unsupported_in_predicate ctx.mc_env loc in
     let mk rpat_desc = { rpat_desc; rpat_loc = loc } in
     match spat.ppat_desc, tpat.pat_desc with
     | Ppat_any, Tpat_any -> locals, mk Rpat_any
@@ -13375,8 +13885,6 @@ let build_refinement_mirror ctx (spred : Parsetree.expression)
         in
         locals, mk (Rpat_tuple components)
     | Ppat_construct (lid, sarg), Tpat_construct (_, cstr, _, targs, _) ->
-        if cstr.cstr_generalized || cstr.cstr_existentials <> [] then
-          fail "A GADT or existential-introducing constructor pattern";
         let path = Typetexp.refinement_constructor_path cstr in
         let locals, arg =
           match sarg, targs with
@@ -13443,10 +13951,9 @@ let close_refinement_node_types env predicate =
    frame discarded (predicates are not program expressions; the mirror is
    their record); a complete reentrant [TyVarEnv] frame (the enclosing
    declaration's named variables stay visible, new named type variables
-   are rejected); and a mode wall — a constant closure lock at the
-   maximal comonadic mode plus a region lock — so reading a value inside
-   a predicate constrains no enclosing closure's inferred modes. *)
-let type_refinement_predicate env ~loc ~payload ~binders spred =
+   are rejected); and a normal total closure lock plus a region lock, so
+   totality and logicality use the ordinary mode discipline. *)
+let type_refinement_predicate env ~loc ~payload ~payload_mode ~binders spred =
   let snap = Btype.snapshot () in
   let outer_delayed_checks = !delayed_checks in
   let outer_allocations = !allocations in
@@ -13460,7 +13967,7 @@ let type_refinement_predicate env ~loc ~payload ~binders spred =
     Cmt_format.set_saved_types outer_saved_types;
     Warnings.restore outer_warnings
   in
-  let add_refinement_value env id ty =
+  let add_refinement_value env id ty declared_mode =
     let sort =
       match Ctype.type_sort ~why:Let_binding ~fixed:false env ty with
       | Ok sort -> sort
@@ -13479,11 +13986,16 @@ let type_refinement_predicate env ~loc ~payload ~binders spred =
         val_loc = loc;
         val_uid = Uid.mk ~current_unit:(Env.get_current_unit ()) }
     in
-    Env.add_value ~mode:Mode.Value.legacy id desc env
+    let mode =
+      { (Mode.Const.alloc_as_value declared_mode) with
+        logicality = Logicality.Const.Logical }
+      |> Mode.Value.of_const
+    in
+    Env.add_value ~mode id desc env
   in
   match
     Typetexp.TyVarEnv.with_reentrant_scope (fun () ->
-        Mode.with_rollback @@ fun () ->
+        with_refinement_predicate_context @@ fun () ->
         (* The frame runs at a raised level: its fresh nodes (instances,
            inference variables, the frame views below) are deeper than
            the ambient type being formed, and the hole and binders are
@@ -13496,7 +14008,14 @@ let type_refinement_predicate env ~loc ~payload ~binders spred =
           Ctype.with_local_level_generalize ~before_generalize:ignore
             (fun () ->
             let env_frame = Env.enter_ghost_context env in
-            let env_frame = Env.add_refinement_frame_lock env_frame in
+            let total_comonadic =
+              { Mode.Value.Comonadic.Const.max with
+                totality = Totality.Const.Total }
+            in
+            let env_frame =
+              Env.add_const_closure_lock (loc, Expression) total_comonadic
+                env_frame
+            in
             let env_frame = Env.add_region_lock env_frame in
             let spred', holes = rewrite_refinement_holes spred in
             let hole_id = Ident.create_local refinement_hole_name in
@@ -13509,21 +14028,30 @@ let type_refinement_predicate env ~loc ~payload ~binders spred =
                   (if holes then Some (Ctype.refinement_frame_view payload)
                    else None),
                   List.map
-                    (fun (id, ty) -> id, Ctype.refinement_frame_view ty)
+                    (fun (id, ty, mode) ->
+                      id, Ctype.refinement_frame_view ty, mode)
                     binders)
             in
             let env_frame =
               match hole_view with
-              | Some view -> add_refinement_value env_frame hole_id view
+              | Some view ->
+                  add_refinement_value env_frame hole_id view payload_mode
               | None -> env_frame
             in
             let env_frame =
               List.fold_left
-                (fun acc (id, ty) -> add_refinement_value acc id ty)
+                (fun acc (id, ty, mode) ->
+                  add_refinement_value acc id ty mode)
                 env_frame binder_views
             in
+            let predicate_mode =
+              Mode.Value.of_const
+                { Mode.Value.Const.legacy with
+                  totality = Totality.Const.Total }
+              |> mode_default
+            in
             let tpred =
-              type_expect env_frame mode_legacy spred'
+              type_expect env_frame predicate_mode spred'
                 (mk_expected Predef.type_bool)
             in
             force_delayed_checks ();
@@ -13533,10 +14061,12 @@ let type_refinement_predicate env ~loc ~payload ~binders spred =
                 mc_hole = hole_id;
                 mc_arrow_binders =
                   List.fold_left
-                    (fun acc (id, _) -> Ident.Set.add id acc)
+                    (fun acc (id, _, _) -> Ident.Set.add id acc)
                     Ident.Set.empty binders }
             in
-            build_refinement_mirror ctx spred tpred)
+            let mirror = build_refinement_mirror ctx spred tpred in
+            validate_refinement_predicate_persistence env_frame tpred mirror;
+            mirror)
         in
         close_refinement_node_types env mirror)
   with

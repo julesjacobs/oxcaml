@@ -24,7 +24,8 @@ let failure_rolls_back failing_source =
     let predicate = Parse.expression (Lexing.from_string source) in
     match
       Typecore.type_refinement_predicate
-        env ~loc:predicate.pexp_loc ~payload ~binders:[] predicate
+        env ~loc:predicate.pexp_loc ~payload
+        ~payload_mode:Mode.Alloc.Const.legacy ~binders:[] predicate
     with
     | _ -> true
     | exception _ -> false
@@ -46,17 +47,18 @@ let typecore_failure_rolls_back =
   failure_rolls_back "if _ then true else 0"
 ;;
 
-(* This predicate reaches mirror construction before [%apply] is rejected.
-   Its payload links must be rolled back just as for an ordinary Typecore
-   failure, so the identical variable remains usable by a later judgment. *)
-let mirror_failure_rolls_back =
-  failure_rolls_back "(fun n -> n > 0) @@ _"
+(* Comparison admission is validated after Typecore has inferred both operand
+   types.  The first conjunct links the payload to [int] before the independent
+   string comparison fails, so this checks that a late judgment failure rolls
+   that concrete link back. *)
+let comparison_validation_failure_rolls_back =
+  failure_rolls_back "(_ = 0) && (\"x\" = \"x\")"
 ;;
 
 [%%expect{|
 val failure_rolls_back : string -> bool = <fun>
 val typecore_failure_rolls_back : bool = true
-val mirror_failure_rolls_back : bool = true
+val comparison_validation_failure_rolls_back : bool = true
 |}]
 
 let successful_reentry_discards_saved_types =
@@ -65,7 +67,8 @@ let successful_reentry_discards_saved_types =
   ignore
     (Typecore.type_refinement_predicate
        (Lazy.force Env.initial)
-       ~loc:predicate.pexp_loc ~payload:Predef.type_unit ~binders:[] predicate);
+       ~loc:predicate.pexp_loc ~payload:Predef.type_unit
+       ~payload_mode:Mode.Alloc.Const.legacy ~binders:[] predicate);
   let after = Cmt_format.get_saved_types () in
   List.length before = List.length after
   && List.for_all2 ( == ) before after
@@ -80,10 +83,15 @@ val successful_reentry_discards_saved_types : bool = true
    equal-label arguments still consume their occurrences. *)
 let duplicate_locations_preserve_application_correspondence =
   let env = Lazy.force Env.initial in
+  let total_mode =
+    Mode.Alloc.of_const
+      { Mode.Alloc.Const.legacy with
+        totality = Mode.Totality.Const.Total }
+  in
   let arrow label argument result =
     Ctype.newty
       (Tarrow
-         ((label, None, Mode.Alloc.legacy, Mode.Alloc.legacy),
+         ((label, None, total_mode, total_mode),
           Ctype.newmono argument, result, Types.commu_ok))
   in
   let fn_type =
@@ -108,7 +116,12 @@ let duplicate_locations_preserve_application_correspondence =
       val_loc = Location.none;
       val_uid = Uid.mk ~current_unit:(Env.get_current_unit ()) }
   in
-  let env = Env.add_value ~mode:Mode.Value.legacy fn_id fn_desc env in
+  let fn_mode =
+    Mode.Value.of_const
+      { Mode.Value.Const.legacy with
+        totality = Mode.Totality.Const.Total }
+  in
+  let env = Env.add_value ~mode:fn_mode fn_id fn_desc env in
   let predicate =
     Parse.expression (Lexing.from_string "f ~y:true ~x:0 1 \"s\"")
   in
@@ -122,7 +135,8 @@ let duplicate_locations_preserve_application_correspondence =
     match
       Typecore.type_refinement_predicate
         env
-        ~loc:predicate.pexp_loc ~payload:Predef.type_unit ~binders:[] predicate
+        ~loc:predicate.pexp_loc ~payload:Predef.type_unit
+        ~payload_mode:Mode.Alloc.Const.legacy ~binders:[] predicate
     with
     | mirror -> Some mirror
     | exception exn ->
@@ -142,10 +156,20 @@ let duplicate_locations_preserve_application_correspondence =
   | None -> false
   | Some { rexp_desc =
       Rexp_apply
-        (_, [ (Asttypes.Labelled "y", y);
-              (Asttypes.Labelled "x", x);
-              (Asttypes.Nolabel, n);
-              (Asttypes.Nolabel, s) ]);
+        (_, { rapp_source_args =
+                [ (Asttypes.Labelled "y", y);
+                  (Asttypes.Labelled "x", x);
+                  (Asttypes.Nolabel, n);
+                  (Asttypes.Nolabel, s) ];
+              rapp_completion =
+                [ { rarg_label = Types.Labelled "x";
+                    rarg_desc = Rarg_source 1 };
+                  { rarg_label = Types.Labelled "y";
+                    rarg_desc = Rarg_source 0 };
+                  { rarg_label = Types.Nolabel;
+                    rarg_desc = Rarg_source 2 };
+                  { rarg_label = Types.Nolabel;
+                    rarg_desc = Rarg_source 3 } ] });
            _ } ->
       has_type Predef.path_bool y
       && has_type Predef.path_int x
@@ -159,9 +183,9 @@ val duplicate_locations_preserve_application_correspondence : bool = true
 |}]
 
 (* A PPX may erase every source location while using positional syntax for a
-   labelled function.  RED's legacy completeness heuristic rejects first;
-   GREEN identifies the ambiguous source/typed argument pairing.  Both paths
-   must be located errors, never fatal correspondence failures. *)
+   labelled function.  The predicate judgment detects that the omitted labels
+   have no unique source/typed argument pairing.  This defensive rejection must
+   be a located error, never a fatal correspondence failure. *)
 let duplicate_locations_ambiguous_application_is_located =
   let env = Lazy.force Env.initial in
   let total_mode =
@@ -210,8 +234,8 @@ let duplicate_locations_ambiguous_application_is_located =
   let predicate = remove_locations.expr remove_locations predicate in
   match
     Typecore.type_refinement_predicate
-      env ~loc:predicate.pexp_loc ~payload:Predef.type_unit ~binders:[]
-      predicate
+      env ~loc:predicate.pexp_loc ~payload:Predef.type_unit
+      ~payload_mode:Mode.Alloc.Const.legacy ~binders:[] predicate
   with
   | _ -> false
   | exception exn ->
@@ -220,8 +244,8 @@ let duplicate_locations_ambiguous_application_is_located =
           Format.asprintf "%a" Location.print_report error
           |> Misc.Stdlib.String.is_substring
                ~substring:
-                 "This application is complete, but surplus arguments were \
-                  provided afterwards."
+                 "An argument the typechecker reordered, synthesized, or \
+                  made ambiguous is not supported in a refinement predicate."
       | Some `Already_displayed | None -> false
       end
 ;;
@@ -263,7 +287,7 @@ let with_predicate_typer typer f =
 
 let queue_fixed_point_calls =
   let calls = ref 0 in
-  let typer _env ~loc:_ ~payload:_ ~binders:_ _predicate =
+  let typer _env ~loc:_ ~payload:_ ~payload_mode:_ ~binders:_ _predicate =
     incr calls;
     (* Two bootstrap results differ from the first strict pass; the next
        strict pass and warning replay retain that new batch. *)
@@ -294,9 +318,9 @@ let queued_batch_failure_rolls_back =
         Btype.iter_type_expr walk ty
       end
     in
-    List.iter (fun (_, ty) -> walk ty) binders
+    List.iter (fun (_, ty, _) -> walk ty) binders
   in
-  let typer env ~loc:_ ~payload ~binders _predicate =
+  let typer env ~loc:_ ~payload ~payload_mode:_ ~binders _predicate =
     incr calls;
     if !calls = 1 then begin
       first_payload := Some payload;
@@ -350,13 +374,13 @@ let queue_defensive_failures_are_located =
   let run typer =
     let payload = ref None in
     let calls = ref 0 in
-    let typer env ~loc ~payload:ty ~binders predicate =
+    let typer env ~loc ~payload:ty ~payload_mode ~binders predicate =
       incr calls;
       if !calls = 1 then begin
         payload := Some ty;
         Ctype.unify env ty Predef.type_int
       end;
-      typer !calls env ~loc ~payload:ty ~binders predicate
+      typer !calls env ~loc ~payload:ty ~payload_mode ~binders predicate
     in
     let failure =
       with_predicate_typer typer (fun () ->
@@ -378,11 +402,13 @@ let queue_defensive_failures_are_located =
     | None, _ | _, None -> false
   in
   let fuel_exhaustion =
-    run (fun call _env ~loc:_ ~payload:_ ~binders:_ _predicate ->
+    run (fun call _env ~loc:_ ~payload:_ ~payload_mode:_ ~binders:_
+             _predicate ->
       synthetic_predicate (((call - 1) / 2) mod 2))
   in
   let warning_replay =
-    run (fun call _env ~loc:_ ~payload:_ ~binders:_ _predicate ->
+    run (fun call _env ~loc:_ ~payload:_ ~payload_mode:_ ~binders:_
+             _predicate ->
       synthetic_predicate (if call <= 4 then 0 else 1))
   in
   fuel_exhaustion && warning_replay
@@ -395,7 +421,8 @@ val with_predicate_typer :
   (Env.t ->
    loc:Location.t ->
    payload:Types.type_expr ->
-   binders:(Ident.t * Types.type_expr) list ->
+   payload_mode:Mode.Alloc.Const.t ->
+   binders:(Ident.t * Types.type_expr * Mode.Alloc.Const.t) list ->
    Parsetree.expression -> Types.refinement_expression) ->
   (unit -> 'a) -> 'a = <fun>
 val queue_fixed_point_calls : int = 8
@@ -435,7 +462,74 @@ let equality_ignores_only_derived_annotations =
          (constrained left Predef.type_int)
          (constrained right Predef.type_bool))
   in
-  derived_ignored && written_compared
+  let application label desc =
+    { rexp_desc =
+        Rexp_apply
+          ( left,
+            { rapp_source_args =
+                [ Asttypes.Nolabel, left; Asttypes.Nolabel, left ];
+              rapp_completion = [ { rarg_label = label; rarg_desc = desc } ] } );
+      rexp_loc = Location.none;
+      rexp_type = Some Predef.type_int }
+  in
+  let application_equal left right =
+    Vox_rexp.equal ~type_eq:same_head ~pairs:[] left right
+  in
+  let completion_variants_are_distinct =
+    List.for_all
+      (fun (label, left, right) ->
+        not
+          (application_equal
+             (application label left)
+             (application label right)))
+      [ Types.Optional "o", Rarg_source 0, Rarg_optional_wrapper 0;
+        Types.Optional "o", Rarg_optional_default, Rarg_omitted_optional;
+        Types.Position "p", Rarg_call_pos Location.none,
+          Rarg_omitted_position;
+        Types.Labelled "x", Rarg_source 0, Rarg_omitted_required;
+        Types.Nolabel, Rarg_source 0, Rarg_source 1 ]
+  in
+  let call_pos_locations_are_derived =
+    application_equal
+      (application (Types.Position "p")
+         (Rarg_call_pos Location.{ none with loc_ghost = false }))
+      (application (Types.Position "p")
+         (Rarg_call_pos Location.{ none with loc_ghost = true }))
+  in
+  let completion_labels_are_compared =
+    not
+      (application_equal
+         (application (Types.Optional "o") (Rarg_source 0))
+         (application (Types.Optional "p") (Rarg_source 0)))
+  in
+  let string_constant value : Parsetree.constant =
+    { pconst_desc = Pconst_string (value, Location.none, None);
+      pconst_loc = Location.none }
+  in
+  let format literal expansion =
+    { rexp_desc = Rexp_format (string_constant literal, expansion);
+      rexp_loc = Location.none;
+      rexp_type = Some Predef.type_int }
+  in
+  let expansion_one =
+    { left with
+      rexp_desc =
+        Rexp_constant
+          { pconst_desc = Pconst_integer ("1", None);
+            pconst_loc = Location.none } }
+  in
+  let format_literal_and_expansion_are_compared =
+    List.for_all
+      (fun (left, right) -> not (application_equal left right))
+      [ format "%d" left, format "%s" left;
+        format "%d" left, format "%d" expansion_one ]
+  in
+  derived_ignored
+  && written_compared
+  && completion_variants_are_distinct
+  && call_pos_locations_are_derived
+  && completion_labels_are_compared
+  && format_literal_and_expansion_are_compared
 ;;
 
 [%%expect{|
@@ -449,6 +543,9 @@ let imported_mirror_contract =
   let signature =
     let cmi = Cmi_format.read_cmi "ocamlc.opt/predicate_typing_defs.cmi" in
     fst cmi.Cmi_format.cmi_sign
+  in
+  let value_path name =
+    Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib"), name)
   in
   let rec result_signature = function
     | Mty_signature signature -> signature
@@ -504,9 +601,10 @@ let imported_mirror_contract =
     ||
     match expression.rexp_desc with
     | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> false
-    | Rexp_apply (fn, args) ->
+    | Rexp_apply (fn, { rapp_source_args = args; rapp_completion = _ }) ->
         exists_expression test fn
         || List.exists (fun (_, arg) -> exists_expression test arg) args
+    | Rexp_format (_, expansion) -> exists_expression test expansion
     | Rexp_tuple components ->
         List.exists
           (fun (_, component) -> exists_expression test component)
@@ -531,6 +629,33 @@ let imported_mirror_contract =
              cases
     | Rexp_constraint (expression, _) -> exists_expression test expression
   in
+  let find_expression test expression =
+    let found = ref None in
+    ignore
+      (exists_expression
+         (fun expression ->
+           match !found with
+           | Some _ -> true
+           | None ->
+               if test expression then begin
+                 found := Some expression;
+                 true
+               end else
+                 false)
+         expression
+       : bool);
+    !found
+  in
+  let find_application callee predicate =
+    find_expression
+      (fun expression ->
+        match expression.rexp_desc with
+        | Rexp_apply
+            ({ rexp_desc = Rexp_ident (_, lid); _ }, _)
+          -> String.equal (Longident.last lid.txt) callee
+        | _ -> false)
+      predicate
+  in
   let node_annotations_are_exact manifests =
     let valid = ref true in
     let contextual = ref 0 in
@@ -553,9 +678,10 @@ let imported_mirror_contract =
         match rexp.rexp_desc with
         | Rexp_hole -> true
         | Rexp_var _ -> true
-        | Rexp_ident _ | Rexp_constant _ | Rexp_apply _ | Rexp_tuple _
-        | Rexp_construct _ | Rexp_field _ | Rexp_ifthenelse _ | Rexp_let _
-        | Rexp_fun _ | Rexp_match _ | Rexp_constraint _ -> false
+        | Rexp_ident _ | Rexp_constant _ | Rexp_apply _ | Rexp_format _
+        | Rexp_tuple _ | Rexp_construct _ | Rexp_field _
+        | Rexp_ifthenelse _ | Rexp_let _ | Rexp_fun _ | Rexp_match _
+        | Rexp_constraint _ -> false
       in
       if should_be_contextual then incr contextual else incr annotated;
       if should_be_contextual <> Option.is_none rexp.rexp_type then
@@ -567,9 +693,10 @@ let imported_mirror_contract =
         rexp.rexp_type;
       match rexp.rexp_desc with
       | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> ()
-      | Rexp_apply (fn, args) ->
+      | Rexp_apply (fn, { rapp_source_args = args; rapp_completion = _ }) ->
           expression fn;
           List.iter (fun (_, arg) -> expression arg) args
+      | Rexp_format (_, expansion) -> expression expansion
       | Rexp_tuple components ->
           List.iter (fun (_, component) -> expression component) components
       | Rexp_construct (_, _, arg) ->
@@ -663,6 +790,223 @@ let imported_mirror_contract =
                has_node_type (has_path Predef.path_int) expression
            | _ -> false)
          application_predicate
+  in
+  let application_record callee predicate =
+    match find_application callee predicate with
+    | Some { rexp_desc = Rexp_apply (_, application); _ } ->
+        Some application
+    | Some _ | None -> None
+  in
+  let normalize_completion =
+    List.map
+      (fun { rarg_label; rarg_desc } ->
+        let rarg_desc =
+          match rarg_desc with
+          | Rarg_call_pos _ -> Rarg_call_pos Location.none
+          | desc -> desc
+        in
+        rarg_label, rarg_desc)
+  in
+  let application_has_shape manifest_name callee source completion =
+    let manifest = manifest signature manifest_name in
+    match application_record callee (predicate manifest) with
+    | Some { rapp_source_args; rapp_completion } ->
+        List.map fst rapp_source_args = source
+        && normalize_completion rapp_completion = completion
+    | None -> false
+  in
+  let sl name = Asttypes.Labelled name in
+  let sn = Asttypes.Nolabel in
+  let tl name = Types.Labelled name in
+  let topt name = Types.Optional name in
+  let tpos name = Types.Position name in
+  let tn = Types.Nolabel in
+  let src index = Rarg_source index in
+  let application_cases =
+    [ "completion_source", "mirror_labelled",
+      [ sl "y"; sl "x" ], [ tl "x", src 1; tl "y", src 0 ];
+      "completion_wrapper", "mirror_optional",
+      [ sl "o"; sn ], [ topt "o", Rarg_optional_wrapper 0; tn, src 1 ];
+      "completion_default", "mirror_optional",
+      [ sn ], [ topt "o", Rarg_optional_default; tn, src 0 ];
+      "completion_eta_default", "mirror_optional",
+      [], [ topt "o", Rarg_optional_default ];
+      "completion_eta_call_pos", "mirror_positional_eta",
+      [], [ tpos "p", Rarg_call_pos Location.none ];
+      "completion_omitted_optional", "mirror_optional_labelled",
+      [ sl "y" ], [ topt "o", Rarg_omitted_optional; tl "y", src 0 ];
+      "completion_call_pos", "mirror_positional",
+      [ sl "y"; sn ],
+      [ tpos "p", Rarg_call_pos Location.none; tl "y", src 0; tn, src 1 ];
+      "completion_omitted_position", "mirror_positional",
+      [ sl "y" ], [ tpos "p", Rarg_omitted_position; tl "y", src 0 ];
+      "completion_omitted_required", "mirror_labelled",
+      [ sl "y" ], [ tl "x", Rarg_omitted_required; tl "y", src 0 ];
+      "primitive_apply", "@@",
+      [ sn; sn ], [ tn, src 0; tn, src 1 ];
+      "primitive_revapply", "|>",
+      [ sn; sn ], [ tn, src 0; tn, src 1 ] ]
+  in
+  let exact_application_completions =
+    List.for_all
+      (fun (manifest, callee, source, completion) ->
+        application_has_shape manifest callee source completion)
+      application_cases
+  in
+  let exact_application_primitive_paths =
+    List.for_all
+      (fun (manifest_name, callee) ->
+        match
+          find_application callee
+            (predicate (manifest signature manifest_name))
+        with
+        | Some
+            { rexp_desc =
+                Rexp_apply
+                  ({ rexp_desc = Rexp_ident (path, _); _ }, _);
+              _ } ->
+            Path.same path (value_path callee)
+        | Some _ | None -> false)
+      [ "primitive_apply", "@@"; "primitive_revapply", "|>" ]
+  in
+  let call_pos_is_synthesized =
+    match
+      application_record "mirror_positional"
+        (predicate (manifest signature "completion_call_pos"))
+    with
+    | Some
+        { rapp_completion =
+            { rarg_desc = Rarg_call_pos { loc_ghost = true; _ }; _ } :: _;
+          _ } ->
+        true
+    | Some _ | None -> false
+  in
+  let format_manifest = manifest signature "format_mirror" in
+  let format_predicate = predicate format_manifest in
+  let format6_path =
+    Path.Pdot
+      ( Path.Pident (Ident.create_persistent "CamlinternalFormatBasics"),
+        "format6" )
+  in
+  let format_constructor_path =
+    Path.Pextra_ty (format6_path, Path.Pcstr_ty "Format")
+  in
+  let exact_format =
+    match
+      find_expression
+        (fun expression ->
+          match expression.rexp_desc with
+          | Rexp_format _ -> true
+          | _ -> false)
+        format_predicate
+    with
+    | Some
+        { rexp_desc =
+            Rexp_format
+              ({ pconst_desc = Pconst_string ("%d", _, None); _ },
+               { rexp_desc = Rexp_construct (path, lid, Some _); _ });
+          _ }
+      when String.equal (Longident.last lid.txt) "Format"
+           && Path.same path format_constructor_path ->
+        (* [string] occurs only in the generated format expansion's stored
+           node types, so this distinguishes descending into [Rexp_format]
+           from visiting the literal's outer format type. *)
+        Vox_rexp.fold_types
+          (fun found ty -> found || has_path Predef.path_string ty)
+          false format_predicate
+    | Some _ | None -> false
+  in
+  let mirror_gadt_id, _ = find_type signature "mirror_gadt" in
+  let mirror_gadt_path = Path.Pident mirror_gadt_id in
+  let gadt_manifest = manifest signature "gadt_mirror" in
+  let gadt_predicate = predicate gadt_manifest in
+  let exact_gadt_pattern =
+    match gadt_predicate.rexp_desc with
+    | Rexp_match
+        (_, [ { rc_lhs =
+                 { rpat_desc = Rpat_construct (path, _, None); _ };
+                rc_guard = None;
+                rc_rhs = _ } ]) ->
+        Path.same path
+          (Path.Pextra_ty (mirror_gadt_path, Path.Pcstr_ty "Mirror_int"))
+    | _ -> false
+  in
+  let mirror_exists_id, _ = find_type signature "mirror_exists" in
+  let mirror_exists_path = Path.Pident mirror_exists_id in
+  let existential_manifest = manifest signature "existential_mirror" in
+  let existential_predicate = predicate existential_manifest in
+  let exact_existential_pattern =
+    match existential_predicate.rexp_desc with
+    | Rexp_match
+        (_, [ { rc_lhs =
+                 { rpat_desc =
+                     Rpat_construct
+                       (path, _, Some { rpat_desc = Rpat_any; _ });
+                   _ };
+                rc_guard = None;
+                rc_rhs = _ } ]) ->
+        Path.same path
+          (Path.Pextra_ty (mirror_exists_path, Path.Pcstr_ty "Mirror_pack"))
+    | _ -> false
+  in
+  let mirror_exists_pair_id, _ = find_type signature "mirror_exists_pair" in
+  let mirror_exists_pair_path = Path.Pident mirror_exists_pair_id in
+  let existential_bound_manifest =
+    manifest signature "existential_bound_mirror"
+  in
+  let existential_bound_predicate = predicate existential_bound_manifest in
+  let exact_existential_bound_pattern =
+    match existential_bound_predicate.rexp_desc with
+    | Rexp_match
+        (_, [ { rc_lhs =
+                 { rpat_desc =
+                     Rpat_construct
+                       ( path, _,
+                         Some
+                           { rpat_desc =
+                               Rpat_tuple
+                                 [ None, { rpat_desc = Rpat_any; _ };
+                                   None, { rpat_desc = Rpat_var id; _ } ];
+                             _ } );
+                   _ };
+                rc_guard = None;
+                rc_rhs } ]) ->
+        Path.same path
+          (Path.Pextra_ty
+             (mirror_exists_pair_path, Path.Pcstr_ty "Mirror_pair"))
+        && Vox_rexp.mentions_ident id rc_rhs
+    | _ -> false
+  in
+  let new_manifests =
+    List.map (manifest signature)
+      [ "completion_source";
+        "completion_wrapper";
+        "completion_default";
+        "completion_eta_default";
+        "completion_eta_call_pos";
+        "completion_omitted_optional";
+        "completion_call_pos";
+        "completion_omitted_position";
+        "completion_omitted_required";
+        "primitive_apply";
+        "primitive_revapply";
+        "format_mirror";
+        "gadt_mirror";
+        "existential_mirror";
+        "existential_bound_mirror" ]
+  in
+  let mirror_equal left right =
+    Vox_rexp.equal
+      ~type_eq:(fun ~pairs:_ _left _right -> true)
+      ~pairs:[] left right
+  in
+  let new_mirrors_survive_subst =
+    List.for_all
+      (fun manifest ->
+        let original = predicate manifest in
+        let copied = predicate (Subst.type_expr Subst.identity manifest) in
+        mirror_equal original copied)
+      new_manifests
   in
   let dependent_hole_manifest = manifest signature "dependent_hole" in
   let outer_hole_predicate, dependent_hole_binder,
@@ -911,16 +1255,17 @@ let imported_mirror_contract =
          field_result_predicate
   in
   let imported_manifests =
-    [ manifest signature "selected_field";
-      manifest signature "selected_constructor";
-      manifest signature "selected_application";
-      dependent_hole_manifest;
-      own_domain_manifest;
-      manifest binder_signature "t";
-      manifest binder_signature "stored";
-      binder_result_manifest;
-      manifest binder_result_signature "stored";
-      field_result_manifest ]
+    new_manifests
+    @ [ manifest signature "selected_field";
+        manifest signature "selected_constructor";
+        manifest signature "selected_application";
+        dependent_hole_manifest;
+        own_domain_manifest;
+        manifest binder_signature "t";
+        manifest binder_signature "stored";
+        binder_result_manifest;
+        manifest binder_result_signature "stored";
+        field_result_manifest ]
   in
   let all_imported_manifests_are_closed =
     List.for_all
@@ -930,6 +1275,14 @@ let imported_mirror_contract =
   exact_field
   && exact_constructor
   && exact_application
+  && exact_application_completions
+  && exact_application_primitive_paths
+  && call_pos_is_synthesized
+  && exact_format
+  && exact_gadt_pattern
+  && exact_existential_pattern
+  && exact_existential_bound_pattern
+  && new_mirrors_survive_subst
   && exact_dependent_hole
   && exact_own_domain
   && nested_binder_identity
