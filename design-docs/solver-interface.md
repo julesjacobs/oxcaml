@@ -395,7 +395,12 @@ Recorded per AGENTS.md: points the spec above left open, with the route taken.
   obligations wires `plan` to `-vox-backend`. `plan` implements exactly the
   spec's driver rules: `"none"` short-circuits before selection, anything else
   is selected and `configured` is checked once, with the failure message
-  naming `-vox-backend none`.
+  naming `-vox-backend none`. Whether a non-verdict refuses the unit is also
+  driver policy, decided here: the printing backend's contract is to emit the
+  query and discharge nothing, so `plan` gives it a distinct `Dump` arm,
+  under which a driver suppresses exactly its expected non-verdict —
+  `Ok (Unknown _)` — while a `discharge` error still refuses the unit exactly
+  as under `Discharge` (test: `vox-solver/dump_policy.ml`).
 
 - **Well-formedness is declaredness, arity and literal shape, not sort
   inference.** Undeclared variables/functions/constructors/sorts, arity and

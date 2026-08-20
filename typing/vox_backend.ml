@@ -51,8 +51,11 @@ end
 
 let solver_error ~cause ~raw : outcome = Result.Error (Error { cause; raw })
 
+(* The renderer's own reason rides in [cause]: "ill-formed obligation"
+   alone would send the reader to the raw payload for the one line that
+   says what was wrong. *)
 let ill_formed message : outcome =
-  solver_error ~cause:"ill-formed obligation" ~raw:message
+  solver_error ~cause:("ill-formed obligation: " ^ message) ~raw:message
 
 let timeout_ms (config : Config.t) =
   Option.map
@@ -494,6 +497,7 @@ let select name =
 
 type plan =
   | No_discharge
+  | Dump of (module BACKEND)
   | Discharge of (module BACKEND)
 
 let plan ~backend_name ~config =
@@ -504,6 +508,9 @@ let plan ~backend_name ~config =
     | Result.Error message -> Result.Error message
     | Ok ((module Backend : BACKEND) as backend) ->
       (match Backend.configured ~config with
-       | Ok () -> Ok (Discharge backend)
+       | Ok () ->
+         if String.equal Backend.name Printing.name
+         then Ok (Dump backend)
+         else Ok (Discharge backend)
        | Result.Error message ->
          Result.Error (Printf.sprintf "%s backend: %s" Backend.name message))
