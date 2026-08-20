@@ -343,6 +343,10 @@ type error =
   | Let_poly_not_syntactic_value
   | Layout_poly_inst_not_yet_supported of invalid_layout_poly_inst_context
   | Useless_lpoly
+  | Refinement_predicate_form_unsupported of string
+  | Refinement_predicate_new_type_variable of string
+  | Refinement_payload_not_representable of
+      Types.type_expr * Jkind.Violation.t
 
 and invalid_layout_poly_inst_context =
   | Binding_op
@@ -12878,6 +12882,693 @@ let type_representable_expression ~why env sexp =
 let type_expression env sexp =
   type_expression env (Jkind.Builtin.any ~why:Type_expression_call) sexp
 
+(* Typing of refinement predicates (design-docs/predicate-typing.md).
+
+   A predicate [t{ p }] is checked, at the point the type is formed, to be
+   a [bool] by re-entering the expression typer under a protected
+   transient frame: the hole [_] is bound at the payload type, each
+   dependent-arrow binder at its declared type, and everything else —
+   disambiguation, labelled application, occurrence strips, error
+   messages — is inherited from [type_expect].  The result is kept as a
+   typed mirror ([Types.refinement_expression]): source shape from the
+   gated parsetree, per-node types and selected identities from the
+   typedtree, joined by the correspondence walk below. *)
+
+(* The hole bridge: [type_expect] raises [Unexpected_hole] on [Pexp_hole],
+   so the predicate's holes are rewritten to one fresh synthetic value
+   bound at the payload type.  The name is the hole's own spelling — no
+   pattern can bind it ([_] parses as [Ppat_any]) and no expression can
+   reference it, so the rewrite is capture-avoiding by construction, and
+   an error message that names the value prints the hole as written.
+   Constraint *types* are not entered: a refinement nested inside one
+   owns its own holes. *)
+let refinement_hole_name = "_"
+
+let rewrite_refinement_holes sexp =
+  let found = ref false in
+  let rec walk sexp =
+    let mk pexp_desc = { sexp with Parsetree.pexp_desc } in
+    match sexp.Parsetree.pexp_desc with
+    | Pexp_hole ->
+        found := true;
+        mk (Pexp_ident
+              { txt = Longident.Lident refinement_hole_name;
+                loc = sexp.pexp_loc })
+    | Pexp_apply (fn, args) ->
+        mk (Pexp_apply (walk fn, List.map (fun (l, a) -> l, walk a) args))
+    | Pexp_tuple components ->
+        mk (Pexp_tuple (List.map (fun (l, c) -> l, walk c) components))
+    | Pexp_construct (lid, arg) ->
+        mk (Pexp_construct (lid, Option.map walk arg))
+    | Pexp_field (e, lid) -> mk (Pexp_field (walk e, lid))
+    | Pexp_ifthenelse (c, t, e) ->
+        mk (Pexp_ifthenelse (walk c, walk t, Option.map walk e))
+    | Pexp_let (mut, rf, vbs, body) ->
+        let vbs =
+          List.map
+            (fun vb -> { vb with Parsetree.pvb_expr = walk vb.Parsetree.pvb_expr })
+            vbs
+        in
+        mk (Pexp_let (mut, rf, vbs, walk body))
+    | Pexp_function (params, constraint_, body) ->
+        let body =
+          match body with
+          | Parsetree.Pfunction_body e -> Parsetree.Pfunction_body (walk e)
+          | Parsetree.Pfunction_cases _ as b -> b
+        in
+        mk (Pexp_function (params, constraint_, body))
+    | Pexp_match (scrutinee, cases) ->
+        let cases =
+          List.map
+            (fun (c : Parsetree.case) ->
+              { c with
+                pc_guard = Option.map walk c.pc_guard;
+                pc_rhs = walk c.pc_rhs })
+            cases
+        in
+        mk (Pexp_match (walk scrutinee, cases))
+    | Pexp_constraint (e, ty, modes) ->
+        mk (Pexp_constraint (walk e, ty, modes))
+    | _ ->
+        (* The syntactic gate admits no other compound form. *)
+        sexp
+  in
+  let sexp = walk sexp in
+  sexp, !found
+
+(* The correspondence walk: the gated parsetree is the shape authority,
+   the typedtree the annotation authority.  Typedtree forms with no
+   faithful preimage are rejected with a located error. *)
+
+type mirror_context =
+  { mc_env : Env.t;
+    mc_hole : Ident.t;
+    mc_arrow_binders : Ident.Set.t }
+
+let unsupported_in_predicate env loc what =
+  raise (Error (loc, env, Refinement_predicate_form_unsupported what))
+
+(* Any [Optional] or [Position] arrow anywhere in an applied callee's type
+   makes the application unfaithful to source (omitted-optional synthesis,
+   [Some]-wrapping, implicit [%call_pos]), so it is rejected whole. *)
+let callee_type_has_unsupported_arrow env ty =
+  let rec scan visited ty =
+    let ty = Ctype.expand_head env ty in
+    if List.memq (get_id ty) visited then false
+    else
+      let visited = get_id ty :: visited in
+      match get_desc ty with
+      | Tarrow ((l, _, _, _), _, ret, _) -> (
+          match l with
+          | Optional _ | Position _ -> true
+          | Nolabel | Labelled _ -> scan visited ret)
+      | Tpoly (ty, _) -> scan visited ty
+      | _ -> false
+  in
+  scan [] ty
+
+let rec refinement_fun_codomain env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tarrow (_, _, ret, _) -> Some ret
+  | Tpoly (ty, _) -> refinement_fun_codomain env ty
+  | _ -> None
+
+(* A refinement nested inside a written constraint or stored node type was
+   typed by its own reentry, which saw the enclosing predicate's binders as
+   ordinary environment values and recorded them as free idents.  The
+   enclosing mirror build knows its binders, so it promotes those mentions to
+   bound occurrences ([Rexp_var]) throughout that type — nested refinements
+   included — keeping alpha-equivalence and [Subst] binder freshening
+   coherent. *)
+let promote_predicate_locals locals ty =
+  if Ident.Set.is_empty locals then ()
+  else begin
+    let visited = Hashtbl.create 8 in
+    let rec walk ty =
+      let id = get_id ty in
+      if not (Hashtbl.mem visited id) then begin
+        Hashtbl.add visited id ();
+        (match get_desc ty with
+         | Trefine desc ->
+             desc.ref_pred := Vox_rexp.promote_locals locals !(desc.ref_pred)
+         | _ -> ());
+        Btype.iter_type_expr walk ty
+      end
+    in
+    walk ty
+  end
+
+let build_refinement_mirror ctx (spred : Parsetree.expression)
+    (tpred : Typedtree.expression) : Types.refinement_expression =
+  let env = ctx.mc_env in
+  let store_type locals ty =
+    promote_predicate_locals locals ty;
+    ty
+  in
+  let mk locals ?ty (sexp : Parsetree.expression) rexp_desc =
+    let ty = Option.map (store_type locals) ty in
+    { rexp_desc; rexp_loc = sexp.pexp_loc; rexp_type = ty }
+  in
+  (* The typed node of a constrained expression keeps the *inner*
+     expression's location ([Pexp_constraint] typing reuses the argument
+     node), so location correspondence anchors through constraints. *)
+  let rec source_anchor (sexp : Parsetree.expression) =
+    match sexp.pexp_desc with
+    | Pexp_constraint (e, _, _) -> source_anchor e
+    | _ -> sexp.pexp_loc
+  in
+  (* Pull the [Texp_constraint] extra recorded for the source constraint
+     at [loc] off the typed node, returning the written type and the node
+     without it.  Other extras (e.g. a discarded refinement-obligation
+     marker) are kept and otherwise ignored by the walk. *)
+  let pop_constraint_extra ?loc (texp : Typedtree.expression) =
+    let rec pop acc = function
+      | [] -> None
+      | (Typedtree.Texp_constraint cty, eloc, _attrs) :: rest
+        when (match loc with None -> true | Some loc -> eloc = loc) ->
+          Some (cty, { texp with exp_extra = List.rev_append acc rest })
+      | extra :: rest -> pop (extra :: acc) rest
+    in
+    pop [] texp.Typedtree.exp_extra
+  in
+  let rec mirror locals (sexp : Parsetree.expression)
+      (texp : Typedtree.expression) =
+    let loc = sexp.pexp_loc in
+    let ty = texp.exp_type in
+    let fail what = unsupported_in_predicate env loc what in
+    match sexp.pexp_desc with
+    | Pexp_constraint (se, Some _, []) -> (
+        match pop_constraint_extra ~loc texp with
+        | Some (cty, inner) ->
+            promote_predicate_locals locals cty.ctyp_type;
+            mk locals ~ty sexp
+              (Rexp_constraint (mirror locals se inner, cty.ctyp_type))
+        | None -> fail "An elaborated constraint")
+    | Pexp_hole -> (
+        match texp.exp_desc with
+        | Texp_ident { path = Path.Pident id; _ }
+          when Ident.same id ctx.mc_hole ->
+            mk locals sexp Rexp_hole
+        | _ -> fail "An elaborated hole")
+    | Pexp_ident lid -> (
+        match texp.exp_desc with
+        | Texp_ident { path = Path.Pident id; _ }
+          when Ident.Set.mem id locals ->
+            (* Bound-variable annotations are contextual.  In particular,
+               storing an instance here can make an own-domain node point
+               back into the refinement that contains it. *)
+            mk locals sexp (Rexp_var id)
+        | Texp_ident { path = Path.Pident id; _ }
+          when Ident.Set.mem id ctx.mc_arrow_binders ->
+            (* An arrow binder: its type is contextual (the declared
+               domain type), never stored — an own-domain binder's stored
+               type would contain the predicate that contains this node. *)
+            mk locals sexp (Rexp_var id)
+        | Texp_ident { path; _ } ->
+            mk locals ~ty sexp (Rexp_ident (path, lid))
+        | Texp_mutvar { txt = id; _ } ->
+            (* A mutable variable read: an ordinary occurrence of a program
+               value (the mode piece decides its fate later). *)
+            mk locals ~ty sexp (Rexp_ident (Path.Pident id, lid))
+        | Texp_apply_layout _ -> fail "A layout-polymorphic use"
+        | _ -> fail "An elaborated identifier")
+    | Pexp_constant const -> (
+        match texp.exp_desc with
+        | Texp_constant _ -> mk locals ~ty sexp (Rexp_constant const)
+        | _ -> fail "A format string")
+    | Pexp_apply (sfn, sargs) -> (
+        match texp.exp_desc with
+        | Texp_apply (tfn, targs, _, _, _, _) ->
+            if tfn.exp_loc <> source_anchor sfn then
+              fail "An application rewritten by the typechecker";
+            if callee_type_has_unsupported_arrow env tfn.exp_type then
+              fail
+                "An application of a function with optional or position \
+                 parameters";
+            if
+              List.exists
+                (function _, Typedtree.Omitted _ -> true | _ -> false)
+                targs
+            then
+              fail
+                "A partial application that omits a labelled argument";
+            let arg_nodes =
+              List.filter_map
+                (function
+                  | lbl, Typedtree.Arg (e, _) -> Some (lbl, e)
+                  | _, Typedtree.Omitted _ -> None)
+                targs
+            in
+            let rec take_first pred rev_prefix = function
+              | [] -> None
+              | arg :: rest ->
+                  if pred arg then
+                    Some (arg, List.rev_append rev_prefix rest)
+                  else take_first pred (arg :: rev_prefix) rest
+            in
+            (* [Texp_apply] arguments are in function-type order, whereas
+               [sargs] are in source order.  Pair them by consuming the first
+               typed occurrence with the same label and source anchor, as
+               application typing consumes source occurrences.  A unique
+               anchor is the fallback for label-kind translations.  In
+               particular, locations are never reusable keys: PPXs commonly
+               give several sibling arguments [Location.none]. *)
+            let take_arg remaining (lbl, (sarg : Parsetree.expression)) =
+              let anchor = source_anchor sarg in
+              let source_label_name : Asttypes.arg_label -> string = function
+                | Nolabel -> ""
+                | Labelled name | Optional name -> name
+              in
+              let same_label (typed_lbl, (e : Typedtree.expression)) =
+                String.equal
+                  (source_label_name lbl) (Btype.label_name typed_lbl)
+                && e.exp_loc = anchor
+              in
+              match take_first same_label [] remaining with
+              | Some ((_, e), remaining) ->
+                  remaining, (lbl, mirror locals sarg e)
+              | None ->
+                  let anchored =
+                    List.filter
+                      (fun (_, (e : Typedtree.expression)) ->
+                        e.exp_loc = anchor)
+                      remaining
+                  in
+                  begin match anchored with
+                  | [ (_, unique) ] ->
+                      begin match
+                        take_first
+                          (fun (_, (e : Typedtree.expression)) -> e == unique)
+                          [] remaining
+                      with
+                      | Some ((_, e), remaining) ->
+                          remaining, (lbl, mirror locals sarg e)
+                      | None -> assert false
+                      end
+                  | [] | _ :: _ :: _ ->
+                      unsupported_in_predicate env sarg.pexp_loc
+                        "An argument the typechecker reordered, synthesized, \
+                         or made ambiguous"
+                  end
+            in
+            let remaining, args =
+              List.fold_left_map take_arg arg_nodes sargs
+            in
+            if remaining <> [] then
+              fail "An argument the typechecker reordered or synthesized";
+            mk locals ~ty sexp (Rexp_apply (mirror locals sfn tfn, args))
+        | _ -> fail "An application rewritten by the typechecker")
+    | Pexp_tuple scomps -> (
+        match texp.exp_desc with
+        | Texp_tuple (tcomps, _)
+          when List.compare_lengths scomps tcomps = 0 ->
+            let components =
+              List.map2
+                (fun (lbl, sc) (_, tc) -> lbl, mirror locals sc tc)
+                scomps tcomps
+            in
+            mk locals ~ty sexp (Rexp_tuple components)
+        | _ -> fail "An elaborated tuple")
+    | Pexp_construct (lid, sarg) -> (
+        match texp.exp_desc with
+        | Texp_construct (_, cstr, _, targs, _) ->
+            let path = Typetexp.refinement_constructor_path cstr in
+            let arg =
+              match sarg, targs with
+              | None, [] -> None
+              | Some sa, [ (_, ta) ] when cstr.cstr_arity = 1 ->
+                  Some (mirror locals sa ta)
+              | Some ({ pexp_desc = Pexp_tuple scomps; _ } as sa), _
+                when cstr.cstr_arity > 1
+                     && List.compare_lengths scomps targs = 0 ->
+                  (* [Texp_construct] flattens the argument tuple; the
+                     mirror keeps the source grouping, so the tuple node's
+                     type is reassembled from the argument types. *)
+                  let components =
+                    List.map2
+                      (fun (lbl, sc) (_, tc) -> lbl, mirror locals sc tc)
+                      scomps targs
+                  in
+                  let tuple_ty =
+                    newty
+                      (Ttuple
+                         (List.map
+                            (fun (_, (tc : Typedtree.expression)) ->
+                              None, tc.exp_type)
+                            targs))
+                  in
+                  Some
+                    { rexp_desc = Rexp_tuple components;
+                      rexp_loc = sa.pexp_loc;
+                      rexp_type = Some (store_type locals tuple_ty) }
+              | _, _ -> fail "An elaborated constructor application"
+            in
+            mk locals ~ty sexp (Rexp_construct (path, lid, arg))
+        | _ -> fail "An elaborated constructor application")
+    | Pexp_field (se, lid) -> (
+        match texp.exp_desc with
+        | Texp_field { record; label; _ } ->
+            let parent = Data_types.lbl_res_type_path label in
+            mk locals ~ty sexp
+              (Rexp_field (mirror locals se record, parent, label.lbl_name,
+                           lid))
+        | _ -> fail "An elaborated field access")
+    | Pexp_ifthenelse (sc, st, se) -> (
+        match texp.exp_desc with
+        | Texp_ifthenelse (tc, tt, te) ->
+            let ifnot =
+              match se, te with
+              | Some se, Some te -> Some (mirror locals se te)
+              | None, None -> None
+              | _ -> fail "An elaborated conditional"
+            in
+            mk locals ~ty sexp
+              (Rexp_ifthenelse (mirror locals sc tc, mirror locals st tt,
+                                ifnot))
+        | _ -> fail "An elaborated conditional")
+    | Pexp_let (Immutable, Nonrecursive, [ svb ], sbody) -> (
+        match texp.exp_desc with
+        | Texp_let (Nonrecursive, [ tvb ], tbody) -> (
+            match tvb.vb_pat.pat_desc with
+            | Tpat_var { id; _ } ->
+                let rb_expr =
+                  (* A binding annotation ([let x : t = e]) reaches the
+                     typed right-hand side as a constraint extra
+                     ([vb_exp_constraint]); mirror it as the equivalent
+                     written constraint. *)
+                  match svb.Parsetree.pvb_constraint with
+                  | None -> mirror locals svb.pvb_expr tvb.vb_expr
+                  | Some (Pvc_constraint { locally_abstract_univars = [];
+                                           typ = _ }) -> (
+                      match pop_constraint_extra tvb.vb_expr with
+                      | Some (cty, inner) ->
+                          promote_predicate_locals locals cty.ctyp_type;
+                          { rexp_desc =
+                              Rexp_constraint
+                                (mirror locals svb.pvb_expr inner,
+                                 cty.ctyp_type);
+                            rexp_loc = svb.pvb_loc;
+                            rexp_type =
+                              Some (store_type locals tvb.vb_expr.exp_type) }
+                      | None -> fail "An elaborated binding annotation")
+                  | Some _ -> fail "This form of binding annotation"
+                in
+                let locals = Ident.Set.add id locals in
+                mk locals ~ty sexp
+                  (Rexp_let ({ rb_ident = id; rb_expr },
+                             mirror locals sbody tbody))
+            | _ -> fail "An elaborated binding")
+        | _ -> fail "An elaborated binding")
+    | Pexp_function (sparams, constraint_, Pfunction_body sbody) -> (
+        match texp.exp_desc with
+        | Texp_function { params = tparams; body = Tfunction_body tbody; _ }
+          when List.compare_lengths sparams tparams = 0 ->
+            let locals, param_ids =
+              List.fold_left_map
+                (fun locals (tp : Typedtree.function_param) ->
+                  match tp.fp_kind with
+                  | Tparam_pat { pat_desc = Tpat_var { id; _ }; _ } ->
+                      Ident.Set.add id locals, id
+                  | _ -> fail "An elaborated function parameter")
+                locals tparams
+            in
+            let body =
+              match constraint_.Parsetree.ret_type_constraint with
+              | None -> mirror locals sbody tbody
+              | Some (Pconstraint _) -> (
+                  match pop_constraint_extra tbody with
+                  | Some (cty, inner) ->
+                      promote_predicate_locals locals cty.ctyp_type;
+                      { rexp_desc =
+                          Rexp_constraint
+                            (mirror locals sbody inner, cty.ctyp_type);
+                        rexp_loc = loc;
+                        rexp_type = Some (store_type locals tbody.exp_type) }
+                  | None -> fail "An elaborated return constraint")
+              | Some _ -> fail "This function constraint"
+            in
+            (* One [Texp_function] carries all parameters; the mirror
+               nests unary [Rexp_fun]s, each carrying its arrow type. *)
+            let rec build_funs ids fun_ty =
+              match ids with
+              | [] -> body
+              | id :: rest ->
+                  let inner_ty =
+                    Option.bind fun_ty (refinement_fun_codomain env)
+                  in
+                  { rexp_desc = Rexp_fun (id, build_funs rest inner_ty);
+                    rexp_loc = loc;
+                    rexp_type = Option.map (store_type locals) fun_ty }
+            in
+            build_funs param_ids (Some ty)
+        | _ -> fail "An elaborated function")
+    | Pexp_match (sscrut, scases) -> (
+        match texp.exp_desc with
+        | Texp_match (tscrut, _, tcases, [], _)
+          when List.compare_lengths scases tcases = 0 ->
+            let cases =
+              List.map2 (mirror_case locals) scases tcases
+            in
+            mk locals ~ty sexp
+              (Rexp_match (mirror locals sscrut tscrut, cases))
+        | _ -> fail "An elaborated match")
+    | _ -> fail "This expression form"
+  and mirror_case locals (scase : Parsetree.case)
+      (tcase : Typedtree.computation Typedtree.case) =
+    let tpat =
+      match tcase.c_lhs.pat_desc with
+      | Tpat_value tv -> (tv :> Typedtree.pattern)
+      | _ ->
+          unsupported_in_predicate env scase.pc_lhs.ppat_loc
+            "An elaborated pattern"
+    in
+    let locals, rc_lhs = mirror_pat locals scase.pc_lhs tpat in
+    { rc_lhs;
+      rc_guard =
+        (match scase.pc_guard, tcase.c_guard with
+         | Some sg, Some tg -> Some (mirror locals sg tg)
+         | None, None -> None
+         | _ ->
+             unsupported_in_predicate env scase.pc_lhs.ppat_loc
+               "An elaborated guard");
+      rc_rhs = mirror locals scase.pc_rhs tcase.c_rhs }
+  and mirror_pat locals (spat : Parsetree.pattern)
+      (tpat : Typedtree.pattern) =
+    let loc = spat.ppat_loc in
+    let fail what = unsupported_in_predicate env loc what in
+    let mk rpat_desc = { rpat_desc; rpat_loc = loc } in
+    match spat.ppat_desc, tpat.pat_desc with
+    | Ppat_any, Tpat_any -> locals, mk Rpat_any
+    | Ppat_var _, Tpat_var { id; _ } ->
+        Ident.Set.add id locals, mk (Rpat_var id)
+    | Ppat_constant const, Tpat_constant _ ->
+        locals, mk (Rpat_constant const)
+    | Ppat_tuple (scomps, Closed), Tpat_tuple tcomps
+      when List.compare_lengths scomps tcomps = 0 ->
+        let locals, components =
+          List.fold_left_map
+            (fun locals ((lbl, sp), (_, tp)) ->
+              let locals, p = mirror_pat locals sp tp in
+              locals, (lbl, p))
+            locals
+            (List.combine scomps tcomps)
+        in
+        locals, mk (Rpat_tuple components)
+    | Ppat_construct (lid, sarg), Tpat_construct (_, cstr, _, targs, _) ->
+        if cstr.cstr_generalized || cstr.cstr_existentials <> [] then
+          fail "A GADT or existential-introducing constructor pattern";
+        let path = Typetexp.refinement_constructor_path cstr in
+        let locals, arg =
+          match sarg, targs with
+          | None, [] -> locals, None
+          | Some ([], sp), [ (_, tp) ] when cstr.cstr_arity = 1 ->
+              let locals, p = mirror_pat locals sp tp in
+              locals, Some p
+          | Some ([], ({ ppat_desc = Ppat_tuple (scomps, Closed); _ } as sp)),
+            _
+            when cstr.cstr_arity > 1
+                 && List.compare_lengths scomps targs = 0 ->
+              let locals, components =
+                List.fold_left_map
+                  (fun locals ((lbl, sc), (_, tc)) ->
+                    let locals, p = mirror_pat locals sc tc in
+                    locals, (lbl, p))
+                  locals
+                  (List.combine scomps targs)
+              in
+              ( locals,
+                Some
+                  { rpat_desc = Rpat_tuple components;
+                    rpat_loc = sp.ppat_loc } )
+          | _ -> fail "An elaborated constructor pattern"
+        in
+        locals, mk (Rpat_construct (path, lid, arg))
+    | Ppat_alias (sp, _), Tpat_alias { pattern = tp; id; _ } ->
+        let locals, p = mirror_pat locals sp tp in
+        Ident.Set.add id locals, mk (Rpat_alias (p, id))
+    | _, _ -> fail "An elaborated pattern"
+  in
+  mirror Ident.Set.empty spred tpred
+
+(* A node annotation may contain inference variables belonging only to the
+   transient predicate-typing frame.  After that frame is generalized, close
+   each such annotation explicitly so the mirror is safe to copy and marshal.
+   Written constraint types are left alone: they are part of the source type,
+   whereas [rexp_type] is derived metadata. *)
+let close_refinement_node_types env predicate =
+  let close ty =
+    let generic_vars =
+      Ctype.free_variables ty
+      |> List.filter (fun ty -> get_level ty = Btype.generic_level)
+    in
+    match generic_vars with
+    | [] -> ty
+    | _ :: _ ->
+        let ty, complete = Ctype.polyfy env ty generic_vars in
+        if not complete then
+          Misc.fatal_error
+            "Typecore: could not close a refinement node's stored type";
+        ty
+  in
+  Vox_rexp.map
+    ~type_expr:(fun _rename ty -> ty)
+    ~stored_type_expr:(fun _rename ty -> close ty)
+    predicate
+
+(* The reentry transaction: a [Btype] snapshot backtracked on any failure
+   through the end of mirror construction and committed on success (so
+   successful ambient constraints — ['a{ _ = 0 }] pinning ['a] — stick);
+   delayed checks and allocation bookkeeping isolated, run for the
+   predicate, and restored; cmt saved expressions produced under the
+   frame discarded (predicates are not program expressions; the mirror is
+   their record); a complete reentrant [TyVarEnv] frame (the enclosing
+   declaration's named variables stay visible, new named type variables
+   are rejected); and a mode wall — a constant closure lock at the
+   maximal comonadic mode plus a region lock — so reading a value inside
+   a predicate constrains no enclosing closure's inferred modes. *)
+let type_refinement_predicate env ~loc ~payload ~binders spred =
+  let snap = Btype.snapshot () in
+  let outer_delayed_checks = !delayed_checks in
+  let outer_allocations = !allocations in
+  let outer_saved_types = Cmt_format.get_saved_types () in
+  let outer_warnings = Warnings.backup () in
+  delayed_checks := [];
+  allocations := [];
+  let restore () =
+    delayed_checks := outer_delayed_checks;
+    allocations := outer_allocations;
+    Cmt_format.set_saved_types outer_saved_types;
+    Warnings.restore outer_warnings
+  in
+  let add_refinement_value env id ty =
+    let sort =
+      match Ctype.type_sort ~why:Let_binding ~fixed:false env ty with
+      | Ok sort -> sort
+      | Error violation ->
+          raise
+            (Error (loc, env,
+                    Refinement_payload_not_representable (ty, violation)))
+    in
+    let desc =
+      { val_type = ty;
+        val_kind = Val_reg sort;
+        val_lpoly = Lpoly.determined [];
+        val_attributes = [];
+        val_zero_alloc = Zero_alloc.default;
+        val_modalities = Modality.undefined;
+        val_loc = loc;
+        val_uid = Uid.mk ~current_unit:(Env.get_current_unit ()) }
+    in
+    Env.add_value ~mode:Mode.Value.legacy id desc env
+  in
+  match
+    Typetexp.TyVarEnv.with_reentrant_scope (fun () ->
+        Mode.with_rollback @@ fun () ->
+        (* The frame runs at a raised level: its fresh nodes (instances,
+           inference variables, the frame views below) are deeper than
+           the ambient type being formed, and the hole and binders are
+           bound at structural *views* of the written types
+           ([Ctype.refinement_frame_view]), so no frame unification can
+           relink a written node — the type's printed shape survives its
+           own predicate's typing.  Variables are shared through the
+           view: ambient inference (['a{ _ = 0 }] pins ['a]) commits. *)
+        let mirror =
+          Ctype.with_local_level_generalize ~before_generalize:ignore
+            (fun () ->
+            let env_frame = Env.enter_ghost_context env in
+            let env_frame = Env.add_refinement_frame_lock env_frame in
+            let env_frame = Env.add_region_lock env_frame in
+            let spred', holes = rewrite_refinement_holes spred in
+            let hole_id = Ident.create_local refinement_hole_name in
+            let hole_view, binder_views =
+              (* Structure-generalize the views, as ordinary annotation
+                 typing does for written types, so that each use takes an
+                 instance and type-directed disambiguation against the
+                 payload is as principal as against an annotation. *)
+              Ctype.with_local_level_generalize_structure (fun () ->
+                  (if holes then Some (Ctype.refinement_frame_view payload)
+                   else None),
+                  List.map
+                    (fun (id, ty) -> id, Ctype.refinement_frame_view ty)
+                    binders)
+            in
+            let env_frame =
+              match hole_view with
+              | Some view -> add_refinement_value env_frame hole_id view
+              | None -> env_frame
+            in
+            let env_frame =
+              List.fold_left
+                (fun acc (id, ty) -> add_refinement_value acc id ty)
+                env_frame binder_views
+            in
+            let tpred =
+              type_expect env_frame mode_legacy spred'
+                (mk_expected Predef.type_bool)
+            in
+            force_delayed_checks ();
+            optimise_allocations ();
+            let ctx =
+              { mc_env = env_frame;
+                mc_hole = hole_id;
+                mc_arrow_binders =
+                  List.fold_left
+                    (fun acc (id, _) -> Ident.Set.add id acc)
+                    Ident.Set.empty binders }
+            in
+            build_refinement_mirror ctx spred tpred)
+        in
+        close_refinement_node_types env mirror)
+  with
+  | mirror, [] ->
+      restore ();
+      mirror
+  | _, name :: _ ->
+      restore ();
+      let exn =
+        Error (loc, env, Refinement_predicate_new_type_variable name)
+      in
+      let exn =
+        match Location.error_of_exn exn with
+        | Some (`Ok error) -> Error_forward error
+        | Some `Already_displayed | None -> exn
+      in
+      Btype.backtrack snap;
+      raise exn
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      restore ();
+      (* Error traces contain live type nodes.  Freeze their report while
+         successful earlier constraints are still linked, then roll the
+         complete transient transaction back. *)
+      let exn =
+        match Location.error_of_exn exn with
+        | Some (`Ok error) -> Error_forward error
+        | Some `Already_displayed | None -> exn
+      in
+      Btype.backtrack snap;
+      Printexc.raise_with_backtrace exn backtrace
+
 (* Error report *)
 
 let spellcheck unbound_name valid_names =
@@ -14102,6 +14793,24 @@ let report_error ~loc env =
   | Unexpected_hole ->
       Location.errorf ~loc
         "wildcard \"_\" not expected."
+  | Refinement_predicate_form_unsupported what ->
+      Location.errorf ~loc
+        "%s is not supported in a refinement predicate." what
+  | Refinement_predicate_new_type_variable name ->
+      Location.errorf ~loc
+        "@[The type variable %a is not bound by the enclosing declaration:@ \
+         a refinement predicate cannot introduce named type variables.@]"
+        Style.inline_code (Pprintast.tyvar_of_name name)
+  | Refinement_payload_not_representable (ty, violation) ->
+      Location.error_of_printer ~loc (fun ppf () ->
+        fprintf ppf
+          "@[The value of this refinement cannot be bound in its \
+           predicate.@ %a@]"
+          (fun v -> Jkind.Violation.report_with_offender
+             ~offender:(fun ppf -> Printtyp.type_expr ppf ty)
+             env v)
+          violation)
+        ()
   | Let_poly_not_yet_implemented ->
       Location.errorf ~loc
         "The %a annotation is not yet implemented."

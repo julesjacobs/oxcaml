@@ -180,6 +180,13 @@ type lock =
   | Region_lock
   | Exclave_lock
   | Unboxed_lock (* to prevent capture of terms with non-value types *)
+  | Refinement_frame_lock
+      (* The boundary of a refinement-predicate typing frame
+         (design-docs/predicate-typing.md): predicates are erased specs,
+         so a value read inside one is not captured by — and must not
+         constrain — any enclosing closure.  Lock walks stop here: the
+         locks between the frame and the enclosing program are not
+         applied. *)
 
 type lock_or_stage =
   | Nonstage_lock of lock
@@ -3119,6 +3126,8 @@ let add_closure_lock closure_context comonadic env =
 
 let add_region_lock env = add_lock Region_lock env
 
+let add_refinement_frame_lock env = add_lock Refinement_frame_lock env
+
 let add_exclave_lock env = add_lock Exclave_lock env
 
 let add_unboxed_lock env = add_lock Unboxed_lock env
@@ -3787,10 +3796,24 @@ let unboxed_type ~errors ~env ~loc ty_and_lid =
     [None] when the function is used on modules and classes.
 
     [pp] is the pinpoint used in errors. *)
+(* Keep only the locks inside the innermost refinement frame: everything
+   between the binding and the frame belongs to the program enclosing the
+   predicate and is not applied to the predicate's uses. *)
+let cut_at_refinement_frame locks =
+  List.rev
+    (List.fold_left
+       (fun acc lock ->
+         match lock with
+         | Refinement_frame_lock -> []
+         | lock -> lock :: acc)
+       [] locks)
+
 let walk_locks ~errors ~env ~pp mode ty_and_lid locks =
+  let locks = cut_at_refinement_frame locks in
   List.fold_left
     (fun vmode lock ->
       match lock with
+      | Refinement_frame_lock -> assert false (* cut above *)
       | Region_lock -> region_mode vmode
       | Const_closure_lock (_, closure_context, comonadic) ->
           const_closure_mode pp vmode closure_context comonadic
@@ -3838,6 +3861,7 @@ let walk_locks_for_totality ~env pp totality =
   a write).
 *)
 let walk_locks_for_mutable_mode ~errors ~loc ~env locks m0 =
+  let locks = cut_at_refinement_frame locks in
   let mode =
     m0
     |> mutable_mode |> Mode.Value.disallow_left
@@ -3865,6 +3889,7 @@ let walk_locks_for_mutable_mode ~errors ~loc ~env locks m0 =
           may_lookup_error errors loc env
             (Mutable_value_used_in_closure pp)
       | Unboxed_lock -> mode
+      | Refinement_frame_lock -> assert false (* cut above *)
     ) mode locks
 
 let lookup_ident_value ~errors ~use ~loc name env =

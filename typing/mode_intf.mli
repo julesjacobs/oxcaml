@@ -347,6 +347,13 @@ module type S = sig
 
   val set_append_changes : (changes ref -> unit) -> unit
 
+  (** Run a transient mode computation and undo every solver change it makes,
+      whether the computation succeeds or raises.  Changes are also forwarded
+      to the enclosing type-graph trail so nested snapshots retain their usual
+      rollback semantics; type unifications in the same dynamic extent may
+      still be committed independently. *)
+  val with_rollback : (unit -> 'a) -> 'a
+
   type nonrec allowed = allowed
 
   type nonrec disallowed = disallowed

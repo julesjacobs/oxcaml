@@ -158,8 +158,17 @@ val set_static_row_name: type_declaration -> Path.t -> unit
 (**** Utilities for type traversal ****)
 
 val iter_type_expr: (type_expr -> unit) -> type_expr -> unit
-        (* Iteration on types *)
+        (* Iteration on types, including stored refinement-node annotations. *)
 val fold_type_expr: ('a -> type_expr -> 'a) -> 'a -> type_expr -> 'a
+        (* Folding on types, including stored refinement-node annotations. *)
+val iter_type_expr_semantic: (type_expr -> unit) -> type_expr -> unit
+        (* Iteration on semantic type structure.  For a refinement, this visits
+           its payload and source-written constraint types, but not stored node
+           annotations. *)
+val fold_type_expr_semantic:
+  ('a -> type_expr -> 'a) -> 'a -> type_expr -> 'a
+        (* Folding on semantic type structure, with the same refinement
+           boundary as [iter_type_expr_semantic]. *)
 val iter_row: (type_expr -> unit) -> row_desc -> unit
         (* Iteration on types in a row *)
 val fold_row: ('a -> type_expr -> 'a) -> 'a -> row_desc -> 'a

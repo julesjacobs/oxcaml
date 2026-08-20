@@ -18,3 +18,15 @@ type pos = Pos of int{ _ > 0 }
 val positive : int -> bool
 
 type p = int{ positive _ }
+
+(* Typed-mirror identities across the .cmi: two records sharing a label
+   name and two variants sharing a constructor name.  The predicates'
+   identities are disambiguated by the payload type on the producer side,
+   and the stored (parent path, name) / constructor path keys must survive
+   import. *)
+type fr1 = { sel : int }
+type fr2 = { sel : bool }
+type selected = fr1{ _.sel > 0 }
+type fv1 = C of int
+type fv2 = C of bool
+type chosen = fv1{ _ = C 1 }

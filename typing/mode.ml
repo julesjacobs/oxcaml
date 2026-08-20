@@ -5748,6 +5748,18 @@ let append_changes : (changes ref -> unit) ref = ref (fun _ -> assert false)
 
 let set_append_changes f = append_changes := f
 
+let with_rollback f =
+  let previous_append_changes = !append_changes in
+  let changes = ref [] in
+  append_changes := (fun change ->
+      changes := !change :: !changes;
+      (* Preserve rollback at any nested [Btype] snapshot while retaining a
+         complete boundary log to undo on successful reentry as well. *)
+      previous_append_changes change);
+  Fun.protect f ~finally:(fun () ->
+      append_changes := previous_append_changes;
+      List.iter undo_changes !changes)
+
 type ('a, 'd) mode = ('a, 'd) S.mode
 
 module Error = struct

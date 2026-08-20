@@ -113,6 +113,8 @@ type error =
   | Val_poly_and_layout
   | Refinement_predicate_not_total of string
   | Refinement_predicate_unsupported of string
+  | Refinement_predicate_stabilization_failed
+  | Refinement_predicate_warning_replay_changed
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -174,6 +176,9 @@ module TyVarEnv : sig
      Precondition: the [type_expr] must be a [Tvar] with the given jkind. *)
 
   val with_local_scope : (unit -> 'a) -> 'a
+  (* see mli file *)
+
+  val with_reentrant_scope : (unit -> 'a) -> 'a * string list
   (* see mli file *)
 
   type poly_univars
@@ -389,6 +394,77 @@ end = struct
   let univars = ref ([] : poly_univars)
   let assert_univars uvs =
     assert (List.for_all (fun (_name, v, _stage) -> not_generic v.univar) uvs)
+
+  (* A complete reentrant frame over the type-variable bookkeeping, for
+     typing a refinement predicate by Typecore reentry
+     (design-docs/predicate-typing.md).  The enclosing declaration's named
+     variables — globals, the variables used so far in the type being
+     translated, and pending univars — are all presented as *globals*, so
+     that the interior [transl_simple_type] calls Typecore makes for the
+     predicate's constraint types (each of which does [reset_locals]) see
+     them without clearing the enclosing bookkeeping.  The local state is
+     saved and restored around the frame.
+
+     Returns the frame's result together with the names of any *new*
+     global type variables the predicate introduced (its interior
+     translations run under Typecore's [Open] policy, which globalizes new
+     names); the caller rejects them — a predicate may not introduce named
+     type variables. *)
+  let with_reentrant_scope f =
+    let context = narrow () in
+    let outer_used_variables = !used_variables in
+    let outer_used_anonymous_variables = !used_anonymous_variables in
+    let outer_warned_imprecise_locs = !warned_imprecise_locs in
+    let outer_pre_univars = !pre_univars in
+    let outer_univars = !univars in
+    let parent_variables = ref TyVarMap.empty in
+    Fun.protect
+      (fun () ->
+        let jkind_of_variable ty =
+          match get_desc ty with
+          | Tvar { jkind; _ } | Tunivar { jkind; _ } -> jkind
+          | _ -> Jkind.Builtin.any ~why:Dummy_jkind
+        in
+        let parents =
+          TyVarMap.fold
+            (fun name (info : used_info) variables ->
+              TyVarMap.add name
+                (info.ty, info.unused, jkind_of_variable info.ty, info.stage)
+                variables)
+            outer_used_variables !type_variables
+        in
+        let parents =
+          List.fold_left
+            (fun variables (name, pending, stage) ->
+              TyVarMap.add name
+                ( pending.univar, ref false,
+                  jkind_of_variable pending.univar, stage )
+                variables)
+            parents outer_univars
+        in
+        parent_variables := parents;
+        type_variables := parents;
+        used_variables := TyVarMap.empty;
+        used_anonymous_variables := [];
+        warned_imprecise_locs := LocSet.empty;
+        pre_univars := [];
+        univars := [];
+        let result = f () in
+        let new_names =
+          TyVarMap.fold
+            (fun name _ acc ->
+              if TyVarMap.mem name !parent_variables then acc
+              else name :: acc)
+            !type_variables []
+        in
+        result, List.rev new_names)
+      ~finally:(fun () ->
+        used_variables := outer_used_variables;
+        used_anonymous_variables := outer_used_anonymous_variables;
+        warned_imprecise_locs := outer_warned_imprecise_locs;
+        pre_univars := outer_pre_univars;
+        univars := outer_univars;
+        widen context)
 
   let rec find_poly_univars name = function
     | [] -> raise Not_found
@@ -893,21 +969,308 @@ let refinement_constructor_path (cstr : Data_types.constructor_description) =
           Misc.fatal_error
             "Typetexp.refinement_constructor_path: malformed constructor")
 
-(* Dependent-arrow binders currently in scope, for resolving names inside
-   refinement predicates.  The dynamic extent of translating an arrow's
-   domain and codomain is exactly the binder's lexical scope, so a
-   [protect_refs]-managed reference suffices; compare [TyVarEnv]. *)
-let refinement_scope : Ident.t Misc.Stdlib.String.Map.t ref =
+(* Dependent-arrow binders currently in scope, each with its declared
+   type, filled when the binder's domain finishes translating (see the
+   two-phase domain formation below).  The dynamic extent of translating
+   an arrow's domain and codomain is exactly the binder's lexical scope,
+   so a [protect_refs]-managed reference suffices; compare [TyVarEnv]. *)
+let refinement_scope
+  : (Ident.t * type_expr option ref) Misc.Stdlib.String.Map.t ref =
   ref Misc.Stdlib.String.Map.empty
 
 let with_refinement_binder binder f =
   match binder with
   | None -> f ()
-  | Some (name, id) ->
+  | Some (name, id, ty_ref) ->
       Misc.protect_refs
         [ Misc.R (refinement_scope,
-                  Misc.Stdlib.String.Map.add name id !refinement_scope) ]
+                  Misc.Stdlib.String.Map.add name (id, ty_ref)
+                    !refinement_scope) ]
         f
+
+(* Two-phase domain formation (design-docs/predicate-typing.md): a
+   dependent binder scopes over its own domain, so its type is unknown
+   until the domain completes.  While any binder-carrying domain is being
+   translated, every predicate encountered is queued — its gated
+   parsetree, environment and binder-scope snapshot — with a placeholder
+   mirror in its [Trefine] node; when the outermost such domain
+   completes (the depth returns to zero) and the binders' declared types
+   are known, the queue is flushed and each predicate is typed, the typed
+   mirror replacing the placeholder.  Predicates formed with no
+   incomplete binder in scope type eagerly. *)
+type pending_predicate =
+  { pp_env : Env.t;
+    pp_payload : type_expr;
+    pp_scope : (Ident.t * type_expr option ref) Misc.Stdlib.String.Map.t;
+    pp_pred : Parsetree.expression;
+    pp_target : refinement_desc }
+
+let pending_predicates : pending_predicate list ref = ref []
+let pending_domain_depth = ref 0
+
+(* Forward declaration, set alongside [type_open] by [Typemod]: the
+   Typecore reentry that types a predicate against [bool] and builds the
+   typed mirror. *)
+let type_refinement_predicate :
+  (Env.t -> loc:Location.t -> payload:type_expr ->
+   binders:(Ident.t * type_expr) list ->
+   Parsetree.expression -> refinement_expression)
+    ref =
+  ref (fun _ ~loc:_ ~payload:_ ~binders:_ _ ->
+    Misc.fatal_error "Typetexp.type_refinement_predicate is not installed")
+
+let refinement_scope_binders scope =
+  Misc.Stdlib.String.Map.fold
+    (fun _name (id, ty_ref) acc ->
+      match !ty_ref with
+      | Some ty -> (id, ty) :: acc
+      | None ->
+          Misc.fatal_error
+            "Typetexp: refinement binder typed before its domain completed")
+    scope []
+
+let type_pending_predicate pp =
+  (* The nested [Ptyp_refine]s inside the predicate's constraint types
+     re-enter this module; they must see the queued predicate's binder
+     scope, not the scope at the flush point. *)
+  Misc.protect_refs [ Misc.R (refinement_scope, pp.pp_scope) ] @@ fun () ->
+  !type_refinement_predicate pp.pp_env ~loc:pp.pp_pred.pexp_loc
+    ~payload:pp.pp_payload
+    ~binders:(refinement_scope_binders pp.pp_scope)
+    pp.pp_pred
+
+let type_pending_batch entries =
+  List.map (fun pp -> pp, type_pending_predicate pp) entries
+
+let install_pending_batch typed =
+  List.iter
+    (fun (pp, predicate) -> pp.pp_target.ref_pred := predicate)
+    typed
+
+let pending_batches_equal left right =
+  List.compare_lengths left right = 0
+  && List.for_all2
+       (fun (left_job, left_predicate) (right_job, right_predicate) ->
+         left_job.pp_target == right_job.pp_target
+         && Ctype.equal_refinement_predicates left_job.pp_env
+              left_predicate right_predicate)
+       left right
+
+let materialize_pending_exception exn =
+  match Location.error_of_exn exn with
+  | Some (`Ok error) -> Error_forward error
+  | Some `Already_displayed | None -> exn
+
+let raise_pending_error entries error =
+  match entries with
+  | pp :: _ -> raise (Error (pp.pp_pred.pexp_loc, pp.pp_env, error))
+  | [] -> assert false
+
+let flush_pending_predicates () =
+  if !pending_predicates <> [] then begin
+    let entries = List.rev !pending_predicates in
+    pending_predicates := [];
+    let snapshot = Btype.snapshot () in
+    let originals =
+      List.map (fun pp -> pp.pp_target.ref_pred, !(pp.pp_target.ref_pred)) entries
+    in
+    let restore_originals () =
+      List.iter (fun (cell, predicate) -> cell := predicate) originals
+    in
+    match
+      (* Bootstrap every job against payloads only and install the complete
+         seed set at one barrier.  No source-order result is visible while
+         any job in the batch is being typed. *)
+      let seeds =
+        Warnings.without_warnings @@ fun () ->
+        Ctype.with_pending_refinement_identities
+          (List.map (fun pp -> pp.pp_target.ref_identity) entries)
+          (fun () -> type_pending_batch entries)
+      in
+      install_pending_batch seeds;
+      (* Strict, warning-suppressed passes observe complete installed sets
+         and iterate to a fixed point before warnings are emitted. *)
+      let rec stabilize fuel previous =
+        let next =
+          Warnings.without_warnings (fun () -> type_pending_batch entries)
+        in
+        if pending_batches_equal previous next then next
+        else if fuel = 0 then
+          raise_pending_error entries Refinement_predicate_stabilization_failed
+        else begin
+          install_pending_batch next;
+          stabilize (fuel - 1) next
+        end
+      in
+      (* Use linear defensive fuel rather than retaining historical batches:
+         their live type graphs can be relinked by later passes and are not
+         sound cycle keys.  This is a fail-safe against nontermination, not a
+         semantic proof that every convergent batch reaches its fixed point
+         within the bound. *)
+      let stable = stabilize (List.length entries + 1) seeds in
+      install_pending_batch stable;
+      (* Replay once with warnings enabled.  This pass is authoritative and
+         must observe the fixed complete batch, never a partially installed
+         result. *)
+      let final = type_pending_batch entries in
+      if not (pending_batches_equal stable final) then
+        raise_pending_error entries Refinement_predicate_warning_replay_changed;
+      install_pending_batch final
+    with
+    | () -> ()
+    | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        let exn = materialize_pending_exception exn in
+        restore_originals ();
+        pending_predicates := [];
+        Btype.backtrack snapshot;
+        Printexc.raise_with_backtrace exn backtrace
+  end
+
+(* The syntactic gate: the predicate sublanguage is a fixed closed subset,
+   enforced by construction over the parsetree, before any typing — no
+   syntactically rejected form reaches Typecore, and gate errors keep
+   their location even when the predicate's typing is queued.  Nothing is
+   resolved here: names, constructors and fields are Typecore's to
+   resolve, type-directedly, at reentry.  [locals] tracks the predicate's
+   own binder names, which may shadow the rejected-by-name spellings
+   ([ref], [!], [:=]). *)
+let rec gate_refinement_predicate env locals (sexp : Parsetree.expression) =
+  let loc = sexp.pexp_loc in
+  let not_total form =
+    raise (Error (loc, env, Refinement_predicate_not_total form))
+  in
+  let unsupported what =
+    raise (Error (loc, env, Refinement_predicate_unsupported what))
+  in
+  let gate locals sexp = gate_refinement_predicate env locals sexp in
+  match sexp.pexp_desc with
+  | Pexp_hole -> ()
+  | Pexp_ident { txt = Longident.Lident name; _ }
+    when Misc.Stdlib.String.Set.mem name locals
+         || Misc.Stdlib.String.Map.mem name !refinement_scope ->
+      ()
+  | Pexp_ident { txt = Longident.Lident "ref"; _ } ->
+      not_total "References are"
+  | Pexp_ident { txt = Longident.Lident ":="; _ } ->
+      not_total "Assignments are"
+  | Pexp_ident { txt = Longident.Lident "!"; _ } ->
+      not_total "Dereferences are"
+  | Pexp_ident _ -> ()
+  | Pexp_constant _ -> ()
+  | Pexp_apply (fn, args) ->
+      gate locals fn;
+      List.iter (fun (_, arg) -> gate locals arg) args
+  | Pexp_tuple components ->
+      List.iter (fun (_, c) -> gate locals c) components
+  | Pexp_construct (_, arg) -> Option.iter (gate locals) arg
+  | Pexp_field (e, _) -> gate locals e
+  | Pexp_ifthenelse (cond, ifso, ifnot) ->
+      gate locals cond;
+      gate locals ifso;
+      Option.iter (gate locals) ifnot
+  | Pexp_let (Mutable, _, _, _) -> not_total "Mutable bindings are"
+  | Pexp_let (Immutable, Recursive, _, _) ->
+      unsupported "A recursive binding"
+  | Pexp_let (Immutable, Nonrecursive, [ vb ], body) -> begin
+      match vb.pvb_pat.ppat_desc with
+      | Ppat_var name ->
+          (match vb.pvb_constraint with
+           | None
+           | Some (Pvc_constraint { locally_abstract_univars = []; _ }) -> ()
+           | Some _ -> unsupported "This form of binding annotation");
+          gate locals vb.pvb_expr;
+          gate (Misc.Stdlib.String.Set.add name.txt locals) body
+      | _ -> unsupported "This binding pattern"
+    end
+  | Pexp_let (Immutable, Nonrecursive, _, _) ->
+      unsupported "A multiple binding"
+  | Pexp_function (params, constraint_, body) ->
+      let locals =
+        List.fold_left
+          (fun locals (param : Parsetree.function_param) ->
+            match param.pparam_desc with
+            | Pparam_val (Nolabel, None, { ppat_desc = Ppat_var name; _ }) ->
+                Misc.Stdlib.String.Set.add name.txt locals
+            | Pparam_val _ | Pparam_newtype _ ->
+                raise (Error (param.pparam_loc, env,
+                              Refinement_predicate_unsupported
+                                "This function parameter")))
+          locals params
+      in
+      (match constraint_ with
+       | { mode_annotations = []; ret_mode_annotations = [];
+           ret_type_constraint = None | Some (Pconstraint _) } -> ()
+       | _ -> unsupported "This function constraint");
+      (match body with
+       | Pfunction_body body -> gate locals body
+       | Pfunction_cases _ -> unsupported "A function defined by cases")
+  | Pexp_match (scrutinee, cases) ->
+      gate locals scrutinee;
+      List.iter
+        (fun (case : Parsetree.case) ->
+          let locals = gate_refinement_pattern env locals case.pc_lhs in
+          Option.iter (gate locals) case.pc_guard;
+          gate locals case.pc_rhs)
+        cases
+  | Pexp_constraint (e, Some _, []) -> gate locals e
+  | Pexp_constraint _ -> unsupported "This form of constraint"
+  | Pexp_while _ -> not_total "While loops are"
+  | Pexp_for _ -> not_total "For loops are"
+  | Pexp_sequence _ -> not_total "Sequencing is"
+  | Pexp_setfield _ | Pexp_setvar _ -> not_total "Assignment is"
+  | Pexp_array _ -> not_total "Arrays are"
+  | Pexp_try _ -> not_total "Exception handlers are"
+  | Pexp_assert _ -> not_total "Assertions are"
+  | Pexp_lazy _ -> not_total "Lazy expressions are"
+  | Pexp_letexception _ -> not_total "Exception declarations are"
+  | Pexp_record _ | Pexp_record_unboxed_product _ ->
+      unsupported "A record expression"
+  | _ -> unsupported "This expression form"
+
+and gate_refinement_pattern env locals (pat : Parsetree.pattern) =
+  let loc = pat.ppat_loc in
+  let unsupported what =
+    raise (Error (loc, env, Refinement_predicate_unsupported what))
+  in
+  match pat.ppat_desc with
+  | Ppat_any -> locals
+  | Ppat_var name -> Misc.Stdlib.String.Set.add name.txt locals
+  | Ppat_constant _ -> locals
+  | Ppat_tuple (components, Closed) ->
+      List.fold_left
+        (fun locals (_, p) -> gate_refinement_pattern env locals p)
+        locals components
+  | Ppat_tuple (_, Open) -> unsupported "A partial tuple pattern"
+  | Ppat_construct (_, arg) -> begin
+      match arg with
+      | None -> locals
+      | Some ([], p) -> gate_refinement_pattern env locals p
+      | Some (_ :: _, _) -> unsupported "An existential type binding"
+    end
+  | Ppat_alias (p, name) ->
+      let locals = gate_refinement_pattern env locals p in
+      Misc.Stdlib.String.Set.add name.txt locals
+  | Ppat_or _ -> unsupported "An or-pattern"
+  | _ -> unsupported "This pattern form"
+
+(* Runs [f] with the pending-domain depth raised; on failure the queue is
+   restored, so entries queued by an abandoned domain never leak into a
+   later translation. *)
+let with_pending_domain f =
+  let saved_pending = !pending_predicates in
+  let saved_depth = !pending_domain_depth in
+  match
+    pending_domain_depth := saved_depth + 1;
+    f ()
+  with
+  | result ->
+      pending_domain_depth := saved_depth;
+      result
+  | exception e ->
+      pending_domain_depth := saved_depth;
+      pending_predicates := saved_pending;
+      raise e
 
 (* The decided form of the name slot of one arrow. *)
 type arrow_argument_name =
@@ -1089,17 +1452,32 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           let l = transl_label arg.aan_label (Some sarg) in
           let binder =
             Option.map
-              (fun (name, scope) -> name, Ident.create_local name, scope)
+              (fun (name, scope) ->
+                name, Ident.create_local name, ref None, scope)
               arg.aan_binder
           in
-          let binder_ident = Option.map (fun (_, id, _) -> id) binder in
-          let in_scope = Option.map (fun (name, id, _) -> name, id) binder in
-          let arg_cty =
+          let binder_ident = Option.map (fun (_, id, _, _) -> id) binder in
+          let in_scope =
+            Option.map (fun (name, id, ty_ref, _) -> name, id, ty_ref) binder
+          in
+          let translate_domain () =
             with_refinement_binder in_scope @@ fun () ->
             if Btype.is_position l then
               ctyp Ttyp_call_pos (newconstr Predef.path_lexing_position [])
             else transl_type env ~policy ~row_context arg_mode.mode_modes sarg
           in
+          let arg_cty =
+            (* Two-phase domain formation: while a binder's own domain is
+               open, predicates queue rather than type. *)
+            match binder with
+            | None -> translate_domain ()
+            | Some _ -> with_pending_domain translate_domain
+          in
+          (match binder with
+           | None -> ()
+           | Some (_, _, ty_ref, _) ->
+               ty_ref := Some arg_cty.ctyp_type;
+               if !pending_domain_depth = 0 then flush_pending_predicates ());
           let acc_mode = curry_mode acc_mode arg_mode.mode_modes in
           let ret_mode =
             match rest with
@@ -1109,8 +1487,9 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
           in
           let in_scope_of_rest =
             match binder with
-            | Some (name, id, `Domain_and_codomain) -> Some (name, id)
-            | Some (_, _, `Domain_only) | None -> None
+            | Some (name, id, ty_ref, `Domain_and_codomain) ->
+                Some (name, id, ty_ref)
+            | Some (_, _, _, `Domain_only) | None -> None
           in
           let ret_cty =
             with_refinement_binder in_scope_of_rest @@ fun () ->
@@ -1451,216 +1830,30 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
   | Ptyp_refine (spayload, spred) ->
       let payload_cty = transl_type env ~policy ~row_context mode spayload in
-      let pred =
-        transl_refinement_predicate env ~policy ~row_context
-          Misc.Stdlib.String.Map.empty spred
+      (* The syntactic gate runs now, unconditionally, so no syntactically
+         rejected form ever reaches Typecore and gate errors keep their
+         locations even for queued predicates. *)
+      gate_refinement_predicate env Misc.Stdlib.String.Set.empty spred;
+      let desc =
+        { ref_payload = payload_cty.ctyp_type;
+          (* A placeholder until the predicate is typed: replaced by the
+             typed mirror either immediately below or at queue flush. *)
+          ref_pred =
+            ref
+              { rexp_desc = Rexp_hole; rexp_loc = spred.pexp_loc;
+                rexp_type = None };
+          ref_identity = ref () }
       in
-      let ty =
-        newty (Trefine { ref_payload = payload_cty.ctyp_type;
-                         ref_pred = pred })
+      let pp =
+        { pp_env = env; pp_payload = payload_cty.ctyp_type;
+          pp_scope = !refinement_scope; pp_pred = spred; pp_target = desc }
       in
-      ctyp (Ttyp_refine (payload_cty, spred)) ty
+      if !pending_domain_depth > 0 then
+        pending_predicates := pp :: !pending_predicates
+      else pp.pp_target.ref_pred := type_pending_predicate pp;
+      ctyp (Ttyp_refine (payload_cty, spred)) (newty (Trefine desc))
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
-
-(* Translation of refinement predicates.  The predicate keeps the shape of
-   the source expression; the sublanguage is the total subset, enforced
-   here by construction.  Value names are resolved: [locals] are the
-   predicate's own binders, [refinement_scope] the dependent-arrow binders,
-   and everything else is looked up in the environment.  Beyond name
-   resolution, nothing is checked: the typing rules for refinements belong
-   to a later piece. *)
-and transl_refinement_predicate env ~policy ~row_context locals sexp
-    : refinement_expression =
-  let loc = sexp.pexp_loc in
-  let mk rexp_desc = { rexp_desc; rexp_loc = loc } in
-  let not_total form =
-    raise (Error (loc, env, Refinement_predicate_not_total form))
-  in
-  let unsupported what =
-    raise (Error (loc, env, Refinement_predicate_unsupported what))
-  in
-  let transl locals sexp =
-    transl_refinement_predicate env ~policy ~row_context locals sexp
-  in
-  (* Interior types are translated with the predicate's own binders added
-     to the ambient scope, so that refinements nested inside them can
-     mention them (locals shadow arrow binders). *)
-  let transl_interior_type locals ty =
-    Misc.protect_refs
-      [ Misc.R (refinement_scope,
-                Misc.Stdlib.String.Map.union
-                  (fun _ _outer local -> Some local)
-                  !refinement_scope locals) ]
-      (fun () -> transl_type env ~policy ~row_context Alloc.Const.legacy ty)
-  in
-  match sexp.pexp_desc with
-  | Pexp_hole -> mk Rexp_hole
-  | Pexp_ident { txt = Longident.Lident name; _ }
-    when Misc.Stdlib.String.Map.mem name locals ->
-      mk (Rexp_var (Misc.Stdlib.String.Map.find name locals))
-  | Pexp_ident { txt = Longident.Lident name; _ }
-    when Misc.Stdlib.String.Map.mem name !refinement_scope ->
-      mk (Rexp_var (Misc.Stdlib.String.Map.find name !refinement_scope))
-  | Pexp_ident { txt = Longident.Lident "ref"; _ } ->
-      not_total "References are"
-  | Pexp_ident { txt = Longident.Lident ":="; _ } ->
-      not_total "Assignments are"
-  | Pexp_ident { txt = Longident.Lident "!"; _ } ->
-      not_total "Dereferences are"
-  | Pexp_ident lid ->
-      let path, _, _ = Env.lookup_value ~loc:lid.loc lid.txt env in
-      mk (Rexp_ident (path, lid))
-  | Pexp_constant const -> mk (Rexp_constant const)
-  | Pexp_apply (fn, args) ->
-      mk (Rexp_apply
-            (transl locals fn,
-             List.map (fun (lbl, arg) -> lbl, transl locals arg) args))
-  | Pexp_tuple components ->
-      mk (Rexp_tuple
-            (List.map (fun (lbl, c) -> lbl, transl locals c) components))
-  | Pexp_construct (lid, arg) ->
-      let cstr, _ =
-        Env.lookup_constructor ~loc:lid.loc Env.Positive lid.txt env
-      in
-      mk (Rexp_construct
-            (refinement_constructor_path cstr, lid,
-             Option.map (transl locals) arg))
-  | Pexp_field (e, lid) ->
-      ignore
-        (Env.lookup_label ~record_form:Legacy ~loc:lid.loc Env.Projection
-           lid.txt env
-         : _ Data_types.gen_label_description);
-      mk (Rexp_field (transl locals e, lid))
-  | Pexp_ifthenelse (cond, ifso, ifnot) ->
-      mk (Rexp_ifthenelse
-            (transl locals cond,
-             transl locals ifso,
-             Option.map (transl locals) ifnot))
-  | Pexp_let (Mutable, _, _, _) -> not_total "Mutable bindings are"
-  | Pexp_let (Immutable, Recursive, _, _) ->
-      unsupported "A recursive binding"
-  | Pexp_let (Immutable, Nonrecursive, [ vb ], body) -> begin
-      match vb.pvb_pat.ppat_desc with
-      | Ppat_var name ->
-          let rb_expr = transl locals vb.pvb_expr in
-          let id = Ident.create_local name.txt in
-          let locals = Misc.Stdlib.String.Map.add name.txt id locals in
-          mk (Rexp_let ({ rb_ident = id; rb_expr }, transl locals body))
-      | _ -> unsupported "This binding pattern"
-    end
-  | Pexp_let (Immutable, Nonrecursive, _, _) ->
-      unsupported "A multiple binding"
-  | Pexp_function (params, constraint_, body) ->
-      let locals, params =
-        List.fold_left_map
-          (fun locals param ->
-            match param.pparam_desc with
-            | Pparam_val (Nolabel, None, { ppat_desc = Ppat_var name; _ }) ->
-                let id = Ident.create_local name.txt in
-                Misc.Stdlib.String.Map.add name.txt id locals, id
-            | Pparam_val _ | Pparam_newtype _ ->
-                raise (Error (param.pparam_loc, env,
-                              Refinement_predicate_unsupported
-                                "This function parameter")))
-          locals params
-      in
-      let body =
-        match body with
-        | Pfunction_body body -> transl locals body
-        | Pfunction_cases _ ->
-            unsupported "A function defined by cases"
-      in
-      let body =
-        match constraint_ with
-        | { mode_annotations = []; ret_mode_annotations = [];
-            ret_type_constraint = None } -> body
-        | { ret_type_constraint = Some (Pconstraint ty);
-            mode_annotations = []; ret_mode_annotations = [] } ->
-            let cty = transl_interior_type locals ty in
-            { rexp_desc = Rexp_constraint (body, cty.ctyp_type);
-              rexp_loc = loc }
-        | _ -> unsupported "This function constraint"
-      in
-      List.fold_right (fun id body -> mk (Rexp_fun (id, body))) params body
-  | Pexp_match (scrutinee, cases) ->
-      mk (Rexp_match
-            (transl locals scrutinee,
-             List.map
-               (transl_refinement_case env ~policy ~row_context locals)
-               cases))
-  | Pexp_constraint (e, Some ty, []) ->
-      let cty = transl_interior_type locals ty in
-      mk (Rexp_constraint (transl locals e, cty.ctyp_type))
-  | Pexp_constraint _ -> unsupported "This form of constraint"
-  | Pexp_while _ -> not_total "While loops are"
-  | Pexp_for _ -> not_total "For loops are"
-  | Pexp_sequence _ -> not_total "Sequencing is"
-  | Pexp_setfield _ | Pexp_setvar _ -> not_total "Assignment is"
-  | Pexp_array _ -> not_total "Arrays are"
-  | Pexp_try _ -> not_total "Exception handlers are"
-  | Pexp_assert _ -> not_total "Assertions are"
-  | Pexp_lazy _ -> not_total "Lazy expressions are"
-  | Pexp_letexception _ -> not_total "Exception declarations are"
-  | Pexp_record _ | Pexp_record_unboxed_product _ ->
-      unsupported "A record expression"
-  | _ -> unsupported "This expression form"
-
-and transl_refinement_case env ~policy ~row_context locals case =
-  let locals, rc_lhs =
-    transl_refinement_pattern env locals case.pc_lhs
-  in
-  { rc_lhs;
-    rc_guard =
-      Option.map
-        (transl_refinement_predicate env ~policy ~row_context locals)
-        case.pc_guard;
-    rc_rhs =
-      transl_refinement_predicate env ~policy ~row_context locals
-        case.pc_rhs }
-
-and transl_refinement_pattern env locals pat =
-  let loc = pat.ppat_loc in
-  let mk rpat_desc = { rpat_desc; rpat_loc = loc } in
-  let unsupported what =
-    raise (Error (loc, env, Refinement_predicate_unsupported what))
-  in
-  match pat.ppat_desc with
-  | Ppat_any -> locals, mk Rpat_any
-  | Ppat_var name ->
-      let id = Ident.create_local name.txt in
-      Misc.Stdlib.String.Map.add name.txt id locals, mk (Rpat_var id)
-  | Ppat_constant const -> locals, mk (Rpat_constant const)
-  | Ppat_tuple (components, Closed) ->
-      let locals, components =
-        List.fold_left_map
-          (fun locals (lbl, p) ->
-            let locals, p = transl_refinement_pattern env locals p in
-            locals, (lbl, p))
-          locals components
-      in
-      locals, mk (Rpat_tuple components)
-  | Ppat_tuple (_, Open) -> unsupported "A partial tuple pattern"
-  | Ppat_construct (lid, arg) ->
-      let cstr, _ =
-        Env.lookup_constructor ~loc:lid.loc Env.Pattern lid.txt env
-      in
-      let locals, arg =
-        match arg with
-        | None -> locals, None
-        | Some ([], p) ->
-            let locals, p = transl_refinement_pattern env locals p in
-            locals, Some p
-        | Some (_ :: _, _) -> unsupported "An existential type binding"
-      in
-      locals, mk (Rpat_construct (refinement_constructor_path cstr, lid, arg))
-  | Ppat_alias (p, name) ->
-      let locals, p = transl_refinement_pattern env locals p in
-      let id = Ident.create_local name.txt in
-      Misc.Stdlib.String.Map.add name.txt id locals,
-      mk (Rpat_alias (p, id))
-  | Ppat_or _ -> unsupported "An or-pattern"
-  | _ -> unsupported "This pattern form"
 
 and transl_type_var env ~policy ~row_context attrs loc name jkind_annot_opt =
   let print_name = "'" ^ name in
@@ -2429,8 +2622,14 @@ let report_error_doc loc env = function
         form
   | Refinement_predicate_unsupported what ->
       Location.errorf ~loc
-        "@[%s is not supported in refinement predicates.@]"
+        "@[%s is not supported in a refinement predicate.@]"
         what
+  | Refinement_predicate_stabilization_failed ->
+      Location.errorf ~loc
+        "Typing this refinement predicate did not stabilize."
+  | Refinement_predicate_warning_replay_changed ->
+      Location.errorf ~loc
+        "Typing this refinement predicate changed while reporting warnings."
 
 let () =
   Location.register_error_of_exn

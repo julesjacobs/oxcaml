@@ -2,11 +2,10 @@
  expect;
 *)
 
-(* Vox type formers: refinement types [t{p}] and the dependent-arrow
-   binder.  This piece is inert: refinements parse, translate, print and
-   travel through the type graph, but there are no introduction or
-   elimination rules yet, so these tests declare, annotate and print
-   rather than use. *)
+(* Vox type formers: refinement types [t{p}] and the dependent-arrow binder.
+   Later stack pieces type predicates and enforce refinement flow; these
+   fixtures focus on the forms' syntax, representation and calling
+   conventions. *)
 
 (* --- The four spellings --------------------------------------------- *)
 
@@ -164,7 +163,11 @@ Error: Unbound value "x"
 (* [~x:] scopes over the whole argument, and only the argument *)
 type tilde_tuple = ~x:(int{ x > 0 } * int) -> unit;;
 [%%expect{|
-type tilde_tuple = ~x:int{ x > 0 } * int -> unit
+Line 1, characters 32-33:
+1 | type tilde_tuple = ~x:(int{ x > 0 } * int) -> unit;;
+                                    ^
+Error: The constant "0" has type "int" but an expression was expected of type
+         "int{ _ } * int"
 |}]
 
 type bad = ~x:int -> int{ _ >= x };;
@@ -178,7 +181,11 @@ Error: Unbound value "x"
 (* A positional binder scopes over refinements anywhere in its domain *)
 type nested_domain = x:(int{ x > 0 } * int) -> unit;;
 [%%expect{|
-type nested_domain = x:int{ x > 0 } * int -> unit
+Line 1, characters 33-34:
+1 | type nested_domain = x:(int{ x > 0 } * int) -> unit;;
+                                     ^
+Error: The constant "0" has type "int" but an expression was expected of type
+         "int{ _ } * int"
 |}]
 
 (* A [fun] parameter in the predicate shadows the name, so [x] stays a
@@ -269,7 +276,7 @@ type bad = int{ { contents = 1 } = _ };;
 Line 1, characters 16-32:
 1 | type bad = int{ { contents = 1 } = _ };;
                     ^^^^^^^^^^^^^^^^
-Error: A record expression is not supported in refinement predicates.
+Error: A record expression is not supported in a refinement predicate.
 |}]
 
 type bad = unit{ ref true };;

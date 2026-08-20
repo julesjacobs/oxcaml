@@ -1,7 +1,7 @@
 # Vox predicate typing
 
 Refinement predicates become well-typed booleans. Today `int{ 42 }`,
-`int{ _ + "x" }` and `int{ String.length _ }` are legal types: the
+`int{ _ + "x" }` and `string{ String.length _ }` are legal types: the
 type-formers piece resolves names and gates the sublanguage syntactically,
 but applies no typing judgment ("the typing rules for refinements belong to
 a later piece" — types.mli, type-formers.md). This is that piece.
@@ -104,9 +104,10 @@ every predicate encountered inside it *queued* (its gated parsetree plus
 its binder-scope snapshot) rather than typed; when the domain type is
 complete, the queued predicates are typed with each binder bound to its
 completed declared (payload-headed) type — Typecore's occurrence rules
-then strip heads at uses, as everywhere. Predicates in a codomain (all
-binders already completed) type eagerly; a predicate with no dependent
-binders in scope types immediately. Consequences, both wanted:
+then strip heads at uses, as everywhere. Predicates outside a binder-carrying
+domain type eagerly. While any such domain is being translated, every
+predicate nested in it queues, including one that does not itself mention the
+binder. Consequences, both wanted:
 
 - `x:(int{ x > 0 } * int)` becomes a type error (`x` is the whole tuple,
   not an int) — current fixtures that accept it flip in the RED/GREEN
@@ -132,10 +133,14 @@ authority, joined by an explicit correspondence (the trees are not
 isomorphic: source constraints are `exp_extra`s, one `Texp_function`
 carries all parameters where the mirror nests unary `Rexp_fun`s,
 `Texp_construct` flattens argument tuples, and application arguments are
-reordered into function-type order). Concretely: the mirror keeps source
-shape, order, constants, grouping and locations from the gated parsetree
-exactly as today; the correspondence walk supplies, per source node, the
-type, the selected constructor/field identity, and binder `Ident.t`s.
+reordered into function-type order). Application correspondence consumes
+same-label, same-anchor matches in source occurrence order; a unique anchor is
+the fallback when label representations differ. Colliding locations such as
+repeated `Location.none` are never reusable keys, and ambiguous pairings are
+rejected. Concretely, the mirror
+keeps source shape, order, constants, grouping and locations from the gated
+parsetree exactly as today; the correspondence walk supplies, per source node,
+the type, the selected constructor/field identity, and binder `Ident.t`s.
 Typedtree forms with no faithful preimage are rejected with a located
 "not supported in a refinement predicate": applications the typechecker
 completes or reorders beyond the source (required-label omission —
@@ -150,12 +155,14 @@ Stored annotations:
 
 - `rexp_type : type_expr` on every node except `Rexp_var`/`Rexp_hole`
   (see "Binder types"); in the type graph: `Btype`/`Subst`/freshening
-  traverse it, `.cmi`s carry it. **Traversal becomes binder-context-aware**:
-  `Vox_rexp.map`'s type callback receives the current rename map, so a
-  predicate-local binder occurring in a nested refinement's stored types
-  freshens with its binder — the existing callback closes over only the
-  outer map, which this piece fixes (with a `.cmi`/functor-copy fixture
-  for exactly that shape).
+  traverse it, `.cmi`s carry it. Before persistence, each stored annotation
+  is scanned under the mirror binders in lexical scope: a free value path in a
+  nested refinement that denotes a predicate-local binder is promoted to
+  `Rexp_var`. Type copying preallocates fresh stamps for all mirror binders
+  before mapping stored types, because an outer function node's full arrow type
+  can mention parameters from nested `Rexp_fun` nodes. A raw-CMI/functor-copy
+  fixture covers both written constraint types and an `Rexp_fun` result
+  annotation, and a direct substitution check rejects the old binder stamp.
 - Constructor identity as today's substitutable path form, but selected
   by Typecore (post-disambiguation).
 - **Field identity as `(parent record type path, label name)`** — `Path.t`
@@ -167,10 +174,11 @@ Stored annotations:
   types + the identity keys; derived node types are ignored by
   `Vox_rexp.equal`.
 
-The *syntactic gate* (totality by construction, unsupported-forms
-rejection) stays as a pre-pass over the parsetree, unchanged in behavior,
-so gate errors keep their current messages and **no syntactically
-rejected form reaches Typecore** (effectful-by-type expressions — a
+The *syntactic gate* (totality by construction, unsupported-forms rejection)
+stays as a pre-pass over the parsetree, so **no syntactically rejected form
+reaches Typecore**. The consolidated gate admits simple predicate-`let`
+annotations that have a faithful constraint preimage and continues to reject
+the other annotation forms (effectful-by-type expressions — a
 well-typed call to a partial function, a qualified mutable access — do
 reach it and are accepted by this piece; the mode piece decides their
 fate later).
@@ -212,7 +220,10 @@ nothing, was drafted and review-looped. It fails on facts of this tree:
 Persistent node types cost mechanical traversal work in `types.ml`,
 `Btype`, `Subst`, equality, and `.cmi` size. That cost is accepted,
 bounded, and paid in one piece — and it is what the translation piece
-needs anyway.
+needs anyway. A queued batch types every predicate once for bootstrap, at
+least once while stabilizing, and once for authoritative warning replay; the
+defensive worst case is quadratic in the number of predicates in one
+binder-carrying domain.
 
 ## Deliberately out of scope
 
@@ -246,7 +257,7 @@ hygiene and full-suite reference churn are expected.
 `testsuite/tests/vox/predicate_typing.ml` (expect):
 
 - Rejections, located: `int{ 42 }`, `int{ _ + "x" }`,
-  `int{ String.length _ }`; acceptance: `int{ _ > 0 }`.
+  `string{ String.length _ }`; acceptance: `int{ _ > 0 }`.
 - Holes: multiple occurrences, nested refinements (innermost payload),
   under `let`/`match`/`fun`.
 - Binders: bare and `~x:` labelled at payload; refined binder head-strip
@@ -288,3 +299,55 @@ refinement-flow) — the occurrence rules this piece inherits are
 refinement-flow's. Red-green commits as above. The mirror change is a
 `.cmi`-shape change: stdlib and test-install refreshes are part of the
 build discipline.
+
+## Decisions taken during consolidation
+
+- **Lane A (`impl-fable`) is the implementation base.** It keeps the intended
+  Typetexp-gate/queue and Typecore-correspondence split, preserves binding
+  annotations and signature-local value identities, contains no generic
+  dev-loop tooling, and has the smaller semantic diff and broader RED. Lane B
+  remains the source for all-failure rollback, reversible mode state,
+  contextual variable annotations, annotation closure, and direct `.cmi`
+  inspection tests. Neither lane is used unchanged; the review-verified
+  defects are repaired in the consolidated GREEN.
+- **Queued mirrors are installed at atomic barriers.** A payload-only bootstrap
+  types every job before installing any seed; strict whole-batch passes then
+  iterate to a fixed point and one authoritative replay emits warnings. A
+  non-semantic refinement identity survives frame and ordinary copies, so the
+  bootstrap recognizes an instantiated view without sharing its mirror cell.
+  Historical batches remain live mutable type graphs and are not sound cycle
+  keys, so stabilization uses linear defensive fuel and rolls the entire batch
+  back on exhaustion; this conservatively trades a possible pathological
+  false rejection for guaranteed termination. Exhaustion and a divergent
+  warning replay are located source errors materialized before rollback, not
+  internal compiler aborts.
+- **Written structure and derived annotations have separate traversals.**
+  Occurrence, universal-escape, well-foundedness, and variance checks visit the
+  payload plus written constraint types. Copying, substitution,
+  generalization, and persistence also visit stored node annotations.
+- **Predicate reentry is fully transactional.** Every failure through mirror
+  construction freezes its diagnostic before `Btype` rollback; delayed checks,
+  allocation state, saved cmt expressions, warning state, and mode-solver
+  changes are framed. The type-only boundary enters ghost context. Successful
+  ambient type constraints still commit. Mode constraints from the transient
+  frame roll back; if a committed weak variable becomes an arrow, its otherwise
+  unconstrained modes default conservatively at the phrase boundary. The
+  local-argument fixture pins that observable conservative boundary; it does
+  not independently isolate the mode-rollback implementation.
+- **Frame views copy every non-variable spine.** This includes polymorphic
+  variants and first-class packages, object field/poly spines, and unboxed
+  tuples as well as constructors, arrows, boxed tuples, and refinements.
+  Ambient variables remain shared; only a refinement's predicate update cell
+  and non-semantic identity are additionally shared. Every bound `Rexp_var`
+  remains contextual, and other stored node types are closed before
+  persistence.
+
+Before a queued predicate has produced its typed mirror, an error that prints
+its enclosing completed binder can show the internal `{ _ }` placeholder
+rather than the written predicate. Retaining unresolved source syntax in
+`Types` solely for this bootstrap-only diagnostic would broaden the marshaled
+representation or reintroduce a parsetree mirror walker; this cosmetic
+limitation is accepted. Successful stored mirrors are unaffected.
+- **The shared artifact magic version advances from 583 to 584.** The Types
+  representation change affects marshaled CMI/CMT data; the common version
+  source intentionally changes all generated artifact magic strings together.

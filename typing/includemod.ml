@@ -533,7 +533,12 @@ let pair_components subst sig1_comps sig2 =
               Subst.add_modtype id2 (Path.Pident id1) subst
           | Sig_jkind _ ->
               Subst.add_jkind id2 (Path.Pident id1) subst
-          | Sig_value _ | Sig_typext _
+          | Sig_value _ ->
+              (* Values appear in types through refinement predicates
+                 ([int{ _ > bound }]), so paired value idents must be
+                 identified like types and modules are. *)
+              Subst.add_value id2 (Path.Pident id1) subst
+          | Sig_typext _
           | Sig_class _ | Sig_class_type _ ->
               subst
         in

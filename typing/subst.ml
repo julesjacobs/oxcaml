@@ -779,14 +779,23 @@ let rec typexp copy_scope s rename ty =
           let ret = typexp copy_scope s rename ret in
           let comm = copy_commu comm in
           Tarrow ((label, binder, marg, mret), arg, ret, comm)
-      | Trefine { ref_payload; ref_pred } ->
+      | Trefine { ref_payload; ref_pred; ref_identity } ->
           Trefine
             { ref_payload = typexp copy_scope s rename ref_payload;
               ref_pred =
-                Vox_rexp.map ~rename ~freshen:true
-                  ~value_path:(value_path s)
-                  ~constructor_path:(type_path s)
-                  ~type_expr:(typexp copy_scope s rename) ref_pred }
+                ref
+                  ((* The type callback takes the rename map in force at the
+                      node, not the one in force at the [Trefine]: a
+                      predicate-local binder occurring in a nested
+                      refinement inside a stored type must freshen with its
+                      binder. *)
+                   Vox_rexp.map ~rename ~freshen:true
+                     ~value_path:(value_path s)
+                     ~type_path:(type_path s)
+                     ~type_expr:(fun rename ty ->
+                       typexp copy_scope s rename ty)
+                     !ref_pred);
+              ref_identity }
       | Tof_kind jk -> Tof_kind (jkind copy_scope s rename jk)
       | Tmod (ty, mod_bounds) ->
           Tmod (typexp copy_scope s rename ty, mod_bounds)

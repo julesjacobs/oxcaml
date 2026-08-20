@@ -335,7 +335,7 @@ let iter_row f row =
   fold_row (fun () v -> f v) () row
 
 
-let fold_type_expr f init ty =
+let fold_type_expr_gen ~include_stored_refinement_types f init ty =
   match get_desc ty with
     Tvar _              -> init
   | Tarrow (_, ty1, ty2, _) ->
@@ -371,12 +371,23 @@ let fold_type_expr f init ty =
     List.fold_left (fun result (_n, ty) -> f result ty) init pack.pack_cstrs
   | Tof_kind _ -> init
   | Tbox ty -> f init ty
-  | Trefine { ref_payload; ref_pred } ->
+  | Trefine { ref_payload; ref_pred; _ } ->
       let result = f init ref_payload in
-      Vox_rexp.fold_types f result ref_pred
+      if include_stored_refinement_types
+      then Vox_rexp.fold_types f result !ref_pred
+      else Vox_rexp.fold_written_types f result !ref_pred
+
+let fold_type_expr f init ty =
+  fold_type_expr_gen ~include_stored_refinement_types:true f init ty
+
+let fold_type_expr_semantic f init ty =
+  fold_type_expr_gen ~include_stored_refinement_types:false f init ty
 
 let iter_type_expr f ty =
   fold_type_expr (fun () v -> f v) () ty
+
+let iter_type_expr_semantic f ty =
+  fold_type_expr_semantic (fun () v -> f v) () ty
 
 let rec iter_abbrev f = function
     Mnil                   -> ()
@@ -618,11 +629,16 @@ let rec copy_type_desc ?(keep_names=false) f = function
         pack_cstrs = List.map (fun (n, ty) -> (n, f ty)) pack.pack_cstrs}
   | Tof_kind jk -> Tof_kind jk
   | Tbox ty -> Tbox (f ty)
-  | Trefine { ref_payload; ref_pred } ->
+  | Trefine { ref_payload; ref_pred; ref_identity } ->
       (* Binder stamps are kept: [Subst] freshens them on import, generic
-         copies do not. *)
+         copies do not — so the rename map handed to the type callback is
+         always empty here and the callback ignores it. *)
       Trefine { ref_payload = f ref_payload;
-                ref_pred = Vox_rexp.map ~type_expr:f ref_pred }
+                ref_pred =
+                  ref
+                    (Vox_rexp.map ~type_expr:(fun _rename ty -> f ty)
+                       !ref_pred);
+                ref_identity }
 
 (* TODO: rename to [module Copy_scope] *)
 module For_copy : sig

@@ -340,6 +340,70 @@ let newconstr path tyl = newty (Tconstr (path, tyl, ref Mnil))
 
 let newmono ty = newty (Tpoly(ty, []))
 
+(* A structural view of a written type for binding the hole and the
+   dependent-arrow binders inside a refinement-predicate typing frame
+   (design-docs/predicate-typing.md).  The spines that unification may relink
+   are copied at the current level, so a frame unification against an
+   abbreviation-pathed instance relinks the copy and never renames the
+   written node ([s:string ->] must not print as [s:String.t ->] because
+   its own predicate applied [String.length]).  Variables are shared —
+   ambient inference through the frame (['a{ _ = 0 }] pinning ['a]) is
+   wanted.  A [Trefine] gets a distinct node and copied payload, while its
+   predicate update cell is shared so atomic queue installation remains
+   visible.  Distinct refinement nodes also prevent copy memoization from
+   freshening a dependent-arrow binder under the wrong rename map. *)
+let refinement_frame_view ty =
+  let visited = TypeHash.create 7 in
+  let rec copy ty =
+    match get_desc ty with
+    | Tvar _ | Tunivar _ -> ty
+    | desc -> (
+        match TypeHash.find_opt visited ty with
+        | Some stub -> stub
+        | None ->
+            let stub =
+              newstub ~scope:(get_scope ty)
+                (Jkind.Builtin.any ~why:Dummy_jkind)
+            in
+            TypeHash.add visited ty stub;
+            let desc =
+              match desc with
+              | Tarrow (ad, dom, cod, commu) ->
+                  (* Preserve the existing commutation state: this is a
+                     structural view, not an ordinary type instance. *)
+                  Tarrow (ad, copy dom, copy cod, commu)
+              | Tvariant row ->
+                  Tvariant
+                    (Btype.copy_row copy true row false
+                       (copy (row_more row)))
+              | Trefine { ref_payload; ref_pred; ref_identity } ->
+                  Trefine
+                    { ref_payload = copy ref_payload; ref_pred; ref_identity }
+              | Tsubst _ -> assert false
+              | desc -> Btype.copy_type_desc copy desc
+            in
+            Transient_expr.set_stub_desc stub desc;
+            stub)
+  in
+  copy ty
+
+(* During the bootstrap pass of an atomic predicate-queue flush, comparisons
+   involving a queued refinement establish only payload compatibility.  The
+   mirrors are not authoritative until every bootstrap job has completed and
+   the complete batch is installed.  The non-semantic identity survives both
+   frame views and ordinary type copies, so bootstrap recognition does not
+   depend on whether an environment lookup instantiated the predicate cell. *)
+let pending_refinement_identities : unit ref list ref = ref []
+
+let with_pending_refinement_identities identities f =
+  let saved = !pending_refinement_identities in
+  pending_refinement_identities := identities @ saved;
+  Misc.try_finally f
+    ~always:(fun () -> pending_refinement_identities := saved)
+
+let refinement_is_pending identity =
+  List.memq identity !pending_refinement_identities
+
 let none = newty (Ttuple [])                (* Clearly ill-formed type *)
 
 (**** Control variable stage in inference *)
@@ -505,6 +569,20 @@ let iter_type_expr_with_stages f env ty =
     f (incr_stage env) ty
   | _ ->
     iter_type_expr (f env) ty
+
+(* Occurrence and escape checks follow the written type structure.  Derived
+   per-node predicate annotations remain part of the persistent type graph,
+   but an edge through such metadata is not a semantic occurrence. *)
+let iter_type_expr_semantic_with_stages f env ty =
+  match get_desc ty with
+  | Tquote ty ->
+    f (incr_stage env) ty
+  | Tsplice ty ->
+    f (decr_stage env) ty
+  | Tquote_eval ty ->
+    f (incr_stage env) ty
+  | _ ->
+    iter_type_expr_semantic (f env) ty
 
 (* CR metaprogramming jbachurski: We use this to adjust the environment while
    printing error messages. The original type may have been well-staged,
@@ -797,6 +875,15 @@ let[@inline] free_vars ~init ~add_one ?env mark tys =
           let acc = fold_row (fv ~kind:Type_variable) acc row in
           if static_row row then acc
           else fv ~kind:Row_variable acc (row_more row)
+      | Trefine { ref_payload; ref_pred; _ }, _ ->
+          (* Free variables are a property of the type's structure: the
+             payload and the predicate's *written* constraint types.  The
+             typed mirror's stored node types may carry a polymorphic
+             [let]'s leftover generic variables and instances that share
+             nodes with the enclosing type; neither is a free variable of
+             the type. *)
+          let acc = fv ~kind acc ref_payload in
+          Vox_rexp.fold_written_types (fv ~kind:Type_variable) acc !ref_pred
       | _    ->
           fold_type_expr (fv ~kind) acc ty
   in
@@ -3775,7 +3862,8 @@ let rec occur_rec env visited allow_recursive parents ty0 ty =
         begin try
           if TypeSet.mem ty parents then raise Occur;
           let parents = TypeSet.add ty parents in
-          iter_type_expr (occur_rec env visited allow_recursive parents ty0) ty
+          iter_type_expr_semantic
+            (occur_rec env visited allow_recursive parents ty0) ty
         with Occur -> try
           let ty' = try_expand_head try_expand_safe env ty in
           (* This call used to be inlined, but there seems no reason for it.
@@ -3789,7 +3877,7 @@ let rec occur_rec env visited allow_recursive parents ty0 ty =
     | _ ->
         if allow_recursive ||  TypeSet.mem ty parents then () else begin
           let parents = TypeSet.add ty parents in
-          iter_type_expr_with_stages
+          iter_type_expr_semantic_with_stages
             (fun env -> occur_rec env visited allow_recursive parents ty0)
             env ty
         end
@@ -3859,7 +3947,7 @@ let rec local_non_recursive_abbrev ~allow_rec strict visited env p ty =
     | _ ->
         if strict || not allow_rec then (* PR#7374 *)
           let visited = get_id ty :: visited in
-          iter_type_expr_with_stages
+          iter_type_expr_semantic_with_stages
             (fun env ->
               local_non_recursive_abbrev ~allow_rec true visited env p)
             env ty
@@ -3986,7 +4074,9 @@ let occur_univar ?(inj_only=false) env ty =
           with Not_found ->
             if not inj_only then List.iter (occur_rec env bound) tl
           end
-      | _ -> iter_type_expr_with_stages (fun env -> occur_rec env bound) env ty
+      | _ ->
+          iter_type_expr_semantic_with_stages
+            (fun env -> occur_rec env bound) env ty
   in
   occur_rec env TypeSet.empty ty
   end
@@ -4040,7 +4130,7 @@ let univars_escape env univar_pairs vl ty =
             List.iter (occur env) tl
           end
       | _ ->
-          iter_type_expr_with_stages occur env t
+          iter_type_expr_semantic_with_stages occur env t
     end
   in
   occur env ty
@@ -4053,6 +4143,15 @@ let univar_pairs = ref []
    push a pair while they descend under two arrows whose binders are being
    identified, and [Vox_rexp.equal] consults the stack. *)
 let arrow_binder_pairs : (Ident.t * Ident.t) list ref = ref []
+
+(* Install a full pairing (the initial pairs extended with a predicate's
+   local binders) for the dynamic extent of comparing a written interior
+   type: a refinement nested inside that type may mention the predicate's
+   local binders, and its own [Vox_rexp.equal] reads the stack. *)
+let with_arrow_binder_pairs pairs f =
+  let old = !arrow_binder_pairs in
+  arrow_binder_pairs := pairs;
+  Misc.try_finally f ~always:(fun () -> arrow_binder_pairs := old)
 
 let with_arrow_binder_pair b1 b2 f =
   match b1, b2 with
@@ -4191,7 +4290,7 @@ let unexpanded_diff ~got ~expected =
 let rec deep_occur_rec mark t0 ty =
   if get_level ty >= get_level t0 && try_mark_node mark ty then begin
     if eq_type ty t0 then raise Occur;
-    iter_type_expr (deep_occur_rec mark t0) ty
+    iter_type_expr_semantic (deep_occur_rec mark t0) ty
   end
 
 let deep_occur t0 ty =
@@ -5181,9 +5280,15 @@ and unify3 uenv t1 t1' t2 t2' =
              syntactically alpha-equivalent.  One-sided refinement falls
              into the mismatch case below. *)
           unify uenv r1.ref_payload r2.ref_payload;
-          let type_eq ty1 ty2 = unify uenv ty1 ty2; true in
-          if not (Vox_rexp.equal ~type_eq ~pairs:!arrow_binder_pairs
-                    r1.ref_pred r2.ref_pred)
+          let type_eq ~pairs ty1 ty2 =
+            with_arrow_binder_pairs pairs
+              (fun () -> unify uenv ty1 ty2);
+            true
+          in
+          if not (refinement_is_pending r1.ref_identity
+                  || refinement_is_pending r2.ref_identity)
+             && not (Vox_rexp.equal ~type_eq ~pairs:!arrow_binder_pairs
+                       !(r1.ref_pred) !(r2.ref_pred))
           then raise_unexplained_for Unify
       | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
           unify_labeled_list uenv labeled_tl1 labeled_tl2
@@ -6247,7 +6352,7 @@ let moregen_occur env level ty =
       let lv = get_level ty in
       if lv <= level then () else
       if is_Tvar ty && lv >= subject_level then raise Occur else
-      if try_mark_node mark ty then iter_type_expr occur ty
+      if try_mark_node mark ty then iter_type_expr_semantic occur ty
     in
     try
       occur ty
@@ -6496,12 +6601,15 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
                  is no weakening — that is a later piece. *)
               moregen inst_nongen variance type_pairs env
                 r1.ref_payload r2.ref_payload;
-              let type_eq ty1 ty2 =
-                moregen inst_nongen variance type_pairs env ty1 ty2;
+              let type_eq ~pairs ty1 ty2 =
+                with_arrow_binder_pairs pairs (fun () ->
+                    moregen inst_nongen variance type_pairs env ty1 ty2);
                 true
               in
-              if not (Vox_rexp.equal ~type_eq ~pairs:!arrow_binder_pairs
-                        r1.ref_pred r2.ref_pred)
+              if not (refinement_is_pending r1.ref_identity
+                      || refinement_is_pending r2.ref_identity)
+                 && not (Vox_rexp.equal ~type_eq ~pairs:!arrow_binder_pairs
+                           !(r1.ref_pred) !(r2.ref_pred))
               then raise_unexplained_for Moregen
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               moregen_labeled_list inst_nongen variance type_pairs env
@@ -7027,13 +7135,16 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
           | (Trefine r1, Trefine r2) ->
               eqtype rename type_pairs subst env
                 r1.ref_payload r2.ref_payload ~do_jkind_check:true;
-              let type_eq ty1 ty2 =
-                eqtype rename type_pairs subst env ty1 ty2
-                  ~do_jkind_check:true;
+              let type_eq ~pairs ty1 ty2 =
+                with_arrow_binder_pairs pairs (fun () ->
+                    eqtype rename type_pairs subst env ty1 ty2
+                      ~do_jkind_check:true);
                 true
               in
-              if not (Vox_rexp.equal ~type_eq ~pairs:!arrow_binder_pairs
-                        r1.ref_pred r2.ref_pred)
+              if not (refinement_is_pending r1.ref_identity
+                      || refinement_is_pending r2.ref_identity)
+                 && not (Vox_rexp.equal ~type_eq ~pairs:!arrow_binder_pairs
+                           !(r1.ref_pred) !(r2.ref_pred))
               then raise_unexplained_for Equality
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               eqtype_labeled_list rename type_pairs subst env labeled_tl1
@@ -7278,6 +7389,13 @@ let is_equal env rename tyl1 tyl2 =
   match equal env rename tyl1 tyl2 with
   | () -> true
   | exception Equality _ -> false
+
+let equal_refinement_predicates env pred1 pred2 =
+  let type_eq ~pairs ty1 ty2 =
+    with_arrow_binder_pairs pairs (fun () ->
+        is_equal env true [ty1] [ty2])
+  in
+  Vox_rexp.equal ~type_eq ~pairs:[] pred1 pred2
 
 let rec equal_private env ty1 ty2 =
   try
@@ -8505,14 +8623,14 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
                *)
             with Cannot_expand -> raise exn
           end
-      | Trefine { ref_payload = _; ref_pred }
-        when Vox_rexp.find_value_path (Path.find_free_opt ids) ref_pred
+      | Trefine { ref_payload = _; ref_pred; _ }
+        when Vox_rexp.find_value_path (Path.find_free_opt ids) !ref_pred
              <> None ->
           (* A predicate mentioning the erased module cannot be kept: the
              value path has no meaning without it. *)
           let id =
             match
-              Vox_rexp.find_value_path (Path.find_free_opt ids) ref_pred
+              Vox_rexp.find_value_path (Path.find_free_opt ids) !ref_pred
             with
             | Some id -> id
             | None -> assert false

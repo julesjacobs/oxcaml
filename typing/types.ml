@@ -170,11 +170,13 @@ and type_desc =
 
 and refinement_desc =
   { ref_payload : type_expr;
-    ref_pred : refinement_expression }
+    ref_pred : refinement_expression ref;
+    ref_identity : unit ref }
 
 and refinement_expression =
   { rexp_desc : refinement_expression_desc;
-    rexp_loc : Location.t }
+    rexp_loc : Location.t;
+    rexp_type : type_expr option }
 
 and refinement_expression_desc =
   | Rexp_hole
@@ -185,7 +187,7 @@ and refinement_expression_desc =
       refinement_expression * (Asttypes.arg_label * refinement_expression) list
   | Rexp_tuple of (string option * refinement_expression) list
   | Rexp_construct of Path.t * Longident.t loc * refinement_expression option
-  | Rexp_field of refinement_expression * Longident.t loc
+  | Rexp_field of refinement_expression * Path.t * string * Longident.t loc
   | Rexp_ifthenelse of
       refinement_expression * refinement_expression
       * refinement_expression option

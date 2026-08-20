@@ -12,52 +12,143 @@
 
 open Types
 
-(* Folding over interior types *)
+(* Folding over interior types. *)
 
-let rec fold_types f acc rexp =
-  match rexp.rexp_desc with
-  | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> acc
-  | Rexp_apply (fn, args) ->
-      List.fold_left
-        (fun acc (_, arg) -> fold_types f acc arg)
-        (fold_types f acc fn) args
-  | Rexp_tuple components ->
-      List.fold_left
-        (fun acc (_, component) -> fold_types f acc component)
-        acc components
-  | Rexp_construct (_, _, arg) ->
-      Option.fold ~none:acc ~some:(fold_types f acc) arg
-  | Rexp_field (e, _) -> fold_types f acc e
-  | Rexp_ifthenelse (cond, ifso, ifnot) ->
-      let acc = fold_types f acc cond in
-      let acc = fold_types f acc ifso in
-      Option.fold ~none:acc ~some:(fold_types f acc) ifnot
-  | Rexp_let ({ rb_ident = _; rb_expr }, body) ->
-      fold_types f (fold_types f acc rb_expr) body
-  | Rexp_fun (_, body) -> fold_types f acc body
-  | Rexp_match (scrutinee, cases) ->
-      List.fold_left (fold_types_case f) (fold_types f acc scrutinee) cases
-  | Rexp_constraint (e, ty) -> f (fold_types f acc e) ty
+let fold_types_gen ~include_stored f acc rexp =
+  let rec fold acc rexp =
+    let acc =
+      if include_stored
+      then Option.fold ~none:acc ~some:(f acc) rexp.rexp_type
+      else acc
+    in
+    match rexp.rexp_desc with
+    | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> acc
+    | Rexp_apply (fn, args) ->
+        List.fold_left
+          (fun acc (_, arg) -> fold acc arg)
+          (fold acc fn) args
+    | Rexp_tuple components ->
+        List.fold_left
+          (fun acc (_, component) -> fold acc component)
+          acc components
+    | Rexp_construct (_, _, arg) ->
+        Option.fold ~none:acc ~some:(fold acc) arg
+    | Rexp_field (e, _, _, _) -> fold acc e
+    | Rexp_ifthenelse (cond, ifso, ifnot) ->
+        let acc = fold acc cond in
+        let acc = fold acc ifso in
+        Option.fold ~none:acc ~some:(fold acc) ifnot
+    | Rexp_let ({ rb_ident = _; rb_expr }, body) ->
+        fold (fold acc rb_expr) body
+    | Rexp_fun (_, body) -> fold acc body
+    | Rexp_match (scrutinee, cases) ->
+        List.fold_left fold_case (fold acc scrutinee) cases
+    | Rexp_constraint (e, ty) -> f (fold acc e) ty
+  and fold_case acc { rc_lhs = _; rc_guard; rc_rhs } =
+    (* Patterns carry no interior types. *)
+    let acc = Option.fold ~none:acc ~some:(fold acc) rc_guard in
+    fold acc rc_rhs
+  in
+  fold acc rexp
 
-and fold_types_case f acc { rc_lhs = _; rc_guard; rc_rhs } =
-  (* Patterns carry no interior types. *)
-  let acc = Option.fold ~none:acc ~some:(fold_types f acc) rc_guard in
-  fold_types f acc rc_rhs
+let fold_types f acc rexp =
+  fold_types_gen ~include_stored:true f acc rexp
 
 let iter_types f rexp = fold_types (fun () ty -> f ty) () rexp
+
+(* Written constraint types only: stored node types may share structure
+   with the enclosing type (own-domain binder instances), and consumers
+   reasoning about type structure must not read those metadata edges. *)
+let fold_written_types f acc rexp =
+  fold_types_gen ~include_stored:false f acc rexp
+
+let iter_written_types f rexp =
+  fold_written_types (fun () ty -> f ty) () rexp
 
 (* Rebuilding *)
 
 let map ?(rename = Ident.Map.empty) ?(freshen = false) ?value_path
-    ?constructor_path ~type_expr rexp =
+    ?type_path ?stored_type_expr ~type_expr rexp =
+  let stored_type_expr =
+    Option.value stored_type_expr ~default:type_expr
+  in
   let rename_var rename id =
     match Ident.Map.find_opt id rename with Some id' -> id' | None -> id
   in
   let bind rename id =
     if freshen then
-      let id' = Ident.rename id in
-      Ident.Map.add id id' rename, id'
+      match Ident.Map.find_opt id rename with
+      | Some id' -> rename, id'
+      | None ->
+          let id' = Ident.rename id in
+          Ident.Map.add id id' rename, id'
     else rename, id
+  in
+  let map_type_path path =
+    match type_path with Some f -> f path | None -> path
+  in
+  (* A stored type on an outer function node is the full arrow and can contain
+     refinements mentioning parameters bound by nested [Rexp_fun] nodes.
+     Allocate every local rename before mapping any stored type; Ident stamps
+     are unique, so mappings for binders outside a node's lexical scope cannot
+     affect a well-formed occurrence there. *)
+  let rec preallocate_rexp_binders rename rexp =
+    match rexp.rexp_desc with
+    | Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> rename
+    | Rexp_apply (fn, args) ->
+        List.fold_left
+          (fun rename (_, arg) -> preallocate_rexp_binders rename arg)
+          (preallocate_rexp_binders rename fn) args
+    | Rexp_tuple components ->
+        List.fold_left
+          (fun rename (_, component) ->
+            preallocate_rexp_binders rename component)
+          rename components
+    | Rexp_construct (_, _, arg) ->
+        Option.fold ~none:rename
+          ~some:(preallocate_rexp_binders rename) arg
+    | Rexp_field (e, _, _, _) -> preallocate_rexp_binders rename e
+    | Rexp_ifthenelse (cond, ifso, ifnot) ->
+        let rename = preallocate_rexp_binders rename cond in
+        let rename = preallocate_rexp_binders rename ifso in
+        Option.fold ~none:rename
+          ~some:(preallocate_rexp_binders rename) ifnot
+    | Rexp_let ({ rb_ident; rb_expr }, body) ->
+        let rename = preallocate_rexp_binders rename rb_expr in
+        let rename, _ = bind rename rb_ident in
+        preallocate_rexp_binders rename body
+    | Rexp_fun (param, body) ->
+        let rename, _ = bind rename param in
+        preallocate_rexp_binders rename body
+    | Rexp_match (scrutinee, cases) ->
+        List.fold_left preallocate_case_binders
+          (preallocate_rexp_binders rename scrutinee) cases
+    | Rexp_constraint (e, _) -> preallocate_rexp_binders rename e
+  and preallocate_case_binders rename { rc_lhs; rc_guard; rc_rhs } =
+    let rename = preallocate_pat_binders rename rc_lhs in
+    let rename =
+      Option.fold ~none:rename
+        ~some:(preallocate_rexp_binders rename) rc_guard
+    in
+    preallocate_rexp_binders rename rc_rhs
+  and preallocate_pat_binders rename pat =
+    match pat.rpat_desc with
+    | Rpat_any | Rpat_constant _ -> rename
+    | Rpat_var id -> fst (bind rename id)
+    | Rpat_tuple components ->
+        List.fold_left
+          (fun rename (_, component) ->
+            preallocate_pat_binders rename component)
+          rename components
+    | Rpat_construct (_, _, arg) ->
+        Option.fold ~none:rename
+          ~some:(preallocate_pat_binders rename) arg
+    | Rpat_alias (pat, id) ->
+        let rename = preallocate_pat_binders rename pat in
+        fst (bind rename id)
+  in
+  let rename =
+    if freshen then preallocate_rexp_binders rename rexp else rename
   in
   let rec map_rexp rename rexp =
     let rexp_desc =
@@ -78,11 +169,10 @@ let map ?(rename = Ident.Map.empty) ?(freshen = false) ?value_path
           Rexp_tuple
             (List.map (fun (lbl, c) -> lbl, map_rexp rename c) components)
       | Rexp_construct (path, lid, arg) ->
-          let path =
-            match constructor_path with Some f -> f path | None -> path
-          in
-          Rexp_construct (path, lid, Option.map (map_rexp rename) arg)
-      | Rexp_field (e, lid) -> Rexp_field (map_rexp rename e, lid)
+          Rexp_construct
+            (map_type_path path, lid, Option.map (map_rexp rename) arg)
+      | Rexp_field (e, parent, name, lid) ->
+          Rexp_field (map_rexp rename e, map_type_path parent, name, lid)
       | Rexp_ifthenelse (cond, ifso, ifnot) ->
           Rexp_ifthenelse
             ( map_rexp rename cond,
@@ -98,9 +188,12 @@ let map ?(rename = Ident.Map.empty) ?(freshen = false) ?value_path
       | Rexp_match (scrutinee, cases) ->
           Rexp_match (map_rexp rename scrutinee, List.map (map_case rename) cases)
       | Rexp_constraint (e, ty) ->
-          Rexp_constraint (map_rexp rename e, type_expr ty)
+          Rexp_constraint (map_rexp rename e, type_expr rename ty)
     in
-    { rexp with rexp_desc }
+    (* The preallocated map includes every binder whose scope can be reflected
+       in this node's stored type. *)
+    let rexp_type = Option.map (stored_type_expr rename) rexp.rexp_type in
+    { rexp with rexp_desc; rexp_type }
   and map_case rename { rc_lhs; rc_guard; rc_rhs } =
     let rename, rc_lhs = map_pat rename rc_lhs in
     { rc_lhs;
@@ -123,9 +216,7 @@ let map ?(rename = Ident.Map.empty) ?(freshen = false) ?value_path
           in
           rename, Rpat_tuple components
       | Rpat_construct (path, lid, arg) ->
-          let path =
-            match constructor_path with Some f -> f path | None -> path
-          in
+          let path = map_type_path path in
           let rename, arg =
             match arg with
             | None -> rename, None
@@ -143,7 +234,9 @@ let map ?(rename = Ident.Map.empty) ?(freshen = false) ?value_path
   in
   map_rexp rename rexp
 
-(* Alpha-equivalence *)
+(* Alpha-equivalence.  Syntactic, over shape + written constraint types +
+   identity keys; stored node types ([rexp_type]) are deliberately not
+   compared — they are derived. *)
 
 (* [Pconst_string] carries the location of the string contents inside the
    description; it is not part of the syntax and must not be part of type
@@ -187,8 +280,11 @@ let equal ~type_eq ~pairs rexp1 rexp2 =
     | Rexp_construct (p1, _, arg1), Rexp_construct (p2, _, arg2) ->
         Path.same p1 p2
         && Option.equal (eq pairs) arg1 arg2
-    | Rexp_field (e1, lid1), Rexp_field (e2, lid2) ->
-        lid1.txt = lid2.txt && eq pairs e1 e2
+    | Rexp_field (e1, parent1, name1, _), Rexp_field (e2, parent2, name2, _)
+      ->
+        Path.same parent1 parent2
+        && String.equal name1 name2
+        && eq pairs e1 e2
     | Rexp_ifthenelse (c1, t1, e1), Rexp_ifthenelse (c2, t2, e2) ->
         eq pairs c1 c2 && eq pairs t1 t2 && Option.equal (eq pairs) e1 e2
     | Rexp_let (b1, body1), Rexp_let (b2, body2) ->
@@ -201,7 +297,7 @@ let equal ~type_eq ~pairs rexp1 rexp2 =
         && List.compare_lengths cases1 cases2 = 0
         && List.for_all2 (eq_case pairs) cases1 cases2
     | Rexp_constraint (e1, ty1), Rexp_constraint (e2, ty2) ->
-        eq pairs e1 e2 && type_eq ty1 ty2
+        eq pairs e1 e2 && type_eq ~pairs ty1 ty2
     | ( ( Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _
         | Rexp_apply _ | Rexp_tuple _ | Rexp_construct _ | Rexp_field _
         | Rexp_ifthenelse _ | Rexp_let _ | Rexp_fun _ | Rexp_match _
@@ -246,7 +342,8 @@ let equal ~type_eq ~pairs rexp1 rexp2 =
 
 (* Back to surface syntax *)
 
-let untype ~var_name ~value_ident ~constructor_ident ~core_type rexp =
+let untype ~var_name ~value_ident ~constructor_ident ~field_ident ~core_type
+    rexp =
   let open Ast_helper in
   let lid_of_name name = Location.mknoloc (Longident.Lident name) in
   let rec untype_rexp rexp =
@@ -269,7 +366,8 @@ let untype ~var_name ~value_ident ~constructor_ident ~core_type rexp =
     | Rexp_construct (path, _, arg) ->
         Exp.construct ~loc (constructor_ident path)
           (Option.map untype_rexp arg)
-    | Rexp_field (e, lid) -> Exp.field ~loc (untype_rexp e) lid
+    | Rexp_field (e, parent, name, _) ->
+        Exp.field ~loc (untype_rexp e) (field_ident parent name)
     | Rexp_ifthenelse (cond, ifso, ifnot) ->
         Exp.ifthenelse ~loc (untype_rexp cond) (untype_rexp ifso)
           (Option.map untype_rexp ifnot)
@@ -329,7 +427,7 @@ let exists_rexp pred rexp =
         List.iter (fun (_, arg) -> walk arg) args
     | Rexp_tuple components -> List.iter (fun (_, c) -> walk c) components
     | Rexp_construct (_, _, arg) -> Option.iter walk arg
-    | Rexp_field (e, _) -> walk e
+    | Rexp_field (e, _, _, _) -> walk e
     | Rexp_ifthenelse (cond, ifso, ifnot) ->
         walk cond; walk ifso; Option.iter walk ifnot
     | Rexp_let ({ rb_expr; _ }, body) -> walk rb_expr; walk body
@@ -358,7 +456,9 @@ let find_value_path (f : Path.t -> 'a option) rexp : 'a option =
     (exists_rexp
        (fun r ->
          match r.rexp_desc with
-         | Rexp_ident (path, _) | Rexp_construct (path, _, _) -> check path
+         | Rexp_ident (path, _) | Rexp_construct (path, _, _)
+         | Rexp_field (_, path, _, _) ->
+             check path
          | Rexp_match (_, cases) ->
              let rec pat_path p =
                match p.rpat_desc with
@@ -374,6 +474,49 @@ let find_value_path (f : Path.t -> 'a option) rexp : 'a option =
        rexp
      : bool);
   !result
+
+let rec promote_locals locals rexp =
+  let promote = promote_locals locals in
+  let rexp_desc =
+    match rexp.rexp_desc with
+    | Rexp_ident (Path.Pident id, _) when Ident.Set.mem id locals ->
+        Rexp_var id
+    | (Rexp_hole | Rexp_var _ | Rexp_ident _ | Rexp_constant _) as desc ->
+        desc
+    | Rexp_apply (fn, args) ->
+        Rexp_apply (promote fn, List.map (fun (l, a) -> l, promote a) args)
+    | Rexp_tuple components ->
+        Rexp_tuple (List.map (fun (l, c) -> l, promote c) components)
+    | Rexp_construct (path, lid, arg) ->
+        Rexp_construct (path, lid, Option.map promote arg)
+    | Rexp_field (e, parent, name, lid) ->
+        Rexp_field (promote e, parent, name, lid)
+    | Rexp_ifthenelse (c, t, e) ->
+        Rexp_ifthenelse (promote c, promote t, Option.map promote e)
+    | Rexp_let ({ rb_ident; rb_expr }, body) ->
+        Rexp_let ({ rb_ident; rb_expr = promote rb_expr }, promote body)
+    | Rexp_fun (param, body) -> Rexp_fun (param, promote body)
+    | Rexp_match (scrutinee, cases) ->
+        Rexp_match
+          ( promote scrutinee,
+            List.map
+              (fun { rc_lhs; rc_guard; rc_rhs } ->
+                { rc_lhs;
+                  rc_guard = Option.map promote rc_guard;
+                  rc_rhs = promote rc_rhs })
+              cases )
+    | Rexp_constraint (e, ty) -> Rexp_constraint (promote e, ty)
+  in
+  let rexp_type =
+    match rexp_desc with
+    | Rexp_var _ ->
+        (* Bound variables are contextual: their binder or enclosing arrow
+           supplies the type, so retaining a derived annotation here would
+           create a metadata backedge. *)
+        None
+    | _ -> rexp.rexp_type
+  in
+  { rexp with rexp_desc; rexp_type }
 
 let mentions_ident id rexp =
   exists_rexp
