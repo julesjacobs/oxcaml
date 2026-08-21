@@ -1007,7 +1007,14 @@ application of the imported value instantiates the freshened binder like any
 local one. An *instantiated* type that reaches a signature carries its
 evaluated subject as ordinary mirror content (constants, paths — persisted
 exactly as declared predicates are; opaque leaf idents persist as unbound
-value paths, the pre-existing escaped-path class). The codomain fact of an
+value paths, the pre-existing escaped-path class). The
+same-magic-same-layout rule (binding; this piece's round-4 ruling above)
+is satisfied without a `.cmi` bump: evaluated subjects are built entirely
+from existing `refinement_expression` constructors, so the `.cmi` marshaled
+*layout* is unchanged — only which content patterns occur changes, and a
+magic number identifies a layout, not a content distribution. The one
+layout change in this fix is the typed tree's new `exp_extra` constructor,
+covered by the `.cmt` bump above. The codomain fact of an
 imported dependent function is an *assumed contract* exactly as its
 non-dependent counterpart: `record_admission` fires from the same deposit
 (`vc:typing/vox_verify.ml:242-256`), so the verdict stays conditional and
