@@ -140,9 +140,82 @@ Test against an independent oracle rather than against itself:
 The mode annotations. vox2's signature is
 `val add : t @ logical -> t @ logical -> t @@ total` throughout, which needs the
 totality piece. Land the module unannotated and add them after.
+(Investigated 2026-08-21; findings and the proposed route in the dated
+section at the end of this file.)
 
 The `Vox_builtin` mapping from these operations to SMT `Int`, which needs the
 solver interface and the translation piece.
 
 Runtime checking of specifications, which is what makes the executable
 implementation earn its keep, and which is a piece of its own.
+
+## 2026-08-21: the deferred mode annotations — findings and proposed route ⚑
+
+Investigated for the gap-refresh shortlist (item 2a: without annotations,
+the predicate judgment's Total-callee rule makes every Bigint mention in a
+specification a formation error). Three facts, each pinned empirically:
+
+**Placement.** `total`/`logical` are mode names introduced by the totality
+piece (`typing/typemode.ml`), two stack slots above this one. On this
+branch, `val f : int -> int @@ total` fails with "Unrecognized modality
+total", so the annotations cannot land on `jujacobs/vox/bigint`; the
+earliest host is the restacked chain at the totality slot (verified at
+in-chain tip dbabe4c8e0, where the same interface compiles). They are their
+own small piece off the post-Wave-B chain — which is where the roadmap
+already lists `bigint-modes/`.
+
+**Checking.** Annotating the interface is not enough. With `@@ total` on the
+thirteen operations and the implementation untouched, stdlib inclusion
+rejects the claims at the first one — "`val of_int : int -> t` is not
+included in `val of_int : int -> t @@ total` ... The first is partial
+because it closes over the value (=) ... which is partial" — and the same
+holds for every operation: this module's ratified iarray/scratch-loop
+representation (see Representation) uses loops, array primitives and
+comparisons, all partiality sources under the totality piece's rules. vox2's
+identical annotations typecheck only because its list-based
+structural-recursion implementation passes vox2's structural termination
+check — machinery vox defers to the termination-structural piece, which the
+roadmap sequences AFTER bigint-modes. So at the point bigint-modes lands,
+the totality of these operations is necessarily claimed, not earned.
+
+**Values vs operations.** `t : immutable_data` crosses both axes, so Bigint
+VALUES are already admissible at `total`/`logical` (pinned by fixture); only
+the operations' totality is missing. vox2's `t @ logical` argument
+annotations are vacuous under crossing and are dropped
+(DIVERGENT-BY-DESIGN: same admissibility, fewer annotations; the crossing
+is pinned by a fixture instead).
+
+**Proposed route (⚑ owner decision — trust is involved).** Keep the
+implementation as ratified, and claim totality at the export boundary with
+a module-local trusted cast, the `Obj.magic_portable` idiom:
+
+    external magic_total : 'a -> 'a @ total = "%identity"
+    let (add @ total) = magic_total add     (* one per exported operation *)
+
+with `@@ total` on the same thirteen operations vox2 annotates (`of_int`,
+`is_zero`, `equal`, `compare`, `lt`, `le`, `gt`, `ge`, `neg`, `abs`, `add`,
+`sub`, `mul`) and the three runtime-only conversions left partial — a
+fixture pins that scoping (`of_string` in a total closure stays rejected).
+The evidence for the claims is the oracle suite ("The oracle is not
+optional" above) plus inspection: every loop is bounded by a magnitude
+length and mutation touches only fresh scratch. vox2 itself trusts external
+modalities the same way (its local `external int_equal : int -> int -> bool
+@@ total = "%equal"`); the difference is the trust boundary sitting around
+whole operations instead of monomorphised primitives. When
+termination-structural lands, the claims can be earned instead (requires
+reversing the iarray decision toward vox2's list recursion) or the casts
+kept; that is a later owner call. Verified end to end at dbabe4c8e0: with
+the casts and annotations, total closures may call all thirteen operations,
+and the runtime-only conversions remain rejected.
+
+Alternatives considered: a compiler-side path allowlist in `type_ident`
+(where the totality primitive allowlist and the vc predicate-scoped
+comparisons already sit) — same trust, but invisible in the interface and
+path-matching is fragile; predicate-scoped admission at the vc level (the
+comparisons precedent) — unlocks specifications only, leaves user total
+closures unable to call Bigint, and leaves the interface silent. Both
+rejected in favour of annotations users can read.
+
+The lowering half of shortlist item 2 (guarded `/`/`mod` rows, Bigint
+operator rows, int↔bv conversions in `vox_lower`) is unchanged by this and
+lands on the vc branch.
