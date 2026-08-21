@@ -1604,3 +1604,28 @@ Line 1, characters 4-16: refined environment entry: ext_sentinel :
 Line 1, characters 34-53: refinement obligation: int{ _ = 0 }
 val ext_sentinel : int{ _ = 0 } = 0
 |}]
+
+(* --- predicate-call-crossing-formation: the no-recheck decision's ground --- *)
+(* The predicate front end lowers admitted calls congruently WITHOUT
+   re-checking argument crossing (the subject gate's per-argument half is
+   deliberately not carried).  That is sound only if no state-dependent
+   call can reach it: a callee that reads mutable state through a
+   parameter needs that parameter PHYSICAL, and inside a predicate every
+   value is a logical view, so the application must die at formation.
+   This pin holds that chain in place — if some spelling of a
+   reads_param-style callee ever FORMS inside a predicate, congruence
+   over it could equate two calls straddling a write, and the no-recheck
+   decision reverses.  Subject-side twin: stability-mutable-arg. *)
+
+let crossing_refused (r : int ref) =
+  let reads @ total = fun (s : int ref) -> s.contents in
+  (0 : int{ reads r = 0 });;
+[%%expect{|
+Line 3, characters 18-19:
+3 |   (0 : int{ reads r = 0 });;
+                      ^
+Error: This value is "logical"
+         because it is used in an expression (at line 3, characters 12-23).
+       However, the highlighted expression is expected to be "physical"
+         because its mutable field "contents" is being read.
+|}]
