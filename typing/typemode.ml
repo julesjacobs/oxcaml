@@ -109,12 +109,12 @@ module Modality_axis_pair = struct
   type t = Modality.atom
 
   let of_string s : t =
-    (* The modality parser reads a monadic axis as a join, so the Physical end
-       of logicality is spelled [nonlogical] and [physical] does not exist in
-       modality position. *)
+    (* The modality parser reads a monadic axis as a join, so [physical] (via
+       the mode table) and [nonlogical] both denote the identity join with
+       Physical; like the other axes' identity modalities they are accepted
+       and warn as redundant. *)
     match[@warning "-18"] s with
     | "nonlogical" -> Modality.Atom (Monadic Logicality, Join_const Physical)
-    | "physical" -> raise Not_found
     | _ -> (
       match[@warning "-18"]
         Mode_axis_pair.to_value (Mode_axis_pair.of_string s)

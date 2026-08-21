@@ -71,8 +71,9 @@ Modality position:
     val logical_int : int @@ logical
 
 The names are `total`, `partial`, `physical`, `logical`. In modality position
-the Physical end is spelled `nonlogical`, and `@@ physical` does not exist,
-because the modality parser reads the monadic axis as a join.
+the Physical end may be spelled `nonlogical` or `physical`; both are the
+identity modality and warn as redundant, like every other axis (amended
+2026-08-21 by owner ruling — the original mandate rejected `@@ physical`).
 
 Kind modifiers (`mod total`, `mod logical`) are supported.
 
@@ -334,6 +335,8 @@ the route taken and why.
   their identity modality with a redundancy warning (`@@ uncontended`,
   `mod partial` parse today), so the `nonlogical` spelling is a convention
   break; kept because this doc specifies it, flagged for reconsideration.
+  RESOLVED 2026-08-21: the owner ruled for convention — `@@ physical` is
+  accepted with the redundancy warning (rulings file item 7).
   (c) *Declaring primitive totality in stdlib interfaces* (`@@ total` on the
   `external`) instead of a compiler allowlist: better long-term (extends to
   user externals, survives abstraction), deferred to keep this piece free of

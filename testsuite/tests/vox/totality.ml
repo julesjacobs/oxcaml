@@ -126,7 +126,9 @@ end
 Line 2, characters 21-29:
 2 |   val x : int ref @@ physical
                          ^^^^^^^^
-Error: Unrecognized modality physical.
+Warning 220 [redundant-modality]: This modality is redundant.
+
+module type S = sig val x : int ref end
 |}]
 
 module type S = sig
