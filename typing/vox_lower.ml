@@ -34,11 +34,6 @@ exception Unsupported of { loc : Location.t; reason : string }
 
 let unsupported ~loc reason = raise (Unsupported { loc; reason })
 
-exception Ill_sorted of { loc : Location.t; message : string }
-
-let ill_sorted ~loc fmt =
-  Format.kasprintf (fun message -> raise (Ill_sorted { loc; message })) fmt
-
 exception Reads_mutable_state of { loc : Location.t }
 
 type resolved =
@@ -834,14 +829,28 @@ let table_prims =
 
 let sort_key = Vox_logic.Sort.key
 
-(* Predicate front end: rexp -> IR.  A located sort checker (rexp is
-   untyped and nothing upstream or downstream checks predicate sorts) and
-   a normaliser to the quantifier-free fragment: [let]s substitute (as
-   binder-environment entries), applied lambdas beta-reduce, [match]
-   lowers to [Ite]/[Select] with equality tests (the day-one matchable
-   subjects — tuples, integer and Boolean patterns — need no
-   [Term.Test]); any residual binder form is a located rejection.  A free mention of a mutable variable, or of a value whose
-   type does not cross logicality, is [Reads_mutable_state]: no predicate
+(* Mirror adapter: the typed mirror is the predicate's type authority.
+   [Rexp_hole] and [Rexp_var] carry no stored type by design (their types
+   are contextual — the innermost payload and the binder's declared type —
+   so the hole-sort and binder-environment paths are permanent); every
+   other node stores the use's ground instance. *)
+let mirror_type (r : Types.refinement_expression) =
+  match r.rexp_type with
+  | Some ty -> ty
+  | None ->
+    Misc.fatal_error "Vox_lower: typed-mirror node without a stored type"
+
+(* Predicate front end: typed mirror -> IR.  A normaliser to the
+   quantifier-free fragment: [let]s substitute (as binder-environment
+   entries), applied lambdas beta-reduce, [match] lowers to
+   [Ite]/[Select] with equality tests (the day-one matchable subjects —
+   tuples, integer and Boolean patterns — need no [Term.Test]); any
+   residual binder form is a located rejection.  Typecore checked the
+   predicate at [bool], so sorts are read off the mirror, never
+   reconstructed, and a sort clash is an internal defect; what remains
+   user-facing is modelability (what the term language cannot yet say).
+   A free mention of a mutable variable, or of a value whose instance
+   does not cross logicality, is [Reads_mutable_state]: no predicate
    over mutable state has one denotation, so this rejection is fail-closed
    even for facts. *)
 let lower_predicate symbols ?on_resolved ~env ~hole_sort
@@ -849,11 +858,11 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
   let resolved r t =
     match on_resolved with None -> () | Some f -> f r t
   in
-  let require_sort ~loc ~what (t : Ir.t) sort =
+  let require_sort ~what (t : Ir.t) sort =
     if not (Vox_logic.Sort.equal t.Ir.sort sort)
     then
-      ill_sorted ~loc "%s has sort %s where %s was expected" what
-        (sort_key t.Ir.sort) (sort_key sort)
+      Misc.fatal_errorf "Vox_lower: %s has sort %s where %s was expected"
+        what (sort_key t.Ir.sort) (sort_key sort)
   in
   let conjunction ~loc = function
     | [] -> ir (Ir.Const (Vox_logic.Literal.Bool true)) Bool loc
@@ -919,60 +928,18 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
          (match vd.val_kind with
           | Val_mut _ -> raise (Reads_mutable_state { loc })
           | _ ->
-            (* a logicality-crossing failure is attributed to its actual
-               cause.  A generic scheme fails only because its variables
-               promise nothing — grounding them (an instance with every
-               free variable unified to [int]) lets the type cross — and
-               "reads mutable state" would be a false diagnosis of an
-               immutable value like [let nil = []], so it gets its own
-               located rejection: rexp is untyped, so there is no
-               occurrence type to instantiate the scheme at.  A type that
-               still fails when grounded is itself the obstacle (a [ref],
-               say), so the crossing's own diagnosis stands — a weak
-               (value-restriction) variable is indistinguishable from a
-               generic one here (both sit at generic level once the item
-               is generalized), and this split keeps its host type's
-               mutability the message.  A variable that refuses [int]
-               (a non-value layout) also keeps the crossing's diagnosis. *)
-            if not (crosses_logicality env vd.val_type)
-            then begin
-              let variables_blocked_crossing =
-                match Ctype.free_variables ~env vd.val_type with
-                | [] -> false
-                | _ :: _ as fvs
-                  when List.exists
-                         (fun v ->
-                            Types.get_level v <> Btype.generic_level)
-                         fvs ->
-                  (* a variable still non-generic at walk time (a toplevel
-                     weak) is shared, not copied, by [instance], so probing
-                     would pin the user's type; such a value is monomorphic
-                     in its scope and keeps the crossing's diagnosis *)
-                  false
-                | _ :: _ ->
-                  (* the probe instance is re-generalized so the crossing
-                     reads it in -principal mode too (crossing_of_ty treats
-                     a non-generic type as crossing nothing) *)
-                  (match
-                     Ctype.with_local_level ~post:Ctype.generalize
-                       (fun () ->
-                          let inst = Ctype.instance vd.val_type in
-                          List.iter
-                            (fun v -> Ctype.unify env v Predef.type_int)
-                            (Ctype.free_variables ~env inst);
-                          inst)
-                   with
-                   | inst -> crosses_logicality env inst
-                   | exception Ctype.Unify _ -> false)
-              in
-              if variables_blocked_crossing
-              then
-                unsupported ~loc
-                  "a value with a polymorphic type cannot yet appear in a \
-                   predicate"
-              else raise (Reads_mutable_state { loc })
-            end;
-            let sort = sort_of_type symbols ~loc env vd.val_type in
+            (* the mirror stores the use's ground instance, so the sort is
+               read off it exactly as the subject front end reads
+               [exp_type] — a polymorphic value's instance either grounds
+               here ([value_symbol] mangles per-instance) or fails the
+               sort mapping as not fully determined.  The logicality
+               crossing guards the same instance: a mention whose instance
+               keeps mutable parts (a [ref], say) has no single
+               denotation. *)
+            let ty = mirror_type r in
+            let sort = sort_of_type symbols ~loc env ty in
+            if not (crosses_logicality env ty)
+            then raise (Reads_mutable_state { loc });
             let t =
               ir (Ir.Var (value_symbol symbols ~loc env path sort)) sort loc
             in
@@ -1044,12 +1011,17 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
              | None ->
                if List.mem p.prim_name table_prims
                then
-                 ill_sorted ~loc "%s is applied to operand(s) of sort %s"
-                   (Path.name path)
-                   (String.concat ", "
-                      (List.map
-                         (fun (a : Ir.t) -> sort_key a.Ir.sort)
-                         lowered))
+                 (* well-typed, but the operator table has no row at these
+                    carrier sorts (a char comparison, say): a modelability
+                    gap, not a sort error *)
+                 unsupported ~loc
+                   (Printf.sprintf
+                      "%s cannot yet be verified at operand sort(s) %s"
+                      (Path.name path)
+                      (String.concat ", "
+                         (List.map
+                            (fun (a : Ir.t) -> sort_key a.Ir.sort)
+                            lowered)))
                else
                  unsupported ~loc
                    (Printf.sprintf
@@ -1096,10 +1068,10 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
       unsupported ~loc "field access cannot yet appear in a predicate"
     | Rexp_ifthenelse (c, a, Some b) ->
       let ci = lower binders c in
-      require_sort ~loc ~what:"this condition" ci Bool;
+      require_sort ~what:"this condition" ci Bool;
       let ai = lower binders a in
       let bi = lower binders b in
-      require_sort ~loc ~what:"the else branch" bi ai.Ir.sort;
+      require_sort ~what:"the else branch" bi ai.Ir.sort;
       ir (Ir.Ite (ci, ai, bi)) ai.Ir.sort loc
     | Rexp_ifthenelse (_, _, None) ->
       unsupported ~loc "an if without an else cannot appear in a predicate"
@@ -1122,7 +1094,7 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
                | None -> []
                | Some g ->
                  let gi = lower binders g in
-                 require_sort ~loc:g.rexp_loc ~what:"this guard" gi Bool;
+                 require_sort ~what:"this guard" gi Bool;
                  [gi])
           in
           let rhs = lower binders c.rc_rhs in
@@ -1130,7 +1102,7 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
            | [] -> rhs (* irrefutable, unguarded: later cases unreachable *)
            | conds ->
              let rest_ir = case_chain rest in
-             require_sort ~loc ~what:"this match case" rest_ir rhs.Ir.sort;
+             require_sort ~what:"this match case" rest_ir rhs.Ir.sort;
              ir (Ir.Ite (conjunction ~loc conds, rhs, rest_ir))
                rhs.Ir.sort loc)
       in
@@ -1138,7 +1110,7 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
     | Rexp_constraint (r, ty) ->
       let t = lower binders r in
       let sort = sort_of_type symbols ~loc env ty in
-      require_sort ~loc ~what:"this constrained expression" t sort;
+      require_sort ~what:"this constrained expression" t sort;
       t
   (* A pattern against a scrutinee term: the tests that select the case
      and the binder instantiations it makes, both as terms about the one
@@ -1153,7 +1125,7 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
       let conds, bindings = lower_pattern scrut p in
       conds, (id, scrut) :: bindings
     | Rpat_constant { pconst_desc = Pconst_integer (digits, None); _ } ->
-      require_sort ~loc ~what:"this pattern's subject" scrut bv63;
+      require_sort ~what:"this pattern's subject" scrut bv63;
       (match int_of_string_opt digits with
        | Some n ->
          [ir (Ir.App (Eq, [scrut; const_int n loc])) Bool loc], []
@@ -1185,17 +1157,19 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
               (List.mapi (fun i f -> i, f) fields)
               ps
           | _ ->
-            ill_sorted ~loc
-              "a tuple pattern is matched against a subject of sort %s"
+            Misc.fatal_errorf
+              "Vox_lower: a tuple pattern is matched against a subject of \
+               sort %s"
               (sort_key scrut.Ir.sort))
        | _ ->
-         ill_sorted ~loc
-           "a tuple pattern is matched against a subject of sort %s"
+         Misc.fatal_errorf
+           "Vox_lower: a tuple pattern is matched against a subject of \
+            sort %s"
            (sort_key scrut.Ir.sort))
     | Rpat_construct (path, _, arg) ->
       (match bool_constructor path, arg with
        | Some b, None ->
-         require_sort ~loc ~what:"this pattern's subject" scrut Bool;
+         require_sort ~what:"this pattern's subject" scrut Bool;
          ( [ ir
                (Ir.App
                   (Eq, [scrut; ir (Ir.Const (Bool b)) Bool loc]))
@@ -1206,7 +1180,7 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
            "constructor patterns cannot yet appear in a predicate")
   in
   let t = lower [] rexp in
-  require_sort ~loc:rexp.rexp_loc ~what:"this predicate" t Bool;
+  require_sort ~what:"this predicate" t Bool;
   t
 
 let rec substitute_hole (ir : Ir.t) ~hole =

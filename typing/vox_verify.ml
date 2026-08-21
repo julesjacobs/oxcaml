@@ -19,7 +19,6 @@ type error =
   | Unrepresentable of string
   | Dependent_arrow
   | Stacked_refinement_heads
-  | Predicate_ill_sorted of string
   | Predicate_reads_mutable
   | Not_verified of int
   | Plan_error of string
@@ -191,7 +190,7 @@ let add_predicate_fact st ~env ~label ~loc ty ~subject_ir ~on_resolved
            (Vox_lower.substitute_hole pred ~hole:subject_ir)
            ~label ~loc;
        true
-     with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> false)
+     with Vox_lower.Unsupported _ -> false)
   | _ -> false
 
 (* The codomain contract of an application: the funct's solved arrow spine
@@ -333,7 +332,7 @@ let add_binder_facts st scope ~env pat facts =
                  ~label:("binder " ^ Ident.name id)
                  ~loc:name.loc ty ~subject_ir ~on_resolved:deposit facts_ref
                : bool)
-          with Vox_lower.Unsupported _ | Vox_lower.Ill_sorted _ -> ())
+          with Vox_lower.Unsupported _ -> ())
        | _ -> ())
     (pat_bound_idents_full pat);
   !facts_ref
@@ -768,9 +767,6 @@ let report_error ~loc = function
   | Stacked_refinement_heads ->
     Location.errorf ~loc
       "Consecutive refinement heads cannot yet be verified."
-  | Predicate_ill_sorted message ->
-    Location.errorf ~loc "This refinement predicate is ill-sorted:@ %s."
-      message
   | Predicate_reads_mutable ->
     Location.errorf ~loc
       "This predicate reads mutable state, which cannot yet be verified."
@@ -900,8 +896,6 @@ let assemble st (p : pending) : Vox_logic.Obligation.t =
       with
       | Vox_lower.Unsupported { loc; reason } ->
         raise (Error (loc, Unrepresentable reason))
-      | Vox_lower.Ill_sorted { loc; message } ->
-        raise (Error (loc, Predicate_ill_sorted message))
     in
     let facts = !facts_ref in
     let signature =

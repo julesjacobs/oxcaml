@@ -418,10 +418,10 @@ Error: The value "pnil" is "partial"
 (* [pnil] above is out of reach (a completed phrase's mode is already
    fixed), so the polymorphic value is bound in the same phrase, where the
    Total frame can still strengthen it.  Formation accepts: the occurrence
-   is grounded at [int list], which crosses.  The lowering still
-   reconstructs the sort from the declared scheme, which has no occurrence
-   type to instantiate, so it rejects a use the typed mirror already
-   grounds. *)
+   is grounded at [int list], which crosses.  The mirror stores that
+   ground instance, so the lowering reads its sort off the use — a
+   polymorphic value in a predicate is no longer a rejection of its own.
+   GREEN: Proved. *)
 
 let poly_let_in_predicate =
   let pl = [] in
@@ -429,11 +429,7 @@ let poly_let_in_predicate =
 [%%expect{|
 Line 3, characters 3-4: refinement obligation:
   int{ let _probe = (pl : int list) in _ > 0 }
-Line 3, characters 26-28:
-3 |   (5 : int{ let _probe = (pl : int list) in _ > 0 });;
-                              ^^
-Error: This expression cannot yet be represented in a verification condition:
-       a value with a polymorphic type cannot yet appear in a predicate.
+val poly_let_in_predicate : int = 5
 |}]
 
 (* --- weak-in-predicate: a value-restriction variable at formation --------- *)
@@ -585,8 +581,8 @@ Line 1, characters 69-70: refinement obligation:
 Line 1, characters 34-55:
 1 | let untabulated_comparison : int{ (char_cmp < char_cmp) && _ > 0 } = 1;;
                                       ^^^^^^^^^^^^^^^^^^^^^
-Error: This refinement predicate is ill-sorted:
-       Stdlib.< is applied to operand(s) of sort char, char.
+Error: This expression cannot yet be represented in a verification condition:
+       Stdlib.< cannot yet be verified at operand sort(s) char, char.
 |}]
 
 (* --- shift-bounds: the guarded shift rows at their boundaries ------------ *)

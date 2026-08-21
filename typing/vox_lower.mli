@@ -90,14 +90,8 @@ end
     catches it and declines. *)
 exception Unsupported of { loc : Location.t; reason : string }
 
-(** A located predicate sort error: rexp is untyped and nothing upstream
-    or downstream checks predicate sorts, so [int{ 1 + true }] compiles and
-    dies here, as a sort error the user can read.  Obligations fail closed
-    (a located user error); fact sources decline fail-open. *)
-exception Ill_sorted of { loc : Location.t; message : string }
-
 (** A predicate mentions a free value that is a mutable variable, or whose
-    declared type does not cross logicality (mutable parts): no such
+    instance does not cross logicality (mutable parts): no such
     predicate has one denotation, so this rejection is fail-closed even
     for facts — a fact with no single denotation is not conservative, it
     is wrong. *)
@@ -153,15 +147,18 @@ val lower_subject :
   ?is_total_local:(Ident.t -> bool) ->
   Typedtree.expression -> Ir.t
 
-(** Predicate front end: rexp -> IR.  A located sort checker — rexp is
-    untyped and nothing upstream or downstream checks predicate sorts —
-    and a normaliser to the quantifier-free fragment.  [hole_sort] is the
-    refined type's payload sort; free paths resolve in [env] (the
-    obligation site's environment), and resolving one reports
-    [Resolved_ident] through [on_resolved] exactly as the subject front
-    end does — the deposit rule is one rule, whichever front end resolves
-    the ident.  A sort clash or residual binder form is a located error at
-    the obligation's site. *)
+(** Predicate front end: typed mirror -> IR.  A normaliser to the
+    quantifier-free fragment; Typecore checked the predicate at [bool],
+    so sorts are read off the mirror's stored node types ([Rexp_hole] and
+    [Rexp_var] are contextual by design: [hole_sort] is the refined
+    type's payload sort, binders carry their environment entries), and a
+    sort clash is an internal defect, not a user error.  Free paths
+    resolve in [env] (the obligation site's environment) for the fact
+    deposit: resolving one reports [Resolved_ident] through [on_resolved]
+    exactly as the subject front end does — the deposit rule is one rule,
+    whichever front end resolves the ident.  A residual binder form or a
+    form outside the term language is a located rejection at the
+    obligation's site. *)
 val lower_predicate :
   Symbols.t ->
   ?on_resolved:(resolved -> Ir.t -> unit) ->
