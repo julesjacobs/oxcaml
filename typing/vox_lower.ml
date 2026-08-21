@@ -990,7 +990,23 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
        | None -> unsupported ~loc "this integer literal cannot be read")
     | Rexp_constant _ ->
       unsupported ~loc "this literal cannot yet appear in a predicate"
-    | Rexp_apply (f, args) ->
+    | Rexp_apply (f, { rapp_source_args; rapp_completion }) ->
+      (* completion entries beyond the source arguments (synthesized
+         defaults, call positions, omitted parameters of a partial
+         application) are forms this lowering does not cover; rejecting
+         them here keeps the completion metadata from being silently
+         reinterpreted as a plain application *)
+      List.iter
+        (fun (arg : Types.refinement_application_arg) ->
+           match arg.rarg_desc with
+           | Rarg_source _ -> ()
+           | Rarg_optional_wrapper _ | Rarg_optional_default
+           | Rarg_call_pos _ | Rarg_omitted_optional
+           | Rarg_omitted_position | Rarg_omitted_required ->
+             unsupported ~loc
+               "an application with synthesized or omitted arguments \
+                cannot yet appear in a predicate")
+        rapp_completion;
       let args =
         List.map
           (fun ((lbl : Asttypes.arg_label), a) ->
@@ -999,7 +1015,7 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
              | Labelled _ | Optional _ ->
                unsupported ~loc:a.Types.rexp_loc
                  "labeled arguments cannot yet appear in a predicate")
-          args
+          rapp_source_args
       in
       (match f.rexp_desc with
        | Rexp_fun _ ->
@@ -1046,6 +1062,8 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
             unsupported ~loc
               "this name cannot be resolved at verification time")
        | _ -> unsupported ~loc "this application cannot yet be verified")
+    | Rexp_format _ ->
+      unsupported ~loc "a format literal cannot yet appear in a predicate"
     | Rexp_tuple comps ->
       let comps =
         List.map

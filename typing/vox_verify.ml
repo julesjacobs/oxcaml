@@ -121,12 +121,13 @@ let rec rexp_has_free_var ~bound (r : Types.refinement_expression) =
   match r.rexp_desc with
   | Rexp_var id -> not (List.exists (Ident.same id) bound)
   | Rexp_hole | Rexp_ident _ | Rexp_constant _ -> false
-  | Rexp_apply (f, args) ->
+  | Rexp_apply (f, { rapp_source_args = args; rapp_completion = _ }) ->
     free ~bound f || List.exists (fun (_, a) -> free ~bound a) args
+  | Rexp_format (_, expansion) -> free ~bound expansion
   | Rexp_tuple comps -> List.exists (fun (_, c) -> free ~bound c) comps
   | Rexp_construct (_, _, arg) ->
     (match arg with Some a -> free ~bound a | None -> false)
-  | Rexp_field (r, _) -> free ~bound r
+  | Rexp_field (r, _, _, _) -> free ~bound r
   | Rexp_ifthenelse (c, a, b) ->
     free ~bound c || free ~bound a
     || (match b with Some x -> free ~bound x | None -> false)
@@ -155,11 +156,11 @@ let rec rexp_has_free_var ~bound (r : Types.refinement_expression) =
 
 let check_imposable env ty loc =
   match Types.get_desc (Ctype.expand_head env ty) with
-  | Trefine { ref_payload; ref_pred } ->
+  | Trefine { ref_payload; ref_pred; _ } ->
     (match Types.get_desc (Ctype.expand_head env ref_payload) with
      | Trefine _ -> raise (Error (loc, Stacked_refinement_heads))
      | _ -> ());
-    if rexp_has_free_var ~bound:[] ref_pred
+    if rexp_has_free_var ~bound:[] !ref_pred
     then raise (Error (loc, Dependent_arrow))
   | _ ->
     (* every imposition source checked its head; reaching here is a
@@ -176,14 +177,14 @@ let check_imposable env ty loc =
 let add_predicate_fact st ~env ~label ~loc ty ~subject_ir ~on_resolved
     facts_ref =
   match Types.get_desc (Ctype.expand_head env ty) with
-  | Trefine { ref_payload; ref_pred } ->
+  | Trefine { ref_payload; ref_pred; _ } ->
     (try
        let hole_sort =
          Vox_lower.sort_of_type st.symbols ~loc env ref_payload
        in
        let pred =
          Vox_lower.lower_predicate st.symbols ~on_resolved ~env ~hole_sort
-           ref_pred
+           !ref_pred
        in
        facts_ref :=
          Vox_fact.add !facts_ref
@@ -874,7 +875,7 @@ let discharge_outcome ~dump_only ~loc (outcome : Vox_backend.outcome) =
 let assemble st (p : pending) : Vox_logic.Obligation.t =
   let env = p.subject.exp_env in
   match Types.get_desc (Ctype.expand_head env p.imposed) with
-  | Trefine { ref_payload; ref_pred } ->
+  | Trefine { ref_payload; ref_pred; _ } ->
     let facts_ref = ref p.facts in
     (* only [Resolved_ident] can fire from the predicate front end (a
        mutable read in a predicate is a rejection, applications and field
@@ -893,7 +894,7 @@ let assemble st (p : pending) : Vox_logic.Obligation.t =
         in
         let pred =
           Vox_lower.lower_predicate st.symbols ~on_resolved:deposit ~env
-            ~hole_sort ref_pred
+            ~hole_sort !ref_pred
         in
         Vox_lower.substitute_hole pred ~hole:p.subject_ir
       with

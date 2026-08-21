@@ -376,10 +376,10 @@ Lines 2-6, characters 2-24: refinement obligation: int{ _ > 0 }
 val shadowed_local : int{ _ > 0 } -> int{ _ > 0 } = <fun>
 |}]
 
-(* --- mutable-in-predicate: rejected at VC time --------------------------- *)
-(* The predicate filter is syntactic, so int{ _ = y } with y mutable compiles
-   today; no fact or goal built from it has one denotation.  GREEN: a located
-   "this predicate reads mutable state" rejection. *)
+(* --- mutable-in-predicate: rejected at predicate formation ---------------- *)
+(* Predicate typing checks every predicate at formation, so a mutable
+   variable in a predicate is a Typecore error before verification ever
+   runs; the walk never sees it. *)
 
 let mutable_in_predicate () =
   let mutable y = 1 in
@@ -387,19 +387,17 @@ let mutable_in_predicate () =
   y <- 2;
   q + y;;
 [%%expect{|
-Line 3, characters 25-26: refinement obligation: int{ _ = y }
 Line 3, characters 19-20:
 3 |   let q : int{ _ = y } = 1 in
                        ^
-Error: This predicate reads mutable state, which cannot yet be verified.
+Error: Mutable variable cannot be used inside an expression (at line 3, characters 15-20).
 |}]
 
-(* --- poly-in-predicate: an honest rejection for an immutable value -------- *)
-(* A generic scheme fails the logicality crossing conservatively (its
-   variables promise nothing), so [pnil] used to be misdiagnosed as "reads
-   mutable state"; rexp is untyped, so there is no occurrence type to
-   instantiate the scheme at.  GREEN: a located polymorphic-value
-   rejection. *)
+(* --- poly-in-predicate: an ungrounded scheme is rejected at formation ----- *)
+(* [pnil = pnil] grounds nothing: the occurrence keeps its type variable,
+   which blocks totality crossing, so the Total predicate frame rejects
+   the mention at formation.  A use grounded to a closed type is a
+   different story: see poly-let-in-predicate below. *)
 
 let pnil = [];;
 [%%expect{|
@@ -408,43 +406,58 @@ val pnil : 'a list = []
 
 let poly_in_predicate : int{ _ > 0 && pnil = pnil } = 5;;
 [%%expect{|
-Line 1, characters 4-21: refined environment entry: poly_in_predicate :
-  int{ (_ > 0) && (pnil = pnil) }
-Line 1, characters 54-55: refinement obligation:
-  int{ (_ > 0) && (pnil = pnil) }
 Line 1, characters 38-42:
 1 | let poly_in_predicate : int{ _ > 0 && pnil = pnil } = 5;;
                                           ^^^^
+Error: The value "pnil" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 29-49).
+|}]
+
+(* --- poly-let-in-predicate: a ground instance of a polymorphic value ------ *)
+(* [pnil] above is out of reach (a completed phrase's mode is already
+   fixed), so the polymorphic value is bound in the same phrase, where the
+   Total frame can still strengthen it.  Formation accepts: the occurrence
+   is grounded at [int list], which crosses.  The lowering still
+   reconstructs the sort from the declared scheme, which has no occurrence
+   type to instantiate, so it rejects a use the typed mirror already
+   grounds. *)
+
+let poly_let_in_predicate =
+  let pl = [] in
+  (5 : int{ let _probe = (pl : int list) in _ > 0 });;
+[%%expect{|
+Line 3, characters 3-4: refinement obligation:
+  int{ let _probe = (pl : int list) in _ > 0 }
+Line 3, characters 26-28:
+3 |   (5 : int{ let _probe = (pl : int list) in _ > 0 });;
+                              ^^
 Error: This expression cannot yet be represented in a verification condition:
        a value with a polymorphic type cannot yet appear in a predicate.
 |}]
 
-(* --- weak-in-predicate: a value-restriction variable keeps the crossing's
-   own diagnosis ------------------------------------------------------------ *)
+(* --- weak-in-predicate: a value-restriction variable at formation --------- *)
 (* [weak_ref]'s type has a free variable only because [ref []] is expansive;
-   grounding the variable does not make [_ list ref] cross logicality, so
-   the failure is the [ref]'s, not the variable's, and the mutable-state
-   rejection stands — not the polymorphic one above. *)
+   the ungrounded variable blocks crossing, so the Total predicate frame
+   rejects the mention at formation. *)
 
 let weak_in_predicate () =
   let weak_ref = ref [] in
   let q : int{ _ > 0 && weak_ref = weak_ref } = 5 in
   q;;
 [%%expect{|
-Line 3, characters 48-49: refinement obligation:
-  int{ (_ > 0) && (weak_ref = weak_ref) }
 Line 3, characters 24-32:
 3 |   let q : int{ _ > 0 && weak_ref = weak_ref } = 5 in
                             ^^^^^^^^
-Error: This predicate reads mutable state, which cannot yet be verified.
+Error: The value "weak_ref" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 3, characters 15-43).
 |}]
 
-(* --- weak-top-in-predicate: a variable still weak at walk time ------------- *)
-(* At the toplevel a weak variable persists across phrases, so [instance]
-   would share it rather than copy it and the grounding probe would pin
-   the user's type: such a variable skips the probe outright and keeps the
-   crossing's diagnosis.  The two phrases after the rejection pin the
-   non-pinning: [weak_top] still unifies with [bool list ref]. *)
+(* --- weak-top-in-predicate: a toplevel weak variable is not pinned --------- *)
+(* The formation-time rejection must not unify the weak variable as a side
+   effect.  The two phrases after the rejection pin the non-pinning:
+   [weak_top] still unifies with [bool list ref]. *)
 
 let weak_top = ref [];;
 [%%expect{|
@@ -453,14 +466,12 @@ val weak_top : '_weak1 list ref = {contents = []}
 
 let qt : int{ _ > 0 && weak_top = weak_top } = 5;;
 [%%expect{|
-Line 1, characters 4-6: refined environment entry: qt :
-  int{ (_ > 0) && (weak_top = weak_top) }
-Line 1, characters 47-48: refinement obligation:
-  int{ (_ > 0) && (weak_top = weak_top) }
 Line 1, characters 23-31:
 1 | let qt : int{ _ > 0 && weak_top = weak_top } = 5;;
                            ^^^^^^^^
-Error: This predicate reads mutable state, which cannot yet be verified.
+Error: The value "weak_top" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 14-42).
 |}]
 
 let () = weak_top := [true];;
@@ -472,20 +483,110 @@ let readback = !weak_top;;
 val readback : bool list = [true]
 |}]
 
-(* --- predicate-sort-error: the located predicate sort checker ------------ *)
-(* Nothing upstream checks predicate sorts: this compiles today.  GREEN: a
-   located sort error at the obligation's site, not a solver failure. *)
+(* --- ground-ref-in-predicate: a logical view of a mutable value ------------ *)
+(* Formation accepts this: [int ref] crosses totality and the frame views
+   the mention logically, so the predicate cannot read the contents.  The
+   lowering's own logicality-crossing check on the declared type still
+   rejects it — strictly more conservative than the mode judgment. *)
+
+let ground_ref = ref 0;;
+[%%expect{|
+val ground_ref : int ref = {contents = 0}
+|}]
+
+let ground_ref_in_predicate : int{ let _probe = ground_ref in _ > 0 } = 5;;
+[%%expect{|
+Line 1, characters 4-27: refined environment entry: ground_ref_in_predicate :
+  int{ let _probe = ground_ref in _ > 0 }
+Line 1, characters 72-73: refinement obligation:
+  int{ let _probe = ground_ref in _ > 0 }
+Line 1, characters 48-58:
+1 | let ground_ref_in_predicate : int{ let _probe = ground_ref in _ > 0 } = 5;;
+                                                    ^^^^^^^^^^
+Error: This predicate reads mutable state, which cannot yet be verified.
+|}]
+
+(* --- total-call-in-predicate: a Total function over a logical ref ---------- *)
+(* Formation accepts the call: the callee is total and its domain asks for
+   a logical ref, which the logical hole provides.  Named calls are not in
+   the lowering's term language, so the obligation is a located
+   modelability rejection. *)
+
+let (accepts_logical_ref @ total)
+    : int ref @ logical -> bool @ total
+  = fun _ -> true;;
+[%%expect{|
+val accepts_logical_ref : int ref @ logical -> bool @ total = <fun>
+|}]
+
+let total_call_in_predicate (r : int ref)
+  : (int ref){ accepts_logical_ref _ } = r;;
+[%%expect{|
+Line 2, characters 41-42: refinement obligation:
+  int ref{ accepts_logical_ref _ }
+Line 2, characters 15-36:
+2 |   : (int ref){ accepts_logical_ref _ } = r;;
+                   ^^^^^^^^^^^^^^^^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       calling a function in a predicate is not yet supported.
+|}]
+
+(* --- total-call-in-fact: the same contract as a fact source ---------------- *)
+(* A fact source declines what it cannot lower, fail-open: the declared
+   contract's predicate is abstracted, and the surrounding obligation
+   proves without it. *)
+
+external mk_checked : unit -> (int ref){ accepts_logical_ref _ }
+  = "%identity";;
+[%%expect{|
+external mk_checked : unit -> int ref{ accepts_logical_ref _ } = "%identity"
+|}]
+
+let total_call_in_fact : int{ _ > 0 } =
+  let r = mk_checked () in
+  ignore r; 1;;
+[%%expect{|
+Line 1, characters 4-22: refined environment entry: total_call_in_fact :
+  int{ _ > 0 }
+Lines 2-3, characters 2-13: refinement obligation: int{ _ > 0 }
+val total_call_in_fact : int{ _ > 0 } = 1
+|}]
+
+(* --- predicate-sort-error: moved upstream to predicate formation ---------- *)
+(* Predicate typing checks the predicate against [bool] at formation, so an
+   ill-typed predicate is a Typecore error even in a bare declaration; the
+   obligation-time sort checker no longer sees it. *)
 
 let predicate_sort_error : int{ 1 + true } = 0;;
 [%%expect{|
-Line 1, characters 4-24: refined environment entry: predicate_sort_error :
-  int{ 1 + true }
-Line 1, characters 45-46: refinement obligation: int{ 1 + true }
-Line 1, characters 32-40:
+Line 1, characters 36-40:
 1 | let predicate_sort_error : int{ 1 + true } = 0;;
-                                    ^^^^^^^^
+                                        ^^^^
+Error: The constructor "true" has type "bool"
+       but an expression was expected of type "int"
+|}]
+
+(* --- untabulated-comparison: well-typed operands the table cannot carry --- *)
+(* [<] admits any immediate, but the operator table interprets only the
+   int and bool rows, so a char comparison reaches the obligation
+   well-typed and is rejected there. *)
+
+let char_cmp = 'a';;
+[%%expect{|
+val char_cmp : char = 'a'
+|}]
+
+let untabulated_comparison : int{ (char_cmp < char_cmp) && _ > 0 } = 1;;
+[%%expect{|
+Line 1, characters 4-26: refined environment entry: untabulated_comparison :
+  int{ (char_cmp < char_cmp) && (_ > 0) }
+Line 1, characters 69-70: refinement obligation:
+  int{ (char_cmp < char_cmp) && (_ > 0) }
+Line 1, characters 34-55:
+1 | let untabulated_comparison : int{ (char_cmp < char_cmp) && _ > 0 } = 1;;
+                                      ^^^^^^^^^^^^^^^^^^^^^
 Error: This refinement predicate is ill-sorted:
-       Stdlib.+ is applied to operand(s) of sort Bv63, Bool.
+       Stdlib.< is applied to operand(s) of sort char, char.
 |}]
 
 (* --- shift-bounds: the guarded shift rows at their boundaries ------------ *)
