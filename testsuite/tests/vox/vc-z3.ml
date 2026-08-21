@@ -481,9 +481,12 @@ val readback : bool list = [true]
 
 (* --- ground-ref-in-predicate: a logical view of a mutable value ------------ *)
 (* Formation accepts this: [int ref] crosses totality and the frame views
-   the mention logically, so the predicate cannot read the contents.  The
-   lowering's own logicality-crossing check on the declared type still
-   rejects it — strictly more conservative than the mode judgment. *)
+   the mention logically, so the predicate cannot read the contents — the
+   mention denotes the ref's identity and the predicate is stable.  It
+   lowers ([ground_ref] is an uninterpreted constant) and the goal proves.
+   The SUBJECT-side stability gate is a different judgment and is
+   untouched: see stability-mutable-arg above, where two calls with a
+   physical [int ref] argument still abstract.  GREEN: Proved. *)
 
 let ground_ref = ref 0;;
 [%%expect{|
@@ -496,10 +499,7 @@ Line 1, characters 4-27: refined environment entry: ground_ref_in_predicate :
   int{ let _probe = ground_ref in _ > 0 }
 Line 1, characters 72-73: refinement obligation:
   int{ let _probe = ground_ref in _ > 0 }
-Line 1, characters 48-58:
-1 | let ground_ref_in_predicate : int{ let _probe = ground_ref in _ > 0 } = 5;;
-                                                    ^^^^^^^^^^
-Error: This predicate reads mutable state, which cannot yet be verified.
+val ground_ref_in_predicate : int{ let _probe = ground_ref in _ > 0 } = 5
 |}]
 
 (* --- total-call-in-predicate: a Total function over a logical ref ---------- *)

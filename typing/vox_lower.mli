@@ -90,13 +90,6 @@ end
     catches it and declines. *)
 exception Unsupported of { loc : Location.t; reason : string }
 
-(** A predicate mentions a free value that is a mutable variable, or whose
-    instance does not cross logicality (mutable parts): no such
-    predicate has one denotation, so this rejection is fail-closed even
-    for facts — a fact with no single denotation is not conservative, it
-    is wrong. *)
-exception Reads_mutable_state of { loc : Location.t }
-
 (** What the subject front end resolved while lowering, reported to the
     caller as it happens: the fact sources that ride on lowering
     (value descriptions at occurrences, apply codomains, immutable field

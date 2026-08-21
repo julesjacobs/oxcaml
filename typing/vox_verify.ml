@@ -19,7 +19,6 @@ type error =
   | Unrepresentable of string
   | Dependent_arrow
   | Stacked_refinement_heads
-  | Predicate_reads_mutable
   | Not_verified of int
   | Plan_error of string
 
@@ -767,9 +766,6 @@ let report_error ~loc = function
   | Stacked_refinement_heads ->
     Location.errorf ~loc
       "Consecutive refinement heads cannot yet be verified."
-  | Predicate_reads_mutable ->
-    Location.errorf ~loc
-      "This predicate reads mutable state, which cannot yet be verified."
   | Not_verified n ->
     Location.errorf ~loc
       "%d refinement obligation%s not verified." n
@@ -873,9 +869,9 @@ let assemble st (p : pending) : Vox_logic.Obligation.t =
   match Types.get_desc (Ctype.expand_head env p.imposed) with
   | Trefine { ref_payload; ref_pred; _ } ->
     let facts_ref = ref p.facts in
-    (* only [Resolved_ident] can fire from the predicate front end (a
-       mutable read in a predicate is a rejection, applications and field
-       reads do not lower there), so the scope is inert *)
+    (* only [Resolved_ident] can fire from the predicate front end
+       (applications and field reads do not lower there), so the scope is
+       inert *)
     let assembly_scope =
       { facts = Vox_fact.empty; mutable_decls = []; total_locals = [] }
     in
@@ -939,11 +935,8 @@ let implementation ~backend:(module B : Vox_backend.BACKEND) ~dump_only
   let base =
     { facts = Vox_fact.empty; mutable_decls = []; total_locals = [] }
   in
-  (try
-     let it = iterator st base in
-     it.structure it str
-   with Vox_lower.Reads_mutable_state { loc } ->
-     raise (Error (loc, Predicate_reads_mutable)));
+  let it = iterator st base in
+  it.structure it str;
   let pendings = List.rev st.pendings in
   (* Sequentially, in source order; the walk continues past a failure (a
      failed goal's spec already became a fact at walk time -- fact sources
@@ -952,11 +945,7 @@ let implementation ~backend:(module B : Vox_backend.BACKEND) ~dump_only
   let failures =
     List.filter_map
       (fun (p : pending) ->
-         let obligation =
-           try assemble st p
-           with Vox_lower.Reads_mutable_state { loc } ->
-             raise (Error (loc, Predicate_reads_mutable))
-         in
+         let obligation = assemble st p in
          if discharge_outcome ~dump_only ~loc:p.loc
               (B.discharge ~config obligation)
          then Some p.loc

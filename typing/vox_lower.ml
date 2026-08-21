@@ -34,8 +34,6 @@ exception Unsupported of { loc : Location.t; reason : string }
 
 let unsupported ~loc reason = raise (Unsupported { loc; reason })
 
-exception Reads_mutable_state of { loc : Location.t }
-
 type resolved =
   | Resolved_ident of Path.t * Types.value_description
   | Resolved_apply of Typedtree.expression
@@ -681,8 +679,6 @@ let crosses_totality_and_logicality env ty =
   crosses_axis env ty (Comonadic Totality)
   && crosses_axis env ty (Monadic Logicality)
 
-let crosses_logicality env ty = crosses_axis env ty (Monadic Logicality)
-
 let lower_subject symbols ?on_resolved ?(is_total_local = fun _ -> false)
     (expr : Typedtree.expression) : Ir.t =
   let resolved r t =
@@ -849,10 +845,9 @@ let mirror_type (r : Types.refinement_expression) =
    predicate at [bool], so sorts are read off the mirror, never
    reconstructed, and a sort clash is an internal defect; what remains
    user-facing is modelability (what the term language cannot yet say).
-   A free mention of a mutable variable, or of a value whose instance
-   does not cross logicality, is [Reads_mutable_state]: no predicate
-   over mutable state has one denotation, so this rejection is fail-closed
-   even for facts. *)
+   Mode discipline is likewise formation's: the Total predicate frame and
+   the Logical hole/binder views admit only mentions a predicate may
+   depend on, so no mode question is re-asked here. *)
 let lower_predicate symbols ?on_resolved ~env ~hole_sort
     (rexp : Types.refinement_expression) : Ir.t =
   let resolved r t =
@@ -925,30 +920,26 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
     | Rexp_ident (path, _) ->
       (match Subst.Lazy.force_value_description (Env.find_value path env) with
        | vd ->
-         (match vd.val_kind with
-          | Val_mut _ -> raise (Reads_mutable_state { loc })
-          | _ ->
-            (* the mirror stores the use's ground instance, so the sort is
-               read off it exactly as the subject front end reads
-               [exp_type] — a polymorphic value's instance either grounds
-               here ([value_symbol] mangles per-instance) or fails the
-               sort mapping as not fully determined.  The logicality
-               crossing guards the same instance: a mention whose instance
-               keeps mutable parts (a [ref], say) has no single
-               denotation. *)
-            let ty = mirror_type r in
-            let sort = sort_of_type symbols ~loc env ty in
-            if not (crosses_logicality env ty)
-            then raise (Reads_mutable_state { loc });
-            let t =
-              ir (Ir.Var (value_symbol symbols ~loc env path sort)) sort loc
-            in
-            (* the same deposit rule as the subject front end: resolving a
-               free ident whose declared type is refined deposits the
-               instantiated fact — a goal's predicate may lean on a
-               declared value the subject never mentions *)
-            resolved (Resolved_ident (path, vd)) t;
-            t)
+         (* the mirror stores the use's ground instance, so the sort is
+            read off it exactly as the subject front end reads
+            [exp_type] — a polymorphic value's instance either grounds
+            here ([value_symbol] mangles per-instance) or fails the
+            sort mapping as not fully determined.  A mutable mention
+            cannot reach this arm: formation admits a value into the
+            Total/Logical frame only when the predicate cannot observe
+            its mutation, so the mention denotes (its identity, or the
+            one logical view). *)
+         let ty = mirror_type r in
+         let sort = sort_of_type symbols ~loc env ty in
+         let t =
+           ir (Ir.Var (value_symbol symbols ~loc env path sort)) sort loc
+         in
+         (* the same deposit rule as the subject front end: resolving a
+            free ident whose declared type is refined deposits the
+            instantiated fact — a goal's predicate may lean on a
+            declared value the subject never mentions *)
+         resolved (Resolved_ident (path, vd)) t;
+         t
        | exception Not_found ->
          unsupported ~loc "this name cannot be resolved at verification time")
     | Rexp_constant { pconst_desc = Pconst_integer (digits, None); _ } ->
