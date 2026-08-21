@@ -236,8 +236,18 @@ Requiring `e @ total` in `ghost_ e`. Ghost array elements. `ghost_` at
 vector layouts (currently a compiler fatal error rather than a located user
 error; reachable only with `-extension simd`). `ghost_` in quotations
 (a compiler fatal error, same caveat). Constructor-argument `@@ ghost`. Convenience functions on
-`Ghost.t`. Interaction with refinement predicates, which is what ghostliness
-exists for.
+`Ghost.t`.
+
+The interaction with refinement predicates is no longer deferred: the owner
+ruled (2026-08-21) that refinement predicates count as ghost contexts, and
+that ghost values are usable inside `ghost_` regions. The predicate half is
+recorded on the predicate-typing piece's pinning fixture. The `ghost_`-region
+half is this piece's existing behaviour, confirmed by probe at the stacked
+predicate-typing tip (`ca3a66ef71`): a `ghost_`-bound value consumed in a
+later `ghost_` expression, a `@ ghost` parameter read inside `ghost_`, and a
+`@@ ghost` field read inside `ghost_` (already the `ghost_fields.ml` `ok` /
+`unwrap` fixtures) all accept, while the same reads outside a ghost region
+still reject — the ambient-flag rule below gives exactly this.
 
 ## Decisions taken during implementation
 
