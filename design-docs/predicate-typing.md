@@ -728,16 +728,24 @@ does not imply stateless (owner ruling "TOTAL ⇏ STATELESS"). The predicate
 lands in this piece as
 `Vox_dependent.retains_call : is_total_local:(Ident.t -> bool) -> …` (its
 inputs — `Mode.Totality.Guts`, `Ctype.crossing_of_ty` — exist below both
-producers), with a stated monotonicity invariant: retention may only grow
-with the `is_total_local` oracle. Application typing calls it with the
-conservative oracle `fun _ -> false` (typing has no `Texp_mode` records in
-hand; fewer retentions only weaken subjects, never strengthen facts); at
-the restack the occurrence lowerer's own gate at `vc::781-786` is replaced
-by a call to the same predicate with its existing oracle — consumer change
-0 in the walk section. Because typing's oracle is the bottom of the
-monotone family, every typing-time retention is also an occurrence-time
-retention, so a retained call lowers to the same congruent `Call` on both
-sides by construction.
+producers), with a stated monotonicity invariant covering all three of its
+time-varying inputs: retention may only grow with the `is_total_local`
+oracle, with mode determination (`check_const_conservative` answers on more
+modes as they determine), and with type-variable solving
+(`crossing_of_ty` crosses on more types as variables solve). Application
+typing calls it with the conservative oracle `fun _ -> false` (typing has
+no `Texp_mode` records in hand; fewer retentions only weaken subjects,
+never strengthen facts); at the restack the occurrence lowerer's own gate
+at `vc::781-786` is replaced by a call to the same predicate with its
+existing oracle — consumer change 0 in the walk section. Because typing's
+oracle is the bottom of the monotone family and typing runs at or before
+the walk on every other input, every typing-time retention is also a
+walk-time retention, so a retained call lowers to the same congruent
+`Call` on both sides by construction. Only that direction is ever relied
+on: the walk never re-runs the rule to reconstruct typing's decisions —
+the descent in walk item 4 is driven by the stored subject's shape
+(delta-review correction; the rule's non-oracle inputs are exactly what a
+replay cannot hold fixed).
 
 **Subjects — vox2's evaluated subjects, adopted wholesale (resolution of
 ruling 2's delegated question).** Ruling 2 rejects the alternative this
@@ -871,12 +879,21 @@ explicit left-to-right fold, vox2's loop shape:
    (`Known_arg.ty_arg`/`ty_arg0`, `Unknown_arg.ty_arg_mono`,
    `Eliminated_optional_arg.ty_arg`, `Omitted.ty_arg`) and the running
    result type.
-3. Accumulate one metadata entry per stage, storing the subject.
+3. Accumulate one metadata entry per stage, storing the subject. The row's
+   `dap_domain` is the domain instantiated at the row's *own* subject as
+   well (delta-review correction): a binder scopes over its own domain, so
+   after `gt 1 2` the second row's domain must record `int{ 2 > 1 }`, not
+   `int{ Rexp_var y > 1 }` — closing it in the producer keeps the walk's
+   no-free-`Rexp_var` invariant exceptionless, where the previous revision
+   would have rejected target 3 at its own metadata check. (The expectation
+   copies the argument was *typed* against are untouched — they were
+   consumed before the subject existed; only the metadata record is the
+   instantiated copy.)
 
 `~x:` (domain-only) binders never occur in later stages or the codomain by
-formation, so step 2 is a no-op beyond their own domain; their binding is
-obligation-local (the walk binds them to the same term as the hole — the
-argument itself).
+formation, so step 2 is a no-op beyond their own domain and step 3's
+own-domain instantiation is the whole of their consumption; the walk needs
+no binder environment for them.
 
 An omitted stage has no subject; its binder substitutes nothing. The
 reconstructed partial-application arrow keeps the binder exactly as today
@@ -1028,13 +1045,15 @@ instead:
   built from one that later flows out of the function joins the pre-existing
   escaped-path class for signature-side scope validation (B5/S7). This
   bounds the port to formation, without vox2's environment machinery.
-- Recursion note (review): a `let rec` defined with the parameter spelling
-  assembles and exports the dependent arrow (the codex probe confirms
-  `let rec` needs and gets the same fix), but the *recursive occurrences
-  inside its own body* see the pre-promotion type, so the
-  induction-hypothesis route of target 4 requires the arrow-annotation
-  spelling day one; recorded, with a fixture pinning the parameter-spelled
-  recursive behaviour.
+- Recursion note (review; softened per the delta-round probe): a `let rec`
+  defined with the parameter spelling assembles and exports the dependent
+  arrow when its recursive occurrences leave the annotated codomain
+  unconstrained; an occurrence that constrains the codomain pins the shared
+  node and the assembly exports the unpromoted type. Either way the
+  *recursive occurrences inside its own body* see the pre-promotion type,
+  so the induction-hypothesis route of target 4 requires the
+  arrow-annotation spelling day one; recorded, with fixtures pinning both
+  parameter-spelled recursive shapes.
 
 The inferred type of the probe program flips from the escaping
 `val f : int -> int{ _ > x }` to `val f' : x:int -> int{ _ > x }`; caller
@@ -1074,13 +1093,24 @@ extensions, numbered:
    binder-less, subject-less metadata rows); each `dap_binder` agreeing
    with the corresponding spine stage's binder; `dap_subject` present
    exactly where binder-and-supplied; and no free `Rexp_var` in any imposed
-   `dap_domain` or in `dap_result`. Any violation is
-   `Misc.fatal_error` with the location — a walker/typer defect must not
-   become a dropped obligation (extends the existing pairing rule,
+   `dap_domain` or in `dap_result`. Violations split into two classes by
+   who can produce them (delta-review correction — the first revision made
+   everything fatal, which would have crashed the compiler on valid
+   source): metadata *absence* where a binder-carrying stage has a supplied
+   argument is a **located** dependent-arrow rejection — the eta wrapper
+   builds exactly this shape from valid source (a compiler-synthesized
+   apply that bypasses the fold) — and a residual free `Rexp_var` that is
+   some stage's *omitted* binder is likewise located (commuted supply,
+   ruled follow-up); everything else — duplicated extras, length/label/
+   supply misalignment, `dap_binder` disagreement, a missing or unexpected
+   `dap_subject`, any other free `Rexp_var` (the producer closes every
+   supplied binder, own domains included) — is `Misc.fatal_error` with the
+   location, since only a typer defect produces it and a walker defect must
+   not become a dropped obligation (extends the existing pairing rule,
    `vc:design-docs/vc-generation.md:126-161`; vox2 precedent
    `vox2:typing/vox_verify.ml:4674-4677`). The eta and commuted-supply
-   sentinels fail here or at the free-variable check — never down the
-   legacy fact path.
+   sentinels therefore stop at located rejections — never `fatal_error` on
+   valid source, never the legacy fact path.
 2. *Per-argument obligations*: when the apply carries metadata, pair
    against `dap_domain` instead of the funct's spine. Obligation semantics
    unchanged: subject = the argument, imposed = the instantiated domain.
@@ -1090,28 +1120,38 @@ extensions, numbered:
    substitution (`vc:typing/vox_lower.mli:166`), once-per-obligation
    deposits, admission recording — unchanged.
 4. *Leaf binding by parallel descent* (replaces the first draft's
-   singleton-list rule; the convergent review fix). For each stored
-   subject, the walk descends the subject and the actual argument
-   expression together, re-running `Vox_dependent.retains_call` with the
-   *typing-time* oracle so the descent reproduces typing's structural
-   decisions exactly: structural nodes pair with their expression
-   counterparts child-by-child; a subject `Rexp_ident (Pident v)` at a
-   position where the shared rule says "opaque" binds
+   singleton-list rule; the convergent review fix — and, per the delta
+   round, driven by the stored subject's shape alone, never by replaying
+   the retention rule: the rule's non-oracle inputs are time-varying, so a
+   dependent stage with a polymorphic domain and an actual `tot y` solved
+   later in the unit stores an opaque leaf at typing yet would replay as
+   retained at the walk, and a replay-driven descent would fatal on that
+   legitimate program). For each stored subject, the walk descends the
+   subject and the actual argument expression together, dispatching on the
+   subject node: a structural node (`Rexp_apply`/`Rexp_tuple`/
+   `Rexp_construct`/`Rexp_field`/`Rexp_constant`) pairs with the
+   expression node of the matching head — typing only emits structure
+   where the expression had that shape, so a head mismatch is fatal
+   (metadata-defect class, item 1) — and descends child-by-child; a
+   subject `Rexp_ident path` over a `Texp_ident` of the same path is a
+   real ident subject, nothing to bind; a subject `Rexp_ident (Pident v)`
+   over any other expression is a minted leaf and binds
    `v ↦ lower_subject(that subexpression)` — the memoized term
    (`vc:typing/vox_lower.ml:45-49`), so the codomain fact, the argument
-   goal, and any let equality meet on one term per evaluation; a subject
-   ident/constant at a retained position is checked against the expression
-   (same path / same constant) — any mismatch anywhere is fatal
-   (metadata-defect class, as in item 1). Whole-actual opacity is the
-   degenerate descent `subject ≡ Rexp_ident v`. `~x:` own-domain binders
-   bind to the same term as the hole at their own argument obligation.
-   Retained structural interiors need no binding: they lower through the
-   existing arms (idents via `Env`, constants, congruent `Call`s —
-   depositing their own declared facts through `on_resolved` exactly as
-   let-equality right-hand sides do), and by the shared retention rule the
-   occurrence lowering of the same node is the same term. An actual whose
-   `lower_subject` raises falls to the opaque tier as ever: facts weaken,
-   goals become unprovable; never a silent discharge.
+   goal, and any let equality meet on one term per evaluation. The
+   retention rule is never consulted at a leaf. Whole-actual opacity is
+   the degenerate descent `subject ≡ Rexp_ident v`. Retained structural
+   interiors need no binding: they lower through the existing arms (idents
+   via `Env`, constants, congruent `Call`s — depositing their own declared
+   facts through `on_resolved` exactly as let-equality right-hand sides
+   do), and by the extended monotonicity invariant a call typing retained
+   is also retained by the walk's `lower_subject`, so the occurrence
+   lowering of the same node is the same term; the walk retaining *more*
+   than typing did is harmless — the stored leaf stands for the evaluation
+   and binds to whatever `lower_subject` now produces for it, structural
+   or opaque. An actual whose `lower_subject` raises falls to the opaque
+   tier as ever: facts weaken, goals become unprovable; never a silent
+   discharge.
 5. *`check_imposable`* (`vc:typing/vox_verify.ml:156-162`): unchanged in
    force — a free `Rexp_var` in an imposed type remains a located rejection
    (higher-order escape, commuted supply, eta path); instantiated types
@@ -1191,8 +1231,9 @@ everything else is SAME or a recorded divergence with its forcing reason.
 - A binder the typing could not close (higher-order escape, commuted supply,
   eta path, unnamed callee parameter) is a **located rejection** — at typing
   where the shape is visible there, in the walk otherwise. Never a silent
-  drop: the dependent-metadata check (walk item 1) makes absence,
-  duplication, or misalignment fatal, and a free `Rexp_var` cannot lower.
+  drop: the dependent-metadata check (walk item 1) makes metadata absence a
+  located rejection (the eta shape reaches it from valid source) and
+  duplication or misalignment fatal, and a free `Rexp_var` cannot lower.
 - A descent mismatch between a stored subject and its actual is **fatal**
   (a typer defect, not a user error): the fact must attach to the walk's
   term for the actual evaluation or not at all.
@@ -1260,6 +1301,9 @@ shape still building (pinned un-instantiated for the walk to reject above).
   argument type does **not** cross Logicality, called twice around a
   mutation; the two evaluations must lower to distinct terms (with the
   first draft's callee-only rule they collapse to one congruent `Call`).
+  Also pins the monotonicity invariant directly: the same call site's
+  retention under the bottom oracle implies its retention under the
+  consumer oracle (codex delta request).
 - `dep-opaque-subject` — a whole-opaque actual: `subject ≡ Rexp_ident v`
   binds to the memoized `lower_subject` term; the codomain fact and the
   goal meet on it (disabling the memo or the descent flips it).
@@ -1277,8 +1321,15 @@ shape still building (pinned un-instantiated for the walk to reject above).
 - `dep-subject-capture` — a predicate-internal dependent call whose actual
   mentions an enclosing dependent parameter, imported through a `.cmi`: the
   substitution callback's rename-map invariant.
-- `dep-labelled` — `~x:` own-domain binder ≡ hole; commuted-supply rejection
-  pinned (ruling 3 sentinel).
+- `dep-labelled` — `~x:` own-domain instantiation (the row's `dap_domain`
+  is closed at its own subject; disabling the own-domain half of fold step 3
+  flips it); commuted-supply rejection pinned as a located error
+  (ruling 3 sentinel).
+- `dep-late-solved-subject` — the delta-round discriminator for the
+  shape-driven descent: a dependent stage with a polymorphic domain and an
+  actual `tot y` whose type and mode solve only later in the unit — typing
+  stores an opaque leaf while the walk's own lowering retains; the program
+  must verify (a replay-driven descent fatals on it).
 - `dep-partial` — `gt 1` then applied: the binder survives reconstruction
   and instantiates at the second application.
 - `dep-ho-escape` — the existing `dependent-arrow-escape` fixture stays
@@ -1312,6 +1363,12 @@ shape still building (pinned un-instantiated for the walk to reject above).
   CRITICAL-1: Total-callee alone can equate evaluations straddling a write;
   the argument-crossing half is load-bearing, and a single predicate used
   by both producers is the only arrangement that cannot drift.
+- **Rows close their own domains; the descent reads shapes** — delta-round
+  corrections: the producer instantiates each row's domain at its own
+  subject (the free-variable invariant stays exceptionless), and the walk's
+  descent dispatches on the stored subject's shape without ever
+  re-evaluating the retention rule (its non-oracle inputs are
+  time-varying). Round-2 revision note below.
 - **Conditional binder freshening ported** — vox2's flag; unconditional
   freshening is incompatible with staged instantiation (nested-arrow
   counterexample), and the parity row now says so instead of claiming SAME.
@@ -1388,6 +1445,40 @@ above. The substantive changes, with the counterexamples they answer:
   mixed-version sentence recorded** (claude #7), and the substitution
   capture invariant and `mentions` stored-type traversal noted from the
   codex audit.
+
+### Revision note (delta review, round 2, 2026-08-21)
+
+Both delta lanes closed every round-1 finding; each found one defect in the
+revised walk contract, both folded in above:
+
+- **The descent is shape-driven, never rule-replaying** (claude delta): the
+  round-1 text replayed `retains_call` with the typing-time oracle, but the
+  rule's *other* inputs are time-varying — a polymorphic domain solved
+  after the application (`crossing_of_ty` over a then-unsolved variable) or
+  a mode determined later (`check_const_conservative`) makes a walk-time
+  replay retain where typing minted a leaf, and the replay-driven descent
+  fatals on that legitimate program. Walk item 4 now dispatches on the
+  stored subject's shape alone; the monotonicity invariant is extended to
+  mode determination and type solving, preserving the one direction facts
+  rely on (typing-retained ⇒ walk-retained) while the converse is never
+  consulted. Fixture `dep-late-solved-subject`.
+- **Own-domain binders are closed in the producer** (codex delta): after
+  `gt 1 2` the second row's domain read `int{ Rexp_var y > 1 }`, which the
+  round-1 walk's own no-free-`Rexp_var` clause and the unchanged
+  `check_imposable` rejected before the promised own-binder binding could
+  run — the design's own contract refused target 3 and `dep-labelled`.
+  Fold step 3 now instantiates each row's domain at the row's own subject
+  (codex's offered alternative), keeping the free-variable invariant
+  exceptionless and deleting the special own-binder binding. Reconciling
+  it exposed an adjacent round-1 defect in item 1, corrected in the same
+  stroke: metadata *absence* where a binder was consumed is a **located**
+  rejection (the eta wrapper reaches that shape from valid source), not
+  `fatal_error`; only present-but-misaligned metadata is fatal, and a
+  residual free `Rexp_var` is located when it is an omitted stage's binder
+  (ruled follow-up), fatal otherwise.
+- The `let rec` parameter-spelling sentence is softened per the claude
+  lane's probe: the dependent arrow exports only when recursive occurrences
+  leave the annotated codomain unconstrained; both shapes are pinned.
 
 ### ⚑ For confirmation (owner)
 
