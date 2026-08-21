@@ -571,7 +571,13 @@ emitter consumes it:
   meet in one term — with no unfolding (definitional equations are a
   later piece) and no re-asked argument gate: the subject gate exists
   because subject arguments may be physical, and a physical value cannot
-  reach a predicate. Typecore checked the predicate
+  reach a predicate. A field read projects through the mirror's stored
+  (owner path, label) identity as the same [Select] the subject front
+  end emits; a record that is not modeled as a datatype (a mutable
+  record) has no selectors and stays a modelability rejection. Neither
+  calls nor field reads deposit facts from the predicate side (a
+  recorded completeness gap; the subject-side sources cover the shared
+  terms). Typecore checked the predicate
   at `bool`, so a sort clash inside this front end is an internal defect,
   not a user error; what remains user-facing is modelability — a
   well-typed operand pair the operator table has no row for (fixture
@@ -1113,6 +1119,13 @@ mechanism alone is disabled:
   `total-call-in-predicate` (a bare uninterpreted goal is honestly
   unprovable), `total-call-in-fact` (the deposited contract makes the
   unit's verdict conditional; the admission report names it).
+- Predicate-side field reads: `field-binder-fact` (the fact's projection
+  and the subject-side read are one `Select` term, Proved),
+  `field-in-goal` (the projection goal lowers, but a record construction
+  abstracts on the subject side — no `Texp_record` lowering — so the
+  obligation is honestly unprovable rather than rejected),
+  `field-unmodeled-goal` (a mutable record has no selectors; a
+  modelability rejection).
 - `predicate-sort-error` — `int{ 1 + true }`: rejected at predicate
   formation (an ordinary Typecore type clash); the obligation-time sort
   checks are internal assertions now, and `untabulated-comparison`
@@ -1449,3 +1462,26 @@ formation judgment now.  What changed, one line each:
   positions, omitted parameters) and `Rexp_format`; the mirror grammar
   adapted to is final, so these arms are the permanent coverage
   boundary until a corpus earns the forms.
+
+### Amended at stage-4 coverage (2026-08-21)
+
+Owner-directed coverage growth on the typed mirror, red-green:
+
+- **Predicate-side total calls lower congruently** — a named
+  non-primitive callee admitted by formation is total over logical
+  views, so the call becomes the subject front end's uninterpreted
+  `Call` (one allocator, one name; congruence only, no definitional
+  equations, and no re-asked argument gate — the subject gate exists for
+  physical arguments, which cannot reach a predicate).  Primitive and
+  operator-table behaviour is unchanged.  A hazard found on the way is
+  recorded in the corpus: an `%identity` external fabricating a ref from
+  `unit` segfaults the toplevel value printer once its obligation proves
+  and the phrase executes, so axiom-source fixtures construct real
+  values.
+- **Predicate-side field reads project** — the mirror's stored (owner
+  path, label) identity gives the selector's position, and the read is
+  the same `Select` member the subject front end emits; a record not
+  modeled as a datatype (a mutable record) has no selectors and keeps a
+  modelability rejection.
+- Neither form deposits facts from the predicate side; the subject-side
+  fact sources cover the shared terms (a recorded completeness gap).

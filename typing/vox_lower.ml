@@ -1068,8 +1068,41 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
            "constructors cannot yet appear in a predicate")
     | Rexp_construct _ ->
       unsupported ~loc "constructors cannot yet appear in a predicate"
-    | Rexp_field _ ->
-      unsupported ~loc "field access cannot yet appear in a predicate"
+    | Rexp_field (rcd, owner, label, _) ->
+      let lowered = lower binders rcd in
+      (match (lowered.Ir.sort : Vox_logic.Sort.t) with
+       | Datatype record_name ->
+         (* the mirror stores the identity Typecore selected: the owner
+            declaration gives the selector's position and the node's
+            stored type its sort — the same [Select] the subject front
+            end emits, so predicate and subject reads of one field meet
+            in one term *)
+         let pos =
+           match Env.find_type owner env with
+           | { type_kind = Type_record (labels, _, _); _ } ->
+             let rec index i = function
+               | [] -> None
+               | (ld : Types.label_declaration) :: rest ->
+                 if String.equal (Ident.name ld.ld_id) label
+                 then Some i
+                 else index (i + 1) rest
+             in
+             index 0 labels
+           | _ -> None
+           | exception Not_found -> None
+         in
+         (match pos with
+          | Some pos ->
+            ir (Ir.Select ("mk_" ^ record_name, pos, lowered))
+              (sort_of_type symbols ~loc env (mirror_type r)) loc
+          | None ->
+            unsupported ~loc
+              "this record field cannot be resolved at verification time")
+       | _ ->
+         (* a mutable record is an uninterpreted sort with no selectors *)
+         unsupported ~loc
+           "a field of a record that is not modeled as a datatype cannot \
+            yet appear in a predicate")
     | Rexp_ifthenelse (c, a, Some b) ->
       let ci = lower binders c in
       require_sort ~what:"this condition" ci Bool;
