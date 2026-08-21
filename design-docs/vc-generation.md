@@ -372,38 +372,29 @@ idents unstable (vox2 `vox_verify.ml:1280`) and rejects `Texp_mutvar`
 subjects outright (vox2 `vox_verify.ml:1590`); the per-read scheme is
 strictly more complete and no less sound.
 
-### Predicates over mutable state — rejected
+### Predicates over mutable state — rejected at formation
 
-The predicate-language filter is syntactic: `typetexp` rejects `ref`, `:=`
-and `!` by spelling and beyond name resolution checks nothing
-(`typing/typetexp.ml:1466-1472`, rejections at `:1505-1510`), so
-`int{ _ = y }` with `y` mutable compiles today — and no fact or goal built
-from it has one meaning, because nothing says which read of `y` the
-predicate denotes. Day one this piece fails closed: an obligation or fact
-whose predicate mentions a free value that is a mutable variable, or whose
-declared type does not cross logicality (mutable parts,
-`design-docs/totality.md:82-87`), is rejected with a located error at VC
-time — "this predicate reads mutable state, which cannot yet be verified".
-Small, and it keeps every admitted predicate denoting the same value at
-every mention. One carve-out keeps the message honest: a crossing
-failure is attributed to its actual cause. A generic scheme fails only
-because its variables promise nothing — grounding them (an instance with
-every free variable unified to `int`) lets the type cross — and such a
-value gets its own located rejection, "a value with a polymorphic type
-cannot yet appear in a predicate", not the mutable-state one. A type that
-still fails when grounded is itself the obstacle, so the crossing's
-diagnosis stands: a value-restriction variable (indistinguishable from a
-generic one once its item is generalized) does not turn its `ref`'s
-rejection into the polymorphic message. Instantiating the
-scheme instead is foreclosed for now by rexp being untyped: a predicate
-occurrence has no occurrence type to instantiate at. A later relaxation
-may give such predicates per-read snapshot semantics (instantiate against
-a snapshot constant taken where the predicate binds); nothing here
-forecloses that. The grounding probe itself never mutates a user type: a
-variable still weak at the walk (a toplevel weak, which an instance would
-share rather than copy) skips the probe and keeps the crossing's
-diagnosis. Fixtures: `mutable-in-predicate`, `poly-in-predicate`,
-`weak-in-predicate`, `weak-top-in-predicate`.
+This rejection class is owned by predicate-typing's formation judgment,
+not by this piece: the predicate is typed by Typecore reentry inside a
+Total closure frame with the hole and dependent binders viewed Logical,
+so a mutable variable, a physical mutable read, or a free value whose
+mention the predicate could observe mutating is a located Typecore error
+when the *type is formed* — before any obligation exists, even in an
+unused declaration. Every mention the frame admits denotes stably (a
+`ref` admitted through a logical view denotes its identity; its contents
+are unreadable inside the frame), so the lowering asks no mode question
+of its own: an earlier revision of this piece re-checked logicality
+crossing on free values at VC time, fail-closed even for facts, with a
+grounding probe to tell a polymorphic scheme from a genuinely mutable
+type — all retired as strictly more conservative than the formation
+judgment (it rejected valid logical specifications, e.g. a predicate
+over a ground `int ref` mention, which now lowers and proves). A later
+relaxation may give predicates over physical mutable state per-read
+snapshot semantics (instantiate against a snapshot constant taken where
+the predicate binds); nothing here forecloses that. Fixtures:
+`mutable-in-predicate`, `poly-in-predicate`, `weak-in-predicate`,
+`weak-top-in-predicate` (all pinning the formation-time rejections),
+`ground-ref-in-predicate` (the admitted logical view, Proved).
 
 ### Path conditions — gated
 
@@ -533,22 +524,20 @@ proof; that is the axis's contract to tighten, not this piece's.
 ## Lowering: one sorted language
 
 Two things must reach `Vox_logic.Term.t`: predicates, which are
-`Types.refinement_expression` (the `Rexp_*` forms, `typing/types.mli:315-354`
-— resolved paths, no types except `Rexp_constraint`, per type-formers'
-"resolved, not typed" decision), and subjects, which are
-`Typedtree.expression`. The avoid-dual-translations lesson (vox2 maintained
-two SMT emitters and measured a near-miss between them, vox2
-`vox_smt.ml:1-14`) rules out two independent paths to `Term`. But the two
-inputs arrive with opposite amounts of typing. A subject carries a full
-type on every node. A rexp is untyped — its let, function and match binders
-carry no types — and nothing upstream checks predicate sorts: the typetexp
-filter is name resolution plus a syntactic total-subset check
-(`typing/typetexp.ml:1466-1472`), so `let accepted : int{ 1 + true } = 0`
-compiles today and records an obligation; the backend cannot catch it
-either, its well-formedness pass checking declarations and arities, never
-sorts (`design-docs/solver-interface.md:400-405`). And `Term.t` has no let,
-lambda or match (`typing/vox_logic.mli:103-123`) while rexp has all three,
-so predicates need normalisation, not just mapping.
+`Types.refinement_expression` (the `Rexp_*` forms — predicate-typing's
+*typed mirror*: paths resolved by Typecore post-disambiguation, and
+`rexp_type` carrying each node's ground instance except on `Rexp_hole`
+and `Rexp_var`, whose types are contextual by design), and subjects,
+which are `Typedtree.expression`. The avoid-dual-translations lesson
+(vox2 maintained two SMT emitters and measured a near-miss between them,
+vox2 `vox_smt.ml:1-14`) rules out two independent paths to `Term`. Both
+inputs now arrive typed: a subject carries `exp_type` on every node, a
+predicate was checked against `bool` by Typecore reentry at formation
+(so `let accepted : int{ 1 + true } = 0` is a formation-time type error,
+never an obligation), and the mirror stores the types the checker
+established. But `Term.t` has no let, lambda or match
+(`typing/vox_logic.mli:103-123`) while rexp has all three, so predicates
+need normalisation, not just mapping.
 
 So the shared language is a small *sorted* VC IR, private to `vox_lower`:
 terms in `Term`'s shape with sorts assigned, plus the binder forms that
@@ -563,29 +552,33 @@ emitter consumes it:
   `if`/`match`-as-subject before lowering sees them). Sorts are read
   straight off `exp_type`: the types the typechecker established are used,
   not discarded and reconstructed.
-- **Predicates: rexp → IR.** This front end is a real, located sort
-  checker. The hole and the dependent binders get the payload sort from
-  the refined type; free paths get their `val_type` (resolved in the
-  node's `exp_env` — the *translation* may consult `Env`; closedness means
-  the *backend* never does, and every resolved symbol lands in the
-  signature — and resolving a free ident whose declared type is refined
-  deposits the instantiated declared fact through the same hook the
-  subject front end uses, so a goal may lean on a declared value only its
-  predicate mentions; fixtures `predicate-ident-fact` and
-  `wildcard-read`); constants have manifest sorts; interpreted operators
-  constrain their operands; predicate-local binders take their bound
-  expression's inferred sort. A clash is a located error at the
-  obligation's site — `int{ 1 + true }` dies here, as a sort error the
-  user can read, not inside a solver. The same front end normalises to the
-  quantifier-free fragment: predicate `let`s are substituted, supported
-  lambdas beta-reduced, `match` lowered to `Ite`/`Select` with equality
-  tests (the day-one matchable subjects — tuples, integer and Boolean
-  patterns — need no `Term.Test`, so the IR carries no tester or binder
-  forms; `Test` earns its IR form with the first constructor-pattern
-  corpus), and any
-  residual binder form (an unapplied lambda, a match the translation
-  cannot lower) is a located rejection in tier 2's shape. Fixture:
-  `predicate-sort-error`.
+- **Predicates: typed mirror → IR.** Sorts are read off the mirror, never
+  reconstructed: the hole and the dependent binders get the payload sort
+  from the refined type (their nodes are contextual by design), every
+  other node carries the ground instance Typecore stored — a polymorphic
+  value's use either grounds there (the symbol allocator mangles
+  per-instance) or fails the sort mapping as not fully determined.
+  `Env.find_value` survives only for the fact deposit: resolving a free
+  ident whose declared type is refined deposits the instantiated declared
+  fact through the same hook the subject front end uses, so a goal may
+  lean on a declared value only its predicate mentions (fixtures
+  `predicate-ident-fact` and `wildcard-read`; the *translation* may
+  consult `Env`, closedness means the *backend* never does, and every
+  resolved symbol lands in the signature). Typecore checked the predicate
+  at `bool`, so a sort clash inside this front end is an internal defect,
+  not a user error; what remains user-facing is modelability — a
+  well-typed operand pair the operator table has no row for (fixture
+  `untabulated-comparison`), or a form outside the term language. The
+  same front end normalises to the quantifier-free fragment: predicate
+  `let`s are substituted, supported lambdas beta-reduced, `match` lowered
+  to `Ite`/`Select` with equality tests (the day-one matchable subjects —
+  tuples, integer and Boolean patterns — need no `Term.Test`, so the IR
+  carries no tester or binder forms; `Test` earns its IR form with the
+  first constructor-pattern corpus), and any residual binder form (an
+  unapplied lambda, a match the translation cannot lower) is a located
+  rejection in tier 2's shape. Fixture: `predicate-sort-error` (pinning
+  that the ill-typed predicate now dies at formation, upstream of this
+  pass).
 - **One emitter: IR → `Term.t`**, trivial by construction — the IR is
   sorted and binder-free by the time it emits. Every fact, goal, subject
   and predicate crosses this one emitter, so there is exactly one meaning
@@ -1092,10 +1085,20 @@ mechanism alone is disabled:
   `r.contents`: the calls abstract (argument fails logicality crossing),
   so the false equality is unprovable; `Unknown`, pinned.
 - `poly-instances`, `shadowed-local` — the allocator fixtures above.
-- `mutable-in-predicate` — `int{ _ = y }` with `y` mutable: the located
-  "predicate reads mutable state" rejection.
-- `predicate-sort-error` — `int{ 1 + true }`: the located predicate sort
-  error.
+- `mutable-in-predicate` — `int{ _ = y }` with `y` mutable: rejected at
+  predicate formation (Typecore's mutable-variable error); the walk never
+  sees it.  Its VC-time siblings after the typed-mirror integration:
+  `ground-ref-in-predicate` (a logical view of a ground `int ref`
+  mention lowers and proves), `total-call-in-predicate` /
+  `total-call-in-fact` (a formation-accepted total call over a logical
+  ref: modelability rejection as an obligation, fail-open abstraction as
+  a fact), `poly-let-in-predicate` (a same-phrase polymorphic value at a
+  ground instance, Proved).
+- `predicate-sort-error` — `int{ 1 + true }`: rejected at predicate
+  formation (an ordinary Typecore type clash); the obligation-time sort
+  checks are internal assertions now, and `untabulated-comparison`
+  (`char < char`) pins the surviving user-facing class — well-typed
+  operands the operator table has no row for, a modelability rejection.
 - `shift-bounds` — the guarded shift rows at their boundaries.
 - `let-equality-opaque` — `let x = g () in (x : int{ _ > 0 })` with
   `g : unit -> int{ _ > 0 }`: apply-codomain fact + opaque-constant
@@ -1184,10 +1187,11 @@ Recorded per AGENTS.md: real forks, the route, and why.
   them payload-typed). Stated as the precise reading of refinement-flow's
   contract rather than a choice; the fork was whether residue heads count
   as facts, and they do not, to keep fact coverage order-independent.
-  Mutable variables get per-read subjects with per-read facts, and
-  predicates that read mutable state are rejected outright — the one place
-  the doc chooses fail-closed for a *fact*, because a fact with no single
-  denotation is not conservative, it is wrong.
+  Mutable variables get per-read subjects with per-read facts; a
+  predicate that could read mutable state never forms in the first place
+  (predicate-typing's Total/Logical frame owns that rejection), so every
+  fact this piece deposits denotes the same value at every mention
+  without a VC-time re-check.
 - **(c) Stability = interpreted-operator lowering, else totality projection
   with arguments crossing totality *and* logicality.** The axis alone is
   insufficient (comparisons deliberately unlisted; partial parameters
@@ -1206,18 +1210,20 @@ Recorded per AGENTS.md: real forks, the route, and why.
   rationale quoted rather than rediscovered. Per-obligation reports print
   as found; one final located error refuses the unit.
 - **(f) One sorted VC IR, two front ends, one emitter**: subjects
-  (typedtree, fully typed) and predicates (rexp, untyped — type-formers'
-  "resolved, not typed") each get a small front end into a private sorted
-  IR; the predicate front end is a real located sort checker with
-  quantifier-free normalisation, because nothing upstream or downstream
-  checks predicate sorts and `Term` has no binder forms; a single trivial
-  emitter serves predicates, subjects, facts and goals. The alternatives —
+  (typedtree, `exp_type` on every node) and predicates (the typed mirror,
+  `rexp_type` on every non-contextual node) each get a small front end
+  into a private sorted IR; the predicate front end is a quantifier-free
+  normaliser that reads sorts off the mirror — Typecore checked the
+  predicate at `bool` at formation, so its sort checks are internal
+  assertions, and `Term` has no binder forms; a single trivial emitter
+  serves predicates, subjects, facts and goals. The alternatives —
   lowering typedtree directly to `Term` beside a rexp lowering (two
-  translations of one semantics; vox2 measured that near-miss), converting
-  subjects *into* untyped rexp first (discards the typechecker's types and
-  reconstructs them, and leaves the sort checker with no place to stand),
-  or adding types to rexp (reopens a type-formers decision for no consumer
-  but us) — all lose. Facts and goals are boolean terms asserted true;
+  translations of one semantics; vox2 measured that near-miss), or
+  converting subjects *into* rexp first (discards the typechecker's
+  richer typedtree structure the fact rules read) — lose. (An earlier
+  revision predates predicate-typing: the rexp was untyped then and this
+  front end doubled as a located sort checker; the typed mirror retired
+  that role.) Facts and goals are boolean terms asserted true;
   and/or/not are the OCaml booleans; one meaning per construct end to end,
   enforced at the emitter.
 - **(g) Consecutive refinement heads**: `int{p}{q}` is currently rejected
@@ -1241,7 +1247,7 @@ Recorded per AGENTS.md: real forks, the route, and why.
   day-one completeness floor, with vox2's intersection + `may_complete`
   machinery named as the follow-up shape when a corpus demands it.
 - **Module layout**: `typing/vox_lower` (the sorted IR, both front ends,
-  the predicate sort checker, operator table, symbol allocator,
+  the predicate normaliser, operator table, symbol allocator,
   instantiation, canonicalisation, signature assembly), `typing/vox_fact`
   (fact environment over IR terms), `typing/vox_verify` (walk, collection,
   discharge, reporting), following the solver piece's precedent that vox
@@ -1384,3 +1390,43 @@ compiled program before adoption). What changed, one line each:
   poly-instances narration states the then-arm is `Unknown`; the
   default-`none` fixture's control is the unrepresentable shape, pinning
   skip-before-walk.
+
+### Amended at the typed-mirror integration (2026-08-21)
+
+The piece was rebased onto predicate-typing (per the stacking plan's
+staged-commit ruling), which changed who owns which judgment.  The
+behaviour-describing sections above were updated in place; two entries in
+"Amended after the review round" are superseded as written there —
+"Predicates reading mutable state are rejected at VC time" and "The
+sort-assignment pass became a located predicate sort checker" — both were
+correct against the untyped rexp and are owned by predicate-typing's
+formation judgment now.  What changed, one line each:
+
+- **The mirror is typed and is the predicate type authority** — every
+  non-contextual node carries its ground instance; the lowering reads
+  sorts off it and reconstructs nothing (`Rexp_hole`/`Rexp_var` stay
+  contextual by design; the payload-sort and binder-environment paths
+  are permanent).
+- **Ill-typed predicates die at formation** — Typecore reentry checks
+  every predicate against `bool` when the type is formed, even in unused
+  declarations; the obligation-time sort checks demoted to internal
+  representability assertions, and the `Ill_sorted` error class is gone.
+  The surviving user-facing class is modelability: well-typed operands
+  the operator table has no row for.
+- **The mode-owned predicate-side rejections retired** — the Total
+  predicate frame plus Logical hole/binder views subsume
+  `Reads_mutable_state` and the logicality-crossing check on free
+  values, which were strictly more conservative (the logical `int ref`
+  mention now lowers and proves).  The SUBJECT-side stability gate is a
+  different judgment and is untouched (`stability-mutable-arg` is
+  byte-identical across the integration).
+- **The polymorphic-free-value rejection and its grounding probe
+  deleted** — the stored ground instance is the occurrence type the old
+  design said it lacked; a use either grounds (per-instance symbols
+  already existed) or fails the sort mapping as not fully determined.
+- **Application arguments arrive as a completion record** — the lowering
+  consumes source-order arguments and rejects, explicitly and located,
+  any completion entry beyond them (synthesized defaults, call
+  positions, omitted parameters) and `Rexp_format`; the mirror grammar
+  adapted to is final, so these arms are the permanent coverage
+  boundary until a corpus earns the forms.
