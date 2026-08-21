@@ -1649,18 +1649,28 @@ val bar_op : int{ _ = 0 } = 0
 |}]
 
 (* --- stacked-heads: one query per head of a stack ---------------------------- *)
-(* RED: the walk refuses consecutive refinement heads before any query is
-   emitted.  GREEN: each head is its own obligation over the same subject
-   — two Prove scripts, outer head first, the hole sorted at the base
-   carrier.  Verdicts in vc-z3.ml (stacked-heads). *)
+(* Each head of a stacked annotation is its own obligation over the same
+   subject: two Prove scripts, outer head first, the hole sorted at the
+   base carrier under all heads.  Verdicts in vc-z3.ml (stacked-heads). *)
 
 let stacked_dump : (int{ _ >= 0 }){ _ < 10 } = 5;;
 [%%expect{|
 Line 1, characters 4-16: refined environment entry: stacked_dump :
   int{ _ >= 0 }{ _ < 10 }
 Line 1, characters 47-48: refinement obligation: int{ _ >= 0 }{ _ < 10 }
-Line 1, characters 47-48:
-1 | let stacked_dump : (int{ _ >= 0 }){ _ < 10 } = 5;;
-                                                   ^
-Error: Consecutive refinement heads cannot yet be verified.
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (not (bvslt (_ bv5 63) (_ bv10 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+(set-option :timeout 10000)
+(set-option :produce-unsat-cores true)
+(assert (not (bvsge (_ bv5 63) (_ bv0 63))))
+(check-sat)
+(get-unsat-core)
+(get-model)
+(get-info :reason-unknown)
+val stacked_dump : int{ _ >= 0 }{ _ < 10 } = 5
 |}]

@@ -1126,6 +1126,14 @@ mechanism alone is disabled:
   obligation is honestly unprovable rather than rejected),
   `field-unmodeled-goal` (a mutable record has no selectors; a
   modelability rejection).
+- `stacked-heads` — `(int{ _ >= 0 }){ _ < 10 }` under decision (g):
+  `stacked_ok` proves both heads; `stacked_outer_bad` / `stacked_inner_bad`
+  each fail exactly one; `stacked_binder_{outer,inner,both}` discriminate
+  that a stacked binder deposits one fact per head (the `both` goal needs
+  the two facts at once); `stacked_dom_applied` imposes a stacked arrow
+  domain at an apply site; the printing baseline (`stacked_dump`) shows
+  one Prove script per head, and `vc-driver-none.ml` pins that formation
+  never rejected stacking — the heads' meaning is verifier business.
 - `predicate-sort-error` — `int{ 1 + true }`: rejected at predicate
   formation (an ordinary Typecore type clash); the obligation-time sort
   checks are internal assertions now, and `untabulated-comparison`
@@ -1258,11 +1266,20 @@ Recorded per AGENTS.md: real forks, the route, and why.
   that role.) Facts and goals are boolean terms asserted true;
   and/or/not are the OCaml booleans; one meaning per construct end to end,
   enforced at the emitter.
-- **(g) Consecutive refinement heads**: `int{p}{q}` is currently rejected
-  upstream and an owner-level question is open on its semantics. The
-  lowering assumes exactly one head and fail-closed-errors on stacked
-  heads; nothing here forecloses either answer. Dependency noted, not
-  decided.
+- **(g) Consecutive refinement heads are a conjunction** (owner ruling,
+  2026-08-21: "stacking should just work and be a conjunction"; formation
+  always accepted stacking — an earlier revision of this section wrongly
+  said "rejected upstream" — and this piece used to refuse it at the
+  walk). `(int{p}){q}` verifies as both: each head imposes its own
+  obligation at introductions and deposits its own fact at binders,
+  outermost head first, and every head's hole sorts at the base carrier
+  under all heads (`sort_of_type` strips heads). The conjunction lives at
+  the verifier only — the written type is untouched: `(int{p}){q}` is
+  *not* normalised to `int{p && q}` at formation, since refinement
+  equality is alpha-rigid and normalisation would change which types
+  unify. OPEN corner, recorded not decided: whether two spellings of the
+  same stack (or a stack and its hand-written conjunction) should ever be
+  one type identity.
 - **Persistent fact environment** instead of vox2's mutable
   env-with-restrict: branch scoping and join-dropping become the data
   structure's behaviour instead of bookkeeping, at the cost of re-adding

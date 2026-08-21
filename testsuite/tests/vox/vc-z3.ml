@@ -1491,27 +1491,24 @@ Error: This expression cannot yet be represented in a verification condition:
        its type is an empty variant.
 |}]
 
-(* --- stacked-heads: consecutive refinement heads --------------------------- *)
-(* RED: the walker refuses a stacked annotation wholesale wherever one is
-   imposed (Stacked_refinement_heads), and a stacked BINDER — which the
-   walk never rejects — deposits only its outermost head's fact, so a goal
-   needing the inner head fails.  The owner ruling ("stacking should just
-   work and be a conjunction") lands in the next commit: [(int{p}){q}]
-   verifies as both — each head imposes its obligation at introductions
-   and deposits its fact at binders, the hole sorted at the base carrier
-   under all heads.  The silent acceptance under the default driver is
-   pinned in vc-driver-none.ml; the emitted query bytes in
-   vc-printing.ml. *)
+(* --- stacked-heads: consecutive refinement heads are a conjunction --------- *)
+(* Owner ruling ("stacking should just work and be a conjunction"):
+   [(int{p}){q}] verifies as both — each head imposes its own obligation
+   at introductions (outermost first) and deposits its own fact at
+   binders; every head's hole sorts at the base carrier under all heads.
+   The written type is untouched: no normalisation to [int{p && q}] at
+   formation (design doc, decision (g)).  The failing stacks below each
+   lose exactly ONE obligation — per-head obligations, not a merged
+   conjunction goal — and the binder trio pins per-head facts the same
+   way.  The silent acceptance under the default driver is pinned in
+   vc-driver-none.ml; the per-head query bytes in vc-printing.ml. *)
 
 let stacked_ok : (int{ _ >= 0 }){ _ < 10 } = 5;;
 [%%expect{|
 Line 1, characters 4-14: refined environment entry: stacked_ok :
   int{ _ >= 0 }{ _ < 10 }
 Line 1, characters 45-46: refinement obligation: int{ _ >= 0 }{ _ < 10 }
-Line 1, characters 45-46:
-1 | let stacked_ok : (int{ _ >= 0 }){ _ < 10 } = 5;;
-                                                 ^
-Error: Consecutive refinement heads cannot yet be verified.
+val stacked_ok : int{ _ >= 0 }{ _ < 10 } = 5
 |}]
 
 let stacked_outer_bad : (int{ _ >= 0 }){ _ < 10 } = 50;;
@@ -1522,7 +1519,11 @@ Line 1, characters 52-54: refinement obligation: int{ _ >= 0 }{ _ < 10 }
 Line 1, characters 52-54:
 1 | let stacked_outer_bad : (int{ _ >= 0 }){ _ < 10 } = 50;;
                                                         ^^
-Error: Consecutive refinement heads cannot yet be verified.
+Error: Refinement verification failed: the predicate is refutable.
+Line 1, characters 52-54:
+1 | let stacked_outer_bad : (int{ _ >= 0 }){ _ < 10 } = 50;;
+                                                        ^^
+Error: 1 refinement obligation was not verified.
 |}]
 
 let stacked_inner_bad : (int{ _ >= 0 }){ _ < 10 } = -5;;
@@ -1533,11 +1534,15 @@ Line 1, characters 52-54: refinement obligation: int{ _ >= 0 }{ _ < 10 }
 Line 1, characters 52-54:
 1 | let stacked_inner_bad : (int{ _ >= 0 }){ _ < 10 } = -5;;
                                                         ^^
-Error: Consecutive refinement heads cannot yet be verified.
+Error: Refinement verification failed: the predicate is refutable.
+Line 1, characters 52-54:
+1 | let stacked_inner_bad : (int{ _ >= 0 }){ _ < 10 } = -5;;
+                                                        ^^
+Error: 1 refinement obligation was not verified.
 |}]
 
-(* A goal needing only the OUTER head's fact: proves under RED and GREEN
-   alike — the control showing exactly which half the binder gap loses. *)
+(* A goal needing only the OUTER head's fact: the control that proves
+   from one deposited fact alone. *)
 let stacked_binder_outer =
   fun (x : (int{ _ > 5 }){ _ < 10 }) -> (x : int{ _ < 20 });;
 [%%expect{|
@@ -1545,19 +1550,12 @@ Line 2, characters 41-42: refinement obligation: int{ _ < 20 }
 val stacked_binder_outer : int{ _ > 5 }{ _ < 10 } -> int = <fun>
 |}]
 
-(* A goal needing the INNER head's fact: the binder gap itself. *)
+(* A goal needing the INNER head's fact. *)
 let stacked_binder_inner =
   fun (x : (int{ _ > 5 }){ _ < 10 }) -> (x : int{ _ > 0 });;
 [%%expect{|
 Line 2, characters 41-42: refinement obligation: int{ _ > 0 }
-Line 2, characters 41-42:
-2 |   fun (x : (int{ _ > 5 }){ _ < 10 }) -> (x : int{ _ > 0 });;
-                                             ^
-Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
-Line 2, characters 41-42:
-2 |   fun (x : (int{ _ > 5 }){ _ < 10 }) -> (x : int{ _ > 0 });;
-                                             ^
-Error: 1 refinement obligation was not verified.
+val stacked_binder_inner : int{ _ > 5 }{ _ < 10 } -> int = <fun>
 |}]
 
 (* A goal needing BOTH heads' facts (x > 5 gives 2x > 10; x < 10 gives
@@ -1566,14 +1564,7 @@ let stacked_binder_both =
   fun (x : (int{ _ > 5 }){ _ < 10 }) -> (x * 2 : int{ _ > 10 && _ < 20 });;
 [%%expect{|
 Line 2, characters 41-46: refinement obligation: int{ (_ > 10) && (_ < 20) }
-Line 2, characters 41-46:
-2 |   fun (x : (int{ _ > 5 }){ _ < 10 }) -> (x * 2 : int{ _ > 10 && _ < 20 });;
-                                             ^^^^^
-Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
-Line 2, characters 41-46:
-2 |   fun (x : (int{ _ > 5 }){ _ < 10 }) -> (x * 2 : int{ _ > 10 && _ < 20 });;
-                                             ^^^^^
-Error: 1 refinement obligation was not verified.
+val stacked_binder_both : int{ _ > 5 }{ _ < 10 } -> int = <fun>
 |}]
 
 (* The stacked domain imposed on an argument at an apply site. *)
@@ -1584,8 +1575,5 @@ val stacked_dom : int{ _ > 5 }{ _ < 10 } -> int = <fun>
 
 let stacked_dom_applied = stacked_dom 7;;
 [%%expect{|
-Line 1, characters 38-39:
-1 | let stacked_dom_applied = stacked_dom 7;;
-                                          ^
-Error: Consecutive refinement heads cannot yet be verified.
+val stacked_dom_applied : int = 7
 |}]

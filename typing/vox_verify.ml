@@ -18,7 +18,6 @@ module Ir = Vox_lower.Ir
 type error =
   | Unrepresentable of string
   | Dependent_arrow
-  | Stacked_refinement_heads
   | Not_verified of int
   | Plan_error of string
 
@@ -32,7 +31,9 @@ exception Error of Location.t * error
 type pending =
   { subject : Typedtree.expression
   ; subject_ir : Ir.t
-  ; imposed : Types.type_expr  (* refined; head = the predicate *)
+  ; imposed : Types.type_expr
+        (* refined; head = the predicate.  A stacked annotation makes one
+           pending per head, so this is always a single head's view *)
   ; facts : Vox_fact.t  (* in scope at the subject *)
   ; seen_idents : Path.t list ref
         (* the idents whose value-description facts this obligation
@@ -152,18 +153,30 @@ let rec rexp_has_free_var ~bound (r : Types.refinement_expression) =
          cases
   | Rexp_constraint (r, _) -> free ~bound r
 
-let check_imposable env ty loc =
+let rec check_imposable env ty loc =
   match Types.get_desc (Ctype.expand_head env ty) with
   | Trefine { ref_payload; ref_pred; _ } ->
-    (match Types.get_desc (Ctype.expand_head env ref_payload) with
-     | Trefine _ -> raise (Error (loc, Stacked_refinement_heads))
-     | _ -> ());
     if rexp_has_free_var ~bound:[] !ref_pred
-    then raise (Error (loc, Dependent_arrow))
+    then raise (Error (loc, Dependent_arrow));
+    (* stacked heads are a conjunction: every head is checked, every head
+       imposes (owner ruling, design doc decision (g)) *)
+    (match Types.get_desc (Ctype.expand_head env ref_payload) with
+     | Trefine _ -> check_imposable env ref_payload loc
+     | _ -> ())
   | _ ->
     (* every imposition source checked its head; reaching here is a
        walker defect, not a user error *)
     Misc.fatal_error "Vox_verify: imposed type without a refined head"
+
+(* Every head of a (possibly stacked) refined annotation, outermost first,
+   each as the type seen from that head: [(int{p}){q}] yields the whole
+   type then [int{p}].  Each head becomes its own obligation or fact over
+   the same subject; the hole under any head sorts at the base carrier
+   ([sort_of_type] strips heads), never at a refined "type of types". *)
+let rec refined_heads env ty =
+  match Types.get_desc (Ctype.expand_head env ty) with
+  | Types.Trefine { ref_payload; _ } -> ty :: refined_heads env ref_payload
+  | _ -> []
 
 (* Fail-open predicate fact: instantiate a declared refined type's
    predicate at a subject term, extending [facts_ref]; [true] when a fact
@@ -171,25 +184,34 @@ let check_imposable env ty loc =
    gap, never a soundness gap) — except a predicate over mutable state,
    which has no single denotation and propagates as a located rejection.
    [on_resolved] receives the idents the predicate's own lowering
-   resolves, so nested declared facts ride the same rule. *)
-let add_predicate_fact st ~env ~label ~loc ty ~subject_ir ~on_resolved
+   resolves, so nested declared facts ride the same rule.  A stacked type
+   deposits one fact per head over the same subject; each head declines
+   independently. *)
+let rec add_predicate_fact st ~env ~label ~loc ty ~subject_ir ~on_resolved
     facts_ref =
   match Types.get_desc (Ctype.expand_head env ty) with
   | Trefine { ref_payload; ref_pred; _ } ->
-    (try
-       let hole_sort =
-         Vox_lower.sort_of_type st.symbols ~loc env ref_payload
-       in
-       let pred =
-         Vox_lower.lower_predicate st.symbols ~on_resolved ~env ~hole_sort
-           !ref_pred
-       in
-       facts_ref :=
-         Vox_fact.add !facts_ref
-           (Vox_lower.substitute_hole pred ~hole:subject_ir)
-           ~label ~loc;
-       true
-     with Vox_lower.Unsupported _ -> false)
+    let here =
+      try
+        let hole_sort =
+          Vox_lower.sort_of_type st.symbols ~loc env ref_payload
+        in
+        let pred =
+          Vox_lower.lower_predicate st.symbols ~on_resolved ~env ~hole_sort
+            !ref_pred
+        in
+        facts_ref :=
+          Vox_fact.add !facts_ref
+            (Vox_lower.substitute_hole pred ~hole:subject_ir)
+            ~label ~loc;
+        true
+      with Vox_lower.Unsupported _ -> false
+    in
+    let below =
+      add_predicate_fact st ~env ~label ~loc ref_payload ~subject_ir
+        ~on_resolved facts_ref
+    in
+    here || below
   | _ -> false
 
 (* The codomain contract of an application: the funct's solved arrow spine
@@ -423,18 +445,24 @@ let finalize st scope ~imposed (e : Typedtree.expression) =
      | subject_ir ->
        List.iter
          (fun (ty, loc) ->
-            st.pendings <-
-              { subject = e
-              ; subject_ir
-              ; imposed = ty
-              ; facts = !facts_ref
-                (* an independent snapshot per pending: assembly mutates
-                   the set, and a second obligation on the same subject
-                   must still deposit the facts its own goal needs *)
-              ; seen_idents = ref !seen_idents
-              ; loc
-              }
-              :: st.pendings)
+            (* one pending per head: a stacked annotation asks each of its
+               predicates of the subject, outermost first *)
+            List.iter
+              (fun head ->
+                 st.pendings <-
+                   { subject = e
+                   ; subject_ir
+                   ; imposed = head
+                   ; facts = !facts_ref
+                     (* an independent snapshot per pending: assembly
+                        mutates the set, and a second obligation on the
+                        same subject must still deposit the facts its own
+                        goal needs *)
+                   ; seen_idents = ref !seen_idents
+                   ; loc
+                   }
+                   :: st.pendings)
+              (refined_heads e.exp_env ty))
          imposed
      | exception Vox_lower.Unsupported { loc; reason } ->
        raise (Error (loc, Unrepresentable reason)))
@@ -763,9 +791,6 @@ let report_error ~loc = function
     Location.errorf ~loc
       "This application involves a dependent function type that cannot \
        yet be verified."
-  | Stacked_refinement_heads ->
-    Location.errorf ~loc
-      "Consecutive refinement heads cannot yet be verified."
   | Not_verified n ->
     Location.errorf ~loc
       "%d refinement obligation%s not verified." n
