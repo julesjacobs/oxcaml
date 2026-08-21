@@ -506,3 +506,656 @@ limitation is accepted. Successful stored mirrors are unaffected.
   bump costs nothing beyond the ordinary stdlib refresh: no released
   artifact carries 584, and stale intermediate-vintage artifacts now fail
   with the ordinary wrong-magic version error instead of crashing.
+
+## Amendment (2026-08-21): dependent application
+
+Owner direction (recorded in `vox/design-decision-rulings-2026-08-21.md`,
+"DEPENDENT APPLICATION" and "DEPENDENT-APPLICATION FLAGS", plus a superseding
+correction of the same day): dependent-arrow consumption is not a new piece —
+it is a deferred gap fixed in the piece that owns it, and the mechanism is
+vox2's: **"do what vox2 does. Obviously it has to happen in type checking."**
+This amendment is that adaptation spec, with the same-day flag rulings
+already applied: the parameter-annotation spelling forms a real dependent
+arrow in this work (ruling 1), instantiated types may carry evaluated
+subjects (ruling 2, with the wholesale-adoption resolution recorded below),
+commuted-supply and the eta path are follow-up with located rejections day
+one (ruling 3), and the recursive induction-hypothesis behaviour ships
+unguarded (ruling 4). It supersedes the deferral rows in
+`design-docs/refinement-flow.md:224-227` ("Dependent arrows stay rejected at
+consumption … is its own piece") and the corresponding out-of-scope rows
+here; gap-table rows moved: S5/A2/b§C (`vox2-gap/refresh-2026-08-21.md`,
+porting shortlist item 1).
+
+Citation convention for this section: an unprefixed `file:line` is this tree
+(`predicate-typing/dev`, branch `jujacobs/vox/predicate-typing`, commit
+`64852382a4`); `vc:` prefixes `vc-generation/dev` at `b0e7815664` (the
+consumer stack above this piece — those seams land there at the next
+restack); `vox2:` prefixes `/usr/local/home/jujacobs/oxcamls/vox2/main`
+(reference only; no code copied).
+
+### Decision 1 (⚑): predicate-typing owns the fix
+
+The gap spans three pieces' territory, so ownership is the first decision:
+
+- The rejections to delete sit in application typing and `Ctype`
+  (`typing/typecore.ml:5215,5360`, `typing/ctype.ml:5948`), introduced by
+  type-formers (`design-docs/type-formers-final.md:29-31`) and re-recorded as
+  deferred by refinement-flow (`design-docs/refinement-flow.md:224-227`).
+- The substitution is a typed-mirror operation: a subject is a
+  `refinement_expression` carrying its ground instance (`rexp_type`), opened
+  into predicates by machinery this piece owns (`Vox_rexp`, the reentry, the
+  mirror's `.cmi` layout).
+- The consumption is the verification walk's (`vc:typing/vox_verify.ml`,
+  `vc:typing/vox_lower.ml`), which exists only above this piece.
+
+**Ruling proposed: this piece (predicate-typing) owns the amendment and the
+fix**, because it is the lowest point in the stack where the fix is
+implementable and buildable: refinement-flow's tree has no typed mirror
+(`grep -c rexp_type refinement-flow/dev/typing/types.mli` → 0), so a subject
+cannot carry its ground instance there; and the walk half is specification
+for the consumer (the stacking plan's producer/consumer rationale for
+predicate-typing < vc-generation, `vox/stacking-plan.md:94`), landing in
+vc-generation at the next restack as its own red-green commits. Flagged ⚑
+(the batch's only open item) because refinement-flow first recorded the
+deferral and owns the application-typing architecture this extends — the
+owner may prefer the record there even though that branch cannot build the
+fix.
+
+### Target programs
+
+Must verify when the fix (typing here + walk consumption at the vc restack)
+is complete; spellings from the existing corpus
+(`testsuite/tests/vox/refinement-flow.ml:359`):
+
+```ocaml
+(* 1. Caller proves a property of the result from the instantiated codomain *)
+external mk : x:int -> int{ _ > x } = "%identity"
+let caller : int{ _ > 5 } = mk 5          (* fact: mk 5 > 5; goal: _ > 5 *)
+
+(* 2. Callee-side check obligation — both spellings, per ruling 1 *)
+let f : x:int -> int{ _ > x } = fun x -> x + 1   (* goal: x + 1 > x *)
+let f' (x : int) : int{ _ > x } = x + 1          (* same arrow, same goal *)
+
+(* 3. Dependent domain: an earlier argument instantiates a later obligation *)
+external gt : x:int -> y:int{ y > x } -> int = "%identity"
+let ok = gt 1 2                            (* goal: 2 > 1 *)
+
+(* 4. Recursive callee: the instantiated codomain is the induction
+      hypothesis at the recursive call (partial correctness; totality
+      still rides the axis) *)
+let rec bump : n:int -> int{ _ >= n } =
+  fun n -> if n <= 0 then 0 else 1 + bump (n - 1)
+```
+
+Must be refused (verification refusals — counted defects, unit refused — not
+type errors; these programs typecheck):
+
+```ocaml
+let bad_callee : x:int -> int{ _ > x } = fun x -> x    (* x > x: Refuted *)
+let bad_caller : int{ _ > 6 } = mk 5    (* only mk 5 > 5 is known: Refuted *)
+let bad_dep = gt 2 1                                   (* 1 > 2: Refuted *)
+```
+
+On this branch alone the demonstrable half is the typing half: the target
+programs typecheck (today 1-4 are rejected in the first spelling), `f'`
+infers the dependent arrow `x:int -> int{ _ > x }` (today it infers a
+scope-escaping type, below), the callee marker and the application metadata
+are recorded and observable; the verdicts flip at the vc restack.
+
+### Where the tree stands
+
+Formation is done for the arrow-annotation spelling (gap row S4): the
+optional binder lives on `arrow_desc` (`typing/types.mli:425-434`; `Some`
+only when a predicate references it; binder names are not part of type
+identity). Positional binders (`x:T -> U`) scope over the predicates of both
+`T` and `U`; `~x:` labelled binders over `T` only; optional and position
+parameters never bind (`typing/typetexp.ml:1295-1323` —
+`decide_arrow_arg_name`; "Optional parameters never bind: the argument may
+be absent"). `.cmi` import freshens binder stamps and rewrites bound
+occurrences through the rename map (`typing/subst.ml:762-781` arrow arm,
+`:782-799` `Trefine` arm via `Vox_rexp.map ~rename ~freshen:true`). Partial
+application preserves binders (`typing/typecore.ml:4958-4967` —
+`untyped_omitted_param.arg_binder`; reconstruction at `:5401-5412`).
+
+Consumption is rejected at three typing gates and, above, two walk gates:
+
+- `typing/typecore.ml:5360` — `collect_apply_args`: a supplied argument for
+  a binder-carrying parameter.
+- `typing/typecore.ml:5215` — `collect_unknown_apply_args`: the
+  not-known-function path meets a binder-carrying arrow.
+- `typing/ctype.ml:5948` — `Ctype.filter_arrow` refuses to split a
+  binder-carrying arrow (rejects defining a `fun` against a dependent
+  annotation; mapped at `typing/typecore.ml:373`, message `:15201-15204`,
+  pinned at `testsuite/tests/vox/refinement-flow.ml:364-371`).
+- `vc:typing/vox_verify.ml:156-162` — `check_imposable`: an imposed type
+  whose predicate has a free `Rexp_var` is a located rejection
+  (`Dependent_arrow`, worded at `vc::790-792`).
+- `vc:typing/vox_lower.ml:909-917` — the predicate front end's `Rexp_var`
+  arm: a binder with no entry in the lowering's binder environment is a
+  located `Unsupported`. These two cover the higher-order escape
+  (`vc:design-docs/vc-generation.md:204-218`, fixture
+  `dependent-arrow-escape`).
+
+The parameter-annotation spelling, probed on `vc-generation/dev` at
+`b0e7815664` with `-vox-backend printing` (same-unit and cross-unit):
+`let f (x : int) : int{ _ > x } = x + 1` compiles **today** — the predicate
+reentry sees `x` as an ordinary ambient value (this doc, "The judgment"),
+the mirror records a free `Rexp_ident (Pident x)`, no binder is formed, and
+the inferred type prints as `val f : int -> int{ _ > x }` with `x` escaped
+from its scope. Above this piece the callee-side obligation nevertheless
+verifies (the walk resolves `x` in the body environment and emits
+`x + 1 > x`), while at every caller the codomain fact is silently declined
+(`Env.find_value` fails on the dangling ident; fail-open, so conservative).
+Ruling 1 makes this spelling form a real dependent arrow in this work — the
+escape disappears rather than being sentinel-pinned; mechanism below.
+
+### The vox2 mechanism (reference only)
+
+- **Substitution.** `Vox_dependent.instantiate ~binder ~with_ ty` is
+  `Subst.type_expr` over a substitution extended with a refinement-bound
+  mapping (`vox2:typing/vox_dependent.ml:100-103`) — non-mutating,
+  capture-avoiding opening of the codomain
+  (`vox2:typing/vox_dependent.mli:19-24`); a `rename` variant re-spells a
+  binder without substituting (`:26-32`).
+- **Application loop.** Arguments typed in arrow order; after typing an
+  argument whose parameter carries a binder, the evaluated subject is
+  substituted into every remaining untyped argument's expected types and the
+  result type (`vox2:typing/typecore.ml:13345-13374`; per-field substitution
+  `:13289-13323`).
+- **Subjects.** `evaluated_argument_subject`
+  (`vox2:typing/typecore.ml:8174-8231`) lowers the typed actual into a
+  refinement expression at typing time: dependent parameters in scope become
+  bound references (`Env.dependent_parameter_ids`,
+  `vox2:typing/env.mli:733-742`), idents free references, constants stay,
+  applications are kept structurally when the callee is total/stable
+  (`dependent_argument_call_is_stable`, `:8156-8172` — total mode, or a
+  direct integer comparison primitive with int operands), tuples/
+  constructors/immutable fields recurse, and any other form becomes an
+  opaque fresh ident spelled as a free reference
+  (`Rexp_ident (Rfree (Rglobal (Pident id)))`, `:8177-8182`).
+- **Metadata.** Per-argument records `{ rap_domain; rap_binder;
+  rap_supplied; rap_subject }` plus the instantiated result, attached as a
+  `Texp_refinement_application` extra when any involved type is refined or a
+  binder exists (`vox2:typing/typedtree.mli:419,460-468`;
+  `vox2:typing/typecore.ml:13030-13043`).
+- **Omitted binders.** A *supplied* argument's domain predicate mentioning
+  an *omitted* parameter's binder becomes a deferred goal, the domain
+  logically erased from the record (`vox2:typing/typecore.ml:13376-13410`).
+- **Eta path.** The omittable-argument elimination wrapper instantiates the
+  codomain at the eta variable with its own metadata
+  (`vox2:typing/typecore.ml:13012-13046`).
+- **Callee side.** A dependent parameter requires a variable or alias
+  pattern (error otherwise); the binder is renamed to the parameter ident in
+  the body's expected type; parameter idents are registered as dependent in
+  the body environment (`Env.add_dependent_parameters`) so body-scope
+  predicates classify mentions as bound, with alias canonicalization
+  (`vox2:typing/typecore.ml:12040-12066`) — the registration is also what
+  makes vox2 form a dependent arrow from the parameter-annotation spelling.
+- **Verifier consumption.** `check_application`
+  (`vox2:typing/vox_verify.ml:4558-4677`) hard-errors on refined
+  applications missing metadata, relates each stored subject to the
+  occurrence-local subject (alpha-equality, equality facts, replacement
+  lists), and proves each supplied argument's domain refinement as a
+  "contract-argument" obligation.
+
+### The adaptation
+
+Same mechanism, vox's representations.
+
+**Subjects — vox2's evaluated subjects, adopted wholesale (resolution of
+ruling 2's delegated question).** Ruling 2 rejects the alternative this
+design first carried (opaque names only, resolved at the walk, with a
+located error when a name would outlive the apply): instantiated types may
+carry evaluated subjects. That forces structural subjects wherever types
+flow — an opaque name embedded in a flowing type is unprintable and
+unresolvable, a structural subject is neither — and with the standing "do
+what vox2 does" meta-ruling the resolution recorded here is **wholesale**:
+subjects are structural lowerings of the typed actual at typing time, vox2's
+classification expressed over vox's mirror. Per node:
+
+- `Texp_ident (path, lid, …)` → `Rexp_ident (path, lid)`, `rexp_type =
+  Some` of the node's `exp_type` (already payload-headed by
+  refinement-flow's occurrence strip). `Texp_mutvar` reads are a distinct
+  head and are *not* idents here — they fall to the opaque leaf (their walk
+  denotation is the per-read opaque constant, `vc:typing/vox_lower.mli:107`);
+  a mention of a `ref` cell is an ordinary ident (the cell is the value, not
+  its contents).
+- `Texp_constant` → `Rexp_constant` of the corresponding
+  `Parsetree.constant` (the mirror stores parsetree constants,
+  `typing/types.mli:338`; the conversion is the one `Untypeast` performs).
+- `Texp_apply` whose funct is stable → `Rexp_apply` with lowered arguments
+  (source-args form; the completion records the identity mapping).
+  Stability is vox2's rule over vox's axis: the funct's mode or declared
+  type carries Total on the totality axis, or the funct is a direct integer
+  comparison primitive at int operands (`vox2:typing/typecore.ml:8150-8172`;
+  vox's own predicate machinery already projects the axis at applications,
+  `typing/typecore.ml:4982`). An omitted argument inside the call defeats
+  the structural form (as in vox2, `:8203`).
+- `Texp_tuple` → `Rexp_tuple`; `Texp_construct` → `Rexp_construct`;
+  immutable `Texp_field` → `Rexp_field` — each recursing on children.
+- Any other form, and any unstable node, becomes an **opaque leaf**: a
+  freshly minted `Ident.create_local`, spelled as vox2 spells it — a free
+  reference `Rexp_ident (Pident v, ·)` with `rexp_type = Some` of the
+  node's `exp_type` — naming "the value this subexpression evaluated to".
+  Every minted ident is recorded in the application metadata (below).
+
+What this buys over the rejected variant: instantiated types are meaningful
+wherever they flow — `mk (a + 1)` yields the printable, provable codomain
+`int{ _ > a + 1 }` (the walk's predicate front end lowers `%addint`
+congruently, `vc:typing/vox_lower.ml:602`), and partial applications of
+`x:int -> (int{ _ > x } -> int)` carry their evaluated subject instead of
+being rejected. What is kept from the variant: the walk still owns opacity —
+an opaque leaf is bound at the apply to the memoized `lower_subject` term of
+its subexpression when that subexpression is the whole actual, so the
+codomain fact and the argument goal meet on one term
+(`vc:typing/vox_lower.ml:45-49`), and to one fresh uninterpreted constant
+per ident otherwise. Unlike vox2, no verifier step *relates* a stored
+subject to an occurrence-local one (`vox2:typing/vox_verify.ml:4594-4645`
+has no counterpart): a structural subject lowers to the same congruent term
+the subject front end produces — one symbol allocator, one name — so there
+is nothing to relate.
+
+**The substitution operation.** New module `typing/vox_dependent.ml` (the
+parity name), two entry points:
+
+- `instantiate : binder:Ident.t -> subject:Types.refinement_expression ->
+  Types.type_expr -> Types.type_expr` — replace every `Rexp_var binder` in
+  every refinement predicate reachable in the type (head, nested, stored
+  interior types) with `subject`; the consumed stage's `arrow_desc` slot is
+  dropped by the caller.
+- `mentions : Ident.t -> Types.type_expr -> bool` — the gate, so unchanged
+  types are not rebuilt (analogue `vox2:typing/vox_dependent.ml:51-67`; the
+  predicate half exists as `Vox_rexp.mentions_ident`,
+  `typing/vox_rexp.mli:91`).
+
+Route: through `Subst`, like vox2 — a refinement-bound substitution map on
+the substitution record, applied where the `Trefine` arm already rebuilds
+predicates (`typing/subst.ml:782-799`). That arm threads an ident rename map
+and freshens predicate-local binders (`Vox_rexp.map ~rename ~freshen:true`),
+which is the capture-avoidance story: predicate-local `let`/`fun`/`match`
+binders are freshened on every rebuild, so a substituted subject cannot be
+captured (and idents are stamped, so accidental capture would require
+rebinding a stamp, which freshening prevents). `Vox_rexp.map` grows the
+substitution callback next to `~rename` (`typing/vox_rexp.mli:55-62`); its
+existing traversal covers stored interior types with the rename map in force
+at the node.
+
+Sharing: `Subst.type_expr` under `No_action` returns type *variables*
+physically unchanged (`typing/subst.ml:632-660` — a `Tvar` is copied only
+under `Duplicate_variables`/`Prepare_for_saving` or a jkind change), so
+substituting the remaining expectation fields one by one, vox2-style, cannot
+sever a variable shared between a later argument's expected type and the
+result type. Non-variable structure is copied, which is the point (the
+funct's declared arrow must not be mutated).
+
+**Caller side.** `collect_apply_args` keeps its shape; two representational
+changes:
+
+- The rejection at `typing/typecore.ml:5360` is deleted; `Known_arg` gains
+  `arg_binder : Ident.t option` (as `untyped_omitted_param` has,
+  `:4958-4967`), filled from the `arrow_desc` in hand at `:5292`.
+- The rejection at `:5215` is deleted; `Unknown_arg` gains the same field
+  (vox2's does for the same reason, `vox2:typing/typecore.ml:13301-13308`).
+
+The typing loop is where the mechanism lands. Today the untyped arguments
+are typed by an order-preserving `List.mapi` over `type_apply_arg`
+(`typing/typecore.ml:11260-11264`; arrow-order typing is already
+load-bearing, `vc:design-docs/vc-generation.md:184`). That becomes an
+explicit left-to-right fold, vox2's loop shape:
+
+1. Type the argument (`type_apply_arg`, unchanged internally — the
+   `Known_arg` pre-strip of both expectation copies stays,
+   `typing/typecore.ml:11091-11096`; a refined domain still never enters
+   `type_argument`).
+2. If the consumed stage carried a binder: build the evaluated subject from
+   the typed actual; substitute it, gated by `mentions`, into the
+   *remaining* untyped arguments' stored expectation types
+   (`Known_arg.ty_arg`/`ty_arg0`, `Unknown_arg.ty_arg_mono`,
+   `Eliminated_optional_arg.ty_arg`, `Omitted.ty_arg`) and the running
+   result type.
+3. Accumulate one metadata entry per stage.
+
+`~x:` (domain-only) binders never occur in later stages or the codomain by
+formation, so step 2 is a no-op beyond their own domain; their binding is
+obligation-local (the walk binds them to the same term as the hole — the
+argument itself).
+
+An omitted stage has no subject; its binder substitutes nothing. The
+reconstructed partial-application arrow keeps the binder exactly as today
+(`:5401-5412`); the later application that supplies it instantiates then.
+When a *supplied* argument's instantiated domain still mentions an *omitted*
+binder (commuted supply: `gt2 ~y:3` for
+`gt2 : x:int -> y:int{ y > x } -> int`), typing leaves the mention free and
+the walk's free-`Rexp_var` rejection fires on that obligation — a located
+refusal where vox2 defers a goal; RULED follow-up (ruling 3), pinned by
+fixture.
+
+The apply node's `exp_type` is the payload head of the *instantiated*
+codomain — the existing apply-result strip (`typing/typecore.ml:7833`) runs
+on the substituted type; a refined head survives only in the metadata, while
+nested refinements in the result (a partial application's arrow, a tuple's
+component) flow in `exp_type` carrying their evaluated subjects, per
+ruling 2. Expression types stay payload-headed at the top; no new `ctype`
+unification arms (the D4 divergence is preserved). Two consequences of
+embedded subjects, stated: printed types may show evaluated subjects,
+including opaque leaf names (vox2's acceptance); and a type carrying a
+subject whose free paths later leave scope joins the pre-existing
+escaped-path class that signature-side scope validation (gap rows B5/S7)
+will police — this fix widens that surface knowingly (ruling 2).
+
+**The metadata record.** One new `exp_extra` constructor (next to
+`Texp_refinement_obligation`, `typing/typedtree.mli:445-449`):
+
+```ocaml
+| Texp_dependent_application of dependent_application
+
+and dependent_application =
+  { dap_args : dependent_argument list;  (* one per stage, arrow order,
+                                            aligned with the apply's args *)
+    dap_result : Types.type_expr }       (* instantiated codomain after the
+                                            last stage this apply consumed *)
+
+and dependent_argument =
+  { dap_domain : Types.type_expr;        (* instantiated domain *)
+    dap_binder : Ident.t option;         (* the stage's binder, if any *)
+    dap_minted : Ident.t list }          (* opaque leaves minted while
+                                            building this argument's subject;
+                                            [v] alone means the whole actual
+                                            was opaque *)
+```
+
+Attached only when at least one consumed stage carried a binder — the
+non-dependent case keeps its zero-metadata road (the walker reads the
+funct's arrow spine, `vc:design-docs/vc-generation.md:126-161`). Leaner than
+vox2's `rap` records: no `rap_supplied` (alignment with the apply's
+`Arg`/`Omitted` list encodes it), no stored subject (the subject was
+substituted into `dap_domain`/`dap_result`; only its minted leaves need
+naming), no logical-erasure rewriting (no deferred goals day one). The
+typed tree is marshaled into `.cmt`s, so the new constructor bumps the
+`.cmt` magic (same-magic-same-layout, per this piece's round-4 ruling
+above).
+
+**Callee side, half one: functions against declared dependent arrows.**
+`Ctype.filter_arrow` returns the binder in `filtered_arrow`
+(`typing/ctype.mli:375-380` grows a field; the rejection at
+`typing/ctype.ml:5948` is deleted — `Ctype` reports, the caller decides).
+Function typing: when the split stage carries a binder, the parameter
+pattern must bind the whole argument as a variable or alias (vox2's rule and
+error, `vox2:typing/typecore.ml:12040-12045`); the body's expected type gets
+`Vox_dependent.instantiate ~binder ~subject:(Rexp_ident (Pident param))`
+before the body is typed. The imposed codomain marker then carries a
+*closed* predicate mentioning the parameter as a free ident resolvable in
+the body environment — the exact shape the walk already lowers end-to-end
+(probe-verified via today's parameter-capture behaviour). The function's own
+type is untouched — the arrow keeps its binder; only the body's expectations
+are opened. Curried dependent arrows repeat the rule per parameter. No
+`check_imposable` change for this half: the substituted predicate has no
+free `Rexp_var`.
+
+**Callee side, half two: the parameter-annotation spelling forms the arrow
+(ruling 1).** `let f (x : int) : int{ _ > x } = …` and
+`let f (x : int) (y : int{ y > x }) = …` produce real dependent arrows.
+vox2 reaches this through body-environment registration
+(`Env.add_dependent_parameters`) because its reentry classifies mentions at
+predicate-typing time; vox's reentry deliberately classifies ambient values
+as free idents (this doc, "The judgment") and the walk's body obligations
+depend on that spelling — so vox promotes at *function-type assembly*
+instead:
+
+- At each arrow stage the function's inferred type assembles, if the stage's
+  parameter pattern binds the whole argument as a variable or alias, the
+  label admits a binder (`Nolabel` or `Labelled`, never `Optional`/
+  `Position` — the term-side mirror of `decide_arrow_arg_name`,
+  `typing/typetexp.ml:1295-1323`), and the parameter's ident (or an alias)
+  has free mentions in the refinement predicates of its own domain or of the
+  suffix type, then: promote those free mentions to bound mentions of one
+  canonical ident (`Vox_rexp.promote_locals` is this exact reclassification,
+  `typing/vox_rexp.mli:100-101`; aliases canonicalize to the root as vox2
+  does, `vox2:typing/typecore.ml:12057-12066`) and set the stage's
+  `arrow_desc` binder.
+- The promotion is a non-mutating rebuild of the assembled arrow only: the
+  body's obligation markers keep the free-ident form the walk lowers today.
+  A parameter mentioned by a predicate but bound by a decomposing pattern is
+  the vox2 error ("a dependent function parameter requires a variable or
+  alias pattern") only when a binder would be *needed* — i.e. the mention
+  exists; otherwise nothing fires.
+- Scope of the rule: the function's own annotation surface (parameter and
+  return annotations). Body-internal predicates mentioning parameters keep
+  the free-ident classification and resolve in the body environment; a type
+  built from one that later flows out of the function joins the pre-existing
+  escaped-path class for signature-side scope validation (B5/S7). This
+  bounds the port to formation, without vox2's environment machinery.
+
+The inferred type of the probe program flips from the escaping
+`val f : int -> int{ _ > x }` to `val f' : x:int -> int{ _ > x }`; caller
+instantiation then works identically for both spellings.
+
+The eta/omittable-elimination path in `type_argument`
+(`typing/typecore.ml:10901-11010`) and the `%ignore` fast path
+(`:11175-11190`) are follow-up (ruling 3): optional and position stages
+never bind, so the only reachable dependent shape is the final `Nolabel`
+stage of an omittable-prefixed function being coerced — the built
+`Texp_apply` carries no metadata and the walk's free-`Rexp_var` rejection
+fires, same family as the higher-order escape. vox2 instantiates here
+(`vox2:typing/typecore.ml:13012-13046`); recorded parity row, pinned by
+fixture.
+
+**What the walk and the lowering consume — lands in vc-generation at the
+restack.** The instantiated refinement flows through existing paths; one
+extension each:
+
+1. *Per-argument obligations* (the `Texp_apply` pairing of args against
+   domains, `vc:design-docs/vc-generation.md:126-161`): when the apply
+   carries metadata, pair against `dap_domain` instead of the funct's spine;
+   fatal on misalignment — the fail-closed rule extends to "metadata present
+   but misaligned", mirroring vox2's missing-metadata hard error
+   (`vox2:typing/vox_verify.ml:4674-4677`).
+2. *Apply-codomain facts* (`apply_codomain` + `add_predicate_fact` deposits,
+   `vc:typing/vox_verify.ml:220-236,190-211,273` onward): read `dap_result`
+   instead of walking the spine; downstream — hole substitution
+   (`vc:typing/vox_lower.mli:166`), once-per-obligation deposits, admission
+   recording — unchanged.
+3. *Opaque-leaf resolution*: the predicate front end's `Rexp_ident` arm
+   resolves through `Env.find_value` (`vc:typing/vox_lower.ml:918` region);
+   it gains a fallback consulted before the located "cannot be resolved"
+   rejection: an ident listed in the metadata in force binds to the memoized
+   `lower_subject` term of its argument node when it is that argument's
+   whole subject (`dap_minted = [v]`), and to one fresh uninterpreted
+   constant per ident at its stored sort otherwise
+   (`vc:typing/vox_lower.ml:45-49,102-105` — the memo is what makes the
+   codomain fact and the argument goal meet on one term). `~x:` own-domain
+   binders bind to the same term as the hole at their own argument
+   obligation. Structural subject interiors need nothing: they lower through
+   the existing arms (idents via `Env`, constants, congruent `Call`s —
+   depositing their own declared facts through `on_resolved` exactly as
+   let-equality right-hand sides do).
+4. *`check_imposable`* (`vc:typing/vox_verify.ml:156-162`): unchanged in
+   force — a free `Rexp_var` in an imposed type remains a located rejection
+   (higher-order escape, commuted supply, eta path); instantiated types
+   contain no free `Rexp_var` by construction, and opaque leaves are free
+   idents, not vars.
+5. *Unchanged, deliberately*: funnel markers (the callee side produces
+   closed predicates); binder facts from `pat_type`; let equalities
+   (`vc:typing/vox_verify.ml:681` onward — how a *named* dependent result
+   reaches later goals: `let y = mk 5 in …` deposits `y = ir(mk 5)` next to
+   the instantiated codomain fact on the same term); value-description
+   facts; result-position pushing (metadata bindings ride with the pending
+   record).
+
+**Predicates: the reentry and the completion grammar.** Applications inside
+predicates are typed by the same `type_application` through the reentry
+(`typing/typecore.ml:13214-13225`), so instantiation works there with no
+extra code; subjects classify against reentry-typed actuals (a mention of
+the hole or a dependent binder in scope is an ident bound by the transient
+frame; the mirror build's promotion reclassifies free mentions of *its*
+binders, `typing/vox_rexp.mli:100-101`). The instantiated types land only in
+stored node types (`rexp_type`), which nothing consumes for facts today —
+the predicate front end lowers calls to congruent uninterpreted `Call`s with
+no codomain deposit — so predicate-internal dependent application is
+admitted at formation and inert at solving, the standing vox gives
+predicate-internal calls generally. The completion grammar
+(`typing/types.mli:369-395`) is unaffected: it records how application
+typing completed the argument list, orthogonal to what the codomain
+instantiated to; partial applications inside predicates keep their existing
+completion-entry rejections in the lowering. A fixture pins one
+predicate-internal dependent call.
+
+**Module boundary.** Nothing new is persisted beyond the `.cmt` layout. A
+dependent arrow crosses the `.cmi` as it has since type-formers; import
+freshens the binder coherently (`typing/subst.ml:762-799`) and an
+application of the imported value instantiates the freshened binder like any
+local one. An *instantiated* type that reaches a signature carries its
+evaluated subject as ordinary mirror content (constants, paths — persisted
+exactly as declared predicates are; opaque leaf idents persist as unbound
+value paths, the pre-existing escaped-path class). The codomain fact of an
+imported dependent function is an *assumed contract* exactly as its
+non-dependent counterpart: `record_admission` fires from the same deposit
+(`vc:typing/vox_verify.ml:242-256`), so the verdict stays conditional and
+the admission report names the declaration — pinned cross-unit by extending
+`vc:testsuite/tests/vox/vc-z3-import.ml`. Signature-side scope validation
+(`vox2:typing/vox_dependent.mli:34-39`,
+`validate_scopes`/`validate_signature`) remains missing in vox (gap rows
+B5/S7); ruling 2 accepts the widened surface until that work.
+
+### vox2 comparison
+
+Per the parity gate: SAME by owner ruling, except the recorded
+representation divergences.
+
+| Aspect | Status vs vox2 |
+|---|---|
+| Instantiation at application typing, capture-avoiding, non-mutating, per remaining-field, arrow order | SAME (`vox2:typing/typecore.ml:13345-13374` ↔ the fold above) |
+| Substitution through `Subst` with local-binder freshening | SAME mechanism (`vox2:typing/vox_dependent.ml:100-103` ↔ `typing/subst.ml:782-799` extension) |
+| Evaluated subjects: structural typing-time lowering, stability-classified, opaque leaves as fresh free idents, embedded in instantiated types | SAME (wholesale adoption per ruling 2; `vox2:typing/typecore.ml:8174-8231`), expressed over vox's mirror |
+| Opaque-leaf resolution at the verifier | DIVERGENT plumbing: vox2 relates stored subjects to occurrence-local ones (`vox2:typing/vox_verify.ml:4594-4645`); vox binds metadata-listed idents to the one lowering authority's terms (memoized `lower_subject` / per-ident opaque constants) and has nothing to relate |
+| Durable per-application metadata, fail-closed | SAME shape (`Texp_refinement_application` ↔ `Texp_dependent_application`); leaner payload (no `rap_supplied`, no stored subject, no erasure rewriting) |
+| Callee side: variable/alias-pattern rule; binder connected to the parameter | SAME rule (`vox2:typing/typecore.ml:12040-12066`); vox substitutes to a free ident where vox2 renames — forced by D3/D4 (no `ref_view`, payload-headed `exp_type`, closed markers) |
+| Parameter-annotation spelling forms a dependent arrow | SAME capability (ruling 1); vox promotes at function-type assembly where vox2 registers dependent parameters in the body environment — forced by vox's reentry classifying ambient values as free idents |
+| Binder spelling: bare `x:T` / `~x:T`, binder on `arrow_desc`, hole distinct from binder | DIVERGENT-BY-DESIGN, standing ledger D2-D3 (`vox2-gap/report-codex-c.md:105-106`); no new spelling here |
+| Expression types payload-headed at the refined head; instantiated heads only in metadata/markers | DIVERGENT-BY-DESIGN, standing ledger D4 (`vox2-gap/report-codex-c.md:107`); nested instantiated refinements flow in `exp_type` as nested refinements always have |
+| Deferred goals for supplied domains mentioning omitted binders | FOLLOW-UP (walk-located rejection day one) — RULED (ruling 3), parity row + fixture |
+| Eta/omittable-elimination instantiation | FOLLOW-UP (walk-located rejection day one) — RULED (ruling 3), parity row + fixture |
+| `[@@vox.spec_only]`, scope/signature validation (`validate_scopes`) | Not this fix (gap rows A10/S8, B5/S7); ruling 2 accepts the interim surface |
+
+No DELIBERATELY-DROPPED rows: the two follow-up rows carry owner rulings;
+everything else is SAME or a standing recorded divergence.
+
+### Failure modes, stated
+
+- A binder the typing could not close (higher-order escape, commuted supply,
+  eta path, unnamed callee parameter) is a **located rejection** — at typing
+  where the shape is visible there, in the walk otherwise. Never a silent
+  drop: the fail-closed alignment check makes a metadata defect fatal, and a
+  free `Rexp_var` cannot lower.
+- An opaque leaf the walk cannot tie to its argument node degrades to a
+  fresh uninterpreted constant: facts weaken, goals become unprovable; both
+  conservative.
+- The assembly-time promotion must rebuild, not mutate: a mutation shared
+  into the body's marker types would flip their predicates to bound form and
+  break the walk's body-obligation route. Discriminating fixture: an inner
+  annotation mentioning the parameter (`let g : int{ _ >= x + 1 } = … in …`)
+  verifies inside `f'`.
+
+### Tests
+
+Two tracks, red-green per convention.
+
+**This branch (typing).** `testsuite/tests/vox/refinement-flow.ml` and a
+dependent-application block: RED pins today's rejections (the three typing
+gates; the parameter-annotation spelling's escaping printed type), GREEN
+flips — the expectation diff is exactly the set of programs admitted and the
+types they get. Observability without the walk: printed types (target
+program `f'` prints `x:int -> int{ _ > x }`; partial application keeps the
+binder; instantiated results print their evaluated subjects, including a
+stable-call subject `int{ _ > a + 1 }` and an opaque leaf's minted name),
+the `-drefinements` probe's obligation map (the callee marker appears,
+closed, mentioning the parameter), `-dtypedtree` for the metadata record.
+Rejection fixtures: decomposing-pattern parameter with a mentioned binder;
+commuted supply and the eta shape still building (pinned un-instantiated for
+the walk to reject above).
+
+**vc restack (verification).** Extending `vc:testsuite/tests/vox/vc-z3.ml`,
+`vc-printing.ml`, `vc-z3-import.ml`; each fixture discriminating:
+
+- `dep-caller` / `dep-caller-refuted` — target 1 and its refusal (metadata +
+  fact path 2).
+- `dep-callee` / `dep-callee-refuted` — target 2, both spellings (binder
+  return + parameter substitution + closed marker; assembly promotion).
+- `dep-domain` / `dep-domain-refuted` — target 3 (remaining-expectation
+  substitution; disabling it leaves a free-`Rexp_var` rejection where a goal
+  should be).
+- `dep-rec-ih` — target 4, closing the V9 coverage gap named in the refresh;
+  ruling 4: no guard, the fixture pins the unguarded behaviour.
+- `dep-subject-call` — `let ok : int{ _ > a + 1 } = mk (a + 1)`: a stable
+  structural subject lowering congruently on both sides.
+- `dep-opaque-subject` — an unstable actual: the whole-actual opaque leaf
+  binds to the memoized `lower_subject` term; the codomain fact and the goal
+  meet on it (disabling the memo or the metadata binding flips it).
+- `dep-partial-embedded` — partial application of
+  `x:int -> (int{ _ > x } -> int)`: the returned arrow's printed and
+  persisted type carries the evaluated subject; applying it discharges
+  against the instantiated domain.
+- `dep-let-named` — `let v = a * b in mk v`: ident subject + let equality
+  reaching later goals.
+- `dep-labelled` — `~x:` own-domain binder ≡ hole; commuted-supply rejection
+  pinned (ruling 3 sentinel).
+- `dep-partial` — `gt 1` then applied: the binder survives reconstruction
+  and instantiates at the second application.
+- `dep-ho-escape` — the existing `dependent-arrow-escape` fixture stays
+  byte-identical.
+- `dep-eta-reject` — the omittable-elimination shape as a walk rejection
+  (ruling 3 sentinel).
+- `dep-import` — imported dependent arrow: instantiated fact under a
+  recorded admission, conditional-verdict line; and an exported instantiated
+  type carrying an evaluated subject.
+- `dep-predicate-apply` — a dependent call inside a predicate: formation
+  accepted, call uninterpreted, byte-pinned query unchanged.
+
+### Decisions taken (amendment)
+
+- **Predicate-typing owns the fix** — Decision 1 above; the batch's only
+  open ⚑.
+- **Instantiation at application typing** — owner ruling; also forced:
+  later arguments' expected types must be instantiated before those
+  arguments are typed, and only the typechecker is there.
+- **Evaluated subjects adopted wholesale** — resolution of ruling 2's
+  delegated question, recorded above: embedded subjects force structural
+  subjects wherever types flow; the meta-ruling makes wholesale the reading;
+  the walk keeps the one-authority opacity hook for minted leaves.
+- **Metadata as a new `exp_extra`, attached only when a binder was
+  consumed** — the non-dependent road keeps zero metadata; the fail-closed
+  check distinguishes "no metadata because non-dependent" from "misaligned".
+- **Callee side substitutes to a free ident; parameter-annotation formation
+  promotes at assembly** (vs vox2's rename + environment registration) —
+  closed markers the existing walk lowers (probe-verified), formation
+  bounded to the function's own annotation surface, no new environment
+  machinery.
+- **`Known_arg` pre-strip, apply-result strip, payload-headed invariant all
+  unchanged** — instantiation happens on declared types and metadata copies;
+  no new `ctype` arms, no weakening.
+- **Commuted supply and eta path: located rejections day one** — RULED
+  follow-up (ruling 3), each with a sentinel fixture so admitting them later
+  is a visible expectation flip.
+
+### Owner rulings applied (2026-08-21 afternoon)
+
+Recorded in `vox/design-decision-rulings-2026-08-21.md`
+("DEPENDENT-APPLICATION FLAGS"), applied throughout this amendment:
+
+1. Parameter-annotation spelling: **ported in this work** (assembly-time
+   promotion; the probe-found scope escape disappears).
+2. Subject escape: **embedded evaluated subjects adopted**; the
+   located-error surface this design first proposed is rejected; the
+   delegated wholesale-vs-partial question is resolved **wholesale** (see
+   Subjects).
+3. Commuted supply and eta path: **follow-up confirmed**; located rejections
+   day one, recorded parity rows, sentinel fixtures.
+4. Recursive induction hypothesis: **no guard confirmed**; `dep-rec-ih` pins
+   it.
+
+### ⚑ For confirmation (owner)
+
+1. **Ownership**: this amendment and the fix live on predicate-typing
+   (rationale in Decision 1); refinement-flow's deferral row is superseded
+   by pointer, and the walk half lands in vc-generation at the restack.
+   Confirm the placement.
