@@ -1432,8 +1432,8 @@ Error: The value "List.hd" is "partial"
          which is expected to be "total".
 |}]
 
-(* This piece is type-only: reading a ghost value is admitted and leaves the
-   later mode/ghost policy undecided. *)
+(* Reading a ghost value inside a predicate is admitted by policy: refinement
+   predicates count as ghost contexts (owner ruling, 2026-08-21). *)
 let uses_ghost_in_predicate (x : int @ ghost) =
   let (_ : int{ x = 0 }) = 0 in
   ();;
