@@ -502,6 +502,39 @@ Line 1, characters 72-73: refinement obligation:
 val ground_ref_in_predicate : int{ let _probe = ground_ref in _ > 0 } = 5
 |}]
 
+(* --- identity-mentions: other mutable containers denote their identity ----- *)
+(* The ground-ref rule is not ref-specific: a logical view of a float ref
+   or an int array mentions the container's identity, which is stable.
+   Both Proved. *)
+
+let float_ref = ref 0.;;
+[%%expect{|
+val float_ref : float ref = {contents = 0.}
+|}]
+
+let float_ref_mention : int{ let _probe = float_ref in _ > 0 } = 5;;
+[%%expect{|
+Line 1, characters 4-21: refined environment entry: float_ref_mention :
+  int{ let _probe = float_ref in _ > 0 }
+Line 1, characters 65-66: refinement obligation:
+  int{ let _probe = float_ref in _ > 0 }
+val float_ref_mention : int{ let _probe = float_ref in _ > 0 } = 5
+|}]
+
+let int_array = [| 1 |];;
+[%%expect{|
+val int_array : int array = [|1|]
+|}]
+
+let int_array_mention : int{ let _probe = int_array in _ > 0 } = 5;;
+[%%expect{|
+Line 1, characters 4-21: refined environment entry: int_array_mention :
+  int{ let _probe = int_array in _ > 0 }
+Line 1, characters 65-66: refinement obligation:
+  int{ let _probe = int_array in _ > 0 }
+val int_array_mention : int{ let _probe = int_array in _ > 0 } = 5
+|}]
+
 (* --- total-call-in-predicate: a Total function over a logical ref ---------- *)
 (* Formation accepts the call: the callee is total and its domain asks for
    a logical ref, which the logical hole provides.  The call lowers to a
@@ -683,6 +716,31 @@ Line 1, characters 42-46:
                                               ^^^^
 Error: This expression cannot yet be represented in a verification condition:
        a field of a record that is not modeled as a datatype cannot yet appear in a predicate.
+|}]
+
+(* --- total-call-recursive-codomain: a recursive callee's contract ---------- *)
+(* The subject-side call deposits rc's refined-codomain fact and the goal
+   is the same congruent call, so the contract discharges the goal.  The
+   recursive definition's own obligations ride the sanctioned
+   self-justification surface pinned by recursive-knot-hole below.
+   GREEN: Proved. *)
+
+let rec (rc @ total) : int -> int{ _ > 0 } =
+  fun n -> match n with 0 -> 1 | _ -> rc (n - 1);;
+[%%expect{|
+Line 2, characters 11-48: refinement obligation: int{ _ > 0 }
+val rc : int -> int{ _ > 0 } = <fun>
+|}]
+
+let total_call_recursive_codomain : int{ rc 5 > 0 } =
+  let y = rc 5 in
+  ignore y; 1;;
+[%%expect{|
+Line 1, characters 4-33:
+  refined environment entry: total_call_recursive_codomain :
+  int{ (rc 5) > 0 }
+Lines 2-3, characters 2-13: refinement obligation: int{ (rc 5) > 0 }
+val total_call_recursive_codomain : int{ (rc 5) > 0 } = 1
 |}]
 
 (* --- predicate-sort-error: moved upstream to predicate formation ---------- *)
