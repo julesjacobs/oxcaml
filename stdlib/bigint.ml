@@ -263,3 +263,28 @@ let of_string string =
         (of_int (Char.code string.[index] - Char.code '0'))
   done;
   if negative then neg !magnitude else !magnitude
+(* Totality exports.
+
+   Totality here is claimed, not checked: the implementation above is
+   imperative (mutable scratch arrays, [while]/[for] loops), which the mode
+   checker cannot see terminate.  [magic_total] is the trusted-cast idiom of
+   [Obj.magic_portable], local to this module so every trust point is in one
+   place.  The oracle test suite is the evidence for the claims: every
+   operation terminates (loops are bounded by magnitude lengths) and mutates
+   only freshly allocated scratch. *)
+
+external magic_total : 'a -> 'a @ total = "%identity"
+
+let (of_int @ total) = magic_total of_int
+let (is_zero @ total) = magic_total is_zero
+let (equal @ total) = magic_total equal
+let (compare @ total) = magic_total compare
+let (lt @ total) = magic_total lt
+let (le @ total) = magic_total le
+let (gt @ total) = magic_total gt
+let (ge @ total) = magic_total ge
+let (neg @ total) = magic_total neg
+let (abs @ total) = magic_total abs
+let (add @ total) = magic_total add
+let (sub @ total) = magic_total sub
+let (mul @ total) = magic_total mul

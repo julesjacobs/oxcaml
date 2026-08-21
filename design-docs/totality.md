@@ -323,6 +323,36 @@ the route taken and why.
   fixture in the test file. Without an explicit `@@ total` claim, recursive
   module values correctly stay partial.
 
+- **2026-08-21: Stdlib.Bigint annotated for specifications (owner-ruled).**
+  This piece now stacks on the bigint piece (placement ruling 1a: the
+  branch was rebased onto the bigint tip, old tip 522a6896ed kept as the
+  recovery pointer), and its axes are applied to that stdlib surface:
+  `@@ total` on the thirteen interpreted operations of `stdlib/bigint.mli`
+  (`of_int`, `is_zero`, `equal`, `compare`, `lt`, `le`, `gt`, `ge`, `neg`,
+  `abs`, `add`, `sub`, `mul` — the same set vox2 annotates), satisfied by a
+  module-local trusted cast per operation
+  (`external magic_total : 'a -> 'a @ total = "%identity"`, the
+  `Obj.magic_portable` idiom). The totality is CLAIMED, not checked —
+  ruled into the same sanctioned trust class as a user external's
+  `@@ total` claim, with the bigint oracle suite as the evidence.
+  Checking is impossible under this piece's own capture-based rules: the
+  bigint implementation's exported operations close over partial values
+  (array primitives, loops, comparisons — its iarray representation is a
+  ratified decision of the bigint piece), so they infer `partial`, and even
+  future structural-termination checking cannot help while the
+  implementation is imperative. vox2's identical interface annotations are
+  earned instead, by its pure list-recursive implementation passing its
+  structural-termination check — machinery vox sequences later. The trust
+  boundary is sentinel-pinned in `testsuite/tests/vox/bigint-modes.ml`
+  (`trust_sentinel`), and the sentinel discriminates: with `mul`'s cast
+  removed from bigint.ml, the sentinel block flips to
+  `Error: The value "Bigint.mul" is "partial" but is expected to be
+  "total"` (probe run 2026-08-21, recorded here; the fixture also pins the
+  scoping — the three runtime-only conversions stay partial). vox2's `t @ logical` argument
+  annotations are not carried: `t : immutable_data` crosses logicality, so
+  they are vacuous; the crossing is pinned by fixture instead
+  (DIVERGENT-BY-DESIGN, fewer annotations, same admissibility).
+
 - **Alternatives raised in review, considered and not taken.**
   (a) *Application-site totality* (constrain the applied function's totality
   into the enclosing locks at `Pexp_apply`, instead of the hereditary literal
