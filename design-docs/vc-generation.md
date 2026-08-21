@@ -515,11 +515,15 @@ one unsigned shape that proves is the batch route's nonrecursive case,
 via the occurrence mode).  Fixtures `rec-total`, `vc_batch_total`,
 `rec-group-total`, `local-rec-group-total` and
 `module-total-boundary`) and every argument
-type crosses totality and logicality. Two trust boundaries ride on the axis and are
-inherited knowingly, both pinned in the totality piece's own report:
-`external ... @@ total` is an unchecked claim, and the `module rec`
-self-justification gap. Both mean a wrong totality claim can make a wrong
-proof; that is the axis's contract to tighten, not this piece's.
+type crosses totality and logicality. Two trust boundaries ride on the axis
+and are inherited knowingly: `external ... @@ total` is an unchecked claim —
+owner-sanctioned programmer responsibility (2026-08-21 ruling, as in vox2),
+pinned by this piece's `external-total-sentinel` fixture so the boundary
+cannot move silently — and the `module rec` self-justification gap, pinned
+in the totality piece's own report. (An earlier revision claimed both were
+pinned there; only the `module rec` half is.) Both mean a wrong totality
+claim can make a wrong proof; that is the axis's contract to tighten, not
+this piece's.
 
 ## Lowering: one sorted language
 
@@ -1126,6 +1130,12 @@ mechanism alone is disabled:
   obligation is honestly unprovable rather than rejected),
   `field-unmodeled-goal` (a mutable record has no selectors; a
   modelability rejection).
+- `external-total-sentinel` — `external ext_op : int -> int @@ total`
+  with the congruence goal `ext_op 4 - ext_op 4 = 0`, Proved with no
+  admission line: the sentinel pinning that a user external's totality
+  claim is trusted (owner-sanctioned programmer responsibility), in the
+  recursive-knot-hole style — a verdict move here is a trust-boundary
+  move.
 - `stacked-heads` — `(int{ _ >= 0 }){ _ < 10 }` under decision (g):
   `stacked_ok` proves both heads; `stacked_outer_bad` / `stacked_inner_bad`
   each fail exactly one; `stacked_binder_{outer,inner,both}` discriminate

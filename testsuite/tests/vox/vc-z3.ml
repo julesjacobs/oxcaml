@@ -1577,3 +1577,30 @@ let stacked_dom_applied = stacked_dom 7;;
 [%%expect{|
 val stacked_dom_applied : int = 7
 |}]
+
+(* --- external-total-sentinel: a total claim on an external is TRUSTED ------ *)
+(* A SENTINEL in the recursive-knot-hole style, pinning a trust boundary
+   the owner sanctioned (2026-08-21 ruling: keep the trust; a user
+   external's totality claim is the programmer's responsibility, as in
+   vox2).  Nothing checks the external terminates or is pure: the declared
+   [@@ total] alone lets both same-argument calls lower to ONE Call
+   symbol, so the congruence goal proves — and NO admission line reports
+   the trust, because the external's unrefined type deposits no fact.
+   The stub is %identity only so the phrase can execute once the
+   obligation proves (a fabricated C stub would fail at run time); the
+   gate reads the declared modality, never the stub.  If this fixture's
+   verdict moves, the trust boundary moved: that must be a deliberate
+   decision, not a drive-by. *)
+
+external ext_op : int -> int @@ total = "%identity";;
+[%%expect{|
+external ext_op : int -> int = "%identity"
+|}]
+
+let ext_sentinel : int{ _ = 0 } = ext_op 4 - ext_op 4;;
+[%%expect{|
+Line 1, characters 4-16: refined environment entry: ext_sentinel :
+  int{ _ = 0 }
+Line 1, characters 34-53: refinement obligation: int{ _ = 0 }
+val ext_sentinel : int{ _ = 0 } = 0
+|}]
