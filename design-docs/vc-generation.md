@@ -564,7 +564,14 @@ emitter consumes it:
   lean on a declared value only its predicate mentions (fixtures
   `predicate-ident-fact` and `wildcard-read`; the *translation* may
   consult `Env`, closedness means the *backend* never does, and every
-  resolved symbol lands in the signature). Typecore checked the predicate
+  resolved symbol lands in the signature). A named non-primitive call
+  lowers to the congruent uninterpreted `Call` the subject front end
+  would emit for the same callee at the same ground sorts — one
+  allocator, one name, so predicate and subject mentions of one call
+  meet in one term — with no unfolding (definitional equations are a
+  later piece) and no re-asked argument gate: the subject gate exists
+  because subject arguments may be physical, and a physical value cannot
+  reach a predicate. Typecore checked the predicate
   at `bool`, so a sort clash inside this front end is an internal defect,
   not a user error; what remains user-facing is modelability — a
   well-typed operand pair the operator table has no row for (fixture
@@ -1089,11 +1096,23 @@ mechanism alone is disabled:
   predicate formation (Typecore's mutable-variable error); the walk never
   sees it.  Its VC-time siblings after the typed-mirror integration:
   `ground-ref-in-predicate` (a logical view of a ground `int ref`
-  mention lowers and proves), `total-call-in-predicate` /
-  `total-call-in-fact` (a formation-accepted total call over a logical
-  ref: modelability rejection as an obligation, fail-open abstraction as
-  a fact), `poly-let-in-predicate` (a same-phrase polymorphic value at a
-  ground instance, Proved).
+  mention lowers and proves), `poly-let-in-predicate` (a same-phrase
+  polymorphic value at a ground instance, Proved).
+- Predicate-side calls (a formation-admitted callee is total over
+  logical views, so a call lowers to the congruent uninterpreted `Call`
+  the subject front end would emit — same allocator, same name; no
+  argument-crossing re-check, because the subject gate exists for
+  physical arguments and a physical value cannot reach a predicate):
+  `total-call-reimposed` (an external's codomain contract discharges its
+  own re-imposition: fact and goal are one term, Proved, admission
+  reported), `total-call-binder-fact` (a binder fact supplies the same
+  call over the hole, Proved), `total-call-congruence`
+  (`gtot 3 - gtot 3 = 0`, Proved), `total-call-no-unfolding`
+  (`gtot 3 = 4` holds at run time and must stay unverified — congruence
+  only, definitional equations are a later piece),
+  `total-call-in-predicate` (a bare uninterpreted goal is honestly
+  unprovable), `total-call-in-fact` (the deposited contract makes the
+  unit's verdict conditional; the admission report names it).
 - `predicate-sort-error` — `int{ 1 + true }`: rejected at predicate
   formation (an ordinary Typecore type clash); the obligation-time sort
   checks are internal assertions now, and `untabulated-comparison`

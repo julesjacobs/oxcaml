@@ -504,9 +504,9 @@ val ground_ref_in_predicate : int{ let _probe = ground_ref in _ > 0 } = 5
 
 (* --- total-call-in-predicate: a Total function over a logical ref ---------- *)
 (* Formation accepts the call: the callee is total and its domain asks for
-   a logical ref, which the logical hole provides.  Named calls are not in
-   the lowering's term language, so the obligation is a located
-   modelability rejection. *)
+   a logical ref, which the logical hole provides.  The call lowers to a
+   congruent uninterpreted term; nothing interprets or supplies it here,
+   so the bare obligation is honestly unprovable.  GREEN: not verified. *)
 
 let (accepts_logical_ref @ total)
     : int ref @ logical -> bool @ total
@@ -520,17 +520,20 @@ let total_call_in_predicate (r : int ref)
 [%%expect{|
 Line 2, characters 41-42: refinement obligation:
   int ref{ accepts_logical_ref _ }
-Line 2, characters 15-36:
+Line 2, characters 41-42:
 2 |   : (int ref){ accepts_logical_ref _ } = r;;
-                   ^^^^^^^^^^^^^^^^^^^^^
-Error: This expression cannot yet be represented in a verification condition:
-       calling a function in a predicate is not yet supported.
+                                             ^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 2, characters 41-42:
+2 |   : (int ref){ accepts_logical_ref _ } = r;;
+                                             ^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- total-call-in-fact: the same contract as a fact source ---------------- *)
-(* A fact source declines what it cannot lower, fail-open: the declared
-   contract's predicate is abstracted, and the surrounding obligation
-   proves without it. *)
+(* The declared codomain contract now lowers and deposits, so the unit's
+   verdict is conditional on the external's assumed contract — the
+   admission report names it.  The obligation itself proves regardless. *)
 
 external mk_checked : unit -> (int ref){ accepts_logical_ref _ }
   = "%identity";;
@@ -545,15 +548,19 @@ let total_call_in_fact : int{ _ > 0 } =
 Line 1, characters 4-22: refined environment entry: total_call_in_fact :
   int{ _ > 0 }
 Lines 2-3, characters 2-13: refinement obligation: int{ _ > 0 }
+Refinement verdicts are conditional on 1 assumed contract:
+  mk_checked : unit -> int ref{ accepts_logical_ref _ }
 val total_call_in_fact : int{ _ > 0 } = 1
 |}]
 
 (* --- total-call-reimposed: a call contract met by re-imposition ------------ *)
 (* The same refined type as a fact source (the external's codomain, on the
-   subject side) and as an obligation on one subject term.  The external
-   takes and returns a real ref ([mk_checked]'s unit fabrication must not
-   be executed and printed as a ref).  Pinned at the current rejection:
-   the goal's predicate call does not lower. *)
+   subject side) and as an obligation on one subject term: the fact and
+   the goal lower to the same congruent call over the same memoized
+   opaque, so the contract discharges its own re-imposition.  The
+   external takes and returns a real ref ([mk_checked]'s unit fabrication
+   must not be executed and printed as a ref).  GREEN: Proved,
+   conditional on the external's admitted contract. *)
 
 external mk_checked_at : int ref -> (int ref){ accepts_logical_ref _ }
   = "%identity";;
@@ -569,16 +576,15 @@ Line 1, characters 4-24: refined environment entry: total_call_reimposed :
   int ref{ accepts_logical_ref _ }
 Line 2, characters 2-23: refinement obligation:
   int ref{ accepts_logical_ref _ }
-Line 1, characters 38-59:
-1 | let total_call_reimposed : (int ref){ accepts_logical_ref _ } =
-                                          ^^^^^^^^^^^^^^^^^^^^^
-Error: This expression cannot yet be represented in a verification condition:
-       calling a function in a predicate is not yet supported.
+Refinement verdicts are conditional on 1 assumed contract:
+  mk_checked_at : int ref -> int ref{ accepts_logical_ref _ }
+val total_call_reimposed : int ref{ accepts_logical_ref _ } = {contents = 0}
 |}]
 
 (* --- total-call-binder-fact: a call reaching a goal through a binder ------- *)
 (* The binder's declared predicate and the return obligation's predicate
-   are the same call over the hole.  Pinned at the current rejection. *)
+   are the same call over the hole: the binder fact gtot(x) > 0 supplies
+   the goal.  GREEN: Proved. *)
 
 let (gtot @ total) : int -> int = fun z -> z + 1;;
 [%%expect{|
@@ -588,15 +594,12 @@ val gtot : int -> int = <fun>
 let total_call_binder_fact (x : int{ gtot _ > 0 }) : int{ gtot _ > 0 } = x;;
 [%%expect{|
 Line 1, characters 73-74: refinement obligation: int{ (gtot _) > 0 }
-Line 1, characters 58-64:
-1 | let total_call_binder_fact (x : int{ gtot _ > 0 }) : int{ gtot _ > 0 } = x;;
-                                                              ^^^^^^
-Error: This expression cannot yet be represented in a verification condition:
-       calling a function in a predicate is not yet supported.
+val total_call_binder_fact : int{ (gtot _) > 0 } -> int{ (gtot _) > 0 } =
+  <fun>
 |}]
 
 (* --- total-call-congruence: equal arguments, equal results ----------------- *)
-(* Pinned at the current rejection. *)
+(* The two mentions of gtot 3 are one term.  GREEN: Proved. *)
 
 let total_call_congruence : int{ gtot 3 - gtot 3 = 0 } = 0;;
 [%%expect{|
@@ -604,27 +607,27 @@ Line 1, characters 4-25: refined environment entry: total_call_congruence :
   int{ ((gtot 3) - (gtot 3)) = 0 }
 Line 1, characters 57-58: refinement obligation:
   int{ ((gtot 3) - (gtot 3)) = 0 }
-Line 1, characters 33-39:
-1 | let total_call_congruence : int{ gtot 3 - gtot 3 = 0 } = 0;;
-                                     ^^^^^^
-Error: This expression cannot yet be represented in a verification condition:
-       calling a function in a predicate is not yet supported.
+val total_call_congruence : int{ ((gtot 3) - (gtot 3)) = 0 } = 0
 |}]
 
 (* --- total-call-no-unfolding: a call result is never computed -------------- *)
-(* [gtot 3 = 4] holds at run time; nothing may prove it from the
-   definition.  Pinned at the current rejection. *)
+(* [gtot 3 = 4] holds at run time, but the call is uninterpreted:
+   congruence alone must never prove a definitional fact (definitional
+   equations are a later piece).  GREEN: not verified. *)
 
 let total_call_no_unfolding : int{ gtot 3 = 4 } = 0;;
 [%%expect{|
 Line 1, characters 4-27: refined environment entry: total_call_no_unfolding :
   int{ (gtot 3) = 4 }
 Line 1, characters 50-51: refinement obligation: int{ (gtot 3) = 4 }
-Line 1, characters 35-41:
+Line 1, characters 50-51:
 1 | let total_call_no_unfolding : int{ gtot 3 = 4 } = 0;;
-                                       ^^^^^^
-Error: This expression cannot yet be represented in a verification condition:
-       calling a function in a predicate is not yet supported.
+                                                      ^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 50-51:
+1 | let total_call_no_unfolding : int{ gtot 3 = 4 } = 0;;
+                                                      ^
+Error: 1 refinement obligation was not verified.
 |}]
 
 (* --- predicate-sort-error: moved upstream to predicate formation ---------- *)

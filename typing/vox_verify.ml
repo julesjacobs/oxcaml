@@ -870,7 +870,8 @@ let assemble st (p : pending) : Vox_logic.Obligation.t =
   | Trefine { ref_payload; ref_pred; _ } ->
     let facts_ref = ref p.facts in
     (* only [Resolved_ident] can fire from the predicate front end
-       (applications and field reads do not lower there), so the scope is
+       (applications lower congruently without depositing a codomain
+       contract, and field reads do not lower there), so the scope is
        inert *)
     let assembly_scope =
       { facts = Vox_fact.empty; mutable_decls = []; total_locals = [] }

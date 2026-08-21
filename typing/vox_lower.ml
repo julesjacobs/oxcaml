@@ -1019,8 +1019,21 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
                       "the primitive %s cannot yet appear in a predicate"
                       (Path.name path)))
           | _ ->
-            unsupported ~loc
-              "calling a function in a predicate is not yet supported"
+            (* the formation judgment admitted this call, so the callee is
+               total and every value reaching it is a logical view: the
+               result is a function of the arguments' denotations.  It
+               lowers as a congruent uninterpreted [Call], named exactly
+               as the subject front end names it, so predicate and
+               subject mentions of one call meet in one term.  Congruence
+               only: no definitional equation is emitted, and no
+               argument-crossing gate is re-asked — the subject gate
+               exists because subject arguments may be physical, and a
+               physical value cannot reach a predicate. *)
+            let lowered = List.map (lower binders) args in
+            let params = List.map (fun (a : Ir.t) -> a.Ir.sort) lowered in
+            let sort = sort_of_type symbols ~loc env (mirror_type r) in
+            ir (Ir.Call (Symbols.func path ~params ~result:sort, lowered))
+              sort loc
           | exception Not_found ->
             unsupported ~loc
               "this name cannot be resolved at verification time")
