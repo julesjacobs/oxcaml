@@ -630,6 +630,63 @@ Line 1, characters 50-51:
 Error: 1 refinement obligation was not verified.
 |}]
 
+(* --- field-in-goal: a projection obligation over a construction ------------ *)
+(* The goal projects the constructed record's field; the binder fact
+   supplies it.  Pinned at the current rejection: field access does not
+   lower in a predicate. *)
+
+type vpt = { vx : int; vy : int };;
+[%%expect{|
+type vpt = { vx : int; vy : int; }
+|}]
+
+let field_in_goal (x : int{ _ > 0 }) : vpt{ _.vx > 0 } = { vx = x; vy = 0 };;
+[%%expect{|
+Line 1, characters 57-75: refinement obligation: vpt{ _.vx > 0 }
+Line 1, characters 44-48:
+1 | let field_in_goal (x : int{ _ > 0 }) : vpt{ _.vx > 0 } = { vx = x; vy = 0 };;
+                                                ^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       field access cannot yet appear in a predicate.
+|}]
+
+(* --- field-binder-fact: a projection fact supplies a scalar goal ----------- *)
+(* The binder's declared predicate projects the record; the goal is the
+   subject-side read of the same field.  Pinned: the fact declines
+   fail-open, so the goal is unverified. *)
+
+let field_binder_fact (v : vpt{ _.vx > 0 }) : int{ _ > 0 } = v.vx;;
+[%%expect{|
+Line 1, characters 61-65: refinement obligation: int{ _ > 0 }
+Line 1, characters 61-65:
+1 | let field_binder_fact (v : vpt{ _.vx > 0 }) : int{ _ > 0 } = v.vx;;
+                                                                 ^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 1, characters 61-65:
+1 | let field_binder_fact (v : vpt{ _.vx > 0 }) : int{ _ > 0 } = v.vx;;
+                                                                 ^^^^
+Error: 1 refinement obligation was not verified.
+|}]
+
+(* --- field-unmodeled-goal: a mutable record's field in a goal -------------- *)
+(* [vmr] has a mutable field, so the record is an uninterpreted sort with
+   no selectors.  Pinned at the current rejection. *)
+
+type vmr = { ro : int; mutable rw : int };;
+[%%expect{|
+type vmr = { ro : int; mutable rw : int; }
+|}]
+
+let field_unmodeled_goal (v : vmr) : vmr{ _.ro > 0 } = v;;
+[%%expect{|
+Line 1, characters 55-56: refinement obligation: vmr{ _.ro > 0 }
+Line 1, characters 42-46:
+1 | let field_unmodeled_goal (v : vmr) : vmr{ _.ro > 0 } = v;;
+                                              ^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       field access cannot yet appear in a predicate.
+|}]
+
 (* --- predicate-sort-error: moved upstream to predicate formation ---------- *)
 (* Predicate typing checks the predicate against [bool] at formation, so an
    ill-typed predicate is a Typecore error even in a bare declaration; the
