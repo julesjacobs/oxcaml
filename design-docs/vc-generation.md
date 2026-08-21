@@ -1122,7 +1122,19 @@ mechanism alone is disabled:
   only, definitional equations are a later piece),
   `total-call-in-predicate` (a bare uninterpreted goal is honestly
   unprovable), `total-call-in-fact` (the deposited contract makes the
-  unit's verdict conditional; the admission report names it).
+  unit's verdict conditional; the admission report names it). An
+  ASYMMETRY, recorded: the congruent lowering serves callees resolved to
+  ordinary values; a callee that is an EXTERNAL (any `Val_prim`, user
+  external or `%`-primitive, outside the operator table) is rejected in
+  the lowering's non-table arm ("the external or primitive ... cannot
+  yet appear in a predicate", pinned by `ext_in_pred`) even when the
+  same external's subject-side calls are trusted and collapse
+  (`external-total-sentinel`). Future coverage, not a soundness gap —
+  the rejection fails closed. A PARTIAL application in a predicate also
+  fails closed at the lowering's completion guard
+  (`predicate-partial-application`: the omitted-optional spelling;
+  formation admits the shape and even caps the synthesized wrapper
+  Total, so the guard is the operative rejection).
 - Predicate-side field reads: `field-binder-fact` (the fact's projection
   and the subject-side read are one `Select` term, Proved),
   `field-in-goal` (the projection goal lowers, but a record construction
@@ -1131,11 +1143,19 @@ mechanism alone is disabled:
   `field-unmodeled-goal` (a mutable record has no selectors; a
   modelability rejection).
 - `external-total-sentinel` — `external ext_op : int -> int @@ total`
-  with the congruence goal `ext_op 4 - ext_op 4 = 0`, Proved with no
-  admission line: the sentinel pinning that a user external's totality
-  claim is trusted (owner-sanctioned programmer responsibility), in the
+  with the congruence goal `ext_op 4 - ext_op 4 = 0` inside a
+  never-applied function body, Proved with no admission line: the
+  sentinel pinning that a user external's totality claim is trusted
+  (owner-sanctioned programmer responsibility), in the
   recursive-knot-hole style — a verdict move here is a trust-boundary
-  move.
+  move. Two mechanics matter: the stub is a real, non-`%` runtime
+  primitive that is never applied (an undefined name fails at phrase
+  load; a `%`-primitive like `%identity` is a sort-guarded interpreted
+  pass-through, so the goal would prove by arithmetic without minting
+  the Call — the reviewer-caught vacuity of this fixture's first
+  version), and a modality-free twin (`ext_control`) pins the
+  discrimination: without `@@ total` the same goal is two opaques,
+  unverified. `ext_in_pred` pins the asymmetry (below).
 - `stacked-heads` — `(int{ _ >= 0 }){ _ < 10 }` under decision (g):
   `stacked_ok` proves both heads; `stacked_outer_bad` / `stacked_inner_bad`
   each fail exactly one; `stacked_binder_{outer,inner,both}` discriminate
@@ -1144,6 +1164,12 @@ mechanism alone is disabled:
   domain at an apply site; the printing baseline (`stacked_dump`) shows
   one Prove script per head, and `vc-driver-none.ml` pins that formation
   never rejected stacking — the heads' meaning is verifier business.
+  `stacked-three-deep` distinguishes the general recursion from an
+  accidental one-level unfolding (three heads; the middle-bad control
+  loses exactly one obligation of three; the binder goal needs all three
+  facts at once), and `stacked-dependent-binder` pins stacked heads
+  referring to an earlier binder (`x > n` composed with `n > 5` gives
+  `x > 5`).
 - `predicate-sort-error` — `int{ 1 + true }`: rejected at predicate
   formation (an ordinary Typecore type clash); the obligation-time sort
   checks are internal assertions now, and `untabulated-comparison`

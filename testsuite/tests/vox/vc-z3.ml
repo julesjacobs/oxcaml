@@ -1584,25 +1584,66 @@ val stacked_dom_applied : int = 7
    external's totality claim is the programmer's responsibility, as in
    vox2).  Nothing checks the external terminates or is pure: the declared
    [@@ total] alone lets both same-argument calls lower to ONE Call
-   symbol, so the congruence goal proves — and NO admission line reports
-   the trust, because the external's unrefined type deposits no fact.
-   The stub is %identity only so the phrase can execute once the
-   obligation proves (a fabricated C stub would fail at run time); the
-   gate reads the declared modality, never the stub.  If this fixture's
-   verdict moves, the trust boundary moved: that must be a deliberate
-   decision, not a drive-by. *)
+   symbol, so the congruence goal proves — with no admission line, because
+   the external's unrefined type deposits no fact.  The discrimination
+   control below drops only the modality: the same goal stops proving
+   (two distinct opaque results), so the proof really rides on the trust.
+   Fixture mechanics, each load-bearing: the stub must be a real runtime
+   primitive (an undefined C name fails at phrase load: "The external
+   function ... is not available") but is NEVER applied — the obligation
+   sits inside a function body no phrase calls — so its actual semantics
+   are irrelevant; and the stub must not be a %-primitive, because the
+   subject front end interprets [%identity] as a sort-guarded
+   pass-through and the goal would prove by arithmetic without ever
+   minting the Call.  If either verdict below moves, the trust boundary
+   moved: that must be a deliberate decision, not a drive-by. *)
 
-external ext_op : int -> int @@ total = "%identity";;
+external ext_op : int -> int @@ total = "caml_int_of_string";;
 [%%expect{|
-external ext_op : int -> int = "%identity"
+external ext_op : int -> int = "caml_int_of_string"
 |}]
 
-let ext_sentinel : int{ _ = 0 } = ext_op 4 - ext_op 4;;
+let ext_sentinel = fun () -> (ext_op 4 - ext_op 4 : int{ _ = 0 });;
 [%%expect{|
-Line 1, characters 4-16: refined environment entry: ext_sentinel :
-  int{ _ = 0 }
-Line 1, characters 34-53: refinement obligation: int{ _ = 0 }
-val ext_sentinel : int{ _ = 0 } = 0
+Line 1, characters 30-49: refinement obligation: int{ _ = 0 }
+val ext_sentinel : unit -> int = <fun>
+|}]
+
+(* The discrimination control: identical stub, no [@@ total]. *)
+external ext_op_untrusted : int -> int = "caml_int_of_string";;
+[%%expect{|
+external ext_op_untrusted : int -> int = "caml_int_of_string"
+|}]
+
+let ext_control =
+  fun () -> (ext_op_untrusted 4 - ext_op_untrusted 4 : int{ _ = 0 });;
+[%%expect{|
+Line 2, characters 13-52: refinement obligation: int{ _ = 0 }
+Line 2, characters 13-52:
+2 |   fun () -> (ext_op_untrusted 4 - ext_op_untrusted 4 : int{ _ = 0 });;
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This refinement obligation could not be verified (prove query: sat; disprove query: sat).
+Line 2, characters 13-52:
+2 |   fun () -> (ext_op_untrusted 4 - ext_op_untrusted 4 : int{ _ = 0 });;
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: 1 refinement obligation was not verified.
+|}]
+
+(* The asymmetry, pinned: the SUBJECT side trusts a total external and
+   collapses its calls (above); the PREDICATE side rejects a call to ANY
+   external — even this trivially-true congruence goal over the same
+   trusted [ext_op] — in the lowering's non-table [Val_prim] arm.
+   Predicate-side externals are future coverage, not a soundness gap:
+   the rejection fails closed. *)
+let ext_in_pred = fun () -> (0 : int{ ext_op 4 = ext_op 4 });;
+[%%expect{|
+Line 1, characters 29-30: refinement obligation:
+  int{ (ext_op 4) = (ext_op 4) }
+Line 1, characters 38-46:
+1 | let ext_in_pred = fun () -> (0 : int{ ext_op 4 = ext_op 4 });;
+                                          ^^^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       the external or primitive ext_op cannot yet appear in a predicate.
 |}]
 
 (* --- predicate-call-crossing-formation: the no-recheck decision's ground --- *)
@@ -1628,4 +1669,78 @@ Error: This value is "logical"
          because it is used in an expression (at line 3, characters 12-23).
        However, the highlighted expression is expected to be "physical"
          because its mutable field "contents" is being read.
+|}]
+
+(* --- stacked-three-deep: the conjunction is per-head, not one-level -------- *)
+(* Distinguishes the general implementation from an accidental one-level
+   unfolding: three heads, each its own obligation and its own binder
+   fact.  The middle-bad control loses exactly ONE obligation of three,
+   and the binder goal needs all three deposited facts at once. *)
+
+let deep3 : ((int{ _ >= 0 }){ _ < 10 }){ _ <> 7 } = 5;;
+[%%expect{|
+Line 1, characters 4-9: refined environment entry: deep3 :
+  int{ _ >= 0 }{ _ < 10 }{ _ <> 7 }
+Line 1, characters 52-53: refinement obligation:
+  int{ _ >= 0 }{ _ < 10 }{ _ <> 7 }
+val deep3 : int{ _ >= 0 }{ _ < 10 }{ _ <> 7 } = 5
+|}]
+
+let deep3_mid_bad : ((int{ _ >= 0 }){ _ < 10 }){ _ <> 7 } = 50;;
+[%%expect{|
+Line 1, characters 4-17: refined environment entry: deep3_mid_bad :
+  int{ _ >= 0 }{ _ < 10 }{ _ <> 7 }
+Line 1, characters 60-62: refinement obligation:
+  int{ _ >= 0 }{ _ < 10 }{ _ <> 7 }
+Line 1, characters 60-62:
+1 | let deep3_mid_bad : ((int{ _ >= 0 }){ _ < 10 }){ _ <> 7 } = 50;;
+                                                                ^^
+Error: Refinement verification failed: the predicate is refutable.
+Line 1, characters 60-62:
+1 | let deep3_mid_bad : ((int{ _ >= 0 }){ _ < 10 }){ _ <> 7 } = 50;;
+                                                                ^^
+Error: 1 refinement obligation was not verified.
+|}]
+
+let deep3_binder =
+  fun (x : ((int{ _ > 5 }){ _ < 10 }){ _ <> 7 }) ->
+    (x * 3 : int{ _ > 15 && _ < 30 && _ <> 21 });;
+[%%expect{|
+Line 3, characters 5-10: refinement obligation:
+  int{ (_ > 15) && ((_ < 30) && (_ <> 21)) }
+val deep3_binder : int{ _ > 5 }{ _ < 10 }{ _ <> 7 } -> int = <fun>
+|}]
+
+(* --- stacked-dependent-binder: stacked facts over another binder ----------- *)
+(* Both heads of the stacked parameter refer to an earlier binder; the
+   goal composes the inner head's fact with that binder's own
+   ([x > n] and [n > 5] give [x > 5]). *)
+
+let dep_stack =
+  fun (n : int{ _ > 5 }) (x : (int{ _ > n }){ _ < n + 10 }) ->
+    (x : int{ _ > 5 });;
+[%%expect{|
+Line 3, characters 5-6: refinement obligation: int{ _ > 5 }
+val dep_stack : int{ _ > 5 } -> int{ _ > n }{ _ < (n + 10) } -> int = <fun>
+|}]
+
+(* --- predicate-partial-application: a partial call fails closed ------------ *)
+(* A genuinely partial application inside a predicate (the optional
+   argument is omitted and synthesized): the mirror records the
+   completion, and the lowering's completion guard rejects — a located,
+   user-readable modelability error.  Formation ADMITS this shape (it
+   even caps the synthesized wrapper Total, typecore's
+   in_refinement_predicate arm), so the guard is the pin, not a
+   formation diagnostic. *)
+
+let partial_in_pred =
+  let fo @ total = fun ?(o = 1) x -> o + x in
+  (0 : int{ fo 2 = 3 });;
+[%%expect{|
+Line 3, characters 3-4: refinement obligation: int{ (fo 2) = 3 }
+Line 3, characters 12-16:
+3 |   (0 : int{ fo 2 = 3 });;
+                ^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       an application with synthesized or omitted arguments cannot yet appear in a predicate.
 |}]

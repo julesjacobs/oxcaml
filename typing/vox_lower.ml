@@ -814,9 +814,11 @@ let lower_subject symbols ?on_resolved ?(is_total_local = fun _ -> false)
   lower expr
 
 (* The primitives the operator table knows: an application of one of these
-   whose operand sorts fit no row is a predicate sort error ([int{ 1 + true }]
-   dies here, as an error the user can read), while a primitive outside the
-   table is an unsupported-construct rejection. *)
+   whose operand sorts fit no row is a modelability rejection over
+   well-typed operands ([char < char] dies here, as an error the user can
+   read; an ill-typed predicate like [int{ 1 + true }] is a formation-time
+   type error and never reaches the lowering), while a primitive outside
+   the table is an unsupported-construct rejection. *)
 let table_prims =
   [ "%boolnot"; "%sequand"; "%sequor"; "%negint"; "%succint"; "%predint"
   ; "%addint"; "%subint"; "%mulint"; "%andint"; "%orint"; "%xorint"
@@ -1016,7 +1018,8 @@ let lower_predicate symbols ?on_resolved ~env ~hole_sort
                else
                  unsupported ~loc
                    (Printf.sprintf
-                      "the primitive %s cannot yet appear in a predicate"
+                      "the external or primitive %s cannot yet appear in \
+                       a predicate"
                       (Path.name path)))
           | _ ->
             (* the formation judgment admitted this call, so the callee is
