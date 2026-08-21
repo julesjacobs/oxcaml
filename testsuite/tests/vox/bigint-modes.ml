@@ -43,10 +43,12 @@ val comparisons :
 
 (* TRUST SENTINEL.  The operations' totality is claimed by the
    [magic_total] casts in bigint.ml, not checked (rulings file 2026-08-21,
-   BIGINT ROUTE: same sanctioned trust class as external @@ total).  This
-   block pins the boundary on a single operation: dropping [mul]'s cast
-   flips this acceptance to a partiality rejection — the flip is recorded
-   in design-docs/totality.md's dated section. *)
+   BIGINT ROUTE: same sanctioned trust class as external @@ total).  The
+   boundary is doubly tripwired: removing an operation's ml-side cast
+   fails stdlib inclusion at build time, before any fixture runs; removing
+   the mli-side [@@ total] claim with the cast intact flips this
+   acceptance to a partiality rejection on [Bigint.mul].  Both halves are
+   recorded in design-docs/totality.md's dated section. *)
 let trust_sentinel @ total = fun x y -> Bigint.mul x y
 [%%expect{|
 val trust_sentinel : Bigint.t -> Bigint.t -> Bigint.t = <fun>

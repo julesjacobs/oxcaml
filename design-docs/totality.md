@@ -344,11 +344,17 @@ the route taken and why.
   earned instead, by its pure list-recursive implementation passing its
   structural-termination check — machinery vox sequences later. The trust
   boundary is sentinel-pinned in `testsuite/tests/vox/bigint-modes.ml`
-  (`trust_sentinel`), and the sentinel discriminates: with `mul`'s cast
-  removed from bigint.ml, the sentinel block flips to
+  (`trust_sentinel`) and is doubly tripwired, one tripwire per half.
+  Removing an operation's ml-side cast (mli claim intact) fails stdlib
+  INCLUSION at build time, before any fixture runs — `val mul : t -> t -> t
+  ... is not included in ... @@ total ... The first is partial`. Removing
+  the mli-side `@@ total` claim (cast intact) flips the sentinel block to
   `Error: The value "Bigint.mul" is "partial" but is expected to be
-  "total"` (probe run 2026-08-21, recorded here; the fixture also pins the
-  scoping — the three runtime-only conversions stay partial). vox2's `t @ logical` argument
+  "total"`. Both single-half mutations were replayed in the dual review
+  (2026-08-21); the original lane probe had removed both halves at once,
+  which builds and reproduces the same client-side error text, but is the
+  weaker mutation. The fixture also pins the scoping — the three
+  runtime-only conversions stay partial. vox2's `t @ logical` argument
   annotations are not carried: `t : immutable_data` crosses logicality, so
   they are vacuous; the crossing is pinned by fixture instead
   (DIVERGENT-BY-DESIGN, fewer annotations, same admissibility).
