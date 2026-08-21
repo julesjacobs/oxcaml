@@ -15,3 +15,12 @@ let unrepresentable_control : (int -> int){ true } = fun x -> x;;
 [%%expect{|
 val unrepresentable_control : (int -> int){ true } = <fun>
 |}]
+
+(* A stacked refinement type under the default driver: accepted silently,
+   like every refined type here — formation never rejects stacking; what
+   the heads mean is the verifier's question (vc-z3.ml, stacked-heads). *)
+
+let stacked_unverified : (int{ _ >= 0 }){ _ < 10 } = 5;;
+[%%expect{|
+val stacked_unverified : int{ _ >= 0 }{ _ < 10 } = 5
+|}]

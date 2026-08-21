@@ -1647,3 +1647,20 @@ Line 1, characters 28-49: refinement obligation: int{ _ = 0 }
 (get-info :reason-unknown)
 val bar_op : int{ _ = 0 } = 0
 |}]
+
+(* --- stacked-heads: one query per head of a stack ---------------------------- *)
+(* RED: the walk refuses consecutive refinement heads before any query is
+   emitted.  GREEN: each head is its own obligation over the same subject
+   — two Prove scripts, outer head first, the hole sorted at the base
+   carrier.  Verdicts in vc-z3.ml (stacked-heads). *)
+
+let stacked_dump : (int{ _ >= 0 }){ _ < 10 } = 5;;
+[%%expect{|
+Line 1, characters 4-16: refined environment entry: stacked_dump :
+  int{ _ >= 0 }{ _ < 10 }
+Line 1, characters 47-48: refinement obligation: int{ _ >= 0 }{ _ < 10 }
+Line 1, characters 47-48:
+1 | let stacked_dump : (int{ _ >= 0 }){ _ < 10 } = 5;;
+                                                   ^
+Error: Consecutive refinement heads cannot yet be verified.
+|}]
