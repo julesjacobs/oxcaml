@@ -548,6 +548,85 @@ Lines 2-3, characters 2-13: refinement obligation: int{ _ > 0 }
 val total_call_in_fact : int{ _ > 0 } = 1
 |}]
 
+(* --- total-call-reimposed: a call contract met by re-imposition ------------ *)
+(* The same refined type as a fact source (the external's codomain, on the
+   subject side) and as an obligation on one subject term.  The external
+   takes and returns a real ref ([mk_checked]'s unit fabrication must not
+   be executed and printed as a ref).  Pinned at the current rejection:
+   the goal's predicate call does not lower. *)
+
+external mk_checked_at : int ref -> (int ref){ accepts_logical_ref _ }
+  = "%identity";;
+[%%expect{|
+external mk_checked_at : int ref -> int ref{ accepts_logical_ref _ }
+  = "%identity"
+|}]
+
+let total_call_reimposed : (int ref){ accepts_logical_ref _ } =
+  mk_checked_at (ref 0);;
+[%%expect{|
+Line 1, characters 4-24: refined environment entry: total_call_reimposed :
+  int ref{ accepts_logical_ref _ }
+Line 2, characters 2-23: refinement obligation:
+  int ref{ accepts_logical_ref _ }
+Line 1, characters 38-59:
+1 | let total_call_reimposed : (int ref){ accepts_logical_ref _ } =
+                                          ^^^^^^^^^^^^^^^^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       calling a function in a predicate is not yet supported.
+|}]
+
+(* --- total-call-binder-fact: a call reaching a goal through a binder ------- *)
+(* The binder's declared predicate and the return obligation's predicate
+   are the same call over the hole.  Pinned at the current rejection. *)
+
+let (gtot @ total) : int -> int = fun z -> z + 1;;
+[%%expect{|
+val gtot : int -> int = <fun>
+|}]
+
+let total_call_binder_fact (x : int{ gtot _ > 0 }) : int{ gtot _ > 0 } = x;;
+[%%expect{|
+Line 1, characters 73-74: refinement obligation: int{ (gtot _) > 0 }
+Line 1, characters 58-64:
+1 | let total_call_binder_fact (x : int{ gtot _ > 0 }) : int{ gtot _ > 0 } = x;;
+                                                              ^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       calling a function in a predicate is not yet supported.
+|}]
+
+(* --- total-call-congruence: equal arguments, equal results ----------------- *)
+(* Pinned at the current rejection. *)
+
+let total_call_congruence : int{ gtot 3 - gtot 3 = 0 } = 0;;
+[%%expect{|
+Line 1, characters 4-25: refined environment entry: total_call_congruence :
+  int{ ((gtot 3) - (gtot 3)) = 0 }
+Line 1, characters 57-58: refinement obligation:
+  int{ ((gtot 3) - (gtot 3)) = 0 }
+Line 1, characters 33-39:
+1 | let total_call_congruence : int{ gtot 3 - gtot 3 = 0 } = 0;;
+                                     ^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       calling a function in a predicate is not yet supported.
+|}]
+
+(* --- total-call-no-unfolding: a call result is never computed -------------- *)
+(* [gtot 3 = 4] holds at run time; nothing may prove it from the
+   definition.  Pinned at the current rejection. *)
+
+let total_call_no_unfolding : int{ gtot 3 = 4 } = 0;;
+[%%expect{|
+Line 1, characters 4-27: refined environment entry: total_call_no_unfolding :
+  int{ (gtot 3) = 4 }
+Line 1, characters 50-51: refinement obligation: int{ (gtot 3) = 4 }
+Line 1, characters 35-41:
+1 | let total_call_no_unfolding : int{ gtot 3 = 4 } = 0;;
+                                       ^^^^^^
+Error: This expression cannot yet be represented in a verification condition:
+       calling a function in a predicate is not yet supported.
+|}]
+
 (* --- predicate-sort-error: moved upstream to predicate formation ---------- *)
 (* Predicate typing checks the predicate against [bool] at formation, so an
    ill-typed predicate is a Typecore error even in a bare declaration; the
