@@ -2623,9 +2623,10 @@ let type_for_annotation ~env ~loc typ =
         | Tunivar _ ->
           let name, jkind_annotation = unwrap_univar ty |> Option.get in
           Ttyp_var (Some name, jkind_annotation)
-        | Tarrow ((arg_label, _, _), ty, ty', _) ->
+        | Tarrow ((arg_label, binder, _, _), ty, ty', _) ->
           Ttyp_arrow
             ( arg_label,
+              binder,
               go ty,
               Typemode.transl_alloc_mode [],
               go ty',
@@ -2699,6 +2700,11 @@ let type_for_annotation ~env ~loc typ =
               tpt_type = Mty_ident pack_path;
               tpt_txt = mkloc (Untypeast.lident_of_path pack_path) loc
             }
+        | Trefine _ ->
+          (* Reachable from valid source; quotation of refinements is not
+             yet specified. *)
+          Location.raise_errorf ~loc
+            "Refinement types are not yet supported in quotations"
         | Tlink _ | Tsubst _ | Tfield _ | Tnil ->
           fatal_errorf
             "Translquote [at %a]:@ Unexpected type expression@ in a quoted \
@@ -2884,7 +2890,7 @@ and quote_core_type ~scopes ty =
         var
     in
     Type.var loc (Some var) |> Type.wrap
-  | Ttyp_arrow (arg_lab, ty1, ms1, ty2, ms2) ->
+  | Ttyp_arrow (arg_lab, _binder, ty1, ms1, ty2, ms2) ->
     let lab = quote_arg_label loc arg_lab
     and ty1 = quote_core_type ~scopes ty1
     and ms1 = quote_modes loc ms1
@@ -3019,6 +3025,11 @@ and quote_core_type ~scopes ty =
     Type.package loc mod_type with_types |> Type.wrap
   | Ttyp_quote ty -> Type.quote loc (quote_core_type ~scopes ty) |> Type.wrap
   | Ttyp_splice _ -> Type.var loc None |> Type.wrap
+  | Ttyp_refine _ ->
+    (* Reachable from valid source; quotation of refinements is not yet
+       specified. *)
+    Location.raise_errorf ~loc:ty.ctyp_loc
+      "Refinement types are not yet supported in quotations"
   | Ttyp_repr _ -> fatal_error "Translquote: Ttyp_repr not implemented."
   | Ttyp_newlayout _ ->
     fatal_error "Translquote: Ttyp_newlayout not implemented."
@@ -3408,6 +3419,7 @@ and quote_expression_extra ~env ~scopes _stage extra lambda =
             { ctyp_desc =
                 Ttyp_arrow
                   ( arg_lbl,
+                    None,
                     (match sch with
                     | Some sch ->
                       type_for_annotation ~env ~loc:(to_location loc) sch

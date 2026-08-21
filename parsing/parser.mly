@@ -4655,7 +4655,7 @@ function_type:
 
 strict_function_or_labeled_tuple_type:
   | mktyp(
-      label = arg_label
+      label = arrow_arg_name
       domain_with_modes = with_optional_mode_expr(extra_rhs(param_type))
       MINUSGREATER
       codomain = strict_function_or_labeled_tuple_type
@@ -4664,7 +4664,7 @@ strict_function_or_labeled_tuple_type:
     )
     { $1 }
   | mktyp(
-      label = arg_label
+      label = arrow_arg_name
       domain_with_modes = with_optional_mode_expr(extra_rhs(param_type))
       MINUSGREATER
       codomain_with_modes = with_optional_mode_expr(tuple_type)
@@ -4689,21 +4689,20 @@ strict_function_or_labeled_tuple_type:
      Apparently, this is sufficient for menhir to be able to delay a decision
      about which of the above module type cases we are in.  *)
   | mktyp(
-      label = LIDENT COLON
+      label = arrow_tuple_domain_name
       tuple_with_modes = with_optional_mode_expr(proper_tuple_type)
       MINUSGREATER
       codomain = strict_function_or_labeled_tuple_type
          {
            let (tuple, tuple_loc), arg_modes = tuple_with_modes in
            let ty, ltys = tuple in
-           let label = Labelled label in
            let domain = mktyp ~loc:tuple_loc (Ptyp_tuple ((None, ty) :: ltys)) in
            let domain = extra_rhs_core_type domain ~pos:(snd tuple_loc) in
            Ptyp_arrow(label, domain, codomain, arg_modes, []) }
     )
     { $1 }
   | mktyp(
-      label = LIDENT COLON
+      label = arrow_tuple_domain_name
       tuple_with_modes = with_optional_mode_expr(proper_tuple_type)
       MINUSGREATER
       codomain_with_modes = with_optional_mode_expr(tuple_type)
@@ -4711,7 +4710,6 @@ strict_function_or_labeled_tuple_type:
          { let (tuple, tuple_loc), arg_modes = tuple_with_modes in
            let (codomain, codomain_loc), ret_modes = codomain_with_modes in
            let ty, ltys = tuple in
-           let label = Labelled label in
            let domain = mktyp ~loc:tuple_loc (Ptyp_tuple ((None, ty) :: ltys)) in
            let domain = extra_rhs_core_type domain ~pos:(snd tuple_loc) in
            Ptyp_arrow(label,
@@ -4740,6 +4738,31 @@ strict_function_or_labeled_tuple_type:
       { $1 }
   | /* empty */
       { Nolabel }
+;
+
+(* The name slot of an arrow type.  A bare [x:] is a positional binder or a
+   label depending on whether [x] occurs in a refinement (decided during
+   translation); [~x:] is always a label; [?x:] is always an optional
+   label. *)
+%inline arrow_arg_name:
+  | label = mkrhs(optlabel)
+      { Pan_optional label }
+  | label = mkrhs(LIDENT) COLON
+      { Pan_name label }
+  | label = mkrhs(LABEL)
+      { Pan_tilde label }
+  | /* empty */
+      { Pan_nolabel }
+;
+
+(* The name slot of an arrow whose domain is an unparenthesised tuple
+   ([x:t1 * t2 -> u]); split out to keep the labeled-tuple disambiguation
+   rules above manageable. *)
+%inline arrow_tuple_domain_name:
+  | label = mkrhs(LIDENT) COLON
+      { Pan_name label }
+  | label = mkrhs(LABEL)
+      { Pan_tilde label }
 ;
 /* Legacy mode annotations */
 %inline mode_legacy:
@@ -4981,6 +5004,10 @@ spliceable_type:
 atomic_type:
   | type_ = delimited_type
       { type_ }
+  | payload = atomic_type LBRACE predicate = seq_expr RBRACE
+      { mktyp ~loc:$sloc (Ptyp_refine (payload, predicate)) }
+  | atomic_type LBRACE seq_expr error
+      { unclosed "{" $loc($2) "}" $loc($4) }
   | mktyp( /* begin mktyp group */
       tys = actual_type_parameters
       tid = mkrhs(type_longident)
