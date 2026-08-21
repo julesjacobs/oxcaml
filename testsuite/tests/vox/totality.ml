@@ -117,14 +117,15 @@ module M :
   sig val empty : int list @@ total val logical_int : int @@ logical end
 |}]
 
-(* [@@ physical] does not exist; the Physical end is spelled [nonlogical]. *)
+(* The identity modality of logicality spelled [physical], on the same type
+   as the [nonlogical] case below. *)
 module type S = sig
-  val x : int @@ physical
+  val x : int ref @@ physical
 end
 [%%expect{|
-Line 2, characters 17-25:
-2 |   val x : int @@ physical
-                     ^^^^^^^^
+Line 2, characters 21-29:
+2 |   val x : int ref @@ physical
+                         ^^^^^^^^
 Error: Unrecognized modality physical.
 |}]
 
