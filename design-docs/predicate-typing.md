@@ -494,7 +494,15 @@ limitation is accepted. Successful stored mirrors are unaffected.
   arity-changing constructor wildcards and ambiguous all-ghost omitted-label
   applications. Residual correspondence mismatches possible only through
   PPX-shaped input are defensive located errors, never compiler-fatal paths.
-- **Round 4 keeps artifact magic 584.** The branch-wide unreleased magic bump
-  already covers the typed-mirror representation; the additional completion
-  and format variants land in the same RED/GREEN stack and do not consume a
-  second version.
+- **Round 4 advances the artifact magic to 585** (correcting the earlier
+  "keep 584" ruling). That ruling reasoned from release lineage — the branch
+  is unreleased, so the whole RED/GREEN stack could share one bump — but a
+  magic number identifies a marshaled layout, not a release: RED2-era
+  compilers wrote `Rexp_apply`'s arguments as a list under `Caml1999I584`,
+  and the round-4 record layout under the same magic made the final compiler
+  accept and misinterpret such a `.cmi` (reproduced as a signal-11 crash via
+  `include module type of` and an inclusion consumer). Same magic must mean
+  same layout, so the completion/format grammar takes its own version. The
+  bump costs nothing beyond the ordinary stdlib refresh: no released
+  artifact carries 584, and stale intermediate-vintage artifacts now fail
+  with the ordinary wrong-magic version error instead of crashing.
