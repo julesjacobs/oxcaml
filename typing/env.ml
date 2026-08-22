@@ -3799,6 +3799,20 @@ let walk_locks_for_legacy_construct ~env pp =
        (Mode.Value.disallow_right Mode.Value.legacy) None locks
       : Mode.Value.l)
 
+(** Registers a use of a construct whose totality is [totality] (a loop, a
+    mutable assignment, or a nested function literal), constraining every
+    enclosing closure lock as if a value at that totality — and otherwise at
+    the bottom of every axis — were used at the pinpoint. In particular a
+    partial construct forces every enclosing closure to be partial, the same
+    way effect handlers force enclosing closures to legacy above. *)
+let walk_locks_for_totality ~env pp totality =
+  let locks = IdTbl.get_all_locks env.values in
+  let _stage_locks, locks = partition_locks locks in
+  ignore
+    (walk_locks ~errors:true ~env ~pp
+       (Mode.Value.min_with_comonadic Totality totality) None locks
+      : Mode.Value.l)
+
 (** Takes [m0] which is the parameter of [let mutable x] at declaration site,
   and [locks] which is the locks between the declaration and the usage (either
   reading or writing) of [x], and:

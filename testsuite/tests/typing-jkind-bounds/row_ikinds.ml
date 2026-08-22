@@ -268,7 +268,7 @@ Line 1, characters 0-71:
 1 | type trec_fails : immutable_data = [ `C | `D of 'a * unit -> 'a ] as 'a
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The kind of type "[ `C | `D of 'a * unit -> 'a ] as 'a" is
-           value non_float mod immutable
+           value non_float mod immutable logical
          because it's a polymorphic variant type.
        But the kind of type "[ `C | `D of 'a * unit -> 'a ] as 'a" must be a subkind of
          immutable_data
@@ -289,7 +289,8 @@ Lines 1-2, characters 0-80:
 2 |   [ `X of 'b | `Y of [ `Z of ('a -> 'b) | `W of 'a | `Loop of 'b ] as 'b ] as 'a
 Error: The kind of type "[ `X of
                             [ `Loop of 'b | `W of 'a | `Z of 'a -> 'b ] as 'b
-                        | `Y of 'b ] as 'a" is value non_float mod immutable
+                        | `Y of 'b ] as 'a" is
+           value non_float mod immutable logical
          because it's a polymorphic variant type.
        But the kind of type "[ `X of
                                 [ `Loop of 'b | `W of 'a | `Z of 'a -> 'b ]
@@ -329,6 +330,8 @@ type t3 : value non_float mod everything with [ `A of string] t1 = C of string  
    ikinds regression vs non-ikinds.
    Internal ticket 6481. *)
 [%%expect{|
+type t3 = C of string
+|}, Principal{|
 Line 1, characters 0-78:
 1 | type t3 : value non_float mod everything with [ `A of string] t1 = C of string  (* should be accepted *)
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -358,6 +361,8 @@ type t3 : value non_float mod everything with [ `A of string | `B of int | `C ] 
    ikinds regression vs non-ikinds.
    Internal ticket 6481. *)
 [%%expect{|
+type t3 = C of string
+|}, Principal{|
 Line 1, characters 0-96:
 1 | type t3 : value non_float mod everything with [ `A of string | `B of int | `C ] t1 = C of string  (* should be accepted *)
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -39,25 +39,25 @@ type t : immutable_data
 
 val zero : t
 val one : t
-val of_int : int -> t
+val of_int : int -> t @@ total
 
-val is_zero : t -> bool
-val equal : t -> t -> bool
+val is_zero : t -> bool @@ total
+val equal : t -> t -> bool @@ total
 
 (** [compare] implements the mathematical order and returns [-1], [0]
     or [1]. *)
-val compare : t -> t -> int
+val compare : t -> t -> int @@ total
 
-val lt : t -> t -> bool
-val le : t -> t -> bool
-val gt : t -> t -> bool
-val ge : t -> t -> bool
+val lt : t -> t -> bool @@ total
+val le : t -> t -> bool @@ total
+val gt : t -> t -> bool @@ total
+val ge : t -> t -> bool @@ total
 
-val neg : t -> t
-val abs : t -> t
-val add : t -> t -> t
-val sub : t -> t -> t
-val mul : t -> t -> t
+val neg : t -> t @@ total
+val abs : t -> t @@ total
+val add : t -> t -> t @@ total
+val sub : t -> t -> t @@ total
+val mul : t -> t -> t @@ total
 
 (** {1 Runtime-only conversions}
 
