@@ -142,6 +142,19 @@ val type_let:
           Typedtree.value_binding list * Env.t
 val type_expression:
         Env.t -> Parsetree.expression -> Typedtree.expression
+
+(** Type a refinement predicate against [bool] by Typecore reentry, inside
+    a protected transient frame, and build its typed mirror.  [payload] and
+    [payload_mode] are the refinement hole's type and declared mode; [binders]
+    are the dependent-arrow binders in scope, each at its completed declared
+    type and mode.  Their list order is not semantically significant.  Installed into
+    [Typetexp.type_refinement_predicate] by [Typemod].
+    See design-docs/predicate-typing.md. *)
+val type_refinement_predicate:
+        Env.t -> loc:Location.t -> payload:type_expr ->
+        payload_mode:Mode.Alloc.Const.t ->
+        binders:(Ident.t * type_expr * Mode.Alloc.Const.t) list ->
+        Parsetree.expression -> Types.refinement_expression
 val type_representable_expression:
         why:Jkind.History.concrete_creation_reason ->
         Env.t -> Parsetree.expression -> Typedtree.expression * Jkind.sort
@@ -389,6 +402,10 @@ type error =
   | Let_poly_not_syntactic_value
   | Layout_poly_inst_not_yet_supported of invalid_layout_poly_inst_context
   | Useless_lpoly
+  | Refinement_predicate_form_unsupported of string
+  | Refinement_predicate_new_type_variable of string
+  | Refinement_payload_not_representable of
+      Types.type_expr * Jkind.Violation.t
 
 and invalid_layout_poly_inst_context =
   | Binding_op

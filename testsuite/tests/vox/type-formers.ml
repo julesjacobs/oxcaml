@@ -2,11 +2,10 @@
  expect;
 *)
 
-(* Vox type formers: refinement types [t{p}] and the dependent-arrow
-   binder.  This piece is inert: refinements parse, translate, print and
-   travel through the type graph, but there are no introduction or
-   elimination rules yet, so these tests declare, annotate and print
-   rather than use. *)
+(* Vox type formers: refinement types [t{p}] and the dependent-arrow binder.
+   Later stack pieces type predicates and enforce refinement flow; these
+   fixtures focus on the forms' syntax, representation and calling
+   conventions. *)
 
 (* --- The four spellings --------------------------------------------- *)
 
@@ -164,7 +163,19 @@ Error: Unbound value "x"
 (* [~x:] scopes over the whole argument, and only the argument *)
 type tilde_tuple = ~x:(int{ x > 0 } * int) -> unit;;
 [%%expect{|
-type tilde_tuple = ~x:int{ x > 0 } * int -> unit
+Line 1, characters 28-29:
+1 | type tilde_tuple = ~x:(int{ x > 0 } * int) -> unit;;
+                                ^
+Error: The value "x" has type "int{ _ } * int"
+       but an expression was expected of type "('a : immediate)"
+       The layout of int{ _ } * int is value non_float
+         because it's a tuple type.
+       But the layout of int{ _ } * int must be a sublayout of
+           value non_pointer
+         because it is the primitive immediate type >.
+       Note: The layout of immediate is value non_pointer.
+       Note: The kinds mutable_data, immutable_data, and sync_data have
+       the layout value non_float.
 |}]
 
 type bad = ~x:int -> int{ _ >= x };;
@@ -178,14 +189,39 @@ Error: Unbound value "x"
 (* A positional binder scopes over refinements anywhere in its domain *)
 type nested_domain = x:(int{ x > 0 } * int) -> unit;;
 [%%expect{|
-type nested_domain = x:int{ x > 0 } * int -> unit
+Line 1, characters 29-30:
+1 | type nested_domain = x:(int{ x > 0 } * int) -> unit;;
+                                 ^
+Error: The value "x" has type "int{ _ } * int"
+       but an expression was expected of type "('a : immediate)"
+       The layout of int{ _ } * int is value non_float
+         because it's a tuple type.
+       But the layout of int{ _ } * int must be a sublayout of
+           value non_pointer
+         because it is the primitive immediate type >.
+       Note: The layout of immediate is value non_pointer.
+       Note: The kinds mutable_data, immutable_data, and sync_data have
+       the layout value non_float.
 |}]
 
 (* A [fun] parameter in the predicate shadows the name, so [x] stays a
-   label *)
-type still_label = x:int list{ List.for_all (fun x -> x > 0) _ } -> unit;;
+   label.  The local [x] is used, so this pin is not vacuous. *)
+type still_label = x:int list{ (fun x -> x > 0) 1 } -> unit;;
 [%%expect{|
-type still_label = x:int list{ List.for_all (fun x -> x > 0) _ } -> unit
+type still_label = x:int list{ (fun x -> x > 0) 1 } -> unit
+|}]
+
+(* Retain the original partial-call fixture unchanged across RED and GREEN:
+   RED admits it and GREEN's Total judgment rejects [List.for_all]. *)
+type still_label_partial =
+  x:int list{ List.for_all (fun x -> x > 0) _ } -> unit;;
+[%%expect{|
+Line 2, characters 14-26:
+2 |   x:int list{ List.for_all (fun x -> x > 0) _ } -> unit;;
+                  ^^^^^^^^^^^^
+Error: The value "List.for_all" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 2, characters 14-45).
 |}]
 
 (* A predicate-local binder is in scope in nested refinements through a
@@ -213,14 +249,30 @@ type mixed = x:int -> y:int -> int{ _ >= x }
 
 (* Predicates are ordinary expressions: applications, field access,
    let, fun, match, if, tuples, constants, constructors *)
-type pred_apply = s:string -> int{ _ < String.length s } -> char;;
+let total_length @ total = fun (_ : string) -> 0;;
 [%%expect{|
-type pred_apply = s:string -> int{ _ < (String.length s) } -> char
+val total_length : string -> int = <fun>
+|}]
+
+type pred_apply = s:string -> int{ _ < total_length s } -> char;;
+[%%expect{|
+type pred_apply = s:string -> int{ _ < (total_length s) } -> char
 |}]
 
 type pred_fun = int list{ List.for_all (fun x -> x > 0) _ };;
 [%%expect{|
-type pred_fun = int list{ List.for_all (fun x -> x > 0) _ }
+Line 1, characters 26-38:
+1 | type pred_fun = int list{ List.for_all (fun x -> x > 0) _ };;
+                              ^^^^^^^^^^^^
+Error: The value "List.for_all" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 26-57).
+|}]
+
+(* A Total function-literal control keeps the accepted function form covered. *)
+type pred_fun_total = int list{ (fun _xs -> true) _ };;
+[%%expect{|
+type pred_fun_total = int list{ (fun _xs -> true) _ }
 |}]
 
 type pred_if = int{ if _ > 0 then _ < 10 else _ > -10 };;
@@ -269,7 +321,7 @@ type bad = int{ { contents = 1 } = _ };;
 Line 1, characters 16-32:
 1 | type bad = int{ { contents = 1 } = _ };;
                     ^^^^^^^^^^^^^^^^
-Error: A record expression is not supported in refinement predicates.
+Error: A record expression is not supported in a refinement predicate.
 |}]
 
 type bad = unit{ ref true };;
@@ -302,10 +354,10 @@ type nat = int{ _ >= 0 }
 (* A recursive declaration whose predicate mentions the type being
    defined, through an interior type *)
 type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
-let well_formed (_ : 'a tree) = true;;
+let well_formed @ total = fun (_ : 'a tree @ logical) -> true;;
 [%%expect{|
 type 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
-val well_formed : 'a tree -> bool = <fun>
+val well_formed : 'a tree @ logical -> bool = <fun>
 |}]
 
 type wft = t tree{ well_formed (_ : t tree) }
@@ -315,33 +367,35 @@ type wft = t tree{ well_formed (_ : t tree) }
 and t = int
 |}]
 
-(* String constants compare by contents, not by where they were
-   written *)
-type s = string{ _ = "a" }
-let l : s list = ([] : string{ _ = "a" } list);;
+(* String constants compare by contents, not by where they were written. *)
+let accepts_string_constant @ total = fun (_ : string) -> true
+type s = string{ accepts_string_constant "a" }
+let l : s list = ([] : string{ accepts_string_constant "a" } list);;
 [%%expect{|
-type s = string{ _ = "a" }
+val accepts_string_constant : string -> bool = <fun>
+type s = string{ accepts_string_constant "a" }
 val l : s list = []
 |}]
 
 (* Type variables inside a predicate are live in the type graph:
    instantiating the declaration substitutes them *)
-type 'a t = int{ (_ : 'a list) = [] }
-let l : int t list = ([] : int{ (_ : int list) = [] } list);;
+type 'a t = 'a list{ let _xs : 'a list = _ in true }
+let l : int t list =
+  ([] : int list{ let _xs : int list = _ in true } list);;
 [%%expect{|
-type 'a t = int{ (_ : 'a list) = [] }
+type 'a t = 'a list{ let _xs = (_ : 'a list) in true }
 val l : int t list = []
 |}]
 
 (* A self-referential predicate, to pin what the occur check does *)
-type u = int{ (_ : u) = _ };;
+type u = int{ let _x : u = _ in true };;
 [%%expect{|
-Line 1, characters 0-27:
-1 | type u = int{ (_ : u) = _ };;
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 1, characters 0-38:
+1 | type u = int{ let _x : u = _ in true };;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The type abbreviation "u" is cyclic:
-         "u" = "int{ (_ : u) = _ }",
-         "int{ (_ : u) = _ }" contains "u"
+         "u" = "int{ let _x = (_ : u) in true }",
+         "int{ let _x = (_ : u) in true }" contains "u"
 |}]
 
 (* Predicates print resolved names: a functor application substitutes the

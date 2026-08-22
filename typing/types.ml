@@ -170,22 +170,24 @@ and type_desc =
 
 and refinement_desc =
   { ref_payload : type_expr;
-    ref_pred : refinement_expression }
+    ref_pred : refinement_expression ref;
+    ref_identity : unit ref }
 
 and refinement_expression =
   { rexp_desc : refinement_expression_desc;
-    rexp_loc : Location.t }
+    rexp_loc : Location.t;
+    rexp_type : type_expr option }
 
 and refinement_expression_desc =
   | Rexp_hole
   | Rexp_var of Ident.t
   | Rexp_ident of Path.t * Longident.t loc
   | Rexp_constant of Parsetree.constant
-  | Rexp_apply of
-      refinement_expression * (Asttypes.arg_label * refinement_expression) list
+  | Rexp_apply of refinement_expression * refinement_application
+  | Rexp_format of Parsetree.constant * refinement_expression
   | Rexp_tuple of (string option * refinement_expression) list
   | Rexp_construct of Path.t * Longident.t loc * refinement_expression option
-  | Rexp_field of refinement_expression * Longident.t loc
+  | Rexp_field of refinement_expression * Path.t * string * Longident.t loc
   | Rexp_ifthenelse of
       refinement_expression * refinement_expression
       * refinement_expression option
@@ -193,6 +195,24 @@ and refinement_expression_desc =
   | Rexp_fun of Ident.t * refinement_expression
   | Rexp_match of refinement_expression * refinement_case list
   | Rexp_constraint of refinement_expression * type_expr
+
+and refinement_application =
+  { rapp_source_args :
+      (Asttypes.arg_label * refinement_expression) list;
+    rapp_completion : refinement_application_arg list }
+
+and refinement_application_arg =
+  { rarg_label : arg_label;
+    rarg_desc : refinement_application_arg_desc }
+
+and refinement_application_arg_desc =
+  | Rarg_source of int
+  | Rarg_optional_wrapper of int
+  | Rarg_optional_default
+  | Rarg_call_pos of Location.t
+  | Rarg_omitted_optional
+  | Rarg_omitted_position
+  | Rarg_omitted_required
 
 and refinement_binding =
   { rb_ident : Ident.t;

@@ -559,6 +559,9 @@ val for_object : Types.jkind_l
 (** The jkind for values that are not floats. *)
 val for_non_float : why:History.value_creation_reason -> 'd Types.jkind
 
+(** An inference jkind restricted to immediate values. *)
+val for_immediate : why:History.immediate_creation_reason -> 'd Types.jkind
+
 (** The jkind for an abbreviation declaration. This implements the design in
     rule FIND_ABBREV in kind-inference.md, where we consider a definition
 

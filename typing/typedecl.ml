@@ -3145,6 +3145,15 @@ let check_well_founded ~abs_env env loc path to_check visited ty0 =
             if not to_check then
               List.iter (check_subtype parents trace ty env) tyl
         end
+    | Trefine { ref_payload; ref_pred; _ } ->
+        (* Well-foundedness is about the type's structure: the payload and
+           the predicate's *written* constraint types.  A stored node type
+           of the typed mirror may share nodes with the enclosing type (an
+           own-domain binder's instance reaches back into the domain), and
+           that metadata edge is not a structural cycle. *)
+        check_subtype parents trace ty env ref_payload;
+        Vox_rexp.iter_written_types (check_subtype parents trace ty env)
+          !ref_pred
     | _ ->
         Ctype.iter_type_expr_with_stages (check_subtype parents trace ty) env ty
   and check_subtype parents trace outer_ty env inner_ty =

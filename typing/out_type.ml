@@ -912,6 +912,14 @@ let printer_iter_type_expr f ty =
       f ty2
   | Tmod (ty, _) ->
       f ty
+  | Trefine { ref_payload; ref_pred; _ } ->
+      (* The printer renders the payload and the *written* constraint
+         types; the typed mirror's stored node types are not printed, and
+         visiting them would fabricate aliases ([as 'a]) and consume
+         variable names, because an own-domain binder's stored instance
+         shares nodes with the enclosing type. *)
+      f ref_payload;
+      Vox_rexp.iter_written_types f !ref_pred
   | _ ->
       Btype.iter_type_expr f ty
 
@@ -1314,7 +1322,7 @@ let exists_refinement_pred f tys =
     if not (Hashtbl.mem visited id) then begin
       Hashtbl.add visited id ();
       (match get_desc ty with
-       | Trefine { ref_pred; _ } -> if f ref_pred then raise Found
+       | Trefine { ref_pred; _ } -> if f !ref_pred then raise Found
        | _ -> ());
       Btype.iter_type_expr walk ty
     end
@@ -1561,7 +1569,7 @@ let rec tree_of_modal_typexp mode modal ty =
               | lab -> lab
         in
         Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
-    | Trefine { ref_payload; ref_pred } ->
+    | Trefine { ref_payload; ref_pred; _ } ->
         let payload = tree_of_typexp mode Alloc.Const.legacy ref_payload in
         let core_type ty =
           (* Render an interior type through the printer and re-parse it as
@@ -1609,10 +1617,21 @@ let rec tree_of_modal_typexp mode modal ty =
               (* extension constructor *)
               Location.mknoloc (longident (tree_of_path None path))
         in
+        let field_ident parent name =
+          (* A field is qualified by the module of its record type. *)
+          match (parent : Path.t) with
+          | Pdot (m, _) | Pextra_ty (Pdot (m, _), _) ->
+              Location.mknoloc
+                (Longident.Ldot
+                   (Location.mknoloc
+                      (longident (tree_of_path (Some Module) m)),
+                    Location.mknoloc name))
+          | _ -> Location.mknoloc (Longident.Lident name)
+        in
         Otyp_refine
           (payload,
            Vox_rexp.untype ~var_name:Ident.name ~value_ident
-             ~constructor_ident ~core_type ref_pred)
+             ~constructor_ident ~field_ident ~core_type !ref_pred)
     | Ttuple labeled_tyl ->
         Otyp_tuple (tree_of_labeled_typlist mode labeled_tyl)
     | Tunboxed_tuple labeled_tyl ->

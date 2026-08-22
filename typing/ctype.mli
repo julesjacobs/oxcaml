@@ -104,6 +104,19 @@ val new_global_var: ?name:string -> jkind_lr -> type_expr
 val newobj: type_expr -> type_expr
 val newconstr: Path.t -> type_expr list -> type_expr
 val newmono : type_expr -> type_expr
+
+(** A structural view of a written type for binding the hole and the
+    dependent-arrow binders inside a refinement-predicate typing frame:
+    [Tconstr]/[Tarrow]/[Ttuple]/[Trefine] spines are copied at the current
+    level so frame unifications never relink (rename) the written nodes;
+    variables are shared, and a copied [Trefine] shares only its predicate
+    update cell.  See design-docs/predicate-typing.md. *)
+val refinement_frame_view : type_expr -> type_expr
+
+(** During the bootstrap pass of an atomic queued-predicate flush, compare
+    refinements backed by these cells by payload only. *)
+val with_pending_refinement_identities : unit ref list -> (unit -> 'a) -> 'a
+
 val none: type_expr
         (* A dummy type expression *)
 
@@ -472,6 +485,12 @@ val equal: ?do_jkind_check:bool ->
            checks whether the parameterized types
            [/\x1.../\xn.tau] and [/\y1.../\yn.sigma] are equivalent. *)
 val is_equal : Env.t -> bool -> type_expr list -> type_expr list -> bool
+
+(** Syntactic equality of two predicate mirrors, including alpha-equivalent
+    binders and written interior types but excluding derived node types. *)
+val equal_refinement_predicates :
+  Env.t -> refinement_expression -> refinement_expression -> bool
+
 val equal_private : Env.t -> type_expr -> type_expr -> unit
 (* [equal_private env t1 t2] checks that [t1] equals [t2] but it is allowed to
    expand [t1] if it is a private abbreviation. No renaming is allowed, but

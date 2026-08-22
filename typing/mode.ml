@@ -5181,6 +5181,8 @@ module Report = struct
   let print_mutable_part ppf = function
     | Record_field s ->
       Fmt.fprintf ppf "mutable field %a" Misc.Style.inline_code s
+    | Instance_variable s ->
+      Fmt.fprintf ppf "mutable instance variable %a" Misc.Style.inline_code s
     | Array_elements -> Fmt.fprintf ppf "array elements"
 
   let print_always_dynamic = function

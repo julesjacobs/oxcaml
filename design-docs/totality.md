@@ -219,8 +219,9 @@ the route taken and why.
   connectives, `%field0_immut`/`%field1_immut` (fst/snd), and
   `%apply`/`%revapply`. `%divint`/`%modint` are excluded (raise on a zero
   divisor). Comparisons are excluded (raise on functions, diverge on cyclic
-  values); vox2's machinery admitting comparisons at immediate operand types
-  was not ported — it can be a follow-up if total code needs `=` on ints.
+  values). Predicate typing round 4 adds a judgment-local follow-up for the six
+  comparison primitives at immediate operand types; it deliberately does not
+  change this global allowlist.
 
 - **`assert` and non-exhaustive matches are partial.** Both can raise
   (`Assert_failure`, `Match_failure`), both are syntactic with no partial
@@ -237,6 +238,14 @@ the route taken and why.
   through it is rejected, much as it is through a contended value". vox2 only
   rejects reads that pass the ref to a function like `!` (argument submoding);
   a direct `r.contents` through a logical record slips through there.
+
+- **A mutable instance-variable read checks its implicit self.** Instance
+  variables elaborate to `Texp_instvar`, rather than an explicit record-field
+  projection. For a mutable instance variable the typer now looks up the
+  hidden self value through the ordinary closure locks and requires a physical
+  mutable read; this prevents an immediate field type such as `int` from
+  crossing away the stateful capture. Immutable instance-variable reads keep
+  their existing value-like mode behavior.
 
 - **Mutable-state *creation* is not constrained.** Allocating a mutable record
   or array literal inside a total closure is allowed; only assignment, loops,

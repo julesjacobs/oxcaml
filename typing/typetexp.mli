@@ -32,6 +32,14 @@ module TyVarEnv : sig
   val with_local_scope : (unit -> 'a) -> 'a
   (** Evaluate in a narrowed type-variable scope *)
 
+  val with_reentrant_scope : (unit -> 'a) -> 'a * string list
+  (** Evaluate in a reentrant frame for typing a refinement predicate: the
+      enclosing declaration's named variables (globals, used variables,
+      pending univars) remain visible as globals, and interior
+      [transl_simple_type] calls do not clear the enclosing bookkeeping.
+      Also returns the names of any new global type variables introduced
+      under the frame, for the caller to reject. *)
+
   type poly_univars
   val make_poly_univars :
     Env.t -> (string Location.loc * Env.stage) list -> poly_univars
@@ -63,6 +71,24 @@ val type_open:
   (?used_slot:bool ref -> Asttypes.override_flag -> Env.t -> Location.t ->
    Longident.t Asttypes.loc -> Path.t * Env.t)
     ref
+
+(** Forward declaration, set alongside [type_open] by [Typemod]: the
+    Typecore reentry that types a refinement predicate against [bool]
+    inside a protected transient frame and builds its typed mirror
+    (design-docs/predicate-typing.md). *)
+val type_refinement_predicate:
+  (Env.t -> loc:Location.t -> payload:Types.type_expr ->
+   payload_mode:Mode.Alloc.Const.t ->
+   binders:(Ident.t * Types.type_expr * Mode.Alloc.Const.t) list ->
+   Parsetree.expression -> Types.refinement_expression)
+    ref
+
+(** The path under which a constructor selected by a refinement predicate
+    is recorded: the constructor path of an extension constructor, and
+    [Pextra_ty (type_path, Pcstr_ty name)] for an ordinary constructor;
+    both are rewritten by [Subst.type_path]. *)
+val refinement_constructor_path :
+  Data_types.constructor_description -> Path.t
 
 val valid_tyvar_name : string -> bool
 
@@ -214,6 +240,8 @@ type error =
   | Val_poly_and_layout
   | Refinement_predicate_not_total of string
   | Refinement_predicate_unsupported of string
+  | Refinement_predicate_stabilization_failed
+  | Refinement_predicate_warning_replay_changed
 
 exception Error of Location.t * Env.t * error
 

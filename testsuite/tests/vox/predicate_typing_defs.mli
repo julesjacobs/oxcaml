@@ -1,40 +1,19 @@
-(* Refined declarations that cross a .cmi boundary: written here, read back
-   and printed by the test. *)
+type int_record = { selected : int }
+type string_record = { selected : string }
 
-type nat = int{ _ >= 0 }
+type selected_field = int_record{ _.selected > 0 }
 
-type dep = x:int{ x > 0 } -> int{ _ >= x }
+type int_variant = Selected of int
+type string_variant = Selected of string
 
-val total_length : string -> int @@ total
+type selected_constructor =
+  int_variant{ let _v = if true then _ else Selected 0 in true }
 
-val sub : s:string -> int{ _ < total_length s } -> char
+type selected_application = int{ (fun n -> n + 1) _ > 0 }
 
-val labelled : ~x:int{ x > 0 } -> unit
-
-type wf = { size : int{ _ >= 0 } }
-
-type pos = Pos of int{ _ > 0 }
-
-(* A predicate referencing a value of the same signature: import must
-   rewrite the path. *)
-val positive : int -> bool @@ total
-
-type p = int{ positive _ }
-
-(* Typed-mirror identities across the .cmi: two records sharing a label
-   name and two variants sharing a constructor name.  The predicates'
-   identities are disambiguated by the payload type on the producer side,
-   and the stored (parent path, name) / constructor path keys must survive
-   import. *)
-type fr1 = { sel : int }
-type fr2 = { sel : bool }
-type selected = fr1{ _.sel > 0 }
-type fv1 = C of int
-type fv2 = C of bool
-type chosen = fv1{ let _v = if true then _ else C 1 in true }
-
-(* Every round-4 persistent mirror form is declared in an interface so the
-   roundtrip test reads it from a CMI and prints only its source shape. *)
+(* Round-4 application completion and typedtree-rewrite forms.  Keep each
+   manifest separate so the raw-CMI test can inspect one discriminating shape
+   at a time. *)
 val mirror_labelled :
   x:int @ total -> (y:bool @ total -> bool @ total) @ total @@ total
 val mirror_optional :
@@ -45,6 +24,9 @@ val mirror_positional :
   p:[%call_pos] @ total ->
   (y:bool @ total ->
    (unit @ total -> bool @ total) @ total) @ total @@ total
+val mirror_positional_eta :
+  p:[%call_pos] @ total ->
+  (unit @ total -> bool @ total) @ total @@ total
 (* [%apply]/[%revapply] preserve the operand mode relationally. *)
 val mirror_id : bool @ total -> bool @ total @@ total
 val mirror_accepts_format :
@@ -63,6 +45,9 @@ type completion_default =
 
 type completion_eta_default =
   bool{ mirror_accepts_unlabelled mirror_optional }
+
+type completion_eta_call_pos =
+  bool{ mirror_accepts_unlabelled mirror_positional_eta }
 
 type completion_omitted_optional =
   bool{ let _f = mirror_optional_labelled ~y:true in true }
@@ -98,3 +83,42 @@ type existential_bound_mirror =
     match Mirror_pair ((), 0) with
     | Mirror_pair (_, n) -> n = n
   }
+
+type dependent_hole =
+  (x:int -> int{ _ >= x }){
+    let _f = if true then _ else _ in
+    true
+  }
+
+type generic_own_domain =
+  x:(int{ fst x > 0 } * int) -> unit
+
+module Binder (X : sig val zero : int end) : sig
+  type t =
+    int{
+      let id = fun x -> (x : int{ x = X.zero }) in
+      id 0 = 0
+    }
+
+  type stored =
+    bool{
+      let _f = fun x -> ([] : int{ _ = x } list) in
+      true
+    }
+end
+
+module Binder_source : sig
+  val zero : int
+end
+
+module Binder_result : module type of Binder (Binder_source)
+
+module Field_copy (X : sig type t = { picked : int } end) : sig
+  type t = X.t{ _.X.picked > 0 }
+end
+
+module Field_source : sig
+  type t = { picked : int }
+end
+
+module Field_result : module type of Field_copy (Field_source)

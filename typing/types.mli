@@ -287,7 +287,7 @@ and type_desc =
   (** [Tbox ty] ==> [ty box] *)
 
   | Trefine of refinement_desc
-  (** [Trefine { ref_payload; ref_pred }] ==> [ref_payload{ ref_pred }]
+  (** [Trefine { ref_payload; ref_pred; _ }] ==> [ref_payload{ !ref_pred }]
 
       A refinement type.  The payload determines the layout, jkind and
       runtime representation; refinements never reach lambda.  Refinements
@@ -296,25 +296,35 @@ and type_desc =
       are equal and their predicates are syntactically alpha-equivalent. *)
 
 (** A refinement type: the payload type and the predicate over the refined
-    value. *)
+    value.  [ref_pred] is a shared update cell for two-phase domain formation:
+    frame views copy the refinement node and payload but share this cell, so
+    an atomic queue installation is visible through every live view.  An
+    ordinary type copy allocates a fresh cell around its copied mirror. *)
 and refinement_desc =
   { ref_payload : type_expr;
-    ref_pred : refinement_expression }
+    ref_pred : refinement_expression ref;
+    (** A non-semantic identity shared by copies.  An atomic queue bootstrap
+        uses it to recognize pending refinements even when ordinary type
+        instantiation has copied [ref_pred]. *)
+    ref_identity : unit ref }
 
-(** A refinement predicate.  This is a second version of the type of
-    expressions for inside the type language: the same shape as ordinary
-    expressions, restricted by construction to the total sublanguage (no
-    loops, no references, no assignment, no sequencing).  Value names are
-    resolved — bound names ([Rexp_var]) are the arrow binders and the
-    predicate's own binders, free names ([Rexp_ident]) are looked up in the
-    environment when the type is translated — but the predicate is not
-    typechecked in any other way; the typing rules for refinements belong
-    to a later piece.  The interior types ([Rexp_constraint]) are ordinary
+(** A refinement predicate: a typed mirror of the source expression.  The
+    shape (order, constants, grouping, locations) is the gated source's;
+    the annotations are Typecore's, produced by re-entering the expression
+    typer with the hole bound at the payload type and each dependent-arrow
+    binder bound at its declared type (design-docs/predicate-typing.md).
+
+    [rexp_type] is the node's type as Typecore derived it: [Some] on every
+    node except [Rexp_hole] and [Rexp_var], whose types are contextual (the
+    innermost payload or the binder's declared type) and whose storage would
+    tie a metadata cycle for own-domain binders.  Stored types are ordinary
     types in the type graph: generic traversals ([Btype], [Subst]) descend
-    into them. *)
+    into them, and [.cmi]s carry them.  Mirror equality stays syntactic and
+    ignores them ([Vox_rexp.equal]). *)
 and refinement_expression =
   { rexp_desc : refinement_expression_desc;
-    rexp_loc : Location.t }
+    rexp_loc : Location.t;
+    rexp_type : type_expr option }
 
 and refinement_expression_desc =
   | Rexp_hole
@@ -326,14 +336,26 @@ and refinement_expression_desc =
   (** A free name, resolved when the type was translated.  The longident
       is kept for printing. *)
   | Rexp_constant of Parsetree.constant
-  | Rexp_apply of
-      refinement_expression * (Asttypes.arg_label * refinement_expression) list
+  | Rexp_apply of refinement_expression * refinement_application
+  (** An application keeps its arguments twice, without duplicating their
+      expressions: [rapp_source_args] is exact source order and
+      [rapp_completion] is callee order, indexing source arguments and
+      recording arguments synthesized or omitted by application typing. *)
+  | Rexp_format of Parsetree.constant * refinement_expression
+  (** A format literal and the typed expansion produced for it.  Printing
+      uses the literal; traversal and persistence retain the expansion. *)
   | Rexp_tuple of (string option * refinement_expression) list
   | Rexp_construct of Path.t * Longident.t loc * refinement_expression option
   (** The path is [Pextra_ty (type_path, Pcstr_ty name)] for an ordinary
       constructor and the constructor's own path for an extension
-      constructor, so that substitution keeps it meaningful. *)
-  | Rexp_field of refinement_expression * Longident.t loc
+      constructor, so that substitution keeps it meaningful.  The
+      constructor is the one Typecore selected (post-disambiguation). *)
+  | Rexp_field of refinement_expression * Path.t * string * Longident.t loc
+  (** Field identity is [(parent record type path, label name)] — [Path.t]
+      has no field constructor, so the pair is the substitutable key: the
+      parent path rewrites under [Subst.type_path] and the pair joins
+      mirror equality and the free-path scans.  The label is the one
+      Typecore selected; the longident is kept for provenance. *)
   | Rexp_ifthenelse of
       refinement_expression * refinement_expression
       * refinement_expression option
@@ -343,6 +365,32 @@ and refinement_expression_desc =
   (** [fun x -> e]; only single, unlabelled variable parameters. *)
   | Rexp_match of refinement_expression * refinement_case list
   | Rexp_constraint of refinement_expression * type_expr
+
+and refinement_application =
+  { rapp_source_args :
+      (Asttypes.arg_label * refinement_expression) list;
+    rapp_completion : refinement_application_arg list }
+
+and refinement_application_arg =
+  { rarg_label : arg_label;
+    rarg_desc : refinement_application_arg_desc }
+
+and refinement_application_arg_desc =
+  | Rarg_source of int
+  (** The typed argument is source argument [i]. *)
+  | Rarg_optional_wrapper of int
+  (** Source argument [i] was written with a labelled argument and wrapped
+      in [Some] for an optional parameter. *)
+  | Rarg_optional_default
+  (** Application typing supplied [None] for an optional parameter. *)
+  | Rarg_call_pos of Location.t
+  (** Application typing supplied the call position at this location. *)
+  | Rarg_omitted_optional
+  (** A partial application retained an optional parameter. *)
+  | Rarg_omitted_position
+  (** A partial application has not yet supplied its implicit call position. *)
+  | Rarg_omitted_required
+  (** A partial application retained a required labelled parameter. *)
 
 and refinement_binding =
   { rb_ident : Ident.t;

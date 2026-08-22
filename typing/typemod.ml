@@ -4435,6 +4435,7 @@ let () =
   Typetexp.transl_modtype := transl_modtype;
   Typecore.type_open := type_open_ ?toplevel:None;
   Typetexp.type_open := type_open_ ?toplevel:None;
+  Typetexp.type_refinement_predicate := Typecore.type_refinement_predicate;
   Typecore.type_open_decl := type_open_decl;
   Typecore.type_package := type_package;
   Typeclass.type_open_descr := type_open_descr;
