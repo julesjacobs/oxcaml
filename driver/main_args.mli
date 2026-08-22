@@ -95,6 +95,9 @@ module type Core_options = sig
   val _dtypedtree : unit -> unit
   val _dshape : unit -> unit
   val _drefinements : unit -> unit
+  val _vox_backend : string -> unit
+  val _vox_z3 : string -> unit
+  val _vox_timeout : float -> unit
   val _dtlambda : unit -> unit
   val _dslambda : unit -> unit
   val _dmatchcomp : unit -> unit

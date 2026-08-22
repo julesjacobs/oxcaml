@@ -314,6 +314,9 @@
   vox_logic
   vox_smtlib
   vox_backend
+  vox_lower
+  vox_fact
+  vox_verify
   cmt2annot
   out_type
   data_types

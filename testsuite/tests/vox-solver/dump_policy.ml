@@ -4,58 +4,22 @@
  expect;
 *)
 
-(* Dump-mode driver policy, stated where the [plan] type lives: the
-   printing backend's contract is to emit the query and discharge nothing,
-   so [plan] gives it the [Dump] arm, under which a driver suppresses
-   exactly its expected non-verdict — [Ok (Unknown _)] — while a
-   [discharge] error (the shared renderer refusing an ill-formed
-   obligation) still refuses the unit.  This test pins the two outcomes
-   that policy discriminates: a well-formed obligation yields the expected
-   non-verdict, and an ill-formed one yields an [Error] whose cause
-   carries the renderer's own reason.  The ill-formed case is synthetic,
-   because source programs cannot produce an ill-formed obligation — which
-   is exactly why the path needs a test to stay covered. *)
+(* Dump-mode failure policy (design-docs/vc-generation.md, "Where the pass
+   sits"): Dump suppresses exactly the printing backend's expected
+   non-verdict — [Ok (Unknown _)] — while a [discharge] error (the shared
+   renderer refusing an ill-formed obligation) reports and counts as a
+   failure in Dump mode exactly as in Discharge mode.  Synthetic, because
+   once the symbol allocator exists, source programs cannot produce an
+   ill-formed obligation — which is exactly why the path needs this test to
+   stay covered.  The output is the renderer's result plus the four policy
+   booleans (each preceded by the failure report the counted cases print). *)
 
 open Vox_logic
 open Vox_backend
 
-let config = { Config.default with timeout_seconds = None }
-
-let describe = function
-  | Ok (Proved _) -> "proved"
-  | Ok (Refuted _) -> "refuted"
-  | Ok (Unknown Timeout) -> "unknown (timeout)"
-  | Ok (Unknown (Incomplete reason)) -> "expected non-verdict: " ^ reason
-  | Result.Error (Unavailable message) -> "unavailable: " ^ message
-  | Result.Error (Error { cause; raw = _ }) -> "error: " ^ cause
-
-[%%expect{|
-val config : Vox_backend.Config.t =
-  {Config.timeout_seconds = None; z3_command = None}
-val describe : (Vox_backend.verdict, Vox_backend.failure) Result.t -> string =
-  <fun>
-|}]
-
-(* [plan] sends the printing backend down the [Dump] arm. *)
-
 let () =
-  match plan ~backend_name:"printing" ~config with
-  | Ok (Dump (module Backend)) ->
-    Format.printf "plan: dump with %s@." Backend.name
-  | Ok (Discharge (module Backend)) ->
-    Format.printf "plan: discharge with %s@." Backend.name
-  | Ok No_discharge -> Format.printf "plan: not discharged@."
-  | Result.Error message -> Format.printf "plan: selection failed: %s@." message
-
-[%%expect{|
-plan: dump with printing
-|}]
-
-(* Ill-formed: the goal mentions a variable the signature does not declare,
-   which the shared renderer refuses — an [Error], not a non-verdict, so a
-   [Dump] driver still refuses the unit. *)
-
-let () =
+  (* Ill-formed: the goal mentions a variable the signature does not
+     declare, which the shared renderer refuses. *)
   let ill_formed : Obligation.t =
     { signature = Signature.empty
     ; hypotheses = []
@@ -63,31 +27,36 @@ let () =
     ; location = Location.none
     }
   in
-  Format.printf "%s@." (describe (Printing.discharge ~config ill_formed))
-
-[%%expect{|
-error: ill-formed obligation: undeclared variable undeclared
-|}]
-
-(* Well-formed: the query is emitted and the outcome is the expected
-   non-verdict that a [Dump] driver suppresses. *)
-
-let () =
-  let trivial : Obligation.t =
-    { signature = Signature.empty
-    ; hypotheses = []
-    ; goal = Const (Bool true)
-    ; location = Location.none
-    }
+  let outcome = Printing.discharge ~config:Config.default ill_formed in
+  (match outcome with
+   | Error (Error { cause; _ }) -> Format.printf "renderer: %s@." cause
+   | _ -> Format.printf "renderer: unexpected outcome@.");
+  let describe failed = if failed then "counted" else "suppressed" in
+  let policy ~what ~dump_only outcome =
+    Format.printf "%s under %s: %s@." what
+      (if dump_only then "Dump" else "Discharge")
+      (describe
+         (Vox_verify.discharge_outcome ~dump_only ~loc:Location.none
+            outcome))
   in
-  Format.printf "%s@." (describe (Printing.discharge ~config trivial))
+  policy ~what:"renderer error" ~dump_only:true outcome;
+  policy ~what:"renderer error" ~dump_only:false outcome;
+  let expected_non_verdict : outcome =
+    Ok (Unknown (Incomplete "printing backend discharges nothing"))
+  in
+  policy ~what:"expected non-verdict" ~dump_only:true expected_non_verdict;
+  policy ~what:"expected non-verdict" ~dump_only:false expected_non_verdict
 
 [%%expect{|
-(set-option :produce-unsat-cores true)
-(assert (not true))
-(check-sat)
-(get-unsat-core)
-(get-model)
-(get-info :reason-unknown)
-expected non-verdict: printing backend discharges nothing
+renderer: ill-formed obligation: undeclared variable undeclared
+File "_none_", line 1:
+Error: The solver backend failed: ill-formed obligation: undeclared variable undeclared.
+renderer error under Dump: counted
+File "_none_", line 1:
+Error: The solver backend failed: ill-formed obligation: undeclared variable undeclared.
+renderer error under Discharge: counted
+expected non-verdict under Dump: suppressed
+File "_none_", line 1:
+Error: This refinement obligation could not be verified (printing backend discharges nothing).
+expected non-verdict under Discharge: counted
 |}]

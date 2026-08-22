@@ -168,6 +168,14 @@ let parse_impl i =
   |> Parse_result.map_ast
        ~f:(print_if i.ppf_dump Clflags.dump_source Pprintast.structure)
 
+(* Refinement verification (see Vox_verify), behind [-vox-backend]; the
+   default [none] short-circuits before the walk, so obligations stay
+   recorded-and-accepted and the compile is unchanged.  An unusable
+   selection fails once, at the unit's file-level location, before any
+   obligation is consulted. *)
+let vox_verify (typed : Typedtree.implementation) =
+  Vox_verify.run_if_enabled typed.structure
+
 let typecheck_impl i parsetree =
   parsetree
   |> Profile.(
@@ -185,6 +193,7 @@ let typecheck_impl i parsetree =
        Refinement_probe.implementation fmt structure)
   |> print_if i.ppf_dump Clflags.dump_shape
     (fun fmt {Typedtree.shape; _} -> Shape.print fmt shape)
+  |> fun typed -> vox_verify typed; typed
 
 let implementation ~hook_parse_tree ~hook_typed_tree info ~backend =
   Profile.(record_call (annotate_file_name (

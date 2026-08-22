@@ -473,6 +473,13 @@ module type S = sig
     end
 
     include Common_axis_pos with module Const := Const
+
+    module Guts : sig
+      (** Returns [Some c] when the mode is conservatively known to be the
+          constant [c], without further constraining the solver; may return
+          [None] for fully-constrained modes (see {!Locality.Guts}). *)
+      val check_const_conservative : ('l * 'r) t -> Const.t option
+    end
   end
 
   module Uniqueness : sig

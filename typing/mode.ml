@@ -6250,6 +6250,13 @@ module Totality = struct
   let legacy = of_const Const.legacy
 
   let zap_to_legacy = zap_to_ceil
+
+  module Guts = struct
+    let check_const_conservative m =
+      let floor = Guts.get_loose_floor m in
+      let ceil = Guts.get_loose_ceil m in
+      if Const.le ceil floor then Some ceil else None
+  end
 end
 
 module Uniqueness = struct

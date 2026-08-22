@@ -261,6 +261,9 @@ let typecheck_phrase ppf oldenv oldsig sstr =
   let modes = Includemod.modes_toplevel in
   Includemod.check_implementation oldenv ~modes sg sg';
   Typecore.force_delayed_checks ();
+  (* Refinement verification (see Vox_verify), behind [-vox-backend];
+     the toplevel runs the same pass per phrase, beside the probe above. *)
+  Vox_verify.run_if_enabled str;
   let shape = Shape_reduce.local_reduce Env.empty shape in
   if !Clflags.dump_shape then Shape.print ppf shape;
   (str, sg', newenv)
