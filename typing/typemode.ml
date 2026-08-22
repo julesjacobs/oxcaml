@@ -102,6 +102,8 @@ module Mode_axis_pair = struct
     | "read_write" -> monadic Visibility Read_write
     | "static" -> monadic Staticity Static
     | "dynamic" -> monadic Staticity Dynamic
+    | "real" -> comonadic Ghostliness Real
+    | "ghost" -> comonadic Ghostliness Ghost
     | _ -> raise Not_found
 end
 
@@ -119,6 +121,12 @@ module Modality_axis_pair = struct
       match[@warning "-18"]
         Mode_axis_pair.to_value (Mode_axis_pair.of_string s)
       with
+      | Atom (Comonadic Ghostliness, _) ->
+        (* Ghostliness is not expressible as a modality or kind modifier: a
+           modality that weakens (a ghost field in a real record) would
+           have to be a comonadic join, and comonadic modalities are meets;
+           and no type crosses ghostliness. Deferred; fail closed. *)
+        raise Not_found
       | Atom (Monadic ax, mode) -> Atom (Monadic ax, Join_const mode)
       | Atom (Comonadic ax, mode) -> Atom (Comonadic ax, Meet_const mode))
 end
@@ -550,6 +558,10 @@ let everything_modality =
   List.fold_left
     (fun acc -> function
       | Value.Axis.P (Monadic Staticity) -> acc
+      | Value.Axis.P (Comonadic Ghostliness) ->
+        (* Types never cross ghostliness: a ghost value's content may be a
+           fabricated placeholder, so it can never be used as real. *)
+        acc
       | Value.Axis.P (Comonadic axis) -> (
         match Per_axis.min (Modal (Comonadic axis)) with
         | Modality value -> Modality.Const.set (Comonadic axis) value acc)

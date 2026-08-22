@@ -15,7 +15,7 @@
 (* Axis lattice: efficient bitfield encoding of jkind axes.
 
    This module packs 13 axes into an OCaml immediate-sized integer. The axes
-   are indexed 0-12 and their values are ordered from most restrictive (0) to
+   are indexed 0-13 and their values are ordered from most restrictive (0) to
    least restrictive (max).
 
    Axis layout (index, name, values from level 0 to max):
@@ -31,10 +31,11 @@
    9. Statefulness: Stateless -> Writing / Reading -> Stateful
    10. Visibility (monadic): Immutable -> Read / Write -> Read_write
    11. Staticity (monadic): Dynamic -> Static
-   12. Externality: External -> External64 -> Internal
+   12. Ghostliness: Real -> Ghost
+   13. Externality: External -> External64 -> Internal
 
-   Axes 0-11 are modal axes (affect mode-crossing).
-   Axis 12 is the only non-modal axis (externality).
+   Axes 0-12 are modal axes (affect mode-crossing).
+   Axis 13 is the only non-modal axis (externality).
 
    Each 2-valued axis uses 1 bit. The 3-valued chain axes and 4-valued diamond
    axes use 2 bits.
@@ -76,6 +77,7 @@ let axis_shapes =
       | Modal (Comonadic Statefulness) -> Diamond4
       | Modal (Monadic Visibility) -> Diamond4
       | Modal (Monadic Staticity) -> Chain2
+      | Modal (Comonadic Ghostliness) -> Chain2
       | Nonmodal Externality -> Chain3)
     axis_by_number
 
@@ -295,6 +297,9 @@ module Levels = struct
   let level_of_externality (x : Jkind_axis.Externality.t) : int =
     match x with External -> 0 | External64 -> 1 | Internal -> 2
 
+  let level_of_ghostliness (x : Mode.Ghostliness.Const.t) : int =
+    match x with Mode.Ghostliness.Const.Real -> 0 | Mode.Ghostliness.Const.Ghost -> 1
+
   let areality_of_level = function
     | 0 -> Mode.Regionality.Const.Global
     | 1 -> Mode.Regionality.Const.Regional
@@ -364,6 +369,11 @@ module Levels = struct
     | 1 -> Mode.Staticity.Static
     | _ -> invalid_arg "Axis_lattice.staticity_of_level_monadic"
 
+  let ghostliness_of_level = function
+    | 0 -> Mode.Ghostliness.Const.Real
+    | 1 -> Mode.Ghostliness.Const.Ghost
+    | _ -> invalid_arg "Axis_lattice.ghostliness_of_level"
+
   let externality_of_level = function
     | 0 -> Jkind_axis.Externality.External
     | 1 -> Jkind_axis.Externality.External64
@@ -407,8 +417,11 @@ let visibility (x : t) : Mode.Visibility.Const.t =
 let staticity (x : t) : Mode.Staticity.const =
   Levels.staticity_of_level_monadic (get_axis x ~axis:11)
 
+let ghostliness (x : t) : Mode.Ghostliness.Const.t =
+  Levels.ghostliness_of_level (get_axis x ~axis:12)
+
 let externality (x : t) : Jkind_axis.Externality.t =
-  Levels.externality_of_level (get_axis x ~axis:12)
+  Levels.externality_of_level (get_axis x ~axis:13)
 
 let set_areality (a : Mode.Regionality.Const.t) (x : t) : t =
   set_axis x ~axis:0 ~level:(Levels.level_of_areality a)
@@ -446,8 +459,11 @@ let set_visibility (v : Mode.Visibility.Const.t) (x : t) : t =
 let set_staticity (s : Mode.Staticity.const) (x : t) : t =
   set_axis x ~axis:11 ~level:(Levels.level_of_staticity_monadic s)
 
+let set_ghostliness (e : Mode.Ghostliness.Const.t) (x : t) : t =
+  set_axis x ~axis:12 ~level:(Levels.level_of_ghostliness e)
+
 let set_externality (e : Jkind_axis.Externality.t) (x : t) : t =
-  set_axis x ~axis:12 ~level:(Levels.level_of_externality e)
+  set_axis x ~axis:13 ~level:(Levels.level_of_externality e)
 
 let to_mode_crossing (x : t) : Mode.Crossing.t =
   let open Mode.Crossing in
@@ -492,12 +508,18 @@ let to_mode_crossing (x : t) : Mode.Crossing.t =
       ~statefulness:
         (Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const (statefulness x)))
+      ~ghostliness:
+        (Comonadic.Atom.Modality
+           (Mode.Modality.Comonadic.Atom.Meet_const (ghostliness x)))
   in
   { monadic; comonadic }
 
 let create ~areality ~linearity ~uniqueness ~portability ~contention ~totality
     ~logicality ~forkable ~yielding ~statefulness ~visibility ~staticity
     ~externality =
+  (* Ghostliness is always at its top: no type crosses ghostliness, because
+     a ghost value's content may be a fabricated placeholder, so treating it
+     as real is never sound. *)
   bot |> set_areality areality |> set_uniqueness uniqueness
   |> set_linearity linearity |> set_contention contention
   |> set_portability portability
@@ -505,6 +527,7 @@ let create ~areality ~linearity ~uniqueness ~portability ~contention ~totality
   |> set_yielding yielding
   |> set_statefulness statefulness
   |> set_visibility visibility |> set_staticity staticity
+  |> set_ghostliness Mode.Ghostliness.Const.Ghost
   |> set_externality externality
 
 (* Canonical lattice constants used by ikinds. *)
@@ -590,7 +613,8 @@ let object_legacy : t =
          totality;
          forkable;
          yielding;
-         statefulness
+         statefulness;
+         ghostliness = _
        }
         : Mode.Value.Comonadic.Const.t) =
     Mode.Value.Comonadic.Const.legacy

@@ -637,6 +637,9 @@ and expression_extra i ppf (extra, loc, attrs) =
       line i ppf "Texp_borrowed\n"
   | Texp_ghost_region ->
       line i ppf "Texp_ghost_region\n"
+  | Texp_ghost ->
+      line i ppf "Texp_ghost\n";
+      attributes i ppf attrs
   | Texp_stack ->
       line i ppf "Texp_stack\n";
       attributes i ppf attrs
@@ -1412,10 +1415,11 @@ and constructor_arguments i ppf = function
   | Cstr_record l -> list i label_decl ppf l
 
 and label_decl i ppf {ld_id; ld_name = _; ld_mutable; ld_type; ld_loc;
-                      ld_attributes; ld_modalities} =
+                      ld_attributes; ld_modalities; ld_ghost} =
   line i ppf "%a\n" fmt_location ld_loc;
   attributes i ppf ld_attributes;
   line (i+1) ppf "%a\n" fmt_mutable_mode_flag ld_mutable;
+  if ld_ghost then line (i+1) ppf "ghost\n";
   line (i+1) ppf "%a" fmt_ident ld_id;
   core_type (i+1) ppf ld_type;
   modalities (i+1) ppf ld_modalities

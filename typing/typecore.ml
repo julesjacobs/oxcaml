@@ -645,14 +645,34 @@ let enter_region_if cond ?region env expected_mode =
   else
     env, expected_mode, []
 
+(* The most permissive expected mode. It still requires the value to be
+   real on the ghostliness axis: a ghost value's content may be a fabricated
+   placeholder, so the positions that accept one are spelled out explicitly
+   (ghost contexts, and statement position, which discards the value). *)
+let value_max_real =
+  Value.of_const { Value.Const.max with ghostliness = Real }
+
 let mode_max =
-  mode_default Value.max
+  mode_default value_max_real
+
+(* A ghost field has no slot. Reading it fabricates a fresh placeholder
+   constant, so the result owes nothing to the record on any axis: it is
+   ghost, and minimal everywhere else (like [ghost_ e] itself). Writing one
+   evaluates the expression and discards the value, so nothing is required
+   of it (statement-like). *)
+let ghost_field_read_mode () =
+  Value.disallow_right
+    (Value.of_const { Value.Const.min with ghostliness = Ghost })
+
+let mode_ghost_field_write () = mode_default Value.max
 
 let mode_with_position mode position =
   { (mode_default mode) with position }
 
-let mode_max_with_position position =
-  { mode_max with position }
+(* Statement position discards the value, so even a ghost one is
+   admissible: nothing of it survives compilation. *)
+let mode_statement_with_position position =
+  { (mode_default Value.max) with position }
 
 (** Take the expected mode of [exclave_ exp], return the expected mode of [exp].
     [expected_mode] must be higher than [regional]. *)
@@ -728,6 +748,7 @@ let mode_lazy expected_mode =
       ~totality:false ~logicality:false
       ~regionality:false ~uniqueness:false ~contention:false ~statefulness:false
       ~visibility:false ~forkable:false ~yielding:false ~staticity:false
+      ~ghostliness:false
   in
   let closure_mode =
     expected_mode |> as_single_mode |> Crossing.apply_right mode_crossing
@@ -802,6 +823,14 @@ let mode_argument ~funct ~index ~position_and_mode ~partial_app marg =
 (* expected_mode.locality_context explains why expected_mode.mode is low;
    shared_context explains why mode.uniqueness is high *)
 let submode ~loc ~env ?(reason = Other) mode expected_mode =
+  let mode =
+    (* Inside a ghost context nothing is checked on the ghostliness axis: the
+       context is deleted from compilation, so a value's absence at run time
+       cannot be observed. This is the ambient rule. *)
+    if Env.in_ghost_context env
+    then Value.meet_const_with Ghostliness Ghostliness.Const.Real mode
+    else Value.disallow_right mode
+  in
   let res =
     Value.submode ~pp:(loc, Expression) mode (as_single_mode expected_mode)
   in
@@ -1365,7 +1394,9 @@ let mode_spliced =
   let hint_monadic = Spliced Monadic
   and hint_comonadic = Spliced Comonadic in
   let mode =
-    Value.Const.max
+    (* A splice reads its operand at program-generation time, so it must be
+       real, like any other read position. *)
+    { Value.Const.max with ghostliness = Real }
     |> Value.of_const ~hint_monadic ~hint_comonadic
   in
   mode_default mode
@@ -3508,11 +3539,23 @@ and type_pat_aux
           apply_left_is_contained_by is_contained_by
             ~modalities:label.lbl_modalities alloc_mode.mode
         in
+        let mode =
+          if label.lbl_ghost then ghost_field_read_mode () else mode
+        in
         let alloc_mode = simple_pat_mode mode in
         let ty_sort =
-          match label_sort record_form label sorts with
-          | `Sort s -> s
-          | `Same_as_record_sort -> record_sort
+          if label.lbl_ghost then
+            (* The slot sort is Void; the pattern sees a placeholder at the
+               sort of the field's type. *)
+            match Ctype.type_sort ~why:Match ~fixed:false !!penv ty_arg with
+            | Ok s -> s
+            | Error err ->
+                raise (Error (label_lid.loc, !!penv,
+                              Field_value_not_rep (ty_arg, err)))
+          else
+            match label_sort record_form label sorts with
+            | `Sort s -> s
+            | `Same_as_record_sort -> record_sort
         in
         (label_lid, label, type_pat tps Value ~alloc_mode sarg ty_arg ty_sort)
       in
@@ -3558,6 +3601,20 @@ and type_pat_aux
       let lbl_a_list = List.map (type_label_pat sorts) lbl_a_list in
       rvp @@ solve_expected (make_record_pat sorts rep lbl_a_list ambiguity)
   in
+  (* Destructuring reads the matched value at run time, so it must be
+     real: a ghost value's content may be a fabricated placeholder. Patterns
+     that bind
+     without reading (wildcards, variables, aliases) leave ghostliness alone, so
+     [let x = ghost_ e in ...] works. Or-patterns, constraints and other
+     wrappers recurse with the same mode, so their sub-patterns decide. *)
+  (match sp.ppat_desc with
+   | Ppat_any | Ppat_var _ | Ppat_alias _ | Ppat_or _ | Ppat_constraint _
+   | Ppat_open _ | Ppat_exception _ | Ppat_extension _ | Ppat_effect _ -> ()
+   | Ppat_constant _ | Ppat_interval _ | Ppat_tuple _ | Ppat_construct _
+   | Ppat_variant _ | Ppat_record _ | Ppat_record_unboxed_product _
+   | Ppat_array _ | Ppat_lazy _ | Ppat_unpack _ | Ppat_type _
+   | Ppat_unboxed_tuple _ | Ppat_unboxed_unit | Ppat_unboxed_bool _ ->
+     submode ~loc ~env:!!penv alloc_mode.mode mode_max);
   match sp.ppat_desc with
     Ppat_any ->
       rvp {
@@ -6879,8 +6936,10 @@ and type_expect_
             container = (loc, Expression) }
         in
         let argument_mode =
-          mode_is_contained_by is_contained_by ~modalities:label.lbl_modalities
-            record_mode
+          if label.lbl_ghost then mode_ghost_field_write ()
+          else
+            mode_is_contained_by is_contained_by
+              ~modalities:label.lbl_modalities record_mode
         in
         type_label_exp ~overwrite true env argument_mode loc ty_record x record_form
       in
@@ -6941,6 +7000,9 @@ and type_expect_
                 apply_left_is_contained_by is_contained_by
                   ~modalities:lbl.lbl_modalities mode
               in
+              let mode =
+                if lbl.lbl_ghost then ghost_field_read_mode () else mode
+              in
               let mode = cross_left env lbl.lbl_arg mode in
               check_construct_mutability ~loc:record_loc ~env lbl.lbl_mut
                 ~ty:lbl.lbl_arg ~modalities:lbl.lbl_modalities record_mode;
@@ -6949,8 +7011,10 @@ and type_expect_
                   container = (record_loc, Expression) }
               in
               let argument_mode =
-                mode_is_contained_by is_contained_by
-                  ~modalities:lbl.lbl_modalities record_mode
+                if lbl.lbl_ghost then mode_ghost_field_write ()
+                else
+                  mode_is_contained_by is_contained_by
+                    ~modalities:lbl.lbl_modalities record_mode
               in
               submode ~loc:extended_expr_loc ~env mode argument_mode;
               Kept (ty_arg1, lbl.lbl_mut,
@@ -7404,6 +7468,9 @@ and type_expect_
       check_dynamic (loc, Expression) (Always_dynamic Application)
         expected_mode;
       let pm = position_and_mode env expected_mode sexp in
+      (* The function position requires a real function: a ghost
+         function has no closure to jump to. (Inside a ghost context
+         [submode] does not check the ghostliness axis.) *)
       let funct_mode =
         match pm.apply_position with
         | Tail ->
@@ -7412,8 +7479,13 @@ and type_expect_
               (of_const ~hint_comonadic:Tailcall_function
                 { Const.max with areality = Regional }))
           in
+          (* Separate and unhinted, so the error reads the same in tail and
+             non-tail positions. *)
+          Value.submode_exn mode value_max_real;
           mode
-        | Nontail | Default -> Value.newvar ()
+        | Nontail | Default ->
+          let mode, _ = Value.newvar_below value_max_real in
+          mode
       in
       let funct_expected_mode = mode_default funct_mode in
       let outer_level = get_current_level () in
@@ -7710,6 +7782,9 @@ and type_expect_
       let mode =
         apply_left_is_contained_by is_contained_by
           ~modalities:label.lbl_modalities mode
+      in
+      let mode =
+        if label.lbl_ghost then ghost_field_read_mode () else mode
       in
       let boxing : texp_field_boxing =
         let is_float_boxing =
@@ -8059,7 +8134,8 @@ and type_expect_
           {Value.Comonadic.Const.max with linearity = Many} env
       in
       let cond_env = Env.add_region_lock env in
-      let mode = mode_region Value.max in
+      (* The condition is read at run time, so it must be real. *)
+      let mode = mode_region value_max_real in
       let wh_cond =
         type_expect cond_env mode scond
           (mk_expected ~explanation:While_loop_conditional Predef.type_bool)
@@ -8085,11 +8161,11 @@ and type_expect_
   | Pexp_for(param, slow, shigh, dir, sbody) ->
       constrain_enclosing_totality ~loc env;
       let for_from =
-        type_expect env (mode_region Value.max) slow
+        type_expect env (mode_region value_max_real) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
       in
       let for_to =
-        type_expect env (mode_region Value.max) shigh
+        type_expect env (mode_region value_max_real) shigh
           (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
       in
       let env =
@@ -8848,6 +8924,19 @@ and type_expect_
       end;
       let exp_extra = (Texp_stack, loc, []) :: exp.exp_extra in
       {exp with exp_extra}
+  | Pexp_ghost e ->
+      (* [ghost_ e] deletes [e] from compilation. The expression itself is
+         ghost, so the context must expect a ghost value: only the ghostliness
+         axis is constrained here. Inside, every value appears real (the
+         ambient rule), implemented by [Env.enter_ghost_context] and the
+         ghostliness carve-out in [submode]. *)
+      submode ~loc ~env
+        (Value.of_const { Value.Const.min with ghostliness = Ghost })
+        expected_mode;
+      let env = Env.enter_ghost_context env in
+      let exp = type_expect env expected_mode e ty_expected_explained in
+      let exp_extra = (Texp_ghost, loc, []) :: exp.exp_extra in
+      {exp with exp_extra}
   | Pexp_comprehension comp ->
       Language_extension.assert_enabled ~loc Comprehensions ();
       type_comprehension_expr
@@ -8864,10 +8953,12 @@ and type_expect_
         raise (Error (exp2.pexp_loc, env, Overwrite_of_invalid_term));
       let cell_mode, _ =
         (* The overwritten cell has to be unique
-           and should have the areality expected here: *)
+           and should have the areality expected here. It is written through
+           at run time, so it must be real. *)
         Value.newvar_below
           (Value.meet [
-            Value.of_const {Value.Const.max with uniqueness = Unique};
+            Value.of_const
+              {Value.Const.max with uniqueness = Unique; ghostliness = Real};
             Value.max_with_comonadic Areality
               (Value.proj_comonadic Areality expected_mode.mode)])
       in
@@ -8937,7 +9028,7 @@ and type_expect_
          (with magic_staged_modes), and we do not constrain the mode. *)
       let mode_quoted =
         if Builtin_attributes.has_magic_staged_modes sexp.pexp_attributes
-        then mode_default Value.max
+        then mode_default value_max_real
         else mode_quoted
       in
       let arg = type_expect new_env mode_quoted exp (mk_expected ty) in
@@ -9018,6 +9109,11 @@ and type_block_access env expected_base_ty principal
     let bad_record_error reason =
       raise (Error (lid.loc, env, Block_access_bad_record reason))
     in
+    (* A ghost field has no slot, so there is no block index for it; and a
+       fabricated index would also bypass [ghost_field_read_mode], handing
+       the field's value to real code. Reject like the other unsupported
+       representations. *)
+    if label.lbl_ghost then bad_record_error "ghost fields in";
     (match label.lbl_repres with
      | Record_boxed | Record_variable -> ()
      | Record_mixed shape ->
@@ -9863,6 +9959,10 @@ and type_label_access
     _ * _ * _ * 'rep gen_label_description * _ * _
   = fun record_form env srecord usage lid ->
   let mode = Value.newvar () in
+  (* Reading or writing a field is a runtime access of the record, so it
+     must be real. (Inside a ghost context [submode] does not check
+     the ghostliness axis.) *)
+  Value.submode_exn mode value_max_real;
   let record_jkind, record_sort =
     Jkind.of_new_sort_var ~why:Record_projection
       ~level:(Ctype.get_current_level ())
@@ -11047,7 +11147,7 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
   in
   (* Raise the current level to detect non-returning functions *)
   with_local_level_generalize
-    (fun () -> type_exp env (mode_max_with_position position) sexp, sort)
+    (fun () -> type_exp env (mode_statement_with_position position) sexp, sort)
   ~before_generalize: begin fun (exp, _sort) ->
     let subexp = final_subexpression exp in
     let ty = expand_head env exp.exp_type in

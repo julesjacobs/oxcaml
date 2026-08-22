@@ -38,6 +38,7 @@ STDLIB_MODULE_BASENAMES = \
   camlinternalAtomic \
   stdlib \
   either \
+  ghost \
   sys \
   obj \
   type \

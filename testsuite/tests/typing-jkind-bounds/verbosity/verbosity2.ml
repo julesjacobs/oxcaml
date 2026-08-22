@@ -28,6 +28,7 @@ type t
           local
           unique
           static
+          ghost
           internal
 |}]
 
@@ -48,6 +49,7 @@ type t
           contended
           external_
           static
+          ghost
 |}]
 
 type t : float64
@@ -67,6 +69,7 @@ type t
           partial
           nonlogical
           static
+          ghost
 |}]
 
 type t : any
@@ -85,6 +88,7 @@ type t
           partial
           nonlogical
           static
+          ghost
           internal
 |}]
 
@@ -104,6 +108,7 @@ type t
           partial
           nonlogical
           static
+          ghost
           internal
 |}]
 
@@ -123,6 +128,7 @@ type t
           partial
           nonlogical
           static
+          ghost
           internal
 |}]
 
@@ -142,6 +148,7 @@ type 'a t
           local
           unique
           static
+          ghost
           internal
       with 'a
 |}]
@@ -162,6 +169,7 @@ type ('a
              local
              unique
              static
+             ghost
              internal)
      t
 |}]
@@ -182,6 +190,7 @@ type ('a
              partial
              nonlogical
              static
+             ghost
              internal)
      t
 |}]
@@ -203,6 +212,7 @@ type 'a t
           partial
           nonlogical
           static
+          ghost
       with 'a @@ external_
 |}]
 
@@ -223,6 +233,7 @@ type 'a t
           partial
           nonlogical
           static
+          ghost
 |}]
 
 type 'a t : immutable_data with 'a @@ external_
@@ -241,6 +252,7 @@ type 'a t
           local
           unique
           static
+          ghost
           internal
       with 'a
 |}]
