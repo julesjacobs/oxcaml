@@ -652,6 +652,9 @@ and expression_extra i ppf (extra, loc, attrs) =
       line i ppf "Texp_inspected_type\n";
       attributes i ppf attrs;
       type_inspection (i+1) ppf ti
+  | Texp_refinement_obligation ty ->
+      line i ppf "Texp_refinement_obligation %a\n" Printtyp.type_expr ty;
+      attributes i ppf attrs
 
 and alloc_mode_raw: type l r. _ -> _ -> (l * r) Mode.Alloc.t -> _
   = fun i ppf m ->

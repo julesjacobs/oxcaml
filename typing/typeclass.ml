@@ -111,6 +111,7 @@ type error =
   | Non_value_binding of string * Jkind.Violation.t
   | Non_value_let_binding of string * Jkind.sort
   | Nonoptional_call_pos_label of string
+  | Refined_instance_variable of string * Types.type_expr
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error
@@ -234,7 +235,18 @@ let add_method loc env label priv virt ty sign =
   | exception Ctype.Add_method_failed failure ->
       raise_add_method_failure loc env label sign failure
 
+(* Refinement flow: class and object types are out of scope for refinements
+   (design-docs/refinement-flow.md) — an instance variable whose declared type
+   has a refined head is rejected loudly rather than recorded with a silently
+   stripped type (initialisation would be obligated but writes unchecked). *)
+let check_instance_variable_not_refined loc env label ty =
+  match Types.get_desc (Ctype.expand_head env ty) with
+  | Types.Trefine _ ->
+      raise (Error (loc, env, Refined_instance_variable (label, ty)))
+  | _ -> ()
+
 let add_instance_variable ~strict loc env label mut virt ty sign =
+  check_instance_variable_not_refined loc env label ty;
   match Ctype.add_instance_variable ~strict env label mut virt ty sign with
   | () -> ()
   | exception Ctype.Add_instance_variable_failed failure ->
@@ -738,6 +750,20 @@ let rec class_field_first_pass self_loc cl_num sign self_scope acc cf =
              Ctype.with_local_level_generalize_structure_if_principal
                (fun () -> Typecore.type_exp val_env sdefinition)
            in
+           (* A refined annotation on the definition was funnelled by
+              typecore: [exp_type] is payload-headed and the annotation
+              survives only as the obligation marker.  An instance variable
+              must not silently lose its refinement (writes would go
+              unchecked), so reject here; [add_instance_variable] catches
+              the virtual and class-type spellings. *)
+           List.iter
+             (fun (extra, _, _) ->
+                match extra with
+                | Texp_refinement_obligation ty ->
+                    raise (Error (label.loc, val_env,
+                                  Refined_instance_variable (label.txt, ty)))
+                | _ -> ())
+             definition.exp_extra;
            begin
              match
                Ctype.constrain_type_jkind
@@ -2423,6 +2449,12 @@ let report_error_doc env ppf =
     fprintf ppf
       "@[the argument labeled '%s' is a [%%call_pos] argument, filled in @ \
          automatically if ommitted. It cannot be passed with '?'.@]" label
+  | Refined_instance_variable (name, ty) ->
+    fprintf ppf
+      "@[The instance variable %a is annotated with the refined type %a.@ \
+       Refinement types are not supported on instance variables.@]"
+      Style.inline_code name
+      (Style.as_inline_code Printtyp.type_expr) ty
 
 let report_error_doc env ppf err =
   Printtyp.wrap_printing_env ~error:true

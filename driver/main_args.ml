@@ -907,6 +907,10 @@ let mk_dshape f =
   "-dshape", Arg.Unit f, " (undocumented)"
 ;;
 
+let mk_drefinements f =
+  "-drefinements", Arg.Unit f, " (undocumented)"
+;;
+
 let mk_dmatchcomp f =
   "-dmatchcomp", Arg.Unit f, " (undocumented)"
 
@@ -1222,6 +1226,7 @@ module type Core_options = sig
   val _dparsetree_loc_ghost_invariants : unit -> unit
   val _dtypedtree : unit -> unit
   val _dshape : unit -> unit
+  val _drefinements : unit -> unit
   val _dtlambda : unit -> unit
   val _dslambda : unit -> unit
   val _dmatchcomp : unit -> unit
@@ -1623,6 +1628,7 @@ struct
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
+    mk_drefinements F._drefinements;
     mk_dmatchcomp F._dmatchcomp;
     mk_drawlambda F._drawlambda;
     mk_dtlambda F._dtlambda;
@@ -1732,6 +1738,7 @@ struct
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
+    mk_drefinements F._drefinements;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_dmatchcomp F._dmatchcomp;
@@ -1916,6 +1923,7 @@ struct
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
+    mk_drefinements F._drefinements;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_dmatchcomp F._dmatchcomp;
@@ -2081,6 +2089,7 @@ module Make_opttop_options (F : Opttop_options) = struct
     mk_dparsetree_loc_ghost_invariants F._dparsetree_loc_ghost_invariants;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
+    mk_drefinements F._drefinements;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_dmatchcomp F._dmatchcomp;
@@ -2227,6 +2236,7 @@ struct
     mk_dparsetree F._dparsetree;
     mk_dtypedtree F._dtypedtree;
     mk_dshape F._dshape;
+    mk_drefinements F._drefinements;
     mk_dtlambda F._dtlambda;
     mk_dslambda F._dslambda;
     mk_drawlambda F._drawlambda;
@@ -2471,6 +2481,7 @@ module Default = struct
     let _dsource = set dump_source
     let _dtypedtree = set dump_typedtree
     let _dshape = set dump_shape
+    let _drefinements = set dump_refinements
     let _dmatchcomp = set dump_matchcomp
     let _dunique_ids = set unique_ids
     let _dno_unique_ids = clear unique_ids

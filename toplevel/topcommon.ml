@@ -256,6 +256,7 @@ let typecheck_phrase ppf oldenv oldsig sstr =
     Typemod.type_toplevel_phrase oldenv oldsig sstr
   in
   if !Clflags.dump_typedtree then Printtyped.implementation ppf str;
+  if !Clflags.dump_refinements then Refinement_probe.implementation ppf str;
   let sg' = Typemod.Signature_names.simplify newenv sn sg in
   let modes = Includemod.modes_toplevel in
   Includemod.check_implementation oldenv ~modes sg sg';

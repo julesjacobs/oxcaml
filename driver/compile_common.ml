@@ -180,6 +180,9 @@ let typecheck_impl i parsetree =
     (Typemod.type_implementation i.target i.module_name i.env)
   |> print_if i.ppf_dump Clflags.dump_typedtree
     Printtyped.implementation_with_coercion
+  |> print_if i.ppf_dump Clflags.dump_refinements
+    (fun fmt {Typedtree.structure; _} ->
+       Refinement_probe.implementation fmt structure)
   |> print_if i.ppf_dump Clflags.dump_shape
     (fun fmt {Typedtree.shape; _} -> Shape.print fmt shape)
 

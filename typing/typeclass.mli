@@ -127,6 +127,7 @@ type error =
   | Non_value_binding of string * Jkind.Violation.t
   | Non_value_let_binding of string * Jkind.sort
   | Nonoptional_call_pos_label of string
+  | Refined_instance_variable of string * Types.type_expr
 
 exception Error of Location.t * Env.t * error
 exception Error_forward of Location.error

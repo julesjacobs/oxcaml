@@ -1753,11 +1753,82 @@ let iter_pattern_variables_type_mut ~f_immut ~f_mut pvs =
     | Val_mut _ -> f_mut pv_type
     | _ -> f_immut pv_lpoly pv_type) pvs
 
-let add_pattern_variables ?check ?check_as env pv =
+(* Refinement flow (design-docs/refinement-flow.md): a declared refined type is
+   used at its payload — the refinement's head is stripped when the type
+   becomes the type of a value occurrence or an environment entry.  The gate
+   runs on every identifier occurrence and every application argument, so it
+   must be cheap: a head-descriptor check, then for [Tconstr] a per-path cache
+   of whether the manifest chain can reveal a refinement.  The cache is
+   bypassed when the environment has local constraints, which can change what
+   a path means. *)
+let refinement_reveal_cache : bool Path.Tbl.t = Path.Tbl.create 17
+
+let rec type_may_reveal_refinement env ty =
+  match get_desc ty with
+  | Trefine _ -> true
+  | Tvar _ ->
+      (* Only reached through a manifest chain ([type 'a t = 'a]): the
+         parameter's instantiation decides, so the path may reveal one. *)
+      true
+  | Tconstr (path, _, _) ->
+      let compute () =
+        match Env.find_type path env with
+        | { type_manifest = Some manifest; _ } ->
+            type_may_reveal_refinement env manifest
+        | { type_manifest = None; _ } -> false
+        | exception Not_found -> false
+      in
+      if Env.has_local_constraints env then compute ()
+      else begin
+        match Path.Tbl.find_opt refinement_reveal_cache path with
+        | Some b -> b
+        | None ->
+            let b = compute () in
+            Path.Tbl.replace refinement_reveal_cache path b;
+            b
+      end
+  | _ -> false
+
+(* The payload of [ty]'s head, after alias expansion; [ty] itself when the
+   head is not refined.  Head-only: nested refinements are left in place. *)
+let rec strip_refined_head env ty =
+  match get_desc ty with
+  | Trefine { ref_payload; _ } -> strip_refined_head env ref_payload
+  | Tconstr _ when type_may_reveal_refinement env ty ->
+      (* The gate is a may-analysis: [type 'a t = 'a] reveals a refinement
+         or not depending on the instantiation, so only the expansion can
+         decide.  Expansion has bookkeeping side effects (abbreviation
+         memos, level and scope updates) that must not outlive a strip that
+         strips nothing — under GADT equations they can change the outcome
+         of later scope-escape checks (typing-gadts/pr10348). *)
+      let snap = Btype.snapshot () in
+      begin match get_desc (expand_head env ty) with
+      | Trefine { ref_payload; _ } -> strip_refined_head env ref_payload
+      | _ -> Btype.backtrack snap; ty
+      end
+  | _ -> ty
+
+(* [Some payload] when [ty]'s head (after alias expansion) is refined. *)
+let refined_head_payload env ty =
+  let stripped = strip_refined_head env ty in
+  if stripped == ty then None else Some stripped
+
+let add_pattern_variables ?check ?check_as ?(strip_refinement = false) env pv =
   List.fold_right
     (fun {pv_id; pv_mode; pv_value_kind; pv_type; pv_loc; pv_kind;
           pv_attributes; pv_uid; pv_lpoly} env ->
        let check = if pv_kind=As_var then check_as else check in
+       let pv_type =
+         (* Local immutable binders enter the environment at the payload; the
+            pattern keeps the refined type as the fact record.  Mutable
+            binders keep the declared type, so every write to them is checked
+            against it. *)
+         if not strip_refinement then pv_type
+         else
+           match pv_value_kind with
+           | Val_mut _ -> pv_type
+           | _ -> strip_refined_head env pv_type
+       in
        Env.add_value ?check ~mode:pv_mode pv_id
          {val_type = pv_type; val_kind = pv_value_kind; val_lpoly = pv_lpoly;
           Types.val_loc = pv_loc;
@@ -3615,6 +3686,29 @@ and type_pat_aux
    | Ppat_array _ | Ppat_lazy _ | Ppat_unpack _ | Ppat_type _
    | Ppat_unboxed_tuple _ | Ppat_unboxed_unit | Ppat_unboxed_bool _ ->
      submode ~loc ~env:!!penv alloc_mode.mode mode_max);
+  (* Refinement flow: a destructuring pattern checked against a refined-head
+     expected type recurses at the payload; the pattern's [pat_type] keeps the
+     refined type — the fact record for VC gen.  Variable, wildcard and alias
+     patterns fall through: they take the refined type whole and the binder
+     strip governs their environment entries. *)
+  let destructuring_refined_payload =
+    match sp.ppat_desc with
+    | Ppat_constant _ | Ppat_interval _ | Ppat_tuple _ | Ppat_unboxed_tuple _
+    | Ppat_construct _ | Ppat_variant _ | Ppat_record _
+    | Ppat_record_unboxed_product _ | Ppat_array _ | Ppat_lazy _
+    | Ppat_unboxed_bool _ | Ppat_unboxed_unit ->
+        refined_head_payload !!penv expected_ty
+    | _ -> None
+  in
+  match destructuring_refined_payload with
+  | Some payload ->
+      let p = type_pat tps category sp payload sort in
+      (* Instancing copies the whole refined type; projecting the payload
+         from the copy keeps it connected to the copied predicate interior. *)
+      let ty = instance expected_ty in
+      unify_pat_types loc !!penv p.pat_type (strip_refined_head !!penv ty);
+      { p with pat_type = ty }
+  | None ->
   match sp.ppat_desc with
     Ppat_any ->
       rvp {
@@ -6793,7 +6887,48 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
   let exp =
     Builtin_attributes.warning_scope sexp.pexp_attributes
       (fun () ->
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
+         (* A refined expectation is an obligation site: the expression is
+            checked against the payload, and the imposed refined type is
+            recorded on the node.  [exp_type] stays payload-headed.  Every
+            expression the typechecker visits funnels through here —
+            [type_expect_] has no other caller — so annotations, function
+            bodies, constructor arguments, match arms, assignments all fall
+            out of this one interception.  An expectation headed by an
+            undetermined variable is left alone: not an obligation site. *)
+         match refined_head_payload env ty_expected_explained.ty with
+         | Some payload ->
+             let exp =
+               type_expect_ ?recarg ~overwrite env expected_mode sexp
+                 { ty_expected_explained with ty = payload }
+             in
+             (* One obligation record per site, where a site is (node,
+                obligation type): the [vb_exp_constraint] rewrap of an
+                annotated binding funnels the same annotation twice — once
+                through the annotation inside the [Pexp_constraint] arm
+                (already recorded in [exp_extra]) and once through the
+                pattern-side expectation arriving here — so an obligation
+                equal (predicates alpha-equivalent) to one already recorded
+                on the node is not recorded again.  Distinct stacked
+                annotations each record. *)
+             let already_recorded =
+               List.exists
+                 (function
+                   | Texp_refinement_obligation ty', _, _ ->
+                       Ctype.is_equal env false
+                         [ty_expected_explained.ty] [ty']
+                   | _ -> false)
+                 exp.exp_extra
+             in
+             if already_recorded then exp
+             else
+               { exp with
+                 exp_extra =
+                   (Texp_refinement_obligation ty_expected_explained.ty,
+                    exp.exp_loc, [])
+                   :: exp.exp_extra }
+         | None ->
+             type_expect_ ?recarg ~overwrite env expected_mode sexp
+               ty_expected_explained
       )
   in
   Cmt_format.set_saved_types
@@ -7230,7 +7365,11 @@ and type_expect_
       in
       let exp = rue {
         exp_desc; exp_loc = loc; exp_extra = [];
-        exp_type = desc.val_type;
+        (* Occurrences are carrier-typed: the head of the (instanced)
+           declared type is stripped, for every value kind.  The [Texp_ident]
+           node keeps the declared description.  For local immutable binders
+           this is a no-op — their entries are already stripped. *)
+        exp_type = strip_refined_head env desc.val_type;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
       in
@@ -7339,8 +7478,8 @@ and type_expect_
             else Modules_rejected
           in
           let (pat_exp_list, new_env) =
-            type_let existential_context env mutable_flag rec_flag
-              spat_sexp_list allow_modules
+            type_let ~strip_refinement:true existential_context env
+              mutable_flag rec_flag spat_sexp_list allow_modules
           in
           let body =
             type_expect
@@ -7549,6 +7688,10 @@ and type_expect_
       let (args, ty_ret, mode_ret, pm, ap_yielding) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
       in
+      (* Application results are carrier-typed: the head of the instantiated
+         codomain is stripped at the apply node.  The funct's arrow keeps the
+         refined codomain — that is the fact record for VC gen. *)
+      let ty_ret = strip_refined_head env ty_ret in
       let mode_ret = Alloc.disallow_right mode_ret in
       let ap_mode = Alloc.proj_comonadic Areality mode_ret in
       let mode_ret = cross_left env ty_ret (alloc_as_value mode_ret) in
@@ -7775,6 +7918,10 @@ and type_expect_
       in
       check_project_mutability ~loc:record.exp_loc ~env
         (Record_field label.lbl_name) label.lbl_mut mode;
+      (* Field reads are carrier-typed: the head of the instantiated label
+         type is stripped.  The label declaration keeps the refined type;
+         writes check against it via the expectation funnel. *)
+      let ty_arg = strip_refined_head env ty_arg in
       let is_contained_by : Mode.Hint.is_contained_by =
         { containing = Record (label.lbl_name, Modality);
           container = (record.exp_loc, Expression) }
@@ -7847,6 +7994,10 @@ and type_expect_
       if Types.is_mutable label.lbl_mut then
         fatal_error
           "Typecore.type_expect_: unboxed record labels are never mutable";
+      (* Field reads are carrier-typed, like [Pexp_field]: the head of the
+         instantiated label type is stripped; the label declaration keeps
+         the refined type. *)
+      let ty_arg = strip_refined_head env ty_arg in
       let is_contained_by : Mode.Hint.is_contained_by =
         { containing = Record (label.lbl_name, Modality);
           container = (record.exp_loc, Expression) }
@@ -8211,7 +8362,9 @@ and type_expect_
       rue {
         exp_desc = arg.exp_desc;
         exp_loc = arg.exp_loc;
-        exp_type = ty';
+        (* A refined annotation is an obligation (recorded on [arg] by the
+           funnel), not the node's type: [exp_type] stays payload-headed. *)
+        exp_type = strip_refined_head env ty';
         exp_attributes = arg.exp_attributes;
         exp_env = env;
         exp_extra = (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra;
@@ -8238,7 +8391,8 @@ and type_expect_
       rue {
         exp_desc = arg.exp_desc;
         exp_loc = arg.exp_loc;
-        exp_type = ty';
+        (* As above: payload-headed under a refined annotation. *)
+        exp_type = strip_refined_head env ty';
         exp_attributes = arg.exp_attributes;
         exp_env = env;
         exp_extra =
@@ -8741,7 +8895,10 @@ and type_expect_
       rue { exp_desc = desc;
             exp_loc = sexp.pexp_loc;
             exp_extra = [];
-            exp_type = instance ty_result;
+            (* A binding operator is an application of the operator: the
+               result node is carrier-typed like any other apply result.
+               The operator's arrow keeps the refined codomain. *)
+            exp_type = strip_refined_head env (instance ty_result);
             exp_env = env;
             exp_attributes = sexp.pexp_attributes; }
 
@@ -9858,19 +10015,27 @@ and type_function
       match body with
       | Pfunction_body body ->
           let body_loc = body.pexp_loc in
-          let body =
+          let body, body_ty =
             match ret_type_constraint with
-            | None -> type_expect env expected_mode body (mk_expected ty_expected)
+            | None ->
+                let body =
+                  type_expect env expected_mode body (mk_expected ty_expected)
+                in
+                body, body.exp_type
             | Some constraint_ ->
               let body, exp_type, exp_extra =
                 type_constraint_expect (expression_constraint body)
                   env expected_mode body_loc ~loc_arg:body_loc
                   type_mode.mode_modes constraint_ ty_expected
               in
+              (* A refined return annotation is an obligation (recorded on
+                 the body by the funnel), not the body node's type; the
+                 declared type still becomes the arrow's codomain. *)
               { body with
                   exp_extra = (exp_extra, body_loc, []) :: body.exp_extra;
-                  exp_type;
-              }
+                  exp_type = strip_refined_head env exp_type;
+              },
+              exp_type
           in
           let body =
             match type_mode.mode_desc with
@@ -9879,7 +10044,7 @@ and type_function
               let extra = Texp_mode type_mode, body_loc, [] in
               { body with exp_extra = extra :: body.exp_extra }
           in
-          body.exp_type, Tfunction_body body, None, None, []
+          body_ty, Tfunction_body body, None, None, []
       | Pfunction_cases (cases, _, attributes) ->
           let type_cases_expect env expected_mode ty_expected =
             type_function_cases_expect
@@ -10520,8 +10685,12 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
          cases, look toward the end of
          typing-layouts-missing-cmi/function_arg.ml *)
       let func texp =
+        (* The synthesized application's result nodes are carrier-typed like
+           any other apply result; the arrow ([ty_fun], [fc_ret_type]) keeps
+           the refined codomain. *)
+        let ty_res_node = strip_refined_head env ty_res in
         let e =
-          {texp with exp_type = ty_res; exp_desc =
+          {texp with exp_type = ty_res_node; exp_desc =
            Texp_apply
              (texp,
               args @ [Nolabel, Arg (eta_var, arg_sort)],
@@ -10530,7 +10699,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
               Yielding.disallow_right Yielding.yielding,
               None)}
         in
-        let e = {texp with exp_type = ty_res; exp_desc = Texp_exclave e} in
+        let e = {texp with exp_type = ty_res_node; exp_desc = Texp_exclave e} in
         let cases = [ case eta_pat e ] in
         let cases_loc = { texp.exp_loc with loc_ghost = true } in
         let param, param_uid = name_cases "param" cases in
@@ -10584,7 +10753,10 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       let mode = expect_mode_cross env ty_expected' mode in
       let texp = type_expect ?recarg ~overwrite env mode sarg
         (mk_expected ?explanation ty_expected') in
-      unify_exp ~sexp:sarg env texp ty_expected;
+      (* When the expectation's head is refined, [type_expect] checked [sarg]
+         at the payload and recorded the obligation, so the confirmation copy
+         must be taken at the payload too. *)
+      unify_exp ~sexp:sarg env texp (strip_refined_head env ty_expected);
       texp
 
 (* See Note [Type-checking applications] for an overview *)
@@ -10613,6 +10785,12 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
       let arg, sch =
         if vars = [] then begin
           let ty_arg0' = tpoly_get_mono ty_arg0 in
+          (* A refined domain never enters [type_argument]: both expectation
+             copies are pre-stripped to their payloads.  The funct's arrow
+             keeps the refined domain — the apply node is the obligation
+             record for its arguments. *)
+          let ty_arg' = strip_refined_head env ty_arg' in
+          let ty_arg0' = strip_refined_head env ty_arg0' in
           if wrapped_in_some then begin
             type_option_some
               env expected_mode sarg ty_arg' ty_arg0', None
@@ -11346,6 +11524,7 @@ and map_half_typed_cases
         let cont_vars, pvs =
           List.partition (fun pv -> pv.pv_kind = Continuation_var) pvs in
         let add_pattern_vars = add_pattern_variables
+            ~strip_refinement:true
             ~check:(fun s ->
               Warnings.Unused_var_strict { name = s; mutated = false })
             ~check_as:(fun s ->
@@ -11608,6 +11787,7 @@ and type_effect_cases
 (* Typing of let bindings *)
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
+    ?(strip_refinement = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
@@ -11747,7 +11927,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
          we type-checked expressions before patterns, then we could call
          [add_module_variables] here.
       *)
-      let new_env = add_pattern_variables new_env pvs in
+      let new_env = add_pattern_variables ~strip_refinement new_env pvs in
       let mode_pat_typ_list =
         List.map
           (fun (m, pat) ->
@@ -12441,7 +12621,8 @@ and type_comprehension_clause ~loc ~comprehension_type ~container_type env
       let env =
         let check s = Warnings.Unused_var { name = s; mutated = false } in
         let pvs = tps.tps_pattern_variables in
-        add_pattern_variables ~check ~check_as:check env pvs
+        add_pattern_variables ~strip_refinement:true ~check ~check_as:check
+          env pvs
       in
       env, Texp_comp_for tbindings
   | Pcomp_when cond ->

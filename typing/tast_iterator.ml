@@ -336,6 +336,7 @@ let extra sub = function
   | Texp_ghost_region -> ()
   | Texp_stack -> ()
   | Texp_ghost -> ()
+  | Texp_refinement_obligation _ -> ()
   | Texp_mode modes -> sub.modes sub modes
   | Texp_inspected_type (Label_disambiguation _) -> ()
   | Texp_inspected_type (Polymorphic_parameter (Method _)) -> ()

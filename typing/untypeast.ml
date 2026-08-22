@@ -472,6 +472,9 @@ let exp_extra sub (extra, loc, attrs) sexp =
         sexp.pexp_desc
     | Texp_borrowed -> Pexp_borrow sexp
     | Texp_ghost_region ->sexp.pexp_desc
+    | Texp_refinement_obligation _ ->
+        (* Imposed by an expectation, not by syntax of this expression. *)
+        sexp.pexp_desc
   in
   Exp.mk ~loc ~attrs desc
 
@@ -594,6 +597,7 @@ let expression sub exp =
                       | Texp_ghost
                       | Texp_inspected_type _ -> [], []
                       | Texp_ghost_region | Texp_borrowed -> [], []
+                      | Texp_refinement_obligation _ -> [], []
                     in
                     new_type_constraints @ ret_type_constraints,
                     new_mode_annotations @ ret_mode_annotations)
