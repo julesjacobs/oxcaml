@@ -59,9 +59,11 @@ status/log/heartbeat plumbing, and no recovery self-tests.
   runner was rejected: it would duplicate the link-time dependency set
   by hand and drift the next time a runner gains a library.
 - `tools/dev-watcher.py` remains for its non-watcher utilities
-  (`prepare-test-root`, `diff`), which the loop still uses; its
-  supervise/build subcommands are dead and can be deleted in a later
-  cleanup together with `tools/dev-watcher-test.sh`.
+  (`stop` for legacy migration, `prepare-test-root`, `diff`), which the
+  loop still uses; the dead watcher half (start/supervise/status/
+  wait-ready/build/touch and the RPC recovery machinery) and
+  `tools/dev-watcher-test.sh` were deleted in the cleanup this bullet
+  used to promise.
 
 ## The build-mode map (the actual investigation)
 
@@ -96,8 +98,6 @@ stdlib refresh is automatic, and the map above is in AGENTS.md.
 
 ## Not done, deliberately
 
-- Deleting the dead watcher machinery from `tools/dev-watcher.py` (kept
-  this change reviewable; the utilities interleave with it).
 - Touching `hacking` / `hacking-emacs-*` (upstream-style polling
   targets, separate from the dev loop).
 - Any change to `dev-test-all` semantics.
