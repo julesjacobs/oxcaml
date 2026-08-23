@@ -83,21 +83,23 @@ below.
 - **A worktree that used the old watcher-based loop.** `make dev-stop`
   stops a leftover watcher process; everything else needs no migration.
   `NOWATCH=1` is accepted and ignored, so older scripts keep working.
-- **An `expect.opt` test whose result looks too good.** `dev-test` rebuilds an
-  expect-test runner when the selected tests ask for it, and you can check that
-  decision directly:
+- **An `expect.opt` test whose result looks too good.** `dev-test` syncs the
+  expect-test runners a selection needs with dune on every run, so a runner
+  cannot be invoked against sources it was not built from; after a compiler
+  change the sync is a real rebuild (~3 min for expectnat, a 110M link),
+  otherwise it is a ~1s no-op. Which runners a selection needs can be checked
+  directly:
   ```sh
   make dev-runners-needed DIR=codegen     # prints: expectnat
   ```
-  If a result is suspicious, the manual escape hatch is to refresh the runner
-  yourself before running anything (~3 min, it is a 110M link):
-  ```sh
-  make dev-expect-runners DEV_RUNNERS=expectnat
-  ```
-  Until PR #6794 landed, the native runner was never refreshed at all, so
-  `codegen/*` results under the dev loop before that should not be trusted: a
-  compiler change could be followed by a passing test that had exercised the
-  previous compiler.
+  History, for results produced by older trees: before PR #6794 the native
+  runner was never refreshed; after it and until this sync landed, the refresh
+  was gated on an mtime comparison against the dev compiler, which never fires
+  for changes to modules only the runners link (the toplevels, and the whole
+  native backend for expectnat) -- so `codegen/*` and toplevel-affecting
+  results from those trees should not be trusted either: a compiler change
+  could be followed by a passing test that had exercised the previous
+  compiler.
 - **A test reported as `skipped` under `make dev-test` that runs elsewhere.** The
   dev test root's `ocamlc.byte` is the boot `main.bc`, built by the host compiler,
   so the in-tree `ocamlrun` cannot execute it. Rather than failing, those actions

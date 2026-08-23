@@ -723,6 +723,18 @@ dev-expect-runners:
 	$(dune) build $(ws_main) \
 	  $(addprefix oxcaml/testsuite/tools/,$(addsuffix .exe,$(DEV_RUNNERS)))
 
+# The expect-test runners are synced with dune on every run, not behind a
+# staleness heuristic. The runners link libraries the dev compiler does not
+# (the toplevels, and for expectnat the whole native backend via
+# ocamlopttoplevel), so no comparison against the dev compiler's mtime can be
+# sound: a change to toplevel/genprintval.ml or backend/* never advances
+# main_native.exe, and the previous heuristic then silently accepted a runner
+# built from the old sources -- a green result against the previous compiler.
+# Only dune's dependency tracking of the main workspace knows whether the
+# runner matches the sources, and asking costs about a second when nothing
+# changed. A vintage stamp compiled into the runner was rejected for the same
+# reason the mtime check failed: it duplicates the link-time dependency set by
+# hand, and drifts the next time a runner gains a library.
 dev-test: dev-check
 	+@set -eu; \
 	  if [ -z "$(TEST)$(DIR)" ]; then \
@@ -732,22 +744,12 @@ dev-test: dev-check
 	  fi; \
 	  selection="$(if $(TEST),$(call locate_test,$(TEST)),$(call locate_test,$(DIR)))"; \
 	  selection="testsuite/$$selection"; \
-	  stale_runners=""; \
-	  for runner in $$($(MAKE) --no-print-directory dev-runners-needed \
-	      $(if $(TEST),TEST=$(TEST)) $(if $(DIR),DIR=$(DIR))); do \
-	    artifact=_build/main/oxcaml/testsuite/tools/$$runner.exe; \
-	    if [ ! -x $$artifact ] || \
-	       [ $(dev_compiler) -nt $$artifact ] || \
-	       find oxcaml/testsuite/tools -type f -newer $$artifact \
-	         -print -quit | grep -q .; then \
-	      stale_runners="$$stale_runners $$runner"; \
-	    fi; \
-	  done; \
-	  if [ -n "$$stale_runners" ]; then \
-	    echo "dev: refreshing expect-test runner(s):$$stale_runners"; \
+	  runners=$$($(MAKE) --no-print-directory dev-runners-needed \
+	      $(if $(TEST),TEST=$(TEST)) $(if $(DIR),DIR=$(DIR)) | xargs); \
+	  if [ -n "$$runners" ]; then \
+	    echo "dev: syncing expect-test runner(s) with dune: $$runners"; \
 	    $(MAKE) --no-print-directory dev-expect-runners \
-	      DEV_IDLE_TIMEOUT=$(DEV_IDLE_TIMEOUT) \
-	      DEV_RUNNERS="$$stale_runners"; \
+	      DEV_RUNNERS="$$runners"; \
 	  fi; \
 	  $(dev_watcher) prepare-test-root; \
 	  echo "dev: compiler = $(dev_build)/default/main_native.exe"; \

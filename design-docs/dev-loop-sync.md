@@ -46,6 +46,18 @@ status/log/heartbeat plumbing, and no recovery self-tests.
   stopping with advice. `DEV_NO_AUTO_STDLIB=1` restores the error.
 - `dev-selftest` drops the watcher-recovery test and keeps the
   runner-selection checks.
+- `dev-test` syncs the expect-test runners a selection needs with a dune
+  build on every run, instead of gating the refresh on an mtime
+  comparison against the dev compiler. The runners link libraries the
+  dev compiler does not (the toplevels; the whole native backend for
+  `expectnat`), so a change there never advanced `main_native.exe`'s
+  mtime and the old gate silently accepted a runner built from the
+  previous sources — a green expect result against the previous
+  compiler. Dune's dependency tracking of the main workspace is the
+  only sound answer to "does the runner match the sources", and asking
+  costs ~1s when nothing changed. A vintage stamp compiled into the
+  runner was rejected: it would duplicate the link-time dependency set
+  by hand and drift the next time a runner gains a library.
 - `tools/dev-watcher.py` remains for its non-watcher utilities
   (`prepare-test-root`, `diff`), which the loop still uses; its
   supervise/build subcommands are dead and can be deleted in a later
