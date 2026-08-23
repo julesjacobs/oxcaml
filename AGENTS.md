@@ -8,7 +8,8 @@ make dev-configure   # or, by hand: autoconf27 && ./configure --prefix="$PWD/_in
 make dev
 ```
 This takes about 5 minutes. Subsequent `make dev` invocations are much faster
-because they use an incremental background watcher.
+because dune rebuilds incrementally (the loop is synchronous; there is no
+background watcher).
 
 `configure` is not tracked in git, so every new worktree needs generating it, and
 `configure.ac` requires autoconf >= 2.71 — newer than the `autoconf` on many
@@ -58,6 +59,24 @@ Corollary: a change to `typing/types.ml` that alters marshaled shapes costs
 one automatic ~3-minute stdlib refresh, not a 15-minute reinstall. If an
 agent or a doc tells you to run `install_for_test` after a Types change,
 it is describing the pre-synchronous loop; don't.
+
+### What each target rebuilds — and what it does NOT
+
+The NOT column is load-bearing: a test result is only meaningful if every
+artifact it exercises postdates your last edit, and each row states which
+part of that the target discharges for you. Anything in a NOT cell is
+something the target assumes current.
+
+| target | rebuilds | does NOT rebuild |
+|---|---|---|
+| `make dev` (also `dev-errors`; also the first step of every target below, via `dev-check`) | the boot workspace into `_build/dev-dune`: dev compiler (`main_native.exe`, `boot_ocamlopt.exe`, `main.bc`), ocamltest, small tools; plus the runtime+stdlib when a `runtime/`/`stdlib/`/`otherlibs/` source is newer than the installed stdlib, or when the one-line probe catches a marshaled-`.cmi`-shape break | the expect-test runners (main workspace); `_install`/`_runtest`; every non-expect tool in the test root |
+| `make dev-test` | everything `dev` does; the expect runners the selection's TEST tokens name, synced with dune unconditionally (~1s no-op; a real relink exactly after a change to their inputs, ~3 min for expectnat); the composed test root (fresh symlinks each run — the previous run's output artifacts are discarded) | `_install`/`_runtest`; the non-expect tools linked from `_runtest` (e.g. `codegen`, which the asmgen family runs) stay at `install_for_test` vintage, so a backend change is NOT reflected in them — known gap, see design-docs/dev-loop-sync.md |
+| `make dev-promote` | the same set as `dev-test` (it runs `dev-test PROMOTE=1`, up to 3 convergence rounds) | the same as `dev-test` |
+| `make dev-test-all` | ocamltest explicitly, then the full main workspace, `_install` and `_runtest` (expect runners included) via `install_for_test` | the boot compiler and the runtime+stdlib inside `install_for_test` (passed `-o`: taken as `dev-check` just left them) |
+| `make dev-expect-runners DEV_RUNNERS=...` | the named runners and their main-workspace library closure | the dev compiler; the stdlib; the test root |
+| `make dev-refresh-stdlib` | the runtime+stdlib workspace (and its boot-compiler prerequisite, in `_build/default`) | the `_build/dev-dune` build; the runners; `_runtest` |
+| `make dev-ocamlc` / `dev-ocamlopt` | what `dev` rebuilds, then runs the dev compiler on `ARGS` against the runtime_stdlib install | the runners; the test root |
+| `make dev-runners-needed`, `dev-diff`, `dev-selftest`, `dev-stop` | nothing (query, report, or legacy-migration only) | everything |
 
 Promote with `make dev-promote`, **never** by copying a `.corrected` file. The
 expect harness runs twice, plain and `-principal`; the second pass writes

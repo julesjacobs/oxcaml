@@ -708,6 +708,17 @@ dev-selftest:
 	  check codegen "expectnat "; \
 	  check tool-expect-test "expect expectnat "; \
 	  check tool-expect-test/braced_token.ml "expectnat "; \
+	  echo "== the token spellings the runner grep knows are ocamltest's"; \
+	  tokens=$$(grep -o 'test_name = "expect[^"]*"' ocamltest/ocaml_tests.ml \
+	    | sed 's/.*"\(.*\)"/\1/' | sort | tr '\n' ' '); \
+	  if [ "$$tokens" = "expect expect.opt " ]; then \
+	    echo "ok: ocamltest's expect-family tokens are [$$tokens]"; \
+	  else \
+	    echo "FAIL: ocamltest's expect-family tokens are [$$tokens]:"; \
+	    echo "FAIL: teach dev-runners-needed the new one, or it will run"; \
+	    echo "FAIL: against an unsynced runner silently"; \
+	    failures=1; \
+	  fi; \
 	  test $$failures = 0
 
 # Fresh diagnostics straight from the running watcher, without a build round
