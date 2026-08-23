@@ -101,3 +101,9 @@ stdlib refresh is automatic, and the map above is in AGENTS.md.
 - Touching `hacking` / `hacking-emacs-*` (upstream-style polling
   targets, separate from the dev loop).
 - Any change to `dev-test-all` semantics.
+- Syncing the other built test tools in the dev root: `prepare-test-root`
+  links everything in `testsuite/tools` except the expect runners from
+  `_runtest`, at `install_for_test` vintage — so e.g. a backend change
+  followed by `make dev-test DIR=asmgen` runs the install-vintage
+  `codegen` binary with no sync and no message. Same staleness shape as
+  the expect runners, one tool over; a named future piece of its own.

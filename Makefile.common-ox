@@ -670,16 +670,19 @@ dev-refresh-stdlib:
 	  $(MAKE) --no-print-directory runtime-stdlib
 
 # Which expect-test runners a selection's tests ask for, decided by the token in
-# their TEST blocks. Separate from the staleness comparison, and printed rather
-# than only used internally, so the decision can be checked: this is exactly the
-# decision that was silently wrong, and nothing could observe it.
+# their TEST blocks. Separate from the sync itself, and printed rather than
+# only used internally, so the decision can be checked: this is exactly the
+# decision that was silently wrong, and nothing could observe it. The boundary
+# classes include braces because the TSL lexer treats { and } as tokens in
+# their own right (ocamltest/tsl_lexer.mll), so `{expect.opt;}` is a valid
+# spelling; tool-expect-test/braced_token.ml and dev-selftest pin it.
 dev-runners-needed:
 	@set -eu; \
 	  selection="testsuite/$(call locate_test,$(if $(TEST),$(TEST),$(DIR)))"; \
 	  for runner in expect expectnat; do \
 	    case $$runner in \
-	      expect) pattern='(^|[;[:space:]])expect([;[:space:]]|$$)' ;; \
-	      expectnat) pattern='(^|[;[:space:]])expect\.opt([;[:space:]]|$$)' ;; \
+	      expect) pattern='(^|[;{}[:space:]])expect([;{}[:space:]]|$$)' ;; \
+	      expectnat) pattern='(^|[;{}[:space:]])expect\.opt([;{}[:space:]]|$$)' ;; \
 	    esac; \
 	    if grep -ERq --include='*.ml' "$$pattern" "$$selection"; then \
 	      printf '%s\n' $$runner; \
@@ -704,6 +707,7 @@ dev-selftest:
 	  }; \
 	  check codegen "expectnat "; \
 	  check tool-expect-test "expect expectnat "; \
+	  check tool-expect-test/braced_token.ml "expectnat "; \
 	  test $$failures = 0
 
 # Fresh diagnostics straight from the running watcher, without a build round
@@ -854,7 +858,6 @@ dev-promote:
 	  promoted=no; \
 	  while [ $$pass -le $(DEV_PROMOTE_PASSES) ]; do \
 	    if $(MAKE) --no-print-directory dev-test PROMOTE=1 \
-	        DEV_IDLE_TIMEOUT=$(DEV_IDLE_TIMEOUT) \
 	        $(if $(TEST),TEST=$(TEST)) $(if $(DIR),DIR=$(DIR)) \
 	        >"$$promote_log" 2>&1; then \
 	      cat "$$promote_log"; \
@@ -862,7 +865,6 @@ dev-promote:
 	    fi; \
 	    cat "$$promote_log"; \
 	    if $(MAKE) --no-print-directory dev-test \
-	        DEV_IDLE_TIMEOUT=$(DEV_IDLE_TIMEOUT) \
 	        $(if $(TEST),TEST=$(TEST)) $(if $(DIR),DIR=$(DIR)); then \
 	      echo "dev: promoted test output (converged after $$pass pass(es))"; \
 	      exit 0; \
