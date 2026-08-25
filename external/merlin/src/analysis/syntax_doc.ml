@@ -259,8 +259,9 @@ let get_mode_doc (Atom (axis, mode) : Mode.Alloc.atom) =
       Some "Functions with this mode can write but not read mutable data"
     | Comonadic Totality, Total ->
       Some
-        "Functions with this mode terminate without raising exceptions or \
-         accessing mutable state"
+        "Functions with this mode do not themselves diverge, raise exceptions, \
+         or access mutable state; calls through function arguments are \
+         excluded"
     | Comonadic Totality, Partial ->
       Some
         "Functions with this mode may diverge, raise exceptions, or access \
