@@ -97,13 +97,16 @@ external ( || ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ portable =
 
 (* Integer operations *)
 
-external ( ~- ) : (int[@local_opt]) -> int @@ portable = "%negint"
-external ( ~+ ) : (int[@local_opt]) -> int @@ portable = "%identity"
-external succ : (int[@local_opt]) -> int @@ portable = "%succint"
-external pred : (int[@local_opt]) -> int @@ portable = "%predint"
-external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%addint"
-external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%subint"
-external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%mulint"
+external ( ~- ) : (int[@local_opt]) -> int @@ total = "%negint"
+external ( ~+ ) : (int[@local_opt]) -> int @@ total = "%identity"
+external succ : (int[@local_opt]) -> int @@ total = "%succint"
+external pred : (int[@local_opt]) -> int @@ total = "%predint"
+external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%addint"
+external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%subint"
+external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%mulint"
 external ( / ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%divint"
 external ( mod ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%modint"
 
@@ -237,9 +240,9 @@ let char_of_int n =
 
 (* Unit operations *)
 
-external ignore : ('a : value_or_null). 'a -> unit @@ portable = "%ignore"
+external ignore : ('a : value_or_null). 'a -> unit @@ total = "%ignore"
 external ignore_contended : ('a : value_or_null).
-  'a @ contended local once -> unit @@ portable = "%ignore"
+  'a @ contended local once -> unit @@ total = "%ignore"
 
 (* Pair operations *)
 
@@ -249,7 +252,8 @@ external snd : ('a * 'b[@local_opt]) -> ('b[@local_opt]) @@ portable = "%field1_
 (* References *)
 
 type ('a : value_or_null) ref = { mutable contents : 'a }
-external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) @@ portable = "%makemutable"
+external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) @@ total
+  = "%makemutable"
 external ( ! ) : ('a : value_or_null) . ('a ref[@local_opt]) -> 'a @@ portable = "%field0"
 external ( := ) : ('a : value_or_null) . ('a ref[@local_opt]) -> 'a -> unit @@ portable = "%setfield0"
 external incr : (int ref[@local_opt]) -> unit @@ portable = "%incr"
