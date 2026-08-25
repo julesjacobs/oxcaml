@@ -1455,6 +1455,14 @@ let tree_of_modes (modes : Mode.Alloc.Const.t) =
       | _, _ -> Some modes.contention
     in
 
+    (* [statefulness] has an implied default based on [totality]: *)
+    let statefulness =
+      match modes.totality, modes.statefulness with
+      | Total, Stateless -> None
+      | Partial, Stateful -> None
+      | _, _ -> Some modes.statefulness
+    in
+
     (* [portability] has implied defaults based on [statefulness]: *)
     let portability =
       match modes.statefulness, modes.portability with
@@ -1466,7 +1474,7 @@ let tree_of_modes (modes : Mode.Alloc.Const.t) =
     in
 
     let diff = Mode.Alloc.Const.diff modes Mode.Alloc.Const.legacy in
-    { diff with forkable; yielding; contention; portability }
+    { diff with forkable; yielding; statefulness; contention; portability }
   in
   (* Step 2: Print the modes *)
   List.filter_map
