@@ -174,7 +174,7 @@ let get_mod_bound_doc mod_bound =
     | Everything ->
       Some
         "Synonym for \"global aliased many contended portable unyielding \
-         immutable stateless external_\", convenient for describing \
+         immutable total stateless external_\", convenient for describing \
          immediates."
   in
   (Some
@@ -257,6 +257,14 @@ let get_mode_doc (Atom (axis, mode) : Mode.Alloc.atom) =
       Some "Functions with this mode cannot access mutable data"
     | Comonadic Statefulness, Writing ->
       Some "Functions with this mode can write but not read mutable data"
+    | Comonadic Totality, Total ->
+      Some
+        "Functions with this mode terminate without raising exceptions or \
+         accessing mutable state"
+    | Comonadic Totality, Partial ->
+      Some
+        "Functions with this mode may diverge, raise exceptions, or access \
+         mutable state"
     | Comonadic Forkable, Forkable ->
       Some "Functions with this mode may be executed concurrently."
     | Comonadic Forkable, Unforkable ->
@@ -276,6 +284,7 @@ let get_mode_doc (Atom (axis, mode) : Mode.Alloc.atom) =
       | Comonadic Yielding -> "modes/intro/"
       | Monadic Visibility -> "modes/intro/"
       | Comonadic Statefulness -> "modes/intro/"
+      | Comonadic Totality -> "modes/intro/"
       | Comonadic Forkable -> "modes/intro/"
       | Monadic Staticity -> "modes/intro/"
     in

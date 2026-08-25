@@ -549,7 +549,7 @@ Convenience function to ensure we haven't made any syntax errors.
   $ syn_doc_desc kinds.ml 7 28
   type t : float64 mod everything
                               ^
-  Synonym for "global aliased many contended portable unyielding immutable stateless external_", convenient for describing immediates.
+  Synonym for "global aliased many contended portable unyielding immutable total stateless external_", convenient for describing immediates.
 
   $ syn_doc_desc kinds.ml 1 40
   type ('a : immediate) t : value mod portable with 'a @@ global
