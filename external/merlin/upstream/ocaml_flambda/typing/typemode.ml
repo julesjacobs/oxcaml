@@ -390,19 +390,20 @@ let least_modalities ~include_implied ~mut (t : Modality.Const.t) =
     List.filter (fun x -> not @@ List.mem x implied) annotated
   in
   let overridden =
-    List.filter_map
-      (fun (Modality.Atom (ax, m_implied)) ->
+    List.fold_left
+      (fun overridden (Modality.Atom (ax, m_implied)) ->
         let m_projected = Modality.Const.proj ax t in
         let already_listed =
           List.exists
             (fun (Modality.Atom (ax', _)) ->
               Modality.Axis.P ax' = Modality.Axis.P ax)
-            exclude_implied
+            (exclude_implied @ overridden)
         in
         if (m_projected <> m_implied || include_implied) && not already_listed
-        then Some (Modality.Atom (ax, m_projected))
-        else None)
-      implied
+        then Modality.Atom (ax, m_projected) :: overridden
+        else overridden)
+      [] implied
+    |> List.rev
   in
   exclude_implied @ overridden
 
