@@ -320,6 +320,10 @@ val walk_locks : env:t -> loc:Location.t -> Longident.t ->
     stateful. *)
 val walk_locks_for_legacy_construct : env:t -> Mode.Hint.pinpoint -> unit
 
+(** Constrains every enclosing closure to be partial without affecting any
+    other mode axis. *)
+val walk_locks_for_partial_construct : env:t -> Mode.Hint.pinpoint -> unit
+
 val lookup_value:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * value_description * mode_with_locks

@@ -6312,6 +6312,7 @@ let mode_crossing_structure_memaddr =
     ~portability:true
     ~forkable:true
     ~yielding:true
+    ~totality:true
     ~statefulness:true
     ~staticity:false
 
@@ -6326,6 +6327,7 @@ let mode_crossing_functor =
     ~portability:false
     ~forkable:false
     ~yielding:false
+    ~totality:false
     ~statefulness:false
     ~staticity:false
 
