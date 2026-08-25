@@ -1,0 +1,3 @@
+(goal 1
+  (verdict sat)
+  (counters (conflicts <100) (decisions <10k) (propagations <10k)))

@@ -1,0 +1,13 @@
+diff --git a/smt/theories/euf/euf.ml b/smt/theories/euf/euf.ml
+index c05a4a396c..7ad5586ea6 100644
+--- a/smt/theories/euf/euf.ml
++++ b/smt/theories/euf/euf.ml
+@@ -412,7 +412,7 @@ let rec register t (term : Term.t) : int =
+     (match term.node with
+      | Eq (a, b) when not (Sort.equal a.sort Sort.bool) -> add_watch a b
+      | App (_, args) when Sort.equal term.sort Sort.bool && Iarr.length args >= 1 ->
+-       add_watch term (Context.bool_const t.ctx true)
++       add_watch term (Context.bool_const t.ctx false)
+      | _ -> ());
+     id
+ ;;

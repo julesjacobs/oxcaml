@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=Contextual simplification shares ONE memo table across all branch scopes (memo = env.memo instead of a fresh Term.Table per scope). Because each ite condition is simplified under the PARENT scope first, its subterms (in particular the variable) are memoized as themselves; a shared table then returns those pre-substitution results inside the branches, shadowing the branch's x->k substitution. The pass then folds nothing — a SILENT NO-OP that forfeits the entire win (nec-smt / Dartagnan stay un-collapsed). Sound (verdicts are preserved — the substitution is bypassed, not corrupted), so it is caught by the effectiveness oracles, not a verdict flip: test_ctx_simp_fires (the then-branch of (ite (= x 5) (>= x 100) foo) must fold to false) and test_ctx_simp_nested_refold both require simplification the shared memo prevents.
+review=task #13 contextual simplification; logs/codex-review/ctx-simplifier.md LOW-3 (effectiveness not soundness); per-branch-scoped memo
+expected=KILLED-TEST

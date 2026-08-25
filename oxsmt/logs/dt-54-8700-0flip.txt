@@ -1,0 +1,1 @@
+QF_DT 8700 0-flip A/B (trunk db07aa58ca vs fix): TOTAL=8700 same=8700 FLIPS=0

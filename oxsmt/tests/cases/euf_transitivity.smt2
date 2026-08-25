@@ -1,0 +1,11 @@
+; EUF transitivity: a = b, b = c, but a != c is unsat.
+(set-logic QF_UF)
+(set-info :status unsat)
+(declare-sort S 0)
+(declare-const a S)
+(declare-const b S)
+(declare-const c S)
+(assert (= a b))
+(assert (= b c))
+(assert (distinct a c))
+(check-sat)

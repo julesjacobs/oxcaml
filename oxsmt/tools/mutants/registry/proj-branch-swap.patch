@@ -1,0 +1,13 @@
+diff --git aa/smt/interface/presolve.ml bb/smt/interface/presolve.ml
+index 9a3e3d7981..cbd12251d8 100644
+--- aa/smt/interface/presolve.ml
++++ bb/smt/interface/presolve.ml
+@@ -795,7 +795,7 @@ let simplify_projection ctx assertions =
+       incr projections;
+       let r =
+         match ite_t.node with
+-        | Ite (c, x, y) -> bool_ite ctx c (rewrite_eq x d) (rewrite_eq y d)
++        | Ite (c, x, y) -> bool_ite ctx c (rewrite_eq y d) (rewrite_eq x d)
+         | _ -> Context.eq ctx ite_t d (* unreachable: caller guarantees an Ite *)
+       in
+       Hashtbl.add proj_memo key r;

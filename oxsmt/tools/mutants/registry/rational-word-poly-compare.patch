@@ -1,0 +1,30 @@
+diff --git a/smt/theories/lia/rational.ml b/smt/theories/lia/rational.ml
+index 932be2056d..00e07088ff 100644
+--- a/smt/theories/lia/rational.ml
++++ b/smt/theories/lia/rational.ml
+@@ -397,23 +397,9 @@ let abs x =
+ let compare x y =
+   if W.is_immediate x && W.is_immediate y
+   then Int.compare (W.to_int_unchecked x) (W.to_int_unchecked y)
+-  else if W.is_immediate x
+-  then (
+-    match W.to_block y with
+-    | W.Frac f -> compare_small (W.to_int_unchecked x) 1 f.n f.d
+-    | W.Big _ -> big_compare (to_big x) (to_big y))
+-  else if W.is_immediate y
+-  then (
+-    match W.to_block x with
+-    | W.Frac f -> compare_small f.n f.d (W.to_int_unchecked y) 1
+-    | W.Big _ -> big_compare (to_big x) (to_big y))
+   else (
+-    match W.to_block x with
+-    | W.Big _ -> big_compare (to_big x) (to_big y)
+-    | W.Frac fx ->
+-      (match W.to_block y with
+-       | W.Frac fy -> compare_small fx.n fx.d fy.n fy.d
+-       | W.Big _ -> big_compare (to_big x) (to_big y)))
++    ignore compare_small;
++    Stdlib.compare x y)
+ ;;
+ 
+ (* Value-based equality. Both immediate is a direct int equality; anything else routes

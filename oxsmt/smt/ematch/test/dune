@@ -1,0 +1,19 @@
+; Lemma-tier tranche-1 acceptance (ADR-0012 §7): the soundness-rule honeypots + the
+; assert-side reserved-symbol gate, driven end-to-end through the REAL Session + Cdclt +
+; Combine + EUF + LIA stack (no mocks). Stays within smt/ (dependency firewall, I3). Run
+; via `make lemma-test`; also built by `make build`. Links the shipped session
+; (oxsmt_interface) and the tier (oxsmt_ematch): no cycle — interface depends on ematch,
+; these tests are leaves above both.
+;
+; [crit_repro] is lemma-reviewer-2's verbatim drop-in reproducer for codex's two CRITICAL
+; wrong-Unsat findings (C1 witness-capture-via-public-intern, C2 cross-session-lemma-
+; injection); kept byte-identical to logs/lemma-crit-repro.ml so the scoped-confirm round
+; checks the exact same file. RED (unsat) on the unfixed tip, PASS (not-unsat / rejection)
+; on the fix.
+
+; [matcher_test] is the tranche-2 acceptance (ADR-0012 L2/L3/R4): the E-matcher, both as
+; unit tests over a hand-rolled Egraph_view and end-to-end through the real Session stack.
+
+(executables
+ (names lemma_honeypot_test crit_repro matcher_test)
+ (libraries oxsmt_core oxsmt_solver oxsmt_ematch oxsmt_interface))

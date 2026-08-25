@@ -1,0 +1,6 @@
+module=presolve
+suite=wiring-test
+target=smt/interface/presolve.ml
+description=Contextual simplification adds the equality substitution x->k for an (= x k) condition REGARDLESS of the assumed polarity (if true instead of if truth), so a DISEQUALITY establishes an equality. After peeling the leading Not of (not (= x 5)), the then-branch (condition true) knows only x <> 5 — no substitution — but the mutant still records x->5. On (ite (not (= x 5)) (>= x 100) false) the correct answer is sat (x=100); the mutant folds (>= x 100) to (>= 5 100) = false and flips to unsat. This is the assume-non-equality-condition mis-scope. Killed by test_ctx_simp_polarity_oracle (unit) AND test_ctx_simp_n3_polarity_e2e (the reviewer's n3: end-to-end through assert_presolved->check_sat, a stronger wrong-unsat discriminator).
+review=task #13 contextual simplification; logs/codex-review/ctx-simplifier.md (n3 proven discriminating); soundness net (equality subst only on the true polarity)
+expected=KILLED-TEST

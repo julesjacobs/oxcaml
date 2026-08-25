@@ -1,0 +1,8 @@
+; In-tree unit + property tests for smt/core. Kept stdlib-only (depends only on
+; oxsmt_core), so it honors the dependency firewall (I3) even though it lives
+; under smt/. Run via `make core-test`; also built by `make build`.
+
+(executable
+ (name core_test)
+ (modules core_test)
+ (libraries oxsmt_core))

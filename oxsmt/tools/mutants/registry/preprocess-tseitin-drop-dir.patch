@@ -1,0 +1,14 @@
+diff --git a/smt/preprocess/cnf.ml b/smt/preprocess/cnf.ml
+index 124cff5..67212f3 100644
+--- a/smt/preprocess/cnf.ml
++++ b/smt/preprocess/cnf.ml
+@@ -137,8 +137,7 @@ let clausify (formula : Term.t) =
+          | And xs ->
+            (* g <-> /\ li : (¬g ∨ li) each, and (g ∨ ¬l1 ∨ … ∨ ¬ln). *)
+            let ls = map_lr lit_of (Iarr.to_list xs) in
+-           List.iter (fun li -> emit [ neg g; li ]) ls;
+-           emit (pos g :: map_lr Lit.negate ls)
++           List.iter (fun li -> emit [ neg g; li ]) ls
+          | Or xs ->
+            (* g <-> \/ li : (¬li ∨ g) each, and (¬g ∨ l1 ∨ … ∨ ln). *)
+            let ls = map_lr lit_of (Iarr.to_list xs) in

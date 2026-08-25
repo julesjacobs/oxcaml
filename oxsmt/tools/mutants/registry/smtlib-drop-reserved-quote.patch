@@ -1,0 +1,28 @@
+diff --git a/smt/lexical/lexer.ml b/smt/lexical/lexer.ml
+index 988cc002e5..7e50ec87ff 100644
+--- a/smt/lexical/lexer.ml
++++ b/smt/lexical/lexer.ml
+@@ -21,22 +21,7 @@ exception Error of string
+ (* §3.1 reserved words. Quoting escapes reserved-ness: [|let|] is an ordinary symbol. Note
+    Core/Ints operators ([and], [+], [true], …) are NOT lexically reserved — they are
+    ordinary symbols the grammar layer interprets. *)
+-let reserved_words =
+-  [ "_"
+-  ; "!"
+-  ; "as"
+-  ; "let"
+-  ; "exists"
+-  ; "forall"
+-  ; "match"
+-  ; "par"
+-  ; "BINARY"
+-  ; "DECIMAL"
+-  ; "HEXADECIMAL"
+-  ; "NUMERAL"
+-  ; "STRING"
+-  ]
+-;;
++let reserved_words = []
+ 
+ (* §3.1 ⟨symbol⟩ constituent characters of a simple symbol. *)
+ let is_symbol_char = function

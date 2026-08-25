@@ -1,0 +1,237 @@
+(* The instantiation manager (ADR-0012 §1.2/§1.4/§1.5). Tranche 1: store + frame-scoped
+   liveness/dedup + a manual seed queue + the budget-bounded [round] that drains it. The
+   matcher (tranche 2) replaces the seed producer; everything else here is durable. *)
+
+open Oxsmt_core
+module Sat = Oxsmt_solver.Sat
+
+let default_gen_budget = 100_000
+
+type stats =
+  { live_lemmas : int
+  ; instances : int
+  ; rounds : int
+  }
+
+(* Provenance of one generated ground instance (ADR-0012: "each instantiation records
+   which lemma and which substitution produced it, and replays in the certificate
+   checker"). Certificate replay of instantiations is a later tranche, but the RECORD
+   exists now: an append-only log of every NEW instance actually handed to the session to
+   assert. A budget-aborted round's instances are rolled OUT of the log (they are never
+   asserted), so the log is exactly the asserted-instance sequence. *)
+type instantiation =
+  { lemma_id : int (* the source lemma's dense id ({!Lemma.t.id}) *)
+  ; subst : Term.t array (* ground image of each qvar, in [Lemma.qvars] order *)
+  ; instance : Term.t (* the resulting ground body [φ[σ]] *)
+  }
+
+type t =
+  { ctx : Context.t
+  ; env : Env.t
+  ; gen_budget : int
+  ; mutable next_id : int
+  ; mutable lemmas : Lemma.t list (* the live store; a pop filters it (§1.5) *)
+  ; seeds : (Lemma.t * Term.t array) Queue.t (* tranche-1 manual instances *)
+  ; dedup : (Sat.var * int, unit) Hashtbl.t
+    (* (owning frame selector, instance body tag) -> present. Keyed on (frame, tag), NOT
+         tag alone (codex M1): the SAME body guarded by two different selectors is two
+         DIFFERENT clauses, so two live lemmas' equal-bodied instances must NOT dedup each
+         other. Scoped to active-clause lifetime — dropped on that frame's pop (§1.4 R2). *)
+  ; mutable budget_remaining : int
+  ; mutable budget_hit : bool
+  ; mutable total_instances : int
+  ; mutable total_rounds : int
+  ; mutable provenance : instantiation list (* newest-first; see {!instantiation} *)
+  }
+
+let create ?(gen_budget = default_gen_budget) ctx env =
+  { ctx
+  ; env
+  ; gen_budget
+  ; next_id = 0
+  ; lemmas = []
+  ; seeds = Queue.create ()
+  ; dedup = Hashtbl.create 64
+  ; budget_remaining = gen_budget
+  ; budget_hit = false
+  ; total_instances = 0
+  ; total_rounds = 0
+  ; provenance = []
+  }
+;;
+
+let context t = t.ctx
+let env t = t.env
+
+let fresh_id t =
+  let id = t.next_id in
+  t.next_id <- t.next_id + 1;
+  id
+;;
+
+let add_lemma t (lemma : Lemma.t) = t.lemmas <- lemma :: t.lemmas
+let has_live_lemma t = t.lemmas <> []
+
+(* codex C2: only a lemma PHYSICALLY present in this manager's live store may be seeded.
+   [List.memq] closes ownership AND liveness in one check: a handle from a different
+   session is not in this manager's store (its base selector would otherwise collide,
+   riding an active foreign selector -> wrong Unsat); a popped lemma was filtered out of
+   the store by [on_pop]. Reject a foreign/stale handle rather than enqueue it. *)
+let seed_instance t lemma sigma =
+  if not (List.memq lemma t.lemmas)
+  then
+    invalid_arg
+      "Ematch.Manager.seed_instance: lemma handle is not a live lemma of this session \
+       (foreign or popped)";
+  Queue.add (lemma, sigma) t.seeds
+;;
+
+let begin_check t =
+  t.budget_remaining <- t.gen_budget;
+  t.budget_hit <- false
+;;
+
+let budget_exhausted t = t.budget_hit
+
+(* Debit one generation-budget step; raise [Matcher.Budget_exhausted] the instant the
+   budget is spent (R4). Shared with the matcher (which debits its own enumeration steps
+   against the same [budget] ref); [round] catches the exception and degrades to
+   [unknown]. *)
+let spend budget =
+  if !budget <= 0 then raise Matcher.Budget_exhausted;
+  decr budget
+;;
+
+(* Produce the next batch of ground instances (ADR-0012 §1.4, tranche 2). Two producers
+   feed ONE dedup + budget + assert pipeline:
+   1. the E-matcher ({!Matcher.substitutions}) over every live lemma, in deterministic
+      lemma-id order (R8 round-robin fairness is tranche 3); and
+   2. the tranche-1 manual seed queue ({!seed_instance}), still supported so the manual
+      path and its honeypots keep working — a seeded instance the matcher also finds
+      dedups. The generation budget is debited INSIDE the matcher's enumeration (R4) and
+      once per NEW emitted instance / drained seed; on exhaustion the whole round stops
+      with instances still pending, and the loop degrades to [unknown] this check.
+      Deterministic order (matcher output, then seed FIFO order; I6). *)
+let round t view =
+  t.total_rounds <- t.total_rounds + 1;
+  let out = ref [] in
+  let budget = ref t.budget_remaining in
+  (* Keys this round added to [dedup], newest-first — so an aborted round can roll them
+     back (codex MED, manager.ml dedup pollution): the session asserts the WHOLE batch
+     [out] only when the round did NOT hit the budget; on [budget_exhausted] it discards
+     [out] and returns [Unknown] WITHOUT asserting (session.ml). If the dedup entries
+     survived, those never-asserted instances would be permanently suppressed on a later
+     round -> a missed refutation (spurious [Unknown] where [Unsat] is right). So a dedup
+     entry must only outlive the round if its instance is actually handed to the session
+     to assert. *)
+  let added = ref [] in
+  (* Manual seeds popped this round, newest-first — restored to the queue on abort so a
+     seed consumed by an aborted round is NOT lost (codex: the popped-seeds sibling of the
+     dedup-pollution path). The whole round is transactional: on [Budget_exhausted] the
+     session discards the batch, so both the dedup entries AND the consumed seeds roll
+     back to their pre-round state. *)
+  let consumed_seeds = ref [] in
+  (* Turn a (lemma, sigma) into a deduped, budget-debited instance. Dedup is keyed
+     (owning-frame selector, instance body tag): a duplicate (already-active clause) costs
+     no budget and emits nothing (redundancy filter, §L5). *)
+  let process (lemma : Lemma.t) sigma =
+    let inst = Instance.of_subst t.ctx ~qvars:lemma.qvars ~body:lemma.body sigma in
+    let key = lemma.frame, (Instance.to_term inst).Term.tag in
+    if Hashtbl.mem t.dedup key
+    then ()
+    else (
+      spend budget;
+      Hashtbl.replace t.dedup key ();
+      added := key :: !added;
+      t.total_instances <- t.total_instances + 1;
+      (* Provenance: one record per NEW instance, in lockstep with the dedup key. A
+         budget-aborted round drops exactly [List.length !added] newest records below, so
+         the log tracks the asserted-instance sequence (never a never-asserted instance). *)
+      t.provenance
+      <- { lemma_id = lemma.Lemma.id; subst = sigma; instance = Instance.to_term inst }
+         :: t.provenance;
+      out := (lemma.frame, inst) :: !out)
+  in
+  (try
+     (* [t.lemmas] is newest-first (add_lemma prepends); [List.rev] gives ascending id
+        order — deterministic. Each live lemma is matched against the read-only e-graph
+        view. *)
+     List.iter
+       (fun (lemma : Lemma.t) ->
+          List.iter (process lemma) (Matcher.substitutions view lemma ~budget))
+       (List.rev t.lemmas);
+     (* Drain the manual seed queue (tranche-1 scaffold). Record each popped seed BEFORE
+        processing so an abort mid-drain can restore the ones this round consumed. *)
+     while not (Queue.is_empty t.seeds) do
+       let seed = Queue.pop t.seeds in
+       consumed_seeds := seed :: !consumed_seeds;
+       let lemma, sigma = seed in
+       process lemma sigma
+     done
+   with
+   | Matcher.Budget_exhausted ->
+     t.budget_hit <- true;
+     (* Roll back this round's dedup entries + counters: the session will NOT assert the
+        aborted batch, so none of these instances become active clauses. *)
+     List.iter (Hashtbl.remove t.dedup) !added;
+     t.total_instances <- t.total_instances - List.length !added;
+     (* Drop this round's provenance records (the newest [List.length !added], since each
+        new instance appended exactly one) — they are never asserted. *)
+     let rec drop n l =
+       if n <= 0
+       then l
+       else (
+         match l with
+         | [] -> []
+         | _ :: tl -> drop (n - 1) tl)
+     in
+     t.provenance <- drop (List.length !added) t.provenance;
+     out := [];
+     (* Restore the seeds this aborted round consumed, at the FRONT of the queue in
+        original FIFO order (the not-yet-consumed remainder stays after them), so no
+        manual seed is dropped by an aborted round. *)
+     (match !consumed_seeds with
+      | [] -> ()
+      | _ :: _ ->
+        let restored = Queue.create () in
+        List.iter (fun s -> Queue.add s restored) (List.rev !consumed_seeds);
+        Queue.transfer t.seeds restored;
+        Queue.transfer restored t.seeds));
+  t.budget_remaining <- !budget;
+  List.rev !out
+;;
+
+let on_pop t selector =
+  t.lemmas <- List.filter (fun (l : Lemma.t) -> not (Int.equal l.frame selector)) t.lemmas;
+  (* drop dedup entries owned by the popped frame (§1.4 R2: retracted instance
+     re-generates) — the key is (frame, tag), so match on the frame component *)
+  let stale =
+    Hashtbl.fold
+      (fun ((fr, _tag) as key) () acc ->
+         if Int.equal fr selector then key :: acc else acc)
+      t.dedup
+      []
+  in
+  List.iter (Hashtbl.remove t.dedup) stale;
+  (* drop pending seeds whose lemma lived in the popped frame *)
+  let kept = Queue.create () in
+  Queue.iter
+    (fun ((l, _) as s) -> if not (Int.equal l.Lemma.frame selector) then Queue.add s kept)
+    t.seeds;
+  Queue.clear t.seeds;
+  Queue.transfer kept t.seeds
+;;
+
+(* The instantiation provenance, oldest-first (generation order). [t.provenance] is stored
+   newest-first, so reverse. A pop does NOT prune this: it is a HISTORICAL trace of what
+   was instantiated (the soundness of a popped instance is handled by its deactivated
+   frame selector, not by this record); frame-scoped pruning for replay is a
+   certificate-tranche concern. *)
+let instantiations t = List.rev t.provenance
+
+let stats t =
+  { live_lemmas = List.length t.lemmas
+  ; instances = t.total_instances
+  ; rounds = t.total_rounds
+  }
+;;

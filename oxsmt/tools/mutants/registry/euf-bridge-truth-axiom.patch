@@ -1,0 +1,13 @@
+diff --git a/smt/theories/euf/euf_adapter.ml b/smt/theories/euf/euf_adapter.ml
+index f39e7a6d83..27a2e31abf 100644
+--- a/smt/theories/euf/euf_adapter.ml
++++ b/smt/theories/euf/euf_adapter.ml
+@@ -59,7 +59,7 @@ let create ctx _env =
+      popped away and re-registration after a pop cannot lose it. *)
+   Euf.register_term engine true_const;
+   Euf.register_term engine false_const;
+-  Euf.assert_neq engine ~premise:P_axiom true_const false_const;
++  Euf.assert_eq engine ~premise:P_axiom true_const false_const;
+   { engine
+   ; true_const
+   ; false_const

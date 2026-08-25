@@ -1,0 +1,17 @@
+diff --git a/smt/theories/lia/rational.ml b/smt/theories/lia/rational.ml
+index 36d7bf3ef6..d3ab6f0a4c 100644
+--- a/smt/theories/lia/rational.ml
++++ b/smt/theories/lia/rational.ml
+@@ -53,11 +53,7 @@ let add_int a b =
+   if (b > 0 && r < a) || (b < 0 && r > a) then raise Overflow else r
+ ;;
+ 
+-let sub_int a b =
+-  let r = a - b in
+-  if (b < 0 && r < a) || (b > 0 && r > a) then raise Overflow else r
+-;;
+-
++let sub_int a b = a - b
+ let neg_int a = if a = min_int then raise Overflow else -a
+ 
+ let mul_int a b =

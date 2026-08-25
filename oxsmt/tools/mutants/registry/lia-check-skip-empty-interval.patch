@@ -1,0 +1,32 @@
+diff --git a/smt/theories/lia/simplex.ml b/smt/theories/lia/simplex.ml
+--- a/smt/theories/lia/simplex.ml
++++ b/smt/theories/lia/simplex.ml
+@@ -480,27 +480,7 @@ let conflict_of t (bi : 'a var) ~low =
+    FIX #3b: scans only the [dirty_bound] worklist (a superset of the vars that may have l
+    > u), not all vars; current bounds remain the ground truth (a member whose interval a
+    [pop] has since reopened is pruned), and [IntSet] order keeps the id-order scan. *)
+-let empty_interval_conflict t =
+-  let rec go s =
+-    match IntSet.min_elt_opt s with
+-    | None ->
+-      t.dirty_bound <- s;
+-      None
+-    | Some i ->
+-      let v = get t i in
+-      (match v.lower, v.upper with
+-       | Some l, Some u when Delta.lt u.bval l.bval ->
+-         t.dirty_bound <- s;
+-         Some
+-           (build_conflict
+-              t
+-              [ { var = i; mult = Rational.one; use_lower = true }
+-              ; { var = i; mult = Rational.one; use_lower = false }
+-              ])
+-       | _ -> go (IntSet.remove i s))
+-  in
+-  go t.dirty_bound
+-;;
++let empty_interval_conflict _t = None
+
+ let check t =
+   guarded t (fun () ->

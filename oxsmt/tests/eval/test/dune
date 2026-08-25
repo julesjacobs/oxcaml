@@ -1,0 +1,8 @@
+; N-version model-evaluator self-test (task #74, `make eval-test`). Stdlib-only,
+; deterministic, nonzero exit on any failed check. Depends only on oxsmt_core +
+; oxsmt_eval — no other module in the tree.
+
+(executable
+ (name eval_test)
+ (libraries oxsmt_core oxsmt_eval)
+ (modules eval_test))

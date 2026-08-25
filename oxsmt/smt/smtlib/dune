@@ -1,0 +1,12 @@
+; The SHIPPED SMT-LIB2 printer. Stdlib-only over oxsmt_core + oxsmt_lexical (both
+; stdlib-only, so the firewall / I3 holds): the printer's quoting decision is grounded in
+; the one shared lexer (ADR-0008) so it cannot disagree with any reader on a token boundary.
+;
+; The printer is the only thing that ships. The test-only PARSER is a separate library
+; (parser/), never listed here and never depended on by shipped code, so it cannot be
+; linked into the compiler artifact (DESIGN.md §3). Keeping the parser out of this
+; directory's library makes that boundary mechanically checkable.
+
+(library
+ (name oxsmt_smtlib)
+ (libraries oxsmt_core oxsmt_lexical))
