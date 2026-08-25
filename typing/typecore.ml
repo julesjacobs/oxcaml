@@ -3973,6 +3973,8 @@ and type_pat_aux
            pat_env = !!penv;
            pat_unique_barrier = Unique_barrier.not_computed () }
   | Ppat_lazy sp1 ->
+      Env.walk_locks_for_partial_construct ~env:!!penv
+        (loc, Mode.Hint.Expression);
       submode ~loc ~env:!!penv alloc_mode.mode mode_force_lazy;
       let nv = solve_Ppat_lazy loc penv expected_ty in
       let alloc_mode = global_pat_mode alloc_mode in
@@ -4029,6 +4031,8 @@ and type_pat_aux
       { p with pat_extra = (Tpat_open (path,lid,new_env),
                                 loc, sp.ppat_attributes) :: p.pat_extra }
   | Ppat_exception p ->
+      Env.walk_locks_for_partial_construct ~env:!!penv
+        (loc, Mode.Hint.Expression);
       let alloc_mode = simple_pat_mode Value.legacy in
       let p_exn =
         type_pat tps Value ~alloc_mode p Predef.type_exn
@@ -8346,6 +8350,7 @@ and type_expect_
         exp_env = env;
       }
   | Pexp_object s ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Object);
       Env.check_no_open_quotations loc env Object_qt;
       submode ~loc ~env Value.legacy expected_mode;
       let desc, meths = !type_object env loc s in
@@ -8559,6 +8564,7 @@ and type_expect_
           ty_params param_sort (mk_expected ty_func_result)
           ~check_if_total:true loc [scase]
       in
+      mark_partial_if_needed ~loc ~env partial;
       let body =
         match cases with
         | [case] -> case
@@ -8618,6 +8624,8 @@ and type_expect_
     begin match Builtin_attributes.get_tracing_probe_payload payload with
     | Error () -> raise (Error (loc, env, Probe_format))
     | Ok { name; name_loc; enabled_at_init; arg; } ->
+        Env.walk_locks_for_partial_construct ~env
+          (loc, Mode.Hint.Expression);
         check_probe_name name name_loc env;
         Env.add_probe name;
         let exp = type_expect env mode_legacy arg
@@ -8638,8 +8646,10 @@ and type_expect_
                          (Pexp_constant
                             { pconst_desc = Pconst_string(name,_,None); _});
                        pexp_loc = name_loc;
-                       _ } ,
+                      _ } ,
                       _)}]) ->
+        Env.walk_locks_for_partial_construct ~env
+          (loc, Mode.Hint.Expression);
         check_probe_name name name_loc env;
         add_delayed_check
           (fun () ->
@@ -8769,6 +8779,7 @@ and type_expect_
       {exp with exp_extra}
   | Pexp_comprehension comp ->
       Language_extension.assert_enabled ~loc Comprehensions ();
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Loop);
       type_comprehension_expr
         ~loc
         ~env
@@ -8780,6 +8791,7 @@ and type_expect_
         raise (Typetexp.Error (loc, env, Unsupported_extension Overwriting));
       if not (can_be_overwritten exp2.pexp_desc) then
         raise (Error (exp2.pexp_loc, env, Overwrite_of_invalid_term));
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let cell_mode, _ =
         (* The overwritten cell has to be unique
            and should have the areality expected here: *)
