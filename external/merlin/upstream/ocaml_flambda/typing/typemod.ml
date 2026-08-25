@@ -800,6 +800,42 @@ and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
       in
       Mty_strengthen (mty, path, alias)
 
+let partial_recursive_module_modality modality =
+  let modality = Mode.Modality.to_const_exn modality in
+  Mode.Modality.Const.set
+    (Mode.Modality.Axis.Comonadic Mode.Axis.Totality)
+    (Mode.Modality.Comonadic.Atom.Meet_const Mode.Totality.Const.Partial)
+    modality
+
+let rec partial_recursive_module_type env mty =
+  match Mtype.scrape env mty with
+  | Mty_ident _ | Mty_alias _ as mty -> mty
+  | Mty_signature sg ->
+      Mty_signature (List.map (partial_recursive_module_item env) sg)
+  | Mty_functor (param, result, mode) ->
+      Mty_functor (param, partial_recursive_module_type env result, mode)
+  | Mty_strengthen (mty, path, alias) ->
+      Mty_strengthen (partial_recursive_module_type env mty, path, alias)
+
+and partial_recursive_module_item env = function
+  | Sig_value (id, desc, visibility) ->
+      let val_modalities =
+        desc.val_modalities
+        |> partial_recursive_module_modality
+        |> Mode.Modality.of_const
+      in
+      Sig_value (id, { desc with val_modalities }, visibility)
+  | Sig_module (id, presence, desc, rec_status, visibility) ->
+      let md_type = partial_recursive_module_type env desc.md_type in
+      let md_modalities =
+        desc.md_modalities
+        |> partial_recursive_module_modality
+        |> Mode.Modality.of_const
+      in
+      let desc = { desc with md_type; md_modalities } in
+      Sig_module (id, presence, desc, rec_status, visibility)
+  | item -> item
+
 
 module Merge = struct
   (** This module hosts the functions dealing with signature constraints. There
@@ -4005,6 +4041,35 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
                    pmd_attributes=attrs; pmd_loc=loc; pmd_modalities=[]}
                   , Some smode)) sbind
             ) in
+        (* A recursive signature must not justify its own claimed totality. *)
+        let body_env =
+          List.fold_left
+            (fun env (mty, mode, _uid, shape) ->
+               match mty.md_id, mode, shape with
+               | Some id, Some mode, Some shape ->
+                   let md_type =
+                     partial_recursive_module_type newenv mty.md_type.mty_type
+                   in
+                   let mdecl =
+                     { Types.md_type;
+                       md_modalities = Modality.undefined;
+                       md_attributes = mty.md_attributes;
+                       md_loc = mty.md_loc;
+                       md_uid = mty.md_uid;
+                     }
+                   in
+                   let partial =
+                     Value.of_const
+                       { Value.Const.min with
+                         totality = Totality.Const.Partial }
+                   in
+                   let mode = Value.join [mode.mode_modes; partial] in
+                   Env.add_module_declaration ~check:true ~shape ~arg:true
+                     id Mp_present mdecl ~mode env
+               | None, _, _ -> env
+               | Some _, None, _ | Some _, Some _, None -> assert false)
+            env decls
+        in
         List.iter
           (fun (md, _, _, _) ->
              Option.iter Signature_names.(check_module names md.md_loc) md.md_id
@@ -4017,7 +4082,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
                  Builtin_attributes.warning_scope attrs
                    (fun () ->
                       type_module ~strengthen:true ~funct_body
-                        (anchor_recmodule id) newenv smodl
+                        (anchor_recmodule id) body_env smodl
                    )
                in
                let mty' =
