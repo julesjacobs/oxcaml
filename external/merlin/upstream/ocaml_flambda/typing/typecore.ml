@@ -687,7 +687,8 @@ let mode_lazy expected_mode =
   let mode_crossing =
     Crossing.create ~linearity:true ~portability:true
       ~regionality:false ~uniqueness:false ~contention:false ~statefulness:false
-      ~visibility:false ~forkable:false ~yielding:false ~staticity:false
+      ~visibility:false ~forkable:false ~yielding:false ~totality:false
+      ~staticity:false
   in
   let closure_mode =
     expected_mode |> as_single_mode |> Crossing.apply_right mode_crossing
@@ -1329,8 +1330,15 @@ let mode_spliced =
   mode_default mode
 
 let check_project_mutability ~loc ~env mut_name mutability mode =
-  if Types.is_mutable mutability then
+  if Types.is_mutable mutability then begin
+    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
     submode ~loc ~env mode (mode_project_mutable mut_name)
+  end
+
+let mark_partial_if_needed ~loc ~env : Typedtree.partial -> unit = function
+  | Total -> ()
+  | Partial ->
+    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
 
 let check_atomic_loc_of_finalized_repr ~loc ~env label record_repres lid =
   if not (Types.is_atomic label.lbl_mut) then
@@ -7021,7 +7029,10 @@ and type_expect_
       in
       let exp_desc =
         match desc.val_kind with
-        | Val_ivar (_, cl_num) ->
+        | Val_ivar (mutability, cl_num) ->
+            if mutability = Asttypes.Mutable then
+              Env.walk_locks_for_partial_construct ~env
+                (loc, Mode.Hint.Expression);
             if not (List.is_empty layout_args) then
               Misc.fatal_error "type_expect_: Val_ivar with layout args";
             let (self_path, _) =
@@ -7033,6 +7044,8 @@ and type_expect_
                              Longident.Lident txt -> { txt; loc = lid.loc }
                            | _ -> assert false)
         | Val_mut (_m0, _) -> begin
+            Env.walk_locks_for_partial_construct ~env
+              (loc, Mode.Hint.Expression);
             if not (List.is_empty layout_args) then
               Misc.fatal_error "type_expect_: Val_mut with layout args";
             match path with
@@ -7460,6 +7473,7 @@ and type_expect_
         type_cases Computation env arg_pat_mode expected_mode arg.exp_type
           sort ty_expected_explained ~check_if_total:true loc val_caselist
       in
+      mark_partial_if_needed ~loc ~env partial;
       let eff_cases =
         match eff_caselist with
         | [] -> []
@@ -7478,6 +7492,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_try(sbody, caselist) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       check_dynamic (loc, Expression) (Always_dynamic Try_with) expected_mode;
       let rec split_cases exnc effc conts = function
         | [] -> List.rev exnc, List.rev effc, List.rev conts
@@ -7699,6 +7714,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_setfield(srecord, lid, snewval) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let (record, _, rmode, label, expected_type, ambiguity) =
         type_label_access Legacy env srecord Env.Mutation lid in
       let ty_record =
@@ -7952,6 +7968,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_while(scond, sbody) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Loop);
       let env =
         Env.add_const_closure_lock ~ghost:true (loc, Loop)
           {Value.Comonadic.Const.max with linearity = Many} env
@@ -7981,6 +7998,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_for(param, slow, shigh, dir, sbody) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Loop);
       let for_from =
         type_expect env (mode_region Value.max) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
@@ -8085,6 +8103,7 @@ and type_expect_
         exp_extra = (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra;
       }
   | Pexp_send (e, met) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       submode ~loc ~env Mode.Value.legacy expected_mode;
       let pm = position_and_mode env expected_mode sexp in
       let (obj,meth,typ) =
@@ -8123,6 +8142,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_new cl ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       submode ~loc ~env Value.legacy expected_mode;
       let (cl_path, cl_decl, cl_mode) =
         Env.lookup_class ~loc:cl.loc cl.txt env
@@ -8143,6 +8163,7 @@ and type_expect_
               exp_env = env }
         end
   | Pexp_setvar (lab, snewval) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let desc =
         match Env.lookup_settable_variable ~loc lab.txt env with
         | Instance_variable (path, Mutable, cl_num,ty) ->
@@ -8172,6 +8193,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_override lst ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       submode ~loc ~env Value.legacy expected_mode;
       let _ =
        List.fold_right
@@ -8283,6 +8305,7 @@ and type_expect_
         exp_env = env }
 
   | Pexp_assert (e) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let cond =
         type_expect env mode_max e
           (mk_expected ~explanation:Assert_condition Predef.type_bool)
@@ -9516,6 +9539,7 @@ and type_function
         | [ result ], partial -> result, partial
         | ([] | _ :: _ :: _), _ -> assert false
       in
+      mark_partial_if_needed ~loc:pat.pat_loc ~env partial;
       Calling_convention_sort.check_doesn't_rely_on_partial_match ~partial
         ~has_default:(Option.is_some default_arg) ~match_loc:pat.pat_loc
         ~outer_env:env ~branch_env:ext_env inner_calling_convention_sorts;
@@ -11317,6 +11341,7 @@ and type_function_cases_expect
         expected_pat_mode expected_inner_mode ty_arg_mono arg_sort
         (mk_expected ty_ret) ~check_if_total:true loc cases
     in
+    mark_partial_if_needed ~loc ~env partial;
     let ty_fun =
       instance
         (newgenty
@@ -11429,6 +11454,11 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         Some m
     | Nonrecursive -> None
   in
+  Option.iter
+    (fun mode ->
+      Totality.submode_exn Totality.partial
+        (Value.proj_comonadic Axis.Totality mode))
+    rec_mode_var;
   let spatl = List.map vb_pat_constraint spat_sexp_list in
   let spatl =
     List.map (pat_modes ~force_toplevel rec_mode_var ~is_lpoly) spatl
@@ -11562,8 +11592,10 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
           Builtin_attributes.warning_scope ~ppwarning:false attrs
             (fun () ->
               let case = Parmatch.typed_case (case pat exp) in
-              ignore(check_partial env pat.pat_type pat.pat_loc
-                       [case] : Typedtree.partial)
+              let partial =
+                check_partial env pat.pat_type pat.pat_loc [case]
+              in
+              mark_partial_if_needed ~loc:pat.pat_loc ~env partial
             )
         )
         mode_pat_typ_list

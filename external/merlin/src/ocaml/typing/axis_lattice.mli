@@ -51,6 +51,7 @@ val create :
   contention:Mode.Contention.Const.t ->
   forkable:Mode.Forkable.Const.t ->
   yielding:Mode.Yielding.Const.t ->
+  totality:Mode.Totality.Const.t ->
   statefulness:Mode.Statefulness.Const.t ->
   visibility:Mode.Visibility.Const.t ->
   staticity:Mode.Staticity.const ->
@@ -70,6 +71,8 @@ val contention : t -> Mode.Contention.Const.t
 val forkable : t -> Mode.Forkable.Const.t
 
 val yielding : t -> Mode.Yielding.Const.t
+
+val totality : t -> Mode.Totality.Const.t
 
 val statefulness : t -> Mode.Statefulness.Const.t
 

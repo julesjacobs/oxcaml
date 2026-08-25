@@ -3977,6 +3977,15 @@ let walk_locks_for_legacy_construct ~env pp =
        (Mode.Value.disallow_right Mode.Value.legacy) None locks
       : Mode.Value.l)
 
+let walk_locks_for_partial_construct ~env pp =
+  let locks = IdTbl.get_all_locks env.values in
+  let _stage_locks, locks = partition_locks locks in
+  ignore
+    (walk_locks ~errors:true ~env ~pp
+       (Mode.Value.min_with_comonadic Mode.Axis.Totality Mode.Totality.partial)
+       None locks
+      : Mode.Value.l)
+
 (** Takes [m0] which is the parameter of [let mutable x] at declaration site,
   and [locks] which is the locks between the declaration and the usage (either
   reading or writing) of [x], and:

@@ -518,6 +518,7 @@ module Mod_bounds = struct
     @@ Sub_result.combine (modal_less_or_equal (Comonadic Portability))
     @@ Sub_result.combine (modal_less_or_equal (Comonadic Forkable))
     @@ Sub_result.combine (modal_less_or_equal (Comonadic Yielding))
+    @@ Sub_result.combine (modal_less_or_equal (Comonadic Totality))
     @@ Sub_result.combine (modal_less_or_equal (Comonadic Statefulness))
     @@ Sub_result.combine (modal_less_or_equal (Monadic Visibility))
     @@ Sub_result.combine (modal_less_or_equal (Monadic Staticity))
@@ -550,6 +551,7 @@ module Mod_bounds = struct
     |> add_crossing_if (Monadic Contention)
     |> add_crossing_if (Comonadic Forkable)
     |> add_crossing_if (Comonadic Yielding)
+    |> add_crossing_if (Comonadic Totality)
     |> add_crossing_if (Comonadic Statefulness)
     |> add_crossing_if (Monadic Visibility)
     |> add_crossing_if (Monadic Staticity)
@@ -1258,6 +1260,7 @@ module Base_and_axes = struct
                     (value_for_axis ~axis:(Modal (Comonadic Portability)))
                   ~forkable:(value_for_axis ~axis:(Modal (Comonadic Forkable)))
                   ~yielding:(value_for_axis ~axis:(Modal (Comonadic Yielding)))
+                  ~totality:(value_for_axis ~axis:(Modal (Comonadic Totality)))
                   ~statefulness:
                     (value_for_axis ~axis:(Modal (Comonadic Statefulness)))
               in
