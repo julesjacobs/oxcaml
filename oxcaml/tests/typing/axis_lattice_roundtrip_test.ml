@@ -27,6 +27,7 @@ type sample =
     contention : Mode.Contention.Const.t;
     forkable : Mode.Forkable.Const.t;
     yielding : Mode.Yielding.Const.t;
+    totality : Mode.Totality.Const.t;
     statefulness : Mode.Statefulness.Const.t;
     visibility : Mode.Visibility.Const.t;
     staticity : Mode.Staticity.const;
@@ -41,6 +42,7 @@ let sample_of_lattice x =
     contention = contention x;
     forkable = forkable x;
     yielding = yielding x;
+    totality = totality x;
     statefulness = statefulness x;
     visibility = visibility x;
     staticity = staticity x;
@@ -52,8 +54,8 @@ let lattice_of_sample sample =
     ~uniqueness:sample.uniqueness ~portability:sample.portability
     ~contention:sample.contention ~forkable:sample.forkable
     ~yielding:sample.yielding ~statefulness:sample.statefulness
-    ~visibility:sample.visibility ~staticity:sample.staticity
-    ~externality:sample.externality
+    ~totality:sample.totality ~visibility:sample.visibility
+    ~staticity:sample.staticity ~externality:sample.externality
 
 let base_samples = [sample_of_lattice bot; sample_of_lattice top]
 
@@ -95,6 +97,9 @@ let mod_bounds_of_sample sample =
       ~yielding:
         (Mode.Crossing.Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const sample.yielding))
+      ~totality:
+        (Mode.Crossing.Comonadic.Atom.Modality
+           (Mode.Modality.Comonadic.Atom.Meet_const sample.totality))
       ~statefulness:
         (Mode.Crossing.Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const sample.statefulness))
@@ -214,6 +219,8 @@ let mask_of_axis : type a. a Jkind_axis.Axis.t -> t =
     lattice_of_sample { sample with forkable = Mode.Forkable.Const.Unforkable }
   | Modal (Comonadic Yielding) ->
     lattice_of_sample { sample with yielding = Mode.Yielding.Const.Yielding }
+  | Modal (Comonadic Totality) ->
+    lattice_of_sample { sample with totality = Mode.Totality.Const.Partial }
   | Modal (Comonadic Statefulness) ->
     lattice_of_sample
       { sample with statefulness = Mode.Statefulness.Const.Stateful }
@@ -297,6 +304,12 @@ let () =
     (fun sample yielding -> { sample with yielding })
     yielding
     [Mode.Yielding.Const.Unyielding; Mode.Yielding.Const.Yielding];
+  check_axis
+    (module Mode.Totality.Const)
+    "totality"
+    (fun sample totality -> { sample with totality })
+    totality
+    [Mode.Totality.Const.Total; Mode.Totality.Const.Partial];
   check_axis
     (module Mode.Statefulness.Const)
     "statefulness"

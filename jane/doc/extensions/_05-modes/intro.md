@@ -317,3 +317,11 @@ capture all values at visibility *write*.
 Statefulness is irrelevant for types that do not contain functions, and values of such
 types *mode cross* on the statefulness axis; they may be used as stateless
 even when they are stateful.
+
+## Future modes: Totality
+
+Totality is a two-point future axis, `total < partial`. A total closure cannot
+call captured partial functions, recurse, loop, raise, use a non-exhaustive
+pattern, or read or write mutable state. The restriction is relative to
+function arguments: a total higher-order function may call its function
+argument. Mutable allocation and returning mutable data are allowed.
