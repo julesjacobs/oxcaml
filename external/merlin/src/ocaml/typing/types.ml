@@ -215,9 +215,14 @@ and refinement_expression_desc =
   | Rexp_match of refinement_expression * refinement_case list
 
 and refinement_binding =
-  { rb_ident : Ident.t;
+  { rb_kind : refinement_binding_kind;
+    rb_ident : Ident.t;
     rb_type : type_expr;
     rb_expr : refinement_expression }
+
+and refinement_binding_kind =
+  | Rbind_value
+  | Rbind_refine
 
 and refinement_case =
   { rc_lhs : refinement_pattern;

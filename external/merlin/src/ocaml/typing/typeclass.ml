@@ -151,9 +151,7 @@ let rc node =
   node
 
 let check_refinement_scope_escape ~loc ~roots ids cty =
-  if Language_extension.is_enabled Refinement_types
-     && not (Ident.Set.is_empty ids)
-  then begin
+  if not (Ident.Set.is_empty ids) then begin
     let escaped =
       match Ctype.refinement_scope_escape_class_type ids cty with
       | Some _ as escaped -> escaped
@@ -171,9 +169,7 @@ let check_refinement_scope_escape ~loc ~roots ids cty =
   end
 
 let refinement_escape_roots env visit =
-  if Language_extension.is_enabled Refinement_types
-  then Typecore.refinement_escape_roots env ~roots:[] visit
-  else []
+  Typecore.refinement_escape_roots env ~roots:[] visit
 
 let update_class_signature loc env ~warn_implicit_public virt kind sign =
   let implicit_public, implicit_declared =

@@ -94,11 +94,12 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
               Option.map (map_rexp rename) ifnot )
       | Rexp_sequence (first, second) ->
           Rexp_sequence (map_rexp rename first, map_rexp rename second)
-      | Rexp_let ({ rb_ident; rb_type; rb_expr }, body) ->
+      | Rexp_let ({ rb_kind; rb_ident; rb_type; rb_expr }, body) ->
           let rb_expr = map_rexp rename rb_expr in
           let rb_type = type_expr rb_type in
           let rename, rb_ident = bind rename rb_ident in
-          Rexp_let ({ rb_ident; rb_type; rb_expr }, map_rexp rename body)
+          Rexp_let
+            ({ rb_kind; rb_ident; rb_type; rb_expr }, map_rexp rename body)
       | Rexp_fun (param, param_type, body) ->
           let param_type = type_expr param_type in
           let rename, param = bind rename param in
@@ -274,7 +275,8 @@ let equal ~pairs rexp1 rexp2 =
     | Rexp_sequence (f1, s1), Rexp_sequence (f2, s2) ->
         eq pairs f1 f2 && eq pairs s1 s2
     | Rexp_let (b1, body1), Rexp_let (b2, body2) ->
-        eq pairs b1.rb_expr b2.rb_expr
+        b1.rb_kind = b2.rb_kind
+        && eq pairs b1.rb_expr b2.rb_expr
         && eq ((b1.rb_ident, b2.rb_ident) :: pairs) body1 body2
     | Rexp_fun (p1, _, body1), Rexp_fun (p2, _, body2) ->
         eq ((p1, p2) :: pairs) body1 body2
@@ -374,12 +376,17 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
           (Option.map untype_rexp ifnot)
     | Rexp_sequence (first, second) ->
         Exp.sequence ~loc (untype_rexp first) (untype_rexp second)
-    | Rexp_let ({ rb_ident; rb_expr; _ }, body) ->
-        Exp.let_ ~loc Immutable Nonrecursive
-          [ Vb.mk
-              (Pat.var (Location.mknoloc (var_name rb_ident)))
-              (untype_rexp rb_expr) ]
-          (untype_rexp body)
+    | Rexp_let ({ rb_kind; rb_ident; rb_expr; _ }, body) ->
+        let name = Location.mknoloc (var_name rb_ident) in
+        begin match rb_kind with
+        | Rbind_value ->
+            Exp.let_ ~loc Immutable Nonrecursive
+              [Vb.mk (Pat.var name) (untype_rexp rb_expr)]
+              (untype_rexp body)
+        | Rbind_refine ->
+            Exp.let_refine ~loc name (untype_rexp rb_expr)
+              (untype_rexp body)
+        end
     | Rexp_fun (param, _, body) ->
         Exp.function_ ~loc
           [ { pparam_desc =

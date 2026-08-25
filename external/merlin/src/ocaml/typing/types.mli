@@ -359,15 +359,23 @@ and refinement_expression_desc =
       * refinement_expression option
   | Rexp_sequence of refinement_expression * refinement_expression
   | Rexp_let of refinement_binding * refinement_expression
-  (** [let x = e1 in e2]; only single, non-recursive variable bindings. *)
+  (** A single, non-recursive variable binding. *)
   | Rexp_fun of Ident.t * type_expr * refinement_expression
   (** [fun x -> e]; only single, unlabelled variable parameters. *)
   | Rexp_match of refinement_expression * refinement_case list
 
 and refinement_binding =
-  { rb_ident : Ident.t;
+  { rb_kind : refinement_binding_kind;
+    rb_ident : Ident.t;
     rb_type : type_expr;
     rb_expr : refinement_expression }
+
+and refinement_binding_kind =
+  | Rbind_value
+  (** [let x = e1 in e2]. *)
+  | Rbind_refine
+  (** [let refine_ x = e1 in e2].  The bound identifier has the payload type
+      of the refinement-typed [e1]. *)
 
 and refinement_case =
   { rc_lhs : refinement_pattern;

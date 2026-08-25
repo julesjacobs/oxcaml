@@ -7015,11 +7015,7 @@ let refinement_escape_roots env ~roots:initial_roots visit =
   !roots
 
 let check_refinement_scope_escape env exp =
-  let ids =
-    if Language_extension.is_enabled Refinement_types
-    then refinement_scope_binders exp
-    else Ident.Set.empty
-  in
+  let ids = refinement_scope_binders exp in
   if not (Ident.Set.is_empty ids) then begin
     match
       Ctype.refinement_scope_escape_types ids
@@ -14835,11 +14831,23 @@ let refinement_expression_of_typed binder predicate =
           check_refinement_pattern_extras binding.vb_pat;
           match binding.vb_pat.pat_desc with
           | Tpat_var { id; _ } ->
+              let rb_kind =
+                if List.exists
+                    (fun (extra, _, _) ->
+                       match extra with
+                       | Texp_let_refine (refine_id, _) ->
+                           Ident.same id refine_id
+                       | _ -> false)
+                    exp.exp_extra
+                then Rbind_refine
+                else Rbind_value
+              in
               let rb_expr = expression locals binding.vb_expr in
               let locals = Ident.Set.add id locals in
               mk
                 (Rexp_let
-                   ( { rb_ident = id;
+                   ( { rb_kind;
+                       rb_ident = id;
                        rb_type = binding.vb_pat.pat_type;
                        rb_expr },
                      expression locals body ))
@@ -14911,9 +14919,14 @@ let refinement_expression_of_typed binder predicate =
          | Texp_inspected_type _ -> result
          | Texp_constraint _ | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
-         | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine
-         | Texp_let_refine _ ->
-             unsupported_refinement_syntax loc "This expression annotation")
+         | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine ->
+             unsupported_refinement_syntax loc "This expression annotation"
+         | Texp_let_refine (id, _) -> begin
+             match result.rexp_desc with
+             | Rexp_let ({ rb_kind = Rbind_refine; rb_ident; _ }, _)
+               when Ident.same id rb_ident -> result
+             | _ -> assert false
+           end)
       result exp.exp_extra
   and case locals case =
     let locals, rc_lhs = refinement_pattern_of_typed locals case.c_lhs in
