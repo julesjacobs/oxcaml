@@ -187,6 +187,7 @@ and refinement_desc =
 
 and refinement_expression =
   { rexp_desc : refinement_expression_desc;
+    rexp_type : type_expr;
     rexp_loc : Location.t }
 
 and refinement_expression_desc =
@@ -196,7 +197,7 @@ and refinement_expression_desc =
   | Rexp_apply of
       refinement_expression * (Asttypes.arg_label * refinement_expression) list
   | Rexp_tuple of (string option * refinement_expression) list
-  | Rexp_construct of Path.t * refinement_expression option
+  | Rexp_construct of Path.t * refinement_expression list
   | Rexp_record of
       (Path.t * string * refinement_expression) list
       * refinement_expression option
@@ -210,11 +211,12 @@ and refinement_expression_desc =
       * refinement_expression option
   | Rexp_sequence of refinement_expression * refinement_expression
   | Rexp_let of refinement_binding * refinement_expression
-  | Rexp_fun of Ident.t * refinement_expression
+  | Rexp_fun of Ident.t * type_expr * refinement_expression
   | Rexp_match of refinement_expression * refinement_case list
 
 and refinement_binding =
   { rb_ident : Ident.t;
+    rb_type : type_expr;
     rb_expr : refinement_expression }
 
 and refinement_case =
@@ -224,6 +226,7 @@ and refinement_case =
 
 and refinement_pattern =
   { rpat_desc : refinement_pattern_desc;
+    rpat_type : type_expr;
     rpat_loc : Location.t }
 
 and refinement_pattern_desc =
@@ -231,7 +234,7 @@ and refinement_pattern_desc =
   | Rpat_var of Ident.t
   | Rpat_constant of Parsetree.constant
   | Rpat_tuple of (string option * refinement_pattern) list
-  | Rpat_construct of Path.t * refinement_pattern option
+  | Rpat_construct of Path.t * refinement_pattern list
   | Rpat_alias of refinement_pattern * Ident.t
 
 and arg_label =

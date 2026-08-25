@@ -14,3 +14,11 @@ let l : { y : int | Roundtrip_defs.positive y } list =
 [%%expect{|
 val l : {y : int | Roundtrip_defs.positive y} list = []
 |}]
+
+let local_polymorphism :
+    { z : int | let _ignored = fun _value -> true in true } list =
+  ([] : Roundtrip_defs.local_polymorphism list);;
+[%%expect{|
+val local_polymorphism : {z : int | let _ignored _value = true in true} list =
+  []
+|}]

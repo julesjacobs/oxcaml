@@ -53,6 +53,32 @@ type match_binder_again =
 val match_binder_same : match_binder list = []
 |}]
 
+type pair = Pair of int * int
+type ordered_pair =
+  { x : pair | match x with Pair (left, right) -> ge right left };;
+[%%expect{|
+type pair = Pair of int * int
+type ordered_pair =
+    {x : pair | match x with | Pair (left, right) -> ge right left}
+|}]
+
+type nested_functions = { x : int | (fun left right -> ge left right) x 0 };;
+[%%expect{|
+type nested_functions =
+    {x : int | (fun left -> fun right -> ge left right) x 0}
+|}]
+
+type _ witness = Int : int witness
+type 'a gadt_predicate =
+  { x : 'a witness | match x with Int -> true };;
+[%%expect{|
+type _ witness = Int : int witness
+Line 3, characters 34-37:
+3 |   { x : 'a witness | match x with Int -> true };;
+                                      ^^^
+Error: A GADT constructor pattern is not yet supported in a refinement predicate
+|}]
+
 type local_scoping = { x : int | let y = x in gt y x }
 type local_scoping_different = { x : int | let y = x in gt x y }
 let local_scoping_not_same : local_scoping list =

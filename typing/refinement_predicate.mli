@@ -10,7 +10,8 @@
 (*                                                                        *)
 (**************************************************************************)
 
-(** Generic operations on refinement predicates ({!Types.refinement_expression}). *)
+(** Generic operations on refinement predicates
+    ({!Types.refinement_expression}). *)
 
 open Types
 
@@ -24,8 +25,13 @@ val map :
   ?value_path:(Path.t -> Path.t) ->
   ?constructor_path:(Path.t -> Path.t) ->
   ?type_path:(Path.t -> Path.t) ->
+  ?type_expr:(type_expr -> type_expr) ->
   ?location:(Location.t -> Location.t) ->
   refinement_expression -> refinement_expression
+
+(** Fold over every persistent type annotation in a predicate. *)
+val fold_types :
+  ('a -> type_expr -> 'a) -> 'a -> refinement_expression -> 'a
 
 (** Syntactic alpha-equivalence.  [pairs] gives the pairing of
     externally-bound idents. *)

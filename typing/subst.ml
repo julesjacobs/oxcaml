@@ -799,7 +799,9 @@ let rec typexp copy_scope s ty =
                   ~rename_bound:(rename_bound_ident s)
                   ~value_path:(value_path s)
                   ~constructor_path:(constructor_path s)
-                  ~type_path:(type_path s) ~location:(loc s) ref_pred }
+                  ~type_path:(type_path s)
+                  ~type_expr:(typexp copy_scope s)
+                  ~location:(loc s) ref_pred }
       | Tof_kind jk -> Tof_kind (jkind copy_scope s jk)
       | Tmod (ty, mod_bounds) ->
           Tmod (typexp copy_scope s ty, mod_bounds)
