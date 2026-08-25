@@ -1462,6 +1462,75 @@ let rec tree_of_modal_typexp mode modal ty =
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
         let t2 = tree_of_modal_typexp mode modal ty2 in
         Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
+    | Trefine { ref_binder; ref_payload; ref_pred } ->
+        let payload = tree_of_typexp mode Alloc.Const.legacy ref_payload in
+        let bound_names =
+          let ids =
+            Ident.Set.add ref_binder
+              (Refinement_predicate.bound_idents ref_pred)
+          in
+          Ident.Set.fold
+            (fun id names -> String.Set.add (Ident.name id) names)
+            ids String.Set.empty
+        in
+        (* Names render through the printer's path machinery, so that
+           shortening and substitution are reflected. *)
+        let rec longident : Outcometree.out_ident -> Longident.t = function
+          | Oide_ident { printed_name } -> Lident printed_name
+          | Oide_dot (id, s) ->
+              Ldot (Location.mknoloc (longident id), Location.mknoloc s)
+          | Oide_apply (a, b) ->
+              Lapply
+                (Location.mknoloc (longident a),
+                 Location.mknoloc (longident b))
+          | Oide_hash id -> longident id
+        in
+        let value_ident path =
+          match path with
+          | Pdot (module_path, name) when String.Set.mem name bound_names ->
+              Location.mknoloc
+                (Longident.Ldot
+                   ( Location.mknoloc
+                       (longident (tree_of_path (Some Module) module_path)),
+                     Location.mknoloc name ))
+          | path ->
+              Location.mknoloc (longident (tree_of_path (Some Value) path))
+        in
+        let constructor_ident path =
+          (* A constructor is qualified by the module of its type. *)
+          match (path : Path.t) with
+          | Pextra_ty (tp, Pcstr_ty name) -> (
+              match tp with
+              | Pdot (m, _) | Pextra_ty (Pdot (m, _), _) ->
+                  Location.mknoloc
+                    (Longident.Ldot
+                       (Location.mknoloc
+                          (longident (tree_of_path (Some Module) m)),
+                        Location.mknoloc name))
+              | _ -> Location.mknoloc (Longident.Lident name))
+          | path ->
+              (* extension constructor *)
+              Location.mknoloc (longident (tree_of_path None path))
+        in
+        let label_ident type_path name =
+          let rec defining_module = function
+            | Pdot (module_path, _) -> Some module_path
+            | Pextra_ty (path, _) -> defining_module path
+            | Pident _ | Papply _ -> None
+          in
+          match defining_module type_path with
+          | Some module_path ->
+              Location.mknoloc
+                (Longident.Ldot
+                   ( Location.mknoloc
+                       (longident (tree_of_path (Some Module) module_path)),
+                     Location.mknoloc name ))
+          | None -> Location.mknoloc (Longident.Lident name)
+        in
+        Otyp_refine
+          (Ident.name ref_binder, payload,
+           Refinement_predicate.untype ~var_name:Ident.name ~value_ident
+             ~constructor_ident ~label_ident ref_pred)
     | Ttuple labeled_tyl ->
         Otyp_tuple (tree_of_labeled_typlist mode labeled_tyl)
     | Tunboxed_tuple labeled_tyl ->

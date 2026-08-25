@@ -552,6 +552,23 @@ let mode_default mode =
 
 let mode_legacy = mode_default Value.legacy
 
+let total_mode () =
+  Value.of_const
+    { Value.Const.legacy with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable
+    }
+
+let total_immutable_mode () =
+  Value.of_const
+    { Value.Const.legacy with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable;
+      visibility = Visibility.Const.Immutable
+    }
+
 let mode_default_opt mode_opt =
   match mode_opt with
   | None -> mode_legacy
@@ -4873,7 +4890,7 @@ let remaining_function_type_for_error ty_ret mode_ret rev_args =
              (ty_ret, mode_ret, closed_args)
          | Arg (Eliminated_optional_arg
                   { mode_fun; ty_arg; mode_arg; level; _ })
-         | Omitted { mode_fun; ty_arg; mode_arg; level } ->
+         | Omitted { mode_fun; ty_arg; mode_arg; level; _ } ->
              let arrow_desc = lbl, mode_arg, mode_ret in
              let ty_ret =
                newty2 ~level
@@ -6643,6 +6660,172 @@ let with_primitive_mode_checks ?defer f =
     (List.rev !checks);
   result
 
+let refinement_scope_binders (exp : expression) =
+  let add ids id = Ident.Set.add id ids in
+  let add_pattern ids pat =
+    List.fold_left add ids (Typedtree.pat_bound_idents pat)
+  in
+  let add_case ids case =
+    let ids = add_pattern ids case.c_lhs in
+    Option.fold ~none:ids ~some:(add ids) case.c_cont
+  in
+  let add_cases ids cases = List.fold_left add_case ids cases in
+  let add_param ids param =
+    let ids = add ids param.fp_param in
+    match param.fp_kind with
+    | Tparam_pat pat | Tparam_optional_default (pat, _, _) ->
+        add_pattern ids pat
+  in
+  let add_comprehension ids { comp_clauses; _ } =
+    List.fold_left
+      (fun ids clause ->
+         match clause with
+         | Texp_comp_when _ -> ids
+         | Texp_comp_for bindings ->
+             List.fold_left
+               (fun ids { comp_cb_iterator; _ } ->
+                  match comp_cb_iterator with
+                  | Texp_comp_range { ident; _ } -> add ids ident
+                  | Texp_comp_in { pattern; _ } -> add_pattern ids pattern)
+               ids bindings)
+      ids comp_clauses
+  in
+  match exp.exp_desc with
+  | Texp_let (_, bindings, _) ->
+      List.fold_left add Ident.Set.empty
+        (Typedtree.let_bound_idents bindings)
+  | Texp_letmutable (binding, _) ->
+      List.fold_left add Ident.Set.empty
+        (Typedtree.let_bound_idents [binding])
+  | Texp_function { params; body; _ } ->
+      let ids = List.fold_left add_param Ident.Set.empty params in
+      begin match body with
+      | Tfunction_body _ -> ids
+      | Tfunction_cases { fc_param; fc_cases; _ } ->
+          add_cases (add ids fc_param) fc_cases
+      end
+  | Texp_match (_, _, computation_cases, value_cases, _) ->
+      add_cases (add_cases Ident.Set.empty computation_cases) value_cases
+  | Texp_try (_, cases, value_cases) ->
+      add_cases (add_cases Ident.Set.empty cases) value_cases
+  | Texp_for { for_id; _ } -> Ident.Set.singleton for_id
+  | Texp_letop { param; body; _ } ->
+      add_case (Ident.Set.singleton param) body
+  | Texp_list_comprehension comp | Texp_array_comprehension (_, _, comp) ->
+      add_comprehension Ident.Set.empty comp
+  | Texp_letmodule (Some id, _, _, _, _) -> Ident.Set.singleton id
+  | Texp_letexception (ext, _) -> Ident.Set.singleton ext.ext_id
+  | Texp_object ({ cstr_self; cstr_fields; _ }, _) ->
+      List.fold_left
+        (fun ids field ->
+           match field.cf_desc with
+           | Tcf_val (_, _, id, _, _) -> add ids id
+           | Tcf_inherit (_, _, _, inherited_vars, super_meths) ->
+               let ids =
+                 List.fold_left
+                   (fun ids (_, id) -> add ids id)
+                   ids inherited_vars
+               in
+               List.fold_left
+                 (fun ids (_, id) -> add ids id)
+                 ids super_meths
+           | Tcf_method _ | Tcf_constraint _ | Tcf_initializer _
+           | Tcf_attribute _ -> ids)
+        (add_pattern Ident.Set.empty cstr_self) cstr_fields
+  | Texp_open ({ open_bound_items; _ }, _) ->
+      List.fold_left
+        (fun ids item -> add ids (Types.signature_item_id item))
+        Ident.Set.empty open_bound_items
+  | Texp_letmodule (None, _, _, _, _)
+  | Texp_ident _ | Texp_apply_layout _ | Texp_constant _ | Texp_apply _
+  | Texp_unboxed_unit | Texp_unboxed_bool _ | Texp_tuple _
+  | Texp_unboxed_tuple _ | Texp_construct _ | Texp_variant _
+  | Texp_record _ | Texp_record_unboxed_product _ | Texp_field _
+  | Texp_unboxed_field _ | Texp_setfield _ | Texp_array _ | Texp_idx _
+  | Texp_atomic_loc _ | Texp_ifthenelse _ | Texp_sequence _ | Texp_while _
+  | Texp_send _ | Texp_new _ | Texp_instvar _ | Texp_mutvar _
+  | Texp_setinstvar _ | Texp_setmutvar _ | Texp_override _ | Texp_assert _
+  | Texp_lazy _ | Texp_pack _ | Texp_unreachable
+  | Texp_extension_constructor _ | Texp_probe _ | Texp_probe_is_enabled _
+  | Texp_exclave _ | Texp_src_pos | Texp_overwrite _ | Texp_hole _
+  | Texp_quote _ | Texp_splice _ ->
+      Ident.Set.empty
+
+let refinement_escape_roots env ~roots:initial_roots visit =
+  let roots = ref initial_roots in
+  let add_outer_value path =
+    match Env.find_value path env with
+    | description ->
+        roots := Subst.Lazy.force_type_expr description.val_type :: !roots
+    | exception Not_found -> ()
+  in
+  let iterator =
+    { Tast_iterator.default_iterator with
+      expr =
+        (fun self exp ->
+           begin match exp.exp_desc with
+           | Texp_ident { path; _ } ->
+               add_outer_value path
+           | Texp_mutvar id ->
+               add_outer_value (Pident id.txt)
+           | Texp_setmutvar (id, _, _) ->
+               add_outer_value (Pident id.txt)
+           | Texp_instvar (_, path, _) -> add_outer_value path
+           | Texp_setinstvar (_, path, _, _) -> add_outer_value path
+           | Texp_override (_, fields) ->
+               List.iter
+                 (fun (id, _, _) -> add_outer_value (Pident id))
+                 fields
+           | Texp_letop { let_; ands; _ } ->
+               List.iter
+                 (fun op -> add_outer_value op.bop_op_path)
+                 (let_ :: ands)
+           | Texp_apply_layout _ | Texp_constant _ | Texp_let _
+           | Texp_letmutable _ | Texp_function _ | Texp_apply _
+           | Texp_match _ | Texp_try _ | Texp_unboxed_unit
+           | Texp_unboxed_bool _ | Texp_tuple _ | Texp_unboxed_tuple _
+           | Texp_construct _ | Texp_variant _ | Texp_record _
+           | Texp_record_unboxed_product _ | Texp_field _
+           | Texp_unboxed_field _ | Texp_setfield _ | Texp_array _
+           | Texp_idx _ | Texp_list_comprehension _
+           | Texp_array_comprehension _ | Texp_atomic_loc _
+           | Texp_ifthenelse _ | Texp_sequence _ | Texp_while _ | Texp_for _
+           | Texp_send _ | Texp_new _ | Texp_letmodule _
+           | Texp_letexception _ | Texp_assert _ | Texp_lazy _
+           | Texp_object _ | Texp_pack _ | Texp_unreachable
+           | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
+           | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
+           | Texp_overwrite _ | Texp_hole _ | Texp_quote _ | Texp_splice _ ->
+               ()
+           end;
+           Tast_iterator.default_iterator.expr self exp)
+    }
+  in
+  visit iterator;
+  !roots
+
+let check_refinement_scope_escape env exp =
+  let ids =
+    if Language_extension.is_enabled Refinement_types
+    then refinement_scope_binders exp
+    else Ident.Set.empty
+  in
+  if not (Ident.Set.is_empty ids) then begin
+    match
+      Ctype.refinement_scope_escape_types ids
+        (refinement_escape_roots env ~roots:[exp.exp_type]
+           (fun iterator -> iterator.expr iterator exp))
+    with
+    | None -> ()
+    | Some id ->
+        raise
+          (Error_forward
+             (Location.errorf ~loc:exp.exp_loc
+                "the refinement type of this expression escapes the scope of \
+                 binding %a"
+                Style.inline_code (Ident.name id)))
+  end
+
 let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
     env expected_mode sexp =
   (* We now delegate everything to type_expect *)
@@ -6670,6 +6853,7 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
            sexp ty_expected_explained
       )
   in
+  check_refinement_scope_escape env exp;
   Cmt_format.set_saved_types
     (Cmt_format.Partial_expression exp :: previous_saved_types);
   exp
@@ -7037,6 +7221,101 @@ and type_expect_
         exp_env = env }
   in
   match sexp.pexp_desc with
+  | Pexp_refine operand -> begin
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      match get_desc (expand_head env ty_expected) with
+      | Trefine { ref_payload; _ } ->
+          let operand =
+            type_expect env (mode_default (total_mode ())) operand
+              (mk_expected ref_payload)
+          in
+          rue
+            { operand with
+              exp_extra =
+                (Texp_refine, loc, sexp.pexp_attributes)
+                :: operand.exp_extra;
+              exp_type = ty_expected
+            }
+      | _ ->
+          raise
+            (Error_forward
+               (Location.errorf ~loc
+                  "%a requires a known refinement type from its context"
+                  Style.inline_code "refine_"))
+    end
+  | Pexp_let_refine (name, bound, body) ->
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let bound = type_exp env mode_max bound in
+      let payload =
+        match get_desc (expand_head env bound.exp_type) with
+        | Trefine { ref_payload; _ } -> ref_payload
+        | _ ->
+            raise
+              (Error_forward
+                 (Location.errorf ~loc:bound.exp_loc
+                    "the right-hand side of %a must have a known refinement \
+                     type"
+                    Style.inline_code "let refine_"))
+      in
+      let sort =
+        match
+          Ctype.type_sort ~why:Jkind.History.Let_binding ~fixed:false env
+            payload
+        with
+        | Ok sort -> sort
+        | Error violation ->
+            raise (Error (loc, env,
+              Function_type_not_rep (payload, violation)))
+      in
+      let id = Ident.create_local name.txt in
+      let uid = Uid.mk ~current_unit:(Env.get_current_unit ()) in
+      let mode = total_mode () in
+      let desc =
+        { val_type = payload;
+          val_kind = Val_reg sort;
+          val_lpoly = Lpoly.determined [];
+          val_attributes = [];
+          val_zero_alloc = Zero_alloc.default;
+          val_modalities = Modality.undefined;
+          val_loc = name.loc;
+          val_uid = uid
+        }
+      in
+      let body_env = Env.add_value ~mode id desc env in
+      let body =
+        type_expect body_env expected_mode body ty_expected_explained
+      in
+      let pat =
+        { pat_desc =
+            Tpat_var
+              { id; name; uid; sort;
+                mode = Value.disallow_right mode };
+          pat_loc = name.loc;
+          pat_extra = [];
+          pat_type = payload;
+          pat_env = env;
+          pat_attributes = [];
+          pat_unique_barrier = Unique_barrier.not_computed ()
+        }
+      in
+      let vb =
+        { vb_pat = pat;
+          vb_expr = bound;
+          vb_rec_kind = Value_rec_types.Dynamic;
+          vb_sort = sort;
+          vb_attributes = [];
+          vb_loc = loc
+        }
+      in
+      re
+        { exp_desc = Texp_let (Nonrecursive, [vb], body);
+          exp_loc = loc;
+          exp_extra =
+            [Texp_let_refine (id, name), loc, sexp.pexp_attributes];
+          exp_type = body.exp_type;
+          exp_attributes = sexp.pexp_attributes;
+          exp_env = env
+        }
   | Pexp_ident lid ->
       let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
         type_ident env ~recarg lid
@@ -13852,3 +14131,296 @@ let type_argument env e t1 t2 =
 let type_option_some env e t1 t2 =
   let exp = type_option_some env mode_legacy e t1 t2 in
   maybe_check_uniqueness_exp exp; exp
+
+let refinement_constructor_path (cstr : Data_types.constructor_description) =
+  match cstr.cstr_tag with
+  | Extension path -> path
+  | Ordinary _ | Null -> begin
+      match get_desc cstr.cstr_res with
+      | Tconstr (path, _, _) ->
+          Path.Pextra_ty (path, Pcstr_ty cstr.cstr_name)
+      | _ ->
+          Misc.fatal_error
+            "Typecore.refinement_constructor_path: malformed constructor"
+    end
+
+let unsupported_refinement_syntax loc what =
+  raise
+    (Error_forward
+       (Location.errorf ~loc
+          "%s is not yet supported in a refinement predicate" what))
+
+let check_refinement_pattern_extras pat =
+  List.iter
+    (fun (extra, loc, _) ->
+       match extra with
+       | Tpat_inspected_type _ -> ()
+       | Tpat_constraint _ | Tpat_type _ | Tpat_open _ | Tpat_unpack ->
+           unsupported_refinement_syntax loc "This pattern annotation")
+    pat.pat_extra
+
+let rec refinement_pattern_of_typed :
+  type k.
+  Ident.Set.t -> k general_pattern -> Ident.Set.t * refinement_pattern =
+  fun locals pat ->
+    check_refinement_pattern_extras pat;
+    let mk rpat_desc = { rpat_desc; rpat_loc = pat.pat_loc } in
+    match pat.pat_desc with
+    | Tpat_any -> locals, mk Rpat_any
+    | Tpat_var { id; _ } ->
+        Ident.Set.add id locals, mk (Rpat_var id)
+    | Tpat_constant constant ->
+        locals, mk (Rpat_constant (Untypeast.constant constant))
+    | Tpat_tuple components ->
+        let locals, components =
+          List.fold_left_map
+            (fun locals (label, pat) ->
+               let locals, pat = refinement_pattern_of_typed locals pat in
+               locals, (label, pat))
+            locals components
+        in
+        locals, mk (Rpat_tuple components)
+    | Tpat_construct (_, cstr, _, args, None) ->
+        let locals, args =
+          List.fold_left_map
+            (fun locals (_, pat) ->
+               refinement_pattern_of_typed locals pat)
+            locals args
+        in
+        let arg =
+          match args with
+          | [] -> None
+          | [arg] -> Some arg
+          | args ->
+              Some
+                { rpat_desc =
+                    Rpat_tuple (List.map (fun arg -> None, arg) args);
+                  rpat_loc = pat.pat_loc
+                }
+        in
+        locals,
+        mk (Rpat_construct (refinement_constructor_path cstr, arg))
+    | Tpat_alias { pattern; id; _ } ->
+        let locals, pattern = refinement_pattern_of_typed locals pattern in
+        Ident.Set.add id locals, mk (Rpat_alias (pattern, id))
+    | Tpat_value pat ->
+        refinement_pattern_of_typed locals (pat :> value general_pattern)
+    | Tpat_unboxed_unit | Tpat_unboxed_bool _ | Tpat_unboxed_tuple _
+    | Tpat_fun_layout _
+    | Tpat_construct (_, _, _, _, Some _)
+    | Tpat_variant _ | Tpat_record _ | Tpat_record_unboxed_product _
+    | Tpat_array _ | Tpat_lazy _ | Tpat_exception _ | Tpat_or _ ->
+        unsupported_refinement_syntax pat.pat_loc "This pattern"
+
+let refinement_expression_of_typed binder predicate =
+  let argument_label : Typedtree.arg_label -> Asttypes.arg_label = function
+    | Nolabel -> Nolabel
+    | Labelled label | Position label -> Labelled label
+    | Optional label -> Optional label
+  in
+  let rec expression locals exp =
+    let mk rexp_desc = { rexp_desc; rexp_loc = exp.exp_loc } in
+    let result =
+      match exp.exp_desc with
+      | Texp_ident { path = Pident id; _ } when Ident.Set.mem id locals ->
+          mk (Rexp_var id)
+      | Texp_ident { path; _ } -> mk (Rexp_ident path)
+      | Texp_instvar (_, path, _) -> mk (Rexp_ident path)
+      | Texp_constant constant ->
+          mk (Rexp_constant (Untypeast.constant constant))
+      | Texp_apply (fn, args, _, _, _, _) ->
+          let args =
+            List.filter_map
+              (fun (label, arg) ->
+                 match arg with
+                 | Arg (arg, _) ->
+                     Some (argument_label label, expression locals arg)
+                 | Omitted _ -> None)
+              args
+          in
+          mk (Rexp_apply (expression locals fn, args))
+      | Texp_tuple (components, _) ->
+          mk
+            (Rexp_tuple
+               (List.map
+                  (fun (label, exp) -> label, expression locals exp)
+                  components))
+      | Texp_construct (_, cstr, _, args, _) ->
+          let args = List.map (fun (_, arg) -> expression locals arg) args in
+          let arg =
+            match args with
+            | [] -> None
+            | [arg] -> Some arg
+            | args ->
+                Some
+                  { rexp_desc =
+                      Rexp_tuple (List.map (fun arg -> None, arg) args);
+                    rexp_loc = exp.exp_loc
+                  }
+          in
+          mk (Rexp_construct (refinement_constructor_path cstr, arg))
+      | Texp_record { fields; extended_expression; _ } ->
+          let fields =
+            Array.fold_right
+              (fun (label, _, field) fields ->
+                 match field with
+                 | Kept _ -> fields
+                 | Overridden (lid, exp) ->
+                     ( Data_types.lbl_res_type_path label,
+                       Longident.last lid.txt,
+                       expression locals exp )
+                     :: fields)
+              fields []
+          in
+          let extended =
+            Option.map
+              (fun (exp, _, _) -> expression locals exp)
+              extended_expression
+          in
+          mk (Rexp_record (fields, extended))
+      | Texp_record_unboxed_product { fields; extended_expression; _ } ->
+          let fields =
+            Array.fold_right
+              (fun (label, _, field) fields ->
+                 match field with
+                 | Kept _ -> fields
+                 | Overridden (lid, exp) ->
+                     ( Data_types.gen_lbl_res_type_path label,
+                       Longident.last lid.txt,
+                       expression locals exp )
+                     :: fields)
+              fields []
+          in
+          let extended =
+            Option.map (fun (exp, _) -> expression locals exp)
+              extended_expression
+          in
+          mk (Rexp_record_unboxed_product (fields, extended))
+      | Texp_array (mutability, _, elements, _) ->
+          let mutability =
+            match mutability with
+            | Types.Immutable -> Asttypes.Immutable
+            | Types.Mutable _ -> Asttypes.Mutable
+          in
+          mk (Rexp_array (mutability, List.map (expression locals) elements))
+      | Texp_field { record; lid; label; _ } ->
+          mk
+            (Rexp_field
+               ( expression locals record,
+                 Data_types.lbl_res_type_path label,
+                 Longident.last lid.txt ))
+      | Texp_ifthenelse (condition, ifso, ifnot) ->
+          mk
+            (Rexp_ifthenelse
+               ( expression locals condition,
+                 expression locals ifso,
+                 Option.map (expression locals) ifnot ))
+      | Texp_sequence (first, _, second) ->
+          mk (Rexp_sequence (expression locals first, expression locals second))
+      | Texp_let (Nonrecursive, [binding], body) -> begin
+          check_refinement_pattern_extras binding.vb_pat;
+          match binding.vb_pat.pat_desc with
+          | Tpat_var { id; _ } ->
+              let rb_expr = expression locals binding.vb_expr in
+              let locals = Ident.Set.add id locals in
+              mk (Rexp_let ({ rb_ident = id; rb_expr }, expression locals body))
+          | _ ->
+              unsupported_refinement_syntax binding.vb_pat.pat_loc
+                "This binding pattern"
+        end
+      | Texp_function { params; body = Tfunction_body body; _ } ->
+          let locals, params =
+            List.fold_left_map
+              (fun locals param ->
+                 match param.fp_arg_label, param.fp_kind with
+                 | Nolabel, Tparam_pat { pat_desc = Tpat_var { id; _ }; _ } ->
+                     begin match param.fp_kind with
+                     | Tparam_pat pat -> check_refinement_pattern_extras pat
+                     | Tparam_optional_default _ -> assert false
+                     end;
+                     Ident.Set.add id locals, id
+                 | _ ->
+                     unsupported_refinement_syntax param.fp_loc
+                       "This function parameter")
+              locals params
+          in
+          let body = expression locals body in
+          List.fold_right (fun id body -> mk (Rexp_fun (id, body))) params body
+      | Texp_match (scrutinee, _, cases, [], _) ->
+          mk
+            (Rexp_match
+               (expression locals scrutinee,
+                List.map (case locals) cases))
+      | Texp_apply_layout (exp, _) -> expression locals exp
+      | Texp_unboxed_unit | Texp_unboxed_bool _ | Texp_let _
+      | Texp_letmutable _ | Texp_function _ | Texp_match _ | Texp_try _
+      | Texp_unboxed_tuple _ | Texp_variant _ | Texp_atomic_loc _
+      | Texp_unboxed_field _ | Texp_setfield _ | Texp_idx _
+      | Texp_list_comprehension _ | Texp_array_comprehension _
+      | Texp_while _ | Texp_for _ | Texp_send _ | Texp_new _
+      | Texp_mutvar _ | Texp_setinstvar _
+      | Texp_setmutvar _ | Texp_override _ | Texp_letmodule _
+      | Texp_letexception _ | Texp_assert _ | Texp_lazy _ | Texp_object _
+      | Texp_pack _ | Texp_letop _ | Texp_unreachable
+      | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
+      | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
+      | Texp_overwrite _ | Texp_hole _ | Texp_quote _ | Texp_splice _ ->
+          unsupported_refinement_syntax exp.exp_loc "This expression form"
+    in
+    List.fold_left
+      (fun result (extra, loc, _) ->
+         match extra with
+         | Texp_inspected_type _ -> result
+         | Texp_constraint _ | Texp_coerce _ | Texp_poly _ | Texp_newtype _
+         | Texp_stack
+         | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine
+         | Texp_let_refine _ ->
+             unsupported_refinement_syntax loc "This expression annotation")
+      result exp.exp_extra
+  and case locals case =
+    let locals, rc_lhs = refinement_pattern_of_typed locals case.c_lhs in
+    { rc_lhs;
+      rc_guard = Option.map (expression locals) case.c_guard;
+      rc_rhs = expression locals case.c_rhs
+    }
+  in
+  expression (Ident.Set.singleton binder) predicate
+
+let () =
+  Typetexp.type_refinement_predicate :=
+    (fun env binder payload predicate ->
+       let loc = predicate.pexp_loc in
+       let env =
+         Env.add_total_closure_lock (loc, Mode.Hint.Expression) env
+       in
+       let sort =
+         match
+           Ctype.type_sort ~why:Jkind.History.Let_binding ~fixed:false
+             env payload
+         with
+         | Ok sort -> sort
+         | Error violation ->
+             raise (Error (loc, env,
+               Function_type_not_rep (payload, violation)))
+       in
+       let value_description =
+         { val_type = payload;
+           val_kind = Val_reg sort;
+           val_lpoly = Lpoly.determined [];
+           val_attributes = [];
+           val_zero_alloc = Zero_alloc.default;
+           val_modalities = Modality.undefined;
+           val_loc = loc;
+           val_uid = Uid.mk ~current_unit:(Env.get_current_unit ())
+         }
+       in
+       let env =
+         Env.add_value ~mode:(total_immutable_mode ()) binder
+           value_description env
+       in
+       let typed_predicate =
+         type_expect env ~mode:(total_immutable_mode ()) predicate
+           (mk_expected Predef.type_bool)
+       in
+       typed_predicate,
+       refinement_expression_of_typed binder typed_predicate)
