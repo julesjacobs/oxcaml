@@ -150,6 +150,31 @@ let rc node =
   Cmt_format.add_saved_type (Cmt_format.Partial_class_expr node);
   node
 
+let check_refinement_scope_escape ~loc ~roots ids cty =
+  if Language_extension.is_enabled Refinement_types
+     && not (Ident.Set.is_empty ids)
+  then begin
+    let escaped =
+      match Ctype.refinement_scope_escape_class_type ids cty with
+      | Some _ as escaped -> escaped
+      | None -> Ctype.refinement_scope_escape_types ids roots
+    in
+    match escaped with
+    | None -> ()
+    | Some id ->
+        raise
+          (Error_forward
+             (Location.errorf ~loc
+                "the refinement type of this class expression escapes the \
+                 scope of binding %a"
+                Misc.Style.inline_code (Ident.name id)))
+  end
+
+let refinement_escape_roots env visit =
+  if Language_extension.is_enabled Refinement_types
+  then Typecore.refinement_escape_roots env ~roots:[] visit
+  else []
+
 let update_class_signature loc env ~warn_implicit_public virt kind sign =
   let implicit_public, implicit_declared =
     Ctype.update_class_signature env sign
@@ -1020,6 +1045,7 @@ and class_fields_second_pass cl_num sign met_env fields =
    When this happens, we cannot close the object type and must error. *)
 and class_structure cl_num virt self_scope final val_env met_env loc
   { pcstr_self = spat; pcstr_fields = str } =
+  let outer_val_env = val_env in
   (* Environment for substructures *)
   (* Classes and objects are treated very conservatively because the
       implementation is unclear. So just to be safe, we add locks here so that
@@ -1130,10 +1156,27 @@ and class_structure cl_num virt self_scope final val_env met_env loc
     | Self_virtual meths_ref -> !meths_ref
     | Self_concrete meths -> meths
   in
-  { cstr_self = self_pat;
-    cstr_fields = fields;
-    cstr_type = sign;
-    cstr_meths = meths; }
+  let ids =
+    List.fold_left
+      (fun ids { Typecore.pv_id; _ } -> Ident.Set.add pv_id ids)
+      Ident.Set.empty self_pat_vars
+  in
+  let ids =
+    Vars.fold (fun _ id ids -> Ident.Set.add id ids) vars ids
+  in
+  let result =
+    { cstr_self = self_pat;
+      cstr_fields = fields;
+      cstr_type = sign;
+      cstr_meths = meths
+    }
+  in
+  let roots =
+    refinement_escape_roots outer_val_env
+      (fun iterator -> iterator.class_structure iterator result)
+  in
+  check_refinement_scope_escape ~loc ~roots ids (Cty_signature sign);
+  result
 
 and class_expr cl_num val_env met_env virt self_scope scl =
   Builtin_attributes.warning_scope scl.pcl_attributes
@@ -1290,6 +1333,24 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
       let cl =
         Ctype.with_raised_nongen_level
           (fun () -> class_expr cl_num val_env' met_env virt self_scope scl') in
+      let ids =
+        List.fold_left
+          (fun ids id -> Ident.Set.add id ids)
+          Ident.Set.empty (Typedtree.pat_bound_idents pat)
+      in
+      let ids =
+        List.fold_left
+          (fun ids (_, exp) ->
+             match exp.exp_desc with
+             | Texp_ident { path = Pident id; _ } -> Ident.Set.add id ids
+             | _ -> ids)
+          ids pv
+      in
+      let roots =
+        refinement_escape_roots val_env
+          (fun iterator -> iterator.class_expr iterator cl)
+      in
+      check_refinement_scope_escape ~loc:scl.pcl_loc ~roots ids cl.cl_type;
       if not_nolabel_function cl.cl_type then begin
         match l with
         | Nolabel | Labelled _ -> ()
@@ -1503,6 +1564,21 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
           ([], met_env)
       in
       let cl = class_expr cl_num val_env met_env virt self_scope scl' in
+      let ids =
+        List.fold_left
+          (fun ids id -> Ident.Set.add id ids)
+          Ident.Set.empty (Typedtree.let_bound_idents defs)
+      in
+      let ids =
+        List.fold_left
+          (fun ids (id, _) -> Ident.Set.add id ids)
+          ids vals
+      in
+      let roots =
+        refinement_escape_roots val_env
+          (fun iterator -> iterator.class_expr iterator cl)
+      in
+      check_refinement_scope_escape ~loc:scl.pcl_loc ~roots ids cl.cl_type;
       let defs = match rec_flag with
         | Recursive -> Typecore.annotate_recursive_bindings val_env defs
         | Nonrecursive -> defs

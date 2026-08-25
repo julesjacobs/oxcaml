@@ -564,6 +564,12 @@ val close_class_signature : Env.t -> class_signature -> bool
 exception Nondep_cannot_erase of Ident.t
 
 val nondep_type: Env.t -> Ident.t list -> type_expr -> type_expr
+(* Find a term identifier from [ids] that occurs in a refinement predicate
+   in one of the types, after following type links. *)
+val refinement_scope_escape_types :
+  Ident.Set.t -> type_expr list -> Ident.t option
+val refinement_scope_escape_class_type :
+  Ident.Set.t -> class_type -> Ident.t option
         (* Return a type equivalent to the given type but without
            references to any of the given identifiers.
            Raise [Nondep_cannot_erase id] if no such type exists because [id],

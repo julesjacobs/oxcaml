@@ -144,6 +144,7 @@ let all_keywords =
     "private", PRIVATE, v1_0;
     "rec", REC, always;
     "repr_", REPR, oxcaml;
+    "refine_", REFINE, oxcaml;
     "sig", SIG, always;
     "stack_", STACK, oxcaml;
     "struct", STRUCT, always;

@@ -64,6 +64,10 @@ val type_open:
    Longident.t Asttypes.loc -> Path.t * Env.t)
     ref
 
+val type_refinement_predicate:
+  (Env.t -> Ident.t -> Types.type_expr -> Parsetree.expression ->
+    Typedtree.expression * Types.refinement_expression) ref
+
 val valid_tyvar_name : string -> bool
 
 (** [transl_label lbl ty] produces a Typedtree argument label for an argument

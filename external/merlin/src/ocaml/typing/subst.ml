@@ -73,6 +73,10 @@ type s =
     modules: Path.t Path.Map.t;
     modtypes: module_type Path.Map.t;
     jkinds: kind_replacement Path.Map.t;
+    values: Path.t Path.Map.t;
+    (* Value paths only occur in types inside refinement predicates
+       ([Rexp_ident]); this map is what keeps them meaningful across
+       signature prefixing and binder renaming. *)
 
     additional_action: additional_action;
     sort_var_mapping: sort_map;
@@ -87,6 +91,11 @@ type safe = [`Safe]
 type unsafe = [`Unsafe]
 type t = safe subst
 exception Module_type_path_substituted_away of Path.t * Types.module_type
+
+let rename_bound_ident s id =
+  match s.additional_action with
+  | Prepare_for_saving { prepare_ident; _ } -> prepare_ident id
+  | Duplicate_variables | No_action -> Ident.rename id
 
 module Ikind_substitution = struct
   type type_lookup_result =
@@ -111,6 +120,7 @@ let identity =
     modules = Path.Map.empty;
     modtypes = Path.Map.empty;
     jkinds = Path.Map.empty;
+    values = Path.Map.empty;
     additional_action = No_action;
     sort_var_mapping = Nothing;
     loc = None;
@@ -154,6 +164,9 @@ let add_type id p s =
 
 let add_module id p s =
   { s with modules = Path.Map.add (Pident id) p s.modules; last_compose = None }
+
+let add_value id p s =
+  { s with values = Path.Map.add (Pident id) p s.values; last_compose = None }
 
 let add_modtype_gen p ty s =
   { s with modtypes = Path.Map.add p ty s.modtypes; last_compose = None }
@@ -413,10 +426,13 @@ let jkind_path s path =
 
 (* For values, extension constructors, classes and class types *)
 let value_path s path =
-  match path with
-  | Pident _ -> path
-  | Pdot(p, n) -> Pdot(module_path s p, n)
-  | Papply _ | Pextra_ty _ -> fatal_error "Subst.value_path"
+  match Path.Map.find path s.values with
+  | p -> p
+  | exception Not_found ->
+      match path with
+      | Pident _ -> path
+      | Pdot(p, n) -> Pdot(module_path s p, n)
+      | Papply _ | Pextra_ty _ -> fatal_error "Subst.value_path"
 
 let rec type_path s path =
   match Path.Map.find path s.types with
@@ -434,6 +450,11 @@ let rec type_path s path =
          | Pcstr_ty _ | Punboxed_ty ->
            Pextra_ty (type_path s p, extra)
          | Pext_ty -> Pextra_ty (value_path s p, extra)
+
+let constructor_path s = function
+  | Pextra_ty _ as path -> type_path s path
+  | (Pident _ | Pdot _) as path -> value_path s path
+  | Papply _ -> fatal_error "Subst.constructor_path"
 
 let to_subst_by_type_function s p =
   match Path.Map.find p s.types with
@@ -695,7 +716,9 @@ let rec typexp copy_scope s ty =
           Tpackage {
             pack_path = modtype_path s pack_path;
             pack_cstrs =
-              List.map (fun (n, ty) -> (n, typexp copy_scope s ty)) pack_cstrs;
+              List.map
+                (fun (n, ty) -> n, typexp copy_scope s ty)
+                pack_cstrs;
           }
       | Tobject (t1, name) ->
           let t1' = typexp copy_scope s t1 in
@@ -705,7 +728,10 @@ let rec typexp copy_scope s ty =
             | Some (p, tl) ->
                 if to_subst_by_type_function s p
                 then None
-                else Some (type_path s p, List.map (typexp copy_scope s) tl)
+                else
+                  Some
+                    (type_path s p,
+                     List.map (typexp copy_scope s) tl)
           in
           Tobject (t1', ref name')
       | Tvariant row ->
@@ -741,7 +767,9 @@ let rec typexp copy_scope s ty =
               (* TODO: check if more' can be eliminated *)
               (* Return a new copy *)
               let row =
-                copy_row (typexp copy_scope s) true row (not dup) more' in
+                copy_row (typexp copy_scope s) true row (not dup)
+                  more'
+              in
               match row_name row with
               | Some (p, tl) ->
                   let name =
@@ -765,6 +793,19 @@ let rec typexp copy_scope s ty =
           let ret = typexp copy_scope s ret in
           let comm = copy_commu comm in
           Tarrow ((label, marg, mret), arg, ret, comm)
+      | Trefine { ref_binder; ref_payload; ref_pred } ->
+          let ref_payload = typexp copy_scope s ref_payload in
+          let ref_binder' = rename_bound_ident s ref_binder in
+          let rename = Ident.Map.singleton ref_binder ref_binder' in
+          Trefine
+            { ref_binder = ref_binder';
+              ref_payload;
+              ref_pred =
+                Refinement_predicate.map ~rename
+                  ~rename_bound:(rename_bound_ident s)
+                  ~value_path:(value_path s)
+                  ~constructor_path:(constructor_path s)
+                  ~type_path:(type_path s) ~location:(loc s) ref_pred }
       | Tof_kind jk -> Tof_kind (jkind copy_scope s jk)
       | Tmod (ty, mod_bounds) ->
           Tmod (typexp copy_scope s ty, mod_bounds)
@@ -812,9 +853,7 @@ let type_expr s ty =
 (* For idents that are guaranteed to be local/scoped, such as bound
    signature items and functor parameters. *)
 let rename_ident s id =
-  match s.additional_action with
-  | Prepare_for_saving { prepare_ident; _ } -> prepare_ident id
-  | Duplicate_variables | No_action -> Ident.rename id
+  rename_bound_ident s id
 
 (* For constructor/label idents, which may be predef (e.g. the constructors
    of [bool] or [or_null], whose declarations can appear in a substituted
@@ -1165,10 +1204,16 @@ let rename_bound_idents scoping s sg =
     | Sig_value(id, vd, vis) :: rest ->
         (* scope doesn't matter for value identifiers. *)
         let id' = rename_ident s id in
-        rename_bound_idents s (Sig_value(id', vd, vis) :: sg) rest
+        rename_bound_idents
+          (add_value id (Pident id') s)
+          (Sig_value(id', vd, vis) :: sg)
+          rest
     | Sig_typext(id, ec, es, vis) :: rest ->
         let id' = rename id in
-        rename_bound_idents s (Sig_typext(id',ec,es,vis) :: sg) rest
+        rename_bound_idents
+          (add_value id (Pident id') s)
+          (Sig_typext(id',ec,es,vis) :: sg)
+          rest
     | Sig_jkind (id, jkd, vis) :: rest ->
         let id' = rename id in
         rename_bound_idents
@@ -1349,6 +1394,7 @@ and compose s1 s2 =
           modules = merge_path_maps (module_path s2) s1.modules s2.modules;
           modtypes = merge_path_maps (modtype Keep s2) s1.modtypes s2.modtypes;
           jkinds = merge_path_maps (jkind_replacement s2) s1.jkinds s2.jkinds;
+          values = merge_path_maps (value_path s2) s1.values s2.values;
           additional_action = begin
             match s1.additional_action, s2.additional_action with
             | action, No_action | No_action, action -> action

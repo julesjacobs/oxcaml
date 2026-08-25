@@ -153,6 +153,9 @@ val type_class_arg_pattern:
 val type_self_pattern:
         Env.t -> Parsetree.pattern ->
         Typedtree.pattern * pattern_variable list
+val refinement_escape_roots:
+        Env.t -> roots:type_expr list ->
+        (Tast_iterator.iterator -> unit) -> type_expr list
 val check_partial:
         ?lev:int -> Env.t -> type_expr ->
         Location.t -> Typedtree.value Typedtree.case list -> Typedtree.partial

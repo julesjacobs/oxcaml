@@ -1061,7 +1061,7 @@ let rec copy_spine copy_scope ty =
   | Tof_kind _
   | Tbox _ -> ty
   | ( Tarrow _ | Tpoly _ | Trepr _ | Ttuple _ | Tunboxed_tuple _ | Tpackage _
-    | Tconstr _ | Tmod _ ) as desc ->
+    | Tconstr _ | Tmod _ | Trefine _ ) as desc ->
       let level = get_level ty in
       if level < !current_level || level = generic_level then ty else
       let t =
@@ -1087,6 +1087,9 @@ let rec copy_spine copy_scope ty =
           Tconstr (path, List.map copy_rec tyl, ref Mnil)
       | Tmod (ty, mod_bounds) ->
           Tmod (copy_rec ty, mod_bounds)
+      | Trefine refinement ->
+          Trefine
+            { refinement with ref_payload = copy_rec refinement.ref_payload }
       | _ -> assert false
       in
       Transient_expr.set_stub_desc t desc';
@@ -2487,6 +2490,8 @@ and try_reduce_quote_eval env t =
   let try_reduce_poly env t = if is_Tpoly t then try_reduce_once env t else t in
   match get_desc t with
   | Tvar _ | Tunivar _ -> raise Cannot_expand
+  (* Refinements are rigid; quoted refined types do not reduce further. *)
+  | Trefine _ -> raise Cannot_expand
   (* [<[t1 -> t2]> eval]  ==>  [<[t1]> eval -> <[t2]> eval] *)
   | Tarrow (a, t1, t2, c) ->
     (* Reduce the parameter type's [Tpoly] immediately *)
@@ -2698,7 +2703,7 @@ let rec extract_concrete_typedecl env ty =
   | Tquote_eval ty -> extract_concrete_typedecl (incr_stage env) ty
   | Tbox ty -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tunboxed_tuple _ | Tobject _ | Tfield _ | Tnil
-  | Tvariant _ | Tpackage _ | Tof_kind _ -> Has_no_typedecl
+  | Tvariant _ | Tpackage _ | Tof_kind _ | Trefine _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
   | Tlink _ | Tsubst _ -> assert false
 
@@ -2895,6 +2900,9 @@ let contained_without_boxing env ty =
   | Tpoly (ty, _) -> [ty]
   | Tmod (ty, _) -> [ty]
   | Trepr (_, _) ->  Misc.fatal_error "Ctype.contained_without_boxing: repr"
+  | Trefine { ref_payload; _ } ->
+    (* The payload determines the runtime representation. *)
+    [ref_payload]
   | Tvar _ | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil | Tlink _
   | Tsubst _ | Tvariant _ | Tunivar _ | Tpackage _ | Tof_kind _ | Tbox _
   | Tquote _ | Tsplice _ | Tquote_eval _ -> []
@@ -3168,6 +3176,9 @@ and estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty =
     |> estimate_type_jkind ~expand_components ~ignore_mod_bounds env
   | Trepr (ty, _sort_vars) ->
     estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty
+  | Trefine { ref_payload; _ } ->
+    estimate_type_jkind ~expand_components ~ignore_mod_bounds env ref_payload
+    |> Ikind.enforce_refinement_crossings
   | Tof_kind jkind ->
     (* A [Tof_kind] is substitued for existential [Tvar]s or [Tunivar]s bound in
        a [Tpoly] that would escape their scope. In both cases, we can never
@@ -4477,6 +4488,11 @@ let rec mcomp type_pairs env t1 t2 =
           when compatible_labels ~in_pattern_mode:true l1 l2 ->
             mcomp type_pairs env t1 t2;
             mcomp type_pairs env u1 u2;
+        | (Trefine r1, Trefine r2, _, _) ->
+            (* Only the payloads are compared: returning without raising
+               means "possibly compatible", which is always sound, and the
+               predicates carry no head structure to refute. *)
+            mcomp type_pairs env r1.ref_payload r2.ref_payload
         | (Ttuple tl1, Ttuple tl2, _, _) ->
             mcomp_labeled_list type_pairs env tl1 tl2
         (*
@@ -5002,6 +5018,17 @@ let unify3_var uenv jkind1 t1' t2 t2' =
         record_equation uenv t1' t2'
       end
 
+let normalize_refinement_predicate env =
+  Refinement_predicate.map
+    ~value_path:(Env.normalize_value_path None env)
+    ~constructor_path:(Env.normalize_value_path None env)
+    ~type_path:(Env.normalize_type_path None env)
+
+let refinement_predicates_equal env ~pairs pred1 pred2 =
+  Refinement_predicate.equal ~pairs
+    (normalize_refinement_predicate env pred1)
+    (normalize_refinement_predicate env pred2)
+
 (*
    1. When unifying two non-abbreviated types, one type is made a link
       to the other. When unifying an abbreviated type with a
@@ -5185,6 +5212,16 @@ and unify3 uenv t1 t1' t2 t2' =
           | false, false -> link_commu ~inside:c1 c2
           | true, true -> ()
           end
+      | (Trefine r1, Trefine r2) ->
+          (* Refinements are rigid: payloads unify, predicates must be
+             syntactically alpha-equivalent.  One-sided refinement falls
+             into the mismatch case below. *)
+          unify uenv r1.ref_payload r2.ref_payload;
+          if not
+            (refinement_predicates_equal (get_env uenv)
+               ~pairs:[r1.ref_binder, r2.ref_binder]
+               r1.ref_pred r2.ref_pred)
+          then raise_unexplained_for Unify
       | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
           unify_labeled_list uenv labeled_tl1 labeled_tl2
       | (Tunboxed_tuple labeled_tl1, Tunboxed_tuple labeled_tl2) ->
@@ -6480,6 +6517,17 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               crossing. Similar for [u1] and [u2]. *)
               moregen_alloc_mode env t2 ~is_ret:false (neg_variance variance) a1 a2;
               moregen_alloc_mode env u2 ~is_ret:true variance r1 r2
+          | (Trefine r1, Trefine r2) ->
+              (* Refinements are rigid: the payloads are compared and the
+                 predicates must be syntactically alpha-equivalent.  There
+                 is no weakening — that is a later piece. *)
+              moregen inst_nongen variance type_pairs env
+                r1.ref_payload r2.ref_payload;
+              if not
+                (refinement_predicates_equal env
+                   ~pairs:[r1.ref_binder, r2.ref_binder]
+                   r1.ref_pred r2.ref_pred)
+              then raise_unexplained_for Moregen
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               moregen_labeled_list inst_nongen variance type_pairs env
                 labeled_tl1 labeled_tl2
@@ -7000,6 +7048,14 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
               eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true;
               eqtype_alloc_mode a1 a2;
               eqtype_alloc_mode r1 r2
+          | (Trefine r1, Trefine r2) ->
+              eqtype rename type_pairs subst env
+                r1.ref_payload r2.ref_payload ~do_jkind_check:true;
+              if not
+                (refinement_predicates_equal env
+                   ~pairs:[r1.ref_binder, r2.ref_binder]
+                   r1.ref_pred r2.ref_pred)
+              then raise_unexplained_for Equality
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               eqtype_labeled_list rename type_pairs subst env labeled_tl1
                 labeled_tl2
@@ -7600,6 +7656,9 @@ let rec build_subtype env (visited : transient_expr list)
           (t, Unchanged)
       else
         (t, Unchanged)
+  | Trefine _ ->
+      (* Subtyping rules for refinements belong to a later piece. *)
+      (t, Unchanged)
   | Tarrow((l,a,r), t1, t2, _) ->
       let tt = Transient_expr.repr t in
       if memq_warn tt visited then (t, Unchanged) else
@@ -8467,6 +8526,20 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
                *)
             with Cannot_expand -> raise exn
           end
+      | Trefine { ref_binder; ref_payload; ref_pred } -> begin
+          let ref_pred = normalize_refinement_predicate env ref_pred in
+          match
+            Refinement_predicate.find_dependency_path
+              (Path.find_free_opt ids) ref_pred
+          with
+          | Some id -> raise (Nondep_cannot_erase id)
+          | None ->
+              Trefine
+                { ref_binder;
+                  ref_payload = nondep_type_rec env ids ref_payload;
+                  ref_pred
+                }
+        end
       | Tpackage pack when Path.exists_free ids pack.pack_path ->
           let p' = normalize_package_path env pack.pack_path in
           begin match Path.find_free_opt ids p' with
@@ -8530,6 +8603,44 @@ let nondep_type env id ty =
   with Nondep_cannot_erase _ as exn ->
     clear_hash ();
     raise exn
+
+let refinement_scope_escape_in ids visit_root =
+  let visited = TypeHash.create 17 in
+  let exception Found of Ident.t in
+  let rec visit ty =
+    if not (TypeHash.mem visited ty) then begin
+      TypeHash.add visited ty ();
+      begin match get_desc ty with
+      | Trefine { ref_pred; _ } ->
+          Option.iter (fun id -> raise (Found id))
+            (Refinement_predicate.find_ident ids ref_pred)
+      | _ -> ()
+      end;
+      iter_type_expr visit ty
+    end
+  in
+  match visit_root visit with
+  | () -> None
+  | exception Found id -> Some id
+
+let refinement_scope_escape_types ids tys =
+  refinement_scope_escape_in ids (fun visit -> List.iter visit tys)
+
+let refinement_scope_escape_class_type ids cty =
+  let rec visit_class_type visit = function
+    | Cty_constr (_, args, cty) ->
+        List.iter visit args;
+        visit_class_type visit cty
+    | Cty_signature sign ->
+        visit sign.csig_self;
+        visit sign.csig_self_row;
+        Vars.iter (fun _ (_, _, ty) -> visit ty) sign.csig_vars;
+        Meths.iter (fun _ (_, _, ty) -> visit ty) sign.csig_meths
+    | Cty_arrow (_, arg, cty) ->
+        visit arg;
+        visit_class_type visit cty
+  in
+  refinement_scope_escape_in ids (fun visit -> visit_class_type visit cty)
 
 let () = nondep_type' := nondep_type
 

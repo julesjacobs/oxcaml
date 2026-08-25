@@ -1089,6 +1089,7 @@ let merloc startpos ?endpos x =
    string that will not trigger a syntax error; see how [not_expecting]
    is used in the definition of [type_variance]. */
 
+<<<<<<< Merlin:jujacobs/vox/refinement-type-former
 %token AMPERAMPER [@symbol "&&"]
 %token AMPERSAND [@symbol "&"]
 %token AND [@symbol "and"]
@@ -1244,6 +1245,318 @@ let merloc startpos ?endpos x =
 %token WHILE [@symbol "while"]
 %token WITH [@symbol "with"]
 %token <string * Location.t> COMMENT "(* comment *)" [@cost 2][@recovery ("", Location.none)]
+||||||| Compiler:last-imported
+%token AMPERAMPER             "&&"
+%token AMPERSAND              "&"
+%token AND                    "and"
+%token AS                     "as"
+%token ASSERT                 "assert"
+%token BACKQUOTE              "`"
+%token BANG                   "!"
+%token BAR                    "|"
+%token BARBAR                 "||"
+%token BARRBRACKET            "|]"
+%token BEGIN                  "begin"
+%token BORROW                 "borrow_"
+%token <char> CHAR            "'a'" (* just an example *)
+%token <char> HASH_CHAR       "#'a'" (* just an example *)
+%token CLASS                  "class"
+%token COLON                  ":"
+%token COLONCOLON             "::"
+%token COLONEQUAL             ":="
+%token COLONGREATER           ":>"
+%token COLONRBRACKET          ":]"
+%token COMMA                  ","
+%token CONSTRAINT             "constraint"
+%token DO                     "do"
+%token DOLLAR                 "$"
+%token DONE                   "done"
+%token DOT                    "."
+%token DOTDOT                 ".."
+%token DOTHASH                ".#"
+%token DOWNTO                 "downto"
+%token EFFECT                 "effect"
+%token ELSE                   "else"
+%token END                    "end"
+%token EOF                    ""
+%token EQUAL                  "="
+%token EXCEPTION              "exception"
+%token EXCLAVE                "exclave_"
+%token EXTERNAL               "external"
+%token FALSE                  "false"
+%token <string * char option> FLOAT       "42.0" (* just an example *)
+%token <string * char option> HASH_FLOAT "#42.0" (* just an example *)
+%token FOR                    "for"
+%token FUN                    "fun"
+%token FUNCTION               "function"
+%token FUNCTOR                "functor"
+%token GLOBAL                 "global_"
+%token GREATER                ">"
+%token GREATERRBRACE          ">}"
+%token GREATERRBRACKET        ">]"
+%token HASHLPAREN             "#("
+%token HASHLBRACE             "#{"
+%token HASHFALSE              "#false"
+%token HASHTRUE               "#true"
+%token IF                     "if"
+%token IN                     "in"
+%token INCLUDE                "include"
+%token <string> INFIXOP0      "!="   (* just an example *)
+%token AT                     "@"    (* mode expression *)
+%token ATAT                   "@@"   (* mode expression *)
+%token <string> INFIXOP1      "^"    (* just an example *)
+%token <string> INFIXOP2      "+!"   (* chosen with care; see above *)
+%token <string> INFIXOP3      "land" (* just an example *)
+%token <string> INFIXOP4      "**"   (* just an example *)
+%token <string> DOTOP         ".+"
+%token <string> LETOP         "let*" (* just an example *)
+%token <string> ANDOP         "and*" (* just an example *)
+%token INHERIT                "inherit"
+%token INITIALIZER            "initializer"
+%token <string * char option> INT      "42"  (* just an example *)
+%token <string * char option> HASH_INT "#42l" (* just an example *)
+%token KIND                   "kind_"
+%token KIND_OF                "kind_of_"
+%token <string> LABEL         "~label:" (* just an example *)
+%token LAZY                   "lazy"
+%token LBRACE                 "{"
+%token LBRACELESS             "{<"
+%token LBRACKET               "["
+%token LBRACKETBAR            "[|"
+%token LBRACKETCOLON          "[:"
+%token LBRACKETLESS           "[<"
+%token LBRACKETGREATER        "[>"
+%token LBRACKETPERCENT        "[%"
+%token LBRACKETPERCENTPERCENT "[%%"
+%token LESS                   "<"
+%token LESSLBRACKET           "<["
+%token LESSMINUS              "<-"
+%token LET                    "let"
+%token <string> LIDENT        "lident" (* just an example *)
+%token LOCAL                  "local_"
+%token LPAREN                 "("
+%token LBRACKETAT             "[@"
+%token LBRACKETATAT           "[@@"
+%token LBRACKETATATAT         "[@@@"
+%token MATCH                  "match"
+%token METHOD                 "method"
+%token MINUS                  "-"
+%token MINUSDOT               "-."
+%token MINUSGREATER           "->"
+%token MOD                    "mod"
+%token MODULE                 "module"
+%token MUTABLE                "mutable"
+%token NEW                    "new"
+%token NONREC                 "nonrec"
+%token OBJECT                 "object"
+%token OF                     "of"
+%token OPEN                   "open"
+%token <string> OPTLABEL      "?label:" (* just an example *)
+%token OR                     "or"
+%token OVERWRITE              "overwrite_"
+/* %token PARSER              "parser" */
+%token POLY                   "poly_"
+%token PERCENT                "%"
+%token PLUS                   "+"
+%token PLUSDOT                "+."
+%token PLUSEQ                 "+="
+%token <string> PREFIXOP      "!+" (* chosen with care; see above *)
+%token PRIVATE                "private"
+%token QUESTION               "?"
+%token QUOTE                  "'"
+%token RBRACE                 "}"
+%token RBRACKET               "]"
+%token RBRACKETGREATER        "]>"
+%token REC                    "rec"
+%token REPR                   "repr_"
+%token RPAREN                 ")"
+%token SEMI                   ";"
+%token SEMISEMI               ";;"
+%token HASH                   "#"
+%token HASH_SUFFIX            "# "
+%token <string> HASHOP        "##" (* just an example *)
+%token SIG                    "sig"
+%token LAYOUT                 "layout_"
+%token STACK                  "stack_"
+%token STAR                   "*"
+%token <string * Location.t * string option>
+       STRING                 "\"hello\"" (* just an example *)
+%token <string * Location.t * string * Location.t * string option>
+       QUOTED_STRING_EXPR     "{%hello|world|}"  (* just an example *)
+%token <string * Location.t * string * Location.t * string option>
+       QUOTED_STRING_ITEM     "{%%hello|world|}" (* just an example *)
+%token STRUCT                 "struct"
+%token THEN                   "then"
+%token TILDE                  "~"
+%token TO                     "to"
+%token TRUE                   "true"
+%token TRY                    "try"
+%token TYPE                   "type"
+%token <string> UIDENT        "UIdent" (* just an example *)
+%token UNDERSCORE             "_"
+%token VAL                    "val"
+%token VIRTUAL                "virtual"
+%token WHEN                   "when"
+%token WHILE                  "while"
+%token WITH                   "with"
+%token <string * Location.t> COMMENT    "(* comment *)"
+=======
+%token AMPERAMPER             "&&"
+%token AMPERSAND              "&"
+%token AND                    "and"
+%token AS                     "as"
+%token ASSERT                 "assert"
+%token BACKQUOTE              "`"
+%token BANG                   "!"
+%token BAR                    "|"
+%token BARBAR                 "||"
+%token BARRBRACKET            "|]"
+%token BEGIN                  "begin"
+%token BORROW                 "borrow_"
+%token REFINE                 "refine_"
+%token <char> CHAR            "'a'" (* just an example *)
+%token <char> HASH_CHAR       "#'a'" (* just an example *)
+%token CLASS                  "class"
+%token COLON                  ":"
+%token COLONCOLON             "::"
+%token COLONEQUAL             ":="
+%token COLONGREATER           ":>"
+%token COLONRBRACKET          ":]"
+%token COMMA                  ","
+%token CONSTRAINT             "constraint"
+%token DO                     "do"
+%token DOLLAR                 "$"
+%token DONE                   "done"
+%token DOT                    "."
+%token DOTDOT                 ".."
+%token DOTHASH                ".#"
+%token DOWNTO                 "downto"
+%token EFFECT                 "effect"
+%token ELSE                   "else"
+%token END                    "end"
+%token EOF                    ""
+%token EQUAL                  "="
+%token EXCEPTION              "exception"
+%token EXCLAVE                "exclave_"
+%token EXTERNAL               "external"
+%token FALSE                  "false"
+%token <string * char option> FLOAT       "42.0" (* just an example *)
+%token <string * char option> HASH_FLOAT "#42.0" (* just an example *)
+%token FOR                    "for"
+%token FUN                    "fun"
+%token FUNCTION               "function"
+%token FUNCTOR                "functor"
+%token GLOBAL                 "global_"
+%token GREATER                ">"
+%token GREATERRBRACE          ">}"
+%token GREATERRBRACKET        ">]"
+%token HASHLPAREN             "#("
+%token HASHLBRACE             "#{"
+%token HASHFALSE              "#false"
+%token HASHTRUE               "#true"
+%token IF                     "if"
+%token IN                     "in"
+%token INCLUDE                "include"
+%token <string> INFIXOP0      "!="   (* just an example *)
+%token AT                     "@"    (* mode expression *)
+%token ATAT                   "@@"   (* mode expression *)
+%token <string> INFIXOP1      "^"    (* just an example *)
+%token <string> INFIXOP2      "+!"   (* chosen with care; see above *)
+%token <string> INFIXOP3      "land" (* just an example *)
+%token <string> INFIXOP4      "**"   (* just an example *)
+%token <string> DOTOP         ".+"
+%token <string> LETOP         "let*" (* just an example *)
+%token <string> ANDOP         "and*" (* just an example *)
+%token INHERIT                "inherit"
+%token INITIALIZER            "initializer"
+%token <string * char option> INT      "42"  (* just an example *)
+%token <string * char option> HASH_INT "#42l" (* just an example *)
+%token KIND                   "kind_"
+%token KIND_OF                "kind_of_"
+%token <string> LABEL         "~label:" (* just an example *)
+%token LAZY                   "lazy"
+%token LBRACE                 "{"
+%token LBRACELESS             "{<"
+%token LBRACKET               "["
+%token LBRACKETBAR            "[|"
+%token LBRACKETCOLON          "[:"
+%token LBRACKETLESS           "[<"
+%token LBRACKETGREATER        "[>"
+%token LBRACKETPERCENT        "[%"
+%token LBRACKETPERCENTPERCENT "[%%"
+%token LESS                   "<"
+%token LESSLBRACKET           "<["
+%token LESSMINUS              "<-"
+%token LET                    "let"
+%token <string> LIDENT        "lident" (* just an example *)
+%token LOCAL                  "local_"
+%token LPAREN                 "("
+%token LBRACKETAT             "[@"
+%token LBRACKETATAT           "[@@"
+%token LBRACKETATATAT         "[@@@"
+%token MATCH                  "match"
+%token METHOD                 "method"
+%token MINUS                  "-"
+%token MINUSDOT               "-."
+%token MINUSGREATER           "->"
+%token MOD                    "mod"
+%token MODULE                 "module"
+%token MUTABLE                "mutable"
+%token NEW                    "new"
+%token NONREC                 "nonrec"
+%token OBJECT                 "object"
+%token OF                     "of"
+%token OPEN                   "open"
+%token <string> OPTLABEL      "?label:" (* just an example *)
+%token OR                     "or"
+%token OVERWRITE              "overwrite_"
+/* %token PARSER              "parser" */
+%token POLY                   "poly_"
+%token PERCENT                "%"
+%token PLUS                   "+"
+%token PLUSDOT                "+."
+%token PLUSEQ                 "+="
+%token <string> PREFIXOP      "!+" (* chosen with care; see above *)
+%token PRIVATE                "private"
+%token QUESTION               "?"
+%token QUOTE                  "'"
+%token RBRACE                 "}"
+%token RBRACKET               "]"
+%token RBRACKETGREATER        "]>"
+%token REC                    "rec"
+%token REPR                   "repr_"
+%token RPAREN                 ")"
+%token SEMI                   ";"
+%token SEMISEMI               ";;"
+%token HASH                   "#"
+%token HASH_SUFFIX            "# "
+%token <string> HASHOP        "##" (* just an example *)
+%token SIG                    "sig"
+%token LAYOUT                 "layout_"
+%token STACK                  "stack_"
+%token STAR                   "*"
+%token <string * Location.t * string option>
+       STRING                 "\"hello\"" (* just an example *)
+%token <string * Location.t * string * Location.t * string option>
+       QUOTED_STRING_EXPR     "{%hello|world|}"  (* just an example *)
+%token <string * Location.t * string * Location.t * string option>
+       QUOTED_STRING_ITEM     "{%%hello|world|}" (* just an example *)
+%token STRUCT                 "struct"
+%token THEN                   "then"
+%token TILDE                  "~"
+%token TO                     "to"
+%token TRUE                   "true"
+%token TRY                    "try"
+%token TYPE                   "type"
+%token <string> UIDENT        "UIdent" (* just an example *)
+%token UNDERSCORE             "_"
+%token VAL                    "val"
+%token VIRTUAL                "virtual"
+%token WHEN                   "when"
+%token WHILE                  "while"
+%token WITH                   "with"
+%token <string * Location.t> COMMENT    "(* comment *)"
+>>>>>>> Compiler:HEAD
 %token <Docstrings.docstring> DOCSTRING "(** documentation *)"
 
 %token EOL                    "\\n"      (* not great, but EOL is unused *)
@@ -3007,7 +3320,16 @@ fun_:
   | expr_
       { $1 }
   | let_bindings(ext) IN seq_expr
+<<<<<<< Merlin:jujacobs/vox/refinement-type-former
       { expr_of_let_bindings ~loc:$sloc $1 (merloc $endpos($2) $3) }
+||||||| Compiler:last-imported
+      { expr_of_let_bindings ~loc:$sloc $1 $3 }
+=======
+      { expr_of_let_bindings ~loc:$sloc $1 $3 }
+  | LET REFINE binder = mkrhs(LIDENT) EQUAL bound = seq_expr
+      IN body = seq_expr
+      { mkexp ~loc:$sloc (Pexp_let_refine (binder, bound, body)) }
+>>>>>>> Compiler:HEAD
   | pbop_op = mkrhs(LETOP) bindings = letop_bindings IN body = seq_expr
       { let (pbop_pat, pbop_exp, rev_ands) = bindings in
         let ands = List.rev rev_ands in
@@ -3087,6 +3409,8 @@ fun_:
   | stack(simple_expr) %prec below_HASH { $1 }
   | BORROW simple_expr %prec below_HASH
       { Exp.borrow ~loc:(make_loc $sloc) $2 }
+  | REFINE simple_expr %prec below_HASH
+      { Exp.refine ~loc:(make_loc $sloc) $2 }
   | labeled_tuple %prec below_COMMA
       { mkexp ~loc:$sloc (Pexp_tuple $1) }
   | maybe_stack (
@@ -4553,6 +4877,11 @@ label_declarations:
   | label_declaration_semi                      { [$1] }
   | label_declaration_semi label_declarations   { $1 :: $2 }
 ;
+refinement_type_head:
+    flags = mutable_or_global_flag name = mkrhs(label)
+    COLON ty = poly_type_no_attr
+      { flags, name, ty }
+;
 label_declaration:
     mutable_or_global_flag mkrhs(label) COLON poly_type_no_attr m1=optional_atat_modalities_expr attrs=attributes
       { let info = symbol_info $endpos in
@@ -5160,6 +5489,14 @@ spliceable_type:
 atomic_type:
   | type_ = delimited_type
       { type_ }
+  | LBRACE head = refinement_type_head BAR predicate = seq_expr RBRACE
+      { let (mut, modalities), binder, payload = head in
+        match mut, modalities with
+        | Immutable, [] ->
+            mktyp ~loc:$sloc (Ptyp_refine (binder, payload, predicate))
+        | _ -> raise Parsing.Parse_error }
+  | LBRACE refinement_type_head BAR seq_expr error
+      { unclosed "{" $loc($1) "}" $loc($5) }
   | mktyp( /* begin mktyp group */
       tys = actual_type_parameters
       tid = mkrhs(type_longident)
@@ -5633,6 +5970,7 @@ single_attr_id:
   | ASSERT { "assert" }
   | BEGIN { "begin" }
   | BORROW { "borrow_" }
+  | REFINE { "refine_" }
   | CLASS { "class" }
   | CONSTRAINT { "constraint" }
   | DO { "do" }

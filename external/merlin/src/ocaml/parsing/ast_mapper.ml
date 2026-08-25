@@ -224,6 +224,9 @@ module T = struct
         repr ~loc ~attrs (List.map (map_loc sub) lvars) (sub.typ sub t)
     | Ptyp_newlayout (lvars, t) ->
         newlayout ~loc ~attrs (List.map (map_loc sub) lvars) (sub.typ sub t)
+    | Ptyp_refine (binder, t, predicate) ->
+        refine ~loc ~attrs (map_loc sub binder) (sub.typ sub t)
+          (sub.expr sub predicate)
     | Ptyp_extension x -> extension ~loc ~attrs (sub.extension sub x)
 
   let map_type_declaration sub
@@ -668,6 +671,10 @@ module E = struct
     | Pexp_splice e -> splice ~loc ~attrs (sub.expr sub e)
     | Pexp_hole -> hole ~loc ~attrs ()
     | Pexp_borrow e -> borrow ~loc ~attrs (sub.expr sub e)
+    | Pexp_refine e -> refine ~loc ~attrs (sub.expr sub e)
+    | Pexp_let_refine (name, bound, body) ->
+        let_refine ~loc ~attrs (map_loc sub name) (sub.expr sub bound)
+          (sub.expr sub body)
 
   let map_binding_op sub {pbop_op; pbop_pat; pbop_exp; pbop_loc} =
     let open Exp in
