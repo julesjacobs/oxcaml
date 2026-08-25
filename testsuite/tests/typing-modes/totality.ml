@@ -1,5 +1,5 @@
 (* TEST
-   flags = "-w -220";
+   flags = "-w -220 -extension comprehensions";
    expect;
 *)
 
@@ -231,4 +231,115 @@ Error: The value "existing_object" is "partial"
        but is expected to be "total"
          because it is used inside the function at line 1, characters 37-57
          which is expected to be "total".
+|}]
+
+let (force_lazy @ total) = function lazy x -> x
+[%%expect{|
+Line 1, characters 36-42:
+1 | let (force_lazy @ total) = function lazy x -> x
+                                        ^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 27-47
+         which is expected to be "total".
+|}]
+
+let (catch_argument @ total) f =
+  match f () with x -> x | exception _ -> 0
+[%%expect{|
+Line 2, characters 27-38:
+2 |   match f () with x -> x | exception _ -> 0
+                               ^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-2, characters 29-43
+         which is expected to be "total".
+|}]
+
+let (make_object @ total) () = object method value = 1 end
+[%%expect{|
+Line 1, characters 31-58:
+1 | let (make_object @ total) () = object method value = 1 end
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The object is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 26-58
+         which is expected to be "total".
+|}]
+
+let install_probe () = [%probe "totality" ()]
+[%%expect{|
+val install_probe : unit -> unit = <fun>
+|}]
+
+let (use_probe @ total) () = [%probe "totality" ()]
+[%%expect{|
+Line 1, characters 29-51:
+1 | let (use_probe @ total) () = [%probe "totality" ()]
+                                 ^^^^^^^^^^^^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 24-51
+         which is expected to be "total".
+|}]
+
+let (probe_enabled @ total) () = [%probe_is_enabled "totality"]
+[%%expect{|
+Line 1, characters 33-63:
+1 | let (probe_enabled @ total) () = [%probe_is_enabled "totality"]
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 28-63
+         which is expected to be "total".
+|}]
+
+let (comprehension @ total) n = [i for i = 0 to n]
+[%%expect{|
+Line 1, characters 32-50:
+1 | let (comprehension @ total) n = [i for i = 0 to n]
+                                    ^^^^^^^^^^^^^^^^^^
+Error: The loop is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 28-50
+         which is expected to be "total".
+|}]
+
+let (unused_recursive @ total) () =
+  let rec _loop () = _loop () in
+  ()
+[%%expect{|
+val unused_recursive : unit -> unit = <fun>
+|}]
+
+let (add_one @ total) = (+) 1
+[%%expect{|
+Line 1, characters 24-29:
+1 | let (add_one @ total) = (+) 1
+                            ^^^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+module rec Recursive_total : sig
+  val f : unit -> unit @@ total
+end = struct
+  let (f @ total) () = Recursive_total.f ()
+end
+[%%expect{|
+Line 4, characters 23-40:
+4 |   let (f @ total) () = Recursive_total.f ()
+                           ^^^^^^^^^^^^^^^^^
+Error: The value "Recursive_total.f" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 4, characters 18-43
+         which is expected to be "total".
+|}]
+
+module rec Independent_total : sig
+  val f : int -> int @@ total
+end = struct
+  let (f @ total) x = x + 1
+end
+[%%expect{|
+module rec Independent_total : sig val f : int -> int @@ total end
 |}]
