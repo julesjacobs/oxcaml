@@ -24,7 +24,6 @@
         aliased
         stateless
         portable
-        portable
         contended
         external_
         static
@@ -41,7 +40,6 @@
         total
         immutable
         stateless
-        portable
         portable
         contended
         local
@@ -63,7 +61,6 @@
         total
         immutable
         stateless
-        portable
         portable
         contended
         local
