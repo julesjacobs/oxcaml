@@ -825,6 +825,7 @@ let rec partial_recursive_module_type env mty =
       Mty_functor (param, partial_recursive_module_type env result, mode)
   | Mty_strengthen (mty, path, alias) ->
       Mty_strengthen (partial_recursive_module_type env mty, path, alias)
+  | Mty_for_hole -> mty
 
 and partial_recursive_module_item env = function
   | Sig_value (id, desc, visibility) ->
