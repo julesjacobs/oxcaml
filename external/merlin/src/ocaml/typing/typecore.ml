@@ -405,7 +405,9 @@ let deep_copy () =
         | Tmod (t, mod_bounds) -> Tmod (copy t, mod_bounds)
         | Trefine { ref_binder; ref_payload; ref_pred } ->
           Trefine
-            { ref_binder; ref_payload = copy ref_payload; ref_pred }
+            { ref_binder;
+              ref_payload = copy ref_payload;
+              ref_pred = Refinement_predicate.map ~type_expr:copy ref_pred }
         | Tlink _ | Tsubst _ -> assert false
       in
       Transient_expr.(set_desc (repr ty') desc);
