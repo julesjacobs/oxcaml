@@ -247,6 +247,7 @@ fi
 temp_dir=$(mktemp -d "$root/_build/.vox-dev.XXXXXX")
 manifest=$root/_runtest/.vox-incremental-state
 planner=$root/_runtest/ocamltest/ocamltest
+compilerlibs_dir=$root/_build/install/main/lib/ocaml/compiler-libs
 
 make_value()
 {
@@ -303,6 +304,8 @@ record_state()
     die "full initialization did not install the standard library"
   [ -x "$root/_runtest/runtime/ocamlrun" ] ||
     die "full initialization did not stage the runtime"
+  [ -f "$compilerlibs_dir/ocamlcommon.cma" ] ||
+    die "full initialization did not install compiler libraries"
   state=$temp_dir/incremental-state
   write_expected_manifest "$state"
   mv -f "$state" "$manifest"
@@ -316,6 +319,8 @@ validate_state()
     die "installed standard library is absent; run './dev init'"
   [ -x "$root/_runtest/runtime/ocamlrun" ] ||
     die "staged runtime is absent; run './dev init'"
+  [ -f "$compilerlibs_dir/ocamlcommon.cma" ] ||
+    die "installed compiler libraries are absent; run './dev init'"
   expected=$temp_dir/expected-state
   write_expected_manifest "$expected"
   if ! cmp -s "$expected" "$manifest"; then
@@ -678,7 +683,6 @@ run_test()
   LC_ALL=C sort -u "$targets_file" -o "$targets_file"
   LC_ALL=C sort -u "$compilerlibs_file" -o "$compilerlibs_file"
 
-  compilerlibs_dir=$root/_build/install/main/lib/ocaml/compiler-libs
   if [ -s "$compilerlibs_file" ]; then
     OCAMLTEST_COMPILERLIBS_DIR=$compilerlibs_dir
     export OCAMLTEST_COMPILERLIBS_DIR
