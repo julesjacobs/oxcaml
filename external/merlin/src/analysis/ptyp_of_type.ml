@@ -43,7 +43,7 @@ and core_type type_expr =
     (* CR modes: do something better here with the jkind *)
     Typ.var s None
   | Tarrow
-      ( (label, arg_alloc_mode, ret_alloc_mode),
+      ( (label, arg_alloc_mode, ret_alloc_mode, binder),
         type_expr,
         type_expr_out,
         _commutable ) ->
@@ -57,7 +57,12 @@ and core_type type_expr =
     in
     let arg_modes = modes arg_alloc_mode in
     let ret_modes = modes ret_alloc_mode in
-    Typ.arrow label type_expr (core_type type_expr_out) arg_modes ret_modes
+    let binder =
+      Option.map binder ~f:(fun binder ->
+        Location.mknoloc (Ident.name binder))
+    in
+    Typ.arrow ?binder label type_expr (core_type type_expr_out)
+      arg_modes ret_modes
   | Ttuple type_exprs ->
     let labeled_type_exprs =
       List.map ~f:(fun (lbl, ty) -> (lbl, core_type ty)) type_exprs

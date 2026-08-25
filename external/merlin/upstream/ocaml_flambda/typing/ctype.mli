@@ -363,7 +363,8 @@ type filtered_arrow =
   { ty_arg : type_expr;
     arg_mode : Mode.Alloc.lr;
     ty_ret : type_expr;
-    ret_mode : Mode.Alloc.lr
+    ret_mode : Mode.Alloc.lr;
+    binder : Ident.t option
   }
 
 val filter_arrow: Env.t -> type_expr -> arg_label -> force_tpoly:bool ->
@@ -563,6 +564,9 @@ val nondep_type: Env.t -> Ident.t list -> type_expr -> type_expr
    in one of the types, after following type links. *)
 val refinement_scope_escape_types :
   Ident.Set.t -> type_expr list -> Ident.t option
+val refinement_ident_occurs : Ident.t -> type_expr -> bool
+val substitute_refinement_ident :
+  Ident.t -> Ident.t -> type_expr -> type_expr
 val refinement_scope_escape_class_type :
   Ident.Set.t -> class_type -> Ident.t option
         (* Return a type equivalent to the given type but without
