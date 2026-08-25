@@ -88,6 +88,8 @@ module Mode_axis_pair = struct
     | "forkable" -> comonadic Forkable Forkable
     | "yielding" -> comonadic Yielding Yielding
     | "unyielding" -> comonadic Yielding Unyielding
+    | "total" -> comonadic Totality Totality.Const.Total
+    | "partial" -> comonadic Totality Totality.Const.Partial
     | "stateless" -> comonadic Statefulness Stateless
     | "reading" -> comonadic Statefulness Reading
     | "writing" -> comonadic Statefulness Writing
@@ -155,7 +157,8 @@ end
 (* Since [unforkable yielding] is the default mode in presence of [local], the
    [global] modality must also apply [forkable unyielding] unless specified.
 
-   Similarly [visibility]/[contention] and [statefulness]/[portability].
+   Similarly [visibility]/[contention], [totality]/[statefulness], and
+   [statefulness]/[portability].
 
    [global] must imply [aliased] for soundness of borrowing. *)
 let implied_modalities (Atom (ax, a) : Modality.atom) : Modality.atom list =
@@ -181,6 +184,12 @@ let implied_modalities (Atom (ax, a) : Modality.atom) : Modality.atom list =
       | Read_write -> Uncontended
     in
     [Atom (Monadic Contention, Join_const b)]
+  | Comonadic Totality, Meet_const Totality.Const.Total ->
+    (* [implied_modalities] is applied once, so state the transitive
+       [Total] => [Stateless] => [Portable] implication explicitly. *)
+    [ Atom (Comonadic Statefulness, Meet_const Statefulness.Const.Stateless);
+      Atom (Comonadic Portability, Meet_const Portability.Const.Portable) ]
+  | Comonadic Totality, Meet_const Totality.Const.Partial -> []
   | Comonadic Statefulness, Meet_const a ->
     let b : Portability.Const.t =
       match a with
@@ -228,7 +237,15 @@ let default_mode_annots (annots : Alloc.Const.Option.t) =
     | None, Some Visibility.Const.Read_write ->
       Some Contention.Const.Uncontended
   in
-  (* Likewise for [portability]. *)
+  (* [total] implies [stateless] unless statefulness is explicit. *)
+  let statefulness =
+    match annots.statefulness, annots.totality with
+    | (Some _ as s), _ | s, None -> s
+    | None, Some Totality.Const.Total -> Some Statefulness.Const.Stateless
+    | None, Some Totality.Const.Partial -> None
+  in
+  let annots = { annots with statefulness } in
+  (* [statefulness] determines the default [portability]. *)
   let portability =
     match annots.portability, annots.statefulness with
     | (Some _ as p), _ | p, None -> p

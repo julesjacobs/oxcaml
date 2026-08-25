@@ -294,35 +294,38 @@ external ( @@ ) : ('a : value_or_null) ('b : value_or_null)
     All operations are taken modulo 2{^[Sys.int_size]}.
     They do not fail on overflow. *)
 
-external ( ~- ) : (int[@local_opt]) -> int = "%negint"
+external ( ~- ) : (int[@local_opt]) -> int @@ total = "%negint"
 (** Unary negation. You can also write [- e] instead of [~- e].
     Unary operator, see {!Ocaml_operators} for more information.
 *)
 
 
-external ( ~+ ) : (int[@local_opt]) -> int = "%identity"
+external ( ~+ ) : (int[@local_opt]) -> int @@ total = "%identity"
 (** Unary addition. You can also write [+ e] instead of [~+ e].
     Unary operator, see {!Ocaml_operators} for more information.
     @since 3.12
 *)
 
-external succ : (int[@local_opt]) -> int = "%succint"
+external succ : (int[@local_opt]) -> int @@ total = "%succint"
 (** [succ x] is [x + 1]. *)
 
-external pred : (int[@local_opt]) -> int = "%predint"
+external pred : (int[@local_opt]) -> int @@ total = "%predint"
 (** [pred x] is [x - 1]. *)
 
-external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%addint"
+external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%addint"
 (** Integer addition.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%subint"
+external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%subint"
 (** Integer subtraction.
     Left-associative operator, , see {!Ocaml_operators} for more information.
 *)
 
-external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%mulint"
+external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%mulint"
 (** Integer multiplication.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
@@ -691,7 +694,7 @@ val char_of_int : int -> char
 
 (** {1 Unit operations} *)
 
-external ignore : ('a : value_or_null) . 'a -> unit = "%ignore"
+external ignore : ('a : value_or_null) . 'a -> unit @@ total = "%ignore"
 (** Discard the value of its argument and return [()].
    For instance, [ignore(f x)] discards the result of
    the side-effecting function [f].  It is equivalent to
@@ -699,8 +702,8 @@ external ignore : ('a : value_or_null) . 'a -> unit = "%ignore"
    compiler warning; writing [ignore(f x)] instead
    avoids the warning. *)
 
-external ignore_contended : ('a : value_or_null) . 'a @ contended local once -> unit
-  = "%ignore"
+external ignore_contended : ('a : value_or_null) .
+  'a @ contended local once -> unit @@ total = "%ignore"
 (** Like {!ignore}, but takes a [contended local once] value. This is technically strictly
     stronger than [ignore], but changing [ignore] in place causes backwards compatibility
     issues due to type inference. *)
@@ -1201,7 +1204,8 @@ type ('a : value_or_null) ref = { mutable contents : 'a }
 (** The type of references (mutable indirection cells) containing
    a value of type ['a]. *)
 
-external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) = "%makemutable"
+external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) @@ total
+  = "%makemutable"
 (** Return a fresh reference containing the given value. *)
 
 external ( ! ) : ('a : value_or_null) . ('a ref[@local_opt]) -> 'a = "%field0"

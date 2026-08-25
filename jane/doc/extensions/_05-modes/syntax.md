@@ -10,7 +10,7 @@ A mode expression is a space-delimited list of modes.
 
 ```
 mode ::= locality | uniqueness | linearity | portability | contention
-       | yield | statefulness | visibility
+       | yield | totality | statefulness | visibility
 
 (* these are the modal axes: *)
 locality ::= `global` | `local`
@@ -20,6 +20,7 @@ portability ::= `portable` | `corruptible` | `shareable` | `nonportable`
 contention ::= `uncontended` | `shared` | `corrupted` | `contended`
 yield ::= `unyielding` | `yielding`
 fork ::= `forkable` | `unforkable`
+totality ::= `total` | `partial`
 statefulness ::= `stateless` | `writing` | `reading` | `stateful`
 visibility ::= `read_write` | `read` | `write` | `immutable`
 
@@ -69,7 +70,7 @@ axes that are omitted, the so-called *legacy* modes are used instead. The legacy
 modes are as follows:
 
 ```ocaml
-global aliased many nonportable uncontended forkable unyielding stateful read_write
+global aliased many nonportable uncontended forkable unyielding partial stateful read_write
 ```
 
 This means that `t1 -> t2` is actually equivalent to
@@ -329,6 +330,8 @@ and modalities, according to this table:
 | `local`      | `unforkable`  |
 | `global`     | `unyielding`  |
 | `local`      | `yielding`    |
+| `total`      | `stateless`   |
+| `total`      | `portable`    |
 | `stateless`  | `portable`    |
 | `reading`    | `shareable`   |
 | `writing`    | `corruptible` |
