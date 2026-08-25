@@ -58,11 +58,10 @@ and core_type type_expr =
     let arg_modes = modes arg_alloc_mode in
     let ret_modes = modes ret_alloc_mode in
     let binder =
-      Option.map binder ~f:(fun binder ->
-        Location.mknoloc (Ident.name binder))
+      Option.map binder ~f:(fun binder -> Location.mknoloc (Ident.name binder))
     in
-    Typ.arrow ?binder label type_expr (core_type type_expr_out)
-      arg_modes ret_modes
+    Typ.arrow ?binder label type_expr (core_type type_expr_out) arg_modes
+      ret_modes
   | Ttuple type_exprs ->
     let labeled_type_exprs =
       List.map ~f:(fun (lbl, ty) -> (lbl, core_type ty)) type_exprs
