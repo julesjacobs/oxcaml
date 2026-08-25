@@ -15,7 +15,8 @@ open Types
 (* Rebuilding *)
 
 let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
-    ?constructor_path ?type_path ?(location = Fun.id) rexp =
+    ?constructor_path ?type_path ?(type_expr = Fun.id)
+    ?(location = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
     let pconst_desc =
       match constant.pconst_desc with
@@ -54,11 +55,11 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
       | Rexp_tuple components ->
           Rexp_tuple
             (List.map (fun (lbl, c) -> lbl, map_rexp rename c) components)
-      | Rexp_construct (path, arg) ->
+      | Rexp_construct (path, args) ->
           let path =
             match constructor_path with Some f -> f path | None -> path
           in
-          Rexp_construct (path, Option.map (map_rexp rename) arg)
+          Rexp_construct (path, List.map (map_rexp rename) args)
       | Rexp_record (fields, extended) ->
           Rexp_record
             (List.map
@@ -93,17 +94,22 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
               Option.map (map_rexp rename) ifnot )
       | Rexp_sequence (first, second) ->
           Rexp_sequence (map_rexp rename first, map_rexp rename second)
-      | Rexp_let ({ rb_ident; rb_expr }, body) ->
+      | Rexp_let ({ rb_ident; rb_type; rb_expr }, body) ->
           let rb_expr = map_rexp rename rb_expr in
+          let rb_type = type_expr rb_type in
           let rename, rb_ident = bind rename rb_ident in
-          Rexp_let ({ rb_ident; rb_expr }, map_rexp rename body)
-      | Rexp_fun (param, body) ->
+          Rexp_let ({ rb_ident; rb_type; rb_expr }, map_rexp rename body)
+      | Rexp_fun (param, param_type, body) ->
+          let param_type = type_expr param_type in
           let rename, param = bind rename param in
-          Rexp_fun (param, map_rexp rename body)
+          Rexp_fun (param, param_type, map_rexp rename body)
       | Rexp_match (scrutinee, cases) ->
-          Rexp_match (map_rexp rename scrutinee, List.map (map_case rename) cases)
+          Rexp_match
+            (map_rexp rename scrutinee, List.map (map_case rename) cases)
     in
-    { rexp_desc; rexp_loc = location rexp.rexp_loc }
+    { rexp_desc;
+      rexp_type = type_expr rexp.rexp_type;
+      rexp_loc = location rexp.rexp_loc }
   and map_case rename { rc_lhs; rc_guard; rc_rhs } =
     let rename, rc_lhs = map_pat rename rc_lhs in
     { rc_lhs;
@@ -127,26 +133,78 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
               rename components
           in
           rename, Rpat_tuple components
-      | Rpat_construct (path, arg) ->
+      | Rpat_construct (path, args) ->
           let path =
             match constructor_path with Some f -> f path | None -> path
           in
-          let rename, arg =
-            match arg with
-            | None -> rename, None
-            | Some p ->
-                let rename, p = map_pat rename p in
-                rename, Some p
+          let rename, args =
+            List.fold_left_map
+              (fun rename p -> map_pat rename p)
+              rename args
           in
-          rename, Rpat_construct (path, arg)
+          rename, Rpat_construct (path, args)
       | Rpat_alias (p, id) ->
           let rename, p = map_pat rename p in
           let rename, id = bind rename id in
           rename, Rpat_alias (p, id)
     in
-    rename, { rpat_desc; rpat_loc = location pat.rpat_loc }
+    rename,
+    { rpat_desc;
+      rpat_type = type_expr pat.rpat_type;
+      rpat_loc = location pat.rpat_loc }
   in
   map_rexp rename rexp
+
+let fold_types f init rexp =
+  let rec expression init rexp =
+    let init = f init rexp.rexp_type in
+    match rexp.rexp_desc with
+    | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> init
+    | Rexp_apply (fn, args) ->
+        List.fold_left
+          (fun init (_, arg) -> expression init arg)
+          (expression init fn) args
+    | Rexp_tuple components ->
+        List.fold_left
+          (fun init (_, component) -> expression init component)
+          init components
+    | Rexp_construct (_, args) -> List.fold_left expression init args
+    | Rexp_record (fields, extended)
+    | Rexp_record_unboxed_product (fields, extended) ->
+        let init =
+          List.fold_left
+            (fun init (_, _, field) -> expression init field)
+            init fields
+        in
+        Option.fold ~none:init ~some:(expression init) extended
+    | Rexp_array (_, elements) -> List.fold_left expression init elements
+    | Rexp_field (record, _, _) -> expression init record
+    | Rexp_ifthenelse (cond, ifso, ifnot) ->
+        let init = expression (expression init cond) ifso in
+        Option.fold ~none:init ~some:(expression init) ifnot
+    | Rexp_sequence (first, second) ->
+        expression (expression init first) second
+    | Rexp_let ({ rb_type; rb_expr; _ }, body) ->
+        expression (expression (f init rb_type) rb_expr) body
+    | Rexp_fun (_, param_type, body) -> expression (f init param_type) body
+    | Rexp_match (scrutinee, cases) ->
+        List.fold_left case (expression init scrutinee) cases
+  and case init { rc_lhs; rc_guard; rc_rhs } =
+    let init = pattern init rc_lhs in
+    let init = Option.fold ~none:init ~some:(expression init) rc_guard in
+    expression init rc_rhs
+  and pattern init pat =
+    let init = f init pat.rpat_type in
+    match pat.rpat_desc with
+    | Rpat_any | Rpat_var _ | Rpat_constant _ -> init
+    | Rpat_tuple components ->
+        List.fold_left
+          (fun init (_, pat) -> pattern init pat)
+          init components
+    | Rpat_construct (_, args) -> List.fold_left pattern init args
+    | Rpat_alias (pat, _) -> pattern init pat
+  in
+  expression init rexp
 
 (* Alpha-equivalence *)
 
@@ -188,9 +246,10 @@ let equal ~pairs rexp1 rexp2 =
         && List.for_all2
              (fun (l1, e1) (l2, e2) -> l1 = l2 && eq pairs e1 e2)
              c1 c2
-    | Rexp_construct (p1, arg1), Rexp_construct (p2, arg2) ->
+    | Rexp_construct (p1, args1), Rexp_construct (p2, args2) ->
         Path.same p1 p2
-        && Option.equal (eq pairs) arg1 arg2
+        && List.compare_lengths args1 args2 = 0
+        && List.for_all2 (eq pairs) args1 args2
     | Rexp_record (f1, e1), Rexp_record (f2, e2)
     | ( Rexp_record_unboxed_product (f1, e1),
         Rexp_record_unboxed_product (f2, e2) ) ->
@@ -217,7 +276,7 @@ let equal ~pairs rexp1 rexp2 =
     | Rexp_let (b1, body1), Rexp_let (b2, body2) ->
         eq pairs b1.rb_expr b2.rb_expr
         && eq ((b1.rb_ident, b2.rb_ident) :: pairs) body1 body2
-    | Rexp_fun (p1, body1), Rexp_fun (p2, body2) ->
+    | Rexp_fun (p1, _, body1), Rexp_fun (p2, _, body2) ->
         eq ((p1, p2) :: pairs) body1 body2
     | Rexp_match (s1, cases1), Rexp_match (s2, cases2) ->
         eq pairs s1 s2
@@ -249,12 +308,12 @@ let equal ~pairs rexp1 rexp2 =
                   if l1 = l2 then eq_pat pairs p1 p2 else None))
             (Some pairs) c1 c2
         else None
-    | Rpat_construct (c1, arg1), Rpat_construct (c2, arg2) ->
-        if Path.same c1 c2 then
-          match arg1, arg2 with
-          | None, None -> Some pairs
-          | Some p1, Some p2 -> eq_pat pairs p1 p2
-          | None, Some _ | Some _, None -> None
+    | Rpat_construct (c1, args1), Rpat_construct (c2, args2) ->
+        if Path.same c1 c2 && List.compare_lengths args1 args2 = 0 then
+          List.fold_left2
+            (fun pairs p1 p2 ->
+              Option.bind pairs (fun pairs -> eq_pat pairs p1 p2))
+            (Some pairs) args1 args2
         else None
     | Rpat_alias (p1, id1), Rpat_alias (p2, id2) ->
         Option.map
@@ -283,9 +342,15 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
     | Rexp_tuple components ->
         Exp.tuple ~loc
           (List.map (fun (lbl, c) -> lbl, untype_rexp c) components)
-    | Rexp_construct (path, arg) ->
+    | Rexp_construct (path, args) ->
+        let arg =
+          match List.map untype_rexp args with
+          | [] -> None
+          | [arg] -> Some arg
+          | args -> Some (Exp.tuple ~loc (List.map (fun arg -> None, arg) args))
+        in
         Exp.construct ~loc (constructor_ident path)
-          (Option.map untype_rexp arg)
+          arg
     | Rexp_record (fields, extended) ->
         Exp.record ~loc
           (List.map
@@ -309,13 +374,13 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
           (Option.map untype_rexp ifnot)
     | Rexp_sequence (first, second) ->
         Exp.sequence ~loc (untype_rexp first) (untype_rexp second)
-    | Rexp_let ({ rb_ident; rb_expr }, body) ->
+    | Rexp_let ({ rb_ident; rb_expr; _ }, body) ->
         Exp.let_ ~loc Immutable Nonrecursive
           [ Vb.mk
               (Pat.var (Location.mknoloc (var_name rb_ident)))
               (untype_rexp rb_expr) ]
           (untype_rexp body)
-    | Rexp_fun (param, body) ->
+    | Rexp_fun (param, _, body) ->
         Exp.function_ ~loc
           [ { pparam_desc =
                 Pparam_val
@@ -342,9 +407,18 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
         Pat.tuple ~loc
           (List.map (fun (lbl, p) -> lbl, untype_pat p) components)
           Asttypes.Closed
-    | Rpat_construct (path, arg) ->
+    | Rpat_construct (path, args) ->
+        let arg =
+          match List.map untype_pat args with
+          | [] -> None
+          | [arg] -> Some ([], arg)
+          | args ->
+              Some
+                ([], Pat.tuple ~loc
+                       (List.map (fun arg -> None, arg) args) Asttypes.Closed)
+        in
         Pat.construct ~loc (constructor_ident path)
-          (Option.map (fun p -> [], untype_pat p) arg)
+          arg
     | Rpat_alias (p, id) ->
         Pat.alias ~loc (untype_pat p) (Location.mknoloc (var_name id))
   in
@@ -362,7 +436,7 @@ let exists_rexp pred rexp =
         walk fn;
         List.iter (fun (_, arg) -> walk arg) args
     | Rexp_tuple components -> List.iter (fun (_, c) -> walk c) components
-    | Rexp_construct (_, arg) -> Option.iter walk arg
+    | Rexp_construct (_, args) -> List.iter walk args
     | Rexp_record (fields, extended)
     | Rexp_record_unboxed_product (fields, extended) ->
         List.iter (fun (_, _, e) -> walk e) fields;
@@ -373,7 +447,7 @@ let exists_rexp pred rexp =
         walk cond; walk ifso; Option.iter walk ifnot
     | Rexp_sequence (first, second) -> walk first; walk second
     | Rexp_let ({ rb_expr; _ }, body) -> walk rb_expr; walk body
-    | Rexp_fun (_, body) -> walk body
+    | Rexp_fun (_, _, body) -> walk body
     | Rexp_match (scrutinee, cases) ->
         walk scrutinee;
         List.iter
@@ -405,9 +479,9 @@ let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
          | Rexp_match (_, cases) ->
              let rec pat_path p =
                match p.rpat_desc with
-               | Rpat_construct (path, arg) ->
+               | Rpat_construct (path, args) ->
                    check path
-                   || Option.fold ~none:false ~some:pat_path arg
+                   || List.exists pat_path args
                | Rpat_alias (p, _) -> pat_path p
                | Rpat_tuple ps -> List.exists (fun (_, p) -> pat_path p) ps
                | Rpat_any | Rpat_var _ | Rpat_constant _ -> false
@@ -446,8 +520,7 @@ let bound_idents rexp =
         List.fold_left
           (fun ids (_, pat) -> pattern ids pat)
           ids components
-    | Rpat_construct (_, arg) ->
-        Option.fold ~none:ids ~some:(pattern ids) arg
+    | Rpat_construct (_, args) -> List.fold_left pattern ids args
     | Rpat_alias (pat, id) -> Ident.Set.add id (pattern ids pat)
   in
   let rec expression ids rexp =
@@ -461,8 +534,7 @@ let bound_idents rexp =
         List.fold_left
           (fun ids (_, component) -> expression ids component)
           ids components
-    | Rexp_construct (_, arg) ->
-        Option.fold ~none:ids ~some:(expression ids) arg
+    | Rexp_construct (_, args) -> List.fold_left expression ids args
     | Rexp_record (fields, extended)
     | Rexp_record_unboxed_product (fields, extended) ->
         let ids =
@@ -478,11 +550,11 @@ let bound_idents rexp =
         Option.fold ~none:ids ~some:(expression ids) ifnot
     | Rexp_sequence (first, second) ->
         expression (expression ids first) second
-    | Rexp_let ({ rb_ident; rb_expr }, body) ->
+    | Rexp_let ({ rb_ident; rb_expr; _ }, body) ->
         expression
           (Ident.Set.add rb_ident (expression ids rb_expr))
           body
-    | Rexp_fun (param, body) ->
+    | Rexp_fun (param, _, body) ->
         expression (Ident.Set.add param ids) body
     | Rexp_match (scrutinee, cases) ->
         List.fold_left

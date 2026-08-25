@@ -1089,7 +1089,11 @@ let rec copy_spine copy_scope ty =
           Tmod (copy_rec ty, mod_bounds)
       | Trefine refinement ->
           Trefine
-            { refinement with ref_payload = copy_rec refinement.ref_payload }
+            { refinement with
+              ref_payload = copy_rec refinement.ref_payload;
+              ref_pred =
+                Refinement_predicate.map ~type_expr:copy_rec
+                  refinement.ref_pred }
       | _ -> assert false
       in
       Transient_expr.set_stub_desc t desc';
@@ -8528,6 +8532,10 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
           end
       | Trefine { ref_binder; ref_payload; ref_pred } -> begin
           let ref_pred = normalize_refinement_predicate env ref_pred in
+          let ref_pred =
+            Refinement_predicate.map
+              ~type_expr:(nondep_type_rec env ids) ref_pred
+          in
           match
             Refinement_predicate.find_dependency_path
               (Path.find_free_opt ids) ref_pred
@@ -8613,7 +8621,11 @@ let refinement_scope_escape_in ids visit_root =
       begin match get_desc ty with
       | Trefine { ref_pred; _ } ->
           Option.iter (fun id -> raise (Found id))
-            (Refinement_predicate.find_ident ids ref_pred)
+            (Refinement_predicate.find_ident ids ref_pred);
+          ignore
+            (Refinement_predicate.fold_types
+               (fun () ty -> visit ty) () ref_pred
+             : unit)
       | _ -> ()
       end;
       iter_type_expr visit ty

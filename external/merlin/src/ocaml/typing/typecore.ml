@@ -14690,7 +14690,9 @@ let rec refinement_pattern_of_typed :
   Ident.Set.t -> k general_pattern -> Ident.Set.t * refinement_pattern =
   fun locals pat ->
     check_refinement_pattern_extras pat;
-    let mk rpat_desc = { rpat_desc; rpat_loc = pat.pat_loc } in
+    let mk rpat_desc =
+      { rpat_desc; rpat_type = pat.pat_type; rpat_loc = pat.pat_loc }
+    in
     match pat.pat_desc with
     | Tpat_any -> locals, mk Rpat_any
     | Tpat_var { id; _ } ->
@@ -14706,6 +14708,9 @@ let rec refinement_pattern_of_typed :
             locals components
         in
         locals, mk (Rpat_tuple components)
+    | Tpat_construct (_, cstr, _, _, _) when cstr.cstr_generalized ->
+        unsupported_refinement_syntax pat.pat_loc
+          "A GADT constructor pattern"
     | Tpat_construct (_, cstr, _, args, None) ->
         let locals, args =
           List.fold_left_map
@@ -14713,19 +14718,8 @@ let rec refinement_pattern_of_typed :
                refinement_pattern_of_typed locals pat)
             locals args
         in
-        let arg =
-          match args with
-          | [] -> None
-          | [arg] -> Some arg
-          | args ->
-              Some
-                { rpat_desc =
-                    Rpat_tuple (List.map (fun arg -> None, arg) args);
-                  rpat_loc = pat.pat_loc
-                }
-        in
         locals,
-        mk (Rpat_construct (refinement_constructor_path cstr, arg))
+        mk (Rpat_construct (refinement_constructor_path cstr, args))
     | Tpat_alias { pattern; id; _ } ->
         let locals, pattern = refinement_pattern_of_typed locals pattern in
         Ident.Set.add id locals, mk (Rpat_alias (pattern, id))
@@ -14745,7 +14739,10 @@ let refinement_expression_of_typed binder predicate =
     | Optional label -> Optional label
   in
   let rec expression locals exp =
-    let mk rexp_desc = { rexp_desc; rexp_loc = exp.exp_loc } in
+    let mk_at rexp_type rexp_desc =
+      { rexp_desc; rexp_type; rexp_loc = exp.exp_loc }
+    in
+    let mk rexp_desc = mk_at exp.exp_type rexp_desc in
     let result =
       match exp.exp_desc with
       | Texp_ident { path = Pident id; _ } when Ident.Set.mem id locals ->
@@ -14773,18 +14770,7 @@ let refinement_expression_of_typed binder predicate =
                   components))
       | Texp_construct (_, cstr, _, args, _) ->
           let args = List.map (fun (_, arg) -> expression locals arg) args in
-          let arg =
-            match args with
-            | [] -> None
-            | [arg] -> Some arg
-            | args ->
-                Some
-                  { rexp_desc =
-                      Rexp_tuple (List.map (fun arg -> None, arg) args);
-                    rexp_loc = exp.exp_loc
-                  }
-          in
-          mk (Rexp_construct (refinement_constructor_path cstr, arg))
+          mk (Rexp_construct (refinement_constructor_path cstr, args))
       | Texp_record { fields; extended_expression; _ } ->
           let fields =
             Array.fold_right
@@ -14849,7 +14835,12 @@ let refinement_expression_of_typed binder predicate =
           | Tpat_var { id; _ } ->
               let rb_expr = expression locals binding.vb_expr in
               let locals = Ident.Set.add id locals in
-              mk (Rexp_let ({ rb_ident = id; rb_expr }, expression locals body))
+              mk
+                (Rexp_let
+                   ( { rb_ident = id;
+                       rb_type = binding.vb_pat.pat_type;
+                       rb_expr },
+                     expression locals body ))
           | _ ->
               unsupported_refinement_syntax binding.vb_pat.pat_loc
                 "This binding pattern"
@@ -14864,14 +14855,32 @@ let refinement_expression_of_typed binder predicate =
                      | Tparam_pat pat -> check_refinement_pattern_extras pat
                      | Tparam_optional_default _ -> assert false
                      end;
-                     Ident.Set.add id locals, id
+                     let param_type =
+                       match param.fp_kind with
+                       | Tparam_pat pat -> pat.pat_type
+                       | Tparam_optional_default _ -> assert false
+                     in
+                     Ident.Set.add id locals, (id, param_type)
                  | _ ->
                      unsupported_refinement_syntax param.fp_loc
                        "This function parameter")
               locals params
           in
           let body = expression locals body in
-          List.fold_right (fun id body -> mk (Rexp_fun (id, body))) params body
+          let rec functions fn_type params =
+            match params with
+            | [] -> body
+            | (id, param_type) :: params ->
+                let result_type =
+                  match get_desc fn_type with
+                  | Tarrow (_, _, result_type, _) -> result_type
+                  | _ -> assert false
+                in
+                mk_at fn_type
+                  (Rexp_fun
+                     (id, param_type, functions result_type params))
+          in
+          functions exp.exp_type params
       | Texp_match (scrutinee, _, cases, [], _) ->
           mk
             (Rexp_match
@@ -14913,6 +14922,50 @@ let refinement_expression_of_typed binder predicate =
   in
   expression (Ident.Set.singleton binder) predicate
 
+let default_refinement_predicate_types payload predicate =
+  let rec traverse add ty =
+    if not (TypeSet.mem ty !add) then begin
+      add := TypeSet.add ty !add;
+      begin match get_desc ty with
+      | Trefine { ref_pred; _ } ->
+          ignore
+            (Refinement_predicate.fold_types
+               (fun () ty -> traverse add ty) () ref_pred
+             : unit)
+      | _ -> ()
+      end;
+      Btype.iter_type_expr (traverse add) ty
+    end
+  in
+  let payload_types = ref TypeSet.empty in
+  traverse payload_types payload;
+  let visited = ref TypeSet.empty in
+  let rec default ty =
+    if not (TypeSet.mem ty !payload_types || TypeSet.mem ty !visited) then begin
+      visited := TypeSet.add ty !visited;
+      begin match get_desc ty with
+      | Tvar { jkind } | Tunivar { jkind } ->
+          Jkind.default_to_scannable jkind
+      | Tarrow ((_, arg_mode, ret_mode), arg, ret, _) ->
+          ignore (Alloc.zap_to_legacy arg_mode : Alloc.Const.t);
+          ignore (Alloc.zap_to_legacy ret_mode : Alloc.Const.t);
+          default arg;
+          default ret
+      | Trefine { ref_pred; _ } ->
+          ignore
+            (Refinement_predicate.fold_types
+               (fun () ty -> default ty) () ref_pred
+             : unit);
+          Btype.iter_type_expr default ty
+      | _ -> Btype.iter_type_expr default ty
+      end
+    end
+  in
+  ignore
+    (Refinement_predicate.fold_types
+       (fun () ty -> default ty) () predicate
+     : unit)
+
 let () =
   Typetexp.type_refinement_predicate :=
     (fun env binder payload predicate ->
@@ -14949,8 +15002,11 @@ let () =
          type_expect env ~mode:(total_immutable_mode ()) predicate
            (mk_expected Predef.type_bool)
        in
-       typed_predicate,
-       refinement_expression_of_typed binder typed_predicate)
+       let predicate =
+         refinement_expression_of_typed binder typed_predicate
+       in
+       default_refinement_predicate_types payload predicate;
+       typed_predicate, predicate)
 
 (* Merlin specific *)
 let partial_pred ~lev ?explode env expected_ty p =

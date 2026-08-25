@@ -328,6 +328,8 @@ and refinement_desc =
     substitution. *)
 and refinement_expression =
   { rexp_desc : refinement_expression_desc;
+    rexp_type : type_expr;
+    (** The instantiated type at this occurrence. *)
     rexp_loc : Location.t }
 
 and refinement_expression_desc =
@@ -340,7 +342,7 @@ and refinement_expression_desc =
   | Rexp_apply of
       refinement_expression * (Asttypes.arg_label * refinement_expression) list
   | Rexp_tuple of (string option * refinement_expression) list
-  | Rexp_construct of Path.t * refinement_expression option
+  | Rexp_construct of Path.t * refinement_expression list
   (** The path is [Pextra_ty (type_path, Pcstr_ty name)] for an ordinary
       constructor and the constructor's own path for an extension
       constructor, so that substitution keeps it meaningful. *)
@@ -358,12 +360,13 @@ and refinement_expression_desc =
   | Rexp_sequence of refinement_expression * refinement_expression
   | Rexp_let of refinement_binding * refinement_expression
   (** [let x = e1 in e2]; only single, non-recursive variable bindings. *)
-  | Rexp_fun of Ident.t * refinement_expression
+  | Rexp_fun of Ident.t * type_expr * refinement_expression
   (** [fun x -> e]; only single, unlabelled variable parameters. *)
   | Rexp_match of refinement_expression * refinement_case list
 
 and refinement_binding =
   { rb_ident : Ident.t;
+    rb_type : type_expr;
     rb_expr : refinement_expression }
 
 and refinement_case =
@@ -373,6 +376,8 @@ and refinement_case =
 
 and refinement_pattern =
   { rpat_desc : refinement_pattern_desc;
+    rpat_type : type_expr;
+    (** The instantiated type at this pattern node. *)
     rpat_loc : Location.t }
 
 and refinement_pattern_desc =
@@ -380,7 +385,7 @@ and refinement_pattern_desc =
   | Rpat_var of Ident.t
   | Rpat_constant of Parsetree.constant
   | Rpat_tuple of (string option * refinement_pattern) list
-  | Rpat_construct of Path.t * refinement_pattern option
+  | Rpat_construct of Path.t * refinement_pattern list
   | Rpat_alias of refinement_pattern * Ident.t
 
 (** This is used in the Typedtree. It is distinct from

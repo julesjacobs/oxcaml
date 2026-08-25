@@ -912,6 +912,9 @@ let printer_iter_type_expr f ty =
       f ty2
   | Tmod (ty, _) ->
       f ty
+  | Trefine { ref_payload; _ } ->
+      (* Predicate types are derived evidence and are not printed. *)
+      f ref_payload
   | _ ->
       Btype.iter_type_expr f ty
 

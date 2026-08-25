@@ -621,7 +621,8 @@ let rec copy_type_desc ?(keep_names=false) f = function
       (* The binder stamp is kept here; [Subst] freshens it on import. *)
       Trefine { ref_binder;
                 ref_payload = f ref_payload;
-                ref_pred }
+                ref_pred =
+                  Refinement_predicate.map ~type_expr:f ref_pred }
 
 (* TODO: rename to [module Copy_scope] *)
 module For_copy : sig
