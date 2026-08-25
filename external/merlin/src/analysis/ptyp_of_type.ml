@@ -72,18 +72,14 @@ and core_type type_expr =
     let loc = Untypeast.lident_of_path path |> Location.mknoloc in
     Typ.constr loc @@ List.map ~f:core_type type_exprs
   | Trefine { ref_binder; ref_payload; ref_pred } ->
-    let path_loc path =
-      Location.mknoloc (Untypeast.lident_of_path path)
-    in
+    let path_loc path = Location.mknoloc (Untypeast.lident_of_path path) in
     let constructor_ident path =
       match (path : Path.t) with
       | Pextra_ty (type_path, Pcstr_ty name) ->
         let lid =
           match type_path with
-          | Pdot (module_path, _)
-          | Pextra_ty (Pdot (module_path, _), _) ->
-            Longident.Ldot
-              (path_loc module_path, Location.mknoloc name)
+          | Pdot (module_path, _) | Pextra_ty (Pdot (module_path, _), _) ->
+            Longident.Ldot (path_loc module_path, Location.mknoloc name)
           | _ -> Longident.Lident name
         in
         Location.mknoloc lid
@@ -98,15 +94,15 @@ and core_type type_expr =
       match defining_module type_path with
       | Some module_path ->
         Location.mknoloc
-          (Longident.Ldot
-             (path_loc module_path, Location.mknoloc name))
+          (Longident.Ldot (path_loc module_path, Location.mknoloc name))
       | None -> Location.mknoloc (Longident.Lident name)
     in
     let predicate =
-      Refinement_predicate.untype ~var_name:Ident.name
-        ~value_ident:path_loc ~constructor_ident ~label_ident ref_pred
+      Refinement_predicate.untype ~var_name:Ident.name ~value_ident:path_loc
+        ~constructor_ident ~label_ident ref_pred
     in
-    Typ.refine (Location.mknoloc (Ident.name ref_binder))
+    Typ.refine
+      (Location.mknoloc (Ident.name ref_binder))
       (core_type ref_payload) predicate
   | Tquote_eval ty ->
     let loc = Untypeast.lident_of_path Predef.path_eval |> Location.mknoloc in

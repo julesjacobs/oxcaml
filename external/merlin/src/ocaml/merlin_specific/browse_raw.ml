@@ -334,9 +334,12 @@ let of_exp_extra (exp, _, _) =
   | Texp_poly cto -> option_fold of_core_type cto
   | Texp_newtype (_, _, jkind, _) -> of_jkind_annotation_opt jkind
   | Texp_mode modes -> of_modes modes
-  | Texp_stack | Texp_inspected_type _ | Texp_borrowed | Texp_ghost_region
-  | Texp_refine | Texp_let_refine _ ->
-    id_fold
+  | Texp_stack
+  | Texp_inspected_type _
+  | Texp_borrowed
+  | Texp_ghost_region
+  | Texp_refine
+  | Texp_let_refine _ -> id_fold
 let of_expression e = app (Expression e) ** list_fold of_exp_extra e.exp_extra
 
 let of_pat_extra (pat, _, _) =
