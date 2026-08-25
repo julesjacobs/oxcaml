@@ -47,7 +47,7 @@ let mkTvar name = Tvar { name; jkind = dummy_jkind }
 
 let mkTarrow (label, t1, t2, comm) =
   let label = Typetexp.transl_label label None in
-  Tarrow ((label, Alloc.legacy, Alloc.legacy), t1, t2, comm)
+  Tarrow ((label, Alloc.legacy, Alloc.legacy, None), t1, t2, comm)
 
 type texp_ident_identifier = ident_kind * unique_use
 

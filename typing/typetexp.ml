@@ -890,7 +890,7 @@ let get_type_param_name styp =
 
 let rec extract_params styp =
   match styp.ptyp_desc with
-  | Ptyp_arrow (l, a, r, ma, mr) ->
+  | Ptyp_arrow (l, a, r, ma, mr, binder) ->
       let arg_mode = Typemode.transl_alloc_mode ma in
       let ret_mode = Typemode.transl_alloc_mode mr in
       let params, ret, ret_mode =
@@ -899,7 +899,7 @@ let rec extract_params styp =
           extract_params r
         | _ -> [], r, ret_mode
       in
-      (l, arg_mode, a) :: params, ret, ret_mode
+      (l, arg_mode, a, binder) :: params, ret, ret_mode
   | _ -> assert false
 
 let check_arg_type styp =
@@ -969,10 +969,18 @@ let type_open :
 
 let type_refinement_predicate =
   ref
-    (fun _env _binder _payload _predicate ->
+    (fun _env _bound_values _binder _payload _predicate ->
       assert false
-      : Env.t -> Ident.t -> type_expr -> Parsetree.expression ->
+      : Env.t -> Ident.Set.t -> Ident.t -> type_expr -> Parsetree.expression ->
         Typedtree.expression * refinement_expression)
+
+let add_dependent_binder =
+  ref
+    (fun _env _binder _payload _loc ->
+      assert false
+      : Env.t -> Ident.t -> type_expr -> Location.t -> Env.t)
+
+let dependent_binders = ref Ident.Set.empty
 
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes
@@ -1009,49 +1017,130 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       ctyp desc typ
   | Ptyp_arrow _ ->
       let args, ret, ret_mode = extract_params styp in
-      let rec loop acc_mode args =
-        match args with
-        | (l, arg_mode, arg) :: rest ->
-          check_arg_type arg;
-          let l = transl_label l (Some arg) in
-          let arg_cty =
-            if Btype.is_position l then
-              ctyp Ttyp_call_pos (newconstr Predef.path_lexing_position [])
-            else transl_type env ~policy ~row_context arg_mode.mode_modes arg
-          in
-          let acc_mode = curry_mode acc_mode arg_mode.mode_modes in
-          let ret_mode =
-            match rest with
-            | [] -> ret_mode
-            | _ :: _ ->
-              { mode_modes = acc_mode; mode_desc = [] }
-          in
-          let ret_cty = loop acc_mode rest in
-          let arg_ty = arg_cty.ctyp_type in
-          let arg_ty =
-            if Btype.is_Tpoly arg_ty then arg_ty else newmono arg_ty
-          in
-          let arg_ty =
-            if not (Btype.is_optional l) then arg_ty
-            else begin
-              if not (Btype.tpoly_is_mono arg_ty) then
-                raise (Error (arg.ptyp_loc, env, Polymorphic_optional_param));
-              newmono
-                (newconstr Predef.path_option [Btype.tpoly_get_mono arg_ty])
-            end
-          in
-          let arg_mode_desc = Alloc.of_const arg_mode.mode_modes in
-          let ret_mode_desc = Alloc.of_const ret_mode.mode_modes in
-          let arrow_desc = (l, arg_mode_desc, ret_mode_desc) in
-          let ty =
-            newty (Tarrow(arrow_desc, arg_ty, ret_cty.ctyp_type, commu_ok))
-          in
-          ctyp
-            (Ttyp_arrow (l, arg_cty, arg_mode, ret_cty, ret_mode))
-            ty
-        | [] -> transl_type env ~policy ~row_context ret_mode.mode_modes ret
+      let dependent_mode =
+        { Alloc.Const.legacy with
+          totality = Totality.Const.Total;
+          statefulness = Statefulness.Const.Stateless;
+          portability = Portability.Const.Portable;
+          visibility = Visibility.Const.Immutable
+        }
       in
-      loop mode args
+      let rec prepare env args =
+        match args with
+        | (l, arg_mode, arg, source_binder) :: rest ->
+            Option.iter
+              (fun binder ->
+                 Language_extension.assert_enabled ~loc:binder.loc
+                   Refinement_types ();
+                 if l <> Asttypes.Nolabel then
+                   raise
+                     (Error_forward
+                        (Location.errorf ~loc:binder.loc
+                           "dependent function binders are supported only on \
+                            unlabelled arrows")))
+              source_binder;
+            check_arg_type arg;
+            let l = transl_label l (Some arg) in
+            let arg_cty =
+              if Btype.is_position l then
+                ctyp Ttyp_call_pos (newconstr Predef.path_lexing_position [])
+              else
+                transl_type env ~policy ~row_context arg_mode.mode_modes arg
+            in
+            let arg_ty =
+              if Btype.is_Tpoly arg_cty.ctyp_type then arg_cty.ctyp_type
+              else newmono arg_cty.ctyp_type
+            in
+            let arg_ty =
+              if not (Btype.is_optional l) then arg_ty
+              else begin
+                if not (Btype.tpoly_is_mono arg_ty) then
+                  raise
+                    (Error (arg.ptyp_loc, env, Polymorphic_optional_param));
+                newmono
+                  (newconstr Predef.path_option [Btype.tpoly_get_mono arg_ty])
+              end
+            in
+            let typed_binder, ret_env =
+              match source_binder with
+              | None -> None, env
+              | Some source_binder ->
+                  let binder = Ident.create_local source_binder.txt in
+                  ( Some (binder, source_binder),
+                    !add_dependent_binder env binder arg_cty.ctyp_type
+                      source_binder.loc )
+            in
+            let prepared_rest, ret_cty =
+              match typed_binder with
+              | None -> prepare ret_env rest
+              | Some (binder, _) ->
+                  Misc.protect_refs
+                    [Misc.R
+                       (dependent_binders,
+                        Ident.Set.add binder !dependent_binders)]
+                    (fun () -> prepare ret_env rest)
+            in
+            (l, arg_mode, arg_cty, arg_ty, typed_binder) :: prepared_rest,
+            ret_cty
+        | [] ->
+            [], transl_type env ~policy ~row_context ret_mode.mode_modes ret
+      in
+      let prepared, result_cty = prepare env args in
+      let prepared, _codomain_types =
+        List.fold_right
+          (fun (l, arg_mode, arg_cty, arg_ty, typed_binder)
+               (resolved, codomain_types) ->
+             let binder =
+               match typed_binder with
+               | Some (binder, _)
+                 when List.exists
+                     (Ctype.refinement_ident_occurs binder)
+                     codomain_types ->
+                   Some binder
+               | None | Some _ -> None
+             in
+             ( (l, arg_mode, arg_cty, arg_ty, typed_binder, binder)
+               :: resolved,
+               arg_ty :: codomain_types ))
+          prepared ([], [result_cty.ctyp_type])
+      in
+      let rec build acc_mode = function
+        | [] -> result_cty
+        | (l, arg_mode, arg_cty, arg_ty, typed_binder, binder) :: rest ->
+            let arg_mode_desc =
+              match binder with
+              | Some _ -> dependent_mode
+              | None -> arg_mode.mode_modes
+            in
+            let acc_mode = curry_mode acc_mode arg_mode_desc in
+            let arrow_ret_mode =
+              match rest with
+              | [] -> ret_mode
+              | _ :: _ -> { mode_modes = acc_mode; mode_desc = [] }
+            in
+            let ret_cty = build acc_mode rest in
+            let arrow_desc =
+              ( l,
+                Alloc.of_const arg_mode_desc,
+                Alloc.of_const arrow_ret_mode.mode_modes,
+                binder )
+            in
+            let ty =
+              newty
+                (Tarrow
+                   (arrow_desc, arg_ty, ret_cty.ctyp_type, commu_ok))
+            in
+            ctyp
+              (Ttyp_arrow
+                 ( l,
+                   arg_cty,
+                   arg_mode,
+                   ret_cty,
+                   arrow_ret_mode,
+                   typed_binder ))
+              ty
+      in
+      build mode prepared
   | Ptyp_tuple stl ->
     let desc, typ =
       transl_type_aux_tuple env ~loc ~policy ~row_context stl
@@ -1365,7 +1454,8 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let binder = Ident.create_local sbinder.txt in
       let typed_pred, pred =
         TyVarEnv.protect_reentrant (fun () ->
-          !type_refinement_predicate env binder payload_cty.ctyp_type spred)
+          !type_refinement_predicate env !dependent_binders binder
+            payload_cty.ctyp_type spred)
       in
       let ty =
         newty (Trefine { ref_binder = binder;

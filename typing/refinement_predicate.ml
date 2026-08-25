@@ -14,7 +14,7 @@ open Types
 
 (* Rebuilding *)
 
-let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
+let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
     ?constructor_path ?type_path ?(type_expr = Fun.id)
     ?(location = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
@@ -42,11 +42,15 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
     let rexp_desc =
       match rexp.rexp_desc with
       | Rexp_var id -> Rexp_var (rename_var rename id)
-      | Rexp_ident path ->
-          let path =
-            match value_path with Some f -> f path | None -> path
-          in
-          Rexp_ident path
+      | Rexp_ident path -> begin
+          match Option.bind bind_value (fun f -> f path) with
+          | Some id -> Rexp_var id
+          | None ->
+              let path =
+                match value_path with Some f -> f path | None -> path
+              in
+              Rexp_ident path
+          end
       | Rexp_constant constant -> Rexp_constant (map_constant constant)
       | Rexp_apply (fn, args) ->
           Rexp_apply
@@ -235,6 +239,8 @@ let equal ~pairs rexp1 rexp2 =
     match rexp1.rexp_desc, rexp2.rexp_desc with
     | Rexp_var id1, Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_ident p1, Rexp_ident p2 -> Path.same p1 p2
+    | Rexp_var id1, Rexp_ident (Pident id2)
+    | Rexp_ident (Pident id1), Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_constant c1, Rexp_constant c2 -> constant_equal c1 c2
     | Rexp_apply (f1, args1), Rexp_apply (f2, args2) ->
         eq pairs f1 f2
