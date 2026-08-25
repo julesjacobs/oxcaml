@@ -334,7 +334,8 @@ let of_exp_extra (exp, _, _) =
   | Texp_poly cto -> option_fold of_core_type cto
   | Texp_newtype (_, _, jkind, _) -> of_jkind_annotation_opt jkind
   | Texp_mode modes -> of_modes modes
-  | Texp_stack | Texp_inspected_type _ | Texp_borrowed | Texp_ghost_region ->
+  | Texp_stack | Texp_inspected_type _ | Texp_borrowed | Texp_ghost_region
+  | Texp_refine | Texp_let_refine _ ->
     id_fold
 let of_expression e = app (Expression e) ** list_fold of_exp_extra e.exp_extra
 
@@ -719,6 +720,8 @@ and of_core_type_desc = function
     of_core_type ct ** of_jkind_annotation_opt jkind
   | Ttyp_variant (rfs, _, _) -> list_fold (fun rf -> app (Row_field rf)) rfs
   | Ttyp_package pt -> app (Package_type pt)
+  | Ttyp_refine (_, _, payload, predicate) ->
+    of_core_type payload ** of_expression predicate
   | Ttyp_quote ct | Ttyp_splice ct | Ttyp_repr (_, ct) | Ttyp_newlayout (_, ct)
     -> of_core_type ct
 

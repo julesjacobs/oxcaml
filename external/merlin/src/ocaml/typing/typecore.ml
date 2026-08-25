@@ -403,6 +403,9 @@ let deep_copy () =
         | Tsplice t -> Tsplice (copy t)
         | Tbox t -> Tbox (copy t)
         | Tmod (t, mod_bounds) -> Tmod (copy t, mod_bounds)
+        | Trefine { ref_binder; ref_payload; ref_pred } ->
+          Trefine
+            { ref_binder; ref_payload = copy ref_payload; ref_pred }
         | Tlink _ | Tsubst _ -> assert false
       in
       Transient_expr.(set_desc (repr ty') desc);
@@ -6871,7 +6874,7 @@ let refinement_scope_binders (exp : expression) =
   in
   let add_case ids case =
     let ids = add_pattern ids case.c_lhs in
-    Option.fold ~none:ids ~some:(add ids) case.c_cont
+    Option.fold ~none:ids ~some:(fun (id, _) -> add ids id) case.c_cont
   in
   let add_cases ids cases = List.fold_left add_case ids cases in
   let add_param ids param =
@@ -6952,7 +6955,7 @@ let refinement_scope_binders (exp : expression) =
   | Texp_lazy _ | Texp_pack _ | Texp_unreachable
   | Texp_extension_constructor _ | Texp_probe _ | Texp_probe_is_enabled _
   | Texp_exclave _ | Texp_src_pos | Texp_overwrite _ | Texp_hole _
-  | Texp_quote _ | Texp_splice _ ->
+  | Texp_typed_hole | Texp_quote _ | Texp_splice _ ->
       Ident.Set.empty
 
 let refinement_escape_roots env ~roots:initial_roots visit =
@@ -6999,7 +7002,8 @@ let refinement_escape_roots env ~roots:initial_roots visit =
            | Texp_object _ | Texp_pack _ | Texp_unreachable
            | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
            | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
-           | Texp_overwrite _ | Texp_hole _ | Texp_quote _ | Texp_splice _ ->
+           | Texp_overwrite _ | Texp_hole _ | Texp_typed_hole
+           | Texp_quote _ | Texp_splice _ ->
                ()
            end;
            Tast_iterator.default_iterator.expr self exp)
@@ -7049,6 +7053,7 @@ and check_layout_args_empty ~loc ~env layout_args ctx =
 
 and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
       (expected_mode : expected_mode) sexp ty_expected_explained =
+<<<<<<< HEAD
   Msupport.with_saved_types
     ~warning_attribute:sexp.pexp_attributes ?save_part:None
       (fun () ->
@@ -7074,12 +7079,52 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
 =======
          type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
       )
+||||||| parent of 39be72dbb (Resolve Merlin refinement import)
+  Msupport.with_saved_types
+    ~warning_attribute:sexp.pexp_attributes ?save_part:None
+      (fun () ->
+<<<<<<< Merlin:jujacobs/vox/refinement-type-former
+        let saved = save_levels () in
+        try
+          type_expect_ ?recarg ~overwrite env
+            expected_mode sexp ty_expected_explained
+        with exn ->
+          Msupport.erroneous_type_register ty_expected_explained.ty;
+          raise_error exn;
+          set_levels saved;
+          let loc = sexp.pexp_loc in
+          create_merlin_type_error_node loc env ty_expected_explained.ty
+            ~attributes:(Msupport.recovery_attributes sexp.pexp_attributes))
+||||||| Compiler:last-imported
+         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
+      )
   in
-  check_refinement_scope_escape env exp;
   Cmt_format.set_saved_types
     (Cmt_format.Partial_expression exp :: previous_saved_types);
   exp
->>>>>>> Compiler:HEAD
+=======
+         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
+      )
+=======
+  let exp =
+    Msupport.with_saved_types
+      ~warning_attribute:sexp.pexp_attributes ?save_part:None
+        (fun () ->
+          let saved = save_levels () in
+          try
+            type_expect_ ?recarg ~overwrite env
+              expected_mode sexp ty_expected_explained
+          with exn ->
+            Msupport.erroneous_type_register ty_expected_explained.ty;
+            raise_error exn;
+            set_levels saved;
+            let loc = sexp.pexp_loc in
+            create_merlin_type_error_node loc env ty_expected_explained.ty
+              ~attributes:(Msupport.recovery_attributes sexp.pexp_attributes))
+>>>>>>> 39be72dbb (Resolve Merlin refinement import)
+  in
+  check_refinement_scope_escape env exp;
+  exp
 
 and type_expect_
     ?(recarg=Rejected) ?defer_primitive_mode ?(overwrite=No_overwrite)
@@ -14612,20 +14657,6 @@ let type_argument env e t1 t2 =
 let type_option_some env e t1 t2 =
   let exp = type_option_some env mode_legacy e t1 t2 in
   maybe_check_uniqueness_exp exp; exp
-<<<<<<< Merlin:jujacobs/vox/refinement-type-former
-
-(* Merlin specific *)
-let partial_pred ~lev ?explode env expected_ty p =
-  let splitting_mode = Refine_or {inside_nonsplit_or = false} in
-  with_local_level begin fun () ->
-    partial_pred
-      (* Fixed *)
-      ~splitting_mode
-      (* Arguments *)
-      ~lev ?explode env expected_ty p
-  end
-||||||| Compiler:last-imported
-=======
 
 let refinement_constructor_path (cstr : Data_types.constructor_description) =
   match cstr.cstr_tag with
@@ -14859,7 +14890,8 @@ let refinement_expression_of_typed binder predicate =
       | Texp_pack _ | Texp_letop _ | Texp_unreachable
       | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
       | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
-      | Texp_overwrite _ | Texp_hole _ | Texp_quote _ | Texp_splice _ ->
+      | Texp_overwrite _ | Texp_hole _ | Texp_typed_hole
+      | Texp_quote _ | Texp_splice _ ->
           unsupported_refinement_syntax exp.exp_loc "This expression form"
     in
     List.fold_left
@@ -14919,4 +14951,14 @@ let () =
        in
        typed_predicate,
        refinement_expression_of_typed binder typed_predicate)
->>>>>>> Compiler:HEAD
+
+(* Merlin specific *)
+let partial_pred ~lev ?explode env expected_ty p =
+  let splitting_mode = Refine_or {inside_nonsplit_or = false} in
+  with_local_level begin fun () ->
+    partial_pred
+      (* Fixed *)
+      ~splitting_mode
+      (* Arguments *)
+      ~lev ?explode env expected_ty p
+  end

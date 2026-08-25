@@ -1304,7 +1304,6 @@ and simple_expr ctxt f x =
           df expression e2 expression e3
     | Pexp_extension ({ txt; _ }, _) when txt = Ast_helper.hole_txt ->
         pp f "_"
-    | Pexp_hole -> pp f "_"
     | _ ->  paren true (expression ctxt) f x
 
 and attributes ctxt f l =

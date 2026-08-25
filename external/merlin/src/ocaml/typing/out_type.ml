@@ -1315,6 +1315,7 @@ module Aliases = struct
       | Tquote_eval ty
       | Tbox ty
       | Trepr (ty, _)
+      | Trefine { ref_payload = ty; _ }
       | Tmod (ty, _) -> mark_loops_rec visited ty
       | Tof_kind _ -> ()
       | Tsubst _ -> ()
