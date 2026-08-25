@@ -138,6 +138,43 @@ let unwrapped = let refine_ x = one in x + 1;;
 val unwrapped : int = 2
 |}]
 
+type greater_than_one =
+  { y : int | let refine_ x = one in gt y x };;
+[%%expect{|
+type greater_than_one = {y : int | let refine_ x = one in gt y x}
+|}]
+
+type greater_than_one_again =
+  { result : int | let refine_ lower = one in gt result lower }
+let greater_than_one_same : greater_than_one list =
+  ([] : greater_than_one_again list);;
+[%%expect{|
+type greater_than_one_again =
+    {result : int | let refine_ lower = one in gt result lower}
+val greater_than_one_same : greater_than_one list = []
+|}]
+
+type ordinary_unused_unpack = { y : int | let x = one in ignore x; true }
+type refined_unused_unpack =
+  { y : int | let refine_ x = one in ignore x; true }
+let binding_kinds_differ : ordinary_unused_unpack list =
+  ([] : refined_unused_unpack list);;
+[%%expect{|
+type ordinary_unused_unpack = {y : int | let x = one in ignore x; true}
+type refined_unused_unpack =
+    {y : int | let refine_ x = one in ignore x; true}
+Line 5, characters 2-35:
+5 |   ([] : refined_unused_unpack list);;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This expression has type "refined_unused_unpack list"
+       but an expression was expected of type "ordinary_unused_unpack list"
+       Type
+         "refined_unused_unpack" =
+           "{y : int | let refine_ x = one in ignore x; true}"
+       is not compatible with type
+         "ordinary_unused_unpack" = "{y : int | let x = one in ignore x; true}"
+|}]
+
 let inferred = refine_ 1;;
 [%%expect{|
 Line 1, characters 15-24:

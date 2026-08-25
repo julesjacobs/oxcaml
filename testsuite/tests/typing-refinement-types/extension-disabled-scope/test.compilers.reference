@@ -1,0 +1,7 @@
+File "consumer.ml", lines 2-6, characters 2-9:
+2 | ..let module Local = struct
+3 |     let flag = true
+4 |   end in
+5 |   let module M = Producer.Make (Local) in
+6 |   M.value
+Error: the refinement type of this expression escapes the scope of binding Local

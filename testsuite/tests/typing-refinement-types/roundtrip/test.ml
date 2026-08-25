@@ -15,6 +15,14 @@ let l : { y : int | Roundtrip_defs.positive y } list =
 val l : {y : int | Roundtrip_defs.positive y} list = []
 |}]
 
+let unpacking :
+    { z : int | let refine_ one = Roundtrip_defs.one in true } list =
+  ([] : Roundtrip_defs.unpacking list);;
+[%%expect{|
+val unpacking : {z : int | let refine_ one = Roundtrip_defs.one in true} list =
+  []
+|}]
+
 let local_polymorphism :
     { z : int | let _ignored = fun _value -> true in true } list =
   ([] : Roundtrip_defs.local_polymorphism list);;
