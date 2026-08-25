@@ -13,15 +13,17 @@
   > type t = int
   > EOF
   Verbosity 0: immediate
-  Verbosity 1: value non_pointer mod global many stateless immutable external_
+  Verbosity 1: value non_pointer mod global many total immutable external_
   Verbosity 2: value non_pointer non_null
     mod global
         many
-        stateless
+        total
         immutable
         forkable
         unyielding
         aliased
+        stateless
+        portable
         portable
         contended
         external_
@@ -31,13 +33,15 @@
   > type 'a t = 'a option
   > EOF
   Verbosity 0: immutable_data with 'a
-  Verbosity 1: value non_float mod forkable unyielding many stateless immutable with 'a
+  Verbosity 1: value non_float mod forkable unyielding many total immutable with 'a
   Verbosity 2: value non_float non_null
     mod forkable
         unyielding
         many
-        stateless
+        total
         immutable
+        stateless
+        portable
         portable
         contended
         local
@@ -51,13 +55,15 @@
   > type t2 = Foo of int t1
   > EOF
   Verbosity 0: immutable_data with int t1
-  Verbosity 1: value non_float mod forkable unyielding many stateless immutable with int t1
+  Verbosity 1: value non_float mod forkable unyielding many total immutable with int t1
   Verbosity 2: value non_float non_null
     mod forkable
         unyielding
         many
-        stateless
+        total
         immutable
+        stateless
+        portable
         portable
         contended
         local
@@ -77,6 +83,7 @@
         yielding
         once
         unique
+        partial
         stateful
         read_write
         uncontended
@@ -89,6 +96,7 @@
         yielding
         once
         unique
+        partial
         stateful
         read_write
         uncontended
@@ -107,6 +115,7 @@
         yielding
         once
         unique
+        partial
         read_write
         uncontended
         static
@@ -119,6 +128,7 @@
         yielding
         once
         unique
+        partial
         read_write
         uncontended
         static

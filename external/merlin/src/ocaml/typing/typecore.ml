@@ -8340,19 +8340,11 @@ and type_expect_
         exp_extra = (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra;
       }
   | Pexp_send (e, met) ->
-<<<<<<< Merlin:jujacobs/totality
+    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
     submode ~loc ~env Mode.Value.legacy expected_mode;
     let obj = type_exp env mode_legacy e in
     let pm = position_and_mode env expected_mode sexp in
     begin try
-||||||| Compiler:last-imported
-      submode ~loc ~env Mode.Value.legacy expected_mode;
-      let pm = position_and_mode env expected_mode sexp in
-=======
-      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
-      submode ~loc ~env Mode.Value.legacy expected_mode;
-      let pm = position_and_mode env expected_mode sexp in
->>>>>>> Compiler:HEAD
       let (obj,meth,typ) =
         with_local_level_generalize_structure_if_principal
           (fun () -> type_send env loc explanation e met.txt)
