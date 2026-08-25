@@ -42,6 +42,34 @@ faithfully pick up changes you've made to test files.
     $ make test-one-no-rebuild TEST=typing-local/local.ml
     $ make promote-one-no-rebuild DIR=typing-local
 
+Configure the worktree-local installation, initialize the incremental test
+state once, then use `dev test` after compiler or test edits:
+
+    $ autoconf
+    $ ./configure --prefix="$PWD/_install"
+    $ ./dev init
+    $ ./dev test typing-modes/modes.ml
+    $ ./dev test typing-modes/
+    $ ./dev test --promote typing-modes/modes.ml
+
+The command parses the selected test actions and builds the required compiler,
+compiler-library, or expect-test artifacts. It uses GNU parallel for directory
+tests when available; promotion is sequential. It rejects an unsupported
+action before building and prints the full-build command to use. Commands are
+serialized per worktree, and an interrupted initialization invalidates its
+state before changing shared artifacts.
+
+By default, `.opt` compiler actions use the incrementally built bytecode-host
+compiler. Select the exact native-host compiler when a test depends on the
+compiler host backend:
+
+    $ ./dev test --compiler-host=native path/to/test.ml
+
+Use `test-one` after changing bootstrap-language support, the runtime, the
+standard library, the compiler-libs installation, or test infrastructure.
+`dev test` detects stale incremental state and asks for `./dev init` instead of
+running with stale artifacts.
+
 ## Debugging
 
 We make several custom printers available so that we can print more values in

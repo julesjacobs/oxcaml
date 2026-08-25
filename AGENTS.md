@@ -5,9 +5,9 @@ This file provides guidance to AI agents when working with code in this reposito
 # OxCaml Compiler Development Guide
 
 Do not stage or commit your changes unless prompted to.
-Always check that your changes build with both (after configuration, see below):
-1. `make -s boot-compiler` - Quick build check
-2. `make -s test` - Full test suite (required before declaring success)
+Use `./dev` for the normal build-and-test loop. Do not start a full build or
+full test suite in the middle of that loop. Run broader validation only at
+closeout when the scope and risk of the change warrant it.
 
 You are working on the OxCaml compiler, a performance-focused fork of OCaml with Jane Street extensions, including the Flambda 2 optimizer and CFG backend.
 
@@ -26,27 +26,46 @@ You are working on the OxCaml compiler, a performance-focused fork of OCaml with
 - `driver/oxcaml_args.ml` - Command-line argument handling
 - Files ending in `.in` require configuration via `./configure`
 
-## Build Commands
+## Development workflow
+
+After configuring a fresh worktree with a local install prefix, initialize it
+once:
+
 ```bash
-make -s boot-compiler         # Quick build (recommended for development)
-make -s                       # Full build
-make -s install               # Install the compiler to $(pwd)/_install
-make -s fmt                   # Auto-format code (always run before committing)
+autoconf
+./configure --prefix="$PWD/_install"
+./dev init
 ```
 
-## Test Commands
+After compiler or test edits, run one command; paths are relative to
+`testsuite/tests`:
+
 ```bash
-make -s test-one TEST=test-dir/path.ml      # Run a single test testsuite/tests/test-dir/path.ml
-make -s test-one DIR=test-dir               # Run all tests in testsuite/tests/test-dir
-make -s promote-one TEST=test-dir/path.ml   # Update expected test output
-make -s test                                # Run all tests
+./dev test typing-modes/modes.ml
+./dev test typing-modes/
+./dev test --promote typing-modes/modes.ml
 ```
 
-## Configuration Commands
+`./dev test` inspects the selected test actions, incrementally rebuilds and
+stages the required compiler, compiler-library, toplevel, and expect-test
+artifacts, then reuses the test tree. It rejects unsupported action families
+before building and prints the full-build command to use. It also detects stale
+or interrupted initialization and asks for `./dev init`; do not bypass these
+checks or manually copy build artifacts.
+
+By default, `.opt` test actions use the real compiler built with the bytecode
+host, avoiding the optimized-compiler rebuild. Use the native host only when a
+test depends on the compiler host backend:
+
 ```bash
-autoconf                  # Generate configure script
-./configure               # Configure the compiler
+./dev test --compiler-host=native path/to/test.ml
 ```
+
+The incremental workflow does not cover changes to bootstrap-language support,
+the runtime, the standard library, the compiler-libs installation, or test
+infrastructure. In those cases, or if `./dev` rejects a test action, run the
+fallback command it prints. Do not run concurrent `make`, Dune, or `./dev`
+commands in the same worktree; they share build and test state.
 
 If the execution of `autoconf` fails because the version is too old, try with `autoconf27` instead.
 
@@ -57,15 +76,13 @@ Configuration is needed after changing `.in` files or the autoconf script.
 Merlin (`external/merlin/`) vendors the compiler's frontend. Any frontend change — approximately `parsing/`, `typing/`, and the files in `file_formats/` and `utils/` they use — must be imported into Merlin; a CI check verifies this. Import by running `external/merlin/scripts/import-ocaml-source.sh` (never hand-merge compiler changes into `external/merlin`, and never manually modify `external/merlin/upstream/ocaml_flambda` except for `external/merlin/upstream/ocaml_flambda/.gitattributes`), then get `make merlin-test` passing. This is what the user is asking you to do if they say something like "Update Merlin", "Fix Merlin", or "Merge compiler/frontend/typing/type-checker changes into Merlin". New compiler flags (even backend-only ones) also require a Merlin update. Don't do anything before reading the full documentation: `external/merlin/HACKING.jst.md`.
 
 ## Development Guidelines
-- Always verify changes build with `make -s boot-compiler`
-- Run `make -s fmt` to ensure code formatting
+- Use `./dev test` for the compiler build-and-test loop
+- Run `make -s fmt` before committing
 - Keep lines under 80 characters
 - Don't add excessive comments unless prompted
 - Don't disable warnings or tests unless prompted
 - Use pattern-matching and functional programming idioms
 - Avoid `assert false` and other unreachable code
-- Rebuild the project often while using the LSP using `make -s boot-compiler`. When
-  you don't rebuild, the LSP may give you stale information from a previous build
 
 ## Important Notes
 

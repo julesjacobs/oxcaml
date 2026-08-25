@@ -18,6 +18,8 @@
 open Ocamltest_stdlib
 open Actions
 
+let make = Actions.make ~incremental_requirement:No_artifact
+
 let reason_with_fallback env fallback =
   match Environments.lookup Builtin_variables.reason env with
   | None -> fallback
@@ -405,7 +407,7 @@ let run = make
   ~does_something:true
   Actions_helpers.run_program
 
-let script = make
+let script = Actions.make
   ~name:"script"
   ~description:"Run the script specified by the script variable"
   ~does_something:true

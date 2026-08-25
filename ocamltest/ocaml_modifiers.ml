@@ -122,8 +122,15 @@ let compilerlibs_subdirs =
   "utils";
 ]
 
+let compilerlibs_directory = Sys.getenv_opt "OCAMLTEST_COMPILERLIBS_DIR"
+
 let add_compiler_subdir subdir =
-  append Ocaml_variables.directories [compiler_subdir [subdir]]
+  let directory =
+    match compilerlibs_directory with
+    | Some directory -> directory
+    | None -> compiler_subdir [subdir]
+  in
+  append Ocaml_variables.directories [directory]
 
 let compilerlibs_archives archives =
   append Ocaml_variables.libraries archives ::

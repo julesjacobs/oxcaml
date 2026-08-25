@@ -1,0 +1,750 @@
+#!/bin/sh
+
+set -eu
+
+program=${0##*/}
+lock_file=
+lock_claim=
+lock_update=
+lock_record=
+active_child=
+active_group_record=
+temp_dir=
+
+usage()
+{
+  cat >&2 <<EOF
+usage: ./$program init
+       ./$program test [--promote] [--compiler-host=bytecode|native] PATH
+
+PATH is relative to testsuite/tests.
+EOF
+  exit 2
+}
+
+die()
+{
+  echo "$program: $*" >&2
+  exit 2
+}
+
+process_record()
+{
+  pid=$1
+  started=$(LC_ALL=C ps -p "$pid" -o lstart= 2>/dev/null |
+    sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  [ -n "$started" ] || return 1
+  printf '%s|%s\n' "$pid" "$started"
+}
+
+record_is_live()
+{
+  record=$1
+  case "$record" in
+    group\|*)
+      process=${record#group|}
+      if record_is_live "$process"; then
+        return 0
+      fi
+      group=${process%%|*}
+      ps -axo pgid= 2>/dev/null |
+        awk -v group="$group" '$1 == group { found = 1 } END { exit !found }'
+      return
+      ;;
+  esac
+  case "$record" in
+    *'|'*) ;;
+    *) return 1 ;;
+  esac
+  pid=${record%%|*}
+  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
+  current=$(process_record "$pid" 2>/dev/null || true)
+  [ "$current" = "$record" ]
+}
+
+lock_has_live_owner()
+{
+  live_owner=
+  while IFS= read -r record; do
+    if record_is_live "$record"; then
+      case "$record" in
+        group\|*)
+          live_owner=${record#group|}
+          live_owner=${live_owner%%|*}
+          ;;
+        *) live_owner=${record%%|*} ;;
+      esac
+      return 0
+    fi
+  done < "$lock_file"
+  return 1
+}
+
+publish_lock()
+{
+  child_record=${1-}
+  {
+    printf '%s\n' "$lock_record"
+    [ -z "$child_record" ] || printf '%s\n' "$child_record"
+  } > "$lock_update"
+  mv -f "$lock_update" "$lock_file"
+}
+
+run_locked()
+{
+  perl -MPOSIX=setsid -e \
+    'setsid() >= 0 or die "setsid: $!\n";
+     my $program = $ARGV[0]; exec @ARGV; die "exec $program: $!\n"' -- "$@" &
+  active_child=$!
+  child_record=$(process_record "$active_child" 2>/dev/null || true)
+  if [ -n "$child_record" ]; then
+    active_group_record="group|$child_record"
+  else
+    active_group_record=
+  fi
+  publish_lock "$active_group_record"
+  child_status=0
+  wait "$active_child" || child_status=$?
+  active_child=
+  active_group_record=
+  publish_lock
+  return "$child_status"
+}
+
+cleanup()
+{
+  status=$?
+  trap - 0 1 2 3 15
+  if [ -n "$active_child" ]; then
+    perl -e 'kill "TERM", -$ARGV[0]' "$active_child" 2>/dev/null || true
+    attempts=0
+    while kill -0 "$active_child" 2>/dev/null && [ "$attempts" -lt 20 ]; do
+      sleep 0.1
+      attempts=$((attempts + 1))
+    done
+    if kill -0 "$active_child" 2>/dev/null; then
+      perl -e 'kill "KILL", -$ARGV[0]' "$active_child" 2>/dev/null || true
+    fi
+    wait "$active_child" 2>/dev/null || true
+    active_child=
+  fi
+  group_still_live=false
+  if [ -n "$active_group_record" ] &&
+     record_is_live "$active_group_record"; then
+    group_still_live=true
+  fi
+  if [ "$group_still_live" = false ] &&
+     [ -n "$temp_dir" ] && [ -d "$temp_dir" ]; then
+    rm -rf "$temp_dir"
+  fi
+  if [ -n "$lock_file" ] && [ -f "$lock_file" ] &&
+     [ -n "$lock_record" ]; then
+    if [ "$group_still_live" = false ] &&
+       grep -Fqx "$lock_record" "$lock_file" 2>/dev/null; then
+      rm -f "$lock_file"
+    fi
+  fi
+  if [ -n "$lock_claim" ] && [ -f "$lock_claim" ]; then
+    rm -f "$lock_claim"
+  fi
+  if [ -n "$lock_update" ] && [ -f "$lock_update" ]; then
+    rm -f "$lock_update"
+  fi
+  exit "$status"
+}
+
+script_dir=$(CDPATH= cd -P "$(dirname "$0")" && pwd)
+root_from_git=$(git -C "$script_dir" rev-parse --show-toplevel 2>/dev/null) ||
+  die "not inside a Git worktree"
+root=$(CDPATH= cd -P "$root_from_git" && pwd)
+[ "$script_dir" = "$root" ] || die "dev must be run from its worktree root"
+case "$root" in
+  *' '*) die "the OCaml testsuite does not support spaces in its path" ;;
+esac
+command -v perl >/dev/null 2>&1 || die "Perl is required"
+perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e \
+  'clock_gettime(CLOCK_MONOTONIC)' 2>/dev/null ||
+  die "Perl Time::HiRes with CLOCK_MONOTONIC is required"
+
+monotonic_seconds()
+{
+  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e \
+    'printf "%d\n", clock_gettime(CLOCK_MONOTONIC)'
+}
+
+[ "$#" -gt 0 ] || usage
+requested_command=$1
+case "$requested_command" in
+  init|test) ;;
+  *) usage ;;
+esac
+
+config=$root/Makefile.config
+[ -f "$config" ] ||
+  die "not configured; run autoconf and ./configure --prefix=\"\$PWD/_install\""
+prefix=$(sed -n 's/^prefix=//p' "$config" | tail -n 1)
+[ "$prefix" = "$root/_install" ] ||
+  die "configured prefix is '$prefix', expected '$root/_install'"
+
+boot_workspace=$root/duneconf/boot.ws
+runtime_workspace=$root/duneconf/runtime_stdlib.ws
+main_workspace=$root/duneconf/main.ws
+generated_dune_project=$root/dune-project
+generated_dirs_to_ignore=$root/duneconf/dirs-to-ignore.inc
+generated_ox_extra=$root/duneconf/ox-extra.inc
+
+validate_workspaces()
+{
+  for workspace in "$boot_workspace" "$runtime_workspace" "$main_workspace"; do
+    [ -f "$workspace" ] || die "missing generated workspace '$workspace'"
+  done
+  for generated in "$generated_dune_project" "$generated_dirs_to_ignore" \
+      "$generated_ox_extra"; do
+    [ -f "$generated" ] || die "missing generated build file '$generated'"
+  done
+  grep -Fq "\"$root/_build/_bootinstall/bin\"" "$runtime_workspace" ||
+    die "runtime workspace belongs to another or stale worktree"
+  grep -Fq "\"$root/_build/_bootinstall/lib/ocaml\"" "$runtime_workspace" ||
+    die "runtime workspace has a stale OCAMLLIB"
+  grep -Fq "\"$root/_build/_bootinstall/bin\"" "$main_workspace" ||
+    die "main workspace belongs to another or stale worktree"
+  grep -Fq \
+    "\"$root/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib\"" \
+    "$main_workspace" || die "main workspace has a stale OCAMLLIB"
+}
+
+trap cleanup 0
+trap 'exit 129' 1
+trap 'exit 130' 2
+trap 'exit 131' 3
+trap 'exit 143' 15
+
+mkdir -p "$root/_build"
+lock_file=$root/_build/.vox-dev.lock
+lock_claim=$root/_build/.vox-dev.lock.$$
+lock_update=$root/_build/.vox-dev.lock.update.$$
+lock_record=$(process_record "$$") || die "cannot identify the current process"
+printf '%s\n' "$lock_record" > "$lock_claim"
+while ! ln "$lock_claim" "$lock_file" 2>/dev/null; do
+  if lock_has_live_owner; then
+    echo "$program: another command owns this worktree (pid $live_owner)" >&2
+    exit 75
+  fi
+  stale=$lock_file.stale.$$
+  if mv "$lock_file" "$stale" 2>/dev/null; then
+    rm -f "$stale"
+  fi
+done
+rm -f "$lock_claim"
+lock_claim=
+find "$root/_build" -mindepth 1 -maxdepth 1 -type d \
+  -name '.vox-dev.*' -exec rm -rf -- {} +
+
+if [ "$requested_command" = test ]; then
+  validate_workspaces
+fi
+
+temp_dir=$(mktemp -d "$root/_build/.vox-dev.XXXXXX")
+manifest=$root/_runtest/.vox-incremental-state
+planner=$root/_runtest/ocamltest/ocamltest
+
+make_value()
+{
+  name=$1
+  sed -n "s/^[[:space:]]*$name[[:space:]]*=[[:space:]]*//p" "$config" |
+    tail -n 1
+}
+
+hash_file()
+{
+  git -C "$root" hash-object -- "$1"
+}
+
+reused_inputs_hash()
+{
+  files=$temp_dir/reused-files
+  hashes=$temp_dir/reused-hashes
+  : > "$files"
+  git -C "$root" ls-files -co --exclude-standard -- \
+    dev Makefile Makefile.ox Makefile.common-ox Makefile.config.in \
+    configure.ac dune dune-project.ox runtime stdlib otherlibs \
+    ocamltest testsuite/Makefile \
+    testsuite/lib testsuite/tools oxcaml/testsuite/tools >> "$files"
+  LC_ALL=C sort -u "$files" -o "$files"
+  git -C "$root" hash-object --stdin-paths < "$files" > "$hashes"
+  paste "$hashes" "$files" | git -C "$root" hash-object --stdin
+}
+
+write_expected_manifest()
+{
+  output=$1
+  {
+    echo 'format=1'
+    printf 'root=%s\n' "$root"
+    printf 'prefix=%s\n' "$prefix"
+    printf 'config=%s\n' "$(hash_file "$config")"
+    printf 'boot_workspace=%s\n' "$(hash_file "$boot_workspace")"
+    printf 'runtime_workspace=%s\n' "$(hash_file "$runtime_workspace")"
+    printf 'main_workspace=%s\n' "$(hash_file "$main_workspace")"
+    printf 'dune_project=%s\n' "$(hash_file "$generated_dune_project")"
+    printf 'dirs_to_ignore=%s\n' "$(hash_file "$generated_dirs_to_ignore")"
+    printf 'ox_extra=%s\n' "$(hash_file "$generated_ox_extra")"
+    printf 'planner=%s\n' "$(hash_file "$planner")"
+    printf 'runtime=%s\n' "$(hash_file "$root/_runtest/runtime/ocamlrun")"
+    printf 'stdlib=%s\n' "$(hash_file "$root/_install/lib/ocaml/stdlib.cmi")"
+    printf 'reused_inputs=%s\n' "$(reused_inputs_hash)"
+  } > "$output"
+}
+
+record_state()
+{
+  [ -x "$planner" ] || die "full initialization did not install ocamltest"
+  [ -f "$root/_install/lib/ocaml/stdlib.cmi" ] ||
+    die "full initialization did not install the standard library"
+  [ -x "$root/_runtest/runtime/ocamlrun" ] ||
+    die "full initialization did not stage the runtime"
+  state=$temp_dir/incremental-state
+  write_expected_manifest "$state"
+  mv -f "$state" "$manifest"
+}
+
+validate_state()
+{
+  [ -f "$manifest" ] || die "incremental state is absent; run './dev init'"
+  [ -x "$planner" ] || die "incremental planner is absent; run './dev init'"
+  [ -f "$root/_install/lib/ocaml/stdlib.cmi" ] ||
+    die "installed standard library is absent; run './dev init'"
+  [ -x "$root/_runtest/runtime/ocamlrun" ] ||
+    die "staged runtime is absent; run './dev init'"
+  expected=$temp_dir/expected-state
+  write_expected_manifest "$expected"
+  if ! cmp -s "$expected" "$manifest"; then
+    echo "$program: incremental state is stale; run './dev init'" >&2
+    exit 2
+  fi
+}
+
+run_init()
+{
+  [ "$#" -eq 0 ] || usage
+  init_started_at=$(monotonic_seconds)
+  rm -f "$manifest"
+  run_locked make -C "$root" -s -B \
+    duneconf/boot.ws duneconf/runtime_stdlib.ws duneconf/main.ws \
+    duneconf/dirs-to-ignore.inc duneconf/ox-extra.inc dune-project
+  validate_workspaces
+  run_locked make -C "$root" -s test-one TEST=basic-more/div_by_zero.ml
+  validate_workspaces
+  record_state
+  init_seconds=$(($(monotonic_seconds) - init_started_at))
+  echo "Incremental test state initialized in ${init_seconds}s."
+}
+
+add_compilerlib()
+{
+  library=$1
+  echo "$library" >> "$targets_file"
+  echo "$library" >> "$compilerlibs_file"
+}
+
+add_compilerlib_modes()
+{
+  basename=$1
+  if [ "$compilerlibs_byte" = true ]; then
+    add_compilerlib "$basename.cma"
+  fi
+  if [ "$compilerlibs_native" = true ]; then
+    add_compilerlib "$basename.cmxa"
+  fi
+}
+
+add_requirement()
+{
+  requirement=$1
+  case "$requirement" in
+    expect)
+      echo oxcaml/testsuite/tools/expect.exe >> "$targets_file"
+      OCAMLTEST_EXPECT=$root/_build/main/oxcaml/testsuite/tools/expect.exe
+      echo "$OCAMLTEST_EXPECT" >> "$artifacts_file"
+      export OCAMLTEST_EXPECT
+      ;;
+    expectnat)
+      echo oxcaml/testsuite/tools/expectnat.exe >> "$targets_file"
+      OCAMLTEST_EXPECTNAT=$root/_build/main/oxcaml/testsuite/tools/expectnat.exe
+      echo "$OCAMLTEST_EXPECTNAT" >> "$artifacts_file"
+      export OCAMLTEST_EXPECTNAT
+      ;;
+    toplevel)
+      echo toplevel/byte/bytetop >> "$targets_file"
+      echo main.bc >> "$targets_file"
+      OCAMLTEST_OCAML=$root/_build/main/toplevel/byte/bytetop
+      OCAMLTEST_OCAMLC_BYTE=$root/_build/main/main.bc
+      echo "$OCAMLTEST_OCAML" >> "$artifacts_file"
+      echo "$OCAMLTEST_OCAMLC_BYTE" >> "$artifacts_file"
+      export OCAMLTEST_OCAML OCAMLTEST_OCAMLC_BYTE
+      ;;
+    ocamlc.byte)
+      echo main.bc >> "$targets_file"
+      OCAMLTEST_OCAMLC_BYTE=$root/_build/main/main.bc
+      echo "$OCAMLTEST_OCAMLC_BYTE" >> "$artifacts_file"
+      export OCAMLTEST_OCAMLC_BYTE
+      ;;
+    ocamlc.opt)
+      if [ "$compiler_host" = native ]; then
+        echo main_native.exe >> "$targets_file"
+        OCAMLTEST_OCAMLC_OPT=$root/_build/main/main_native.exe
+      else
+        echo main.bc >> "$targets_file"
+        OCAMLTEST_OCAMLC_OPT=$root/_build/main/main.bc
+      fi
+      echo "$OCAMLTEST_OCAMLC_OPT" >> "$artifacts_file"
+      export OCAMLTEST_OCAMLC_OPT
+      ;;
+    ocamlopt.byte)
+      echo oxcaml_main.bc >> "$targets_file"
+      OCAMLTEST_OCAMLOPT_BYTE=$root/_build/main/oxcaml_main.bc
+      echo "$OCAMLTEST_OCAMLOPT_BYTE" >> "$artifacts_file"
+      export OCAMLTEST_OCAMLOPT_BYTE
+      ;;
+    ocamlopt.opt)
+      if [ "$compiler_host" = native ]; then
+        echo oxcaml_main_native.exe >> "$targets_file"
+        OCAMLTEST_OCAMLOPT_OPT=$root/_build/main/oxcaml_main_native.exe
+      else
+        echo oxcaml_main.bc >> "$targets_file"
+        OCAMLTEST_OCAMLOPT_OPT=$root/_build/main/oxcaml_main.bc
+      fi
+      echo "$OCAMLTEST_OCAMLOPT_OPT" >> "$artifacts_file"
+      export OCAMLTEST_OCAMLOPT_OPT
+      ;;
+    compilerlibs.ocamlcommon)
+      add_compilerlib_modes ocamlcommon
+      add_compilerlib_modes ocamlfrontend
+      ;;
+    compilerlibs.ocamlbytecomp)
+      add_compilerlib_modes ocamlbytecomp
+      ;;
+    compilerlibs.ocamloptcomp)
+      add_compilerlib_modes ocamloptcomp
+      ;;
+    compilerlibs.ocamltoplevel)
+      [ "$compilerlibs_native" = false ] ||
+        die "ocamltoplevel has no native Dune install artifact"
+      add_compilerlib ocamltoplevel.cma
+      ;;
+    '') ;;
+    *) die "planner returned unsupported requirement '$requirement'" ;;
+  esac
+}
+
+list_suite_directory_tests()
+{
+  suite_root=$1
+  selection=$2
+  priority=$3
+  candidates=$4
+  raw_dirs=$temp_dir/test-dirs.raw
+  if ! run_locked sh -c 'cd "$1" && exec "$2" -find-test-dirs "$3"' \
+      sh "$suite_root" "$planner" "$selection" > "$raw_dirs"; then
+    die "could not enumerate tests below '$suite_root/$selection'"
+  fi
+  dirs=$temp_dir/test-dirs
+  LC_ALL=C sort -u "$raw_dirs" > "$dirs"
+  while IFS= read -r dir; do
+    case "$dir" in
+      ''|*"'"*|*[[:space:]]*) die "unsafe test directory '$dir'" ;;
+    esac
+    listed=$temp_dir/listed-tests
+    if ! run_locked sh -c 'cd "$1" && exec "$2" -list-tests "$3"' \
+        sh "$suite_root" "$planner" "$dir" > "$listed"; then
+      die "could not enumerate tests in '$suite_root/$dir'"
+    fi
+    while IFS= read -r file; do
+      case "$file" in
+        ''|*/*|*"'"*|*[[:space:]]*) die "unsafe test filename '$file'" ;;
+      esac
+      logical=$dir/$file
+      if [ "$priority" -eq 1 ]; then
+        case "$logical" in
+          tests/asmcomp/*|tests/asmgen/*|tests/lib-extensions/*) continue ;;
+        esac
+      fi
+      printf '%s\t%s\t%s\n' \
+        "$logical" "$priority" "$suite_root/$logical" >> "$candidates"
+    done < "$listed"
+  done < "$dirs"
+}
+
+list_directory_tests()
+{
+  path=$1
+  files=$2
+  candidates=$temp_dir/test-candidates
+  sorted=$temp_dir/test-candidates.sorted
+  : > "$candidates"
+  case "$path" in
+    asmcomp|asmcomp/*|asmgen|asmgen/*|lib-extensions|lib-extensions/*)
+      if [ -d "$root/oxcaml/testsuite/tests/$path" ]; then
+        list_suite_directory_tests \
+          "$root/oxcaml/testsuite" "tests/$path" 0 "$candidates"
+      fi
+      ;;
+    *)
+      if [ -d "$root/testsuite/tests/$path" ]; then
+        list_suite_directory_tests \
+          "$root/testsuite" "tests/$path" 1 "$candidates"
+      fi
+      ;;
+  esac
+  tab=$(printf '\t')
+  LC_ALL=C sort -t "$tab" -k1,1 -k2,2n "$candidates" > "$sorted"
+  awk -F '\t' '$1 != previous { print $3; previous = $1 }' \
+    "$sorted" > "$files"
+  [ -s "$files" ] || die "no tests found below 'testsuite/tests/$path'"
+}
+
+plan_tests()
+{
+  plan=$1
+  raw_plan=$temp_dir/plan.raw
+  : > "$raw_plan"
+  while IFS= read -r test_file; do
+    if ! run_locked "$planner" -plan-incremental "$test_file" \
+        >> "$raw_plan"; then
+      return 2
+    fi
+  done < "$test_files"
+  LC_ALL=C sort -u "$raw_plan" > "$plan"
+  return 0
+}
+
+run_planned_tests()
+{
+  log=$1
+  execution_status=0
+  planner_flags='-timeout 600'
+  if [ "$promote" = true ]; then
+    planner_flags="$planner_flags -promote"
+  fi
+  cd "$root/testsuite"
+  if [ "$selection_kind" = directory ] && [ "$promote" = false ] &&
+     command -v parallel >/dev/null 2>&1 &&
+     echo | parallel --gnu --no-notice true >/dev/null 2>&1; then
+    # Test paths are sorted above; --keep-order makes output deterministic.
+    if run_locked parallel --gnu --no-notice --keep-order \
+      "echo Running tests from \'{//}\' ...; $planner $planner_flags {} 2>&1" \
+      :::: "$test_files" > "$log"; then
+      :
+    else
+      execution_status=$?
+    fi
+  else
+    : > "$log"
+    while IFS= read -r test_file; do
+      echo "Running tests from '$(dirname "$test_file")' ..." >> "$log"
+      if [ "$promote" = true ]; then
+        if run_locked "$planner" -timeout 600 -promote "$test_file" \
+            >> "$log" 2>&1; then
+          :
+        else
+          execution_status=1
+        fi
+      else
+        if run_locked "$planner" -timeout 600 "$test_file" \
+            >> "$log" 2>&1; then
+          :
+        else
+          execution_status=1
+        fi
+      fi
+    done < "$test_files"
+  fi
+  cat "$log"
+  report_status=0
+  awk -f "$root/testsuite/summarize.awk" < "$log" || report_status=$?
+  [ "$report_status" -eq 0 ] || return "$report_status"
+  return "$execution_status"
+}
+
+run_test()
+{
+  test_started_at=$(monotonic_seconds)
+  promote=false
+  compiler_host=bytecode
+  unset OCAMLTEST_EXPECT OCAMLTEST_EXPECTNAT OCAMLTEST_OCAML \
+    OCAMLTEST_OCAMLC_BYTE OCAMLTEST_OCAMLC_OPT \
+    OCAMLTEST_OCAMLOPT_BYTE OCAMLTEST_OCAMLOPT_OPT
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --promote) promote=true; shift ;;
+      --compiler-host=bytecode) compiler_host=bytecode; shift ;;
+      --compiler-host=native) compiler_host=native; shift ;;
+      --) shift; break ;;
+      -*) usage ;;
+      *) break ;;
+    esac
+  done
+  [ "$#" -eq 1 ] || usage
+  path=$1
+  case "$path" in
+    ''|/*|.|..|../*|*/../*|*/..|*"'"*|*[[:space:]]*)
+      die "test path must stay below testsuite/tests"
+      ;;
+  esac
+  reject_symlinks_below()
+  {
+    base=$1
+    remaining=$2
+    current=$base
+    while :; do
+      component=${remaining%%/*}
+      current=$current/$component
+      [ ! -L "$current" ] ||
+        die "test path crosses symbolic link '$current'"
+      case "$remaining" in
+        */*) remaining=${remaining#*/} ;;
+        *) break ;;
+      esac
+    done
+    if [ -d "$current" ]; then
+      symlink=$(find "$current" -type l -print -quit)
+      [ -z "$symlink" ] ||
+        die "test directory contains symbolic link '$symlink'"
+    fi
+  }
+  upstream_path=$root/testsuite/tests/$path
+  overlay_path=$root/oxcaml/testsuite/tests/$path
+  case "$path" in
+    asmcomp|asmcomp/*|asmgen|asmgen/*|lib-extensions|lib-extensions/*)
+      upstream_path=
+      reject_symlinks_below "$root/oxcaml/testsuite/tests" "$path"
+      ;;
+    *)
+      overlay_path=
+      reject_symlinks_below "$root/testsuite/tests" "$path"
+      ;;
+  esac
+  if [ -f "$overlay_path" ]; then
+    selection_kind=file
+    selected_file=$overlay_path
+  elif [ -f "$upstream_path" ]; then
+    selection_kind=file
+    selected_file=$upstream_path
+  elif [ -d "$overlay_path" ] || [ -d "$upstream_path" ]; then
+    selection_kind=directory
+  else
+    die "no test file or directory at 'testsuite/tests/$path'"
+  fi
+  validate_state
+  test_files=$temp_dir/test-files
+  if [ "$selection_kind" = directory ]; then
+    list_directory_tests "$path" "$test_files"
+  else
+    printf '%s\n' "$selected_file" > "$test_files"
+  fi
+  plan=$temp_dir/plan
+  if ! plan_tests "$plan"; then
+    echo "$program: selection is not supported incrementally" >&2
+    if [ "$selection_kind" = file ]; then
+      echo "$program: use 'make -s test-one TEST=$path' for the full path" >&2
+    else
+      echo "$program: use 'make -s test-one DIR=$path' for the full path" >&2
+    fi
+    exit 2
+  fi
+
+  targets_file=$temp_dir/targets
+  artifacts_file=$temp_dir/artifacts
+  compilerlibs_file=$temp_dir/compilerlibs
+  : > "$targets_file"
+  : > "$artifacts_file"
+  : > "$compilerlibs_file"
+  compilerlibs_byte=false
+  compilerlibs_native=false
+  if grep -Eq '^(expect|ocamlc\.(byte|opt)|toplevel)$' "$plan"; then
+    compilerlibs_byte=true
+  fi
+  if grep -Eq '^(expectnat|ocamlopt\.(byte|opt))$' "$plan"; then
+    compilerlibs_native=true
+  fi
+  if grep -q '^compilerlibs\.' "$plan" &&
+     [ "$compilerlibs_byte" = false ] &&
+     [ "$compilerlibs_native" = false ]; then
+    die "compiler-library modifier has no supported compiler action"
+  fi
+  while IFS= read -r requirement; do
+    add_requirement "$requirement"
+  done < "$plan"
+  LC_ALL=C sort -u "$targets_file" -o "$targets_file"
+  LC_ALL=C sort -u "$compilerlibs_file" -o "$compilerlibs_file"
+
+  compilerlibs_dir=$root/_build/install/main/lib/ocaml/compiler-libs
+  if [ -s "$compilerlibs_file" ]; then
+    OCAMLTEST_COMPILERLIBS_DIR=$compilerlibs_dir
+    export OCAMLTEST_COMPILERLIBS_DIR
+  else
+    unset OCAMLTEST_COMPILERLIBS_DIR
+  fi
+
+  dune=$(make_value dune)
+  [ -x "$dune" ] || die "configured Dune is not executable: '$dune'"
+  ARCH=$(make_value ARCH)
+  SYSTEM=$(make_value SYSTEM)
+  MODEL=$(make_value MODEL)
+  ASPP=$(make_value ASPP)
+  ASPPFLAGS=$(make_value ASPPFLAGS)
+  export ARCH SYSTEM MODEL ASPP ASPPFLAGS
+  set --
+  while IFS= read -r target; do
+    set -- "$@" "$target"
+  done < "$targets_file"
+  if [ "$#" -gt 0 ]; then
+    build_started_at=$(monotonic_seconds)
+    run_locked sh -c 'cd "$1" && shift && exec "$@"' \
+      sh "$root" "$dune" build --root=. --workspace=duneconf/main.ws "$@"
+    build_seconds=$(($(monotonic_seconds) - build_started_at))
+  else
+    build_seconds=0
+  fi
+  while IFS= read -r artifact; do
+    [ -x "$artifact" ] || die "Dune did not produce '$artifact'"
+  done < "$artifacts_file"
+  while IFS= read -r library; do
+    [ -f "$compilerlibs_dir/$library" ] ||
+      die "Dune did not install compiler library '$library'"
+  done < "$compilerlibs_file"
+
+  OCAMLSRCDIR=$root/_runtest
+  CAML_LD_LIBRARY_PATH=$root/_runtest/lib/ocaml/stublibs
+  if command -v gfortran >/dev/null 2>&1; then
+    LIBRARY_PATH=$(dirname "$(gfortran -print-file-name=libgfortran.a)")
+    export LIBRARY_PATH
+  fi
+  MAKE=make
+  SORT=sort
+  TERM=dumb
+  unset ROWS COLUMNS USE_RUNTIME
+  export OCAMLSRCDIR CAML_LD_LIBRARY_PATH OCAMLTESTDIR MAKE SORT TERM
+  invocation=$(date +%Y%m%dT%H%M%S).$$
+  run_dir=$root/_build/vox-dev-runs/$invocation
+  OCAMLTESTDIR=$run_dir/ocamltest
+  export OCAMLTESTDIR
+  mkdir -p "$OCAMLTESTDIR"
+  log=$run_dir/test.log
+  test_status=0
+  execution_started_at=$(monotonic_seconds)
+  run_planned_tests "$log" || test_status=$?
+  execution_seconds=$(($(monotonic_seconds) - execution_started_at))
+  total_seconds=$(($(monotonic_seconds) - test_started_at))
+  echo "Time: build ${build_seconds}s, test ${execution_seconds}s, total ${total_seconds}s"
+  echo "Test log: $log"
+  return "$test_status"
+}
+
+command=$1
+shift
+case "$command" in
+  init) run_init "$@" ;;
+  test) run_test "$@" ;;
+  *) usage ;;
+esac

@@ -257,11 +257,9 @@ let extract_rootenv (Ast (stmts, subs)) =
   let (env, stmts) = split_env stmts in
   (env, Ast (stmts, subs))
 
-let test_file test_filename =
-  let start = if Options.show_timings then Unix.gettimeofday () else 0.0 in
-  let skip_test = List.mem test_filename !tests_to_skip in
+let parse_test_file test_filename =
   let tsl_ast = tsl_parse_file_safe test_filename in
-  let (rootenv_statements, tsl_ast) = extract_rootenv tsl_ast in
+  let rootenv_statements, tsl_ast = extract_rootenv tsl_ast in
   let tsl_ast = match[@ocaml.warning "-fragile-match"] tsl_ast with
     | Ast ([], []) ->
       let default_tests = Tests.default_tests() in
@@ -272,6 +270,12 @@ let test_file test_filename =
       Ast ([], List.map make_tree default_tests)
     | _ -> tsl_ast
   in
+  rootenv_statements, tsl_ast
+
+let test_file test_filename =
+  let start = if Options.show_timings then Unix.gettimeofday () else 0.0 in
+  let skip_test = List.mem test_filename !tests_to_skip in
+  let rootenv_statements, tsl_ast = parse_test_file test_filename in
   let used_tests = tests_in_tree tsl_ast in
   let used_actions = actions_in_tests used_tests in
   let action_names =
@@ -382,6 +386,188 @@ let test_file test_filename =
         clean_test_build_directory ()
   end
 
+let plan_incremental files =
+  let fail_unsupported filename format =
+    Printf.ksprintf
+      (fun message ->
+        Printf.eprintf "Incremental testing does not support %s in %s.\n%!"
+          message filename;
+        exit 2)
+      format
+  in
+  let action_hook filename action =
+    let basename = Filename.basename filename in
+    let prefix = Filename.chop_extension basename in
+    let prefix = Filename.concat (Filename.dirname filename) prefix in
+    Filename.make_filename prefix (Actions.name action)
+  in
+  let add_action filename action requirements =
+    let hook = action_hook filename action in
+    if Sys.file_exists hook then
+      fail_unsupported filename "action hook %S" hook;
+    match Actions.incremental_requirement action with
+    | Actions.No_artifact -> requirements
+    | Actions.Requirement requirement ->
+        String.Set.add requirement requirements
+    | Actions.Unsupported ->
+        fail_unsupported filename "action %S" (Actions.name action)
+  in
+  let generated_source filename =
+    Filename.check_suffix filename ".mll" ||
+    Filename.check_suffix filename ".mly"
+  in
+  let value_uses_generator value =
+    List.exists generated_source (String.words value.node)
+  in
+  let environment_uses_generator statement =
+    match statement.node with
+    | Assignment (_, _, value) | Append (_, value) ->
+        value_uses_generator value
+    | Include _ | Unset _ -> false
+  in
+  let rec item_uses_generator = function
+    | Environment_statement statement ->
+        environment_uses_generator statement
+    | Test (_, _, modifiers) ->
+        List.exists value_uses_generator modifiers
+    | Split alternatives ->
+        List.exists (List.exists item_uses_generator) alternatives
+  in
+  let rec tree_uses_generator (Ast (statements, subtrees)) =
+    List.exists item_uses_generator statements
+    || List.exists tree_uses_generator subtrees
+  in
+  let environment_uses_expanded_generator env =
+    List.exists
+      (fun variable ->
+        match Environments.lookup variable env with
+        | None -> false
+        | Some value -> List.exists generated_source (String.words value))
+      Ocaml_variables.[all_modules; modules; plugins]
+  in
+  let apply_planning_statement filename env statement =
+    let env =
+      try interpret_environment_statement env statement with
+      | exn ->
+          fail_unsupported filename "environment expansion (%s)"
+            (Printexc.to_string exn)
+    in
+    if environment_uses_expanded_generator env then
+      fail_unsupported filename "generated lexer or parser sources";
+    env
+  in
+  let rec plan_items filename env = function
+    | [] -> [env]
+    | Environment_statement statement :: rest ->
+        let env = apply_planning_statement filename env statement in
+        plan_items filename env rest
+    | Test (_, _, modifiers) :: rest ->
+        let env =
+          List.fold_left
+            (fun env modifier ->
+              try apply_modifiers env modifier with
+              | exn ->
+                  fail_unsupported filename "environment modifier %S (%s)"
+                    modifier.node (Printexc.to_string exn))
+            env modifiers
+        in
+        if environment_uses_expanded_generator env then
+          fail_unsupported filename "generated lexer or parser sources";
+        plan_items filename env rest
+    | Split alternatives :: rest ->
+        List.concat_map
+          (fun alternative -> plan_items filename env (alternative @ rest))
+          alternatives
+  in
+  let rec plan_tree filename env (Ast (statements, subtrees)) =
+    let environments = plan_items filename env statements in
+    List.iter
+      (fun env ->
+        List.iter (fun subtree -> plan_tree filename env subtree) subtrees)
+      environments
+  in
+  let compilerlibs_requirement = function
+    | "ocamlcommon" -> Some "compilerlibs.ocamlcommon"
+    | "ocamlbytecomp" -> Some "compilerlibs.ocamlbytecomp"
+    | "ocamloptcomp" -> Some "compilerlibs.ocamloptcomp"
+    | "ocamltoplevel" -> Some "compilerlibs.ocamltoplevel"
+    | "ocamlmiddleend" ->
+        failwith "the ocamlmiddleend modifier has no Dune install artifact"
+    | _ -> None
+  in
+  let add_modifier_requirement filename name requirements =
+    match compilerlibs_requirement name.node with
+    | Some requirement -> String.Set.add requirement requirements
+    | None -> requirements
+    | exception Failure message -> fail_unsupported filename "%s" message
+  in
+  let add_environment_requirement filename statement requirements =
+    match statement.node with
+    | Include name -> add_modifier_requirement filename name requirements
+    | Assignment _ | Append _ | Unset _ -> requirements
+  in
+  let rec add_item_requirements filename requirements = function
+    | Environment_statement statement ->
+        add_environment_requirement filename statement requirements
+    | Test (_, _, modifiers) ->
+        List.fold_left
+          (fun requirements name ->
+            add_modifier_requirement filename name requirements)
+          requirements modifiers
+    | Split alternatives ->
+        List.fold_left
+          (List.fold_left (add_item_requirements filename))
+          requirements alternatives
+  in
+  let rec add_tree_requirements filename requirements
+      (Ast (statements, subtrees)) =
+    let requirements =
+      List.fold_left (add_item_requirements filename) requirements statements
+    in
+    List.fold_left (add_tree_requirements filename) requirements subtrees
+  in
+  let compiler_requirement action =
+    match Actions.incremental_requirement action with
+    | Actions.Requirement
+        ("ocamlc.byte" | "ocamlc.opt" | "ocamlopt.byte" | "ocamlopt.opt") ->
+        true
+    | Actions.No_artifact | Actions.Requirement _ | Actions.Unsupported ->
+        false
+  in
+  let add_file requirements filename =
+    let rootenv, tsl_ast = parse_test_file filename in
+    let tests =
+      try tests_in_tree_strict tsl_ast with
+      | No_such_test_or_action name ->
+          Printf.eprintf
+            "Incremental testing cannot resolve test or action %S in %s.\n%!"
+            name filename;
+          exit 2
+    in
+    let actions = actions_in_tests tests in
+    let root_environment =
+      List.fold_left
+        (apply_planning_statement filename)
+        Environments.empty rootenv
+    in
+    plan_tree filename root_environment tsl_ast;
+    if Actions.ActionSet.exists compiler_requirement actions &&
+       (generated_source filename ||
+        List.exists environment_uses_generator rootenv ||
+        tree_uses_generator tsl_ast)
+    then fail_unsupported filename "generated lexer or parser sources";
+    let requirements =
+      List.fold_left
+        (fun requirements statement ->
+          add_environment_requirement filename statement requirements)
+        requirements rootenv
+    in
+    let requirements = add_tree_requirements filename requirements tsl_ast in
+    Actions.ActionSet.fold (add_action filename) actions requirements
+  in
+  let requirements = List.fold_left add_file String.Set.empty files in
+  String.Set.iter print_endline requirements
+
 let is_test filename =
   let input_channel = open_in filename in
   let lexbuf = Lexing.from_channel input_channel in
@@ -448,14 +634,29 @@ let () =
   in
   let find_test_dirs dir = List.iter print_endline (find_test_dirs dir) in
   let doit f x = work_done := true; f x in
-  List.iter (doit find_test_dirs) Options.find_test_dirs;
-  List.iter (doit list_tests) Options.list_tests;
-  let do_file =
-    if Options.translate then
-      Translate.file ~style:Options.style ~compact:Options.compact
-    else
-      test_file
-  in
-  List.iter (doit do_file) Options.files_to_test;
+  if Options.plan_incremental then begin
+    if Options.translate || Options.find_test_dirs <> [] ||
+       Options.list_tests <> [] then begin
+      Printf.eprintf
+        "-plan-incremental cannot be combined with listing or translation.\n%!";
+      exit 2
+    end;
+    if Options.files_to_test = [] then begin
+      Printf.eprintf "-plan-incremental requires at least one test file.\n%!";
+      exit 2
+    end;
+    work_done := true;
+    plan_incremental Options.files_to_test
+  end else begin
+    List.iter (doit find_test_dirs) Options.find_test_dirs;
+    List.iter (doit list_tests) Options.list_tests;
+    let do_file =
+      if Options.translate then
+        Translate.file ~style:Options.style ~compact:Options.compact
+      else
+        test_file
+    in
+    List.iter (doit do_file) Options.files_to_test
+  end;
   if not !work_done then print_usage();
   if !failed || not !work_done then exit 1
