@@ -343,3 +343,140 @@ end
 [%%expect{|
 module rec Independent_total : sig val f : int -> int @@ total end
 |}]
+
+let (int_equal @ total) (x : int) y = x = y
+let (int_not_equal @ total) (x : int) y = x <> y
+let (int_less @ total) (x : int) y = x < y
+let (int_less_equal @ total) (x : int) y = x <= y
+let (int_greater @ total) (x : int) y = x > y
+let (int_greater_equal @ total) (x : int) y = x >= y
+let (int_compare @ total) (x : int) y = compare x y
+let (bool_equal @ total) (x : bool) y = x = y
+[%%expect{|
+val int_equal : int -> int -> bool = <fun>
+val int_not_equal : int -> int -> bool = <fun>
+val int_less : int -> int -> bool = <fun>
+val int_less_equal : int -> int -> bool = <fun>
+val int_greater : int -> int -> bool = <fun>
+val int_greater_equal : int -> int -> bool = <fun>
+val int_compare : int -> int -> int = <fun>
+val bool_equal : bool -> bool -> bool = <fun>
+|}]
+
+let (inferred_equal @ total) x = x = 0
+let (use_inferred @ total) x =
+  let equal y = y = 0 in
+  equal x
+let (equal_value @ total) = ((=) : int -> int -> bool)
+let (qualified_equal @ total) (x : int) y = Stdlib.(=) x y
+type integer = int
+let (alias_equal @ total) (x : integer) y = x = y
+[%%expect{|
+val inferred_equal : int -> bool = <fun>
+val use_inferred : int -> bool = <fun>
+val equal_value : int -> int -> bool = <fun>
+val qualified_equal : int -> int -> bool = <fun>
+type integer = int
+val alias_equal : integer -> integer -> bool = <fun>
+|}]
+
+let (constrained_equal @ total) x = ((=) : _ -> _ -> bool) x 0
+let (mode_constrained_equal @ total) x = ((=) : @ total) x 0
+let (locally_opened_equal @ total) x = Stdlib.((=)) x 0
+external scalar_equal : int -> int -> bool = "%equal"
+let (use_scalar_external @ total) x y = scalar_equal x y
+[%%expect{|
+val constrained_equal : int -> bool = <fun>
+val mode_constrained_equal : int -> bool = <fun>
+val locally_opened_equal : int -> bool = <fun>
+external scalar_equal : int -> int -> bool = "%equal"
+val use_scalar_external : int -> int -> bool = <fun>
+|}]
+
+let ordinary_equal x y = x = y
+let ordinary_function_equal (x : int -> int) y = x = y
+[%%expect{|
+val ordinary_equal : 'a -> 'a -> bool = <fun>
+val ordinary_function_equal : (int -> int) -> (int -> int) -> bool = <fun>
+|}]
+
+let polymorphic_value =
+  let (eq @ total) = (=) in
+  eq 0 0
+[%%expect{|
+Line 2, characters 21-24:
+2 |   let (eq @ total) = (=) in
+                         ^^^
+Error: This value is "partial" but is expected to be "total".
+|}]
+
+let (polymorphic_equal @ total) x y = x = y
+[%%expect{|
+Line 1, characters 40-41:
+1 | let (polymorphic_equal @ total) x y = x = y
+                                            ^
+Error: The value "(=)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 32-43
+         which is expected to be "total".
+|}]
+
+let (function_equal @ total) (x : int -> int) y = x = y
+[%%expect{|
+Line 1, characters 52-53:
+1 | let (function_equal @ total) (x : int -> int) y = x = y
+                                                        ^
+Error: The value "(=)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 29-55
+         which is expected to be "total".
+|}]
+
+let (mutable_equal @ total) (x : int ref) y = x = y
+[%%expect{|
+Line 1, characters 48-49:
+1 | let (mutable_equal @ total) (x : int ref) y = x = y
+                                                    ^
+Error: The value "(=)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 28-51
+         which is expected to be "total".
+|}]
+
+let (cyclic_equal @ total) (x : int list) y = x = y
+[%%expect{|
+Line 1, characters 48-49:
+1 | let (cyclic_equal @ total) (x : int list) y = x = y
+                                                    ^
+Error: The value "(=)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 27-51
+         which is expected to be "total".
+|}]
+
+let (physical_equal @ total) (x : int) y = x == y
+[%%expect{|
+Line 1, characters 45-47:
+1 | let (physical_equal @ total) (x : int) y = x == y
+                                                 ^^
+Error: The value "(==)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 29-49
+         which is expected to be "total".
+|}]
+
+let shadowed_equal =
+  let ( = ) x y = print_endline "comparison"; Stdlib.(=) x y in
+  let (f @ total) (x : int) y = x = y in
+  f
+[%%expect{|
+Line 3, characters 34-35:
+3 |   let (f @ total) (x : int) y = x = y in
+                                      ^
+Error: The value "(=)" is "partial"
+         because it closes over the value "print_endline" at line 2, characters 18-31
+         which is "partial".
+       However, the value "(=)" highlighted is expected to be "total"
+         because it is used inside the function at line 3, characters 18-37
+         which is expected to be "total".
+|}]
