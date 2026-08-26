@@ -15307,22 +15307,16 @@ let default_refinement_predicate_types payload predicate =
   let rec default ty =
     if not (TypeSet.mem ty !payload_types || TypeSet.mem ty !visited) then begin
       visited := TypeSet.add ty !visited;
+      Ctype.default_mode_and_jkind_variables_in_node ty;
       begin match get_desc ty with
-      | Tvar { jkind } | Tunivar { jkind } ->
-          Jkind.default_to_scannable jkind
-      | Tarrow ((_, arg_mode, ret_mode, _), arg, ret, _) ->
-          ignore (Alloc.zap_to_legacy arg_mode : Alloc.Const.t);
-          ignore (Alloc.zap_to_legacy ret_mode : Alloc.Const.t);
-          default arg;
-          default ret
       | Trefine { ref_pred; _ } ->
           ignore
             (Refinement_predicate.fold_types
                (fun () ty -> default ty) () ref_pred
-             : unit);
-          Btype.iter_type_expr default ty
-      | _ -> Btype.iter_type_expr default ty
-      end
+             : unit)
+      | _ -> ()
+      end;
+      Btype.iter_type_expr default ty
     end
   in
   ignore

@@ -729,20 +729,22 @@ let rec filter_row_fields erase = function
           link_row_field_ext ~inside:f rf_absent; fi
       | _ -> p :: fi
 
-(* Ensure all mode variables are fully determined *)
+(* Defaulting modes and jkinds *)
+let default_mode_and_jkind_variables_in_node ty =
+  match get_desc ty with
+  | Tvar { jkind } | Tunivar { jkind } -> Jkind.default_to_scannable jkind
+  | Tarrow ((_, marg, mret, _), _, _, _) ->
+      ignore (Alloc.zap_to_legacy marg : Alloc.Const.t);
+      ignore (Alloc.zap_to_legacy mret : Alloc.Const.t)
+  | _ -> ()
+
 let remove_mode_and_jkind_variables ty =
   let visited = ref TypeSet.empty in
   let rec go ty =
     if TypeSet.mem ty !visited then () else begin
       visited := TypeSet.add ty !visited;
-      match get_desc ty with
-      | Tvar { jkind } -> Jkind.default_to_scannable jkind
-      | Tunivar { jkind } -> Jkind.default_to_scannable jkind
-      | Tarrow ((_,marg,mret,_),targ,tret,_) ->
-         let _ = Alloc.zap_to_legacy marg in
-         let _ = Alloc.zap_to_legacy mret in
-         go targ; go tret
-      | _ -> iter_type_expr go ty
+      default_mode_and_jkind_variables_in_node ty;
+      iter_type_expr go ty
     end
   in go ty
 
@@ -8688,20 +8690,12 @@ let substitute_refinement_ident id replacement ty =
     ty
 
 let refinement_scope_escape_class_type ids cty =
-  let rec visit_class_type visit = function
-    | Cty_constr (_, args, cty) ->
-        List.iter visit args;
-        visit_class_type visit cty
-    | Cty_signature sign ->
-        visit sign.csig_self;
-        visit sign.csig_self_row;
-        Vars.iter (fun _ (_, _, ty) -> visit ty) sign.csig_vars;
-        Meths.iter (fun _ (_, _, ty) -> visit ty) sign.csig_meths
-    | Cty_arrow (_, arg, cty) ->
-        visit arg;
-        visit_class_type visit cty
-  in
-  refinement_scope_escape_in ids (fun visit -> visit_class_type visit cty)
+  refinement_scope_escape_in ids (fun visit ->
+    let it =
+      { Btype.type_iterators_without_type_expr with
+        it_type_expr = (fun _ ty -> visit ty) }
+    in
+    it.it_class_type it cty)
 
 let () = nondep_type' := nondep_type
 

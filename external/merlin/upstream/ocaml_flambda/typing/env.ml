@@ -3717,13 +3717,24 @@ let lookup_global_name_module_no_locks
           may_lookup_error errors loc env (Error_from_persistent_env err)
     end
 
+let check_module_locks ~errors ~loc path lid locks env =
+  let stage_locks, locks = partition_locks locks in
+  check_cross_quotation ~errors ~loc_use:loc ~loc_def:Location.none env
+    path lid stage_locks;
+  locks
+
+let use_local_module ~use ~loc path mda alias_locks locks =
+  use_module ~use ~loc path mda;
+  let _, mode = Normalize_mode.mda Assert_normalized mda in
+  mode, alias_locks @ locks
+
 let lookup_ident_module (type a) (load : a load) ~errors ~use ~loc s env =
   let path, locks, data =
     match find_name_module ~mark:use ~stage:env.stage s env.modules with
     | path, locks, data -> begin
-        let stage_locks, locks = partition_locks locks in
-        check_cross_quotation ~errors ~loc_use:loc ~loc_def:Location.none env
-          path (Lident s) stage_locks;
+        let locks =
+          check_module_locks ~errors ~loc path (Lident s) locks env
+        in
         path, locks, data
     end
     | exception Not_found ->
@@ -3731,9 +3742,9 @@ let lookup_ident_module (type a) (load : a load) ~errors ~use ~loc s env =
   in
   match data with
   | Mod_local (mda, alias_locks) -> begin
-      use_module ~use ~loc path mda;
-      let _, mode = Normalize_mode.mda Assert_normalized mda in
-      let locks = alias_locks @ locks in
+      let mode, locks =
+        use_local_module ~use ~loc path mda alias_locks locks
+      in
       match load with
       (* CR-soon zqian: duplication of information. Should move modes out of
          [value_data] and [module_data] *)
@@ -3905,20 +3916,23 @@ let walk_locks_for_mutable_mode ~errors ~loc ~env locks m0 =
       | Unboxed_lock -> mode
     ) mode locks
 
+let use_ident_value ~errors ~use ~loc path lid vda locks env =
+  let stage_locks, locks = partition_locks locks in
+  begin match vda with
+  | {vda_description={val_kind=Val_mut (m0, _); _}; _} ->
+      m0
+      |> walk_locks_for_mutable_mode ~errors ~loc ~env locks
+      |> ignore
+  | _ -> () end;
+  check_cross_quotation ~errors ~loc_use:loc
+    ~loc_def:vda.vda_description.val_loc env path lid stage_locks;
+  use_value ~use ~loc path vda;
+  path, locks, vda
+
 let lookup_ident_value ~errors ~use ~loc name env =
   match IdTbl.find_name_and_locks wrap_value ~mark:use name env.values with
   | Ok (path, locks, Val_bound vda) ->
-      let stage_locks, locks = partition_locks locks in
-      begin match vda with
-      | {vda_description={val_kind=Val_mut (m0, _); _}; _} ->
-          m0
-          |> walk_locks_for_mutable_mode ~errors ~loc ~env locks
-          |> ignore
-      | _ -> () end;
-      check_cross_quotation ~errors ~loc_use:loc
-        ~loc_def:vda.vda_description.val_loc env path (Lident name) stage_locks;
-      use_value ~use ~loc path vda;
-      path, locks, vda
+      use_ident_value ~errors ~use ~loc path (Lident name) vda locks env
   | Ok (_, _, Val_unbound reason) ->
       report_value_unbound ~errors ~loc env reason (Lident name)
   | Error _ ->
@@ -4538,32 +4552,56 @@ let lookup_value ~errors ~use ~loc lid env =
   let vd = Subst.Lazy.force_value_description vd in
   path, vd, mode_with_locks
 
-let rec locks_of_module_path path env =
+let rec locks_of_module_path ~use ~loc path env =
   match path with
   | Pident id when Ident.is_global id ->
-      IdTbl.get_all_locks env.modules
-  | Pident id -> snd (IdTbl.find_same_and_locks id env.modules)
-  | Pdot (parent, _) | Pextra_ty (parent, _) ->
-      locks_of_module_path parent env
-  | Papply (fn, _) -> locks_of_module_path fn env
+      let mda = find_ident_module id env in
+      use_module ~use ~loc path mda;
+      locks_for_pers_mod ~loc_use:loc
+        ~loc_def:mda.mda_declaration.md_loc env path
+  | Pident id ->
+      let data, locks = IdTbl.find_same_and_locks id env.modules in
+      let locks =
+        check_module_locks ~errors:true ~loc path
+          (Lident (Ident.name id)) locks env
+      in
+      begin match data with
+      | Mod_local (mda, alias_locks) ->
+          snd (use_local_module ~use ~loc path mda alias_locks locks)
+      | Mod_unbound reason ->
+          report_module_unbound ~errors:true ~loc env reason
+      | Mod_persistent -> raise Not_found
+      end
+  | Pdot (parent, name) ->
+      let locks = locks_of_module_path ~use ~loc parent env in
+      let comps = find_structure_components parent env in
+      use_module ~use ~loc path (NameMap.find name comps.comp_modules);
+      locks
+  | Papply (fn, arg) ->
+      ignore (locks_of_module_path ~use ~loc fn env : locks);
+      ignore (locks_of_module_path ~use ~loc arg env : locks);
+      snd fcomp_res_mode_with_locks
+  | Pextra_ty _ -> raise Not_found
 
 let lookup_value_path ?(use = true) ~loc path env =
-  let vda, locks =
+  let path, locks, vda =
     match path with
     | Pident id -> begin
         match IdTbl.find_same_and_locks id env.values with
-        | Val_bound vda, locks -> vda, locks
-        | Val_unbound _, _ -> raise Not_found
+        | Val_bound vda, locks ->
+            use_ident_value ~errors:true ~use ~loc path
+              (Lident (Ident.name id)) vda locks env
+        | Val_unbound reason, _ ->
+            report_value_unbound ~errors:true ~loc env reason
+              (Lident (Ident.name id))
       end
     | Pdot (parent, _) ->
-        find_value_full path env, locks_of_module_path parent env
+        let locks = locks_of_module_path ~use ~loc parent env in
+        let vda = find_value_full path env in
+        use_value ~use ~loc path vda;
+        path, locks, vda
     | Papply _ | Pextra_ty _ -> raise Not_found
   in
-  let stage_locks, locks = partition_locks locks in
-  check_cross_quotation ~errors:true ~loc_use:loc
-    ~loc_def:vda.vda_description.val_loc env path
-    (Lident (Path.name path)) stage_locks;
-  use_value ~use ~loc path vda;
   let vd, mode = Normalize_mode.vda Normalize vda in
   path, Subst.Lazy.force_value_description vd, (mode, locks)
 
@@ -4578,15 +4616,18 @@ let lookup_constructor_path ~loc usage path env =
       | _ -> raise Not_found
     end
   | _ ->
-      let cda, locks =
+      let cda, stage_locks, locks =
         match path with
-        | Pident id -> TycompTbl.find_same_and_locks id env.constrs
+        | Pident id ->
+            let cda, locks = TycompTbl.find_same_and_locks id env.constrs in
+            let stage_locks, locks = partition_locks locks in
+            cda, stage_locks, locks
         | Pdot (parent, _) ->
-            find_extension_full path env, locks_of_module_path parent env
+            let locks = locks_of_module_path ~use:true ~loc parent env in
+            find_extension_full path env, [], locks
         | Papply _ | Pextra_ty _ -> raise Not_found
       in
       let cstr = cda.cda_description in
-      let stage_locks, locks = partition_locks locks in
       check_cross_quotation ~errors:true ~loc_use:loc
         ~loc_def:cstr.cstr_loc env path
         (Lident cstr.cstr_name) stage_locks;

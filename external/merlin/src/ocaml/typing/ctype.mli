@@ -604,6 +604,10 @@ val normalize_type: type_expr -> unit
 val remove_mode_and_jkind_variables: type_expr -> unit
         (* Ensure mode and jkind variables are fully determined *)
 
+val default_mode_and_jkind_variables_in_node: type_expr -> unit
+        (* Default only variables stored directly in this node, without
+           traversing its children. *)
+
 val nongen_vars_in_schema: Env.t -> type_expr -> Btype.TypeSet.t option
         (* Return any non-generic variables in the type scheme. Also ensures
            mode variables are fully determined. *)
