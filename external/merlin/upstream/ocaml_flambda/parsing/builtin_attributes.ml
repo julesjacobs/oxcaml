@@ -120,6 +120,7 @@ let builtin_attrs =
   ; "warn_on_literal_pattern"
   ; "immediate"
   ; "immediate64"
+  ; "inductive"
   ; "boxed"
   ; "unboxed"
   ; "principal"

@@ -1636,6 +1636,7 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope origin jkind =
     type_loc = loc;
     type_attributes = [];
     type_unboxed_default = false;
+    type_inductive = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -2668,6 +2669,12 @@ let expand_head_unif env ty =
 let expand_head env ty =
   try try_expand_head try_expand_safe env ty
   with Cannot_expand -> ty
+
+let is_inductive env ty =
+  match get_desc (expand_head env ty) with
+  | Tconstr (path, _, _) ->
+      (try (Env.find_type path env).type_inductive with Not_found -> false)
+  | _ -> false
 
 let _ = forward_try_expand_safe := try_expand_safe
 
@@ -8783,6 +8790,7 @@ let rec nondep_type_decl env mid is_covariant decl =
       type_loc = decl.type_loc;
       type_attributes = decl.type_attributes;
       type_unboxed_default = decl.type_unboxed_default;
+      type_inductive = decl.type_inductive;
       type_uid = decl.type_uid;
       type_unboxed_version;
     }

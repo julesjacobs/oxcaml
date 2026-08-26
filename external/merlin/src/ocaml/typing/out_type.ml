@@ -2333,6 +2333,11 @@ let tree_of_type_decl ?(print_non_value_inferred_jkind = false) id decl =
     then [{ oattr_name = "unsafe_allow_any_mode_crossing" }]
     else []
   in
+  let otype_attributes =
+    if decl.type_inductive then
+      { oattr_name = "inductive" } :: otype_attributes
+    else otype_attributes
+  in
   { otype_name = name;
     otype_params = args;
     otype_type = ty;
@@ -2812,6 +2817,7 @@ let dummy =
     type_loc = Location.none;
     type_attributes = [];
     type_unboxed_default = false;
+    type_inductive = false;
     type_uid = Uid.internal_not_actually_unique;
     type_unboxed_version = None;
   }
