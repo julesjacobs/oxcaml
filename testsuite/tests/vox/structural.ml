@@ -1,5 +1,6 @@
 (* TEST
  flags = "-extension refinement_types";
+ has-z3;
  expect;
 *)
 
@@ -89,4 +90,27 @@ Error: Signature mismatch:
        Their inductive guarantees differ;
        the guarantee can only be hidden
        behind an abstract type.
+|}]
+
+module Composition = struct
+  let rec (length @ total) (xs @ immutable) =
+    match xs with
+    | V.List.Nil -> 0
+    | V.List.Cons (_, rest) ->
+        let[@def] step n = n + 1 in
+        step (length rest)
+end;;
+[%%expect{|
+module Composition : sig val length : 'a V.List.t @ immutable -> int end
+|}]
+
+let unproved () : {n : int | n = 0} =
+  let xs = V.List.Nil in
+  let n = V.List.length xs in
+  refine_ n;;
+[%%expect{|
+Line 4, characters 2-11:
+4 |   refine_ n;;
+      ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]
