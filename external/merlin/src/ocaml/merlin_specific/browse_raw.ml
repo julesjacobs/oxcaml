@@ -339,6 +339,7 @@ let of_exp_extra (exp, _, _) =
   | Texp_borrowed
   | Texp_ghost_region
   | Texp_refine
+  | Texp_assume
   | Texp_let_refine _ -> id_fold
 let of_expression e = app (Expression e) ** list_fold of_exp_extra e.exp_extra
 

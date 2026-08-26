@@ -7256,10 +7256,6 @@ and check_layout_args_empty ~loc ~env layout_args ctx =
 
 and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
       (expected_mode : expected_mode) sexp ty_expected_explained =
-<<<<<<< Merlin:jujacobs/vox/assume
-||||||| Compiler:last-imported
-  let previous_saved_types = Cmt_format.get_saved_types () in
-=======
   let ty_expected_explained =
     match Resolved_predicate.expected_type env sexp with
     | None -> ty_expected_explained
@@ -7267,8 +7263,6 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
         unify_exp_types sexp.pexp_loc env ty ty_expected_explained.ty;
         { ty_expected_explained with ty }
   in
-  let previous_saved_types = Cmt_format.get_saved_types () in
->>>>>>> Compiler:HEAD
   let exp =
     Msupport.with_saved_types
       ~warning_attribute:sexp.pexp_attributes ?save_part:None
