@@ -12,26 +12,36 @@ let app op args = App (op, args)
 
 let eq a b = app Eq [a; b]
 
-let check ?(symbols = []) ?(facts = []) term =
+let check ?(symbols = []) ?(functions = []) ?(facts = []) term =
   Vox_smt_solver.check ~config ~int_width:63
     { symbols;
+      functions;
       facts = List.map (fun term -> { label = "fact"; term }) facts;
       goal = { label = "goal"; term }
     }
 
-let valid ?symbols ?facts term =
-  match (check ?symbols ?facts term).validity with
+let valid ?symbols ?functions ?facts term =
+  match (check ?symbols ?functions ?facts term).validity with
   | Valid -> ()
   | Failure message -> failwith message
   | _ -> failwith "Expected valid"
 
-let invalid ?symbols ?facts term =
-  match (check ?symbols ?facts term).validity with
+let invalid ?symbols ?functions ?facts term =
+  match (check ?symbols ?functions ?facts term).validity with
   | Invalid model -> model
   | Failure message -> failwith message
   | _ -> failwith "Expected invalid"
 
 let () =
+  let f = Function.create ~label:"same" ~arguments:[Bv63] ~result:Bv63 in
+  let g = Function.create ~label:"same" ~arguments:[Bv63] ~result:Bv63 in
+  valid ~symbols:[x] ~functions:[f]
+    ~facts:[eq (Var x) (i 0L)]
+    (eq (Call (f, [Var x])) (Call (f, [i 0L])));
+  ignore (invalid ~functions:[f; g] (eq (Call (f, [i 0L])) (Call (g, [i 0L]))));
+  valid ~functions:[f]
+    ~facts:[eq (Call (f, [i 3L])) (i 5L)]
+    (eq (Call (f, [i 3L])) (i 5L));
   valid (Boolean true);
   assert (invalid (Boolean false) = Some []);
   valid

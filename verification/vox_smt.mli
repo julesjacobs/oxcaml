@@ -14,6 +14,18 @@ module Symbol : sig
   val sort : t -> sort
 end
 
+module Function : sig
+  type t
+
+  val create : label:string -> arguments:sort list -> result:sort -> t
+
+  val label : t -> string
+
+  val arguments : t -> sort list
+
+  val result : t -> sort
+end
+
 (** Arithmetic wraps modulo [2^63]; comparisons use signed order. *)
 type op =
   | Add
@@ -37,6 +49,7 @@ type term =
   | Integer of int64
   | Var of Symbol.t
   | App of op * term list
+  | Call of Function.t * term list
 
 type labelled_term =
   { label : string;
@@ -45,6 +58,7 @@ type labelled_term =
 
 type query =
   { symbols : Symbol.t list;
+    functions : Function.t list;
     facts : labelled_term list;
     goal : labelled_term
   }
@@ -62,7 +76,8 @@ val check : int_width:int -> query -> unit
 
 (** Always checks sorts first. Names [v0], [v1], ... follow declaration order.
     Includes options, declarations, assertions and [check-sat], but not [exit].
-    No division, remainder, functions, or quantifiers can be represented. *)
+    Uninterpreted functions select QF_UFBV; scalar-only queries use QF_BV. No
+    division, remainder, or quantifiers can be represented. *)
 val to_smtlib : int_width:int -> timeout_ms:int -> query -> string
 
 (** Integer model values are signed, including on a narrower host. *)

@@ -1,7 +1,7 @@
 open Vox_smt
 
-let query ?(symbols = []) ?(facts = []) term =
-  { symbols; facts; goal = { label = "goal"; term } }
+let query ?(symbols = []) ?(functions = []) ?(facts = []) term =
+  { symbols; functions; facts; goal = { label = "goal"; term } }
 
 let app op args = App (op, args)
 
@@ -17,6 +17,23 @@ let sort_error q =
 let () =
   let x = Symbol.create ~label:"x" Bv63 in
   let b = Symbol.create ~label:"x" Bool in
+  let f =
+    Function.create ~label:"v0) (assert false)" ~arguments:[Bv63] ~result:Bv63
+  in
+  let call = Call (f, [integer 0]) in
+  sort_error (query (app Eq [call; call]));
+  sort_error (query ~functions:[f; f] (Boolean true));
+  sort_error (query ~functions:[f] (app Eq [Call (f, []); call]));
+  sort_error (query ~functions:[f] (app Eq [Call (f, [Boolean true]); call]));
+  assert (
+    serialize (query ~functions:[f] (app Eq [call; call]))
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-logic QF_UFBV)\n\
+       (declare-fun f0 ((_ BitVec 63)) (_ BitVec 63))\n\
+       (assert (not (= (f0 (_ bv0 63)) (f0 (_ bv0 63)))))\n\
+       (check-sat)\n");
   let bad_arity =
     [Add; Sub; Mul; Neg; Eq; Ne; Lt; Le; Gt; Ge; Not; And; Or; Implies; Ite]
   in
