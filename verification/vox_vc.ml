@@ -155,19 +155,21 @@ let operation env ty name args =
   | Some value when Some (term_sort value) = sort env ty -> scalar_option result
   | _ -> None
 
-let rec signature env ty =
-  match get_desc (Ctype.expand_head env ty) with
-  | Tarrow ((Nolabel, _, _, _), arg, ret, _) ->
-    begin match sort env arg, signature env ret with
-    | Some arg, Some (args, result) -> Some (arg :: args, result)
+let rec signature env ty arity =
+  if arity = 0
+  then Option.map (fun result -> [], result) (sort env ty)
+  else
+    match get_desc (Ctype.expand_head env ty) with
+    | Tarrow ((Nolabel, _, _, _), arg, ret, _) ->
+      begin match sort env arg, signature env ret (arity - 1) with
+      | Some arg, Some (args, result) -> Some (arg :: args, result)
+      | _ -> None
+      end
     | _ -> None
-    end
-  | _ -> Option.map (fun result -> [], result) (sort env ty)
 
 let function_call ctx env ty fn args =
-  match fn, signature env ty with
-  | Some (Function fn), Some (arguments, result)
-    when List.length arguments = List.length args ->
+  match fn, signature env ty (List.length args) with
+  | Some (Function fn), Some (arguments, result) ->
     let args = List.filter_map scalar args in
     if List.map term_sort args <> arguments
     then None
