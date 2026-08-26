@@ -6863,10 +6863,9 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
   Msupport.with_saved_types
     ~warning_attribute:sexp.pexp_attributes ?save_part:None
       (fun () ->
-<<<<<<< Merlin:jujacobs/vox/totality
         let saved = save_levels () in
         try
-          type_expect_ ?recarg ~overwrite env
+          type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
             expected_mode sexp ty_expected_explained
         with exn ->
           Msupport.erroneous_type_register ty_expected_explained.ty;
@@ -6875,22 +6874,6 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
           let loc = sexp.pexp_loc in
           create_merlin_type_error_node loc env ty_expected_explained.ty
             ~attributes:(Msupport.recovery_attributes sexp.pexp_attributes))
-||||||| Compiler:last-imported
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
-      )
-  in
-  Cmt_format.set_saved_types
-    (Cmt_format.Partial_expression exp :: previous_saved_types);
-  exp
-=======
-         type_expect_ ?recarg ?defer_primitive_mode ~overwrite env expected_mode
-           sexp ty_expected_explained
-      )
-  in
-  Cmt_format.set_saved_types
-    (Cmt_format.Partial_expression exp :: previous_saved_types);
-  exp
->>>>>>> Compiler:HEAD
 
 and type_expect_
     ?(recarg=Rejected) ?defer_primitive_mode ?(overwrite=No_overwrite)
@@ -8779,10 +8762,12 @@ and type_expect_
       | _ -> Env.check_no_open_quotations loc env Open_qt
       end;
       let tv = newvar (Jkind.Builtin.any ~why:Dummy_jkind) in
-<<<<<<< Merlin:jujacobs/vox/totality
       begin match !type_open_decl env od with
       | (od, newenv) ->
-        let exp = type_expect newenv expected_mode e ty_expected_explained in
+        let exp =
+          type_expect ?defer_primitive_mode newenv expected_mode e
+            ty_expected_explained
+        in
         (* Force the return type to be well-formed in the original
            environment. *)
         unify_var newenv tv exp.exp_type;
@@ -8800,40 +8785,10 @@ and type_expect_
            We also don't report any error in the body, as there's no way to
            tell if it is due to the failed open. *)
         Msupport.catch_errors (Warnings.backup ()) (ref [])
-          (fun () -> type_expect env expected_mode e ty_expected_explained)
+          (fun () ->
+            type_expect ?defer_primitive_mode env expected_mode e
+              ty_expected_explained)
       end
-||||||| Compiler:last-imported
-      let (od, newenv) = !type_open_decl env od in
-      let exp = type_expect newenv expected_mode e ty_expected_explained in
-      (* Force the return type to be well-formed in the original
-         environment. *)
-      unify_var newenv tv exp.exp_type;
-      re {
-        exp_desc = Texp_open (od, exp);
-        exp_type = exp.exp_type;
-        exp_loc = loc;
-        exp_extra = [];
-        exp_attributes = sexp.pexp_attributes;
-        exp_env = env;
-      }
-=======
-      let (od, newenv) = !type_open_decl env od in
-      let exp =
-        type_expect ?defer_primitive_mode newenv expected_mode e
-          ty_expected_explained
-      in
-      (* Force the return type to be well-formed in the original
-         environment. *)
-      unify_var newenv tv exp.exp_type;
-      re {
-        exp_desc = Texp_open (od, exp);
-        exp_type = exp.exp_type;
-        exp_loc = loc;
-        exp_extra = [];
-        exp_attributes = sexp.pexp_attributes;
-        exp_env = env;
-      }
->>>>>>> Compiler:HEAD
   | Pexp_letop{ let_ = slet; ands = sands; body = sbody } ->
       submode ~loc ~env Value.legacy expected_mode;
       let rec loop spat_acc ty_acc ty_acc_sort sands =
@@ -10711,18 +10666,10 @@ and type_label_exp
   if is_poly then check_univars env "field value" arg label.lbl_arg vars;
   (lid, label, {arg with exp_type = instance arg.exp_type})
 
-<<<<<<< Merlin:jujacobs/vox/totality
-and type_argument_ ?explanation ?recarg ~overwrite env (mode : expected_mode) sarg
-      ty_expected' ty_expected =
-||||||| Compiler:last-imported
-and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sarg
-      ty_expected' ty_expected =
-=======
-and type_argument ?explanation ?recarg ?defer_primitive_mode ~overwrite env
+and type_argument_ ?explanation ?recarg ?defer_primitive_mode ~overwrite env
       (mode : expected_mode) sarg ty_expected' ty_expected =
   with_primitive_mode_checks ?defer:defer_primitive_mode
     begin fun defer_primitive_mode ->
->>>>>>> Compiler:HEAD
   (* ty_expected' may be generic *)
   let no_labels ty =
     let ls, tvar = list_labels env ty in
@@ -10957,14 +10904,15 @@ and type_argument ?explanation ?recarg ?defer_primitive_mode ~overwrite env
       texp
     end
 
-and type_argument ?explanation ?recarg ~overwrite env mode sarg ty_expected' ty_expected =
+and type_argument ?explanation ?recarg ?defer_primitive_mode ~overwrite env
+    mode sarg ty_expected' ty_expected =
   Msupport.with_saved_types
     ~warning_attribute:sarg.pexp_attributes ?save_part:None
       (fun () ->
         let saved = save_levels () in
         try
-          type_argument_ ?explanation ?recarg ~overwrite env mode sarg ty_expected'
-            ty_expected
+          type_argument_ ?explanation ?recarg ?defer_primitive_mode ~overwrite
+            env mode sarg ty_expected' ty_expected
         with exn ->
           Msupport.erroneous_type_register ty_expected;
           raise_error exn;
