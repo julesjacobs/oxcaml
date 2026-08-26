@@ -266,9 +266,11 @@ reused_inputs_hash()
   files=$temp_dir/reused-files
   hashes=$temp_dir/reused-hashes
   : > "$files"
+  # Types representation changes invalidate installed .cmi files.
   git -C "$root" ls-files -co --exclude-standard -- \
     dev Makefile Makefile.ox Makefile.common-ox Makefile.config.in \
     configure.ac dune dune-project.ox runtime stdlib otherlibs \
+    typing/types.ml typing/types.mli \
     ocamltest testsuite/Makefile \
     testsuite/lib testsuite/tools oxcaml/testsuite/tools >> "$files"
   LC_ALL=C sort -u "$files" -o "$files"

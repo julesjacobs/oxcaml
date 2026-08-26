@@ -7,6 +7,9 @@ tests. Each PR adds its demos; run every demo present at the current checkout:
 ./dev test vox/
 ```
 
+When switching stack stages, rerun `./dev init` if requested: changes to the
+serialized type representation invalidate installed interfaces.
+
 Expect files show types, results, and nearby rejected programs. Definitions
 whose modes matter live inside modules to avoid the interactive toplevel's
 legacy-mode defaults.
