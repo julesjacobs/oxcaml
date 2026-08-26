@@ -101,6 +101,43 @@ let lookup_test located_name =
     end
   | Some test -> test
 
+type ('state, 'result) step = Continue of 'state | Stop of 'result
+
+let walk_tree ~environment ~test ~split ~finish ~join state ast =
+  let rec statements state stmts segments subs branches =
+    match stmts with
+    | Environment_statement statement :: rest ->
+        continue (environment branches state statement)
+          rest segments subs branches
+    | Test (_, name, modifiers) :: rest ->
+        continue (test branches state name modifiers)
+          rest segments subs branches
+    | Split alternatives :: rest ->
+        let count = List.length alternatives in
+        List.mapi
+          (fun i alternative ->
+            split (i + 1) count;
+            statements state alternative (rest :: segments) subs
+              (i + 1 :: branches))
+          alternatives
+        |> join
+    | [] ->
+        match segments with
+        | segment :: segments ->
+            statements state segment segments subs branches
+        | [] ->
+            match subs with
+            | [] -> finish state
+            | _ -> List.map (tree state branches) subs |> join
+  and continue step rest segments subs branches =
+    match step with
+    | Continue state -> statements state rest segments subs branches
+    | Stop result -> result
+  and tree state branches (Ast (stmts, subs)) =
+    statements state stmts [] subs branches
+  in
+  tree state [] ast
+
 let test_trees_of_tsl_block tsl_block =
   let rec env_of_lines = function [@ocaml.warning "-fragile-match"]
     | [] -> ([], [])
@@ -145,25 +182,22 @@ let test_trees_of_tsl_block tsl_block =
     | (Environment_statement s)::_ -> unexpected_environment_statement s
     | _ -> assert false
 
-let rec tests_in_stmt ~strict set stmt =
+let rec tests_in_stmt set stmt =
   match stmt with
   | Environment_statement _ -> set
   | Test (_, name, _) ->
     begin match lookup_test name with
     | t -> Tests.TestSet.add t set
-    | exception No_such_test_or_action _ when not strict -> set
+    | exception No_such_test_or_action _ -> set
     end
   | Split alternatives ->
-    List.fold_left (List.fold_left (tests_in_stmt ~strict)) set alternatives
+    List.fold_left (List.fold_left tests_in_stmt) set alternatives
 
-let rec tests_in_tree_aux ~strict set (Tsl_ast.Ast (stmts, subs)) =
-  let set1 = List.fold_left (tests_in_stmt ~strict) set stmts in
-  List.fold_left (tests_in_tree_aux ~strict) set1 subs
+let rec tests_in_tree_aux set (Tsl_ast.Ast (stmts, subs)) =
+  let set1 = List.fold_left tests_in_stmt set stmts in
+  List.fold_left tests_in_tree_aux set1 subs
 
-let tests_in_tree t = tests_in_tree_aux ~strict:false Tests.TestSet.empty t
-
-let tests_in_tree_strict t =
-  tests_in_tree_aux ~strict:true Tests.TestSet.empty t
+let tests_in_tree t = tests_in_tree_aux Tests.TestSet.empty t
 
 let actions_in_test test =
   let add action_set action = Actions.ActionSet.add action action_set in

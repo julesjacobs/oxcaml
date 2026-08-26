@@ -1,0 +1,5 @@
+(* CHILDTEST
+ set source = "parser.mly";
+ modules = "${source}";
+ ocamlc.byte;
+*)

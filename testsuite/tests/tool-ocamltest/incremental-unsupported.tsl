@@ -1,0 +1,4 @@
+(* CHILDTEST
+ script = "touch should-not-exist";
+ script;
+*)

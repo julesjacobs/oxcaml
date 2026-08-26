@@ -1,0 +1,5 @@
+(* CHILDTEST
+ fail;
+ script = "touch ${test_source_directory}/should-not-exist";
+ script;
+*)

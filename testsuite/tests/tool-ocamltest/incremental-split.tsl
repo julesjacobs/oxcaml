@@ -1,0 +1,12 @@
+(* CHILDTEST
+ split [
+ | ocamlopt.byte;
+ | pass with ocamlcommon;
+ ]
+ ocamlc.byte;
+ {
+   pass;
+ }{
+   ocamlc.byte;
+ }
+*)

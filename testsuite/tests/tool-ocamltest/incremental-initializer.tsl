@@ -1,0 +1,5 @@
+(* CHILDTEST
+ test_pass = "pass";
+ set selected_action = "${test_pass}";
+ ${selected_action};
+*)

@@ -1,0 +1,7 @@
+(* CHILDTEST
+ set test_build_directory_prefix = "script";
+ test_build_directory = "pass";
+ script = "true";
+ setup-simple-build-env;
+ ${test_build_directory};
+*)

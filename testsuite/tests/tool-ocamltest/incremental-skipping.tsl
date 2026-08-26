@@ -1,0 +1,13 @@
+(* CHILDTEST
+ set selected_action = "pass";
+ {
+   skip;
+   script = "touch ${test_source_directory}/should-not-exist";
+   script;
+ }{
+   selected_action = "skip";
+   ${selected_action};
+ }{
+   ${selected_action};
+ }
+*)

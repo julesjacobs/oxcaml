@@ -1,0 +1,4 @@
+(* CHILDTEST
+ setup-ocamlc.byte-build-env;
+ ${program};
+*)

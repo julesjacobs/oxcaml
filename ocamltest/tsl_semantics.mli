@@ -26,6 +26,19 @@ val interpret_environment_statement :
 exception No_such_test_or_action of string
 val lookup_test : string located -> Tests.t
 
+type ('state, 'result) step = Continue of 'state | Stop of 'result
+
+(** Split arms inherit the incoming state and each run the remaining
+    statements and subtrees. Only terminal results are joined. *)
+val walk_tree :
+  environment:(int list -> 'state -> environment_statement located ->
+    ('state, 'result) step) ->
+  test:(int list -> 'state -> string located -> string located list ->
+    ('state, 'result) step) ->
+  split:(int -> int -> unit) ->
+  finish:('state -> 'result) ->
+  join:('result list -> 'result) -> 'state -> Tsl_ast.t -> 'result
+
 type test_tree =
   | Node of
     (Tsl_ast.environment_statement located list) *
@@ -42,8 +55,6 @@ val tsl_ast_of_test_trees :
   Tsl_ast.t
 
 val tests_in_tree : Tsl_ast.t -> Tests.TestSet.t
-
-val tests_in_tree_strict : Tsl_ast.t -> Tests.TestSet.t
 
 val actions_in_test : Tests.t -> Actions.ActionSet.t
 

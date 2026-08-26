@@ -130,45 +130,38 @@ let string_of_test_location ~branches line =
   ^ Printf.sprintf "line %d" line
 
 let run_test_tree log add_msg behavior env summ ast =
-  (* Interpret the statements contained in [stmts] and [segments] (effectively,
-     run [stmts @ List.concat segments]), then go into each of the subtrees in
-     [subs]. [branches] is a list of indices of [split] arms that we've
-     descended into. *)
-  let rec run_statements behavior env summ stmts segments subs ~branches
-      ~must_do_something =
-    match stmts with
-    | Environment_statement s :: rest ->
-      begin match interpret_environment_statement env s with
-      | env ->
-        run_statements behavior env summ rest segments subs ~branches
-          ~must_do_something
-      | exception e ->
+  let environment branches (behavior, env, summ, must_do_something) s =
+    begin match interpret_environment_statement env s with
+    | env ->
+        Continue (behavior, env, summ, must_do_something)
+    | exception e ->
         let bt = Printexc.get_backtrace () in
         let line = s.loc.Location.loc_start.Lexing.pos_lnum in
         Printf.ksprintf add_msg "%s %s"
           (string_of_test_location ~branches line)
           (report_error s.loc e bt);
-        Fail
-      end
-    | Test (_, name, mods) :: rest ->
-      let skip_all =
-        match behavior with
-        | Skip_all -> true
-        | Run -> false
-      in
-      let locstr =
-        if name.loc = Location.none then
-          "default"
-        else
-          string_of_test_location ~branches
-            name.loc.Location.loc_start.Lexing.pos_lnum
-      in
-      let name = { name with node = Environments.expand env name.node } in
-      let test = lookup_test name in
-      let (msg, behavior, env, result) =
-        match behavior with
-        | Skip_all -> ("", Skip_all, env, Result.skip)
-        | Run ->
+        Stop Fail
+    end
+  in
+  let test branches (behavior, env, summ, must_do_something) name mods =
+    let skip_all =
+      match behavior with
+      | Skip_all -> true
+      | Run -> false
+    in
+    let locstr =
+      if name.loc = Location.none then
+        "default"
+      else
+        string_of_test_location ~branches
+          name.loc.Location.loc_start.Lexing.pos_lnum
+    in
+    let name = { name with node = Environments.expand env name.node } in
+    let test = lookup_test name in
+    let (msg, behavior, env, result) =
+      match behavior with
+      | Skip_all -> ("", Skip_all, env, Result.skip)
+      | Run ->
           begin try
             let testenv = List.fold_left apply_modifiers env mods in
             let (result, newenv) = Tests.run log testenv test in
@@ -180,59 +173,27 @@ let run_test_tree log add_msg behavior env summ ast =
             let bt = Printexc.get_backtrace () in
             (report_error name.loc e bt, Skip_all, env, Result.fail)
           end
-      in
-      if not skip_all then
-        Printf.ksprintf add_msg "%s (%s) %s" locstr name.node msg;
-      let summ = join_sequential summ (summary_of_status result.status) in
-      let must_do_something =
-        must_do_something && not (Tests.does_something test)
-      in
-      run_statements behavior env summ rest segments subs ~branches
-        ~must_do_something
-    | Split alternatives :: rest ->
-      let count = List.length alternatives in
-      let run_alternative i alternative =
-        Printf.fprintf log "Running split branch %d of %d\n%!" (i + 1) count;
-        run_statements behavior env summ alternative (rest :: segments)
-          subs ~branches:(i + 1 :: branches) ~must_do_something
-      in
-      join_list_parallel (List.mapi run_alternative alternatives)
-    | [] ->
-      run_segments behavior env summ segments subs ~branches ~must_do_something
-  and run_segments behavior env summ segments subs ~branches
-      ~must_do_something =
-    match segments with
-    | segment :: segments ->
-        run_statements behavior env summ segment segments subs ~branches
-          ~must_do_something
-    | [] ->
-        (* If [subs] is empty, there are no further test actions to
-           perform: we are at the end of a test path and can report
-           our current summary. Otherwise we continue with each
-           branch, and parallel-join the result summaries. *)
-        begin match subs with
-        | [] ->
-          if not must_do_something then summ
-          else (
-            match summ with
-            | Pass ->
-              add_msg "does the test tree do something? => failed";
-              Fail
-            | Skip | Fail -> summ
-          )
-        | _ ->
-        (* CR mshinwell/xclerc: maybe sequences of actions that "do something"
-           and then have further actions that do not "do something" should be
-           flagged *)
-            join_list_parallel
-              (List.map
-                (run_tree behavior env summ ~branches ~must_do_something)
-                subs)
-        end
-  and run_tree behavior env summ (Ast (stmts, subs)) ~branches
-      ~must_do_something =
-    run_statements behavior env summ stmts [] subs ~branches ~must_do_something
-  in run_tree behavior env summ ast ~branches:[] ~must_do_something:true
+    in
+    if not skip_all then
+      Printf.ksprintf add_msg "%s (%s) %s" locstr name.node msg;
+    let summ = join_sequential summ (summary_of_status result.status) in
+    let must_do_something =
+      must_do_something && not (Tests.does_something test)
+    in
+    Continue (behavior, env, summ, must_do_something)
+  in
+  let split branch count =
+    Printf.fprintf log "Running split branch %d of %d\n%!" branch count
+  in
+  let finish (_, _, summ, must_do_something) =
+    match summ with
+    | Pass when must_do_something ->
+        add_msg "does the test tree do something? => failed";
+        Fail
+    | Pass | Skip | Fail -> summ
+  in
+  walk_tree ~environment ~test ~split ~finish ~join:join_list_parallel
+    (behavior, env, summ, true) ast
 
 let get_test_source_directory test_dirname =
   if (Filename.is_relative test_dirname) then
@@ -456,35 +417,40 @@ let plan_incremental files =
       fail_unsupported filename "generated lexer or parser sources";
     env
   in
-  let rec plan_items filename env = function
-    | [] -> [env]
-    | Environment_statement statement :: rest ->
-        let env = apply_planning_statement filename env statement in
-        plan_items filename env rest
-    | Test (_, _, modifiers) :: rest ->
-        let env =
-          List.fold_left
-            (fun env modifier ->
-              try apply_modifiers env modifier with
-              | exn ->
-                  fail_unsupported filename "environment modifier %S (%s)"
-                    modifier.node (Printexc.to_string exn))
-            env modifiers
-        in
-        if environment_uses_expanded_generator env then
-          fail_unsupported filename "generated lexer or parser sources";
-        plan_items filename env rest
-    | Split alternatives :: rest ->
-        List.concat_map
-          (fun alternative -> plan_items filename env (alternative @ rest))
-          alternatives
-  in
-  let rec plan_tree filename env (Ast (statements, subtrees)) =
-    let environments = plan_items filename env statements in
-    List.iter
-      (fun env ->
-        List.iter (fun subtree -> plan_tree filename env subtree) subtrees)
-      environments
+  let plan_tree filename env ast =
+    let environment _ (env, requirements) statement =
+      let env = apply_planning_statement filename env statement in
+      Continue (env, requirements)
+    in
+    let test _ (env, requirements) name modifiers =
+      let test =
+        (* Actions and initializers can change expansion dependencies. *)
+        try lookup_test name with
+        | exn ->
+            fail_unsupported filename "test or action %S (%s)"
+              name.node (Printexc.to_string exn)
+      in
+      let requirements =
+        List.fold_left (fun requirements action ->
+          add_action filename action requirements)
+          requirements test.Tests.test_actions
+      in
+      let env =
+        List.fold_left
+          (fun env modifier ->
+             try apply_modifiers env modifier with
+             | exn ->
+                 fail_unsupported filename "environment modifier %S (%s)"
+                   modifier.node (Printexc.to_string exn))
+          env modifiers
+      in
+      if environment_uses_expanded_generator env then
+        fail_unsupported filename "generated lexer or parser sources";
+      Continue (env, requirements)
+    in
+    walk_tree ~environment ~test ~split:(fun _ _ -> ()) ~finish:snd
+      ~join:(List.fold_left String.Set.union String.Set.empty)
+      (env, String.Set.empty) ast
   in
   let compilerlibs_requirement = function
     | "ocamlcommon" -> Some "compilerlibs.ocamlcommon"
@@ -526,32 +492,19 @@ let plan_incremental files =
     in
     List.fold_left (add_tree_requirements filename) requirements subtrees
   in
-  let compiler_requirement action =
-    match Actions.incremental_requirement action with
-    | Actions.Requirement
-        ("ocamlc.byte" | "ocamlc.opt" | "ocamlopt.byte" | "ocamlopt.opt") ->
-        true
-    | Actions.No_artifact | Actions.Requirement _ | Actions.Unsupported ->
-        false
+  let compiler_requirement = function
+    | "ocamlc.byte" | "ocamlc.opt" | "ocamlopt.byte" | "ocamlopt.opt" -> true
+    | _ -> false
   in
   let add_file requirements filename =
     let rootenv, tsl_ast = parse_test_file filename in
-    let tests =
-      try tests_in_tree_strict tsl_ast with
-      | No_such_test_or_action name ->
-          Printf.eprintf
-            "Incremental testing cannot resolve test or action %S in %s.\n%!"
-            name filename;
-          exit 2
-    in
-    let actions = actions_in_tests tests in
     let root_environment =
       List.fold_left
         (apply_planning_statement filename)
         Environments.empty rootenv
     in
-    plan_tree filename root_environment tsl_ast;
-    if Actions.ActionSet.exists compiler_requirement actions &&
+    let file_requirements = plan_tree filename root_environment tsl_ast in
+    if String.Set.exists compiler_requirement file_requirements &&
        (generated_source filename ||
         List.exists environment_uses_generator rootenv ||
         tree_uses_generator tsl_ast)
@@ -560,10 +513,9 @@ let plan_incremental files =
       List.fold_left
         (fun requirements statement ->
           add_environment_requirement filename statement requirements)
-        requirements rootenv
+        (String.Set.union requirements file_requirements) rootenv
     in
-    let requirements = add_tree_requirements filename requirements tsl_ast in
-    Actions.ActionSet.fold (add_action filename) actions requirements
+    add_tree_requirements filename requirements tsl_ast
   in
   let requirements = List.fold_left add_file String.Set.empty files in
   String.Set.iter print_endline requirements
