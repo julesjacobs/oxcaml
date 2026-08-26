@@ -428,9 +428,6 @@ and exp_extra =
         (* NB. If an expression has both [Texp_borrowed] and
         [Texp_ghost_region], we assume the [Texp_borrowed] is inner than
         [Texp_ghost_region]. Currently it's impossible. *)
-  | Texp_assume
-        (** A mandatory refinement check, elaborated to a let and
-            conditional. *)
   | Texp_refine
         (** The source expression was introduced by [refine_]. *)
   | Texp_let_refine of Ident.t * string loc
@@ -706,6 +703,10 @@ and expression_desc =
         expression
   | Texp_letexception of extension_constructor * expression
   | Texp_assert of expression * Location.t
+  | Texp_assume of value_binding * expression * expression
+        (** Bind the operand, check the predicate, and return the payload.
+            The binding scopes over the predicate and return expression.
+            Failure raises [Assert_failure], including under [-noassert]. *)
   | Texp_lazy of expression
   | Texp_object of class_structure * string list
   | Texp_pack of module_expr

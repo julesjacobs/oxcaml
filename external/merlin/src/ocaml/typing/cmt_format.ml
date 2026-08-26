@@ -278,7 +278,8 @@ let iter_on_occurrences
       | Texp_unboxed_bool _ | Texp_tuple _ | Texp_unboxed_tuple _
       | Texp_variant _ | Texp_array _ | Texp_ifthenelse _ | Texp_sequence _
       | Texp_while _ | Texp_for _ | Texp_send _
-      | Texp_letmodule _ | Texp_letexception _ | Texp_assert _ | Texp_lazy _
+      | Texp_letmodule _ | Texp_letexception _
+      | Texp_assert _ | Texp_assume _ | Texp_lazy _
       | Texp_object _ | Texp_pack _ | Texp_letop _ | Texp_unreachable
       | Texp_list_comprehension _ | Texp_array_comprehension _ | Texp_probe _
       | Texp_probe_is_enabled _ | Texp_exclave _
