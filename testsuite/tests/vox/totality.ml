@@ -10,6 +10,8 @@ val value_after_effect : int = 42
 
 module Pure = struct
   let (increment @ total) x = x + 1
+  let (conjunction @ total) x y = x && y
+  let (disjunction @ total) x y = x || y
   let (apply @ total) f x = f x
   let (allocate @ total) x = ref x
 end;;
@@ -17,6 +19,8 @@ end;;
 module Pure :
   sig
     val increment : int -> int
+    val conjunction : bool -> bool -> bool
+    val disjunction : bool -> bool -> bool
     val apply : ('a -> 'b) -> 'a -> 'b
     val allocate : 'a -> 'a ref
   end
