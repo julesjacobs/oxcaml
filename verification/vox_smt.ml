@@ -106,6 +106,32 @@ let sort_name = function Bool -> "Bool" | Bv63 -> "(_ BitVec 63)"
 
 let error fmt = Printf.ksprintf (fun s -> raise (Sort_error s)) fmt
 
+type operator_signature =
+  | Fixed of sort list * sort
+  | Equality
+  | Conditional
+
+let operator_signature = function
+  | Add | Sub | Mul -> Fixed ([Bv63; Bv63], Bv63)
+  | Neg -> Fixed ([Bv63], Bv63)
+  | Lt | Le | Gt | Ge -> Fixed ([Bv63; Bv63], Bool)
+  | Not -> Fixed ([Bool], Bool)
+  | And | Or | Implies -> Fixed ([Bool; Bool], Bool)
+  | Eq | Ne -> Equality
+  | Ite -> Conditional
+
+let rec term_sort = function
+  | Boolean _ -> Bool
+  | Integer _ -> Bv63
+  | Var s -> Symbol.sort s
+  | Call (f, _) -> Function.result f
+  | App (op, args) -> (
+    match operator_signature op, args with
+    | Fixed (_, result), _ -> result
+    | Equality, _ -> Bool
+    | Conditional, [_; t; _] -> term_sort t
+    | Conditional, _ -> error "ite expects 3 operands")
+
 let check ~int_width q =
   if int_width <> 63 then raise (Unsupported_target int_width);
   let declared = Hashtbl.create 16 in
@@ -144,24 +170,24 @@ let check ~int_width q =
       List.iter2 require (Function.arguments f) (List.map infer args);
       Function.result f
     | App (op, args) -> (
-      let arity = match op with Neg | Not -> 1 | Ite -> 3 | _ -> 2 in
+      let signature = operator_signature op in
+      let arity =
+        match signature with
+        | Fixed (arguments, _) -> List.length arguments
+        | Equality -> 2
+        | Conditional -> 3
+      in
       if List.length args <> arity
       then error "%s expects %d operands" (operator op) arity;
       let sorts = List.map infer args in
-      match op, sorts with
-      | (Add | Sub | Mul | Neg), _ ->
-        List.iter (require Bv63) sorts;
-        Bv63
-      | (Lt | Le | Gt | Ge), _ ->
-        List.iter (require Bv63) sorts;
-        Bool
-      | (Not | And | Or | Implies), _ ->
-        List.iter (require Bool) sorts;
-        Bool
-      | (Eq | Ne), [a; b] ->
+      match signature, sorts with
+      | Fixed (arguments, result), _ ->
+        List.iter2 require arguments sorts;
+        result
+      | Equality, [a; b] ->
         require a b;
         Bool
-      | Ite, [c; a; b] ->
+      | Conditional, [c; a; b] ->
         require Bool c;
         require a b;
         a

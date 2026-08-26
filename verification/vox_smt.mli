@@ -68,6 +68,11 @@ exception Sort_error of string
 
 exception Unsupported_target of int
 
+(** Result sort of a well-sorted term; does not validate operands or
+    declarations. Only conditional result branches need traversal. Use [check]
+    for validation. *)
+val term_sort : term -> sort
+
 (** [int_width] is the target's OCaml integer width, not the host width. Only 63
     is supported. All operators have fixed arity: one for [Neg] and [Not], three
     for [Ite], and two otherwise. Constants must be signed 63-bit integers.

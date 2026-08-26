@@ -130,15 +130,6 @@ let primitive env path =
   | _ -> None
   | exception Not_found -> None
 
-let rec term_sort = function
-  | Boolean _ -> Bool
-  | Integer _ -> Bv63
-  | Var s -> Symbol.sort s
-  | Call (f, _) -> Function.result f
-  | App ((Add | Sub | Mul | Neg), _) -> Bv63
-  | App (Ite, [_; t; _]) -> term_sort t
-  | App _ -> Bool
-
 let operation env ty name args =
   let args = List.map scalar args in
   let unary sort op =
