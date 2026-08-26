@@ -6635,9 +6635,18 @@ let add_zero_alloc_attribute expr attributes =
     end
   | _ -> expr
 
-let rec type_exp ?recarg ?(overwrite=No_overwrite) env expected_mode sexp =
+let with_primitive_mode_checks ?defer f =
+  let checks = ref [] in
+  let result = f (fun check -> checks := check :: !checks) in
+  List.iter
+    (fun check -> match defer with None -> check () | Some defer -> defer check)
+    (List.rev !checks);
+  result
+
+let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
+    env expected_mode sexp =
   (* We now delegate everything to type_expect *)
-  type_expect ?recarg ~overwrite env expected_mode sexp
+  type_expect ?recarg ?defer_primitive_mode ~overwrite env expected_mode sexp
     (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
 
 (* Typing of an expression with an expected type.
@@ -6651,13 +6660,14 @@ and check_layout_args_empty ~loc ~env layout_args ctx =
   if not (List.is_empty layout_args) then
     raise (Error (loc, env, Layout_poly_inst_not_yet_supported ctx))
 
-and type_expect ?recarg ?(overwrite=No_overwrite) env
+and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
       (expected_mode : expected_mode) sexp ty_expected_explained =
   let previous_saved_types = Cmt_format.get_saved_types () in
   let exp =
     Builtin_attributes.warning_scope sexp.pexp_attributes
       (fun () ->
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
+         type_expect_ ?recarg ?defer_primitive_mode ~overwrite env expected_mode
+           sexp ty_expected_explained
       )
   in
   Cmt_format.set_saved_types
@@ -6665,7 +6675,7 @@ and type_expect ?recarg ?(overwrite=No_overwrite) env
   exp
 
 and type_expect_
-    ?(recarg=Rejected) ?(overwrite=No_overwrite)
+    ?(recarg=Rejected) ?defer_primitive_mode ?(overwrite=No_overwrite)
     env (expected_mode : expected_mode) sexp ty_expected_explained =
   let { ty = ty_expected; explanation } = ty_expected_explained in
   let loc = sexp.pexp_loc in
@@ -7028,7 +7038,7 @@ and type_expect_
   in
   match sexp.pexp_desc with
   | Pexp_ident lid ->
-      let path, actual_mode, layout_args, desc, kind =
+      let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
         type_ident env ~recarg lid
       in
       let exp_desc =
@@ -7088,6 +7098,12 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
       in
+      Option.iter
+        (fun check ->
+          match defer_primitive_mode with
+          | None -> check ()
+          | Some defer -> defer check)
+        primitive_mode_check;
       submode ~loc ~env actual_mode expected_mode;
       if List.is_empty layout_args then exp
       else { exp with exp_desc = Texp_apply_layout (exp, layout_args) }
@@ -7357,10 +7373,16 @@ and type_expect_
       in
       (* one more level for warning on non-returning functions *)
       with_local_level_generalize ~before_generalize:ignore begin fun () ->
+      (* Comparison totality needs the argument types, but must be resolved
+         before the application can be generalized. *)
+      let primitive_mode_checks = ref [] in
       let type_sfunct sfunct =
         let funct =
           with_local_level_generalize_structure_if_principal
-            (fun () -> type_exp env funct_expected_mode sfunct)
+            (fun () ->
+              type_exp env funct_expected_mode sfunct
+                ~defer_primitive_mode:(fun check ->
+                  primitive_mode_checks := check :: !primitive_mode_checks))
         in
         let ty = instance funct.exp_type in
         let rt = wrap_trace_gadt_instances env (ret_tvar TypeSet.empty) ty in
@@ -7395,6 +7417,7 @@ and type_expect_
       let (args, ty_ret, mode_ret, pm, ap_yielding) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
       in
+      List.iter (fun check -> check ()) (List.rev !primitive_mode_checks);
       let mode_ret = Alloc.disallow_right mode_ret in
       let ap_mode = Alloc.proj_comonadic Areality mode_ret in
       let mode_ret = cross_left env ty_ret (alloc_as_value mode_ret) in
@@ -8036,7 +8059,10 @@ and type_expect_
       let expected_mode =
         type_expect_mode ~loc ~env ~modes:modes.mode_modes expected_mode
       in
-      let exp = type_expect env expected_mode sarg (mk_expected ty_expected ?explanation) in
+      let exp =
+        type_expect ?defer_primitive_mode env expected_mode sarg
+          (mk_expected ty_expected ?explanation)
+      in
       { exp with exp_loc = loc
       ; exp_extra = (Texp_mode modes, loc, []) :: exp.exp_extra
       }
@@ -8048,8 +8074,8 @@ and type_expect_
       let explanation = Option.map (fun msg -> Error_message_attr msg)
                           error_message_attr_opt in
       let arg =
-        type_argument ~overwrite ?explanation env expected_mode sarg ty
-          (instance ty)
+        type_argument ~overwrite ?explanation ?defer_primitive_mode env
+          expected_mode sarg ty (instance ty)
       in
       rue {
         exp_desc = arg.exp_desc;
@@ -8077,7 +8103,10 @@ and type_expect_
         Builtin_attributes.error_message_attr sexp.pexp_attributes in
       let explanation = Option.map (fun msg -> Error_message_attr msg)
                           error_message_attr_opt in
-      let arg = type_argument ~overwrite ?explanation env expected_mode sarg ty (instance ty) in
+      let arg =
+        type_argument ~overwrite ?explanation ?defer_primitive_mode env
+          expected_mode sarg ty (instance ty)
+      in
       rue {
         exp_desc = arg.exp_desc;
         exp_loc = arg.exp_loc;
@@ -8482,7 +8511,10 @@ and type_expect_
       end;
       let tv = newvar (Jkind.Builtin.any ~why:Dummy_jkind) in
       let (od, newenv) = !type_open_decl env od in
-      let exp = type_expect newenv expected_mode e ty_expected_explained in
+      let exp =
+        type_expect ?defer_primitive_mode newenv expected_mode e
+          ty_expected_explained
+      in
       (* Force the return type to be well-formed in the original
          environment. *)
       unify_var newenv tv exp.exp_type;
@@ -9218,6 +9250,43 @@ and type_ident env ?(recarg=Rejected) lid =
   (* CR zqian: [lookup_value] should close over the memaddr of all prefix
   modules.  *)
   let path, desc, (mode, locks) = Env.lookup_value ~loc:lid.loc lid.txt env in
+  let mode, check_primitive_mode =
+    match desc.val_kind with
+    | Val_prim { prim_name =
+        ("%equal" | "%notequal" | "%lessthan" | "%lessequal"
+        | "%greaterthan" | "%greaterequal" | "%compare"); _ } ->
+        let total_mode =
+          mode
+          |> Value.meet_const_with Totality Totality.Const.Total
+          |> Value.meet_const_with Statefulness Statefulness.Const.Stateless
+          |> Value.meet_const_with Portability Portability.Const.Portable
+        in
+        let specialized_mode, _ = Value.newvar_above total_mode in
+        let check ty =
+          let rec is_scalar ty =
+            match get_desc (expand_head env ty) with
+            | Tpoly (ty, []) -> is_scalar ty
+            | Tconstr (path, [], _) ->
+                Path.same path Predef.path_int
+                || Path.same path Predef.path_bool
+            | _ -> false
+          in
+          let total =
+            match get_desc (expand_head env ty) with
+            | Tarrow (_, arg, rest, _) -> begin
+                match get_desc (expand_head env rest) with
+                | Tarrow (_, arg', _, _) -> is_scalar arg && is_scalar arg'
+                | _ -> false
+              end
+            | _ -> false
+          in
+          Value.submode_err
+            (lid.loc, Ident { category = Value; lid = lid.txt })
+            (if total then total_mode else mode) specialized_mode
+        in
+        Value.disallow_right specialized_mode, Some check
+    | _ -> mode, None
+  in
   (* We cross modes when typing [Ppat_ident], before adding new variables into
   the environment. Therefore, one might think all values in the environment are
   already mode-crossed. That is not true for several reasons:
@@ -9316,13 +9385,19 @@ and type_ident env ?(recarg=Rejected) lid =
   in
   (* after layout instantiation, the value loses layout polymorphism. *)
   let val_lpoly = Lpoly.determined [] in
+  let check_primitive_mode =
+    Option.map (fun check () -> check val_type) check_primitive_mode
+  in
   path, actual_mode, layout_args,
-  { desc with val_type; val_lpoly }, kind
+  { desc with val_type; val_lpoly }, kind, check_primitive_mode
 
 and type_binding_op_ident env s =
   let loc = s.loc in
   let lid = Location.mkloc (Longident.Lident s.txt) loc in
-  let path, actual_mode, layout_args, desc, kind = type_ident env lid in
+  let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
+    type_ident env lid
+  in
+  Option.iter (fun check -> check ()) primitive_mode_check;
   check_layout_args_empty ~loc ~env layout_args Binding_op;
   submode ~env ~loc:lid.loc ~reason:Other actual_mode mode_legacy;
   let path =
@@ -10176,8 +10251,10 @@ and type_label_exp
   if is_poly then check_univars env "field value" arg label.lbl_arg vars;
   (lid, label, {arg with exp_type = instance arg.exp_type})
 
-and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sarg
-      ty_expected' ty_expected =
+and type_argument ?explanation ?recarg ?defer_primitive_mode ~overwrite env
+      (mode : expected_mode) sarg ty_expected' ty_expected =
+  with_primitive_mode_checks ?defer:defer_primitive_mode
+    begin fun defer_primitive_mode ->
   (* ty_expected' may be generic *)
   let no_labels ty =
     let ls, tvar = list_labels env ty in
@@ -10248,7 +10325,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
               |> expect_mode_cross env ty_expected'
             in
             let expected_mode = {expected_mode with position = RNontail} in
-            type_exp ~overwrite env expected_mode sarg)
+            type_exp ~overwrite ~defer_primitive_mode env expected_mode sarg)
       in
       let rec make_args args ty_fun =
         match get_desc (expand_head env ty_fun) with
@@ -10404,10 +10481,13 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       end
   | None ->
       let mode = expect_mode_cross env ty_expected' mode in
-      let texp = type_expect ?recarg ~overwrite env mode sarg
-        (mk_expected ?explanation ty_expected') in
+      let texp =
+        type_expect ?recarg ~overwrite ~defer_primitive_mode env mode sarg
+          (mk_expected ?explanation ty_expected')
+      in
       unify_exp ~sexp:sarg env texp ty_expected;
       texp
+    end
 
 (* See Note [Type-checking applications] for an overview *)
 and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
