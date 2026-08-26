@@ -18,16 +18,16 @@ legacy-mode defaults.
 | --- | --- | --- |
 | Dev loop | `smoke.ml` | The expect-test workflow runs. |
 | Totality | `totality.ml` | Totality constrains function values, not effects producing integers. |
-| Refinements | `refinements.ml`, `unchecked.ml`, `principal.ml` | Wrappers and scope checking work; predicates are not yet proved. |
+| Refinements | `refinements.ml`, `principal.ml` | Wrappers and scope checking work. |
 | Dependent functions | `dependent.ml` | Results and recursive callback domains can depend on arguments. |
 | Assume | `assume.ml`, `assume_runtime.ml` | Predicates are checked at runtime, including under `-noassert`. |
 | SMT interface | `smt.ml`, `smt_solver.ml` | Queries serialize and the solver can prove or refute them. |
+| VC generation | `verification.ml`, `unchecked.ml` | Branches and successful runtime checks prove introductions; false claims and wraparound are rejected. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 
-These are different claims: **typechecked**, **runtime-checked**, and
-**statically verified**. In particular, `unchecked.ml` intentionally exposes
-the current lack of VC checking. When VC generation lands, change that demo
-to expect rejection; do not preserve acceptance as intended behavior.
+`unchecked.ml`, accepted at the refinement-former stage, now demonstrates
+rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
+skip when it is absent; the default Linux CI job installs pinned Z3.
 
 `principal.ml` exposes the current mode-crossing failure for ordinary
 polymorphic comparisons under `-principal`. Other predicate demos bind the
@@ -54,10 +54,8 @@ from `./dev`, since both use the worktree's Dune lock.
 
 ## Next milestones
 
-VC generation should turn the unchecked examples into real proof obligations,
-with accepted guarded decrements and rejected wraparound cases. Numerical
-recursion can then demonstrate a refined recursion combinator, with its
-implementation's trust boundary stated explicitly.
+Definition lemmas add explicit unfolding. Numerical recursion can then
+demonstrate a refined recursion combinator and recursive proofs.
 
 Structural recursion does not fix the existing totality loophole through
 ordinary negative datatypes. A successful demo is not a claim of global

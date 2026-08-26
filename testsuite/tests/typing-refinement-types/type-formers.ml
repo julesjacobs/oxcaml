@@ -1,4 +1,5 @@
 (* TEST
+ has-z3;
  flags = "-extension refinement_types";
  expect;
 *)
@@ -112,16 +113,19 @@ Error: This expression has type "nonnegative list"
          "positive" = "{x : int | gt x 0}"
 |}]
 
-let one : positive = refine_ 1;;
+let one : positive = let raw = 1 in refine_ raw;;
 [%%expect{|
 val one : positive = 1
 |}]
 
 type impossible = { x : int | false }
-let unchecked : impossible = refine_ 0;;
+let unchecked : impossible = let raw = 0 in refine_ raw;;
 [%%expect{|
 type impossible = {x : int | false}
-val unchecked : impossible = 0
+Line 2, characters 44-55:
+2 | let unchecked : impossible = let raw = 0 in refine_ raw;;
+                                                ^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]
 
 let no_implicit_unwrap : int = one;;
@@ -247,7 +251,7 @@ type total_function = { f : unit -> unit | true };;
 type total_function = {f : unit -> unit | true}
 |}]
 
-let wrapped_function : total_function = refine_ (fun () -> ());;
+let wrapped_function : total_function = let raw = fun () -> () in refine_ raw;;
 [%%expect{|
 val wrapped_function : total_function = <fun>
 |}]
@@ -314,18 +318,18 @@ val wrapped_atomic : refined_atomic = {Atomic.contents = 0}
 |}]
 
 let escape_parameter n =
-  let value : { x : int | gt x n } = refine_ (n + 1) in
+  let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
   value;;
 [%%expect{|
 Lines 1-3, characters 21-7:
 1 | .....................n =
-2 |   let value : { x : int | gt x n } = refine_ (n + 1) in
+2 |   let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
 3 |   value..
 Error: the refinement type of this expression escapes the scope of binding "n"
 |}]
 
 let consume_parameter n =
-  let value : { x : int | gt x n } = refine_ (n + 1) in
+  let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
   let refine_ result = value in
   result;;
 [%%expect{|
@@ -334,7 +338,7 @@ val consume_parameter : int @ total -> int = <fun>
 
 let id x = x
 let use_parameter_locally n =
-  let value : { x : int | gt x n } = refine_ (n + 1) in
+  let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
   ignore (id value);
   0;;
 [%%expect{|
@@ -344,12 +348,12 @@ val use_parameter_locally : int @ total -> int = <fun>
 
 let escape_let =
   let n = 0 in
-  let value : { x : int | gt x n } = refine_ (n + 1) in
+  let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
   value;;
 [%%expect{|
 Lines 2-4, characters 2-7:
 2 | ..let n = 0 in
-3 |   let value : { x : int | gt x n } = refine_ (n + 1) in
+3 |   let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
 4 |   value..
 Error: the refinement type of this expression escapes the scope of binding "n"
 |}]
@@ -357,13 +361,13 @@ Error: the refinement type of this expression escapes the scope of binding "n"
 let escape_match =
   match 0 with
   | n ->
-      let value : { x : int | gt x n } = refine_ (n + 1) in
+      let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
       value;;
 [%%expect{|
 Lines 2-5, characters 2-11:
 2 | ..match 0 with
 3 |   | n ->
-4 |       let value : { x : int | gt x n } = refine_ (n + 1) in
+4 |       let value : { x : int | gt x n } = (let raw = n + 1 in assume_ raw) in
 5 |       value..
 Error: the refinement type of this expression escapes the scope of binding "n"
 |}]
@@ -371,12 +375,12 @@ Error: the refinement type of this expression escapes the scope of binding "n"
 let escape_through_unification =
   let slot = ref None in
   let n = 0 in
-  slot := Some ((refine_ (n + 1)) : { x : int | gt x n });
+  slot := Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n });
   slot;;
 [%%expect{|
 Lines 3-5, characters 2-6:
 3 | ..let n = 0 in
-4 |   slot := Some ((refine_ (n + 1)) : { x : int | gt x n });
+4 |   slot := Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n });
 5 |   slot..
 Error: the refinement type of this expression escapes the scope of binding "n"
 |}]
@@ -388,22 +392,22 @@ val outer_slot : '_weak1 option ref = {contents = None}
 
 let set_outer_slot () =
   let n = 0 in
-  outer_slot := Some ((refine_ (n + 1)) : { x : int | gt x n });;
+  outer_slot := Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n });;
 [%%expect{|
-Lines 2-3, characters 2-63:
+Lines 2-3, characters 2-80:
 2 | ..let n = 0 in
-3 |   outer_slot := Some ((refine_ (n + 1)) : { x : int | gt x n })..
+3 |   outer_slot := Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n })..
 Error: the refinement type of this expression escapes the scope of binding "n"
 |}]
 
 let escape_mutable_slot () =
   let mutable slot = None in
   let n = 0 in
-  slot <- Some ((refine_ (n + 1)) : { x : int | gt x n });;
+  slot <- Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n });;
 [%%expect{|
-Lines 3-4, characters 2-57:
+Lines 3-4, characters 2-74:
 3 | ..let n = 0 in
-4 |   slot <- Some ((refine_ (n + 1)) : { x : int | gt x n })..
+4 |   slot <- Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n })..
 Error: the refinement type of this expression escapes the scope of binding "n"
 |}]
 
@@ -411,14 +415,14 @@ let escape_local_module =
   let module M = struct
     let (holds @ total) x = gt x 0
   end in
-  let value : { x : int | M.holds x } = refine_ 1 in
+  let value : { x : int | M.holds x } = (let raw = 1 in refine_ raw) in
   value;;
 [%%expect{|
 Lines 2-6, characters 2-7:
 2 | ..let module M = struct
 3 |     let (holds @ total) x = gt x 0
 4 |   end in
-5 |   let value : { x : int | M.holds x } = refine_ 1 in
+5 |   let value : { x : int | M.holds x } = (let raw = 1 in refine_ raw) in
 6 |   value..
 Error: the refinement type of this expression escapes the scope of binding "M"
 |}]
@@ -427,14 +431,14 @@ let escape_local_open =
   let open struct
     let (holds @ total) x = gt x 0
   end in
-  let value : { x : int | holds x } = refine_ 1 in
+  let value : { x : int | holds x } = (let raw = 1 in refine_ raw) in
   value;;
 [%%expect{|
 Lines 2-6, characters 2-7:
 2 | ..let open struct
 3 |     let (holds @ total) x = gt x 0
 4 |   end in
-5 |   let value : { x : int | holds x } = refine_ 1 in
+5 |   let value : { x : int | holds x } = (let raw = 1 in refine_ raw) in
 6 |   value..
 Error: the refinement type of this expression escapes the scope of binding "holds"
 |}]
@@ -442,14 +446,14 @@ Error: the refinement type of this expression escapes the scope of binding "hold
 let escape_local_exception =
   let exception E in
   let value : { x : exn | match x with E -> true | _ -> false } =
-    refine_ E
+    let raw = E in refine_ raw
   in
   value;;
 [%%expect{|
 Lines 2-6, characters 2-7:
 2 | ..let exception E in
 3 |   let value : { x : exn | match x with E -> true | _ -> false } =
-4 |     refine_ E
+4 |     let raw = E in refine_ raw
 5 |   in
 6 |   value..
 Error: the refinement type of this expression escapes the scope of binding "E"
@@ -473,12 +477,12 @@ class escape_method_parameter =
   object
     val mutable slot = None
     method set n =
-      slot <- Some ((refine_ (n + 1)) : { x : int | gt x n })
+      slot <- Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n })
   end;;
 [%%expect{|
-Lines 4-5, characters 15-61:
+Lines 4-5, characters 15-78:
 4 | ...............n =
-5 |       slot <- Some ((refine_ (n + 1)) : { x : int | gt x n })
+5 |       slot <- Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n })
 Error: the refinement type of this expression escapes the scope of binding "n"
 |}]
 
@@ -487,7 +491,7 @@ let use_local_object n =
     object
       val mutable slot = None
       method set =
-        slot <- Some ((refine_ (n + 1)) : { x : int | gt x n })
+        slot <- Some (((let raw = n + 1 in assume_ raw)) : { x : int | gt x n })
     end
   in
   obj#set;

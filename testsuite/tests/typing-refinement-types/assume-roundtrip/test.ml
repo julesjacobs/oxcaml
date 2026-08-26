@@ -1,6 +1,7 @@
 (* TEST
  modules = "producer.ml";
  flags = "-extension refinement_types -noassert -warn-error +11";
+ has-z3;
  { bytecode; }
  { native; }
 *)

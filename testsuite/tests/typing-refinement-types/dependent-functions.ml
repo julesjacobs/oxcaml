@@ -1,4 +1,5 @@
 (* TEST
+ has-z3;
  flags = "-extension refinement_types";
  expect;
 *)
@@ -29,7 +30,7 @@ val alpha_equivalent : addition list = []
 |}]
 
 let add_refined : addition =
-  fun x y -> refine_ (add x y);;
+  fun x y -> let raw = add x y in refine_ raw;;
 [%%expect{|
 val add_refined : addition = <fun>
 |}]
@@ -73,7 +74,7 @@ val ordinary_application : int = 3
 |}]
 
 let explicitly_dependent x : {y : int | eq y (add x 1)} =
-  refine_ (add x 1);;
+  let raw = add x 1 in refine_ raw;;
 [%%expect{|
 val explicitly_dependent : (x : int) -> {y : int | eq y (add x 1)} = <fun>
 |}]
@@ -89,7 +90,7 @@ type labelled_after_dependent =
   (x : int) -> label:int -> {z : int | eq z (add x 1)}
 
 let labelled_after_dependent : labelled_after_dependent =
-  fun x ~label:_ -> refine_ (add x 1)
+  fun x ~label:_ -> let raw = add x 1 in refine_ raw
 
 let label_only = labelled_after_dependent ~label:0
 
@@ -143,7 +144,7 @@ type applies_function =
   (f : (int -> int)) -> {z : int | eq z (f 0)}
 
 let apply_function : applies_function =
-  fun f -> refine_ (f 0)
+  fun f -> let raw = f 0 in assume_ raw
 
 let partial x = x
 let bad_partial = apply_function partial;;
