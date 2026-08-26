@@ -1,0 +1,4 @@
+(* CHILDTEST
+ include ocamlmiddleend;
+ ocamlc.byte;
+*)

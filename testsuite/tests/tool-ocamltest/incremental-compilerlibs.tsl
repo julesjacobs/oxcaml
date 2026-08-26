@@ -1,0 +1,8 @@
+(* CHILDTEST
+ include ocamlcommon;
+ {
+   ocamlc.byte with ocamlbytecomp, ocamltoplevel;
+ }{
+   ocamlopt.byte with ocamloptcomp;
+ }
+*)

@@ -136,6 +136,31 @@ let compilerlibs_archives archives =
   append Ocaml_variables.libraries archives ::
   List.map add_compiler_subdir compilerlibs_subdirs
 
+let verification_libraries =
+  ["unix"; "vox_smt"; "vox_vc"; "vox_smt_solver"; "vox_verify"]
+
+let compilerlibs_modifiers =
+  [
+    (* The compilerlibs split of ocamlcommon into ocamlcommon and
+       ocamlfrontend is specific to this repo.  To avoid updating every
+       test, the "ocamlcommon" modifier links both archives (there is
+       deliberately no "ocamlfrontend" modifier).  If the split is ever
+       upstreamed, this hack should go, with the tests then updated to
+       use the appropriate archives. *)
+    "ocamlcommon", ["ocamlcommon"; "ocamlfrontend"];
+    "ocamlbytecomp", verification_libraries @ ["ocamlbytecomp"];
+    "ocamlmiddleend", ["ocamlmiddleend"];
+    "ocamloptcomp", verification_libraries @ ["ocamloptcomp"];
+    "ocamltoplevel", ["ocamltoplevel"];
+  ]
+
+let incremental_compilerlibs name =
+  match List.assoc_opt name compilerlibs_modifiers with
+  | None -> []
+  | Some archives ->
+      (* Unix is reused from dev init, like the other runtime libraries. *)
+      List.filter (fun archive -> archive <> "unix") archives
+
 let debugger = [add_compiler_subdir "debugger"]
 
 let extension_universe_lib name =
@@ -169,27 +194,13 @@ let init () =
   List.iter
     (fun (name, archives) ->
       let modifiers = compilerlibs_archives archives in
-      let modifiers = if name = "ocamlbytecomp" || name = "ocamloptcomp"
+      let modifiers = if List.mem "unix" archives
         then append Ocaml_variables.directories
           [compiler_subdir ["otherlibs"; "unix"]] :: modifiers
         else modifiers
       in
       register_modifiers name modifiers)
-    [
-      (* The compilerlibs split of ocamlcommon into ocamlcommon and
-         ocamlfrontend is specific to this repo.  To avoid updating every
-         test, the "ocamlcommon" modifier links both archives (there is
-         deliberately no "ocamlfrontend" modifier).  If the split is ever
-         upstreamed, this hack should go, with the tests then updated to
-         use the appropriate archives. *)
-      "ocamlcommon", ["ocamlcommon"; "ocamlfrontend"];
-      "ocamlbytecomp", ["unix"; "vox_smt"; "vox_vc"; "vox_smt_solver";
-                        "vox_verify"; "ocamlbytecomp"];
-      "ocamlmiddleend", ["ocamlmiddleend"];
-      "ocamloptcomp", ["unix"; "vox_smt"; "vox_vc"; "vox_smt_solver";
-                       "vox_verify"; "ocamloptcomp"];
-      "ocamltoplevel", ["ocamltoplevel"];
-    ];
+    compilerlibs_modifiers;
   register_modifiers "runtime_events" runtime_events;
   register_modifiers "systhreads" systhreads;
   register_modifiers "latex" latex;

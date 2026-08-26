@@ -351,36 +351,20 @@ add_compilerlib()
 {
   library=$1
   echo "$library" >> "$targets_file"
-  echo "$library" >> "$compilerlibs_file"
+  echo "${2:-${library##*/}}" >> "$compilerlibs_file"
 }
 
 add_compilerlib_modes()
 {
   basename=$1
+  installed_basename=${2:-${basename##*/}}
   if [ "$compilerlibs_byte" = true ]; then
-    add_compilerlib "$basename.cma"
+    add_compilerlib "$basename.cma" "$installed_basename.cma"
   fi
   if [ "$compilerlibs_native" = true ]; then
-    add_compilerlib "$basename.cmxa"
+    add_compilerlib "$basename.cmxa" "$installed_basename.cmxa"
+    add_compilerlib "$basename.a" "$installed_basename.a"
   fi
-}
-
-add_verifier_libraries()
-{
-  for verifier_library in vox_smt vox_vc vox_smt_solver vox_verify; do
-    case "$verifier_library" in
-      vox_verify) verifier_dir=verification/runtime ;;
-      *) verifier_dir=verification ;;
-    esac
-    if [ "$compilerlibs_byte" = true ]; then
-      echo "$verifier_dir/$verifier_library.cma" >> "$targets_file"
-      echo "$verifier_library.cma" >> "$compilerlibs_file"
-    fi
-    if [ "$compilerlibs_native" = true ]; then
-      echo "$verifier_dir/$verifier_library.cmxa" >> "$targets_file"
-      echo "$verifier_library.cmxa" >> "$compilerlibs_file"
-    fi
-  done
 }
 
 add_requirement()
@@ -442,22 +426,26 @@ add_requirement()
       echo "$OCAMLTEST_OCAMLOPT_OPT" >> "$artifacts_file"
       export OCAMLTEST_OCAMLOPT_OPT
       ;;
-    compilerlibs.ocamlcommon)
-      add_compilerlib_modes ocamlcommon
-      add_compilerlib_modes ocamlfrontend
-      ;;
+    compilerlibs.ocamlcommon | compilerlibs.ocamlfrontend | \
     compilerlibs.ocamlbytecomp)
-      add_verifier_libraries
-      add_compilerlib_modes ocamlbytecomp
+      add_compilerlib_modes "${requirement#compilerlibs.}"
       ;;
     compilerlibs.ocamloptcomp)
-      add_verifier_libraries
-      add_compilerlib_modes ocamloptcomp
+      add_compilerlib_modes ocamloptcomp_with_flambda2 ocamloptcomp
+      ;;
+    compilerlibs.vox_smt | compilerlibs.vox_vc | compilerlibs.vox_smt_solver)
+      add_compilerlib_modes "verification/${requirement#compilerlibs.}"
+      ;;
+    compilerlibs.vox_verify)
+      add_compilerlib_modes verification/runtime/vox_verify
       ;;
     compilerlibs.ocamltoplevel)
       [ "$compilerlibs_native" = false ] ||
         die "ocamltoplevel has no native Dune install artifact"
-      add_compilerlib ocamltoplevel.cma
+      add_compilerlib toplevel/byte/ocamltoplevel.cma
+      ;;
+    compilerlibs.ocamlmiddleend)
+      die "ocamlmiddleend has no Dune install artifact"
       ;;
     '') ;;
     *) die "planner returned unsupported requirement '$requirement'" ;;

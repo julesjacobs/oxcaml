@@ -34,8 +34,22 @@ else
   [ "$?" = 2 ]
 fi
 check_plan incremental-split 'compilerlibs.ocamlcommon
+compilerlibs.ocamlfrontend
 ocamlc.byte
 ocamlopt.byte'
+check_plan incremental-compilerlibs 'compilerlibs.ocamlbytecomp
+compilerlibs.ocamlcommon
+compilerlibs.ocamlfrontend
+compilerlibs.ocamloptcomp
+compilerlibs.ocamltoplevel
+compilerlibs.vox_smt
+compilerlibs.vox_smt_solver
+compilerlibs.vox_vc
+compilerlibs.vox_verify
+ocamlc.byte
+ocamlopt.byte'
+check_plan incremental-middleend 'compilerlibs.ocamlmiddleend
+ocamlc.byte'
 reject_plan incremental-unsupported
 reject_plan incremental-dynamic
 reject_plan incremental-generator

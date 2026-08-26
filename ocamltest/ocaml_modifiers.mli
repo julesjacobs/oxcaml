@@ -27,4 +27,6 @@ val latex: Environments.modifiers
 val man: Environments.modifiers
 val html: Environments.modifiers
 
+val incremental_compilerlibs : string -> string list
+
 val init : unit -> unit

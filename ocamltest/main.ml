@@ -417,9 +417,21 @@ let plan_incremental files =
       fail_unsupported filename "generated lexer or parser sources";
     env
   in
-  let plan_tree filename env ast =
+  let add_modifier_requirement requirements name =
+    List.fold_left
+      (fun requirements archive ->
+        String.Set.add ("compilerlibs." ^ archive) requirements)
+      requirements (Ocaml_modifiers.incremental_compilerlibs name.node)
+  in
+  let add_environment_requirement requirements statement =
+    match statement.node with
+    | Include name -> add_modifier_requirement requirements name
+    | Assignment _ | Append _ | Unset _ -> requirements
+  in
+  let plan_tree filename env requirements ast =
     let environment _ (env, requirements) statement =
       let env = apply_planning_statement filename env statement in
+      let requirements = add_environment_requirement requirements statement in
       Continue (env, requirements)
     in
     let test _ (env, requirements) name modifiers =
@@ -446,51 +458,14 @@ let plan_incremental files =
       in
       if environment_uses_expanded_generator env then
         fail_unsupported filename "generated lexer or parser sources";
+      let requirements =
+        List.fold_left add_modifier_requirement requirements modifiers
+      in
       Continue (env, requirements)
     in
     walk_tree ~environment ~test ~split:(fun _ _ -> ()) ~finish:snd
       ~join:(List.fold_left String.Set.union String.Set.empty)
-      (env, String.Set.empty) ast
-  in
-  let compilerlibs_requirement = function
-    | "ocamlcommon" -> Some "compilerlibs.ocamlcommon"
-    | "ocamlbytecomp" -> Some "compilerlibs.ocamlbytecomp"
-    | "ocamloptcomp" -> Some "compilerlibs.ocamloptcomp"
-    | "ocamltoplevel" -> Some "compilerlibs.ocamltoplevel"
-    | "ocamlmiddleend" ->
-        failwith "the ocamlmiddleend modifier has no Dune install artifact"
-    | _ -> None
-  in
-  let add_modifier_requirement filename name requirements =
-    match compilerlibs_requirement name.node with
-    | Some requirement -> String.Set.add requirement requirements
-    | None -> requirements
-    | exception Failure message -> fail_unsupported filename "%s" message
-  in
-  let add_environment_requirement filename statement requirements =
-    match statement.node with
-    | Include name -> add_modifier_requirement filename name requirements
-    | Assignment _ | Append _ | Unset _ -> requirements
-  in
-  let rec add_item_requirements filename requirements = function
-    | Environment_statement statement ->
-        add_environment_requirement filename statement requirements
-    | Test (_, _, modifiers) ->
-        List.fold_left
-          (fun requirements name ->
-            add_modifier_requirement filename name requirements)
-          requirements modifiers
-    | Split alternatives ->
-        List.fold_left
-          (List.fold_left (add_item_requirements filename))
-          requirements alternatives
-  in
-  let rec add_tree_requirements filename requirements
-      (Ast (statements, subtrees)) =
-    let requirements =
-      List.fold_left (add_item_requirements filename) requirements statements
-    in
-    List.fold_left (add_tree_requirements filename) requirements subtrees
+      (env, requirements) ast
   in
   let compiler_requirement = function
     | "ocamlc.byte" | "ocamlc.opt" | "ocamlopt.byte" | "ocamlopt.opt" -> true
@@ -503,19 +478,18 @@ let plan_incremental files =
         (apply_planning_statement filename)
         Environments.empty rootenv
     in
-    let file_requirements = plan_tree filename root_environment tsl_ast in
+    let root_requirements =
+      List.fold_left add_environment_requirement String.Set.empty rootenv
+    in
+    let file_requirements =
+      plan_tree filename root_environment root_requirements tsl_ast
+    in
     if String.Set.exists compiler_requirement file_requirements &&
        (generated_source filename ||
         List.exists environment_uses_generator rootenv ||
         tree_uses_generator tsl_ast)
     then fail_unsupported filename "generated lexer or parser sources";
-    let requirements =
-      List.fold_left
-        (fun requirements statement ->
-          add_environment_requirement filename statement requirements)
-        (String.Set.union requirements file_requirements) rootenv
-    in
-    add_tree_requirements filename requirements tsl_ast
+    String.Set.union requirements file_requirements
   in
   let requirements = List.fold_left add_file String.Set.empty files in
   String.Set.iter print_endline requirements
