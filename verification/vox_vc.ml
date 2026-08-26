@@ -68,6 +68,30 @@ let impossible s =
 let paths outcomes f =
   List.concat_map (fun (s, v) -> if impossible s then [] else f s v) outcomes
 
+let rec arguments_right_to_left eval s = function
+  | [] -> [s, []]
+  | arg :: args ->
+    paths (arguments_right_to_left eval s args) (fun s values ->
+        paths (eval s arg) (fun s value -> [s, value :: values]))
+
+let short_circuit eval loc ~is_and s a b =
+  paths (eval s a) (fun s a ->
+      let a = required loc a in
+      eval (branch s (if is_and then a else not_ a)) b
+      @ [ ( branch s (if is_and then not_ a else a),
+            scalar_value (Boolean (not is_and)) ) ])
+
+let guarded_case eval loc s (matched, condition) guard body rest =
+  let guards =
+    match guard with
+    | None -> [branch matched condition, scalar_value (Boolean true)]
+    | Some g -> eval (branch matched condition) g
+  in
+  paths guards (fun s g ->
+      let g = required loc g in
+      eval (branch s g) body @ rest (branch s (not_ g)))
+  @ rest (branch s (not_ condition))
+
 let rec sort env ty =
   match get_desc (Ctype.expand_head env ty) with
   | Tpoly (ty, []) -> sort env ty
@@ -251,24 +275,13 @@ let rec predicate ctx env s e =
         | Rexp_ident path -> primitive env path
         | _ -> None
       in
-      begin match prim with
-      | Some ((("%sequand" | "%sequor") as name), 2) when List.length args = 2
-        ->
-        let a = snd (List.hd args) and b = snd (List.hd (List.tl args)) in
-        paths (eval s a) (fun s a ->
-            let a = required e.rexp_loc a in
-            let is_and = name = "%sequand" in
-            eval (branch s (if is_and then a else not_ a)) b
-            @ [ ( branch s (if is_and then not_ a else a),
-                  scalar_value (Boolean (not is_and)) ) ])
+      begin match prim, args with
+      | Some ((("%sequand" | "%sequor") as name), 2), [(_, a); (_, b)] ->
+        short_circuit eval e.rexp_loc ~is_and:(name = "%sequand") s a b
       | _ ->
-        let rec arguments s = function
-          | [] -> [s, []]
-          | (_, e) :: es ->
-            paths (arguments s es) (fun s vs ->
-                paths (eval s e) (fun s v -> [s, v :: vs]))
-        in
-        paths (arguments s args) (fun s args ->
+        paths
+          (arguments_right_to_left (fun s (_, e) -> eval s e) s args)
+          (fun s args ->
             paths (eval s fn) (fun s value ->
                 let result =
                   apply_function ctx env fn.rexp_type e.rexp_type prim value
@@ -324,17 +337,10 @@ and predicate_cases ctx env s value cases =
     match cases with
     | [] -> []
     | case :: cases ->
-      let matched, condition = predicate_pattern env s value case.rc_lhs in
+      let matched = predicate_pattern env s value case.rc_lhs in
       let rest s = predicate_cases ctx env s value cases in
-      let guard =
-        match case.rc_guard with
-        | None -> [branch matched condition, scalar_value (Boolean true)]
-        | Some g -> predicate ctx env (branch matched condition) g
-      in
-      paths guard (fun s g ->
-          let g = required case.rc_rhs.rexp_loc g in
-          predicate ctx env (branch s g) case.rc_rhs @ rest (branch s (not_ g)))
-      @ rest (branch s (not_ condition))
+      guarded_case (predicate ctx env) case.rc_rhs.rexp_loc s matched
+        case.rc_guard case.rc_rhs rest
 
 let rec pattern : type k.
     context -> state -> value option -> k general_pattern -> state * term =
@@ -503,23 +509,12 @@ and expression_desc ctx s e =
     begin match prim, args with
     | ( Some ((("%sequand" | "%sequor") as name), 2),
         [(_, Arg (a, _)); (_, Arg (b, _))] ) ->
-      paths (eval s a) (fun s a ->
-          let a = required e.exp_loc a in
-          let is_and = name = "%sequand" in
-          eval (branch s (if is_and then a else not_ a)) b
-          @ [ ( branch s (if is_and then not_ a else a),
-                scalar_value (Boolean (not is_and)) ) ])
+      short_circuit eval e.exp_loc ~is_and:(name = "%sequand") s a b
     | _ ->
-      let rec arguments s = function
-        | [] -> [s, []]
-        | (_, arg) :: args ->
-          paths (arguments s args) (fun s values ->
-              match arg with
-              | Omitted _ -> [s, None :: values]
-              | Arg (e, _) ->
-                paths (eval s e) (fun s value -> [s, value :: values]))
+      let argument s (_, arg) =
+        match arg with Omitted _ -> [s, None] | Arg (e, _) -> eval s e
       in
-      paths (arguments s args) (fun s args ->
+      paths (arguments_right_to_left argument s args) (fun s args ->
           paths (eval s fn) (fun s fn_value ->
               let total =
                 match fn_value with
@@ -630,17 +625,10 @@ and cases_with_pattern : type k.
     match cases with
     | [] -> []
     | c :: cases ->
-      let matched, condition = pattern ctx s value c.c_lhs in
+      let matched = pattern ctx s value c.c_lhs in
       let rest s = cases_with_pattern ctx s value cases in
-      let guards =
-        match c.c_guard with
-        | None -> [branch matched condition, scalar_value (Boolean true)]
-        | Some g -> expression ctx (branch matched condition) g
-      in
-      paths guards (fun s g ->
-          let g = required c.c_rhs.exp_loc g in
-          expression ctx (branch s g) c.c_rhs @ rest (branch s (not_ g)))
-      @ rest (branch s (not_ condition))
+      guarded_case (expression ctx) c.c_rhs.exp_loc s matched c.c_guard c.c_rhs
+        rest
 
 and structure ctx s str =
   List.fold_left
