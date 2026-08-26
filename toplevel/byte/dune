@@ -34,7 +34,8 @@
  ; Bytecode startup loads these stubs, including in the build sandbox.
  (deps
   ../../middle_end/flambda2/numbers/floats/dllflambda2_floats_stubs.so
-  ../../verification/dllvox_smt_solver_stubs.so
+  ; The solver is disabled in the bootstrap context.
+  (glob_files ../../verification/dllvox_smt_solver_stubs.so)
   ../../otherlibs/unix/dllunix_stubs.so)
  (action (run %{ocaml_where}/../../bin/ocamlrun
               -I ../../middle_end/flambda2/numbers/floats
