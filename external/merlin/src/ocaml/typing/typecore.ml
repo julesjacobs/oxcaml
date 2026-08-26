@@ -2895,6 +2895,19 @@ let type_assume = ref
          (_ : refinement_desc) ->
        Misc.fatal_error "Typecore.assume: elaborator not installed")
 
+let definition_lemma : (Env.t -> value_binding -> value_binding * Env.t) ref =
+  ref (fun _ _ -> Misc.fatal_error "Typecore.def: elaborator not installed")
+
+let definition_attribute attrs =
+  match Builtin_attributes.select_attributes ["def", Return] attrs with
+  | [] -> None
+  | [{attr_payload = PStr []; attr_loc; _}] -> Some attr_loc
+  | [attr] ->
+      Location.raise_errorf ~loc:attr.attr_loc
+        "The def attribute takes no payload"
+  | _ :: attr :: _ ->
+      Location.raise_errorf ~loc:attr.attr_loc "Duplicate def attribute"
+
 (* Records *)
 exception Wrong_name_disambiguation of Env.t * wrong_name
 
@@ -12587,6 +12600,21 @@ and type_effect_cases
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
+  let definitions =
+    List.filter_map (fun vb -> definition_attribute vb.pvb_attributes)
+      spat_sexp_list
+  in
+  let spat_sexp_list = match definitions, spat_sexp_list with
+    | [], _ -> spat_sexp_list
+    | [loc], [vb]
+      when rec_flag = Nonrecursive && mutable_flag = Asttypes.Immutable ->
+        Language_extension.assert_enabled ~loc Refinement_types ();
+        [{vb with pvb_modes =
+           Location.mkloc (Parsetree.Mode "total") loc :: vb.pvb_modes}]
+    | loc :: _, _ ->
+        Location.raise_errorf ~loc
+          "The def attribute requires a single nonrecursive function binding"
+  in
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
     match spat_sexp_list with
@@ -12867,7 +12895,12 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ) l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
-  (l, new_env)
+  match definitions, l with
+  | [], _ -> l, new_env
+  | [_], [binding] ->
+      let lemma, new_env = !definition_lemma new_env binding in
+      [binding; lemma], new_env
+  | _ -> assert false
 
 and type_let_def_wrap_warnings
     ?(check = fun name mutated -> Warnings.Unused_var { name; mutated })
@@ -15295,7 +15328,227 @@ let add_total_immutable_value env binder payload loc =
   in
   Env.add_value ~mode:(total_immutable_mode ()) binder value_description env
 
+let with_resolved_refinement predicate_env loc predicate f =
+  let expressions = ref [] and values = ref [] in
+  let constructors = ref [] and labels = ref [] in
+  let locals = Refinement_predicate.bound_idents predicate in
+  let var_name id = "_assume_" ^ Ident.unique_name id in
+  let resolved entries path name =
+    let lid = Longident.Lident name in
+    entries := (lid, path) :: !entries;
+    Location.mkloc lid loc
+  in
+  let value_ident path = resolved values path (Path.last path) in
+  let syntax = Refinement_predicate.untype predicate
+      ~var_name
+      ~value_ident
+      ~function_label:(fun rexp ->
+        (* [-nolabels] formation can check an unlabelled lambda against
+           a labelled arrow. Recover its label from the retained type. *)
+        let rec label ty =
+          match get_desc (expand_head predicate_env ty) with
+          | Tarrow ((label, _, _, _), _, _, _) ->
+              refinement_argument_label label
+          | Tpoly (body, _) -> label body
+          | _ -> Misc.fatal_error
+              "Typecore.refinement: invalid function evidence"
+        in
+        label rexp.rexp_type)
+      ~constructor_ident:(fun path ->
+        let name = match path with
+          | Pextra_ty (_, Pcstr_ty name) -> name
+          | _ -> Path.last path
+        in
+        resolved constructors path name)
+      ~label_ident:(fun path name -> resolved labels (path, name) name)
+      ~expression:(fun rexp sexp ->
+        let sexp = match rexp.rexp_desc with
+          | Rexp_var id when not (Ident.Set.mem id locals) ->
+              Ast_helper.Exp.ident ~loc:rexp.rexp_loc
+                (value_ident (Path.Pident id))
+          | _ -> sexp
+        in
+        expressions := (sexp, rexp.rexp_type) :: !expressions;
+        sexp)
+  in
+  let input : Resolved_predicate.input =
+    { expressions = !expressions; values = !values;
+      constructors = !constructors; labels = !labels;
+      locals = List.map (fun id -> id, var_name id)
+          (Ident.Set.elements locals) }
+  in
+  Resolved_predicate.with_input input (fun () -> f syntax)
+
+let scalar_definition_type env ty =
+  match get_desc (expand_head env ty) with
+  | Tconstr (path, [], _) ->
+      Path.same path Predef.path_int || Path.same path Predef.path_bool
+  | _ -> false
+
+let make_definition_lemma env binding =
+  let loc = binding.vb_loc in
+  let reject loc =
+    Location.raise_errorf ~loc
+      "Definition lemmas require a scalar function with simple \
+       unlabelled parameters"
+  in
+  let id = match binding.vb_pat.pat_desc with
+    | Tpat_var {id; _} -> id
+    | _ -> reject binding.vb_pat.pat_loc
+  in
+  let name = Ident.name id ^ "_def" in
+  if not (Misc.Utf8_lexeme.is_valid_identifier name) then
+    Location.raise_errorf ~loc
+      "Definition lemmas require an identifier function name";
+  begin match Env.find_value_by_name (Longident.Lident name) env with
+  | _ -> Location.raise_errorf ~loc
+      "The generated name %s is already bound" name
+  | exception Not_found -> ()
+  end;
+  let params, body = match binding.vb_expr.exp_desc with
+    | Texp_function {params; body = Tfunction_body body; _} when params <> [] ->
+        let params = List.map (fun param ->
+          match param.fp_arg_label, param.fp_kind, param.fp_newtypes with
+          | Nolabel, Tparam_pat ({pat_desc = Tpat_var {id; _}; _} as pat), []
+            when scalar_definition_type env pat.pat_type -> id, pat.pat_type
+          | _ -> reject param.fp_loc) params in
+        params, body
+    | _ -> reject binding.vb_expr.exp_loc
+  in
+  if not (scalar_definition_type env body.exp_type) then reject body.exp_loc;
+  let binder = Ident.create_local "u" in
+  let bound = Ident.Set.of_list (List.map fst params) in
+  let body_ir = refinement_expression_of_typed bound binder body in
+  let rec check e =
+    if not (scalar_definition_type env e.rexp_type) then reject e.rexp_loc;
+    match e.rexp_desc with
+    | Rexp_var _ | Rexp_constant _ | Rexp_construct (_, []) -> ()
+    | Rexp_ident path ->
+        begin match (Env.find_value path body.exp_env).val_kind with
+        | Val_prim {prim_arity = 0; _} -> reject e.rexp_loc
+        | _ -> ()
+        end
+    | Rexp_apply ({rexp_desc = Rexp_ident _; rexp_type; _}, args) ->
+        let rec signature ty args =
+          match get_desc (expand_head env ty), args with
+          | Tarrow ((Nolabel, _, _, None), arg, result, _),
+            (Asttypes.Nolabel, e) :: args
+            when scalar_definition_type env (Btype.tpoly_get_mono arg) ->
+              check e; signature result args
+          | _, [] when scalar_definition_type env ty -> ()
+          | _ -> reject e.rexp_loc
+        in
+        signature rexp_type args
+    | Rexp_ifthenelse (c, t, Some f) -> List.iter check [c; t; f]
+    | Rexp_sequence (a, b) -> check a; check b
+    | Rexp_let ({rb_kind = Rbind_value; rb_expr; _}, body) ->
+        check rb_expr; check body
+    | Rexp_match (scrutinee, cases) ->
+        check scrutinee;
+        List.iter (fun case ->
+          Option.iter check case.rc_guard; check case.rc_rhs) cases
+    | _ -> reject e.rexp_loc
+  in
+  check body_ir;
+  let type_params = List.map (fun (id, ty) -> Ident.rename id, ty) params in
+  let rename = List.fold_left2
+      (fun rename (id, _) (fresh, _) -> Ident.Map.add id fresh rename)
+      Ident.Map.empty params type_params in
+  let body_ir = Refinement_predicate.map ~rename body_ir in
+  let predicate_env = List.fold_left (fun env (id, ty) ->
+      add_total_immutable_value env id ty loc) env type_params in
+  let mk rexp_type rexp_desc = {rexp_type; rexp_desc; rexp_loc = loc} in
+  let call = mk body.exp_type (Rexp_apply
+      (mk binding.vb_expr.exp_type (Rexp_ident (Path.Pident id)),
+       List.map (fun (id, ty) -> Asttypes.Nolabel, mk ty (Rexp_var id))
+         type_params)) in
+  let arrow arg ret = newty
+      (Tarrow ((Nolabel, dependent_argument_mode (), Alloc.legacy, None),
+               newmono arg, ret, commu_ok)) in
+  let equality =
+    Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib"), "=") in
+  let equality_type = instance
+      (Subst.Lazy.force_value_description
+         (Env.find_value equality env)).val_type in
+  begin match get_desc equality_type with
+  | Tarrow (_, arg, _, _) -> unify env (Btype.tpoly_get_mono arg) body.exp_type
+  | _ -> Misc.fatal_error "Typecore.def: invalid primitive equality type"
+  end;
+  let predicate = mk Predef.type_bool (Rexp_apply
+      (mk equality_type (Rexp_ident equality),
+       [Asttypes.Nolabel, call; Asttypes.Nolabel, body_ir])) in
+  let _, predicate = with_resolved_refinement predicate_env loc predicate
+      (fun syntax -> Typetexp.TyVarEnv.protect_reentrant (fun () ->
+        !Typetexp.type_refinement_predicate predicate_env
+          (Ident.Set.of_list (List.map fst type_params))
+          binder Predef.type_unit syntax)) in
+  let result = newty (Trefine
+      {ref_binder = binder; ref_payload = Predef.type_unit;
+       ref_pred = predicate}) in
+  let syntax_params = List.map (fun (id, _) ->
+      {pparam_loc = loc;
+       pparam_desc = Pparam_val (Asttypes.Nolabel, None,
+           Ast_helper.Pat.var ~loc
+             (Location.mkloc (Ident.name id) loc))}) params in
+  let syntax = Ast_helper.Exp.function_ ~loc syntax_params
+      {mode_annotations = []; ret_mode_annotations = [];
+       ret_type_constraint = None}
+      (Pfunction_body (Ast_helper.Exp.construct ~loc
+          (Location.mkloc (Longident.Lident "()") loc) None)) in
+  let stub_type = List.fold_right (fun (_, ty) ret -> arrow ty ret)
+      params Predef.type_unit in
+  let stub = Resolved_predicate.with_input
+      {expressions = []; values = []; constructors = [];
+       labels = []; locals = []}
+      (fun () -> type_expect_in_expression env
+          ~mode:(mode_default (total_mode ())) syntax
+          (mk_expected stub_type)) in
+  let stub = match stub.exp_desc with
+    | Texp_function
+        ({params = runtime_params; body = Tfunction_body unit; _} as fn) ->
+        let result_in_body = List.fold_left2 (fun ty (binder, _) param ->
+            let id = match param.fp_kind with
+              | Tparam_pat {pat_desc = Tpat_var {id; _}; _} -> id
+              | _ -> assert false in
+            substitute_refinement_ident binder id ty)
+            result type_params runtime_params in
+        let rec contract ty params = match get_desc ty, params with
+          | Tarrow ((label, arg_mode, ret_mode, _), arg, ret, commu),
+            (id, _) :: rest ->
+              newty (Tarrow ((label, arg_mode, ret_mode, Some id),
+                             arg, contract ret rest, commu))
+          | _, [] -> result
+          | _ -> assert false in
+        {stub with
+         exp_desc = Texp_function
+           {fn with body = Tfunction_body
+               {unit with exp_type = result_in_body}};
+         exp_type = contract stub.exp_type type_params}
+    | _ -> assert false in
+  generalize stub.exp_type;
+  let lemma_id = Ident.create_local name in
+  let description = Subst.Lazy.force_value_description
+      (Env.find_value (Path.Pident id) env) in
+  let description = {description with
+      val_type = stub.exp_type; val_attributes = [];
+      val_zero_alloc = Zero_alloc.default;
+      val_modalities = Modality.undefined;
+      val_uid = Uid.mk ~current_unit:(Env.get_current_unit ())} in
+  let pat_desc = match binding.vb_pat.pat_desc with
+    | Tpat_var variable -> Tpat_var {variable with id = lemma_id;
+        name = Location.mkloc name loc; uid = description.val_uid;
+        mode = Value.disallow_right (total_mode ())}
+    | _ -> assert false in
+  let pat = {binding.vb_pat with
+      pat_desc;
+      pat_type = stub.exp_type; pat_env = env;
+      pat_extra = []; pat_attributes = [];
+      pat_unique_barrier = Unique_barrier.not_computed ()} in
+  {binding with vb_pat = pat; vb_expr = stub; vb_attributes = []},
+  Env.add_value ~mode:(total_mode ()) lemma_id description env
+
 let () =
+  definition_lemma := make_definition_lemma;
   type_assume :=
     (fun env expected_mode loc operand
          { ref_binder; ref_payload; ref_pred } ->
@@ -15309,57 +15562,8 @@ let () =
        let desc = Subst.Lazy.force_value_description
            (Env.find_value (Path.Pident binder) predicate_env) in
        let return_env = Env.add_value ~mode:(total_mode ()) binder desc env in
-       let expressions = ref [] and values = ref [] in
-       let constructors = ref [] and labels = ref [] in
-       let locals = Refinement_predicate.bound_idents predicate in
-       let var_name id = "_assume_" ^ Ident.unique_name id in
-       let resolved entries path name =
-         let lid = Longident.Lident name in
-         entries := (lid, path) :: !entries;
-         Location.mkloc lid loc
-       in
-       let value_ident path = resolved values path (Path.last path) in
-       let syntax = Refinement_predicate.untype predicate
-           ~var_name
-           ~value_ident
-           ~function_label:(fun rexp ->
-             (* [-nolabels] formation can check an unlabelled lambda against
-                a labelled arrow. Recover its label from the retained type. *)
-             let rec label ty =
-               match get_desc (expand_head predicate_env ty) with
-               | Tarrow ((label, _, _, _), _, _, _) ->
-                   refinement_argument_label label
-               | Tpoly (body, _) -> label body
-               | _ -> Misc.fatal_error
-                   "Typecore.assume: invalid function evidence"
-             in
-             label rexp.rexp_type)
-           ~constructor_ident:(fun path ->
-             let name = match path with
-               | Pextra_ty (_, Pcstr_ty name) -> name
-               | _ -> Path.last path
-             in
-             resolved constructors path name)
-           ~label_ident:(fun path name ->
-             resolved labels (path, name) name)
-           ~expression:(fun rexp sexp ->
-             let sexp = match rexp.rexp_desc with
-               | Rexp_var id when not (Ident.Set.mem id locals) ->
-                   Ast_helper.Exp.ident ~loc:rexp.rexp_loc
-                     (value_ident (Path.Pident id))
-               | _ -> sexp
-             in
-             expressions := (sexp, rexp.rexp_type) :: !expressions;
-             sexp)
-       in
-       let input : Resolved_predicate.input =
-         { expressions = !expressions; values = !values;
-           constructors = !constructors; labels = !labels;
-           locals = List.map (fun id -> id, var_name id)
-               (Ident.Set.elements locals) }
-       in
-       let predicate, return = Resolved_predicate.with_input input
-           (fun () ->
+       let predicate, return =
+         with_resolved_refinement predicate_env loc predicate (fun syntax ->
              let predicate = type_expect_in_expression predicate_env syntax
                  (mk_expected Predef.type_bool) in
              let return = type_expect_in_expression return_env
