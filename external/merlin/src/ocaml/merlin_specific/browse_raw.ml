@@ -339,7 +339,6 @@ let of_exp_extra (exp, _, _) =
   | Texp_borrowed
   | Texp_ghost_region
   | Texp_refine
-  | Texp_assume
   | Texp_let_refine _ -> id_fold
 let of_expression e = app (Expression e) ** list_fold of_exp_extra e.exp_extra
 
@@ -444,6 +443,7 @@ let rec of_expression_desc loc = function
   | Texp_typed_hole -> id_fold
   | Texp_let (_, vbs, e) -> of_expression e ** list_fold of_value_binding vbs
   | Texp_letmutable (vb, e) -> of_expression e ** of_value_binding vb
+  | Texp_assume (binding, _, _) -> of_expression binding.vb_expr
   | Texp_function { params; body; ret_mode; _ } ->
     list_fold of_function_param params
     ** of_function_body body ** of_modes ret_mode

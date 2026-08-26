@@ -9,7 +9,7 @@
   ["assume_ requires a plain local variable"]
 
   $ $MERLIN single type-enclosing -position 2:17 -extension refinement_types -filename assume.ml <assume.ml | jq -c '.value | map(.type)'
-  ["int","t","int @ total -> t"]
+  ["t","int @ total -> t"]
 
   $ $MERLIN single locate -look-for implementation -position 2:22 -extension refinement_types -filename assume.ml <assume.ml | jq -c '.value.pos'
   {"line":2,"col":6}
