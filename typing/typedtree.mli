@@ -428,6 +428,9 @@ and exp_extra =
         (* NB. If an expression has both [Texp_borrowed] and
         [Texp_ghost_region], we assume the [Texp_borrowed] is inner than
         [Texp_ghost_region]. Currently it's impossible. *)
+  | Texp_assume
+        (** A mandatory refinement check, elaborated to a let and
+            conditional. *)
   | Texp_refine
         (** The source expression was introduced by [refine_]. *)
   | Texp_let_refine of Ident.t * string loc

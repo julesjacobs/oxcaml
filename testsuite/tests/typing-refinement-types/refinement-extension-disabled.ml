@@ -26,3 +26,11 @@ Line 1, characters 17-39:
                      ^^^^^^^^^^^^^^^^^^^^^^
 Error: The extension "refinement_types" is disabled and cannot be used
 |}]
+
+let assumed x : int = assume_ x;;
+[%%expect{|
+Line 1, characters 22-31:
+1 | let assumed x : int = assume_ x;;
+                          ^^^^^^^^^
+Error: The extension "refinement_types" is disabled and cannot be used
+|}]

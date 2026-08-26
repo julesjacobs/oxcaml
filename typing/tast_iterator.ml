@@ -334,7 +334,7 @@ let extra sub = function
   | Texp_poly cto -> Option.iter (sub.typ sub) cto
   | Texp_borrowed -> ()
   | Texp_ghost_region -> ()
-  | Texp_refine -> ()
+  | Texp_refine | Texp_assume -> ()
   | Texp_let_refine (_, name) -> iter_loc sub name
   | Texp_stack -> ()
   | Texp_mode modes -> sub.modes sub modes
