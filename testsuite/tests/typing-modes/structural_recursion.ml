@@ -564,12 +564,13 @@ module Test_type_call = struct
     match n with
     | Z -> true
     | S child ->
-        let x : {x : bool | type_call child} = refine_ true in
+        let value = true in
+        let x : {x : bool | type_call child} = refine_ value in
         let refine_ x = x in x
 end
 [%%expect{|
-Line 6, characters 12-13:
-6 |         let x : {x : bool | type_call child} = refine_ true in
+Line 7, characters 12-13:
+7 |         let x : {x : bool | type_call child} = refine_ value in
                 ^
 Error: This recursive function cannot be total: the recursive function occurs in a type predicate.
 |}]
