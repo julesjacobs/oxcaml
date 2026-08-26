@@ -264,6 +264,7 @@ and exp_extra =
   | Texp_inspected_type of [ `exp ] type_inspection
   | Texp_borrowed
   | Texp_ghost_region
+  | Texp_assume
   | Texp_refine
   | Texp_let_refine of Ident.t * string loc
 

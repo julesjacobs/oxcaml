@@ -646,6 +646,8 @@ and expression_extra i ppf (extra, loc, attrs) =
       line i ppf "Texp_ghost_region\n"
   | Texp_refine ->
       line i ppf "Texp_refine\n"
+  | Texp_assume ->
+      line i ppf "Texp_assume\n"
   | Texp_let_refine (id, name) ->
       line i ppf "Texp_let_refine %a %a %s\n" Ident.print id
         fmt_location name.loc name.txt

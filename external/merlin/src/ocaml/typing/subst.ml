@@ -816,15 +816,22 @@ let rec typexp copy_scope s ty =
       | Trefine { ref_binder; ref_payload; ref_pred } ->
           let ref_payload = typexp copy_scope s ref_payload in
           let ref_binder' = rename_bound_ident s ref_binder in
-          let rename =
-            Ident.Map.add ref_binder ref_binder' s.bound_values
+          (* Retained types and predicate nodes must share the same fresh
+             identities, including binders introduced inside the predicate. *)
+          let s =
+            Ident.Set.fold
+              (fun id s -> add_bound_value id (rename_bound_ident s id) s)
+              (Refinement_predicate.bound_idents ref_pred)
+              (add_bound_value ref_binder ref_binder' s)
           in
           Trefine
             { ref_binder = ref_binder';
               ref_payload;
               ref_pred =
-                Refinement_predicate.map ~rename
-                  ~rename_bound:(rename_bound_ident s)
+                Refinement_predicate.map ~rename:s.bound_values
+                  ~rename_bound:(fun id -> Ident.Map.find id s.bound_values)
+                  ~free_var_path:(fun id ->
+                    Path.Map.find_opt (Pident id) s.values)
                   ~bind_value:(fun path ->
                     match path with
                     | Pident id -> Ident.Map.find_opt id s.bound_values

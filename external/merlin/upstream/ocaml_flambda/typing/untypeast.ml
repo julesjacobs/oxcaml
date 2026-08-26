@@ -466,6 +466,11 @@ let exp_extra sub (extra, loc, attrs) sexp =
     | Texp_borrowed -> Pexp_borrow sexp
     | Texp_ghost_region ->sexp.pexp_desc
     | Texp_refine -> Pexp_refine sexp
+    | Texp_assume -> begin
+        match sexp.pexp_desc with
+        | Pexp_let (_, _, [{ pvb_expr; _ }], _) -> Pexp_assume pvb_expr
+        | _ -> Misc.fatal_error "Untypeast: malformed assume_"
+      end
     | Texp_let_refine (_, name) -> begin
         match sexp.pexp_desc with
         | Pexp_let (Immutable, Nonrecursive,
@@ -595,6 +600,7 @@ let expression sub exp =
                       | Texp_poly _ | Texp_newtype _ | Texp_stack
                       | Texp_inspected_type _ -> [], []
                       | Texp_ghost_region | Texp_borrowed | Texp_refine
+                      | Texp_assume
                       | Texp_let_refine _ -> [], []
                     in
                     new_type_constraints @ ret_type_constraints,

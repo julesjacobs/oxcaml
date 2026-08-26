@@ -451,7 +451,7 @@ let extra sub = function
   | Texp_poly cto -> Texp_poly (Option.map (sub.typ sub) cto)
   | Texp_borrowed as d -> d
   | Texp_ghost_region as d -> d
-  | Texp_refine as d -> d
+  | (Texp_refine | Texp_assume) as d -> d
   | Texp_let_refine (id, name) ->
       Texp_let_refine (id, map_loc sub name)
   | Texp_stack as d -> d
