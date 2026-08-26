@@ -7697,6 +7697,12 @@ and type_expect_
             type_expect env (mode_default (total_mode ())) operand
               (mk_expected ref_payload)
           in
+          begin match operand.exp_desc, operand.exp_extra with
+          | Texp_ident { path = Pident _; _ }, [] -> ()
+          | _ -> raise (Error_forward (Location.errorf ~loc:operand.exp_loc
+              "%a requires a plain local variable"
+              Style.inline_code "refine_"))
+          end;
           rue
             { operand with
               exp_extra =
