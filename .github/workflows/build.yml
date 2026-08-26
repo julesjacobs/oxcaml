@@ -366,6 +366,23 @@ jobs:
             $MATRIX_CONFIG \
             $dissector_config
 
+      - name: Install pinned Z3 for SMT integration tests
+        if: matrix.name == 'default (x86_64-linux)'
+        env:
+          Z3_ARCHIVE: z3-4.16.0-x64-glibc-2.39
+          Z3_SHA256: 7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e
+        run: |
+          cd "$RUNNER_TEMP"
+          curl --fail --location --retry 3 \
+            "https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/$Z3_ARCHIVE.zip" \
+            --output "$Z3_ARCHIVE.zip"
+          echo "$Z3_SHA256  $Z3_ARCHIVE.zip" | sha256sum --check
+          unzip -q "$Z3_ARCHIVE.zip"
+          test "$("$RUNNER_TEMP/$Z3_ARCHIVE/bin/z3" --version)" = \
+            'Z3 version 4.16.0 - 64 bit'
+          echo "$RUNNER_TEMP/$Z3_ARCHIVE/bin" >> "$GITHUB_PATH"
+          echo 'VOX_TEST_Z3=true' >> "$GITHUB_ENV"
+
       - name: Setup for saving core files (Linux)
         if: runner.os == 'Linux'
         run: |
