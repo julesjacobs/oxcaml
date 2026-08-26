@@ -729,20 +729,22 @@ let rec filter_row_fields erase = function
           link_row_field_ext ~inside:f rf_absent; fi
       | _ -> p :: fi
 
-(* Ensure all mode variables are fully determined *)
+(* Defaulting modes and jkinds *)
+let default_mode_and_jkind_variables_in_node ty =
+  match get_desc ty with
+  | Tvar { jkind } | Tunivar { jkind } -> Jkind.default_to_scannable jkind
+  | Tarrow ((_, marg, mret, _), _, _, _) ->
+      ignore (Alloc.zap_to_legacy marg : Alloc.Const.t);
+      ignore (Alloc.zap_to_legacy mret : Alloc.Const.t)
+  | _ -> ()
+
 let remove_mode_and_jkind_variables ty =
   let visited = ref TypeSet.empty in
   let rec go ty =
     if TypeSet.mem ty !visited then () else begin
       visited := TypeSet.add ty !visited;
-      match get_desc ty with
-      | Tvar { jkind } -> Jkind.default_to_scannable jkind
-      | Tunivar { jkind } -> Jkind.default_to_scannable jkind
-      | Tarrow ((_,marg,mret,_),targ,tret,_) ->
-         let _ = Alloc.zap_to_legacy marg in
-         let _ = Alloc.zap_to_legacy mret in
-         go targ; go tret
-      | _ -> iter_type_expr go ty
+      default_mode_and_jkind_variables_in_node ty;
+      iter_type_expr go ty
     end
   in go ty
 
