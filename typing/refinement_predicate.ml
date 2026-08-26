@@ -166,56 +166,56 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
   in
   map_rexp rename rexp
 
-let fold_types f init rexp =
-  let rec expression init rexp =
-    let init = f init rexp.rexp_type in
+let rec iter_pattern f pat =
+  f pat;
+  match pat.rpat_desc with
+  | Rpat_any | Rpat_var _ | Rpat_constant _ -> ()
+  | Rpat_tuple components ->
+      List.iter (fun (_, pat) -> iter_pattern f pat) components
+  | Rpat_construct (_, args) -> List.iter (iter_pattern f) args
+  | Rpat_alias (pat, _) -> iter_pattern f pat
+
+let iter ?(expression = ignore) ?(pattern = ignore) ?(type_expr = ignore)
+    rexp =
+  let rec walk rexp =
+    expression rexp;
+    type_expr rexp.rexp_type;
     match rexp.rexp_desc with
-    | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> init
+    | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> ()
     | Rexp_apply (fn, args) ->
-        List.fold_left
-          (fun init (_, arg) -> expression init arg)
-          (expression init fn) args
+        walk fn;
+        List.iter (fun (_, arg) -> walk arg) args
     | Rexp_tuple components ->
-        List.fold_left
-          (fun init (_, component) -> expression init component)
-          init components
-    | Rexp_construct (_, args) -> List.fold_left expression init args
+        List.iter (fun (_, component) -> walk component) components
+    | Rexp_construct (_, args) -> List.iter walk args
     | Rexp_record (fields, extended)
     | Rexp_record_unboxed_product (fields, extended) ->
-        let init =
-          List.fold_left
-            (fun init (_, _, field) -> expression init field)
-            init fields
-        in
-        Option.fold ~none:init ~some:(expression init) extended
-    | Rexp_array (_, elements) -> List.fold_left expression init elements
-    | Rexp_field (record, _, _) -> expression init record
+        List.iter (fun (_, _, field) -> walk field) fields;
+        Option.iter walk extended
+    | Rexp_array (_, elements) -> List.iter walk elements
+    | Rexp_field (record, _, _) -> walk record
     | Rexp_ifthenelse (cond, ifso, ifnot) ->
-        let init = expression (expression init cond) ifso in
-        Option.fold ~none:init ~some:(expression init) ifnot
-    | Rexp_sequence (first, second) ->
-        expression (expression init first) second
+        walk cond; walk ifso; Option.iter walk ifnot
+    | Rexp_sequence (first, second) -> walk first; walk second
     | Rexp_let ({ rb_type; rb_expr; _ }, body) ->
-        expression (expression (f init rb_type) rb_expr) body
-    | Rexp_fun (_, param_type, body) -> expression (f init param_type) body
+        type_expr rb_type;
+        walk rb_expr;
+        walk body
+    | Rexp_fun (_, param_type, body) -> type_expr param_type; walk body
     | Rexp_match (scrutinee, cases) ->
-        List.fold_left case (expression init scrutinee) cases
-  and case init { rc_lhs; rc_guard; rc_rhs } =
-    let init = pattern init rc_lhs in
-    let init = Option.fold ~none:init ~some:(expression init) rc_guard in
-    expression init rc_rhs
-  and pattern init pat =
-    let init = f init pat.rpat_type in
-    match pat.rpat_desc with
-    | Rpat_any | Rpat_var _ | Rpat_constant _ -> init
-    | Rpat_tuple components ->
-        List.fold_left
-          (fun init (_, pat) -> pattern init pat)
-          init components
-    | Rpat_construct (_, args) -> List.fold_left pattern init args
-    | Rpat_alias (pat, _) -> pattern init pat
+        walk scrutinee;
+        List.iter case cases
+  and case { rc_lhs; rc_guard; rc_rhs } =
+    iter_pattern (fun pat -> pattern pat; type_expr pat.rpat_type) rc_lhs;
+    Option.iter walk rc_guard;
+    walk rc_rhs
   in
-  expression init rexp
+  walk rexp
+
+let fold_types f init rexp =
+  let result = ref init in
+  iter ~type_expr:(fun ty -> result := f !result ty) rexp;
+  !result
 
 (* Alpha-equivalence *)
 
@@ -451,35 +451,9 @@ let untype ?(expression = fun _ exp -> exp)
 
 let exists_rexp pred rexp =
   let exception Found in
-  let rec walk rexp =
-    if pred rexp then raise Found;
-    match rexp.rexp_desc with
-    | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> ()
-    | Rexp_apply (fn, args) ->
-        walk fn;
-        List.iter (fun (_, arg) -> walk arg) args
-    | Rexp_tuple components -> List.iter (fun (_, c) -> walk c) components
-    | Rexp_construct (_, args) -> List.iter walk args
-    | Rexp_record (fields, extended)
-    | Rexp_record_unboxed_product (fields, extended) ->
-        List.iter (fun (_, _, e) -> walk e) fields;
-        Option.iter walk extended
-    | Rexp_array (_, elements) -> List.iter walk elements
-    | Rexp_field (e, _, _) -> walk e
-    | Rexp_ifthenelse (cond, ifso, ifnot) ->
-        walk cond; walk ifso; Option.iter walk ifnot
-    | Rexp_sequence (first, second) -> walk first; walk second
-    | Rexp_let ({ rb_expr; _ }, body) -> walk rb_expr; walk body
-    | Rexp_fun (_, _, body) -> walk body
-    | Rexp_match (scrutinee, cases) ->
-        walk scrutinee;
-        List.iter
-          (fun { rc_guard; rc_rhs; _ } ->
-            Option.iter walk rc_guard;
-            walk rc_rhs)
-          cases
-  in
-  match walk rexp with () -> false | exception Found -> true
+  match iter ~expression:(fun e -> if pred e then raise Found) rexp with
+  | () -> false
+  | exception Found -> true
 
 let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
   let result = ref None in
@@ -500,16 +474,18 @@ let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
              List.exists (fun (path, _, _) -> check path) fields
          | Rexp_field (_, path, _) -> check path
          | Rexp_match (_, cases) ->
-             let rec pat_path p =
+             let exception Found in
+             let pattern p =
                match p.rpat_desc with
-               | Rpat_construct (path, args) ->
-                   check path
-                   || List.exists pat_path args
-               | Rpat_alias (p, _) -> pat_path p
-               | Rpat_tuple ps -> List.exists (fun (_, p) -> pat_path p) ps
-               | Rpat_any | Rpat_var _ | Rpat_constant _ -> false
+               | Rpat_construct (path, _) when check path -> raise Found
+               | _ -> ()
              in
-             List.exists (fun c -> pat_path c.rc_lhs) cases
+             begin match
+               List.iter (fun c -> iter_pattern pattern c.rc_lhs) cases
+             with
+             | () -> false
+             | exception Found -> true
+             end
          | _ -> false)
        rexp
      : bool);
@@ -535,58 +511,18 @@ let find_ident ids rexp =
       !found
 
 let bound_idents rexp =
-  let rec pattern ids pat =
+  let ids = ref Ident.Set.empty in
+  let bind id = ids := Ident.Set.add id !ids in
+  let pattern pat =
     match pat.rpat_desc with
-    | Rpat_any | Rpat_constant _ -> ids
-    | Rpat_var id -> Ident.Set.add id ids
-    | Rpat_tuple components ->
-        List.fold_left
-          (fun ids (_, pat) -> pattern ids pat)
-          ids components
-    | Rpat_construct (_, args) -> List.fold_left pattern ids args
-    | Rpat_alias (pat, id) -> Ident.Set.add id (pattern ids pat)
+    | Rpat_var id | Rpat_alias (_, id) -> bind id
+    | Rpat_any | Rpat_constant _ | Rpat_tuple _ | Rpat_construct _ -> ()
   in
-  let rec expression ids rexp =
+  let expression rexp =
     match rexp.rexp_desc with
-    | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> ids
-    | Rexp_apply (fn, args) ->
-        List.fold_left
-          (fun ids (_, arg) -> expression ids arg)
-          (expression ids fn) args
-    | Rexp_tuple components ->
-        List.fold_left
-          (fun ids (_, component) -> expression ids component)
-          ids components
-    | Rexp_construct (_, args) -> List.fold_left expression ids args
-    | Rexp_record (fields, extended)
-    | Rexp_record_unboxed_product (fields, extended) ->
-        let ids =
-          List.fold_left
-            (fun ids (_, _, field) -> expression ids field)
-            ids fields
-        in
-        Option.fold ~none:ids ~some:(expression ids) extended
-    | Rexp_array (_, elements) -> List.fold_left expression ids elements
-    | Rexp_field (record, _, _) -> expression ids record
-    | Rexp_ifthenelse (cond, ifso, ifnot) ->
-        let ids = expression (expression ids cond) ifso in
-        Option.fold ~none:ids ~some:(expression ids) ifnot
-    | Rexp_sequence (first, second) ->
-        expression (expression ids first) second
-    | Rexp_let ({ rb_ident; rb_expr; _ }, body) ->
-        expression
-          (Ident.Set.add rb_ident (expression ids rb_expr))
-          body
-    | Rexp_fun (param, _, body) ->
-        expression (Ident.Set.add param ids) body
-    | Rexp_match (scrutinee, cases) ->
-        List.fold_left
-          (fun ids { rc_lhs; rc_guard; rc_rhs } ->
-             let ids = pattern ids rc_lhs in
-             let ids =
-               Option.fold ~none:ids ~some:(expression ids) rc_guard
-             in
-             expression ids rc_rhs)
-          (expression ids scrutinee) cases
+    | Rexp_let ({ rb_ident; _ }, _) -> bind rb_ident
+    | Rexp_fun (param, _, _) -> bind param
+    | _ -> ()
   in
-  expression Ident.Set.empty rexp
+  iter ~expression ~pattern rexp;
+  !ids
