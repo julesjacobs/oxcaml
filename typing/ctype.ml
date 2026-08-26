@@ -8690,20 +8690,12 @@ let substitute_refinement_ident id replacement ty =
     ty
 
 let refinement_scope_escape_class_type ids cty =
-  let rec visit_class_type visit = function
-    | Cty_constr (_, args, cty) ->
-        List.iter visit args;
-        visit_class_type visit cty
-    | Cty_signature sign ->
-        visit sign.csig_self;
-        visit sign.csig_self_row;
-        Vars.iter (fun _ (_, _, ty) -> visit ty) sign.csig_vars;
-        Meths.iter (fun _ (_, _, ty) -> visit ty) sign.csig_meths
-    | Cty_arrow (_, arg, cty) ->
-        visit arg;
-        visit_class_type visit cty
-  in
-  refinement_scope_escape_in ids (fun visit -> visit_class_type visit cty)
+  refinement_scope_escape_in ids (fun visit ->
+    let it =
+      { Btype.type_iterators_without_type_expr with
+        it_type_expr = (fun _ ty -> visit ty) }
+    in
+    it.it_class_type it cty)
 
 let () = nondep_type' := nondep_type
 
