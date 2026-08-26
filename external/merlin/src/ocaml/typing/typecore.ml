@@ -6855,7 +6855,6 @@ let add_zero_alloc_attribute expr attributes =
     end
   | _ -> expr
 
-<<<<<<< HEAD
 let with_primitive_mode_checks ?defer f =
   let checks = ref [] in
   let result = f (fun check -> checks := check :: !checks) in
@@ -6864,11 +6863,6 @@ let with_primitive_mode_checks ?defer f =
     (List.rev !checks);
   result
 
-let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
-    env expected_mode sexp =
-||||||| parent of 23c42e3f1 (Automated commit: Import compiler changes from 33f2d387de8e060097505d1536688f849f4bde87)
-let rec type_exp ?recarg ?(overwrite=No_overwrite) env expected_mode sexp =
-=======
 let refinement_scope_binders (exp : expression) =
   let add ids id = Ident.Set.add id ids in
   let add_pattern ids pat =
@@ -7032,8 +7026,8 @@ let check_refinement_scope_escape env exp =
                 Style.inline_code (Ident.name id)))
   end
 
-let rec type_exp ?recarg ?(overwrite=No_overwrite) env expected_mode sexp =
->>>>>>> 23c42e3f1 (Automated commit: Import compiler changes from 33f2d387de8e060097505d1536688f849f4bde87)
+let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
+    env expected_mode sexp =
   (* We now delegate everything to type_expect *)
   type_expect ?recarg ?defer_primitive_mode ~overwrite env expected_mode sexp
     (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
@@ -7051,66 +7045,13 @@ and check_layout_args_empty ~loc ~env layout_args ctx =
 
 and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
       (expected_mode : expected_mode) sexp ty_expected_explained =
-<<<<<<< HEAD
-  Msupport.with_saved_types
-    ~warning_attribute:sexp.pexp_attributes ?save_part:None
-      (fun () ->
-<<<<<<< Merlin:jujacobs/vox/refinement-type-former
-        let saved = save_levels () in
-        try
-          type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
-            expected_mode sexp ty_expected_explained
-        with exn ->
-          Msupport.erroneous_type_register ty_expected_explained.ty;
-          raise_error exn;
-          set_levels saved;
-          let loc = sexp.pexp_loc in
-          create_merlin_type_error_node loc env ty_expected_explained.ty
-            ~attributes:(Msupport.recovery_attributes sexp.pexp_attributes))
-||||||| Compiler:last-imported
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
-      )
-  in
-  Cmt_format.set_saved_types
-    (Cmt_format.Partial_expression exp :: previous_saved_types);
-  exp
-=======
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
-      )
-||||||| parent of 39be72dbb (Resolve Merlin refinement import)
-  Msupport.with_saved_types
-    ~warning_attribute:sexp.pexp_attributes ?save_part:None
-      (fun () ->
-<<<<<<< Merlin:jujacobs/vox/refinement-type-former
-        let saved = save_levels () in
-        try
-          type_expect_ ?recarg ~overwrite env
-            expected_mode sexp ty_expected_explained
-        with exn ->
-          Msupport.erroneous_type_register ty_expected_explained.ty;
-          raise_error exn;
-          set_levels saved;
-          let loc = sexp.pexp_loc in
-          create_merlin_type_error_node loc env ty_expected_explained.ty
-            ~attributes:(Msupport.recovery_attributes sexp.pexp_attributes))
-||||||| Compiler:last-imported
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
-      )
-  in
-  Cmt_format.set_saved_types
-    (Cmt_format.Partial_expression exp :: previous_saved_types);
-  exp
-=======
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
-      )
-=======
   let exp =
     Msupport.with_saved_types
       ~warning_attribute:sexp.pexp_attributes ?save_part:None
         (fun () ->
           let saved = save_levels () in
           try
-            type_expect_ ?recarg ~overwrite env
+            type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
               expected_mode sexp ty_expected_explained
           with exn ->
             Msupport.erroneous_type_register ty_expected_explained.ty;
@@ -7119,7 +7060,6 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
             let loc = sexp.pexp_loc in
             create_merlin_type_error_node loc env ty_expected_explained.ty
               ~attributes:(Msupport.recovery_attributes sexp.pexp_attributes))
->>>>>>> 39be72dbb (Resolve Merlin refinement import)
   in
   check_refinement_scope_escape env exp;
   exp
