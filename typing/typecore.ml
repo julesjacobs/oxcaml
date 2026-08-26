@@ -5415,6 +5415,8 @@ let rec is_nonexpansive exp =
       is_nonexpansive body
   | Texp_letmutable(pat_exp, body) ->
       is_nonexpansive pat_exp.vb_expr && is_nonexpansive body
+  | Texp_assume (binding, _, body) ->
+      is_nonexpansive binding.vb_expr && is_nonexpansive body
   | Texp_apply(e, (_,Omitted _)::el, _, _, _, _) ->
       is_nonexpansive e && List.for_all is_nonexpansive_arg (List.map snd el)
   | Texp_match(e, _, cases, _, _) ->
@@ -5675,7 +5677,7 @@ let rec maybe_computation exp =
   | Texp_override _
   | Texp_letmodule _
   | Texp_letexception _
-  | Texp_assert _
+  | Texp_assert _ | Texp_assume _
   | Texp_lazy _
   | Texp_object _
   | Texp_pack _
@@ -6114,7 +6116,8 @@ let check_partial_application ~statement exp =
             | Texp_list_comprehension _ | Texp_array_comprehension _
             | Texp_while _ | Texp_for _ | Texp_instvar _
             | Texp_mutvar _ | Texp_setmutvar _
-            | Texp_setinstvar _ | Texp_override _ | Texp_assert _
+            | Texp_setinstvar _ | Texp_override _
+            | Texp_assert _ | Texp_assume _
             | Texp_lazy _ | Texp_object _ | Texp_pack _ | Texp_unreachable
             | Texp_extension_constructor _ | Texp_ifthenelse (_, _, None)
             | Texp_probe _ | Texp_probe_is_enabled _ | Texp_src_pos
@@ -6904,7 +6907,7 @@ let refinement_scope_binders (exp : expression) =
   | Texp_let (_, bindings, _) ->
       List.fold_left add Ident.Set.empty
         (Typedtree.let_bound_idents bindings)
-  | Texp_letmutable (binding, _) ->
+  | Texp_letmutable (binding, _) | Texp_assume (binding, _, _) ->
       List.fold_left add Ident.Set.empty
         (Typedtree.let_bound_idents [binding])
   | Texp_function { params; body; _ } ->
@@ -7001,7 +7004,7 @@ let refinement_escape_roots env ~roots:initial_roots visit =
            | Texp_array_comprehension _ | Texp_atomic_loc _
            | Texp_ifthenelse _ | Texp_sequence _ | Texp_while _ | Texp_for _
            | Texp_send _ | Texp_new _ | Texp_letmodule _
-           | Texp_letexception _ | Texp_assert _ | Texp_lazy _
+           | Texp_letexception _ | Texp_assert _ | Texp_assume _ | Texp_lazy _
            | Texp_object _ | Texp_pack _ | Texp_unreachable
            | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
            | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
@@ -7453,7 +7456,7 @@ and type_expect_
           let exp = !type_assume env expected_mode loc operand refinement in
           re { exp with
                exp_type = ty_expected;
-               exp_extra = [Texp_assume, loc, sexp.pexp_attributes];
+               exp_extra = [];
                exp_attributes = sexp.pexp_attributes }
       | _ -> raise (Error_forward (Location.errorf ~loc
           "%a requires a known refinement type from its context"
@@ -14710,7 +14713,8 @@ let refinement_expression_of_typed bound_values binder predicate =
       | Texp_while _ | Texp_for _ | Texp_send _ | Texp_new _
       | Texp_mutvar _ | Texp_setinstvar _
       | Texp_setmutvar _ | Texp_override _ | Texp_letmodule _
-      | Texp_letexception _ | Texp_assert _ | Texp_lazy _ | Texp_object _
+      | Texp_letexception _ | Texp_assert _ | Texp_assume _
+      | Texp_lazy _ | Texp_object _
       | Texp_pack _ | Texp_letop _ | Texp_unreachable
       | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
       | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
@@ -14723,8 +14727,7 @@ let refinement_expression_of_typed bound_values binder predicate =
          | Texp_inspected_type _ -> result
          | Texp_constraint _ | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
-         | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine
-         | Texp_assume ->
+         | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine ->
              unsupported_refinement_syntax loc "This expression annotation"
          | Texp_let_refine (id, _) -> begin
              match result.rexp_desc with
@@ -14871,7 +14874,7 @@ let () =
            locals = List.map (fun id -> id, var_name id)
                (Ident.Set.elements locals) }
        in
-       let predicate, return, failure = Resolved_predicate.with_input input
+       let predicate, return = Resolved_predicate.with_input input
            (fun () ->
              let predicate = type_expect_in_expression predicate_env syntax
                  (mk_expected Predef.type_bool) in
@@ -14880,16 +14883,7 @@ let () =
                  (Ast_helper.Exp.ident ~loc
                     (Location.mkloc (Longident.Lident (Ident.name binder)) loc))
                  (mk_expected ref_payload) in
-             (* [assert false] is an unconditional raise, even with -noassert.
-                The predicate itself must not be an ordinary assertion. *)
-             let failure = type_expect_in_expression return_env
-                 (Ast_helper.Exp.assert_ ~loc
-                    (Ast_helper.Exp.construct ~loc
-                       (Location.mkloc (Longident.Lident "false") loc) None))
-                 (mk_expected ref_payload) in
-             predicate, return, failure) in
-       let body = { return with
-           exp_desc = Texp_ifthenelse (predicate, return, Some failure) } in
+             predicate, return) in
        let sort = match desc.val_kind with
          | Val_reg sort -> sort
          | _ -> Misc.fatal_error "Typecore.assume: invalid binder"
@@ -14908,7 +14902,7 @@ let () =
            vb_rec_kind = Value_rec_types.Dynamic; vb_sort = sort;
            vb_attributes = []; vb_loc = loc }
        in
-       { body with exp_desc = Texp_let (Nonrecursive, [binding], body);
+       { return with exp_desc = Texp_assume (binding, predicate, return);
                    exp_env = env; exp_loc = loc });
   Typetexp.add_dependent_binder :=
     (fun env binder payload loc ->

@@ -451,7 +451,7 @@ let extra sub = function
   | Texp_poly cto -> Texp_poly (Option.map (sub.typ sub) cto)
   | Texp_borrowed as d -> d
   | Texp_ghost_region as d -> d
-  | (Texp_refine | Texp_assume) as d -> d
+    | Texp_refine as d -> d
   | Texp_let_refine (id, name) ->
       Texp_let_refine (id, map_loc sub name)
   | Texp_stack as d -> d
@@ -719,6 +719,10 @@ let expr sub x =
         )
     | Texp_assert (exp, loc) ->
         Texp_assert (sub.expr sub exp, loc)
+    | Texp_assume (binding, predicate, body) ->
+        Texp_assume
+          (sub.value_binding sub binding, sub.expr sub predicate,
+           sub.expr sub body)
     | Texp_lazy exp ->
         Texp_lazy (sub.expr sub exp)
     | Texp_object (cl, sl) ->
