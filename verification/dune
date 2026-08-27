@@ -4,6 +4,12 @@
  (modules vox_smt))
 
 (library
+ (name vox_vc)
+ (wrapped false)
+ (modules vox_vc)
+ (libraries vox_smt ocamlfrontend))
+
+(library
  (name vox_smt_solver)
  (wrapped false)
  (modules vox_smt_solver)
@@ -12,3 +18,34 @@
   (language c)
   (names monotonic_clock))
  (enabled_if (= %{context_name} main)))
+(install
+ (section lib)
+ (package ocaml)
+ (enabled_if (= %{context_name} main))
+ (files
+  (vox_smt.cma as compiler-libs/vox_smt.cma)
+  (vox_smt.cmxa as compiler-libs/vox_smt.cmxa)
+  (vox_smt.a as compiler-libs/vox_smt.a)
+  (.vox_smt.objs/byte/vox_smt.cmi as compiler-libs/vox_smt.cmi)
+  (.vox_smt.objs/byte/vox_smt.cmt as compiler-libs/vox_smt.cmt)
+  (.vox_smt.objs/native/vox_smt.cmx as compiler-libs/vox_smt.cmx)
+  (vox_vc.cma as compiler-libs/vox_vc.cma)
+  (vox_vc.cmxa as compiler-libs/vox_vc.cmxa)
+  (vox_vc.a as compiler-libs/vox_vc.a)
+  (.vox_vc.objs/byte/vox_vc.cmi as compiler-libs/vox_vc.cmi)
+  (.vox_vc.objs/byte/vox_vc.cmt as compiler-libs/vox_vc.cmt)
+  (.vox_vc.objs/native/vox_vc.cmx as compiler-libs/vox_vc.cmx)
+  (vox_smt_solver.cma as compiler-libs/vox_smt_solver.cma)
+  (vox_smt_solver.cmxa as compiler-libs/vox_smt_solver.cmxa)
+  (vox_smt_solver.a as compiler-libs/vox_smt_solver.a)
+  (.vox_smt_solver.objs/byte/vox_smt_solver.cmi as compiler-libs/vox_smt_solver.cmi)
+  (.vox_smt_solver.objs/byte/vox_smt_solver.cmt as compiler-libs/vox_smt_solver.cmt)
+  (.vox_smt_solver.objs/native/vox_smt_solver.cmx as compiler-libs/vox_smt_solver.cmx)
+  (libvox_smt_solver_stubs.a as compiler-libs/libvox_smt_solver_stubs.a)
+ ))
+
+(install
+ (section lib)
+ (package ocaml)
+ (enabled_if (= %{context_name} main))
+ (files (dllvox_smt_solver_stubs.so as stublibs/dllvox_smt_solver_stubs.so)))

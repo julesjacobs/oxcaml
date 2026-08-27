@@ -1,4 +1,5 @@
 (* TEST
+ has-z3;
  flags = "-extension refinement_types -no-ikinds";
  expect;
 *)
@@ -8,7 +9,7 @@ type total_function = { f : unit -> unit | true };;
 type total_function = {f : unit -> unit | true}
 |}]
 
-let wrapped : total_function = refine_ (fun () -> ());;
+let wrapped : total_function = let raw = fun () -> () in refine_ raw;;
 [%%expect{|
 val wrapped : total_function = <fun>
 |}]
