@@ -598,6 +598,10 @@ a loop) *)
 val add_const_closure_lock : ?ghost:bool -> Mode.Hint.pinpoint ->
   Mode.Value.Comonadic.Const.t -> t -> t
 
+(** Restrict lexical captures to values usable by a total, stateless and
+    portable computation. *)
+val add_total_closure_lock : Mode.Hint.pinpoint -> t -> t
+
 val add_region_lock : t -> t
 val add_exclave_lock : t -> t
 val add_unboxed_lock : t -> t

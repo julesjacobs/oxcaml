@@ -76,6 +76,7 @@ exception Moregen  of moregen_error
 exception Subtype  of Subtype.error
 
 exception Escape of type_expr escape
+exception Refinement_scope_escape of Ident.t
 
 (* For local use: throw the appropriate exception.  Can be passed into local
    functions as a parameter *)
@@ -173,6 +174,90 @@ let current_level = s_ref 0
 let nongen_level = s_ref 0
 let global_level = s_ref 0
 let saved_level = s_ref []
+
+let refinement_value_scopes = s_table Hashtbl.create 17
+module Refinement_scope_dependencies =
+  Ephemeron.K1.Make (Types.TransientTypeOps)
+
+let refinement_scope_dependencies =
+  s_table Refinement_scope_dependencies.create 251
+
+let in_refinement_predicate = s_ref false
+
+(* A refinement node has two independent scope contributions.  The ordinary
+   type/GADT contribution is stored in [ref_structural_scope].  This table
+   caches the greatest free term dependency in its predicate.  Predicate
+   substitution can lower the latter, so it must be recomputed instead of
+   folded into the monotone structural contribution. *)
+
+let refinement_scopes_enabled () =
+  may_have_refinement_types ()
+  || Language_extension.is_enabled Refinement_types
+
+let may_track_refinement_scopes () =
+  refinement_scopes_enabled () && not !in_refinement_predicate
+
+let with_refinement_predicate_scope f =
+  let previous = !in_refinement_predicate in
+  in_refinement_predicate := true;
+  Fun.protect f ~finally:(fun () -> in_refinement_predicate := previous)
+
+let register_refinement_value_scope ~level ids =
+  if refinement_scopes_enabled () then begin
+    let level =
+      if !in_refinement_predicate then Ident.lowest_scope else level
+    in
+    List.iter (fun id -> Hashtbl.replace !refinement_value_scopes id level) ids
+  end
+
+let direct_refinement_scope_dependency ty =
+  let ty = Transient_expr.repr ty in
+  match
+    Refinement_scope_dependencies.find !refinement_scope_dependencies
+      ty
+  with
+  | dependency -> Some dependency
+  | exception Not_found -> None
+
+let refresh_refinement_scope ty
+    { ref_structural_scope; ref_binder; ref_payload = _; ref_pred } =
+  let locally_bound =
+    Ident.Set.add ref_binder (Refinement_predicate.bound_idents ref_pred)
+  in
+  register_refinement_value_scope ~level:Ident.lowest_scope
+    (Ident.Set.elements locally_bound);
+  let dependency = ref None in
+  let note id =
+    let scope =
+      match Hashtbl.find_opt !refinement_value_scopes id with
+      | Some scope -> scope
+      | None -> Ident.scope id
+    in
+    match !dependency with
+    | Some (_, previous_scope) when previous_scope >= scope -> ()
+    | None | Some _ -> dependency := Some (id, scope)
+  in
+  Refinement_predicate.iter_scoped_dependencies
+    ~bound:(Ident.Set.singleton ref_binder)
+    ~ident:note ~type_expr:(fun ~bound:_ _ -> ()) ref_pred;
+  let ty = Transient_expr.type_expr ty in
+  begin match !dependency with
+  | None ->
+      Refinement_scope_dependencies.remove !refinement_scope_dependencies
+        (Transient_expr.coerce ty);
+      set_scope ty ref_structural_scope
+  | Some ((_, scope) as dependency) ->
+      Refinement_scope_dependencies.replace !refinement_scope_dependencies
+        (Transient_expr.coerce ty) dependency;
+      set_scope ty (Int.max ref_structural_scope scope)
+  end
+
+let () =
+  Types.set_type_desc_observer (fun ty ->
+    match Transient_expr.get_desc ty with
+    | Trefine refinement -> refresh_refinement_scope ty refinement
+    | _ ->
+        Refinement_scope_dependencies.remove !refinement_scope_dependencies ty)
 
 let get_current_level () = !current_level
 let init_def level = current_level := level; nongen_level := level
@@ -1042,7 +1127,7 @@ let rec copy_spine copy_scope ty =
   | Tof_kind _
   | Tbox _ -> ty
   | ( Tarrow _ | Tpoly _ | Trepr _ | Ttuple _ | Tunboxed_tuple _ | Tpackage _
-    | Tconstr _ | Tmod _ ) as desc ->
+    | Tconstr _ | Tmod _ | Trefine _ ) as desc ->
       let level = get_level ty in
       if level < !current_level || level = generic_level then ty else
       let t =
@@ -1068,6 +1153,13 @@ let rec copy_spine copy_scope ty =
           Tconstr (path, List.map copy_rec tyl, ref Mnil)
       | Tmod (ty, mod_bounds) ->
           Tmod (copy_rec ty, mod_bounds)
+      | Trefine refinement ->
+          Trefine
+            { refinement with
+              ref_payload = copy_rec refinement.ref_payload;
+              ref_pred =
+                Refinement_predicate.map ~type_expr:copy_rec
+                  refinement.ref_pred }
       | _ -> assert false
       in
       Transient_expr.set_stub_desc t desc';
@@ -1100,6 +1192,13 @@ let rec normalize_package_path env p =
           normalize_package_path env (Path.Pdot (p1', s))
       | _ -> p
 
+let iter_type_expr_with_refinement_types f ty =
+  iter_type_expr f ty;
+  match get_desc ty with
+  | Trefine { ref_pred; _ } ->
+      ignore (Refinement_predicate.fold_types (fun () ty -> f ty) () ref_pred)
+  | _ -> ()
+
 let rec check_scope_escape mark env level ty =
   let orig_level = get_level ty in
   if try_mark_node mark ty then begin
@@ -1120,8 +1219,14 @@ let rec check_scope_escape mark env level ty =
           (newty2 ~level:orig_level
             (Tpackage {pack with pack_path = p'}))
     | _ ->
-        iter_type_expr_with_stages
-          (fun env -> check_scope_escape mark env level) env ty
+        begin match get_desc ty with
+        | Trefine _ ->
+            iter_type_expr_with_refinement_types
+              (check_scope_escape mark env level) ty
+        | _ ->
+            iter_type_expr_with_stages
+              (fun env -> check_scope_escape mark env level) env ty
+        end
     end;
   end
 
@@ -1132,12 +1237,28 @@ let check_scope_escape env level ty =
     raise (Escape { e with context = Some ty })
   end
 
+let structural_scope ty =
+  match get_desc ty with
+  | Trefine { ref_structural_scope; _ } -> ref_structural_scope
+  | _ -> get_scope ty
+
 let rec update_scope scope ty =
-  if get_scope ty < scope then begin
+  let needs_update =
+    match get_desc ty with
+    | Trefine { ref_structural_scope; _ } -> ref_structural_scope < scope
+    | _ -> get_scope ty < scope
+  in
+  if needs_update then begin
     if get_level ty < scope then raise_scope_escape_exn ty;
-    set_scope ty scope;
+    begin match get_desc ty with
+    | Trefine refinement ->
+        refinement.ref_structural_scope <- scope;
+        refresh_refinement_scope (Transient_expr.repr ty) refinement
+    | _ -> set_scope ty scope
+    end;
     (* Only recurse in principal mode as this is not necessary for soundness *)
-    if !Clflags.principal then iter_type_expr (update_scope scope) ty
+    if !Clflags.principal then
+      iter_type_expr_with_refinement_types (update_scope scope) ty
   end
 
 let update_scope_for tr_exn scope ty =
@@ -1156,7 +1277,12 @@ let update_scope_for tr_exn scope ty =
 let rec update_level env level expand ty =
   let ty_level = get_level ty in
   if ty_level > level then begin
-    if level < get_scope ty then raise_scope_escape_exn ty;
+    if level < get_scope ty then begin
+      match direct_refinement_scope_dependency ty with
+      | Some (id, dependency_scope) when level < dependency_scope ->
+          raise (Refinement_scope_escape id)
+      | _ -> raise_scope_escape_exn ty
+    end;
     let set_level () =
       set_level ty level;
       if ty_level = generic_level then
@@ -1214,8 +1340,53 @@ let rec update_level env level expand ty =
     | _ ->
         set_level ();
         (* XXX what about abbreviations in Tconstr ? *)
-        iter_type_expr_with_stages
-          (fun env -> update_level env level expand) env ty
+        begin match get_desc ty with
+        | Trefine _ ->
+            iter_type_expr_with_refinement_types
+              (update_level env level expand) ty
+        | _ ->
+            iter_type_expr_with_stages
+              (fun env -> update_level env level expand) env ty
+        end
+  end
+
+let check_refinement_level_escape_in level visit_root =
+  let visited = Hashtbl.create 17 in
+  let rec visit ty =
+    if get_level ty > level then begin
+      let key = get_id ty in
+      if not (Hashtbl.mem visited key) then begin
+        Hashtbl.add visited key ();
+        begin match direct_refinement_scope_dependency ty with
+        | Some (id, dependency_scope) when level < dependency_scope ->
+            raise (Refinement_scope_escape id)
+        | None | Some _ -> ()
+        end;
+        match get_desc ty with
+        | Trefine _ -> iter_type_expr_with_refinement_types visit ty
+        | _ -> iter_type_expr visit ty
+      end
+    end
+  in
+  visit_root visit
+
+let check_refinement_class_level_escape level cty =
+  if may_have_refinement_types () then begin
+    let rec visit_class_type visit = function
+      | Cty_constr (_, args, cty) ->
+          List.iter visit args;
+          visit_class_type visit cty
+      | Cty_signature sign ->
+          visit sign.csig_self;
+          visit sign.csig_self_row;
+          Vars.iter (fun _ (_, _, ty) -> visit ty) sign.csig_vars;
+          Meths.iter (fun _ (_, _, ty) -> visit ty) sign.csig_meths
+      | Cty_arrow (_, arg, cty) ->
+          visit arg;
+          visit_class_type visit cty
+    in
+    check_refinement_level_escape_in level
+      (fun visit -> visit_class_type visit cty)
   end
 
 (* First try without expanding, then expand everything,
@@ -1225,9 +1396,17 @@ let update_level env level ty =
     let snap = snapshot () in
     try
       update_level env level false ty
-    with Escape _ ->
-      backtrack snap;
-      update_level env level true ty
+    with
+    | Refinement_scope_escape _ as exn ->
+        backtrack snap;
+        raise exn
+    | Escape _ ->
+        backtrack snap;
+        begin try update_level env level true ty with
+        | Refinement_scope_escape _ as exn ->
+            backtrack snap;
+            raise exn
+        end
   end
 
 let update_level_for tr_exn env level ty =
@@ -2324,7 +2503,7 @@ let expand_abbrev_gen kind find_type_expansion env ty =
           (* For gadts, remember type as non exportable *)
           (* The ambiguous level registered for ty' should be the highest *)
           (* if !trace_gadt_instances then begin *)
-          let scope = Int.max lv (get_scope ty) in
+          let scope = Int.max lv (structural_scope ty) in
           update_scope scope ty;
           update_scope scope ty';
           ty'
@@ -2465,6 +2644,8 @@ and try_reduce_quote_eval env t =
   let try_reduce_poly env t = if is_Tpoly t then try_reduce_once env t else t in
   match get_desc t with
   | Tvar _ | Tunivar _ -> raise Cannot_expand
+  (* Refinements are rigid; quoted refined types do not reduce further. *)
+  | Trefine _ -> raise Cannot_expand
   (* [<[t1 -> t2]> eval]  ==>  [<[t1]> eval -> <[t2]> eval] *)
   | Tarrow (a, t1, t2, c) ->
     (* Reduce the parameter type's [Tpoly] immediately *)
@@ -2783,7 +2964,7 @@ let rec extract_concrete_typedecl env ty =
   | Tquote_eval ty -> extract_concrete_typedecl (incr_stage env) ty
   | Tbox ty -> extract_concrete_typedecl env ty
   | Tarrow _ | Ttuple _ | Tunboxed_tuple _ | Tobject _ | Tfield _ | Tnil
-  | Tvariant _ | Tpackage _ | Tof_kind _ -> Has_no_typedecl
+  | Tvariant _ | Tpackage _ | Tof_kind _ | Trefine _ -> Has_no_typedecl
   | Tvar _ | Tunivar _ -> May_have_typedecl
   | Tlink _ | Tsubst _ -> assert false
 
@@ -2980,6 +3161,9 @@ let contained_without_boxing env ty =
   | Tpoly (ty, _) -> [ty]
   | Tmod (ty, _) -> [ty]
   | Trepr (_, _) ->  Misc.fatal_error "Ctype.contained_without_boxing: repr"
+  | Trefine { ref_payload; _ } ->
+    (* The payload determines the runtime representation. *)
+    [ref_payload]
   | Tvar _ | Tarrow _ | Ttuple _ | Tobject _ | Tfield _ | Tnil | Tlink _
   | Tsubst _ | Tvariant _ | Tunivar _ | Tpackage _ | Tof_kind _ | Tbox _
   | Tquote _ | Tsplice _ | Tquote_eval _ -> []
@@ -3253,6 +3437,9 @@ and estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty =
     |> estimate_type_jkind ~expand_components ~ignore_mod_bounds env
   | Trepr (ty, _sort_vars) ->
     estimate_type_jkind ~expand_components ~ignore_mod_bounds env ty
+  | Trefine { ref_payload; _ } ->
+    estimate_type_jkind ~expand_components ~ignore_mod_bounds env ref_payload
+    |> Ikind.enforce_refinement_crossings
   | Tof_kind jkind ->
     (* A [Tof_kind] is substitued for existential [Tvar]s or [Tunivar]s bound in
        a [Tpoly] that would escape their scope. In both cases, we can never
@@ -4562,6 +4749,11 @@ let rec mcomp type_pairs env t1 t2 =
           when compatible_labels ~in_pattern_mode:true l1 l2 ->
             mcomp type_pairs env t1 t2;
             mcomp type_pairs env u1 u2;
+        | (Trefine r1, Trefine r2, _, _) ->
+            (* Only the payloads are compared: returning without raising
+               means "possibly compatible", which is always sound, and the
+               predicates carry no head structure to refute. *)
+            mcomp type_pairs env r1.ref_payload r2.ref_payload
         | (Ttuple tl1, Ttuple tl2, _, _) ->
             mcomp_labeled_list type_pairs env tl1 tl2
         (*
@@ -5039,7 +5231,7 @@ let unify1_var uenv t1 t2 =
       begin
         try
           update_level env (get_level t1) t2;
-          update_scope (get_scope t1) t2;
+          update_scope (structural_scope t1) t2;
         with Escape e ->
           raise_for Unify (Escape e)
       end;
@@ -5086,6 +5278,17 @@ let unify3_var uenv jkind1 t1' t2 t2' =
         end;
         record_equation uenv t1' t2'
       end
+
+let normalize_refinement_predicate env =
+  Refinement_predicate.map
+    ~value_path:(Env.normalize_value_path None env)
+    ~constructor_path:(Env.normalize_value_path None env)
+    ~type_path:(Env.normalize_type_path None env)
+
+let refinement_predicates_equal env ~pairs pred1 pred2 =
+  Refinement_predicate.equal ~pairs
+    (normalize_refinement_predicate env pred1)
+    (normalize_refinement_predicate env pred2)
 
 (*
    1. When unifying two non-abbreviated types, one type is made a link
@@ -5138,7 +5341,7 @@ let rec unify uenv t1 t2 =
     | (Tunivar { jkind = k1 }, Tunivar { jkind = k2 }) ->
         unify_univar_for Unify (get_env uenv) t1 t2 k1 k2 !univar_pairs;
         update_level_for Unify (get_env uenv) (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         link_type t1 t2
     | (Tconstr (p1, [], a1), Tconstr (p2, [], a2))
           when Path.same p1 p2
@@ -5148,7 +5351,7 @@ let rec unify uenv t1 t2 =
             && not (has_cached_expansion p1 !a1
                  || has_cached_expansion p2 !a2) ->
         update_level_for Unify (get_env uenv) (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         link_type t1 t2
     | (Tconstr _, Tconstr _) when Env.has_local_constraints (get_env uenv) ->
         unify2_rec uenv t1 t1 t2 t2
@@ -5156,9 +5359,13 @@ let rec unify uenv t1 t2 =
         unify2 uenv t1 t2
     end;
     reset_trace_gadt_instances reset_tracing;
-  with Unify_trace trace ->
-    reset_trace_gadt_instances reset_tracing;
-    raise_trace_for Unify (Diff {got = t1; expected = t2} :: trace)
+  with
+  | Unify_trace trace ->
+      reset_trace_gadt_instances reset_tracing;
+      raise_trace_for Unify (Diff {got = t1; expected = t2} :: trace)
+  | Refinement_scope_escape _ as exn ->
+      reset_trace_gadt_instances reset_tracing;
+      raise exn
 
 and unify2 uenv t1 t2 = unify2_expand uenv t1 t1 t2 t2
 
@@ -5170,7 +5377,7 @@ and unify2_rec uenv t10 t1 t20 t2 =
       && not (has_cached_expansion p1 !a1 || has_cached_expansion p2 !a2)
       then begin
         update_level_for Unify (get_env uenv) (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         link_type t1 t2
       end else
         let env = get_env uenv in
@@ -5191,7 +5398,7 @@ and unify2_expand uenv t1 t1' t2 t2' =
   let t1' = expand_head_unif env t1' in
   let t2' = expand_head_unif env t2' in
   let lv = Int.min (get_level t1') (get_level t2') in
-  let scope = Int.max (get_scope t1') (get_scope t2') in
+  let scope = Int.max (structural_scope t1') (structural_scope t2') in
   update_level_for Unify env lv t2;
   update_level_for Unify env lv t1;
   update_scope_for Unify scope t2;
@@ -5270,6 +5477,16 @@ and unify3 uenv t1 t1' t2 t2' =
           | false, false -> link_commu ~inside:c1 c2
           | true, true -> ()
           end
+      | (Trefine r1, Trefine r2) ->
+          (* Refinements are rigid: payloads unify, predicates must be
+             syntactically alpha-equivalent.  One-sided refinement falls
+             into the mismatch case below. *)
+          unify uenv r1.ref_payload r2.ref_payload;
+          if not
+            (refinement_predicates_equal (get_env uenv)
+               ~pairs:[r1.ref_binder, r2.ref_binder]
+               r1.ref_pred r2.ref_pred)
+          then raise_unexplained_for Unify
       | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
           unify_labeled_list uenv labeled_tl1 labeled_tl2
       | (Tunboxed_tuple labeled_tl1, Tunboxed_tuple labeled_tl2) ->
@@ -5511,7 +5728,7 @@ and unify_fields uenv ty1 ty2 =          (* Optimization *)
           if !trace_gadt_instances && not (in_subst_mode uenv) then begin
             (* in_subst_mode: see PR#11771 *)
             update_level_for Unify (get_env uenv) (get_level va) t1;
-            update_scope_for Unify (get_scope va) t1
+            update_scope_for Unify (structural_scope va) t1
           end;
           unify uenv t1 t2
         with Unify_trace trace ->
@@ -5615,7 +5832,7 @@ and unify_row uenv row1 row2 =
                     (create_row ~fields:rest ~more ~closed ~fixed ~name))
       in
       update_level_for Unify (get_env uenv) (get_level rm) ty;
-      update_scope_for Unify (get_scope rm) ty;
+      update_scope_for Unify (structural_scope rm) ty;
       link_type rm ty
   in
   let tm1 = Transient_expr.repr rm1 and tm2 = Transient_expr.repr rm2 in
@@ -5697,7 +5914,7 @@ and unify_row_field uenv fixed1 fixed2 rm1 rm2 l f1 f2 =
         List.iter
           (fun ty ->
             update_level_for Unify env (get_level rm) ty;
-            update_scope_for Unify (get_scope rm) ty)
+            update_scope_for Unify (structural_scope rm) ty)
       in
       update_levels rm2 tl1';
       update_levels rm1 tl2';
@@ -5714,7 +5931,7 @@ and unify_row_field uenv fixed1 fixed2 rm1 rm2 l f1 f2 =
           let s = snapshot () in
           link_row_field_ext ~inside:f1 f2;
           update_level_for Unify (get_env uenv) (get_level rm1) t2;
-          update_scope_for Unify (get_scope rm1) t2;
+          update_scope_for Unify (structural_scope rm1) t2;
           (try List.iter (fun t1 -> unify uenv t1 t2) tl
            with exn -> undo_first_change_after s; raise exn)
         )
@@ -5723,7 +5940,7 @@ and unify_row_field uenv fixed1 fixed2 rm1 rm2 l f1 f2 =
           let s = snapshot () in
           link_row_field_ext ~inside:f2 f1;
           update_level_for Unify (get_env uenv) (get_level rm2) t1;
-          update_scope_for Unify (get_scope rm2) t1;
+          update_scope_for Unify (structural_scope rm2) t1;
           (try List.iter (unify uenv t1) tl
            with exn -> undo_first_change_after s; raise exn)
         )
@@ -5794,7 +6011,7 @@ let unify_var uenv t1 t2 =
       begin try
         occur_for Unify uenv t1 t2;
         update_level_for Unify env (get_level t1) t2;
-        update_scope_for Unify (get_scope t1) t2;
+        update_scope_for Unify (structural_scope t1) t2;
         unification_jkind_check uenv t2 (Jkind.disallow_left jkind);
         link_type t1 t2;
         reset_trace_gadt_instances reset_tracing;
@@ -6529,7 +6746,7 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
       (Tvar { jkind }, _) when may_instantiate inst_nongen t1
                             && not (deep_occur t1 t2) ->
         moregen_occur env (get_level t1) t2;
-        update_scope_for Moregen (get_scope t1) t2;
+        update_scope_for Moregen (structural_scope t1) t2;
         (* use [check], not [constrain], here because [constrain] would be like
         instantiating [t2], which we do not wish to do *)
         check_type_jkind_exn env Moregen t2 (Jkind.disallow_left jkind);
@@ -6548,7 +6765,7 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
             (Tvar { jkind }, _) when may_instantiate inst_nongen t1' ->
               let t2 = reduce_head ~expand_reducible_abbrevs:false env t2 in
               moregen_occur env (get_level t1') t2;
-              update_scope_for Moregen (get_scope t1') t2;
+              update_scope_for Moregen (structural_scope t1') t2;
               (* use [check], not [constrain], here because [constrain] would be like
               instantiating [t2], which we do not wish to do *)
               check_type_jkind_exn env Moregen t2 (Jkind.disallow_left jkind);
@@ -6565,6 +6782,17 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               crossing. Similar for [u1] and [u2]. *)
               moregen_alloc_mode env t2 ~is_ret:false (neg_variance variance) a1 a2;
               moregen_alloc_mode env u2 ~is_ret:true variance r1 r2
+          | (Trefine r1, Trefine r2) ->
+              (* Refinements are rigid: the payloads are compared and the
+                 predicates must be syntactically alpha-equivalent.  There
+                 is no weakening — that is a later piece. *)
+              moregen inst_nongen variance type_pairs env
+                r1.ref_payload r2.ref_payload;
+              if not
+                (refinement_predicates_equal env
+                   ~pairs:[r1.ref_binder, r2.ref_binder]
+                   r1.ref_pred r2.ref_pred)
+              then raise_unexplained_for Moregen
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               moregen_labeled_list inst_nongen variance type_pairs env
                 labeled_tl1 labeled_tl2
@@ -6737,7 +6965,7 @@ and moregen_row inst_nongen variance type_pairs env row1 row2 =
                        ~fixed:row2_fixed ~closed:row2_closed))
       in
       moregen_occur env (get_level rm1) ext;
-      update_scope_for Moregen (get_scope rm1) ext;
+      update_scope_for Moregen (structural_scope rm1) ext;
       (* This [link_type] has to be undone if the rest of the function fails *)
       link_type rm1 ext
   | Tconstr _, Tconstr _ ->
@@ -7085,6 +7313,14 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
               eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true;
               eqtype_alloc_mode a1 a2;
               eqtype_alloc_mode r1 r2
+          | (Trefine r1, Trefine r2) ->
+              eqtype rename type_pairs subst env
+                r1.ref_payload r2.ref_payload ~do_jkind_check:true;
+              if not
+                (refinement_predicates_equal env
+                   ~pairs:[r1.ref_binder, r2.ref_binder]
+                   r1.ref_pred r2.ref_pred)
+              then raise_unexplained_for Equality
           | (Ttuple labeled_tl1, Ttuple labeled_tl2) ->
               eqtype_labeled_list rename type_pairs subst env labeled_tl1
                 labeled_tl2
@@ -7685,6 +7921,9 @@ let rec build_subtype env (visited : transient_expr list)
           (t, Unchanged)
       else
         (t, Unchanged)
+  | Trefine _ ->
+      (* Subtyping rules for refinements belong to a later piece. *)
+      (t, Unchanged)
   | Tarrow((l,a,r), t1, t2, _) ->
       let tt = Transient_expr.repr t in
       if memq_warn tt visited then (t, Unchanged) else
@@ -8552,6 +8791,26 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
                *)
             with Cannot_expand -> raise exn
           end
+      | Trefine
+          { ref_structural_scope; ref_binder; ref_payload; ref_pred } -> begin
+          let ref_pred = normalize_refinement_predicate env ref_pred in
+          let ref_pred =
+            Refinement_predicate.map
+              ~type_expr:(nondep_type_rec env ids) ref_pred
+          in
+          match
+            Refinement_predicate.find_dependency_path
+              (Path.find_free_opt ids) ref_pred
+          with
+          | Some id -> raise (Nondep_cannot_erase id)
+          | None ->
+              Trefine
+                { ref_structural_scope;
+                  ref_binder;
+                  ref_payload = nondep_type_rec env ids ref_payload;
+                  ref_pred
+                }
+        end
       | Tpackage pack when Path.exists_free ids pack.pack_path ->
           let p' = normalize_package_path env pack.pack_path in
           begin match Path.find_free_opt ids p' with
@@ -8615,6 +8874,7 @@ let nondep_type env id ty =
   with Nondep_cannot_erase _ as exn ->
     clear_hash ();
     raise exn
+
 
 let () = nondep_type' := nondep_type
 

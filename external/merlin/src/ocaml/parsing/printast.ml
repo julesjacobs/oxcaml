@@ -245,6 +245,11 @@ let rec core_type i ppf x =
       core_type i ppf t
   | Ptyp_of_kind jkind ->
       line i ppf "Ptyp_of_kind %a\n" (jkind_annotation (i + 1)) jkind
+  | Ptyp_refine (binder, ct, predicate) ->
+      line i ppf "Ptyp_refine\n";
+      line (i + 1) ppf "%a %s\n" fmt_location binder.loc binder.txt;
+      core_type i ppf ct;
+      expression i ppf predicate
   | Ptyp_repr (lvars, ct) ->
       line i ppf "Ptyp_repr\n";
       list i reprvar ppf lvars;
@@ -528,6 +533,13 @@ and expression i ppf x =
   | Pexp_borrow e ->
       line i ppf "Pexp_borrow\n";
       expression i ppf e
+  | Pexp_refine e ->
+      line i ppf "Pexp_refine\n";
+      expression i ppf e
+  | Pexp_let_refine (name, bound, body) ->
+      line i ppf "Pexp_let_refine %a %s\n" fmt_location name.loc name.txt;
+      expression i ppf bound;
+      expression i ppf body
 
 and block_access i ppf = function
   | Baccess_field lid ->
