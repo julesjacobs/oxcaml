@@ -309,6 +309,17 @@ module TycompTbl =
         | Nothing -> raise exn
         end
 
+    let rec find_same_and_locks id tbl acc =
+      match Ident.find_same id tbl.current with
+      | desc -> desc, acc
+      | exception Not_found ->
+          match tbl.layer with
+          | Open {next; _} -> find_same_and_locks id next acc
+          | Lock {lock; next} -> find_same_and_locks id next (lock :: acc)
+          | Nothing -> raise Not_found
+
+    let find_same_and_locks id tbl = find_same_and_locks id tbl []
+
     let nothing = fun () -> ()
 
     let mk_callback rest name desc using =
@@ -4524,6 +4535,61 @@ let lookup_value ~errors ~use ~loc lid env =
   let path, vd, mode_with_locks = lookup_value_lazy ~errors ~use ~loc lid env in
   let vd = Subst.Lazy.force_value_description vd in
   path, vd, mode_with_locks
+
+let rec locks_of_module_path path env =
+  match path with
+  | Pident id when Ident.is_global id ->
+      IdTbl.get_all_locks env.modules
+  | Pident id -> snd (IdTbl.find_same_and_locks id env.modules)
+  | Pdot (parent, _) | Pextra_ty (parent, _) ->
+      locks_of_module_path parent env
+  | Papply (fn, _) -> locks_of_module_path fn env
+
+let lookup_value_path ?(use = true) ~loc path env =
+  let vda, locks =
+    match path with
+    | Pident id -> begin
+        match IdTbl.find_same_and_locks id env.values with
+        | Val_bound vda, locks -> vda, locks
+        | Val_unbound _, _ -> raise Not_found
+      end
+    | Pdot (parent, _) ->
+        find_value_full path env, locks_of_module_path parent env
+    | Papply _ | Pextra_ty _ -> raise Not_found
+  in
+  let stage_locks, locks = partition_locks locks in
+  check_cross_quotation ~errors:true ~loc_use:loc
+    ~loc_def:vda.vda_description.val_loc env path
+    (Lident (Path.name path)) stage_locks;
+  use_value ~use ~loc path vda;
+  let vd, mode = Normalize_mode.vda Normalize vda in
+  path, Subst.Lazy.force_value_description vd, (mode, locks)
+
+let lookup_constructor_path ~loc usage path env =
+  match path with
+  | Pextra_ty (owner, Pcstr_ty name) -> begin
+      match find_type_descrs owner env with
+      | Type_variant (constructors, _, _) ->
+          let cstr = List.find (fun c -> c.cstr_name = name) constructors in
+          use_constructor_desc ~use:true ~loc usage env cstr;
+          cstr, locks_empty
+      | _ -> raise Not_found
+    end
+  | _ ->
+      let cda, locks =
+        match path with
+        | Pident id -> TycompTbl.find_same_and_locks id env.constrs
+        | Pdot (parent, _) ->
+            find_extension_full path env, locks_of_module_path parent env
+        | Papply _ | Pextra_ty _ -> raise Not_found
+      in
+      let cstr = cda.cda_description in
+      let stage_locks, locks = partition_locks locks in
+      check_cross_quotation ~errors:true ~loc_use:loc
+        ~loc_def:cstr.cstr_loc env path
+        (Lident cstr.cstr_name) stage_locks;
+      use_constructor_desc ~use:true ~loc usage env cstr;
+      cstr, locks
 
 let lookup_type_full ~errors ~use ~loc lid env =
   match lid with

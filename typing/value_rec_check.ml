@@ -277,6 +277,7 @@ let classify_expression : Typedtree.expression -> sd =
     | Texp_field _
     | Texp_unboxed_field _
     | Texp_assert _
+    | Texp_assume _
     | Texp_try _
     | Texp_override _
     | Texp_letop _
@@ -985,6 +986,9 @@ let rec expression : Typedtree.expression -> term_judg =
         Note: `assert e` is treated just as if `assert` was a function.
       *)
       expression e << Dereference
+    | Texp_assume (binding, predicate, body) ->
+      value_bindings Nonrecursive [binding] >>
+        join [expression predicate << Dereference; expression body]
     | Texp_pack mexp ->
       (*
         G |- M: m

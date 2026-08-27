@@ -172,6 +172,7 @@ let print_symbol = function
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_BACKQUOTE) -> "`"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_ATAT) -> "@@"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_AT) -> "@"
+  | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_ASSUME) -> "assume_"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_ASSERT) -> "assert"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_AS) -> "as"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_ANDOP) -> "ANDOP"
@@ -614,6 +615,7 @@ let print_value (type a) : a MenhirInterpreter.symbol -> a -> string = function
   | MenhirInterpreter.T MenhirInterpreter.T_BACKQUOTE -> (fun _ -> "`")
   | MenhirInterpreter.T MenhirInterpreter.T_ATAT -> (fun _ -> "@@")
   | MenhirInterpreter.T MenhirInterpreter.T_AT -> (fun _ -> "@")
+  | MenhirInterpreter.T MenhirInterpreter.T_ASSUME -> (fun _ -> "assume_")
   | MenhirInterpreter.T MenhirInterpreter.T_ASSERT -> (fun _ -> "assert")
   | MenhirInterpreter.T MenhirInterpreter.T_AS -> (fun _ -> "as")
   | MenhirInterpreter.T MenhirInterpreter.T_ANDOP -> (fun _ -> "ANDOP")
@@ -1055,6 +1057,7 @@ let print_token = function
   | BACKQUOTE -> print_value (MenhirInterpreter.T MenhirInterpreter.T_BACKQUOTE) ()
   | ATAT -> print_value (MenhirInterpreter.T MenhirInterpreter.T_ATAT) ()
   | AT -> print_value (MenhirInterpreter.T MenhirInterpreter.T_AT) ()
+  | ASSUME -> print_value (MenhirInterpreter.T MenhirInterpreter.T_ASSUME) ()
   | ASSERT -> print_value (MenhirInterpreter.T MenhirInterpreter.T_ASSERT) ()
   | AS -> print_value (MenhirInterpreter.T MenhirInterpreter.T_AS) ()
   | ANDOP v -> print_value (MenhirInterpreter.T MenhirInterpreter.T_ANDOP) v
@@ -1218,6 +1221,7 @@ let token_of_terminal (type a) (t : a MenhirInterpreter.terminal) (v : a) : toke
   | MenhirInterpreter.T_BACKQUOTE -> BACKQUOTE
   | MenhirInterpreter.T_ATAT -> ATAT
   | MenhirInterpreter.T_AT -> AT
+  | MenhirInterpreter.T_ASSUME -> ASSUME
   | MenhirInterpreter.T_ASSERT -> ASSERT
   | MenhirInterpreter.T_AS -> AS
   | MenhirInterpreter.T_ANDOP -> ANDOP v

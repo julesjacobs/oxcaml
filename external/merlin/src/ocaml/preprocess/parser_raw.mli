@@ -155,6 +155,7 @@ type token =
   | BACKQUOTE
   | ATAT
   | AT
+  | ASSUME
   | ASSERT
   | AS
   | ANDOP of (string)
@@ -362,6 +363,7 @@ module MenhirInterpreter : sig
     | T_BACKQUOTE : unit terminal
     | T_ATAT : unit terminal
     | T_AT : unit terminal
+    | T_ASSUME : unit terminal
     | T_ASSERT : unit terminal
     | T_AS : unit terminal
     | T_ANDOP : (string) terminal

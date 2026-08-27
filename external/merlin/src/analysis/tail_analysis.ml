@@ -100,6 +100,7 @@ let expr_tail_positions = function
   | Texp_letmodule (_, _, _, _, e)
   | Texp_letexception (_, e)
   | Texp_let (_, _, e)
+  | Texp_assume (_, _, e)
   | Texp_letmutable (_, e)
   | Texp_sequence (_, _, e)
   | Texp_ifthenelse (_, e, None)

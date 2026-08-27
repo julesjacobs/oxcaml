@@ -144,7 +144,7 @@ val is_at_least : 'a t -> 'a -> bool
     instead. *)
 val with_set : unit t -> enabled:bool -> (unit -> unit) -> unit
 
-val with_enabled : 'a t -> 'a -> (unit -> unit) -> unit
+val with_enabled : 'a t -> 'a -> (unit -> 'b) -> 'b
 
 val with_disabled : 'a t -> (unit -> unit) -> unit
 

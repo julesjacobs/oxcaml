@@ -14,7 +14,8 @@ open Types
 
 (* Rebuilding *)
 
-let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
+let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
+    ?value_path
     ?constructor_path ?type_path ?(type_expr = Fun.id)
     ?(location = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
@@ -28,20 +29,25 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
       pconst_loc = location constant.pconst_loc
     }
   in
-  let rename_var rename id =
-    match Ident.Map.find_opt id rename with Some id' -> id' | None -> id
-  in
   let bind rename id =
     match rename_bound with
     | Some rename_bound ->
       let id' = rename_bound id in
       Ident.Map.add id id' rename, id'
-    | None -> rename, id
+    | None -> Ident.Map.add id id rename, id
   in
   let rec map_rexp rename rexp =
     let rexp_desc =
       match rexp.rexp_desc with
-      | Rexp_var id -> Rexp_var (rename_var rename id)
+      | Rexp_var id -> begin
+          match Ident.Map.find_opt id rename with
+          | Some id -> Rexp_var id
+          | None ->
+              match Option.bind free_var_path (fun f -> f id) with
+              | None -> Rexp_var id
+              | Some (Path.Pident id) -> Rexp_var id
+              | Some path -> Rexp_ident path
+        end
       | Rexp_ident path -> begin
           match Option.bind bind_value (fun f -> f path) with
           | Some id -> Rexp_var id
@@ -407,11 +413,15 @@ let equal ~pairs rexp1 rexp2 =
 
 (* Back to surface syntax *)
 
-let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
+let untype ?(expression = fun _ exp -> exp)
+    ?(function_label = fun _ -> Asttypes.Nolabel)
+    ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
   let open Ast_helper in
   let lid_of_name name = Location.mknoloc (Longident.Lident name) in
   let rec untype_rexp rexp =
     let loc = rexp.rexp_loc in
+    expression rexp (untype_desc loc rexp)
+  and untype_desc loc rexp =
     match rexp.rexp_desc with
     | Rexp_var id -> Exp.ident ~loc (lid_of_name (var_name id))
     | Rexp_ident path -> Exp.ident ~loc (value_ident path)
@@ -469,7 +479,7 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
         Exp.function_ ~loc
           [ { pparam_desc =
                 Pparam_val
-                  ( Asttypes.Nolabel, None,
+                  ( function_label rexp, None,
                     Pat.var (Location.mknoloc (var_name param)) );
               pparam_loc = Location.none } ]
           { mode_annotations = [];
