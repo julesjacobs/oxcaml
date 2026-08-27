@@ -327,6 +327,15 @@ val walk_locks_for_partial_construct : env:t -> Mode.Hint.pinpoint -> unit
 val lookup_value:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * value_description * mode_with_locks
+
+(** Resolved-input counterparts used when elaborating persistent predicates.
+    These never resolve a path by its printed name. *)
+val lookup_value_path :
+  ?use:bool -> loc:Location.t -> Path.t -> t ->
+  Path.t * value_description * mode_with_locks
+val lookup_constructor_path :
+  loc:Location.t -> constructor_usage -> Path.t -> t ->
+  constructor_description * locks
 val lookup_type:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * type_declaration
