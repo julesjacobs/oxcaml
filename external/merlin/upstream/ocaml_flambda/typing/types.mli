@@ -176,9 +176,10 @@ and type_desc =
       [Tvar None]       ==> [_] *)
 
   | Tarrow of arrow_desc * type_expr * type_expr * commutable
-  (** [Tarrow (Nolabel,      e1, e2, c)] ==> [e1    -> e2]
-      [Tarrow (Labelled "l", e1, e2, c)] ==> [l:e1  -> e2]
-      [Tarrow (Optional "l", e1, e2, c)] ==> [?l:e1 -> e2]
+  (** [Tarrow ((Nolabel, _, _, None), e1, e2, c)] ==> [e1 -> e2]
+      [Tarrow ((Nolabel, _, _, Some x), e1, e2, c)] ==> [(x : e1) -> e2]
+      [Tarrow ((Labelled "l", _, _, None), e1, e2, c)] ==> [l:e1 -> e2]
+      [Tarrow ((Optional "l", _, _, None), e1, e2, c)] ==> [?l:e1 -> e2]
 
       See [commutable] for the last argument. The argument
       type must be a [Tpoly] node *)
@@ -410,7 +411,7 @@ and arg_label =
   | Position of string (** [label:[%call_pos] -> ...] *)
 
 and arrow_desc =
-  arg_label * Mode.Alloc.lr * Mode.Alloc.lr
+  arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option
 
 (** [package] corresponds to the type of a first-class module *)
 and package =

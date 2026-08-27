@@ -692,12 +692,13 @@ let total_immutable_mode () =
       visibility = Visibility.Const.Immutable
     }
 
-let refinement_operand_mode () =
-  Value.of_const
-    { Value.Const.max with
+let dependent_argument_mode () =
+  Alloc.of_const
+    { Alloc.Const.legacy with
       totality = Totality.Const.Total;
       statefulness = Statefulness.Const.Stateless;
-      portability = Portability.Const.Portable
+      portability = Portability.Const.Portable;
+      visibility = Visibility.Const.Immutable
     }
 
 let mode_default_opt mode_opt =
@@ -4909,7 +4910,7 @@ let rec list_labels_aux env visited ls ty_fun =
   if TypeSet.mem ty visited then
     List.rev ls, false
   else match get_desc ty with
-    | Tarrow ((l,_,_), _, ty_res, _) ->
+    | Tarrow ((l,_,_,_), _, ty_res, _) ->
         list_labels_aux env (TypeSet.add ty visited) (l::ls) ty_res
     | _ ->
         List.rev ls, is_Tvar ty
@@ -4977,6 +4978,7 @@ type untyped_omitted_param =
   { mode_fun: Alloc.lr;
     ty_arg : type_expr;
     mode_arg : Alloc.lr;
+    binder : Ident.t option;
     level: int;
     sort_arg : Jkind.sort }
 
@@ -5110,10 +5112,19 @@ let remaining_function_type_for_error ty_ret mode_ret rev_args =
          | Arg (Unknown_arg { mode_arg; _ } | Known_arg { mode_arg; _ }) ->
              let closed_args = mode_arg :: closed_args in
              (ty_ret, mode_ret, closed_args)
-         | Arg (Eliminated_optional_arg
-                  { mode_fun; ty_arg; mode_arg; level; _ })
-         | Omitted { mode_fun; ty_arg; mode_arg; level; _ } ->
-             let arrow_desc = lbl, mode_arg, mode_ret in
+         | (Arg (Eliminated_optional_arg _) | Omitted _) ->
+             let mode_fun, ty_arg, mode_arg, binder, level =
+               match arg with
+               | Arg
+                   (Eliminated_optional_arg
+                     { mode_fun; ty_arg; mode_arg; level; _ }) ->
+                   mode_fun, ty_arg, mode_arg, None, level
+               | Omitted
+                   { mode_fun; ty_arg; mode_arg; binder; level; _ } ->
+                   mode_fun, ty_arg, mode_arg, binder, level
+               | Arg (Known_arg _ | Unknown_arg _) -> assert false
+             in
+             let arrow_desc = lbl, mode_arg, mode_ret, binder in
              let ty_ret =
                newty2 ~level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, commu_ok))
@@ -5177,7 +5188,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                   Warnings.Ignored_extra_argument;
               let mode_arg = Alloc.newvar () in
               let mode_ret = Alloc.newvar () in
-              let kind = (lbl, mode_arg, mode_ret) in
+              let kind = (lbl, mode_arg, mode_ret, None) in
               begin try
                 unify env ty_fun
                   (newty (Tarrow(kind,ty_arg,ty_res,commu_var ())));
@@ -5196,7 +5207,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                               { some_args_ok; ty_fun; jkind }))
               end;
               (sort_arg, mode_arg, ty_arg_mono, mode_ret, ty_res)
-        | Tarrow ((l, mode_arg, mode_ret), ty_arg, ty_res, _)
+        | Tarrow ((l, mode_arg, mode_ret, _), ty_arg, ty_res, _)
           when labels_match ~param:l ~arg:lbl ->
             let sort_arg =
               match
@@ -5260,9 +5271,9 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
     let lopt =
       match get_desc ty_fun', get_desc (expand_head env ty_fun0) with
       | Tarrow (ad, ty_arg, ty_ret, com),
-        Tarrow (_, ty_arg0, ty_ret0, _)
+        Tarrow ((_, _, _, binder0), ty_arg0, ty_ret0, _)
         when is_commu_ok com ->
-          Some (ad, `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0))
+          Some (ad, `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0, binder0))
       | _ -> None
     in
     let first_arg_loc =
@@ -5277,7 +5288,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
         ret_tvar
     | Some (ad, arrow_kind) ->
       begin
-        let (l, mode_arg, mode_ret) = ad in
+        let (l, mode_arg, mode_ret, binder) = ad in
         let name = label_name l
         and optional = is_optional l
         and omittable = is_omittable l in
@@ -5327,7 +5338,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                 sargs, None
         in
         match arrow_kind with
-        | `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0) ->
+        | `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0, binder0) ->
             let sort_arg =
               match
                 type_sort ~why:Function_argument ~fixed:false env ty_arg
@@ -5336,6 +5347,44 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
               | Error err ->
                 raise(error(first_arg_loc, env,
                             Function_type_not_rep(ty_arg, err)))
+            in
+            let ty_ret, ty_ret0 =
+              match binder, arg_opt with
+              | None, _ -> ty_ret, ty_ret0
+              | Some binder, Some (sarg, _, ~commuted:_) ->
+                  let id =
+                    match sarg.pexp_desc with
+                    | Pexp_ident lid ->
+                        let path, _, _ =
+                          Env.lookup_value ~use:false ~loc:lid.loc lid.txt env
+                        in
+                        begin match path with
+                        | Path.Pident id -> id
+                        | _ ->
+                            raise
+                              (Error_forward
+                                 (Location.errorf ~loc:sarg.pexp_loc
+                                    "A dependent function argument must be a \
+                                     plain local variable"))
+                        end
+                    | _ ->
+                        raise
+                          (Error_forward
+                             (Location.errorf ~loc:sarg.pexp_loc
+                                "A dependent function argument must be a \
+                                 plain local variable"))
+                  in
+                  let ty_ret =
+                    Ctype.substitute_refinement_ident binder id ty_ret
+                  in
+                  let ty_ret0 =
+                    match binder0 with
+                    | Some binder0 ->
+                        Ctype.substitute_refinement_ident binder0 id ty_ret0
+                    | None -> assert false
+                  in
+                  ty_ret, ty_ret0
+              | Some _, None -> ty_ret, ty_ret0
             in
             let arg =
               match arg_opt with
@@ -5359,7 +5408,14 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                      over it. *)
                   may_warn funct.exp_loc
                     (Warnings.Non_principal_labels "commuted an argument");
-                  Omitted { mode_fun; ty_arg; mode_arg; level = lv; sort_arg }
+                  Omitted
+                    { mode_fun;
+                      ty_arg;
+                      mode_arg;
+                      binder;
+                      level = lv;
+                      sort_arg
+                    }
                 end
             in
             loop ty_ret ty_ret0 mode_ret ((l, arg) :: rev_args) remaining_sargs
@@ -5378,8 +5434,9 @@ let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
              let open_args = (exp, marg) :: open_args in
              let args = (lbl, Arg (exp, sort), sch) :: args in
              (ty_ret, mode_ret, open_args, closed_args, args)
-         | Omitted { mode_fun; ty_arg; mode_arg; level; sort_arg } ->
-             let arrow_desc = (lbl, mode_arg, mode_ret) in
+         | Omitted
+             { mode_fun; ty_arg; mode_arg; binder; level; sort_arg } ->
+             let arrow_desc = (lbl, mode_arg, mode_ret, binder) in
              let sort_ret =
                match type_sort ~why:Function_result ~fixed:false env ty_ret with
                | Ok sort -> sort
@@ -5800,7 +5857,22 @@ let approx_type_default () = newvar (Jkind.Builtin.any ~why:Dummy_jkind)
 
 let rec approx_type env sty =
   match sty.ptyp_desc with
-  | Ptyp_arrow (p, ({ ptyp_desc = Ptyp_poly _ } as arg_sty), sty, arg_mode, _) ->
+  | Ptyp_arrow (_, _, _, _, _, Some _) ->
+      let inferred_ty =
+        Typetexp.transl_simple_type ~new_var_jkind:Any env ~closed:false
+          Alloc.Const.legacy sty
+      in
+      let rec approximate_returns ty =
+        match get_desc ty with
+        | Tarrow ((label, mode_arg, _, binder), arg, ret, commu) ->
+            newty (Tarrow
+              ((label, mode_arg, Alloc.newvar (), binder), arg,
+               approximate_returns ret, commu))
+        | _ -> ty
+      in
+      approximate_returns inferred_ty.ctyp_type
+  | Ptyp_arrow
+      (p, ({ ptyp_desc = Ptyp_poly _ } as arg_sty), sty, arg_mode, _, _) ->
       let p = Typetexp.transl_label p (Some arg_sty) in
       (* CR layouts v5: value requirement here to be relaxed *)
       if is_optional p then newvar Predef.option_argument_jkind
@@ -5816,9 +5888,9 @@ let rec approx_type env sty =
         let ret = approx_type env sty in
         let marg = Alloc.of_const arg_mode.mode_modes in
         let mret = Alloc.newvar () in
-        newty (Tarrow ((p,marg,mret), arg_ty.ctyp_type, ret, commu_ok))
+        newty (Tarrow ((p,marg,mret,None), arg_ty.ctyp_type, ret, commu_ok))
       end
-  | Ptyp_arrow (p, arg_sty, sty, arg_mode, _) ->
+  | Ptyp_arrow (p, arg_sty, sty, arg_mode, _, _) ->
       let arg_mode = Typemode.transl_alloc_mode arg_mode in
       let p = Typetexp.transl_label p (Some arg_sty) in
       let arg =
@@ -5829,7 +5901,7 @@ let rec approx_type env sty =
       let ret = approx_type env sty in
       let marg = Alloc.of_const arg_mode.mode_modes in
       let mret = Alloc.newvar () in
-      newty (Tarrow ((p,marg,mret), newmono arg, ret, commu_ok))
+      newty (Tarrow ((p,marg,mret,None), newmono arg, ret, commu_ok))
   | Ptyp_tuple args ->
       newty (Ttuple (List.map (fun (l, t) -> l, approx_type env t) args))
   | Ptyp_constr (lid, ctl) ->
@@ -6399,10 +6471,10 @@ type apply_prim =
   | Revapply
 let check_apply_prim_type prim typ =
   match get_desc typ with
-  | Tarrow ((Nolabel,_,_),a,b,_) when tpoly_is_mono a ->
+  | Tarrow ((Nolabel,_,_,_),a,b,_) when tpoly_is_mono a ->
       let a = tpoly_get_mono a in
       begin match get_desc b with
-      | Tarrow((Nolabel,_,_),c,d,_) when tpoly_is_mono c ->
+      | Tarrow((Nolabel,_,_,_),c,d,_) when tpoly_is_mono c ->
           let c = tpoly_get_mono c in
           let f, x, res =
             match prim with
@@ -6410,7 +6482,7 @@ let check_apply_prim_type prim typ =
             | Revapply -> c, a, d
           in
           begin match get_desc f with
-          | Tarrow((Nolabel,_,_),fl,fr,_) ->
+          | Tarrow((Nolabel,_,_,_),fl,fr,_) ->
               let fl = tpoly_get_mono fl in
               is_Tvar fl && is_Tvar fr && is_Tvar x && is_Tvar res
               && Types.eq_type fl x && Types.eq_type fr res
@@ -6557,7 +6629,7 @@ let split_function_ty
       (Alloc.proj_comonadic Areality alloc_mode);
   let { ty = ty_fun; explanation }, loc_fun = in_function in
   let separate = !Clflags.principal || Env.has_local_constraints env in
-  let { ty_arg; ty_ret; arg_mode; ret_mode } as filtered_arrow =
+  let { ty_arg; ty_ret; arg_mode; ret_mode; binder = _ } as filtered_arrow =
     with_local_level_generalize_structure_if separate begin fun () ->
       let force_tpoly =
         (* If [has_poly] is true then we rely on the later call to
@@ -6580,6 +6652,7 @@ let split_function_ty
         ; arg_mode = Mode.Alloc.newvar ()
         ; ty_ret = newvar2 level ret_kind
         ; ret_mode = Mode.Alloc.newvar ()
+        ; binder = None
         }
     end
   in
@@ -6933,6 +7006,47 @@ let with_primitive_mode_checks ?defer f =
     (List.rev !checks);
   result
 
+type dependent_opening =
+  { binder : Ident.t;
+    parameter : Ident.t
+  }
+
+let refinement_type_closing = ref Ident.Map.empty
+
+let with_refinement_type_closing openings f =
+  let previous = !refinement_type_closing in
+  let closing =
+    List.fold_left
+      (fun closing { binder; parameter } ->
+         Ident.Map.add parameter binder closing)
+      previous openings
+  in
+  refinement_type_closing := closing;
+  Fun.protect f ~finally:(fun () -> refinement_type_closing := previous)
+
+let open_dependent_type openings ty =
+  match openings with
+  | [] -> ty
+  | _ :: _ ->
+      let subst =
+        List.fold_left
+          (fun subst { binder; parameter } ->
+             Subst.add_bound_value binder parameter subst)
+          Subst.identity openings
+      in
+      Subst.type_expr subst ty
+
+let close_dependent_type openings ty =
+  match openings with
+  | [] -> ty
+  | _ :: _ ->
+      let subst =
+        List.fold_left
+          (fun subst { binder; parameter } ->
+             Subst.add_bound_value parameter binder subst)
+          Subst.identity openings
+      in
+      Subst.type_expr subst ty
 
 let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
     env expected_mode sexp =
@@ -7365,8 +7479,7 @@ and type_expect_
       match get_desc (expand_head env ty_expected) with
       | Trefine { ref_payload; _ } ->
           let operand =
-            type_expect env
-              (mode_coerce (refinement_operand_mode ()) expected_mode) operand
+            type_expect env (mode_default (total_mode ())) operand
               (mk_expected ref_payload)
           in
           rue
@@ -9066,7 +9179,7 @@ and type_expect_
             loop slet.pbop_pat (newvar initial_jkind) initial_sort sands
           in
           let ty_func_result, body_sort = new_rep_var ~why:Function_result () in
-          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy in
+          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy, None in
           let ty_func =
             newty (Tarrow(arrow_desc, newmono ty_params, ty_func_result,
                           commu_ok))
@@ -9594,9 +9707,11 @@ and expression_constraint pexp =
     an explanation of how this typechecking is polymorphic in the body.
 *)
 and type_coerce
-  : type a. a constraint_arg -> _ -> _ -> _ -> _ -> _ -> _ -> loc_arg:_
+  : type a. ?dependent_openings:dependent_opening list ->
+         a constraint_arg -> _ -> _ -> _ -> _ -> _ -> _ -> loc_arg:_
          -> a * type_expr * exp_extra =
-  fun constraint_arg env expected_mode loc sty sty' type_mode ~loc_arg ->
+  fun ?(dependent_openings = []) constraint_arg env expected_mode loc sty sty'
+      type_mode ~loc_arg ->
   (* Pretend separate = true, 1% slowdown for lablgtk *)
   (* Also see PR#7199 for a problem with the following:
       let separate = !Clflags.principal || Env.has_local_constraints env in*)
@@ -9606,10 +9721,12 @@ and type_coerce
   match sty with
   | None ->
     let (cty', ty', force) =
-      with_local_level_generalize_structure begin fun () ->
-        Typetexp.transl_simple_type_delayed env type_mode sty'
-      end
+      with_refinement_type_closing dependent_openings (fun () ->
+        with_local_level_generalize_structure begin fun () ->
+          Typetexp.transl_simple_type_delayed env type_mode sty'
+        end)
     in
+    let opened_ty' = open_dependent_type dependent_openings ty' in
     let arg, arg_type, gen =
       let lv = get_current_level () in
       with_local_level_generalize begin fun () ->
@@ -9619,24 +9736,24 @@ and type_coerce
         ~before_generalize:
          (fun (_, arg_type, _) -> enforce_current_level env arg_type)
     in
-    begin match !self_coercion, get_desc ty' with
+    begin match !self_coercion, get_desc opened_ty' with
       | ((path, r) :: _, Tconstr (path', _, _))
         when is_self arg && Path.same path path' ->
           (* prerr_endline "self coercion"; *)
           r := loc :: !r;
           force ()
       | _ when closed_type_expr ~env arg_type
-            && closed_type_expr ~env ty' ->
+            && closed_type_expr ~env opened_ty' ->
           if not gen && (* first try a single coercion *)
             let snap = snapshot () in
-            let ty, _b = enlarge_type env (generic_instance ty') in
+            let ty, _b = enlarge_type env (generic_instance opened_ty') in
             try
               force (); Ctype.unify env arg_type ty; true
             with Unify _ ->
               backtrack snap; false
           then ()
           else begin try
-            let force' = subtype env arg_type (generic_instance ty') in
+            let force' = subtype env arg_type (generic_instance opened_ty') in
             force (); force' ();
             if not gen && !Clflags.principal then
               Location.prerr_warning loc
@@ -9646,35 +9763,40 @@ and type_coerce
             raise (error (loc, env, Not_subtype err))
           end;
       | _ ->
-          let ty, b = enlarge_type env (generic_instance ty') in
+          let ty, b = enlarge_type env (generic_instance opened_ty') in
           force ();
           begin try Ctype.unify env arg_type ty with Unify err ->
-            let expanded = full_expand ~may_forget_scope:true env ty' in
+            let expanded = full_expand ~may_forget_scope:true env opened_ty' in
             raise(error(loc_arg, env,
-                        Coercion_failure ({ ty = ty'; expanded }, err, b)))
+                        Coercion_failure
+                          ({ ty = opened_ty'; expanded }, err, b)))
           end
       end;
       (arg, ty', Texp_coerce (None, cty'))
   | Some sty ->
       let cty, ty, force, cty', ty', force' =
-        with_local_level_generalize_structure begin fun () ->
-          let (cty, ty, force) =
-            Typetexp.transl_simple_type_delayed env type_mode sty
-          and (cty', ty', force') =
-            Typetexp.transl_simple_type_delayed env type_mode sty'
-          in
-          (cty, ty, force, cty', ty', force')
-        end
+        with_refinement_type_closing dependent_openings (fun () ->
+          with_local_level_generalize_structure begin fun () ->
+            let (cty, ty, force) =
+              Typetexp.transl_simple_type_delayed env type_mode sty
+            and (cty', ty', force') =
+              Typetexp.transl_simple_type_delayed env type_mode sty'
+            in
+            (cty, ty, force, cty', ty', force')
+          end)
       in
+      let opened_ty = open_dependent_type dependent_openings ty in
+      let opened_ty' = open_dependent_type dependent_openings ty' in
       begin try
         let force'' =
-          subtype env (generic_instance ty) (generic_instance ty')
+          subtype env (generic_instance opened_ty)
+            (generic_instance opened_ty')
         in
         force (); force' (); force'' ()
       with Subtype err ->
         raise (error (loc, env, Not_subtype err))
       end;
-      (type_with_constraint env expected_mode ty,
+      (type_with_constraint env expected_mode opened_ty,
        instance ty', Texp_coerce (Some cty, cty'))
 
 and type_constraint env sty type_mode =
@@ -9693,22 +9815,33 @@ and type_constraint env sty type_mode =
     @param loc_arg the location of the thing being constrained
 *)
 and type_constraint_expect
-  : type a. a constraint_arg -> _ -> _ -> _ -> loc_arg:_ -> _ -> _ -> _ -> a * _ * _
+  : type a. ?dependent_openings:dependent_opening list ->
+         a constraint_arg -> _ -> _ -> _ -> loc_arg:_ -> _ -> _ -> _ ->
+         a * _ * _
   =
-  fun constraint_arg env expected_mode loc ~loc_arg type_mode constraint_ ty_expected ->
-  let ret, ty, exp_extra =
+  fun ?(dependent_openings = []) constraint_arg env expected_mode loc ~loc_arg
+      type_mode constraint_ ty_expected ->
+  let ret, ty, opened_ty, exp_extra =
     let type_mode = Alloc.Const.Option.value ~default:Alloc.Const.legacy type_mode in
     match constraint_ with
     | Pcoerce (ty_constrain, ty_coerce) ->
-        type_coerce constraint_arg env expected_mode loc ty_constrain ty_coerce
-          type_mode ~loc_arg
+        let ret, ty, exp_extra =
+          type_coerce ~dependent_openings constraint_arg env expected_mode loc
+            ty_constrain ty_coerce type_mode ~loc_arg
+        in
+        ret, ty, open_dependent_type dependent_openings ty, exp_extra
     | Pconstraint ty_constrain ->
-        let ty, exp_extra = type_constraint env ty_constrain type_mode in
-        constraint_arg.type_with_constraint env expected_mode ty,
-        ty,
-        exp_extra
+        let ty, exp_extra =
+          with_refinement_type_closing dependent_openings (fun () ->
+            type_constraint env ty_constrain type_mode)
+        in
+        let opened_ty = open_dependent_type dependent_openings ty in
+        ( constraint_arg.type_with_constraint env expected_mode opened_ty,
+          ty,
+          opened_ty,
+          exp_extra )
   in
-  unify_exp_types loc env ty (instance ty_expected);
+  unify_exp_types loc env opened_ty (instance ty_expected);
   ret, ty, exp_extra
 
 (** Typecheck the body of a newtype. The "body" of a newtype may be:
@@ -9723,9 +9856,11 @@ and type_constraint_expect
       by the user.
 *)
 and type_newtype
-  : type a. _ -> _ -> _ -> (Env.t -> a * type_expr)
+  : type a. ?dependent_openings:dependent_opening list -> _ -> _ -> _
+    -> (Env.t -> a * type_expr)
     -> a * type_expr * Ident.t * Uid.t =
-  fun env { txt = name; loc = name_loc } jkind_annot_opt type_body  ->
+  fun ?(dependent_openings = []) env
+      { txt = name; loc = name_loc } jkind_annot_opt type_body ->
   let jkind =
     Jkind.of_annotation_option_default env ~context:(Newtype_declaration name)
       ~default:(Jkind.Builtin.value ~why:Univar) jkind_annot_opt
@@ -9756,12 +9891,15 @@ and type_newtype
         | _ -> Btype.iter_type_expr replace t
       end
     in
-    let ety = Subst.type_expr Subst.identity exp_type in
+    let ety =
+      close_dependent_type dependent_openings
+        (Subst.type_expr Subst.identity exp_type)
+    in
     replace ety;
     let uid = decl.type_uid in
     (result, ety, id, uid)
   end
-   ~before_generalize:(fun (_,ety,_,_) -> enforce_current_level env ety)
+   ~before_generalize:(fun (_, ety, _, _) -> enforce_current_level env ety)
 
 (** [type_newtype] where the "body" is just an expression. *)
 and type_newtype_expr
@@ -9946,8 +10084,9 @@ and type_binding_op_ident env s =
   path, desc
 
 and type_function
-    env (expected_mode : expected_mode) ty_expected
-      params_suffix body_constraint body ~first ~in_function
+    ?(dependent_openings = []) ?return_constraint_has_refinement env
+    (expected_mode : expected_mode) ty_expected params_suffix body_constraint
+    body ~first ~in_function
   : type_function_result
   =
   let _, (loc_fun : Location.t) = in_function in
@@ -9958,7 +10097,8 @@ and type_function
     let saved = save_levels () in
     try
       type_function_
-        env expected_mode ty_expected
+        ~dependent_openings ?return_constraint_has_refinement env
+        expected_mode ty_expected
         params_suffix body_constraint body ~first ~loc ~in_function
     with exn ->
       Msupport.erroneous_type_register ty_expected;
@@ -9999,13 +10139,38 @@ and type_function
    See [type_function_result] for the meaning of the returned type.
 *)
 and type_function_
-      env (expected_mode : expected_mode) ty_expected
-      params_suffix body_constraint body ~loc ~first ~in_function
+      ?(dependent_openings = []) ?return_constraint_has_refinement env
+      (expected_mode : expected_mode) ty_expected params_suffix body_constraint
+      body ~loc ~first ~in_function
   : type_function_result
   =
+  let return_constraint_has_refinement =
+    match return_constraint_has_refinement with
+    | Some has_refinement -> has_refinement
+    | None ->
+        let contains_refinement ty =
+          let found = ref false in
+          let iterator = Ast_iterator.default_iterator in
+          let iterator =
+            { iterator with
+              typ =
+                (fun self ty ->
+                   match ty.ptyp_desc with
+                   | Ptyp_refine _ -> found := true
+                   | _ -> iterator.typ self ty) }
+          in
+          iterator.typ iterator ty;
+          !found
+        in
+        match body_constraint.ret_type_constraint with
+        | None -> false
+        | Some (Pconstraint ty) -> contains_refinement ty
+        | Some (Pcoerce (source, target)) ->
+            Option.fold ~none:false ~some:contains_refinement source
+            || contains_refinement target
+  in
   (* Merlin: [loc] is computed in [type_function] and passed through to
-     here. (We use it in the error recovery in [type_function].)
-  *)
+     here. (We use it in the error recovery in [type_function].) *)
   let ty_fun, _ = in_function in
   match params_suffix with
   | { pparam_desc = Pparam_newtype (newtype_var, jkind_annot) } :: rest ->
@@ -10013,7 +10178,7 @@ and type_function_
       let (params, body, newtypes, contains_gadt, fun_alloc_mode, ret_info,
            calling_convention_sorts),
           exp_type, id, uid =
-        type_newtype env newtype_var jkind_annot (fun env ->
+        type_newtype ~dependent_openings env newtype_var jkind_annot (fun env ->
           let { function_ = exp_type, params, body;
                 newtypes; params_contain_gadt = contains_gadt;
                 fun_alloc_mode; ret_info; calling_convention_sorts;
@@ -10022,7 +10187,8 @@ and type_function_
             (* mimic the typing of Pexp_newtype by minting a new type var,
                 like [type_exp].
             *)
-            type_function env expected_mode
+            type_function ~dependent_openings
+              ~return_constraint_has_refinement env expected_mode
               (newvar (Jkind.Builtin.any ~why:Dummy_jkind))
               rest body_constraint body ~in_function ~first
           in
@@ -10112,7 +10278,7 @@ and type_function_
           { mode_modes = Alloc.Const.Option.none; mode_desc = [] }
       in
       let env,
-          { filtered_arrow = { ty_arg; arg_mode; ty_ret; ret_mode };
+          { filtered_arrow = { ty_arg; arg_mode; ty_ret; ret_mode; binder };
             arg_sort; ret_sort;
             ty_arg_mono; expected_pat_mode; expected_inner_mode;
             alloc_mode; really_poly
@@ -10123,6 +10289,7 @@ and type_function_
           ~mode_annots:mode_annots.mode_modes
           ~ret_mode_annots:ret_mode_annots.mode_modes
       in
+      let introduced_dependency = ref None in
       (* [ty_arg_internal] is the type of the parameter viewed internally
          to the function. This is different than [ty_arg_mono] exactly for
          optional arguments with defaults, where the external [ty_arg_mono]
@@ -10176,15 +10343,60 @@ and type_function_
           ~type_body:begin
             fun () pat ~when_env:_ ~ext_env ~cont:_ ~ty_expected ~ty_infer:_
               ~contains_gadt:param_contains_gadt ->
-              let { function_ = _, params_suffix, body;
+              let opening =
+                match binder, pat.pat_desc with
+                | Some binder, Tpat_var { id = parameter; _ } ->
+                    Some { binder; parameter }
+                | Some _, _ ->
+                    raise
+                      (Error_forward
+                         (Location.errorf ~loc:pat.pat_loc
+                            "A function checked against a dependent arrow \
+                             must have a simple variable parameter"))
+                | None, Tpat_var { id = parameter; _ }
+                  when return_constraint_has_refinement ->
+                    let binder =
+                      Ident.create_scoped ~scope:Ident.lowest_scope
+                        (Ident.name parameter)
+                    in
+                    Some { binder; parameter }
+                | None, _ -> None
+              in
+              let body_ty_expected =
+                match opening, binder with
+                | Some opening, Some _ ->
+                    open_dependent_type [opening] ty_expected
+                | Some _, None ->
+                    newvar (Jkind.Builtin.any ~why:Dummy_jkind)
+                | None, _ -> ty_expected
+              in
+              let type_body () =
+                let dependent_openings =
+                  match opening with
+                  | None -> dependent_openings
+                  | Some opening -> opening :: dependent_openings
+                in
+                type_function ~dependent_openings
+                  ~return_constraint_has_refinement ext_env expected_inner_mode
+                  body_ty_expected rest body_constraint body ~in_function
+                  ~first:false
+              in
+              let { function_ = body_type, params_suffix, body;
                     newtypes; params_contain_gadt = suffix_contains_gadt;
                     fun_alloc_mode; ret_info; calling_convention_sorts;
-                  }
-                =
-                type_function ext_env expected_inner_mode ty_expected
-                  rest body_constraint body
-                  ~in_function ~first:false
-              in
+                  } = type_body () in
+              begin match opening, binder,
+                  body_constraint.ret_type_constraint with
+              | Some ({ binder = opened_binder; _ } as opening), None, Some _ ->
+                  if Ctype.refinement_ident_occurs opened_binder body_type then
+                    introduced_dependency :=
+                      Some (opening, close_dependent_type [opening] body_type)
+                  else
+                    unify_exp_types loc ext_env body_type ty_ret
+              | Some _, Some _, Some _ ->
+                  unify_exp_types loc ext_env body_type ty_ret
+              | None, _, _ | Some _, _, None -> ()
+              end;
               let contains_gadt =
                 if param_contains_gadt then
                   Contains_gadt
@@ -10234,43 +10446,6 @@ and type_function_
       Calling_convention_sort.check_doesn't_rely_on_partial_match ~partial
         ~has_default:(Option.is_some default_arg) ~match_loc:pat.pat_loc
         ~outer_env:env ~branch_env:ext_env inner_calling_convention_sorts;
-      let exp_type =
-        instance
-          (newgenty
-             (Tarrow
-                ((typed_arg_label, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
-      in
-      (* This is quadratic, as it operates over the entire tail of the
-         type for each new parameter. Now that functions are n-ary, we
-         could possibly run this once.
-      *)
-      begin
-        try with_explanation ty_fun.explanation (fun () ->
-          unify_exp_types loc env exp_type (instance ty_expected));
-        with exn ->
-          (* Merlin: We recover from this error in [type_function]. *)
-          record_exp_and_reraise ~exn
-            { exp_desc =
-               (let params = List.map (fun { param; _ } -> param) params in
-                let ret_mode, ret_sort =
-                  match ret_info with
-                  | Some { ret_mode; ret_sort } -> ret_mode, ret_sort
-                  | None ->
-                    ( { mode_modes = Alloc.disallow_right ret_mode; mode_desc = [] }
-                    , ret_sort )
-                in
-                Texp_function
-                  { params; body; ret_mode; ret_sort;
-                    alloc_mode = Alloc.disallow_left alloc_mode;
-                    zero_alloc = Zero_alloc.default;
-                    yielding = Yielding.newvar () });
-              exp_loc = loc;
-              exp_extra = [];
-              exp_type;
-              exp_attributes = [];
-              exp_env = env;
-            }
-      end;
       (* This is quadratic, as it extracts all of the parameters from an arrow
          type for each parameter that's added. Now that functions are n-ary,
          there might be an opportunity to improve this.
@@ -10312,6 +10487,85 @@ and type_function_
             param,
             param_uid
       in
+      let expected_binder = binder in
+      let binder =
+        match expected_binder, !introduced_dependency with
+        | (Some _ as binder), _ -> binder
+        | None, Some (opening, closed_body_type) ->
+            if typed_arg_label <> Nolabel then
+              raise
+                (Error_forward
+                   (Location.errorf ~loc:pparam_loc
+                       "Dependent binders are supported only on unlabelled \
+                       parameters"));
+            unify_exp_types loc env closed_body_type ty_ret;
+            Some opening.binder
+        | None, None -> None
+      in
+      begin match expected_binder, binder with
+      | None, Some binder ->
+          let expected = expand_head env ty_expected in
+          begin match get_desc expected with
+          | Tarrow ((label, arg_mode, ret_mode, None), arg, _, commu) ->
+              set_type_desc expected
+                (Tarrow
+                   ((label, arg_mode, ret_mode, Some binder),
+                    arg, ty_ret, commu))
+          | Tarrow ((_, _, _, Some _), _, _, _) -> ()
+          | _ -> assert false
+          end
+      | _ -> ()
+      end;
+      let arg_mode =
+        match expected_binder, binder with
+        | None, Some _ ->
+            let dependent_mode = dependent_argument_mode () in
+            Alloc.equate_err
+              (pparam_loc, Mode.Hint.Expression)
+              arg_mode dependent_mode;
+            arg_mode
+        | _ -> arg_mode
+      in
+      let exp_type =
+        instance
+          (newgenty
+             (Tarrow
+                ((typed_arg_label, arg_mode, ret_mode, binder),
+                 ty_arg, ty_ret, commu_ok)))
+      in
+      begin
+        try with_explanation ty_fun.explanation (fun () ->
+          unify_exp_types loc env exp_type (instance ty_expected));
+        with exn ->
+          (* Merlin: We recover from this error in [type_function]. *)
+          record_exp_and_reraise ~exn
+            { exp_desc =
+               (let params = List.map (fun { param; _ } -> param) params in
+                let ret_mode, ret_sort =
+                  match ret_info with
+                  | Some { ret_mode; ret_sort } -> ret_mode, ret_sort
+                  | None ->
+                    ( { mode_modes = Alloc.disallow_right ret_mode;
+                        mode_desc = []
+                      },
+                      ret_sort )
+                in
+                Texp_function
+                  { params;
+                    body;
+                    ret_mode;
+                    ret_sort;
+                    alloc_mode = Alloc.disallow_left alloc_mode;
+                    zero_alloc = Zero_alloc.default;
+                    yielding = Yielding.newvar ()
+                  });
+              exp_loc = loc;
+              exp_extra = [];
+              exp_type;
+              exp_attributes = [];
+              exp_env = env
+            }
+      end;
       let param =
         { has_poly;
           param =
@@ -10395,9 +10649,9 @@ and type_function_
             | None -> type_expect env expected_mode body (mk_expected ty_expected)
             | Some constraint_ ->
               let body, exp_type, exp_extra =
-                type_constraint_expect (expression_constraint body)
-                  env expected_mode body_loc ~loc_arg:body_loc
-                  type_mode.mode_modes constraint_ ty_expected
+                type_constraint_expect ~dependent_openings
+                  (expression_constraint body) env expected_mode body_loc
+                  ~loc_arg:body_loc type_mode.mode_modes constraint_ ty_expected
               in
               { body with
                   exp_extra = (exp_extra, body_loc, []) :: body.exp_extra;
@@ -10455,9 +10709,9 @@ and type_function_
               in
               let (body, fun_alloc_mode, ret_info, calling_convention_sorts),
                   exp_type, exp_extra =
-                type_constraint_expect function_cases_constraint_arg
-                  env expected_mode loc type_mode.mode_modes constraint_
-                  ty_expected ~loc_arg:loc
+                type_constraint_expect ~dependent_openings
+                  function_cases_constraint_arg env expected_mode loc
+                  type_mode.mode_modes constraint_ ty_expected ~loc_arg:loc
               in
               let exp_extra =
                 match type_mode.mode_desc with
@@ -10925,19 +11179,29 @@ and type_argument_ ?explanation ?recarg ?defer_primitive_mode ~overwrite env
     let lv = get_level expty in
     let lv' = get_level expty' in
     match get_desc expty', get_desc expty with
-    | Tarrow((l, marg, mret), ty_arg', ty_res', _),
-      Tarrow(_, ty_arg,  ty_res,  _)
+    | Tarrow((l, marg, mret, binder'), ty_arg', ty_res', _),
+      Tarrow((_, _, _, binder), ty_arg, ty_res, _)
       when lv' = generic_level || not !Clflags.principal ->
+      let binder, ty_res =
+        match binder', binder with
+        | None, None -> None, ty_res
+        | Some binder', Some binder ->
+            ( Some binder',
+              Ctype.substitute_refinement_ident binder binder' ty_res )
+        | None, Some _ | Some _, None -> raise Exit
+      in
       let ty_res', ty_res, changed = loosen_arrow_modes ty_res' ty_res in
       let mret, changed' = Alloc.newvar_below mret in
       let marg, changed'' = Alloc.newvar_above marg in
       if changed || changed' || changed'' then
-        newty2 ~level:lv' (Tarrow((l, marg, mret), ty_arg', ty_res', commu_ok)),
-        newty2 ~level:lv  (Tarrow((l, marg, mret), ty_arg,  ty_res,  commu_ok)),
+        newty2 ~level:lv'
+          (Tarrow((l, marg, mret, binder), ty_arg', ty_res', commu_ok)),
+        newty2 ~level:lv
+          (Tarrow((l, marg, mret, binder), ty_arg, ty_res, commu_ok)),
         true
       else
         ty', ty, false
-    | _ ->
+    | _ | exception Exit ->
       ty', ty, false
   in
   let ty_expected', ty_expected =
@@ -10959,7 +11223,7 @@ and type_argument_ ?explanation ?recarg ?defer_primitive_mode ~overwrite env
     let work () =
       let te = expand_head env ty_expected' in
       match get_desc te with
-        Tarrow((Nolabel,_,_),_,ty_res0,_) ->
+        Tarrow((Nolabel,_,_,_),_,ty_res0,_) ->
           Some (no_labels ty_res0, get_level te)
       | _ -> None
     in
@@ -10987,7 +11251,7 @@ and type_argument_ ?explanation ?recarg ?defer_primitive_mode ~overwrite env
       in
       let rec make_args args ty_fun =
         match get_desc (expand_head env ty_fun) with
-        | Tarrow ((l,_marg,_mret),ty_arg,ty_fun,_) when is_optional l ->
+        | Tarrow ((l,_marg,_mret,_),ty_arg,ty_fun,_) when is_optional l ->
             let ty =
               type_option_none env (instance (tpoly_get_mono ty_arg))
                 sarg.pexp_loc
@@ -10995,10 +11259,10 @@ and type_argument_ ?explanation ?recarg ?defer_primitive_mode ~overwrite env
             (* CR layouts v5: change value assumption below when we allow
                non-values in structures. *)
             make_args ((l, Arg (ty, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_marg,_mret),_,ty_fun,_) when is_position l ->
+        | Tarrow ((l,_marg,_mret,_),_,ty_fun,_) when is_position l ->
             let arg = src_pos (Location.ghostify sarg.pexp_loc) [] env in
             make_args ((l, Arg (arg, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_,_),_,ty_res',_) when l = Nolabel || !Clflags.classic ->
+        | Tarrow ((l,_,_,_),_,ty_res',_) when l = Nolabel || !Clflags.classic ->
             List.rev args, ty_fun, no_labels ty_res'
         | Tvar _ ->  List.rev args, ty_fun, false
         |  _ -> [], texp.exp_type, false
@@ -11015,7 +11279,7 @@ and type_argument_ ?explanation ?recarg ?defer_primitive_mode ~overwrite env
       and ty_fun = instance ty_fun' in
       let marg, ty_arg, mret, ty_res =
         match get_desc (expand_head env ty_expected) with
-          Tarrow((Nolabel,marg,mret),ty_arg,ty_res,_) ->
+          Tarrow((Nolabel,marg,mret,_),ty_arg,ty_res,_) ->
            marg, ty_arg, mret, ty_res
         | _ -> assert false
       in
@@ -12107,7 +12371,7 @@ and type_function_cases_expect
     env expected_mode ty_expected loc cases attrs ~first ~in_function =
   Builtin_attributes.warning_scope attrs begin fun () ->
     let env,
-        { filtered_arrow = { ty_arg; ty_ret; arg_mode; ret_mode };
+        { filtered_arrow = { ty_arg; ty_ret; arg_mode; ret_mode; binder };
           arg_sort; ret_sort;
           ty_arg_mono; expected_pat_mode; expected_inner_mode; alloc_mode;
         } =
@@ -12116,6 +12380,14 @@ and type_function_cases_expect
         ~ret_mode_annots:Mode.Alloc.Const.Option.none
         ~is_first_val_param:first ~is_final_val_param:true
     in
+    Option.iter
+      (fun _ ->
+         raise
+           (Error_forward
+              (Location.errorf ~loc
+                 "A function checked against a dependent arrow must have a \
+                  simple variable parameter")))
+      binder;
     let cases, partial =
       type_cases Value env
         expected_pat_mode expected_inner_mode ty_arg_mono arg_sort
@@ -12125,7 +12397,8 @@ and type_function_cases_expect
     let ty_fun =
       instance
         (newgenty
-           (Tarrow ((Nolabel, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
+           (Tarrow ((Nolabel, arg_mode, ret_mode, None),
+             ty_arg, ty_ret, commu_ok)))
     in
     let param, param_uid =
       name_cases ~pattern_kind:Value_pattern_in_argument "param" cases
@@ -12664,8 +12937,10 @@ and type_andops env sarg sands expected_sort expected_ty =
             let op_type = op_desc.val_type in
             let ty_arg, sort_arg = new_rep_var ~why:Function_argument () in
             let ty_rest, sort_rest = new_rep_var ~why:Function_argument () in
-            let ty_result, op_result_sort = new_rep_var ~why:Function_result () in
-            let arrow_desc = (Nolabel,Alloc.legacy,Alloc.legacy) in
+            let ty_result, op_result_sort =
+              new_rep_var ~why:Function_result ()
+            in
+            let arrow_desc = (Nolabel, Alloc.legacy, Alloc.legacy, None) in
             let ty_rest_fun =
               newty (Tarrow(arrow_desc, newmono ty_arg, ty_result, commu_ok))
             in
@@ -12774,7 +13049,10 @@ and type_n_ary_function
                       let new_mode_var () = Mode.Alloc.newvar () in
                       (newty
                          (Tarrow
-                            ( (arg_label, new_mode_var (), new_mode_var ())
+                            ( ( arg_label,
+                                new_mode_var (),
+                                new_mode_var (),
+                                None )
                             , new_ty_var Function_argument
                             , new_ty_var Function_result
                             , commu_ok )));
@@ -13495,7 +13773,7 @@ let escaping_submode_reason_hint =
     let get_non_local_arity ty =
       let rec loop sureness n ty =
         match get_desc ty with
-        | Tarrow ((_, _, res_mode), _, res_ty, _) ->
+        | Tarrow ((_, _, res_mode, _), _, res_ty, _) ->
           begin match
             Locality.Guts.check_const (Alloc.proj_comonadic Areality res_mode)
           with
@@ -14652,7 +14930,7 @@ let rec refinement_pattern_of_typed :
     | Tpat_array _ | Tpat_lazy _ | Tpat_exception _ | Tpat_or _ ->
         unsupported_refinement_syntax pat.pat_loc "This pattern"
 
-let refinement_expression_of_typed binder predicate =
+let refinement_expression_of_typed bound_values binder predicate =
   let argument_label : Typedtree.arg_label -> Asttypes.arg_label = function
     | Nolabel -> Nolabel
     | Labelled label | Position label -> Labelled label
@@ -14665,7 +14943,8 @@ let refinement_expression_of_typed binder predicate =
     let mk rexp_desc = mk_at exp.exp_type rexp_desc in
     let result =
       match exp.exp_desc with
-      | Texp_ident { path = Pident id; _ } when Ident.Set.mem id locals ->
+      | Texp_ident { path = Pident id; _ }
+        when Ident.Set.mem id locals || Ident.Set.mem id bound_values ->
           mk (Rexp_var id)
       | Texp_ident { path; _ } -> mk (Rexp_ident path)
       | Texp_instvar (_, path, _) -> mk (Rexp_ident path)
@@ -14883,7 +15162,7 @@ let default_refinement_predicate_types payload predicate =
       begin match get_desc ty with
       | Tvar { jkind } | Tunivar { jkind } ->
           Jkind.default_to_scannable jkind
-      | Tarrow ((_, arg_mode, ret_mode), arg, ret, _) ->
+      | Tarrow ((_, arg_mode, ret_mode, _), arg, ret, _) ->
           ignore (Alloc.zap_to_legacy arg_mode : Alloc.Const.t);
           ignore (Alloc.zap_to_legacy ret_mode : Alloc.Const.t);
           default arg;
@@ -14903,45 +15182,67 @@ let default_refinement_predicate_types payload predicate =
        (fun () ty -> default ty) () predicate
      : unit)
 
+let add_total_immutable_value env binder payload loc =
+  let sort =
+    match
+      Ctype.type_sort ~why:Jkind.History.Let_binding ~fixed:false env payload
+    with
+    | Ok sort -> sort
+    | Error violation ->
+        raise (Error (loc, env, Function_type_not_rep (payload, violation)))
+  in
+  let value_description =
+    { val_type = payload;
+      val_kind = Val_reg sort;
+      val_lpoly = Lpoly.determined [];
+      val_attributes = [];
+      val_zero_alloc = Zero_alloc.default;
+      val_modalities = Modality.undefined;
+      val_loc = loc;
+      val_uid = Uid.mk ~current_unit:(Env.get_current_unit ())
+    }
+  in
+  Env.add_value ~mode:(total_immutable_mode ()) binder value_description env
+
 let () =
+  Typetexp.add_dependent_binder :=
+    (fun env binder payload loc ->
+       add_total_immutable_value env binder payload loc);
   Typetexp.type_refinement_predicate :=
-    (fun env binder payload predicate ->
+    (fun env bound_values binder payload predicate ->
        let loc = predicate.pexp_loc in
        let env =
          Env.add_total_closure_lock (loc, Mode.Hint.Expression) env
        in
-       let sort =
-         match
-           Ctype.type_sort ~why:Jkind.History.Let_binding ~fixed:false
-             env payload
-         with
-         | Ok sort -> sort
-         | Error violation ->
-             raise (Error (loc, env,
-               Function_type_not_rep (payload, violation)))
-       in
-       let value_description =
-         { val_type = payload;
-           val_kind = Val_reg sort;
-           val_lpoly = Lpoly.determined [];
-           val_attributes = [];
-           val_zero_alloc = Zero_alloc.default;
-           val_modalities = Modality.undefined;
-           val_loc = loc;
-           val_uid = Uid.mk ~current_unit:(Env.get_current_unit ())
-         }
-       in
-       let env =
-         Env.add_value ~mode:(total_immutable_mode ()) binder
-           value_description env
-       in
+       let env = add_total_immutable_value env binder payload loc in
        let typed_predicate =
          Ctype.with_refinement_predicate_scope (fun () ->
            type_expect env ~mode:(total_immutable_mode ()) predicate
              (mk_expected Predef.type_bool))
        in
        let predicate =
-         refinement_expression_of_typed binder typed_predicate
+         refinement_expression_of_typed
+           bound_values binder typed_predicate
+       in
+       let predicate =
+         if Ident.Map.is_empty !refinement_type_closing then predicate
+         else
+           let closing = !refinement_type_closing in
+           let subst =
+             Ident.Map.fold
+               (fun parameter binder subst ->
+                  Subst.add_bound_value parameter binder subst)
+               closing Subst.identity
+           in
+           Refinement_predicate.map
+             ~rename:closing
+             ~bind_value:(fun path ->
+               match path with
+               | Path.Pident parameter ->
+                   Ident.Map.find_opt parameter closing
+               | _ -> None)
+             ~type_expr:(Subst.type_expr subst)
+             predicate
        in
        default_refinement_predicate_types payload predicate;
        typed_predicate, predicate)
