@@ -1,0 +1,24 @@
+(install
+ (section lib)
+ (package ocaml)
+ (enabled_if (= %{context_name} main))
+ (files
+  (vox_verify.cma as compiler-libs/vox_verify.cma)
+  (vox_verify.cmxa as compiler-libs/vox_verify.cmxa)
+  (vox_verify.a as compiler-libs/vox_verify.a)
+  (.vox_verify.objs/byte/vox_verify.cmi as compiler-libs/vox_verify.cmi)
+  (.vox_verify.objs/byte/vox_verify.cmt as compiler-libs/vox_verify.cmt)
+  (.vox_verify.objs/native/vox_verify.cmx as compiler-libs/vox_verify.cmx)
+ ))
+
+(library
+ (name vox_verify)
+ (wrapped false)
+ ; Verifier implementation edits must not rebuild the native optimizer.
+ (ocamlopt_flags (:standard -opaque))
+ (modules vox_verify)
+ (libraries
+  ocamlfrontend
+  (select vox_verify.ml from
+   (vox_smt_solver vox_vc -> vox_verify.enabled.ml)
+   (-> vox_verify.disabled.ml))))
