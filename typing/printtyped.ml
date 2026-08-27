@@ -435,6 +435,12 @@ let rec core_type i ppf x =
   | Ttyp_splice t ->
       line i ppf "Ttyp_splice\n";
       core_type i ppf t
+  | Ttyp_refine (_, binder, ct, pred) ->
+      line i ppf "Ttyp_refine\n";
+      line (i + 1) ppf "%a %s\n" fmt_location binder.loc binder.txt;
+      core_type i ppf ct;
+      line (i+1) ppf "predicate\n";
+      expression (i + 2) ppf pred
   | Ttyp_repr (lv, ct) ->
       line i ppf "Ttyp_repr%a\n"
         (fun ppf -> List.iter (typevar_no_jkind ~print_quote:true ppf)) lv;
@@ -634,6 +640,11 @@ and expression_extra i ppf (extra, loc, attrs) =
       line i ppf "Texp_borrowed\n"
   | Texp_ghost_region ->
       line i ppf "Texp_ghost_region\n"
+  | Texp_refine ->
+      line i ppf "Texp_refine\n"
+  | Texp_let_refine (id, name) ->
+      line i ppf "Texp_let_refine %a %a %s\n" Ident.print id
+        fmt_location name.loc name.txt
   | Texp_stack ->
       line i ppf "Texp_stack\n";
       attributes i ppf attrs

@@ -178,6 +178,70 @@ and type_desc =
   | Tpackage of package
   | Tof_kind of jkind_lr
   | Tbox of type_expr
+  | Trefine of refinement_desc
+
+and refinement_desc =
+  { mutable ref_structural_scope : int;
+    ref_binder : Ident.t;
+    ref_payload : type_expr;
+    ref_pred : refinement_expression }
+
+and refinement_expression =
+  { rexp_desc : refinement_expression_desc;
+    rexp_type : type_expr;
+    rexp_loc : Location.t }
+
+and refinement_expression_desc =
+  | Rexp_var of Ident.t
+  | Rexp_ident of Path.t
+  | Rexp_constant of Parsetree.constant
+  | Rexp_apply of
+      refinement_expression * (Asttypes.arg_label * refinement_expression) list
+  | Rexp_tuple of (string option * refinement_expression) list
+  | Rexp_construct of Path.t * refinement_expression list
+  | Rexp_record of
+      (Path.t * string * refinement_expression) list
+      * refinement_expression option
+  | Rexp_record_unboxed_product of
+      (Path.t * string * refinement_expression) list
+      * refinement_expression option
+  | Rexp_array of Asttypes.mutable_flag * refinement_expression list
+  | Rexp_field of refinement_expression * Path.t * string
+  | Rexp_ifthenelse of
+      refinement_expression * refinement_expression
+      * refinement_expression option
+  | Rexp_sequence of refinement_expression * refinement_expression
+  | Rexp_let of refinement_binding * refinement_expression
+  | Rexp_fun of Ident.t * type_expr * refinement_expression
+  | Rexp_match of refinement_expression * refinement_case list
+
+and refinement_binding =
+  { rb_kind : refinement_binding_kind;
+    rb_ident : Ident.t;
+    rb_type : type_expr;
+    rb_expr : refinement_expression }
+
+and refinement_binding_kind =
+  | Rbind_value
+  | Rbind_refine
+
+and refinement_case =
+  { rc_lhs : refinement_pattern;
+    rc_guard : refinement_expression option;
+    rc_rhs : refinement_expression }
+
+and refinement_pattern =
+  { rpat_desc : refinement_pattern_desc;
+    rpat_type : type_expr;
+    rpat_loc : Location.t }
+
+and refinement_pattern_desc =
+  | Rpat_any
+  | Rpat_var of Ident.t
+  | Rpat_constant of Parsetree.constant
+  | Rpat_tuple of (string option * refinement_pattern) list
+  | Rpat_construct of Path.t * refinement_pattern list
+  | Rpat_alias of refinement_pattern * Ident.t
 
 and arg_label =
   | Nolabel
@@ -303,6 +367,22 @@ and jkind_declaration =
     jkind_uid : Shape.Uid.t;
     jkind_loc : Location.t
   }
+
+let type_desc_observer : (transient_expr -> unit) ref = ref ignore
+
+let set_type_desc_observer observer = type_desc_observer := observer
+
+let refinement_types_created = Local_store.s_ref false
+
+let may_have_refinement_types () = !refinement_types_created
+
+let observe_type_desc ty desc =
+  match desc with
+  | Trefine _ ->
+      refinement_types_created := true;
+      !type_desc_observer ty
+  | _ when !refinement_types_created -> !type_desc_observer ty
+  | _ -> ()
 
 module TransientTypeOps = struct
   type t = type_expr
@@ -1311,13 +1391,20 @@ let not_marked_node mark t =
 (* transient type_expr *)
 
 module Transient_expr = struct
-  let create desc ~level ~scope ~id = {desc; level; scope; id}
-  let set_desc ty d = ty.desc <- d
+  let create desc ~level ~scope ~id =
+    let ty = {desc; level; scope; id} in
+    observe_type_desc ty desc;
+    ty
+  let get_desc ty = ty.desc
+  let set_desc ty d =
+    ty.desc <- d;
+    observe_type_desc ty d
   let set_stub_desc ty d =
     (match ty.desc with
     | Tvar {name = None; _} -> ()
     | _ -> assert false);
-    ty.desc <- d
+    ty.desc <- d;
+    observe_type_desc ty d
   let set_level ty lv = ty.level <- lv
   let set_var_jkind ty jkind' =
     match ty.desc with
@@ -1398,6 +1485,7 @@ let best_effort_compare_type_expr te1 te2 =
         | Tsplice _
         | Tquote_eval _
         | Tbox _
+        | Trefine _
         (* CR layouts v2.8: we can actually see Tsubst here in certain cases, eg during
            [Ctype.copy] when copying the types inside of with_bounds. We also can't
            compare Tsubst structurally, because the Tsubsts that are created in
