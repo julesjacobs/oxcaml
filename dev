@@ -371,6 +371,24 @@ add_compilerlib_modes()
   fi
 }
 
+add_verifier_libraries()
+{
+  for verifier_library in vox_smt vox_vc vox_smt_solver vox_verify; do
+    case "$verifier_library" in
+      vox_verify) verifier_dir=verification/runtime ;;
+      *) verifier_dir=verification ;;
+    esac
+    if [ "$compilerlibs_byte" = true ]; then
+      echo "$verifier_dir/$verifier_library.cma" >> "$targets_file"
+      echo "$verifier_library.cma" >> "$compilerlibs_file"
+    fi
+    if [ "$compilerlibs_native" = true ]; then
+      echo "$verifier_dir/$verifier_library.cmxa" >> "$targets_file"
+      echo "$verifier_library.cmxa" >> "$compilerlibs_file"
+    fi
+  done
+}
+
 add_requirement()
 {
   requirement=$1
@@ -437,9 +455,11 @@ add_requirement()
       add_compilerlib_modes ocamlfrontend
       ;;
     compilerlibs.ocamlbytecomp)
+      add_verifier_libraries
       add_compilerlib_modes ocamlbytecomp
       ;;
     compilerlibs.ocamloptcomp)
+      add_verifier_libraries
       add_compilerlib_modes ocamloptcomp
       ;;
     compilerlibs.ocamltoplevel)

@@ -168,7 +168,13 @@ let init () =
     ];
   List.iter
     (fun (name, archives) ->
-      register_modifiers name (compilerlibs_archives archives))
+      let modifiers = compilerlibs_archives archives in
+      let modifiers = if name = "ocamlbytecomp" || name = "ocamloptcomp"
+        then append Ocaml_variables.directories
+          [compiler_subdir ["otherlibs"; "unix"]] :: modifiers
+        else modifiers
+      in
+      register_modifiers name modifiers)
     [
       (* The compilerlibs split of ocamlcommon into ocamlcommon and
          ocamlfrontend is specific to this repo.  To avoid updating every
@@ -177,9 +183,11 @@ let init () =
          upstreamed, this hack should go, with the tests then updated to
          use the appropriate archives. *)
       "ocamlcommon", ["ocamlcommon"; "ocamlfrontend"];
-      "ocamlbytecomp", ["ocamlbytecomp"];
+      "ocamlbytecomp", ["unix"; "vox_smt"; "vox_vc"; "vox_smt_solver";
+                        "vox_verify"; "ocamlbytecomp"];
       "ocamlmiddleend", ["ocamlmiddleend"];
-      "ocamloptcomp", ["ocamloptcomp"];
+      "ocamloptcomp", ["unix"; "vox_smt"; "vox_vc"; "vox_smt_solver";
+                       "vox_verify"; "ocamloptcomp"];
       "ocamltoplevel", ["ocamltoplevel"];
     ];
   register_modifiers "runtime_events" runtime_events;

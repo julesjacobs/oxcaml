@@ -164,6 +164,7 @@ let implementation_aux ~start_from ~source_file ~output_prefix
     emit_bytecode info bytecode
 
 let implementation ~start_from ~source_file ~output_prefix ~keep_symbol_tables =
+  Vox_verify.install ();
   let start_from = start_from |> starting_point_of_compiler_pass in
   implementation_aux ~start_from ~source_file ~output_prefix ~keep_symbol_tables
     ~compilation_unit:Inferred_from_output_prefix
