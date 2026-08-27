@@ -124,7 +124,7 @@ module Util = struct
           Some params
         | None ->
           begin match type_expr.desc with
-          | Tarrow ((arg_label, _, _), _, te, _) ->
+          | Tarrow ((arg_label, _, _, _), _, te, _) ->
             check_type te (arg_label :: params)
           | _ -> None
           end
@@ -516,7 +516,7 @@ module Gen = struct
         | Tarrow _ ->
           let rec left_types acc env ty =
             match get_desc ty with
-            | Tarrow ((label, _, _), tyleft, tyright, _) ->
+            | Tarrow ((label, _, _, _), tyleft, tyright, _) ->
               let arg, name = make_arg env label tyleft in
               let value_description =
                 { val_type = tyleft;
