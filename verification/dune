@@ -1,0 +1,14 @@
+(library
+ (name vox_smt)
+ (wrapped false)
+ (modules vox_smt))
+
+(library
+ (name vox_smt_solver)
+ (wrapped false)
+ (modules vox_smt_solver)
+ (libraries vox_smt unix)
+ (foreign_stubs
+  (language c)
+  (names monotonic_clock))
+ (enabled_if (= %{context_name} main)))
