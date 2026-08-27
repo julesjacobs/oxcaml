@@ -343,7 +343,7 @@ let rec add_expr bv exp =
   | Pexp_unreachable -> ()
   | Pexp_comprehension x -> add_comprehension_expr bv x
   | Pexp_borrow e -> add_expr bv e
-  | Pexp_refine e -> add_expr bv e
+  | Pexp_refine e | Pexp_assume e -> add_expr bv e
   | Pexp_let_refine (_, bound, body) -> add_expr bv bound; add_expr bv body
 
 and add_comprehension_expr bv = function

@@ -1230,7 +1230,15 @@ and expression ctxt f x =
     | Pexp_borrow e ->
         pp f "@[<hov2>borrow_@ %a@]" (expression2 (reset_flags ctxt))  e
     | Pexp_refine e ->
+<<<<<<< HEAD
         pp f "@[<hov2>refine_@ %a@]" (expression2 (reset_flags ctxt)) e
+||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
+        pp f "@[<hov2>refine_@ %a@]" (expression2 reset_ctxt) e
+=======
+        pp f "@[<hov2>refine_@ %a@]" (expression2 reset_ctxt) e
+    | Pexp_assume e ->
+        pp f "@[<hov2>assume_@ %a@]" (expression2 reset_ctxt) e
+>>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
     | Pexp_let_refine (name, bound, body) ->
         pp f "@[<2>let refine_ %a =@ %a@ in@]@ %a"
           ident_of_name name.txt (expression (reset_flags ctxt)) bound

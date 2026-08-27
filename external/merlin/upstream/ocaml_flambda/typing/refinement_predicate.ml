@@ -14,8 +14,17 @@ open Types
 
 (* Rebuilding *)
 
+<<<<<<< HEAD
 let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
     ?value_path ?constructor_path ?type_path ?(type_expr = Fun.id)
+||||||| parent of 5be690e59a (Add mandatory runtime refinement checks with assume_)
+let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
+    ?constructor_path ?type_path ?(type_expr = Fun.id)
+=======
+let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
+    ?value_path
+    ?constructor_path ?type_path ?(type_expr = Fun.id)
+>>>>>>> 5be690e59a (Add mandatory runtime refinement checks with assume_)
     ?(location = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
     let pconst_desc =
@@ -33,11 +42,12 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
     | Some rename_bound ->
       let id' = rename_bound id in
       Ident.Map.add id id' rename, id'
-    | None -> rename, id
+    | None -> Ident.Map.add id id rename, id
   in
   let rec map_rexp rename rexp =
     let rexp_desc =
       match rexp.rexp_desc with
+<<<<<<< HEAD
       | Rexp_var id -> begin
           match Ident.Map.find_opt id rename with
           | Some id -> Rexp_var id
@@ -46,6 +56,19 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
               | Some path -> Rexp_ident path
               | None -> Rexp_var id
         end
+||||||| parent of 5be690e59a (Add mandatory runtime refinement checks with assume_)
+      | Rexp_var id -> Rexp_var (rename_var rename id)
+=======
+      | Rexp_var id -> begin
+          match Ident.Map.find_opt id rename with
+          | Some id -> Rexp_var id
+          | None ->
+              match Option.bind free_var_path (fun f -> f id) with
+              | None -> Rexp_var id
+              | Some (Path.Pident id) -> Rexp_var id
+              | Some path -> Rexp_ident path
+        end
+>>>>>>> 5be690e59a (Add mandatory runtime refinement checks with assume_)
       | Rexp_ident path -> begin
           match Option.bind bind_value (fun f -> f path) with
           | Some id -> Rexp_var id
@@ -423,8 +446,16 @@ let equal ~pairs rexp1 rexp2 =
 
 (* Back to surface syntax *)
 
+<<<<<<< HEAD
 let untype ?(type_constraint = fun _ -> None)
     ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
+||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
+let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
+=======
+let untype ?(expression = fun _ exp -> exp)
+    ?(function_label = fun _ -> Asttypes.Nolabel)
+    ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
+>>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
   let open Ast_helper in
   let lid_of_name name = Location.mknoloc (Longident.Lident name) in
   let constrain_pattern constrained ty pat =
@@ -434,7 +465,15 @@ let untype ?(type_constraint = fun _ -> None)
   in
   let rec untype_rexp rexp =
     let loc = rexp.rexp_loc in
+<<<<<<< HEAD
     let expression = match rexp.rexp_desc with
+||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
+    match rexp.rexp_desc with
+=======
+    expression rexp (untype_desc loc rexp)
+  and untype_desc loc rexp =
+    match rexp.rexp_desc with
+>>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
     | Rexp_var id -> Exp.ident ~loc (lid_of_name (var_name id))
     | Rexp_ident path -> Exp.ident ~loc (value_ident path)
     | Rexp_constant const -> Exp.constant ~loc const
@@ -494,9 +533,17 @@ let untype ?(type_constraint = fun _ -> None)
         Exp.function_ ~loc
           [ { pparam_desc =
                 Pparam_val
+<<<<<<< HEAD
                   ( Asttypes.Nolabel, None,
                     constrain_pattern constrained param_type
                       (Pat.var (Location.mknoloc (var_name param))) );
+||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
+                  ( Asttypes.Nolabel, None,
+                    Pat.var (Location.mknoloc (var_name param)) );
+=======
+                  ( function_label rexp, None,
+                    Pat.var (Location.mknoloc (var_name param)) );
+>>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
               pparam_loc = Location.none } ]
           { mode_annotations = [];
             ret_mode_annotations = [];
