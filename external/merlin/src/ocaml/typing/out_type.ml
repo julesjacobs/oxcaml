@@ -1555,7 +1555,7 @@ let rec tree_of_modal_typexp mode modal ty =
         let non_gen = is_non_gen mode ty in
         let name_gen = Variable_names.new_var_name ~non_gen ty in
         Otyp_var (non_gen, Variable_names.name_of_type name_gen tty)
-    | Tarrow ((l, marg, mret), ty1, ty2, _) ->
+    | Tarrow ((l, marg, mret, binder), ty1, ty2, _) ->
         let lab =
           if !print_labels || is_omittable l then outcome_label l
           else Nolabel
@@ -1580,7 +1580,8 @@ let rec tree_of_modal_typexp mode modal ty =
         let acc_mode = curry_mode alloc_mode arg_mode in
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
         let t2 = tree_of_modal_typexp mode modal ty2 in
-        Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
+        Otyp_arrow
+          (lab, tree_of_modes arg_mode, t1, t2, Option.map Ident.name binder)
     | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
         let payload = tree_of_typexp mode Alloc.Const.legacy ref_payload in
         let bound_names =

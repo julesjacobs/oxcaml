@@ -65,8 +65,11 @@ val type_open:
     ref
 
 val type_refinement_predicate:
-  (Env.t -> Ident.t -> Types.type_expr -> Parsetree.expression ->
+  (Env.t -> Ident.Set.t -> Ident.t -> Types.type_expr -> Parsetree.expression ->
     Typedtree.expression * Types.refinement_expression) ref
+
+val add_dependent_binder:
+  (Env.t -> Ident.t -> Types.type_expr -> Location.t -> Env.t) ref
 
 val valid_tyvar_name : string -> bool
 

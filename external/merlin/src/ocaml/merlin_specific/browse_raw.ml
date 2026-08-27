@@ -704,7 +704,7 @@ and of_core_type_desc = function
   | Ttyp_call_pos -> id_fold
   | Ttyp_of_kind jkind -> of_jkind_annotation jkind
   | Ttyp_open (_, _, ct) -> of_core_type ct
-  | Ttyp_arrow (_, ct1, modes1, ct2, modes2) ->
+  | Ttyp_arrow (_, ct1, modes1, ct2, modes2, _) ->
     of_core_type ct1 ** of_core_type ct2 ** of_modes modes1 ** of_modes modes2
   | Ttyp_tuple cts -> list_fold (fun (_, ty) -> of_core_type ty) cts
   | Ttyp_unboxed_tuple cts -> list_fold (fun (_, ty) -> of_core_type ty) cts

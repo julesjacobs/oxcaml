@@ -2623,13 +2623,14 @@ let type_for_annotation ~env ~loc typ =
         | Tunivar _ ->
           let name, jkind_annotation = unwrap_univar ty |> Option.get in
           Ttyp_var (Some name, jkind_annotation)
-        | Tarrow ((arg_label, _, _), ty, ty', _) ->
+        | Tarrow ((arg_label, _, _, _), ty, ty', _) ->
           Ttyp_arrow
             ( arg_label,
               go ty,
               Typemode.transl_alloc_mode [],
               go ty',
-              Typemode.transl_alloc_mode [] )
+              Typemode.transl_alloc_mode [],
+              None )
         | Tpoly (ty, tyl) -> (
           let cty = go ty in
           match List.filter_map unwrap_univar tyl with
@@ -2889,7 +2890,7 @@ and quote_core_type ~scopes ty =
         var
     in
     Type.var loc (Some var) |> Type.wrap
-  | Ttyp_arrow (arg_lab, ty1, ms1, ty2, ms2) ->
+  | Ttyp_arrow (arg_lab, ty1, ms1, ty2, ms2, _binder) ->
     let lab = quote_arg_label loc arg_lab
     and ty1 = quote_core_type ~scopes ty1
     and ms1 = quote_modes loc ms1
@@ -3424,7 +3425,8 @@ and quote_expression_extra ~env ~scopes _stage extra lambda =
                     | None -> newcorevar env loc),
                     Typemode.transl_alloc_mode [],
                     spine,
-                    Typemode.transl_alloc_mode [] );
+                    Typemode.transl_alloc_mode [],
+                    None );
               ctyp_type = newvar ();
               ctyp_env = env;
               ctyp_loc = to_location loc;

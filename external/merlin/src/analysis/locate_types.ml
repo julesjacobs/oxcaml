@@ -15,7 +15,7 @@ end
 
 let rec flatten_arrow ret_ty =
   match Types.get_desc ret_ty with
-  | Tarrow ((label, _, _), ty1, ty2, _) ->
+  | Tarrow ((label, _, _, _), ty1, ty2, _) ->
     let ty1 =
       match label with
       | Optional _ ->

@@ -1123,11 +1123,12 @@ let core_type sub ct =
   let desc = match ct.ctyp_desc with
       Ttyp_var (None, jkind) -> Ptyp_any jkind
     | Ttyp_var (Some s, jkind) -> Ptyp_var (s, jkind)
-    | Ttyp_arrow (arg_label, ct1, modes1, ct2, modes2) ->
+    | Ttyp_arrow (arg_label, ct1, modes1, ct2, modes2, binder) ->
         let modes1 = Typemode.untransl_mode modes1 in
         let modes2 = Typemode.untransl_mode modes2 in
         Ptyp_arrow
-          (label arg_label, sub.typ sub ct1, sub.typ sub ct2, modes1, modes2)
+          (label arg_label, sub.typ sub ct1, sub.typ sub ct2, modes1, modes2,
+           Option.map snd binder)
     | Ttyp_refine (_, binder, payload, pred) ->
         Ptyp_refine (binder, sub.typ sub payload, sub.expr sub pred)
     | Ttyp_tuple list ->

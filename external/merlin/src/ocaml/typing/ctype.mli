@@ -379,7 +379,8 @@ type filtered_arrow =
   { ty_arg : type_expr;
     arg_mode : Mode.Alloc.lr;
     ty_ret : type_expr;
-    ret_mode : Mode.Alloc.lr
+    ret_mode : Mode.Alloc.lr;
+    binder : Ident.t option
   }
 
 val filter_arrow: Env.t -> type_expr -> arg_label -> force_tpoly:bool ->
@@ -575,6 +576,9 @@ val close_class_signature : Env.t -> class_signature -> bool
 exception Nondep_cannot_erase of Ident.t
 
 val nondep_type: Env.t -> Ident.t list -> type_expr -> type_expr
+val refinement_ident_occurs : Ident.t -> type_expr -> bool
+val substitute_refinement_ident :
+  Ident.t -> Ident.t -> type_expr -> type_expr
         (* Return a type equivalent to the given type but without
            references to any of the given identifiers.
            Raise [Nondep_cannot_erase id] if no such type exists because [id],

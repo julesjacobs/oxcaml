@@ -18,10 +18,12 @@ open Types
 (** Rebuild a predicate.  [rename_bound] renames every binder introduced
     inside the predicate;
     [rename] maps externally-bound idents;
+    [bind_value] turns selected free value paths into bound variables;
     [value_path] rewrites the paths of free idents. *)
 val map :
   ?rename:Ident.t Ident.Map.t ->
   ?rename_bound:(Ident.t -> Ident.t) ->
+  ?bind_value:(Path.t -> Ident.t option) ->
   ?value_path:(Path.t -> Path.t) ->
   ?constructor_path:(Path.t -> Path.t) ->
   ?type_path:(Path.t -> Path.t) ->

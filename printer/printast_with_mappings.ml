@@ -201,13 +201,14 @@ let rec core_type i ppf x =
   | Ptyp_var (s, jkind) ->
       line i ppf "Ptyp_var %s\n" s;
       jkind_annotation_opt (i+1) ppf jkind
-  | Ptyp_arrow (l, ct1, ct2, m1, m2) ->
+  | Ptyp_arrow (l, ct1, ct2, m1, m2, binder) ->
       line i ppf "Ptyp_arrow\n";
       arg_label i ppf l;
       core_type i ppf ct1;
       core_type i ppf ct2;
       modes i ppf m1;
       modes i ppf m2;
+      option i string_loc ppf binder;
   | Ptyp_tuple l ->
       line i ppf "Ptyp_tuple\n";
       list i (labeled_tuple_element core_type) ppf l;

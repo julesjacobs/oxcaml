@@ -76,7 +76,8 @@ module Typ = struct
 
   let any ?loc ?attrs a = mk ?loc ?attrs (Ptyp_any a)
   let var ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_var (a, b))
-  let arrow ?loc ?attrs a b c d e = mk ?loc ?attrs (Ptyp_arrow (a, b, c, d, e))
+  let arrow ?loc ?attrs ?binder a b c d e =
+    mk ?loc ?attrs (Ptyp_arrow (a, b, c, d, e, binder))
   let tuple ?loc ?attrs a = mk ?loc ?attrs (Ptyp_tuple a)
   let unboxed_tuple ?loc ?attrs a = mk ?loc ?attrs (Ptyp_unboxed_tuple a)
   let constr ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_constr (a, b))
@@ -118,8 +119,9 @@ module Typ = struct
             let jkind = Option.map loop_jkind jkind in
             check_variable var_names t.ptyp_loc x;
             Ptyp_var (x, jkind)
-        | Ptyp_arrow (label,core_type,core_type',modes,modes') ->
-            Ptyp_arrow(label, loop core_type, loop core_type', modes, modes')
+        | Ptyp_arrow (label,core_type,core_type',modes,modes',binder) ->
+            Ptyp_arrow
+              (label, loop core_type, loop core_type', modes, modes', binder)
         | Ptyp_tuple lst ->
             Ptyp_tuple (List.map (fun (l, t) -> l, loop t) lst)
         | Ptyp_unboxed_tuple lst ->

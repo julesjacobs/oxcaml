@@ -4845,12 +4845,28 @@ function_type:
 
 strict_function_or_labeled_tuple_type:
   | mktyp(
+      LPAREN binder = mkrhs(LIDENT) COLON domain = dependent_param_type RPAREN
+      MINUSGREATER codomain = strict_function_or_labeled_tuple_type
+        { Ptyp_arrow (Nolabel, domain, codomain, [], [], Some binder) }
+    )
+    { $1 }
+  | mktyp(
+      LPAREN binder = mkrhs(LIDENT) COLON domain = dependent_param_type RPAREN
+      MINUSGREATER codomain_with_modes = with_optional_mode_expr(tuple_type)
+      %prec MINUSGREATER
+        { let (codomain, codomain_loc), ret_modes = codomain_with_modes in
+          Ptyp_arrow
+            (Nolabel, domain, maybe_curry_typ codomain codomain_loc,
+             [], ret_modes, Some binder) }
+    )
+    { $1 }
+  | mktyp(
       label = arg_label
       domain_with_modes = with_optional_mode_expr(extra_rhs(param_type))
       MINUSGREATER
       codomain = strict_function_or_labeled_tuple_type
         { let (domain, (_ : Lexing.position * Lexing.position)), arg_modes = domain_with_modes in
-          Ptyp_arrow(label, domain , codomain, arg_modes, []) }
+          Ptyp_arrow(label, domain, codomain, arg_modes, [], None) }
     )
     { $1 }
   | mktyp(
@@ -4863,7 +4879,7 @@ strict_function_or_labeled_tuple_type:
           let (codomain, codomain_loc), ret_modes = codomain_with_modes in
           Ptyp_arrow(label,
             domain,
-            maybe_curry_typ codomain codomain_loc, arg_modes, ret_modes) }
+            maybe_curry_typ codomain codomain_loc, arg_modes, ret_modes, None) }
     )
     { $1 }
   (* The next three cases are for labled tuples - see comment on [tuple_type]
@@ -4889,7 +4905,7 @@ strict_function_or_labeled_tuple_type:
            let label = Labelled label in
            let domain = mktyp ~loc:tuple_loc (Ptyp_tuple ((None, ty) :: ltys)) in
            let domain = extra_rhs_core_type domain ~pos:(snd tuple_loc) in
-           Ptyp_arrow(label, domain, codomain, arg_modes, []) }
+           Ptyp_arrow(label, domain, codomain, arg_modes, [], None) }
     )
     { $1 }
   | mktyp(
@@ -4908,7 +4924,8 @@ strict_function_or_labeled_tuple_type:
             domain ,
             maybe_curry_typ codomain codomain_loc,
             arg_modes,
-            ret_modes)
+            ret_modes,
+            None)
          }
     )
     { $1 }
@@ -5017,6 +5034,26 @@ optional_atat_modalities_expr:
     )
     { $1 }
   | ty = tuple_type
+    { ty }
+;
+
+%inline dependent_param_type:
+  | mktyp(
+    LPAREN bound_vars = typevar_list DOT inner_type = core_type RPAREN
+      { Ptyp_poly (bound_vars, inner_type) }
+    )
+    { $1 }
+  | mktyp(
+    LPAREN bound_vars = typevar_repr_list DOT inner_type = core_type RPAREN
+      { Ptyp_repr (bound_vars, inner_type) }
+    )
+    { $1 }
+  | mktyp(
+    LPAREN LAYOUT bound_vars = newlayouts DOT inner_type = core_type RPAREN
+      { Ptyp_newlayout (bound_vars, inner_type) }
+    )
+    { $1 }
+  | ty = atomic_type
     { ty }
 ;
 
