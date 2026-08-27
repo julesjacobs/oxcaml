@@ -24,7 +24,7 @@ type addition =
 let add_refined : addition =
   fun left right ->
     let raw = add left right in
-    refine_ raw;;
+    assume_ raw;;
 [%%expect{|
 val above : (n : int) -> {value : int | gt value n} = <fun>
 type addition =
