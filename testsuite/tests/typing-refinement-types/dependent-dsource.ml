@@ -15,3 +15,14 @@ external equal : int -> int -> bool = "%equal"
 type higher_order = (f : (int -> int)) -> {result : int | equal result (f 0)};;
 type higher_order = (f : (int -> int)) -> {result : int | equal result (f 0)}
 |}]
+
+type checked = { x : int | true }
+let assume_value (x : int) : checked = assume_ x;;
+[%%expect{|
+
+type checked = {x : int | true};;
+type checked = {x : int | true}
+
+let assume_value (x : int)  : checked = assume_ x;;
+val assume_value : int -> checked = <fun>
+|}]

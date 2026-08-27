@@ -2699,6 +2699,129 @@ let rec expand_path env p =
 let compare_type_path env tpath1 tpath2 =
   Path.same (expand_path env tpath1) (expand_path env tpath2)
 
+(* Resolved predicate elaboration *)
+module Resolved_predicate = struct
+  (* Only compiler-created syntax can carry resolved evidence. These keys are
+     physical nodes, not names or forgeable source attributes. *)
+  type input =
+    { expressions : (Parsetree.expression * type_expr) list;
+      values : (Longident.t * Path.t) list;
+      constructors : (Longident.t * Path.t) list;
+      labels : (Longident.t * (Path.t * string)) list;
+      locals : (Ident.t * string) list }
+
+  let current = ref None
+
+  let with_input input f =
+    let warnings = Warnings.backup () in
+    Misc.try_finally ~always:(fun () -> Warnings.restore warnings) (fun () ->
+      (* Source policy was checked at formation; replay and generated syntax
+         must not reapply it. Delayed warnings must capture this state too. *)
+      ignore (Warnings.parse_options false "-a");
+      Warnings.parse_alert_option "-all";
+      Language_extension.with_enabled Immutable_arrays () (fun () ->
+      Language_extension.with_enabled Layouts
+        Language_extension.Alpha (fun () ->
+      Language_extension.with_enabled Small_numbers
+        Language_extension.Alpha (fun () ->
+      Misc.protect_refs
+        [Misc.R (current, Some input);
+         Misc.R (Clflags.strict_sequence, false);
+         (* Reconstructed labels are explicit; partial applications commute. *)
+         Misc.R (Clflags.classic, false)]
+        f))))
+
+  let find key entries =
+    List.find_map (fun (k, value) -> if k == key then Some value else None)
+      entries
+
+  let find_input key field =
+    Option.bind !current (fun input -> find key (field input))
+
+  let is_resolved_value lid =
+    Option.is_some (find_input lid (fun input -> input.values))
+
+  let unavailable loc path =
+    raise (Error_forward
+      (Location.errorf ~loc
+         "Cannot recover runtime evidence for refinement reference %a"
+         Style.inline_code (Path.name path)))
+
+  let lookup_value ?(use = true) ~loc lid env =
+    match find_input lid (fun input -> input.values) with
+    | None -> Env.lookup_value ~use ~loc lid env
+    | Some path -> begin
+        try
+          let _, desc, _ as result = Env.lookup_value_path ~use ~loc path env in
+          begin match desc.val_kind with
+          | Val_prim _ -> ()
+          | _ -> ignore (Env.find_value_address path env : Env.address)
+          end;
+          result
+        with Not_found -> unavailable loc path
+      end
+
+  let lookup_all_constructors ~loc usage lid env =
+    match find_input lid (fun input -> input.constructors) with
+    | None -> Env.lookup_all_constructors ~loc usage lid env
+    | Some path -> begin
+        try
+          let cstr, _ as result =
+            Env.lookup_constructor_path ~loc usage path env in
+          begin match cstr.cstr_tag with
+          | Extension path ->
+              ignore (Env.find_constructor_address path env : Env.address)
+          | Ordinary _ | Null -> ()
+          end;
+          Ok [result, ignore]
+        with Not_found -> unavailable loc path
+      end
+
+  let lookup_all_labels : type rep.
+      record_form:rep record_form -> loc:Location.t -> Env.label_usage ->
+      Longident.t -> Env.t ->
+      ((rep gen_label_description * (unit -> unit)) list,
+       Location.t * Env.t * Env.lookup_error) result =
+    fun ~record_form ~loc usage lid env ->
+      match find_input lid (fun input -> input.labels) with
+      | None -> Env.lookup_all_labels ~record_form ~loc usage lid env
+      | Some (path, name) -> begin
+          try
+            let labels = Env.lookup_all_labels_from_type
+                ~record_form ~loc usage path env in
+            Ok [List.find (fun (label, _) -> label.lbl_name = name) labels]
+          with Not_found -> unavailable loc path
+        end
+
+  let expected_type env sexp =
+    Option.map
+      (fun ty ->
+         let ty =
+           match !current with
+           | None -> ty
+           | Some input ->
+               let subst = List.fold_left (fun subst (id, name) ->
+                 match Env.find_value_by_name (Longident.Lident name) env with
+                 | Path.Pident replacement, _ ->
+                     Subst.add_bound_value id replacement subst
+                 | _ | exception Not_found -> subst)
+                   Subst.identity input.locals
+               in
+               Subst.type_expr subst ty
+         in
+         (* Synthesized optional arguments can retain their [Tpoly] wrapper;
+            the ordinary argument checker expects an instance of its body. *)
+         match get_desc ty with
+         | Tpoly (body, vars) -> instance_poly vars body
+         | _ -> instance ty)
+      (find_input sexp (fun input -> input.expressions))
+end
+
+let type_assume = ref
+    (fun (_ : Env.t) (_ : expected_mode) (_ : Location.t) (_ : expression)
+         (_ : refinement_desc) ->
+       Misc.fatal_error "Typecore.assume: elaborator not installed")
+
 (* Records *)
 exception Wrong_name_disambiguation of Env.t * wrong_name
 
@@ -3045,7 +3168,8 @@ let disambiguate_sort_lid_a_list
   in
   let process_label lid =
     let scope =
-      Env.lookup_all_labels ~record_form  ~loc:lid.loc usage lid.txt env in
+      Resolved_predicate.lookup_all_labels ~record_form ~loc:lid.loc
+        usage lid.txt env in
     let filter = disambiguate_label_by_ids closed ids in
     label_disambiguate ~warn ~filter record_form usage lid env expected_type
       scope
@@ -3773,7 +3897,8 @@ and type_pat_aux
       in
       let (constr, locks), ambiguity =
         let candidates =
-          Env.lookup_all_constructors Env.Pattern ~loc:lid.loc lid.txt !!penv in
+          Resolved_predicate.lookup_all_constructors Env.Pattern
+            ~loc:lid.loc lid.txt !!penv in
         wrap_disambiguate "This variant pattern is expected to have"
           (mk_expected expected_ty)
           (Constructor.disambiguate Env.Pattern lid !!penv expected_type)
@@ -5200,14 +5325,19 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
               match binder, arg_opt with
               | None, _ -> ty_ret, ty_ret0
               | Some binder, Some (sarg, _, ~commuted:_) ->
-                  let id =
+                  let path =
                     match sarg.pexp_desc with
                     | Pexp_ident lid ->
                         let path, _, _ =
-                          Env.lookup_value ~use:false ~loc:lid.loc lid.txt env
+                          Resolved_predicate.lookup_value ~use:false
+                            ~loc:lid.loc lid.txt env
                         in
                         begin match path with
-                        | Path.Pident id -> id
+                        | Path.Pident _ -> path
+                        (* Module substitution can qualify a predicate argument
+                           that was a local variable at formation. *)
+                        | _ when Resolved_predicate.is_resolved_value lid.txt ->
+                            path
                         | _ ->
                             raise
                               (Error_forward
@@ -5222,13 +5352,21 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                                 "A dependent function argument must be a \
                                  plain local variable"))
                   in
+                  let substitute binder ty =
+                    match path with
+                    | Path.Pident id ->
+                        Ctype.substitute_refinement_ident binder id ty
+                    | _ ->
+                        Subst.type_expr
+                          (Subst.add_value binder path Subst.identity) ty
+                  in
                   let ty_ret =
-                    Ctype.substitute_refinement_ident binder id ty_ret
+                    substitute binder ty_ret
                   in
                   let ty_ret0 =
                     match binder0 with
                     | Some binder0 ->
-                        Ctype.substitute_refinement_ident binder0 id ty_ret0
+                        substitute binder0 ty_ret0
                     | None -> assert false
                   in
                   ty_ret, ty_ret0
@@ -5346,6 +5484,8 @@ let rec is_nonexpansive exp =
       is_nonexpansive body
   | Texp_letmutable(pat_exp, body) ->
       is_nonexpansive pat_exp.vb_expr && is_nonexpansive body
+  | Texp_assume (binding, _, body) ->
+      is_nonexpansive binding.vb_expr && is_nonexpansive body
   | Texp_apply(e, (_,Omitted _)::el, _, _, _, _) ->
       is_nonexpansive e && List.for_all is_nonexpansive_arg (List.map snd el)
   | Texp_match(e, _, cases, _, _) ->
@@ -5606,7 +5746,7 @@ let rec maybe_computation exp =
   | Texp_override _
   | Texp_letmodule _
   | Texp_letexception _
-  | Texp_assert _
+  | Texp_assert _ | Texp_assume _
   | Texp_lazy _
   | Texp_object _
   | Texp_pack _
@@ -6053,7 +6193,8 @@ let check_partial_application ~statement exp =
             | Texp_list_comprehension _ | Texp_array_comprehension _
             | Texp_while _ | Texp_for _ | Texp_instvar _
             | Texp_mutvar _ | Texp_setmutvar _
-            | Texp_setinstvar _ | Texp_override _ | Texp_assert _
+            | Texp_setinstvar _ | Texp_override _
+            | Texp_assert _ | Texp_assume _
             | Texp_lazy _ | Texp_object _ | Texp_pack _ | Texp_unreachable
             | Texp_extension_constructor _ | Texp_ifthenelse (_, _, None)
             | Texp_probe _ | Texp_probe_is_enabled _ | Texp_src_pos
@@ -6870,6 +7011,13 @@ and check_layout_args_empty ~loc ~env layout_args ctx =
 
 and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
       (expected_mode : expected_mode) sexp ty_expected_explained =
+  let ty_expected_explained =
+    match Resolved_predicate.expected_type env sexp with
+    | None -> ty_expected_explained
+    | Some ty ->
+        unify_exp_types sexp.pexp_loc env ty ty_expected_explained.ty;
+        { ty_expected_explained with ty }
+  in
   let previous_saved_types = Cmt_format.get_saved_types () in
   let exp =
     try
@@ -7252,6 +7400,31 @@ and type_expect_
         exp_env = env }
   in
   match sexp.pexp_desc with
+  | Pexp_assume operand -> begin
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      match get_desc (expand_head env ty_expected) with
+      | Trefine refinement ->
+          let operand =
+            type_expect env (mode_default (total_mode ())) operand
+              (mk_expected refinement.ref_payload)
+          in
+          begin match operand.exp_desc, operand.exp_extra with
+          | Texp_ident { path = Pident _; _ }, [] -> ()
+          | _ -> raise (Error_forward (Location.errorf ~loc:operand.exp_loc
+              "%a requires a plain local variable"
+              Style.inline_code "assume_"))
+          end;
+          Env.walk_locks_for_partial_construct ~env
+            (loc, Mode.Hint.Expression);
+          let exp = !type_assume env expected_mode loc operand refinement in
+          re { exp with
+               exp_type = ty_expected;
+               exp_extra = [];
+               exp_attributes = sexp.pexp_attributes }
+      | _ -> raise (Error_forward (Location.errorf ~loc
+          "%a requires a known refinement type from its context"
+          Style.inline_code "assume_"))
+    end
   | Pexp_refine operand -> begin
       Language_extension.assert_enabled ~loc Refinement_types ();
       match get_desc (expand_head env ty_expected) with
@@ -9309,7 +9482,8 @@ and type_block_access env expected_base_ty principal
       | _ -> None
     in
     let labels =
-      Env.lookup_all_labels ~record_form:Legacy ~loc:lid.loc Projection
+      Resolved_predicate.lookup_all_labels ~record_form:Legacy
+        ~loc:lid.loc Projection
         lid.txt env
     in
     let label, _ambiguity =
@@ -9383,7 +9557,8 @@ and type_unboxed_access env loc el_ty ua =
       | _ -> None
     in
     let labels =
-      Env.lookup_all_labels ~record_form:Unboxed_product ~loc:lid.loc
+      Resolved_predicate.lookup_all_labels ~record_form:Unboxed_product
+        ~loc:lid.loc
         Projection lid.txt env
     in
     let label, _ambiguity =
@@ -9624,7 +9799,9 @@ and type_newtype
 and type_ident env ?(recarg=Rejected) lid =
   (* CR zqian: [lookup_value] should close over the memaddr of all prefix
   modules.  *)
-  let path, desc, (mode, locks) = Env.lookup_value ~loc:lid.loc lid.txt env in
+  let path, desc, (mode, locks) =
+    Resolved_predicate.lookup_value ~loc:lid.loc lid.txt env
+  in
   let mode, check_primitive_mode =
     match desc.val_kind with
     | Val_prim { prim_name =
@@ -10369,7 +10546,8 @@ and type_label_access
         raise (Error (record.exp_loc, env, error))
   in
   let labels =
-    Env.lookup_all_labels ~record_form ~loc:lid.loc usage lid.txt env in
+    Resolved_predicate.lookup_all_labels ~record_form ~loc:lid.loc
+      usage lid.txt env in
   let label, ambiguity =
     wrap_disambiguate "This expression has" (mk_expected ty_exp)
       (label_disambiguate record_form usage lid env expected_type) labels in
@@ -11346,7 +11524,8 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
         raise (Error (sexp.pexp_loc, env, error))
   in
   let constrs =
-    Env.lookup_all_constructors ~loc:lid.loc Env.Positive lid.txt env
+    Resolved_predicate.lookup_all_constructors ~loc:lid.loc
+      Env.Positive lid.txt env
   in
   let (constr, locks), ambiguity =
     wrap_disambiguate "This variant expression is expected to have"
@@ -14362,6 +14541,10 @@ let () =
 let check_partial ?lev a b c cases =
   check_partial ?lev a b c (List.map Parmatch.typed_case cases)
 
+(* Reconstructed children participate in the enclosing uniqueness pass. *)
+let type_expect_in_expression env ?(mode = mode_legacy) e ty =
+  type_expect env mode e ty
+
 (* drop unnecessary arguments from the external API
    and check for uniqueness *)
 let type_expect env ?mode e ty =
@@ -14456,12 +14639,13 @@ let rec refinement_pattern_of_typed :
     | Tpat_array _ | Tpat_lazy _ | Tpat_exception _ | Tpat_or _ ->
         unsupported_refinement_syntax pat.pat_loc "This pattern"
 
-let refinement_expression_of_typed bound_values binder predicate =
-  let argument_label : Typedtree.arg_label -> Asttypes.arg_label = function
+let refinement_argument_label : Typedtree.arg_label -> Asttypes.arg_label =
+  function
     | Nolabel -> Nolabel
     | Labelled label | Position label -> Labelled label
     | Optional label -> Optional label
-  in
+
+let refinement_expression_of_typed bound_values binder predicate =
   let rec expression locals exp =
     let mk_at rexp_type rexp_desc =
       { rexp_desc; rexp_type; rexp_loc = exp.exp_loc }
@@ -14482,7 +14666,8 @@ let refinement_expression_of_typed bound_values binder predicate =
               (fun (label, arg) ->
                  match arg with
                  | Arg (arg, _) ->
-                     Some (argument_label label, expression locals arg)
+                     Some
+                       (refinement_argument_label label, expression locals arg)
                  | Omitted _ -> None)
               args
           in
@@ -14632,7 +14817,8 @@ let refinement_expression_of_typed bound_values binder predicate =
       | Texp_while _ | Texp_for _ | Texp_send _ | Texp_new _
       | Texp_mutvar _ | Texp_setinstvar _
       | Texp_setmutvar _ | Texp_override _ | Texp_letmodule _
-      | Texp_letexception _ | Texp_assert _ | Texp_lazy _ | Texp_object _
+      | Texp_letexception _ | Texp_assert _ | Texp_assume _
+      | Texp_lazy _ | Texp_object _
       | Texp_pack _ | Texp_letop _ | Texp_unreachable
       | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
       | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
@@ -14730,6 +14916,100 @@ let add_total_immutable_value env binder payload loc =
   Env.add_value ~mode:(total_immutable_mode ()) binder value_description env
 
 let () =
+  type_assume :=
+    (fun env expected_mode loc operand
+         { ref_binder; ref_payload; ref_pred; _ } ->
+       let binder =
+         Ident.create_scoped ~scope:Ident.lowest_scope "assume_value"
+       in
+       let predicate = Refinement_predicate.map
+           ~rename:(Ident.Map.singleton ref_binder binder)
+           ~type_expr:(substitute_refinement_ident ref_binder binder)
+           ref_pred in
+       let predicate_env =
+         add_total_immutable_value env binder ref_payload loc in
+       let desc = Subst.Lazy.force_value_description
+           (Env.find_value (Path.Pident binder) predicate_env) in
+       let return_env = Env.add_value ~mode:(total_mode ()) binder desc env in
+       let expressions = ref [] and values = ref [] in
+       let constructors = ref [] and labels = ref [] in
+       let locals = Refinement_predicate.bound_idents predicate in
+       let var_name id = "_assume_" ^ Ident.unique_name id in
+       let resolved entries path name =
+         let lid = Longident.Lident name in
+         entries := (lid, path) :: !entries;
+         Location.mkloc lid loc
+       in
+       let value_ident path = resolved values path (Path.last path) in
+       let syntax = Refinement_predicate.untype predicate
+           ~var_name
+           ~value_ident
+           ~function_label:(fun rexp ->
+             (* [-nolabels] formation can check an unlabelled lambda against
+                a labelled arrow. Recover its label from the retained type. *)
+             let rec label ty =
+               match get_desc (expand_head predicate_env ty) with
+               | Tarrow ((label, _, _, _), _, _, _) ->
+                   refinement_argument_label label
+               | Tpoly (body, _) -> label body
+               | _ -> Misc.fatal_error
+                   "Typecore.assume: invalid function evidence"
+             in
+             label rexp.rexp_type)
+           ~constructor_ident:(fun path ->
+             let name = match path with
+               | Pextra_ty (_, Pcstr_ty name) -> name
+               | _ -> Path.last path
+             in
+             resolved constructors path name)
+           ~label_ident:(fun path name ->
+             resolved labels (path, name) name)
+           ~expression:(fun rexp sexp ->
+             let sexp = match rexp.rexp_desc with
+               | Rexp_var id when not (Ident.Set.mem id locals) ->
+                   Ast_helper.Exp.ident ~loc:rexp.rexp_loc
+                     (value_ident (Path.Pident id))
+               | _ -> sexp
+             in
+             expressions := (sexp, rexp.rexp_type) :: !expressions;
+             sexp)
+       in
+       let input : Resolved_predicate.input =
+         { expressions = !expressions; values = !values;
+           constructors = !constructors; labels = !labels;
+           locals = List.map (fun id -> id, var_name id)
+               (Ident.Set.elements locals) }
+       in
+       let predicate, return = Resolved_predicate.with_input input
+           (fun () ->
+             let predicate = type_expect_in_expression predicate_env syntax
+                 (mk_expected Predef.type_bool) in
+             let return = type_expect_in_expression return_env
+                 ~mode:expected_mode
+                 (Ast_helper.Exp.ident ~loc
+                    (Location.mkloc (Longident.Lident (Ident.name binder)) loc))
+                 (mk_expected ref_payload) in
+             predicate, return) in
+       let sort = match desc.val_kind with
+         | Val_reg sort -> sort
+         | _ -> Misc.fatal_error "Typecore.assume: invalid binder"
+       in
+       let pat =
+         { pat_desc = Tpat_var
+             { id = binder; name = Location.mkloc (Ident.name binder) loc;
+               uid = desc.val_uid; sort;
+               mode = Value.disallow_right (total_mode ()) };
+           pat_loc = loc; pat_extra = []; pat_type = ref_payload;
+           pat_env = env; pat_attributes = [];
+           pat_unique_barrier = Unique_barrier.not_computed () }
+       in
+       let binding =
+         { vb_pat = pat; vb_expr = operand;
+           vb_rec_kind = Value_rec_types.Dynamic; vb_sort = sort;
+           vb_attributes = []; vb_loc = loc }
+       in
+       { return with exp_desc = Texp_assume (binding, predicate, return);
+                   exp_env = env; exp_loc = loc });
   Typetexp.add_dependent_binder :=
     (fun env binder payload loc ->
        add_total_immutable_value env binder payload loc);

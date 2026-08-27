@@ -248,6 +248,7 @@ module Exp:
     val binding_op: str -> pattern -> expression -> loc -> binding_op
     val borrow : ?loc:loc -> ?attrs:attrs -> expression -> expression
     val refine : ?loc:loc -> ?attrs:attrs -> expression -> expression
+    val assume : ?loc:loc -> ?attrs:attrs -> expression -> expression
     val let_refine :
       ?loc:loc -> ?attrs:attrs -> str -> expression -> expression -> expression
   end
