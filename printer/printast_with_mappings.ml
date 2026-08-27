@@ -261,6 +261,11 @@ let rec core_type i ppf x =
   | Ptyp_splice t ->
       line i ppf "Ptyp_splice\n";
       core_type i ppf t
+  | Ptyp_refine (binder, ct, predicate) ->
+      line i ppf "Ptyp_refine\n";
+      line (i + 1) ppf "%a %s\n" fmt_location binder.loc binder.txt;
+      core_type i ppf ct;
+      expression i ppf predicate
   | Ptyp_repr (lv, ct) ->
       line i ppf "Ptyp_repr\n";
       list i reprvar ppf lv;
@@ -544,6 +549,13 @@ and expression i ppf x =
   | Pexp_borrow e ->
       line i ppf "Pexp_borrow\n";
       expression i ppf e
+  | Pexp_refine e ->
+      line i ppf "Pexp_refine\n";
+      expression i ppf e
+  | Pexp_let_refine (name, bound, body) ->
+      line i ppf "Pexp_let_refine %a %s\n" fmt_location name.loc name.txt;
+      expression i ppf bound;
+      expression i ppf body
   )
 
 and block_access i ppf = function

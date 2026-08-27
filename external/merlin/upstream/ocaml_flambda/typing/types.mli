@@ -302,6 +302,104 @@ and type_desc =
   | Tbox of type_expr
   (** [Tbox ty] ==> [ty box] *)
 
+  | Trefine of refinement_desc
+  (** [Trefine { ref_binder; ref_payload; ref_pred; _ }] ==>
+      [{ref_binder : ref_payload | ref_pred}]
+
+      A refinement type.  The payload determines the layout and runtime
+      representation and supplies unrelated jkind bounds; refinements never
+      reach lambda.  Refinements are rigid: they are never inferred and never
+      solved for, [{x:t | p}] and [t] do not unify, and two refined types are
+      equal iff their payloads are equal and their predicates are syntactically
+      alpha-equivalent. *)
+
+(** A refinement type: the payload type and the predicate over the refined
+    value. *)
+and refinement_desc =
+  { mutable ref_structural_scope : int;
+    (** The monotone contribution from ordinary type/GADT scope checks.
+        [type_expr.scope] is the maximum of this field and the recomputable
+        free term-dependency scope. *)
+    ref_binder : Ident.t;
+    ref_payload : type_expr;
+    ref_pred : refinement_expression }
+
+(** A refinement predicate.  This is a second expression representation for
+    the type language.  Predicates are first checked as ordinary expressions
+    under a total closure lock.  Value names are resolved: bound names
+    ([Rexp_var]) are the refinement binder and predicate-local binders, while
+    free names ([Rexp_ident]) carry paths that are rewritten by module
+    substitution. *)
+and refinement_expression =
+  { rexp_desc : refinement_expression_desc;
+    rexp_type : type_expr;
+    (** The instantiated type at this occurrence. *)
+    rexp_loc : Location.t }
+
+and refinement_expression_desc =
+  | Rexp_var of Ident.t
+  (** A bound name: the refinement binder, or a binder introduced inside
+      the predicate by [Rexp_let], [Rexp_fun] or [Rexp_match]. *)
+  | Rexp_ident of Path.t
+  (** A free name, resolved when the type was translated. *)
+  | Rexp_constant of Parsetree.constant
+  | Rexp_apply of
+      refinement_expression * (Asttypes.arg_label * refinement_expression) list
+  | Rexp_tuple of (string option * refinement_expression) list
+  | Rexp_construct of Path.t * refinement_expression list
+  (** The path is [Pextra_ty (type_path, Pcstr_ty name)] for an ordinary
+      constructor and the constructor's own path for an extension
+      constructor, so that substitution keeps it meaningful. *)
+  | Rexp_record of
+      (Path.t * string * refinement_expression) list
+      * refinement_expression option
+  | Rexp_record_unboxed_product of
+      (Path.t * string * refinement_expression) list
+      * refinement_expression option
+  | Rexp_array of Asttypes.mutable_flag * refinement_expression list
+  | Rexp_field of refinement_expression * Path.t * string
+  | Rexp_ifthenelse of
+      refinement_expression * refinement_expression
+      * refinement_expression option
+  | Rexp_sequence of refinement_expression * refinement_expression
+  | Rexp_let of refinement_binding * refinement_expression
+  (** A single, non-recursive variable binding. *)
+  | Rexp_fun of Ident.t * type_expr * refinement_expression
+  (** [fun x -> e]; only single, unlabelled variable parameters. *)
+  | Rexp_match of refinement_expression * refinement_case list
+
+and refinement_binding =
+  { rb_kind : refinement_binding_kind;
+    rb_ident : Ident.t;
+    rb_type : type_expr;
+    rb_expr : refinement_expression }
+
+and refinement_binding_kind =
+  | Rbind_value
+  (** [let x = e1 in e2]. *)
+  | Rbind_refine
+  (** [let refine_ x = e1 in e2].  The bound identifier has the payload type
+      of the refinement-typed [e1]. *)
+
+and refinement_case =
+  { rc_lhs : refinement_pattern;
+    rc_guard : refinement_expression option;
+    rc_rhs : refinement_expression }
+
+and refinement_pattern =
+  { rpat_desc : refinement_pattern_desc;
+    rpat_type : type_expr;
+    (** The instantiated type at this pattern node. *)
+    rpat_loc : Location.t }
+
+and refinement_pattern_desc =
+  | Rpat_any
+  | Rpat_var of Ident.t
+  | Rpat_constant of Parsetree.constant
+  | Rpat_tuple of (string option * refinement_pattern) list
+  | Rpat_construct of Path.t * refinement_pattern list
+  | Rpat_alias of refinement_pattern * Ident.t
+
 (** This is used in the Typedtree. It is distinct from
     {{!Asttypes.arg_label}[arg_label]} because Position argument labels are
     discovered through typechecking. *)
@@ -563,6 +661,7 @@ module Transient_expr : sig
   (** Operations on [transient_expr] *)
 
   val create: type_desc -> level: int -> scope: int -> id: int -> transient_expr
+  val get_desc : transient_expr -> type_desc
   val get_scope: transient_expr -> int
   val get_marks: transient_expr -> int
   val set_desc: transient_expr -> type_desc -> unit
@@ -581,6 +680,12 @@ module Transient_expr : sig
 end
 
 val create_expr: type_desc -> level: int -> scope: int -> id: int -> type_expr
+
+(** Install the observer called after a type description is initialized or
+    replaced. *)
+val set_type_desc_observer : (transient_expr -> unit) -> unit
+
+val may_have_refinement_types : unit -> bool
 
 (** Functions and definitions moved from Btype *)
 

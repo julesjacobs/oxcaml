@@ -264,6 +264,8 @@ and exp_extra =
   | Texp_inspected_type of [ `exp ] type_inspection
   | Texp_borrowed
   | Texp_ghost_region
+  | Texp_refine
+  | Texp_let_refine of Ident.t * string loc
 
 and arg_label = Types.arg_label =
   | Nolabel
@@ -876,6 +878,8 @@ and core_type_desc =
   | Ttyp_quote of core_type
   | Ttyp_splice of core_type
   | Ttyp_repr of string list * core_type
+  | Ttyp_refine of Ident.t * string loc * core_type * expression
+      (** [{x : T | P}]. The type graph carries the resolved predicate. *)
   | Ttyp_newlayout of string loc list * core_type
   | Ttyp_of_kind of Parsetree.jkind_annotation
   | Ttyp_call_pos
