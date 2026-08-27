@@ -870,6 +870,12 @@ and expression i ppf x =
   | Texp_assert (e, _) ->
       line i ppf "Texp_assert";
       expression i ppf e;
+  | Texp_assume (binding, predicate, body) ->
+      line i ppf "Texp_assume\n";
+      pattern i ppf binding.vb_pat;
+      expression i ppf binding.vb_expr;
+      expression i ppf predicate;
+      expression i ppf body;
   | Texp_lazy (e) ->
       line i ppf "Texp_lazy";
       expression i ppf e;

@@ -1006,6 +1006,7 @@ let maybe_pmod_constraint mode expr =
 %token BEGIN                  "begin"
 %token BORROW                 "borrow_"
 %token REFINE                 "refine_"
+%token ASSUME                 "assume_"
 %token <char> CHAR            "'a'" (* just an example *)
 %token <char> HASH_CHAR       "#'a'" (* just an example *)
 %token CLASS                  "class"
@@ -2955,6 +2956,8 @@ fun_expr:
       { Exp.borrow ~loc:(make_loc $sloc) $2 }
   | REFINE simple_expr %prec below_HASH
       { Exp.refine ~loc:(make_loc $sloc) $2 }
+  | ASSUME simple_expr %prec below_HASH
+      { Exp.assume ~loc:(make_loc $sloc) $2 }
   | labeled_tuple %prec below_COMMA
       { mkexp ~loc:$sloc (Pexp_tuple $1) }
   | maybe_stack (
@@ -5509,6 +5512,7 @@ single_attr_id:
   | BEGIN { "begin" }
   | BORROW { "borrow_" }
   | REFINE { "refine_" }
+  | ASSUME { "assume_" }
   | CLASS { "class" }
   | CONSTRAINT { "constraint" }
   | DO { "do" }

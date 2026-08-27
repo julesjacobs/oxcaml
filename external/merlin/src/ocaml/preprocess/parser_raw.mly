@@ -1102,6 +1102,7 @@ let merloc startpos ?endpos x =
 %token BEGIN [@symbol "begin"]
 %token BORROW [@symbol "borrow_"]
 %token REFINE [@symbol "refine_"]
+%token ASSUME [@symbol "assume_"]
 %token <char> CHAR [@cost 2] [@recovery '_']
 %token <char> HASH_CHAR [@cost 2] [@recovery '_']
 %token CLASS [@symbol "class"]
@@ -3093,6 +3094,8 @@ fun_:
       { Exp.borrow ~loc:(make_loc $sloc) $2 }
   | REFINE simple_expr %prec below_HASH
       { Exp.refine ~loc:(make_loc $sloc) $2 }
+  | ASSUME simple_expr %prec below_HASH
+      { Exp.assume ~loc:(make_loc $sloc) $2 }
   | labeled_tuple %prec below_COMMA
       { mkexp ~loc:$sloc (Pexp_tuple $1) }
   | maybe_stack (
@@ -5692,6 +5695,7 @@ single_attr_id:
   | BEGIN { "begin" }
   | BORROW { "borrow_" }
   | REFINE { "refine_" }
+  | ASSUME { "assume_" }
   | CLASS { "class" }
   | CONSTRAINT { "constraint" }
   | DO { "do" }

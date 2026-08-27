@@ -832,7 +832,15 @@ let rec typexp copy_scope s ty =
               ref_payload;
               ref_pred =
                 Refinement_predicate.map ~rename:s.bound_values
+<<<<<<< HEAD
                   ~rename_bound:(fun id -> Ident.Map.find id s.bound_values)
+||||||| parent of 5be690e59a (Add mandatory runtime refinement checks with assume_)
+                  ~rename_bound:(rename_bound_ident s)
+=======
+                  ~rename_bound:(fun id -> Ident.Map.find id s.bound_values)
+                  ~free_var_path:(fun id ->
+                    Path.Map.find_opt (Pident id) s.values)
+>>>>>>> 5be690e59a (Add mandatory runtime refinement checks with assume_)
                   ~bind_value:(fun path ->
                     match path with
                     | Pident id -> Ident.Map.find_opt id s.bound_values

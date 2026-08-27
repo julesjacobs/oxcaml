@@ -831,7 +831,7 @@ let rec typexp copy_scope s ty =
                     match path with
                     | Pident id -> Ident.Map.find_opt id s.bound_values
                     | _ -> None)
-                  ~unbind_value:(fun id ->
+                  ~free_var_path:(fun id ->
                     Path.Map.find_opt (Pident id) s.values)
                   ~value_path:(value_path s)
                   ~constructor_path:(constructor_path s)

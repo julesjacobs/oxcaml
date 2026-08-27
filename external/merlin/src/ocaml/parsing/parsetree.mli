@@ -573,6 +573,8 @@ and expression_desc =
     (** borrow_ exp *)
   | Pexp_refine of expression
     (** [refine_ exp] *)
+  | Pexp_assume of expression
+    (** [assume_ exp] *)
   | Pexp_let_refine of string loc * expression * expression
     (** [let refine_ x = exp1 in exp2] *)
 

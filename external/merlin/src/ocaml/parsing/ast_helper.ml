@@ -329,6 +329,7 @@ module Exp = struct
 
   let borrow ?loc ?attrs a = mk ?loc ?attrs (Pexp_borrow a)
   let refine ?loc ?attrs a = mk ?loc ?attrs (Pexp_refine a)
+  let assume ?loc ?attrs a = mk ?loc ?attrs (Pexp_assume a)
   let let_refine ?loc ?attrs a b c =
     mk ?loc ?attrs (Pexp_let_refine (a, b, c))
 end
