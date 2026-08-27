@@ -41,6 +41,7 @@ let print_symbol = function
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_SEMI) -> ";"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_RPAREN) -> ")"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_REPR) -> "repr_"
+  | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_REFINE) -> "refine_"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_REC) -> "rec"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_RBRACKETGREATER) -> "]>"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_RBRACKET) -> "]"
@@ -258,6 +259,7 @@ let print_symbol = function
   | MenhirInterpreter.X (MenhirInterpreter.N MenhirInterpreter.N_reversed_bar_llist_constructor_declaration_) -> "reversed_bar_llist_constructor_declaration_"
   | MenhirInterpreter.X (MenhirInterpreter.N MenhirInterpreter.N_reverse_product_jkind_gen_jkind_desc_no_with_kinds_) -> "reverse_product_jkind_gen_jkind_desc_no_with_kinds_"
   | MenhirInterpreter.X (MenhirInterpreter.N MenhirInterpreter.N_reverse_product_jkind_gen_jkind_desc_) -> "reverse_product_jkind_gen_jkind_desc_"
+  | MenhirInterpreter.X (MenhirInterpreter.N MenhirInterpreter.N_refinement_type_head) -> "refinement_type_head"
   | MenhirInterpreter.X (MenhirInterpreter.N MenhirInterpreter.N_record_expr_content) -> "record_expr_content"
   | MenhirInterpreter.X (MenhirInterpreter.N MenhirInterpreter.N_rec_flag) -> "rec_flag"
   | MenhirInterpreter.X (MenhirInterpreter.N MenhirInterpreter.N_private_virtual_flags) -> "private_virtual_flags"
@@ -481,6 +483,7 @@ let print_value (type a) : a MenhirInterpreter.symbol -> a -> string = function
   | MenhirInterpreter.T MenhirInterpreter.T_SEMI -> (fun _ -> ";")
   | MenhirInterpreter.T MenhirInterpreter.T_RPAREN -> (fun _ -> ")")
   | MenhirInterpreter.T MenhirInterpreter.T_REPR -> (fun _ -> "repr_")
+  | MenhirInterpreter.T MenhirInterpreter.T_REFINE -> (fun _ -> "refine_")
   | MenhirInterpreter.T MenhirInterpreter.T_REC -> (fun _ -> "rec")
   | MenhirInterpreter.T MenhirInterpreter.T_RBRACKETGREATER -> (fun _ -> "]>")
   | MenhirInterpreter.T MenhirInterpreter.T_RBRACKET -> (fun _ -> "]")
@@ -698,6 +701,7 @@ let print_value (type a) : a MenhirInterpreter.symbol -> a -> string = function
   | MenhirInterpreter.N MenhirInterpreter.N_reversed_bar_llist_constructor_declaration_ -> (fun _ -> "reversed_bar_llist_constructor_declaration_")
   | MenhirInterpreter.N MenhirInterpreter.N_reverse_product_jkind_gen_jkind_desc_no_with_kinds_ -> (fun _ -> "reverse_product_jkind_gen_jkind_desc_no_with_kinds_")
   | MenhirInterpreter.N MenhirInterpreter.N_reverse_product_jkind_gen_jkind_desc_ -> (fun _ -> "reverse_product_jkind_gen_jkind_desc_")
+  | MenhirInterpreter.N MenhirInterpreter.N_refinement_type_head -> (fun _ -> "refinement_type_head")
   | MenhirInterpreter.N MenhirInterpreter.N_record_expr_content -> (fun _ -> "record_expr_content")
   | MenhirInterpreter.N MenhirInterpreter.N_rec_flag -> (fun _ -> "rec_flag")
   | MenhirInterpreter.N MenhirInterpreter.N_private_virtual_flags -> (fun _ -> "private_virtual_flags")
@@ -920,6 +924,7 @@ let print_token = function
   | SEMI -> print_value (MenhirInterpreter.T MenhirInterpreter.T_SEMI) ()
   | RPAREN -> print_value (MenhirInterpreter.T MenhirInterpreter.T_RPAREN) ()
   | REPR -> print_value (MenhirInterpreter.T MenhirInterpreter.T_REPR) ()
+  | REFINE -> print_value (MenhirInterpreter.T MenhirInterpreter.T_REFINE) ()
   | REC -> print_value (MenhirInterpreter.T MenhirInterpreter.T_REC) ()
   | RBRACKETGREATER -> print_value (MenhirInterpreter.T MenhirInterpreter.T_RBRACKETGREATER) ()
   | RBRACKET -> print_value (MenhirInterpreter.T MenhirInterpreter.T_RBRACKET) ()
@@ -1082,6 +1087,7 @@ let token_of_terminal (type a) (t : a MenhirInterpreter.terminal) (v : a) : toke
   | MenhirInterpreter.T_SEMI -> SEMI
   | MenhirInterpreter.T_RPAREN -> RPAREN
   | MenhirInterpreter.T_REPR -> REPR
+  | MenhirInterpreter.T_REFINE -> REFINE
   | MenhirInterpreter.T_REC -> REC
   | MenhirInterpreter.T_RBRACKETGREATER -> RBRACKETGREATER
   | MenhirInterpreter.T_RBRACKET -> RBRACKET

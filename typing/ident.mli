@@ -52,6 +52,9 @@ val rename: t -> t
 val rename_with_stamp: int -> t -> t
         (** Like {!rename}, but with the given stamp rather than a fresh one. *)
 
+val rename_preserving_scope_with_stamp : int -> t -> t
+(** Like {!rename_with_stamp}, preserving the scope of a scoped identifier. *)
+
 val name: t -> string
 val unique_name: t -> string
 val canonical_name: t -> string

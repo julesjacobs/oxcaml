@@ -1,0 +1,4 @@
+File "consumer.ml", line 13, characters 2-9:
+13 |   M.value
+       ^^^^^^^
+Error: the refinement type of this expression escapes the scope of binding Local

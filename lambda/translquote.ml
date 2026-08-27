@@ -2699,6 +2699,11 @@ let type_for_annotation ~env ~loc typ =
               tpt_type = Mty_ident pack_path;
               tpt_txt = mkloc (Untypeast.lident_of_path pack_path) loc
             }
+        | Trefine _ ->
+          (* Reachable from valid source; quotation of refinements is not
+             yet specified. *)
+          Location.raise_errorf ~loc
+            "Refinement types are not yet supported in quotations"
         | Tlink _ | Tsubst _ | Tfield _ | Tnil ->
           fatal_errorf
             "Translquote [at %a]:@ Unexpected type expression@ in a quoted \
@@ -3019,6 +3024,11 @@ and quote_core_type ~scopes ty =
     Type.package loc mod_type with_types |> Type.wrap
   | Ttyp_quote ty -> Type.quote loc (quote_core_type ~scopes ty) |> Type.wrap
   | Ttyp_splice _ -> Type.var loc None |> Type.wrap
+  | Ttyp_refine _ ->
+    (* Reachable from valid source; quotation of refinements is not yet
+       specified. *)
+    Location.raise_errorf ~loc:ty.ctyp_loc
+      "Refinement types are not yet supported in quotations"
   | Ttyp_repr _ -> fatal_error "Translquote: Ttyp_repr not implemented."
   | Ttyp_newlayout _ ->
     fatal_error "Translquote: Ttyp_newlayout not implemented."
@@ -3439,6 +3449,7 @@ and quote_expression_extra ~env ~scopes _stage extra lambda =
   | Texp_ghost_region -> lambda
   | Texp_borrowed ->
     Exp_desc.borrow loc (mk_exp_noattr loc lambda) |> Exp_desc.wrap
+  | Texp_refine | Texp_let_refine _ -> lambda
 
 and update_env_with_extra ~loc extra =
   let extra, _, _ = extra in
@@ -3452,6 +3463,7 @@ and update_env_with_extra ~loc extra =
   | Texp_inspected_type _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
+  | Texp_refine | Texp_let_refine _ -> ()
 
 and update_env_without_extra ~loc extra =
   let extra, _, _ = extra in
@@ -3465,6 +3477,7 @@ and update_env_without_extra ~loc extra =
   | Texp_inspected_type _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
+  | Texp_refine | Texp_let_refine _ -> ()
 
 and quote_expression_desc ~scopes ~transl stage e : Exp_desc.t =
   let env = e.exp_env in

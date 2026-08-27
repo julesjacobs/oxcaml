@@ -582,7 +582,13 @@ let _ = add_directive "principal"
     }
 
 let _ = add_directive "rectypes"
-    (Directive_none(fun () -> Clflags.recursive_types := true))
+    (Directive_none(fun () ->
+       if Language_extension.is_enabled Language_extension.Refinement_types
+       then
+         Location.raise_errorf ~loc:Location.none
+           "The #rectypes directive cannot be used with the refinement_types \
+            extension";
+       Clflags.recursive_types := true))
     {
       section = section_options;
       doc = "Allow arbitrary recursive types during type-checking.";

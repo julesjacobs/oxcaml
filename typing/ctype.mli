@@ -25,6 +25,7 @@ exception Moregen  of Errortrace.moregen_error
 exception Subtype  of Errortrace.Subtype.error
 
 exception Escape of type_expr Errortrace.escape
+exception Refinement_scope_escape of Ident.t
 
 exception Tags of label * label
 exception Cannot_expand
@@ -83,6 +84,14 @@ val restore_global_level: int -> unit
         (* This pair of functions is only used in Typetexp *)
 
 val create_scope : unit -> int
+
+(** Register term identifiers whose refinement dependencies are valid down to
+    the given type-inference level. *)
+val register_refinement_value_scope : level:int -> Ident.t list -> unit
+val with_refinement_predicate_scope : (unit -> 'a) -> 'a
+val may_track_refinement_scopes : unit -> bool
+
+val check_refinement_class_level_escape : int -> class_type -> unit
 
 val mark_persistent_in_quotations : Env.t -> Env.t
 
