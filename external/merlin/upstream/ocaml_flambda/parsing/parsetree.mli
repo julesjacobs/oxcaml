@@ -224,6 +224,9 @@ and core_type_desc =
   | Ptyp_splice of core_type (** [$T] *)
   | Ptyp_of_kind of jkind_annotation (** [(type : k)] *)
   | Ptyp_repr of string loc list * core_type
+  | Ptyp_refine of string loc * core_type * expression
+      (** [{x : T | P}]: the refinement of the payload type [T] by the
+          predicate [P].  [x] scopes over [P], but not [T]. *)
   | Ptyp_extension of extension  (** [[%id]]. *)
 
 and arg_label = Asttypes.arg_label =
@@ -564,6 +567,10 @@ and expression_desc =
   | Pexp_hole (** _ *)
   | Pexp_borrow of expression
     (** borrow_ exp *)
+  | Pexp_refine of expression
+    (** [refine_ exp] *)
+  | Pexp_let_refine of string loc * expression * expression
+    (** [let refine_ x = exp1 in exp2] *)
 
 and case =
     {

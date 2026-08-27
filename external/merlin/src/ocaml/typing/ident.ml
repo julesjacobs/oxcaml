@@ -79,6 +79,12 @@ let rename_with_stamp stamp = function
   | id ->
       Misc.fatal_errorf "Ident.rename %s" (name id)
 
+let rename_preserving_scope_with_stamp stamp = function
+  | Local { name; stamp = _ } -> Local { name; stamp }
+  | Scoped { name; stamp = _; scope } -> Scoped { name; stamp; scope }
+  | id ->
+      Misc.fatal_errorf "Ident.rename_preserving_scope %s" (name id)
+
 let rename id =
   incr currentstamp;
   rename_with_stamp !currentstamp id

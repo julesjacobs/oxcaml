@@ -129,6 +129,9 @@ and out_type =
   | Otyp_alias of {non_gen:bool; aliased:out_type; alias:string}
   | Otyp_arrow of arg_label * out_arg_mode * out_type * out_type
   (** INVARIANT: the [out_type] for the return must be [Otyp_ret]. *)
+  | Otyp_refine of string * out_type * Parsetree.expression
+  (** [{x : T | P}]: a refinement type. The predicate is carried as surface
+      syntax, produced by [Out_type], and printed with [Pprintast]. *)
   | Otyp_class of out_ident * out_type list
   | Otyp_constr of out_ident * out_type list
   | Otyp_manifest of out_type * out_type

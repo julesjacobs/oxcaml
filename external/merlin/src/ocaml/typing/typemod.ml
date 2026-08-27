@@ -2346,6 +2346,8 @@ and transl_signature ?(keep_warnings = false) ?(interface_toplevel = false) env 
               (Value.disallow_right md_mode, sig_modalities.moda_modalities))
             ~why:Signature_item
         in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [tdesc.val_id];
         Signature_names.check_value names tdesc.val_loc tdesc.val_id;
         mksig (Tsig_value tdesc) env loc,
         [Sig_value(tdesc.val_id, tdesc.val_val, Exported)],
@@ -3996,6 +3998,8 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
         in
         let val_val = {desc.val_val with val_modalities} in
         let desc = {desc with val_val} in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [desc.val_id];
         Signature_names.check_value names desc.val_loc desc.val_id;
         Tstr_primitive desc,
         [Sig_value(desc.val_id, desc.val_val, Exported)],
