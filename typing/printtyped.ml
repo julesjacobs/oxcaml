@@ -376,13 +376,17 @@ let rec core_type i ppf x =
   | Ttyp_var (s, jkind) ->
       line i ppf "Ttyp_var %s\n" (Option.value ~default:"_" s);
       option i jkind_annotation ppf jkind
-  | Ttyp_arrow (l, ct1, m1, ct2, m2) ->
+  | Ttyp_arrow (l, ct1, m1, ct2, m2, binder) ->
       line i ppf "Ttyp_arrow\n";
       arg_label i ppf l;
       core_type i ppf ct1;
       alloc_modes i ppf m1;
       core_type i ppf ct2;
       alloc_modes i ppf m2;
+      option i
+        (fun i ppf (id, name) ->
+          line i ppf "binder %a %s\n" Ident.print id name.txt)
+        ppf binder;
   | Ttyp_tuple l ->
       line i ppf "Ttyp_tuple\n";
       list i labeled_core_type ppf l;
