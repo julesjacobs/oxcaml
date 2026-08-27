@@ -4683,6 +4683,7 @@ let type_implementation target modulename initial_env ast =
             simple_sg
         in
         Typecore.force_delayed_checks ();
+        Verification.run str;
         Mode.erase_hints ();
         Typecore.optimise_allocations ();
         let shape = Shape_reduce.local_reduce Env.empty shape in
@@ -4765,6 +4766,7 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:staticity dclsig arg_type
           in
           Typecore.force_delayed_checks ();
+          Verification.run str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* It is important to run these checks after the inclusion test above,
@@ -4814,6 +4816,7 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:Staticity.Dynamic simple_sg arg_type
           in
           Typecore.force_delayed_checks ();
+          Verification.run str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* See comment above. Here the target signature contains all

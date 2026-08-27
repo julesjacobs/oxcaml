@@ -438,6 +438,8 @@ let query_flags =
 
 let ocaml_ignored_flags =
   [ "-a";
+    "-dvc";
+    "-dsmtlib";
     "-absname";
     "-alias-deps";
     "-annot";
@@ -789,6 +791,8 @@ let ocaml_ignored_flags =
 
 let ocaml_ignored_parametrized_flags =
   [ "-cc";
+    "-smt-solver";
+    "-smt-timeout";
     "-cclib";
     "-ccopt";
     "-color";
