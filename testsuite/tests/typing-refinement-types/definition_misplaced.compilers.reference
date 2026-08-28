@@ -1,0 +1,4 @@
+File "definition_misplaced.ml", line 9, characters 27-30:
+9 | let misplaced x = (x + 1 [@def])
+                               ^^^
+Error: The def attribute is only supported on function bindings
