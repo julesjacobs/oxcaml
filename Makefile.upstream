@@ -156,6 +156,7 @@ typing_SOURCES = \
   typing/typedecl.mli typing/typedecl.ml \
   typing/value_rec_check.mli typing/value_rec_check.ml \
   typing/verification.mli typing/verification.ml \
+  typing/structural_recursion.mli typing/structural_recursion.ml \
   typing/typecore.mli typing/typecore.ml \
   typing/typeclass.mli typing/typeclass.ml \
   typing/typemod.mli typing/typemod.ml
