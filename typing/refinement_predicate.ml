@@ -266,8 +266,16 @@ let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
     | Rpat_construct (constructor, args) ->
         path bound constructor;
         List.fold_left pattern bound args
+    | Rpat_record (_, fields) ->
+        List.fold_left
+          (fun bound (owner, _, pat) ->
+             path bound owner;
+             pattern bound pat)
+          bound fields
     | Rpat_alias (pat, id) ->
         Ident.Set.add id (pattern bound pat)
+    | Rpat_or (left, right) ->
+        Ident.Set.union (pattern bound left) (pattern bound right)
   in
   let rec expression bound rexp =
     type_expr ~bound rexp.rexp_type;
