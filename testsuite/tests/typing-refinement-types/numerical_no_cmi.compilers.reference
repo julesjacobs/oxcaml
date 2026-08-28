@@ -1,0 +1,8 @@
+File "numerical_no_cmi.ml", line 22, characters 17-23:
+22 | let rec loop n = loop n [@@decreases n]
+                      ^^^^^^
+Error: Refinement could not be proved (counterexample)
+File "numerical_no_cmi.ml", line 22, characters 37-38:
+22 | let rec loop n = loop n [@@decreases n]
+                                          ^
+  Required by this decreases attribute
