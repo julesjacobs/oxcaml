@@ -1,10 +1,11 @@
-(** [timeout_ms] must be positive and bounds elapsed time as well as solving. *)
+(** [timeout_ms] must be positive. It configures Z3's timeout and the runner's
+    best-effort deadline for startup and protocol handling. *)
 type config =
   { executable : string;
     timeout_ms : int
   }
 
-(** Z3 on PATH, with a five-second monotonic deadline and solver timeout. The
+(** Z3 on PATH, with a five-second process deadline and solver timeout. The
     executable is invoked directly with [-in -smt2], never via a shell. *)
 val default_config : config
 
