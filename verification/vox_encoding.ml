@@ -64,6 +64,7 @@ let sort env ty =
   match Vox_type.classify_payload env ty with
   | Some Vox_type.Int -> Some Int63
   | Some Vox_type.Bool -> Some Bool
+  | Some Vox_type.Bigint -> Some Int
   | None -> Option.map (fun key -> Opaque (opaque_id key)) (opaque_key env ty)
 
 let primitive env path =
@@ -71,6 +72,17 @@ let primitive env path =
   | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
   | _ -> None
   | exception Not_found -> None
+
+let value_constant env ty path =
+  if sort env ty <> Some Int
+  then None
+  else
+    let path = Env.normalize_value_path None env path in
+    if Path.same path (Vox_type.bigint_path "zero")
+    then Some (Big_integer "0")
+    else if Path.same path (Vox_type.bigint_path "one")
+    then Some (Big_integer "1")
+    else None
 
 let operation env ~function_type ~result_type name args =
   let unary sort op =
@@ -89,13 +101,36 @@ let operation env ~function_type ~result_type name args =
     | [Some x; Some y] when term_sort x = term_sort y -> Some (App (op, [x; y]))
     | _ -> None
   in
-  let physical_equality op =
+  let argument_type =
     match get_desc (Ctype.expand_head env function_type) with
-    | Tarrow (_, arg, _, _) ->
-      begin match Vox_type.classify_payload env arg with
-      | Some (Vox_type.Int | Vox_type.Bool) -> equality op
-      | None -> None
-      end
+    | Tarrow (_, arg, _, _) -> Vox_type.classify_payload env arg
+    | _ -> None
+  in
+  let physical_equality op =
+    match argument_type with
+    | Some (Vox_type.Int | Vox_type.Bool) -> equality op
+    | Some Vox_type.Bigint | None -> None
+  in
+  let structural_equality op =
+    match argument_type with
+    | Some (Vox_type.Int | Vox_type.Bool | Vox_type.Bigint) -> equality op
+    | None -> None
+  in
+  let comparison int_op bigint_op =
+    match argument_type with
+    | Some Vox_type.Int -> binary Int63 int_op
+    | Some Vox_type.Bigint -> binary Int bigint_op
+    | Some Vox_type.Bool | None -> None
+  in
+  let bigint_division op =
+    match binary Int op, args with
+    | Some result, [Some x; Some y] ->
+      Some
+        (App
+           ( Ite,
+             [ App (Eq, [y; Big_integer "0"]);
+               (if op = Int_div then Big_integer "0" else x);
+               result ] ))
     | _ -> None
   in
   let result =
@@ -110,14 +145,37 @@ let operation env ~function_type ~result_type name args =
       | _ -> None
       end
     | "%negint" -> unary Int63 Neg
-    | "%equal" -> equality Eq
-    | "%notequal" -> equality Ne
+    | "%equal" -> structural_equality Eq
+    | "%notequal" -> structural_equality Ne
     | "%eq" -> physical_equality Eq
     | "%noteq" -> physical_equality Ne
-    | "%lessthan" | "%ltint" -> binary Int63 Lt
-    | "%lessequal" | "%leint" -> binary Int63 Le
-    | "%greaterthan" | "%gtint" -> binary Int63 Gt
-    | "%greaterequal" | "%geint" -> binary Int63 Ge
+    | "%lessthan" -> comparison Lt Int_lt
+    | "%lessequal" -> comparison Le Int_le
+    | "%greaterthan" -> comparison Gt Int_gt
+    | "%greaterequal" -> comparison Ge Int_ge
+    | "%ltint" -> binary Int63 Lt
+    | "%leint" -> binary Int63 Le
+    | "%gtint" -> binary Int63 Gt
+    | "%geint" -> binary Int63 Ge
+    | "%compare" when argument_type = Some Vox_type.Bigint ->
+      begin match binary Int Int_lt, equality Eq with
+      | Some lt, Some eq ->
+        Some
+          (App
+             (Ite, [lt; Integer (-1L); App (Ite, [eq; Integer 0L; Integer 1L])]))
+      | _ -> None
+      end
+    | "caml_bigint_of_int" ->
+      begin match args with
+      | [Some (Integer n)] -> Some (Big_integer (Int64.to_string n))
+      | _ -> unary Int63 Int_of_int63
+      end
+    | "caml_bigint_neg" -> unary Int Int_neg
+    | "caml_bigint_add" -> binary Int Int_add
+    | "caml_bigint_sub" -> binary Int Int_sub
+    | "caml_bigint_mul" -> binary Int Int_mul
+    | "caml_bigint_div" -> bigint_division Int_div
+    | "caml_bigint_modulo" -> bigint_division Int_mod
     | "%boolnot" -> unary Bool Not
     | "%sequand" -> binary Bool And
     | "%sequor" -> binary Bool Or
