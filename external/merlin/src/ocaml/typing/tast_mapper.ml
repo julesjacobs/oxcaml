@@ -723,6 +723,8 @@ let expr sub x =
         Texp_assume
           (sub.value_binding sub binding, sub.expr sub predicate,
            sub.expr sub body)
+    | Texp_logical_equal (left, right) ->
+        Texp_logical_equal (sub.expr sub left, sub.expr sub right)
     | Texp_lazy exp ->
         Texp_lazy (sub.expr sub exp)
     | Texp_object (cl, sl) ->
