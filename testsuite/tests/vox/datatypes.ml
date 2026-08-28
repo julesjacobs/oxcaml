@@ -122,7 +122,7 @@ let injective (left @ immutable) (right @ immutable)
 
 let disjoint (left @ immutable) (right @ immutable)
     (premise : {u : unit | First left === Second right}) :
-    {u : unit | false} =
+    {u : unit | (First left === Second right) && false} =
   let refine_ _proof = premise in
   let u = () in
   refine_ u;;
@@ -143,7 +143,8 @@ val injective :
 val disjoint :
   (left : int) ->
   (right : int) ->
-  {u : unit | (First left) === (Second right)} -> {u : unit | false} = <fun>
+  {u : unit | (First left) === (Second right)} ->
+  {u : unit | ((First left) === (Second right)) && false} = <fun>
 |}]
 
 type 'a tree = Leaf of 'a | Node of 'a * 'a tree [@@inductive]
