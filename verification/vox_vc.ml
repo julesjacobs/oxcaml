@@ -143,15 +143,18 @@ let instantiate_path ctx env ty path value =
 
 let lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
-  match Path.Map.find_opt path s.values with
-  | Some value -> instantiate_path ctx env ty path value
+  match value_constant env ty path with
+  | Some value -> scalar_value value
   | None -> (
-    match Path.Map.find_opt path ctx.free with
+    match Path.Map.find_opt path s.values with
     | Some value -> instantiate_path ctx env ty path value
-    | None ->
-      let value = fresh ctx env ty (Path.name path) in
-      ctx.free <- Path.Map.add path value ctx.free;
-      value)
+    | None -> (
+      match Path.Map.find_opt path ctx.free with
+      | Some value -> instantiate_path ctx env ty path value
+      | None ->
+        let value = fresh ctx env ty (Path.name path) in
+        ctx.free <- Path.Map.add path value ctx.free;
+        value))
 
 let operation env function_type result_type name args =
   scalar_option
@@ -160,7 +163,7 @@ let operation env function_type result_type name args =
 
 let function_call ctx env ty fn args =
   match fn, signature env ty (List.length args) with
-  | Some (Function fn), Some (arguments, ((Bool | Int63) as result)) ->
+  | Some (Function fn), Some (arguments, ((Bool | Int63 | Int) as result)) ->
     let args = List.filter_map scalar args in
     if List.map term_sort args <> arguments
     then None
@@ -191,7 +194,10 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
   in
   match value with
   | Some _ -> value
-  | None when total -> function_call ctx env fn_type fn args
+  | None when total ->
+    (* Trusted total declarations must respect the scalar encoding: equal bigint
+       numbers are indistinguishable, regardless of allocation identity. *)
+    function_call ctx env fn_type fn args
   | None -> None
 
 let constant c = scalar_option (Vox_encoding.constant c)
@@ -472,6 +478,8 @@ and expression_desc ctx s e =
     paths
       (value_bindings ctx s rec_flag bindings (has_elim e))
       (fun s _ -> eval s body)
+  | Texp_open ({ open_expr = { mod_desc = Tmod_ident _; _ }; _ }, body) ->
+    eval s body
   | Texp_letmodule (Some id, _, _, m, body)
     when Option.is_some (module_structure m) ->
     let str = Option.get (module_structure m) in
@@ -727,6 +735,7 @@ let check_termination ~prove ~self ~fn ~measure =
               match sort arg.exp_env arg.exp_type with
               | Some Bool -> scalar_value (Boolean false)
               | Some Int63 -> scalar_value (Integer 0L)
+              | Some Int -> scalar_value (Big_integer "0")
               | Some (Opaque _) -> reject arg
               | None -> reject arg)
             args
@@ -746,6 +755,8 @@ let check_termination ~prove ~self ~fn ~measure =
         bindings;
       check body
     | Texp_ifthenelse (c, t, Some f) -> List.iter check [c; t; f]
+    | Texp_open ({ open_expr = { mod_desc = Tmod_ident _; _ }; _ }, body) ->
+      check body
     | Texp_sequence (a, _, b) ->
       check a;
       check b
@@ -785,7 +796,14 @@ let check_termination ~prove ~self ~fn ~measure =
                   goal =
                     { label = "decreases";
                       term =
-                        both Lt (required measure.exp_loc value) entry_measure
+                        (let value = required measure.exp_loc value in
+                         match term_sort entry_measure with
+                         | Int63 -> both Lt value entry_measure
+                         | Int ->
+                           both And
+                             (both Int_ge value (Big_integer "0"))
+                             (both Int_lt value entry_measure)
+                         | Bool | Opaque _ -> reject measure)
                     }
                 })
             (expression ctx call_state measure)
