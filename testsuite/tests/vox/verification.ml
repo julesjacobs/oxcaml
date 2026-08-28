@@ -276,3 +276,70 @@ let converted_sort b =
 [%%expect{|
 val converted_sort : bool -> unit = <fun>
 |}]
+
+type number = int
+type flag = bool;;
+[%%expect{|
+type number = int
+type flag = bool
+|}]
+
+let alias_step (x : number) : {n : number | n = x + 1} =
+  let n = x + 1 in refine_ n
+let alias_flag (b : flag) : {r : flag | r} =
+  let r = if b then true else not b in refine_ r;;
+[%%expect{|
+val alias_step : (x : number) -> {n : number | n = (x + 1)} = <fun>
+val alias_flag : flag -> {r : flag | r} = <fun>
+|}]
+
+let physical_int (x : number) : {b : bool | b} =
+  let y = x + 0 in
+  let b = x == y in refine_ b
+let physical_bool (x : flag) : {b : bool | b} =
+  let y = not (not x) in
+  let b = x == y in refine_ b
+let physical_refined (x : zero) : {b : bool | b} =
+  let b = x == x in refine_ b;;
+[%%expect{|
+val physical_int : number -> {b : bool | b} = <fun>
+val physical_bool : flag -> {b : bool | b} = <fun>
+val physical_refined : zero -> {b : bool | b} = <fun>
+|}]
+
+external physical_equal : 'a @ immutable -> 'a @ immutable -> bool @@ total =
+  "%eq";;
+[%%expect{|
+external physical_equal : 'a @ immutable -> 'a @ immutable -> bool = "%eq"
+|}]
+
+let physical_predicate (x : number) : {n : number | physical_equal n x} =
+  let n = x + 0 in refine_ n;;
+[%%expect{|
+val physical_predicate : (x : number) -> {n : number | physical_equal n x} =
+  <fun>
+|}]
+
+let shadowed_add () : {n : int | n = 2} =
+  let ( + ) x y = x - y in
+  let n = 1 + 1 in refine_ n;;
+[%%expect{|
+Line 3, characters 19-28:
+3 |   let n = 1 + 1 in refine_ n;;
+                       ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Abstract : sig type t end = struct type t = int end;;
+[%%expect{|
+module Abstract : sig type t end
+|}]
+
+let abstract_physical (x : Abstract.t) : {b : bool | b} =
+  let b = physical_equal x x in refine_ b;;
+[%%expect{|
+Line 2, characters 32-41:
+2 |   let b = physical_equal x x in refine_ b;;
+                                    ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]

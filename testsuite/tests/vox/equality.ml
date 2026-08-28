@@ -17,6 +17,72 @@ let reflexive (x : int) : {r : int | r === x} =
 val reflexive : (x : int) -> {r : int | r === x} = <fun>
 |}]
 
+module Opaque : sig
+  type t
+  val zero : t
+  val one : t
+  val observe : t @ total immutable -> int @@ total
+end = struct
+  type t = int
+  let zero = 0
+  let one = 1
+  let observe x = x
+end;;
+[%%expect{|
+module Opaque :
+  sig
+    type t
+    val zero : t
+    val one : t
+    val observe : t @ total immutable -> int @@ total
+  end
+|}]
+
+let opaque_reflexive () : {r : Opaque.t | r === Opaque.zero} =
+  let r = Opaque.zero in
+  refine_ r;;
+[%%expect{|
+val opaque_reflexive : unit -> {r : Opaque.t | r === Opaque.zero} = <fun>
+|}]
+
+type token = Token
+
+let constructor_reflexive : {r : token | r === Token} =
+  let r = Token in
+  refine_ r;;
+[%%expect{|
+type token = Token
+val constructor_reflexive : {r : token | r === Token} = Token
+|}]
+
+let opaque_argument_congruence (x : Opaque.t) (y : {y : Opaque.t | y === x})
+    : {u : unit |
+        let refine_ y = y in
+        Opaque.observe y === Opaque.observe x} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+val opaque_argument_congruence :
+  (x : Opaque.t) ->
+  (y : {y : Opaque.t | y === x}) ->
+  {u : unit | let refine_ y = y in (Opaque.observe y) === (Opaque.observe x)} =
+  <fun>
+|}]
+
+let fresh_allocations : {u : unit | ref 0 === ref 0} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+Line 1, characters 46-51:
+1 | let fresh_allocations : {u : unit | ref 0 === ref 0} =
+                                                  ^^^^^
+Error: Unsupported refinement predicate in VC generation
+Line 3, characters 2-11:
+3 |   refine_ u;;
+      ^^^^^^^^^
+  Required by this refinement introduction
+|}]
+
 let scalar_failure =
   let x = 0 in
   match (assume_ x : {r : int | r === 1}) with

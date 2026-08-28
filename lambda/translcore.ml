@@ -154,15 +154,6 @@ let prim_logical_equal =
   Pccall
     (Lambda.simple_prim_on_values ~name:"caml_equal" ~arity:2 ~alloc:true)
 
-let rec dynamically_checkable_logical_equality env ty =
-  match get_desc (Ctype.expand_head env ty) with
-  | Tpoly (body, []) -> dynamically_checkable_logical_equality env body
-  | Trefine refinement ->
-      dynamically_checkable_logical_equality env refinement.ref_payload
-  | Tconstr (path, [], _) ->
-      Path.same path Predef.path_int || Path.same path Predef.path_bool
-  | _ -> false
-
 let transl_opaque_logical_equal ~scopes exp left right =
   let loc = of_location ~scopes exp.exp_loc in
   let invalid_argument =
@@ -1364,18 +1355,17 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
             assert_failed e.exp_loc ~scopes e,
             layout))
   | Texp_logical_equal (left, right) ->
-      let dynamically_checkable =
-        dynamically_checkable_logical_equality e.exp_env left.exp_type
-      in
+      let payload = Vox_type.classify_payload e.exp_env left.exp_type in
       let left = transl_exp ~scopes Lambda.layout_any_value left in
       let right = transl_exp ~scopes Lambda.layout_any_value right in
-      if dynamically_checkable
-      then
+      begin match payload with
+      | Some (Vox_type.Int | Vox_type.Bool) ->
           Lprim
             ( prim_logical_equal,
               [left; right],
               of_location ~scopes e.exp_loc )
-      else transl_opaque_logical_equal ~scopes e left right
+      | None -> transl_opaque_logical_equal ~scopes e left right
+      end
   | Texp_assert (cond, loc) ->
       if !Clflags.noassert
       then lambda_unit
