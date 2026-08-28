@@ -78,6 +78,13 @@ val polymorphic : 'a @ immutable -> 'a @ immutable = <fun>
 val polymorphic_def : (x : 'a) -> {u : unit | (polymorphic x) === x} = <fun>
 |}]
 
+let[@def] dependent : (x : int) -> { y : int | y = x } =
+  fun x -> refine_ x;;
+[%%expect{|
+val dependent : (x : int) -> {y : int | y = x} = <fun>
+val dependent_def : (x : int) -> {u : unit | (dependent x) === x} = <fun>
+|}]
+
 let[@def] apply (f @ total) x = f x;;
 [%%expect{|
 val apply : ('a @ immutable -> 'b) @ total -> 'a @ immutable -> 'b = <fun>
