@@ -150,6 +150,45 @@ let prim_fresh_oo_id =
   Pccall
     (Lambda.simple_prim_on_values ~name:"caml_fresh_oo_id" ~arity:1 ~alloc:false)
 
+let prim_logical_equal =
+  Pccall
+    (Lambda.simple_prim_on_values ~name:"caml_equal" ~arity:2 ~alloc:true)
+
+let rec dynamically_checkable_logical_equality env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tpoly (body, []) -> dynamically_checkable_logical_equality env body
+  | Trefine refinement ->
+      dynamically_checkable_logical_equality env refinement.ref_payload
+  | Tconstr (path, [], _) ->
+      Path.same path Predef.path_int || Path.same path Predef.path_bool
+  | _ -> false
+
+let transl_opaque_logical_equal ~scopes exp left right =
+  let loc = of_location ~scopes exp.exp_loc in
+  let invalid_argument =
+    transl_extension_path loc (Lazy.force Env.initial)
+      Predef.path_invalid_argument
+  in
+  let failure =
+    Lprim
+      ( Praise Raise_regular,
+        [ Lprim
+            ( Pmakeblock (0, Immutable, All_value, alloc_heap),
+              [ invalid_argument;
+                Lconst
+                  (Const_immstring
+                     "logical equality is not dynamically checkable")
+              ],
+              loc )
+        ],
+        loc )
+  in
+  Lifthenelse
+    ( Lambda.phys_equal left right ~loc,
+      Lambda.of_bool true,
+      failure,
+      layout_int )
+
 let transl_extension_constructor ~scopes env path ext =
   let path =
     Printtyp.wrap_printing_env env ~error:true (fun () ->
@@ -1324,6 +1363,19 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
             transl_exp ~scopes layout body,
             assert_failed e.exp_loc ~scopes e,
             layout))
+  | Texp_logical_equal (left, right) ->
+      let dynamically_checkable =
+        dynamically_checkable_logical_equality e.exp_env left.exp_type
+      in
+      let left = transl_exp ~scopes Lambda.layout_any_value left in
+      let right = transl_exp ~scopes Lambda.layout_any_value right in
+      if dynamically_checkable
+      then
+          Lprim
+            ( prim_logical_equal,
+              [left; right],
+              of_location ~scopes e.exp_loc )
+      else transl_opaque_logical_equal ~scopes e left right
   | Texp_assert (cond, loc) ->
       if !Clflags.noassert
       then lambda_unit
