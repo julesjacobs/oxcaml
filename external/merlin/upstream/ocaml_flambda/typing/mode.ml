@@ -5913,6 +5913,8 @@ module Statefulness = struct
 
   let stateful = of_const Stateful
 
+  let is_stateless m = Const.le (Guts.get_floor m) Const.Stateless
+
   let legacy = of_const Const.legacy
 
   let zap_to_legacy = zap_to_ceil
