@@ -162,6 +162,22 @@ val total_calls : (int -> int @ total) @ total -> int -> {n : int | n = 0} =
   <fun>
 |}]
 
+external stateful_total_read : int ref -> int @@ stateful total = "%field0"
+
+let stateful_total_calls_are_fresh r : {n : int | n = 0} =
+  let a = stateful_total_read r in
+  r := a + 1;
+  let b = stateful_total_read r in
+  let n = a - b in
+  refine_ n;;
+[%%expect{|
+external stateful_total_read : int ref -> int = "%field0"
+Line 8, characters 2-11:
+8 |   refine_ n;;
+      ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
 let closure_instances make : {n : int | n = 1} =
   let one = 1 in
   let two = 2 in
