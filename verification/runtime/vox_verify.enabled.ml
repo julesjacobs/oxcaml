@@ -26,7 +26,8 @@ let prove loc query =
           | Bool -> "bool"
           | Int63 -> "int"
           | Int -> "bigint"
-          | Opaque _ -> "opaque"))
+          | Opaque _ -> "opaque"
+          | Datatype datatype -> Vox_smt.Datatype.label datatype))
       query.Vox_smt.symbols;
     List.iteri
       (fun i f -> Format.eprintf "  f%d: %s@." i (Vox_smt.Function.label f))
