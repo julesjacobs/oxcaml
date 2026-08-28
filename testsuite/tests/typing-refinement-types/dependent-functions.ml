@@ -234,7 +234,9 @@ type cell = Cell of int
 
 let (contain_contended @ total) :
     (x : int) -> {r : cell | true} @ immutable contended =
-  fun x -> refine_ (Cell x);;
+  fun x ->
+  let cell = Cell x in
+  refine_ cell;;
 [%%expect{|
 type cell = Cell of int
 val contain_contended : int -> {r : cell | true} @ immutable = <fun>
