@@ -69,7 +69,7 @@ val eliminate : zero -> zero = <fun>
 |}]
 
 type tuple_fact =
-  {u : unit | match (0, 0) with (left, right) -> left = right}
+  {pair : int * int | match pair with (left, right) -> left = right}
 
 let omit_irrelevant_tuple_fact (fact : tuple_fact) : zero =
   let refine_ proof = fact in
@@ -77,27 +77,17 @@ let omit_irrelevant_tuple_fact (fact : tuple_fact) : zero =
   refine_ zero;;
 [%%expect{|
 type tuple_fact =
-    {u : unit | match (0, 0) with | (left, right) -> left = right}
+    {pair : int * int | match pair with | (left, right) -> left = right}
 val omit_irrelevant_tuple_fact : tuple_fact -> zero = <fun>
 |}]
 
-let report_needed_tuple_fact (fact : tuple_fact) : zero =
-  let refine_ proof = fact in
-  let one = 1 in
-  refine_ one;;
+let translated_tuple_fact (fact : tuple_fact) : {b : bool | b} =
+  let refine_ pair = fact in
+  let left, right = pair in
+  let b = left = right in
+  refine_ b;;
 [%%expect{|
-Line 4, characters 2-13:
-4 |   refine_ one;;
-      ^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 2, characters 22-26:
-2 |   let refine_ proof = fact in
-                          ^^^^
-  This refinement premise was omitted because it could not be translated to SMT
-Line 2, characters 20-26:
-2 |   {u : unit | match (0, 0) with (left, right) -> left = right}
-                        ^^^^^^
-  Unsupported refinement predicate in VC generation
+val translated_tuple_fact : tuple_fact -> {b : bool | b} = <fun>
 |}]
 
 let hidden (r : zero) : zero =
