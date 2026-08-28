@@ -81,11 +81,13 @@ let unsupported loc =
 let required loc value =
   match scalar value with Some t -> t | None -> unsupported loc
 
-let total_mode mode =
+let logical_function_mode mode =
   Mode.Totality.is_total (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
+  && Mode.Statefulness.is_stateless
+       (Mode.Value.proj_comonadic Mode.Axis.Statefulness mode)
 
 let at_mode mode = function
-  | Some (Function f) when total_mode mode ->
+  | Some (Function f) when logical_function_mode mode ->
     Some (Function { f with total = true })
   | value -> value
 
