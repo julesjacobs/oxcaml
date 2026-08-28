@@ -575,7 +575,8 @@ let dependent_argument_mode () =
       totality = Totality.Const.Total;
       statefulness = Statefulness.Const.Stateless;
       portability = Portability.Const.Portable;
-      visibility = Visibility.Const.Immutable
+      visibility = Visibility.Const.Immutable;
+      contention = Contention.Const.Contended
     }
 
 let mode_default_opt mode_opt =
