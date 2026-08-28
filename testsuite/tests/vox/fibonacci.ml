@@ -118,7 +118,7 @@ module Fibonacci :
     val fib_def :
       (n : int) ->
       {u : unit
-        | (fib n) =
+        | (fib n) ===
             (if n <= 0
              then 0
              else if n = 1 then 1 else (fib (n - 1)) + (fib (n - 2)))}
