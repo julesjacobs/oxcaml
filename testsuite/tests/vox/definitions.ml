@@ -229,21 +229,35 @@ val wrap : int -> wrapped = <fun>
 val wrap_def : (x : int) -> {u : unit | (wrap x) === (Wrap x)} = <fun>
 |}]
 
-let unsupported_definition_lemma (x : int) : {n : int | n = x} =
+let translated_datatype_definition_lemma (x : int) :
+    {n : int | n = x} =
   let refine_ proof = wrap_def x in
   let n = 0 in
   refine_ n;;
 [%%expect{|
-Line 4, characters 2-11:
-4 |   refine_ n;;
+Line 5, characters 2-11:
+5 |   refine_ n;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 2, characters 22-32:
-2 |   let refine_ proof = wrap_def x in
-                          ^^^^^^^^^^
-  This refinement premise was omitted because it could not be translated to SMT
-Line 2, characters 19-25:
-2 | let[@def] wrap x = Wrap x;;
-                       ^^^^^^
-  Unsupported refinement predicate in VC generation
+|}]
+
+module Datatype_definition = struct
+  let[@def] (wrapped_zero @ total stateless) (_wrapped : wrapped) = 0
+  let wrapped_argument = Wrap 1
+
+  let use () : {n : int | n = 0} =
+    let (wrapped @ total stateless) = wrapped_argument in
+    let refine_ proof = wrapped_zero_def wrapped in
+    let n = wrapped_zero wrapped in
+    refine_ n
+end;;
+[%%expect{|
+module Datatype_definition :
+  sig
+    val wrapped_zero : wrapped -> int
+    val wrapped_zero_def :
+      (_wrapped : wrapped) -> {u : unit | (wrapped_zero _wrapped) === 0}
+    val wrapped_argument : wrapped
+    val use : unit -> {n : int | n = 0}
+  end
 |}]
