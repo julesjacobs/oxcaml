@@ -1,8 +1,40 @@
+type datatype
+
 type sort =
   | Bool
   | Bv63
   | Int
   | Opaque of int
+  | Datatype of datatype
+
+module Datatype : sig
+  type t = datatype
+
+  val create : label:string -> t
+
+  val label : t -> string
+end
+
+type constructor
+
+module Constructor : sig
+  type t = constructor
+
+  val create : datatype:Datatype.t -> label:string -> (string * sort) list -> t
+
+  val label : t -> string
+
+  val datatype : t -> Datatype.t
+
+  val fields : t -> (string * sort) list
+end
+
+type datatype_declaration =
+  { datatype : Datatype.t;
+    constructors : Constructor.t list
+  }
+
+val datatypes_well_founded : datatype_declaration list -> bool
 
 module Symbol : sig
   type t
@@ -67,6 +99,9 @@ type term =
   | Var of Symbol.t
   | App of op * term list
   | Call of Function.t * term list
+  | Construct of Constructor.t * term list
+  | Is of Constructor.t * term
+  | Select of Constructor.t * int * term
 
 type labelled_term =
   { label : string;
@@ -74,7 +109,8 @@ type labelled_term =
   }
 
 type query =
-  { symbols : Symbol.t list;
+  { datatypes : datatype_declaration list;
+    symbols : Symbol.t list;
     functions : Function.t list;
     facts : labelled_term list;
     goal : labelled_term
@@ -101,9 +137,9 @@ val check : int_width:int -> query -> unit
 
 (** Always checks sorts first. Names [v0], [v1], ... follow declaration order.
     Includes options, declarations, assertions and [check-sat], but not [exit].
-    Queries using [Int] or [Opaque _] select ALL; other queries use QF_UFBV for
-    uninterpreted functions and QF_BV otherwise. No quantifiers can be
-    represented. [Div]/[Rem] use signed bitvector semantics; callers must
+    Queries using [Int], opaque sorts, or datatypes select ALL; other queries
+    use QF_UFBV for uninterpreted functions and QF_BV otherwise. No quantifiers
+    can be represented. [Div]/[Rem] use signed bitvector semantics; callers must
     exclude zero divisors when modeling OCaml normal returns.
     [Int_div]/[Int_mod] use Euclidean semantics; callers must supply the
     zero-divisor behavior. *)
