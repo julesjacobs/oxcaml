@@ -130,6 +130,7 @@ let model symbols response =
           if n < -4611686018427387904L || n > 4611686018427387903L
           then None
           else Some (Int_value n))
+    | (Opaque _ | Datatype _), _ -> None
     | _ -> None
   in
   let rec bindings i acc symbols entries =
