@@ -120,6 +120,11 @@ let model symbols response =
     match Symbol.sort symbol, sexp with
     | Bool, Atom "true" -> Some (Bool_value true)
     | Bool, Atom "false" -> Some (Bool_value false)
+    | Int, Atom digits when decimal_integer digits && digits.[0] <> '-' ->
+      Some (Bigint_value digits)
+    | Int, List [Atom "-"; Atom digits]
+      when decimal_integer digits && digits.[0] <> '-' ->
+      Some (Bigint_value (if digits = "0" then "0" else "-" ^ digits))
     | Int63, sexp ->
       Option.bind (integer sexp) (fun n ->
           if n < -4611686018427387904L || n > 4611686018427387903L
