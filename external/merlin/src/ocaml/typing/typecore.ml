@@ -7654,7 +7654,8 @@ and type_expect_
       match get_desc (expand_head env ty_expected) with
       | Trefine refinement ->
           let operand =
-            type_expect env (mode_default (total_mode ())) operand
+            type_expect env
+              (mode_coerce (refinement_operand_mode ()) expected_mode) operand
               (mk_expected refinement.ref_payload)
           in
           begin match operand.exp_desc, operand.exp_extra with
