@@ -23,6 +23,7 @@ legacy-mode defaults.
 | Assume | `assume.ml`, `assume_runtime.ml` | Predicates are checked at runtime, including under `-noassert`. |
 | SMT interface | `smt.ml`, `smt_solver.ml` | Queries serialize and the solver can prove or refute them. |
 | VC generation | `verification.ml`, `unchecked.ml` | Branches and successful runtime checks prove introductions; false claims and wraparound are rejected. |
+| Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
