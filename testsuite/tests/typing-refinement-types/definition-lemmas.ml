@@ -128,6 +128,13 @@ val mode_checked_def : (x : int) -> {u : unit | (mode_checked x) === (x + 1)} =
   <fun>
 |}]
 
+let[@def] (explicit_total @ total stateless) x = x + 1;;
+[%%expect{|
+val explicit_total : int -> int = <fun>
+val explicit_total_def :
+  (x : int) -> {u : unit | (explicit_total x) === (x + 1)} = <fun>
+|}]
+
 let[@def 1] payload x = x + 1;;
 [%%expect{|
 Line 1, characters 3-11:
