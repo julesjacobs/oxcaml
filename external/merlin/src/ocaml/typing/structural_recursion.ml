@@ -12,7 +12,6 @@
 
 open Asttypes
 open Types
-open Btype
 open Typedtree
 
 type descent = Root | Smaller
@@ -81,69 +80,29 @@ and bind_field facts owner ty pat =
       end
   | _ -> facts
 
-let check_predicates self exp =
-  let seen_types = ref TypeSet.empty in
-  let check_type loc ty =
-    if not (TypeSet.mem ty !seen_types) then begin
-      seen_types := TypeSet.add ty !seen_types;
-      if Ctype.refinement_ident_occurs self ty then
-        reject loc "the recursive function occurs in a type predicate"
-    end
-  in
-  let default = Tast_iterator.default_iterator in
-  let it =
-    { default with
-      typ = (fun it ty ->
-        check_type ty.ctyp_loc ty.ctyp_type;
-        default.typ it ty);
-      pat = (fun it pat ->
-        check_type pat.pat_loc pat.pat_type;
-        default.pat it pat);
-      expr = (fun it exp ->
-        check_type exp.exp_loc exp.exp_type;
-        default.expr it exp) }
-  in
-  it.expr it exp
-
-let check_parameter self arity body index root =
-  let rec iterator facts allow_calls : Tast_iterator.iterator =
+let check_parameter self body index root =
+  let rec iterator facts : Tast_iterator.iterator =
     let default = Tast_iterator.default_iterator in
     { default with
-      binding_op = (fun it op ->
-        if Path.same op.bop_op_path (Path.Pident self) then
-          reject op.bop_loc
-            "the recursive function cannot be used as a binding operator";
-        default.binding_op it op);
       expr = (fun it exp ->
         match exp.exp_desc with
         | Texp_apply (fn, args, _, _, _, _)
           when Misc.Stdlib.Option.exists (Ident.same self) (variable fn) ->
-            if not allow_calls then
-              reject fn.exp_loc
-                "the recursive function occurs in a delayed body";
-            if List.length args <> arity then
-              reject exp.exp_loc
-                "recursive calls must supply every value parameter";
             let actuals = List.map (function
               | Nolabel, Arg (arg, _) -> arg
-              | _ -> reject exp.exp_loc
-                  "recursive calls must be unlabelled and fully applied") args
+              | _ -> assert false) args
             in
             if status facts (List.nth actuals index) <> Some Smaller then
               reject exp.exp_loc
                 "the recursive argument is not a known proper descendant";
             List.iter (it.expr it) actuals
-        | Texp_ident { path = Path.Pident id; _ } when Ident.same self id ->
-            reject exp.exp_loc "the recursive function must be called directly";
-        | Texp_function _ | Texp_lazy _ | Texp_quote _ | Texp_letop _ ->
-            default.expr (iterator facts false) exp
         | Texp_let (Nonrecursive, bindings, body) ->
             List.iter (it.value_binding it) bindings;
             let facts = List.fold_left (fun facts binding ->
               bind_pattern facts (status facts binding.vb_expr) binding.vb_pat)
                 facts bindings
             in
-            let it = iterator facts allow_calls in
+            let it = iterator facts in
             it.expr it body
         | Texp_match (scrutinee, _, cases, effects, _) ->
             it.expr it scrutinee;
@@ -154,46 +113,36 @@ let check_parameter self arity body index root =
                     bind_pattern facts (status facts scrutinee) pat
                 | _ -> facts
               in
-              let it = iterator facts allow_calls in
+              let it = iterator facts in
               it.case it case) cases;
             List.iter (it.case it) effects
         | _ -> default.expr it exp)
     }
   in
-  let it = iterator (Ident.Map.singleton root Root) true in
+  let it = iterator (Ident.Map.singleton root Root) in
   it.expr it body
 
 let check self exp =
   try
-    match exp.exp_desc with
-    | Texp_function { params; body = Tfunction_body body; _ } ->
-        let params = List.map (fun param ->
-          match param.fp_arg_label, param.fp_kind with
-          | Nolabel, Tparam_pat ({ pat_desc = Tpat_var { id; _ }; _ } as pat) ->
-              id, pat
-          | _ -> reject param.fp_loc
-              "structural recursion requires simple unlabelled parameters")
-          params
-        in
-        let candidates =
-          List.mapi (fun index (id, pat) -> index, id, pat) params
-          |> List.filter_map (fun (index, id, pat) ->
-            if Ctype.is_inductive pat.pat_env pat.pat_type
-            then Some (index, id) else None)
-        in
-        if candidates <> [] then check_predicates self exp;
-        let rec try_parameters failure = function
-          | [] -> Error failure
-          | (index, id) :: rest ->
-              match check_parameter self (List.length params) body index id with
-              | () -> Ok ()
-              | exception Not_structural (loc, reason) ->
-                  try_parameters (loc, reason) rest
-        in
-        try_parameters
-          (exp.exp_loc, "no parameter has a checked inductive datatype")
-          candidates
-    | _ ->
-        Error (exp.exp_loc,
-          "structural recursion requires a function with variable parameters")
-  with Not_structural (loc, reason) -> Error (loc, reason)
+    let params, body = Recursive_function.parameters exp in
+    let candidates =
+      List.mapi (fun index (id, pat) -> index, id, pat) params
+      |> List.filter_map (fun (index, id, pat) ->
+        if Ctype.is_inductive pat.pat_env pat.pat_type
+        then Some (index, id) else None)
+    in
+    if candidates <> [] then Recursive_function.check_uses self exp;
+    let rec try_parameters failure = function
+      | [] -> Error failure
+      | (index, id) :: rest ->
+          match check_parameter self body index id with
+          | () -> Ok ()
+          | exception Not_structural (loc, reason) ->
+              try_parameters (loc, reason) rest
+    in
+    try_parameters
+      (exp.exp_loc, "no parameter has a checked inductive datatype")
+      candidates
+  with
+  | Not_structural (loc, reason)
+  | Recursive_function.Invalid (loc, reason) -> Error (loc, reason)
