@@ -1,13 +1,11 @@
-#include <time.h>
+#include <stdint.h>
 #include <caml/alloc.h>
-#include <caml/fail.h>
 #include <caml/mlvalues.h>
+
+extern uint64_t caml_time_counter(void);
 
 CAMLprim value caml_vox_smt_monotonic_time(value unit)
 {
-  struct timespec now;
   (void)unit;
-  if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
-    caml_failwith("Vox_smt_solver: monotonic clock unavailable");
-  return caml_copy_double((double)now.tv_sec + (double)now.tv_nsec / 1e9);
+  return caml_copy_double((double)caml_time_counter() / 1e9);
 }
