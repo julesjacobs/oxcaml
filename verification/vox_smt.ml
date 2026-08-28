@@ -1,8 +1,96 @@
-type sort =
+type datatype =
+  { datatype_id : int;
+    datatype_label : string
+  }
+
+and sort =
   | Bool
   | Bv63
   | Int
   | Opaque of int
+  | Datatype of datatype
+
+and constructor =
+  { constructor_id : int;
+    constructor_datatype : datatype;
+    constructor_label : string;
+    constructor_fields : (string * sort) list
+  }
+
+module Datatype = struct
+  type t = datatype
+
+  let next = ref 0
+
+  let create ~label =
+    if !next = max_int then invalid_arg "Vox_smt.Datatype.create: exhausted";
+    let id = !next in
+    incr next;
+    { datatype_id = id; datatype_label = label }
+
+  let label t = t.datatype_label
+end
+
+module Constructor = struct
+  type t = constructor
+
+  let next = ref 0
+
+  let create ~datatype ~label fields =
+    if !next = max_int then invalid_arg "Vox_smt.Constructor.create: exhausted";
+    let id = !next in
+    incr next;
+    { constructor_id = id;
+      constructor_datatype = datatype;
+      constructor_label = label;
+      constructor_fields = fields
+    }
+
+  let label t = t.constructor_label
+
+  let datatype t = t.constructor_datatype
+
+  let fields t = t.constructor_fields
+end
+
+type datatype_declaration =
+  { datatype : Datatype.t;
+    constructors : Constructor.t list
+  }
+
+let datatypes_well_founded declarations =
+  let declared = Hashtbl.create (List.length declarations) in
+  List.iter
+    (fun declaration ->
+      Hashtbl.replace declared declaration.datatype.datatype_id declaration)
+    declarations;
+  let inhabited = Hashtbl.create (List.length declarations) in
+  let changed = ref true in
+  while !changed do
+    changed := false;
+    List.iter
+      (fun declaration ->
+        let id = declaration.datatype.datatype_id in
+        if
+          (not (Hashtbl.mem inhabited id))
+          && List.exists
+               (fun constructor ->
+                 List.for_all
+                   (fun (_, sort) ->
+                     match sort with
+                     | Datatype datatype ->
+                       Hashtbl.mem declared datatype.datatype_id
+                       && Hashtbl.mem inhabited datatype.datatype_id
+                     | Bool | Bv63 | Int | Opaque _ -> true)
+                   constructor.constructor_fields)
+               declaration.constructors
+        then begin
+          Hashtbl.add inhabited id ();
+          changed := true
+        end)
+      declarations
+  done;
+  Hashtbl.length inhabited = Hashtbl.length declared
 
 module Symbol = struct
   type t =
@@ -84,6 +172,9 @@ type term =
   | Var of Symbol.t
   | App of op * term list
   | Call of Function.t * term list
+  | Construct of Constructor.t * term list
+  | Is of Constructor.t * term
+  | Select of Constructor.t * int * term
 
 type labelled_term =
   { label : string;
@@ -91,7 +182,8 @@ type labelled_term =
   }
 
 type query =
-  { symbols : Symbol.t list;
+  { datatypes : datatype_declaration list;
+    symbols : Symbol.t list;
     functions : Function.t list;
     facts : labelled_term list;
     goal : labelled_term
@@ -135,6 +227,7 @@ let sort_name = function
   | Bv63 -> "(_ BitVec 63)"
   | Int -> "Int"
   | Opaque id -> Printf.sprintf "opaque(%d)" id
+  | Datatype datatype -> Printf.sprintf "datatype(%s)" datatype.datatype_label
 
 let decimal_integer text =
   let len = String.length text in
@@ -171,6 +264,18 @@ let rec term_sort = function
   | Big_integer _ -> Int
   | Var s -> Symbol.sort s
   | Call (f, _) -> Function.result f
+  | Construct (constructor, _) -> Datatype constructor.constructor_datatype
+  | Is _ -> Bool
+  | Select (constructor, index, _) ->
+    begin match
+      if index < 0
+      then None
+      else List.nth_opt constructor.constructor_fields index
+    with
+    | Some (_, sort) -> sort
+    | None ->
+      error "Invalid selector %d for %s" index constructor.constructor_label
+    end
   | App (op, args) -> (
     match operator_signature op, args with
     | Fixed (_, result), _ -> result
@@ -180,11 +285,55 @@ let rec term_sort = function
 
 let check ~int_width q =
   if int_width <> 63 then raise (Unsupported_target int_width);
+  let datatypes = Hashtbl.create 16 in
+  List.iter
+    (fun declaration ->
+      let datatype = declaration.datatype in
+      if Hashtbl.mem datatypes datatype.datatype_id
+      then error "Duplicate SMT datatype %S" datatype.datatype_label;
+      if declaration.constructors = []
+      then error "SMT datatype %S has no constructors" datatype.datatype_label;
+      Hashtbl.add datatypes datatype.datatype_id declaration)
+    q.datatypes;
+  let constructors = Hashtbl.create 32 in
+  List.iter
+    (fun declaration ->
+      List.iter
+        (fun constructor ->
+          if
+            constructor.constructor_datatype.datatype_id
+            <> declaration.datatype.datatype_id
+          then
+            error "Constructor %S belongs to the wrong datatype"
+              constructor.constructor_label;
+          if Hashtbl.mem constructors constructor.constructor_id
+          then
+            error "Duplicate SMT constructor %S" constructor.constructor_label;
+          Hashtbl.add constructors constructor.constructor_id constructor)
+        declaration.constructors)
+    q.datatypes;
+  let require_declared_sort = function
+    | Datatype datatype when not (Hashtbl.mem datatypes datatype.datatype_id) ->
+      error "Undeclared SMT datatype %S" datatype.datatype_label
+    | Bool | Bv63 | Int | Opaque _ | Datatype _ -> ()
+  in
+  List.iter
+    (fun declaration ->
+      List.iter
+        (fun constructor ->
+          List.iter
+            (fun (_, sort) -> require_declared_sort sort)
+            constructor.constructor_fields)
+        declaration.constructors)
+    q.datatypes;
+  if not (datatypes_well_founded q.datatypes)
+  then error "SMT datatype declarations are not well-founded";
   let declared = Hashtbl.create 16 in
   List.iter
     (fun s ->
       if Hashtbl.mem declared s.Symbol.id
       then error "Duplicate SMT symbol %S" (Symbol.label s);
+      require_declared_sort (Symbol.sort s);
       Hashtbl.add declared s.Symbol.id ())
     q.symbols;
   let functions = Hashtbl.create 16 in
@@ -192,6 +341,8 @@ let check ~int_width q =
     (fun f ->
       if Hashtbl.mem functions f.Function.id
       then error "Duplicate SMT function %S" (Function.label f);
+      List.iter require_declared_sort (Function.arguments f);
+      require_declared_sort (Function.result f);
       Hashtbl.add functions f.Function.id ())
     q.functions;
   let require expected actual =
@@ -219,6 +370,34 @@ let check ~int_width q =
       then error "Wrong arity for SMT function %S" (Function.label f);
       List.iter2 require (Function.arguments f) (List.map infer args);
       Function.result f
+    | Construct (constructor, args) ->
+      if not (Hashtbl.mem constructors constructor.constructor_id)
+      then error "Undeclared SMT constructor %S" constructor.constructor_label;
+      if List.length args <> List.length constructor.constructor_fields
+      then
+        error "Wrong arity for SMT constructor %S" constructor.constructor_label;
+      List.iter2 require
+        (List.map snd constructor.constructor_fields)
+        (List.map infer args);
+      Datatype constructor.constructor_datatype
+    | Is (constructor, value) ->
+      if not (Hashtbl.mem constructors constructor.constructor_id)
+      then error "Undeclared SMT constructor %S" constructor.constructor_label;
+      require (Datatype constructor.constructor_datatype) (infer value);
+      Bool
+    | Select (constructor, index, value) ->
+      if not (Hashtbl.mem constructors constructor.constructor_id)
+      then error "Undeclared SMT constructor %S" constructor.constructor_label;
+      require (Datatype constructor.constructor_datatype) (infer value);
+      begin match
+        if index < 0
+        then None
+        else List.nth_opt constructor.constructor_fields index
+      with
+      | Some (_, sort) -> sort
+      | None ->
+        error "Invalid selector %d for %S" index constructor.constructor_label
+      end
     | App (op, args) -> (
       let signature = operator_signature op in
       let arity =
@@ -262,22 +441,55 @@ let to_smtlib ~int_width ~timeout_ms q =
   List.iteri
     (fun i f -> Hashtbl.add functions f.Function.id ("f" ^ string_of_int i))
     q.functions;
+  let datatype_names = Hashtbl.create 16 in
+  let constructor_names = Hashtbl.create 32 in
+  let selector_names = Hashtbl.create 64 in
+  let next_constructor = ref 0 and next_selector = ref 0 in
+  List.iteri
+    (fun i declaration ->
+      Hashtbl.add datatype_names declaration.datatype.datatype_id
+        ("d" ^ string_of_int i);
+      List.iter
+        (fun constructor ->
+          Hashtbl.add constructor_names constructor.constructor_id
+            ("c" ^ string_of_int !next_constructor);
+          incr next_constructor;
+          List.iteri
+            (fun index _ ->
+              Hashtbl.add selector_names
+                (constructor.constructor_id, index)
+                ("p" ^ string_of_int !next_selector);
+              incr next_selector)
+            constructor.constructor_fields)
+        declaration.constructors)
+    q.datatypes;
   let add s = Buffer.add_string b s in
   let opaque_ids =
-    let add ids = function
+    let collect ids = function
       | Opaque id -> if List.mem id ids then ids else id :: ids
-      | Bool | Bv63 | Int -> ids
+      | Bool | Bv63 | Int | Datatype _ -> ids
     in
     let ids =
-      List.fold_left (fun ids s -> add ids (Symbol.sort s)) [] q.symbols
+      List.fold_left (fun ids s -> collect ids (Symbol.sort s)) [] q.symbols
     in
     let ids =
       List.fold_left
         (fun ids f ->
-          List.fold_left add
-            (add ids (Function.result f))
+          List.fold_left collect
+            (collect ids (Function.result f))
             (Function.arguments f))
         ids q.functions
+    in
+    let ids =
+      List.fold_left
+        (fun ids declaration ->
+          List.fold_left
+            (fun ids constructor ->
+              List.fold_left
+                (fun ids (_, sort) -> collect ids sort)
+                ids constructor.constructor_fields)
+            ids declaration.constructors)
+        ids q.datatypes
     in
     List.sort Int.compare ids
   in
@@ -290,6 +502,7 @@ let to_smtlib ~int_width ~timeout_ms q =
     | Bv63 -> "(_ BitVec 63)"
     | Int -> "Int"
     | Opaque id -> Hashtbl.find opaque_names id
+    | Datatype datatype -> Hashtbl.find datatype_names datatype.datatype_id
   in
   let rec term = function
     | Boolean v -> add (string_of_bool v)
@@ -314,6 +527,32 @@ let to_smtlib ~int_width ~timeout_ms q =
           args;
         add ")"
       end
+    | Construct (constructor, args) ->
+      let name = Hashtbl.find constructor_names constructor.constructor_id in
+      if args = []
+      then add name
+      else begin
+        add "(";
+        add name;
+        List.iter
+          (fun arg ->
+            add " ";
+            term arg)
+          args;
+        add ")"
+      end
+    | Is (constructor, value) ->
+      add "((_ is ";
+      add (Hashtbl.find constructor_names constructor.constructor_id);
+      add ") ";
+      term value;
+      add ")"
+    | Select (constructor, index, value) ->
+      add "(";
+      add (Hashtbl.find selector_names (constructor.constructor_id, index));
+      add " ";
+      term value;
+      add ")"
     | App (op, args) ->
       add "(";
       add (operator op);
@@ -331,7 +570,9 @@ let to_smtlib ~int_width ~timeout_ms q =
     term_sort t = Int
     ||
     match t with
-    | App (_, args) | Call (_, args) -> List.exists uses_int args
+    | App (_, args) | Call (_, args) | Construct (_, args) ->
+      List.exists uses_int args
+    | Is (_, value) | Select (_, _, value) -> uses_int value
     | Boolean _ | Integer _ | Big_integer _ | Var _ -> false
   in
   let has_int =
@@ -343,7 +584,7 @@ let to_smtlib ~int_width ~timeout_ms q =
     || List.exists (fun f -> uses_int f.term) (q.goal :: q.facts)
   in
   add
-    (if has_int || opaque_ids <> []
+    (if has_int || opaque_ids <> [] || q.datatypes <> []
      then "(set-logic ALL)\n"
      else if q.functions = []
      then "(set-logic QF_BV)\n"
@@ -353,6 +594,42 @@ let to_smtlib ~int_width ~timeout_ms q =
       add
         (Printf.sprintf "(declare-sort %s 0)\n" (Hashtbl.find opaque_names id)))
     opaque_ids;
+  if q.datatypes <> []
+  then begin
+    add "(declare-datatypes (";
+    List.iteri
+      (fun index declaration ->
+        if index > 0 then add " ";
+        add "(";
+        add (Hashtbl.find datatype_names declaration.datatype.datatype_id);
+        add " 0)")
+      q.datatypes;
+    add ") (";
+    List.iteri
+      (fun datatype_index declaration ->
+        if datatype_index > 0 then add " ";
+        add "(";
+        List.iteri
+          (fun constructor_index constructor ->
+            if constructor_index > 0 then add " ";
+            add "(";
+            add (Hashtbl.find constructor_names constructor.constructor_id);
+            List.iteri
+              (fun index (_, sort) ->
+                add " (";
+                add
+                  (Hashtbl.find selector_names
+                     (constructor.constructor_id, index));
+                add " ";
+                add (smt_sort sort);
+                add ")")
+              constructor.constructor_fields;
+            add ")")
+          declaration.constructors;
+        add ")")
+      q.datatypes;
+    add "))\n"
+  end;
   List.iter
     (fun s ->
       add
