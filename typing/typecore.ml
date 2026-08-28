@@ -15098,15 +15098,16 @@ let make_definition_lemma env binding =
         "Definition lemmas cannot preserve zero-argument primitive values"
   | None -> ()
   end;
-  let type_params = List.map
-      (fun (id, ty) ->
-         Ident.create_scoped ~scope:Ident.lowest_scope (Ident.name id),
-         duplicate_type ty)
-      params
-  in
-  let rename = List.fold_left2
-      (fun rename (id, _) (fresh, _) -> Ident.Map.add id fresh rename)
-      Ident.Map.empty params type_params in
+  let type_params, rename, _ = List.fold_left
+      (fun (type_params, rename, subst) (id, ty) ->
+         let fresh =
+           Ident.create_scoped ~scope:Ident.lowest_scope (Ident.name id)
+         in
+         ( (fresh, Subst.type_expr subst ty) :: type_params,
+           Ident.Map.add id fresh rename,
+           Subst.add_bound_value id fresh subst ))
+      ([], Ident.Map.empty, Subst.identity) params in
+  let type_params = List.rev type_params in
   let body_ir = Refinement_predicate.map ~rename body_ir in
   let predicate_env = List.fold_left (fun env (id, ty) ->
       add_total_immutable_value env id ty loc) env type_params in
