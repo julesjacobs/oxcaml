@@ -16,14 +16,14 @@ open Vox_smt;;
 let n = Symbol.create ~label:"n" Bv63
 let next = App (Sub, [Var n; Integer 1L])
 let countdown =
-  { symbols = [n];
+  { symbols = [n]; functions = [];
     facts = [{label = "positive"; term = App (Gt, [Var n; Integer 0L])}];
     goal = {label = "decreases"; term = App (Lt, [next; Var n])} };;
 [%%expect{|
 val n : Vox_smt.Symbol.t = <abstr>
 val next : Vox_smt.term = App (Sub, [Var <abstr>; Integer 1L])
 val countdown : Vox_smt.query =
-  {symbols = [<abstr>];
+  {symbols = [<abstr>]; functions = [];
    facts = [{label = "positive"; term = App (Gt, [Var <abstr>; Integer 0L])}];
    goal =
     {label = "decreases";

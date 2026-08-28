@@ -1,7 +1,7 @@
 open Vox_smt
 
-let query ?(symbols = []) ?(facts = []) term =
-  { symbols; facts; goal = { label = "goal"; term } }
+let query ?(symbols = []) ?(functions = []) ?(facts = []) term =
+  { symbols; functions; facts; goal = { label = "goal"; term } }
 
 let app op args = App (op, args)
 
@@ -17,16 +17,19 @@ let sort_error q =
 let () =
   let x = Symbol.create ~label:"x" Bv63 in
   let b = Symbol.create ~label:"b" Bool in
+  let f = Function.create ~label:"f" ~arguments:[Bv63] ~result:Bool in
   let n = integer 0 and p = Boolean true in
   List.iter
     (fun (term, expected) ->
       assert (term_sort term = expected);
       let witness = match expected with Bool -> p | Bv63 -> n in
-      check ~int_width:63 (query ~symbols:[x; b] (app Eq [term; witness])))
+      check ~int_width:63
+        (query ~symbols:[x; b] ~functions:[f] (app Eq [term; witness])))
     [ p, Bool;
       n, Bv63;
       Var x, Bv63;
       Var b, Bool;
+      Call (f, [n]), Bool;
       app Add [n; n], Bv63;
       app Sub [n; n], Bv63;
       app Mul [n; n], Bv63;
@@ -45,11 +48,29 @@ let () =
       app Implies [p; p], Bool;
       app Ite [p; app Ite [p; n; n]; n], Bv63;
       app Ite [p; p; p], Bool ];
-  sort_error (query (app Eq [Var x; n]))
+  sort_error (query (app Eq [Var x; n]));
+  sort_error (query (Call (f, [n])))
 
 let () =
   let x = Symbol.create ~label:"x" Bv63 in
   let b = Symbol.create ~label:"x" Bool in
+  let f =
+    Function.create ~label:"v0) (assert false)" ~arguments:[Bv63] ~result:Bv63
+  in
+  let call = Call (f, [integer 0]) in
+  sort_error (query (app Eq [call; call]));
+  sort_error (query ~functions:[f; f] (Boolean true));
+  sort_error (query ~functions:[f] (app Eq [Call (f, []); call]));
+  sort_error (query ~functions:[f] (app Eq [Call (f, [Boolean true]); call]));
+  assert (
+    serialize (query ~functions:[f] (app Eq [call; call]))
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-logic QF_UFBV)\n\
+       (declare-fun f0 ((_ BitVec 63)) (_ BitVec 63))\n\
+       (assert (not (= (f0 (_ bv0 63)) (f0 (_ bv0 63)))))\n\
+       (check-sat)\n");
   let bad_arity =
     [ Add;
       Sub;
