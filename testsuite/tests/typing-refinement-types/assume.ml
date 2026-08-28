@@ -202,3 +202,16 @@ Warning 11 [redundant-case]: this match case is unused.
 
 val warning_restored : 'a -> bool = <fun>
 |}]
+
+type refined_list = { xs : int list | true };;
+[%%expect{|
+type refined_list = {xs : int list | true}
+|}]
+
+let escape_local (raw @ local) : refined_list @ global = assume_ raw;;
+[%%expect{|
+Line 1, characters 65-68:
+1 | let escape_local (raw @ local) : refined_list @ global = assume_ raw;;
+                                                                     ^^^
+Error: This value is "local" to the parent region but is expected to be "global".
+|}]
