@@ -1,6 +1,7 @@
 type sort =
   | Bool
   | Int63
+  | Opaque of int
 
 module Symbol : sig
   type t
