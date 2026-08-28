@@ -318,6 +318,8 @@ val try_expand_safe_opt: Env.t -> type_expr -> type_expr
 
 val expand_head_once: Env.t -> type_expr -> type_expr
 val expand_head: Env.t -> type_expr -> type_expr
+val is_inductive: Env.t -> type_expr -> bool
+(* Expand transparent aliases and read the checked declaration marker. *)
 val expand_head_opt: Env.t -> type_expr -> type_expr
 (** The compiler's own version of [expand_head] necessary for type-based
     optimisations. *)
