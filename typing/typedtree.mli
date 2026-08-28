@@ -707,6 +707,8 @@ and expression_desc =
         (** Bind the operand, check the predicate, and return the payload.
             The binding scopes over the predicate and return expression.
             Failure raises [Assert_failure], including under [-noassert]. *)
+  | Texp_logical_equal of expression * expression
+        (** Logical equality in a refinement predicate. *)
   | Texp_lazy of expression
   | Texp_object of class_structure * string list
   | Texp_pack of module_expr
