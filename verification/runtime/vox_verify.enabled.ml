@@ -25,6 +25,7 @@ let prove loc query =
           (match Vox_smt.Symbol.sort s with
           | Bool -> "bool"
           | Int63 -> "int"
+          | Int -> "bigint"
           | Opaque _ -> "opaque"))
       query.Vox_smt.symbols;
     List.iteri

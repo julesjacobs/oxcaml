@@ -1359,7 +1359,7 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
       let left = transl_exp ~scopes Lambda.layout_any_value left in
       let right = transl_exp ~scopes Lambda.layout_any_value right in
       begin match payload with
-      | Some (Vox_type.Int | Vox_type.Bool) ->
+      | Some (Vox_type.Int | Vox_type.Bool | Vox_type.Bigint) ->
           Lprim
             ( prim_logical_equal,
               [left; right],
