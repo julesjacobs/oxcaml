@@ -14,8 +14,18 @@
 (**************************************************************************)
 
 let main () =
+  let argv = List.tl (Array.to_list Sys.argv) in
+  let unix, argv =
+    List.partition (fun arg -> Filename.basename arg = "unix.cma") argv
+  in
+  let unix =
+    match unix with
+    | [] -> "unix.cma"
+    | unix :: _ -> unix
+  in
+  let unix = Ccomp.quote_files ~response_files:true [unix] in
   let args =
-    Ccomp.quote_files ~response_files:true (List.tl (Array.to_list Sys.argv))
+    Ccomp.quote_files ~response_files:true argv
   in
   let ocamlmktop = Sys.executable_name in
   (* On Windows Sys.command calls system() which in turn calls 'cmd.exe /c'.
@@ -29,7 +39,8 @@ let main () =
     extra_quote ^ ocamlc ^
     " -I +compiler-libs -I +unix " ^
     "-linkall ocamlcommon.cma ocamlfrontend.cma " ^
-    "unix.cma vox_smt.cma vox_vc.cma vox_smt_solver.cma vox_verify.cma " ^
+    unix ^ " " ^
+    "vox_smt.cma vox_vc.cma vox_smt_solver.cma vox_verify.cma " ^
     "ocamlbytecomp.cma ocamltoplevel.cma " ^
     args ^ " topstart.cmo" ^
     extra_quote
