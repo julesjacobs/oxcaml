@@ -36,7 +36,9 @@ module Symbolic_keys = Hashtbl.Make (struct
 end)
 
 type context =
-  { mutable symbols : Symbol.t list;
+  { encoding : Vox_encoding.context;
+    mutable datatypes : datatype_declaration list;
+    mutable symbols : Symbol.t list;
     mutable functions : Function.t list;
     mutable free : value option Path.Map.t;
     symbolic : value option Symbolic_keys.t;
@@ -167,20 +169,110 @@ let predicate_if eval loc s condition ifso ifnot =
               (fun (s, value) -> branch s (not_ condition), value)
               ifnot_outcomes))
 
-let guarded_case eval loc s (matched, condition) guard body rest =
-  let guards =
-    match guard with
-    | None -> [branch matched condition, scalar_value (Boolean true)]
-    | Some g -> eval (branch matched condition) g
+let disjunction terms = List.fold_left (both Or) (Boolean false) terms
+
+let guarded_case eval loc s matched guard body rest =
+  let matched_condition = disjunction (List.map snd matched) in
+  let selected =
+    List.concat_map
+      (fun (matched, condition) ->
+        let guards =
+          match guard with
+          | None -> [branch matched condition, scalar_value (Boolean true)]
+          | Some g -> eval (branch matched condition) g
+        in
+        paths guards (fun s g ->
+            let g = required loc g in
+            eval (branch s g) body @ rest (branch s (not_ g))))
+      matched
   in
-  paths guards (fun s g ->
-      let g = required loc g in
-      eval (branch s g) body @ rest (branch s (not_ g)))
-  @ rest (branch s (not_ condition))
+  selected @ rest (branch s (not_ matched_condition))
+
+let register_declarations ctx declarations =
+  List.iter
+    (fun declaration ->
+      if
+        not
+          (List.exists
+             (fun existing -> existing.datatype = declaration.datatype)
+             ctx.datatypes)
+      then ctx.datatypes <- declaration :: ctx.datatypes)
+    declarations
+
+let register_data ctx data =
+  register_declarations ctx (declarations ctx.encoding data)
+
+let register_sort ctx sort =
+  register_declarations ctx (declarations_of_sort ctx.encoding sort)
+
+let data_of_type ctx env ty =
+  match data ctx.encoding env ty with
+  | Some data ->
+    register_data ctx data;
+    Some data
+  | None -> None
+
+let data_constructor data name =
+  match data.kind with
+  | Tuple_data constructor | Record_data constructor -> Some constructor
+  | Variant_data constructors -> List.assoc_opt name constructors
+
+let path_constructor_name = function
+  | Path.Pextra_ty (_, Path.Pcstr_ty name) -> Some name
+  | _ -> None
+
+let construct ctx env ty name values =
+  match data_of_type ctx env ty with
+  | None -> None
+  | Some data ->
+    begin match data_constructor data name with
+    | None -> None
+    | Some constructor ->
+      let values = List.filter_map scalar values in
+      if
+        List.map term_sort values
+        = List.map snd (Constructor.fields constructor)
+      then scalar_value (Construct (constructor, values))
+      else None
+    end
+
+let select_field ctx env ty name value =
+  match data_of_type ctx env ty, scalar value with
+  | Some { kind = Record_data constructor; _ }, Some value ->
+    begin match
+      List.find_mapi
+        (fun index (label, _) -> if label = name then Some index else None)
+        (Constructor.fields constructor)
+    with
+    | Some index -> scalar_value (Select (constructor, index, value))
+    | None -> None
+    end
+  | _ -> None
+
+let record_value ctx env ty base fields =
+  match data_of_type ctx env ty with
+  | Some { kind = Record_data constructor; _ } ->
+    let field name index =
+      match List.assoc_opt name fields with
+      | Some value -> scalar value
+      | None ->
+        Option.map (fun base -> Select (constructor, index, base)) (scalar base)
+    in
+    let values =
+      List.mapi
+        (fun index (name, _) -> field name index)
+        (Constructor.fields constructor)
+    in
+    begin match Misc.Stdlib.List.map_option Fun.id values with
+    | Some values -> scalar_value (Construct (constructor, values))
+    | None -> None
+    end
+  | _ -> None
 
 let fresh ?primitive ctx env ty label =
-  match sort env ty with
+  match sort ctx.encoding env ty with
   | Some sort ->
+    register_sort ctx sort;
     let symbol = Symbol.create ~label sort in
     ctx.symbols <- symbol :: ctx.symbols;
     scalar_value (Var symbol)
@@ -193,7 +285,7 @@ let fresh ?primitive ctx env ty label =
 
 let symbolic_path ctx env ty path =
   let path = Env.normalize_value_path None env path in
-  match sort env ty with
+  match sort ctx.encoding env ty with
   | None -> fresh ctx env ty (Path.name path)
   | Some sort ->
     let key = path, sort in
@@ -206,14 +298,14 @@ let symbolic_path ctx env ty path =
     end
 
 let instantiate_path ctx env ty path value =
-  match value, sort env ty with
+  match value, sort ctx.encoding env ty with
   | Some (Scalar term), Some expected when term_sort term <> expected ->
     symbolic_path ctx env ty path
   | _ -> value
 
 let lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
-  match value_constant env ty path with
+  match value_constant ctx.encoding env ty path with
   | Some value -> scalar_value value
   | None -> (
     match Path.Map.find_opt path s.values with
@@ -228,14 +320,15 @@ let lookup ctx s env ty path =
         ctx.free <- Path.Map.add path value ctx.free;
         value))
 
-let operation env function_type result_type name args =
+let operation ctx env function_type result_type name args =
   scalar_option
-    (Vox_encoding.operation env ~function_type ~result_type name
+    (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
        (List.map scalar args))
 
 let function_call ctx env ty fn args =
-  match fn, signature env ty (List.length args) with
+  match fn, signature ctx.encoding env ty (List.length args) with
   | Some (Function fn), Some (arguments, result) ->
+    List.iter (register_sort ctx) (result :: arguments);
     let args = List.filter_map scalar args in
     if List.map term_sort args <> arguments
     then None
@@ -261,7 +354,7 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
   let value =
     match prim with
     | Some (name, arity) when arity = List.length args ->
-      operation env fn_type result_type name args
+      operation ctx env fn_type result_type name args
     | _ -> None
   in
   match value with
@@ -280,26 +373,38 @@ let constant c = scalar_option (Vox_encoding.constant c)
 
 let rconstant c = scalar_option (Vox_encoding.rconstant c)
 
-let constructor env ty name =
-  scalar_option (Vox_encoding.constructor env ty name)
+let constructor ctx env ty name =
+  scalar_option (Vox_encoding.constructor ctx.encoding env ty name)
 
 let rconstructor ctx env ty path =
-  match scalar_option (Vox_encoding.rconstructor env ty path) with
-  | Some _ as value -> value
-  | None -> symbolic_path ctx env ty path
-
-let expression_constructor ctx env ty (c : Data_types.constructor_description) =
-  match constructor env ty c.cstr_name with
+  match scalar_option (Vox_encoding.rconstructor ctx.encoding env ty path) with
   | Some _ as value -> value
   | None ->
-    let path =
-      match c.cstr_tag with
-      | Extension path -> path
-      | Ordinary _ | Null ->
-        Path.Pextra_ty
-          (Data_types.cstr_res_type_path c, Path.Pcstr_ty c.cstr_name)
-    in
-    symbolic_path ctx env ty path
+    begin match path_constructor_name path with
+    | Some name ->
+      begin match construct ctx env ty name [] with
+      | Some _ as value -> value
+      | None -> symbolic_path ctx env ty path
+      end
+    | None -> symbolic_path ctx env ty path
+    end
+
+let expression_constructor ctx env ty (c : Data_types.constructor_description) =
+  match constructor ctx env ty c.cstr_name with
+  | Some _ as value -> value
+  | None ->
+    begin match construct ctx env ty c.cstr_name [] with
+    | Some _ as value -> value
+    | None ->
+      let path =
+        match c.cstr_tag with
+        | Extension path -> path
+        | Ordinary _ | Null ->
+          Path.Pextra_ty
+            (Data_types.cstr_res_type_path c, Path.Pcstr_ty c.cstr_name)
+      in
+      symbolic_path ctx env ty path
+    end
 
 let refinement env ty loc =
   match get_desc (Ctype.expand_head env ty) with
@@ -322,7 +427,47 @@ let rec predicate ctx env s e =
       end
     | Rexp_constant c ->
       return (scalar_value (required e.rexp_loc (rconstant c)))
-    | Rexp_construct (p, []) -> return (rconstructor ctx env e.rexp_type p)
+    | Rexp_tuple components ->
+      paths
+        (arguments_right_to_left (fun s (_, e) -> eval s e) s components)
+        (fun s values ->
+          [ ( s,
+              scalar_value
+                (required e.rexp_loc (construct ctx env e.rexp_type "" values))
+            ) ])
+    | Rexp_construct (path, args) ->
+      paths (arguments_right_to_left eval s args) (fun s values ->
+          let value =
+            match values with
+            | [] -> rconstructor ctx env e.rexp_type path
+            | _ ->
+              begin match path_constructor_name path with
+              | Some name -> construct ctx env e.rexp_type name values
+              | None -> None
+              end
+          in
+          [s, scalar_value (required e.rexp_loc value)])
+    | Rexp_record (fields, extended) ->
+      let bases =
+        match extended with
+        | None -> [s, None]
+        | Some extended -> eval s extended
+      in
+      paths bases (fun s base ->
+          paths
+            (arguments_right_to_left
+               (fun s (_, _, field) -> eval s field)
+               s fields)
+            (fun s values ->
+              let fields =
+                List.map2 (fun (_, name, _) value -> name, value) fields values
+              in
+              let value = record_value ctx env e.rexp_type base fields in
+              [s, scalar_value (required e.rexp_loc value)]))
+    | Rexp_field (record_exp, _, name) ->
+      paths (eval s record_exp) (fun s record ->
+          let value = select_field ctx env record_exp.rexp_type name record in
+          [s, scalar_value (required e.rexp_loc value)])
     | Rexp_apply (fn, args) ->
       let prim =
         match fn.rexp_desc with
@@ -378,17 +523,86 @@ and expose ctx env s ty value loc =
 
 and predicate_pattern ctx env s value p =
   match p.rpat_desc with
-  | Rpat_any -> s, Boolean true
-  | Rpat_var id -> bind s id value, Boolean true
+  | Rpat_any -> [s, Boolean true]
+  | Rpat_var id -> [bind s id value, Boolean true]
   | Rpat_alias (p, id) -> predicate_pattern ctx env (bind s id value) value p
   | Rpat_constant c ->
-    s, both Eq (required p.rpat_loc value) (required p.rpat_loc (rconstant c))
-  | Rpat_construct (path, []) ->
-    ( s,
-      both Eq
-        (required p.rpat_loc value)
-        (required p.rpat_loc (rconstructor ctx env p.rpat_type path)) )
-  | _ -> unsupported p.rpat_loc
+    [s, both Eq (required p.rpat_loc value) (required p.rpat_loc (rconstant c))]
+  | Rpat_tuple components ->
+    begin match data_of_type ctx env p.rpat_type, scalar value with
+    | Some { kind = Tuple_data constructor; _ }, Some value ->
+      predicate_pattern_fields ctx env s value constructor
+        (List.map snd components)
+    | _ -> unsupported p.rpat_loc
+    end
+  | Rpat_construct (path, patterns) ->
+    begin match
+      patterns, scalar value, scalar (rconstructor ctx env p.rpat_type path)
+    with
+    | [], Some value, Some constructor -> [s, both Eq value constructor]
+    | _ ->
+      begin match
+        ( data_of_type ctx env p.rpat_type,
+          path_constructor_name path,
+          scalar value )
+      with
+      | Some data, Some name, Some value ->
+        begin match data_constructor data name with
+        | Some constructor ->
+          predicate_pattern_fields ctx env s value constructor patterns
+        | None -> unsupported p.rpat_loc
+        end
+      | _ -> unsupported p.rpat_loc
+      end
+    end
+  | Rpat_record (_, fields) ->
+    begin match data_of_type ctx env p.rpat_type, scalar value with
+    | Some { kind = Record_data constructor; _ }, Some value ->
+      let fields =
+        List.map
+          (fun (_, name, pattern) ->
+            match
+              List.find_mapi
+                (fun index (field, _) ->
+                  if String.equal field name then Some index else None)
+                (Constructor.fields constructor)
+            with
+            | Some index -> index, pattern
+            | None -> unsupported pattern.rpat_loc)
+          fields
+      in
+      predicate_pattern_selected_fields ctx env s value constructor fields
+    | _ -> unsupported p.rpat_loc
+    end
+  | Rpat_or (left, right) ->
+    let left = predicate_pattern ctx env s value left in
+    let left_condition = disjunction (List.map snd left) in
+    let right =
+      List.map
+        (fun (s, condition) -> s, both And (not_ left_condition) condition)
+        (predicate_pattern ctx env s value right)
+    in
+    left @ right
+
+and predicate_pattern_fields ctx env s value constructor patterns =
+  if List.length patterns <> List.length (Constructor.fields constructor)
+  then unsupported Location.none;
+  predicate_pattern_selected_fields ctx env s value constructor
+    (List.mapi (fun index pattern -> index, pattern) patterns)
+
+and predicate_pattern_selected_fields ctx env s value constructor patterns =
+  List.fold_left
+    (fun outcomes (index, pattern) ->
+      List.concat_map
+        (fun (s, condition) ->
+          List.map
+            (fun (s, field_condition) -> s, both And condition field_condition)
+            (predicate_pattern ctx env s
+               (scalar_value (Select (constructor, index, value)))
+               pattern))
+        outcomes)
+    [s, Is (constructor, value)]
+    patterns
 
 and predicate_cases ctx env s value cases =
   if impossible s
@@ -403,35 +617,94 @@ and predicate_cases ctx env s value cases =
         case.rc_guard case.rc_rhs rest
 
 let rec pattern : type k.
-    context -> state -> value option -> k general_pattern -> state * term =
+    context -> state -> value option -> k general_pattern -> (state * term) list
+    =
  fun ctx s value p ->
   match p.pat_desc with
-  | Tpat_any -> s, Boolean true
-  | Tpat_var { id; mode; _ } -> bind s id (at_mode mode value), Boolean true
+  | Tpat_any -> [s, Boolean true]
+  | Tpat_var { id; mode; _ } -> [bind s id (at_mode mode value), Boolean true]
   | Tpat_alias { pattern = p; id; _ } -> pattern ctx (bind s id value) value p
   | Tpat_value p -> pattern ctx s value (p :> Typedtree.pattern)
   | Tpat_constant c ->
     begin match scalar value, scalar (constant c) with
-    | Some x, Some c -> s, both Eq x c
+    | Some x, Some c -> [s, both Eq x c]
     | _ ->
-      s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")
+      [s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")]
     end
-  | Tpat_construct (_, c, _, [], _) ->
-    begin match
-      scalar value, scalar (expression_constructor ctx p.pat_env p.pat_type c)
-    with
-    | Some x, Some c -> s, both Eq x c
+  | Tpat_tuple components ->
+    begin match data_of_type ctx p.pat_env p.pat_type, scalar value with
+    | Some { kind = Tuple_data constructor; _ }, Some value ->
+      pattern_fields ctx s value constructor (List.map snd components)
+    | _ -> pattern_fallback ctx s p
+    end
+  | Tpat_construct (_, c, _, args, _) ->
+    begin match data_of_type ctx p.pat_env p.pat_type, scalar value with
+    | Some data, Some value ->
+      begin match data_constructor data c.cstr_name with
+      | Some constructor ->
+        pattern_fields ctx s value constructor (List.map snd args)
+      | None -> pattern_fallback ctx s p
+      end
     | _ ->
-      s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")
+      begin match
+        ( scalar value,
+          scalar (expression_constructor ctx p.pat_env p.pat_type c),
+          args )
+      with
+      | Some x, Some c, [] -> [s, both Eq x c]
+      | _ -> pattern_fallback ctx s p
+      end
     end
-  | _ ->
-    let s =
-      List.fold_left
-        (fun s (id, _, ty, _, _) ->
-          bind s id (fresh ctx p.pat_env ty (Ident.name id)))
-        s (pat_bound_idents_full p)
+  | Tpat_record (fields, _, _) ->
+    begin match data_of_type ctx p.pat_env p.pat_type, scalar value with
+    | Some { kind = Record_data constructor; _ }, Some value ->
+      let patterns =
+        List.map
+          (fun (_, label, pattern) -> label.Data_types.lbl_pos, pattern)
+          fields
+      in
+      pattern_selected_fields ctx s value constructor patterns
+    | _ -> pattern_fallback ctx s p
+    end
+  | Tpat_or (left, right, _) ->
+    let left = pattern ctx s value left in
+    let left_condition = disjunction (List.map snd left) in
+    let right =
+      List.map
+        (fun (s, condition) -> s, both And (not_ left_condition) condition)
+        (pattern ctx s value right)
     in
-    s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")
+    left @ right
+  | _ -> pattern_fallback ctx s p
+
+and pattern_fields ctx s value constructor patterns =
+  pattern_selected_fields ctx s value constructor
+    (List.mapi (fun index pattern -> index, pattern) patterns)
+
+and pattern_selected_fields ctx s value constructor patterns =
+  List.fold_left
+    (fun outcomes (index, pat) ->
+      List.concat_map
+        (fun (s, condition) ->
+          List.map
+            (fun (s, field_condition) -> s, both And condition field_condition)
+            (pattern ctx s
+               (scalar_value (Select (constructor, index, value)))
+               pat))
+        outcomes)
+    [s, Is (constructor, value)]
+    patterns
+
+and pattern_fallback : type k.
+    context -> state -> k general_pattern -> (state * term) list =
+ fun ctx s p ->
+  let s =
+    List.fold_left
+      (fun s (id, _, ty, _, _) ->
+        bind s id (fresh ctx p.pat_env ty (Ident.name id)))
+      s (pat_bound_idents_full p)
+  in
+  [s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")]
 
 let intro_loc e =
   List.find_map
@@ -518,7 +791,8 @@ let rec expression ctx s e =
             (fun (s, goal) ->
               try
                 ctx.prove loc
-                  { symbols = List.rev ctx.symbols;
+                  { datatypes = List.rev ctx.datatypes;
+                    symbols = List.rev ctx.symbols;
                     functions = List.rev ctx.functions;
                     facts = List.rev s.facts;
                     goal =
@@ -537,6 +811,10 @@ let rec expression ctx s e =
 and expression_desc ctx s e =
   let eval = expression ctx in
   let opaque () = fresh ctx e.exp_env e.exp_type "result" in
+  let opaque_if_unsupported = function
+    | Some _ as value -> value
+    | None -> opaque ()
+  in
   match e.exp_desc with
   | Texp_ident { path; desc; mode; _ } ->
     let value =
@@ -547,8 +825,55 @@ and expression_desc ctx s e =
     in
     [s, value]
   | Texp_constant c -> [s, constant c]
-  | Texp_construct (_, c, _, [], _) ->
-    [s, expression_constructor ctx e.exp_env e.exp_type c]
+  | Texp_tuple (components, _) ->
+    paths
+      (arguments_right_to_left (fun s (_, e) -> eval s e) s components)
+      (fun s values ->
+        [s, opaque_if_unsupported (construct ctx e.exp_env e.exp_type "" values)])
+  | Texp_construct (_, c, _, args, _) ->
+    paths
+      (arguments_right_to_left (fun s (_, e) -> eval s e) s args)
+      (fun s values ->
+        let value =
+          match values with
+          | [] -> expression_constructor ctx e.exp_env e.exp_type c
+          | _ -> construct ctx e.exp_env e.exp_type c.cstr_name values
+        in
+        [s, opaque_if_unsupported value])
+  | Texp_record { fields; extended_expression; _ } ->
+    let bases =
+      match extended_expression with
+      | None -> [s, None]
+      | Some (base, _, _) -> eval s base
+    in
+    let fields = Array.to_list fields in
+    paths bases (fun s base ->
+        paths
+          (arguments_right_to_left
+             (fun s (_, _, field) ->
+               match field with
+               | Kept _ -> [s, None]
+               | Overridden (_, field) -> eval s field)
+             s fields)
+          (fun s values ->
+            let fields =
+              List.filter_map Fun.id
+                (List.map2
+                   (fun (label, _, field) value ->
+                     match field with
+                     | Kept _ -> None
+                     | Overridden _ -> Some (label.Data_types.lbl_name, value))
+                   fields values)
+            in
+            [ ( s,
+                opaque_if_unsupported
+                  (record_value ctx e.exp_env e.exp_type base fields) ) ]))
+  | Texp_field { record; label; _ } ->
+    paths (eval s record) (fun s value ->
+        [ ( s,
+            opaque_if_unsupported
+              (select_field ctx e.exp_env record.exp_type
+                 label.Data_types.lbl_name value) ) ])
   | Texp_let (rec_flag, bindings, body) ->
     paths
       (value_bindings ctx s rec_flag bindings (has_elim e))
@@ -619,34 +944,42 @@ and expression_desc ctx s e =
     end
   | Texp_function { params; body; _ } ->
     let captured = s in
-    let s =
+    let states =
       List.fold_left
-        (fun s p ->
-          let pat =
-            match p.fp_kind with
-            | Tparam_pat pat -> pat
-            | Tparam_optional_default (pat, default, _) ->
-              ignore (eval s default);
-              pat
-          in
-          let value =
-            fresh ctx pat.pat_env pat.pat_type (Ident.name p.fp_param)
-          in
-          let s, condition = pattern ctx (bind s p.fp_param value) value pat in
-          branch s condition)
-        s params
+        (fun states p ->
+          List.concat_map
+            (fun s ->
+              let pat =
+                match p.fp_kind with
+                | Tparam_pat pat -> pat
+                | Tparam_optional_default (pat, default, _) ->
+                  ignore (eval s default);
+                  pat
+              in
+              let value =
+                fresh ctx pat.pat_env pat.pat_type (Ident.name p.fp_param)
+              in
+              List.map
+                (fun (s, condition) -> branch s condition)
+                (pattern ctx (bind s p.fp_param value) value pat))
+            states)
+        [s] params
     in
-    begin match body with
-    | Tfunction_body body -> ignore (eval s body)
-    | Tfunction_cases cases ->
-      begin match cases.fc_cases with
-      | [] -> ()
-      | c :: _ ->
-        let value = fresh ctx c.c_lhs.pat_env c.c_lhs.pat_type "argument" in
-        ignore
-          (value_cases ctx (bind s cases.fc_param value) value cases.fc_cases)
-      end
-    end;
+    List.iter
+      (fun s ->
+        match body with
+        | Tfunction_body body -> ignore (eval s body)
+        | Tfunction_cases cases ->
+          begin match cases.fc_cases with
+          | [] -> ()
+          | c :: _ ->
+            let value = fresh ctx c.c_lhs.pat_env c.c_lhs.pat_type "argument" in
+            ignore
+              (value_cases ctx
+                 (bind s cases.fc_param value)
+                 value cases.fc_cases)
+          end)
+      states;
     [captured, opaque ()]
   | Texp_match (scrutinee, _, cases, [], _)
     when List.for_all (fun c -> snd (split_pattern c.c_lhs) = None) cases ->
@@ -660,9 +993,9 @@ and expression_desc ctx s e =
     [s, opaque ()]
 
 and value_bindings ctx s rec_flag bindings eliminate =
-  let s =
+  let states =
     match rec_flag with
-    | Asttypes.Nonrecursive -> s
+    | Asttypes.Nonrecursive -> [s]
     | Asttypes.Recursive ->
       List.iter
         (fun vb ->
@@ -674,12 +1007,17 @@ and value_bindings ctx s rec_flag bindings eliminate =
                initialization")
         bindings;
       List.fold_left
-        (fun s vb ->
-          fst
-            (pattern ctx s
-               (fresh ctx vb.vb_pat.pat_env vb.vb_pat.pat_type "recursive")
-               vb.vb_pat))
-        s bindings
+        (fun states vb ->
+          List.concat_map
+            (fun s ->
+              let value =
+                fresh ctx vb.vb_pat.pat_env vb.vb_pat.pat_type "recursive"
+              in
+              List.map
+                (fun (s, condition) -> branch s condition)
+                (pattern ctx s value vb.vb_pat))
+            states)
+        [s] bindings
   in
   let rec loop s = function
     | [] -> [s, None]
@@ -693,10 +1031,11 @@ and value_bindings ctx s rec_flag bindings eliminate =
             else [s, value]
           in
           paths states (fun s value ->
-              let s, condition = pattern ctx s value vb.vb_pat in
-              loop (branch s condition) rest))
+              List.concat_map
+                (fun (s, condition) -> loop (branch s condition) rest)
+                (pattern ctx s value vb.vb_pat)))
   in
-  loop s bindings
+  List.concat_map (fun s -> loop s bindings) states
 
 and value_cases ctx s value cases = cases_with_pattern ctx s value cases
 
@@ -750,7 +1089,9 @@ and iterator ctx s =
   }
 
 let context ~prove ~verify_introductions =
-  { symbols = [];
+  { encoding = Vox_encoding.create_context ();
+    datatypes = [];
+    symbols = [];
     functions = [];
     free = Path.Map.empty;
     symbolic = Symbolic_keys.create 16;
@@ -783,14 +1124,16 @@ let check_termination ~prove ~self ~fn ~measure =
       "Unsupported decreases expression: expected scalar primitive operations"
   in
   let rec check e =
-    if Option.is_some (intro_loc e) || sort e.exp_env e.exp_type = None
+    if
+      Option.is_some (intro_loc e)
+      || sort ctx.encoding e.exp_env e.exp_type = None
     then reject e;
     match e.exp_desc with
     | Texp_ident { desc = { val_kind = Val_reg _; _ }; _ }
     | Texp_constant (Const_int _) ->
       ()
     | Texp_construct (_, c, _, [], _)
-      when Option.is_some (constructor e.exp_env e.exp_type c.cstr_name) ->
+      when Option.is_some (constructor ctx e.exp_env e.exp_type c.cstr_name) ->
       ()
     | Texp_apply
         (({ exp_desc = Texp_ident { path; _ }; _ } as f), args, _, _, _, _) ->
@@ -808,15 +1151,15 @@ let check_termination ~prove ~self ~fn ~measure =
         let values =
           List.map
             (fun arg ->
-              match sort arg.exp_env arg.exp_type with
+              match sort ctx.encoding arg.exp_env arg.exp_type with
               | Some Bool -> scalar_value (Boolean false)
               | Some Int63 -> scalar_value (Integer 0L)
               | Some Int -> scalar_value (Big_integer "0")
-              | Some (Opaque _) -> reject arg
+              | Some (Opaque _ | Datatype _) -> reject arg
               | None -> reject arg)
             args
         in
-        if operation e.exp_env f.exp_type e.exp_type name values = None
+        if operation ctx e.exp_env f.exp_type e.exp_type name values = None
         then reject e
       | _ -> reject e
       end
@@ -866,7 +1209,8 @@ let check_termination ~prove ~self ~fn ~measure =
           List.iter
             (fun (s, value) ->
               prove call.exp_loc
-                { symbols = List.rev ctx.symbols;
+                { datatypes = List.rev ctx.datatypes;
+                  symbols = List.rev ctx.symbols;
                   functions = List.rev ctx.functions;
                   facts = List.rev s.facts;
                   goal =
@@ -879,7 +1223,7 @@ let check_termination ~prove ~self ~fn ~measure =
                            both And
                              (both Int_ge value (Big_integer "0"))
                              (both Int_lt value entry_measure)
-                         | Bool | Opaque _ -> reject measure)
+                         | Bool | Opaque _ | Datatype _ -> reject measure)
                     }
                 })
             (expression ctx call_state measure)
