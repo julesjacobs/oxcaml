@@ -510,6 +510,9 @@ let expr sub {exp_loc; exp_extra; exp_desc; exp_env; exp_attributes; _} =
       sub.value_binding sub binding;
       sub.expr sub predicate;
       sub.expr sub body
+  | Texp_logical_equal (left, right) ->
+      sub.expr sub left;
+      sub.expr sub right
   | Texp_lazy exp -> sub.expr sub exp
   | Texp_object (cl, _) -> sub.class_structure sub cl
   | Texp_pack mexpr -> sub.module_expr sub mexpr
