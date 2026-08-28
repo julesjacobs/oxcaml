@@ -78,6 +78,17 @@ val polymorphic : 'a @ immutable -> 'a @ immutable = <fun>
 val polymorphic_def : (x : 'a) -> {u : unit | (polymorphic x) === x} = <fun>
 |}]
 
+let[@def] dependent :
+    (x : int) -> (y : { y : int | y = x }) -> unit =
+  fun x y -> ();;
+[%%expect{|
+val dependent : (x : int) -> ({y : int | y = x} -> unit) @ total nonportable =
+  <fun>
+val dependent_def :
+  (x : int) -> (y : {y : int | y = x}) -> {u : unit | (dependent x y) === ()} =
+  <fun>
+|}]
+
 let[@def] apply (f @ total) x = f x;;
 [%%expect{|
 val apply : ('a @ immutable -> 'b) @ total -> 'a @ immutable -> 'b = <fun>
