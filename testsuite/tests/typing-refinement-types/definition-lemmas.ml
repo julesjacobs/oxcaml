@@ -117,6 +117,26 @@ Line 1, characters 30-37:
 Error: Duplicate def attribute
 |}]
 
+let[@def] (mode_checked @ stateless) x = x + 1;;
+[%%expect{|
+val mode_checked : int -> int = <fun>
+val mode_checked_def : (x : int) -> {u : unit | (mode_checked x) === (x + 1)} =
+  <fun>
+|}]
+
+let[@def] proof_erased (x : {x : int | x >= 0}) =
+  let refine_ payload = x in
+  let proof = () in
+  let checked : {u : unit | true} = refine_ proof in
+  let refine_ proof = checked in
+  payload;;
+[%%expect{|
+val proof_erased : {x : int | x >= 0} -> int = <fun>
+val proof_erased_def :
+  (x : {x : int | x >= 0}) ->
+  {u : unit | (proof_erased x) === (let payload = x in payload)} = <fun>
+|}]
+
 let[@def 1] payload x = x + 1;;
 [%%expect{|
 Line 1, characters 3-11:
