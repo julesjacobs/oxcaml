@@ -564,6 +564,9 @@ module type S = sig
     val reading : lr
 
     val stateful : lr
+
+    (** Inspect the inferred mode without committing solver changes. *)
+    val is_stateless : (allowed * 'r) t -> bool
   end
 
   module Visibility : sig
