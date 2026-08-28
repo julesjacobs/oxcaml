@@ -277,6 +277,7 @@
   tast_iterator
   tast_mapper
   verification
+  vox_type
   signature_group
   cmt_format
   cms_format

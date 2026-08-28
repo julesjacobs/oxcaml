@@ -22,7 +22,10 @@ let prove loc query =
     List.iteri
       (fun i s ->
         Format.eprintf "  v%d: %s (%s)@." i (Vox_smt.Symbol.label s)
-          (match Vox_smt.Symbol.sort s with Bool -> "bool" | Bv63 -> "int"))
+          (match Vox_smt.Symbol.sort s with
+          | Bool -> "bool"
+          | Bv63 -> "int"
+          | Opaque _ -> "opaque"))
       query.Vox_smt.symbols;
     List.iteri
       (fun i f -> Format.eprintf "  f%d: %s@." i (Vox_smt.Function.label f))
