@@ -1,7 +1,8 @@
 open Vox_smt
 
-let query ?(symbols = []) ?(functions = []) ?(facts = []) term =
-  { symbols; functions; facts; goal = { label = "goal"; term } }
+let query ?(datatypes = []) ?(symbols = []) ?(functions = []) ?(facts = []) term
+    =
+  { datatypes; symbols; functions; facts; goal = { label = "goal"; term } }
 
 let app op args = App (op, args)
 
@@ -28,6 +29,7 @@ let () =
         | Bv63 -> n
         | Int -> Big_integer "0"
         | Opaque _ -> assert false
+        | Datatype _ -> assert false
       in
       check ~int_width:63
         (query ~symbols:[x; b] ~functions:[f] (app Eq [term; witness])))
@@ -180,6 +182,54 @@ let () =
        (assert (not (= v0 v1)))\n\
        (check-sat)\n");
   sort_error (query ~symbols:[a; other] (app Eq [Var a; Var other]))
+
+let () =
+  let tree = Datatype.create ~label:"tree" in
+  let leaf = Constructor.create ~datatype:tree ~label:"Leaf" ["value", Bv63] in
+  let node =
+    Constructor.create ~datatype:tree ~label:"Node"
+      ["left", Datatype tree; "right", Datatype tree]
+  in
+  let declaration = { datatype = tree; constructors = [leaf; node] } in
+  let one = Construct (leaf, [integer 1]) in
+  let two = Construct (leaf, [integer 2]) in
+  let pair = Construct (node, [one; two]) in
+  check ~int_width:63
+    (query ~datatypes:[declaration]
+       (app And [Is (node, pair); app Eq [Select (node, 0, pair); one]]));
+  sort_error (query (app Eq [one; one]));
+  sort_error
+    (query ~datatypes:[declaration] (app Eq [Construct (leaf, []); one]));
+  (match term_sort (Select (leaf, -1, one)) with
+  | _ -> failwith "Expected sort error"
+  | exception Sort_error _ -> ());
+  sort_error (query ~datatypes:[declaration] (Select (leaf, -1, one)));
+  let actual =
+    serialize
+      (query ~datatypes:[declaration]
+         (app Eq [Select (leaf, 0, one); integer 1]))
+  in
+  let expected =
+    "(set-option :print-success false)\n\
+     (set-option :produce-models true)\n\
+     (set-option :timeout 5000)\n\
+     (set-logic ALL)\n\
+     (declare-datatypes ((d0 0)) (((c0 (p0 (_ BitVec 63))) (c1 (p1 d0) (p2 \
+     d0)))))\n\
+     (assert (not (= (p0 (c0 (_ bv1 63))) (_ bv1 63))))\n\
+     (check-sat)\n"
+  in
+  if actual <> expected then failwith actual
+
+let () =
+  let loop = Datatype.create ~label:"loop" in
+  let loop_constructor =
+    Constructor.create ~datatype:loop ~label:"Loop" ["rest", Datatype loop]
+  in
+  sort_error
+    (query
+       ~datatypes:[{ datatype = loop; constructors = [loop_constructor] }]
+       (Boolean true))
 
 let fake =
   if Filename.is_relative Sys.argv.(1)

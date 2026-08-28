@@ -141,6 +141,7 @@ let model symbols response =
           if n < 0L
           then None
           else Some (Int_value (Int64.shift_right (Int64.shift_left n 1) 1)))
+    | (Opaque _ | Datatype _), _ -> None
     | _ -> None
   in
   let rec bindings i acc symbols entries =
