@@ -15,3 +15,10 @@ let unavailable structure =
 let verifier = ref unavailable
 let install verify = verifier := verify
 let run structure = !verifier structure
+
+let termination = ref (fun ~self:_ ~fn:_ ~measure ->
+  Location.raise_errorf ~loc:measure.Typedtree.exp_loc
+    "Numerical termination verification is unavailable in this compiler")
+
+let install_termination check = termination := check
+let check_termination ~self ~fn ~measure = !termination ~self ~fn ~measure
