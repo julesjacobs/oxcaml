@@ -684,13 +684,22 @@ let total_immutable_mode () =
       visibility = Visibility.Const.Immutable
     }
 
+let refinement_operand_mode () =
+  Value.of_const
+    { Value.Const.max with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable
+    }
+
 let dependent_argument_mode () =
   Alloc.of_const
     { Alloc.Const.legacy with
       totality = Totality.Const.Total;
       statefulness = Statefulness.Const.Stateless;
       portability = Portability.Const.Portable;
-      visibility = Visibility.Const.Immutable
+      visibility = Visibility.Const.Immutable;
+      contention = Contention.Const.Contended
     }
 
 let mode_default_opt mode_opt =
@@ -7488,7 +7497,8 @@ and type_expect_
       match get_desc (expand_head env ty_expected) with
       | Trefine { ref_payload; _ } ->
           let operand =
-            type_expect env (mode_default (total_mode ())) operand
+            type_expect env
+              (mode_coerce (refinement_operand_mode ()) expected_mode) operand
               (mk_expected ref_payload)
           in
           rue
