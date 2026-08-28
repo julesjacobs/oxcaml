@@ -577,14 +577,6 @@ let refinement_operand_mode () =
       portability = Portability.Const.Portable
     }
 
-let refinement_operand_mode () =
-  Value.of_const
-    { Value.Const.max with
-      totality = Totality.Const.Total;
-      statefulness = Statefulness.Const.Stateless;
-      portability = Portability.Const.Portable
-    }
-
 let dependent_argument_mode () =
   Alloc.of_const
     { Alloc.Const.legacy with
