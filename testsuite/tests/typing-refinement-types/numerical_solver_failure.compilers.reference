@@ -1,0 +1,8 @@
+File "numerical_solver_failure.ml", line 11, characters 31-43:
+11 | let rec loop n = if n > 0 then loop (n - 1) else 0 [@@decreases n]
+                                    ^^^^^^^^^^^^
+Error: Refinement solver timeout must be positive
+File "numerical_solver_failure.ml", line 11, characters 64-65:
+11 | let rec loop n = if n > 0 then loop (n - 1) else 0 [@@decreases n]
+                                                                     ^
+  Required by this decreases attribute
