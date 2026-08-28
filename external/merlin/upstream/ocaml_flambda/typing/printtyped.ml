@@ -873,6 +873,10 @@ and expression i ppf x =
       expression i ppf binding.vb_expr;
       expression i ppf predicate;
       expression i ppf body;
+  | Texp_logical_equal (left, right) ->
+      line i ppf "Texp_logical_equal\n";
+      expression i ppf left;
+      expression i ppf right;
   | Texp_lazy (e) ->
       line i ppf "Texp_lazy";
       expression i ppf e;
