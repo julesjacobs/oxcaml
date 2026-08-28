@@ -444,6 +444,8 @@ let rec of_expression_desc loc = function
   | Texp_let (_, vbs, e) -> of_expression e ** list_fold of_value_binding vbs
   | Texp_letmutable (vb, e) -> of_expression e ** of_value_binding vb
   | Texp_assume (binding, _, _) -> of_expression binding.vb_expr
+  | Texp_logical_equal (left, right) ->
+    of_expression left ** of_expression right
   | Texp_function { params; body; ret_mode; _ } ->
     list_fold of_function_param params
     ** of_function_body body ** of_modes ret_mode
