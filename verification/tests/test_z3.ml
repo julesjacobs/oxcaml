@@ -12,22 +12,24 @@ let app op args = App (op, args)
 
 let eq a b = app Eq [a; b]
 
-let check ?(symbols = []) ?(functions = []) ?(facts = []) term =
+let check ?(datatypes = []) ?(symbols = []) ?(functions = []) ?(facts = []) term
+    =
   Vox_smt_solver.check ~config ~int_width:63
-    { symbols;
+    { datatypes;
+      symbols;
       functions;
       facts = List.map (fun term -> { label = "fact"; term }) facts;
       goal = { label = "goal"; term }
     }
 
-let valid ?symbols ?functions ?facts term =
-  match (check ?symbols ?functions ?facts term).validity with
+let valid ?datatypes ?symbols ?functions ?facts term =
+  match (check ?datatypes ?symbols ?functions ?facts term).validity with
   | Valid -> ()
   | Failure message -> failwith message
   | _ -> failwith "Expected valid"
 
-let invalid ?symbols ?functions ?facts term =
-  match (check ?symbols ?functions ?facts term).validity with
+let invalid ?datatypes ?symbols ?functions ?facts term =
+  match (check ?datatypes ?symbols ?functions ?facts term).validity with
   | Invalid model -> model
   | Failure message -> failwith message
   | _ -> failwith "Expected invalid"
@@ -125,6 +127,29 @@ let () =
     (eq
        (Call (mixed, [Var x; Var y; Var b]))
        (Call (mixed, [Var x; app Int_of_int63 [Var x]; Var b])));
+  let tree = Datatype.create ~label:"tree" in
+  let leaf = Constructor.create ~datatype:tree ~label:"Leaf" ["value", Int63] in
+  let node =
+    Constructor.create ~datatype:tree ~label:"Node"
+      ["left", Datatype tree; "right", Datatype tree]
+  in
+  let datatypes = [{ datatype = tree; constructors = [leaf; node] }] in
+  let a = Symbol.create ~label:"a" Int63 in
+  let b = Symbol.create ~label:"b" Int63 in
+  let leaf_a = Construct (leaf, [Var a]) in
+  let leaf_b = Construct (leaf, [Var b]) in
+  valid ~datatypes ~symbols:[a; b]
+    ~facts:[eq leaf_a leaf_b]
+    (eq (Var a) (Var b));
+  valid ~datatypes ~symbols:[a]
+    (app Ne [Construct (node, [leaf_a; leaf_a]); leaf_a]);
+  valid ~datatypes ~symbols:[a]
+    (eq (Select (node, 0, Construct (node, [leaf_a; leaf_a]))) leaf_a);
+  let tree_value = Symbol.create ~label:"tree" (Datatype tree) in
+  valid ~datatypes ~symbols:[tree_value]
+    (app Ge [Select (leaf, 0, Var tree_value); i (-4611686018427387904L)]);
+  valid ~datatypes ~symbols:[tree_value]
+    (app Le [Select (leaf, 0, Var tree_value); i 4611686018427387903L]);
   print_endline "Z3 integration tests passed"
 
 let () =

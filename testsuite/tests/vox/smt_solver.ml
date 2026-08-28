@@ -7,7 +7,7 @@ let n = Symbol.create ~label:"n" Int63
 let next = App (Sub, [Var n; Integer 1L])
 
 let countdown facts =
-  { symbols = [n]; functions = [];
+  { datatypes = []; symbols = [n]; functions = [];
     facts;
     goal = { label = "decreases"; term = App (Lt, [next; Var n]) }
   }

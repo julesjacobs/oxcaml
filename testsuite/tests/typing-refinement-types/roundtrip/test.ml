@@ -30,3 +30,46 @@ let local_polymorphism :
 val local_polymorphism : {z : int | let _ignored _value = true in true} list =
   []
 |}]
+
+let pattern_predicates :
+    { value : int |
+      match { Roundtrip_defs.x = value; y = value } with
+      | { x = field; y = 0 } -> field = value
+      | { x = 0; y = field } -> field = value
+      | _ -> true } list =
+  ([] : Roundtrip_defs.pattern_predicates list)
+
+let open_pattern_predicate :
+    { value : int |
+      match { Roundtrip_defs.x = value; y = value } with
+      | { x = field; _ } -> field = value } list =
+  ([] : Roundtrip_defs.open_pattern_predicate list)
+
+let or_predicate :
+    { value : int |
+      match Roundtrip_defs.Pair (value, value) with
+      | Roundtrip_defs.Pair (0, field)
+      | Roundtrip_defs.Pair (field, 0) -> field = value
+      | Roundtrip_defs.Pair (_, _) -> true } list =
+  ([] : Roundtrip_defs.or_predicate list);;
+[%%expect{|
+val pattern_predicates :
+  {value : int
+    | match { Roundtrip_defs.x = value; Roundtrip_defs.y = value } with
+      | { Roundtrip_defs.x = field; Roundtrip_defs.y = 0 } -> field = value
+      | { Roundtrip_defs.x = 0; Roundtrip_defs.y = field } -> field = value
+      | _ -> true}
+  list = []
+val open_pattern_predicate :
+  {value : int
+    | match { Roundtrip_defs.x = value; Roundtrip_defs.y = value } with
+      | { Roundtrip_defs.x = field;_} -> field = value}
+  list = []
+val or_predicate :
+  {value : int
+    | match Roundtrip_defs.Pair (value, value) with
+      | Roundtrip_defs.Pair (0, field) | Roundtrip_defs.Pair (field, 0) ->
+          field = value
+      | Roundtrip_defs.Pair (_, _) -> true}
+  list = []
+|}]
