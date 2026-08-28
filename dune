@@ -298,6 +298,7 @@
   typedecl
   typeopt
   value_rec_check
+  structural_recursion
   typecore
   solver_intf
   solver
