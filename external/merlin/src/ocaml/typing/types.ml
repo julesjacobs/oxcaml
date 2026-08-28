@@ -242,7 +242,10 @@ and refinement_pattern_desc =
   | Rpat_constant of Parsetree.constant
   | Rpat_tuple of (string option * refinement_pattern) list
   | Rpat_construct of Path.t * refinement_pattern list
+  | Rpat_record of
+      Asttypes.closed_flag * (Path.t * string * refinement_pattern) list
   | Rpat_alias of refinement_pattern * Ident.t
+  | Rpat_or of refinement_pattern * refinement_pattern
 
 and arg_label =
   | Nolabel
