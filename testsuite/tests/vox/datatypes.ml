@@ -120,10 +120,8 @@ let injective (left @ immutable) (right @ immutable)
   let u = () in
   refine_ u
 
-let disjoint (left @ immutable) (right @ immutable)
-    (premise : {u : unit | First left === Second right}) :
-    {u : unit | (First left === Second right) && false} =
-  let refine_ _proof = premise in
+let disjoint (left @ immutable) (right @ immutable) :
+    {u : unit | (First left === Second right) === false} =
   let u = () in
   refine_ u;;
 [%%expect{|
@@ -142,9 +140,8 @@ val injective :
   <fun>
 val disjoint :
   (left : int) ->
-  (right : int) ->
-  {u : unit | (First left) === (Second right)} ->
-  {u : unit | ((First left) === (Second right)) && false} = <fun>
+  (right : int) -> {u : unit | ((First left) === (Second right)) === false} =
+  <fun>
 |}]
 
 type 'a tree = Leaf of 'a | Node of 'a * 'a tree [@@inductive]
@@ -218,6 +215,41 @@ let ordinary_opaque () : {r : ordinary | r === r} =
 val ordinary_opaque : unit -> {r : ordinary | r === r} = <fun>
 |}]
 
+type ordinary_wrapper = Ordinary_wrap of ordinary
+
+let wrapper_first (wrapped @ immutable) (tree @ immutable) :
+    {u : unit |
+      match wrapped with Ordinary_wrap _ -> tree === tree} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+type ordinary_wrapper = Ordinary_wrap of ordinary
+Line 5, characters 25-40:
+5 |       match wrapped with Ordinary_wrap _ -> tree === tree} =
+                             ^^^^^^^^^^^^^^^
+Error: Unsupported refinement predicate in VC generation
+Line 7, characters 2-11:
+7 |   refine_ u;;
+      ^^^^^^^^^
+  Required by this refinement introduction
+|}]
+
+let recursive_first (tree @ immutable) (wrapped @ immutable) :
+    {u : unit |
+      match wrapped with Ordinary_wrap _ -> tree === tree} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+Line 3, characters 25-40:
+3 |       match wrapped with Ordinary_wrap _ -> tree === tree} =
+                             ^^^^^^^^^^^^^^^
+Error: Unsupported refinement predicate in VC generation
+Line 5, characters 2-11:
+5 |   refine_ u;;
+      ^^^^^^^^^
+  Required by this refinement introduction
+|}]
+
 type mutable_point = {mutable mx : int; my : int}
 
 let mutable_record_opaque () : {r : mutable_point | r === r} =
@@ -275,6 +307,62 @@ Line 6, characters 2-11:
 6 |   refine_ u;;
       ^^^^^^^^^
   Required by this refinement introduction
+|}]
+
+type non_well_wrapper = Non_well_wrap of non_well_founded
+
+let non_well_wrapper_first (wrapped @ immutable) (tree @ immutable) :
+    {u : unit |
+      match wrapped with Non_well_wrap _ -> tree === tree} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+type non_well_wrapper = Non_well_wrap of non_well_founded
+Line 5, characters 25-40:
+5 |       match wrapped with Non_well_wrap _ -> tree === tree} =
+                             ^^^^^^^^^^^^^^^
+Error: Unsupported refinement predicate in VC generation
+Line 7, characters 2-11:
+7 |   refine_ u;;
+      ^^^^^^^^^
+  Required by this refinement introduction
+|}]
+
+let non_well_recursive_first (tree @ immutable) (wrapped @ immutable) :
+    {u : unit |
+      match wrapped with Non_well_wrap _ -> tree === tree} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+Line 3, characters 25-40:
+3 |       match wrapped with Non_well_wrap _ -> tree === tree} =
+                             ^^^^^^^^^^^^^^^
+Error: Unsupported refinement predicate in VC generation
+Line 5, characters 2-11:
+5 |   refine_ u;;
+      ^^^^^^^^^
+  Required by this refinement introduction
+|}]
+
+type finite_point = {value : int}
+type non_well_with_point =
+  | Loop_with_point of non_well_with_point * finite_point
+  [@@inductive]
+
+let finite_dependency_survives
+    (loop : non_well_with_point @ immutable) (point @ immutable) :
+    {u : unit | loop === loop && point.value = point.value} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+type finite_point = { value : int; }
+type non_well_with_point =
+    Loop_with_point of non_well_with_point * finite_point
+[@@inductive]
+val finite_dependency_survives :
+  (loop : non_well_with_point) ->
+  (point : finite_point) ->
+  {u : unit | (loop === loop) && (point.value = point.value)} = <fun>
 |}]
 
 type nested_ordinary =

@@ -17,6 +17,7 @@ end)
 
 type context =
   { opaque_ids : int Type_keys.t;
+    unsupported : unit Type_keys.t;
     mutable next_opaque_id : int;
     data_by_key : data Type_keys.t;
     data_by_datatype : (datatype, data) Hashtbl.t;
@@ -35,6 +36,7 @@ and data =
 
 let create_context () =
   { opaque_ids = Type_keys.create 32;
+    unsupported = Type_keys.create 32;
     next_opaque_id = 0;
     data_by_key = Type_keys.create 32;
     data_by_datatype = Hashtbl.create 32;
@@ -103,7 +105,7 @@ let source_type env ty =
   | Tconstr (path, arguments, _) ->
     let path = Env.normalize_type_path None env path in
     begin match Env.find_type path env with
-    | declaration -> Some (path, arguments, declaration)
+    | declaration -> Some (arguments, declaration)
     | exception Not_found -> None
     end
   | _ -> None
@@ -124,6 +126,10 @@ let nonregular_recursive_instance key stack =
   | Variable _ | Tuple _ | Box _ -> false
 
 exception Unsupported_recursive_datatype
+
+let reject_recursive ctx key =
+  Type_keys.replace ctx.unsupported key ();
+  raise Unsupported_recursive_datatype
 
 let recursive_backedge key stack =
   let rec loop crossed_nominal = function
@@ -168,17 +174,18 @@ let rec classify ctx env stack ty =
     | Some key ->
       begin match Type_keys.find_opt ctx.data_by_key key with
       | Some data -> Some (Datatype data.declaration.datatype)
+      | None when Type_keys.mem ctx.unsupported key ->
+        raise Unsupported_recursive_datatype
       | None ->
         begin match Type_keys.find_opt ctx.opaque_ids key with
         | Some id -> Some (Opaque id)
         | None ->
           begin match recursive_backedge key stack with
           | Some (`Allowed datatype) -> Some (Datatype datatype)
-          | Some (`Unsupported | `Mutual) ->
-            raise Unsupported_recursive_datatype
+          | Some (`Unsupported | `Mutual) -> reject_recursive ctx key
           | None ->
             if nonregular_recursive_instance key stack
-            then raise Unsupported_recursive_datatype
+            then reject_recursive ctx key
             else
               begin match build_data ctx env stack key ty with
               | Some data -> Some (Datatype data.declaration.datatype)
@@ -222,7 +229,7 @@ and build_data ctx env stack key ty =
   | Tconstr _ ->
     begin match source_type env ty with
     | None -> None
-    | Some (_, arguments, declaration) ->
+    | Some (arguments, declaration) ->
       begin match declaration.type_kind with
       | Type_record (labels, Record_boxed, _)
         when List.for_all (fun label -> label.ld_mutable = Immutable) labels ->
@@ -333,7 +340,11 @@ let classify_top ctx env ty =
       | Some data when datatypes_well_founded (declarations ctx data) -> result
       | Some _ | None ->
         rollback ctx !created;
-        Option.map (fun key -> Opaque (opaque_id ctx key)) (type_key env ty)
+        Option.map
+          (fun key ->
+            Type_keys.replace ctx.unsupported key ();
+            Opaque (opaque_id ctx key))
+          (type_key env ty)
       end
     | result ->
       ctx.building_transaction <- None;
@@ -344,6 +355,7 @@ let classify_top ctx env ty =
       rollback ctx !created;
       begin match exn, type_key env ty with
       | Unsupported_recursive_datatype, Some key ->
+        Type_keys.replace ctx.unsupported key ();
         Some (Opaque (opaque_id ctx key))
       | _ -> raise exn
       end)

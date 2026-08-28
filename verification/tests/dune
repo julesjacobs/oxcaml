@@ -19,6 +19,12 @@
   (and (= %{context_name} main) (= %{env:VOX_TEST_Z3=false} true)))
  (action (run %{test} %{bin:z3})))
 
+(test
+ (name test_encoding)
+ (modules test_encoding)
+ (libraries vox_vc ocamlfrontend)
+ (enabled_if (= %{context_name} main)))
+
 (copy_files ../../testsuite/tests/vox/smt_solver.ml)
 (copy_files ../../testsuite/tests/vox/smt_solver.reference)
 
