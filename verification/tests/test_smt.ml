@@ -23,7 +23,11 @@ let () =
     (fun (term, expected) ->
       assert (term_sort term = expected);
       let witness =
-        match expected with Bool -> p | Bv63 -> n | Opaque _ -> assert false
+        match expected with
+        | Bool -> p
+        | Bv63 -> n
+        | Int -> Big_integer "0"
+        | Opaque _ -> assert false
       in
       check ~int_width:63
         (query ~symbols:[x; b] ~functions:[f] (app Eq [term; witness])))
@@ -52,6 +56,27 @@ let () =
       app Ite [p; p; p], Bool ];
   sort_error (query (app Eq [Var x; n]));
   sort_error (query (Call (f, [n])))
+
+let () =
+  let z = Big_integer "123456789012345678901234567890" in
+  List.iter
+    (fun op -> check ~int_width:63 (query (app Eq [app op [z; z]; z])))
+    [Int_add; Int_sub; Int_mul; Int_div; Int_mod];
+  List.iter
+    (fun op -> check ~int_width:63 (query (app op [z; z])))
+    [Int_lt; Int_le; Int_gt; Int_ge];
+  check ~int_width:63 (query (app Eq [app Int_neg [z]; z]));
+  check ~int_width:63
+    (query (app Eq [app Int_of_bv63 [integer (-1)]; Big_integer "-1"]));
+  List.iter
+    (fun text -> sort_error (query (app Eq [Big_integer text; z])))
+    [""; "-"; "+1"; "00"; "-0"; "1_000"; "1) (assert false)"];
+  sort_error (query (app Eq [app Int_add [z; integer 1]; z]));
+  sort_error (query (app Eq [app Add [z; z]; integer 0]));
+  sort_error (query (app Eq [app Int_of_bv63 [z]; z]));
+  assert (
+    List.mem "(set-logic ALL)"
+      (String.split_on_char '\n' (serialize (query (app Eq [z; z])))))
 
 let () =
   let x = Symbol.create ~label:"x" Bv63 in

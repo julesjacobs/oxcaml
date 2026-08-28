@@ -1,6 +1,7 @@
 type sort =
   | Bool
   | Bv63
+  | Int
   | Opaque of int
 
 module Symbol = struct
@@ -64,10 +65,22 @@ type op =
   | Or
   | Implies
   | Ite
+  | Int_add
+  | Int_sub
+  | Int_mul
+  | Int_div
+  | Int_mod
+  | Int_neg
+  | Int_lt
+  | Int_le
+  | Int_gt
+  | Int_ge
+  | Int_of_bv63
 
 type term =
   | Boolean of bool
   | Integer of int64
+  | Big_integer of string
   | Var of Symbol.t
   | App of op * term list
   | Call of Function.t * term list
@@ -106,11 +119,31 @@ let operator = function
   | Or -> "or"
   | Implies -> "=>"
   | Ite -> "ite"
+  | Int_add -> "+"
+  | Int_sub | Int_neg -> "-"
+  | Int_mul -> "*"
+  | Int_div -> "div"
+  | Int_mod -> "mod"
+  | Int_lt -> "<"
+  | Int_le -> "<="
+  | Int_gt -> ">"
+  | Int_ge -> ">="
+  | Int_of_bv63 -> "sbv_to_int"
 
 let sort_name = function
   | Bool -> "Bool"
   | Bv63 -> "(_ BitVec 63)"
+  | Int -> "Int"
   | Opaque id -> Printf.sprintf "opaque(%d)" id
+
+let decimal_integer text =
+  let len = String.length text in
+  let start = if len > 0 && text.[0] = '-' then 1 else 0 in
+  len > start
+  && (text.[start] <> '0' || len = 1)
+  && String.for_all
+       (fun c -> c >= '0' && c <= '9')
+       (String.sub text start (len - start))
 
 let error fmt = Printf.ksprintf (fun s -> raise (Sort_error s)) fmt
 
@@ -127,10 +160,15 @@ let operator_signature = function
   | And | Or | Implies -> Fixed ([Bool; Bool], Bool)
   | Eq | Ne -> Equality
   | Ite -> Conditional
+  | Int_add | Int_sub | Int_mul | Int_div | Int_mod -> Fixed ([Int; Int], Int)
+  | Int_neg -> Fixed ([Int], Int)
+  | Int_lt | Int_le | Int_gt | Int_ge -> Fixed ([Int; Int], Bool)
+  | Int_of_bv63 -> Fixed ([Bv63], Int)
 
 let rec term_sort = function
   | Boolean _ -> Bool
   | Integer _ -> Bv63
+  | Big_integer _ -> Int
   | Var s -> Symbol.sort s
   | Call (f, _) -> Function.result f
   | App (op, args) -> (
@@ -166,6 +204,10 @@ let check ~int_width q =
       if n < -4611686018427387904L || n > 4611686018427387903L
       then error "Integer %Ld is outside the signed 63-bit range" n;
       Bv63
+    | Big_integer text ->
+      if not (decimal_integer text)
+      then error "Invalid unbounded integer constant %S" text;
+      Int
     | Var s ->
       if not (Hashtbl.mem declared s.Symbol.id)
       then error "Undeclared SMT symbol %S" (Symbol.label s);
@@ -224,7 +266,7 @@ let to_smtlib ~int_width ~timeout_ms q =
   let opaque_ids =
     let add ids = function
       | Opaque id -> if List.mem id ids then ids else id :: ids
-      | Bool | Bv63 -> ids
+      | Bool | Bv63 | Int -> ids
     in
     let ids =
       List.fold_left (fun ids s -> add ids (Symbol.sort s)) [] q.symbols
@@ -246,12 +288,17 @@ let to_smtlib ~int_width ~timeout_ms q =
   let smt_sort = function
     | Bool -> "Bool"
     | Bv63 -> "(_ BitVec 63)"
+    | Int -> "Int"
     | Opaque id -> Hashtbl.find opaque_names id
   in
   let rec term = function
     | Boolean v -> add (string_of_bool v)
     | Integer v ->
       add (Printf.sprintf "(_ bv%Ld 63)" (Int64.logand v Int64.max_int))
+    | Big_integer text ->
+      if text.[0] = '-'
+      then add ("(- " ^ String.sub text 1 (String.length text - 1) ^ ")")
+      else add text
     | Var s -> add (Hashtbl.find names s.Symbol.id)
     | Call (f, args) ->
       let name = Hashtbl.find functions f.Function.id in
@@ -280,8 +327,23 @@ let to_smtlib ~int_width ~timeout_ms q =
   add "(set-option :print-success false)\n";
   add "(set-option :produce-models true)\n";
   add (Printf.sprintf "(set-option :timeout %d)\n" timeout_ms);
+  let rec uses_int t =
+    term_sort t = Int
+    ||
+    match t with
+    | App (_, args) | Call (_, args) -> List.exists uses_int args
+    | Boolean _ | Integer _ | Big_integer _ | Var _ -> false
+  in
+  let has_int =
+    List.exists (fun s -> Symbol.sort s = Int) q.symbols
+    || List.exists
+         (fun f ->
+           Function.result f = Int || List.mem Int (Function.arguments f))
+         q.functions
+    || List.exists (fun f -> uses_int f.term) (q.goal :: q.facts)
+  in
   add
-    (if opaque_ids <> []
+    (if has_int || opaque_ids <> []
      then "(set-logic ALL)\n"
      else if q.functions = []
      then "(set-logic QF_BV)\n"
@@ -320,6 +382,7 @@ let to_smtlib ~int_width ~timeout_ms q =
 type value =
   | Bool_value of bool
   | Int_value of int64
+  | Bigint_value of string
 
 type validity =
   | Valid
