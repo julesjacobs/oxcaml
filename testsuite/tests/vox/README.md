@@ -28,6 +28,7 @@ legacy-mode defaults.
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 | Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |
 | SMT encoding | `verification.ml`, `equality.ml` | Source types map consistently to scalar and opaque SMT sorts. |
+| Bigints | `bigints.ml`, `bigint_fibonacci.ml` | Unbounded arithmetic, nonnegative decreasing measures, and Fibonacci proofs beyond machine bounds. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -61,6 +62,9 @@ from `./dev`, since both use the worktree's Dune lock.
 implementations accept indices 0 through 90 and raise outside that range.
 At 90, fast doubling's unused second component wraps; its result still fits.
 The inductive proof helper still runs at runtime, pending ghost-code erasure.
+
+`bigint_fibonacci.ml` gives both indices and results type `Bigint.t`, maps
+negative inputs to zero, and computes Fibonacci 100 without overflow guards.
 
 SMT datatypes add reasoning about tuples, records, and nonrecursive variants.
 

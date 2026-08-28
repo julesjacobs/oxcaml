@@ -1090,6 +1090,7 @@ runtime_COMMON_C_SOURCES = \
   array \
   backtrace \
   bigarray \
+  bigint \
   blake2 \
   callback \
   codefrag \

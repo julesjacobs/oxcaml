@@ -1,6 +1,7 @@
 type sort =
   | Bool
   | Bv63
+  | Int
   | Opaque of int
 
 module Symbol : sig
@@ -27,7 +28,8 @@ module Function : sig
   val result : t -> sort
 end
 
-(** Arithmetic wraps modulo [2^63]; comparisons use signed order. *)
+(** Unprefixed arithmetic wraps modulo [2^63] and uses signed order. [Int_*]
+    operations use unbounded integers. *)
 type op =
   | Add
   | Sub
@@ -46,10 +48,22 @@ type op =
   | Or
   | Implies
   | Ite
+  | Int_add
+  | Int_sub
+  | Int_mul
+  | Int_div
+  | Int_mod
+  | Int_neg
+  | Int_lt
+  | Int_le
+  | Int_gt
+  | Int_ge
+  | Int_of_bv63
 
 type term =
   | Boolean of bool
   | Integer of int64
+  | Big_integer of string
   | Var of Symbol.t
   | App of op * term list
   | Call of Function.t * term list
@@ -71,29 +85,35 @@ exception Sort_error of string
 
 exception Unsupported_target of int
 
+(** Canonical signed decimal text: no leading zeroes, plus sign, or [-0]. *)
+val decimal_integer : string -> bool
+
 (** Result sort of a well-sorted term; does not validate operands or
     declarations. Only conditional result branches need traversal. Use [check]
     for validation. *)
 val term_sort : term -> sort
 
 (** [int_width] is the target's OCaml integer width, not the host width. Only 63
-    is supported. All operators have fixed arity: one for [Neg] and [Not], three
-    for [Ite], and two otherwise. Constants must be signed 63-bit integers.
+    is supported. Operators have fixed arity. [Integer] constants must be signed
+    63-bit integers; [Big_integer] constants use canonical decimal text.
     Undeclared and duplicate symbols are errors. *)
 val check : int_width:int -> query -> unit
 
 (** Always checks sorts first. Names [v0], [v1], ... follow declaration order.
     Includes options, declarations, assertions and [check-sat], but not [exit].
-    Uninterpreted functions select QF_UFBV; scalar-only queries use QF_BV. No
-    quantifiers can be represented. Division and remainder use SMT-LIB's signed
-    bitvector semantics; callers must exclude zero divisors when modeling OCaml
-    normal returns. *)
+    Queries using [Int] or [Opaque _] select ALL; other queries use QF_UFBV for
+    uninterpreted functions and QF_BV otherwise. No quantifiers can be
+    represented. [Div]/[Rem] use signed bitvector semantics; callers must
+    exclude zero divisors when modeling OCaml normal returns.
+    [Int_div]/[Int_mod] use Euclidean semantics; callers must supply the
+    zero-divisor behavior. *)
 val to_smtlib : int_width:int -> timeout_ms:int -> query -> string
 
 (** Integer model values are signed, including on a narrower host. *)
 type value =
   | Bool_value of bool
   | Int_value of int64
+  | Bigint_value of string
 
 type validity =
   | Valid
