@@ -278,12 +278,13 @@ let construct ctx env ty name values =
     begin match data_constructor data name with
     | None -> None
     | Some constructor ->
-      let values = List.filter_map scalar values in
-      if
-        List.map term_sort values
-        = List.map snd (Constructor.fields constructor)
-      then scalar_value (Construct (constructor, values))
-      else None
+      begin match Misc.Stdlib.List.map_option scalar values with
+      | Some values
+        when List.map term_sort values
+             = List.map snd (Constructor.fields constructor) ->
+        scalar_value (Construct (constructor, values))
+      | Some _ | None -> None
+      end
     end
 
 let select_field ctx env ty name value =
@@ -383,30 +384,30 @@ let rec function_call ctx env ty fn args =
     join_value condition
       (function_call ctx env ty (Some (Function a)) args)
       (function_call ctx env ty (Some (Function b)) args)
-  | _ -> (
-    match fn, signature ctx.encoding env ty (List.length args) with
-    | Some (Function fn), Some (arguments, result) ->
-      List.iter (register_sort ctx) (result :: arguments);
-      let args = List.filter_map scalar args in
-      if List.map term_sort args <> arguments
-      then None
-      else
-        let f =
-          match
-            List.find_opt
-              (fun f ->
-                Function.arguments f = arguments && Function.result f = result)
-              !(fn.instances)
-          with
-          | Some f -> f
-          | None ->
-            let f = Function.create ~label:fn.label ~arguments ~result in
-            fn.instances := f :: !(fn.instances);
-            ctx.functions <- f :: ctx.functions;
-            f
-        in
-        scalar_value (Call (f, args))
-    | _ -> None)
+  | _ ->
+  match fn, signature ctx.encoding env ty (List.length args) with
+  | Some (Function fn), Some (arguments, result) ->
+    List.iter (register_sort ctx) (result :: arguments);
+    begin match Misc.Stdlib.List.map_option scalar args with
+    | Some args when List.map term_sort args = arguments ->
+      let f =
+        match
+          List.find_opt
+            (fun f ->
+              Function.arguments f = arguments && Function.result f = result)
+            !(fn.instances)
+        with
+        | Some f -> f
+        | None ->
+          let f = Function.create ~label:fn.label ~arguments ~result in
+          fn.instances := f :: !(fn.instances);
+          ctx.functions <- f :: ctx.functions;
+          f
+      in
+      scalar_value (Call (f, args))
+    | Some _ | None -> None
+    end
+  | _ -> None
 
 let apply_function ctx env fn_type result_type prim fn args ~total =
   let value =
