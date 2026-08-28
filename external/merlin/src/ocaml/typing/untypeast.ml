@@ -780,6 +780,12 @@ let expression sub exp =
     | Texp_assert (exp, _) -> Pexp_assert (sub.expr sub exp)
     | Texp_assume (binding, _, _) ->
         Pexp_assume (sub.expr sub binding.vb_expr)
+    | Texp_logical_equal (left, right) ->
+        let left = sub.expr sub left in
+        Pexp_apply
+          ( Exp.ident ~loc:left.pexp_loc
+              (Location.mkloc (Longident.Lident "===") left.pexp_loc),
+            [ Nolabel, left; Nolabel, sub.expr sub right ] )
     | Texp_lazy exp -> Pexp_lazy (sub.expr sub exp)
     | Texp_object (cl, _) ->
         Pexp_object (sub.class_structure sub cl)

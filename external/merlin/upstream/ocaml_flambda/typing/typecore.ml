@@ -2689,6 +2689,8 @@ module Resolved_predicate = struct
          Misc.R (Clflags.classic, false)]
         f))))
 
+  let active () = Option.is_some !current
+
   let find key entries =
     List.find_map (fun (k, value) -> if k == key then Some value else None)
       entries
@@ -2779,6 +2781,8 @@ let type_assume = ref
     (fun (_ : Env.t) (_ : expected_mode) (_ : Location.t) (_ : expression)
          (_ : refinement_desc) ->
        Misc.fatal_error "Typecore.assume: elaborator not installed")
+
+let typing_refinement_predicate = ref false
 
 (* Records *)
 exception Wrong_name_disambiguation of Env.t * wrong_name
@@ -5536,6 +5540,7 @@ let rec is_nonexpansive exp =
   | Texp_setmutvar _
   | Texp_override _
   | Texp_letexception _
+  | Texp_logical_equal _
   | Texp_letop _
   | Texp_splice _
   | Texp_extension_constructor _ ->
@@ -5686,7 +5691,7 @@ let rec maybe_computation exp =
   | Texp_override _
   | Texp_letmodule _
   | Texp_letexception _
-  | Texp_assert _ | Texp_assume _
+  | Texp_assert _ | Texp_assume _ | Texp_logical_equal _
   | Texp_lazy _
   | Texp_object _
   | Texp_pack _
@@ -6134,7 +6139,7 @@ let check_partial_application ~statement exp =
             | Texp_while _ | Texp_for _ | Texp_instvar _
             | Texp_mutvar _ | Texp_setmutvar _
             | Texp_setinstvar _ | Texp_override _
-            | Texp_assert _ | Texp_assume _
+            | Texp_assert _ | Texp_assume _ | Texp_logical_equal _
             | Texp_lazy _ | Texp_object _ | Texp_pack _ | Texp_unreachable
             | Texp_extension_constructor _ | Texp_ifthenelse (_, _, None)
             | Texp_probe _ | Texp_probe_is_enabled _ | Texp_src_pos
@@ -7473,6 +7478,13 @@ and type_expect_
           exp_attributes = sexp.pexp_attributes;
           exp_env = env
         }
+  | Pexp_ident lid when String.equal (Longident.last lid.txt) "===" ->
+      raise
+        (Error_forward
+           (Location.errorf ~loc
+              "%a must be used as an unqualified binary operator in a \
+               refinement predicate"
+              Style.inline_code "==="))
   | Pexp_ident lid ->
       let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
         type_ident env ~recarg lid
@@ -7720,6 +7732,37 @@ and type_expect_
   | Pexp_function (params, body_constraint, body) ->
       type_n_ary_function ~loc ~env ~expected_mode ~ty_expected ~explanation
         ~attributes:sexp.pexp_attributes (params, body_constraint, body)
+  | Pexp_apply
+      ({ pexp_desc = Pexp_ident { txt = Longident.Lident "==="; _ } },
+       [Nolabel, left; Nolabel, right]) ->
+      if not (!typing_refinement_predicate || Resolved_predicate.active ())
+      then
+        raise
+          (Error_forward
+             (Location.errorf ~loc
+                "%a is available only in refinement predicates"
+                Style.inline_code "==="));
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let operand_type =
+        newvar
+          (Jkind.Builtin.value ~why:(Unknown "logical equality operand"))
+      in
+      let left =
+        type_expect env (mode_default (Value.newvar ())) left
+          (mk_expected operand_type)
+      in
+      let right =
+        type_expect env (mode_default (Value.newvar ())) right
+          (mk_expected operand_type)
+      in
+      rue
+        { exp_desc = Texp_logical_equal (left, right);
+          exp_loc = loc;
+          exp_extra = [];
+          exp_type = instance Predef.type_bool;
+          exp_attributes = sexp.pexp_attributes;
+          exp_env = env
+        }
   | Pexp_apply
       ({ pexp_desc = Pexp_extension({ txt }, PStr []) },
        [Nolabel, sbody]) when is_exclave_extension_node txt ->
@@ -14611,6 +14654,10 @@ let refinement_expression_of_typed bound_values binder predicate =
               args
           in
           mk (Rexp_apply (expression locals fn, args))
+      | Texp_logical_equal (left, right) ->
+          mk
+            (Rexp_logical_equal
+               (expression locals left, expression locals right))
       | Texp_tuple (components, _) ->
           mk
             (Rexp_tuple
@@ -14960,9 +15007,11 @@ let () =
        in
        let env = add_total_immutable_value env binder payload loc in
        let typed_predicate =
-         Ctype.with_refinement_predicate_scope (fun () ->
-           type_expect env ~mode:(total_immutable_mode ()) predicate
-             (mk_expected Predef.type_bool))
+         Misc.protect_refs [Misc.R (typing_refinement_predicate, true)]
+           (fun () ->
+              Ctype.with_refinement_predicate_scope (fun () ->
+                type_expect env ~mode:(total_immutable_mode ()) predicate
+                  (mk_expected Predef.type_bool)))
        in
        let predicate =
          refinement_expression_of_typed
