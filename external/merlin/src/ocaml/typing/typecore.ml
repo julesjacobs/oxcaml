@@ -2923,6 +2923,19 @@ let definition_attribute attrs =
   | _ :: attr :: _ ->
       Location.raise_errorf ~loc:attr.attr_loc "Duplicate def attribute"
 
+let decreases_attribute attrs =
+  match Builtin_attributes.select_attributes ["decreases", Return] attrs with
+  | [] -> None
+  | [{attr_payload = PStr [{pstr_desc = Pstr_eval (e, []); _}]; _}] -> Some e
+  | [attr] -> Location.raise_errorf ~loc:attr.attr_loc
+      "The decreases attribute requires one expression"
+  | _ :: attr :: _ -> Location.raise_errorf ~loc:attr.attr_loc
+      "Duplicate decreases attribute"
+
+let type_decreases :
+    (Ident.t -> expression -> Parsetree.expression -> expression) ref =
+  ref (fun _ _ _ -> Misc.fatal_error "Typecore.decreases: typer not installed")
+
 (* Records *)
 exception Wrong_name_disambiguation of Env.t * wrong_name
 
@@ -12676,6 +12689,19 @@ and type_effect_cases
 and type_let ?check ?check_strict ?(force_toplevel = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   let refinement_binding_level = get_current_level () in
+  let decreases =
+    List.filter_map (fun vb -> decreases_attribute vb.pvb_attributes)
+      spat_sexp_list
+  in
+  let decreases = match decreases, spat_sexp_list, rec_flag, mutable_flag with
+    | [], _, _, _ -> None
+    | [measure], [_], Recursive, Asttypes.Immutable ->
+        Language_extension.assert_enabled ~loc:measure.pexp_loc
+          Refinement_types ();
+        Some measure
+    | measure :: _, _, _, _ -> Location.raise_errorf ~loc:measure.pexp_loc
+        "The decreases attribute requires a single recursive function binding"
+  in
   let definitions =
     List.filter_map (fun vb -> definition_attribute vb.pvb_attributes)
       spat_sexp_list
@@ -12683,7 +12709,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   let spat_sexp_list = match definitions, spat_sexp_list with
     | [], _ -> spat_sexp_list
     | [loc], [vb]
-      when rec_flag = Nonrecursive && mutable_flag = Asttypes.Immutable ->
+      when mutable_flag = Asttypes.Immutable ->
         Language_extension.assert_enabled ~loc Refinement_types ();
         let has_total =
           List.exists
@@ -12699,7 +12725,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
              Location.mkloc (Parsetree.Mode "total") loc :: vb.pvb_modes}]
     | loc :: _, _ ->
         Location.raise_errorf ~loc
-          "The def attribute requires a single nonrecursive function binding"
+          "The def attribute requires a single function binding"
   in
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
@@ -12726,6 +12752,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   in
   let vb_is_fun { pvb_expr = sexp; _ } = sexp_is_fun sexp in
   let entirely_functions = List.for_all vb_is_fun spat_sexp_list in
+  if not entirely_functions then
+    Option.iter (fun measure -> Location.raise_errorf ~loc:measure.pexp_loc
+      "The decreases attribute requires a function binding") decreases;
   let rec_mode_var =
     match rec_flag with
     | Recursive when entirely_functions -> Some (Value.newvar ())
@@ -12914,11 +12943,31 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
           in
           match mode_pat_typ_list, exp_list with
           | [(_, { pat_desc = Tpat_var { id; _ }; _ }, _)], [(exp, _)] ->
-              begin match Structural_recursion.check id exp with
-              | Ok () -> ()
-              | Error (loc, reason) -> partial loc reason
+              begin match decreases with
+              | Some measure ->
+                  begin try
+                    let measure = !type_decreases id exp measure in
+                    Recursive_function.check_uses id exp;
+                    Verification.check_termination ~self:id ~fn:exp ~measure
+                  with
+                  | Recursive_function.Invalid (loc, reason) ->
+                      Location.raise_errorf ~loc "%s" reason
+                  | Location.Error error ->
+                      raise (Location.Error {error with sub = error.sub @
+                        [Location.msg ~loc:measure.pexp_loc
+                           "Required by this decreases attribute"]})
+                  end
+              | None ->
+                  begin match Structural_recursion.check id exp with
+                  | Ok () -> ()
+                  | Error (loc, reason) -> partial loc reason
+                  end
               end
           | _ ->
+              Option.iter (fun measure ->
+                Location.raise_errorf ~loc:measure.pexp_loc
+                  "The decreases attribute requires a simple function binding")
+                decreases;
               partial (List.hd spat_sexp_list).pvb_loc
                 "structural recursion requires a simple function binding")
           rec_mode_var;
@@ -15452,6 +15501,28 @@ let add_total_immutable_value env binder payload loc =
     }
   in
   Env.add_value ~mode:(total_immutable_mode ()) binder value_description env
+
+let () = type_decreases := (fun self fn measure ->
+  let params, body = Recursive_function.parameters fn in
+  let env = Env.add_total_closure_lock
+      (measure.pexp_loc, Mode.Hint.Expression) body.exp_env in
+  let env = List.fold_left (fun env (id, pat) ->
+      add_total_immutable_value env id pat.pat_type pat.pat_loc) env params in
+  let measure =
+    Ctype.with_refinement_predicate_scope (fun () ->
+      type_expect env ~mode:(total_immutable_mode ()) measure
+        (mk_expected Predef.type_int))
+  in
+  Recursive_function.check_predicates self measure;
+  let default = Tast_iterator.default_iterator in
+  let it = {default with expr = (fun it exp ->
+    match exp.exp_desc with
+    | Texp_ident {path = Path.Pident id; _} when Ident.same id self ->
+        Location.raise_errorf ~loc:exp.exp_loc
+          "The recursive function occurs in its own measure"
+    | _ -> default.expr it exp)} in
+  it.expr it measure;
+  measure)
 
 let with_resolved_refinement predicate_env loc predicate f =
   let expressions = ref [] and values = ref [] in
