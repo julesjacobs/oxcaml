@@ -70,7 +70,10 @@ type state =
 type context =
   { mutable functions : Function.t list;
     mutable free : value option Path.Map.t;
-    mutable batches : command list list
+    mutable batches : command list list;
+    prove : Location.t -> query -> unit;
+    verify_introductions : bool;
+    mutable check_call : context -> state -> expression -> value option list -> unit
   }
 
 let empty =
@@ -580,7 +583,7 @@ let rec expression ctx s e =
   then s, None
   else
     let s, value = expression_desc ctx s e in
-    match intro_loc e with
+    match if ctx.verify_introductions then intro_loc e else None with
     | Some loc when not s.dead ->
       let r = refinement e.exp_env e.exp_type e.exp_loc in
       let goals, goal =
@@ -671,6 +674,7 @@ and expression_desc ctx s e =
         match arg with Omitted _ -> s, None | Arg (e, _) -> eval s e
       in
       let s, args = arguments_right_to_left argument s args in
+      if not s.dead then ctx.check_call ctx s e args;
       let s, fn_value = eval s fn in
       let total =
         match fn_value with Some (Function { total; _ }) -> total | _ -> false
@@ -906,6 +910,10 @@ let verify_batch ctx prove code =
           prove_one o { query with goal = { label = "refine_"; term } })
         goals)
 
+let context ~prove ~verify_introductions =
+  { functions = []; free = Path.Map.empty; batches = []; prove;
+    verify_introductions; check_call = (fun _ _ _ _ -> ()) }
+
 let generate ~prove str =
   let exception Has_obligation in
   let scan =
@@ -919,7 +927,91 @@ let generate ~prove str =
   match scan.structure scan str with
   | () -> ()
   | exception Has_obligation ->
-    let ctx = { functions = []; free = Path.Map.empty; batches = [] } in
+    let ctx = context ~prove ~verify_introductions:true in
     let result, _ = structure ctx empty str in
     List.iter (verify_batch ctx prove) (List.rev ctx.batches);
     verify_batch ctx prove result.code
+
+let check_termination ~prove ~self ~fn ~measure =
+  let params, body = Recursive_function.parameters fn in
+  let ctx = context ~prove ~verify_introductions:false in
+  let reject e =
+    Location.raise_errorf ~loc:e.exp_loc
+      "Unsupported decreases expression: expected scalar primitive operations"
+  in
+  let rec check e =
+    if Option.is_some (intro_loc e) || sort e.exp_env e.exp_type = None
+    then reject e;
+    match e.exp_desc with
+    | Texp_ident { desc = { val_kind = Val_reg _; _ }; _ }
+    | Texp_constant (Const_int _) ->
+      ()
+    | Texp_construct (_, c, _, [], _)
+      when Option.is_some (constructor e.exp_env e.exp_type c.cstr_name) ->
+      ()
+    | Texp_apply
+        (({ exp_desc = Texp_ident { path; _ }; _ } as f), args, _, _, _, _) ->
+      let args =
+        List.map
+          (function
+            | Nolabel, Arg (e, _) ->
+              check e;
+              e
+            | _ -> reject e)
+          args
+      in
+      begin match primitive f.exp_env path with
+      | Some (name, arity) when arity = List.length args ->
+        let values =
+          List.map
+            (fun arg ->
+              match sort arg.exp_env arg.exp_type with
+              | Some Bool -> scalar_value (Boolean false)
+              | Some Int63 -> scalar_value (Integer 0L)
+              | None -> reject arg)
+            args
+        in
+        if operation e.exp_env e.exp_type name values = None then reject e
+      | _ -> reject e
+      end
+    | Texp_let (Asttypes.Nonrecursive, bindings, body) ->
+      List.iter
+        (fun vb ->
+          begin match vb.vb_pat.pat_desc with
+          | Tpat_var _ | Tpat_any -> ()
+          | _ -> reject vb.vb_expr
+          end;
+          check vb.vb_expr)
+        bindings;
+      check body
+    | Texp_ifthenelse (c, t, Some f) -> List.iter check [c; t; f]
+    | Texp_sequence (a, _, b) ->
+      check a;
+      check b
+    | _ -> reject e
+  in
+  check measure;
+  let entry =
+    List.fold_left
+      (fun s (id, pat) ->
+        bind s id (fresh ctx pat.pat_env pat.pat_type (Ident.name id)))
+      empty params
+  in
+  let entry, entry_measure = expression ctx entry measure in
+  if not entry.dead then begin
+    let entry_measure = required measure.exp_loc entry_measure in
+    let check_call ctx s call args =
+      match call.exp_desc with
+      | Texp_apply ({ exp_desc = Texp_ident { path = Path.Pident id; _ }; _ }, _, _, _, _, _)
+        when Ident.same self id ->
+        let call_state = List.fold_left2 (fun s (id, _) value -> bind s id value) s params args in
+        let checked, value = expression ctx call_state measure in
+        if not checked.dead then
+          verify_batch ctx prove (Assert { loc = call.exp_loc;
+            goal = both Lt (required measure.exp_loc value) entry_measure;
+            omitted_premises = checked.omitted_premises } :: checked.code)
+      | _ -> ()
+    in
+    ctx.check_call <- check_call;
+    ignore (expression ctx entry body)
+  end
