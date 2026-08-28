@@ -128,20 +128,28 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
     { rc_lhs;
       rc_guard = Option.map (map_rexp rename) rc_guard;
       rc_rhs = map_rexp rename rc_rhs }
-  and map_pat rename pat =
+  and map_pat ?(reuse_bound = false) rename pat =
+    let bind_pat rename id =
+      if reuse_bound
+      then
+        match Ident.Map.find_opt id rename with
+        | Some id -> rename, id
+        | None -> bind rename id
+      else bind rename id
+    in
     let rename, rpat_desc =
       match pat.rpat_desc with
       | Rpat_any -> rename, Rpat_any
       | Rpat_constant constant ->
           rename, Rpat_constant (map_constant constant)
       | Rpat_var id ->
-          let rename, id = bind rename id in
+          let rename, id = bind_pat rename id in
           rename, Rpat_var id
       | Rpat_tuple components ->
           let rename, components =
             List.fold_left_map
               (fun rename (lbl, p) ->
-                let rename, p = map_pat rename p in
+                let rename, p = map_pat ~reuse_bound rename p in
                 rename, (lbl, p))
               rename components
           in
@@ -152,14 +160,30 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
           in
           let rename, args =
             List.fold_left_map
-              (fun rename p -> map_pat rename p)
+              (fun rename p -> map_pat ~reuse_bound rename p)
               rename args
           in
           rename, Rpat_construct (path, args)
+      | Rpat_record (closed, fields) ->
+          let rename, fields =
+            List.fold_left_map
+              (fun rename (path, label, p) ->
+                let path =
+                  match type_path with Some f -> f path | None -> path
+                in
+                let rename, p = map_pat ~reuse_bound rename p in
+                rename, (path, label, p))
+              rename fields
+          in
+          rename, Rpat_record (closed, fields)
       | Rpat_alias (p, id) ->
-          let rename, p = map_pat rename p in
-          let rename, id = bind rename id in
+          let rename, p = map_pat ~reuse_bound rename p in
+          let rename, id = bind_pat rename id in
           rename, Rpat_alias (p, id)
+      | Rpat_or (left, right) ->
+          let rename, left = map_pat ~reuse_bound rename left in
+          let _, right = map_pat ~reuse_bound:true rename right in
+          rename, Rpat_or (left, right)
     in
     rename,
     { rpat_desc;
@@ -217,7 +241,10 @@ let fold_types f init rexp =
           (fun init (_, pat) -> pattern init pat)
           init components
     | Rpat_construct (_, args) -> List.fold_left pattern init args
+    | Rpat_record (_, fields) ->
+        List.fold_left (fun init (_, _, pat) -> pattern init pat) init fields
     | Rpat_alias (pat, _) -> pattern init pat
+    | Rpat_or (left, right) -> pattern (pattern init left) right
   in
   expression init rexp
 
@@ -239,8 +266,16 @@ let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
     | Rpat_construct (constructor, args) ->
         path bound constructor;
         List.fold_left pattern bound args
+    | Rpat_record (_, fields) ->
+        List.fold_left
+          (fun bound (owner, _, pat) ->
+             path bound owner;
+             pattern bound pat)
+          bound fields
     | Rpat_alias (pat, id) ->
         Ident.Set.add id (pattern bound pat)
+    | Rpat_or (left, right) ->
+        Ident.Set.union (pattern bound left) (pattern bound right)
   in
   let rec expression bound rexp =
     type_expr ~bound rexp.rexp_type;
@@ -411,12 +446,25 @@ let equal ~pairs rexp1 rexp2 =
               Option.bind pairs (fun pairs -> eq_pat pairs p1 p2))
             (Some pairs) args1 args2
         else None
+    | Rpat_record (closed1, f1), Rpat_record (closed2, f2) ->
+        if closed1 = closed2 && List.compare_lengths f1 f2 = 0 then
+          List.fold_left2
+            (fun pairs (path1, label1, pat1) (path2, label2, pat2) ->
+              Option.bind pairs (fun pairs ->
+                  if Path.same path1 path2 && String.equal label1 label2
+                  then eq_pat pairs pat1 pat2
+                  else None))
+            (Some pairs) f1 f2
+        else None
     | Rpat_alias (p1, id1), Rpat_alias (p2, id2) ->
         Option.map
           (fun pairs -> (id1, id2) :: pairs)
           (eq_pat pairs p1 p2)
+    | Rpat_or (left1, right1), Rpat_or (left2, right2) ->
+        Option.bind (eq_pat pairs left1 left2) (fun pairs ->
+            eq_pat pairs right1 right2)
     | ( ( Rpat_any | Rpat_var _ | Rpat_constant _ | Rpat_tuple _
-        | Rpat_construct _ | Rpat_alias _ ), _ ) ->
+        | Rpat_construct _ | Rpat_record _ | Rpat_alias _ | Rpat_or _ ), _ ) ->
         None
   in
   eq pairs rexp1 rexp2
@@ -528,8 +576,17 @@ let untype ?(expression = fun _ exp -> exp)
         in
         Pat.construct ~loc (constructor_ident path)
           arg
+    | Rpat_record (closed, fields) ->
+        Pat.record ~loc
+          (List.map
+             (fun (path, label, pat) ->
+               label_ident path label, untype_pat pat)
+             fields)
+          closed
     | Rpat_alias (p, id) ->
         Pat.alias ~loc (untype_pat p) (Location.mknoloc (var_name id))
+    | Rpat_or (left, right) ->
+        Pat.or_ ~loc (untype_pat left) (untype_pat right)
   in
   untype_rexp rexp
 
@@ -594,6 +651,11 @@ let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
                    || List.exists pat_path args
                | Rpat_alias (p, _) -> pat_path p
                | Rpat_tuple ps -> List.exists (fun (_, p) -> pat_path p) ps
+               | Rpat_record (_, fields) ->
+                   List.exists
+                     (fun (path, _, pat) -> check path || pat_path pat)
+                     fields
+               | Rpat_or (left, right) -> pat_path left || pat_path right
                | Rpat_any | Rpat_var _ | Rpat_constant _ -> false
              in
              List.exists (fun c -> pat_path c.rc_lhs) cases
@@ -631,7 +693,10 @@ let bound_idents rexp =
           (fun ids (_, pat) -> pattern ids pat)
           ids components
     | Rpat_construct (_, args) -> List.fold_left pattern ids args
+    | Rpat_record (_, fields) ->
+        List.fold_left (fun ids (_, _, pat) -> pattern ids pat) ids fields
     | Rpat_alias (pat, id) -> Ident.Set.add id (pattern ids pat)
+    | Rpat_or (left, right) -> pattern (pattern ids left) right
   in
   let rec expression ids rexp =
     match rexp.rexp_desc with
