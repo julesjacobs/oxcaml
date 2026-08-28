@@ -66,10 +66,13 @@ Error: The value "print_endline" is "partial"
 
 let[@def] rec recursive x = recursive x;;
 [%%expect{|
-Line 1, characters 3-9:
+Line 1, characters 28-37:
 1 | let[@def] rec recursive x = recursive x;;
-       ^^^^^^
-Error: The def attribute requires a single nonrecursive function binding
+                                ^^^^^^^^^
+Error: The value "recursive" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 24-39
+         which is expected to be "total".
 |}]
 
 let[@def] polymorphic x = x;;
@@ -239,7 +242,7 @@ let[@def] f x = x + 1 and g x = x - 1;;
 Line 1, characters 3-9:
 1 | let[@def] f x = x + 1 and g x = x - 1;;
        ^^^^^^
-Error: The def attribute requires a single nonrecursive function binding
+Error: The def attribute requires a single function binding
 |}]
 
 module Hidden : sig val f : int -> int @@ total end = struct
