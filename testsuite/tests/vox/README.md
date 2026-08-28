@@ -25,8 +25,9 @@ legacy-mode defaults.
 | VC generation | `verification.ml`, `unchecked.ml` | Branches and successful runtime checks prove introductions; false claims and wraparound are rejected. |
 | Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
 | Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
-| Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
+| Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |
+| SMT encoding | `verification.ml`, `equality.ml` | Source types map consistently to scalar and opaque SMT sorts. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
