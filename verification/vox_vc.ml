@@ -4,7 +4,8 @@ open Vox_smt
 
 type state =
   { values : term option Path.Map.t;
-    facts : labelled_term list
+    facts : labelled_term list;
+    omitted_premises : (Location.t * Location.error) list
   }
 
 type context =
@@ -13,7 +14,7 @@ type context =
     prove : Location.t -> query -> unit
   }
 
-let empty = { values = Path.Map.empty; facts = [] }
+let empty = { values = Path.Map.empty; facts = []; omitted_premises = [] }
 
 let bind s id value =
   { s with values = Path.Map.add (Path.Pident id) value s.values }
@@ -282,7 +283,18 @@ let intro_loc e =
 
 let expose_fact ctx env s ty value loc =
   (* Dropping an unsupported premise is conservative; goals remain strict. *)
-  try expose ctx env s ty value loc with Location.Error _ -> [s, value]
+  try expose ctx env s ty value loc
+  with Location.Error error ->
+    [{ s with omitted_premises = (loc, error) :: s.omitted_premises }, value]
+
+let omitted_premise_messages s =
+  List.concat_map
+    (fun (loc, (error : Location.error)) ->
+      Location.msg ~loc
+        "This refinement premise was omitted because it could not be \
+         translated to SMT"
+      :: error.main :: error.sub)
+    (List.rev s.omitted_premises)
 
 let has_elim e =
   List.exists
@@ -312,14 +324,19 @@ let rec expression ctx s e =
           in
           List.iter
             (fun (s, goal) ->
-              ctx.prove loc
-                { symbols = List.rev ctx.symbols;
-                  facts = List.rev s.facts;
-                  goal =
-                    { label = "refine_";
-                      term = required r.ref_pred.rexp_loc goal
-                    }
-                })
+              try
+                ctx.prove loc
+                  { symbols = List.rev ctx.symbols;
+                    facts = List.rev s.facts;
+                    goal =
+                      { label = "refine_";
+                        term = required r.ref_pred.rexp_loc goal
+                      }
+                  }
+              with Location.Error error ->
+                raise
+                  (Location.Error
+                     { error with sub = error.sub @ omitted_premise_messages s }))
             goals;
           [s, value])
     | None -> outcomes
