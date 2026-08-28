@@ -333,6 +333,19 @@ let wrapped_atomic : refined_atomic = refine_ raw_atomic;;
 val wrapped_atomic : refined_atomic = {Atomic.contents = 0}
 |}]
 
+type refined_list = { xs : int list | true };;
+[%%expect{|
+type refined_list = {xs : int list | true}
+|}]
+
+let escape_local (raw @ local) : refined_list @ global = refine_ raw;;
+[%%expect{|
+Line 1, characters 65-68:
+1 | let escape_local (raw @ local) : refined_list @ global = refine_ raw;;
+                                                                     ^^^
+Error: This value is "local" to the parent region but is expected to be "global".
+|}]
+
 let escape_parameter n =
   let value : { x : int | gt x n } = refine_ (n + 1) in
   value;;
