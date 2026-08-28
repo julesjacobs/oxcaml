@@ -69,7 +69,11 @@ let warn_misplaced_attributes () =
     List.iter (fun sloc ->
       if sloc.txt = "def" || sloc.txt = "ocaml.def" then
         Location.raise_errorf ~loc:sloc.loc
-          "The def attribute is only supported on function bindings") keys;
+          "The def attribute is only supported on function bindings";
+      if sloc.txt = "decreases" || sloc.txt = "ocaml.decreases" then
+        Location.raise_errorf ~loc:sloc.loc
+          "The decreases attribute is only supported on recursive function \
+           bindings") keys;
   if not (compiler_stops_before_attributes_consumed ()) then
     let keys = List.sort attr_order keys in
     List.iter (fun sloc ->
@@ -103,6 +107,7 @@ let warn_unused () =
 let builtin_attrs =
   [ "inline"
   ; "def"
+  ; "decreases"
   ; "atomic"
   ; "inlined"
   ; "specialise"
