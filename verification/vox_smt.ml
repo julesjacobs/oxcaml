@@ -1,6 +1,7 @@
 type sort =
   | Bool
   | Bv63
+  | Opaque of int
 
 module Symbol = struct
   type t =
@@ -106,7 +107,10 @@ let operator = function
   | Implies -> "=>"
   | Ite -> "ite"
 
-let sort_name = function Bool -> "Bool" | Bv63 -> "(_ BitVec 63)"
+let sort_name = function
+  | Bool -> "Bool"
+  | Bv63 -> "(_ BitVec 63)"
+  | Opaque id -> Printf.sprintf "opaque(%d)" id
 
 let error fmt = Printf.ksprintf (fun s -> raise (Sort_error s)) fmt
 
@@ -217,6 +221,33 @@ let to_smtlib ~int_width ~timeout_ms q =
     (fun i f -> Hashtbl.add functions f.Function.id ("f" ^ string_of_int i))
     q.functions;
   let add s = Buffer.add_string b s in
+  let opaque_ids =
+    let add ids = function
+      | Opaque id -> if List.mem id ids then ids else id :: ids
+      | Bool | Bv63 -> ids
+    in
+    let ids =
+      List.fold_left (fun ids s -> add ids (Symbol.sort s)) [] q.symbols
+    in
+    let ids =
+      List.fold_left
+        (fun ids f ->
+          List.fold_left add
+            (add ids (Function.result f))
+            (Function.arguments f))
+        ids q.functions
+    in
+    List.sort Int.compare ids
+  in
+  let opaque_names = Hashtbl.create 8 in
+  List.iteri
+    (fun index id -> Hashtbl.add opaque_names id ("s" ^ string_of_int index))
+    opaque_ids;
+  let smt_sort = function
+    | Bool -> "Bool"
+    | Bv63 -> "(_ BitVec 63)"
+    | Opaque id -> Hashtbl.find opaque_names id
+  in
   let rec term = function
     | Boolean v -> add (string_of_bool v)
     | Integer v ->
@@ -250,21 +281,30 @@ let to_smtlib ~int_width ~timeout_ms q =
   add "(set-option :produce-models true)\n";
   add (Printf.sprintf "(set-option :timeout %d)\n" timeout_ms);
   add
-    (if q.functions = [] then "(set-logic QF_BV)\n" else "(set-logic QF_UFBV)\n");
+    (if opaque_ids <> []
+     then "(set-logic ALL)\n"
+     else if q.functions = []
+     then "(set-logic QF_BV)\n"
+     else "(set-logic QF_UFBV)\n");
+  List.iter
+    (fun id ->
+      add
+        (Printf.sprintf "(declare-sort %s 0)\n" (Hashtbl.find opaque_names id)))
+    opaque_ids;
   List.iter
     (fun s ->
       add
         (Printf.sprintf "(declare-fun %s () %s)\n"
            (Hashtbl.find names s.Symbol.id)
-           (sort_name (Symbol.sort s))))
+           (smt_sort (Symbol.sort s))))
     q.symbols;
   List.iter
     (fun f ->
       add
         (Printf.sprintf "(declare-fun %s (%s) %s)\n"
            (Hashtbl.find functions f.Function.id)
-           (String.concat " " (List.map sort_name (Function.arguments f)))
-           (sort_name (Function.result f))))
+           (String.concat " " (List.map smt_sort (Function.arguments f)))
+           (smt_sort (Function.result f))))
     q.functions;
   List.iter
     (fun f ->
