@@ -14847,10 +14847,10 @@ let refinement_expression_of_typed bound_values binder predicate =
     List.fold_left
       (fun result (extra, loc, _) ->
          match extra with
-         | Texp_inspected_type _ -> result
+         | Texp_inspected_type _ | Texp_mode _ -> result
          | Texp_constraint _ | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
-         | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine ->
+         | Texp_borrowed | Texp_ghost_region | Texp_refine ->
              unsupported_refinement_syntax loc "This expression annotation"
          | Texp_let_refine (id, _) -> begin
              match result.rexp_desc with

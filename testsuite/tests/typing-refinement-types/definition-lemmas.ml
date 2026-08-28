@@ -121,6 +121,13 @@ Line 1, characters 30-37:
 Error: Duplicate def attribute
 |}]
 
+let[@def] (mode_checked @ stateless) x = x + 1;;
+[%%expect{|
+val mode_checked : int -> int = <fun>
+val mode_checked_def : (x : int) -> {u : unit | (mode_checked x) === (x + 1)} =
+  <fun>
+|}]
+
 let[@def 1] payload x = x + 1;;
 [%%expect{|
 Line 1, characters 3-11:
