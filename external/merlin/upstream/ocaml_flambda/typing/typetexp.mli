@@ -32,6 +32,9 @@ module TyVarEnv : sig
   val with_local_scope : (unit -> 'a) -> 'a
   (** Evaluate in a narrowed type-variable scope *)
 
+  val protect_reentrant : (unit -> 'a) -> 'a
+  (** Preserve the caller's type-variable state during predicate typing. *)
+
   type poly_univars
   val make_poly_univars :
     Env.t -> (string Location.loc * Env.stage) list -> poly_univars

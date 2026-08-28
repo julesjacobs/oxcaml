@@ -5933,6 +5933,8 @@ module Totality = struct
 
   let partial = of_const Partial
 
+  let is_total m = Const.le (Guts.get_floor m) Const.Total
+
   let legacy = of_const Const.legacy
 
   let zap_to_legacy = zap_to_ceil
