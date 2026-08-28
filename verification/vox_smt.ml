@@ -22,6 +22,29 @@ module Symbol = struct
   let sort t = t.sort
 end
 
+module Function = struct
+  type t =
+    { id : int;
+      label : string;
+      arguments : sort list;
+      result : sort
+    }
+
+  let next = ref 0
+
+  let create ~label ~arguments ~result =
+    if !next = max_int then invalid_arg "Vox_smt.Function.create: exhausted";
+    let id = !next in
+    incr next;
+    { id; label; arguments; result }
+
+  let label t = t.label
+
+  let arguments t = t.arguments
+
+  let result t = t.result
+end
+
 type op =
   | Add
   | Sub
@@ -46,6 +69,7 @@ type term =
   | Integer of int64
   | Var of Symbol.t
   | App of op * term list
+  | Call of Function.t * term list
 
 type labelled_term =
   { label : string;
@@ -54,6 +78,7 @@ type labelled_term =
 
 type query =
   { symbols : Symbol.t list;
+    functions : Function.t list;
     facts : labelled_term list;
     goal : labelled_term
   }
@@ -103,6 +128,7 @@ let rec term_sort = function
   | Boolean _ -> Bool
   | Integer _ -> Int63
   | Var s -> Symbol.sort s
+  | Call (f, _) -> Function.result f
   | App (op, args) -> (
     match operator_signature op, args with
     | Fixed (_, result), _ -> result
@@ -119,6 +145,13 @@ let check ~int_width q =
       then error "Duplicate SMT symbol %S" (Symbol.label s);
       Hashtbl.add declared s.Symbol.id ())
     q.symbols;
+  let functions = Hashtbl.create 16 in
+  List.iter
+    (fun f ->
+      if Hashtbl.mem functions f.Function.id
+      then error "Duplicate SMT function %S" (Function.label f);
+      Hashtbl.add functions f.Function.id ())
+    q.functions;
   let require expected actual =
     if actual <> expected
     then error "Expected %s, got %s" (sort_name expected) (sort_name actual)
@@ -133,6 +166,13 @@ let check ~int_width q =
       if not (Hashtbl.mem declared s.Symbol.id)
       then error "Undeclared SMT symbol %S" (Symbol.label s);
       Symbol.sort s
+    | Call (f, args) ->
+      if not (Hashtbl.mem functions f.Function.id)
+      then error "Undeclared SMT function %S" (Function.label f);
+      if List.length args <> List.length (Function.arguments f)
+      then error "Wrong arity for SMT function %S" (Function.label f);
+      List.iter2 require (Function.arguments f) (List.map infer args);
+      Function.result f
     | App (op, args) -> (
       let signature = operator_signature op in
       let arity =
@@ -172,6 +212,10 @@ let to_smtlib ~int_width ~timeout_ms q =
     (fun i s -> Hashtbl.add names s.Symbol.id ("v" ^ string_of_int i))
     q.symbols;
   let b = Buffer.create 256 in
+  let functions = Hashtbl.create 16 in
+  List.iteri
+    (fun i f -> Hashtbl.add functions f.Function.id ("f" ^ string_of_int i))
+    q.functions;
   let add s = Buffer.add_string b s in
   let minimum = "(- 4611686018427387904)" in
   let maximum = "4611686018427387903" in
@@ -180,7 +224,7 @@ let to_smtlib ~int_width ~timeout_ms q =
     f term;
     match term with
     | Boolean _ | Integer _ | Var _ -> ()
-    | App (_, arguments) -> List.iter (iter f) arguments
+    | App (_, arguments) | Call (_, arguments) -> List.iter (iter f) arguments
   in
   let roots = q.goal.term :: List.map (fun fact -> fact.term) q.facts in
   let uses operator =
@@ -217,6 +261,16 @@ let to_smtlib ~int_width ~timeout_ms q =
       roots;
     List.sort_uniq Stdlib.compare !found
   in
+  let int_calls =
+    let found = ref [] in
+    List.iter
+      (iter (function
+        | (Call (function_, _) as call) when Function.result function_ = Int63 ->
+          found := call :: !found
+        | _ -> ()))
+      roots;
+    List.sort_uniq Stdlib.compare !found
+  in
   let integer value =
     if value < 0L
     then add (Printf.sprintf "(- %Ld)" (Int64.neg value))
@@ -248,6 +302,20 @@ let to_smtlib ~int_width ~timeout_ms q =
       add ")) (let ((r (mod (ite (< x 0) (- x) x) ";
       integer (Int64.abs divisor);
       add "))) (ite (< x 0) (- r) r)))"
+    | Call (f, args) ->
+      let name = Hashtbl.find functions f.Function.id in
+      if args = []
+      then add name
+      else begin
+        add "(";
+        add name;
+        List.iter
+          (fun arg ->
+            add " ";
+            term arg)
+          args;
+        add ")"
+      end
     | App (op, args) ->
       add "(";
       add (operator op);
@@ -264,7 +332,7 @@ let to_smtlib ~int_width ~timeout_ms q =
   add
     (if uses_general Div || uses_general Rem
      then "(set-logic ALL)\n"
-     else if multiplications = []
+     else if multiplications = [] && q.functions = []
      then "(set-logic QF_LIA)\n"
      else "(set-logic QF_UFLIA)\n");
   if uses Add
@@ -317,6 +385,14 @@ let to_smtlib ~int_width ~timeout_ms q =
            (Hashtbl.find names s.Symbol.id)
            (sort_name (Symbol.sort s))))
     q.symbols;
+  List.iter
+    (fun f ->
+      add
+        (Printf.sprintf "(declare-fun %s (%s) %s)\n"
+           (Hashtbl.find functions f.Function.id)
+           (String.concat " " (List.map sort_name (Function.arguments f)))
+           (sort_name (Function.result f))))
+    q.functions;
   let bounded value =
     add "(assert (and (<= ";
     add minimum;
@@ -333,6 +409,7 @@ let to_smtlib ~int_width ~timeout_ms q =
       match Symbol.sort symbol with Bool -> () | Int63 -> bounded (Var symbol))
     q.symbols;
   List.iter bounded multiplications;
+  List.iter bounded int_calls;
   List.iter
     (fun f ->
       add "(assert ";
