@@ -12317,8 +12317,18 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     | [loc], [vb]
       when rec_flag = Nonrecursive && mutable_flag = Asttypes.Immutable ->
         Language_extension.assert_enabled ~loc Refinement_types ();
-        [{vb with pvb_modes =
-           Location.mkloc (Parsetree.Mode "total") loc :: vb.pvb_modes}]
+        let has_total =
+          List.exists
+            (fun {Location.txt; _} ->
+              match txt with
+              | Parsetree.Mode "total" -> true
+              | _ -> false)
+            vb.pvb_modes
+        in
+        if has_total then [vb]
+        else
+          [{vb with pvb_modes =
+             Location.mkloc (Parsetree.Mode "total") loc :: vb.pvb_modes}]
     | loc :: _, _ ->
         Location.raise_errorf ~loc
           "The def attribute requires a single nonrecursive function binding"
