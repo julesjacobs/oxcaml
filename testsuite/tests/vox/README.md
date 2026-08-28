@@ -25,6 +25,7 @@ legacy-mode defaults.
 | VC generation | `verification.ml`, `unchecked.ml` | Branches and successful runtime checks prove introductions; false claims and wraparound are rejected. |
 | Checked windows | `checked_windows.ml` | Runtime validation establishes ordered bounds; subtraction and a client budget are proved safe. |
 | Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
+| Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
@@ -55,8 +56,8 @@ from `./dev`, since both use the worktree's Dune lock.
 
 ## Next milestones
 
-Definition lemmas add explicit unfolding. Numerical recursion can then
-demonstrate a refined recursion combinator and recursive proofs.
+Numerical recursion adds recursive definitions, a refined recursion combinator,
+and recursive proofs.
 
 Structural recursion does not fix the existing totality loophole through
 ordinary negative datatypes. A successful demo is not a claim of global

@@ -1,0 +1,6 @@
+let[@def] next x = x + 2
+let[@def] choose b x y = if b then x + 1 else y - 1
+
+type 'a box = Box of 'a
+
+let[@def] box x = Box x

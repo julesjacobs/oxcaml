@@ -24,6 +24,9 @@ let prove check loc query =
         Format.eprintf "  v%d: %s (%s)@." i (Vox_smt.Symbol.label s)
           (match Vox_smt.Symbol.sort s with Bool -> "bool" | Int63 -> "int"))
       query.Vox_smt.symbols;
+    List.iteri
+      (fun i f -> Format.eprintf "  f%d: %s@." i (Vox_smt.Function.label f))
+      query.Vox_smt.functions;
     Format.eprintf "%s@."
       (Vox_smt.to_smtlib ~int_width ~timeout_ms:!timeout_ms query)
   end;

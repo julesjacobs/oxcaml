@@ -11,6 +11,14 @@ Line 1, characters 9-27:
 Error: The extension "refinement_types" is disabled and cannot be used
 |}]
 
+let[@def] f x = x + 1;;
+[%%expect{|
+Line 1, characters 3-9:
+1 | let[@def] f x = x + 1;;
+       ^^^^^^
+Error: The extension "refinement_types" is disabled and cannot be used
+|}]
+
 let introduced : int = refine_ 1;;
 [%%expect{|
 Line 1, characters 23-32:

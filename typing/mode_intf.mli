@@ -539,6 +539,9 @@ module type S = sig
     val total : lr
 
     val partial : lr
+
+    (** Inspect the inferred mode without committing solver changes. *)
+    val is_total : (allowed * 'r) t -> bool
   end
 
   module Statefulness : sig
