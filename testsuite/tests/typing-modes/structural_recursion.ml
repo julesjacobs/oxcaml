@@ -605,7 +605,7 @@ end
 Line 2, characters 29-31:
 2 |   let rec (labelled @ total) ~n =
                                  ^^
-Error: This recursive function cannot be total: structural recursion requires simple unlabelled parameters.
+Error: This recursive function cannot be total: checked recursion requires simple unlabelled parameters.
 |}]
 module Test_pattern_param = struct
   let rec (pattern_param @ total) (S child) = pattern_param child

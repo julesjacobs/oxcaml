@@ -25,6 +25,7 @@ legacy-mode defaults.
 | VC generation | `verification.ml`, `unchecked.ml` | Branches and successful runtime checks prove introductions; false claims and wraparound are rejected. |
 | Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
 | Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
+| Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
@@ -55,8 +56,12 @@ from `./dev`, since both use the worktree's Dune lock.
 
 ## Next milestones
 
-Numerical recursion adds recursive definitions, a refined recursion combinator,
-and recursive proofs.
+`fibonacci.ml` uses static proofs and ordinary wrapping arithmetic. Both
+implementations accept indices 0 through 90 and raise outside that range.
+At 90, fast doubling's unused second component wraps; its result still fits.
+The inductive proof helper still runs at runtime, pending ghost-code erasure.
+
+SMT datatypes add reasoning about tuples, records, and nonrecursive variants.
 
 Structural recursion does not fix the existing totality loophole through
 ordinary negative datatypes. A successful demo is not a claim of global

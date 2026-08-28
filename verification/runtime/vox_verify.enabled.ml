@@ -56,6 +56,7 @@ let install () =
   then begin
     installed := true;
     Verification.install (Vox_vc.generate ~prove);
+    Verification.install_termination (Vox_vc.check_termination ~prove);
     Clflags.add_arguments __LOC__
       [ "-dvc", Arg.Set dump_vc, " Dump refinement verification conditions";
         ( "-dsmtlib",

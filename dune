@@ -299,6 +299,7 @@
   typeopt
   value_rec_check
   structural_recursion
+  recursive_function
   typecore
   solver_intf
   solver
