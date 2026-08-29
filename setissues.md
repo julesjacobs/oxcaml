@@ -11,9 +11,6 @@
 - Calls whose dependent result mentions an argument require that argument to
   be a plain local variable. Even constants used with generated definition
   lemmas must first be named.
-- Refinement types are not implicitly forgotten. `add` and `union` return a
-  set with a representation equation, so callers must use `let refine_` before
-  passing the result where `t` is expected.
 - Dependent results are not inferred from an unconstrained function body. A
   function that returns a refinement mentioning one of its parameters needs
   an explicit dependent result type; otherwise the dependency is reported as
