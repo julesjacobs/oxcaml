@@ -12807,7 +12807,11 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         Some m
     | Nonrecursive -> None
   in
-  Option.iter
+  let provisional_recursion =
+    rec_flag = Recursive && entirely_functions
+    && List.length spat_sexp_list = 1
+  in
+  if not provisional_recursion then Option.iter
     (fun mode ->
       Totality.submode_exn Totality.partial
         (Value.proj_comonadic Axis.Totality mode))
@@ -12964,6 +12968,26 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
        List.map (fun pv -> { pv with pv_type = instance pv.pv_type}) pvs)
     end
     ~before_generalize: begin fun (mode_pat_typ_list, exp_list, _, _, _, pvs) ->
+      if provisional_recursion then
+        Option.iter (fun mode ->
+          let partial loc reason =
+            match Totality.submode Totality.partial
+              (Value.proj_comonadic Axis.Totality mode) with
+            | Ok () -> ()
+            | Error _ ->
+                Location.raise_errorf ~loc
+                  "This recursive function cannot be total: %s." reason
+          in
+          match mode_pat_typ_list, exp_list with
+          | [(_, { pat_desc = Tpat_var { id; _ }; _ }, _)], [(exp, _)] ->
+              begin match Structural_recursion.check id exp with
+              | Ok () -> ()
+              | Error (loc, reason) -> partial loc reason
+              end
+          | _ ->
+              partial (List.hd spat_sexp_list).pvb_loc
+                "structural recursion requires a simple function binding")
+          rec_mode_var;
       List.iter2
         (fun (_, pat, _) (exp, _) ->
           if maybe_expansive exp then lower_contravariant env pat.pat_type)

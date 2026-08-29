@@ -3858,7 +3858,6 @@ let check_inductive_decl env ~single id decl =
     | _ -> reject "a closed variant declaration is required"
   end
 
-(* Translate a set of type declarations, mutually recursive or not *)
 let transl_type_decl env rec_flag sdecl_list =
   List.iter check_redefined_unit sdecl_list;
   (* Add dummy types for fixed rows *)
@@ -3982,6 +3981,9 @@ let transl_type_decl env rec_flag sdecl_list =
     decls;
   List.iter
     (check_abbrev_regularity ~abs_env new_env id_loc_list to_check) tdecls;
+  List.iter (fun (id, decl) ->
+    check_inductive_decl new_env ~single:(List.length decls = 1) id decl)
+    decls;
   List.iter (fun (id, decl) ->
     check_unboxed_recursion_decl ~abs_env new_env (List.assoc id id_loc_list)
       (Path.Pident id)
@@ -5080,7 +5082,10 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       in
       cty, cty.ctyp_type
   in
-  if sig_decl.type_inductive && not (Ctype.is_inductive env man) then
+  if (sig_decl.type_inductive
+      || Attr_helper.has_no_payload_attribute
+           "inductive" sdecl.ptype_attributes)
+     && not (Ctype.is_inductive env man) then
     Location.raise_errorf ~loc
       "This constraint requires a type with a checked inductive guarantee.";
   (* In the second part, we check the consistency between the two
