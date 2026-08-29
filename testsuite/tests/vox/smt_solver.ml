@@ -2,7 +2,7 @@ open Vox_smt
 
 let config = { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
 
-let n = Symbol.create ~label:"n" Bv63
+let n = Symbol.create ~label:"n" Int63
 
 let next = App (Sub, [Var n; Integer 1L])
 

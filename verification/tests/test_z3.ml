@@ -2,7 +2,7 @@ open Vox_smt
 
 let config = { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
 
-let x = Symbol.create ~label:"x" Bv63
+let x = Symbol.create ~label:"x" Int63
 
 let b = Symbol.create ~label:"x" Bool
 
@@ -39,9 +39,17 @@ let () =
   valid (eq (app Neg [i (-4611686018427387904L)]) (i (-4611686018427387904L)));
   valid
     (eq (app Sub [i (-4611686018427387904L); i 1L]) (i 4611686018427387903L));
-  valid (eq (app Mul [i 4611686018427387903L; i 2L]) (i (-2L)));
+  let product = app Mul [i 4611686018427387903L; i 2L] in
+  ignore (invalid (eq product (i (-2L))));
+  valid (eq product product);
+  valid (app Ge [product; i (-4611686018427387904L)]);
+  valid (app Le [product; i 4611686018427387903L]);
   valid (eq (app Div [i (-7L); i 2L]) (i (-3L)));
   valid (eq (app Rem [i (-7L); i 2L]) (i (-1L)));
+  valid (eq (app Div [i 7L; i (-2L)]) (i (-3L)));
+  valid (eq (app Rem [i 7L; i (-2L)]) (i 1L));
+  valid (eq (app Div [i (-7L); i (-2L)]) (i 3L));
+  valid (eq (app Rem [i (-7L); i (-2L)]) (i (-1L)));
   valid
     (eq
        (app Div [i (-4611686018427387904L); i (-1L)])
@@ -49,6 +57,8 @@ let () =
   valid (eq (app Rem [i (-4611686018427387904L); i (-1L)]) (i 0L));
   List.iter (fun op -> valid (app op [i (-1L); i 0L])) [Lt; Le; Ne];
   List.iter (fun op -> valid (app op [i 0L; i (-1L)])) [Gt; Ge; Ne];
+  valid ~symbols:[x] (app Ge [Var x; i (-4611686018427387904L)]);
+  valid ~symbols:[x] (app Le [Var x; i 4611686018427387903L]);
   assert (
     invalid ~symbols:[x] (app Gt [app Add [Var x; i 1L]; Var x])
     = Some [x, Int_value 4611686018427387903L]);

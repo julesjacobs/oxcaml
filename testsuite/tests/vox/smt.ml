@@ -13,7 +13,7 @@
 *)
 
 open Vox_smt;;
-let n = Symbol.create ~label:"n" Bv63
+let n = Symbol.create ~label:"n" Int63
 let next = App (Sub, [Var n; Integer 1L])
 let countdown =
   { symbols = [n];
@@ -36,16 +36,19 @@ let () =
 (set-option :print-success false)
 (set-option :produce-models true)
 (set-option :timeout 5000)
-(set-logic QF_BV)
-(declare-fun v0 () (_ BitVec 63))
-(assert (bvsgt v0 (_ bv0 63)))
-(assert (not (bvslt (bvsub v0 (_ bv1 63)) v0)))
+(set-logic QF_LIA)
+(define-fun int63_sub ((x Int) (y Int)) Int
+  (ite (> (- x y) 4611686018427387903) (- (- x y) 9223372036854775808)
+    (ite (< (- x y) (- 4611686018427387904)) (+ (- x y) 9223372036854775808) (- x y))))
+(declare-fun v0 () Int)
+(assert (and (<= (- 4611686018427387904) v0) (<= v0 4611686018427387903)))
+(assert (> v0 0))
+(assert (not (< (int63_sub v0 1) v0)))
 (check-sat)
 |}]
 
 let () = check ~int_width:63
   {countdown with goal = {label = "not a proposition"; term = next}};;
 [%%expect{|
-Exception:
-Vox_smt.Sort_error "not a proposition: Expected Bool, got (_ BitVec 63)".
+Exception: Vox_smt.Sort_error "not a proposition: Expected Bool, got Int".
 |}]
