@@ -46,6 +46,15 @@ Line 1, characters 21-33:
 Error: This kind of expression is not allowed as right-hand side of "let rec"
 |}]
 
+let rec left_cyclic_nat = S right_cyclic_nat
+and right_cyclic_nat = S left_cyclic_nat
+[%%expect{|
+Line 1, characters 26-44:
+1 | let rec left_cyclic_nat = S right_cyclic_nat
+                              ^^^^^^^^^^^^^^^^^^
+Error: This kind of expression is not allowed as right-hand side of "let rec"
+|}]
+
 type knot = Roll of (knot -> int)
 
 let (roll @ total) f = Roll f
@@ -301,23 +310,38 @@ module rec Closed :
   type t = Abstract_roll of (payload -> int) [@@inductive]
 end
 [%%expect{|
-module rec Closed :
-  sig
-    type payload = Closed.t
-    type t = Abstract_roll of (payload -> int)
-    [@@inductive]
-  end
+Line 2, characters 3-51:
+2 |   (Abstract_dependency with type payload = Closed.t) = struct
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Type "t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
 |}]
 
-let (closed_unroll @ total) = function Closed.Abstract_roll f -> f
+module rec Uses_nat : sig
+  val identity : nat -> nat @@ total
+end = struct
+  let (identity @ total) x = x
+end
 [%%expect{|
-Line 1, characters 39-61:
-1 | let (closed_unroll @ total) = function Closed.Abstract_roll f -> f
-                                           ^^^^^^^^^^^^^^^^^^^^^^
-Error: The expression is "partial"
-       but is expected to be "total"
-         because it is used inside the function at line 1, characters 30-66
-         which is expected to be "total".
+module rec Uses_nat : sig val identity : nat -> nat @@ total end
+|}]
+
+module rec Nested : sig
+  module Inner : sig
+    type t = Stop | More of t [@@inductive]
+  end
+end = struct
+  module Inner = struct
+    type t = Stop | More of t [@@inductive]
+  end
+end
+[%%expect{|
+Lines 1-5, characters 20-3:
+1 | ....................sig
+2 |   module Inner : sig
+3 |     type t = Stop | More of t [@@inductive]
+4 |   end
+5 | end.........
+Error: Type "t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
 |}]
 
 module rec Internal : sig
