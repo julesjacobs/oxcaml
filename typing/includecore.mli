@@ -130,6 +130,7 @@ type unsafe_mode_crossing_mismatch =
 
 type type_mismatch =
   | Arity
+  | Inductiveness
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
