@@ -15,24 +15,24 @@ let sort_error q =
   | exception Sort_error _ -> ()
 
 let () =
-  let x = Symbol.create ~label:"x" Bv63 in
+  let x = Symbol.create ~label:"x" Int63 in
   let b = Symbol.create ~label:"b" Bool in
   let n = integer 0 and p = Boolean true in
   List.iter
     (fun (term, expected) ->
       assert (term_sort term = expected);
-      let witness = match expected with Bool -> p | Bv63 -> n in
+      let witness = match expected with Bool -> p | Int63 -> n in
       check ~int_width:63 (query ~symbols:[x; b] (app Eq [term; witness])))
     [ p, Bool;
-      n, Bv63;
-      Var x, Bv63;
+      n, Int63;
+      Var x, Int63;
       Var b, Bool;
-      app Add [n; n], Bv63;
-      app Sub [n; n], Bv63;
-      app Mul [n; n], Bv63;
-      app Div [n; n], Bv63;
-      app Rem [n; n], Bv63;
-      app Neg [n], Bv63;
+      app Add [n; n], Int63;
+      app Sub [n; n], Int63;
+      app Mul [n; n], Int63;
+      app Div [n; n], Int63;
+      app Rem [n; n], Int63;
+      app Neg [n], Int63;
       app Eq [n; n], Bool;
       app Ne [p; p], Bool;
       app Lt [n; n], Bool;
@@ -43,12 +43,12 @@ let () =
       app And [p; p], Bool;
       app Or [p; p], Bool;
       app Implies [p; p], Bool;
-      app Ite [p; app Ite [p; n; n]; n], Bv63;
+      app Ite [p; app Ite [p; n; n]; n], Int63;
       app Ite [p; p; p], Bool ];
   sort_error (query (app Eq [Var x; n]))
 
 let () =
-  let x = Symbol.create ~label:"x" Bv63 in
+  let x = Symbol.create ~label:"x" Int63 in
   let b = Symbol.create ~label:"x" Bool in
   let bad_arity =
     [ Add;
@@ -95,8 +95,8 @@ let () =
   | exception Sort_error message ->
     assert (String.starts_with ~prefix:"source fact:" message));
   let collision_query () =
-    let a = Symbol.create ~label:"v0) (assert false) ;" Bv63 in
-    let b = Symbol.create ~label:"v0) (assert false) ;" Bv63 in
+    let a = Symbol.create ~label:"v0) (assert false) ;" Int63 in
+    let b = Symbol.create ~label:"v0) (assert false) ;" Int63 in
     query ~symbols:[a; b] (app Eq [Var a; Var b])
   in
   let serialized = serialize (collision_query ()) in
@@ -106,15 +106,44 @@ let () =
     = "(set-option :print-success false)\n\
        (set-option :produce-models true)\n\
        (set-option :timeout 5000)\n\
-       (set-logic QF_BV)\n\
-       (declare-fun v0 () (_ BitVec 63))\n\
-       (declare-fun v1 () (_ BitVec 63))\n\
+       (set-logic QF_LIA)\n\
+       (declare-fun v0 () Int)\n\
+       (declare-fun v1 () Int)\n\
+       (assert (and (<= (- 4611686018427387904) v0) (<= v0 \
+       4611686018427387903)))\n\
+       (assert (and (<= (- 4611686018427387904) v1) (<= v1 \
+       4611686018427387903)))\n\
        (assert (not (= v0 v1)))\n\
        (check-sat)\n");
   ignore
     (serialize
        (query ~symbols:[x; b]
           (app Eq [Var x; app Ite [Var b; integer 0; integer (-1)]])))
+
+let () =
+  let x = Symbol.create ~label:"x" Int63 in
+  let product = app Mul [Var x; integer 2] in
+  let serialized =
+    serialize
+      (query ~symbols:[x]
+         ~facts:[{ label = "same product"; term = app Eq [product; product] }]
+         (app Eq [product; product]))
+  in
+  assert (
+    serialized
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-logic QF_UFLIA)\n\
+       (declare-fun int63_mul (Int Int) Int)\n\
+       (declare-fun v0 () Int)\n\
+       (assert (and (<= (- 4611686018427387904) v0) (<= v0 \
+       4611686018427387903)))\n\
+       (assert (and (<= (- 4611686018427387904) (int63_mul v0 2)) (<= \
+       (int63_mul v0 2) 4611686018427387903)))\n\
+       (assert (= (int63_mul v0 2) (int63_mul v0 2)))\n\
+       (assert (not (= (int63_mul v0 2) (int63_mul v0 2))))\n\
+       (check-sat)\n")
 
 let fake =
   if Filename.is_relative Sys.argv.(1)
@@ -162,7 +191,7 @@ let () =
       assert (
         Buffer.contents dump
         = to_smtlib ~int_width:63 ~timeout_ms:2000 q ^ "(exit)\n");
-      let x = Symbol.create ~label:"x" Bv63 in
+      let x = Symbol.create ~label:"x" Int63 in
       let sat = query ~symbols:[x] (app Eq [Var x; integer 0]) in
       List.iter
         (fun mode ->
@@ -170,7 +199,10 @@ let () =
         ["sat"; "decimal-model"];
       List.iter
         (fun mode -> assert (validity (run mode sat) = Invalid None))
-        ["model-error"; "unparsed-model"];
+        [ "model-error";
+          "positive-out-of-range";
+          "negative-out-of-range";
+          "unparsed-model" ];
       assert (validity (run "unknown" q) = Unknown (Some "incomplete"));
       assert (validity (run "solver-timeout" q) = Timeout);
       List.iter
@@ -200,7 +232,7 @@ let () =
         ["startup-hang"; "hang"; "unsat-hang"];
       let large =
         query
-          ~symbols:(List.init 10000 (fun _ -> Symbol.create ~label:"x" Bv63))
+          ~symbols:(List.init 10000 (fun _ -> Symbol.create ~label:"x" Int63))
           (Boolean true)
       in
       assert (validity (run ~timeout_ms:100 "startup-hang" large) = Timeout);
