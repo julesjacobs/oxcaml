@@ -100,6 +100,74 @@ let short_circuit eval loc ~is_and s a b =
       @ [ ( branch s (if is_and then not_ a else a),
             scalar_value (Boolean (not is_and)) ) ])
 
+let rec added_prefix ~base = function
+  | current when current == base -> []
+  | item :: rest -> item :: added_prefix ~base rest
+  | [] -> Misc.fatal_error "VC: state does not extend its input"
+
+let guard_added_facts ~base guard s =
+  List.map
+    (fun fact -> { fact with term = both Implies guard fact.term })
+    (added_prefix ~base:base.facts s.facts)
+
+let added_omitted_premises ~base s =
+  added_prefix ~base:base.omitted_premises s.omitted_premises
+
+let merge_predicate_branches base branches =
+  let facts =
+    List.concat_map (fun (guard, s) -> guard_added_facts ~base guard s) branches
+    @ base.facts
+  in
+  let omitted_premises =
+    List.concat_map (fun (_, s) -> added_omitted_premises ~base s) branches
+    @ base.omitted_premises
+  in
+  { base with facts; omitted_premises }
+
+let predicate_short_circuit eval loc ~is_and s a b =
+  paths (eval s a) (fun s a ->
+      let a = required loc a in
+      if a = Boolean (not is_and)
+      then [s, scalar_value a]
+      else
+        match eval s b with
+        | [(right, b)] ->
+          let guard = if is_and then a else not_ a in
+          let state = merge_predicate_branches s [guard, right] in
+          let b = required loc b in
+          [state, scalar_value (both (if is_and then And else Or) a b)]
+        | rights ->
+          List.map
+            (fun (right, value) ->
+              branch right (if is_and then a else not_ a), value)
+            rights
+          @ [ ( branch s (if is_and then not_ a else a),
+                scalar_value (Boolean (not is_and)) ) ])
+
+let predicate_if eval loc s condition ifso ifnot =
+  paths (eval s condition) (fun s condition ->
+      let condition = required loc condition in
+      match condition with
+      | Boolean true -> eval s ifso
+      | Boolean false -> eval s ifnot
+      | _ -> (
+        let ifso_outcomes = eval s ifso in
+        let ifnot_outcomes = eval s ifnot in
+        match ifso_outcomes, ifnot_outcomes with
+        | [(ifso_state, ifso)], [(ifnot_state, ifnot)] ->
+          let state =
+            merge_predicate_branches s
+              [condition, ifso_state; not_ condition, ifnot_state]
+          in
+          let ifso = required loc ifso in
+          let ifnot = required loc ifnot in
+          [state, scalar_value (App (Ite, [condition; ifso; ifnot]))]
+        | _ ->
+          List.map (fun (s, value) -> branch s condition, value) ifso_outcomes
+          @ List.map
+              (fun (s, value) -> branch s (not_ condition), value)
+              ifnot_outcomes))
+
 let disjunction terms = List.fold_left (both Or) (Boolean false) terms
 
 let guarded_case eval loc s matched guard body rest =
@@ -402,7 +470,8 @@ let rec predicate ctx env s e =
       in
       begin match prim, args with
       | Some ((("%sequand" | "%sequor") as name), 2), [(_, a); (_, b)] ->
-        short_circuit eval e.rexp_loc ~is_and:(name = "%sequand") s a b
+        predicate_short_circuit eval e.rexp_loc ~is_and:(name = "%sequand") s a
+          b
       | _ ->
         paths
           (arguments_right_to_left (fun s (_, e) -> eval s e) s args)
@@ -421,10 +490,7 @@ let rec predicate ctx env s e =
                   scalar_value
                     (both Eq (required e.rexp_loc left)
                        (required e.rexp_loc right)) ) ]))
-    | Rexp_ifthenelse (c, t, Some f) ->
-      paths (eval s c) (fun s c ->
-          let c = required e.rexp_loc c in
-          eval (branch s c) t @ eval (branch s (not_ c)) f)
+    | Rexp_ifthenelse (c, t, Some f) -> predicate_if eval e.rexp_loc s c t f
     | Rexp_sequence (a, b) -> paths (eval s a) (fun s _ -> eval s b)
     | Rexp_let (binding, body) ->
       paths (eval s binding.rb_expr) (fun s value ->
