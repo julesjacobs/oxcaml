@@ -111,31 +111,20 @@ let parse text =
 
 let model symbols response =
   let integer = function
-    | List [Atom "_"; Atom bv; Atom "63"]
-      when String.starts_with ~prefix:"bv" bv ->
-      let digits = String.sub bv 2 (String.length bv - 2) in
-      if
-        digits = ""
-        || not (String.for_all (fun c -> c >= '0' && c <= '9') digits)
-      then None
-      else Int64.of_string_opt digits
-    | Atom bits
-      when String.length bits = 65 && String.starts_with ~prefix:"#b" bits ->
-      let digits = String.sub bits 2 63 in
-      if String.for_all (fun c -> c = '0' || c = '1') digits
-      then Int64.of_string_opt ("0b" ^ digits)
-      else None
+    | Atom digits -> Int64.of_string_opt digits
+    | List [Atom "-"; Atom digits] ->
+      Option.map Int64.neg (Int64.of_string_opt digits)
     | _ -> None
   in
   let value symbol sexp =
     match Symbol.sort symbol, sexp with
     | Bool, Atom "true" -> Some (Bool_value true)
     | Bool, Atom "false" -> Some (Bool_value false)
-    | Bv63, sexp ->
+    | Int63, sexp ->
       Option.bind (integer sexp) (fun n ->
-          if n < 0L
+          if n < -4611686018427387904L || n > 4611686018427387903L
           then None
-          else Some (Int_value (Int64.shift_right (Int64.shift_left n 1) 1)))
+          else Some (Int_value n))
     | _ -> None
   in
   let rec bindings i acc symbols entries =
