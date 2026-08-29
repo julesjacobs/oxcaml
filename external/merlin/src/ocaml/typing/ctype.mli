@@ -309,6 +309,8 @@ val try_expand_safe_opt: Env.t -> type_expr -> type_expr
 
 val expand_head_once: Env.t -> type_expr -> type_expr
 val expand_head: Env.t -> type_expr -> type_expr
+val is_inductive: Env.t -> type_expr -> bool
+val can_pattern_match_total: Env.t -> type_expr -> bool
 val expand_head_opt: Env.t -> type_expr -> type_expr
 (** The compiler's own version of [expand_head] necessary for type-based
     optimisations. *)

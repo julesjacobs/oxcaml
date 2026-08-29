@@ -473,6 +473,7 @@ type type_declaration =
     type_loc: Location.t;
     type_attributes: Parsetree.attributes;
     type_unboxed_default: bool;
+    type_inductive: bool;
     type_uid: Uid.t;
     type_unboxed_version : type_declaration option;
  }

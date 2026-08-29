@@ -1571,6 +1571,7 @@ and find_type_unboxed_version path env seen =
       type_loc = decl.type_loc;
       type_attributes = decl.type_attributes;
       type_unboxed_default = false;
+      type_inductive = false;
       type_uid = Uid.unboxed_version decl.type_uid;
       type_unboxed_version = None;
     }
@@ -1619,6 +1620,7 @@ and find_type_unboxed_version path env seen =
       type_loc = decl.type_loc;
       type_attributes = decl.type_attributes;
       type_unboxed_default = false;
+      type_inductive = false;
       type_uid = Uid.unboxed_version decl.type_uid;
       type_unboxed_version = None;
     }
