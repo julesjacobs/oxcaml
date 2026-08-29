@@ -85,6 +85,7 @@ type error =
   | Cannot_scrape_alias of Path.t
   | Cannot_scrape_package_type of Path.t
   | Badly_formed_signature of string * Typedecl.error
+  | Inductive_type_in_recursive_module of string
   | Cannot_hide_id of hiding_error
   | Invalid_type_subst_rhs
   | Non_packable_local_modtype_subst of Path.t
@@ -2693,6 +2694,36 @@ and transl_modtype_decl_aux env
   newenv, mtd, decl
 
 and transl_recmodule_modtypes env ~sig_modalities sdecls =
+  let rec find_inductive_guarantee env mty =
+    match Mtype.scrape env mty with
+    | Mty_ident _ | Mty_alias _ -> None
+    | Mty_functor (param, result, _) ->
+        let env =
+          match param with
+          | Unit | Named (None, _, _) -> env
+          | Named (Some id, param, mode) ->
+              let mode =
+                Mode.(mode |> alloc_as_value |> Value.disallow_right)
+              in
+              Env.add_module ~arg:true id Mp_present param ~mode env
+        in
+        find_inductive_guarantee env result
+    | Mty_strengthen (result, _, _) ->
+        find_inductive_guarantee env result
+    | Mty_signature signature ->
+        let env = Env.add_signature signature env in
+        List.find_map (find_inductive_guarantee_in_item env) signature
+  and find_inductive_guarantee_in_item env = function
+    | Sig_type (id, decl, _, _) when decl.type_inductive ->
+        Some (Ident.name id)
+    | Sig_module (_, _, decl, _, _) ->
+        find_inductive_guarantee env decl.md_type
+    | Sig_modtype (_, { mtd_type = Some mty; _ }, _) ->
+        find_inductive_guarantee env mty
+    | Sig_value _ | Sig_type _ | Sig_typext _ | Sig_modtype _ | Sig_class _
+    | Sig_class_type _ | Sig_jkind _ ->
+        None
+  in
   let make_env curr =
     List.fold_left (fun env (id_shape, _, md, mode, _, _) ->
       let mode = Option.map (fun m -> m.mode_modes) mode in
@@ -2798,6 +2829,17 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
 *)
   let env2 = make_env dcl2 in
   check_recmod_decls env2 (map_mtys dcl2);
+  List.iter2
+    (fun (pmd, _) (_, _, (md : Types.module_declaration), _, _, _) ->
+       match find_inductive_guarantee env2 md.md_type with
+       | None -> ()
+       | Some name ->
+           raise
+             (Error
+                ( pmd.pmd_type.pmty_loc,
+                  env2,
+                  Inductive_type_in_recursive_module name )))
+    sdecls dcl2;
   let dcl2 =
     List.map2 (fun (pmd, _) (id_shape, id_loc, md, mmode, md_modalities, mty) ->
       let tmd =
@@ -5480,6 +5522,11 @@ let report_error ~loc _env = function
          Format_doc.pp_doc report.main.txt
      in
      { report with main = { report.main with txt} }
+  | Inductive_type_in_recursive_module name ->
+      Location.errorf ~loc
+        "Type %a has an [@@@@inductive] guarantee, which is not allowed in a \
+         recursive module signature."
+        Style.inline_code name
   | Cannot_hide_id Illegal_shadowing
       { shadowed_item_kind; shadowed_item_id; shadowed_item_loc;
         shadower_id; user_id; user_kind; user_loc } ->
