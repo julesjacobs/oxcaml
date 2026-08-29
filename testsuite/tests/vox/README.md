@@ -32,7 +32,7 @@ legacy-mode defaults.
 | SMT datatypes | `datatypes.ml` | Native datatype reasoning covers tuples, records, variants, patterns, and recursive trees. |
 | Int-list proofs | `int_lists.ml` | Structural induction proves append identities, associativity, and length and sum homomorphisms. |
 | Int-set proofs | `int_set_intf.mli`, `list_int_set.mli`, `int_sets.ml` | A canonical list set exposes verified membership, size, and `===` extensionality through an abstract interface. |
-| AVL-set proofs | `avl_sets.ml` | Rotations and insertion preserve AVL validity; lookup, insertion, union, and size refine the canonical list model. |
+| AVL-set proofs | `avl_sets.mli`, `avl_set_client.ml` | A valid AVL set exposes semantic `equal`; the demo distinguishes it from representation `=`. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and

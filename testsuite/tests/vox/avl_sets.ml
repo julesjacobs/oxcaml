@@ -2,7 +2,7 @@
  flags = "-extension refinement_types";
  has-z3;
  timeout = "120";
- all_modules = "avl_sets.mli avl_sets.ml";
+ all_modules = "int_set_intf.mli avl_sets.mli avl_sets.ml avl_set_client.ml";
  { bytecode; }
  { flags += " -principal"; bytecode; }
 *)
@@ -24,6 +24,11 @@ module List_set = struct
       match xs with
       | Nil -> true
       | Cons (head, tail) -> lower < head && all_greater lower tail
+
+    let[@def] rec (valid @ total) xs =
+      match xs with
+      | Nil -> true
+      | Cons (head, tail) -> all_greater head tail && valid tail
 
     let[@def] rec (add_repr @ total) element xs =
       match xs with
@@ -47,6 +52,18 @@ module List_set = struct
       match xs with
       | Nil -> 0Z
       | Cons (_, tail) -> Bigint.add 1Z (size_repr tail)
+
+    let[@def] rec (same_repr @ total) left right =
+      match left with
+      | Nil ->
+        (match right with
+         | Nil -> true
+         | Cons _ -> false)
+      | Cons (left_head, left_tail) ->
+        match right with
+        | Nil -> false
+        | Cons (right_head, right_tail) ->
+          left_head = right_head && same_repr left_tail right_tail
 end
 
 module List_proofs = struct
@@ -263,6 +280,249 @@ module List_proofs = struct
           let refine_ induction = add_at_pivot tail pivot right in
           refine_ u
       else refine_ u
+
+    let rec (all_greater_transitive @ total) :
+        (lower : int) ->
+        (middle : int) ->
+        (xs : repr) ->
+        {u : unit |
+          if lower < middle && all_greater middle xs
+          then all_greater lower xs
+          else true} @ immutable contended =
+      fun lower middle xs ->
+      let u = () in
+      if lower < middle && all_greater middle xs then
+        match xs with
+        | Nil ->
+          let refine_ lower_equation = all_greater_def lower xs in
+          refine_ u
+        | Cons (_, tail) ->
+          let refine_ middle_equation = all_greater_def middle xs in
+          let refine_ lower_equation = all_greater_def lower xs in
+          let refine_ induction = all_greater_transitive lower middle tail in
+          refine_ u
+      else refine_ u
+
+    let rec (valid_append_pivot @ total) :
+        (left : repr) ->
+        (pivot : int) ->
+        (right : repr) ->
+        {u : unit |
+          if valid left && valid right
+             && all_less pivot left && all_greater pivot right
+          then valid (append left (Cons (pivot, right)))
+          else true} @ immutable contended =
+      fun left pivot right ->
+      let u = () in
+      if valid left && valid right
+         && all_less pivot left && all_greater pivot right
+      then
+        let suffix = Cons (pivot, right) in
+        let result = append left suffix in
+        let refine_ result_equation = append_def left suffix in
+        match left with
+        | Nil ->
+          let refine_ result_valid = valid_def result in
+          let refine_ suffix_valid = valid_def suffix in
+          refine_ u
+        | Cons (head, tail) ->
+          let refine_ left_valid = valid_def left in
+          let refine_ left_bound = all_less_def pivot left in
+          let refine_ tail_valid = valid_append_pivot tail pivot right in
+          let refine_ result_valid = valid_def result in
+          let refine_ tail_greater = all_greater_append head tail suffix in
+          let refine_ right_transitive =
+            all_greater_transitive head pivot right
+          in
+          let refine_ suffix_greater = all_greater_def head suffix in
+          refine_ u
+      else refine_ u
+
+    let rec (lookup_add_repr @ total) :
+        (element : int) ->
+        (added : int) ->
+        (xs : repr) ->
+        {u : unit |
+          lookup_repr element (add_repr added xs)
+          === (element = added || lookup_repr element xs)}
+          @ immutable contended =
+      fun element added xs ->
+      let result = add_repr added xs in
+      let refine_ add_equation = add_repr_def added xs in
+      let refine_ result_equation = lookup_repr_def element result in
+      let refine_ input_equation = lookup_repr_def element xs in
+      match xs with
+      | Nil ->
+        let u = () in
+        refine_ u
+      | Cons (_, tail) ->
+        let refine_ induction = lookup_add_repr element added tail in
+        let u = () in
+        refine_ u
+
+    let rec (lookup_union_repr @ total) :
+        (element : int) ->
+        (left : repr) ->
+        (right : repr) ->
+        {u : unit |
+          lookup_repr element (union_repr left right)
+          === (lookup_repr element left || lookup_repr element right)}
+          @ immutable contended =
+      fun element left right ->
+      let result = union_repr left right in
+      let refine_ union_equation = union_repr_def left right in
+      let refine_ result_equation = lookup_repr_def element result in
+      let refine_ left_equation = lookup_repr_def element left in
+      match left with
+      | Nil ->
+        let u = () in
+        refine_ u
+      | Cons (head, tail) ->
+        let added = add_repr head right in
+        let refine_ added_equation = lookup_add_repr element head right in
+        let refine_ induction = lookup_union_repr element tail added in
+        let u = () in
+        refine_ u
+
+    let rec (same_repr_reflexive @ total) :
+        (xs : repr) ->
+        {u : unit | same_repr xs xs === true} @ immutable contended =
+      fun xs ->
+      let refine_ equation = same_repr_def xs xs in
+      match xs with
+      | Nil ->
+        let u = () in
+        refine_ u
+      | Cons (_, tail) ->
+        let refine_ induction = same_repr_reflexive tail in
+        let u = () in
+        refine_ u
+
+    let rec (same_repr_equal @ total) :
+        (left : repr) ->
+        (right : repr) ->
+        {u : unit |
+          if same_repr left right then left === right else true}
+          @ immutable contended =
+      fun left right ->
+      let u = () in
+      if same_repr left right then
+        let refine_ equation = same_repr_def left right in
+        match left with
+        | Nil -> refine_ u
+        | Cons (_, left_tail) ->
+          match right with
+          | Nil -> refine_ u
+          | Cons (_, right_tail) ->
+            let refine_ induction = same_repr_equal left_tail right_tail in
+            refine_ u
+      else refine_ u
+
+    let rec (size_nonnegative @ total) :
+        (xs : repr) ->
+        {u : unit | size_repr xs >= 0Z} @ immutable contended =
+      fun xs ->
+      let refine_ equation = size_repr_def xs in
+      match xs with
+      | Nil ->
+        let u = () in
+        refine_ u
+      | Cons (_, tail) ->
+        let refine_ induction = size_nonnegative tail in
+        let u = () in
+        refine_ u
+
+    let rec (size_zero_repr @ total) :
+        (xs : repr) ->
+        {u : unit |
+          (size_repr xs === 0Z) === same_repr xs Nil}
+          @ immutable contended =
+      fun xs ->
+      let nil = Nil in
+      let refine_ size_equation = size_repr_def xs in
+      let refine_ equal_equation = same_repr_def xs nil in
+      match xs with
+      | Nil ->
+        let u = () in
+        refine_ u
+      | Cons (_, tail) ->
+        let refine_ nonnegative = size_nonnegative tail in
+        let u = () in
+        refine_ u
+
+    let rec (extensional_repr @ total) :
+        (left : repr) ->
+        (right : repr) ->
+        ((element : int) ->
+          {u : unit |
+            lookup_repr element left === lookup_repr element right})
+          @ total ->
+        {u : unit |
+          if valid left && valid right then left === right else true}
+          @ immutable contended =
+      fun left right premise ->
+      let u = () in
+      if valid left && valid right then
+        let refine_ left_valid = valid_def left in
+        let refine_ right_valid = valid_def right in
+        match left with
+        | Nil ->
+          (match right with
+           | Nil -> refine_ u
+           | Cons (right_head, _) ->
+             let refine_ same_lookup = premise right_head in
+             let refine_ left_lookup = lookup_repr_def right_head left in
+             let refine_ right_lookup = lookup_repr_def right_head right in
+             refine_ u)
+        | Cons (left_head, left_tail) ->
+          match right with
+          | Nil ->
+            let refine_ same_lookup = premise left_head in
+            let refine_ left_lookup = lookup_repr_def left_head left in
+            let refine_ right_lookup = lookup_repr_def left_head right in
+            refine_ u
+          | Cons (right_head, right_tail) ->
+            let refine_ left_lookup = premise left_head in
+            let refine_ right_lookup = premise right_head in
+            let refine_ left_at_left = lookup_repr_def left_head left in
+            let refine_ right_at_left = lookup_repr_def left_head right in
+            let refine_ left_at_right = lookup_repr_def right_head left in
+            let refine_ right_at_right = lookup_repr_def right_head right in
+            if left_head < right_head then
+              let refine_ absent =
+                lookup_below left_head right_head right_tail
+              in
+              refine_ u
+            else if right_head < left_head then
+              let refine_ absent =
+                lookup_below right_head left_head left_tail
+              in
+              refine_ u
+            else
+              let (tail_premise @ total) :
+                  (element : int) ->
+                  {u : unit |
+                    lookup_repr element left_tail
+                    === lookup_repr element right_tail} =
+                fun element ->
+                let refine_ same_lookup = premise element in
+                let refine_ left_equation = lookup_repr_def element left in
+                let refine_ right_equation = lookup_repr_def element right in
+                if element = left_head then
+                  let refine_ left_absent =
+                    lookup_below element left_head left_tail
+                  in
+                  let refine_ right_absent =
+                    lookup_below element right_head right_tail
+                  in
+                  refine_ u
+                else refine_ u
+              in
+              let refine_ tails_equal =
+                extensional_repr left_tail right_tail tail_premise
+              in
+              refine_ u
+      else refine_ u
 end
 
 module Core = struct
@@ -301,8 +561,6 @@ type tree = Empty | Node of tree * int * tree * Bigint.t [@@inductive]
         && valid left
         && valid right
 
-    type t = tree
-
     let[@def] rec (elements @ total) tree =
       match tree with
       | Empty -> List_set.Nil
@@ -310,7 +568,7 @@ type tree = Empty | Node of tree * int * tree * Bigint.t [@@inductive]
         List_set.append (elements left)
           (List_set.Cons (value, elements right))
 
-    let (empty @ total) : t = Empty
+    let (empty @ total) : tree = Empty
 
     let[@def] rec (lookup_tree @ total) element tree =
       match tree with
@@ -1788,7 +2046,9 @@ module Validity_proofs : sig
           refine_ u
     end
 
-    module Model_proofs : sig end = struct
+    module Model_proofs : sig
+      module Set : Int_set_intf.Extensional
+    end = struct
     module Element_proofs : sig
       val elements_all_less :
         (upper : int) ->
@@ -1797,6 +2057,28 @@ module Validity_proofs : sig
           if all_less upper tree
           then List_set.all_less upper (elements tree)
           else true} @ immutable contended
+
+      val elements_valid :
+        (tree : tree) ->
+        (validity : {u : unit | valid tree}) ->
+        {u : unit | List_set.valid (elements tree)} @ immutable contended
+
+      val lookup :
+        (element : int) ->
+        (tree : tree) ->
+        (validity : {u : unit | valid tree}) ->
+        {found : bool |
+          found === List_set.lookup_repr element (elements tree)}
+          @ immutable contended
+
+      val lookup_tree_elements :
+        (element : int) ->
+        (tree : tree) ->
+        (validity : {u : unit | valid tree}) ->
+        {u : unit |
+          lookup_tree element tree
+          === List_set.lookup_repr element (elements tree)}
+          @ immutable contended
     end = struct
     let rec (elements_all_less @ total) :
         (upper : int) ->
@@ -1829,6 +2111,14 @@ module Validity_proofs : sig
       else refine_ u
 
     module Lookup_proofs : sig
+      val elements_all_greater :
+        (lower : int) ->
+        (tree : tree) ->
+        {u : unit |
+          if all_greater lower tree
+          then List_set.all_greater lower (elements tree)
+          else true} @ immutable contended
+
       val lookup_tree_elements :
         (element : int) ->
         (tree : tree) ->
@@ -1940,6 +2230,46 @@ module Validity_proofs : sig
         Lookup_proofs.lookup_tree_elements element tree validity
       in
       refine_ found
+
+    let (lookup_tree_elements @ total) :
+        (element : int) ->
+        (tree : tree) ->
+        (validity : {u : unit | valid tree}) ->
+        {u : unit |
+          lookup_tree element tree
+          === List_set.lookup_repr element (elements tree)}
+          @ immutable contended =
+      fun element tree validity ->
+      Lookup_proofs.lookup_tree_elements element tree validity
+
+    let rec (elements_valid @ total) :
+        (tree : tree) ->
+        (validity : {u : unit | valid tree}) ->
+        {u : unit | List_set.valid (elements tree)} @ immutable contended =
+      fun tree validity ->
+      let refine_ valid_unit = validity in
+      let tree_elements = elements tree in
+      let refine_ tree_equation = elements_def tree in
+      match tree with
+      | Empty ->
+        let refine_ result = List_set.valid_def tree_elements in
+        let u = () in
+        refine_ u
+      | Node (left, value, right, _) ->
+        let refine_ invariant = valid_def tree in
+        let left_elements = elements left in
+        let right_elements = elements right in
+        let proof = () in
+        let left_validity : {u : unit | valid left} = refine_ proof in
+        let right_validity : {u : unit | valid right} = refine_ proof in
+        let refine_ left_induction = elements_valid left left_validity in
+        let refine_ right_induction = elements_valid right right_validity in
+        let refine_ left_bound = elements_all_less value left in
+        let refine_ right_bound = Lookup_proofs.elements_all_greater value right in
+        let refine_ result =
+          List_proofs.valid_append_pivot left_elements value right_elements
+        in
+        refine_ proof
 
     end
 
@@ -2422,7 +2752,7 @@ module Validity_proofs : sig
 
     end
 
-    module Operations : sig end = struct
+    module Operations = struct
     let (add @ total) :
         (element : int) ->
         (tree : tree) ->
@@ -2504,4 +2834,238 @@ module Validity_proofs : sig
 
     end
 
+    module Set = struct
+      type t = {tree : tree | valid tree}
+
+      let (empty @ total) : t =
+        let tree = Empty in
+        let refine_ invariant = valid_def tree in
+        refine_ tree
+
+      let[@def] (lookup @ total) element (set : t) =
+        let refine_ tree = set in
+        lookup_tree element tree
+
+      let[@def] (add @ total) :
+          int -> t -> t @ immutable contended =
+        fun element set ->
+        let refine_ tree = set in
+        let proof = () in
+        let validity : {u : unit | valid tree} = refine_ proof in
+        let refine_ result_tree = Operations.add element tree validity in
+        refine_ result_tree
+
+      let[@def] (union @ total) :
+          t -> t -> t @ immutable contended =
+        fun left right ->
+        let refine_ left_tree = left in
+        let refine_ right_tree = right in
+        let proof = () in
+        let right_validity : {u : unit | valid right_tree} = refine_ proof in
+        let refine_ result_tree =
+          Operations.union left_tree right_tree right_validity
+        in
+        refine_ result_tree
+
+      let[@def] (size @ total) (set : t) =
+        let refine_ tree = set in
+        List_set.size_repr (elements tree)
+
+      let[@def] (equal @ total) (left : t) (right : t) =
+        let refine_ left_tree = left in
+        let refine_ right_tree = right in
+        List_set.same_repr (elements left_tree) (elements right_tree)
+
+      let (lookup_empty @ total) element :
+          {u : unit | lookup element empty === false} =
+        let empty_set = empty in
+        let refine_ tree = empty_set in
+        let refine_ public_lookup = lookup_def element empty_set in
+        let refine_ tree_lookup = lookup_tree_def element tree in
+        let u = () in
+        refine_ u
+
+      let (lookup_add @ total) :
+          (element : int) ->
+          (added_element : int) ->
+          (set : t) ->
+          {u : unit |
+            lookup element (add added_element set)
+            === (element = added_element || lookup element set)}
+            @ immutable contended =
+        fun element added_element set ->
+        let refine_ tree = set in
+        let proof = () in
+        let validity : {u : unit | valid tree} = refine_ proof in
+        let refine_ model_result_tree =
+          Operations.add added_element tree validity
+        in
+        let result = add added_element set in
+        let refine_ add_equation = add_def added_element set in
+        let refine_ result_tree = result in
+        let expected = List_set.add_repr added_element (elements tree) in
+        let result_elements = elements result_tree in
+        let refine_ same_result =
+          List_proofs.same_repr_equal result_elements expected
+        in
+        let result_validity : {u : unit | valid result_tree} = refine_ proof in
+        let refine_ input_lookup =
+          Element_proofs.lookup_tree_elements element tree validity
+        in
+        let refine_ result_lookup =
+          Element_proofs.lookup_tree_elements element result_tree
+            result_validity
+        in
+        let refine_ public_input = lookup_def element set in
+        let refine_ public_result = lookup_def element result in
+        let tree_elements = elements tree in
+        let refine_ model_law =
+          List_proofs.lookup_add_repr element added_element tree_elements
+        in
+        refine_ proof
+
+      let (lookup_union @ total) :
+          (element : int) ->
+          (left : t) ->
+          (right : t) ->
+          {u : unit |
+            lookup element (union left right)
+            === (lookup element left || lookup element right)}
+            @ immutable contended =
+        fun element left right ->
+        let refine_ left_tree = left in
+        let refine_ right_tree = right in
+        let proof = () in
+        let right_validity : {u : unit | valid right_tree} = refine_ proof in
+        let refine_ model_result_tree =
+          Operations.union left_tree right_tree right_validity
+        in
+        let result = union left right in
+        let refine_ union_equation = union_def left right in
+        let refine_ result_tree = result in
+        let left_elements = elements left_tree in
+        let right_elements = elements right_tree in
+        let expected = List_set.union_repr left_elements right_elements in
+        let result_elements = elements result_tree in
+        let refine_ same_result =
+          List_proofs.same_repr_equal result_elements expected
+        in
+        let left_validity : {u : unit | valid left_tree} = refine_ proof in
+        let result_validity : {u : unit | valid result_tree} = refine_ proof in
+        let refine_ left_lookup =
+          Element_proofs.lookup_tree_elements element left_tree left_validity
+        in
+        let refine_ right_lookup =
+          Element_proofs.lookup_tree_elements element right_tree right_validity
+        in
+        let refine_ result_lookup =
+          Element_proofs.lookup_tree_elements element result_tree
+            result_validity
+        in
+        let refine_ public_left = lookup_def element left in
+        let refine_ public_right = lookup_def element right in
+        let refine_ public_result = lookup_def element result in
+        let refine_ model_law =
+          List_proofs.lookup_union_repr element left_elements right_elements
+        in
+        refine_ proof
+
+      let (equal_lookup @ total) :
+          (left : t) ->
+          (right : t) ->
+          (element : int) ->
+          {u : unit |
+            if equal left right
+            then lookup element left === lookup element right
+            else true} @ immutable contended =
+        fun left right element ->
+        let proof = () in
+        if equal left right then
+          let refine_ left_tree = left in
+          let refine_ right_tree = right in
+          let left_elements = elements left_tree in
+          let right_elements = elements right_tree in
+          let refine_ equal_equation = equal_def left right in
+          let refine_ same_model =
+            List_proofs.same_repr_equal left_elements right_elements
+          in
+          let left_validity : {u : unit | valid left_tree} = refine_ proof in
+          let right_validity : {u : unit | valid right_tree} = refine_ proof in
+          let refine_ left_lookup =
+            Element_proofs.lookup_tree_elements element left_tree left_validity
+          in
+          let refine_ right_lookup =
+            Element_proofs.lookup_tree_elements element right_tree
+              right_validity
+          in
+          let refine_ public_left = lookup_def element left in
+          let refine_ public_right = lookup_def element right in
+          refine_ proof
+        else refine_ proof
+
+      let (extensional @ total) :
+          (left : t) ->
+          (right : t) ->
+          ((element : int) ->
+            {u : unit | lookup element left === lookup element right})
+            @ total ->
+          {u : unit | equal left right === true} @ immutable contended =
+        fun left right premise ->
+        let refine_ left_tree = left in
+        let refine_ right_tree = right in
+        let left_elements = elements left_tree in
+        let right_elements = elements right_tree in
+        let proof = () in
+        let left_validity : {u : unit | valid left_tree} = refine_ proof in
+        let right_validity : {u : unit | valid right_tree} = refine_ proof in
+        let refine_ left_model_valid =
+          Element_proofs.elements_valid left_tree left_validity
+        in
+        let refine_ right_model_valid =
+          Element_proofs.elements_valid right_tree right_validity
+        in
+        let (model_premise @ total) :
+            (element : int) ->
+            {u : unit |
+              List_set.lookup_repr element left_elements
+              === List_set.lookup_repr element right_elements} =
+          fun element ->
+          let refine_ same_lookup = premise element in
+          let refine_ left_lookup =
+            Element_proofs.lookup_tree_elements element left_tree left_validity
+          in
+          let refine_ right_lookup =
+            Element_proofs.lookup_tree_elements element right_tree
+              right_validity
+          in
+          let refine_ public_left = lookup_def element left in
+          let refine_ public_right = lookup_def element right in
+          refine_ proof
+        in
+        let refine_ same_model =
+          List_proofs.extensional_repr left_elements right_elements
+            model_premise
+        in
+        let refine_ reflexive =
+          List_proofs.same_repr_reflexive left_elements
+        in
+        let refine_ equal_equation = equal_def left right in
+        refine_ proof
+
+      let (size_zero @ total) (set : t) :
+          {u : unit | (size set === 0Z) === equal set empty} =
+        let empty_set = empty in
+        let refine_ tree = set in
+        let refine_ empty_tree = empty_set in
+        let tree_elements = elements tree in
+        let refine_ size_equation = size_def set in
+        let refine_ equal_equation = equal_def set empty_set in
+        let refine_ empty_elements = elements_def empty_tree in
+        let refine_ model_law = List_proofs.size_zero_repr tree_elements in
+        let u = () in
+        refine_ u
     end
+
+    end
+
+include Model_proofs.Set
