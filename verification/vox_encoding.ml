@@ -62,7 +62,7 @@ let opaque_key env ty =
 
 let sort env ty =
   match Vox_type.classify_payload env ty with
-  | Some Vox_type.Int -> Some Bv63
+  | Some Vox_type.Int -> Some Int63
   | Some Vox_type.Bool -> Some Bool
   | None -> Option.map (fun key -> Opaque (opaque_id key)) (opaque_key env ty)
 
@@ -100,23 +100,23 @@ let operation env ~function_type ~result_type name args =
   in
   let result =
     match name with
-    | "%addint" -> binary Bv63 Add
-    | "%subint" -> binary Bv63 Sub
-    | "%mulint" -> binary Bv63 Mul
+    | "%addint" -> binary Int63 Add
+    | "%subint" -> binary Int63 Sub
+    | "%mulint" -> binary Int63 Mul
     | "%divint" | "%modint" ->
       begin match args with
       | [_; Some (Integer 0L)] -> None
-      | _ -> binary Bv63 (if name = "%divint" then Div else Rem)
+      | _ -> binary Int63 (if name = "%divint" then Div else Rem)
       end
-    | "%negint" -> unary Bv63 Neg
+    | "%negint" -> unary Int63 Neg
     | "%equal" -> equality Eq
     | "%notequal" -> equality Ne
     | "%eq" -> physical_equality Eq
     | "%noteq" -> physical_equality Ne
-    | "%lessthan" | "%ltint" -> binary Bv63 Lt
-    | "%lessequal" | "%leint" -> binary Bv63 Le
-    | "%greaterthan" | "%gtint" -> binary Bv63 Gt
-    | "%greaterequal" | "%geint" -> binary Bv63 Ge
+    | "%lessthan" | "%ltint" -> binary Int63 Lt
+    | "%lessequal" | "%leint" -> binary Int63 Le
+    | "%greaterthan" | "%gtint" -> binary Int63 Gt
+    | "%greaterequal" | "%geint" -> binary Int63 Ge
     | "%boolnot" -> unary Bool Not
     | "%sequand" -> binary Bool And
     | "%sequor" -> binary Bool Or

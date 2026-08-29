@@ -24,7 +24,7 @@ let prove check loc query =
         Format.eprintf "  v%d: %s (%s)@." i (Vox_smt.Symbol.label s)
           (match Vox_smt.Symbol.sort s with
           | Bool -> "bool"
-          | Bv63 -> "int"
+          | Int63 -> "int"
           | Opaque _ -> "opaque"))
       query.Vox_smt.symbols;
     List.iteri
