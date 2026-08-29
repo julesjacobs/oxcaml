@@ -69,7 +69,7 @@ let guarded_case eval loc s (matched, condition) guard body rest =
 let rec sort env ty =
   match get_desc (Ctype.expand_head env ty) with
   | Trefine r -> sort env r.ref_payload
-  | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Bv63
+  | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Int63
   | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Bool
   | _ -> None
 
@@ -117,22 +117,22 @@ let operation env ty name args =
   in
   let result =
     match name with
-    | "%addint" -> binary Bv63 Add
-    | "%subint" -> binary Bv63 Sub
-    | "%mulint" -> binary Bv63 Mul
+    | "%addint" -> binary Int63 Add
+    | "%subint" -> binary Int63 Sub
+    | "%mulint" -> binary Int63 Mul
     | "%divint" | "%modint" ->
       begin match args with
       | [_; Some (Integer divisor)] when divisor <> 0L ->
-        binary Bv63 (if name = "%divint" then Div else Rem)
+        binary Int63 (if name = "%divint" then Div else Rem)
       | _ -> None
       end
-    | "%negint" -> unary Bv63 Neg
+    | "%negint" -> unary Int63 Neg
     | "%equal" | "%eq" -> equality Eq
     | "%notequal" | "%noteq" -> equality Ne
-    | "%lessthan" | "%ltint" -> binary Bv63 Lt
-    | "%lessequal" | "%leint" -> binary Bv63 Le
-    | "%greaterthan" | "%gtint" -> binary Bv63 Gt
-    | "%greaterequal" | "%geint" -> binary Bv63 Ge
+    | "%lessthan" | "%ltint" -> binary Int63 Lt
+    | "%lessequal" | "%leint" -> binary Int63 Le
+    | "%greaterthan" | "%gtint" -> binary Int63 Gt
+    | "%greaterequal" | "%geint" -> binary Int63 Ge
     | "%boolnot" -> unary Bool Not
     | "%sequand" -> binary Bool And
     | "%sequor" -> binary Bool Or
