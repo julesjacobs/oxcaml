@@ -228,7 +228,7 @@ let operation env function_type result_type name args =
 
 let function_call ctx env ty fn args =
   match fn, signature env ty (List.length args) with
-  | Some (Function fn), Some (arguments, ((Bool | Bv63) as result)) ->
+  | Some (Function fn), Some (arguments, ((Bool | Int63) as result)) ->
     let args = List.filter_map scalar args in
     if List.map term_sort args <> arguments
     then None
@@ -792,7 +792,7 @@ let check_termination ~prove ~self ~fn ~measure =
             (fun arg ->
               match sort arg.exp_env arg.exp_type with
               | Some Bool -> scalar_value (Boolean false)
-              | Some Bv63 -> scalar_value (Integer 0L)
+              | Some Int63 -> scalar_value (Integer 0L)
               | Some (Opaque _) -> reject arg
               | None -> reject arg)
             args
