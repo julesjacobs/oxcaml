@@ -394,6 +394,8 @@ datatype through a recursive-module constraint:
 module type S = sig
   type payload
   type t = Roll of (payload -> int) [@@inductive]
+  val coerce : t -> payload @@ total
+  val uncoerce : payload -> t @@ total
 end
 
 module Eliminate (X : S) = struct
@@ -409,6 +411,8 @@ module rec Closed :
   (S with type payload = Closed.t) = struct
   type payload = Closed.t
   type t = Roll of (payload -> int) [@@inductive]
+  let (coerce @ total) x = x
+  let (uncoerce @ total) x = x
 end
 
 module E = Eliminate (Closed)
@@ -419,21 +423,24 @@ let (omega @ total) () = delta (Closed.Roll delta)
 The check therefore treats a reachable abstract functor-parameter type as an
 unresolved cycle.
 
-The declaration check also applies to recursive module signatures. The
-recursive-signature path cannot justify an indirect occurrence in its own
-datatype:
+First-class module unpacking introduces the same dependency through a value
+instead of a functor parameter. Without an additional restriction, a generic
+total eliminator could be instantiated with `Closed`:
 
 ```ocaml
-module rec Internal : sig
-  type payload = Internal.t
-  type t = Roll of (payload -> int) [@@inductive]  (* rejected *)
-end = struct
-  type payload = Internal.t
-  type t = Roll of (payload -> int) [@@inductive]
-end
+let (run @ total) (module X : S) =
+  let (delta @ total) (x : X.t) =
+    match x with X.Roll f -> f (X.coerce x)
+  in
+  delta (X.Roll (fun x -> delta (X.uncoerce x)))
+
+let (omega @ total) () = run (module Closed)
 ```
 
-Treating `Internal.t` as an unrelated nominal type would miss this equation.
+For `Closed`, `X.payload` and `X.t` are equal, so `delta` reduces to itself.
+Recursive module signatures therefore cannot contain an `[@@inductive]`
+guarantee. This conservative rule also covers guarantees introduced through a
+module type abbreviation or a nested signature.
 
 The traversal also terminates when recursive modules transform type arguments
 on each step. Such a cycle is rejected when the same declaration is reached
