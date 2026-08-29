@@ -2696,7 +2696,7 @@ and transl_modtype_decl_aux env
 and transl_recmodule_modtypes env ~sig_modalities sdecls =
   let rec find_inductive_guarantee env mty =
     match Mtype.scrape env mty with
-    | Mty_ident _ | Mty_alias _ -> None
+    | Mty_ident _ | Mty_alias _ | Mty_for_hole -> None
     | Mty_functor (param, result, _) ->
         let env =
           match param with
