@@ -31,7 +31,8 @@ let () =
       | "bad-status" -> print_endline "probably"
       | "stdout-flood" -> print_endline (String.make (5 * 1024 * 1024) 'x')
       | "unknown" | "solver-timeout" -> print_endline "unknown"
-      | "sat" | "model-error" | "bad-model" | "decimal-model" | "unparsed-model"
+      | "sat" | "model-error" | "bad-model" | "decimal-model"
+      | "positive-out-of-range" | "negative-out-of-range" | "unparsed-model"
       | "wrong-model-shape" | "deep-model" | "flat-model" ->
         print_endline "sat"
       | "unsat-hang" ->
@@ -50,8 +51,11 @@ let () =
     | "(exit)" -> ()
     | line when String.starts_with ~prefix:"(get-value" line ->
       (match mode with
-      | "sat" -> print_endline ("((v0 #b" ^ String.make 63 '1' ^ "))")
-      | "decimal-model" -> print_endline "((v0 (_ bv9223372036854775807 63)))"
+      | "sat" -> print_endline "((v0 (- 1)))"
+      | "decimal-model" -> print_endline "((v0 -1))"
+      | "positive-out-of-range" -> print_endline "((v0 4611686018427387904))"
+      | "negative-out-of-range" ->
+        print_endline "((v0 (- 4611686018427387905)))"
       | "model-error" -> print_endline "(error \"model unavailable\")"
       | "unparsed-model" -> print_endline "((v0 unexpected))"
       | "bad-model" -> print_endline "((v0"
