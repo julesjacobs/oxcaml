@@ -1629,6 +1629,7 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope origin jkind =
     type_loc = loc;
     type_attributes = [];
     type_unboxed_default = false;
+    type_inductive = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -2658,6 +2659,122 @@ let expand_head_unif env ty =
 let expand_head env ty =
   try try_expand_head try_expand_safe env ty
   with Cannot_expand -> ty
+
+let is_inductive env ty =
+  match get_desc (expand_head env ty) with
+  | Tconstr (path, _, _) ->
+      (try (Env.find_type path env).type_inductive with Not_found -> false)
+  | _ -> false
+
+let declaration_can_pattern_match_total env root root_args decl =
+  let visited_direct_types = ref TypeSet.empty in
+  let visited_indirect_types = ref TypeSet.empty in
+  let active_declarations = ref Path.Map.empty in
+  let completed_declarations = ref Path.Map.empty in
+  let exception Not_definitely_nonrecursive in
+  let allow_direct_recursion = decl.type_inductive in
+  let rec visit_type direct ty =
+    let visited =
+      if direct then visited_direct_types else visited_indirect_types
+    in
+    if not (TypeSet.mem ty !visited) then begin
+      visited := TypeSet.add ty !visited;
+      match get_desc ty with
+      | Tconstr (path, args, _) ->
+        if Path.same path root then begin
+          if not (allow_direct_recursion
+                  && direct
+                  && List.equal eq_type args root_args)
+          then raise_notrace Not_definitely_nonrecursive
+        end else begin
+          let expanded = expand_head env ty in
+          if eq_type expanded ty then visit_declaration path args
+          else visit_type direct expanded
+        end
+      | Ttuple fields ->
+        List.iter (fun (_, ty) -> visit_type direct ty) fields
+      | Tvar _ | Tunivar _ -> ()
+      | _ -> Btype.iter_type_expr (visit_type false) ty
+    end
+  and visit_declaration path args =
+    (* Functor arguments and recursive-module approximations can be replaced
+       later, so their paths do not prove that they differ from [root]. *)
+    if Env.is_functor_arg path env then
+      raise_notrace Not_definitely_nonrecursive;
+    let completed =
+      Option.value
+        (Path.Map.find_opt path !completed_declarations)
+        ~default:[]
+    in
+    if List.exists (List.equal eq_type args) completed then ()
+    else match Path.Map.find_opt path !active_declarations with
+    | Some active_args ->
+      (* An exact revisit closes a nominal cycle. Changed arguments may keep
+         transforming forever, so reject instead of expanding the sequence. *)
+      if not (List.equal eq_type args active_args) then
+        raise_notrace Not_definitely_nonrecursive
+    | None ->
+      active_declarations := Path.Map.add path args !active_declarations;
+      Fun.protect
+        ~finally:(fun () ->
+          active_declarations := Path.Map.remove path !active_declarations)
+        (fun () ->
+          match Env.find_type path env with
+          | decl -> visit_representation false decl args
+          | exception Not_found -> ());
+      completed_declarations :=
+        Path.Map.add path (args :: completed) !completed_declarations
+  and visit_representation direct decl args =
+    let visit ty =
+      let ty =
+        if decl.type_params = [] then ty
+        else apply env decl.type_params ty args
+      in
+      visit_type direct ty
+    in
+    Option.iter visit decl.type_manifest;
+    match decl.type_kind with
+    | Type_variant (constructors, _, _) ->
+      List.iter
+        (fun constructor ->
+          Btype.iter_type_expr_cstr_args visit constructor.cd_args)
+        constructors
+    | Type_record (labels, _, _)
+    | Type_record_unboxed_product (labels, _, _) ->
+      List.iter (fun label -> visit label.ld_type) labels
+    | Type_abstract _ -> ()
+    | Type_open -> ()
+  in
+  try
+    visit_representation true decl root_args;
+    true
+  with
+  | Not_definitely_nonrecursive
+  | Cannot_apply -> false
+
+let can_pattern_match_total env ty =
+  let rec check seen ty =
+    match get_desc ty with
+    | Tconstr (path, args, _) ->
+        if Path.Set.mem path seen then false
+        else begin
+          match Env.find_type path env with
+          | decl ->
+              let expanded = expand_head env ty in
+              if not (eq_type expanded ty) then
+                check (Path.Set.add path seen) expanded
+              else begin match decl.type_kind with
+              | Type_variant _ | Type_record _
+              | Type_record_unboxed_product _ ->
+                declaration_can_pattern_match_total env path args decl
+              | Type_abstract _ | Type_open -> false
+              end
+          | exception Not_found -> false
+        end
+    | Tpoly (ty, _) -> check seen ty
+    | _ -> false
+  in
+  check Path.Set.empty ty
 
 let _ = forward_try_expand_safe := try_expand_safe
 
@@ -8586,6 +8703,7 @@ let rec nondep_type_decl env mid is_covariant decl =
       type_loc = decl.type_loc;
       type_attributes = decl.type_attributes;
       type_unboxed_default = decl.type_unboxed_default;
+      type_inductive = decl.type_inductive;
       type_uid = decl.type_uid;
       type_unboxed_version;
     }

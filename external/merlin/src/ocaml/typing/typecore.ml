@@ -1456,6 +1456,10 @@ let mark_partial_if_needed ~loc ~env : Typedtree.partial -> unit = function
   | Partial ->
     Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
 
+let mark_partial_if_not_total_pattern_type ~loc ~env ty =
+  if not (Ctype.can_pattern_match_total env ty) then
+    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
+
 let check_atomic_loc_of_finalized_repr ~loc ~env label record_repres lid =
   if not (Types.is_atomic label.lbl_mut) then
     raise (error (loc, env, Label_not_atomic lid));
@@ -1738,9 +1742,16 @@ type module_variables =
   | Modvars_rejected
   | Modvars_ignored
 
+type total_pattern_check =
+  { tpc_loc : Location.t;
+    tpc_env : Env.t;
+    tpc_type : type_expr;
+  }
+
 type type_pat_state =
   { mutable tps_pattern_variables: pattern_variable list;
     mutable tps_pattern_force: (unit -> unit) list;
+    mutable tps_total_pattern_checks: total_pattern_check list;
     mutable tps_module_variables: module_variables;
     (* Mutation will not change the constructor of [tps_module_variables], just
        the contained [module_variables] list. [module_variables] could be made
@@ -1773,24 +1784,55 @@ let create_type_pat_state ?cont allow_modules =
   { tps_pattern_variables = continuation_variable cont;
     tps_module_variables;
     tps_pattern_force = [];
+    tps_total_pattern_checks = [];
   }
+
+let defer_partial_if_not_total_pattern_type tps ~loc ~env ty =
+  tps.tps_total_pattern_checks <-
+    { tpc_loc = loc; tpc_env = env; tpc_type = ty }
+    :: tps.tps_total_pattern_checks
+
+let run_total_pattern_checks checks =
+  let memo = ref [] in
+  List.iter
+    (fun { tpc_loc; tpc_env; tpc_type } ->
+      let total =
+        match
+          List.find_opt
+            (fun (env', ty', _) ->
+              tpc_env == env' && eq_type tpc_type ty')
+            !memo
+        with
+        | Some (_, _, total) -> total
+        | None ->
+          let total = Ctype.can_pattern_match_total tpc_env tpc_type in
+          memo := (tpc_env, tpc_type, total) :: !memo;
+          total
+      in
+      if not total then
+        Env.walk_locks_for_partial_construct ~env:tpc_env
+          (tpc_loc, Mode.Hint.Expression))
+    checks
 
 (* Copy mutable fields. Used in typechecking or-patterns. *)
 let copy_type_pat_state
       { tps_pattern_variables;
         tps_module_variables;
         tps_pattern_force;
+        tps_total_pattern_checks;
       }
   =
   { tps_pattern_variables;
     tps_module_variables;
     tps_pattern_force;
+    tps_total_pattern_checks;
   }
 
 let blit_type_pat_state ~src ~dst =
   dst.tps_pattern_variables <- src.tps_pattern_variables;
   dst.tps_module_variables <- src.tps_module_variables;
   dst.tps_pattern_force <- src.tps_pattern_force;
+  dst.tps_total_pattern_checks <- src.tps_total_pattern_checks;
 ;;
 
 let maybe_add_pattern_variables_ghost loc_let env pv =
@@ -3655,7 +3697,10 @@ and type_pat_aux
           ~containing_type:(instance record_ty)
       in
       let lbl_a_list = List.map (type_label_pat rep) lbl_a_list in
-      rvp @@ solve_expected (make_record_pat rep lbl_a_list ambiguity)
+      let pattern = solve_expected (make_record_pat rep lbl_a_list ambiguity) in
+      defer_partial_if_not_total_pattern_type
+        tps ~loc ~env:!!penv pattern.pat_type;
+      rvp pattern
   in
   match sp.ppat_desc with
     Ppat_any ->
@@ -3894,6 +3939,8 @@ and type_pat_aux
         solve_Ppat_construct tps penv loc constr no_existentials
           existential_styp expected_ty
       in
+      defer_partial_if_not_total_pattern_type
+        tps ~loc ~env:!!penv expected_ty;
 
       let rec check_non_escaping p =
         match p.ppat_desc with
@@ -3994,6 +4041,7 @@ and type_pat_aux
       let constant = (sarg = None) in
       let arg_type, row, pat_type =
         solve_Ppat_variant loc penv tag constant expected_ty in
+      defer_partial_if_not_total_pattern_type tps ~loc ~env:!!penv pat_type;
       let arg =
         (* PR#6235: propagate type information *)
         match sarg, arg_type with
@@ -4058,7 +4106,12 @@ and type_pat_aux
          [tps2]'s pattern forces, and we don't want to duplicate [tps]'s pattern
          forces. *)
       let tps1 = copy_type_pat_state tps in
-      let tps2 = {(copy_type_pat_state tps) with tps_pattern_force = []} in
+      let tps2 =
+        { (copy_type_pat_state tps) with
+          tps_pattern_force = [];
+          tps_total_pattern_checks = [];
+        }
+      in
       (* Introduce a new level to avoid keeping nodes at intermediate levels *)
       let pat_desc, _ = with_local_level_generalize
         ~before_generalize:(fun (_, tys) -> List.iter generalize tys)
@@ -4102,6 +4155,9 @@ and type_pat_aux
             *)
             tps_pattern_force =
               tps2.tps_pattern_force @ tps1.tps_pattern_force;
+            tps_total_pattern_checks =
+              tps2.tps_total_pattern_checks
+              @ tps1.tps_total_pattern_checks;
             tps_module_variables = tps1.tps_module_variables;
           }
         ~dst:tps;
@@ -4211,8 +4267,9 @@ let type_pattern
   let { tps_pattern_variables = pvs;
         tps_module_variables = mvs;
         tps_pattern_force = forces;
+        tps_total_pattern_checks = total_pattern_checks;
       } = tps in
-  (pat, !!new_penv, forces, pvs, mvs)
+  (pat, !!new_penv, forces, total_pattern_checks, pvs, mvs)
 
 let type_pattern_list
     category no_existentials env mutable_flag spatl expected_tys expected_sorts
@@ -4236,8 +4293,9 @@ let type_pattern_list
   let { tps_pattern_variables = pvs;
         tps_module_variables = mvs;
         tps_pattern_force = forces;
+        tps_total_pattern_checks = total_pattern_checks;
       } = tps in
-  (patl, !!new_penv, forces, pvs, mvs)
+  (patl, !!new_penv, forces, total_pattern_checks, pvs, mvs)
 
 let type_class_arg_pattern cl_num val_env met_env l spat =
   let pvs, pat =
@@ -4258,6 +4316,7 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
         finalize_variants pat;
       end;
       List.iter (fun f -> f()) tps.tps_pattern_force;
+      run_total_pattern_checks tps.tps_total_pattern_checks;
       (* CR layouts v5: value restriction here to be relaxed *)
       if is_optional l then
         unify_pat val_env pat
@@ -4320,6 +4379,7 @@ let type_self_pattern env spat =
       Jkind.Sort.(of_const Const.for_object)
   in
   List.iter (fun f -> f()) tps.tps_pattern_force;
+  run_total_pattern_checks tps.tps_total_pattern_checks;
   pat, tps.tps_pattern_variables
 
 type pat_tuple_arity =
@@ -4718,8 +4778,8 @@ let rec check_counter_example_pat
 
 let check_counter_example_pat ~counter_example_args penv tp expected_ty =
   (* [check_counter_example_pat] doesn't use [type_pat_state] in an interesting
-     way -- one of the functions it calls writes an entry into
-     [tps_pattern_forces] -- so we can just ignore module patterns. *)
+     way. Its deferred checks are intentionally ignored, as this pattern is not
+     part of the source program. *)
   let type_pat_state = create_type_pat_state Modules_ignored in
   wrap_trace_gadt_instances ~force:true !!penv
     (check_counter_example_pat ~info:counter_example_args ~penv
@@ -7880,6 +7940,7 @@ and type_expect_
         solve_Pexp_field ~label_usage:Env.Projection loc env sexp srecord Legacy
           lid
       in
+      mark_partial_if_not_total_pattern_type ~loc ~env record.exp_type;
       check_project_mutability ~loc:record.exp_loc ~env
         (Record_field label.lbl_name) label.lbl_mut mode;
       let is_contained_by : Mode.Hint.is_contained_by =
@@ -7948,6 +8009,7 @@ and type_expect_
         solve_Pexp_field ~label_usage:Env.Projection loc env sexp srecord
           Unboxed_product lid
       in
+      mark_partial_if_not_total_pattern_type ~loc ~env record.exp_type;
       if Types.is_mutable label.lbl_mut then
         fatal_error
           "Typecore.type_expect_: unboxed record labels are never mutable";
@@ -11586,6 +11648,7 @@ and map_half_typed_cases
    (* propagation of the argument *)
     with_local_level_generalize begin fun () ->
       let pattern_force = ref [] in
+      let total_pattern_checks = ref [] in
       (*  Format.printf "@[%i %i@ %a@]@." lev (get_current_level())
           Printtyp.raw_type_expr ty_arg; *)
       let half_typed_cases =
@@ -11598,11 +11661,12 @@ and map_half_typed_cases
                 with_local_level_generalize_structure
                   (fun () -> instance ?partial:take_partial_instance ty_arg)
               in
-              let (pat, ext_env, force, pvs, mvs) =
+              let (pat, ext_env, force, checks, pvs, mvs) =
                 type_pattern ?cont category ~lev ~alloc_mode:pat_mode env
                   pattern ty_arg sort_arg allow_modules
               in
               pattern_force := force @ !pattern_force;
+              total_pattern_checks := checks @ !total_pattern_checks;
               { typed_pat = pat;
                 pat_type_for_unif = ty_arg;
                 untyped_case;
@@ -11647,6 +11711,7 @@ and map_half_typed_cases
       end;
       (* `Contaminating' unifications start here *)
       List.iter (fun f -> f()) !pattern_force;
+      run_total_pattern_checks !total_pattern_checks;
       (* Post-processing and generalization *)
       if take_partial_instance <> None then unify_pats (instance ty_arg);
       List.iter (fun { pat_vars; _ } ->
@@ -12020,17 +12085,17 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   let (pat_list, exp_list, new_env, mvs, sorts, pvs) =
     with_local_level_generalize begin fun () ->
       if existential_context = At_toplevel then Typetexp.TyVarEnv.reset ();
-      let (pat_list, new_env, force, pvs, mvs), sorts =
+      let (pat_list, new_env, force, total_pattern_checks, pvs, mvs), sorts =
         with_local_level_generalize_structure_if_principal begin fun () ->
           let nvs, sorts =
             List.split (List.map (fun _ -> new_rep_var ~why:Let_binding ())
                           spatl)
           in
-          let (pat_list, _new_env, _force, pvs, _mvs as res) =
+          let (pat_list, _new_env, _force, _checks, pvs, _mvs as res) =
             with_local_level_generalize_if is_recursive (fun () ->
               type_pattern_list Value existential_context env mutable_flag spatl
                 nvs sorts allow_modules
-            ) ~before_generalize:(fun (_, _, _, pvs, _) ->
+            ) ~before_generalize:(fun (_, _, _, _, pvs, _) ->
                                     iter_pattern_variables_type generalize pvs)
           in
           (* If recursive, first unify with an approximation of the
@@ -12105,6 +12170,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
       in
       (* Only bind pattern variables after generalizing *)
       List.iter (fun f -> f()) force;
+      run_total_pattern_checks total_pattern_checks;
 
       let exp_list =
         (* See Note [add_module_variables after checking expressions]
@@ -12781,6 +12847,8 @@ and type_comprehension_clause ~loc ~comprehension_type ~container_type env
              ~loc ~comprehension_type ~container_type ~env tps)
           bindings
       in
+      List.iter (fun f -> f()) tps.tps_pattern_force;
+      run_total_pattern_checks tps.tps_total_pattern_checks;
       let env =
         let check s = Warnings.Unused_var { name = s; mutated = false } in
         let pvs = tps.tps_pattern_variables in

@@ -420,6 +420,7 @@ type unsafe_mode_crossing_mismatch =
 
 type type_mismatch =
   | Arity
+  | Inductiveness
   | Privacy of privacy_mismatch
   | Kind of kind_mismatch
   | Constraint of Errortrace.equality_error
@@ -808,6 +809,9 @@ let report_type_mismatch first second decl env ppf err =
   match err with
   | Arity ->
       pr "They have different arities."
+  | Inductiveness ->
+      pr "Their inductive guarantees differ;@ the guarantee can only be \
+          hidden@ behind an abstract type."
   | Privacy err ->
       report_privacy_mismatch ppf err
   | Kind err ->
@@ -1619,6 +1623,9 @@ let type_manifest env ty1 ty2 priv2 kind2 =
    context E where all type constructors are equal). *)
 let type_declarations_consistency env decl1 decl2 =
   if decl1.type_arity <> decl2.type_arity then Some Arity
+  else if decl1.type_inductive <> decl2.type_inductive
+       && (decl2.type_inductive || not (Btype.type_kind_is_abstract decl2))
+  then Some Inductiveness
   else match privacy_mismatch env decl1 decl2 with
     | Some err -> Some (Privacy err)
     | None -> None
