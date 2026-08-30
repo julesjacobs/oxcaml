@@ -26,6 +26,16 @@ val declarations : context -> data -> Vox_smt.datatype_declaration list
 val declarations_of_sort :
   context -> Vox_smt.sort -> Vox_smt.datatype_declaration list
 
+val sort_has_iarray : context -> Vox_smt.sort -> bool
+
+val is_iarray_sort : context -> Vox_smt.sort -> bool
+
+val iarray :
+  context ->
+  Env.t ->
+  Types.type_expr ->
+  (Vox_smt.sort * Vox_smt.sort option) option
+
 val primitive : Env.t -> Path.t -> (string * int) option
 
 val value_constant :

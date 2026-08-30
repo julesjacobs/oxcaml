@@ -84,6 +84,8 @@ type context =
   { encoding : Vox_encoding.context;
     mutable datatypes : datatype_declaration list;
     mutable functions : Function.t list;
+    mutable iarray_length : Function.t option;
+    iarray_contents : (sort, Function.t) Hashtbl.t;
     mutable free : value option Path.Map.t;
     mutable batches : command list list;
     symbolic : value option Symbolic_keys.t;
@@ -336,6 +338,73 @@ let rec erase_assertions code =
       | Choice (a, b) -> Some (Choice (erase_assertions a, erase_assertions b)))
     code
 
+let fact s _label term = branch s term
+
+let fresh_sort ctx label sort =
+  register_sort ctx sort;
+  let symbol = Symbol.create ~label sort in
+  Var symbol
+
+let iarray_length ctx iarray_sort array =
+  let function_ =
+    match ctx.iarray_length with
+    | Some function_ -> function_
+    | None ->
+      let function_ =
+        Function.create ~label:"Iarray.length" ~arguments:[iarray_sort]
+          ~result:Int63
+      in
+      ctx.iarray_length <- Some function_;
+      ctx.functions <- function_ :: ctx.functions;
+      function_
+  in
+  Call (function_, [array])
+
+let iarray_get ctx iarray_sort element_sort array index =
+  register_sort ctx element_sort;
+  let function_ =
+    match Hashtbl.find_opt ctx.iarray_contents element_sort with
+    | Some function_ -> function_
+    | None ->
+      let function_ =
+        Function.create ~label:"Iarray.get" ~arguments:[iarray_sort; Int63]
+          ~result:element_sort
+      in
+      Hashtbl.add ctx.iarray_contents element_sort function_;
+      ctx.functions <- function_ :: ctx.functions;
+      function_
+  in
+  Call (function_, [array; index])
+
+let iarray_value ctx env ty s values =
+  match iarray ctx.encoding env ty with
+  | Some (iarray_sort, element_sort) ->
+    let array = fresh_sort ctx "iarray" iarray_sort in
+    let s =
+      fact s "iarray literal"
+        (both Eq
+           (iarray_length ctx iarray_sort array)
+           (Integer (Int64.of_int (List.length values))))
+    in
+    let s =
+      match element_sort with
+      | None -> s
+      | Some element_sort ->
+        Misc.Stdlib.List.fold_lefti
+          (fun index s value ->
+            match scalar value with
+            | Some element when term_sort element = element_sort ->
+              fact s "iarray literal"
+                (both Eq
+                   (iarray_get ctx iarray_sort element_sort array
+                      (Integer (Int64.of_int index)))
+                   element)
+            | Some _ | None -> s)
+          s values
+    in
+    s, scalar_value array
+  | None -> s, None
+
 let fresh ?primitive ctx env ty label =
   match sort ctx.encoding env ty with
   | Some sort ->
@@ -409,10 +478,57 @@ let lookup ctx s env ty path =
         ctx.free <- Path.Map.add path value ctx.free;
         value))
 
+let iarray_call ctx value =
+  match scalar value with
+  | None -> None
+  | Some value ->
+    let sort = term_sort value in
+    if is_iarray_sort ctx.encoding sort then Some (sort, value) else None
+
 let operation ctx env function_type result_type name args =
-  scalar_option
-    (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
-       (List.map scalar args))
+  match name, args with
+  | "%array_length", [array] ->
+    begin match iarray_call ctx array with
+    | Some (iarray_sort, array) ->
+      scalar_value (iarray_length ctx iarray_sort array)
+    | None -> None
+    end
+  | "%array_safe_get", [array; index] ->
+    begin match
+      iarray_call ctx array, scalar index, sort ctx.encoding env result_type
+    with
+    | Some (iarray_sort, array), Some index, Some element_sort
+      when term_sort index = Int63 ->
+      scalar_value (iarray_get ctx iarray_sort element_sort array index)
+    | _ -> None
+    end
+  | _ ->
+    scalar_option
+      (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
+         (List.map scalar args))
+
+let normal_iarray_length ctx args s =
+  match args with
+  | [array] ->
+    begin match iarray_call ctx array with
+    | Some (iarray_sort, array) ->
+      fact s "iarray length"
+        (both Le (Integer 0L) (iarray_length ctx iarray_sort array))
+    | None -> s
+    end
+  | _ -> s
+
+let normal_iarray_get ctx args s =
+  match args with
+  | [array; index] ->
+    begin match iarray_call ctx array, scalar index with
+    | Some (iarray_sort, array), Some index when term_sort index = Int63 ->
+      let length = iarray_length ctx iarray_sort array in
+      fact s "normal return"
+        (both And (both Le (Integer 0L) index) (both Lt index length))
+    | _ -> s
+    end
+  | _ -> s
 
 let rec function_call ctx env ty fn args =
   match fn with
@@ -576,6 +692,7 @@ let rec predicate ctx env s e =
         in
         let s, value = eval s fn in
         let prim = stored_primitive prim value in
+        let s = match prim with Some ("%array_length", 1) -> normal_iarray_length ctx args s | _ -> s in
         if s.dead
         then s, None
         else
@@ -588,12 +705,11 @@ let rec predicate ctx env s e =
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
       let s, left = eval s left in
-      if s.dead
-      then s, None
-      else
-        name s
-          (scalar_value
-             (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
+      if s.dead then s, None else
+      let left = required e.rexp_loc left in
+      let right = required e.rexp_loc right in
+      if sort_has_iarray ctx.encoding (term_sort left) then unsupported e.rexp_loc
+      else name s (scalar_value (both Eq left right))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose s
@@ -965,6 +1081,10 @@ and expression_desc ctx s e =
     name s
       (opaque_if_unsupported
          (record_value ctx e.exp_env e.exp_type base fields))
+  | Texp_array (Immutable, _, elements, _) ->
+    let s, values = arguments_right_to_left eval s elements in
+    let s, value = iarray_value ctx e.exp_env e.exp_type s values in
+    s, opaque_if_unsupported value
   | Texp_field { record; label; _ } ->
     let s, value = eval s record in
     name s
@@ -988,7 +1108,7 @@ and expression_desc ctx s e =
     let s, right = eval s right in
     let s, left = eval s left in
     match scalar left, scalar right with
-    | Some left, Some right when term_sort left = term_sort right ->
+    | Some left, Some right when term_sort left = term_sort right && not (sort_has_iarray ctx.encoding (term_sort left)) ->
       name s (scalar_value (both Eq left right))
     | _ -> s, opaque ())
   | Texp_sequence (a, _, b) ->
@@ -1033,6 +1153,10 @@ and expression_desc ctx s e =
       match prim with
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
         branch s (Boolean false), None
+      | Some ("%array_length", 1) ->
+        name (normal_iarray_length ctx args s) (match value with Some _ -> value | None -> opaque ())
+      | Some ("%array_safe_get", 2) ->
+        name (normal_iarray_get ctx args s) (match value with Some _ -> value | None -> opaque ())
       | _ -> name s (match value with Some _ -> value | None -> opaque ()))
     end
   | Texp_function { params; body; _ } ->
@@ -1267,6 +1391,8 @@ let context ~prove ~verify_introductions =
   { encoding = Vox_encoding.create_context ();
     datatypes = [];
     functions = [];
+    iarray_length = None;
+    iarray_contents = Hashtbl.create 8;
     free = Path.Map.empty;
     batches = [];
     symbolic = Symbolic_keys.create 16;
