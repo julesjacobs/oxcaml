@@ -675,6 +675,14 @@ let mode_default mode =
 
 let mode_legacy = mode_default Value.legacy
 
+let total_mode () =
+  Value.of_const
+    { Value.Const.legacy with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable
+    }
+
 let total_immutable_mode () =
   Value.of_const
     { Value.Const.legacy with
