@@ -19,3 +19,37 @@ let () =
   assert (Vox_encoding.sort context Env.empty nested_iarray = Some sort);
   assert (
     Vox_encoding.iarray context Env.empty nested_iarray = Some (sort, Some sort))
+
+let () =
+  let context = Vox_encoding.create_context () in
+  let env = Lazy.force Env.initial in
+  let int_list = Predef.type_list Predef.type_int in
+  let data = Option.get (Vox_encoding.data context env int_list) in
+  let datatype = data.declaration.datatype in
+  let constructors = data.declaration.constructors in
+  assert (List.map Vox_smt.Constructor.label constructors = ["[]"; "::"]);
+  let cons = List.nth constructors 1 in
+  begin match Vox_smt.Constructor.fields cons with
+  | [(_, Vox_smt.Int63); (_, Vox_smt.Datatype tail)] -> assert (tail = datatype)
+  | _ -> assert false
+  end;
+  let nested = Predef.type_list int_list in
+  let nested_data = Option.get (Vox_encoding.data context env nested) in
+  assert (List.length (Vox_encoding.declarations context nested_data) = 2);
+  let bool_list = Predef.type_list Predef.type_bool in
+  let bool_data = Option.get (Vox_encoding.data context env bool_list) in
+  assert (bool_data.declaration.datatype <> datatype)
+
+let () =
+  let context = Vox_encoding.create_context () in
+  let env = Lazy.force Env.initial in
+  let element = Btype.newgenvar value_jkind in
+  let data =
+    Option.get (Vox_encoding.data context env (Predef.type_list element))
+  in
+  let datatype = data.declaration.datatype in
+  let cons = List.nth data.declaration.constructors 1 in
+  match Vox_smt.Constructor.fields cons with
+  | [(_, Vox_smt.Opaque _); (_, Vox_smt.Datatype tail)] ->
+    assert (tail = datatype)
+  | _ -> assert false

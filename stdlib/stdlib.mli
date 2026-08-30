@@ -804,7 +804,7 @@ external snd : ('a * 'b[@local_opt]) -> ('b[@local_opt]) = "%field1_immut"
    More list operations are provided in module {!List}.
 *)
 
-val ( @ ) : ('a : value_or_null) . 'a list -> 'a list -> 'a list
+val ( @ ) : ('a : value_or_null) . 'a list -> 'a list -> 'a list @@ total
 (** [l0 @ l1] appends [l1] to [l0]. Same function as {!List.append}.
   Right-associative operator, see {!Ocaml_operators} for more information.
   @since 5.1 this function is tail-recursive.

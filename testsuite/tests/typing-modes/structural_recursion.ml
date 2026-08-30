@@ -751,3 +751,20 @@ Lines 2-3, characters 0-51:
 3 |   (bad_shared shared_identity -> int) [@@inductive]
 Error: Invalid inductive declaration: recursive occurrences must be direct fields or tuple components.
 |}]
+
+module Standard_list = struct
+  let rec (length @ total) xs = match xs with
+    | [] -> 0
+    | _ :: tail -> 1 + length tail
+end
+[%%expect{|
+module Standard_list : sig val length : 'a list -> int end
+|}]
+
+let rec cyclic_list = 0 :: cyclic_list
+[%%expect{|
+Line 1, characters 22-38:
+1 | let rec cyclic_list = 0 :: cyclic_list
+                          ^^^^^^^^^^^^^^^^
+Error: This kind of expression is not allowed as right-hand side of "let rec"
+|}]

@@ -5,11 +5,13 @@
    We can delete this when internal ticket 1110 is resolved.
 *)
 
-type r = R of r list [@@unboxed]
-let rec a = R [a];;
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+type r = R of r recursive_list [@@unboxed]
+let rec a = R (Cons (a, Nil));;
 [%%expect{|
-type r = R of r list [@@unboxed]
-val a : r = R [<cycle>]
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+type r = R of r recursive_list [@@unboxed]
+val a : r = R (Cons (<cycle>, Nil))
 |}];;
 
 

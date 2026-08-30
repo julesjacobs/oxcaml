@@ -202,13 +202,7 @@ val unwrap_phantom : phantom_recursive -> unit = <fun>
 
 let (list_head @ total) = function [] -> 0 | x :: _ -> x
 [%%expect{|
-Line 1, characters 45-51:
-1 | let (list_head @ total) = function [] -> 0 | x :: _ -> x
-                                                 ^^^^^^
-Error: The expression is "partial"
-       but is expected to be "total"
-         because it is used inside the function at line 1, characters 26-56
-         which is expected to be "total".
+val list_head : int list -> int = <fun>
 |}]
 
 type ordinary_nat_alias = ordinary_nat
