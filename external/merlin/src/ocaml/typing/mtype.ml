@@ -165,6 +165,8 @@ and strengthen_lazy_sig' ~aliasable sg p =
       in
       sigelt :: strengthen_lazy_sig' ~aliasable rem p
 
+(* This is a comparison copy, so preserve bound signature identifiers.
+   [Subst.signature Keep] refreshes them. *)
 and subst_signature_value_paths subst (sg : Types.signature) : Types.signature =
   List.map
     (function
