@@ -65,6 +65,51 @@ val separate_instances :
   <fun>
 |}]
 
+module Nullary = struct
+  type 'a maybe = Empty | Other [@@inductive]
+  let polymorphic_empty = Empty
+  type 'a maybe_alias = 'a maybe = Empty | Other [@@inductive]
+
+  let instantiate_empty_int () : {r : int maybe | r === Empty} =
+    let (empty @ total) : int maybe = polymorphic_empty in
+    refine_ empty
+
+  let instantiate_empty_bool () : {r : bool maybe | r === Empty} =
+    let (empty @ total) : bool maybe = polymorphic_empty in
+    refine_ empty
+
+  let instantiate_empty_alias () : {r : int maybe_alias | r === Empty} =
+    let (empty @ total) : int maybe_alias = polymorphic_empty in
+    refine_ empty
+end;;
+[%%expect{|
+module Nullary :
+  sig
+    type 'a maybe = Empty | Other
+    [@@inductive]
+    val polymorphic_empty : 'a maybe
+    type 'a maybe_alias = 'a maybe = Empty | Other
+    [@@inductive]
+    val instantiate_empty_int : unit -> {r : int maybe | r === Empty}
+    val instantiate_empty_bool : unit -> {r : bool maybe | r === Empty}
+    val instantiate_empty_alias : unit -> {r : int maybe_alias | r === Empty}
+  end
+|}]
+
+module Wrong_nullary = struct
+  type 'a maybe = Empty | Other [@@inductive]
+  let polymorphic_empty = Empty
+  let wrong_empty () : {r : int maybe | r === Other} =
+    let (empty @ total) : int maybe = polymorphic_empty in
+    refine_ empty
+end;;
+[%%expect{|
+Line 6, characters 4-17:
+6 |     refine_ empty
+        ^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
 let alias (p : pair) : {r : pair | r === p} =
   match p with
   | (Pair (_, _) as whole) ->

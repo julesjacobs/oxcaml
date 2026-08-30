@@ -365,6 +365,12 @@ let data ctx env ty =
   | Some (Datatype _), Some key -> Type_keys.find_opt ctx.data_by_key key
   | _ -> None
 
+let same_nominal_data_type env left right =
+  match type_key env left, type_key env right with
+  | Some (Constructor (source, _)), Some (Constructor (expected, _)) ->
+    Path.same source expected
+  | _ -> false
+
 let declarations_of_sort ctx = function
   | Datatype datatype ->
     begin match Hashtbl.find_opt ctx.data_by_datatype datatype with

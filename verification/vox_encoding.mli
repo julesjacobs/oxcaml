@@ -19,6 +19,8 @@ type data =
 
 val data : context -> Env.t -> Types.type_expr -> data option
 
+val same_nominal_data_type : Env.t -> Types.type_expr -> Types.type_expr -> bool
+
 val declarations : context -> data -> Vox_smt.datatype_declaration list
 
 val declarations_of_sort :

@@ -352,10 +352,28 @@ let symbolic_path ctx env ty path =
       value
     end
 
+let reinstantiate_nullary_constructor ctx env ty path constructor =
+  match Subst.Lazy.force_value_description (Env.find_value path env) with
+  | source
+    when Constructor.fields constructor = []
+         && same_nominal_data_type env source.val_type ty ->
+    construct ctx env ty (Constructor.label constructor) []
+  | _ -> None
+  | exception Not_found -> None
+
 let instantiate_path ctx env ty path value =
   match value, sort ctx.encoding env ty with
   | Some (Scalar term), Some expected when term_sort term <> expected ->
-    symbolic_path ctx env ty path
+    begin match term with
+    | Construct (constructor, []) ->
+      begin match
+        reinstantiate_nullary_constructor ctx env ty path constructor
+      with
+      | Some _ as value -> value
+      | None -> symbolic_path ctx env ty path
+      end
+    | _ -> symbolic_path ctx env ty path
+    end
   | _ -> value
 
 let lookup ctx s env ty path =
