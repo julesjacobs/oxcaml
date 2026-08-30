@@ -3787,7 +3787,6 @@ let add_types_to_env ~shapes decls env =
       add_type ~long_path:false ~check:true ~shape id decl env)
     decls shapes env
 
-(* Translate a set of type declarations, mutually recursive or not *)
 let check_inductive_decl env ~single id decl =
   if decl.type_inductive then begin
     let reject reason =
@@ -3851,6 +3850,7 @@ let check_inductive_decl env ~single id decl =
     | _ -> reject "a closed variant declaration is required"
   end
 
+(* Translate a set of type declarations, mutually recursive or not *)
 let transl_type_decl env rec_flag sdecl_list =
   List.iter check_redefined_unit sdecl_list;
   (* Add dummy types for fixed rows *)
