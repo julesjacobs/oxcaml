@@ -284,7 +284,7 @@ let rec function_call ctx env ty fn args =
       (function_call ctx env ty (Some (Function b)) args)
   | _ -> (
     match fn, signature env ty (List.length args) with
-    | Some (Function fn), Some (arguments, ((Bool | Int63) as result)) ->
+    | Some (Function fn), Some (arguments, result) ->
       let args = List.filter_map scalar args in
       if List.map term_sort args <> arguments
       then None
