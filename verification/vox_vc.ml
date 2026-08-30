@@ -6,6 +6,7 @@ open Vox_encoding
 type function_value =
   { label : string;
     instances : Function.t list ref;
+    primitive : (string * int) option;
     choice : (term * function_value * function_value) option;
     total : bool
   }
@@ -41,6 +42,7 @@ let join_value condition a b =
            { label = "choice";
              instances = ref [];
              choice = Some (condition, a, b);
+             primitive = (if a.primitive = b.primitive then a.primitive else None);
              total = a.total && b.total
            })
     | _ -> None
@@ -231,14 +233,14 @@ let rec erase_assertions code =
       | Choice (a, b) -> Some (Choice (erase_assertions a, erase_assertions b)))
     code
 
-let fresh _ctx env ty label =
+let fresh ?primitive _ctx env ty label =
   match sort env ty with
   | Some sort -> scalar_value (fresh_symbol sort label)
   | None -> (
     match get_desc (Ctype.expand_head env ty) with
     | Tarrow _ ->
       Some
-        (Function { label; instances = ref []; choice = None; total = false })
+        (Function { label; instances = ref []; choice = None; primitive; total = false })
     | _ -> None)
 
 let symbolic_path ctx env ty path =
@@ -269,7 +271,9 @@ let lookup ctx s env ty path =
     match Path.Map.find_opt path ctx.free with
     | Some value -> instantiate_path ctx env ty path value
     | None ->
-      let value = fresh ctx env ty (Path.name path) in
+      let value =
+        fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
+      in
       ctx.free <- Path.Map.add path value ctx.free;
       value)
 
@@ -317,6 +321,10 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
   | Some _ -> value
   | None when total -> function_call ctx env fn_type fn args
   | None -> None
+
+let stored_primitive syntax = function
+  | Some (Function { primitive = Some _ as primitive; _ }) -> primitive
+  | _ -> syntax
 
 let constant c = scalar_option (Vox_encoding.constant c)
 
@@ -377,6 +385,7 @@ let rec predicate ctx env s e =
           arguments_right_to_left (fun s (_, e) -> eval s e) s args
         in
         let s, value = eval s fn in
+        let prim = stored_primitive prim value in
         if s.dead
         then s, None
         else
@@ -644,6 +653,7 @@ and expression_desc ctx s e =
       let s, args = arguments_right_to_left argument s args in
       if not s.dead then ctx.check_call ctx s e args;
       let s, fn_value = eval s fn in
+      let prim = stored_primitive prim fn_value in
       let total =
         match fn_value with Some (Function { total; _ }) -> total | _ -> false
       in
