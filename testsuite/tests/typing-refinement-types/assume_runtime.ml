@@ -52,6 +52,21 @@ let () =
   let refine_ result = checked in
   ensure (r == result)
 
+external[@layout_poly] any_array_length :
+  ('a : any mod separable).
+  'a array @ immutable contended -> int @@ total = "%array_length"
+
+type ('a : any mod separable) nonempty_array =
+  { a : 'a array | any_array_length a > 0 }
+
+let () =
+  let value = [| 0 |] in
+  let checked : int nonempty_array = assume_ value in
+  ignore checked;
+  let nonvalue = [| #0.0 |] in
+  let checked : float# nonempty_array = assume_ nonvalue in
+  ignore checked
+
 external equal : int -> int -> bool @@ total = "%equal"
 type shadowed_value = { v : int | equal v 0 }
 let equal _ _ = false
