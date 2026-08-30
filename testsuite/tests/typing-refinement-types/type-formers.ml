@@ -688,3 +688,194 @@ module Make_alias :
 module Applied_alias : sig type t = {x : int | Stable.holds x} end
 type applied_alias = Applied_alias.t
 |}]
+
+module type Result_signature = sig
+  val holds : int -> bool @@ total
+  type t = { x : int | holds x }
+  module Refined : sig
+    val accept : { x : int | holds x } -> unit @@ total
+  end
+end
+
+module Make_result (P : Predicate) : Result_signature = struct
+  let (holds @ total) = P.holds
+  type t = { x : int | holds x }
+  module Refined = struct
+    external accept : { x : int | holds x } -> unit @@ total = "%ignore"
+  end
+end
+
+module Outer_modtype : sig
+  module type R = Result_signature
+  module N : R
+end = struct
+  module type R = Result_signature
+  module N = Make_result (Nonzero)
+end;;
+[%%expect{|
+module type Result_signature =
+  sig
+    val holds : int -> bool @@ total
+    type t = {x : int | holds x}
+    module Refined :
+      sig val accept : {x : int | holds x} -> unit @@ total end
+  end
+module Make_result : functor (P : Predicate) -> Result_signature
+module Outer_modtype : sig module type R = Result_signature module N : R end
+|}]
+
+module Result = Make_result (Nonzero)
+module Result_alias = Result
+module Result_again = Make_result (Nonzero);;
+[%%expect{|
+module Result :
+  sig
+    val holds : int -> bool @@ total
+    type t = {x : int | holds x}
+    module Refined :
+      sig val accept : {x : int | holds x} -> unit @@ total end
+  end
+module Result_alias = Result
+module Result_again :
+  sig
+    val holds : int -> bool @@ total
+    type t = {x : int | holds x}
+    module Refined :
+      sig val accept : {x : int | holds x} -> unit @@ total end
+  end
+|}]
+
+module Shadowed : sig
+  val holds : int -> bool @@ total
+  type hidden = { x : int | holds x }
+  val holds : int -> bool @@ total
+  type exported = { x : int | holds x }
+end = struct
+  let (holds @ total) (_ : int) = true
+  type hidden = { x : int | holds x }
+  let (holds @ total) (_ : int) = false
+  type exported = { x : int | holds x }
+end;;
+[%%expect{|
+module Shadowed :
+  sig
+    type hidden : immediate
+    val holds : int -> bool @@ total
+    type exported = {x : int | holds x}
+  end
+|}]
+
+let hidden_is_not_exported : Shadowed.hidden list =
+  ([] : Shadowed.exported list);;
+[%%expect{|
+Line 2, characters 2-31:
+2 |   ([] : Shadowed.exported list);;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This expression has type "Shadowed.exported list"
+       but an expression was expected of type "Shadowed.hidden list"
+       Type "Shadowed.exported" = "{x : int | Shadowed.holds x}"
+       is not compatible with type "Shadowed.hidden"
+|}]
+
+module Missing_nested_constraint : sig
+  module N : sig val y : string end
+end = struct
+  module N = struct let x = 0 end
+end;;
+[%%expect{|
+Lines 3-5, characters 6-3:
+3 | ......struct
+4 |   module N = struct let x = 0 end
+5 | end..
+Error: Signature mismatch:
+       Modules do not match:
+         sig module N : sig val x : int end end
+       is not included in
+         sig module N : sig val y : string end end
+       In module "N":
+       Modules do not match:
+         sig val x : int end
+       is not included in
+         sig val y : string end
+       In module "N":
+       The value "y" is required but not provided
+|}]
+
+let accept_result (x : Result.t) = Result.Refined.accept x
+let accept_alias (x : Result_alias.t) = Result.Refined.accept x
+let accept_applicative (x : Make_result(Nonzero).t) =
+  Result.Refined.accept x;;
+[%%expect{|
+val accept_result : Result.t -> unit = <fun>
+val accept_alias : Result_alias.t -> unit = <fun>
+Line 4, characters 24-25:
+4 |   Result.Refined.accept x;;
+                            ^
+Error: The value "x" has type
+         "Make_result(Nonzero).t" = "{x : int | Make_result(Nonzero).holds x}"
+       but an expression was expected of type "{x : int | Result.holds x}"
+|}]
+
+module Empty = struct end
+let choose_positive = ref true
+module Positive : Predicate = struct
+  let (holds @ total) x = gt x 0
+end
+module Nontrivial : Predicate = struct
+  let (holds @ total) x = gt x 1
+end
+
+module Unstable (_ : sig end) : Result_signature = struct
+  let (holds @ total) =
+    if !choose_positive then Positive.holds else Nontrivial.holds
+  type t = { x : int | holds x }
+  module Refined = struct
+    external accept : { x : int | holds x } -> unit @@ total = "%ignore"
+  end
+end
+
+module First = Unstable (Empty)
+let () = choose_positive := false
+module Second = Unstable (Empty);;
+[%%expect{|
+module Empty : sig end
+val choose_positive : bool ref = {contents = true}
+module Positive : Predicate
+module Nontrivial : Predicate
+module Unstable : sig end -> Result_signature
+module First :
+  sig
+    val holds : int -> bool @@ total
+    type t = {x : int | holds x}
+    module Refined :
+      sig val accept : {x : int | holds x} -> unit @@ total end
+  end
+module Second :
+  sig
+    val holds : int -> bool @@ total
+    type t = {x : int | holds x}
+    module Refined :
+      sig val accept : {x : int | holds x} -> unit @@ total end
+  end
+|}]
+
+let first_is_not_second (x : First.t) : Second.t = x;;
+[%%expect{|
+Line 1, characters 51-52:
+1 | let first_is_not_second (x : First.t) : Second.t = x;;
+                                                       ^
+Error: The value "x" has type "First.t" = "{x : int | First.holds x}"
+       but an expression was expected of type
+         "Second.t" = "{x : int | Second.holds x}"
+|}]
+
+let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
+[%%expect{|
+Line 1, characters 60-61:
+1 | let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
+                                                                ^
+Error: The value "x" has type
+         "Unstable(Empty).t" = "{x : int | Unstable(Empty).holds x}"
+       but an expression was expected of type
+         "First.t" = "{x : int | First.holds x}"
+|}]

@@ -903,6 +903,10 @@ and equate_one_functor_param subst env arg2' name1 name2  =
 and strengthened_modtypes ~core ~direction ~loc ~aliasable env
     subst mty1 path1 mty2 shape =
   let mty1 = Mtype.strengthen_lazy ~aliasable mty1 path1 in
+  let mty1 =
+    Mtype.prefix_refinement_paths_lazy env Subst.identity mty1 path1
+  in
+  let mty2 = Mtype.prefix_refinement_paths_lazy env subst mty2 path1 in
   modtypes ~core ~direction ~loc env subst mty1 mty2 shape
 
 and strengthened_module_decl ~loc ~aliasable ~core ~direction env
