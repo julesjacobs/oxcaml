@@ -318,11 +318,7 @@ end = struct
   let (identity @ total) x = x
 end
 [%%expect{|
-Lines 1-3, characters 22-3:
-1 | ......................sig
-2 |   val identity : nat -> nat @@ total
-3 | end.........
-Error: Type "nat" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
+module rec Uses_nat : sig val identity : nat -> nat @@ total end
 |}]
 
 module rec Nested : sig

@@ -123,7 +123,33 @@ Lines 2-6, characters 22-5:
 4 |     val into : t -> Roller(Closed).t @@ total
 5 |     val out : Roller(Closed).t -> t @@ total
 6 |   end.........
-Error: Type "Roller(Closed).t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
+Error: The type of total value "into" depends on the current recursive module group.
+|}]
+
+module rec Closed : sig
+  type t
+  val pack : (t -> int) -> t @@ total
+  val apply : t -> t -> int @@ total
+end = struct
+  module Local = struct
+    type t = T of (Closed.t -> int) [@@inductive]
+    let (pack @ total) x = T x
+    let (apply @ total) (T f) x = f x
+  end
+  type t = Local.t
+  let pack = Local.pack
+  let apply = Local.apply
+end
+let (delta @ total) x = Closed.apply x x
+let (omega @ total) () = delta (Closed.pack delta)
+[%%expect{|
+Lines 1-5, characters 20-3:
+1 | ....................sig
+2 |   type t
+3 |   val pack : (t -> int) -> t @@ total
+4 |   val apply : t -> t -> int @@ total
+5 | end.........
+Error: The type of total value "pack" depends on the current recursive module group.
 |}]
 
 module type Eliminable = sig
@@ -155,4 +181,35 @@ Line 9, characters 4-43:
 9 |     Eliminable with type payload = Closed.t = struct
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Type "Closed.t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
+|}]
+
+type 'a roll = Roll of ('a -> int) [@@inductive]
+
+module rec Closed : sig
+  type t
+  val into : t -> t roll @@ total
+  val out : t roll -> t @@ total
+end = struct
+  module Local = struct
+    type t = T of Closed.t roll [@@inductive]
+    let (into @ total) (T x) = x
+    let (out @ total) x = T x
+  end
+  type t = Local.t
+  let into = Local.into
+  let out = Local.out
+end
+
+let (delta @ total) (x : Closed.t) =
+  match Closed.into x with Roll f -> f x
+let (omega @ total) () = delta (Closed.out (Roll delta))
+[%%expect{|
+type 'a roll = Roll of ('a -> int) [@@inductive]
+Lines 3-7, characters 20-3:
+3 | ....................sig
+4 |   type t
+5 |   val into : t -> t roll @@ total
+6 |   val out : t roll -> t @@ total
+7 | end.........
+Error: The type of total value "into" depends on the current recursive module group.
 |}]
