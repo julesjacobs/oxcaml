@@ -51,14 +51,14 @@ end
 
 open Or_missing.Syntax
 
-module rec Types : sig
+module Types = struct
   type closure =
     { clo_params : Slambdaident.t array;
       clo_body : slambda;
-      clo_env : Env.t
+      clo_env : env
     }
 
-  type halves =
+  and halves =
     { slv_comptime : value Or_missing.t;
       slv_runtime : lambda
     }
@@ -68,11 +68,12 @@ module rec Types : sig
     | SLVlayout of layout
     | SLVrecord of value Or_missing.t array
     | SLVclosure of closure
-end =
-  Types
 
-and Env : sig
-  type t
+  and env = value Slambdaident.Map.t
+end
+
+module Env : sig
+  type t = Types.env
 
   val empty : t
 
