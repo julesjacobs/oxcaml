@@ -557,10 +557,13 @@ module Test_lazy_call = struct
     match n with Z -> 0 | S child -> let _ = lazy (lazy_call child) in 0
 end
 [%%expect{|
-Line 3, characters 51-60:
+Line 3, characters 45-67:
 3 |     match n with Z -> 0 | S child -> let _ = lazy (lazy_call child) in 0
-                                                       ^^^^^^^^^
-Error: This recursive function cannot be total: the recursive function occurs in a delayed body.
+                                                 ^^^^^^^^^^^^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 2-3, characters 30-72
+         which is expected to be "total".
 |}]
 module Test_type_call = struct
   let rec (type_call @ total) (n @ immutable) =
@@ -595,7 +598,13 @@ module Test_allocating = struct
     match n with Z -> ref 0 | S child -> allocating child
 end
 [%%expect{|
-module Test_allocating : sig val allocating : reexport -> int ref end
+Line 3, characters 22-25:
+3 |     match n with Z -> ref 0 | S child -> allocating child
+                          ^^^
+Error: The value "ref" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 2-3, characters 31-57
+         which is expected to be "total".
 |}]
 module Test_labelled = struct
   let rec (labelled @ total) ~n =
