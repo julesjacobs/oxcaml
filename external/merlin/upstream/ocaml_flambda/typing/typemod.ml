@@ -4388,8 +4388,9 @@ let type_module_alias env smod =
   type_module_maybe_hold_locks ~alias:true ~hold_locks:true ~strengthen:true
     ~funct_body:false None env smod
 
-let type_module =
-  type_module ~strengthen:true ~funct_body:false None
+let type_module env smod =
+  check_refinement_types_options ();
+  type_module ~strengthen:true ~funct_body:false None env smod
 let type_module_maybe_hold_locks =
   type_module_maybe_hold_locks ~strengthen:true ~funct_body:false None
 let type_structure env sstr =
