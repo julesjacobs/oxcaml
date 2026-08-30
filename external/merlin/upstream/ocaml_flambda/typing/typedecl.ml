@@ -3823,13 +3823,6 @@ let check_inductive_decl env ~single id decl =
               let expanded = Ctype.expand_head env ty in
               if not (eq_type ty expanded) then check visiting direct expanded
               else begin
-                (match Env.find_type p env with
-                 | { type_kind = Type_abstract _; type_manifest = None; _ }
-                   when not direct && Env.is_functor_arg p env ->
-                   reject
-                     "module-parameter and recursive-module dependencies must \
-                      occur only as direct fields or tuple components"
-                 | _ | exception Not_found -> ());
                 Btype.iter_type_expr (check visiting false) ty
               end;
               checked_aliases :=

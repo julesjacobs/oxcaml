@@ -2694,6 +2694,33 @@ and transl_modtype_decl_aux env
   newenv, mtd, decl
 
 and transl_recmodule_modtypes env ~sig_modalities sdecls =
+  let find_inductive_type env item =
+    let exception Found of string in
+    try
+      with_type_mark begin fun mark ->
+        let super = Btype.type_iterators mark in
+        let iterator =
+          { super with
+            Btype.it_type_expr = (fun self ty ->
+              match get_desc ty with
+              | Tconstr (path, _, _) ->
+                begin match Env.find_type path env with
+                | { type_inductive = true; _ } ->
+                  raise_notrace (Found (Path.name path))
+                | _ | exception Not_found ->
+                  let expanded = Ctype.expand_head env ty in
+                  if eq_type expanded ty
+                  then super.Btype.it_type_expr self ty
+                  else self.Btype.it_type_expr self expanded
+                end
+              | _ -> super.Btype.it_type_expr self ty)
+          }
+        in
+        iterator.Btype.it_signature_item iterator item
+      end;
+      None
+    with Found name -> Some name
+  in
   let rec find_inductive_guarantee env mty =
     match Mtype.scrape env mty with
     | Mty_ident _ | Mty_alias _ | Mty_for_hole -> None
@@ -2720,9 +2747,9 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
         find_inductive_guarantee env decl.md_type
     | Sig_modtype (_, { mtd_type = Some mty; _ }, _) ->
         find_inductive_guarantee env mty
-    | Sig_value _ | Sig_type _ | Sig_typext _ | Sig_modtype _ | Sig_class _
-    | Sig_class_type _ | Sig_jkind _ ->
-        None
+    | (Sig_value _ | Sig_type _ | Sig_typext _ | Sig_modtype _ | Sig_class _
+      | Sig_class_type _ | Sig_jkind _) as item ->
+        find_inductive_type env item
   in
   let make_env curr =
     List.fold_left (fun env (id_shape, _, md, mode, _, _) ->

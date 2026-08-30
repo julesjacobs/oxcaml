@@ -6901,6 +6901,12 @@ let with_primitive_mode_checks ?defer f =
     (List.rev !checks);
   result
 
+let rec module_expression_is_alias module_expr =
+  match module_expr.pmod_desc with
+  | Pmod_ident _ -> true
+  | Pmod_constraint (module_expr, _, _) ->
+    module_expression_is_alias module_expr
+  | _ -> false
 let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
     env expected_mode sexp =
   (* We now delegate everything to type_expect *)
@@ -7026,6 +7032,16 @@ and type_expect_
              expected_type)
           lid_sexp_list
       in
+      if
+        List.exists
+          (fun (_, label, _) ->
+            Array.exists
+              (fun label -> Types.is_mutable label.lbl_mut)
+              label.lbl_all)
+          lbl_a_list
+      then
+        Env.walk_locks_for_partial_construct ~env
+          (loc, Mode.Hint.Expression);
       let repres_might_allocate (type rep) (record_form : rep record_form)
             (rep : rep) =
         match record_form with
@@ -8134,6 +8150,11 @@ and type_expect_
         }
         | Immutable -> Immutable
       in
+      (match mutability with
+       | Mutable _ ->
+         Env.walk_locks_for_partial_construct ~env
+           (loc, Mode.Hint.Expression)
+       | Immutable -> ());
       let alloc_mode, array_mode = register_allocation ~loc expected_mode in
       let modalities = Typemode.mutable_modalities mutability in
       let is_contained_by : Mode.Hint.is_contained_by =
@@ -8593,6 +8614,9 @@ and type_expect_
           assert false
       end
   | Pexp_letmodule(name, smodl, sbody) ->
+      if not (module_expression_is_alias smodl) then
+        Env.walk_locks_for_partial_construct ~env
+          (smodl.pmod_loc, Mode.Hint.Expression);
       let lv = get_current_level () in
       let (id, pres, modl, _, body) =
         with_local_level_generalize begin fun () ->
@@ -8650,6 +8674,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_letexception(cd, sbody) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let (cd, newenv, _shape) = Typedecl.transl_exception env cd in
       let body =
         type_expect newenv expected_mode sbody ty_expected_explained
@@ -8688,6 +8713,7 @@ and type_expect_
         exp_env = env;
       }
   | Pexp_lazy e ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let expected_mode, closure_mode = mode_lazy expected_mode in
       let ty = newgenvar (Jkind.Builtin.value ~why:Lazy_expression) in
       let to_unify = Predef.type_lazy_t ty in
@@ -8766,6 +8792,9 @@ and type_expect_
     type_newtype_expr ~loc ~env ~expected_mode ~rue ~attributes:sexp.pexp_attributes
       name jkind sbody
   | Pexp_pack (m, optyp) ->
+      if not (module_expression_is_alias m) then
+        Env.walk_locks_for_partial_construct ~env
+          (m.pmod_loc, Mode.Hint.Expression);
       begin match optyp with
       | Some ptyp ->
         let t = Ast_helper.Typ.package ~loc:ptyp.ppt_loc ptyp in
@@ -8819,9 +8848,12 @@ and type_expect_
             exp_env = env }
       end
   | Pexp_open (od, e) ->
-      begin match od with
-      | { popen_expr = { pmod_desc = Pmod_ident _ } } -> ()
-      | _ -> Env.check_no_open_quotations loc env Open_qt
+      begin match module_expression_is_alias od.popen_expr with
+      | true -> ()
+      | false ->
+        Env.walk_locks_for_partial_construct ~env
+          (od.popen_expr.pmod_loc, Mode.Hint.Expression);
+        Env.check_no_open_quotations loc env Open_qt
       end;
       let tv = newvar (Jkind.Builtin.any ~why:Dummy_jkind) in
       begin match !type_open_decl env od with
