@@ -17,9 +17,7 @@ let dependent_argument_mode : Alloc.Const.t =
   { Alloc.Const.legacy with
     totality = Totality.Const.Total;
     statefulness = Statefulness.Const.Stateless;
-    portability = Portability.Const.Portable;
-    visibility = Visibility.Const.Immutable;
-    contention = Contention.Const.Contended
+    portability = Portability.Const.Portable
   }
 
 type 'ax annot_type =
