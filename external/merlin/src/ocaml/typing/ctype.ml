@@ -8880,7 +8880,10 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
             match binder with
             | None -> None, nondep_type_rec env ids ret
             | Some binder ->
-                let binder' = Ident.rename binder in
+                let binder' =
+                  Ident.create_scoped ~scope:(Ident.scope binder)
+                    (Ident.name binder)
+                in
                 let ret =
                   Subst.type_expr
                     (Subst.add_bound_value binder binder' Subst.identity)
