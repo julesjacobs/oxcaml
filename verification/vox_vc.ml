@@ -24,6 +24,12 @@ type set_origin =
   | Set_inter
   | Set_diff
 
+type map_origin =
+  | Map_empty
+  | Map_singleton
+  | Map_add
+  | Map_remove
+
 let scalar = function Some (Scalar t) -> Some t | _ -> None
 
 let scalar_value t = Some (Scalar t)
@@ -98,6 +104,8 @@ type context =
     set_class_sorts : (sort, sort) Hashtbl.t;
     set_membership : (sort * term * term, term) Hashtbl.t;
     membership_definitions : (Symbol.t, term) Hashtbl.t;
+    map_origins : (Function.t, map_origin) Hashtbl.t;
+    map_class_sorts : (sort, sort) Hashtbl.t;
     mutable free : value option Path.Map.t;
     mutable batches : command list list;
     named_terms : (Symbol.t, term) Hashtbl.t;
@@ -394,20 +402,22 @@ let set_constructor ctx origin label arguments set_sort terms =
 let set_empty ctx set_sort =
   set_constructor ctx Set_empty "Set.empty" [] set_sort []
 
-let set_class ctx set_sort element =
+let comparison_class ctx class_sorts label container_sort element =
   let element_sort = term_sort element in
   let class_sort =
-    match Hashtbl.find_opt ctx.set_class_sorts set_sort with
+    match Hashtbl.find_opt class_sorts container_sort with
     | Some sort -> sort
     | None ->
       let sort = fresh_opaque_sort ctx.encoding in
-      Hashtbl.add ctx.set_class_sorts set_sort sort;
+      Hashtbl.add class_sorts container_sort sort;
       sort
   in
-  let function_ =
-    intern_function ctx "Set.comparison_class" [element_sort] class_sort
-  in
+  let function_ = intern_function ctx label [element_sort] class_sort in
   Call (function_, [element])
+
+let set_class ctx set_sort element =
+  comparison_class ctx ctx.set_class_sorts "Set.comparison_class" set_sort
+    element
 
 let set_same_element ctx set_sort left right =
   both Eq (set_class ctx set_sort left) (set_class ctx set_sort right)
@@ -477,6 +487,77 @@ let set_find ctx set_sort element set =
       (term_sort element)
   in
   Call (function_, [class_; set])
+
+let map_constructor ctx origin label arguments map_sort terms =
+  let function_ = intern_function ctx label arguments map_sort in
+  Hashtbl.replace ctx.map_origins function_ origin;
+  Call (function_, terms)
+
+let map_empty ctx map_sort =
+  map_constructor ctx Map_empty "Map.empty" [] map_sort []
+
+let map_class ctx map_sort key =
+  comparison_class ctx ctx.map_class_sorts "Map.comparison_class" map_sort key
+
+let map_same_key ctx map_sort left right =
+  both Eq (map_class ctx map_sort left) (map_class ctx map_sort right)
+
+let rec map_mem ctx map_sort key map =
+  let class_ = map_class ctx map_sort key in
+  let unknown () =
+    let function_ =
+      intern_function ctx "Map.mem" [term_sort class_; map_sort] Bool
+    in
+    Call (function_, [class_; map])
+  in
+  match expose_head ctx map with
+  | App (Ite, [condition; left; right]) ->
+    App (Ite, [condition; map_mem ctx map_sort key left; map_mem ctx map_sort key right])
+  | Call (function_, arguments) ->
+    begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
+    | Some Map_empty, [] -> Boolean false
+    | Some Map_singleton, [bound; _] -> map_same_key ctx map_sort key bound
+    | Some Map_add, [bound; _; map] ->
+      both Or
+        (map_same_key ctx map_sort key bound)
+        (map_mem ctx map_sort key map)
+    | Some Map_remove, [bound; map] ->
+      both And
+        (not_ (map_same_key ctx map_sort key bound))
+        (map_mem ctx map_sort key map)
+    | _ -> unknown ()
+    end
+  | _ -> unknown ()
+
+let rec map_find ctx map_sort value_sort key map =
+  let unknown () =
+    let class_ = map_class ctx map_sort key in
+    let function_ =
+      intern_function ctx "Map.find" [term_sort class_; map_sort] value_sort
+    in
+    Call (function_, [class_; map])
+  in
+  match expose_head ctx map with
+  | App (Ite, [condition; left; right]) ->
+    App (Ite, [condition; map_find ctx map_sort value_sort key left; map_find ctx map_sort value_sort key right])
+  | Call (function_, arguments) ->
+    begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
+    | Some Map_singleton, [_; data] when term_sort data = value_sort -> data
+    | Some Map_add, [bound; data; map] when term_sort data = value_sort ->
+      App
+        ( Ite,
+          [ map_same_key ctx map_sort key bound;
+            data;
+            map_find ctx map_sort value_sort key map ] )
+    | Some Map_remove, [bound; rest] ->
+      App
+        ( Ite,
+          [ map_same_key ctx map_sort key bound;
+            unknown ();
+            map_find ctx map_sort value_sort key rest ] )
+    | Some Map_empty, [] | _ -> unknown ()
+    end
+  | _ -> unknown ()
 
 let iarray_value ctx env ty s values =
   match iarray ctx.encoding env ty with
@@ -569,6 +650,9 @@ let lookup ctx s env ty path =
   | Some set_sort
     when is_set_sort ctx.encoding set_sort && is_set_empty env path ->
     scalar_value (set_empty ctx set_sort)
+  | Some map_sort
+    when is_map_sort ctx.encoding map_sort && is_map_empty env path ->
+    scalar_value (map_empty ctx map_sort)
   | _ -> (
     match value_constant ctx.encoding env ty path with
     | Some value -> scalar_value value
@@ -646,6 +730,48 @@ let operation ctx env function_type result_type name args =
       scalar_value (set_find ctx (term_sort set) element set)
     | _ -> None
     end
+  | "%map_singleton", [key; data] ->
+    begin match scalar key, scalar data, sort ctx.encoding env result_type with
+    | Some key, Some data, Some map_sort when is_map_sort ctx.encoding map_sort
+      ->
+      scalar_value
+        (map_constructor ctx Map_singleton "Map.singleton"
+           [term_sort key; term_sort data]
+           map_sort [key; data])
+    | _ -> None
+    end
+  | "%map_add", [key; data; map] ->
+    begin match scalar key, scalar data, scalar map with
+    | Some key, Some data, Some map
+      when is_map_sort ctx.encoding (term_sort map) ->
+      scalar_value
+        (map_constructor ctx Map_add "Map.add"
+           [term_sort key; term_sort data; term_sort map]
+           (term_sort map) [key; data; map])
+    | _ -> None
+    end
+  | "%map_remove", [key; map] ->
+    begin match scalar key, scalar map with
+    | Some key, Some map when is_map_sort ctx.encoding (term_sort map) ->
+      scalar_value
+        (map_constructor ctx Map_remove "Map.remove"
+           [term_sort key; term_sort map]
+           (term_sort map) [key; map])
+    | _ -> None
+    end
+  | "%map_mem", [key; map] ->
+    begin match scalar key, scalar map with
+    | Some key, Some map when is_map_sort ctx.encoding (term_sort map) ->
+      scalar_value (map_mem ctx (term_sort map) key map)
+    | _ -> None
+    end
+  | "%map_find", [key; map] | "%map_refined_find", [map; key] ->
+    begin match scalar key, scalar map, sort ctx.encoding env result_type with
+    | Some key, Some map, Some value_sort
+      when is_map_sort ctx.encoding (term_sort map) ->
+      scalar_value (map_find ctx (term_sort map) value_sort key map)
+    | _ -> None
+    end
   | "%array_length", [array] ->
     begin match iarray_call ctx array with
     | Some (iarray_sort, array) ->
@@ -706,6 +832,18 @@ let normal_set_find ctx name args value s =
       (both And
          (set_mem ctx set_sort result set)
          (set_same_element ctx set_sort result element))
+  | _ -> s
+
+let normal_map_find ctx name args s =
+  let key, map =
+    match name, args with
+    | "%map_find", [key; map] -> key, map
+    | "%map_refined_find", [map; key] -> key, map
+    | _ -> None, None
+  in
+  match scalar key, scalar map with
+  | Some key, Some map when is_map_sort ctx.encoding (term_sort map) ->
+    fact s "normal return" (map_mem ctx (term_sort map) key map)
   | _ -> s
 
 let rec function_call ctx env ty fn args =
@@ -810,7 +948,7 @@ let rec predicate ctx env s e =
     | Rexp_var id -> s, lookup ctx s env e.rexp_type (Path.Pident id)
     | Rexp_ident path ->
       begin match primitive env path with
-      | Some ("%set_empty", 0) -> s, lookup ctx s env e.rexp_type path
+      | Some (("%set_empty" | "%map_empty"), 0) -> s, lookup ctx s env e.rexp_type path
       | Some (_, 0) -> unsupported e.rexp_loc
       | _ -> s, lookup ctx s env e.rexp_type path
       end
@@ -874,6 +1012,7 @@ let rec predicate ctx env s e =
         let s = match prim with
           | Some ("%array_length", 1) -> normal_iarray_length ctx args s
           | Some ((("%set_find" | "%set_refined_find") as op_name), 2) -> normal_set_find ctx op_name args result s
+          | Some ((("%map_find" | "%map_refined_find") as op_name), 2) -> normal_map_find ctx op_name args s
           | _ -> s in
         name ctx s (scalar_value (required e.rexp_loc result))
       end
@@ -1334,6 +1473,8 @@ and expression_desc ctx s e =
         name ctx (normal_iarray_get ctx args s) (match value with Some _ -> value | None -> opaque ())
       | Some ((("%set_find" | "%set_refined_find") as op_name), 2) ->
         name ctx (normal_set_find ctx op_name args value s) (match value with Some _ -> value | None -> opaque ())
+      | Some ((("%map_find" | "%map_refined_find") as op_name), 2) ->
+        name ctx (normal_map_find ctx op_name args s) (match value with Some _ -> value | None -> opaque ())
       | _ -> name ctx s (match value with Some _ -> value | None -> opaque ()))
     end
   | Texp_function { params; body; _ } ->
@@ -1580,6 +1721,8 @@ let context ~prove ~verify_introductions =
     set_class_sorts = Hashtbl.create 8;
     set_membership = Hashtbl.create 32;
     membership_definitions = Hashtbl.create 32;
+    map_origins = Hashtbl.create 16;
+    map_class_sorts = Hashtbl.create 8;
     free = Path.Map.empty;
     batches = [];
     named_terms = Hashtbl.create 32;
