@@ -144,9 +144,13 @@ perl -p -e\
 /`cat tools/unlabel-patches/4.mli`/" \
   stdlib/moreLabels.5temp.mli > stdlib/moreLabels.6temp.mli
 perl -p -e\
+  "s/module MakeTotal \(Ord : TotalOrderedType\) : TotalS with type key = Ord.t\
+/`cat tools/unlabel-patches/map-total.mli`/" \
+  stdlib/moreLabels.6temp.mli > stdlib/moreLabels.7temp.mli
+perl -p -e\
   "s/module MakeTotal \(Ord : TotalOrderedType\) : TotalS with type elt = Ord.t\
 /`cat tools/unlabel-patches/set-total.mli`/" \
-  stdlib/moreLabels.6temp.mli > stdlib/moreLabels.mli
+  stdlib/moreLabels.7temp.mli > stdlib/moreLabels.mli
 
 #Unix
 perl -p -e "$LABREGEX" \

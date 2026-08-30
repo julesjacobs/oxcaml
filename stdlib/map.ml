@@ -24,6 +24,12 @@ module type OrderedType =
     val compare: t -> t -> int
   end
 
+module type TotalOrderedType =
+  sig
+    type t
+    val compare: t -> t -> int @@ total
+  end
+
 module type S =
   sig
     type key
@@ -73,6 +79,68 @@ module type S =
     val to_seq_from : key -> 'a t -> (key * 'a) Seq.t
     val add_seq : (key * 'a) Seq.t -> 'a t -> 'a t
     val of_seq : (key * 'a) Seq.t -> 'a t
+  end
+
+module type TotalS =
+  sig
+    include S
+    val empty: 'a t @@ total
+    val add: key -> 'a -> 'a t -> 'a t @@ total
+    val add_to_list: key -> 'a -> 'a list t -> 'a list t @@ total
+    val update: key -> ('a option -> 'a option) -> 'a t -> 'a t @@ total
+    val singleton: key -> 'a -> 'a t @@ total
+    val remove: key -> 'a t -> 'a t @@ total
+    val merge:
+      (key -> 'a option -> 'b option -> 'c option) ->
+      'a t -> 'b t -> 'c t @@ total
+    val union:
+      (key -> 'a -> 'a -> 'a option) -> 'a t -> 'a t -> 'a t @@ total
+    val cardinal: 'a t -> int @@ total
+    val bindings: 'a t -> (key * 'a) list @@ total
+    val min_binding_opt: 'a t -> (key * 'a) option @@ total
+    val max_binding_opt: 'a t -> (key * 'a) option @@ total
+    val choose_opt: 'a t -> (key * 'a) option @@ total
+    val find_opt: key -> 'a t -> 'a option @@ total
+    val find_first_opt: (key -> bool) -> 'a t -> (key * 'a) option @@ total
+    val find_last_opt: (key -> bool) -> 'a t -> (key * 'a) option @@ total
+    val iter: (key -> 'a -> unit) -> 'a t -> unit @@ total
+    val fold: (key -> 'a -> 'b -> 'b) -> 'a t -> 'b -> 'b @@ total
+    val map: ('a -> 'b) -> 'a t -> 'b t @@ total
+    val mapi: (key -> 'a -> 'b) -> 'a t -> 'b t @@ total
+    val filter: (key -> 'a -> bool) -> 'a t -> 'a t @@ total
+    val filter_map: (key -> 'a -> 'b option) -> 'a t -> 'b t @@ total
+    val partition: (key -> 'a -> bool) -> 'a t -> 'a t * 'a t @@ total
+    val split: key -> 'a t -> 'a t * 'a option * 'a t @@ total
+    val is_empty: 'a t -> bool @@ total
+    val mem: key @ immutable -> 'a t @ immutable -> bool @@ total
+    val equal: ('a -> 'a -> bool) -> 'a t -> 'a t -> bool @@ total
+    val compare: ('a -> 'a -> int) -> 'a t -> 'a t -> int @@ total
+    val for_all: (key -> 'a -> bool) -> 'a t -> bool @@ total
+    val exists: (key -> 'a -> bool) -> 'a t -> bool @@ total
+    val to_list: 'a t -> (key * 'a) list @@ total
+    val of_list: (key * 'a) list -> 'a t @@ total
+    val to_seq: 'a t -> (key * 'a) Seq.t @@ total
+    val to_rev_seq: 'a t -> (key * 'a) Seq.t @@ total
+    val to_seq_from: key -> 'a t -> (key * 'a) Seq.t @@ total
+    module Refined : sig
+      val singleton:
+        key @ total ->
+        'a @ total ->
+        'a t @ total @@ total
+      val add:
+        key @ total ->
+        'a @ total ->
+        'a t @ total ->
+        'a t @ total @@ total
+      val remove:
+        key ->
+        'a t @ total ->
+        'a t @ total @@ total
+      val find:
+        ('a : value mod separable).
+        (map : 'a t) ->
+        {key : key | mem key map} -> 'a @ total @@ total
+    end
   end
 
 module Make(Ord: OrderedType) = struct
@@ -1026,3 +1094,97 @@ module MakePortable(Ord: sig @@ portable include OrderedType end) = struct
       in
       seq_of_enum_ (aux low m End)
 end [@@inline available]
+
+external trust_total : ('a : value). 'a -> 'a @ total = "%identity"
+external trust_total_immutable2 :
+  ('a : value) ('b : value) ('c : value).
+  ('a -> 'b -> 'c) -> ('a @ immutable -> 'b @ immutable -> 'c) @ total
+  = "%identity"
+
+module MakeTotal(Ord: TotalOrderedType) : TotalS with type key = Ord.t =
+  struct
+    module Base = Make(Ord)
+    type key = Ord.t
+    type 'a t = 'a Base.t
+
+    let empty = trust_total Base.empty
+    let add = trust_total Base.add
+    let add_to_list = trust_total Base.add_to_list
+    let update = trust_total Base.update
+    let singleton = trust_total Base.singleton
+    let remove = trust_total Base.remove
+    let merge = trust_total Base.merge
+    let union = trust_total Base.union
+    let cardinal = trust_total Base.cardinal
+    let bindings = trust_total Base.bindings
+    let min_binding_opt = trust_total Base.min_binding_opt
+    let max_binding_opt = trust_total Base.max_binding_opt
+    let choose_opt = trust_total Base.choose_opt
+    let find_opt = trust_total Base.find_opt
+    let find_first_opt = trust_total Base.find_first_opt
+    let find_last_opt = trust_total Base.find_last_opt
+    let iter = trust_total Base.iter
+    let fold = trust_total Base.fold
+    let map = trust_total Base.map
+    let mapi = trust_total Base.mapi
+    let filter = trust_total Base.filter
+    let filter_map = trust_total Base.filter_map
+    let partition = trust_total Base.partition
+    let split = trust_total Base.split
+    let is_empty = trust_total Base.is_empty
+    let mem = trust_total_immutable2 Base.mem
+    let equal = trust_total Base.equal
+    let compare = trust_total Base.compare
+    let for_all = trust_total Base.for_all
+    let exists = trust_total Base.exists
+    let to_list = trust_total Base.to_list
+    let of_list = trust_total Base.of_list
+    let to_seq = trust_total Base.to_seq
+    let to_rev_seq = trust_total Base.to_rev_seq
+    let to_seq_from = trust_total Base.to_seq_from
+    let min_binding = Base.min_binding
+    let max_binding = Base.max_binding
+    let choose = Base.choose
+    let find = Base.find
+    let find_first = Base.find_first
+    let find_last = Base.find_last
+    let add_seq = Base.add_seq
+    let of_seq = Base.of_seq
+
+    module Refined = struct
+      external trust_constructor2 :
+        ('a : value) ('b : value) ('c : value).
+        ('a -> 'b -> 'c) ->
+        ('a @ total ->
+         'b @ total ->
+         'c @ total) @ total
+        = "%identity"
+      external trust_constructor3 :
+        ('a : value) ('b : value) ('c : value) ('d : value).
+        ('a -> 'b -> 'c -> 'd) ->
+        ('a @ total ->
+         'b @ total ->
+         'c @ total ->
+         'd @ total) @ total
+        = "%identity"
+      external trust_remove :
+        ('a : value) ('b : value).
+        ('a -> 'b -> 'b) ->
+        ('a ->
+         'b @ total ->
+         'b @ total) @ total
+        = "%identity"
+      external trust_find :
+        ('a : value mod separable).
+        ('a Base.t -> Ord.t -> 'a) ->
+        ((map : 'a Base.t) ->
+         {key : Ord.t | mem key map} ->
+         'a @ total) @ total
+        = "%identity"
+
+      let singleton = trust_constructor2 Base.singleton
+      let add = trust_constructor3 Base.add
+      let remove = trust_remove Base.remove
+      let find = trust_find (fun map key -> Base.find key map)
+    end
+  end

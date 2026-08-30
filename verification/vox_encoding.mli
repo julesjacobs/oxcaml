@@ -34,6 +34,8 @@ val is_iarray_sort : context -> Vox_smt.sort -> bool
 
 val is_set_sort : context -> Vox_smt.sort -> bool
 
+val is_map_sort : context -> Vox_smt.sort -> bool
+
 val iarray :
   context ->
   Env.t ->
@@ -43,6 +45,8 @@ val iarray :
 val primitive : Env.t -> Path.t -> (string * int) option
 
 val is_set_empty : Env.t -> Path.t -> bool
+
+val is_map_empty : Env.t -> Path.t -> bool
 
 val value_constant :
   context -> Env.t -> Types.type_expr -> Path.t -> Vox_smt.term option
