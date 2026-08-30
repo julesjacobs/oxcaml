@@ -19,6 +19,7 @@ type context =
   { opaque_ids : int Type_keys.t;
     mutable iarray_sort : sort option;
     set_sorts : (sort, unit) Hashtbl.t;
+    map_sorts : (sort, unit) Hashtbl.t;
     unsupported_logical_equality : (sort, unit) Hashtbl.t;
     unsupported : unit Type_keys.t;
     mutable next_opaque_id : int;
@@ -41,6 +42,7 @@ let create_context () =
   { opaque_ids = Type_keys.create 32;
     iarray_sort = None;
     set_sorts = Hashtbl.create 8;
+    map_sorts = Hashtbl.create 8;
     unsupported_logical_equality = Hashtbl.create 8;
     unsupported = Type_keys.create 32;
     next_opaque_id = 0;
@@ -79,8 +81,8 @@ let iarray_element env ty =
     Some element
   | _ -> None
 
-let standard_make_total =
-  Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib__Set"), "MakeTotal")
+let standard_make_total unit_name =
+  Path.Pdot (Path.Pident (Ident.create_persistent unit_name), "MakeTotal")
 
 module Shape_reducer = Shape_reduce.Make (struct
   let fuel () = Misc.Maybe_bounded.of_int 100
@@ -102,6 +104,7 @@ module Shape_reducer = Shape_reduce.Make (struct
       let standard =
         String.equal unit_name "Stdlib"
         || String.equal unit_name "Stdlib__Set"
+        || String.equal unit_name "Stdlib__Map"
         || String.equal unit_name "Stdlib__MoreLabels"
       in
       let filename = String.uncapitalize_ascii unit_name in
@@ -154,7 +157,7 @@ let shape_uid env namespace path =
   Option.bind (Env.shape_of_path_opt ~namespace env path) (fun shape ->
       resolved_uid (Shape_reducer.reduce_for_uid env shape))
 
-let make_total_result_uid env modules name namespace =
+let make_total_result_uid env standard_make_total modules name namespace =
   Option.bind
     (Env.shape_of_path_opt ~namespace:Shape.Sig_component_kind.Module env
        standard_make_total) (fun shape ->
@@ -181,26 +184,59 @@ let set_operations =
     ["Refined"], "diff", ("%set_diff", 2);
     ["Refined"], "find", ("%set_refined_find", 2) ]
 
-let set_value env path =
+let functor_result_value env standard_make_total operations path =
   let actual = shape_uid env Shape.Sig_component_kind.Value path in
   List.find_map
     (fun (modules, name, operation) ->
       match
         ( actual,
-          make_total_result_uid env modules name Shape.Sig_component_kind.Value
-        )
+          make_total_result_uid env standard_make_total modules name
+            Shape.Sig_component_kind.Value )
       with
       | Some actual, Some standard when Shape.Uid.equal actual standard ->
         Some operation
       | _ -> None)
-    set_operations
+    operations
+
+let set_make_total = standard_make_total "Stdlib__Set"
+
+let set_value env path =
+  functor_result_value env set_make_total set_operations path
 
 let is_set_type env ty =
   match get_desc (Ctype.expand_head env ty) with
   | Tconstr (path, [], _) ->
     begin match
       ( shape_uid env Shape.Sig_component_kind.Type path,
-        make_total_result_uid env [] "t" Shape.Sig_component_kind.Type )
+        make_total_result_uid env set_make_total [] "t"
+          Shape.Sig_component_kind.Type )
+    with
+    | Some actual, Some standard -> Shape.Uid.equal actual standard
+    | _ -> false
+    end
+  | _ -> false
+
+let map_make_total = standard_make_total "Stdlib__Map"
+
+let map_operations =
+  [ [], "empty", ("%map_empty", 0);
+    [], "mem", ("%map_mem", 2);
+    [], "find", ("%map_find", 2);
+    ["Refined"], "singleton", ("%map_singleton", 2);
+    ["Refined"], "add", ("%map_add", 3);
+    ["Refined"], "remove", ("%map_remove", 2);
+    ["Refined"], "find", ("%map_refined_find", 2) ]
+
+let map_value env path =
+  functor_result_value env map_make_total map_operations path
+
+let is_map_type env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tconstr (path, [_], _) ->
+    begin match
+      ( shape_uid env Shape.Sig_component_kind.Type path,
+        make_total_result_uid env map_make_total [] "t"
+          Shape.Sig_component_kind.Type )
     with
     | Some actual, Some standard -> Shape.Uid.equal actual standard
     | _ -> false
@@ -220,10 +256,13 @@ let type_key env ty =
         Some (Variable id)
       | Tvar _ | Tunivar _ -> None
       | Tconstr (path, arguments, _) ->
-        Option.map
-          (fun arguments ->
-            Constructor (Env.normalize_type_path None env path, arguments))
-          (Misc.Stdlib.List.map_option (loop visited) arguments)
+        let path = Env.normalize_type_path None env path in
+        if is_map_type env ty
+        then Some (Constructor (path, []))
+        else
+          Option.map
+            (fun arguments -> Constructor (path, arguments))
+            (Misc.Stdlib.List.map_option (loop visited) arguments)
       | Ttuple components ->
         Option.map
           (fun components -> Tuple components)
@@ -359,6 +398,13 @@ let rec classify ctx env stack ty =
     Option.iter
       (fun sort ->
         Hashtbl.replace ctx.set_sorts sort ();
+        Hashtbl.replace ctx.unsupported_logical_equality sort ())
+      result;
+  if is_map_type env ty
+  then
+    Option.iter
+      (fun sort ->
+        Hashtbl.replace ctx.map_sorts sort ();
         Hashtbl.replace ctx.unsupported_logical_equality sort ())
       result;
   result
@@ -571,6 +617,8 @@ let sort_has_unsupported_logical_equality ctx sort =
 
 let is_set_sort ctx sort = Hashtbl.mem ctx.set_sorts sort
 
+let is_map_sort ctx sort = Hashtbl.mem ctx.map_sorts sort
+
 let is_iarray_sort ctx sort = Some sort = ctx.iarray_sort
 
 let iarray ctx env ty =
@@ -595,24 +643,29 @@ let primitive env path =
     match set_value env path with
     | Some _ as operation -> operation
     | None -> (
-      let path = Env.normalize_value_path None env path in
-      let description =
-        Subst.Lazy.force_value_description (Env.find_value path env)
-      in
-      match description.val_kind with
-      | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
-      | _ ->
-        if same_value env description (iarray_value_path ["length"])
-        then Some ("%array_length", 1)
-        else if same_value env description (iarray_value_path ["get"])
-        then Some ("%array_safe_get", 2)
-        else if
-          same_value env description (iarray_value_path ["Refined"; "get"])
-        then Some ("%array_safe_get", 2)
-        else None)
+      match map_value env path with
+      | Some _ as operation -> operation
+      | None -> (
+        let path = Env.normalize_value_path None env path in
+        let description =
+          Subst.Lazy.force_value_description (Env.find_value path env)
+        in
+        match description.val_kind with
+        | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
+        | _ ->
+          if same_value env description (iarray_value_path ["length"])
+          then Some ("%array_length", 1)
+          else if same_value env description (iarray_value_path ["get"])
+          then Some ("%array_safe_get", 2)
+          else if
+            same_value env description (iarray_value_path ["Refined"; "get"])
+          then Some ("%array_safe_get", 2)
+          else None))
   with Not_found -> None
 
 let is_set_empty env path = set_value env path = Some ("%set_empty", 0)
+
+let is_map_empty env path = map_value env path = Some ("%map_empty", 0)
 
 let value_constant ctx env ty path =
   if sort ctx env ty <> Some Int
