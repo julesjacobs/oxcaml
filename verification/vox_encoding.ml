@@ -373,28 +373,6 @@ let declarations_of_sort ctx = function
     end
   | Bool | Int63 | Int | Opaque _ -> []
 
-let stable_sort ctx sort =
-  let rec stable seen = function
-    | Bool | Int63 | Int -> true
-    | Opaque _ -> false
-    | Datatype datatype ->
-      if List.mem datatype seen
-      then true
-      else
-        begin match Hashtbl.find_opt ctx.data_by_datatype datatype with
-        | None -> false
-        | Some data ->
-          let seen = datatype :: seen in
-          List.for_all
-            (fun constructor ->
-              List.for_all
-                (fun (_, sort) -> stable seen sort)
-                (Constructor.fields constructor))
-            data.declaration.constructors
-        end
-  in
-  stable [] sort
-
 let sort ctx env ty = classify_top ctx env ty
 
 let primitive env path =
