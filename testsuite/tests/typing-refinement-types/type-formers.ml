@@ -709,7 +709,13 @@ module Outer_modtype : sig
   module type R = Result_signature
   module N : R
 end = struct
-  module type R = Result_signature
+  module type R = sig
+    val holds : int -> bool @@ total
+    type t = { x : int | holds x }
+    module Refined : sig
+      val accept : { x : int | holds x } -> unit @@ total
+    end
+  end
   module N = Make_result (Nonzero)
 end;;
 [%%expect{|
