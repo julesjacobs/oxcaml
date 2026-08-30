@@ -13,6 +13,15 @@ type modalities =
     moda_desc : Mode.Modality.atom Location.loc list
   }
 
+let dependent_argument_mode : Alloc.Const.t =
+  { Alloc.Const.legacy with
+    totality = Totality.Const.Total;
+    statefulness = Statefulness.Const.Stateless;
+    portability = Portability.Const.Portable;
+    visibility = Visibility.Const.Immutable;
+    contention = Contention.Const.Contended
+  }
+
 type 'ax annot_type =
   | Modifier : 'a Axis.t annot_type
   | Mode : 'a Alloc.Axis.t annot_type

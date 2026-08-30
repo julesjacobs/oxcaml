@@ -1030,14 +1030,7 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       ctyp desc typ
   | Ptyp_arrow _ ->
       let args, ret, ret_mode = extract_params styp in
-      let dependent_mode =
-        { Alloc.Const.legacy with
-          totality = Totality.Const.Total;
-          statefulness = Statefulness.Const.Stateless;
-          portability = Portability.Const.Portable;
-          visibility = Visibility.Const.Immutable
-        }
-      in
+      let dependent_mode = Typemode.dependent_argument_mode in
       let rec prepare env args =
         match args with
         | (l, arg_mode, arg, source_binder) :: rest ->
