@@ -68,6 +68,25 @@ type nested_functions =
     {x : int | (fun left -> fun right -> ge left right) x 0}
 |}]
 
+external[@layout_poly] any_array_length :
+  ('a : any mod separable).
+  'a array @ immutable contended -> int @@ total = "%array_length"
+
+let runtime_array_length x = any_array_length x
+
+external[@layout_poly] refined_array_length :
+  ('a : any mod separable).
+  { a : 'a array | ge (any_array_length a) 0 } -> int @@ total
+  = "%array_length";;
+[%%expect{|
+external any_array_length : ('a : any separable). 'a array @ immutable -> int
+  = "%array_length" [@@layout_poly]
+val runtime_array_length : ('a : value_maybe_null). 'a array -> int = <fun>
+external refined_array_length :
+  ('a : any separable). {a : 'a array | ge (any_array_length a) 0} -> int
+  = "%array_length" [@@layout_poly]
+|}]
+
 type _ witness = Int : int witness
 type 'a gadt_predicate =
   { x : 'a witness | match x with Int -> true };;
