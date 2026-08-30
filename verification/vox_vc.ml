@@ -6,6 +6,7 @@ open Vox_encoding
 type function_value =
   { label : string;
     instances : Function.t list ref;
+    primitive : (string * int) option;
     total : bool
   }
 
@@ -177,7 +178,7 @@ let guarded_case eval loc s (matched, condition) guard body rest =
       eval (branch s g) body @ rest (branch s (not_ g)))
   @ rest (branch s (not_ condition))
 
-let fresh ctx env ty label =
+let fresh ?primitive ctx env ty label =
   match sort env ty with
   | Some sort ->
     let symbol = Symbol.create ~label sort in
@@ -185,7 +186,8 @@ let fresh ctx env ty label =
     scalar_value (Var symbol)
   | None ->
     begin match get_desc (Ctype.expand_head env ty) with
-    | Tarrow _ -> Some (Function { label; instances = ref []; total = false })
+    | Tarrow _ ->
+      Some (Function { label; instances = ref []; primitive; total = false })
     | _ -> None
     end
 
@@ -217,7 +219,9 @@ let lookup ctx s env ty path =
     match Path.Map.find_opt path ctx.free with
     | Some value -> instantiate_path ctx env ty path value
     | None ->
-      let value = fresh ctx env ty (Path.name path) in
+      let value =
+        fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
+      in
       ctx.free <- Path.Map.add path value ctx.free;
       value)
 
@@ -261,6 +265,10 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
   | Some _ -> value
   | None when total -> function_call ctx env fn_type fn args
   | None -> None
+
+let stored_primitive syntax = function
+  | Some (Function { primitive = Some _ as primitive; _ }) -> primitive
+  | _ -> syntax
 
 let constant c = scalar_option (Vox_encoding.constant c)
 
@@ -324,6 +332,7 @@ let rec predicate ctx env s e =
           (arguments_right_to_left (fun s (_, e) -> eval s e) s args)
           (fun s args ->
             paths (eval s fn) (fun s value ->
+                let prim = stored_primitive prim value in
                 let result =
                   apply_function ctx env fn.rexp_type e.rexp_type prim value
                     args ~total:true
@@ -585,6 +594,7 @@ and expression_desc ctx s e =
       paths (arguments_right_to_left argument s args) (fun s args ->
           ctx.check_call ctx s e args;
           paths (eval s fn) (fun s fn_value ->
+              let prim = stored_primitive prim fn_value in
               let total =
                 match fn_value with
                 | Some (Function { total; _ }) -> total

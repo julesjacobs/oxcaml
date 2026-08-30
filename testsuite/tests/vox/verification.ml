@@ -286,10 +286,17 @@ type flag = bool
 
 let alias_step (x : number) : {n : number | n = x + 1} =
   let n = x + 1 in refine_ n
+let aliased_add (x : int) : {n : int | n = x + 1} =
+  let add = ( + ) in
+  let add_again = add in
+  let n = add_again x 1 in
+  let (_ : {n : int | n = add_again x 1}) = refine_ n in
+  refine_ n
 let alias_flag (b : flag) : {r : flag | r} =
   let r = if b then true else not b in refine_ r;;
 [%%expect{|
 val alias_step : (x : number) -> {n : number | n = (x + 1)} = <fun>
+val aliased_add : (x : int) -> {n : int | n = (x + 1)} = <fun>
 val alias_flag : flag -> {r : flag | r} = <fun>
 |}]
 
@@ -322,11 +329,12 @@ val physical_predicate : (x : number) -> {n : number | physical_equal n x} =
 
 let shadowed_add () : {n : int | n = 2} =
   let ( + ) x y = x - y in
-  let n = 1 + 1 in refine_ n;;
+  let add = ( + ) in
+  let n = add 1 1 in refine_ n;;
 [%%expect{|
-Line 3, characters 19-28:
-3 |   let n = 1 + 1 in refine_ n;;
-                       ^^^^^^^^^
+Line 4, characters 21-30:
+4 |   let n = add 1 1 in refine_ n;;
+                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
