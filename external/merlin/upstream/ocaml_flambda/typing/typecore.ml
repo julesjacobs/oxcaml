@@ -14157,8 +14157,8 @@ let check_refinement_pattern_extras pat =
   List.iter
     (fun (extra, loc, _) ->
        match extra with
-       | Tpat_inspected_type _ -> ()
-       | Tpat_constraint _ | Tpat_type _ | Tpat_open _ | Tpat_unpack ->
+       | Tpat_inspected_type _ | Tpat_constraint _ -> ()
+       | Tpat_type _ | Tpat_open _ | Tpat_unpack ->
            unsupported_refinement_syntax loc "This pattern annotation")
     pat.pat_extra
 
@@ -14394,8 +14394,8 @@ let refinement_expression_of_typed binder predicate =
     List.fold_left
       (fun result (extra, loc, _) ->
          match extra with
-         | Texp_inspected_type _ -> result
-         | Texp_constraint _ | Texp_coerce _ | Texp_poly _ | Texp_newtype _
+         | Texp_inspected_type _ | Texp_constraint _ -> result
+         | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
          | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine ->
              unsupported_refinement_syntax loc "This expression annotation"
