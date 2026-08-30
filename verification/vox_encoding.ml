@@ -17,6 +17,7 @@ end)
 
 type context =
   { opaque_ids : int Type_keys.t;
+    mutable iarray_sort : sort option;
     unsupported : unit Type_keys.t;
     mutable next_opaque_id : int;
     data_by_key : data Type_keys.t;
@@ -36,6 +37,7 @@ and data =
 
 let create_context () =
   { opaque_ids = Type_keys.create 32;
+    iarray_sort = None;
     unsupported = Type_keys.create 32;
     next_opaque_id = 0;
     data_by_key = Type_keys.create 32;
@@ -51,6 +53,23 @@ let opaque_id ctx key =
     ctx.next_opaque_id <- id + 1;
     Type_keys.add ctx.opaque_ids key id;
     id
+
+let iarray_sort ctx =
+  match ctx.iarray_sort with
+  | Some sort -> sort
+  | None ->
+    let id = ctx.next_opaque_id in
+    ctx.next_opaque_id <- id + 1;
+    let sort = Opaque id in
+    ctx.iarray_sort <- Some sort;
+    sort
+
+let iarray_element env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tconstr (path, [element], _)
+    when Path.same (Env.normalize_type_path None env path) Predef.path_iarray ->
+    Some element
+  | _ -> None
 
 let type_key env ty =
   let rec loop visited ty =
@@ -168,6 +187,7 @@ let rec classify ctx env stack ty =
   | Some Vox_type.Int -> Some Int63
   | Some Vox_type.Bool -> Some Bool
   | Some Vox_type.Bigint -> Some Int
+  | None when Option.is_some (iarray_element env ty) -> Some (iarray_sort ctx)
   | None ->
     begin match type_key env ty with
     | None -> None
@@ -379,13 +399,65 @@ let declarations_of_sort ctx = function
     end
   | Bool | Int63 | Int | Opaque _ -> []
 
+let sort_has_iarray ctx sort =
+  let seen = Hashtbl.create 16 in
+  let rec loop = function
+    | Opaque _ as sort -> Some sort = ctx.iarray_sort
+    | Datatype datatype ->
+      if Hashtbl.mem seen datatype
+      then false
+      else begin
+        Hashtbl.add seen datatype ();
+        match Hashtbl.find_opt ctx.data_by_datatype datatype with
+        | None -> false
+        | Some data ->
+          List.exists
+            (fun constructor ->
+              List.exists
+                (fun (_, sort) -> loop sort)
+                (Constructor.fields constructor))
+            data.declaration.constructors
+      end
+    | Bool | Int63 | Int -> false
+  in
+  loop sort
+
+let is_iarray_sort ctx sort = Some sort = ctx.iarray_sort
+
+let iarray ctx env ty =
+  match iarray_element env ty with
+  | None -> None
+  | Some element -> Some (iarray_sort ctx, classify_top ctx env element)
+
 let sort ctx env ty = classify_top ctx env ty
 
+let iarray_value_path fields =
+  List.fold_left
+    (fun path field -> Path.Pdot (path, field))
+    (Path.Pident (Ident.create_persistent "Stdlib__Iarray"))
+    fields
+
+let same_value env description path =
+  let standard = Subst.Lazy.force_value_description (Env.find_value path env) in
+  Uid.equal description.val_uid standard.val_uid
+
 let primitive env path =
-  match (Env.find_value path env).val_kind with
-  | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
-  | _ -> None
-  | exception Not_found -> None
+  try
+    let path = Env.normalize_value_path None env path in
+    let description =
+      Subst.Lazy.force_value_description (Env.find_value path env)
+    in
+    match description.val_kind with
+    | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
+    | _ ->
+      if same_value env description (iarray_value_path ["length"])
+      then Some ("%array_length", 1)
+      else if same_value env description (iarray_value_path ["get"])
+      then Some ("%array_safe_get", 2)
+      else if same_value env description (iarray_value_path ["Refined"; "get"])
+      then Some ("%array_safe_get", 2)
+      else None
+  with Not_found -> None
 
 let value_constant ctx env ty path =
   if sort ctx env ty <> Some Int
