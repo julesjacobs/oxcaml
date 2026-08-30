@@ -15261,7 +15261,8 @@ let refinement_argument_label : Typedtree.arg_label -> Asttypes.arg_label =
     | Labelled label | Position label -> Labelled label
     | Optional label -> Optional label
 
-let refinement_expression_of_typed bound_values binder predicate =
+let refinement_expression_of_typed ?(definition_body = false) bound_values
+    binder predicate =
   let rec expression locals exp =
     let mk_at rexp_type rexp_desc =
       { rexp_desc; rexp_type; rexp_loc = exp.exp_loc }
@@ -15450,9 +15451,12 @@ let refinement_expression_of_typed bound_values binder predicate =
       (fun result (extra, loc, _) ->
          match extra with
          | Texp_inspected_type _ | Texp_constraint _ | Texp_mode _ -> result
+         | Texp_refine when definition_body -> result
+         | Texp_refine ->
+             unsupported_refinement_syntax loc "This expression annotation"
          | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
-         | Texp_borrowed | Texp_ghost_region | Texp_refine ->
+         | Texp_borrowed | Texp_ghost_region ->
              unsupported_refinement_syntax loc "This expression annotation"
          | Texp_let_refine (id, _) -> begin
              match result.rexp_desc with
@@ -15618,7 +15622,9 @@ let make_definition_lemma env binding =
   in
   let binder = Ident.create_scoped ~scope:Ident.lowest_scope "u" in
   let bound = Ident.Set.of_list (List.map fst params) in
-  let body_ir = refinement_expression_of_typed bound binder body in
+  let body_ir =
+    refinement_expression_of_typed ~definition_body:true bound binder body
+  in
   begin match Refinement_predicate.find_dependency_path
       (fun path ->
          match (Env.find_value path body.exp_env).val_kind with
@@ -15632,7 +15638,8 @@ let make_definition_lemma env binding =
         "Definition lemmas cannot preserve zero-argument primitive values"
   | None -> ()
   end;
-  let type_params, rename, _ = List.fold_left
+  let type_params, rename, subst =
+    List.fold_left
       (fun (type_params, rename, subst) (id, ty) ->
          let fresh =
            Ident.create_scoped ~scope:Ident.lowest_scope (Ident.name id)
@@ -15640,33 +15647,90 @@ let make_definition_lemma env binding =
          ( (fresh, Subst.type_expr subst ty) :: type_params,
            Ident.Map.add id fresh rename,
            Subst.add_bound_value id fresh subst ))
-      ([], Ident.Map.empty, Subst.identity) params in
+      ([], Ident.Map.empty, Subst.identity) params
+  in
   let type_params = List.rev type_params in
-  let body_ir = Refinement_predicate.map ~rename body_ir in
-  let predicate_env = List.fold_left (fun env (id, ty) ->
-      add_total_immutable_value env id ty loc) env type_params in
+  let body_ir =
+    Refinement_predicate.map ~rename
+      ~type_expr:(Subst.type_expr subst) body_ir
+  in
+  let predicate_env =
+    List.fold_left
+      (fun env (id, ty) -> add_total_immutable_value env id ty loc)
+      env type_params
+  in
   let definition_description = Subst.Lazy.force_value_description
       (Env.find_value (Path.Pident id) predicate_env) in
   let predicate_env =
     Env.add_value ~mode:(total_mode ()) id definition_description predicate_env
   in
   let mk rexp_type rexp_desc = {rexp_type; rexp_desc; rexp_loc = loc} in
-  let call = mk body.exp_type (Rexp_apply
-      (mk binding.vb_expr.exp_type (Rexp_ident (Path.Pident id)),
+  let call = mk (Subst.type_expr subst body.exp_type) (Rexp_apply
+      (mk (Subst.type_expr subst binding.vb_expr.exp_type)
+         (Rexp_ident (Path.Pident id)),
        List.map (fun (id, ty) -> Asttypes.Nolabel, mk ty (Rexp_var id))
          type_params)) in
   let arrow arg ret = newty
       (Tarrow ((Nolabel, Alloc.of_const Typemode.dependent_argument_mode,
                 Alloc.legacy, None),
                newmono arg, ret, commu_ok)) in
+  let validation = mk Predef.type_bool (Rexp_logical_equal (call, call)) in
+  ignore
+    (with_resolved_refinement predicate_env loc validation (fun syntax ->
+       Typetexp.TyVarEnv.protect_reentrant (fun () ->
+         !Typetexp.type_refinement_predicate predicate_env
+           (Ident.Set.of_list (List.map fst type_params))
+           binder Predef.type_unit syntax)));
+  let body_ir = Refinement_predicate.logical_definition_body body_ir in
   let predicate =
     mk Predef.type_bool (Rexp_logical_equal (call, body_ir))
   in
-  let _, predicate = with_resolved_refinement predicate_env loc predicate
-      (fun syntax -> Typetexp.TyVarEnv.protect_reentrant (fun () ->
-        !Typetexp.type_refinement_predicate predicate_env
-          (Ident.Set.of_list (List.map fst type_params))
-          binder Predef.type_unit syntax)) in
+  let types = ref [] in
+  ignore
+    (Refinement_predicate.map
+       ~type_expr:(fun ty -> types := ty :: !types; ty) predicate);
+  let types = List.rev !types in
+  let carrier = newty (Ttuple (List.map (fun ty -> None, ty) types)) in
+  let copy_subst =
+    Subst.with_additional_action Subst.Duplicate_variables Subst.identity
+  in
+  let copied_types =
+    match get_desc (Subst.type_expr copy_subst carrier) with
+    | Ttuple components -> List.map snd components
+    | _ -> assert false
+  in
+  let visited = ref TypeSet.empty in
+  let rec normalize_logical_type ty =
+    if not (TypeSet.mem ty !visited) then begin
+      visited := TypeSet.add ty !visited;
+      begin match get_desc ty with
+      | Tarrow ((label, _, _, binder), arg, result, commu) ->
+          set_type_desc ty
+            (Tarrow
+               ( (label, Alloc.legacy, Alloc.legacy, binder),
+                 arg,
+                 result,
+                 commu ));
+          normalize_logical_type arg;
+          normalize_logical_type result
+      | Trefine { ref_payload; _ } ->
+          set_type_desc ty (Tlink ref_payload);
+          normalize_logical_type ref_payload
+      | _ -> iter_type_expr normalize_logical_type ty
+      end
+    end
+  in
+  List.iter normalize_logical_type copied_types;
+  let copied_types = ref copied_types in
+  let predicate =
+    Refinement_predicate.map
+      ~type_expr:(fun _ ->
+        match !copied_types with
+        | ty :: rest -> copied_types := rest; ty
+        | [] -> assert false)
+      predicate
+  in
+  assert (!copied_types = []);
   let result = newty (Trefine
       {ref_structural_scope = Ident.lowest_scope;
        ref_binder = binder; ref_payload = Predef.type_unit;
