@@ -13,6 +13,9 @@ type modalities =
     moda_desc : Mode.Modality.atom Location.loc list
   }
 
+(** The mode of arguments referenced by dependent result types. *)
+val dependent_argument_mode : Mode.Alloc.Const.t
+
 (** Interpret mode syntax as mode annotation, where axes can be left unspecified
 *)
 val transl_mode_annots : Parsetree.modes -> Mode.Alloc.Const.Option.t modes

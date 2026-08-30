@@ -569,16 +569,6 @@ let refinement_operand_mode () =
       portability = Portability.Const.Portable
     }
 
-let dependent_argument_mode () =
-  Alloc.of_const
-    { Alloc.Const.legacy with
-      totality = Totality.Const.Total;
-      statefulness = Statefulness.Const.Stateless;
-      portability = Portability.Const.Portable;
-      visibility = Visibility.Const.Immutable;
-      contention = Contention.Const.Contended
-    }
-
 let mode_default_opt mode_opt =
   match mode_opt with
   | None -> mode_legacy
@@ -10182,7 +10172,9 @@ and type_function
       let arg_mode =
         match expected_binder, binder with
         | None, Some _ ->
-            let dependent_mode = dependent_argument_mode () in
+            let dependent_mode =
+              Alloc.of_const Typemode.dependent_argument_mode
+            in
             Alloc.equate_err
               (pparam_loc, Mode.Hint.Expression)
               arg_mode dependent_mode;
