@@ -123,18 +123,36 @@ val apply_label_first : (x : int) -> {z : int | eq z (add x 1)} = <fun>
 |}]
 
 type box = { mutable contents : int }
-external same_box : box -> box -> bool @@ total = "%equal"
+external same_box : box @ immutable -> box @ immutable -> bool @@ total = "%equal"
 
-let bad_inferred_mode box : {result : box | same_box result box} =
+let keep_box :
+    (box : box) -> {result : box | same_box result box} =
+  fun box -> refine_ box
+
+let mutate_returned_box box =
+  let refine_ returned = keep_box box in
+  returned.contents <- 1;;
+[%%expect{|
+type box = { mutable contents : int; }
+external same_box : box @ immutable -> box @ immutable -> bool = "%equal"
+val keep_box : (box : box) -> {result : box | same_box result box} = <fun>
+val mutate_returned_box : box -> unit = <fun>
+|}]
+
+let mutate_before_return box : {result : box | same_box result box} =
   box.contents <- 1;
   refine_ box;;
 [%%expect{|
-type box = { mutable contents : int; }
-external same_box : box -> box -> bool = "%equal"
-Line 4, characters 53-59:
-4 | let bad_inferred_mode box : {result : box | same_box result box} =
-                                                         ^^^^^^
-Error: This value is "immutable" but is expected to be "read_write".
+val mutate_before_return :
+  (box : box) -> {result : box | same_box result box} = <fun>
+|}]
+
+let keep_immutable (box @ immutable) :
+    {result : box | same_box result box} @ immutable =
+  refine_ box;;
+[%%expect{|
+val keep_immutable :
+  (box : box) -> {result : box | same_box result box} @ immutable = <fun>
 |}]
 
 let bad_pattern :
@@ -181,6 +199,25 @@ let good_total = apply_function increment;;
 [%%expect{|
 external increment : int -> int = "%identity"
 val good_total : {z : int | eq z (increment 0)} = 0
+|}]
+
+let mutable_argument () =
+  let mutable x = 0 in
+  ignore (explicitly_dependent x);;
+[%%expect{|
+Line 3, characters 31-32:
+3 |   ignore (explicitly_dependent x);;
+                                   ^
+Error: A dependent function argument must have a stable binding; bind the current value with [let] first
+|}]
+
+let mutable_snapshot () =
+  let mutable x = 0 in
+  x <- 1;
+  let snapshot = x in
+  ignore (explicitly_dependent snapshot);;
+[%%expect{|
+val mutable_snapshot : unit -> unit = <fun>
 |}]
 
 let escaped_result =
