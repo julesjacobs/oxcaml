@@ -182,7 +182,7 @@ end = struct
 end
 
 and Lam : sig
-  type 'a t
+  type 'a t = private lambda
 
   type 'a param =
     | Var_module : Var.Module.t param
@@ -1107,7 +1107,7 @@ module rec Object_type : sig
   module Object_closed_flag : sig
     type s
 
-    type t' = s lazy_t
+    type t'
 
     type t = s lam
 
@@ -1121,7 +1121,7 @@ module rec Object_type : sig
   module Object_field : sig
     type s
 
-    type t' = s lazy_t
+    type t'
 
     type t = s lam
 
@@ -1134,7 +1134,7 @@ module rec Object_type : sig
 
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -1194,7 +1194,7 @@ and Variant_type : sig
   module Variant_form : sig
     type s
 
-    type t' = s lazy_t
+    type t'
 
     type t = s lam
 
@@ -1210,7 +1210,7 @@ and Variant_type : sig
   module Row_field : sig
     type s
 
-    type t' = s lazy_t
+    type t'
 
     type t = s lam
 
@@ -1224,7 +1224,7 @@ and Variant_type : sig
 
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -1285,7 +1285,7 @@ end
 and Type : sig
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -1493,7 +1493,7 @@ end
 module rec Case : sig
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -1568,7 +1568,7 @@ end
 and Type_constraint : sig
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -1598,7 +1598,7 @@ end
 and Function : sig
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -1677,7 +1677,7 @@ and Comprehension : sig
   module Iterator : sig
     type s
 
-    type t' = s lazy_t
+    type t'
 
     type t = s lam
 
@@ -1697,7 +1697,7 @@ and Comprehension : sig
 
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -1755,7 +1755,7 @@ end
 and Exp_desc : sig
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -2074,7 +2074,7 @@ end
 and Exp : sig
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
@@ -2098,7 +2098,7 @@ end
 and Code : sig
   type s
 
-  type t' = s lazy_t
+  type t'
 
   type t = s lam
 
