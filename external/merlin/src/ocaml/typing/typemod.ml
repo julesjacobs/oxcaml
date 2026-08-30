@@ -4470,7 +4470,15 @@ let remove_mode_and_jkind_variables_for_toplevel str =
      Ctype.remove_mode_and_jkind_variables exp.exp_type
   | _ -> ()
 
+let check_refinement_types_options () =
+  if !Clflags.recursive_types
+     && Language_extension.is_enabled Language_extension.Refinement_types
+  then
+    Location.raise_errorf ~loc:Location.none
+      "The -rectypes option cannot be used with the refinement_types extension"
+
 let type_toplevel_phrase env sig_acc s =
+  check_refinement_types_options ();
   Env.reset_required_globals ();
   Env.reset_probes ();
   Typecore.reset_allocations ();
@@ -4492,13 +4500,15 @@ let type_module =
   type_module ~strengthen:true ~funct_body:false None
 let type_module_maybe_hold_locks =
   type_module_maybe_hold_locks ~strengthen:true ~funct_body:false None
-
 let merlin_type_structure env sig_acc str =
+  check_refinement_types_options ();
   let (str, sg, _mode, _sg_names, _shape, env) =
     type_structure ~keep_warnings:true ~funct_body:false None env sig_acc str
   in
   str, sg, env
-let type_structure env = type_structure ~funct_body:false None env []
+let type_structure env sstr =
+  check_refinement_types_options ();
+  type_structure ~funct_body:false None env [] sstr
 let merlin_transl_signature ?interface_toplevel env sig_acc sg =
   transl_signature ?interface_toplevel ~keep_warnings:true env sig_acc sg
 let transl_signature ?interface_toplevel env sg =
@@ -5015,6 +5025,7 @@ let cms_register_toplevel_signature_attributes ~sourcefile ~uid ast =
         | _ -> None)
 
 let type_interface ~sourcefile modulename env ast =
+  check_refinement_types_options ();
   let error e =
     raise (Error (Location.none, Env.empty, e))
   in
