@@ -19,8 +19,15 @@ open Types
     inside the predicate;
     [rename] maps externally-bound idents;
     [bind_value] turns selected free value paths into bound variables;
+<<<<<<< HEAD
     [free_var_path] turns selected bound variables into free value paths;
     [value_path] rewrites the paths of free idents. *)
+||||||| parent of 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
+    [value_path] rewrites the paths of free idents. *)
+=======
+    [value_path] rewrites the paths of free idents;
+    [expression] rewrites each expression after its children. *)
+>>>>>>> 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
 val map :
   ?rename:Ident.t Ident.Map.t ->
   ?rename_bound:(Ident.t -> Ident.t) ->
@@ -31,6 +38,7 @@ val map :
   ?type_path:(Path.t -> Path.t) ->
   ?type_expr:(type_expr -> type_expr) ->
   ?location:(Location.t -> Location.t) ->
+  ?expression:(refinement_expression -> refinement_expression) ->
   refinement_expression -> refinement_expression
 
 (** Fold over every persistent type annotation in a predicate. *)
@@ -69,6 +77,11 @@ val iter_value_idents : (Ident.t -> unit) -> refinement_expression -> unit
 
 (** Find an occurrence of one of the given bound identifiers. *)
 val find_ident : Ident.Set.t -> refinement_expression -> Ident.t option
+
+(** Remove unused bindings and turn refinement eliminations into ordinary
+    payload bindings in a retained function body. *)
+val logical_definition_body :
+  refinement_expression -> refinement_expression
 
 (** Identifiers bound inside the predicate. *)
 val bound_idents : refinement_expression -> Ident.Set.t

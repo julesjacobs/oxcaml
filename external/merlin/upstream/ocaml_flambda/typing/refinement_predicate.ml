@@ -15,8 +15,18 @@ open Types
 (* Rebuilding *)
 
 let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
+<<<<<<< HEAD
     ?value_path ?constructor_path ?type_path ?(type_expr = Fun.id)
     ?(location = Fun.id) rexp =
+||||||| parent of 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
+    ?value_path
+    ?constructor_path ?type_path ?(type_expr = Fun.id)
+    ?(location = Fun.id) rexp =
+=======
+    ?value_path
+    ?constructor_path ?type_path ?(type_expr = Fun.id)
+    ?(location = Fun.id) ?(expression = Fun.id) rexp =
+>>>>>>> 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
   let map_constant (constant : Parsetree.constant) =
     let pconst_desc =
       match constant.pconst_desc with
@@ -120,10 +130,21 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
           Rexp_match
             (map_rexp rename scrutinee, List.map (map_case rename) cases)
     in
+<<<<<<< HEAD
     { rexp_desc;
       rexp_type = type_expr rexp.rexp_type;
       rexp_type_constraint = rexp.rexp_type_constraint;
       rexp_loc = location rexp.rexp_loc }
+||||||| parent of 9cf9d2e29e (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
+    { rexp_desc;
+      rexp_type = type_expr rexp.rexp_type;
+      rexp_loc = location rexp.rexp_loc }
+=======
+    expression
+      { rexp_desc;
+        rexp_type = type_expr rexp.rexp_type;
+        rexp_loc = location rexp.rexp_loc }
+>>>>>>> 9cf9d2e29e (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
   and map_case rename { rc_lhs; rc_guard; rc_rhs } =
     let rename, rc_lhs = map_pat rename rc_lhs in
     { rc_lhs;
@@ -596,6 +617,7 @@ let exists_rexp pred rexp =
   in
   match walk rexp with () -> false | exception Found -> true
 
+<<<<<<< HEAD
 let iter_value_idents f rexp =
   ignore (exists_rexp (fun rexp ->
     begin match rexp.rexp_desc with
@@ -604,6 +626,36 @@ let iter_value_idents f rexp =
     end;
     false) rexp : bool)
 
+||||||| parent of 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
+=======
+let logical_definition_body rexp =
+  map ~expression:(fun rexp ->
+    match rexp.rexp_desc with
+    | Rexp_let (binding, body) ->
+        let used =
+          exists_rexp
+            (fun exp -> match exp.rexp_desc with
+               | Rexp_var id -> Ident.same id binding.rb_ident
+               | _ -> false)
+            body
+        in
+        if not used then { rexp with rexp_desc = body.rexp_desc }
+        else
+          begin match binding.rb_kind with
+          | Rbind_value -> rexp
+          | Rbind_refine ->
+              let binding =
+                { binding with
+                  rb_kind = Rbind_value;
+                  rb_expr =
+                    { binding.rb_expr with rexp_type = binding.rb_type } }
+              in
+              { rexp with rexp_desc = Rexp_let (binding, body) }
+          end
+    | _ -> rexp)
+    rexp
+
+>>>>>>> 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
 let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
   let result = ref None in
   let check path =
