@@ -468,10 +468,12 @@ let escape_local_exception =
   in
   value;;
 [%%expect{|
-Line 6, characters 2-7:
-6 |   value;;
-      ^^^^^
-Error: the refinement type of this expression escapes the scope of binding "E"
+Line 3, characters 39-40:
+3 |   let value : { x : exn | match x with E -> true | _ -> false } =
+                                           ^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 3, characters 26-61).
 |}]
 
 class virtual escape_class_let =
