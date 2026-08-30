@@ -13,7 +13,9 @@ type modalities =
     moda_desc : Mode.Modality.atom Location.loc list
   }
 
-(** The mode of arguments referenced by dependent result types. *)
+(** The runtime mode of arguments referenced by dependent result types. The
+    corresponding binder has a total immutable view while checking the result
+    type. *)
 val dependent_argument_mode : Mode.Alloc.Const.t
 
 (** Interpret mode syntax as mode annotation, where axes can be left unspecified
