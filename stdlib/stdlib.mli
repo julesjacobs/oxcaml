@@ -1206,7 +1206,7 @@ type ('a : value_or_null) ref = { mutable contents : 'a }
 (** The type of references (mutable indirection cells) containing
    a value of type ['a]. *)
 
-external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt]) @@ total
+external ref : ('a : value_or_null) . 'a -> ('a ref[@local_opt])
   = "%makemutable"
 (** Return a fresh reference containing the given value. *)
 

@@ -295,13 +295,9 @@ module type Abstract_dependency =
     type t = Abstract_roll of (payload -> int)
     [@@inductive]
   end
-Line 7, characters 34-58:
-7 |   let (unroll @ total) = function Argument.Abstract_roll f -> f
-                                      ^^^^^^^^^^^^^^^^^^^^^^^^
-Error: The expression is "partial"
-       but is expected to be "total"
-         because it is used inside the function at line 7, characters 25-63
-         which is expected to be "total".
+module Abstract_eliminator :
+  functor (Argument : Abstract_dependency) ->
+    sig val unroll : Argument.t -> Argument.payload -> int end
 |}]
 
 module rec Closed :
@@ -313,7 +309,7 @@ end
 Line 2, characters 3-51:
 2 |   (Abstract_dependency with type payload = Closed.t) = struct
        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Type "t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
+Error: Type "Closed.t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
 |}]
 
 module rec Uses_nat : sig
@@ -322,7 +318,11 @@ end = struct
   let (identity @ total) x = x
 end
 [%%expect{|
-module rec Uses_nat : sig val identity : nat -> nat @@ total end
+Lines 1-3, characters 22-3:
+1 | ......................sig
+2 |   val identity : nat -> nat @@ total
+3 | end.........
+Error: Type "nat" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
 |}]
 
 module rec Nested : sig
@@ -352,10 +352,12 @@ end = struct
   type t = Internal_roll of (payload -> int) [@@inductive]
 end
 [%%expect{|
-Line 3, characters 2-58:
+Lines 1-4, characters 22-3:
+1 | ......................sig
+2 |   type payload = Internal.t
 3 |   type t = Internal_roll of (payload -> int) [@@inductive]
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Invalid inductive declaration: module-parameter and recursive-module dependencies must occur only as direct fields or tuple components.
+4 | end.........
+Error: Type "Internal.t" has an [@@inductive] guarantee, which is not allowed in a recursive module signature.
 |}]
 
 module rec Transforming_left : sig

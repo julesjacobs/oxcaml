@@ -2665,10 +2665,6 @@ let declaration_can_pattern_match_total env root root_args decl =
       | _ -> Btype.iter_type_expr (visit_type false) ty
     end
   and visit_declaration path args =
-    (* Functor arguments and recursive-module approximations can be replaced
-       later, so their paths do not prove that they differ from [root]. *)
-    if Env.is_functor_arg path env then
-      raise_notrace Not_definitely_nonrecursive;
     let completed =
       Option.value
         (Path.Map.find_opt path !completed_declarations)

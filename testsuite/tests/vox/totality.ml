@@ -13,7 +13,6 @@ module Pure = struct
   let (conjunction @ total) x y = x && y
   let (disjunction @ total) x y = x || y
   let (apply @ total) f x = f x
-  let (allocate @ total) x = ref x
 end;;
 [%%expect{|
 module Pure :
@@ -22,8 +21,18 @@ module Pure :
     val conjunction : bool -> bool -> bool
     val disjunction : bool -> bool -> bool
     val apply : ('a -> 'b) -> 'a -> 'b
-    val allocate : 'a -> 'a ref
   end
+|}]
+
+let (allocate_identity @ total) x = ref x;;
+[%%expect{|
+Line 1, characters 36-39:
+1 | let (allocate_identity @ total) x = ref x;;
+                                        ^^^
+Error: The value "ref" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 32-41
+         which is expected to be "total".
 |}]
 
 let answer = Pure.apply (fun x -> Format.printf "argument called@."; x + 1) 41;;

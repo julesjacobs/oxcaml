@@ -98,6 +98,16 @@ type box = { mutable value : int }
 type box = { mutable value : int; }
 |}]
 
+type immutable_box = { fixed : int }
+[%%expect{|
+type immutable_box = { fixed : int; }
+|}]
+
+let (allocate_immutable @ total) fixed = { fixed }
+[%%expect{|
+val allocate_immutable : int -> immutable_box = <fun>
+|}]
+
 let (read @ total) box = box.value
 [%%expect{|
 Line 1, characters 25-28:
@@ -122,12 +132,18 @@ Error: The expression is "partial"
 
 let (allocate @ total) value = { value }
 [%%expect{|
-val allocate : int -> box = <fun>
+Line 1, characters 31-40:
+1 | let (allocate @ total) value = { value }
+                                   ^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 23-40
+         which is expected to be "total".
 |}]
 
-let (return_mutable @ total) box = box
+let (return_mutable @ total) (box : box) = box
 [%%expect{|
-val return_mutable : 'a -> 'a = <fun>
+val return_mutable : box -> box = <fun>
 |}]
 
 let captured_box = { value = 0 }
@@ -158,7 +174,108 @@ Error: The value "(/)" is "partial"
 
 let (allocate_ref @ total) x = ref x
 [%%expect{|
-val allocate_ref : 'a -> 'a ref = <fun>
+Line 1, characters 31-34:
+1 | let (allocate_ref @ total) x = ref x
+                                   ^^^
+Error: The value "ref" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 27-36
+         which is expected to be "total".
+|}]
+
+let (allocate_array @ total) x = [|x|]
+[%%expect{|
+Line 1, characters 33-38:
+1 | let (allocate_array @ total) x = [|x|]
+                                     ^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 29-38
+         which is expected to be "total".
+|}]
+
+let (allocate_iarray @ total) x : _ iarray = [|x|]
+[%%expect{|
+val allocate_iarray : ('a : value_maybe_null). 'a -> 'a iarray = <fun>
+|}]
+
+let (allocate_lazy @ total) x = lazy x
+[%%expect{|
+Line 1, characters 32-38:
+1 | let (allocate_lazy @ total) x = lazy x
+                                    ^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 28-38
+         which is expected to be "total".
+|}]
+
+let (allocate_exception @ total) () =
+  let exception Fresh in
+  Fresh
+[%%expect{|
+Lines 2-3, characters 2-7:
+2 | ..let exception Fresh in
+3 |   Fresh
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-3, characters 33-7
+         which is expected to be "total".
+|}]
+
+let (allocate_module_exception @ total) () =
+  let module M = struct exception Fresh end in
+  M.Fresh
+[%%expect{|
+Line 2, characters 17-43:
+2 |   let module M = struct exception Fresh end in
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-3, characters 40-9
+         which is expected to be "total".
+|}]
+
+module type Exception_module = sig exception Fresh end
+[%%expect{|
+module type Exception_module = sig exception Fresh end
+|}]
+
+let (allocate_packed_exception @ total) () =
+  (module struct exception Fresh end : Exception_module)
+[%%expect{|
+Line 2, characters 10-36:
+2 |   (module struct exception Fresh end : Exception_module)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-2, characters 40-56
+         which is expected to be "total".
+|}]
+
+let (open_exception_module @ total) () =
+  let open struct exception Fresh end in
+  Fresh
+[%%expect{|
+Line 2, characters 11-37:
+2 |   let open struct exception Fresh end in
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-3, characters 36-7
+         which is expected to be "total".
+|}]
+
+module Existing = struct let value = 1 end
+[%%expect{|
+module Existing : sig val value : int end
+|}]
+
+let (use_module_alias @ total) () =
+  let module M = Existing in
+  M.value
+[%%expect{|
+val use_module_alias : unit -> int = <fun>
 |}]
 
 let (read_ref @ total) x = !x

@@ -324,7 +324,12 @@ Totality is a two-point future axis, `total < partial`. A total closure cannot
 call captured partial functions, recurse, loop, raise, use a non-exhaustive
 pattern, or read or write mutable state. The restriction is relative to
 function arguments: a total higher-order function may call its function
-argument. Mutable allocation and returning mutable data are allowed.
+argument. Total code may return existing mutable data but cannot allocate fresh
+identity-bearing values such as references, mutable arrays or records, lazy
+cells, objects, and locally generated exception constructors. Module
+computation in an expression is partial until the module language tracks
+totality; module aliases remain allowed. Immutable structural allocation is
+allowed.
 
 ### Inductive pattern matching
 
@@ -385,63 +390,27 @@ and Right : sig type t = Right of Left.t end = Right
 Both `alias` and `Left.t` remain unavailable to constructor patterns in total
 code. An `[@@inductive]` guarantee is also checked by signature inclusion, so a
 module cannot claim the guarantee for an unchecked implementation type.
-
-An abstract functor-parameter type is not evidence that a representation is
-nonrecursive. A later application can identify that abstract type with the
-datatype through a recursive-module constraint:
+Functor parameters may carry and eliminate an `[@@inductive]` guarantee.
+This supports ordinary functors over inductive containers:
 
 ```ocaml
 module type S = sig
-  type payload
-  type t = Roll of (payload -> int) [@@inductive]
-  val coerce : t -> payload @@ total
-  val uncoerce : payload -> t @@ total
+  type elt
+  type t = Nil | Cons of elt * t [@@inductive]
 end
 
-module Eliminate (X : S) = struct
-  let (unroll @ total) = function X.Roll f -> f  (* rejected *)
+module Length (X : S) = struct
+  let rec (length @ total) = function
+    | X.Nil -> 0
+    | X.Cons (_, tail) -> 1 + length tail
 end
 ```
 
-Without that rejection, a recursive-module constraint could close the abstract
-dependency and recover the original counterexample:
-
-```ocaml
-module rec Closed :
-  (S with type payload = Closed.t) = struct
-  type payload = Closed.t
-  type t = Roll of (payload -> int) [@@inductive]
-  let (coerce @ total) x = x
-  let (uncoerce @ total) x = x
-end
-
-module E = Eliminate (Closed)
-let (delta @ total) x = E.unroll x x
-let (omega @ total) () = delta (Closed.Roll delta)
-```
-
-The check therefore treats a reachable abstract functor-parameter type as an
-unresolved cycle.
-
-First-class module unpacking introduces the same dependency through a value
-instead of a functor parameter. Without an additional restriction, a generic
-total eliminator could be instantiated with `Closed`:
-
-```ocaml
-let (run @ total) (module X : S) =
-  let (delta @ total) (x : X.t) =
-    match x with X.Roll f -> f (X.coerce x)
-  in
-  delta (X.Roll (fun x -> delta (X.uncoerce x)))
-
-let (omega @ total) () = run (module Closed)
-```
-
-For `Closed`, `X.payload` and `X.t` are equal, so `delta` reduces to itself.
-Recursive module signatures therefore cannot contain an `[@@inductive]`
-guarantee. This conservative rule also covers guarantees introduced through a
-module type abbreviation or a nested signature.
-
+The guarantee cannot be used to close a cycle through a recursive module.
+Recursive module signatures therefore cannot mention a guaranteed inductive
+type, directly or through value types, aliases, module type abbreviations, or
+nested signatures. This restriction also covers first-class packages produced
+from recursive modules.
 The traversal also terminates when recursive modules transform type arguments
 on each step. Such a cycle is rejected when the same declaration is reached
 with different arguments:
