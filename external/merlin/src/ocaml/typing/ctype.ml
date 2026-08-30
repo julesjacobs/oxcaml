@@ -2277,7 +2277,8 @@ let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
    type of an external declaration. However, the code is written without
    relaying this assumption. *)
 let instance_prim_layout env (desc : Primitive.description) ty =
-  if not desc.prim_is_layout_poly
+  (* Executable predicates are retyped after refinement instantiation. *)
+  if not desc.prim_is_layout_poly || !in_refinement_predicate
   then ty, None
   else
   let new_sort = ref None in
