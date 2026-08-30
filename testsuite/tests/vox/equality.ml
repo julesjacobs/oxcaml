@@ -22,11 +22,13 @@ module Opaque : sig
   val zero : t
   val one : t
   val observe : t @ total immutable -> int @@ total
+  val choose : bool -> t @@ total
 end = struct
   type t = int
   let zero = 0
   let one = 1
   let observe x = x
+  let choose b = if b then zero else one
 end;;
 [%%expect{|
 module Opaque :
@@ -35,6 +37,7 @@ module Opaque :
     val zero : t
     val one : t
     val observe : t @ total immutable -> int @@ total
+    val choose : bool -> t @@ total
   end
 |}]
 
@@ -43,6 +46,15 @@ let opaque_reflexive () : {r : Opaque.t | r === Opaque.zero} =
   refine_ r;;
 [%%expect{|
 val opaque_reflexive : unit -> {r : Opaque.t | r === Opaque.zero} = <fun>
+|}]
+
+let opaque_result_congruence b :
+    {u : unit | Opaque.choose b === Opaque.choose b} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+val opaque_result_congruence :
+  (b : bool) -> {u : unit | (Opaque.choose b) === (Opaque.choose b)} = <fun>
 |}]
 
 type token = Token
@@ -73,14 +85,12 @@ let fresh_allocations : {u : unit | ref 0 === ref 0} =
   let u = () in
   refine_ u;;
 [%%expect{|
-Line 1, characters 46-51:
+Line 1, characters 36-39:
 1 | let fresh_allocations : {u : unit | ref 0 === ref 0} =
-                                                  ^^^^^
-Error: Unsupported refinement predicate in VC generation
-Line 3, characters 2-11:
-3 |   refine_ u;;
-      ^^^^^^^^^
-  Required by this refinement introduction
+                                        ^^^
+Error: The value "ref" is "partial"
+       but is expected to be "total"
+         because it is used in an expression (at line 1, characters 36-51).
 |}]
 
 let scalar_failure =
