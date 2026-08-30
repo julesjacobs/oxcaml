@@ -5185,11 +5185,18 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                   let id =
                     match sarg.pexp_desc with
                     | Pexp_ident lid ->
-                        let path, _, _ =
+                        let path, desc, _ =
                           Env.lookup_value ~use:false ~loc:lid.loc lid.txt env
                         in
-                        begin match path with
-                        | Path.Pident id -> id
+                        begin match path, desc.val_kind with
+                        | Path.Pident _, Val_mut _ ->
+                            raise
+                              (Error_forward
+                                 (Location.errorf ~loc:sarg.pexp_loc
+                                    "A dependent function argument must have \
+                                     a stable binding; bind the current value \
+                                     with [let] first"))
+                        | Path.Pident id, _ -> id
                         | _ ->
                             raise
                               (Error_forward
@@ -10172,12 +10179,9 @@ and type_function
       let arg_mode =
         match expected_binder, binder with
         | None, Some _ ->
-            let dependent_mode =
-              Alloc.of_const Typemode.dependent_argument_mode
-            in
-            Alloc.equate_err
-              (pparam_loc, Mode.Hint.Expression)
-              arg_mode dependent_mode;
+            Totality.equate_exn
+              (Alloc.proj_comonadic Totality arg_mode)
+              Totality.total;
             arg_mode
         | _ -> arg_mode
       in
