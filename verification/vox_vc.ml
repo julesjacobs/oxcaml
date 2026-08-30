@@ -228,7 +228,7 @@ let operation env function_type result_type name args =
 
 let function_call ctx env ty fn args =
   match fn, signature env ty (List.length args) with
-  | Some (Function fn), Some (arguments, ((Bool | Int63) as result)) ->
+  | Some (Function fn), Some (arguments, result) ->
     let args = List.filter_map scalar args in
     if List.map term_sort args <> arguments
     then None
