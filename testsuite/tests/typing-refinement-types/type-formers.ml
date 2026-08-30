@@ -157,6 +157,38 @@ let unwrapped = let refine_ x = one in x + 1;;
 val unwrapped : int = 2
 |}]
 
+type refined_function_modes = { f : unit -> unit | true };;
+[%%expect{|
+type refined_function_modes = {f : unit -> unit | true}
+|}]
+
+let escape_unwrapped_local (x : refined_function_modes @ local)
+    : (unit -> unit) @ global =
+  let refine_ f = x in
+  f;;
+[%%expect{|
+Line 4, characters 2-3:
+4 |   f;;
+      ^
+Error: This value is "local" to the parent region but is expected to be "global".
+|}]
+
+let call_unwrapped_once_twice (x : refined_function_modes @ once) =
+  let refine_ f = x in
+  f ();
+  f ();;
+[%%expect{|
+Line 4, characters 2-3:
+4 |   f ();;
+      ^
+Error: This value is used here,
+       but it is defined as once and has already been used at:
+Line 3, characters 2-3:
+3 |   f ();
+      ^
+
+|}]
+
 type greater_than_one =
   { y : int | let refine_ x = one in gt y x };;
 [%%expect{|
