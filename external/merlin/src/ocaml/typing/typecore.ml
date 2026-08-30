@@ -675,14 +675,6 @@ let mode_default mode =
 
 let mode_legacy = mode_default Value.legacy
 
-let total_mode () =
-  Value.of_const
-    { Value.Const.legacy with
-      totality = Totality.Const.Total;
-      statefulness = Statefulness.Const.Stateless;
-      portability = Portability.Const.Portable
-    }
-
 let total_immutable_mode () =
   Value.of_const
     { Value.Const.legacy with
@@ -7400,7 +7392,8 @@ and type_expect_
     end
   | Pexp_let_refine (name, bound, body) ->
       Language_extension.assert_enabled ~loc Refinement_types ();
-      let bound = type_exp env mode_max bound in
+      let bound_mode = Value.newvar () in
+      let bound = type_exp env (mode_default bound_mode) bound in
       let payload =
         match get_desc (expand_head env bound.exp_type) with
         | Trefine { ref_payload; _ } -> ref_payload
@@ -7424,7 +7417,12 @@ and type_expect_
       in
       let id = Ident.create_local name.txt in
       let uid = Uid.mk ~current_unit:(Env.get_current_unit ()) in
-      let mode = total_mode () in
+      let mode =
+        bound_mode
+        |> Value.meet_const_with Totality Totality.Const.Total
+        |> Value.meet_const_with Statefulness Statefulness.Const.Stateless
+        |> Value.meet_const_with Portability Portability.Const.Portable
+      in
       let desc =
         { val_type = payload;
           val_kind = Val_reg sort;

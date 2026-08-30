@@ -5308,11 +5308,27 @@ let unify3_var uenv jkind1 t1' t2 t2' =
         record_equation uenv t1' t2'
       end
 
+let normalize_owner_type_path env owner =
+  let owner = Env.normalize_type_path None env owner in
+  match Env.find_type_expansion owner env with
+  | _, manifest, _ -> begin
+      match get_desc (expand_head env manifest) with
+      | Tconstr (path, _, _) -> Env.normalize_type_path None env path
+      | _ -> owner
+    end
+  | exception Not_found -> owner
+
 let normalize_refinement_predicate env =
+  let constructor_path = function
+    | Path.Pextra_ty (owner, Path.Pcstr_ty name) ->
+      let owner = normalize_owner_type_path env owner in
+      Path.Pextra_ty (owner, Path.Pcstr_ty name)
+    | path -> Env.normalize_value_path None env path
+  in
   Refinement_predicate.map
     ~value_path:(Env.normalize_value_path None env)
-    ~constructor_path:(Env.normalize_value_path None env)
-    ~type_path:(Env.normalize_type_path None env)
+    ~constructor_path
+    ~type_path:(normalize_owner_type_path env)
 
 let refinement_predicates_equal env ~pairs pred1 pred2 =
   Refinement_predicate.equal ~pairs
