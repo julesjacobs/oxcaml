@@ -34,8 +34,9 @@ let () = (h [@inlined always]) (Sys.opaque_identity 2)
 *)
 
 (* Recursive constant values should be static *)
-let rec a = 1 :: b
-and b = 2 :: a
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+let rec a = Cons (1, b)
+and b = Cons (2, a)
 let () =
   assert(is_in_static_data a);
   assert(is_in_static_data b)
@@ -74,8 +75,8 @@ let () = assert(is_in_static_data (module Stdlib:P))
 
 (* Not constant let rec to test extraction to initialize_symbol *)
 let r = ref 0
-let rec a = (incr r; !r) :: b
-and b = (incr r; !r) :: a
+let rec a = Cons ((incr r; !r), b)
+and b = Cons ((incr r; !r), a)
 
 let next =
   let r = ref 0 in

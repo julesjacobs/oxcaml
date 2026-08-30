@@ -19,9 +19,11 @@ open! Stdlib
 [@@@ocaml.flambda_o3]
 
 (* An alias for the type of lists. *)
-type ('a : value_or_null) t = 'a list = [] | (::) of 'a * 'a list
+type ('a : value_or_null) t = 'a list = [] | (::) of 'a * 'a list [@@inductive]
 
 (* List operations *)
+
+external trust_total : ('a : value_or_null). 'a -> 'a @ total = "%identity"
 
 let rec length_aux len = function
     [] -> len
@@ -617,3 +619,64 @@ let[@tail_mod_cons] rec of_seq seq =
       | Seq.Nil -> [x1]
       | Seq.Cons (x2, seq) -> x1 :: x2 :: of_seq seq
       end
+
+let length = trust_total length
+let cons = trust_total cons
+let singleton = trust_total singleton
+let append = trust_total append
+let rev_append = trust_total rev_append
+let rev = trust_total rev
+let flatten = trust_total flatten
+let concat = trust_total concat
+let map = trust_total map
+let mapi = trust_total mapi
+let rev_map = trust_total rev_map
+let iter = trust_total iter
+let iteri = trust_total iteri
+let fold_left = trust_total fold_left
+let fold_right = trust_total fold_right
+let for_all = trust_total for_all
+let exists = trust_total exists
+let find_opt = trust_total find_opt
+let find_index = trust_total find_index
+let find_map = trust_total find_map
+let find_mapi = trust_total find_mapi
+let find_all = trust_total find_all
+let filter = trust_total filter
+let filteri = trust_total filteri
+let filter_map = trust_total filter_map
+let concat_map = trust_total concat_map
+let fold_left_map = trust_total fold_left_map
+let take = trust_total take
+let drop = trust_total drop
+let take_while = trust_total take_while
+let drop_while = trust_total drop_while
+let partition = trust_total partition
+let partition_map = trust_total partition_map
+let split = trust_total split
+let merge = trust_total merge
+let stable_sort = trust_total stable_sort
+let sort = trust_total sort
+let fast_sort = trust_total fast_sort
+let sort_uniq = trust_total sort_uniq
+let compare_lengths = trust_total compare_lengths
+let compare_length_with = trust_total compare_length_with
+let is_empty = trust_total is_empty
+let equal = trust_total equal
+let compare = trust_total compare
+let to_seq = trust_total to_seq
+
+module Refined = struct
+  let hd : ('a : value_or_null).
+      { l : 'a list | (l === []) === false } -> 'a @ total =
+    fun l ->
+      let refine_ l = l in
+      trust_total (hd l)
+  let hd = trust_total hd
+  let tl : ('a : value_or_null).
+      { l : 'a list | (l === []) === false } -> 'a list @ total =
+    fun l ->
+      let refine_ l = l in
+      trust_total (tl l)
+  let tl = trust_total tl
+end
