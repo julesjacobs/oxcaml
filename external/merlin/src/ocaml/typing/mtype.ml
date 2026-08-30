@@ -211,7 +211,7 @@ and subst_module_type_value_paths subst (mty : Types.module_type) =
   | Mty_strengthen (mty, path, aliasability) ->
       Mty_strengthen
         (subst_module_type_value_paths subst mty, path, aliasability)
-  | (Mty_ident _ | Mty_alias _) as mty -> mty
+  | (Mty_ident _ | Mty_alias _ | Mty_for_hole) as mty -> mty
 
 and strengthen_lazy_sig ~aliasable sg p =
   let sg = Subst.Lazy.force_signature_once sg in
@@ -243,7 +243,8 @@ let rec subst_module_type_head_paths subst = function
          aliasability)
   | Subst.Lazy.Mty_alias path ->
       Subst.Lazy.Mty_alias (Subst.module_path subst path)
-  | (Subst.Lazy.Mty_signature _ | Subst.Lazy.Mty_functor _) as mty -> mty
+  | (Subst.Lazy.Mty_signature _ | Subst.Lazy.Mty_functor _
+    | Subst.Lazy.Mty_for_hole) as mty -> mty
 
 let rec prefix_refinement_paths_lazy env outer_subst mty p =
   let open Subst.Lazy in
@@ -274,7 +275,7 @@ let rec prefix_refinement_paths_lazy env outer_subst mty p =
           prefix_refinement_paths_lazy env Subst.identity mty p
       | None -> mty
       end
-  | Mty_alias _ | Mty_functor _ -> mty
+  | Mty_alias _ | Mty_functor _ | Mty_for_hole -> mty
 
 (* Perform one reduction on a module type, returning None is it couldn't be
   reduced. Possible reductions are unfolding type abbreviations, pushing
