@@ -24,8 +24,6 @@ val declarations : context -> data -> Vox_smt.datatype_declaration list
 val declarations_of_sort :
   context -> Vox_smt.sort -> Vox_smt.datatype_declaration list
 
-val stable_sort : context -> Vox_smt.sort -> bool
-
 val primitive : Env.t -> Path.t -> (string * int) option
 
 val value_constant :
