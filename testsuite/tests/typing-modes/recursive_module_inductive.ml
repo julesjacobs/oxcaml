@@ -262,11 +262,13 @@ end = struct
 end
 and Independent_right : sig
   module Nested : sig val identity : int -> int @@ total end
-  module Make : functor (_ : sig type t end) ->
-    sig val identity : int -> int @@ total end
+  module Make : functor (Argument : sig type t end) ->
+    sig val identity : Argument.t -> Argument.t @@ total end
 end = struct
   module Nested = struct let (identity @ total) x = x end
-  module Make (_ : sig type t end) = Nested
+  module Make (Argument : sig type t end) = struct
+    let (identity @ total) (x : Argument.t) = x
+  end
 end
 [%%expect{|
 module rec Independent_left : sig type t end
@@ -274,6 +276,7 @@ and Independent_right :
   sig
     module Nested : sig val identity : int -> int @@ total end
     module Make :
-      sig type t end -> sig val identity : int -> int @@ total end
+      functor (Argument : sig type t end) ->
+        sig val identity : Argument.t -> Argument.t @@ total end
   end
 |}]
