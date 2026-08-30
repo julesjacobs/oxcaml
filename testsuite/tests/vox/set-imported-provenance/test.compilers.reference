@@ -1,0 +1,4 @@
+File "rejected.ml", line 3, characters 31-46:
+3 |   let proof : {b : bool | b} = refine_ present in
+                                   ^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
