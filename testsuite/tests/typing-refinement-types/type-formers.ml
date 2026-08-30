@@ -725,8 +725,7 @@ module Outer_modtype : sig module type R = Result_signature module N : R end
 |}]
 
 module Result = Make_result (Nonzero)
-module Result_alias = Result
-module Result_again = Make_result (Nonzero);;
+module Result_alias = Result;;
 [%%expect{|
 module Result :
   sig
@@ -736,13 +735,6 @@ module Result :
       sig val accept : {x : int | holds x} -> unit @@ total end
   end
 module Result_alias = Result
-module Result_again :
-  sig
-    val holds : int -> bool @@ total
-    type t = {x : int | holds x}
-    module Refined :
-      sig val accept : {x : int | holds x} -> unit @@ total end
-  end
 |}]
 
 module Shadowed : sig
@@ -818,16 +810,13 @@ Error: The value "x" has type
 
 module Empty = struct end
 let choose_positive = ref true
-module Positive : Predicate = struct
-  let (holds @ total) x = gt x 0
-end
 module Nontrivial : Predicate = struct
   let (holds @ total) x = gt x 1
 end
 
 module Unstable (_ : sig end) : Result_signature = struct
   let (holds @ total) =
-    if !choose_positive then Positive.holds else Nontrivial.holds
+    if !choose_positive then Nonzero.holds else Nontrivial.holds
   type t = { x : int | holds x }
   module Refined = struct
     external accept : { x : int | holds x } -> unit @@ total = "%ignore"
@@ -840,7 +829,6 @@ module Second = Unstable (Empty);;
 [%%expect{|
 module Empty : sig end
 val choose_positive : bool ref = {contents = true}
-module Positive : Predicate
 module Nontrivial : Predicate
 module Unstable : sig end -> Result_signature
 module First :

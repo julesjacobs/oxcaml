@@ -14,5 +14,6 @@ end
 
 module Argument = struct end
 module A = Make (Argument)
+let () = choose_positive := true
 module B = Make (Argument)
 module Alias = A
