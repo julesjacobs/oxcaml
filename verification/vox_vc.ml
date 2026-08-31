@@ -310,6 +310,12 @@ let path_constructor_name = function
   | Path.Pextra_ty (_, Path.Pcstr_ty name) -> Some name
   | _ -> None
 
+let select constructor index value =
+  match value with
+  | Construct (actual, fields) when actual = constructor ->
+    List.nth fields index
+  | value -> Select (constructor, index, value)
+
 let construct ctx env ty name values =
   match data_of_type ctx env ty with
   | None -> None
@@ -334,7 +340,7 @@ let select_field ctx env ty name value =
         (fun index (label, _) -> if label = name then Some index else None)
         (Constructor.fields constructor)
     with
-    | Some index -> scalar_value (Select (constructor, index, value))
+    | Some index -> scalar_value (select constructor index value)
     | None -> None
     end
   | _ -> None
@@ -728,6 +734,12 @@ let operation ctx env function_type result_type name args =
     begin match scalar element, scalar set with
     | Some element, Some set when is_set_sort ctx.encoding (term_sort set) ->
       scalar_value (set_find ctx (term_sort set) element set)
+    | _ -> None
+    end
+  | "%map_empty", [_unit] ->
+    begin match sort ctx.encoding env result_type with
+    | Some map_sort when is_map_sort ctx.encoding map_sort ->
+      scalar_value (map_empty ctx map_sort)
     | _ -> None
     end
   | "%map_singleton", [key; data] ->
@@ -1135,7 +1147,7 @@ and predicate_pattern_selected_fields ctx env s value constructor patterns =
           List.map
             (fun (s, field_condition) -> s, both And condition field_condition)
             (predicate_pattern ctx env s
-               (scalar_value (Select (constructor, index, value)))
+               (scalar_value (select constructor index value))
                pattern))
         outcomes)
     [s, Is (constructor, value)]
@@ -1225,9 +1237,7 @@ and pattern_selected_fields ctx s value constructor patterns =
         (fun (s, condition) ->
           List.map
             (fun (s, field_condition) -> s, both And condition field_condition)
-            (pattern ctx s
-               (scalar_value (Select (constructor, index, value)))
-               pat))
+            (pattern ctx s (scalar_value (select constructor index value)) pat))
         outcomes)
     [s, Is (constructor, value)]
     patterns
