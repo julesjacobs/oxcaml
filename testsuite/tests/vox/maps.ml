@@ -23,13 +23,16 @@ module Demo : sig end = struct
   module Alias = M
   module Ascribed : module type of M = M
 
+  type 'a wrapped = {map : 'a M.t}
+
   let to_more_labels : 'a. 'a M.t -> 'a More_labeled.t = fun map -> map
   let from_more_labels : 'a. 'a More_labeled.t -> 'a M.t = fun map -> map
 
   let (constructor_laws @ total) (key @ total) =
-    let empty = M.empty in
+    let empty = M.Refined.empty () in
     let singleton = M.Refined.singleton key 10 in
     let added = M.Refined.add key 20 singleton in
+    let wrapped = {map = added} in
     let removed = M.Refined.remove key added in
     let found = M.Refined.find added (refine_ key) in
     let result = () in
@@ -38,6 +41,7 @@ module Demo : sig end = struct
           M.mem key empty = false
           && M.mem key singleton
           && M.mem key added
+          && M.mem key wrapped.map
           && found = 20
           && M.mem key removed = false} =
       refine_ result
@@ -108,10 +112,15 @@ module Demo : sig end = struct
     ()
 
   let (more_labels @ total) (key @ total) =
+    let empty = More_labeled.Refined.empty () in
     let map = More_labeled.Refined.singleton key 17 in
     let found = More_labeled.Refined.find map (refine_ key) in
     let result = () in
-    let proof : {u : unit | More_labeled.mem key map && found = 17} =
+    let proof :
+        {u : unit |
+          More_labeled.mem key empty = false
+          && More_labeled.mem key map
+          && found = 17} =
       refine_ result
     in
     let refine_ proof = proof in

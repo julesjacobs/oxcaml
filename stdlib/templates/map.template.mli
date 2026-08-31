@@ -427,8 +427,10 @@ module type TotalS =
           operations preserve ordinary visibility and contention, so mutable
           keys and values remain writable. Ordinary constructors also accept
           values containing partial functions. The query passed to [remove]
-          is not retained. *)
+          is not retained. [empty ()] instantiates its value type at ordinary
+          access. *)
 
+      val empty: unit -> 'a t @ total @@ total
       val singleton:
         key @ total ->
         'a @ total ->

@@ -123,6 +123,7 @@ module type TotalS =
     val to_rev_seq: 'a t -> (key * 'a) Seq.t @@ total
     val to_seq_from: key -> 'a t -> (key * 'a) Seq.t @@ total
     module Refined : sig
+      val empty: unit -> 'a t @ total @@ total
       val singleton:
         key @ total ->
         'a @ total ->
@@ -1152,6 +1153,11 @@ module MakeTotal(Ord: TotalOrderedType) : TotalS with type key = Ord.t =
     let of_seq = Base.of_seq
 
     module Refined = struct
+      external trust_empty :
+        ('a : value).
+        (unit -> 'a Base.t) ->
+        (unit -> 'a Base.t @ total) @ total
+        = "%identity"
       external trust_constructor2 :
         ('a : value) ('b : value) ('c : value).
         ('a -> 'b -> 'c) ->
@@ -1182,6 +1188,7 @@ module MakeTotal(Ord: TotalOrderedType) : TotalS with type key = Ord.t =
          'a @ total) @ total
         = "%identity"
 
+      let empty = trust_empty (fun () -> Base.empty)
       let singleton = trust_constructor2 Base.singleton
       let add = trust_constructor3 Base.add
       let remove = trust_remove Base.remove
