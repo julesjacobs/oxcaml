@@ -222,6 +222,7 @@ let map_operations =
   [ [], "empty", ("%map_empty", 0);
     [], "mem", ("%map_mem", 2);
     [], "find", ("%map_find", 2);
+    ["Refined"], "empty", ("%map_empty", 1);
     ["Refined"], "singleton", ("%map_singleton", 2);
     ["Refined"], "add", ("%map_add", 3);
     ["Refined"], "remove", ("%map_remove", 2);
