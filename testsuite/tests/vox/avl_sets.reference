@@ -1,3 +1,4 @@
 height = 2; valid = true; members = true,true,true; size = 3
 rotations valid = true,true,true,true
 semantic equal = true; representation equal = false
+AVL/model members = true,true,true
