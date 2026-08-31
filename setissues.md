@@ -30,3 +30,8 @@
 - AVL shape depends on insertion order. Its interface therefore uses semantic
   `equal`, defined by the canonical inorder sequence; `===` remains
   representation equality.
+- `Set.MakeTotal` models comparator equivalence with opaque classes because a
+  comparator may identify logically distinct values. Relating another set
+  implementation that uses source equality therefore requires an explicit
+  compatibility premise. Exact-key membership and operations that merely
+  combine membership predicates need no such premise.
