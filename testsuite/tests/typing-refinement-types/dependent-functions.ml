@@ -27,7 +27,7 @@ type 'a constrained_dependent =
   (p : ('a * int)) -> {r : int | match p with a, b -> r = a + b};;
 [%%expect{|
 type 'a constrained_dependent =
-    (p : 'a * int) -> {r : int | match p with | (a, b) -> r = (a + b)}
+    (p : ('a * int)) -> {r : int | match p with | (a, b) -> r = (a + b)}
   constraint 'a = int
 |}]
 
