@@ -100,12 +100,12 @@ let separate_function_signature ~args (e : Typedtree.expression) =
   let ppf = Format.formatter_of_buffer buffer in
   let rec separate ?(parameters = []) args ty =
     match (args, Types.get_desc ty) with
-    | (_l, arg) :: args, Tarrow ((label, _, _), ty1, ty2, _) ->
+    | (_l, arg) :: args, Tarrow ((label, _, _, _), ty1, ty2, _) ->
       let parameter =
         print_parameter_offset ~arg ppf buffer e.exp_env label ty1
       in
       separate args ty2 ~parameters:(parameter :: parameters)
-    | [], Tarrow ((label, _, _), ty1, ty2, _) ->
+    | [], Tarrow ((label, _, _, _), ty1, ty2, _) ->
       let parameter =
         print_parameter_offset ~arg:(Omitted omitted) ppf buffer e.exp_env label
           ty1
