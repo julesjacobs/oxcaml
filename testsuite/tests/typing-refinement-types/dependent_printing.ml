@@ -22,7 +22,7 @@ type tuple = (p : (int * int)) -> {r:int | match p with a,b -> r = a+b}
 type nested = (x:int) -> (x: {r:int | r=x}) -> {r:int | let refine_ n=x in r=n}
 type predicate = (x:int) -> {r:int | let x = x + 1 in r=x}
 
-let g (x:int) : {r:int | r=x} = refine_ x
+external g : (x:int) -> {r:int | r=x} = "g"
 module M = struct
   let x = 1
   let y = g x
