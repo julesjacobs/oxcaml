@@ -20,7 +20,8 @@ open Types
     [rename] maps externally-bound idents;
     [free_var_path] substitutes externally-bound variables with value paths;
     [bind_value] turns selected free value paths into bound variables;
-    [value_path] rewrites the paths of free idents. *)
+    [value_path] rewrites the paths of free idents;
+    [expression] rewrites each expression after its children. *)
 val map :
   ?rename:Ident.t Ident.Map.t ->
   ?rename_bound:(Ident.t -> Ident.t) ->
@@ -31,6 +32,7 @@ val map :
   ?type_path:(Path.t -> Path.t) ->
   ?type_expr:(type_expr -> type_expr) ->
   ?location:(Location.t -> Location.t) ->
+  ?expression:(refinement_expression -> refinement_expression) ->
   refinement_expression -> refinement_expression
 
 (** Fold over every persistent type annotation in a predicate. *)
@@ -60,6 +62,11 @@ val untype :
 
 (** Find an occurrence of one of the given bound identifiers. *)
 val find_ident : Ident.Set.t -> refinement_expression -> Ident.t option
+
+(** Remove unused bindings and turn refinement eliminations into ordinary
+    payload bindings in a retained function body. *)
+val logical_definition_body :
+  refinement_expression -> refinement_expression
 
 (** Identifiers bound inside the predicate. *)
 val bound_idents : refinement_expression -> Ident.Set.t

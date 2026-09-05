@@ -17,7 +17,7 @@ open Types
 let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
     ?value_path
     ?constructor_path ?type_path ?(type_expr = Fun.id)
-    ?(location = Fun.id) rexp =
+    ?(location = Fun.id) ?(expression = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
     let pconst_desc =
       match constant.pconst_desc with
@@ -120,9 +120,10 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
           Rexp_match
             (map_rexp rename scrutinee, List.map (map_case rename) cases)
     in
-    { rexp_desc;
-      rexp_type = type_expr rexp.rexp_type;
-      rexp_loc = location rexp.rexp_loc }
+    expression
+      { rexp_desc;
+        rexp_type = type_expr rexp.rexp_type;
+        rexp_loc = location rexp.rexp_loc }
   and map_case rename { rc_lhs; rc_guard; rc_rhs } =
     let rename, rc_lhs = map_pat rename rc_lhs in
     { rc_lhs;
@@ -567,6 +568,33 @@ let exists_rexp pred rexp =
           cases
   in
   match walk rexp with () -> false | exception Found -> true
+
+let logical_definition_body rexp =
+  map ~expression:(fun rexp ->
+    match rexp.rexp_desc with
+    | Rexp_let (binding, body) ->
+        let used =
+          exists_rexp
+            (fun exp -> match exp.rexp_desc with
+               | Rexp_var id -> Ident.same id binding.rb_ident
+               | _ -> false)
+            body
+        in
+        if not used then { rexp with rexp_desc = body.rexp_desc }
+        else
+          begin match binding.rb_kind with
+          | Rbind_value -> rexp
+          | Rbind_refine ->
+              let binding =
+                { binding with
+                  rb_kind = Rbind_value;
+                  rb_expr =
+                    { binding.rb_expr with rexp_type = binding.rb_type } }
+              in
+              { rexp with rexp_desc = Rexp_let (binding, body) }
+          end
+    | _ -> rexp)
+    rexp
 
 let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
   let result = ref None in

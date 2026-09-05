@@ -65,6 +65,10 @@ let compiler_stops_before_attributes_consumed () =
 let warn_misplaced_attributes () =
   let keys = List.of_seq (Attribute_table.to_seq_keys unused_attrs) in
   Attribute_table.clear unused_attrs;
+  List.iter (fun sloc ->
+    if sloc.txt = "def" || sloc.txt = "ocaml.def" then
+      Location.raise_errorf ~loc:sloc.loc
+        "The def attribute is only supported on function bindings") keys;
   if not (compiler_stops_before_attributes_consumed ()) then
     let keys = List.sort attr_order keys in
     List.iter (fun sloc ->
@@ -97,6 +101,7 @@ let warn_unused () =
    misplaced attribute warnings. *)
 let builtin_attrs =
   [ "inline"
+  ; "def"
   ; "atomic"
   ; "inlined"
   ; "specialise"
