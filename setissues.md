@@ -21,3 +21,12 @@
 - The higher-order recursive extensionality proof produces large verification
   conditions. It is a compile-only test so it is checked once rather than by
   every expect-test mode and backend.
+
+## AVL demo
+
+- A refinement-wrapped inductive argument is not recognized as a structural
+  recursion argument. The insertion proof passes validity as a refined `unit`
+  witness while keeping the tree as the recursive argument.
+- AVL shape depends on insertion order. Its interface therefore uses semantic
+  `equal`, defined by the canonical inorder sequence; `===` remains
+  representation equality.
