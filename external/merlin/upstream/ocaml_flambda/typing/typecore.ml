@@ -15211,7 +15211,9 @@ let make_definition_lemma env binding =
   let predicate_env =
     Env.add_value ~mode:(total_mode ()) id definition_description predicate_env
   in
-  let mk rexp_type rexp_desc = {rexp_type; rexp_desc; rexp_loc = loc} in
+  let mk rexp_type rexp_desc =
+    {rexp_type; rexp_desc; rexp_type_constraint = false; rexp_loc = loc}
+  in
   let call = mk (Subst.type_expr subst body.exp_type) (Rexp_apply
       (mk (Subst.type_expr subst binding.vb_expr.exp_type)
          (Rexp_ident (Path.Pident id)),
