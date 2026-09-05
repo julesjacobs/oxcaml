@@ -613,14 +613,10 @@ let untype ?(type_constraint = fun _ -> None)
           closed
     | Rpat_alias (p, id) ->
         Pat.alias ~loc (untype_pat p) (Location.mknoloc (var_name id))
-<<<<<<< HEAD
-    in
-    constrain_pattern pat.rpat_type_constraint pat.rpat_type pattern
-||||||| parent of 0780aad5c3 (Automated commit: Import compiler changes from 4f3a9b966bedb56bd6431290847732d8135cad97)
-=======
     | Rpat_or (left, right) ->
         Pat.or_ ~loc (untype_pat left) (untype_pat right)
->>>>>>> 0780aad5c3 (Automated commit: Import compiler changes from 4f3a9b966bedb56bd6431290847732d8135cad97)
+    in
+    constrain_pattern pat.rpat_type_constraint pat.rpat_type pattern
   in
   untype_rexp rexp
 
