@@ -399,6 +399,7 @@ in
       type_loc = sdecl.ptype_loc;
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default = false;
+      type_inductive = false;
       type_uid = Uid.unboxed_version uid;
       type_unboxed_version = None;
     }
@@ -418,6 +419,7 @@ in
       type_loc = sdecl.ptype_loc;
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default = false;
+      type_inductive = false;
       type_uid = uid;
       type_unboxed_version;
     }
@@ -1281,6 +1283,9 @@ let transl_declaration env sdecl (id, uid) =
         type_loc = sdecl.ptype_loc;
         type_attributes = sdecl.ptype_attributes;
         type_unboxed_default = unboxed_default;
+        type_inductive =
+          Attr_helper.has_no_payload_attribute
+            "inductive" sdecl.ptype_attributes;
         type_uid = uid;
         type_unboxed_version = None;
         (* Unboxed versions are computed after all declarations have been
@@ -1481,6 +1486,7 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
         type_loc = decl.type_loc;
         type_attributes = decl.type_attributes;
         type_unboxed_default = false;
+        type_inductive = false;
         type_uid = Uid.unboxed_version decl.type_uid;
         type_unboxed_version = None;
       }
@@ -3782,6 +3788,70 @@ let add_types_to_env ~shapes decls env =
     decls shapes env
 
 (* Translate a set of type declarations, mutually recursive or not *)
+let check_inductive_decl env ~single id decl =
+  if decl.type_inductive then begin
+    let reject reason =
+      Location.raise_errorf ~loc:decl.type_loc
+        "Invalid inductive declaration: %s." reason
+    in
+    if not single then reject "mutually declared types are not supported";
+    let path = Path.Pident id in
+    let checked_direct = ref TypeSet.empty in
+    let checked_indirect = ref TypeSet.empty in
+    let checked_aliases = ref Path.Map.empty in
+    let rec check visiting direct ty =
+      if TypeSet.mem ty visiting then
+        reject "recursive type expressions are not supported";
+      let checked = if direct then checked_direct else checked_indirect in
+      if not (TypeSet.mem ty !checked) then begin
+        let visiting = TypeSet.add ty visiting in
+        begin match get_desc ty with
+        | Tconstr (p, args, _) when Path.same path p ->
+            if not direct then
+              reject
+                "recursive occurrences must be direct fields or \
+                 tuple components";
+            (try Ctype.equal env false args decl.type_params
+             with Ctype.Equality _ ->
+               reject "recursion must use unchanged type parameters")
+        | Ttuple fields ->
+            List.iter (fun (_, ty) -> check visiting direct ty) fields
+        | Tconstr (p, args, _) ->
+            let previous =
+              Option.value (Path.Map.find_opt p !checked_aliases) ~default:[]
+            in
+            if not (List.exists (fun (direct', args') ->
+              direct = direct' && List.equal eq_type args args') previous)
+            then begin
+              let expanded = Ctype.expand_head env ty in
+              if not (eq_type ty expanded) then check visiting direct expanded
+              else begin
+                Btype.iter_type_expr (check visiting false) ty
+              end;
+              checked_aliases :=
+                Path.Map.add p ((direct, args) :: previous) !checked_aliases
+            end
+        | _ -> Btype.iter_type_expr (check visiting false) ty
+        end;
+        checked := TypeSet.add ty !checked
+      end
+    in
+    match decl.type_kind with
+    | Type_variant (constructors, _, _) ->
+        List.iter (fun (cd : Types.constructor_declaration) ->
+          if Option.is_some cd.cd_res then
+            reject "GADT constructors are not supported";
+          match cd.cd_args with
+          | Cstr_record _ ->
+              reject "inline-record constructors are not supported"
+          | Cstr_tuple args ->
+              List.iter (fun (arg : Types.constructor_argument) ->
+                check TypeSet.empty true arg.ca_type) args)
+          constructors
+    | _ -> reject "a closed variant declaration is required"
+  end
+
+(* Translate a set of type declarations, mutually recursive or not *)
 let transl_type_decl env rec_flag sdecl_list =
   List.iter check_redefined_unit sdecl_list;
   (* Add dummy types for fixed rows *)
@@ -4002,6 +4072,9 @@ let transl_type_decl env rec_flag sdecl_list =
   let shapes = shape_declarations env decls in
   (* Compute the final environment with variance and immediacy *)
   let final_env = add_types_to_env ~shapes:(Some shapes) decls env in
+  List.iter (fun (id, decl) ->
+    check_inductive_decl final_env ~single:(List.length decls = 1) id decl)
+    decls;
   (* Keep original declaration *)
   let final_decls =
     List.map2
@@ -5000,6 +5073,9 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       in
       cty, cty.ctyp_type
   in
+  if sig_decl.type_inductive && not (Ctype.is_inductive env man) then
+    Location.raise_errorf ~loc
+      "This constraint requires a type with a checked inductive guarantee.";
   (* In the second part, we check the consistency between the two
      declarations and compute a "merged" declaration; we now need to
      work in the larger signature environment [sig_env], because
@@ -5064,6 +5140,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
           type_loc = loc;
           type_attributes = decl.type_attributes;
           type_unboxed_default = false;
+          type_inductive = false;
           type_uid = Uid.unboxed_version type_uid;
           type_unboxed_version = None;
         }
@@ -5103,6 +5180,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_loc = loc;
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default;
+      type_inductive = sig_decl.type_inductive;
       type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
       type_unboxed_version;
     }
@@ -5138,6 +5216,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_private = new_sig_decl.type_private;
       type_manifest = new_sig_decl.type_manifest;
       type_unboxed_default = new_sig_decl.type_unboxed_default;
+      type_inductive = new_sig_decl.type_inductive;
       type_is_newtype = new_sig_decl.type_is_newtype;
       type_expansion_scope = new_sig_decl.type_expansion_scope;
       type_loc = new_sig_decl.type_loc;
@@ -5209,6 +5288,7 @@ let transl_package_constraint ~loc ty =
     type_loc = loc;
     type_attributes = [];
     type_unboxed_default = false;
+    type_inductive = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -5234,6 +5314,7 @@ let abstract_type_decl ~injective ~jkind ~params =
       type_loc = Location.none;
       type_attributes = [];
       type_unboxed_default = false;
+      type_inductive = false;
       type_uid = Uid.internal_not_actually_unique;
       type_unboxed_version =
         Some {
@@ -5251,6 +5332,7 @@ let abstract_type_decl ~injective ~jkind ~params =
           type_loc = Location.none;
           type_attributes = [];
           type_unboxed_default = false;
+          type_inductive = false;
           type_uid = Uid.internal_not_actually_unique;
           type_unboxed_version = None;
         };

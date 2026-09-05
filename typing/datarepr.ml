@@ -94,6 +94,7 @@ let constructor_args ~current_unit priv cd_args cd_res path rep =
           type_loc = Location.none;
           type_attributes = [];
           type_unboxed_default = false;
+          type_inductive = false;
           type_uid = Uid.mk ~current_unit;
           type_unboxed_version = None;
         }

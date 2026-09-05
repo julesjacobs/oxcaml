@@ -317,3 +317,134 @@ capture all values at visibility *write*.
 Statefulness is irrelevant for types that do not contain functions, and values of such
 types *mode cross* on the statefulness axis; they may be used as stateless
 even when they are stateful.
+
+## Future modes: Totality
+
+Totality is a two-point future axis, `total < partial`. A total closure cannot
+call captured partial functions, recurse, loop, raise, use a non-exhaustive
+pattern, or read or write mutable state. The restriction is relative to
+function arguments: a total higher-order function may call its function
+argument. Total code may return existing mutable data but cannot allocate fresh
+identity-bearing values such as references, mutable arrays or records, lazy
+cells, objects, and locally generated exception constructors. Module
+computation in an expression is partial until the module language tracks
+totality; module aliases remain allowed. Immutable structural allocation is
+allowed.
+
+### Inductive pattern matching
+
+Pattern matching can itself introduce nontermination when a recursive type is
+not inductive. For example, this definition has no syntactic recursion, but
+evaluating `omega ()` repeatedly applies `delta` to `Roll delta`:
+
+```ocaml
+type knot = Roll of (knot -> int)
+
+let (delta @ total) (Roll f as x) = f x
+let (omega @ total) () = delta (Roll delta)
+```
+
+Constructor and record elimination in total code therefore requires either a
+nonrecursive nominal type or a checked `[@@inductive]` declaration. Record
+elimination includes record patterns and field projection. The checked
+attribute allows only direct recursive fields and tuple components. It also
+prevents recursive value definitions from constructing cycles:
+
+```ocaml
+type nat = Z | S of nat [@@inductive]
+
+let (predecessor @ total) = function Z -> Z | S n -> n
+let rec invalid = S invalid  (* rejected *)
+```
+
+As a conservative initial rule, ordinary recursive types without the attribute
+cannot be destructured in total code. They can still be constructed, passed,
+returned, or destructured by partial code. In particular, the rule prevents a
+cyclic ordinary value such as `let rec ones = 1 :: ones` from being consumed by
+a total pattern match.
+
+Structural patterns have no declaration carrying the checked guarantee, so
+they are also partial. This closes the specialization of a generic eliminator
+to a recursive structural type:
+
+```ocaml
+let (unroll @ total) = function `Roll f -> f
+type knot = [ `Roll of (knot -> int) ]
+```
+
+Pattern checks are deferred until all cases have fixed the matched type. Checks
+with the same type and branch environment share one representation traversal,
+so a match does not rescan an N-constructor declaration for each of its N
+cases. Branches with distinct GADT environments remain separate.
+
+The nonrecursive check follows transparent aliases and mutually recursive
+module declarations. Neither an alias nor a module boundary may hide a cycle:
+
+```ocaml
+type alias = knot
+
+module rec Left : sig type t = Left of Right.t end = Left
+and Right : sig type t = Right of Left.t end = Right
+```
+
+Both `alias` and `Left.t` remain unavailable to constructor patterns in total
+code. An `[@@inductive]` guarantee is also checked by signature inclusion, so a
+module cannot claim the guarantee for an unchecked implementation type.
+Functor parameters may carry and eliminate an `[@@inductive]` guarantee.
+This supports ordinary functors over inductive containers:
+
+```ocaml
+module type S = sig
+  type elt
+  type t = Nil | Cons of elt * t [@@inductive]
+end
+
+module Length (X : S) = struct
+  let rec (length @ total) = function
+    | X.Nil -> 0
+    | X.Cons (_, tail) -> 1 + length tail
+end
+```
+
+The guarantee cannot be used to close a cycle through a recursive module.
+Recursive module signatures therefore cannot mention a guaranteed inductive
+type, directly or through value types, aliases, module type abbreviations, or
+nested signatures. This restriction also covers first-class packages produced
+from recursive modules.
+The traversal also terminates when recursive modules transform type arguments
+on each step. Such a cycle is rejected when the same declaration is reached
+with different arguments:
+
+```ocaml
+module rec Left : sig
+  type 'a t = Left of ('a * 'a) Right.t
+end = Left
+and Right : sig
+  type 'a t = Right of 'a Left.t
+end = Right
+
+type root = Root of int Left.t
+```
+
+Following this representation produces `int Left.t`, then `(int * int)
+Left.t`, and so on. Remembering only complete type expressions would never
+reach a fixed point.
+
+The cycle check follows instantiated representations rather than every type
+argument. A phantom occurrence does not make the representation recursive:
+
+```ocaml
+type 'a phantom = Phantom
+type t = Wrap of t phantom
+```
+
+Constructor patterns over `t` remain available in total code.
+
+Likewise, a type parameter is a leaf of a nonrecursive representation:
+
+```ocaml
+type 'a box = Box of 'a
+let (unbox @ total) = function Box x -> x
+```
+
+Destructuring the outer `box` takes one step for every instantiation of `'a`.

@@ -179,6 +179,7 @@ type error =
   | Cannot_scrape_alias of Path.t
   | Cannot_scrape_package_type of Path.t
   | Badly_formed_signature of string * Typedecl.error
+  | Inductive_type_in_recursive_module of string
   | Cannot_hide_id of hiding_error
   | Invalid_type_subst_rhs
   | Non_packable_local_modtype_subst of Path.t

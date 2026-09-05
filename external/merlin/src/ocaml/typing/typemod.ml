@@ -85,6 +85,7 @@ type error =
   | Cannot_scrape_alias of Path.t
   | Cannot_scrape_package_type of Path.t
   | Badly_formed_signature of string * Typedecl.error
+  | Inductive_type_in_recursive_module of string
   | Cannot_hide_id of hiding_error
   | Invalid_type_subst_rhs
   | Non_packable_local_modtype_subst of Path.t
@@ -809,6 +810,43 @@ and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
       Mty_strengthen (mty, path, alias)
   | Mty_for_hole -> mty
 
+let partial_recursive_module_modality modality =
+  let modality = Mode.Modality.to_const_exn modality in
+  Mode.Modality.Const.set
+    (Mode.Modality.Axis.Comonadic Mode.Axis.Totality)
+    (Mode.Modality.Comonadic.Atom.Meet_const Mode.Totality.Const.Partial)
+    modality
+
+let rec partial_recursive_module_type env mty =
+  match Mtype.scrape env mty with
+  | Mty_ident _ | Mty_alias _ as mty -> mty
+  | Mty_signature sg ->
+      Mty_signature (List.map (partial_recursive_module_item env) sg)
+  | Mty_functor (param, result, mode) ->
+      Mty_functor (param, partial_recursive_module_type env result, mode)
+  | Mty_strengthen (mty, path, alias) ->
+      Mty_strengthen (partial_recursive_module_type env mty, path, alias)
+  | Mty_for_hole -> mty
+
+and partial_recursive_module_item env = function
+  | Sig_value (id, desc, visibility) ->
+      let val_modalities =
+        desc.val_modalities
+        |> partial_recursive_module_modality
+        |> Mode.Modality.of_const
+      in
+      Sig_value (id, { desc with val_modalities }, visibility)
+  | Sig_module (id, presence, desc, rec_status, visibility) ->
+      let md_type = partial_recursive_module_type env desc.md_type in
+      let md_modalities =
+        desc.md_modalities
+        |> partial_recursive_module_modality
+        |> Mode.Modality.of_const
+      in
+      let desc = { desc with md_type; md_modalities } in
+      Sig_module (id, presence, desc, rec_status, visibility)
+  | item -> item
+
 
 module Merge = struct
   (** This module hosts the functions dealing with signature constraints. There
@@ -1018,6 +1056,7 @@ module Merge = struct
               type_expansion_scope = Btype.lowest_level;
               type_attributes = [];
               type_unboxed_default = false;
+              type_inductive = false;
               type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
               type_unboxed_version = None;
             }
@@ -2655,6 +2694,63 @@ and transl_modtype_decl_aux env
   newenv, mtd, decl
 
 and transl_recmodule_modtypes env ~sig_modalities sdecls =
+  let find_inductive_type env item =
+    let exception Found of string in
+    try
+      with_type_mark begin fun mark ->
+        let super = Btype.type_iterators mark in
+        let iterator =
+          { super with
+            Btype.it_type_expr = (fun self ty ->
+              match get_desc ty with
+              | Tconstr (path, _, _) ->
+                begin match Env.find_type path env with
+                | { type_inductive = true; _ } ->
+                  raise_notrace (Found (Path.name path))
+                | _ | exception Not_found ->
+                  let expanded = Ctype.expand_head env ty in
+                  if eq_type expanded ty
+                  then super.Btype.it_type_expr self ty
+                  else self.Btype.it_type_expr self expanded
+                end
+              | _ -> super.Btype.it_type_expr self ty)
+          }
+        in
+        iterator.Btype.it_signature_item iterator item
+      end;
+      None
+    with Found name -> Some name
+  in
+  let rec find_inductive_guarantee env mty =
+    match Mtype.scrape env mty with
+    | Mty_ident _ | Mty_alias _ | Mty_for_hole -> None
+    | Mty_functor (param, result, _) ->
+        let env =
+          match param with
+          | Unit | Named (None, _, _) -> env
+          | Named (Some id, param, mode) ->
+              let mode =
+                Mode.(mode |> alloc_as_value |> Value.disallow_right)
+              in
+              Env.add_module ~arg:true id Mp_present param ~mode env
+        in
+        find_inductive_guarantee env result
+    | Mty_strengthen (result, _, _) ->
+        find_inductive_guarantee env result
+    | Mty_signature signature ->
+        let env = Env.add_signature signature env in
+        List.find_map (find_inductive_guarantee_in_item env) signature
+  and find_inductive_guarantee_in_item env = function
+    | Sig_type (id, decl, _, _) when decl.type_inductive ->
+        Some (Ident.name id)
+    | Sig_module (_, _, decl, _, _) ->
+        find_inductive_guarantee env decl.md_type
+    | Sig_modtype (_, { mtd_type = Some mty; _ }, _) ->
+        find_inductive_guarantee env mty
+    | (Sig_value _ | Sig_type _ | Sig_typext _ | Sig_modtype _ | Sig_class _
+      | Sig_class_type _ | Sig_jkind _) as item ->
+        find_inductive_type env item
+  in
   let make_env curr =
     List.fold_left (fun env (id_shape, _, md, mode, _, _) ->
       let mode = Option.map (fun m -> m.mode_modes) mode in
@@ -2760,6 +2856,17 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
 *)
   let env2 = make_env dcl2 in
   check_recmod_decls env2 (map_mtys dcl2);
+  List.iter2
+    (fun (pmd, _) (_, _, (md : Types.module_declaration), _, _, _) ->
+       match find_inductive_guarantee env2 md.md_type with
+       | None -> ()
+       | Some name ->
+           raise
+             (Error
+                ( pmd.pmd_type.pmty_loc,
+                  env2,
+                  Inductive_type_in_recursive_module name )))
+    sdecls dcl2;
   let dcl2 =
     List.map2 (fun (pmd, _) (id_shape, id_loc, md, mmode, md_modalities, mty) ->
       let tmd =
@@ -4102,6 +4209,35 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
                    pmd_attributes=attrs; pmd_loc=loc; pmd_modalities=[]}
                   , Some smode)) sbind
             ) in
+        (* A recursive signature must not justify its own claimed totality. *)
+        let body_env =
+          List.fold_left
+            (fun env (mty, mode, _uid, shape) ->
+               match mty.md_id, mode, shape with
+               | Some id, Some mode, Some shape ->
+                   let md_type =
+                     partial_recursive_module_type newenv mty.md_type.mty_type
+                   in
+                   let mdecl =
+                     { Types.md_type;
+                       md_modalities = Modality.undefined;
+                       md_attributes = mty.md_attributes;
+                       md_loc = mty.md_loc;
+                       md_uid = mty.md_uid;
+                     }
+                   in
+                   let partial =
+                     Value.of_const
+                       { Value.Const.min with
+                         totality = Totality.Const.Partial }
+                   in
+                   let mode = Value.join [mode.mode_modes; partial] in
+                   Env.add_module_declaration ~check:true ~shape ~arg:true
+                     id Mp_present mdecl ~mode env
+               | None, _, _ -> env
+               | Some _, None, _ | Some _, Some _, None -> assert false)
+            env decls
+        in
         List.iter
           (fun (md, _, _, _) ->
              Option.iter Signature_names.(check_module names md.md_loc) md.md_id
@@ -4115,7 +4251,7 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
                  Builtin_attributes.warning_scope attrs
                    (fun () ->
                       type_module ~strengthen:true ~funct_body
-                        (anchor_recmodule id) newenv smodl
+                        (anchor_recmodule id) body_env smodl
                    )
                in
                let mty' =
@@ -5413,6 +5549,11 @@ let report_error ~loc _env = function
          Format_doc.pp_doc report.main.txt
      in
      { report with main = { report.main with txt} }
+  | Inductive_type_in_recursive_module name ->
+      Location.errorf ~loc
+        "Type %a has an [@@@@inductive] guarantee, which is not allowed in a \
+         recursive module signature."
+        Style.inline_code name
   | Cannot_hide_id Illegal_shadowing
       { shadowed_item_kind; shadowed_item_id; shadowed_item_loc;
         shadower_id; user_id; user_kind; user_loc } ->

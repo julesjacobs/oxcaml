@@ -1345,6 +1345,14 @@ let tree_of_modes (modes : Mode.Alloc.Const.t) =
       | _, _ -> Some modes.contention
     in
 
+    (* [statefulness] has an implied default based on [totality]: *)
+    let statefulness =
+      match modes.totality, modes.statefulness with
+      | Total, Stateless -> None
+      | Partial, Stateful -> None
+      | _, _ -> Some modes.statefulness
+    in
+
     (* [portability] has implied defaults based on [statefulness]: *)
     let portability =
       match modes.statefulness, modes.portability with
@@ -1356,7 +1364,7 @@ let tree_of_modes (modes : Mode.Alloc.Const.t) =
     in
 
     let diff = Mode.Alloc.Const.diff modes Mode.Alloc.Const.legacy in
-    { diff with forkable; yielding; contention; portability }
+    { diff with forkable; yielding; statefulness; contention; portability }
   in
   (* Step 2: Print the modes *)
   List.filter_map
@@ -2129,6 +2137,11 @@ let tree_of_type_decl id decl =
     then [{ oattr_name = "unsafe_allow_any_mode_crossing" }]
     else []
   in
+  let otype_attributes =
+    if decl.type_inductive then
+      { oattr_name = "inductive" } :: otype_attributes
+    else otype_attributes
+  in
   { otype_name = name;
     otype_params = args;
     otype_type = ty;
@@ -2591,6 +2604,7 @@ let dummy =
     type_loc = Location.none;
     type_attributes = [];
     type_unboxed_default = false;
+    type_inductive = false;
     type_uid = Uid.internal_not_actually_unique;
     type_unboxed_version = None;
   }
