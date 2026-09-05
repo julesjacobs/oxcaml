@@ -291,8 +291,11 @@ let rec predicate ctx env s e =
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
       let s, left = eval s left in
-      if s.dead then s, None else
-      name s (Some (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
+      if s.dead
+      then s, None
+      else
+        name s
+          (Some (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose s
@@ -461,10 +464,10 @@ and expression_desc ctx s e =
   | Texp_assume (binding, _, _) ->
     let s, value = eval s binding.vb_expr in
     expose_fact ctx e.exp_env s e.exp_type value e.exp_loc
-  | Texp_logical_equal (left, right) ->
+  | Texp_logical_equal (left, right) -> (
     let s, right = eval s right in
     let s, left = eval s left in
-    (match left, right with
+    match left, right with
     | Some left, Some right when term_sort left = term_sort right ->
       name s (Some (both Eq left right))
     | _ -> s, opaque ())
