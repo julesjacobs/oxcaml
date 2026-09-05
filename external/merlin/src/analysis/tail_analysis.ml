@@ -55,6 +55,7 @@ let expr_tail_positions = function
   | Texp_setinstvar _
   | Texp_override _
   | Texp_assert _
+  | Texp_logical_equal _
   | Texp_lazy _
   | Texp_object _
   | Texp_pack _

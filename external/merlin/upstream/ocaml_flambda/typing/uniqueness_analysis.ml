@@ -2370,6 +2370,10 @@ let rec check_uniqueness_exp_desc ~borrows ~overwrite (ienv : Ienv.t) ~loc :
     let uf_predicate = check_uniqueness_exp ~overwrite:None ienv predicate in
     let uf_body = check_uniqueness_exp ~overwrite:None ienv body in
     UF.seq uf_vbs (UF.seq uf_predicate uf_body)
+  | Texp_logical_equal (left, right) ->
+    UF.pars
+      [ check_uniqueness_exp ~overwrite:None ienv left;
+        check_uniqueness_exp ~overwrite:None ienv right ]
   | Texp_function { params; body; _ } ->
     let ienv, uf_params =
       List.fold_left_map

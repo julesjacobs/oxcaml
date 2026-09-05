@@ -3772,6 +3772,10 @@ and quote_expression_desc ~scopes ~transl stage e : Exp_desc.t =
           exp_extra = []
         }
       |> Exp_desc.delay
+    | Texp_logical_equal _ ->
+      (* Refinement types are rejected in quotations before translation. *)
+      fatal_errorf "Translquote [at %a]: logical equality" Location.print_loc
+        (to_location loc)
     | Texp_lazy exp ->
       let exp = quote_expression ~scopes ~transl stage exp in
       Exp_desc.lazy_ loc exp

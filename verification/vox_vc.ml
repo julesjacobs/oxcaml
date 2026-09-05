@@ -263,6 +263,13 @@ let rec predicate ctx env s e =
             [s, Some (required e.rexp_loc (operation env e.rexp_type name args))])
       | _ -> unsupported e.rexp_loc
       end
+    | Rexp_logical_equal (left, right) ->
+      paths (eval s right) (fun s right ->
+          paths (eval s left) (fun s left ->
+              [ ( s,
+                  Some
+                    (both Eq (required e.rexp_loc left)
+                       (required e.rexp_loc right)) ) ]))
     | Rexp_ifthenelse (c, t, Some f) -> predicate_if eval e.rexp_loc s c t f
     | Rexp_sequence (a, b) -> paths (eval s a) (fun s _ -> eval s b)
     | Rexp_let (binding, body) ->
@@ -428,6 +435,13 @@ and expression_desc ctx s e =
   | Texp_assume (binding, _, _) ->
     paths (eval s binding.vb_expr) (fun s value ->
         expose_fact ctx e.exp_env s e.exp_type value e.exp_loc)
+  | Texp_logical_equal (left, right) ->
+    paths (eval s right) (fun s right ->
+        paths (eval s left) (fun s left ->
+            match left, right with
+            | Some left, Some right when term_sort left = term_sort right ->
+              [s, Some (both Eq left right)]
+            | _ -> [s, opaque ()]))
   | Texp_sequence (a, _, b) -> paths (eval s a) (fun s _ -> eval s b)
   | Texp_ifthenelse (c, t, f) ->
     paths (eval s c) (fun s c ->
