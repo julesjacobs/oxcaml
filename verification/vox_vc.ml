@@ -2,137 +2,166 @@ open Types
 open Typedtree
 open Vox_smt
 
+type obligation =
+  { loc : Location.t;
+    goal : term;
+    omitted_premises : (Location.t * Location.error) list
+  }
+
+(* Command lists are stored in reverse execution order. Define binds a fresh
+   symbol to a total SMT expression; it does not restrict reachability. Check
+   verifies a nested computation without exporting its assumptions. *)
+type command =
+  | Assume of term
+  | Define of term
+  | Assert of obligation
+  | Choice of command list * command list
+  | Check of command list
+
 type state =
   { values : term option Path.Map.t;
-    facts : labelled_term list;
+    code : command list;
+    dead : bool;
     omitted_premises : (Location.t * Location.error) list
   }
 
 type context =
-  { mutable symbols : Symbol.t list;
-    mutable free : term option Path.Map.t;
-    prove : Location.t -> query -> unit
+  { mutable free : term option Path.Map.t;
+    mutable batches : command list list
   }
 
-let empty = { values = Path.Map.empty; facts = []; omitted_premises = [] }
+let empty =
+  { values = Path.Map.empty; code = []; dead = false; omitted_premises = [] }
 
 let bind s id value =
   { s with values = Path.Map.add (Path.Pident id) value s.values }
 
-let fact s label term =
-  match term with
-  | Boolean true -> s
-  | _ -> { s with facts = { label; term } :: s.facts }
-
 let not_ = function Boolean b -> Boolean (not b) | t -> App (Not, [t])
 
-let branch s t = fact s "branch" t
+let both op a b =
+  match op, a, b with
+  | And, Boolean true, x | And, x, Boolean true -> x
+  | And, Boolean false, _ | And, _, Boolean false -> Boolean false
+  | Implies, Boolean false, _ | Implies, _, Boolean true -> Boolean true
+  | Implies, Boolean true, x -> x
+  | Implies, x, Boolean false -> not_ x
+  | _ -> App (op, [a; b])
 
-let both op a b = App (op, [a; b])
+let branch s term =
+  match term with
+  | Boolean true -> s
+  | _ ->
+    { s with
+      code = Assume term :: s.code;
+      dead = s.dead || term = Boolean false
+    }
+
+let impossible s = s.dead
 
 let unsupported loc =
   Location.raise_errorf ~loc "Unsupported refinement predicate in VC generation"
 
 let required loc = function Some t -> t | None -> unsupported loc
 
-let impossible s =
-  List.exists
-    (fun f -> match f.term with Boolean false -> true | _ -> false)
-    s.facts
+let fresh_symbol sort label = Var (Symbol.create ~label sort)
 
-let paths outcomes f =
-  List.concat_map (fun (s, v) -> if impossible s then [] else f s v) outcomes
-
-let rec arguments_right_to_left eval s = function
-  | [] -> [s, []]
-  | arg :: args ->
-    paths (arguments_right_to_left eval s args) (fun s values ->
-        paths (eval s arg) (fun s value -> [s, value :: values]))
-
-let short_circuit eval loc ~is_and s a b =
-  paths (eval s a) (fun s a ->
-      let a = required loc a in
-      eval (branch s (if is_and then a else not_ a)) b
-      @ [branch s (if is_and then not_ a else a), Some (Boolean (not is_and))])
+let name s = function
+  | Some (App (op, args) as term) ->
+    let s =
+      match op, args with
+      | (Div | Rem), [_; divisor] -> branch s (App (Ne, [divisor; Integer 0L]))
+      | _ -> s
+    in
+    let value = fresh_symbol (term_sort term) "value" in
+    { s with code = Define (both Eq value term) :: s.code }, Some value
+  | value -> s, value
 
 let rec added_prefix ~base = function
   | current when current == base -> []
   | item :: rest -> item :: added_prefix ~base rest
   | [] -> Misc.fatal_error "VC: state does not extend its input"
 
-let guard_added_facts ~base guard s =
-  List.map
-    (fun fact -> { fact with term = both Implies guard fact.term })
-    (added_prefix ~base:base.facts s.facts)
+let choose s condition ifso ifnot =
+  if s.dead
+  then s, None
+  else
+    match condition with
+    | Boolean true -> ifso s
+    | Boolean false -> ifnot s
+    | _ ->
+      let left, a = ifso (branch s condition) in
+      let right, b = ifnot (branch s (not_ condition)) in
+      let value =
+        if left.dead
+        then b
+        else if right.dead
+        then a
+        else if a = b
+        then a
+        else
+          match a, b with
+          | Some a, Some b -> Some (App (Ite, [condition; a; b]))
+          | _ -> None
+      in
+      let s =
+        { s with
+          code =
+            Choice
+              ( added_prefix ~base:s.code left.code,
+                added_prefix ~base:s.code right.code )
+            :: s.code;
+          dead = left.dead && right.dead;
+          omitted_premises =
+            added_prefix ~base:s.omitted_premises left.omitted_premises
+            @ added_prefix ~base:s.omitted_premises right.omitted_premises
+            @ s.omitted_premises
+        }
+      in
+      name s value
 
-let added_omitted_premises ~base s =
-  added_prefix ~base:base.omitted_premises s.omitted_premises
+let rec arguments_right_to_left eval s = function
+  | [] -> s, []
+  | arg :: args ->
+    let s, values = arguments_right_to_left eval s args in
+    let s, value = eval s arg in
+    s, value :: values
 
-let merge_predicate_branches base branches =
-  let facts =
-    List.concat_map (fun (guard, s) -> guard_added_facts ~base guard s) branches
-    @ base.facts
-  in
-  let omitted_premises =
-    List.concat_map (fun (_, s) -> added_omitted_premises ~base s) branches
-    @ base.omitted_premises
-  in
-  { base with facts; omitted_premises }
-
-let predicate_short_circuit eval loc ~is_and s a b =
-  paths (eval s a) (fun s a ->
-      let a = required loc a in
-      if a = Boolean (not is_and)
-      then [s, Some a]
-      else
-        match eval s b with
-        | [(right, b)] ->
-          let guard = if is_and then a else not_ a in
-          let state = merge_predicate_branches s [guard, right] in
-          let b = required loc b in
-          [state, Some (both (if is_and then And else Or) a b)]
-        | rights ->
-          List.map
-            (fun (right, value) ->
-              branch right (if is_and then a else not_ a), value)
-            rights
-          @ [ ( branch s (if is_and then not_ a else a),
-                Some (Boolean (not is_and)) ) ])
-
-let predicate_if eval loc s condition ifso ifnot =
-  paths (eval s condition) (fun s condition ->
-      let condition = required loc condition in
-      match condition with
-      | Boolean true -> eval s ifso
-      | Boolean false -> eval s ifnot
-      | _ -> (
-        let ifso_outcomes = eval s ifso in
-        let ifnot_outcomes = eval s ifnot in
-        match ifso_outcomes, ifnot_outcomes with
-        | [(ifso_state, ifso)], [(ifnot_state, ifnot)] ->
-          let state =
-            merge_predicate_branches s
-              [condition, ifso_state; not_ condition, ifnot_state]
-          in
-          let ifso = required loc ifso in
-          let ifnot = required loc ifnot in
-          [state, Some (App (Ite, [condition; ifso; ifnot]))]
-        | _ ->
-          List.map (fun (s, value) -> branch s condition, value) ifso_outcomes
-          @ List.map
-              (fun (s, value) -> branch s (not_ condition), value)
-              ifnot_outcomes))
+let short_circuit eval loc ~is_and s a b =
+  let s, a = eval s a in
+  if s.dead
+  then s, None
+  else
+    let condition = required loc a in
+    if is_and
+    then
+      choose s condition (fun s -> eval s b) (fun s -> s, Some (Boolean false))
+    else
+      choose s condition (fun s -> s, Some (Boolean true)) (fun s -> eval s b)
 
 let guarded_case eval loc s (matched, condition) guard body rest =
-  let guards =
+  let values = s.values in
+  let s, accepted =
     match guard with
-    | None -> [branch matched condition, Some (Boolean true)]
-    | Some g -> eval (branch matched condition) g
+    | None -> matched, condition
+    | Some g ->
+      let state, value =
+        choose matched condition
+          (fun s -> eval s g)
+          (fun s -> s, Some (Boolean false))
+      in
+      state, if state.dead then Boolean false else required loc value
   in
-  paths guards (fun s g ->
-      let g = required loc g in
-      eval (branch s g) body @ rest (branch s (not_ g)))
-  @ rest (branch s (not_ condition))
+  choose s accepted
+    (fun s -> eval s body)
+    (fun state -> rest { state with values })
+
+let rec erase_assertions code =
+  List.filter_map
+    (function
+      | Assert _ | Check _ -> None
+      | (Assume _ | Define _) as c -> Some c
+      | Choice (a, b) -> Some (Choice (erase_assertions a, erase_assertions b)))
+    code
 
 let rec sort env ty =
   match get_desc (Ctype.expand_head env ty) with
@@ -141,13 +170,8 @@ let rec sort env ty =
   | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Bool
   | _ -> None
 
-let fresh ctx env ty label =
-  Option.map
-    (fun sort ->
-      let symbol = Symbol.create ~label sort in
-      ctx.symbols <- symbol :: ctx.symbols;
-      Var symbol)
-    (sort env ty)
+let fresh _ctx env ty label =
+  Option.map (fun sort -> fresh_symbol sort label) (sort env ty)
 
 let lookup ctx s env ty path =
   match Path.Map.find_opt path s.values with
@@ -190,9 +214,8 @@ let operation env ty name args =
     | "%mulint" -> binary Int63 Mul
     | "%divint" | "%modint" ->
       begin match args with
-      | [_; Some (Integer divisor)] when divisor <> 0L ->
-        binary Int63 (if name = "%divint" then Div else Rem)
-      | _ -> None
+      | [_; Some (Integer 0L)] -> None
+      | _ -> binary Int63 (if name = "%divint" then Div else Rem)
       end
     | "%negint" -> unary Int63 Neg
     | "%equal" | "%eq" -> equality Eq
@@ -238,54 +261,66 @@ let refinement env ty loc =
 
 let rec predicate ctx env s e =
   if impossible s
-  then []
+  then s, None
   else
     let eval = predicate ctx env in
-    let return v = [s, v] in
     match e.rexp_desc with
-    | Rexp_var id -> return (lookup ctx s env e.rexp_type (Path.Pident id))
+    | Rexp_var id -> s, lookup ctx s env e.rexp_type (Path.Pident id)
     | Rexp_ident path ->
       begin match primitive env path with
       | Some (_, 0) -> unsupported e.rexp_loc
-      | _ -> return (lookup ctx s env e.rexp_type path)
+      | _ -> s, lookup ctx s env e.rexp_type path
       end
-    | Rexp_constant c -> return (Some (required e.rexp_loc (rconstant c)))
-    | Rexp_construct (p, []) -> return (rconstructor env e.rexp_type p)
+    | Rexp_constant c -> s, Some (required e.rexp_loc (rconstant c))
+    | Rexp_construct (p, []) -> s, rconstructor env e.rexp_type p
     | Rexp_apply ({ rexp_desc = Rexp_ident path; _ }, args) ->
       begin match primitive env path, args with
-      | Some ((("%sequand" | "%sequor") as name), 2), [(_, a); (_, b)] ->
-        predicate_short_circuit eval e.rexp_loc ~is_and:(name = "%sequand") s a
-          b
-      | Some (name, arity), _ when arity = List.length args ->
-        paths
-          (arguments_right_to_left (fun s (_, e) -> eval s e) s args)
-          (fun s args ->
-            [s, Some (required e.rexp_loc (operation env e.rexp_type name args))])
+      | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
+        short_circuit eval e.rexp_loc ~is_and:(op = "%sequand") s a b
+      | Some (op, arity), _ when arity = List.length args ->
+        let s, args =
+          arguments_right_to_left (fun s (_, e) -> eval s e) s args
+        in
+        if s.dead
+        then s, None
+        else
+          name s
+            (Some (required e.rexp_loc (operation env e.rexp_type op args)))
       | _ -> unsupported e.rexp_loc
       end
-    | Rexp_ifthenelse (c, t, Some f) -> predicate_if eval e.rexp_loc s c t f
-    | Rexp_sequence (a, b) -> paths (eval s a) (fun s _ -> eval s b)
+    | Rexp_ifthenelse (c, t, Some f) ->
+      let s, c = eval s c in
+      choose s
+        (if s.dead then Boolean false else required e.rexp_loc c)
+        (fun s -> eval s t)
+        (fun s -> eval s f)
+    | Rexp_sequence (a, b) ->
+      let s, _ = eval s a in
+      eval s b
     | Rexp_let (binding, body) ->
-      paths (eval s binding.rb_expr) (fun s value ->
-          let states =
-            match binding.rb_kind with
-            | Rbind_value -> [s, value]
-            | Rbind_refine ->
-              expose ctx env s binding.rb_expr.rexp_type value
-                binding.rb_expr.rexp_loc
-          in
-          paths states (fun s value ->
-              eval (bind s binding.rb_ident value) body))
+      let s, value = eval s binding.rb_expr in
+      let s, value =
+        match binding.rb_kind with
+        | Rbind_value -> s, value
+        | Rbind_refine ->
+          expose ctx env s binding.rb_expr.rexp_type value
+            binding.rb_expr.rexp_loc
+      in
+      eval (bind s binding.rb_ident value) body
     | Rexp_match (scrutinee, cases) ->
-      paths (eval s scrutinee) (fun s value ->
-          predicate_cases ctx env s value cases)
+      let s, value = eval s scrutinee in
+      predicate_cases ctx env s value cases
     | _ -> unsupported e.rexp_loc
 
 and expose ctx env s ty value loc =
-  let r = refinement env ty loc in
-  paths
-    (predicate ctx env (bind s r.ref_binder value) r.ref_pred)
-    (fun s predicate -> [fact s "refinement" (required loc predicate), value])
+  if impossible s
+  then s, value
+  else
+    let r = refinement env ty loc in
+    let s, predicate =
+      predicate ctx env (bind s r.ref_binder value) r.ref_pred
+    in
+    (if s.dead then s else branch s (required loc predicate)), value
 
 and predicate_pattern env s value p =
   match p.rpat_desc with
@@ -303,10 +338,10 @@ and predicate_pattern env s value p =
 
 and predicate_cases ctx env s value cases =
   if impossible s
-  then []
+  then s, None
   else
     match cases with
-    | [] -> []
+    | [] -> branch s (Boolean false), None
     | case :: cases ->
       let matched = predicate_pattern env s value case.rc_lhs in
       let rest s = predicate_cases ctx env s value cases in
@@ -351,7 +386,7 @@ let expose_fact ctx env s ty value loc =
   (* Dropping an unsupported premise is conservative; goals remain strict. *)
   try expose ctx env s ty value loc
   with Location.Error error ->
-    [{ s with omitted_premises = (loc, error) :: s.omitted_premises }, value]
+    { s with omitted_premises = (loc, error) :: s.omitted_premises }, value
 
 let omitted_premise_messages s =
   List.concat_map
@@ -369,43 +404,37 @@ let has_elim e =
 
 let rec expression ctx s e =
   if impossible s
-  then []
+  then s, None
   else
-    let outcomes = expression_desc ctx s e in
+    let s, value = expression_desc ctx s e in
     match intro_loc e with
-    | Some loc ->
-      paths outcomes (fun s value ->
-          let r = refinement e.exp_env e.exp_type e.exp_loc in
-          let goals =
-            try predicate ctx e.exp_env (bind s r.ref_binder value) r.ref_pred
-            with Location.Error error ->
-              raise
-                (Location.Error
-                   { error with
-                     sub =
-                       error.sub
-                       @ [ Location.msg ~loc
-                             "Required by this refinement introduction" ]
-                   })
-          in
-          List.iter
-            (fun (s, goal) ->
-              try
-                ctx.prove loc
-                  { symbols = List.rev ctx.symbols;
-                    facts = List.rev s.facts;
-                    goal =
-                      { label = "refine_";
-                        term = required r.ref_pred.rexp_loc goal
-                      }
-                  }
-              with Location.Error error ->
-                raise
-                  (Location.Error
-                     { error with sub = error.sub @ omitted_premise_messages s }))
-            goals;
-          [s, value])
-    | None -> outcomes
+    | Some loc when not s.dead ->
+      let r = refinement e.exp_env e.exp_type e.exp_loc in
+      let goals, goal =
+        try predicate ctx e.exp_env (bind s r.ref_binder value) r.ref_pred
+        with Location.Error error ->
+          raise
+            (Location.Error
+               { error with
+                 sub =
+                   error.sub
+                   @ [ Location.msg ~loc
+                         "Required by this refinement introduction" ]
+               })
+      in
+      let assertion =
+        Assert
+          { loc;
+            goal =
+              (if goals.dead
+               then Boolean true
+               else required r.ref_pred.rexp_loc goal);
+            omitted_premises = goals.omitted_premises
+          }
+      in
+      let check = assertion :: added_prefix ~base:s.code goals.code in
+      { s with code = Check check :: s.code }, value
+    | _ -> s, value
 
 and expression_desc ctx s e =
   let eval = expression ctx in
@@ -417,32 +446,30 @@ and expression_desc ctx s e =
       | Val_mut _ | Val_ivar _ | Val_prim _ -> opaque ()
       | _ -> lookup ctx s e.exp_env e.exp_type path
     in
-    [s, value]
-  | Texp_constant c -> [s, constant c]
+    s, value
+  | Texp_constant c -> s, constant c
   | Texp_construct (_, c, _, [], _) ->
-    [s, constructor e.exp_env e.exp_type c.cstr_name]
+    s, constructor e.exp_env e.exp_type c.cstr_name
   | Texp_let (rec_flag, bindings, body) ->
-    paths
-      (value_bindings ctx s rec_flag bindings (has_elim e))
-      (fun s _ -> eval s body)
+    let s, _ = value_bindings ctx s rec_flag bindings (has_elim e) in
+    eval s body
   | Texp_assume (binding, _, _) ->
-    paths (eval s binding.vb_expr) (fun s value ->
-        expose_fact ctx e.exp_env s e.exp_type value e.exp_loc)
-  | Texp_sequence (a, _, b) -> paths (eval s a) (fun s _ -> eval s b)
+    let s, value = eval s binding.vb_expr in
+    expose_fact ctx e.exp_env s e.exp_type value e.exp_loc
+  | Texp_sequence (a, _, b) ->
+    let s, _ = eval s a in
+    eval s b
   | Texp_ifthenelse (c, t, f) ->
-    paths (eval s c) (fun s c ->
-        let c =
-          match c with
-          | Some c -> c
-          | None ->
-            required e.exp_loc
-              (fresh ctx e.exp_env Predef.type_bool "condition")
-        in
-        eval (branch s c) t
-        @
-        match f with
-        | None -> [branch s (not_ c), None]
-        | Some f -> eval (branch s (not_ c)) f)
+    let s, c = eval s c in
+    let c =
+      match c with
+      | Some c -> c
+      | None ->
+        required e.exp_loc (fresh ctx e.exp_env Predef.type_bool "condition")
+    in
+    choose s c
+      (fun s -> eval s t)
+      (fun s -> match f with None -> s, None | Some f -> eval s f)
   | Texp_apply (fn, args, _, _, _, _) ->
     let prim =
       match fn.exp_desc with
@@ -450,37 +477,42 @@ and expression_desc ctx s e =
       | _ -> None
     in
     begin match prim, args with
-    | ( Some ((("%sequand" | "%sequor") as name), 2),
+    | ( Some ((("%sequand" | "%sequor") as op), 2),
         [(_, Arg (a, _)); (_, Arg (b, _))] ) ->
-      short_circuit eval e.exp_loc ~is_and:(name = "%sequand") s a b
-    | _ ->
+      short_circuit eval e.exp_loc ~is_and:(op = "%sequand") s a b
+    | _ -> (
       let argument s (_, arg) =
-        match arg with Omitted _ -> [s, None] | Arg (e, _) -> eval s e
+        match arg with Omitted _ -> s, None | Arg (e, _) -> eval s e
       in
-      paths (arguments_right_to_left argument s args) (fun s args ->
-          paths (eval s fn) (fun s _ ->
-              let value =
-                match prim with
-                | Some (name, arity) when arity = List.length args ->
-                  operation e.exp_env e.exp_type name args
-                | _ -> None
-              in
-              match prim with
-              | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) -> []
-              | _ ->
-                [(s, match value with Some _ -> value | None -> opaque ())]))
+      let s, args = arguments_right_to_left argument s args in
+      let s, _ = eval s fn in
+      let value =
+        match prim with
+        | Some (op, arity) when arity = List.length args ->
+          operation e.exp_env e.exp_type op args
+        | _ -> None
+      in
+      match prim with
+      | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
+        branch s (Boolean false), None
+      | _ -> name s (match value with Some _ -> value | None -> opaque ()))
     end
   | Texp_function { params; body; _ } ->
     let captured = s in
+    let s = { s with code = erase_assertions s.code } in
     let s =
       List.fold_left
         (fun s p ->
-          let pat =
+          let s, pat =
             match p.fp_kind with
-            | Tparam_pat pat -> pat
+            | Tparam_pat pat -> s, pat
             | Tparam_optional_default (pat, default, _) ->
-              ignore (eval s default);
-              pat
+              let checked, _ = eval s default in
+              ( { s with
+                  code =
+                    Check (added_prefix ~base:s.code checked.code) :: s.code
+                },
+                pat )
           in
           let value =
             fresh ctx pat.pat_env pat.pat_type (Ident.name p.fp_param)
@@ -489,28 +521,30 @@ and expression_desc ctx s e =
           branch s condition)
         s params
     in
-    begin match body with
-    | Tfunction_body body -> ignore (eval s body)
-    | Tfunction_cases cases ->
-      begin match cases.fc_cases with
-      | [] -> ()
-      | c :: _ ->
-        let value = fresh ctx c.c_lhs.pat_env c.c_lhs.pat_type "argument" in
-        ignore
-          (value_cases ctx (bind s cases.fc_param value) value cases.fc_cases)
-      end
-    end;
-    [captured, None]
+    let s, _ =
+      match body with
+      | Tfunction_body body -> eval s body
+      | Tfunction_cases cases ->
+        begin match cases.fc_cases with
+        | [] -> s, None
+        | c :: _ ->
+          let value = fresh ctx c.c_lhs.pat_env c.c_lhs.pat_type "argument" in
+          value_cases ctx (bind s cases.fc_param value) value cases.fc_cases
+        end
+    in
+    ctx.batches <- s.code :: ctx.batches;
+    captured, None
   | Texp_match (scrutinee, _, cases, [], _)
     when List.for_all (fun c -> snd (split_pattern c.c_lhs) = None) cases ->
-    paths (eval s scrutinee) (fun s value ->
-        computation_cases ctx s value cases)
+    let s, value = eval s scrutinee in
+    computation_cases ctx s value cases
   | _ ->
     (* Unknown evaluation/control-flow forms lose outgoing facts, but cannot
        hide obligations in their children or delayed bodies. *)
-    let iterator = iterator ctx s in
+    let state = ref s in
+    let iterator = iterator ctx state in
     Tast_iterator.default_iterator.expr iterator e;
-    [s, opaque ()]
+    !state, opaque ()
 
 and value_bindings ctx s rec_flag bindings eliminate =
   let s =
@@ -535,19 +569,19 @@ and value_bindings ctx s rec_flag bindings eliminate =
         s bindings
   in
   let rec loop s = function
-    | [] -> [s, None]
+    | [] -> s, None
+    | _ when impossible s -> s, None
     | vb :: rest ->
-      paths (expression ctx s vb.vb_expr) (fun s value ->
-          let states =
-            if eliminate
-            then
-              expose_fact ctx vb.vb_expr.exp_env s vb.vb_expr.exp_type value
-                vb.vb_expr.exp_loc
-            else [s, value]
-          in
-          paths states (fun s value ->
-              let s, condition = pattern ctx s value vb.vb_pat in
-              loop (branch s condition) rest))
+      let s, value = expression ctx s vb.vb_expr in
+      let s, value =
+        if eliminate
+        then
+          expose_fact ctx vb.vb_expr.exp_env s vb.vb_expr.exp_type value
+            vb.vb_expr.exp_loc
+        else s, value
+      in
+      let s, condition = pattern ctx s value vb.vb_pat in
+      loop (branch s condition) rest
   in
   loop s bindings
 
@@ -556,14 +590,13 @@ and value_cases ctx s value cases = cases_with_pattern ctx s value cases
 and computation_cases ctx s value cases = cases_with_pattern ctx s value cases
 
 and cases_with_pattern : type k.
-    context -> state -> term option -> k case list -> (state * term option) list
-    =
+    context -> state -> term option -> k case list -> state * term option =
  fun ctx s value cases ->
   if impossible s
-  then []
+  then s, None
   else
     match cases with
-    | [] -> []
+    | [] -> branch s (Boolean false), None
     | c :: cases ->
       let matched = pattern ctx s value c.c_lhs in
       let rest s = cases_with_pattern ctx s value cases in
@@ -572,27 +605,109 @@ and cases_with_pattern : type k.
 
 and structure ctx s str =
   List.fold_left
-    (fun states item ->
-      paths states (fun s _ ->
-          match item.str_desc with
-          | Tstr_value (rec_flag, bindings) ->
-            value_bindings ctx s rec_flag bindings false
-          | Tstr_eval (e, _, _) -> expression ctx s e
-          | _ ->
-            let iterator = iterator ctx s in
-            Tast_iterator.default_iterator.structure_item iterator item;
-            [s, None]))
-    [s, None]
-    str.str_items
+    (fun (s, _) item ->
+      if impossible s
+      then s, None
+      else
+        match item.str_desc with
+        | Tstr_value (rec_flag, bindings) ->
+          value_bindings ctx s rec_flag bindings false
+        | Tstr_eval (e, _, _) -> expression ctx s e
+        | _ ->
+          let state = ref s in
+          let iterator = iterator ctx state in
+          Tast_iterator.default_iterator.structure_item iterator item;
+          !state, None)
+    (s, None) str.str_items
 
-and iterator ctx s =
+and iterator ctx state =
+  let checked f =
+    let s = !state in
+    let result, _ = f s in
+    state
+      := { s with
+           code = Check (added_prefix ~base:s.code result.code) :: s.code
+         }
+  in
   { Tast_iterator.default_iterator with
-    expr = (fun _ e -> ignore (expression ctx s e));
+    expr = (fun _ e -> checked (fun s -> expression ctx s e));
     value_bindings =
       (fun _ (rec_flag, bindings) ->
-        ignore (value_bindings ctx s rec_flag bindings false));
-    structure = (fun _ str -> ignore (structure ctx s str))
+        checked (fun s -> value_bindings ctx s rec_flag bindings false));
+    structure = (fun _ str -> checked (fun s -> structure ctx s str))
   }
+
+let query code =
+  let definitions = ref [] in
+  let share = function
+    | App _ as term ->
+      let value = fresh_symbol Bool "reachable" in
+      definitions
+        := { label = "reachable"; term = both Eq value term } :: !definitions;
+      value
+    | term -> term
+  in
+  let goals = ref [] in
+  let rec forward code reachable =
+    List.fold_left
+      (fun reachable -> function
+        | Assume p -> share (both And reachable p)
+        | Define term ->
+          definitions := { label = "value"; term } :: !definitions;
+          reachable
+        | Assert o ->
+          goals := (o, both Implies reachable o.goal) :: !goals;
+          reachable
+        | Choice (a, b) ->
+          let a = forward a reachable in
+          let b = forward b reachable in
+          share (both Or a b)
+        | Check code ->
+          ignore (forward code reachable);
+          reachable)
+      reachable (List.rev code)
+  in
+  ignore (forward code (Boolean true));
+  let goals = List.rev !goals in
+  let goal =
+    { label = "refine_";
+      term =
+        List.fold_left (fun q (_, goal) -> both And q goal) (Boolean true) goals
+    }
+  in
+  let facts = List.rev !definitions in
+  let seen = Hashtbl.create 16 and symbols = ref [] in
+  let rec visit = function
+    | Var s when not (Hashtbl.mem seen s) ->
+      Hashtbl.add seen s ();
+      symbols := s :: !symbols
+    | App (_, args) -> List.iter visit args
+    | _ -> ()
+  in
+  List.iter (fun f -> visit f.term) facts;
+  visit goal.term;
+  { symbols = List.rev !symbols; facts; goal }, goals
+
+let verify_batch prove code =
+  let query, goals = query code in
+  let prove_one (o : obligation) q =
+    try prove o.loc q
+    with Location.Error error ->
+      let s = { empty with omitted_premises = o.omitted_premises } in
+      raise
+        (Location.Error
+           { error with sub = error.sub @ omitted_premise_messages s })
+  in
+  match goals with
+  | [] -> ()
+  | [(o, _)] -> prove_one o query
+  | (first, _) :: _ -> (
+    try prove first.loc query
+    with Location.Error _ ->
+      List.iter
+        (fun (o, term) ->
+          prove_one o { query with goal = { label = "refine_"; term } })
+        goals)
 
 let generate ~prove str =
   let exception Has_obligation in
@@ -607,5 +722,7 @@ let generate ~prove str =
   match scan.structure scan str with
   | () -> ()
   | exception Has_obligation ->
-    let ctx = { symbols = []; free = Path.Map.empty; prove } in
-    ignore (structure ctx empty str)
+    let ctx = { free = Path.Map.empty; batches = [] } in
+    let result, _ = structure ctx empty str in
+    List.iter (verify_batch prove) (List.rev ctx.batches);
+    verify_batch prove result.code

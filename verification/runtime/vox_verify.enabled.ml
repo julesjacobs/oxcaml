@@ -8,7 +8,7 @@ let executable = ref Vox_smt_solver.default_config.executable
 
 let timeout_ms = ref Vox_smt_solver.default_config.timeout_ms
 
-let prove loc query =
+let prove check loc query =
   let int_width = if Target_system.is_64_bit () then 63 else 31 in
   if int_width <> 63
   then
@@ -27,16 +27,7 @@ let prove loc query =
     Format.eprintf "%s@."
       (Vox_smt.to_smtlib ~int_width ~timeout_ms:!timeout_ms query)
   end;
-  let dump =
-    if !dump_smtlib
-    then Some (fun bytes -> Format.eprintf "%s%!" bytes)
-    else None
-  in
-  let result =
-    Vox_smt_solver.check
-      ~config:{ executable = !executable; timeout_ms = !timeout_ms }
-      ?dump ~int_width query
-  in
+  let result : Vox_smt_solver.result = check query in
   match result.validity with
   | Vox_smt.Valid -> ()
   | Invalid _ ->
@@ -52,7 +43,17 @@ let install () =
   if not !installed
   then begin
     installed := true;
-    Verification.install (Vox_vc.generate ~prove);
+    Verification.install (fun structure ->
+        let int_width = if Target_system.is_64_bit () then 63 else 31 in
+        let dump =
+          if !dump_smtlib
+          then Some (fun bytes -> Format.eprintf "%s%!" bytes)
+          else None
+        in
+        Vox_smt_solver.with_session
+          ~config:{ executable = !executable; timeout_ms = !timeout_ms }
+          ?dump ~int_width (fun check ->
+            Vox_vc.generate ~prove:(prove check) structure));
     Clflags.add_arguments __LOC__
       [ "-dvc", Arg.Set dump_vc, " Dump refinement verification conditions";
         ( "-dsmtlib",
