@@ -502,8 +502,13 @@ module Gen = struct
               let variable =
                 Exp.ident (Location.mknoloc (Longident.Lident name.txt))
               in
+              let pattern =
+                Pat.constraint_ (Pat.var name)
+                  (Some (Ptyp_of_type.core_type ref_payload))
+                  []
+              in
               Exp.let_ Immutable Nonrecursive
-                [ Vb.mk (Pat.var name) payload ]
+                [ Vb.mk pattern payload ]
                 (Exp.refine variable))
         | Tunivar _ | Tvar _ | Tof_kind _ -> []
         | Tconstr (path, [ texp ], _) when path = Predef.path_lazy_t ->

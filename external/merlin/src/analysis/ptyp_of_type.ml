@@ -98,8 +98,10 @@ and core_type type_expr =
       | None -> Location.mknoloc (Longident.Lident name)
     in
     let predicate =
-      Refinement_predicate.untype ~var_name:Ident.name ~value_ident:path_loc
-        ~constructor_ident ~label_ident ref_pred
+      Refinement_predicate.untype
+        ~type_constraint:(fun ty -> Some (core_type ty))
+        ~var_name:Ident.name ~value_ident:path_loc ~constructor_ident
+        ~label_ident ref_pred
     in
     Typ.refine
       (Location.mknoloc (Ident.name ref_binder))
