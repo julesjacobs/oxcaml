@@ -495,7 +495,16 @@ module Gen = struct
           (* We are not going "deeper" so we don't call [exp_or_hole] here *)
           expression ~idents_table values_scope ~depth env texp
         | Trefine { ref_payload; _ } ->
-          exp_or_hole env ref_payload |> List.map ~f:Ast_helper.Exp.refine
+          exp_or_hole env ref_payload
+          |> List.map ~f:(fun payload ->
+              let open Ast_helper in
+              let name = Location.mknoloc "value" in
+              let variable =
+                Exp.ident (Location.mknoloc (Longident.Lident name.txt))
+              in
+              Exp.let_ Immutable Nonrecursive
+                [ Vb.mk (Pat.var name) payload ]
+                (Exp.refine variable))
         | Tunivar _ | Tvar _ | Tof_kind _ -> []
         | Tconstr (path, [ texp ], _) when path = Predef.path_lazy_t ->
           (* Special case for lazy *)
@@ -623,7 +632,7 @@ end
 
 let needs_parentheses e =
   match e.Parsetree.pexp_desc with
-  | Pexp_function _ | Pexp_lazy _ | Pexp_apply _
+  | Pexp_function _ | Pexp_lazy _ | Pexp_apply _ | Pexp_let _
   | Pexp_variant (_, Some _)
   | Pexp_construct (_, Some _) -> true
   | _ -> false
