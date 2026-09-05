@@ -396,7 +396,7 @@ and print_out_type_1 ppf =
           print_arg_label_and_out_type ppf lab ty1
             ~print_type:(print_out_arg am)
       | Some binder ->
-          fprintf ppf "(%s : %a)" binder (print_out_type_2 ~arg:false) ty1
+          fprintf ppf "(%s : %a)" binder print_simple_out_type ty1
       end;
       pp_print_string ppf " ->";
       pp_print_space ppf ();

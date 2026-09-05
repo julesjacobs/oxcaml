@@ -5373,12 +5373,12 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                                  plain local variable"))
                   in
                   let ty_ret =
-                    Ctype.substitute_refinement_ident binder id ty_ret
+                    Ctype.apply_dependent_type binder id ty_ret
                   in
                   let ty_ret0 =
                     match binder0 with
                     | Some binder0 ->
-                        Ctype.substitute_refinement_ident binder0 id ty_ret0
+                        Ctype.apply_dependent_type binder0 id ty_ret0
                     | None -> assert false
                   in
                   ty_ret, ty_ret0

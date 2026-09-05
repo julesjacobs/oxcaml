@@ -14,8 +14,8 @@ open Types
 
 (* Rebuilding *)
 
-let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
-    ?constructor_path ?type_path ?(type_expr = Fun.id)
+let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
+    ?value_path ?constructor_path ?type_path ?(type_expr = Fun.id)
     ?(location = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
     let pconst_desc =
@@ -28,9 +28,6 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
       pconst_loc = location constant.pconst_loc
     }
   in
-  let rename_var rename id =
-    match Ident.Map.find_opt id rename with Some id' -> id' | None -> id
-  in
   let bind rename id =
     match rename_bound with
     | Some rename_bound ->
@@ -41,7 +38,14 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
   let rec map_rexp rename rexp =
     let rexp_desc =
       match rexp.rexp_desc with
-      | Rexp_var id -> Rexp_var (rename_var rename id)
+      | Rexp_var id -> begin
+          match Ident.Map.find_opt id rename with
+          | Some id -> Rexp_var id
+          | None ->
+              match Option.bind unbind_value (fun f -> f id) with
+              | Some path -> Rexp_ident path
+              | None -> Rexp_var id
+        end
       | Rexp_ident path -> begin
           match Option.bind bind_value (fun f -> f path) with
           | Some id -> Rexp_var id
@@ -572,6 +576,14 @@ let exists_rexp pred rexp =
           cases
   in
   match walk rexp with () -> false | exception Found -> true
+
+let iter_value_idents f rexp =
+  ignore (exists_rexp (fun rexp ->
+    begin match rexp.rexp_desc with
+    | Rexp_var id | Rexp_ident (Path.Pident id) -> f id
+    | _ -> ()
+    end;
+    false) rexp : bool)
 
 let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
   let result = ref None in
