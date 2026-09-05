@@ -14996,21 +14996,11 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
     List.fold_left
       (fun result (extra, loc, _) ->
          match extra with
-<<<<<<< HEAD
-         | Texp_inspected_type _ -> result
+         | Texp_inspected_type _ | Texp_mode _ -> result
          | Texp_constraint _ -> { result with rexp_type_constraint = true }
-||||||| parent of 6320d2db8a (Automated commit: Import compiler changes from c14ee4d9e0)
-         | Texp_inspected_type _ | Texp_constraint _ -> result
-=======
-         | Texp_inspected_type _ | Texp_constraint _ | Texp_mode _ -> result
-<<<<<<< HEAD
->>>>>>> 6320d2db8a (Automated commit: Import compiler changes from c14ee4d9e0)
-||||||| parent of 9cf9d2e29e (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
-=======
          | Texp_refine when definition_body -> result
          | Texp_refine ->
              unsupported_refinement_syntax loc "This expression annotation"
->>>>>>> 9cf9d2e29e (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
          | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
          | Texp_borrowed | Texp_ghost_region ->
