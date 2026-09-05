@@ -440,6 +440,17 @@ and print_simple_out_type ppf =
   function
     Otyp_class (id, tyl) ->
       fprintf ppf "@[%a#%a@]" print_typargs tyl print_ident id
+  | Otyp_refine (binder, payload, predicate, type_overrides) ->
+      let type_overrides =
+        List.map
+          (fun (ty, printed) ->
+            ty, (fun ppf -> Format_doc.compat print_out_type ppf printed))
+          type_overrides
+      in
+      fprintf ppf "@[<hov 2>{%s : %a@ | %a}@]" binder
+        print_out_type payload
+        (Format_doc.deprecated
+           (Pprintast.expression_with_type_overrides type_overrides)) predicate
   | Otyp_constr (id, tyl) ->
       pp_open_box ppf 0;
       print_typargs ppf tyl;

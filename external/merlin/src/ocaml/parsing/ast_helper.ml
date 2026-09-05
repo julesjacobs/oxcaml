@@ -91,6 +91,7 @@ module Typ = struct
   let quote ?loc ?attrs t = mk ?loc ?attrs (Ptyp_quote t)
   let splice ?loc ?attrs t = mk ?loc ?attrs (Ptyp_splice t)
   let repr ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_repr (a, b))
+  let refine ?loc ?attrs a b c = mk ?loc ?attrs (Ptyp_refine (a, b, c))
   let newlayout ?loc ?attrs a b = mk ?loc ?attrs (Ptyp_newlayout (a, b))
   let of_kind ?loc ?attrs a = mk ?loc ?attrs (Ptyp_of_kind a)
 
@@ -161,6 +162,8 @@ module Typ = struct
             Ptyp_repr (var_lst, loop core_type)
         | Ptyp_newlayout (var_lst, core_type) ->
             Ptyp_newlayout (var_lst, loop core_type)
+        | Ptyp_refine (binder, core_type, predicate) ->
+            Ptyp_refine (binder, loop core_type, predicate)
         | Ptyp_extension (s, arg) ->
             Ptyp_extension (s, arg)
       in
@@ -323,6 +326,9 @@ module Exp = struct
     }
 
   let borrow ?loc ?attrs a = mk ?loc ?attrs (Pexp_borrow a)
+  let refine ?loc ?attrs a = mk ?loc ?attrs (Pexp_refine a)
+  let let_refine ?loc ?attrs a b c =
+    mk ?loc ?attrs (Pexp_let_refine (a, b, c))
 end
 
 module Mty = struct

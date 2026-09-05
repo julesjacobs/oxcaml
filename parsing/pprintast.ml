@@ -313,9 +313,18 @@ type ctxt = {
   semi : bool;
   ifthenelse : bool;
   functionrhs : bool;
+  type_overrides : (core_type * (Format.formatter -> unit)) list;
 }
 
-let reset_ctxt = { pipe=false; semi=false; ifthenelse=false; functionrhs=false }
+let reset_ctxt =
+  { pipe=false; semi=false; ifthenelse=false; functionrhs=false;
+    type_overrides=[] }
+let reset_flags ctxt = { reset_ctxt with type_overrides = ctxt.type_overrides }
+
+let type_override ctxt x =
+  List.find_map (fun (ty, print) -> if ty == x then Some print else None)
+    ctxt.type_overrides
+
 let under_pipe ctxt = { ctxt with pipe=true }
 let under_semi ctxt = { ctxt with semi=true }
 let under_ifthenelse ctxt = { ctxt with ifthenelse=true }
@@ -558,6 +567,9 @@ and name_jkind f (name, jkind) =
 and name_loc_jkind f (str, jkind) = name_jkind f (str.txt,jkind)
 
 and core_type ctxt f x =
+  match type_override ctxt x with
+  | Some print -> print f
+  | None ->
   if x.ptyp_attributes <> [] then begin
     pp f "((%a)%a)" (core_type ctxt) {x with ptyp_attributes=[]}
       (attributes ctxt) x.ptyp_attributes
@@ -596,7 +608,7 @@ and core_type ctxt f x =
           (list string_loc ~sep:"@;") lv
           (core_type ctxt) ct
     | Ptyp_of_kind jkind ->
-      pp f "@[(type@ :@ %a)@]" (jkind_annotation reset_ctxt) jkind
+      pp f "@[(type@ :@ %a)@]" (jkind_annotation (reset_flags ctxt)) jkind
     | _ -> pp f "@[<2>%a@]" (core_type1 ctxt) x
 
 and tuple_type_component ctxt f (label, ty) =
@@ -607,6 +619,9 @@ and tuple_type_component ctxt f (label, ty) =
   core_type1 ctxt f ty
 
 and core_type1 ctxt f x =
+  match type_override ctxt x with
+  | Some print -> pp f "(%t)" print
+  | None ->
   if x.ptyp_attributes <> [] then core_type ctxt f x
   else
     match x.ptyp_desc with
@@ -685,12 +700,18 @@ and core_type1 ctxt f x =
         pp f "@[<hov2><[%a]>@]" (core_type ctxt) t
     | Ptyp_splice t ->
         pp f "@[<hov2>$(%a)@]" (core_type ctxt) t
+    | Ptyp_refine (binder, payload, predicate) ->
+        pp f "@[<hov2>{%a : %a@ | %a}@]" ident_of_name binder.txt
+          (core_type ctxt) payload (expression (reset_flags ctxt)) predicate
     | Ptyp_extension e -> extension ctxt f e
     | (Ptyp_arrow _ | Ptyp_alias _ | Ptyp_poly _ | Ptyp_repr _
       | Ptyp_newlayout _ | Ptyp_of_kind _) ->
        paren true (core_type ctxt) f x
 
 and core_type2 ctxt f x =
+  match type_override ctxt x with
+  | Some print -> pp f "(%t)" print
+  | None ->
   if x.ptyp_attributes <> [] then core_type ctxt f x
   else
   match x.ptyp_desc with
@@ -1020,13 +1041,13 @@ and expression ctxt f x =
     | Pexp_function _ | Pexp_match _ | Pexp_try _ | Pexp_sequence _
     | Pexp_newtype _
       when ctxt.pipe || ctxt.semi ->
-        paren true (expression reset_ctxt) f x
+        paren true (expression (reset_flags ctxt)) f x
     | Pexp_ifthenelse _ | Pexp_sequence _ when ctxt.ifthenelse ->
-        paren true (expression reset_ctxt) f x
+        paren true (expression (reset_flags ctxt)) f x
     | Pexp_let _ | Pexp_letmodule _ | Pexp_open _
       | Pexp_letexception _ | Pexp_letop _
         when ctxt.semi ->
-        paren true (expression reset_ctxt) f x
+        paren true (expression (reset_flags ctxt)) f x
     | Pexp_newtype (lid, jkind, e) ->
         pp f "@[<2>fun@;(type@;%a)@;%a@]"
           name_jkind (lid.txt, jkind)
@@ -1043,7 +1064,7 @@ and expression ctxt f x =
                 | Pfunction_cases _ -> ctxt.functionrhs
                 | Pfunction_body _ -> false
               in
-              let ctxt' = if should_paren then reset_ctxt else ctxt in
+              let ctxt' = if should_paren then reset_flags ctxt else ctxt in
               pp f "@[<2>%a@]" (paren should_paren (function_body ctxt')) body
           | [], constraint_ ->
             pp f "@[<2>(%a%a)@]"
@@ -1057,19 +1078,19 @@ and expression ctxt f x =
         end
     | Pexp_match (e, l) ->
         pp f "@[<hv0>@[<hv0>@[<2>match %a@]@ with@]%a@]"
-          (expression reset_ctxt) e (case_list ctxt) l
+          (expression (reset_flags ctxt)) e (case_list ctxt) l
 
     | Pexp_try (e, l) ->
         pp f "@[<0>@[<hv2>try@ %a@]@ @[<0>with%a@]@]"
              (* "try@;@[<2>%a@]@\nwith@\n%a"*)
-          (expression reset_ctxt) e  (case_list ctxt) l
+          (expression (reset_flags ctxt)) e  (case_list ctxt) l
     | Pexp_let (mf, rf, l, e) ->
         (* pp f "@[<2>let %a%a in@;<1 -2>%a@]"
            (*no indentation here, a new line*) *)
         (*   rec_flag rf *)
         (*   mutable_flag mf *)
         pp f "@[<2>%a in@;<1 -2>%a@]"
-          (bindings reset_ctxt) (mf,rf,l)
+          (bindings (reset_flags ctxt)) (mf,rf,l)
           (expression ctxt) e
     | Pexp_apply
       ({ pexp_desc = Pexp_extension({txt = "extension.exclave"}, PStr []) },
@@ -1083,7 +1104,7 @@ and expression ctxt f x =
                 | [ (Nolabel, _) as arg1; (Nolabel, _) as arg2 ] ->
                     (* FIXME associativity label_x_expression_param *)
                     pp f "@[<2>%a@;%s@;%a@]"
-                      (label_x_expression_param reset_ctxt) arg1 s
+                      (label_x_expression_param (reset_flags ctxt)) arg1 s
                       (label_x_expression_param ctxt) arg2
                 | _ ->
                     pp f "@[<2>%a %a@]"
@@ -1110,7 +1131,7 @@ and expression ctxt f x =
             | _ ->
                 pp f "@[<hov2>%a@]" begin fun f (e,l) ->
                   pp f "%a@ %a" (expression2 ctxt) e
-                    (list (label_x_expression_param reset_ctxt))  l
+                    (list (label_x_expression_param (reset_flags ctxt)))  l
                     (* reset here only because [function,match,try,sequence]
                        are lower priority *)
                 end (e,l)
@@ -1118,7 +1139,7 @@ and expression ctxt f x =
 
     | Pexp_stack e ->
         (* Similar to the common case of [Pexp_apply] *)
-        pp f "@[<hov2>stack_@ %a@]" (expression2 reset_ctxt)  e
+        pp f "@[<hov2>stack_@ %a@]" (expression2 (reset_flags ctxt))  e
     | Pexp_construct (li, Some eo)
       when not (is_simple_construct (view_expr x))-> (* Not efficient FIXME*)
         (match view_expr x with
@@ -1159,7 +1180,7 @@ and expression ctxt f x =
     | Pexp_letmodule (s, me, e) ->
         pp f "@[<hov2>let@ module@ %s@ =@ %a@ in@ %a@]"
           (Option.value s.txt ~default:"_")
-          (module_expr reset_ctxt) me (expression ctxt) e
+          (module_expr (reset_flags ctxt)) me (expression ctxt) e
     | Pexp_letexception (cd, e) ->
         pp f "@[<hov2>let@ exception@ %a@ in@ %a@]"
           (extension_constructor ctxt) cd
@@ -1191,15 +1212,21 @@ and expression ctxt f x =
     | Pexp_overwrite (e1, e2) ->
         (* Similar to the case of [Pexp_stack] *)
         pp f "@[<hov2>overwrite_@ %a@ with@ %a@]"
-          (expression2 reset_ctxt) e1
-          (expression2 reset_ctxt) e2
+          (expression2 (reset_flags ctxt)) e1
+          (expression2 (reset_flags ctxt)) e2
     | Pexp_quote e ->
         pp f "@[<hov2><[%a]>@]" (expression ctxt) e
     | Pexp_splice e ->
         pp f "@[$%a@]" (simple_expr ctxt) e
     | Pexp_hole -> pp f "_"
     | Pexp_borrow e ->
-        pp f "@[<hov2>borrow_@ %a@]" (expression2 reset_ctxt)  e
+        pp f "@[<hov2>borrow_@ %a@]" (expression2 (reset_flags ctxt))  e
+    | Pexp_refine e ->
+        pp f "@[<hov2>refine_@ %a@]" (expression2 (reset_flags ctxt)) e
+    | Pexp_let_refine (name, bound, body) ->
+        pp f "@[<2>let refine_ %a =@ %a@ in@]@ %a"
+          ident_of_name name.txt (expression (reset_flags ctxt)) bound
+          (expression ctxt) body
     | _ -> expression1 ctxt f x
 
 and expression1 ctxt f x =
@@ -1235,6 +1262,7 @@ and simple_expr ctxt f x =
                (list (expression (under_semi ctxt)) ~sep:";@;") xs
          | `simple x -> constr f x
          | _ -> assert false)
+    | Pexp_hole -> pp f "_"
     | Pexp_ident li ->
         value_longident_loc f li
     (* (match view_fixity_of_exp x with *)
@@ -2490,6 +2518,10 @@ let toplevel_phrase f x =
    pp f "@[<hov2>#%s@ %a@]" pdir_name.txt directive_argument pdir_arg
 
 let toplevel_phrase = print_with_maximal_extensions toplevel_phrase
+
+let expression_with_type_overrides type_overrides =
+  print_with_maximal_extensions
+    (fun f x -> pp f "@[%a@]" (expression { reset_ctxt with type_overrides }) x)
 
 let expression f x =
   pp f "@[%a@]" (expression reset_ctxt) x
