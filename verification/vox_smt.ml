@@ -265,7 +265,7 @@ let to_smtlib ~int_width ~timeout_ms q =
     let found = ref [] in
     List.iter
       (iter (function
-        | (Call (function_, _) as call) when Function.result function_ = Int63 ->
+        | Call (function_, _) as call when Function.result function_ = Int63 ->
           found := call :: !found
         | _ -> ()))
       roots;

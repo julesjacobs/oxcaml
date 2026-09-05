@@ -5,6 +5,7 @@ open Vox_smt
 type function_value =
   { label : string;
     instances : Function.t list ref;
+    choice : (term * function_value * function_value) option;
     total : bool
   }
 
@@ -17,6 +18,31 @@ let scalar = function Some (Scalar t) -> Some t | _ -> None
 let scalar_value t = Some (Scalar t)
 
 let scalar_option = Option.map (fun t -> Scalar t)
+
+let equal_value a b =
+  match a, b with
+  | None, None -> true
+  | Some (Scalar a), Some (Scalar b) -> a = b
+  | Some (Function a), Some (Function b) ->
+    a.instances == b.instances && a.total = b.total
+  | _ -> false
+
+let join_value condition a b =
+  if equal_value a b
+  then a
+  else
+    match a, b with
+    | Some (Scalar a), Some (Scalar b) ->
+      Some (Scalar (App (Ite, [condition; a; b])))
+    | Some (Function a), Some (Function b) ->
+      Some
+        (Function
+           { label = "choice";
+             instances = ref [];
+             choice = Some (condition, a, b);
+             total = a.total && b.total
+           })
+    | _ -> None
 
 type obligation =
   { loc : Location.t;
@@ -97,7 +123,8 @@ let name s = function
   | Some (Scalar ((App _ | Call _) as term)) ->
     let s =
       match term with
-      | App ((Div | Rem), [_; divisor]) -> branch s (App (Ne, [divisor; Integer 0L]))
+      | App ((Div | Rem), [_; divisor]) ->
+        branch s (App (Ne, [divisor; Integer 0L]))
       | _ -> s
     in
     let value = fresh_symbol (term_sort term) "value" in
@@ -124,12 +151,7 @@ let choose s condition ifso ifnot =
         then b
         else if right.dead
         then a
-        else if a = b
-        then a
-        else
-          match a, b with
-          | Some (Scalar a), Some (Scalar b) -> scalar_value (App (Ite, [condition; a; b]))
-          | _ -> None
+        else join_value condition a b
       in
       let s =
         { s with
@@ -162,9 +184,13 @@ let short_circuit eval loc ~is_and s a b =
     let condition = required loc a in
     if is_and
     then
-      choose s condition (fun s -> eval s b) (fun s -> s, scalar_value (Boolean false))
+      choose s condition
+        (fun s -> eval s b)
+        (fun s -> s, scalar_value (Boolean false))
     else
-      choose s condition (fun s -> s, scalar_value (Boolean true)) (fun s -> eval s b)
+      choose s condition
+        (fun s -> s, scalar_value (Boolean true))
+        (fun s -> eval s b)
 
 let guarded_case eval loc s (matched, condition) guard body rest =
   let values = s.values in
@@ -202,10 +228,12 @@ let rec sort env ty =
 let fresh _ctx env ty label =
   match sort env ty with
   | Some sort -> scalar_value (fresh_symbol sort label)
-  | None ->
+  | None -> (
     match get_desc (Ctype.expand_head env ty) with
-    | Tarrow _ -> Some (Function { label; instances = ref []; total = false })
-    | _ -> None
+    | Tarrow _ ->
+      Some
+        (Function { label; instances = ref []; choice = None; total = false })
+    | _ -> None)
 
 let lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
@@ -282,29 +310,35 @@ let rec signature env ty arity =
       end
     | _ -> None
 
-let function_call ctx env ty fn args =
-  match fn, signature env ty (List.length args) with
-  | Some (Function fn), Some (arguments, result) ->
-    let args = List.filter_map scalar args in
-    if List.map term_sort args <> arguments
-    then None
-    else
-      let f =
-        match
-          List.find_opt
-            (fun f ->
-              Function.arguments f = arguments && Function.result f = result)
-            !(fn.instances)
-        with
-        | Some f -> f
-        | None ->
-          let f = Function.create ~label:fn.label ~arguments ~result in
-          fn.instances := f :: !(fn.instances);
-          ctx.functions <- f :: ctx.functions;
-          f
-      in
-      scalar_value (Call (f, args))
-  | _ -> None
+let rec function_call ctx env ty fn args =
+  match fn with
+  | Some (Function { choice = Some (condition, a, b); _ }) ->
+    join_value condition
+      (function_call ctx env ty (Some (Function a)) args)
+      (function_call ctx env ty (Some (Function b)) args)
+  | _ -> (
+    match fn, signature env ty (List.length args) with
+    | Some (Function fn), Some (arguments, result) ->
+      let args = List.filter_map scalar args in
+      if List.map term_sort args <> arguments
+      then None
+      else
+        let f =
+          match
+            List.find_opt
+              (fun f ->
+                Function.arguments f = arguments && Function.result f = result)
+              !(fn.instances)
+          with
+          | Some f -> f
+          | None ->
+            let f = Function.create ~label:fn.label ~arguments ~result in
+            fn.instances := f :: !(fn.instances);
+            ctx.functions <- f :: ctx.functions;
+            f
+        in
+        scalar_value (Call (f, args))
+    | _ -> None)
 
 let apply_function ctx env fn_type result_type prim fn args ~total =
   let value =
@@ -359,7 +393,8 @@ let rec predicate ctx env s e =
     | Rexp_constant c -> s, scalar_value (required e.rexp_loc (rconstant c))
     | Rexp_construct (p, []) -> s, rconstructor env e.rexp_type p
     | Rexp_apply (fn, args) ->
-      let prim = match fn.rexp_desc with
+      let prim =
+        match fn.rexp_desc with
         | Rexp_ident path -> primitive env path
         | _ -> None
       in
@@ -367,11 +402,18 @@ let rec predicate ctx env s e =
       | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
         short_circuit eval e.rexp_loc ~is_and:(op = "%sequand") s a b
       | _ ->
-        let s, args = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
+        let s, args =
+          arguments_right_to_left (fun s (_, e) -> eval s e) s args
+        in
         let s, value = eval s fn in
-        if s.dead then s, None else
-        name s (scalar_value (required e.rexp_loc
-          (apply_function ctx env fn.rexp_type e.rexp_type prim value args ~total:true)))
+        if s.dead
+        then s, None
+        else
+          name s
+            (scalar_value
+               (required e.rexp_loc
+                  (apply_function ctx env fn.rexp_type e.rexp_type prim value
+                     args ~total:true)))
       end
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
@@ -380,7 +422,8 @@ let rec predicate ctx env s e =
       then s, None
       else
         name s
-          (scalar_value (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
+          (scalar_value
+             (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose s
@@ -581,7 +624,8 @@ and expression_desc ctx s e =
   | Texp_constant c -> s, constant c
   | Texp_construct (_, c, _, [], _) ->
     s, constructor e.exp_env e.exp_type c.cstr_name
-  | Texp_letmodule (Some id, _, _, m, body) when Option.is_some (module_structure m) ->
+  | Texp_letmodule (Some id, _, _, m, body)
+    when Option.is_some (module_structure m) ->
     let str = Option.get (module_structure m) in
     let s, _ = structure ctx s str in
     eval (export_module ctx id str s) body
@@ -628,8 +672,13 @@ and expression_desc ctx s e =
       in
       let s, args = arguments_right_to_left argument s args in
       let s, fn_value = eval s fn in
-      let total = match fn_value with Some (Function {total; _}) -> total | _ -> false in
-      let value = apply_function ctx e.exp_env fn.exp_type e.exp_type prim fn_value args ~total in
+      let total =
+        match fn_value with Some (Function { total; _ }) -> total | _ -> false
+      in
+      let value =
+        apply_function ctx e.exp_env fn.exp_type e.exp_type prim fn_value args
+          ~total
+      in
       match prim with
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
         branch s (Boolean false), None
@@ -829,7 +878,12 @@ let query ctx code =
   in
   List.iter (fun f -> visit f.term) facts;
   visit goal.term;
-  { symbols = List.rev !symbols; functions = List.rev ctx.functions; facts; goal }, goals
+  ( { symbols = List.rev !symbols;
+      functions = List.rev ctx.functions;
+      facts;
+      goal
+    },
+    goals )
 
 let verify_batch ctx prove code =
   let query, goals = query ctx code in
