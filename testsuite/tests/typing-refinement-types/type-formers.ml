@@ -265,7 +265,7 @@ Error: This expression has type "int" but an expression was expected of type
 
 type constrained_predicate = { x : int | (gt x 0 : bool) };;
 [%%expect{|
-type constrained_predicate = {x : int | gt x 0}
+type constrained_predicate = {x : int | (gt x 0 : bool)}
 |}]
 
 type nested_refine =

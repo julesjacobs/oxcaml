@@ -94,22 +94,25 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
               Option.map (map_rexp rename) ifnot )
       | Rexp_sequence (first, second) ->
           Rexp_sequence (map_rexp rename first, map_rexp rename second)
-      | Rexp_let ({ rb_kind; rb_ident; rb_type; rb_expr }, body) ->
+      | Rexp_let
+          ({ rb_kind; rb_ident; rb_type; rb_type_constraint; rb_expr }, body) ->
           let rb_expr = map_rexp rename rb_expr in
           let rb_type = type_expr rb_type in
           let rename, rb_ident = bind rename rb_ident in
           Rexp_let
-            ({ rb_kind; rb_ident; rb_type; rb_expr }, map_rexp rename body)
-      | Rexp_fun (param, param_type, body) ->
+            ({ rb_kind; rb_ident; rb_type; rb_type_constraint; rb_expr },
+             map_rexp rename body)
+      | Rexp_fun (param, param_type, constrained, body) ->
           let param_type = type_expr param_type in
           let rename, param = bind rename param in
-          Rexp_fun (param, param_type, map_rexp rename body)
+          Rexp_fun (param, param_type, constrained, map_rexp rename body)
       | Rexp_match (scrutinee, cases) ->
           Rexp_match
             (map_rexp rename scrutinee, List.map (map_case rename) cases)
     in
     { rexp_desc;
       rexp_type = type_expr rexp.rexp_type;
+      rexp_type_constraint = rexp.rexp_type_constraint;
       rexp_loc = location rexp.rexp_loc }
   and map_case rename { rc_lhs; rc_guard; rc_rhs } =
     let rename, rc_lhs = map_pat rename rc_lhs in
@@ -152,13 +155,17 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?value_path
     rename,
     { rpat_desc;
       rpat_type = type_expr pat.rpat_type;
+      rpat_type_constraint = pat.rpat_type_constraint;
       rpat_loc = location pat.rpat_loc }
   in
   map_rexp rename rexp
 
-let fold_types f init rexp =
+let fold_types_gen ~constraints_only f init rexp =
+  let f constrained init ty =
+    if constrained || not constraints_only then f init ty else init
+  in
   let rec expression init rexp =
-    let init = f init rexp.rexp_type in
+    let init = f rexp.rexp_type_constraint init rexp.rexp_type in
     match rexp.rexp_desc with
     | Rexp_var _ | Rexp_ident _ | Rexp_constant _ -> init
     | Rexp_apply (fn, args) ->
@@ -185,9 +192,10 @@ let fold_types f init rexp =
         Option.fold ~none:init ~some:(expression init) ifnot
     | Rexp_sequence (first, second) ->
         expression (expression init first) second
-    | Rexp_let ({ rb_type; rb_expr; _ }, body) ->
-        expression (expression (f init rb_type) rb_expr) body
-    | Rexp_fun (_, param_type, body) -> expression (f init param_type) body
+    | Rexp_let ({ rb_type; rb_type_constraint; rb_expr; _ }, body) ->
+        expression (expression (f rb_type_constraint init rb_type) rb_expr) body
+    | Rexp_fun (_, param_type, constrained, body) ->
+        expression (f constrained init param_type) body
     | Rexp_match (scrutinee, cases) ->
         List.fold_left case (expression init scrutinee) cases
   and case init { rc_lhs; rc_guard; rc_rhs } =
@@ -195,7 +203,7 @@ let fold_types f init rexp =
     let init = Option.fold ~none:init ~some:(expression init) rc_guard in
     expression init rc_rhs
   and pattern init pat =
-    let init = f init pat.rpat_type in
+    let init = f pat.rpat_type_constraint init pat.rpat_type in
     match pat.rpat_desc with
     | Rpat_any | Rpat_var _ | Rpat_constant _ -> init
     | Rpat_tuple components ->
@@ -206,6 +214,10 @@ let fold_types f init rexp =
     | Rpat_alias (pat, _) -> pattern init pat
   in
   expression init rexp
+
+let fold_types f = fold_types_gen ~constraints_only:false f
+
+let fold_type_constraints f = fold_types_gen ~constraints_only:true f
 
 let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
   let path bound path =
@@ -266,7 +278,7 @@ let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
         type_expr ~bound rb_type;
         expression bound rb_expr;
         expression (Ident.Set.add rb_ident bound) body
-    | Rexp_fun (id, param_type, body) ->
+    | Rexp_fun (id, param_type, _, body) ->
         type_expr ~bound param_type;
         expression (Ident.Set.add id bound) body
     | Rexp_match (scrutinee, cases) ->
@@ -350,7 +362,7 @@ let equal ~pairs rexp1 rexp2 =
         b1.rb_kind = b2.rb_kind
         && eq pairs b1.rb_expr b2.rb_expr
         && eq ((b1.rb_ident, b2.rb_ident) :: pairs) body1 body2
-    | Rexp_fun (p1, _, body1), Rexp_fun (p2, _, body2) ->
+    | Rexp_fun (p1, _, _, body1), Rexp_fun (p2, _, _, body2) ->
         eq ((p1, p2) :: pairs) body1 body2
     | Rexp_match (s1, cases1), Rexp_match (s2, cases2) ->
         eq pairs s1 s2
@@ -401,12 +413,18 @@ let equal ~pairs rexp1 rexp2 =
 
 (* Back to surface syntax *)
 
-let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
+let untype ?(type_constraint = fun _ -> None)
+    ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
   let open Ast_helper in
   let lid_of_name name = Location.mknoloc (Longident.Lident name) in
+  let constrain_pattern constrained ty pat =
+    match if constrained then type_constraint ty else None with
+    | None -> pat
+    | Some ty -> Pat.constraint_ ~loc:pat.Parsetree.ppat_loc pat (Some ty) []
+  in
   let rec untype_rexp rexp =
     let loc = rexp.rexp_loc in
-    match rexp.rexp_desc with
+    let expression = match rexp.rexp_desc with
     | Rexp_var id -> Exp.ident ~loc (lid_of_name (var_name id))
     | Rexp_ident path -> Exp.ident ~loc (value_ident path)
     | Rexp_constant const -> Exp.constant ~loc const
@@ -448,23 +466,27 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
           (Option.map untype_rexp ifnot)
     | Rexp_sequence (first, second) ->
         Exp.sequence ~loc (untype_rexp first) (untype_rexp second)
-    | Rexp_let ({ rb_kind; rb_ident; rb_expr; _ }, body) ->
+    | Rexp_let
+          ({ rb_kind; rb_ident; rb_type; rb_type_constraint; rb_expr }, body) ->
         let name = Location.mknoloc (var_name rb_ident) in
         begin match rb_kind with
         | Rbind_value ->
             Exp.let_ ~loc Immutable Nonrecursive
-              [Vb.mk (Pat.var name) (untype_rexp rb_expr)]
+              [Vb.mk
+                 (constrain_pattern rb_type_constraint rb_type (Pat.var name))
+                 (untype_rexp rb_expr)]
               (untype_rexp body)
         | Rbind_refine ->
             Exp.let_refine ~loc name (untype_rexp rb_expr)
               (untype_rexp body)
         end
-    | Rexp_fun (param, _, body) ->
+    | Rexp_fun (param, param_type, constrained, body) ->
         Exp.function_ ~loc
           [ { pparam_desc =
                 Pparam_val
                   ( Asttypes.Nolabel, None,
-                    Pat.var (Location.mknoloc (var_name param)) );
+                    constrain_pattern constrained param_type
+                      (Pat.var (Location.mknoloc (var_name param))) );
               pparam_loc = Location.none } ]
           { mode_annotations = [];
             ret_mode_annotations = [];
@@ -472,15 +494,21 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
           (Pfunction_body (untype_rexp body))
     | Rexp_match (scrutinee, cases) ->
         Exp.match_ ~loc (untype_rexp scrutinee) (List.map untype_case cases)
+    in
+    match if rexp.rexp_type_constraint
+          then type_constraint rexp.rexp_type else None with
+    | None -> expression
+    | Some ty -> Exp.constraint_ ~loc expression (Some ty) []
   and untype_case { rc_lhs; rc_guard; rc_rhs } =
     Exp.case (untype_pat rc_lhs)
       ?guard:(Option.map untype_rexp rc_guard)
       (untype_rexp rc_rhs)
   and untype_pat pat =
     let loc = pat.rpat_loc in
-    match pat.rpat_desc with
+    let pattern = match pat.rpat_desc with
     | Rpat_any -> Pat.any ~loc ()
-    | Rpat_var id -> Pat.var ~loc (Location.mknoloc (var_name id))
+    | Rpat_var id ->
+        Pat.var ~loc (Location.mknoloc (var_name id))
     | Rpat_constant const -> Pat.constant ~loc const
     | Rpat_tuple components ->
         Pat.tuple ~loc
@@ -500,6 +528,8 @@ let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
           arg
     | Rpat_alias (p, id) ->
         Pat.alias ~loc (untype_pat p) (Location.mknoloc (var_name id))
+    in
+    constrain_pattern pat.rpat_type_constraint pat.rpat_type pattern
   in
   untype_rexp rexp
 
@@ -526,7 +556,7 @@ let exists_rexp pred rexp =
         walk cond; walk ifso; Option.iter walk ifnot
     | Rexp_sequence (first, second) -> walk first; walk second
     | Rexp_let ({ rb_expr; _ }, body) -> walk rb_expr; walk body
-    | Rexp_fun (_, _, body) -> walk body
+    | Rexp_fun (_, _, _, body) -> walk body
     | Rexp_match (scrutinee, cases) ->
         walk scrutinee;
         List.iter
@@ -633,7 +663,7 @@ let bound_idents rexp =
         expression
           (Ident.Set.add rb_ident (expression ids rb_expr))
           body
-    | Rexp_fun (param, _, body) ->
+    | Rexp_fun (param, _, _, body) ->
         expression (Ident.Set.add param ids) body
     | Rexp_match (scrutinee, cases) ->
         List.fold_left

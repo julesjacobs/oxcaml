@@ -494,7 +494,8 @@ module Gen = struct
         | Tpoly (texp, _) ->
           (* We are not going "deeper" so we don't call [exp_or_hole] here *)
           expression ~idents_table values_scope ~depth env texp
-        | Trefine { ref_payload; _ } -> exp_or_hole env ref_payload
+        | Trefine { ref_payload; _ } ->
+          exp_or_hole env ref_payload |> List.map ~f:Ast_helper.Exp.refine
         | Tunivar _ | Tvar _ | Tof_kind _ -> []
         | Tconstr (path, [ texp ], _) when path = Predef.path_lazy_t ->
           (* Special case for lazy *)
