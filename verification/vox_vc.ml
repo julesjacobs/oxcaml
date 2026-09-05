@@ -40,6 +40,8 @@ type context =
     mutable datatypes : datatype_declaration list;
     mutable symbols : Symbol.t list;
     mutable functions : Function.t list;
+    mutable iarray_length : Function.t option;
+    iarray_contents : (sort, Function.t) Hashtbl.t;
     mutable free : value option Path.Map.t;
     symbolic : value option Symbolic_keys.t;
     prove : Location.t -> query -> unit;
@@ -270,13 +272,75 @@ let record_value ctx env ty base fields =
     end
   | _ -> None
 
+let fresh_sort ctx label sort =
+  register_sort ctx sort;
+  let symbol = Symbol.create ~label sort in
+  ctx.symbols <- symbol :: ctx.symbols;
+  Var symbol
+
+let iarray_length ctx iarray_sort array =
+  let function_ =
+    match ctx.iarray_length with
+    | Some function_ -> function_
+    | None ->
+      let function_ =
+        Function.create ~label:"Iarray.length" ~arguments:[iarray_sort]
+          ~result:Int63
+      in
+      ctx.iarray_length <- Some function_;
+      ctx.functions <- function_ :: ctx.functions;
+      function_
+  in
+  Call (function_, [array])
+
+let iarray_get ctx iarray_sort element_sort array index =
+  register_sort ctx element_sort;
+  let function_ =
+    match Hashtbl.find_opt ctx.iarray_contents element_sort with
+    | Some function_ -> function_
+    | None ->
+      let function_ =
+        Function.create ~label:"Iarray.get" ~arguments:[iarray_sort; Int63]
+          ~result:element_sort
+      in
+      Hashtbl.add ctx.iarray_contents element_sort function_;
+      ctx.functions <- function_ :: ctx.functions;
+      function_
+  in
+  Call (function_, [array; index])
+
+let iarray_value ctx env ty s values =
+  match iarray ctx.encoding env ty with
+  | Some (iarray_sort, element_sort) ->
+    let array = fresh_sort ctx "iarray" iarray_sort in
+    let s =
+      fact s "iarray literal"
+        (both Eq
+           (iarray_length ctx iarray_sort array)
+           (Integer (Int64.of_int (List.length values))))
+    in
+    let s =
+      match element_sort with
+      | None -> s
+      | Some element_sort ->
+        Misc.Stdlib.List.fold_lefti
+          (fun index s value ->
+            match scalar value with
+            | Some element when term_sort element = element_sort ->
+              fact s "iarray literal"
+                (both Eq
+                   (iarray_get ctx iarray_sort element_sort array
+                      (Integer (Int64.of_int index)))
+                   element)
+            | Some _ | None -> s)
+          s values
+    in
+    s, scalar_value array
+  | None -> s, None
+
 let fresh ?primitive ctx env ty label =
   match sort ctx.encoding env ty with
-  | Some sort ->
-    register_sort ctx sort;
-    let symbol = Symbol.create ~label sort in
-    ctx.symbols <- symbol :: ctx.symbols;
-    scalar_value (Var symbol)
+  | Some sort -> scalar_value (fresh_sort ctx label sort)
   | None ->
     begin match get_desc (Ctype.expand_head env ty) with
     | Tarrow _ ->
@@ -339,10 +403,57 @@ let lookup ctx s env ty path =
         ctx.free <- Path.Map.add path value ctx.free;
         value))
 
+let iarray_call ctx value =
+  match scalar value with
+  | None -> None
+  | Some value ->
+    let sort = term_sort value in
+    if is_iarray_sort ctx.encoding sort then Some (sort, value) else None
+
 let operation ctx env function_type result_type name args =
-  scalar_option
-    (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
-       (List.map scalar args))
+  match name, args with
+  | "%array_length", [array] ->
+    begin match iarray_call ctx array with
+    | Some (iarray_sort, array) ->
+      scalar_value (iarray_length ctx iarray_sort array)
+    | None -> None
+    end
+  | "%array_safe_get", [array; index] ->
+    begin match
+      iarray_call ctx array, scalar index, sort ctx.encoding env result_type
+    with
+    | Some (iarray_sort, array), Some index, Some element_sort
+      when term_sort index = Int63 ->
+      scalar_value (iarray_get ctx iarray_sort element_sort array index)
+    | _ -> None
+    end
+  | _ ->
+    scalar_option
+      (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
+         (List.map scalar args))
+
+let normal_iarray_length ctx args s =
+  match args with
+  | [array] ->
+    begin match iarray_call ctx array with
+    | Some (iarray_sort, array) ->
+      fact s "iarray length"
+        (both Le (Integer 0L) (iarray_length ctx iarray_sort array))
+    | None -> s
+    end
+  | _ -> s
+
+let normal_iarray_get ctx args s =
+  match args with
+  | [array; index] ->
+    begin match iarray_call ctx array, scalar index with
+    | Some (iarray_sort, array), Some index when term_sort index = Int63 ->
+      let length = iarray_length ctx iarray_sort array in
+      fact s "normal return"
+        (both And (both Le (Integer 0L) index) (both Lt index length))
+    | _ -> s
+    end
+  | _ -> s
 
 let function_call ctx env ty fn args =
   match fn, signature ctx.encoding env ty (List.length args) with
@@ -507,15 +618,21 @@ let rec predicate ctx env s e =
                   apply_function ctx env fn.rexp_type e.rexp_type prim value
                     args ~total:true
                 in
+                let s =
+                  match prim with
+                  | Some ("%array_length", 1) -> normal_iarray_length ctx args s
+                  | _ -> s
+                in
                 [s, scalar_value (required e.rexp_loc result)]))
       end
     | Rexp_logical_equal (left, right) ->
       paths (eval s right) (fun s right ->
           paths (eval s left) (fun s left ->
-              [ ( s,
-                  scalar_value
-                    (both Eq (required e.rexp_loc left)
-                       (required e.rexp_loc right)) ) ]))
+              let left = required e.rexp_loc left in
+              let right = required e.rexp_loc right in
+              if sort_has_iarray ctx.encoding (term_sort left)
+              then unsupported e.rexp_loc
+              else [s, scalar_value (both Eq left right)]))
     | Rexp_ifthenelse (c, t, Some f) -> predicate_if eval e.rexp_loc s c t f
     | Rexp_sequence (a, b) -> paths (eval s a) (fun s _ -> eval s b)
     | Rexp_let (binding, body) ->
@@ -887,6 +1004,10 @@ and expression_desc ctx s e =
             [ ( s,
                 opaque_if_unsupported
                   (record_value ctx e.exp_env e.exp_type base fields) ) ]))
+  | Texp_array (Immutable, _, elements, _) ->
+    paths (arguments_right_to_left eval s elements) (fun s values ->
+        let s, value = iarray_value ctx e.exp_env e.exp_type s values in
+        [s, opaque_if_unsupported value])
   | Texp_field { record; label; _ } ->
     paths (eval s record) (fun s value ->
         [ ( s,
@@ -911,7 +1032,9 @@ and expression_desc ctx s e =
     paths (eval s right) (fun s right ->
         paths (eval s left) (fun s left ->
             match scalar left, scalar right with
-            | Some left, Some right when term_sort left = term_sort right ->
+            | Some left, Some right
+              when term_sort left = term_sort right
+                   && not (sort_has_iarray ctx.encoding (term_sort left)) ->
               [s, scalar_value (both Eq left right)]
             | _ -> [s, opaque ()]))
   | Texp_sequence (a, _, b) -> paths (eval s a) (fun s _ -> eval s b)
@@ -958,6 +1081,12 @@ and expression_desc ctx s e =
               in
               match prim with
               | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) -> []
+              | Some ("%array_length", 1) ->
+                [ ( normal_iarray_length ctx args s,
+                    match value with Some _ -> value | None -> opaque () ) ]
+              | Some ("%array_safe_get", 2) ->
+                [ ( normal_iarray_get ctx args s,
+                    match value with Some _ -> value | None -> opaque () ) ]
               | _ ->
                 [(s, match value with Some _ -> value | None -> opaque ())]))
     end
@@ -1112,6 +1241,8 @@ let context ~prove ~verify_introductions =
     datatypes = [];
     symbols = [];
     functions = [];
+    iarray_length = None;
+    iarray_contents = Hashtbl.create 8;
     free = Path.Map.empty;
     symbolic = Symbolic_keys.create 16;
     prove;
