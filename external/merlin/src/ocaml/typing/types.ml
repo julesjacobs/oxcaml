@@ -786,14 +786,12 @@ module Lpoly = struct
     | Determined _ -> on_determined ()
 end
 
-module type Wrapped = sig
-  type 'a wrapped
-
+module Wrapped_types (Wrap : Wrap) = struct
   type value_description =
-    { val_type: type_expr wrapped;                (* Type of the value *)
+    { val_type: type_expr Wrap.t;                 (* Type of the value *)
       val_modalities : Mode.Modality.t;     (* Modalities on the value *)
       val_kind: value_kind;
-      val_lpoly: Lpoly.t wrapped;
+      val_lpoly: Lpoly.t Wrap.t;
       val_loc: Location.t;
       val_zero_alloc: Zero_alloc.t;
       val_attributes: Parsetree.attributes;
@@ -813,7 +811,7 @@ module type Wrapped = sig
   | Unit
   | Named of Ident.t option * module_type * Mode.Alloc.lr
 
-  and signature = signature_item list wrapped
+  and signature = signature_item list Wrap.t
 
   and persistent_signature = signature * Mode.Value.l
 
@@ -844,15 +842,20 @@ module type Wrapped = sig
     mtd_loc: Location.t;
     mtd_uid: Uid.t;
   }
+end
+
+module type Wrapped = sig
+  type 'a wrapped
+
+  include module type of Wrapped_types(struct type 'a t = 'a wrapped end)
 
   val sort_of_signature_item :
     signature_item -> Jkind_types.Sort.t option
 end
 
 module Make_wrapped(Wrap : Wrap) = struct
-  (* Avoid repeating everything in Wrapped *)
-  module rec M : Wrapped with type 'a wrapped = 'a Wrap.t = M
-  include M
+  type 'a wrapped = 'a Wrap.t
+  include Wrapped_types(Wrap)
 
   let sort_of_signature_item = function
     | Sig_value(_, decl, _) ->
