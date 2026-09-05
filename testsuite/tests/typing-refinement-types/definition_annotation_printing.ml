@@ -16,5 +16,6 @@ let[@def] eq_outer x =
 [%%expect{|
 val eq_outer : 'a @ immutable -> int -> int -> bool = <fun>
 val eq_outer_def :
-  (x : 'a) -> {u : unit | (eq_outer x) === ((=) : int -> int -> bool)} = <fun>
+  (x : 'a) -> {u : unit | (eq_outer x) === ((=) : int -> int -> bool)} =
+  <fun>
 |}]
