@@ -629,7 +629,11 @@ let logical_definition_body rexp =
                | _ -> false)
             body
         in
-        if not used then { rexp with rexp_desc = body.rexp_desc }
+        if not used then
+          { rexp with
+            rexp_desc = body.rexp_desc;
+            rexp_type_constraint =
+              rexp.rexp_type_constraint || body.rexp_type_constraint }
         else
           begin match binding.rb_kind with
           | Rbind_value -> rexp
