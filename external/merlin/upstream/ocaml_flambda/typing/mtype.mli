@@ -42,6 +42,9 @@ val freshen: scope:int -> module_type -> module_type
            where bound identifiers are fresh. *)
 val strengthen_lazy:
         aliasable:bool -> Subst.Lazy.module_type -> Path.t -> Subst.Lazy.module_type
+val prefix_refinement_paths_lazy:
+  Env.t -> Subst.t -> Subst.Lazy.module_type -> Path.t ->
+  Subst.Lazy.module_type
 val strengthen: aliasable:bool -> module_type -> Path.t -> module_type
         (* Strengthen abstract type components relative to the
            given path. *)

@@ -685,6 +685,9 @@ and core_type1 ctxt f x =
         pp f "@[<hov2><[%a]>@]" (core_type ctxt) t
     | Ptyp_splice t ->
         pp f "@[<hov2>$(%a)@]" (core_type ctxt) t
+    | Ptyp_refine (binder, payload, predicate) ->
+        pp f "@[<hov2>{%a : %a@ | %a}@]" ident_of_name binder.txt
+          (core_type ctxt) payload (expression reset_ctxt) predicate
     | Ptyp_extension e -> extension ctxt f e
     | (Ptyp_arrow _ | Ptyp_alias _ | Ptyp_poly _ | Ptyp_repr _
       | Ptyp_newlayout _ | Ptyp_of_kind _) ->
@@ -1202,6 +1205,12 @@ and expression ctxt f x =
     | Pexp_hole -> pp f "_"
     | Pexp_borrow e ->
         pp f "@[<hov2>borrow_@ %a@]" (expression2 reset_ctxt)  e
+    | Pexp_refine e ->
+        pp f "@[<hov2>refine_@ %a@]" (expression2 reset_ctxt) e
+    | Pexp_let_refine (name, bound, body) ->
+        pp f "@[<2>let refine_ %a =@ %a@ in@]@ %a"
+          ident_of_name name.txt (expression reset_ctxt) bound
+          (expression ctxt) body
     | _ -> expression1 ctxt f x
 
 and expression1 ctxt f x =
@@ -1237,6 +1246,7 @@ and simple_expr ctxt f x =
                (list (expression (under_semi ctxt)) ~sep:";@;") xs
          | `simple x -> constr f x
          | _ -> assert false)
+    | Pexp_hole -> pp f "_"
     | Pexp_ident li ->
         value_longident_loc f li
     (* (match view_fixity_of_exp x with *)
@@ -1294,7 +1304,6 @@ and simple_expr ctxt f x =
           df expression e2 expression e3
     | Pexp_extension ({ txt; _ }, _) when txt = Ast_helper.hole_txt ->
         pp f "_"
-    | Pexp_hole -> pp f "_"
     | _ ->  paren true (expression ctxt) f x
 
 and attributes ctxt f l =
