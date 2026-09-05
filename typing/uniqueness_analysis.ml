@@ -2364,6 +2364,12 @@ let rec check_uniqueness_exp_desc ~borrows ~overwrite (ienv : Ienv.t) ~loc :
       check_uniqueness_exp ~overwrite:None (Ienv.extend ienv ext) body
     in
     UF.seq uf_vbs uf_body
+  | Texp_assume (vb, predicate, body) ->
+    let ext, uf_vbs = check_uniqueness_value_bindings ienv [vb] in
+    let ienv = Ienv.extend ienv ext in
+    let uf_predicate = check_uniqueness_exp ~overwrite:None ienv predicate in
+    let uf_body = check_uniqueness_exp ~overwrite:None ienv body in
+    UF.seq uf_vbs (UF.seq uf_predicate uf_body)
   | Texp_function { params; body; _ } ->
     let ienv, uf_params =
       List.fold_left_map

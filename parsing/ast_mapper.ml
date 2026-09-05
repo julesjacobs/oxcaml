@@ -674,6 +674,7 @@ module E = struct
     | Pexp_hole -> hole ~loc ~attrs ()
     | Pexp_borrow e -> borrow ~loc ~attrs (sub.expr sub e)
     | Pexp_refine e -> refine ~loc ~attrs (sub.expr sub e)
+    | Pexp_assume e -> assume ~loc ~attrs (sub.expr sub e)
     | Pexp_let_refine (name, bound, body) ->
         let_refine ~loc ~attrs (map_loc sub name) (sub.expr sub bound)
           (sub.expr sub body)

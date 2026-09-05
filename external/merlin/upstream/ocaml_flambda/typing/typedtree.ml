@@ -392,6 +392,7 @@ and expression_desc =
         expression
   | Texp_letexception of extension_constructor * expression
   | Texp_assert of expression * Location.t
+  | Texp_assume of value_binding * expression * expression
   | Texp_lazy of expression
   | Texp_object of class_structure * string list
   | Texp_pack of module_expr
