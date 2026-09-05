@@ -2719,7 +2719,7 @@ let declaration_can_pattern_match_total env root root_args decl =
 let can_pattern_match_total env ty =
   let rec check seen ty =
     match get_desc ty with
-    | Tconstr (path, args, _) ->
+    | Tconstr (path, _, _) ->
         if Path.Set.mem path seen then false
         else begin
           match Env.find_type path env with
@@ -2730,7 +2730,8 @@ let can_pattern_match_total env ty =
               else begin match decl.type_kind with
               | Type_variant _ | Type_record _
               | Type_record_unboxed_product _ ->
-                declaration_can_pattern_match_total env path args decl
+                declaration_can_pattern_match_total env path
+                  decl.type_params decl
               | Type_abstract _ | Type_open -> false
               end
           | exception Not_found -> false

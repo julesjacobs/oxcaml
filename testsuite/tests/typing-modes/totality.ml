@@ -161,6 +161,11 @@ let (addition @ total) x = x + 1
 val addition : int -> int = <fun>
 |}]
 
+let (negation @ total) x = not x
+[%%expect{|
+val negation : bool -> bool = <fun>
+|}]
+
 let (division @ total) x = x / 1
 [%%expect{|
 Line 1, characters 29-30:

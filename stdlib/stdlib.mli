@@ -186,7 +186,7 @@ external ( != ) :
 
 (** {1 Boolean operations} *)
 
-external not : (bool[@local_opt]) -> bool = "%boolnot"
+external not : (bool[@local_opt]) -> bool @@ total = "%boolnot"
 (** The boolean negation. *)
 
 external ( && ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ total

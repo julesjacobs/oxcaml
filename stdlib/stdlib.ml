@@ -91,7 +91,7 @@ external ( != ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) ->
 
 (* Boolean operations *)
 
-external not : (bool[@local_opt]) -> bool @@ portable = "%boolnot"
+external not : (bool[@local_opt]) -> bool @@ total = "%boolnot"
 external ( && ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ total
   = "%sequand"
 external ( || ) : (bool[@local_opt]) -> (bool[@local_opt]) -> bool @@ total
