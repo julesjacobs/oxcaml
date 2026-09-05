@@ -15,18 +15,9 @@ open Types
 (* Rebuilding *)
 
 let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
-<<<<<<< HEAD
-    ?value_path ?constructor_path ?type_path ?(type_expr = Fun.id)
-    ?(location = Fun.id) rexp =
-||||||| parent of 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
-    ?value_path
-    ?constructor_path ?type_path ?(type_expr = Fun.id)
-    ?(location = Fun.id) rexp =
-=======
     ?value_path
     ?constructor_path ?type_path ?(type_expr = Fun.id)
     ?(location = Fun.id) ?(expression = Fun.id) rexp =
->>>>>>> 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
   let map_constant (constant : Parsetree.constant) =
     let pconst_desc =
       match constant.pconst_desc with
@@ -607,7 +598,6 @@ let exists_rexp pred rexp =
   in
   match walk rexp with () -> false | exception Found -> true
 
-<<<<<<< HEAD
 let iter_value_idents f rexp =
   ignore (exists_rexp (fun rexp ->
     begin match rexp.rexp_desc with
@@ -616,8 +606,6 @@ let iter_value_idents f rexp =
     end;
     false) rexp : bool)
 
-||||||| parent of 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
-=======
 let logical_definition_body rexp =
   map ~expression:(fun rexp ->
     match rexp.rexp_desc with
@@ -649,7 +637,6 @@ let logical_definition_body rexp =
     | _ -> rexp)
     rexp
 
->>>>>>> 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
 let find_dependency_path (f : Path.t -> 'a option) rexp : 'a option =
   let result = ref None in
   let check path =

@@ -19,15 +19,9 @@ open Types
     inside the predicate;
     [rename] maps externally-bound idents;
     [bind_value] turns selected free value paths into bound variables;
-<<<<<<< HEAD
     [free_var_path] turns selected bound variables into free value paths;
-    [value_path] rewrites the paths of free idents. *)
-||||||| parent of 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
-    [value_path] rewrites the paths of free idents. *)
-=======
     [value_path] rewrites the paths of free idents;
     [expression] rewrites each expression after its children. *)
->>>>>>> 40c8375b60 (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
 val map :
   ?rename:Ident.t Ident.Map.t ->
   ?rename_bound:(Ident.t -> Ident.t) ->
