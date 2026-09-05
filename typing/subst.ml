@@ -826,11 +826,13 @@ let rec typexp copy_scope s ty =
               ref_payload;
               ref_pred =
                 Refinement_predicate.map ~rename:s.bound_values
-                  ~rename_bound:(rename_bound_ident s)
+                  ~rename_bound:(fun id -> Ident.Map.find id s.bound_values)
                   ~bind_value:(fun path ->
                     match path with
                     | Pident id -> Ident.Map.find_opt id s.bound_values
                     | _ -> None)
+                  ~unbind_value:(fun id ->
+                    Path.Map.find_opt (Pident id) s.values)
                   ~value_path:(value_path s)
                   ~constructor_path:(constructor_path s)
                   ~type_path:(type_path s)

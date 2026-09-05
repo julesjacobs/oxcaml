@@ -572,6 +572,8 @@ exception Nondep_cannot_erase of Ident.t
 
 val nondep_type: Env.t -> Ident.t list -> type_expr -> type_expr
 val refinement_ident_occurs : Ident.t -> type_expr -> bool
+val apply_dependent_type :
+  Ident.t -> Ident.t -> type_expr -> type_expr
 val substitute_refinement_ident :
   Ident.t -> Ident.t -> type_expr -> type_expr
         (* Return a type equivalent to the given type but without
