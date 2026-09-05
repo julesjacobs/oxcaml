@@ -36,6 +36,7 @@ legacy-mode defaults.
 | Immutable arrays | `iarrays.ml`, `iarrays_ordinary.ml` | Immutable-array literals expose exact lengths and elements; safe reads expose normal-return bounds. |
 | Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
 | Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
+| Standard maps | `maps.ml` | Total comparators enable total operations; refined updates and lookup expose membership and value facts while preserving key and value access. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
