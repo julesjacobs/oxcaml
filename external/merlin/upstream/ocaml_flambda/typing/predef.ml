@@ -914,10 +914,13 @@ let decl_of_type_constr type_constr =
         variant [cstr ident_nil [];
                  cstr ident_cons [unrestricted tvar list_argument_sort;
                                   unrestricted (type_list tvar) list_sort]] in
-      decl1 ~variance:Variance.covariant ~kind
-       ~param_jkind:list_argument_jkind
-       ~jkind:list_jkind
-        ()
+      let declaration =
+        decl1 ~variance:Variance.covariant ~kind
+          ~param_jkind:list_argument_jkind
+          ~jkind:list_jkind
+          ()
+      in
+      { declaration with type_inductive = true }
   | `Option ->
       let kind tvar =
         variant [cstr ident_none [];
