@@ -46,3 +46,14 @@
   $ $MERLIN single errors -extension refinement_types \
   > -filename nested.ml <nested.ml | jq '.value'
   []
+
+  $ cat >optional.ml <<EOF
+  > let x : { f : ?x:int -> unit -> int | true } = _
+  > EOF
+
+  $ suggestion=$($MERLIN single construct -position 1:48 -depth 3 \
+  > -extension refinement_types -filename optional.ml <optional.ml | revert-newlines | jq -r '.value[1][0]')
+  $ printf 'let x : { f : ?x:int -> unit -> int | true } = %s\n' "$suggestion" >optional.ml
+  $ $MERLIN single errors -extension refinement_types \
+  > -filename optional.ml <optional.ml | revert-newlines | jq '.value'
+  []

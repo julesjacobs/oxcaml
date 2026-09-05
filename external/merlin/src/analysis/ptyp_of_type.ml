@@ -53,7 +53,14 @@ and core_type type_expr =
         (Labelled l, Typ.extension (mkloc "call_pos" !default_loc, PStr []))
       | Nolabel -> (Nolabel, core_type type_expr)
       | Labelled l -> (Labelled l, core_type type_expr)
-      | Optional l -> (Optional l, core_type type_expr)
+      | Optional l ->
+        let argument =
+          match get_desc (Btype.tpoly_get_mono type_expr) with
+          | Tconstr (path, [ argument ], _)
+            when Path.same path Predef.path_option -> argument
+          | _ -> type_expr
+        in
+        (Optional l, core_type argument)
     in
     let arg_modes = modes arg_alloc_mode in
     let ret_modes = modes ret_alloc_mode in
