@@ -5515,32 +5515,16 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                                  plain local variable"))
                   in
                   let substitute binder ty =
-                    match path with
-                    | Path.Pident id ->
-                        Ctype.substitute_refinement_ident binder id ty
-                    | _ ->
-                        Subst.type_expr
-                          (Subst.add_value binder path Subst.identity) ty
+                    Subst.type_expr
+                      (Subst.add_value binder path Subst.identity) ty
                   in
                   let ty_ret =
-<<<<<<< HEAD
-                    Ctype.apply_dependent_type binder id ty_ret
-||||||| parent of 5be690e59a (Add mandatory runtime refinement checks with assume_)
-                    Ctype.substitute_refinement_ident binder id ty_ret
-=======
                     substitute binder ty_ret
->>>>>>> 5be690e59a (Add mandatory runtime refinement checks with assume_)
                   in
                   let ty_ret0 =
                     match binder0 with
                     | Some binder0 ->
-<<<<<<< HEAD
-                        Ctype.apply_dependent_type binder0 id ty_ret0
-||||||| parent of 5be690e59a (Add mandatory runtime refinement checks with assume_)
-                        Ctype.substitute_refinement_ident binder0 id ty_ret0
-=======
                         substitute binder0 ty_ret0
->>>>>>> 5be690e59a (Add mandatory runtime refinement checks with assume_)
                     | None -> assert false
                   in
                   ty_ret, ty_ret0
