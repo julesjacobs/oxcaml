@@ -446,16 +446,10 @@ let equal ~pairs rexp1 rexp2 =
 
 (* Back to surface syntax *)
 
-<<<<<<< HEAD
 let untype ?(type_constraint = fun _ -> None)
-    ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
-||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
-let untype ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
-=======
-let untype ?(expression = fun _ exp -> exp)
+    ?(expression = fun _ exp -> exp)
     ?(function_label = fun _ -> Asttypes.Nolabel)
     ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
->>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
   let open Ast_helper in
   let lid_of_name name = Location.mknoloc (Longident.Lident name) in
   let constrain_pattern constrained ty pat =
@@ -465,15 +459,7 @@ let untype ?(expression = fun _ exp -> exp)
   in
   let rec untype_rexp rexp =
     let loc = rexp.rexp_loc in
-<<<<<<< HEAD
-    let expression = match rexp.rexp_desc with
-||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
-    match rexp.rexp_desc with
-=======
-    expression rexp (untype_desc loc rexp)
-  and untype_desc loc rexp =
-    match rexp.rexp_desc with
->>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
+    let exp = match rexp.rexp_desc with
     | Rexp_var id -> Exp.ident ~loc (lid_of_name (var_name id))
     | Rexp_ident path -> Exp.ident ~loc (value_ident path)
     | Rexp_constant const -> Exp.constant ~loc const
@@ -533,17 +519,9 @@ let untype ?(expression = fun _ exp -> exp)
         Exp.function_ ~loc
           [ { pparam_desc =
                 Pparam_val
-<<<<<<< HEAD
-                  ( Asttypes.Nolabel, None,
+                  ( function_label rexp, None,
                     constrain_pattern constrained param_type
                       (Pat.var (Location.mknoloc (var_name param))) );
-||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
-                  ( Asttypes.Nolabel, None,
-                    Pat.var (Location.mknoloc (var_name param)) );
-=======
-                  ( function_label rexp, None,
-                    Pat.var (Location.mknoloc (var_name param)) );
->>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
               pparam_loc = Location.none } ]
           { mode_annotations = [];
             ret_mode_annotations = [];
@@ -552,10 +530,12 @@ let untype ?(expression = fun _ exp -> exp)
     | Rexp_match (scrutinee, cases) ->
         Exp.match_ ~loc (untype_rexp scrutinee) (List.map untype_case cases)
     in
-    match if rexp.rexp_type_constraint
+    let exp = match if rexp.rexp_type_constraint
           then type_constraint rexp.rexp_type else None with
-    | None -> expression
-    | Some ty -> Exp.constraint_ ~loc expression (Some ty) []
+    | None -> exp
+    | Some ty -> Exp.constraint_ ~loc exp (Some ty) []
+    in
+    expression rexp exp
   and untype_case { rc_lhs; rc_guard; rc_rhs } =
     Exp.case (untype_pat rc_lhs)
       ?guard:(Option.map untype_rexp rc_guard)

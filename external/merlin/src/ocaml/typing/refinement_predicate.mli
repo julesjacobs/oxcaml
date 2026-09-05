@@ -55,25 +55,15 @@ val equal :
 
 (** Back to surface syntax, for printing.  [var_name] chooses the printed
     name of a bound ident; [value_ident] renders a free ident from its
-<<<<<<< HEAD
     resolved (possibly substituted) path. [type_constraint] optionally
-    restores explicit type constraints. *)
-||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
-    resolved (possibly substituted) path. *)
-=======
-    resolved (possibly substituted) path. [expression] postprocesses each node
+    restores explicit type constraints. [expression] postprocesses each node
     for resolved elaboration; it is not represented by a source attribute.
     [function_label] recovers lambda labels for resolved elaboration. *)
->>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
 val untype :
-<<<<<<< HEAD
   ?type_constraint:(type_expr -> Parsetree.core_type option) ->
-||||||| parent of e40cc917fa (Add mandatory runtime refinement checks with assume_)
-=======
   ?expression:(refinement_expression -> Parsetree.expression ->
                Parsetree.expression) ->
   ?function_label:(refinement_expression -> Asttypes.arg_label) ->
->>>>>>> e40cc917fa (Add mandatory runtime refinement checks with assume_)
   var_name:(Ident.t -> string) ->
   value_ident:(Path.t -> Longident.t Location.loc) ->
   constructor_ident:(Path.t -> Longident.t Location.loc) ->
