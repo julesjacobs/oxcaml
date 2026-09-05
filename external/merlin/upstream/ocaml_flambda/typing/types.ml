@@ -181,7 +181,7 @@ and type_desc =
   | Trefine of refinement_desc
 
 and refinement_desc =
-  { mutable ref_structural_scope : int;
+  { ref_structural_scope : int;
     ref_binder : Ident.t;
     ref_payload : type_expr;
     ref_pred : refinement_expression }
@@ -189,6 +189,7 @@ and refinement_desc =
 and refinement_expression =
   { rexp_desc : refinement_expression_desc;
     rexp_type : type_expr;
+    rexp_type_constraint : bool;
     rexp_loc : Location.t }
 
 and refinement_expression_desc =
@@ -212,13 +213,14 @@ and refinement_expression_desc =
       * refinement_expression option
   | Rexp_sequence of refinement_expression * refinement_expression
   | Rexp_let of refinement_binding * refinement_expression
-  | Rexp_fun of Ident.t * type_expr * refinement_expression
+  | Rexp_fun of Ident.t * type_expr * bool * refinement_expression
   | Rexp_match of refinement_expression * refinement_case list
 
 and refinement_binding =
   { rb_kind : refinement_binding_kind;
     rb_ident : Ident.t;
     rb_type : type_expr;
+    rb_type_constraint : bool;
     rb_expr : refinement_expression }
 
 and refinement_binding_kind =
@@ -233,6 +235,7 @@ and refinement_case =
 and refinement_pattern =
   { rpat_desc : refinement_pattern_desc;
     rpat_type : type_expr;
+    rpat_type_constraint : bool;
     rpat_loc : Location.t }
 
 and refinement_pattern_desc =

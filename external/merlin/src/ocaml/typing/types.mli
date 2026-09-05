@@ -316,7 +316,7 @@ and type_desc =
 (** A refinement type: the payload type and the predicate over the refined
     value. *)
 and refinement_desc =
-  { mutable ref_structural_scope : int;
+  { ref_structural_scope : int;
     (** The monotone contribution from ordinary type/GADT scope checks.
         [type_expr.scope] is the maximum of this field and the recomputable
         free term-dependency scope. *)
@@ -334,6 +334,8 @@ and refinement_expression =
   { rexp_desc : refinement_expression_desc;
     rexp_type : type_expr;
     (** The instantiated type at this occurrence. *)
+    rexp_type_constraint : bool;
+    (** Whether this occurrence has an explicit source type constraint. *)
     rexp_loc : Location.t }
 
 and refinement_expression_desc =
@@ -364,14 +366,16 @@ and refinement_expression_desc =
   | Rexp_sequence of refinement_expression * refinement_expression
   | Rexp_let of refinement_binding * refinement_expression
   (** A single, non-recursive variable binding. *)
-  | Rexp_fun of Ident.t * type_expr * refinement_expression
-  (** [fun x -> e]; only single, unlabelled variable parameters. *)
+  | Rexp_fun of Ident.t * type_expr * bool * refinement_expression
+  (** [fun x -> e]; only single, unlabelled variable parameters.
+      The boolean records an explicit parameter type constraint. *)
   | Rexp_match of refinement_expression * refinement_case list
 
 and refinement_binding =
   { rb_kind : refinement_binding_kind;
     rb_ident : Ident.t;
     rb_type : type_expr;
+    rb_type_constraint : bool;
     rb_expr : refinement_expression }
 
 and refinement_binding_kind =
@@ -390,6 +394,8 @@ and refinement_pattern =
   { rpat_desc : refinement_pattern_desc;
     rpat_type : type_expr;
     (** The instantiated type at this pattern node. *)
+    rpat_type_constraint : bool;
+    (** Whether this pattern has an explicit source type constraint. *)
     rpat_loc : Location.t }
 
 and refinement_pattern_desc =

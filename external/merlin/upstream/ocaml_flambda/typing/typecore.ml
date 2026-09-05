@@ -14160,13 +14160,24 @@ let check_refinement_pattern_extras pat =
            unsupported_refinement_syntax loc "This pattern annotation")
     pat.pat_extra
 
+let refinement_pattern_has_type_constraint pat =
+  List.exists
+    (fun (extra, _, _) ->
+       match extra with
+       | Tpat_constraint (Some _, _) -> true
+       | _ -> false)
+    pat.pat_extra
+
 let rec refinement_pattern_of_typed :
   type k.
   Ident.Set.t -> k general_pattern -> Ident.Set.t * refinement_pattern =
   fun locals pat ->
     check_refinement_pattern_extras pat;
     let mk rpat_desc =
-      { rpat_desc; rpat_type = pat.pat_type; rpat_loc = pat.pat_loc }
+      { rpat_desc;
+        rpat_type = pat.pat_type;
+        rpat_type_constraint = refinement_pattern_has_type_constraint pat;
+        rpat_loc = pat.pat_loc }
     in
     match pat.pat_desc with
     | Tpat_any -> locals, mk Rpat_any
@@ -14215,7 +14226,8 @@ let refinement_expression_of_typed binder predicate =
   in
   let rec expression locals exp =
     let mk_at rexp_type rexp_desc =
-      { rexp_desc; rexp_type; rexp_loc = exp.exp_loc }
+      { rexp_desc; rexp_type; rexp_type_constraint = false;
+        rexp_loc = exp.exp_loc }
     in
     let mk rexp_desc = mk_at exp.exp_type rexp_desc in
     let result =
@@ -14326,6 +14338,8 @@ let refinement_expression_of_typed binder predicate =
                    ( { rb_kind;
                        rb_ident = id;
                        rb_type = binding.vb_pat.pat_type;
+                       rb_type_constraint =
+                         refinement_pattern_has_type_constraint binding.vb_pat;
                        rb_expr },
                      expression locals body ))
           | _ ->
@@ -14347,7 +14361,13 @@ let refinement_expression_of_typed binder predicate =
                        | Tparam_pat pat -> pat.pat_type
                        | Tparam_optional_default _ -> assert false
                      in
-                     Ident.Set.add id locals, (id, param_type)
+                     let constrained =
+                       match param.fp_kind with
+                       | Tparam_pat pat ->
+                           refinement_pattern_has_type_constraint pat
+                       | Tparam_optional_default _ -> assert false
+                     in
+                     Ident.Set.add id locals, (id, param_type, constrained)
                  | _ ->
                      unsupported_refinement_syntax param.fp_loc
                        "This function parameter")
@@ -14357,7 +14377,7 @@ let refinement_expression_of_typed binder predicate =
           let rec functions fn_type params =
             match params with
             | [] -> body
-            | (id, param_type) :: params ->
+            | (id, param_type, constrained) :: params ->
                 let result_type =
                   match get_desc fn_type with
                   | Tarrow (_, _, result_type, _) -> result_type
@@ -14365,7 +14385,8 @@ let refinement_expression_of_typed binder predicate =
                 in
                 mk_at fn_type
                   (Rexp_fun
-                     (id, param_type, functions result_type params))
+                     (id, param_type, constrained,
+                      functions result_type params))
           in
           functions exp.exp_type params
       | Texp_match (scrutinee, _, cases, [], _) ->
@@ -14392,7 +14413,8 @@ let refinement_expression_of_typed binder predicate =
     List.fold_left
       (fun result (extra, loc, _) ->
          match extra with
-         | Texp_inspected_type _ | Texp_constraint _ -> result
+         | Texp_inspected_type _ -> result
+         | Texp_constraint _ -> { result with rexp_type_constraint = true }
          | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
          | Texp_mode _ | Texp_borrowed | Texp_ghost_region | Texp_refine ->

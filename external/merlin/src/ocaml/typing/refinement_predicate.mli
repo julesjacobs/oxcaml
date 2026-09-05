@@ -33,6 +33,10 @@ val map :
 val fold_types :
   ('a -> type_expr -> 'a) -> 'a -> refinement_expression -> 'a
 
+(** Fold over types at explicit source constraints. *)
+val fold_type_constraints :
+  ('a -> type_expr -> 'a) -> 'a -> refinement_expression -> 'a
+
 (** Syntactic alpha-equivalence.  [pairs] gives the pairing of
     externally-bound idents. *)
 val equal :
@@ -41,8 +45,10 @@ val equal :
 
 (** Back to surface syntax, for printing.  [var_name] chooses the printed
     name of a bound ident; [value_ident] renders a free ident from its
-    resolved (possibly substituted) path. *)
+    resolved (possibly substituted) path. [type_constraint] optionally
+    restores explicit type constraints. *)
 val untype :
+  ?type_constraint:(type_expr -> Parsetree.core_type option) ->
   var_name:(Ident.t -> string) ->
   value_ident:(Path.t -> Longident.t Location.loc) ->
   constructor_ident:(Path.t -> Longident.t Location.loc) ->

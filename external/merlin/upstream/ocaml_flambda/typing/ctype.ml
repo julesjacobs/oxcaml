@@ -1252,8 +1252,8 @@ let rec update_scope scope ty =
     if get_level ty < scope then raise_scope_escape_exn ty;
     begin match get_desc ty with
     | Trefine refinement ->
-        refinement.ref_structural_scope <- scope;
-        refresh_refinement_scope (Transient_expr.repr ty) refinement
+        set_type_desc ty
+          (Trefine { refinement with ref_structural_scope = scope })
     | _ -> set_scope ty scope
     end;
     (* Only recurse in principal mode as this is not necessary for soundness *)

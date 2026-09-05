@@ -862,12 +862,12 @@ let proxy ty = Transient_expr.repr (proxy ty)
 
 (* When printing a type scheme, we print weak names.  When printing a plain
    type, we do not.  This type controls that behavior *)
-type type_or_scheme = Type | Type_scheme
+type type_or_scheme = Type | Type_scheme | Type_constraint
 
 let is_non_gen mode ty =
   match mode with
   | Type_scheme -> is_Tvar ty && get_level ty <> generic_level
-  | Type        -> false
+  | Type | Type_constraint -> false
 
 let nameable_row row =
   row_name row <> None &&
@@ -912,9 +912,9 @@ let printer_iter_type_expr f ty =
       f ty2
   | Tmod (ty, _) ->
       f ty
-  | Trefine { ref_payload; _ } ->
-      (* Predicate types are derived evidence and are not printed. *)
-      f ref_payload
+  | Trefine { ref_payload; ref_pred; _ } ->
+      f ref_payload;
+      Refinement_predicate.fold_type_constraints (fun () ty -> f ty) () ref_pred
   | _ ->
       Btype.iter_type_expr f ty
 
@@ -1435,6 +1435,11 @@ let rec tree_of_modal_typexp mode modal ty =
   let pr_typ alloc_mode =
     let tty = Transient_expr.repr ty in
     match tty.desc with
+    | Tvar { name = None }
+      when mode = Type_constraint && get_level ty = generic_level ->
+        (* Naming an anonymous generalized variable would make a local
+           annotation monomorphic when the predicate is checked again. *)
+        Otyp_stuff "_"
     | Tvar _ ->
         let non_gen = is_non_gen mode ty in
         let name_gen = Variable_names.new_var_name ~non_gen ty in
@@ -1530,10 +1535,20 @@ let rec tree_of_modal_typexp mode modal ty =
                      Location.mknoloc name ))
           | None -> Location.mknoloc (Longident.Lident name)
         in
+        let type_overrides = ref [] in
+        let type_constraint ty =
+          let placeholder = Ast_helper.Typ.any None in
+          let printed = tree_of_typexp Type_constraint Alloc.Const.legacy ty in
+          type_overrides := (placeholder, printed) :: !type_overrides;
+          Some placeholder
+        in
+        let predicate =
+          Refinement_predicate.untype ~type_constraint
+            ~var_name:Ident.name ~value_ident
+            ~constructor_ident ~label_ident ref_pred
+        in
         Otyp_refine
-          (Ident.name ref_binder, payload,
-           Refinement_predicate.untype ~var_name:Ident.name ~value_ident
-             ~constructor_ident ~label_ident ref_pred)
+          (Ident.name ref_binder, payload, predicate, !type_overrides)
     | Ttuple labeled_tyl ->
         Otyp_tuple (tree_of_labeled_typlist mode labeled_tyl)
     | Tunboxed_tuple labeled_tyl ->
