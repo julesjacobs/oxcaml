@@ -18,6 +18,8 @@
 open Ocamltest_stdlib
 open Actions
 
+let make_no_artifact = Actions.make ~incremental_requirement:No_artifact
+
 (* Extracting information from environment *)
 
 let no_native_compilers _log env =
@@ -436,12 +438,13 @@ let setup_toplevel_build_env (toplevel : Ocaml_toplevels.toplevel) log env =
   setup_tool_build_env (module Toplevel : Ocaml_tools.Tool) log env
 
 let mk_compiler_env_setup name (compiler : Ocaml_compilers.compiler) =
-  Actions.make ~name ~description:(Printf.sprintf "Setup build env (%s)" name)
+  make_no_artifact ~name
+    ~description:(Printf.sprintf "Setup build env (%s)" name)
     ~does_something:false
     (setup_compiler_build_env compiler)
 
 let mk_toplevel_env_setup name (toplevel : Ocaml_toplevels.toplevel) =
-  Actions.make ~name
+  make_no_artifact ~name
     ~description:(Printf.sprintf "Setup toplevel env (%s)" name)
     ~does_something:false
     (setup_toplevel_build_env toplevel)
@@ -517,6 +520,7 @@ let compile (compiler : Ocaml_compilers.compiler) log env =
 
 let ocamlc_byte =
   Actions.make
+    ~incremental_requirement:(Requirement "ocamlc.byte")
     ~name:"ocamlc.byte"
     ~description:"Compile the program using ocamlc.byte"
     ~does_something:true
@@ -525,6 +529,7 @@ let ocamlc_byte =
 let ocamlc_opt =
   native_action
     (Actions.make
+      ~incremental_requirement:(Requirement "ocamlc.opt")
       ~name:"ocamlc.opt"
       ~description:"Compile the program using ocamlc.opt"
       ~does_something:true
@@ -533,6 +538,7 @@ let ocamlc_opt =
 let ocamlopt_byte =
   native_action
     (Actions.make
+      ~incremental_requirement:(Requirement "ocamlopt.byte")
       ~name:"ocamlopt.byte"
       ~description:"Compile the program using ocamlopt.byte"
       ~does_something:true
@@ -541,6 +547,7 @@ let ocamlopt_byte =
 let ocamlopt_opt =
   native_action
     (Actions.make
+      ~incremental_requirement:(Requirement "ocamlopt.opt")
       ~name:"ocamlopt.opt"
       ~description:"Compile the program using ocamlopt.opt"
       ~does_something:true
@@ -945,17 +952,19 @@ let run_expect_with ~backend log env =
   run_expect_twice input_file log env ~backend
 
 let run_expect =
-  Actions.make ~name:"run-expect" ~description:"Run expect test"
+  Actions.make ~incremental_requirement:(Requirement "expect")
+    ~name:"run-expect" ~description:"Run expect test"
     ~does_something:true
     (run_expect_with ~backend:Bytecode)
 
 let run_expectnat =
-  Actions.make ~name:"run-expectnat"
+  Actions.make ~incremental_requirement:(Requirement "expectnat")
+    ~name:"run-expectnat"
     ~description:"Run expect test (native code)"
     ~does_something:true
     (run_expect_with ~backend:Native)
 
-let make_check_tool_output name tool = Actions.make
+let make_check_tool_output name tool = make_no_artifact
   ~name
   ~description:(Printf.sprintf "Check tool output (%s)" name)
   ~does_something:true
@@ -1224,7 +1233,7 @@ let run_test_program_in_toplevel (toplevel : Ocaml_toplevels.toplevel) log env =
         end
       end else (result, env)
 
-let ocaml = Actions.make
+let ocaml = Actions.make ~incremental_requirement:(Requirement "toplevel")
   ~name:"ocaml"
   ~description:"Run the test program in the toplevel"
   ~does_something:true
@@ -1278,7 +1287,7 @@ let config_variables _log env =
     Ocaml_variables.os_type, Sys.os_type
   ] env
 
-let flat_float_array = Actions.make
+let flat_float_array = make_no_artifact
   ~name:"flat-float-array"
   ~description:"Passes if the compiler is configured with \
     --enable-flat-float-array"
@@ -1287,7 +1296,7 @@ let flat_float_array = Actions.make
     "compiler configured with --enable-flat-float-array"
     "compiler configured with --disable-flat-float-array")
 
-let no_flat_float_array = make
+let no_flat_float_array = make_no_artifact
   ~name:"no-flat-float-array"
   ~description:"Passes if the compiler is configured with \
     --disable-flat-float-array"
@@ -1296,7 +1305,7 @@ let no_flat_float_array = make
     "compiler configured with --disable-flat-float-array"
     "compiler configured with --enable-flat-float-array")
 
-let flambda = Actions.make
+let flambda = make_no_artifact
   ~name:"flambda"
   ~description:"Passes if the compiler is configured with flambda or flambda2 enabled"
   ~does_something:false
@@ -1305,7 +1314,7 @@ let flambda = Actions.make
     "support for flambda enabled"
     "support for flambda disabled")
 
-let no_flambda = make
+let no_flambda = make_no_artifact
   ~name:"no-flambda"
   ~description:"Passes if the compiler is NOT configured with flambda or flambda2 enabled"
   ~does_something:false
@@ -1314,7 +1323,7 @@ let no_flambda = make
     "support for flambda disabled"
     "support for flambda enabled")
 
-let flambda2 = Actions.make
+let flambda2 = make_no_artifact
   ~name:"flambda2"
   ~description:"Passes if the compiler is configured with flambda2 enabled"
   ~does_something:false
@@ -1322,7 +1331,7 @@ let flambda2 = Actions.make
     "support for flambda2 enabled"
     "support for flambda2 disabled")
 
-let no_flambda2 = make
+let no_flambda2 = make_no_artifact
   ~name:"no-flambda2"
   ~description:"Passes if the compiler is NOT configured with flambda2 enabled"
   ~does_something:false
@@ -1330,7 +1339,7 @@ let no_flambda2 = make
     "support for flambda2 disabled"
     "support for flambda2 enabled")
 
-let shared_libraries = Actions.make
+let shared_libraries = make_no_artifact
   ~name:"shared-libraries"
   ~description:"Passes if shared libraries are supported"
   ~does_something:false
@@ -1338,7 +1347,7 @@ let shared_libraries = Actions.make
     "Shared libraries are supported."
     "Shared libraries are not supported.")
 
-let no_shared_libraries = Actions.make
+let no_shared_libraries = make_no_artifact
   ~name:"no-shared-libraries"
   ~description:"Passes if shared libraries are NOT supported"
   ~does_something:false
@@ -1346,7 +1355,7 @@ let no_shared_libraries = Actions.make
     "Shared libraries are not supported."
     "Shared libraries are supported.")
 
-let native_compiler = Actions.make
+let native_compiler = make_no_artifact
   ~name:"native-compiler"
   ~description:"Passes if the native compiler is available"
   ~does_something:false
@@ -1354,7 +1363,7 @@ let native_compiler = Actions.make
     "native compiler available"
     "native compiler not available")
 
-let native_dynlink = Actions.make
+let native_dynlink = make_no_artifact
   ~name:"native-dynlink"
   ~description:"Passes if native dynlink support is available"
   ~does_something:false
@@ -1362,7 +1371,7 @@ let native_dynlink = Actions.make
     "native dynlink support available"
     "native dynlink support not available")
 
-let debugger = Actions.make
+let debugger = make_no_artifact
   ~name:"debugger"
   ~description:"Passes if the debugger is available"
   ~does_something:false
@@ -1370,7 +1379,7 @@ let debugger = Actions.make
      "debugger available"
      "debugger not available")
 
-let instrumented_runtime = make
+let instrumented_runtime = make_no_artifact
   ~name:"instrumented-runtime"
   ~description:"Passes if the instrumented runtime is available"
   ~does_something:false
@@ -1378,7 +1387,7 @@ let instrumented_runtime = make
     "instrumented runtime available"
     "instrumented runtime not available")
 
-let csharp_compiler = Actions.make
+let csharp_compiler = make_no_artifact
   ~name:"csharp-compiler"
   ~description:"Passes if the C# compiler is available"
   ~does_something:false
@@ -1386,7 +1395,7 @@ let csharp_compiler = Actions.make
     "C# compiler available"
     "C# compiler not available")
 
-let windows_unicode = Actions.make
+let windows_unicode = make_no_artifact
   ~name:"windows-unicode"
   ~description:"Passes if Windows unicode support is available"
   ~does_something:false
@@ -1394,7 +1403,7 @@ let windows_unicode = Actions.make
     "Windows Unicode support available"
     "Windows Unicode support not available")
 
-let afl_instrument = Actions.make
+let afl_instrument = make_no_artifact
   ~name:"afl-instrument"
   ~description:"Passes if AFL instrumentation is enabled"
   ~does_something:false
@@ -1402,7 +1411,7 @@ let afl_instrument = Actions.make
     "AFL instrumentation enabled"
     "AFL instrumentation disabled")
 
-let no_afl_instrument = Actions.make
+let no_afl_instrument = make_no_artifact
   ~name:"no-afl-instrument"
   ~description:"Passes if AFL instrumentation is NOT enabled"
   ~does_something:false
@@ -1410,7 +1419,7 @@ let no_afl_instrument = Actions.make
     "AFL instrumentation disabled"
     "AFL instrumentation enabled")
 
-let stack_allocation = Actions.make
+let stack_allocation = make_no_artifact
   ~name:"stack-allocation"
   ~description:"Passes if stack allocation is enabled"
   ~does_something:false
@@ -1418,7 +1427,7 @@ let stack_allocation = Actions.make
     "Stack allocation enabled"
     "Stack allocation disabled")
 
-let no_stack_allocation = Actions.make
+let no_stack_allocation = make_no_artifact
   ~name:"no-stack-allocation"
   ~description:"Passes if stack allocation is disabled"
   ~does_something:false
@@ -1426,7 +1435,7 @@ let no_stack_allocation = Actions.make
     "Stack allocation disabled"
     "Stack allocation enabled")
 
-let poll_insertion = Actions.make
+let poll_insertion = make_no_artifact
   ~name:"poll-insertion"
   ~description:"Passes if poll insertion is enabled"
   ~does_something:false
@@ -1434,7 +1443,7 @@ let poll_insertion = Actions.make
     "Poll insertion enabled"
     "Poll insertion disabled")
 
-let no_poll_insertion = Actions.make
+let no_poll_insertion = make_no_artifact
   ~name:"no-poll-insertion"
   ~description:"Passes if poll insertion is disabled"
   ~does_something:false
@@ -1442,7 +1451,7 @@ let no_poll_insertion = Actions.make
     "Poll insertion disabled"
     "Poll insertion enabled")
 
-let stack_checks = Actions.make
+let stack_checks = make_no_artifact
   ~name:"stack-checks"
   ~description:"Passes if stack checks are enabled"
   ~does_something:false
@@ -1450,7 +1459,7 @@ let stack_checks = Actions.make
     "Stack checks enabled"
     "Stack checks disabled")
 
-let no_stack_checks = Actions.make
+let no_stack_checks = make_no_artifact
   ~name:"no-stack-checks"
   ~description:"Passes if stack checks are enabled"
   ~does_something:false
@@ -1460,7 +1469,7 @@ let no_stack_checks = Actions.make
 
 (* CR ttebbi: We should also protect against non-default register allocation
     options. *)
-let only_default_codegen = Actions.make
+let only_default_codegen = make_no_artifact
   ~name:"only-default-codegen"
   ~description:"Passes if all the codegen options are at the current default, \
                 useful for [%%expect_asm]"
@@ -1476,7 +1485,7 @@ let only_default_codegen = Actions.make
 (* Like [only_default_codegen] but requires stack checks to be enabled. Used by
    [%%expect_asm] tests that check the code emitted for stack checks (e.g. the
    stack-realloc handler), which only exists when stack checks are on. *)
-let only_stack_checks_codegen = Actions.make
+let only_stack_checks_codegen = make_no_artifact
   ~name:"only-stack-checks-codegen"
   ~description:"Passes if codegen options are at the default except that stack \
                 checks are enabled"

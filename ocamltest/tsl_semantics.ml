@@ -145,22 +145,25 @@ let test_trees_of_tsl_block tsl_block =
     | (Environment_statement s)::_ -> unexpected_environment_statement s
     | _ -> assert false
 
-let rec tests_in_stmt set stmt =
+let rec tests_in_stmt ~strict set stmt =
   match stmt with
   | Environment_statement _ -> set
   | Test (_, name, _) ->
     begin match lookup_test name with
     | t -> Tests.TestSet.add t set
-    | exception No_such_test_or_action _ -> set
+    | exception No_such_test_or_action _ when not strict -> set
     end
   | Split alternatives ->
-    List.fold_left (List.fold_left tests_in_stmt) set alternatives
+    List.fold_left (List.fold_left (tests_in_stmt ~strict)) set alternatives
 
-let rec tests_in_tree_aux set (Tsl_ast.Ast (stmts, subs)) =
-  let set1 = List.fold_left tests_in_stmt set stmts in
-  List.fold_left tests_in_tree_aux set1 subs
+let rec tests_in_tree_aux ~strict set (Tsl_ast.Ast (stmts, subs)) =
+  let set1 = List.fold_left (tests_in_stmt ~strict) set stmts in
+  List.fold_left (tests_in_tree_aux ~strict) set1 subs
 
-let tests_in_tree t = tests_in_tree_aux Tests.TestSet.empty t
+let tests_in_tree t = tests_in_tree_aux ~strict:false Tests.TestSet.empty t
+
+let tests_in_tree_strict t =
+  tests_in_tree_aux ~strict:true Tests.TestSet.empty t
 
 let actions_in_test test =
   let add action_set action = Actions.ActionSet.add action action_set in

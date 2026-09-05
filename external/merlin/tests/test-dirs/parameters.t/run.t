@@ -48,7 +48,8 @@ Check that merlin understands the `-parameter` flag.
 Copy the original version of [p.mli] into place (but don't preserve modes,
 since we want to overwrite it later).
 
-  $ cp p_original.mli p.mli --no-preserve=mode
+  $ cp p_original.mli p.mli
+  $ chmod u+w p.mli
 
 Start by compiling [P] and a module that uses it:
 

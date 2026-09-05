@@ -18,11 +18,20 @@
 let ocamlrun program =
   Ocaml_files.ocamlrun ^ " " ^ program
 
-let ocamlrun_ocamlc = ocamlrun Ocaml_files.ocamlc
+let with_optional_runtime ~uses_runtime program =
+  if uses_runtime then ocamlrun program else program
 
-let ocamlrun_ocamlopt = ocamlrun Ocaml_files.ocamlopt
+let ocamlrun_ocamlc =
+  with_optional_runtime
+    ~uses_runtime:Ocaml_files.ocamlc_uses_runtime Ocaml_files.ocamlc
 
-let ocamlrun_ocaml = ocamlrun Ocaml_files.ocaml
+let ocamlrun_ocamlopt =
+  with_optional_runtime
+    ~uses_runtime:Ocaml_files.ocamlopt_uses_runtime Ocaml_files.ocamlopt
+
+let ocamlrun_ocaml =
+  with_optional_runtime
+    ~uses_runtime:Ocaml_files.ocaml_uses_runtime Ocaml_files.ocaml
 
 let expect =
   Ocaml_files.expect

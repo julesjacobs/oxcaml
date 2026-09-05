@@ -64,6 +64,7 @@ let show_timings = ref false
 let translate = ref false
 let style = ref Translate.Plain
 let compact = ref false
+let plan_incremental = ref false
 
 
 let add_to_list r x =
@@ -98,6 +99,8 @@ let commandline_options =
    " If translating, preserve line numbers in the output.");
   ("-keep-chars", Arg.Unit (fun () -> style := Translate.Chars),
    " If translating, preserve char offsets in the output.");
+  ("-plan-incremental", Arg.Set plan_incremental,
+   " Print the artifacts needed for incremental testing.");
   ("-color",
    Arg.Symbol (["auto"; "always"; "never"],
      (Misc.set_or_ignore Clflags.color_reader.parse Clflags.color)),
@@ -135,3 +138,4 @@ let show_timings = !show_timings
 let translate = !translate
 let style = !style
 let compact = !compact
+let plan_incremental = !plan_incremental
