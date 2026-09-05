@@ -14,17 +14,8 @@ open Types
 
 (* Rebuilding *)
 
-<<<<<<< HEAD
-let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
-    ?value_path ?constructor_path ?type_path ?(type_expr = Fun.id)
-||||||| parent of 5be690e59a (Add mandatory runtime refinement checks with assume_)
-let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?value_path
-    ?constructor_path ?type_path ?(type_expr = Fun.id)
-=======
 let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
-    ?value_path
-    ?constructor_path ?type_path ?(type_expr = Fun.id)
->>>>>>> 5be690e59a (Add mandatory runtime refinement checks with assume_)
+    ?value_path ?constructor_path ?type_path ?(type_expr = Fun.id)
     ?(location = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
     let pconst_desc =
@@ -47,28 +38,14 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
   let rec map_rexp rename rexp =
     let rexp_desc =
       match rexp.rexp_desc with
-<<<<<<< HEAD
-      | Rexp_var id -> begin
-          match Ident.Map.find_opt id rename with
-          | Some id -> Rexp_var id
-          | None ->
-              match Option.bind unbind_value (fun f -> f id) with
-              | Some path -> Rexp_ident path
-              | None -> Rexp_var id
-        end
-||||||| parent of 5be690e59a (Add mandatory runtime refinement checks with assume_)
-      | Rexp_var id -> Rexp_var (rename_var rename id)
-=======
       | Rexp_var id -> begin
           match Ident.Map.find_opt id rename with
           | Some id -> Rexp_var id
           | None ->
               match Option.bind free_var_path (fun f -> f id) with
-              | None -> Rexp_var id
-              | Some (Path.Pident id) -> Rexp_var id
               | Some path -> Rexp_ident path
+              | None -> Rexp_var id
         end
->>>>>>> 5be690e59a (Add mandatory runtime refinement checks with assume_)
       | Rexp_ident path -> begin
           match Option.bind bind_value (fun f -> f path) with
           | Some id -> Rexp_var id
