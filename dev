@@ -350,7 +350,12 @@ run_init()
 add_compilerlib()
 {
   library=$1
-  echo "$library" >> "$targets_file"
+  case "$library" in
+    ocamloptcomp.*) target=ocamloptcomp_with_flambda2.${library##*.} ;;
+    ocamltoplevel.cma) target=toplevel/byte/ocamltoplevel.cma ;;
+    *) target=$library ;;
+  esac
+  echo "$target" >> "$targets_file"
   echo "$library" >> "$compilerlibs_file"
 }
 
@@ -362,6 +367,7 @@ add_compilerlib_modes()
   fi
   if [ "$compilerlibs_native" = true ]; then
     add_compilerlib "$basename.cmxa"
+    add_compilerlib "$basename.a"
   fi
 }
 
@@ -426,6 +432,8 @@ add_requirement()
       ;;
     compilerlibs.ocamlcommon)
       add_compilerlib_modes ocamlcommon
+      ;;
+    compilerlibs.ocamlfrontend)
       add_compilerlib_modes ocamlfrontend
       ;;
     compilerlibs.ocamlbytecomp)

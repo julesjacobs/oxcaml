@@ -456,6 +456,24 @@ let plan_incremental files =
       fail_unsupported filename "generated lexer or parser sources";
     env
   in
+  let compilerlibs_requirements = ref String.Set.empty in
+  let add_library_requirements filename env =
+    let libraries =
+      Environments.safe_lookup Ocaml_variables.libraries env |> String.words
+    in
+    List.iter
+      (function
+        | "ocamlmiddleend" ->
+            fail_unsupported filename
+              "compiler library ocamlmiddleend (no Dune install artifact)"
+        | ("ocamlcommon" | "ocamlfrontend" | "ocamlbytecomp"
+          | "ocamloptcomp" | "ocamltoplevel") as library ->
+            compilerlibs_requirements :=
+              String.Set.add ("compilerlibs." ^ library)
+                !compilerlibs_requirements
+        | _ -> ())
+      libraries
+  in
   let rec plan_items filename env = function
     | [] -> [env]
     | Environment_statement statement :: rest ->
@@ -473,6 +491,7 @@ let plan_incremental files =
         in
         if environment_uses_expanded_generator env then
           fail_unsupported filename "generated lexer or parser sources";
+        add_library_requirements filename env;
         plan_items filename env rest
     | Split alternatives :: rest ->
         List.concat_map
@@ -485,46 +504,6 @@ let plan_incremental files =
       (fun env ->
         List.iter (fun subtree -> plan_tree filename env subtree) subtrees)
       environments
-  in
-  let compilerlibs_requirement = function
-    | "ocamlcommon" -> Some "compilerlibs.ocamlcommon"
-    | "ocamlbytecomp" -> Some "compilerlibs.ocamlbytecomp"
-    | "ocamloptcomp" -> Some "compilerlibs.ocamloptcomp"
-    | "ocamltoplevel" -> Some "compilerlibs.ocamltoplevel"
-    | "ocamlmiddleend" ->
-        failwith "the ocamlmiddleend modifier has no Dune install artifact"
-    | _ -> None
-  in
-  let add_modifier_requirement filename name requirements =
-    match compilerlibs_requirement name.node with
-    | Some requirement -> String.Set.add requirement requirements
-    | None -> requirements
-    | exception Failure message -> fail_unsupported filename "%s" message
-  in
-  let add_environment_requirement filename statement requirements =
-    match statement.node with
-    | Include name -> add_modifier_requirement filename name requirements
-    | Assignment _ | Append _ | Unset _ -> requirements
-  in
-  let rec add_item_requirements filename requirements = function
-    | Environment_statement statement ->
-        add_environment_requirement filename statement requirements
-    | Test (_, _, modifiers) ->
-        List.fold_left
-          (fun requirements name ->
-            add_modifier_requirement filename name requirements)
-          requirements modifiers
-    | Split alternatives ->
-        List.fold_left
-          (List.fold_left (add_item_requirements filename))
-          requirements alternatives
-  in
-  let rec add_tree_requirements filename requirements
-      (Ast (statements, subtrees)) =
-    let requirements =
-      List.fold_left (add_item_requirements filename) requirements statements
-    in
-    List.fold_left (add_tree_requirements filename) requirements subtrees
   in
   let compiler_requirement action =
     match Actions.incremental_requirement action with
@@ -556,17 +535,11 @@ let plan_incremental files =
         List.exists environment_uses_generator rootenv ||
         tree_uses_generator tsl_ast)
     then fail_unsupported filename "generated lexer or parser sources";
-    let requirements =
-      List.fold_left
-        (fun requirements statement ->
-          add_environment_requirement filename statement requirements)
-        requirements rootenv
-    in
-    let requirements = add_tree_requirements filename requirements tsl_ast in
     Actions.ActionSet.fold (add_action filename) actions requirements
   in
   let requirements = List.fold_left add_file String.Set.empty files in
-  String.Set.iter print_endline requirements
+  String.Set.union requirements !compilerlibs_requirements
+  |> String.Set.iter print_endline
 
 let is_test filename =
   let input_channel = open_in filename in
