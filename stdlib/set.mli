@@ -68,6 +68,17 @@ module type OrderedType =
   end
 (** Input signature of the functor {!Make}. *)
 
+module type TotalOrderedType =
+  sig
+    type t
+    val compare : t -> t -> int @@ total
+  end
+(** Input signature of {!MakeTotal}. [compare] must implement the total
+    ordering specified by {!OrderedType} and have [total] mode. Throughout
+    verified use, the sign of [compare x y] must remain stable for every pair:
+    [compare] may depend only on state that remains immutable. {!MakeTotal}
+    trusts this contract. *)
+
 module type S =
   sig
 
@@ -323,6 +334,83 @@ module type S =
   end
 (** Output signature of the functor {!Make}. *)
 
+module type TotalS =
+  sig
+    include S
+
+    val empty: t @@ total
+    val add: elt -> t -> t @@ total
+    val singleton: elt -> t @@ total
+    val remove: elt -> t -> t @@ total
+    val union: t -> t -> t @@ total
+    val inter: t -> t -> t @@ total
+    val disjoint: t -> t -> bool @@ total
+    val diff: t -> t -> t @@ total
+    val cardinal: t -> int @@ total
+    val elements: t -> elt list @@ total
+    val min_elt_opt: t -> elt option @@ total
+    val max_elt_opt: t -> elt option @@ total
+    val choose_opt: t -> elt option @@ total
+    val find_opt: elt -> t -> elt option @@ total
+    val find_first_opt: (elt -> bool) -> t -> elt option @@ total
+    val find_last_opt: (elt -> bool) -> t -> elt option @@ total
+    val iter: (elt -> unit) -> t -> unit @@ total
+    val fold: (elt -> 'acc -> 'acc) -> t -> 'acc -> 'acc @@ total
+    val map: (elt -> elt) -> t -> t @@ total
+    val filter: (elt -> bool) -> t -> t @@ total
+    val filter_map: (elt -> elt option) -> t -> t @@ total
+    val partition: (elt -> bool) -> t -> t * t @@ total
+    val split: elt -> t -> t * bool * t @@ total
+    val is_empty: t -> bool @@ total
+    val mem: elt @ immutable -> t @ immutable -> bool @@ total
+    val equal: t -> t -> bool @@ total
+    val compare: t -> t -> int @@ total
+    val subset: t -> t -> bool @@ total
+    val for_all: (elt -> bool) -> t -> bool @@ total
+    val exists: (elt -> bool) -> t -> bool @@ total
+    val to_list: t -> elt list @@ total
+    val of_list: elt list -> t @@ total
+    val to_seq_from: elt -> t -> elt Seq.t @@ total
+    val to_seq: t -> elt Seq.t @@ total
+    val to_rev_seq: t -> elt Seq.t @@ total
+
+    module Refined : sig
+      (** Operations whose modes or domains permit their use in refinement
+          predicates. Constructors retain only total values. All operations
+          preserve ordinary visibility and contention, so mutable values
+          remain writable. Ordinary constructors also accept values containing
+          partial functions. The query passed to [remove] is not retained. *)
+
+      val singleton: elt @ total -> t @ total @@ total
+      val add:
+        elt @ total ->
+        t @ total ->
+        t @ total @@ total
+      val remove:
+        elt ->
+        t @ total ->
+        t @ total @@ total
+      val union:
+        t @ total ->
+        t @ total ->
+        t @ total @@ total
+      val inter:
+        t @ total ->
+        t @ total ->
+        t @ total @@ total
+      val diff:
+        t @ total ->
+        t @ total ->
+        t @ total @@ total
+      val find:
+        (set : t) ->
+        {elt : elt | mem elt set} ->
+        elt @ total @@ total
+      (** [find s x] returns the representative of [x] stored in [s]. *)
+    end
+  end
+(** Set operations with total comparison and totality modes. *)
+
 module Make (Ord : OrderedType) : S with type elt = Ord.t
 (** Functor building an implementation of the set structure
    given a totally ordered type. *)
@@ -331,3 +419,7 @@ module MakePortable (Ord : sig @@ portable include OrderedType end)
   : sig @@ portable include S with type elt = Ord.t end
 (** Like [Make], but takes a portable [compare] function to
     portable [Set] operations. *)
+
+module MakeTotal (Ord : TotalOrderedType) : TotalS with type elt = Ord.t
+(** Like {!Make}, with a total comparison and totality modes on operations
+    that cannot raise on their own. *)

@@ -14,6 +14,15 @@ type value =
   | Scalar of term
   | Function of function_value
 
+type set_origin =
+  | Set_empty
+  | Set_singleton
+  | Set_add
+  | Set_remove
+  | Set_union
+  | Set_inter
+  | Set_diff
+
 let scalar = function Some (Scalar t) -> Some t | _ -> None
 
 let scalar_value t = Some (Scalar t)
@@ -40,8 +49,9 @@ type context =
     mutable datatypes : datatype_declaration list;
     mutable symbols : Symbol.t list;
     mutable functions : Function.t list;
-    mutable iarray_length : Function.t option;
-    iarray_contents : (sort, Function.t) Hashtbl.t;
+    function_cache : (string * sort list * sort, Function.t) Hashtbl.t;
+    set_origins : (Function.t, set_origin) Hashtbl.t;
+    set_class_sorts : (sort, sort) Hashtbl.t;
     mutable free : value option Path.Map.t;
     symbolic : value option Symbolic_keys.t;
     prove : Location.t -> query -> unit;
@@ -278,36 +288,99 @@ let fresh_sort ctx label sort =
   ctx.symbols <- symbol :: ctx.symbols;
   Var symbol
 
+let intern_function ctx label arguments result =
+  List.iter (register_sort ctx) (result :: arguments);
+  let key = label, arguments, result in
+  match Hashtbl.find_opt ctx.function_cache key with
+  | Some function_ -> function_
+  | None ->
+    let function_ = Function.create ~label ~arguments ~result in
+    Hashtbl.add ctx.function_cache key function_;
+    ctx.functions <- function_ :: ctx.functions;
+    function_
+
 let iarray_length ctx iarray_sort array =
-  let function_ =
-    match ctx.iarray_length with
-    | Some function_ -> function_
-    | None ->
-      let function_ =
-        Function.create ~label:"Iarray.length" ~arguments:[iarray_sort]
-          ~result:Int63
-      in
-      ctx.iarray_length <- Some function_;
-      ctx.functions <- function_ :: ctx.functions;
-      function_
-  in
+  let function_ = intern_function ctx "Iarray.length" [iarray_sort] Int63 in
   Call (function_, [array])
 
 let iarray_get ctx iarray_sort element_sort array index =
-  register_sort ctx element_sort;
   let function_ =
-    match Hashtbl.find_opt ctx.iarray_contents element_sort with
-    | Some function_ -> function_
-    | None ->
-      let function_ =
-        Function.create ~label:"Iarray.get" ~arguments:[iarray_sort; Int63]
-          ~result:element_sort
-      in
-      Hashtbl.add ctx.iarray_contents element_sort function_;
-      ctx.functions <- function_ :: ctx.functions;
-      function_
+    intern_function ctx "Iarray.get" [iarray_sort; Int63] element_sort
   in
   Call (function_, [array; index])
+
+let set_constructor ctx origin label arguments set_sort terms =
+  let function_ = intern_function ctx label arguments set_sort in
+  Hashtbl.replace ctx.set_origins function_ origin;
+  Call (function_, terms)
+
+let set_empty ctx set_sort =
+  set_constructor ctx Set_empty "Set.empty" [] set_sort []
+
+let set_class ctx set_sort element =
+  let element_sort = term_sort element in
+  let class_sort =
+    match Hashtbl.find_opt ctx.set_class_sorts set_sort with
+    | Some sort -> sort
+    | None ->
+      let sort = fresh_opaque_sort ctx.encoding in
+      Hashtbl.add ctx.set_class_sorts set_sort sort;
+      sort
+  in
+  let function_ =
+    intern_function ctx "Set.comparison_class" [element_sort] class_sort
+  in
+  Call (function_, [element])
+
+let set_same_element ctx set_sort left right =
+  both Eq (set_class ctx set_sort left) (set_class ctx set_sort right)
+
+let rec set_mem ctx set_sort element set =
+  let class_ = set_class ctx set_sort element in
+  let unknown () =
+    let function_ =
+      intern_function ctx "Set.mem" [term_sort class_; set_sort] Bool
+    in
+    Call (function_, [class_; set])
+  in
+  match set with
+  | Call (function_, arguments) ->
+    begin match Hashtbl.find_opt ctx.set_origins function_, arguments with
+    | Some Set_empty, [] -> Boolean false
+    | Some Set_singleton, [member] ->
+      set_same_element ctx set_sort element member
+    | Some Set_add, [member; set] ->
+      both Or
+        (set_same_element ctx set_sort element member)
+        (set_mem ctx set_sort element set)
+    | Some Set_remove, [member; set] ->
+      both And
+        (not_ (set_same_element ctx set_sort element member))
+        (set_mem ctx set_sort element set)
+    | Some Set_union, [left; right] ->
+      both Or
+        (set_mem ctx set_sort element left)
+        (set_mem ctx set_sort element right)
+    | Some Set_inter, [left; right] ->
+      both And
+        (set_mem ctx set_sort element left)
+        (set_mem ctx set_sort element right)
+    | Some Set_diff, [left; right] ->
+      both And
+        (set_mem ctx set_sort element left)
+        (not_ (set_mem ctx set_sort element right))
+    | _ -> unknown ()
+    end
+  | _ -> unknown ()
+
+let set_find ctx set_sort element set =
+  let class_ = set_class ctx set_sort element in
+  let function_ =
+    intern_function ctx "Set.find"
+      [term_sort class_; set_sort]
+      (term_sort element)
+  in
+  Call (function_, [class_; set])
 
 let iarray_value ctx env ty s values =
   match iarray ctx.encoding env ty with
@@ -388,20 +461,25 @@ let instantiate_path ctx env ty path value =
 
 let lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
-  match value_constant ctx.encoding env ty path with
-  | Some value -> scalar_value value
-  | None -> (
-    match Path.Map.find_opt path s.values with
-    | Some value -> instantiate_path ctx env ty path value
+  match sort ctx.encoding env ty with
+  | Some set_sort
+    when is_set_sort ctx.encoding set_sort && is_set_empty env path ->
+    scalar_value (set_empty ctx set_sort)
+  | _ -> (
+    match value_constant ctx.encoding env ty path with
+    | Some value -> scalar_value value
     | None -> (
-      match Path.Map.find_opt path ctx.free with
+      match Path.Map.find_opt path s.values with
       | Some value -> instantiate_path ctx env ty path value
-      | None ->
-        let value =
-          fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
-        in
-        ctx.free <- Path.Map.add path value ctx.free;
-        value))
+      | None -> (
+        match Path.Map.find_opt path ctx.free with
+        | Some value -> instantiate_path ctx env ty path value
+        | None ->
+          let value =
+            fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
+          in
+          ctx.free <- Path.Map.add path value ctx.free;
+          value)))
 
 let iarray_call ctx value =
   match scalar value with
@@ -412,6 +490,58 @@ let iarray_call ctx value =
 
 let operation ctx env function_type result_type name args =
   match name, args with
+  | "%set_singleton", [element] ->
+    begin match scalar element, sort ctx.encoding env result_type with
+    | Some element, Some set_sort when is_set_sort ctx.encoding set_sort ->
+      scalar_value
+        (set_constructor ctx Set_singleton "Set.singleton"
+           [term_sort element]
+           set_sort [element])
+    | _ -> None
+    end
+  | (("%set_add" | "%set_remove") as name), [element; set] ->
+    begin match scalar element, scalar set with
+    | Some element, Some set when is_set_sort ctx.encoding (term_sort set) ->
+      let origin, label =
+        if name = "%set_add"
+        then Set_add, "Set.add"
+        else Set_remove, "Set.remove"
+      in
+      scalar_value
+        (set_constructor ctx origin label
+           [term_sort element; term_sort set]
+           (term_sort set) [element; set])
+    | _ -> None
+    end
+  | (("%set_union" | "%set_inter" | "%set_diff") as name), [left; right] ->
+    begin match scalar left, scalar right with
+    | Some left, Some right
+      when term_sort left = term_sort right
+           && is_set_sort ctx.encoding (term_sort left) ->
+      let origin, label =
+        match name with
+        | "%set_union" -> Set_union, "Set.union"
+        | "%set_inter" -> Set_inter, "Set.inter"
+        | _ -> Set_diff, "Set.diff"
+      in
+      scalar_value
+        (set_constructor ctx origin label
+           [term_sort left; term_sort right]
+           (term_sort left) [left; right])
+    | _ -> None
+    end
+  | "%set_mem", [element; set] ->
+    begin match scalar element, scalar set with
+    | Some element, Some set when is_set_sort ctx.encoding (term_sort set) ->
+      scalar_value (set_mem ctx (term_sort set) element set)
+    | _ -> None
+    end
+  | "%set_find", [element; set] | "%set_refined_find", [set; element] ->
+    begin match scalar element, scalar set with
+    | Some element, Some set when is_set_sort ctx.encoding (term_sort set) ->
+      scalar_value (set_find ctx (term_sort set) element set)
+    | _ -> None
+    end
   | "%array_length", [array] ->
     begin match iarray_call ctx array with
     | Some (iarray_sort, array) ->
@@ -453,6 +583,25 @@ let normal_iarray_get ctx args s =
         (both And (both Le (Integer 0L) index) (both Lt index length))
     | _ -> s
     end
+  | _ -> s
+
+let normal_set_find ctx name args value s =
+  let element, set =
+    match name, args with
+    | "%set_find", [element; set] -> element, set
+    | "%set_refined_find", [set; element] -> element, set
+    | _ -> None, None
+  in
+  match scalar element, scalar set, scalar value with
+  | Some element, Some set, Some result
+    when is_set_sort ctx.encoding (term_sort set) ->
+    let set_sort = term_sort set in
+    fact
+      (fact s "normal return" (set_mem ctx set_sort element set))
+      "set representative"
+      (both And
+         (set_mem ctx set_sort result set)
+         (set_same_element ctx set_sort result element))
   | _ -> s
 
 let function_call ctx env ty fn args =
@@ -552,8 +701,9 @@ let rec predicate ctx env s e =
     | Rexp_var id -> return (lookup ctx s env e.rexp_type (Path.Pident id))
     | Rexp_ident path ->
       begin match primitive env path with
+      | Some ("%set_empty", 0) -> return (lookup ctx s env e.rexp_type path)
       | Some (_, 0) -> unsupported e.rexp_loc
-      | _ -> return (lookup ctx s env e.rexp_type path)
+      | None | Some (_, _) -> return (lookup ctx s env e.rexp_type path)
       end
     | Rexp_constant c ->
       return (scalar_value (required e.rexp_loc (rconstant c)))
@@ -621,6 +771,8 @@ let rec predicate ctx env s e =
                 let s =
                   match prim with
                   | Some ("%array_length", 1) -> normal_iarray_length ctx args s
+                  | Some ((("%set_find" | "%set_refined_find") as name), 2) ->
+                    normal_set_find ctx name args result s
                   | _ -> s
                 in
                 [s, scalar_value (required e.rexp_loc result)]))
@@ -630,7 +782,9 @@ let rec predicate ctx env s e =
           paths (eval s left) (fun s left ->
               let left = required e.rexp_loc left in
               let right = required e.rexp_loc right in
-              if sort_has_iarray ctx.encoding (term_sort left)
+              if
+                sort_has_unsupported_logical_equality ctx.encoding
+                  (term_sort left)
               then unsupported e.rexp_loc
               else [s, scalar_value (both Eq left right)]))
     | Rexp_ifthenelse (c, t, Some f) -> predicate_if eval e.rexp_loc s c t f
@@ -1034,7 +1188,9 @@ and expression_desc ctx s e =
             match scalar left, scalar right with
             | Some left, Some right
               when term_sort left = term_sort right
-                   && not (sort_has_iarray ctx.encoding (term_sort left)) ->
+                   && not
+                        (sort_has_unsupported_logical_equality ctx.encoding
+                           (term_sort left)) ->
               [s, scalar_value (both Eq left right)]
             | _ -> [s, opaque ()]))
   | Texp_sequence (a, _, b) -> paths (eval s a) (fun s _ -> eval s b)
@@ -1086,6 +1242,9 @@ and expression_desc ctx s e =
                     match value with Some _ -> value | None -> opaque () ) ]
               | Some ("%array_safe_get", 2) ->
                 [ ( normal_iarray_get ctx args s,
+                    match value with Some _ -> value | None -> opaque () ) ]
+              | Some ((("%set_find" | "%set_refined_find") as name), 2) ->
+                [ ( normal_set_find ctx name args value s,
                     match value with Some _ -> value | None -> opaque () ) ]
               | _ ->
                 [(s, match value with Some _ -> value | None -> opaque ())]))
@@ -1241,8 +1400,9 @@ let context ~prove ~verify_introductions =
     datatypes = [];
     symbols = [];
     functions = [];
-    iarray_length = None;
-    iarray_contents = Hashtbl.create 8;
+    function_cache = Hashtbl.create 32;
+    set_origins = Hashtbl.create 16;
+    set_class_sorts = Hashtbl.create 8;
     free = Path.Map.empty;
     symbolic = Symbolic_keys.create 16;
     prove;

@@ -18,6 +18,8 @@ end)
 type context =
   { opaque_ids : int Type_keys.t;
     mutable iarray_sort : sort option;
+    set_sorts : (sort, unit) Hashtbl.t;
+    unsupported_logical_equality : (sort, unit) Hashtbl.t;
     unsupported : unit Type_keys.t;
     mutable next_opaque_id : int;
     data_by_key : data Type_keys.t;
@@ -38,6 +40,8 @@ and data =
 let create_context () =
   { opaque_ids = Type_keys.create 32;
     iarray_sort = None;
+    set_sorts = Hashtbl.create 8;
+    unsupported_logical_equality = Hashtbl.create 8;
     unsupported = Type_keys.create 32;
     next_opaque_id = 0;
     data_by_key = Type_keys.create 32;
@@ -54,14 +58,18 @@ let opaque_id ctx key =
     Type_keys.add ctx.opaque_ids key id;
     id
 
+let fresh_opaque_sort ctx =
+  let id = ctx.next_opaque_id in
+  ctx.next_opaque_id <- id + 1;
+  Opaque id
+
 let iarray_sort ctx =
   match ctx.iarray_sort with
   | Some sort -> sort
   | None ->
-    let id = ctx.next_opaque_id in
-    ctx.next_opaque_id <- id + 1;
-    let sort = Opaque id in
+    let sort = fresh_opaque_sort ctx in
     ctx.iarray_sort <- Some sort;
+    Hashtbl.replace ctx.unsupported_logical_equality sort ();
     sort
 
 let iarray_element env ty =
@@ -70,6 +78,134 @@ let iarray_element env ty =
     when Path.same (Env.normalize_type_path None env path) Predef.path_iarray ->
     Some element
   | _ -> None
+
+let standard_make_total =
+  Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib__Set"), "MakeTotal")
+
+module Shape_reducer = Shape_reduce.Make (struct
+  let fuel () = Misc.Maybe_bounded.of_int 100
+
+  let fuel_for_compilation_units () = Misc.Maybe_bounded.of_int 20
+
+  let max_shape_reduce_steps_per_variable () = Misc.Maybe_bounded.of_int 100
+
+  let max_compilation_unit_depth () = Misc.Maybe_bounded.of_int 10
+
+  let projection_rules_for_merlin_enabled = false
+
+  let cache = Misc.Stdlib.String.Tbl.create 16
+
+  let read_unit_shape ~diagnostics ~unit_name =
+    match Misc.Stdlib.String.Tbl.find_opt cache unit_name with
+    | Some shape -> shape
+    | None ->
+      let standard =
+        String.equal unit_name "Stdlib"
+        || String.equal unit_name "Stdlib__Set"
+        || String.equal unit_name "Stdlib__MoreLabels"
+      in
+      let filename = String.uncapitalize_ascii unit_name in
+      let find_artifact extension =
+        if not standard then raise Not_found;
+        let path =
+          Filename.concat Config.standard_library (filename ^ extension)
+        in
+        if Sys.file_exists path then path else raise Not_found
+      in
+      let read_cms () =
+        match find_artifact ".cms" with
+        | path -> Some (Cms_format.read path).cms_impl_shape
+        | exception (Not_found | Cms_format.Error _) -> None
+      in
+      let read_cmt () =
+        match find_artifact ".cmt" with
+        | path ->
+          begin match Cmt_format.read path with
+          | _, Some info -> Some info.cmt_impl_shape
+          | _, None -> Some None
+          | exception Cmt_format.Error _ -> None
+          end
+        | exception Not_found -> None
+      in
+      let shape =
+        match read_cms () with
+        | Some shape -> shape
+        | None ->
+          begin match read_cmt () with
+          | Some shape -> shape
+          | None ->
+            Shape_reduce.Diagnostics.add_cms_file_missing diagnostics
+              (filename ^ ".cms");
+            None
+          end
+      in
+      Misc.Stdlib.String.Tbl.add cache unit_name shape;
+      shape
+end)
+
+let rec resolved_uid = function
+  | Shape_reduce.Resolved uid -> Some uid
+  | Shape_reduce.Resolved_alias (_, result) -> resolved_uid result
+  | Shape_reduce.Unresolved _ | Shape_reduce.Approximated _
+  | Shape_reduce.Internal_error_missing_uid ->
+    None
+
+let shape_uid env namespace path =
+  Option.bind (Env.shape_of_path_opt ~namespace env path) (fun shape ->
+      resolved_uid (Shape_reducer.reduce_for_uid env shape))
+
+let make_total_result_uid env modules name namespace =
+  Option.bind
+    (Env.shape_of_path_opt ~namespace:Shape.Sig_component_kind.Module env
+       standard_make_total) (fun shape ->
+      let shape = Shape.app shape ~arg:Shape.dummy_mod in
+      let shape =
+        List.fold_left
+          (fun shape name ->
+            Shape.proj shape
+              (Shape.Item.make name Shape.Sig_component_kind.Module))
+          shape modules
+      in
+      let shape = Shape.proj shape (Shape.Item.make name namespace) in
+      resolved_uid (Shape_reducer.reduce_for_uid env shape))
+
+let set_operations =
+  [ [], "empty", ("%set_empty", 0);
+    [], "mem", ("%set_mem", 2);
+    [], "find", ("%set_find", 2);
+    ["Refined"], "singleton", ("%set_singleton", 1);
+    ["Refined"], "add", ("%set_add", 2);
+    ["Refined"], "remove", ("%set_remove", 2);
+    ["Refined"], "union", ("%set_union", 2);
+    ["Refined"], "inter", ("%set_inter", 2);
+    ["Refined"], "diff", ("%set_diff", 2);
+    ["Refined"], "find", ("%set_refined_find", 2) ]
+
+let set_value env path =
+  let actual = shape_uid env Shape.Sig_component_kind.Value path in
+  List.find_map
+    (fun (modules, name, operation) ->
+      match
+        ( actual,
+          make_total_result_uid env modules name Shape.Sig_component_kind.Value
+        )
+      with
+      | Some actual, Some standard when Shape.Uid.equal actual standard ->
+        Some operation
+      | _ -> None)
+    set_operations
+
+let is_set_type env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tconstr (path, [], _) ->
+    begin match
+      ( shape_uid env Shape.Sig_component_kind.Type path,
+        make_total_result_uid env [] "t" Shape.Sig_component_kind.Type )
+    with
+    | Some actual, Some standard -> Shape.Uid.equal actual standard
+    | _ -> false
+    end
+  | _ -> false
 
 let type_key env ty =
   let rec loop visited ty =
@@ -184,38 +320,48 @@ let rec logical_payload env ty =
 
 let rec classify ctx env stack ty =
   let ty = logical_payload env ty in
-  match Vox_type.classify_payload env ty with
-  | Some Vox_type.Int -> Some Int63
-  | Some Vox_type.Bool -> Some Bool
-  | Some Vox_type.Bigint -> Some Int
-  | None when Option.is_some (iarray_element env ty) -> Some (iarray_sort ctx)
-  | None ->
-    begin match type_key env ty with
-    | None -> None
-    | Some key ->
-      begin match Type_keys.find_opt ctx.data_by_key key with
-      | Some data -> Some (Datatype data.declaration.datatype)
-      | None when Type_keys.mem ctx.unsupported key ->
-        raise Unsupported_recursive_datatype
-      | None ->
-        begin match Type_keys.find_opt ctx.opaque_ids key with
-        | Some id -> Some (Opaque id)
+  let result =
+    match Vox_type.classify_payload env ty with
+    | Some Vox_type.Int -> Some Int63
+    | Some Vox_type.Bool -> Some Bool
+    | Some Vox_type.Bigint -> Some Int
+    | None when Option.is_some (iarray_element env ty) -> Some (iarray_sort ctx)
+    | None ->
+      begin match type_key env ty with
+      | None -> None
+      | Some key ->
+        begin match Type_keys.find_opt ctx.data_by_key key with
+        | Some data -> Some (Datatype data.declaration.datatype)
+        | None when Type_keys.mem ctx.unsupported key ->
+          raise Unsupported_recursive_datatype
         | None ->
-          begin match recursive_backedge key stack with
-          | Some (`Allowed datatype) -> Some (Datatype datatype)
-          | Some (`Unsupported | `Mutual) -> reject_recursive ctx key
+          begin match Type_keys.find_opt ctx.opaque_ids key with
+          | Some id -> Some (Opaque id)
           | None ->
-            if nonregular_recursive_instance key stack
-            then reject_recursive ctx key
-            else
-              begin match build_data ctx env stack key ty with
-              | Some data -> Some (Datatype data.declaration.datatype)
-              | None -> Some (Opaque (opaque_id ctx key))
-              end
+            begin match recursive_backedge key stack with
+            | Some (`Allowed datatype) -> Some (Datatype datatype)
+            | Some (`Unsupported | `Mutual) -> reject_recursive ctx key
+            | None ->
+              if nonregular_recursive_instance key stack
+              then reject_recursive ctx key
+              else
+                begin match build_data ctx env stack key ty with
+                | Some data -> Some (Datatype data.declaration.datatype)
+                | None -> Some (Opaque (opaque_id ctx key))
+                end
+            end
           end
         end
       end
-    end
+  in
+  if is_set_type env ty
+  then
+    Option.iter
+      (fun sort ->
+        Hashtbl.replace ctx.set_sorts sort ();
+        Hashtbl.replace ctx.unsupported_logical_equality sort ())
+      result;
+  result
 
 and build_data ctx env stack key ty =
   let label =
@@ -400,10 +546,10 @@ let declarations_of_sort ctx = function
     end
   | Bool | Int63 | Int | Opaque _ -> []
 
-let sort_has_iarray ctx sort =
+let sort_has_unsupported_logical_equality ctx sort =
   let seen = Hashtbl.create 16 in
   let rec loop = function
-    | Opaque _ as sort -> Some sort = ctx.iarray_sort
+    | Opaque _ as sort -> Hashtbl.mem ctx.unsupported_logical_equality sort
     | Datatype datatype ->
       if Hashtbl.mem seen datatype
       then false
@@ -422,6 +568,8 @@ let sort_has_iarray ctx sort =
     | Bool | Int63 | Int -> false
   in
   loop sort
+
+let is_set_sort ctx sort = Hashtbl.mem ctx.set_sorts sort
 
 let is_iarray_sort ctx sort = Some sort = ctx.iarray_sort
 
@@ -444,21 +592,27 @@ let same_value env description path =
 
 let primitive env path =
   try
-    let path = Env.normalize_value_path None env path in
-    let description =
-      Subst.Lazy.force_value_description (Env.find_value path env)
-    in
-    match description.val_kind with
-    | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
-    | _ ->
-      if same_value env description (iarray_value_path ["length"])
-      then Some ("%array_length", 1)
-      else if same_value env description (iarray_value_path ["get"])
-      then Some ("%array_safe_get", 2)
-      else if same_value env description (iarray_value_path ["Refined"; "get"])
-      then Some ("%array_safe_get", 2)
-      else None
+    match set_value env path with
+    | Some _ as operation -> operation
+    | None -> (
+      let path = Env.normalize_value_path None env path in
+      let description =
+        Subst.Lazy.force_value_description (Env.find_value path env)
+      in
+      match description.val_kind with
+      | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
+      | _ ->
+        if same_value env description (iarray_value_path ["length"])
+        then Some ("%array_length", 1)
+        else if same_value env description (iarray_value_path ["get"])
+        then Some ("%array_safe_get", 2)
+        else if
+          same_value env description (iarray_value_path ["Refined"; "get"])
+        then Some ("%array_safe_get", 2)
+        else None)
   with Not_found -> None
+
+let is_set_empty env path = set_value env path = Some ("%set_empty", 0)
 
 let value_constant ctx env ty path =
   if sort ctx env ty <> Some Int
