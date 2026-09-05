@@ -88,4 +88,41 @@ let () =
   ignore (invalid ~symbols:[x] (eq (Var x) (i 0L)));
   valid ~symbols:[x] ~facts:[Boolean false] (Boolean false);
   ignore (invalid ~symbols:[x] (Boolean false));
+  let z text = Big_integer text in
+  let y = Symbol.create ~label:"bigint" Int in
+  let large = "123456789012345678901234567890" in
+  valid (eq (app Int_add [z large; z "1"]) (z "123456789012345678901234567891"));
+  valid
+    (eq
+       (app Int_mul [z "100000000000000000000"; z "100000000000000000000"])
+       (z "10000000000000000000000000000000000000000"));
+  List.iter
+    (fun (a, b, q, r) ->
+      valid (eq (app Int_div [z a; z b]) (z q));
+      valid (eq (app Int_mod [z a; z b]) (z r)))
+    [ "7", "2", "3", "1";
+      "-7", "2", "-4", "1";
+      "7", "-2", "-3", "1";
+      "-7", "-2", "4", "1" ];
+  List.iter
+    (fun n -> valid (eq (app Int_of_int63 [i n]) (z (Int64.to_string n))))
+    [-4611686018427387904L; -1L; 0L; 4611686018427387903L];
+  valid ~symbols:[x]
+    (app Int_ge [app Int_of_int63 [Var x]; z "-4611686018427387904"]);
+  List.iter
+    (fun value ->
+      assert (
+        invalid ~symbols:[y]
+          ~facts:[eq (Var y) (z value)]
+          (app Ne [Var y; z value])
+        = Some [y, Bigint_value value]))
+    [large; "-" ^ large; "0"];
+  let mixed =
+    Function.create ~label:"mixed" ~arguments:[Int63; Int; Bool] ~result:Int
+  in
+  valid ~symbols:[x; y; b] ~functions:[mixed]
+    ~facts:[eq (Var y) (app Int_of_int63 [Var x])]
+    (eq
+       (Call (mixed, [Var x; Var y; Var b]))
+       (Call (mixed, [Var x; app Int_of_int63 [Var x]; Var b])));
   print_endline "Z3 integration tests passed"
