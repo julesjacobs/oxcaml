@@ -8990,6 +8990,11 @@ let substitute_refinement_ident id replacement ty =
     (Subst.add_bound_value id replacement Subst.identity)
     ty
 
+let apply_dependent_type binder argument ty =
+  Subst.type_expr
+    (Subst.add_value binder (Path.Pident argument) Subst.identity)
+    ty
+
 let () = nondep_type' := nondep_type
 
 (* Preserve sharing inside type declarations. *)
