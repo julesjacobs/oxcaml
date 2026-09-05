@@ -130,21 +130,11 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
           Rexp_match
             (map_rexp rename scrutinee, List.map (map_case rename) cases)
     in
-<<<<<<< HEAD
-    { rexp_desc;
-      rexp_type = type_expr rexp.rexp_type;
-      rexp_type_constraint = rexp.rexp_type_constraint;
-      rexp_loc = location rexp.rexp_loc }
-||||||| parent of 9cf9d2e29e (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
-    { rexp_desc;
-      rexp_type = type_expr rexp.rexp_type;
-      rexp_loc = location rexp.rexp_loc }
-=======
     expression
       { rexp_desc;
         rexp_type = type_expr rexp.rexp_type;
+        rexp_type_constraint = rexp.rexp_type_constraint;
         rexp_loc = location rexp.rexp_loc }
->>>>>>> 9cf9d2e29e (Automated commit: Import compiler changes from 31e6e0ed01ab17f8dead4c9c71786ac712a9fcc0)
   and map_case rename { rc_lhs; rc_guard; rc_rhs } =
     let rename, rc_lhs = map_pat rename rc_lhs in
     { rc_lhs;
