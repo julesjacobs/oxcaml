@@ -79,3 +79,26 @@ let () =
   valid ~symbols:[x] ~facts:[Boolean false] (Boolean false);
   ignore (invalid ~symbols:[x] (Boolean false));
   print_endline "Z3 integration tests passed"
+
+let () =
+  Vox_smt_solver.with_session ~config ~int_width:63 (fun check ->
+      let query symbols facts term =
+        { symbols;
+          facts = List.map (fun term -> { label = "fact"; term }) facts;
+          goal = { label = "goal"; term }
+        }
+      in
+      for _ = 1 to 3 do
+        assert (
+          (check (query [x] [Boolean false] (Boolean false))).validity = Valid);
+        assert (
+          (check (query [b] [] (Var b))).validity
+          = Invalid (Some [b, Bool_value false]));
+        assert (
+          (check (query [x] [eq (Var x) (i 1L)] (eq (Var x) (i 1L)))).validity
+          = Valid);
+        match (check (query [x] [] (eq (Var x) (i 1L)))).validity with
+        | Invalid _ -> ()
+        | _ -> failwith "A previous query's assumptions escaped its scope"
+      done);
+  print_endline "Z3 session tests passed"

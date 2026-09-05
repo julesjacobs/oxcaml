@@ -17,7 +17,7 @@ type nested_comparison =
   {n : int option | match n with None -> true | Some n -> n >= 0};;
 [%%expect{|
 type nested_comparison =
-    {n : int option | match n with | None -> true | Some n -> n >= 0}
+    {n' : int option | match n' with | None -> true | Some n -> n >= 0}
 |}]
 
 type 'a constrained =

@@ -18,7 +18,7 @@ exception Cancelled
 
 (** Each call starts and reaps its own solver. Sort errors and unsupported
     target widths are raised before starting it. [dump] receives the exact bytes
-    written, including follow-up model/reason requests and [exit].
+    written, including query scopes and follow-up model/reason requests.
 
     Cancellation is polled throughout I/O and waiting. A true [cancelled] raises
     [Cancelled]; any exception (including [Sys.Break] from the caller's signal
@@ -33,3 +33,17 @@ val check :
   int_width:int ->
   Vox_smt.query ->
   result
+
+(** Reuse a solver process for the checks performed by the callback. Each query
+    has its own declaration/assertion scope and deadline. Timeout, cancellation,
+    and protocol errors discard the process; a later check starts a new one. The
+    process is always reaped when the callback returns or raises. The check
+    function is valid only within the callback, and calls must be serialized.
+    Dumps include the actual push/pop and echo commands used by the session. *)
+val with_session :
+  ?config:config ->
+  ?dump:(string -> unit) ->
+  ?cancelled:(unit -> bool) ->
+  int_width:int ->
+  ((Vox_smt.query -> result) -> 'a) ->
+  'a
