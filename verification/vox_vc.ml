@@ -929,7 +929,7 @@ let generate ~prove str =
   | exception Has_obligation ->
     let ctx = context ~prove ~verify_introductions:true in
     let result, _ = structure ctx empty str in
-    List.iter (verify_batch ctx prove) (List.rev ctx.batches);
+    List.iter (verify_batch ctx ctx.prove) (List.rev ctx.batches);
     verify_batch ctx prove result.code
 
 let check_termination ~prove ~self ~fn ~measure =
