@@ -56,7 +56,7 @@ let or_predicate :
 val pattern_predicates :
   {value : int
     | match { Roundtrip_defs.x = value; Roundtrip_defs.y = value } with
-      | { Roundtrip_defs.x = field; Roundtrip_defs.y = 0 } -> field = value
+      | { Roundtrip_defs.x = field'; Roundtrip_defs.y = 0 } -> field' = value
       | { Roundtrip_defs.x = 0; Roundtrip_defs.y = field } -> field = value
       | _ -> true}
   list = []
