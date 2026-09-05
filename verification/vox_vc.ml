@@ -1,10 +1,12 @@
 open Types
 open Typedtree
 open Vox_smt
+open Vox_encoding
 
 type function_value =
   { label : string;
     instances : Function.t list ref;
+    primitive : (string * int) option;
     total : bool
   }
 
@@ -24,10 +26,20 @@ type state =
     omitted_premises : (Location.t * Location.error) list
   }
 
+module Symbolic_keys = Hashtbl.Make (struct
+  type t = Path.t * sort
+
+  let equal (path1, sort1) (path2, sort2) =
+    Path.same path1 path2 && sort1 = sort2
+
+  let hash (path, sort) = Hashtbl.hash (Path.hash path, sort)
+end)
+
 type context =
   { mutable symbols : Symbol.t list;
     mutable functions : Function.t list;
     mutable free : value option Path.Map.t;
+    symbolic : value option Symbolic_keys.t;
     prove : Location.t -> query -> unit;
     verify_introductions : bool;
     mutable check_call :
@@ -166,15 +178,7 @@ let guarded_case eval loc s (matched, condition) guard body rest =
       eval (branch s g) body @ rest (branch s (not_ g)))
   @ rest (branch s (not_ condition))
 
-let rec sort env ty =
-  match get_desc (Ctype.expand_head env ty) with
-  | Tpoly (ty, []) -> sort env ty
-  | Trefine r -> sort env r.ref_payload
-  | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Int63
-  | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Bool
-  | _ -> None
-
-let fresh ctx env ty label =
+let fresh ?primitive ctx env ty label =
   match sort env ty with
   | Some sort ->
     let symbol = Symbol.create ~label sort in
@@ -182,85 +186,49 @@ let fresh ctx env ty label =
     scalar_value (Var symbol)
   | None ->
     begin match get_desc (Ctype.expand_head env ty) with
-    | Tarrow _ -> Some (Function { label; instances = ref []; total = false })
+    | Tarrow _ ->
+      Some (Function { label; instances = ref []; primitive; total = false })
     | _ -> None
     end
+
+let symbolic_path ctx env ty path =
+  let path = Env.normalize_value_path None env path in
+  match sort env ty with
+  | None -> fresh ctx env ty (Path.name path)
+  | Some sort ->
+    let key = path, sort in
+    begin match Symbolic_keys.find_opt ctx.symbolic key with
+    | Some value -> value
+    | None ->
+      let value = fresh ctx env ty (Path.name path) in
+      Symbolic_keys.add ctx.symbolic key value;
+      value
+    end
+
+let instantiate_path ctx env ty path value =
+  match value, sort env ty with
+  | Some (Scalar term), Some expected when term_sort term <> expected ->
+    symbolic_path ctx env ty path
+  | _ -> value
 
 let lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
   match Path.Map.find_opt path s.values with
-  | Some value -> value
+  | Some value -> instantiate_path ctx env ty path value
   | None -> (
     match Path.Map.find_opt path ctx.free with
-    | Some value -> value
+    | Some value -> instantiate_path ctx env ty path value
     | None ->
-      let value = fresh ctx env ty (Path.name path) in
+      let value =
+        fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
+      in
       ctx.free <- Path.Map.add path value ctx.free;
       value)
 
-let primitive env path =
-  match (Env.find_value path env).val_kind with
-  | Val_prim p -> Some (p.Primitive.prim_name, p.prim_arity)
-  | _ -> None
-  | exception Not_found -> None
-
-let operation env ty name args =
-  let args = List.map scalar args in
-  let unary sort op =
-    match args with
-    | [Some x] when term_sort x = sort -> Some (App (op, [x]))
-    | _ -> None
-  in
-  let binary sort op =
-    match args with
-    | [Some x; Some y] when term_sort x = sort && term_sort y = sort ->
-      Some (App (op, [x; y]))
-    | _ -> None
-  in
-  let equality op =
-    match args with
-    | [Some x; Some y] when term_sort x = term_sort y -> Some (App (op, [x; y]))
-    | _ -> None
-  in
-  let result =
-    match name with
-    | "%addint" -> binary Int63 Add
-    | "%subint" -> binary Int63 Sub
-    | "%mulint" -> binary Int63 Mul
-    | "%divint" | "%modint" ->
-      begin match args with
-      | [_; Some (Integer divisor)] when divisor <> 0L ->
-        binary Int63 (if name = "%divint" then Div else Rem)
-      | _ -> None
-      end
-    | "%negint" -> unary Int63 Neg
-    | "%equal" | "%eq" -> equality Eq
-    | "%notequal" | "%noteq" -> equality Ne
-    | "%lessthan" | "%ltint" -> binary Int63 Lt
-    | "%lessequal" | "%leint" -> binary Int63 Le
-    | "%greaterthan" | "%gtint" -> binary Int63 Gt
-    | "%greaterequal" | "%geint" -> binary Int63 Ge
-    | "%boolnot" -> unary Bool Not
-    | "%sequand" -> binary Bool And
-    | "%sequor" -> binary Bool Or
-    | "%identity" -> ( match args with [v] -> v | _ -> None)
-    | _ -> None
-  in
-  match result with
-  | Some value when Some (term_sort value) = sort env ty -> scalar_option result
-  | _ -> None
-
-let rec signature env ty arity =
-  if arity = 0
-  then Option.map (fun result -> [], result) (sort env ty)
-  else
-    match get_desc (Ctype.expand_head env ty) with
-    | Tarrow ((Nolabel, _, _, _), arg, ret, _) ->
-      begin match sort env arg, signature env ret (arity - 1) with
-      | Some arg, Some (args, result) -> Some (arg :: args, result)
-      | _ -> None
-      end
-    | _ -> None
+let operation env function_type result_type name args =
+  scalar_option
+    (Vox_encoding.operation env ~function_type ~result_type name
+       (List.map scalar args))
 
 let function_call ctx env ty fn args =
   match fn, signature env ty (List.length args) with
@@ -290,7 +258,7 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
   let value =
     match prim with
     | Some (name, arity) when arity = List.length args ->
-      operation env result_type name args
+      operation env fn_type result_type name args
     | _ -> None
   in
   match value with
@@ -298,25 +266,34 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
   | None when total -> function_call ctx env fn_type fn args
   | None -> None
 
-let constant = function
-  | Typedtree.Const_int n -> scalar_value (Integer (Int64.of_int n))
-  | _ -> None
+let stored_primitive syntax = function
+  | Some (Function { primitive = Some _ as primitive; _ }) -> primitive
+  | _ -> syntax
 
-let rconstant c =
-  match c.Parsetree.pconst_desc with
-  | Parsetree.Pconst_integer (n, None) ->
-    scalar_value (Integer (Int64.of_string n))
-  | _ -> None
+let constant c = scalar_option (Vox_encoding.constant c)
+
+let rconstant c = scalar_option (Vox_encoding.rconstant c)
 
 let constructor env ty name =
-  match sort env ty, name with
-  | Some Bool, "true" -> scalar_value (Boolean true)
-  | Some Bool, "false" -> scalar_value (Boolean false)
-  | _ -> None
+  scalar_option (Vox_encoding.constructor env ty name)
 
-let rconstructor env ty = function
-  | Path.Pextra_ty (_, Path.Pcstr_ty name) -> constructor env ty name
-  | _ -> None
+let rconstructor ctx env ty path =
+  match scalar_option (Vox_encoding.rconstructor env ty path) with
+  | Some _ as value -> value
+  | None -> symbolic_path ctx env ty path
+
+let expression_constructor ctx env ty (c : Data_types.constructor_description) =
+  match constructor env ty c.cstr_name with
+  | Some _ as value -> value
+  | None ->
+    let path =
+      match c.cstr_tag with
+      | Extension path -> path
+      | Ordinary _ | Null ->
+        Path.Pextra_ty
+          (Data_types.cstr_res_type_path c, Path.Pcstr_ty c.cstr_name)
+    in
+    symbolic_path ctx env ty path
 
 let refinement env ty loc =
   match get_desc (Ctype.expand_head env ty) with
@@ -339,7 +316,7 @@ let rec predicate ctx env s e =
       end
     | Rexp_constant c ->
       return (scalar_value (required e.rexp_loc (rconstant c)))
-    | Rexp_construct (p, []) -> return (rconstructor env e.rexp_type p)
+    | Rexp_construct (p, []) -> return (rconstructor ctx env e.rexp_type p)
     | Rexp_apply (fn, args) ->
       let prim =
         match fn.rexp_desc with
@@ -355,6 +332,7 @@ let rec predicate ctx env s e =
           (arguments_right_to_left (fun s (_, e) -> eval s e) s args)
           (fun s args ->
             paths (eval s fn) (fun s value ->
+                let prim = stored_primitive prim value in
                 let result =
                   apply_function ctx env fn.rexp_type e.rexp_type prim value
                     args ~total:true
@@ -392,18 +370,18 @@ and expose ctx env s ty value loc =
     (predicate ctx env (bind s r.ref_binder value) r.ref_pred)
     (fun s predicate -> [fact s "refinement" (required loc predicate), value])
 
-and predicate_pattern env s value p =
+and predicate_pattern ctx env s value p =
   match p.rpat_desc with
   | Rpat_any -> s, Boolean true
   | Rpat_var id -> bind s id value, Boolean true
-  | Rpat_alias (p, id) -> predicate_pattern env (bind s id value) value p
+  | Rpat_alias (p, id) -> predicate_pattern ctx env (bind s id value) value p
   | Rpat_constant c ->
     s, both Eq (required p.rpat_loc value) (required p.rpat_loc (rconstant c))
   | Rpat_construct (path, []) ->
     ( s,
       both Eq
         (required p.rpat_loc value)
-        (required p.rpat_loc (rconstructor env p.rpat_type path)) )
+        (required p.rpat_loc (rconstructor ctx env p.rpat_type path)) )
   | _ -> unsupported p.rpat_loc
 
 and predicate_cases ctx env s value cases =
@@ -413,7 +391,7 @@ and predicate_cases ctx env s value cases =
     match cases with
     | [] -> []
     | case :: cases ->
-      let matched = predicate_pattern env s value case.rc_lhs in
+      let matched = predicate_pattern ctx env s value case.rc_lhs in
       let rest s = predicate_cases ctx env s value cases in
       guarded_case (predicate ctx env) case.rc_rhs.rexp_loc s matched
         case.rc_guard case.rc_rhs rest
@@ -434,7 +412,7 @@ let rec pattern : type k.
     end
   | Tpat_construct (_, c, _, [], _) ->
     begin match
-      scalar value, scalar (constructor p.pat_env p.pat_type c.cstr_name)
+      scalar value, scalar (expression_constructor ctx p.pat_env p.pat_type c)
     with
     | Some x, Some c -> s, both Eq x c
     | _ ->
@@ -564,7 +542,7 @@ and expression_desc ctx s e =
     [s, value]
   | Texp_constant c -> [s, constant c]
   | Texp_construct (_, c, _, [], _) ->
-    [s, constructor e.exp_env e.exp_type c.cstr_name]
+    [s, expression_constructor ctx e.exp_env e.exp_type c]
   | Texp_let (rec_flag, bindings, body) ->
     paths
       (value_bindings ctx s rec_flag bindings (has_elim e))
@@ -616,6 +594,7 @@ and expression_desc ctx s e =
       paths (arguments_right_to_left argument s args) (fun s args ->
           ctx.check_call ctx s e args;
           paths (eval s fn) (fun s fn_value ->
+              let prim = stored_primitive prim fn_value in
               let total =
                 match fn_value with
                 | Some (Function { total; _ }) -> total
@@ -766,6 +745,7 @@ let context ~prove ~verify_introductions =
   { symbols = [];
     functions = [];
     free = Path.Map.empty;
+    symbolic = Symbolic_keys.create 16;
     prove;
     verify_introductions;
     check_call = (fun _ _ _ _ -> ())
@@ -823,10 +803,12 @@ let check_termination ~prove ~self ~fn ~measure =
               match sort arg.exp_env arg.exp_type with
               | Some Bool -> scalar_value (Boolean false)
               | Some Int63 -> scalar_value (Integer 0L)
+              | Some (Opaque _) -> reject arg
               | None -> reject arg)
             args
         in
-        if operation e.exp_env e.exp_type name values = None then reject e
+        if operation e.exp_env f.exp_type e.exp_type name values = None
+        then reject e
       | _ -> reject e
       end
     | Texp_let (Asttypes.Nonrecursive, bindings, body) ->

@@ -9934,10 +9934,10 @@ and type_ident env ?(recarg=Rejected) lid =
           let rec is_scalar ty =
             match get_desc (expand_head env ty) with
             | Tpoly (ty, []) -> is_scalar ty
-            | Tconstr (path, [], _) ->
-                Path.same path Predef.path_int
-                || Path.same path Predef.path_bool
-            | _ -> false
+            | _ -> begin match Vox_type.classify env ty with
+                | Some (Int | Bool) -> true
+                | None -> false
+              end
           in
           let total =
             match get_desc (expand_head env ty) with
