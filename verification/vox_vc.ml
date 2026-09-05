@@ -138,7 +138,7 @@ let at_mode mode = function
 let fresh_symbol sort label = Var (Symbol.create ~label sort)
 
 let name s = function
-  | Some (Scalar ((App _ | Call _) as term)) ->
+  | Some (Scalar ((App _ | Call _ | Construct _ | Is _ | Select _) as term)) ->
     let s =
       match term with
       | App ((Div | Rem), [_; divisor]) ->
@@ -518,9 +518,9 @@ let rec predicate ctx env s e =
       let s, values = arguments_right_to_left (fun s (_, _, e) -> eval s e) s fields in
       let fields = List.map2 (fun (_, name, _) value -> name, value) fields values in
       name s (scalar_value (required e.rexp_loc (record_value ctx env e.rexp_type base fields)))
-    | Rexp_field (record_exp, _, name) ->
+    | Rexp_field (record_exp, _, field_name) ->
       let s, record = eval s record_exp in
-      name s (scalar_value (required e.rexp_loc (select_field ctx env record_exp.rexp_type name record)))
+      name s (scalar_value (required e.rexp_loc (select_field ctx env record_exp.rexp_type field_name record)))
     | Rexp_apply (fn, args) ->
       let prim =
         match fn.rexp_desc with
