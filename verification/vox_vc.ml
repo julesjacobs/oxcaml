@@ -15,6 +15,15 @@ type value =
   | Scalar of term
   | Function of function_value
 
+type set_origin =
+  | Set_empty
+  | Set_singleton
+  | Set_add
+  | Set_remove
+  | Set_union
+  | Set_inter
+  | Set_diff
+
 let scalar = function Some (Scalar t) -> Some t | _ -> None
 
 let scalar_value t = Some (Scalar t)
@@ -84,10 +93,14 @@ type context =
   { encoding : Vox_encoding.context;
     mutable datatypes : datatype_declaration list;
     mutable functions : Function.t list;
-    mutable iarray_length : Function.t option;
-    iarray_contents : (sort, Function.t) Hashtbl.t;
+    function_cache : (string * sort list * sort, Function.t) Hashtbl.t;
+    set_origins : (Function.t, set_origin) Hashtbl.t;
+    set_class_sorts : (sort, sort) Hashtbl.t;
+    set_membership : (sort * term * term, term) Hashtbl.t;
+    membership_definitions : (Symbol.t, term) Hashtbl.t;
     mutable free : value option Path.Map.t;
     mutable batches : command list list;
+    named_terms : (Symbol.t, term) Hashtbl.t;
     symbolic : value option Symbolic_keys.t;
     prove : Location.t -> query -> unit;
     verify_introductions : bool;
@@ -141,7 +154,7 @@ let at_mode mode = function
 
 let fresh_symbol sort label = Var (Symbol.create ~label sort)
 
-let name s = function
+let name ctx s = function
   | Some (Scalar (Construct (_, []))) as value -> s, value
   | Some (Scalar ((App _ | Call _ | Construct _ | Is _ | Select _) as term)) ->
     let s =
@@ -150,16 +163,23 @@ let name s = function
         branch s (App (Ne, [divisor; Integer 0L]))
       | _ -> s
     in
-    let value = fresh_symbol (term_sort term) "value" in
+    let symbol = Symbol.create ~label:"value" (term_sort term) in
+    Hashtbl.add ctx.named_terms symbol term;
+    let value = Var symbol in
     { s with code = Define (both Eq value term) :: s.code }, scalar_value value
   | value -> s, value
+
+let rec expose_head ctx = function
+  | Var symbol as value -> (match Hashtbl.find_opt ctx.named_terms symbol with
+      | Some term -> expose_head ctx term | None -> value)
+  | value -> value
 
 let rec added_prefix ~base = function
   | current when current == base -> []
   | item :: rest -> item :: added_prefix ~base rest
   | [] -> Misc.fatal_error "VC: state does not extend its input"
 
-let choose s condition ifso ifnot =
+let choose ctx s condition ifso ifnot =
   if s.dead
   then s, None
   else
@@ -190,7 +210,7 @@ let choose s condition ifso ifnot =
             @ s.omitted_premises
         }
       in
-      name s value
+      name ctx s value
 
 let rec arguments_right_to_left eval s = function
   | [] -> s, []
@@ -199,7 +219,7 @@ let rec arguments_right_to_left eval s = function
     let s, value = eval s arg in
     s, value :: values
 
-let short_circuit eval loc ~is_and s a b =
+let short_circuit ctx eval loc ~is_and s a b =
   let s, a = eval s a in
   if s.dead
   then s, None
@@ -207,11 +227,11 @@ let short_circuit eval loc ~is_and s a b =
     let condition = required loc a in
     if is_and
     then
-      choose s condition
+      choose ctx s condition
         (fun s -> eval s b)
         (fun s -> s, scalar_value (Boolean false))
     else
-      choose s condition
+      choose ctx s condition
         (fun s -> s, scalar_value (Boolean true))
         (fun s -> eval s b)
 
@@ -231,7 +251,7 @@ let merge_patterns base outcomes =
   in
   { base with values }, disjunction (List.map snd outcomes)
 
-let guarded_case eval loc s matched guard body rest =
+let guarded_case ctx eval loc s matched guard body rest =
   let matched, condition = merge_patterns s matched in
   let values = s.values in
   let s, accepted =
@@ -239,13 +259,13 @@ let guarded_case eval loc s matched guard body rest =
     | None -> matched, condition
     | Some g ->
       let state, value =
-        choose matched condition
+        choose ctx matched condition
           (fun s -> eval s g)
           (fun s -> s, scalar_value (Boolean false))
       in
       state, if state.dead then Boolean false else required loc value
   in
-  choose s accepted
+  choose ctx s accepted
     (fun s -> eval s body)
     (fun state -> rest { state with values })
 
@@ -345,36 +365,118 @@ let fresh_sort ctx label sort =
   let symbol = Symbol.create ~label sort in
   Var symbol
 
+let intern_function ctx label arguments result =
+  List.iter (register_sort ctx) (result :: arguments);
+  let key = label, arguments, result in
+  match Hashtbl.find_opt ctx.function_cache key with
+  | Some function_ -> function_
+  | None ->
+    let function_ = Function.create ~label ~arguments ~result in
+    Hashtbl.add ctx.function_cache key function_;
+    ctx.functions <- function_ :: ctx.functions;
+    function_
+
 let iarray_length ctx iarray_sort array =
-  let function_ =
-    match ctx.iarray_length with
-    | Some function_ -> function_
-    | None ->
-      let function_ =
-        Function.create ~label:"Iarray.length" ~arguments:[iarray_sort]
-          ~result:Int63
-      in
-      ctx.iarray_length <- Some function_;
-      ctx.functions <- function_ :: ctx.functions;
-      function_
-  in
+  let function_ = intern_function ctx "Iarray.length" [iarray_sort] Int63 in
   Call (function_, [array])
 
 let iarray_get ctx iarray_sort element_sort array index =
-  register_sort ctx element_sort;
   let function_ =
-    match Hashtbl.find_opt ctx.iarray_contents element_sort with
-    | Some function_ -> function_
-    | None ->
-      let function_ =
-        Function.create ~label:"Iarray.get" ~arguments:[iarray_sort; Int63]
-          ~result:element_sort
-      in
-      Hashtbl.add ctx.iarray_contents element_sort function_;
-      ctx.functions <- function_ :: ctx.functions;
-      function_
+    intern_function ctx "Iarray.get" [iarray_sort; Int63] element_sort
   in
   Call (function_, [array; index])
+
+let set_constructor ctx origin label arguments set_sort terms =
+  let function_ = intern_function ctx label arguments set_sort in
+  Hashtbl.replace ctx.set_origins function_ origin;
+  Call (function_, terms)
+
+let set_empty ctx set_sort =
+  set_constructor ctx Set_empty "Set.empty" [] set_sort []
+
+let set_class ctx set_sort element =
+  let element_sort = term_sort element in
+  let class_sort =
+    match Hashtbl.find_opt ctx.set_class_sorts set_sort with
+    | Some sort -> sort
+    | None ->
+      let sort = fresh_opaque_sort ctx.encoding in
+      Hashtbl.add ctx.set_class_sorts set_sort sort;
+      sort
+  in
+  let function_ =
+    intern_function ctx "Set.comparison_class" [element_sort] class_sort
+  in
+  Call (function_, [element])
+
+let set_same_element ctx set_sort left right =
+  both Eq (set_class ctx set_sort left) (set_class ctx set_sort right)
+
+let rec set_mem ctx set_sort element set =
+  let key = set_sort, element, set in
+  match Hashtbl.find_opt ctx.set_membership key with
+  | Some value -> value
+  | None ->
+    let term = expand_set_mem ctx set_sort element set in
+    let value =
+      match term with
+      | Boolean _ | Var _ -> term
+      | _ ->
+        let symbol = Symbol.create ~label:"membership" Bool in
+        Hashtbl.add ctx.membership_definitions symbol term;
+        Var symbol
+    in
+    Hashtbl.add ctx.set_membership key value;
+    value
+
+and expand_set_mem ctx set_sort element set =
+  let class_ = set_class ctx set_sort element in
+  let unknown () =
+    let function_ =
+      intern_function ctx "Set.mem" [term_sort class_; set_sort] Bool
+    in
+    Call (function_, [class_; set])
+  in
+  match expose_head ctx set with
+  | App (Ite, [condition; left; right]) ->
+    App (Ite, [condition; set_mem ctx set_sort element left; set_mem ctx set_sort element right])
+  | Call (function_, arguments) ->
+    begin match Hashtbl.find_opt ctx.set_origins function_, arguments with
+    | Some Set_empty, [] -> Boolean false
+    | Some Set_singleton, [member] ->
+      set_same_element ctx set_sort element member
+    | Some Set_add, [member; set] ->
+      both Or
+        (set_same_element ctx set_sort element member)
+        (set_mem ctx set_sort element set)
+    | Some Set_remove, [member; set] ->
+      both And
+        (not_ (set_same_element ctx set_sort element member))
+        (set_mem ctx set_sort element set)
+    | Some Set_union, [left; right] ->
+      both Or
+        (set_mem ctx set_sort element left)
+        (set_mem ctx set_sort element right)
+    | Some Set_inter, [left; right] ->
+      both And
+        (set_mem ctx set_sort element left)
+        (set_mem ctx set_sort element right)
+    | Some Set_diff, [left; right] ->
+      both And
+        (set_mem ctx set_sort element left)
+        (not_ (set_mem ctx set_sort element right))
+    | _ -> unknown ()
+    end
+  | _ -> unknown ()
+
+let set_find ctx set_sort element set =
+  let class_ = set_class ctx set_sort element in
+  let function_ =
+    intern_function ctx "Set.find"
+      [term_sort class_; set_sort]
+      (term_sort element)
+  in
+  Call (function_, [class_; set])
 
 let iarray_value ctx env ty s values =
   match iarray ctx.encoding env ty with
@@ -463,20 +565,25 @@ let instantiate_path ctx env ty path value =
 
 let lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
-  match value_constant ctx.encoding env ty path with
-  | Some value -> scalar_value value
-  | None -> (
-    match Path.Map.find_opt path s.values with
-    | Some value -> instantiate_path ctx env ty path value
+  match sort ctx.encoding env ty with
+  | Some set_sort
+    when is_set_sort ctx.encoding set_sort && is_set_empty env path ->
+    scalar_value (set_empty ctx set_sort)
+  | _ -> (
+    match value_constant ctx.encoding env ty path with
+    | Some value -> scalar_value value
     | None -> (
-      match Path.Map.find_opt path ctx.free with
+      match Path.Map.find_opt path s.values with
       | Some value -> instantiate_path ctx env ty path value
-      | None ->
-        let value =
-          fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
-        in
-        ctx.free <- Path.Map.add path value ctx.free;
-        value))
+      | None -> (
+        match Path.Map.find_opt path ctx.free with
+        | Some value -> instantiate_path ctx env ty path value
+        | None ->
+          let value =
+            fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
+          in
+          ctx.free <- Path.Map.add path value ctx.free;
+          value)))
 
 let iarray_call ctx value =
   match scalar value with
@@ -487,6 +594,58 @@ let iarray_call ctx value =
 
 let operation ctx env function_type result_type name args =
   match name, args with
+  | "%set_singleton", [element] ->
+    begin match scalar element, sort ctx.encoding env result_type with
+    | Some element, Some set_sort when is_set_sort ctx.encoding set_sort ->
+      scalar_value
+        (set_constructor ctx Set_singleton "Set.singleton"
+           [term_sort element]
+           set_sort [element])
+    | _ -> None
+    end
+  | (("%set_add" | "%set_remove") as name), [element; set] ->
+    begin match scalar element, scalar set with
+    | Some element, Some set when is_set_sort ctx.encoding (term_sort set) ->
+      let origin, label =
+        if name = "%set_add"
+        then Set_add, "Set.add"
+        else Set_remove, "Set.remove"
+      in
+      scalar_value
+        (set_constructor ctx origin label
+           [term_sort element; term_sort set]
+           (term_sort set) [element; set])
+    | _ -> None
+    end
+  | (("%set_union" | "%set_inter" | "%set_diff") as name), [left; right] ->
+    begin match scalar left, scalar right with
+    | Some left, Some right
+      when term_sort left = term_sort right
+           && is_set_sort ctx.encoding (term_sort left) ->
+      let origin, label =
+        match name with
+        | "%set_union" -> Set_union, "Set.union"
+        | "%set_inter" -> Set_inter, "Set.inter"
+        | _ -> Set_diff, "Set.diff"
+      in
+      scalar_value
+        (set_constructor ctx origin label
+           [term_sort left; term_sort right]
+           (term_sort left) [left; right])
+    | _ -> None
+    end
+  | "%set_mem", [element; set] ->
+    begin match scalar element, scalar set with
+    | Some element, Some set when is_set_sort ctx.encoding (term_sort set) ->
+      scalar_value (set_mem ctx (term_sort set) element set)
+    | _ -> None
+    end
+  | "%set_find", [element; set] | "%set_refined_find", [set; element] ->
+    begin match scalar element, scalar set with
+    | Some element, Some set when is_set_sort ctx.encoding (term_sort set) ->
+      scalar_value (set_find ctx (term_sort set) element set)
+    | _ -> None
+    end
   | "%array_length", [array] ->
     begin match iarray_call ctx array with
     | Some (iarray_sort, array) ->
@@ -528,6 +687,25 @@ let normal_iarray_get ctx args s =
         (both And (both Le (Integer 0L) index) (both Lt index length))
     | _ -> s
     end
+  | _ -> s
+
+let normal_set_find ctx name args value s =
+  let element, set =
+    match name, args with
+    | "%set_find", [element; set] -> element, set
+    | "%set_refined_find", [set; element] -> element, set
+    | _ -> None, None
+  in
+  match scalar element, scalar set, scalar value with
+  | Some element, Some set, Some result
+    when is_set_sort ctx.encoding (term_sort set) ->
+    let set_sort = term_sort set in
+    fact
+      (fact s "normal return" (set_mem ctx set_sort element set))
+      "set representative"
+      (both And
+         (set_mem ctx set_sort result set)
+         (set_same_element ctx set_sort result element))
   | _ -> s
 
 let rec function_call ctx env ty fn args =
@@ -632,6 +810,7 @@ let rec predicate ctx env s e =
     | Rexp_var id -> s, lookup ctx s env e.rexp_type (Path.Pident id)
     | Rexp_ident path ->
       begin match primitive env path with
+      | Some ("%set_empty", 0) -> s, lookup ctx s env e.rexp_type path
       | Some (_, 0) -> unsupported e.rexp_loc
       | _ -> s, lookup ctx s env e.rexp_type path
       end
@@ -640,7 +819,7 @@ let rec predicate ctx env s e =
       let s, values =
         arguments_right_to_left (fun s (_, e) -> eval s e) s components
       in
-      name s
+      name ctx s
         (scalar_value
            (required e.rexp_loc (construct ctx env e.rexp_type "" values)))
     | Rexp_construct (path, args) ->
@@ -653,7 +832,7 @@ let rec predicate ctx env s e =
           | Some name -> construct ctx env e.rexp_type name values
           | None -> None)
       in
-      name s (scalar_value (required e.rexp_loc value))
+      name ctx s (scalar_value (required e.rexp_loc value))
     | Rexp_record (fields, extended) ->
       let s, base =
         match extended with
@@ -668,12 +847,12 @@ let rec predicate ctx env s e =
       let fields =
         List.map2 (fun (_, name, _) value -> name, value) fields values
       in
-      name s
+      name ctx s
         (scalar_value
            (required e.rexp_loc (record_value ctx env e.rexp_type base fields)))
     | Rexp_field (record_exp, _, field_name) ->
       let s, record = eval s record_exp in
-      name s
+      name ctx s
         (scalar_value
            (required e.rexp_loc
               (select_field ctx env record_exp.rexp_type field_name record)))
@@ -685,22 +864,18 @@ let rec predicate ctx env s e =
       in
       begin match prim, args with
       | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
-        short_circuit eval e.rexp_loc ~is_and:(op = "%sequand") s a b
+        short_circuit ctx eval e.rexp_loc ~is_and:(op = "%sequand") s a b
       | _ ->
-        let s, args =
-          arguments_right_to_left (fun s (_, e) -> eval s e) s args
-        in
+        let s, args = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
         let s, value = eval s fn in
         let prim = stored_primitive prim value in
-        let s = match prim with Some ("%array_length", 1) -> normal_iarray_length ctx args s | _ -> s in
-        if s.dead
-        then s, None
-        else
-          name s
-            (scalar_value
-               (required e.rexp_loc
-                  (apply_function ctx env fn.rexp_type e.rexp_type prim value
-                     args ~total:true)))
+        if s.dead then s, None else
+        let result = apply_function ctx env fn.rexp_type e.rexp_type prim value args ~total:true in
+        let s = match prim with
+          | Some ("%array_length", 1) -> normal_iarray_length ctx args s
+          | Some ((("%set_find" | "%set_refined_find") as op_name), 2) -> normal_set_find ctx op_name args result s
+          | _ -> s in
+        name ctx s (scalar_value (required e.rexp_loc result))
       end
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
@@ -708,11 +883,11 @@ let rec predicate ctx env s e =
       if s.dead then s, None else
       let left = required e.rexp_loc left in
       let right = required e.rexp_loc right in
-      if sort_has_iarray ctx.encoding (term_sort left) then unsupported e.rexp_loc
-      else name s (scalar_value (both Eq left right))
+      if sort_has_unsupported_logical_equality ctx.encoding (term_sort left) then unsupported e.rexp_loc
+      else name ctx s (scalar_value (both Eq left right))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
-      choose s
+      choose ctx s
         (if s.dead then Boolean false else required e.rexp_loc c)
         (fun s -> eval s t)
         (fun s -> eval s f)
@@ -836,7 +1011,7 @@ and predicate_cases ctx env s value cases =
     | case :: cases ->
       let matched = predicate_pattern ctx env s value case.rc_lhs in
       let rest s = predicate_cases ctx env s value cases in
-      guarded_case (predicate ctx env) case.rc_rhs.rexp_loc s matched
+      guarded_case ctx (predicate ctx env) case.rc_rhs.rexp_loc s matched
         case.rc_guard case.rc_rhs rest
 
 let rec pattern : type k.
@@ -1044,7 +1219,7 @@ and expression_desc ctx s e =
     let s, values =
       arguments_right_to_left (fun s (_, e) -> eval s e) s components
     in
-    name s
+    name ctx s
       (opaque_if_unsupported (construct ctx e.exp_env e.exp_type "" values))
   | Texp_construct (_, c, _, args, _) ->
     let s, values = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
@@ -1053,7 +1228,7 @@ and expression_desc ctx s e =
       | [] -> expression_constructor ctx e.exp_env e.exp_type c
       | _ -> construct ctx e.exp_env e.exp_type c.cstr_name values
     in
-    name s (opaque_if_unsupported value)
+    name ctx s (opaque_if_unsupported value)
   | Texp_record { fields; extended_expression; _ } ->
     let s, base =
       match extended_expression with
@@ -1078,7 +1253,7 @@ and expression_desc ctx s e =
              | Overridden _ -> Some (label.Data_types.lbl_name, value))
            fields values)
     in
-    name s
+    name ctx s
       (opaque_if_unsupported
          (record_value ctx e.exp_env e.exp_type base fields))
   | Texp_array (Immutable, _, elements, _) ->
@@ -1087,7 +1262,7 @@ and expression_desc ctx s e =
     s, opaque_if_unsupported value
   | Texp_field { record; label; _ } ->
     let s, value = eval s record in
-    name s
+    name ctx s
       (opaque_if_unsupported
          (select_field ctx e.exp_env record.exp_type label.Data_types.lbl_name
             value))
@@ -1108,8 +1283,8 @@ and expression_desc ctx s e =
     let s, right = eval s right in
     let s, left = eval s left in
     match scalar left, scalar right with
-    | Some left, Some right when term_sort left = term_sort right && not (sort_has_iarray ctx.encoding (term_sort left)) ->
-      name s (scalar_value (both Eq left right))
+    | Some left, Some right when term_sort left = term_sort right && not (sort_has_unsupported_logical_equality ctx.encoding (term_sort left)) ->
+      name ctx s (scalar_value (both Eq left right))
     | _ -> s, opaque ())
   | Texp_sequence (a, _, b) ->
     let s, _ = eval s a in
@@ -1122,7 +1297,7 @@ and expression_desc ctx s e =
       | None ->
         required e.exp_loc (fresh ctx e.exp_env Predef.type_bool "condition")
     in
-    choose s c
+    choose ctx s c
       (fun s -> eval s t)
       (fun s -> match f with None -> s, None | Some f -> eval s f)
   | Texp_apply (fn, args, _, _, _, _) ->
@@ -1134,7 +1309,7 @@ and expression_desc ctx s e =
     begin match prim, args with
     | ( Some ((("%sequand" | "%sequor") as op), 2),
         [(_, Arg (a, _)); (_, Arg (b, _))] ) ->
-      short_circuit eval e.exp_loc ~is_and:(op = "%sequand") s a b
+      short_circuit ctx eval e.exp_loc ~is_and:(op = "%sequand") s a b
     | _ -> (
       let argument s (_, arg) =
         match arg with Omitted _ -> s, None | Arg (e, _) -> eval s e
@@ -1154,10 +1329,12 @@ and expression_desc ctx s e =
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
         branch s (Boolean false), None
       | Some ("%array_length", 1) ->
-        name (normal_iarray_length ctx args s) (match value with Some _ -> value | None -> opaque ())
+        name ctx (normal_iarray_length ctx args s) (match value with Some _ -> value | None -> opaque ())
       | Some ("%array_safe_get", 2) ->
-        name (normal_iarray_get ctx args s) (match value with Some _ -> value | None -> opaque ())
-      | _ -> name s (match value with Some _ -> value | None -> opaque ()))
+        name ctx (normal_iarray_get ctx args s) (match value with Some _ -> value | None -> opaque ())
+      | Some ((("%set_find" | "%set_refined_find") as op_name), 2) ->
+        name ctx (normal_set_find ctx op_name args value s) (match value with Some _ -> value | None -> opaque ())
+      | _ -> name ctx s (match value with Some _ -> value | None -> opaque ()))
     end
   | Texp_function { params; body; _ } ->
     let captured = s in
@@ -1265,7 +1442,7 @@ and cases_with_pattern : type k.
     | c :: cases ->
       let matched = pattern ctx s value c.c_lhs in
       let rest s = cases_with_pattern ctx s value cases in
-      guarded_case (expression ctx) c.c_rhs.exp_loc s matched c.c_guard c.c_rhs
+      guarded_case ctx (expression ctx) c.c_rhs.exp_loc s matched c.c_guard c.c_rhs
         rest
 
 and structure ctx s str =
@@ -1350,7 +1527,14 @@ let query ctx code =
   let rec visit = function
     | Var s when not (Hashtbl.mem seen s) ->
       Hashtbl.add seen s ();
-      symbols := s :: !symbols
+      symbols := s :: !symbols;
+      Option.iter
+        (fun term ->
+          definitions
+            := { label = "membership"; term = both Eq (Var s) term }
+               :: !definitions;
+          visit term)
+        (Hashtbl.find_opt ctx.membership_definitions s)
     | App (_, args) | Call (_, args) | Construct (_, args) ->
       List.iter visit args
     | Is (_, arg) | Select (_, _, arg) -> visit arg
@@ -1361,7 +1545,7 @@ let query ctx code =
   ( { datatypes = List.rev ctx.datatypes;
       symbols = List.rev !symbols;
       functions = List.rev ctx.functions;
-      facts;
+      facts = List.rev !definitions;
       goal
     },
     goals )
@@ -1391,10 +1575,14 @@ let context ~prove ~verify_introductions =
   { encoding = Vox_encoding.create_context ();
     datatypes = [];
     functions = [];
-    iarray_length = None;
-    iarray_contents = Hashtbl.create 8;
+    function_cache = Hashtbl.create 32;
+    set_origins = Hashtbl.create 16;
+    set_class_sorts = Hashtbl.create 8;
+    set_membership = Hashtbl.create 32;
+    membership_definitions = Hashtbl.create 32;
     free = Path.Map.empty;
     batches = [];
+    named_terms = Hashtbl.create 32;
     symbolic = Symbolic_keys.create 16;
     prove;
     verify_introductions;
