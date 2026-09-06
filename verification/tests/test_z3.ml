@@ -93,7 +93,7 @@ let () =
 let () =
   Vox_smt_solver.with_session ~config ~int_width:63 (fun check ->
       let query symbols facts term =
-        { symbols;
+        { functions = []; symbols;
           facts = List.map (fun term -> { label = "fact"; term }) facts;
           goal = { label = "goal"; term }
         }
