@@ -823,7 +823,7 @@ let remove_mode_and_jkind_variables ty =
       match get_desc ty with
       | Tvar { jkind } -> Jkind.default_to_scannable jkind
       | Tunivar { jkind } -> Jkind.default_to_scannable jkind
-      | Tarrow ((_,marg,mret),targ,tret,_) ->
+      | Tarrow ((_,marg,mret,_),targ,tret,_) ->
          let _ = Alloc.zap_to_legacy marg in
          let _ = Alloc.zap_to_legacy mret in
          go targ; go tret
@@ -2211,7 +2211,7 @@ let curry_mode alloc arg : Alloc.Const.t =
 
 let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
   match locals, get_desc ty with
-  | l :: locals, Tarrow ((lbl,marg,mret),arg,ret,commu) ->
+  | l :: locals, Tarrow ((lbl,marg,mret,binder),arg,ret,commu) ->
      let marg = with_locality_and_forkable_yielding
       (prim_mode' (Some (mvar_l, mvar_y)) l) marg
      in
@@ -2230,7 +2230,8 @@ let rec instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ty =
           mret'
      in
      let ret = instance_prim_locals locals mvar_l mvar_y macc (loc, yld) ret in
-     newty2 ~level:(get_level ty) (Tarrow ((lbl,marg,mret),arg,ret, commu))
+     newty2 ~level:(get_level ty)
+       (Tarrow ((lbl,marg,mret,binder),arg,ret, commu))
   | _ :: _, _ -> assert false
   | [], _ ->
      ty
@@ -2999,7 +3000,7 @@ let prim_params_yielding env ty ~arity =
     if n <= 0 then Some acc
     else
       match get_desc (expand_head_opt env ty) with
-      | Tarrow ((_, marg, _), _, ret, _) ->
+      | Tarrow ((_, marg, _, _), _, ret, _) ->
         let yielding =
           Yielding.disallow_right (Alloc.proj_comonadic Yielding marg)
         in
@@ -4677,6 +4678,18 @@ let may_have_jkind_intersection_tk env ty jkind =
    and that both their objects and variants are closed
  *)
 
+let align_arrow_codomains binder1 codomain1 binder2 codomain2 =
+  match binder1, binder2 with
+  | None, None -> Some (codomain1, codomain2)
+  | Some binder1, Some binder2 ->
+      let codomain1 =
+        Subst.type_expr
+          (Subst.add_bound_value binder1 binder2 Subst.identity)
+          codomain1
+      in
+      Some (codomain1, codomain2)
+  | None, Some _ | Some _, None -> None
+
 let rec mcomp type_pairs env t1 t2 =
   let check_jkinds ty jkind =
     if not (may_have_jkind_intersection_tk env ty
@@ -4743,10 +4756,14 @@ let rec mcomp type_pairs env t1 t2 =
             with Not_found -> ()
             end
         (* Rigid cases -- neither side is flexible nor aliasable *)
-        | (Tarrow ((l1,_,_), t1, u1, _), Tarrow ((l2,_,_), t2, u2, _), _, _)
+        | (Tarrow ((l1,_,_,binder1), t1, u1, _),
+           Tarrow ((l2,_,_,binder2), t2, u2, _), _, _)
           when compatible_labels ~in_pattern_mode:true l1 l2 ->
             mcomp type_pairs env t1 t2;
-            mcomp type_pairs env u1 u2;
+            begin match align_arrow_codomains binder1 u1 binder2 u2 with
+            | Some (u1, u2) -> mcomp type_pairs env u1 u2
+            | None -> raise Incompatible
+            end;
         | (Trefine r1, Trefine r2, _, _) ->
             (* Only the payloads are compared: returning without raising
                means "possibly compatible", which is always sound, and the
@@ -5480,11 +5497,16 @@ and unify3 uenv t1 t1' t2 t2' =
     end;
     try
       begin match (d1, d2) with
-        (Tarrow ((l1,a1,r1), t1, u1, c1), Tarrow ((l2,a2,r2), t2, u2, c2)) ->
+        (Tarrow ((l1,a1,r1,binder1), t1, u1, c1),
+         Tarrow ((l2,a2,r2,binder2), t2, u2, c2)) ->
           eq_labels Unify ~in_pattern_mode:(in_pattern_mode uenv) l1 l2;
           unify_alloc_mode_for Unify a1 a2;
           unify_alloc_mode_for Unify r1 r2;
-          unify uenv t1 t2; unify uenv u1 u2;
+          unify uenv t1 t2;
+          begin match align_arrow_codomains binder1 u1 binder2 u2 with
+          | Some (u1, u2) -> unify uenv u1 u2
+          | None -> raise_unexplained_for Unify
+          end;
           begin match is_commu_ok c1, is_commu_ok c2 with
           | false, true -> set_commu_ok c1
           | true, false -> set_commu_ok c2
@@ -6091,7 +6113,8 @@ type filtered_arrow =
   { ty_arg : type_expr;
     arg_mode : Mode.Alloc.lr;
     ty_ret : type_expr;
-    ret_mode : Mode.Alloc.lr
+    ret_mode : Mode.Alloc.lr;
+    binder : Ident.t option
   }
 
 let filter_arrow env t l ~force_tpoly =
@@ -6123,9 +6146,10 @@ let filter_arrow env t l ~force_tpoly =
     let arg_mode = Alloc.newvar () in
     let ret_mode = Alloc.newvar () in
     let t' =
-      newty2 ~level (Tarrow ((l, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok))
+      newty2 ~level
+        (Tarrow ((l, arg_mode, ret_mode, None), ty_arg, ty_ret, commu_ok))
     in
-    t', { ty_arg; arg_mode; ty_ret; ret_mode }
+    t', { ty_arg; arg_mode; ty_ret; ret_mode; binder = None }
   in
   let t =
     try expand_head_trace env t
@@ -6151,11 +6175,11 @@ let filter_arrow env t l ~force_tpoly =
       end;
       link_type t t';
       arrow_desc
-  | Tarrow((l', arg_mode, ret_mode), ty_arg, ty_ret, _) ->
+  | Tarrow((l', arg_mode, ret_mode, binder), ty_arg, ty_ret, _) ->
       if l = l' || !Clflags.classic && l = Nolabel &&
         equivalent_with_nolabels l l'
       then
-        { ty_arg; arg_mode; ty_ret; ret_mode }
+        { ty_arg; arg_mode; ty_ret; ret_mode; binder }
       else raise (Filter_arrow_failed
                     (Label_mismatch
                        { got = l; expected = l'; expected_type = t }))
@@ -6784,11 +6808,15 @@ let rec moregen inst_nongen variance type_pairs env t1 t2 =
               instantiating [t2], which we do not wish to do *)
               check_type_jkind_exn env Moregen t2 (Jkind.disallow_left jkind);
               link_type t1' t2
-          | (Tarrow ((l1,a1,r1), t1, u1, _),
-             Tarrow ((l2,a2,r2), t2, u2, _)) ->
+          | (Tarrow ((l1,a1,r1,binder1), t1, u1, _),
+             Tarrow ((l2,a2,r2,binder2), t2, u2, _)) ->
               eq_labels Moregen ~in_pattern_mode:false l1 l2;
               moregen inst_nongen (neg_variance variance) type_pairs env t1 t2;
-              moregen inst_nongen variance type_pairs env u1 u2;
+              begin match align_arrow_codomains binder1 u1 binder2 u2 with
+              | Some (u1, u2) ->
+                  moregen inst_nongen variance type_pairs env u1 u2
+              | None -> raise_unexplained_for Moregen
+              end;
               (* [t2] and [u2] is the user-written interface, which we deem as
                  more "principal" and used for mode crossing. See
                  [typing-modes/crossing.ml]. *)
@@ -7320,11 +7348,16 @@ let rec eqtype rename type_pairs subst env ~do_jkind_check t1 t2 =
           match (get_desc t1', get_desc t2') with
             (Tvar { jkind = k1 }, Tvar { jkind = k2 }) when rename ->
               eqtype_subst env type_pairs subst t1' k1 t2' k2 ~do_jkind_check
-          | (Tarrow ((l1,a1,r1), t1, u1, _),
-             Tarrow ((l2,a2,r2), t2, u2, _)) ->
+          | (Tarrow ((l1,a1,r1,binder1), t1, u1, _),
+             Tarrow ((l2,a2,r2,binder2), t2, u2, _)) ->
               eq_labels Equality ~in_pattern_mode:false l1 l2;
               eqtype rename type_pairs subst env t1 t2 ~do_jkind_check:true;
-              eqtype rename type_pairs subst env u1 u2 ~do_jkind_check:true;
+              begin match align_arrow_codomains binder1 u1 binder2 u2 with
+              | Some (u1, u2) ->
+                  eqtype rename type_pairs subst env u1 u2
+                    ~do_jkind_check:true
+              | None -> raise_unexplained_for Equality
+              end;
               eqtype_alloc_mode a1 a2;
               eqtype_alloc_mode r1 r2
           | (Trefine r1, Trefine r2) ->
@@ -7938,7 +7971,7 @@ let rec build_subtype env (visited : transient_expr list)
   | Trefine _ ->
       (* Subtyping rules for refinements belong to a later piece. *)
       (t, Unchanged)
-  | Tarrow((l,a,r), t1, t2, _) ->
+  | Tarrow((l,a,r,binder), t1, t2, _) ->
       let tt = Transient_expr.repr t in
       if memq_warn tt visited then (t, Unchanged) else
       let visited = tt :: visited in
@@ -7975,7 +8008,7 @@ let rec build_subtype env (visited : transient_expr list)
       in
       let c = max_change c1 (max_change c2 (max_change c3 c4)) in
       if c > Unchanged
-      then (newty (Tarrow((l,a',r'), t1', t2', commu_ok)), c)
+      then (newty (Tarrow((l,a',r',binder), t1', t2', commu_ok)), c)
       else (t, Unchanged)
   | Ttuple labeled_tlist ->
       build_subtype_tuple env visited loops posi level t labeled_tlist
@@ -8214,9 +8247,14 @@ let rec subtype_rec env trace t1 t2 cstrs =
     match (get_desc t1, get_desc t2) with
       (Tvar _, _) | (_, Tvar _) ->
         (trace, t1, t2, !univar_pairs)::cstrs
-    | (Tarrow((l1,a1,r1), t1, u1, _),
-       Tarrow((l2,a2,r2), t2, u2, _))
+    | (Tarrow((l1,a1,r1,binder1), t1, u1, _),
+       Tarrow((l2,a2,r2,binder2), t2, u2, _))
       when compatible_labels ~in_pattern_mode:false l1 l2 ->
+        let u1, u2 =
+          match align_arrow_codomains binder1 u1 binder2 u2 with
+          | Some codomains -> codomains
+          | None -> subtype_error ~env ~trace ~unification_trace:[]
+        in
         let cstrs =
           subtype_rec
             env
@@ -8805,6 +8843,24 @@ let rec nondep_type_rec ?(expand_private=false) env ids ty =
                *)
             with Cannot_expand -> raise exn
           end
+      | Tarrow ((label, arg_mode, ret_mode, binder), arg, ret, commu) ->
+          let arg = nondep_type_rec env ids arg in
+          let binder, ret =
+            match binder with
+            | None -> None, nondep_type_rec env ids ret
+            | Some binder ->
+                let binder' =
+                  Ident.create_scoped ~scope:(Ident.scope binder)
+                    (Ident.name binder)
+                in
+                let ret =
+                  Subst.type_expr
+                    (Subst.add_bound_value binder binder' Subst.identity)
+                    ret
+                in
+                Some binder', nondep_type_rec env ids ret
+          in
+          Tarrow ((label, arg_mode, ret_mode, binder), arg, ret, commu)
       | Trefine
           { ref_structural_scope; ref_binder; ref_payload; ref_pred } -> begin
           let ref_pred = normalize_refinement_predicate env ref_pred in
@@ -8889,6 +8945,55 @@ let nondep_type env id ty =
     clear_hash ();
     raise exn
 
+let refinement_scope_escape_in ids visit_root =
+  let exception Found of Ident.t in
+  let visit_ident id =
+    let visited = TypeHash.create 17 in
+    let ids = Ident.Set.singleton id in
+    let rec visit ty =
+      if not (TypeHash.mem visited ty) then begin
+        TypeHash.add visited ty ();
+        match get_desc ty with
+        | Tarrow ((_, _, _, binder), arg, ret, _) ->
+            visit arg;
+            if not
+                (match binder with
+                 | Some binder -> Ident.same id binder
+                 | None -> false)
+            then visit ret
+        | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+            visit ref_payload;
+            if not (Ident.same id ref_binder) then begin
+              Option.iter (fun id -> raise (Found id))
+                (Refinement_predicate.find_ident ids ref_pred);
+              ignore
+                (Refinement_predicate.fold_types
+                   (fun () ty -> visit ty) () ref_pred
+                 : unit)
+            end
+        | _ -> iter_type_expr visit ty
+      end
+    in
+    visit_root visit
+  in
+  match Ident.Set.iter visit_ident ids with
+  | () -> None
+  | exception Found id -> Some id
+
+let refinement_ident_occurs id ty =
+  Option.is_some
+    (refinement_scope_escape_in
+       (Ident.Set.singleton id) (fun visit -> visit ty))
+
+let substitute_refinement_ident id replacement ty =
+  Subst.type_expr
+    (Subst.add_bound_value id replacement Subst.identity)
+    ty
+
+let apply_dependent_type binder argument ty =
+  Subst.type_expr
+    (Subst.add_value binder (Path.Pident argument) Subst.identity)
+    ty
 
 let () = nondep_type' := nondep_type
 

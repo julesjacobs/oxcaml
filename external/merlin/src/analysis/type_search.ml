@@ -52,10 +52,10 @@ let sherlodoc_type_of _env typ =
 let make_constructible path desc =
   let holes =
     match Types.get_desc desc with
-    | Types.Tarrow ((l, _, _), _, b, _) ->
+    | Types.Tarrow ((l, _, _, _), _, b, _) ->
       let rec aux acc t =
         match Types.get_desc t with
-        | Types.Tarrow ((l, _, _), _, b, _) -> aux (acc ^ with_label l) b
+        | Types.Tarrow ((l, _, _, _), _, b, _) -> aux (acc ^ with_label l) b
         | _ -> acc
       and with_label l =
         match l with

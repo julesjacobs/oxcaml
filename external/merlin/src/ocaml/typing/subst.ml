@@ -78,6 +78,9 @@ type s =
        ([Rexp_ident]); this map is what keeps them meaningful across
        signature prefixing and binder renaming. *)
 
+    bound_values: Ident.t Ident.Map.t;
+    (* Term identifiers bound by type formers. *)
+
     additional_action: additional_action;
     sort_var_mapping: sort_map;
 
@@ -122,6 +125,7 @@ let identity =
     modtypes = Path.Map.empty;
     jkinds = Path.Map.empty;
     values = Path.Map.empty;
+    bound_values = Ident.Map.empty;
     additional_action = No_action;
     sort_var_mapping = Nothing;
     loc = None;
@@ -168,6 +172,13 @@ let add_module id p s =
 
 let add_value id p s =
   { s with values = Path.Map.add (Pident id) p s.values; last_compose = None }
+
+let add_bound_value id id' s =
+  { s with
+    bound_values = Ident.Map.add id id' s.bound_values;
+    values = Path.Map.add (Pident id) (Pident id') s.values;
+    last_compose = None
+  }
 
 let add_modtype_gen p ty s =
   { s with modtypes = Path.Map.add p ty s.modtypes; last_compose = None }
@@ -783,7 +794,7 @@ let rec typexp copy_scope s ty =
           end
       | Tfield(_label, kind, _t1, t2) when field_kind_repr kind = Fabsent ->
           Tlink (typexp copy_scope s t2)
-      | Tarrow ((label, marg, mret), arg, ret, comm) ->
+      | Tarrow ((label, marg, mret, binder), arg, ret, comm) ->
           let marg, mret =
             match s.additional_action with
             | Prepare_for_saving { prepare_mode; _ } ->
@@ -791,21 +802,43 @@ let rec typexp copy_scope s ty =
             | _ -> marg, mret
           in
           let arg = typexp copy_scope s arg in
-          let ret = typexp copy_scope s ret in
+          let binder, ret =
+            match binder with
+            | None -> None, typexp copy_scope s ret
+            | Some binder ->
+                let binder' = rename_bound_ident s binder in
+                let ret =
+                  typexp copy_scope (add_bound_value binder binder' s) ret
+                in
+                Some binder', ret
+          in
           let comm = copy_commu comm in
-          Tarrow ((label, marg, mret), arg, ret, comm)
+          Tarrow ((label, marg, mret, binder), arg, ret, comm)
       | Trefine
           { ref_structural_scope; ref_binder; ref_payload; ref_pred } ->
           let ref_payload = typexp copy_scope s ref_payload in
           let ref_binder' = rename_bound_ident s ref_binder in
-          let rename = Ident.Map.singleton ref_binder ref_binder' in
+          (* Retained types and predicate nodes must share the same fresh
+             identities, including binders introduced inside the predicate. *)
+          let s =
+            Ident.Set.fold
+              (fun id s -> add_bound_value id (rename_bound_ident s id) s)
+              (Refinement_predicate.bound_idents ref_pred)
+              (add_bound_value ref_binder ref_binder' s)
+          in
           Trefine
             { ref_structural_scope;
               ref_binder = ref_binder';
               ref_payload;
               ref_pred =
-                Refinement_predicate.map ~rename
-                  ~rename_bound:(rename_bound_ident s)
+                Refinement_predicate.map ~rename:s.bound_values
+                  ~rename_bound:(fun id -> Ident.Map.find id s.bound_values)
+                  ~bind_value:(fun path ->
+                    match path with
+                    | Pident id -> Ident.Map.find_opt id s.bound_values
+                    | _ -> None)
+                  ~unbind_value:(fun id ->
+                    Path.Map.find_opt (Pident id) s.values)
                   ~value_path:(value_path s)
                   ~constructor_path:(constructor_path s)
                   ~type_path:(type_path s)
@@ -1401,6 +1434,16 @@ and compose s1 s2 =
           modtypes = merge_path_maps (modtype Keep s2) s1.modtypes s2.modtypes;
           jkinds = merge_path_maps (jkind_replacement s2) s1.jkinds s2.jkinds;
           values = merge_path_maps (value_path s2) s1.values s2.values;
+          bound_values =
+            Ident.Map.fold
+              (fun id id' bound_values ->
+                 let id' =
+                   match Ident.Map.find_opt id' s2.bound_values with
+                   | Some id'' -> id''
+                   | None -> id'
+                 in
+                 Ident.Map.add id id' bound_values)
+              s1.bound_values s2.bound_values;
           additional_action = begin
             match s1.additional_action, s2.additional_action with
             | action, No_action | No_action, action -> action

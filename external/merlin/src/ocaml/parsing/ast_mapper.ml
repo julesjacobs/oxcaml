@@ -182,8 +182,10 @@ module T = struct
     | Ptyp_var (s, jkind) ->
         let jkind = map_opt (sub.jkind_annotation sub) jkind in
         var ~loc ~attrs s jkind
-    | Ptyp_arrow (lab, t1, t2, m1, m2) ->
-        arrow ~loc ~attrs lab (sub.typ sub t1) (sub.typ sub t2) (sub.modes sub m1) (sub.modes sub m2)
+    | Ptyp_arrow (lab, t1, t2, m1, m2, binder) ->
+        let binder = map_opt (map_loc sub) binder in
+        arrow ~loc ~attrs ?binder lab (sub.typ sub t1) (sub.typ sub t2)
+          (sub.modes sub m1) (sub.modes sub m2)
     | Ptyp_tuple tyl ->
         tuple ~loc ~attrs (List.map (fun (l, t) -> l, sub.typ sub t) tyl)
     | Ptyp_unboxed_tuple tyl ->

@@ -539,7 +539,7 @@ module MenhirInterpreter : sig
     | N_mk_longident_mod_ext_longident_type_trailing_no_hash_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_type_trailing_hash_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_ident_ : (Longident.t) nonterminal
-    | N_mk_longident_mod_ext_longident___anonymous_52_ : (Longident.t) nonterminal
+    | N_mk_longident_mod_ext_longident___anonymous_57_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_UIDENT_ : (Longident.t) nonterminal
     | N_mk_longident_mod_ext_longident_LIDENT_ : (Longident.t) nonterminal
     | N_method_ : ((string Location.loc * Asttypes.private_flag * Parsetree.class_field_kind) *
