@@ -45,6 +45,7 @@ legacy-mode defaults.
 | Persistent environments | `environments.ml` | Binding shadows its comparator class and preserves observations in a distinct class; retaining the outer environment restores scope. |
 | Standard-set model | `avl_stdlib_set.ml` | Pointwise refinement relates the verified AVL implementation to `Set.MakeTotal`, with comparator compatibility explicit. |
 | Sparse immutable arrays | `sparse_iarrays.ml` | A polymorphic `Map.MakeTotal` overlay proves read-after-write, overwrite, removal fallback, and safe base-array reads. |
+| Regex matching | `regex.ml` | Derivative matching is sound and complete for an independent membership-derivation spec, including nullable and nested stars. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -117,3 +118,22 @@ Sparse-array removal and commutation are refined-unit lemmas about the actual
 and restoration of base values from these contracts. The examples check bounds
 and comparator-class distinction at runtime. The generic `get` operation also
 preserves writable access to mutable elements.
+
+`regex.ml` specifies membership by finite derivations: `Membership.valid r p`
+checks the regex rules, and `Membership.word p` gives the derived word. Thus
+membership of `s` in `r` means that some `p` is valid for `r` and has word `s`.
+The spec contains no derivatives and permits empty repetitions in star.
+
+The checked `sound` theorem constructs such a derivation whenever `matches`
+returns true. The checked `complete` theorem proves acceptance for every valid
+derivation, so rejection also excludes every derivation. Their derivative
+lemmas construct derivations in both directions; contraction skips empty star
+repetitions by structural recursion on the derivation.
+
+`matches` runs the Boolean derivative algorithm without proof calls.
+`recognize` additionally constructs a checked membership derivation on success.
+The demo uses integer symbols and unsimplified regexes; it makes no complexity
+claim. Executable checks compare all 3,244 regexes of depth at most two over
+symbols 0 and 1 against an independent split-based matcher on all 15 words of
+length at most three. Rejection fixtures exercise the soundness and
+completeness contracts.
