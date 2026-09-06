@@ -239,8 +239,8 @@ let total_congruence (p : point) (q : {q : point | q === p})
 module Stable : sig val id : 'a -> 'a end
 val total_congruence :
   (p : point) ->
-  (q : {q : point | q === p}) ->
-  {u : unit | let refine_ q = q in (Stable.id q) === (Stable.id p)} = <fun>
+  (q' : {q : point | q === p}) ->
+  {u : unit | let refine_ q = q' in (Stable.id q) === (Stable.id p)} = <fun>
 |}]
 
 type ordinary = Ordinary_stop | Ordinary_more of ordinary

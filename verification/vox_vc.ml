@@ -42,7 +42,8 @@ let join_value condition a b =
            { label = "choice";
              instances = ref [];
              choice = Some (condition, a, b);
-             primitive = (if a.primitive = b.primitive then a.primitive else None);
+             primitive =
+               (if a.primitive = b.primitive then a.primitive else None);
              total = a.total && b.total
            })
     | _ -> None
@@ -88,7 +89,8 @@ type context =
     symbolic : value option Symbolic_keys.t;
     prove : Location.t -> query -> unit;
     verify_introductions : bool;
-    mutable check_call : context -> state -> expression -> value option list -> unit
+    mutable check_call :
+      context -> state -> expression -> value option list -> unit
   }
 
 let empty =
@@ -138,6 +140,7 @@ let at_mode mode = function
 let fresh_symbol sort label = Var (Symbol.create ~label sort)
 
 let name s = function
+  | Some (Scalar (Construct (_, []))) as value -> s, value
   | Some (Scalar ((App _ | Call _ | Construct _ | Is _ | Select _) as term)) ->
     let s =
       match term with
@@ -213,11 +216,17 @@ let short_circuit eval loc ~is_and s a b =
 let disjunction terms = List.fold_left (both Or) (Boolean false) terms
 
 let merge_patterns base outcomes =
-  let values = List.fold_right (fun (s, condition) values ->
-    Path.Map.merge (fun _ left right -> match left, right with
-      | None, value | value, None -> value
-      | Some a, Some b -> Some (join_value condition a b)) s.values values)
-    outcomes Path.Map.empty in
+  let values =
+    List.fold_right
+      (fun (s, condition) values ->
+        Path.Map.merge
+          (fun _ left right ->
+            match left, right with
+            | None, value | value, None -> value
+            | Some a, Some b -> Some (join_value condition a b))
+          s.values values)
+      outcomes Path.Map.empty
+  in
   { base with values }, disjunction (List.map snd outcomes)
 
 let guarded_case eval loc s matched guard body rest =
@@ -330,12 +339,20 @@ let rec erase_assertions code =
 
 let fresh ?primitive ctx env ty label =
   match sort ctx.encoding env ty with
-  | Some sort -> register_sort ctx sort; scalar_value (fresh_symbol sort label)
+  | Some sort ->
+    register_sort ctx sort;
+    scalar_value (fresh_symbol sort label)
   | None -> (
     match get_desc (Ctype.expand_head env ty) with
     | Tarrow _ ->
       Some
-        (Function { label; instances = ref []; choice = None; primitive; total = false })
+        (Function
+           { label;
+             instances = ref [];
+             choice = None;
+             primitive;
+             total = false
+           })
     | _ -> None)
 
 let symbolic_path ctx env ty path =
@@ -394,7 +411,9 @@ let lookup ctx s env ty path =
         value))
 
 let operation ctx env function_type result_type name args =
-  scalar_option (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name (List.map scalar args))
+  scalar_option
+    (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
+       (List.map scalar args))
 
 let rec function_call ctx env ty fn args =
   match fn with
@@ -402,30 +421,30 @@ let rec function_call ctx env ty fn args =
     join_value condition
       (function_call ctx env ty (Some (Function a)) args)
       (function_call ctx env ty (Some (Function b)) args)
-  | _ ->
-  match fn, signature ctx.encoding env ty (List.length args) with
-  | Some (Function fn), Some (arguments, result) ->
-    List.iter (register_sort ctx) (result :: arguments);
-    begin match Misc.Stdlib.List.map_option scalar args with
-    | Some args when List.map term_sort args = arguments ->
-      let f =
-        match
-          List.find_opt
-            (fun f ->
-              Function.arguments f = arguments && Function.result f = result)
-            !(fn.instances)
-        with
-        | Some f -> f
-        | None ->
-          let f = Function.create ~label:fn.label ~arguments ~result in
-          fn.instances := f :: !(fn.instances);
-          ctx.functions <- f :: ctx.functions;
-          f
-      in
-      scalar_value (Call (f, args))
-    | Some _ | None -> None
-    end
-  | _ -> None
+  | _ -> (
+    match fn, signature ctx.encoding env ty (List.length args) with
+    | Some (Function fn), Some (arguments, result) ->
+      List.iter (register_sort ctx) (result :: arguments);
+      begin match Misc.Stdlib.List.map_option scalar args with
+      | Some args when List.map term_sort args = arguments ->
+        let f =
+          match
+            List.find_opt
+              (fun f ->
+                Function.arguments f = arguments && Function.result f = result)
+              !(fn.instances)
+          with
+          | Some f -> f
+          | None ->
+            let f = Function.create ~label:fn.label ~arguments ~result in
+            fn.instances := f :: !(fn.instances);
+            ctx.functions <- f :: ctx.functions;
+            f
+        in
+        scalar_value (Call (f, args))
+      | Some _ | None -> None
+      end
+    | _ -> None)
 
 let apply_function ctx env fn_type result_type prim fn args ~total =
   let value =
@@ -503,24 +522,42 @@ let rec predicate ctx env s e =
       end
     | Rexp_constant c -> s, scalar_value (required e.rexp_loc (rconstant c))
     | Rexp_tuple components ->
-      let s, values = arguments_right_to_left (fun s (_, e) -> eval s e) s components in
-      name s (scalar_value (required e.rexp_loc (construct ctx env e.rexp_type "" values)))
+      let s, values =
+        arguments_right_to_left (fun s (_, e) -> eval s e) s components
+      in
+      name s
+        (scalar_value
+           (required e.rexp_loc (construct ctx env e.rexp_type "" values)))
     | Rexp_construct (path, args) ->
       let s, values = arguments_right_to_left eval s args in
-      let value = match values with
+      let value =
+        match values with
         | [] -> rconstructor ctx env e.rexp_type path
-        | _ -> (match path_constructor_name path with
+        | _ -> (
+          match path_constructor_name path with
           | Some name -> construct ctx env e.rexp_type name values
-          | None -> None) in
+          | None -> None)
+      in
       name s (scalar_value (required e.rexp_loc value))
     | Rexp_record (fields, extended) ->
-      let s, base = match extended with None -> s, None | Some e -> eval s e in
-      let s, values = arguments_right_to_left (fun s (_, _, e) -> eval s e) s fields in
-      let fields = List.map2 (fun (_, name, _) value -> name, value) fields values in
-      name s (scalar_value (required e.rexp_loc (record_value ctx env e.rexp_type base fields)))
+      let s, base =
+        match extended with None -> s, None | Some e -> eval s e
+      in
+      let s, values =
+        arguments_right_to_left (fun s (_, _, e) -> eval s e) s fields
+      in
+      let fields =
+        List.map2 (fun (_, name, _) value -> name, value) fields values
+      in
+      name s
+        (scalar_value
+           (required e.rexp_loc (record_value ctx env e.rexp_type base fields)))
     | Rexp_field (record_exp, _, field_name) ->
       let s, record = eval s record_exp in
-      name s (scalar_value (required e.rexp_loc (select_field ctx env record_exp.rexp_type field_name record)))
+      name s
+        (scalar_value
+           (required e.rexp_loc
+              (select_field ctx env record_exp.rexp_type field_name record)))
     | Rexp_apply (fn, args) ->
       let prim =
         match fn.rexp_desc with
@@ -885,28 +922,54 @@ and expression_desc ctx s e =
     s, value
   | Texp_constant c -> s, constant c
   | Texp_tuple (components, _) ->
-    let s, values = arguments_right_to_left (fun s (_, e) -> eval s e) s components in
-    name s (opaque_if_unsupported (construct ctx e.exp_env e.exp_type "" values))
+    let s, values =
+      arguments_right_to_left (fun s (_, e) -> eval s e) s components
+    in
+    name s
+      (opaque_if_unsupported (construct ctx e.exp_env e.exp_type "" values))
   | Texp_construct (_, c, _, args, _) ->
     let s, values = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
-    let value = match values with
+    let value =
+      match values with
       | [] -> expression_constructor ctx e.exp_env e.exp_type c
-      | _ -> construct ctx e.exp_env e.exp_type c.cstr_name values in
+      | _ -> construct ctx e.exp_env e.exp_type c.cstr_name values
+    in
     name s (opaque_if_unsupported value)
   | Texp_record { fields; extended_expression; _ } ->
-    let s, base = match extended_expression with None -> s, None | Some (e, _, _) -> eval s e in
+    let s, base =
+      match extended_expression with
+      | None -> s, None
+      | Some (e, _, _) -> eval s e
+    in
     let fields = Array.to_list fields in
-    let s, values = arguments_right_to_left (fun s (_, _, field) ->
-      match field with Kept _ -> s, None | Overridden (_, e) -> eval s e) s fields in
-    let fields = List.filter_map Fun.id (List.map2 (fun (label, _, field) value ->
-      match field with Kept _ -> None | Overridden _ -> Some (label.Data_types.lbl_name, value)) fields values) in
-    name s (opaque_if_unsupported (record_value ctx e.exp_env e.exp_type base fields))
+    let s, values =
+      arguments_right_to_left
+        (fun s (_, _, field) ->
+          match field with Kept _ -> s, None | Overridden (_, e) -> eval s e)
+        s fields
+    in
+    let fields =
+      List.filter_map Fun.id
+        (List.map2
+           (fun (label, _, field) value ->
+             match field with
+             | Kept _ -> None
+             | Overridden _ -> Some (label.Data_types.lbl_name, value))
+           fields values)
+    in
+    name s
+      (opaque_if_unsupported
+         (record_value ctx e.exp_env e.exp_type base fields))
   | Texp_field { record; label; _ } ->
     let s, value = eval s record in
-    name s (opaque_if_unsupported (select_field ctx e.exp_env record.exp_type label.Data_types.lbl_name value))
+    name s
+      (opaque_if_unsupported
+         (select_field ctx e.exp_env record.exp_type label.Data_types.lbl_name
+            value))
   | Texp_open ({ open_expr = { mod_desc = Tmod_ident _; _ }; _ }, body) ->
     eval s body
-  | Texp_letmodule (Some id, _, _, m, body) when Option.is_some (module_structure m) ->
+  | Texp_letmodule (Some id, _, _, m, body)
+    when Option.is_some (module_structure m) ->
     let str = Option.get (module_structure m) in
     let s, _ = structure ctx s str in
     eval (export_module ctx id str s) body
@@ -987,7 +1050,9 @@ and expression_desc ctx s e =
           let value =
             fresh ctx pat.pat_env pat.pat_type (Ident.name p.fp_param)
           in
-          let s, condition = merge_patterns s (pattern ctx (bind s p.fp_param value) value pat) in
+          let s, condition =
+            merge_patterns s (pattern ctx (bind s p.fp_param value) value pat)
+          in
           branch s condition)
         s params
     in
@@ -1021,14 +1086,23 @@ and value_bindings ctx s rec_flag bindings eliminate =
     match rec_flag with
     | Asttypes.Nonrecursive -> s
     | Asttypes.Recursive ->
-      List.iter (fun vb -> match vb.vb_expr.exp_desc with
-        | Texp_function _ -> ()
-        | _ -> Location.raise_errorf ~loc:vb.vb_expr.exp_loc
-          "Refinement verification does not support recursive value initialization") bindings;
-      List.fold_left (fun s vb ->
-        let value = fresh ctx vb.vb_pat.pat_env vb.vb_pat.pat_type "recursive" in
-        let s, condition = merge_patterns s (pattern ctx s value vb.vb_pat) in
-        branch s condition) s bindings
+      List.iter
+        (fun vb ->
+          match vb.vb_expr.exp_desc with
+          | Texp_function _ -> ()
+          | _ ->
+            Location.raise_errorf ~loc:vb.vb_expr.exp_loc
+              "Refinement verification does not support recursive value \
+               initialization")
+        bindings;
+      List.fold_left
+        (fun s vb ->
+          let value =
+            fresh ctx vb.vb_pat.pat_env vb.vb_pat.pat_type "recursive"
+          in
+          let s, condition = merge_patterns s (pattern ctx s value vb.vb_pat) in
+          branch s condition)
+        s bindings
   in
   let rec loop s = function
     | [] -> s, None
@@ -1148,13 +1222,15 @@ let query ctx code =
     | Var s when not (Hashtbl.mem seen s) ->
       Hashtbl.add seen s ();
       symbols := s :: !symbols
-    | App (_, args) | Call (_, args) | Construct (_, args) -> List.iter visit args
+    | App (_, args) | Call (_, args) | Construct (_, args) ->
+      List.iter visit args
     | Is (_, arg) | Select (_, _, arg) -> visit arg
     | _ -> ()
   in
   List.iter (fun f -> visit f.term) facts;
   visit goal.term;
-  ( { datatypes = List.rev ctx.datatypes; symbols = List.rev !symbols;
+  ( { datatypes = List.rev ctx.datatypes;
+      symbols = List.rev !symbols;
       functions = List.rev ctx.functions;
       facts;
       goal
@@ -1183,8 +1259,16 @@ let verify_batch ctx prove code =
         goals)
 
 let context ~prove ~verify_introductions =
-  { encoding = Vox_encoding.create_context (); datatypes = []; functions = []; free = Path.Map.empty; batches = []; symbolic = Symbolic_keys.create 16; prove;
-    verify_introductions; check_call = (fun _ _ _ _ -> ()) }
+  { encoding = Vox_encoding.create_context ();
+    datatypes = [];
+    functions = [];
+    free = Path.Map.empty;
+    batches = [];
+    symbolic = Symbolic_keys.create 16;
+    prove;
+    verify_introductions;
+    check_call = (fun _ _ _ _ -> ())
+  }
 
 let generate ~prove str =
   let exception Has_obligation in
@@ -1277,22 +1361,40 @@ let check_termination ~prove ~self ~fn ~measure =
       empty params
   in
   let entry, entry_measure = expression ctx entry measure in
-  if not entry.dead then begin
+  if not entry.dead
+  then begin
     let entry_measure = required measure.exp_loc entry_measure in
     let check_call ctx s call args =
       match call.exp_desc with
-      | Texp_apply ({ exp_desc = Texp_ident { path = Path.Pident id; _ }; _ }, _, _, _, _, _)
+      | Texp_apply
+          ( { exp_desc = Texp_ident { path = Path.Pident id; _ }; _ },
+            _,
+            _,
+            _,
+            _,
+            _ )
         when Ident.same self id ->
-        let call_state = List.fold_left2 (fun s (id, _) value -> bind s id value) s params args in
+        let call_state =
+          List.fold_left2 (fun s (id, _) value -> bind s id value) s params args
+        in
         let checked, value = expression ctx call_state measure in
-        if not checked.dead then
-          verify_batch ctx prove (Assert { loc = call.exp_loc;
-            goal = (let value = required measure.exp_loc value in
-              match term_sort entry_measure with
-              | Int63 -> both Lt value entry_measure
-              | Int -> both And (both Int_ge value (Big_integer "0")) (both Int_lt value entry_measure)
-              | Bool | Opaque _ | Datatype _ -> reject measure);
-            omitted_premises = checked.omitted_premises } :: checked.code)
+        if not checked.dead
+        then
+          verify_batch ctx prove
+            (Assert
+               { loc = call.exp_loc;
+                 goal =
+                   (let value = required measure.exp_loc value in
+                    match term_sort entry_measure with
+                    | Int63 -> both Lt value entry_measure
+                    | Int ->
+                      both And
+                        (both Int_ge value (Big_integer "0"))
+                        (both Int_lt value entry_measure)
+                    | Bool | Opaque _ | Datatype _ -> reject measure);
+                 omitted_premises = checked.omitted_premises
+               }
+            :: checked.code)
       | _ -> ()
     in
     ctx.check_call <- check_call;
