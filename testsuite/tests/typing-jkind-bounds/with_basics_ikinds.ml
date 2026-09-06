@@ -631,7 +631,7 @@ Line 2, characters 0-40:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data,
-       because 'a is not mod forkable unyielding many stateless immutable.
+       because 'a is not mod forkable unyielding many total immutable.
 |}]
 
 (* A residual for a type-constructor occurrence covers only the
@@ -1379,7 +1379,7 @@ Line 2, characters 0-53:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data,
-       because 'a is not mod forkable unyielding many stateless immutable.
+       because 'a is not mod forkable unyielding many total immutable.
 |}]
 
 (**********************************)

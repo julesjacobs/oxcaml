@@ -4994,6 +4994,7 @@ and mcomp_record_description type_pairs env =
         mcomp type_pairs env l1.ld_type l2.ld_type;
         if Ident.name l1.ld_id = Ident.name l2.ld_id &&
            l1.ld_mutable = l2.ld_mutable &&
+           l1.ld_ghost = l2.ld_ghost &&
            l1.ld_modalities = l2.ld_modalities
         then iter xs ys
         else raise Incompatible
@@ -6655,6 +6656,7 @@ let mode_crossing_structure_memaddr =
     ~totality:true
     ~statefulness:true
     ~staticity:false
+    ~ghostliness:false
 
 (** The mode crossing of a functor. *)
 let mode_crossing_functor =
@@ -6670,6 +6672,7 @@ let mode_crossing_functor =
     ~totality:false
     ~statefulness:false
     ~staticity:false
+    ~ghostliness:false
 
 (** The mode crossing of any module. *)
 let mode_crossing_module = Mode.Crossing.max

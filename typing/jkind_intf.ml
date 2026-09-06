@@ -467,7 +467,9 @@ module History = struct
   type scannable_creation_reason = Dummy_jkind
 
   (* CR layouts v5: make new void_creation_reasons *)
-  type void_creation_reason = |
+  type void_creation_reason = Ghost_record
+  (* A record all of whose fields are ghost: nothing exists at run
+           time, so the record itself is void. *)
 
   type any_creation_reason =
     | Missing_cmi of Path.t

@@ -127,7 +127,7 @@ Line 2, characters 0-53:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data with 'a,
-       because 'b is not mod forkable unyielding many stateless immutable.
+       because 'b is not mod forkable unyielding many total immutable.
 |}]
 
 type ('a, 'b) t : immutable_data with 'a with 'b

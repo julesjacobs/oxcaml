@@ -107,6 +107,8 @@ module Mode_axis_pair = struct
     | "read_write" -> monadic Visibility Read_write
     | "static" -> monadic Staticity Static
     | "dynamic" -> monadic Staticity Dynamic
+    | "real" -> comonadic Ghostliness Real
+    | "ghost" -> comonadic Ghostliness Ghost
     | _ -> raise Not_found
 end
 
@@ -117,6 +119,7 @@ module Modality_axis_pair = struct
     match[@warning "-18"]
       Mode_axis_pair.to_value (Mode_axis_pair.of_string s)
     with
+    | Atom (Comonadic Ghostliness, _) -> raise Not_found
     | Atom (Monadic ax, mode) -> Atom (Monadic ax, Join_const mode)
     | Atom (Comonadic ax, mode) -> Atom (Comonadic ax, Meet_const mode)
 end
@@ -303,6 +306,8 @@ let mode_annot_to_modality_annot mode_annot =
 
 let transl_modality ~maturity { txt = Parsetree.Modality modality; loc } =
   Language_extension.assert_enabled ~loc Mode maturity;
+  if String.equal modality "ghost" || String.equal modality "real"
+  then raise (Error (loc, Unrecognized_modifier (Modality, modality)));
   let mode =
     try Mode_axis_pair.(of_string modality)
     with Not_found ->
@@ -579,6 +584,10 @@ let everything_modality =
   List.fold_left
     (fun acc -> function
       | Value.Axis.P (Monadic Staticity) -> acc
+      | Value.Axis.P (Comonadic Ghostliness) ->
+        (* Types never cross ghostliness: a ghost value's content may be a
+           fabricated placeholder, so it can never be used as real. *)
+        acc
       | Value.Axis.P (Comonadic axis) -> (
         match Per_axis.min (Modal (Comonadic axis)) with
         | Modality value -> Modality.Const.set (Comonadic axis) value acc)

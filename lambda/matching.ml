@@ -2590,6 +2590,20 @@ let get_expr_args_record ~scopes head { arg; mut; sort; layout; _ } rem =
       let lbl = all_labels.(pos) in
       let ptr, _ = Typeopt.maybe_pointer_type head.pat_env lbl.lbl_arg in
       let lbl_sort =
+        if lbl.lbl_ghost then
+          (* A ghost field has no slot ([lbl_sort] is Void); the pattern
+             is matched against a fabricated placeholder at the sort of the
+             field's type. *)
+          let field_type =
+            Ctype.apply head.pat_env [lbl.lbl_res] lbl.lbl_arg [head.pat_type]
+          in
+          match
+            Ctype.type_sort ~why:Match ~fixed:false head.pat_env field_type
+          with
+          | Ok s -> Jkind.Sort.default_for_transl_and_get s
+          | Error _ ->
+              fatal_error "get_expr_args_record: unrepresentable ghost field"
+        else
         finalized_label_sort lbl lbl_repres ~record_sort:sort ~variable_sorts
       in
       let lbl_layout = Typeopt.layout_of_sort lbl.lbl_loc lbl_sort in
@@ -2599,6 +2613,9 @@ let get_expr_args_record ~scopes head { arg; mut; sort; layout; _ } rem =
       let ubr = Translmode.transl_unique_barrier head.pat_unique_barrier in
       let sem = add_barrier_to_read ubr sem in
       let access, sort, layout =
+        if lbl.lbl_ghost then
+          Lambda.placeholder_of_layout loc lbl_layout, lbl_sort, lbl_layout
+        else
         match lbl_repres with
         | Record_boxed
         | Record_inlined (_, Constructor_uniform_value, Variant_boxed _) ->

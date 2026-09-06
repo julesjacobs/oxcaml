@@ -569,6 +569,22 @@ module type S = sig
     val is_stateless : (allowed * 'r) t -> bool
   end
 
+  module Ghostliness : sig
+    module Const : sig
+      type t =
+        | Real
+        | Ghost
+
+      include Const with type t := t
+    end
+
+    include Common_axis_pos with module Const := Const
+
+    val real : lr
+
+    val ghost : lr
+  end
+
   module Visibility : sig
     module Const : sig
       type t =
@@ -607,7 +623,8 @@ module type S = sig
       forkable : Forkable.Const.t;
       yielding : Yielding.Const.t;
       totality : Totality.Const.t;
-      statefulness : Statefulness.Const.t
+      statefulness : Statefulness.Const.t;
+      ghostliness : Ghostliness.Const.t
     }
 
   type monadic =
@@ -630,6 +647,7 @@ module type S = sig
       | Totality : ('areality comonadic_with, Totality.Const.t) t
       | Statefulness : ('areality comonadic_with, Statefulness.Const.t) t
       | Portability : ('areality comonadic_with, Portability.Const.t) t
+      | Ghostliness : ('areality comonadic_with, Ghostliness.Const.t) t
       | Uniqueness : (monadic, Uniqueness.Const.t) t
       | Visibility : (monadic, Visibility.Const.t) t
       | Contention : (monadic, Contention.Const.t) t
@@ -693,7 +711,7 @@ module type S = sig
       include Axis with type 'a t := 'a t
     end
 
-    type ('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j, 'k) modes =
+    type ('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j, 'k, 'l) modes =
       { areality : 'a;
         linearity : 'b;
         uniqueness : 'c;
@@ -704,7 +722,8 @@ module type S = sig
         totality : 'h;
         statefulness : 'i;
         visibility : 'j;
-        staticity : 'k
+        staticity : 'k;
+        ghostliness : 'l
       }
 
     module Const : sig
@@ -721,7 +740,8 @@ module type S = sig
               Totality.Const.t,
               Statefulness.Const.t,
               Visibility.Const.t,
-              Staticity.Const.t )
+              Staticity.Const.t,
+              Ghostliness.Const.t )
             modes
 
       module Option : sig
@@ -738,7 +758,8 @@ module type S = sig
             Totality.Const.t option,
             Statefulness.Const.t option,
             Visibility.Const.t option,
-            Staticity.Const.t option )
+            Staticity.Const.t option,
+            Ghostliness.Const.t option )
           modes
 
         val none : t
@@ -1174,6 +1195,7 @@ module type S = sig
         yielding:Yielding.Const.t Atom.t ->
         totality:Totality.Const.t Atom.t ->
         statefulness:Statefulness.Const.t Atom.t ->
+        ghostliness:Ghostliness.Const.t Atom.t ->
         t
 
       (** Create the mode crossing for a type whose values are always
@@ -1219,6 +1241,7 @@ module type S = sig
       statefulness:bool ->
       visibility:bool ->
       staticity:bool ->
+      ghostliness:bool ->
       t
 
     (** Project a mode crossing (of all axes) onto the specified axis. *)
