@@ -74,9 +74,8 @@ Error: The def attribute requires a single nonrecursive function binding
 
 let[@def] polymorphic x = x;;
 [%%expect{|
-val polymorphic : 'a @ immutable -> 'a @ immutable = <fun>
-val polymorphic_def :
-  (x : 'a) @ immutable -> {u : unit | (polymorphic x) === x} = <fun>
+val polymorphic : 'a -> 'a = <fun>
+val polymorphic_def : (x : 'a) -> {u : unit | (polymorphic x) === x} = <fun>
 |}]
 
 let instantiate_int (x : int) =
@@ -114,6 +113,36 @@ val alias_identity_def : (x : int) -> {u : unit | (alias_identity x) === x} =
   <fun>
 |}]
 
+module Observer = struct
+  type cell = {mutable contents : int}
+  type 'a wrapper = {value : 'a}
+  let[@def] get (wrapper : 'a wrapper) : 'a = wrapper.value
+  let write wrapper = (get wrapper).contents <- 1
+end;;
+[%%expect{|
+module Observer :
+  sig
+    type cell = { mutable contents : int; }
+    type 'a wrapper = { value : 'a; }
+    val get : 'a wrapper -> 'a
+    val get_def :
+      (wrapper : 'a wrapper) ->
+      {u : unit | (get wrapper) === (wrapper.value : _)}
+    val write : cell wrapper -> unit
+  end
+|}]
+
+let[@def] read_cell (cell : Observer.cell @ total) = cell.contents;;
+[%%expect{|
+Line 1, characters 53-57:
+1 | let[@def] read_cell (cell : Observer.cell @ total) = cell.contents;;
+                                                         ^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at line 1, characters 20-66
+         which is expected to be "total".
+|}]
+
 let[@def] dependent : (x : int) -> { y : int | y = x } =
   fun x -> refine_ x;;
 [%%expect{|
@@ -123,19 +152,17 @@ val dependent_def : (x : int) -> {u : unit | (dependent x) === x} = <fun>
 
 let[@def] apply (f @ total) x = f x;;
 [%%expect{|
-val apply : ('a @ immutable -> 'b) @ total -> 'a @ immutable -> 'b = <fun>
+val apply : ('a -> 'b) @ total -> 'a -> 'b = <fun>
 val apply_def :
-  (f : ('a @ immutable -> 'b)) ->
-  (x : 'a) @ immutable -> {u : unit | (apply f x) === (f x)} = <fun>
+  (f : ('a -> 'b)) -> (x : 'a) -> {u : unit | (apply f x) === (f x)} = <fun>
 |}]
 
 type 'a box = Box of 'a
 let[@def] box x = Box x;;
 [%%expect{|
 type 'a box = Box of 'a
-val box : 'a @ immutable -> 'a box @ immutable = <fun>
-val box_def : (x : 'a) @ immutable -> {u : unit | (box x) === (Box x)} =
-  <fun>
+val box : 'a -> 'a box = <fun>
+val box_def : (x : 'a) -> {u : unit | (box x) === (Box x)} = <fun>
 |}]
 
 let[@def] labelled ~x = x + 1;;
