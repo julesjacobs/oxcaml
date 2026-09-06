@@ -23,6 +23,7 @@ legacy-mode defaults.
 | Assume | `assume.ml`, `assume_runtime.ml` | Predicates are checked at runtime, including under `-noassert`. |
 | SMT interface | `smt.ml`, `smt_solver.ml` | Queries serialize and the solver can prove or refute them. |
 | VC generation | `verification.ml`, `unchecked.ml` | Branches and successful runtime checks prove introductions; false claims and wraparound are rejected. |
+| Checked windows | `checked_windows.ml` | Runtime validation establishes ordered bounds; subtraction and a client budget are proved safe. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
@@ -59,3 +60,8 @@ demonstrate a refined recursion combinator and recursive proofs.
 Structural recursion does not fix the existing totality loophole through
 ordinary negative datatypes. A successful demo is not a claim of global
 soundness; never execute known-divergent examples.
+
+## Additional demos
+
+`checked_windows.ml` checks input bounds with `assume_`, catches invalid
+input, and derives the width with `refine_`.
