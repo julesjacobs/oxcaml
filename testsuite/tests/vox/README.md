@@ -39,6 +39,7 @@ legacy-mode defaults.
 | Immutable arrays | `iarrays.ml`, `iarrays_ordinary.ml` | Immutable-array literals expose exact lengths and elements; safe reads expose normal-return bounds. |
 | Bounded search | `array_search.ml` | A decreasing interval establishes termination, safe reads, and matching returned indices. |
 | Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
+| Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract two-list queue implements a sequence model; a separate client proves FIFO behavior and rejects empty dequeue. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -95,3 +96,7 @@ expression and input. Both evaluations use machine-integer wrapping semantics.
 target. It does not prove absence or first-match correctness. Its total `at`
 observer returns zero outside the array; the result contract separately
 establishes bounds.
+
+The queue proves its tail-recursive reversal against an explicit
+append/reverse model. Its representation stays behind a `.mli`. Proof helpers
+execute at runtime, so this demo makes no amortized-cost claim.
