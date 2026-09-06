@@ -199,6 +199,7 @@ and refinement_expression_desc =
   | Rexp_apply of
       refinement_expression * (Asttypes.arg_label * refinement_expression) list
   | Rexp_logical_equal of refinement_expression * refinement_expression
+  | Rexp_ghost of refinement_expression
   | Rexp_tuple of (string option * refinement_expression) list
   | Rexp_construct of Path.t * refinement_expression list
   | Rexp_record of
