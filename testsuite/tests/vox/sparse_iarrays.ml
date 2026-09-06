@@ -111,6 +111,33 @@ module Demo : sig end = struct
     let results = result, base_result in
     refine_ results
 
+  let (independent_updates @ total) :
+      (base : int iarray) -> int Updates.t @ total ->
+      (left : int) ->
+      {right : int | not (Updates.mem right (Updates.Refined.singleton left 0))} ->
+      int -> int ->
+      {index : int | 0 <= index && index < Iarray.length base} ->
+      {results : int * int | match results with before, after -> before = after} =
+    fun base updates left right left_value right_value index ->
+    let refine_ right = right in
+    let refine_ probe = index in
+    let left_first = Updates.Refined.add left left_value updates in
+    let left_first = Updates.Refined.add right right_value left_first in
+    let right_first = Updates.Refined.add right right_value updates in
+    let right_first = Updates.Refined.add left left_value right_first in
+    let before =
+      if Updates.mem probe left_first then
+        Updates.Refined.find left_first (refine_ probe)
+      else Iarray.Refined.get base index
+    in
+    let after =
+      if Updates.mem probe right_first then
+        Updates.Refined.find right_first (refine_ probe)
+      else Iarray.Refined.get base index
+    in
+    let results = before, after in
+    refine_ results
+
   let literal () : {result : int | result = 20} =
     let base = [: 10; 20; 30 :] in
     let overlay =
@@ -155,10 +182,24 @@ module Demo : sig end = struct
     let updated = get base overlay.updates bounded in
     let cleared = clear index overlay in
     let restored = get base cleared.updates bounded in
-    Format.printf "sparse reads = %d,%d@." updated restored
+    Format.printf "sparse reads = %d,%d@." updated restored;
+    let left = 0 in
+    let right = 2 in
+    let right :
+        {right : int |
+          not (Updates.mem right (Updates.Refined.singleton left 0))} =
+      assume_ right
+    in
+    let updates = Updates.Refined.empty () in
+    let refine_ results =
+      independent_updates base updates left right 77 88 bounded
+    in
+    let before, after = results in
+    Format.printf "independent updates at index 1 = %d,%d@." before after
 end;;
 [%%expect{|
 sparse reads = 99,20
+independent updates at index 1 = 20,20
 module Demo : sig end
 |}]
 
