@@ -4846,18 +4846,20 @@ function_type:
 strict_function_or_labeled_tuple_type:
   | mktyp(
       LPAREN binder = mkrhs(LIDENT) COLON domain = dependent_param_type RPAREN
+      arg_modes = optional_at_mode_expr
       MINUSGREATER codomain = strict_function_or_labeled_tuple_type
-        { Ptyp_arrow (Nolabel, domain, codomain, [], [], Some binder) }
+        { Ptyp_arrow (Nolabel, domain, codomain, arg_modes, [], Some binder) }
     )
     { $1 }
   | mktyp(
       LPAREN binder = mkrhs(LIDENT) COLON domain = dependent_param_type RPAREN
+      arg_modes = optional_at_mode_expr
       MINUSGREATER codomain_with_modes = with_optional_mode_expr(tuple_type)
       %prec MINUSGREATER
         { let (codomain, codomain_loc), ret_modes = codomain_with_modes in
           Ptyp_arrow
             (Nolabel, domain, maybe_curry_typ codomain codomain_loc,
-             [], ret_modes, Some binder) }
+             arg_modes, ret_modes, Some binder) }
     )
     { $1 }
   | mktyp(
