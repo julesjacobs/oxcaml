@@ -126,7 +126,8 @@ shadowed value.
 
 Sparse-array removal and commutation are refined-unit lemmas about the actual
 `get` operation at an arbitrary valid probe. A proof functor accepts an abstract
-`immutable_data` element type; integer and record clients instantiate it. The record client derives equality of reads
+`immutable_data` element type; integer and record clients instantiate it and
+erase proof calls with `ghost_`. The record client derives equality of reads
 and restoration of base values from these contracts. The examples check bounds
 and comparator-class distinction at runtime. The generic `get` operation also
 preserves writable access to mutable elements.
