@@ -26,7 +26,8 @@ let prove check loc query =
           | Bool -> "bool"
           | Int63 -> "int"
           | Int -> "bigint"
-          | Opaque _ -> "opaque"))
+          | Opaque _ -> "opaque"
+          | Datatype datatype -> Vox_smt.Datatype.label datatype))
       query.Vox_smt.symbols;
     List.iteri
       (fun i f -> Format.eprintf "  f%d: %s@." i (Vox_smt.Function.label f))
@@ -52,14 +53,20 @@ let install () =
     installed := true;
     let with_prover f =
       let int_width = if Target_system.is_64_bit () then 63 else 31 in
-      let dump = if !dump_smtlib then Some (fun bytes -> Format.eprintf "%s%!" bytes) else None in
+      let dump =
+        if !dump_smtlib
+        then Some (fun bytes -> Format.eprintf "%s%!" bytes)
+        else None
+      in
       Vox_smt_solver.with_session
         ~config:{ executable = !executable; timeout_ms = !timeout_ms }
         ?dump ~int_width (fun check -> f (prove check))
     in
-    Verification.install (fun structure -> with_prover (fun prove -> Vox_vc.generate ~prove structure));
+    Verification.install (fun structure ->
+        with_prover (fun prove -> Vox_vc.generate ~prove structure));
     Verification.install_termination (fun ~self ~fn ~measure ->
-      with_prover (fun prove -> Vox_vc.check_termination ~prove ~self ~fn ~measure));
+        with_prover (fun prove ->
+            Vox_vc.check_termination ~prove ~self ~fn ~measure));
     Clflags.add_arguments __LOC__
       [ "-dvc", Arg.Set dump_vc, " Dump refinement verification conditions";
         ( "-dsmtlib",
