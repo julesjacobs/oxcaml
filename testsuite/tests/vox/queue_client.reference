@@ -1,1 +1,3 @@
 FIFO: 10 20; empty=true
+records: 10 20
+lists: true

@@ -1,10 +1,11 @@
-let[@def] rec append (xs : int list) ys =
+let[@def] rec append (xs : ('a : immutable_data) list @ immutable)
+    (ys : ('a : immutable_data) list @ immutable) : 'a list @ total =
   match xs with [] -> ys | head :: tail -> head :: append tail ys
 
-let rec (append_nil @ total) : (xs : int list) ->
+let rec (append_nil @ total) : (xs : ('a : immutable_data) list) @ immutable ->
     {u : unit | append xs [] === xs} @ immutable contended =
   fun xs ->
-  let nil = [] in
+  let nil : 'a list = [] in
   let refine_ equation = append_def xs nil in
   let u = () in
   match xs with
@@ -14,7 +15,8 @@ let rec (append_nil @ total) : (xs : int list) ->
     refine_ u
 
 let rec (append_associative @ total) :
-    (xs : int list) -> (ys : int list) -> (zs : int list) ->
+    (xs : ('a : immutable_data) list) @ immutable ->
+    (ys : 'a list) @ immutable -> (zs : 'a list) @ immutable ->
     {u : unit | append (append xs ys) zs === append xs (append ys zs)}
       @ immutable contended =
   fun xs ys zs ->
@@ -30,18 +32,21 @@ let rec (append_associative @ total) :
     let refine_ induction = append_associative tail ys zs in
     refine_ u
 
-let[@def] rec reverse (xs : int list) =
+let[@def] rec reverse (xs : ('a : immutable_data) list @ immutable)
+    : 'a list @ total =
   match xs with
   | [] -> []
   | head :: tail -> append (reverse tail) [head]
 
-let[@def] rec reverse_append (xs : int list) acc =
+let[@def] rec reverse_append (xs : ('a : immutable_data) list @ immutable)
+    (acc : ('a : immutable_data) list @ immutable) : 'a list @ total =
   match xs with
   | [] -> acc
   | head :: tail -> reverse_append tail (head :: acc)
 
 let rec (reverse_append_correct @ total) :
-    (xs : int list) -> (acc : int list) ->
+    (xs : ('a : immutable_data) list) @ immutable ->
+    (acc : 'a list) @ immutable ->
     {u : unit | reverse_append xs acc === append (reverse xs) acc}
       @ immutable contended =
   fun xs acc ->
@@ -56,26 +61,27 @@ let rec (reverse_append_correct @ total) :
     let next = head :: acc in
     let singleton = [head] in
     let rest = reverse tail in
-    let nil = [] in
+    let nil : 'a list = [] in
     let refine_ induction = reverse_append_correct tail next in
     let refine_ association = append_associative rest singleton acc in
     let refine_ equation = append_def singleton acc in
     let refine_ equation = append_def nil acc in
     refine_ u
 
-type representation = {front : int list; rear : int list}
-type t = {q : representation |
+type ('a : immutable_data) representation = {front : 'a list; rear : 'a list}
+type ('a : immutable_data) t = {q : 'a representation |
   match q.front with [] -> q.rear === [] | _ :: _ -> true}
 
-let[@def] contents (q : t) =
+let[@def] contents (q : 'a t @ immutable) : 'a list @ total =
   let refine_ q = q in
   append q.front (reverse q.rear)
 
-let (normalize @ total) : (front : int list) -> (rear : int list) ->
-    {r : t | contents r === append front (reverse rear)} =
+let (normalize @ total) :
+    (front : 'a list) @ immutable -> (rear : 'a list) @ immutable ->
+    {r : 'a t | contents r === append front (reverse rear)} @ immutable total =
   fun front rear ->
-  let nil = [] in
-  let q : t =
+  let nil : 'a list = [] in
+  let q : 'a t =
     match front with
     | [] ->
       let reversed = reverse_append rear nil in
@@ -103,15 +109,15 @@ let (normalize @ total) : (front : int list) -> (rear : int list) ->
   in
   refine_ q
 
-let (empty @ total) : {q : t | contents q === []} =
-  let nil = [] in
+let (empty @ total) : {q : 'a t | contents q === []} @ immutable =
+  let nil : 'a list = [] in
   let refine_ result = normalize nil nil in
   let refine_ equation = ghost_ (reverse_def nil) in
   let refine_ equation = ghost_ (append_def nil nil) in
   refine_ result
 
-let (enqueue @ total) : (q : t) -> (value : int) ->
-    {r : t | contents r === append (contents q) [value]} =
+let (enqueue @ total) : (q : 'a t) @ immutable -> (value : 'a) @ immutable ->
+    {r : 'a t | contents r === append (contents q) [value]} @ immutable total =
   fun q value ->
   let refine_ raw = q in
   let front = raw.front in
@@ -130,10 +136,11 @@ let (enqueue @ total) : (q : t) -> (value : int) ->
   refine_ result
 
 let (dequeue @ total) :
-    (q : {q : t | (contents q === []) === false}) ->
-    {r : int * t |
+    (q : {q : 'a t | (contents q === []) === false}) @ immutable ->
+    {r : 'a * 'a t |
       let refine_ original = q in
-      match r with head, tail -> contents original === head :: contents tail} =
+      match r with head, tail -> contents original === head :: contents tail}
+      @ immutable total =
   fun q ->
   let refine_ original = q in
   let refine_ model = ghost_ (contents_def original) in
@@ -145,7 +152,7 @@ let (dequeue @ total) :
   match front with
   | [] ->
     let refine_ equation = ghost_ (reverse_def rear) in
-    let nonempty : {xs : int list | (xs === []) === false} = refine_ front in
+    let nonempty : {xs : 'a list | (xs === []) === false} = refine_ front in
     let head = List.Refined.hd nonempty in
     let refine_ rest = empty in
     let result = head, rest in

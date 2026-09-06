@@ -14,9 +14,9 @@
 let () =
   let refine_ empty = Functional_queue.empty in
   let nonempty :
-      {q : Functional_queue.t |
+      {q : int Functional_queue.t |
         (Functional_queue.contents q === []) === false} =
     refine_ empty
   in
-  let refine_ result = Functional_queue.dequeue nonempty in
-  ignore result
+  let refine_ _result = Functional_queue.dequeue nonempty in
+  ()

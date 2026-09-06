@@ -69,6 +69,18 @@ element type, and maps depend on their key and value types. Collections of
 immutable data can be captured in ghost proofs while collections containing
 mutable data retain their access restrictions.
 
+For generic proof interfaces, write immutable argument views explicitly:
+`(xs : 'a list) @ immutable -> ...`. Dependent arguments remain total,
+stateless, and portable. Give results used by further proofs explicit
+`@ immutable total` modes. Generated definition lemmas preserve the operation's
+argument visibility and contention, so intermediate model values can be passed
+directly to their equations, including under `-principal`.
+
+The polymorphic queue demo requires `immutable_data` elements: its implementation
+uses the ordinary-access refined list destructor while its proofs capture
+immutable queue values. Its separate client proves FIFO for arbitrary elements
+of that kind and instantiates the same interface at integers, records, and lists.
+
 `ghost_` checks the proof and erases its evaluation. Marking a parameter `@ ghost`
 controls how its value may be used; it does not erase evaluation of an ordinary
 argument expression.
