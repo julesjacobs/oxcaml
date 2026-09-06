@@ -89,7 +89,7 @@ let operation env ~function_type ~result_type name args =
     | [Some x; Some y] when term_sort x = term_sort y -> Some (App (op, [x; y]))
     | _ -> None
   in
-  let physical_equality op =
+  let scalar_equality op =
     match get_desc (Ctype.expand_head env function_type) with
     | Tarrow (_, arg, _, _) ->
       begin match Vox_type.classify_payload env arg with
@@ -109,10 +109,10 @@ let operation env ~function_type ~result_type name args =
       | _ -> binary Int63 (if name = "%divint" then Div else Rem)
       end
     | "%negint" -> unary Int63 Neg
-    | "%equal" -> equality Eq
-    | "%notequal" -> equality Ne
-    | "%eq" -> physical_equality Eq
-    | "%noteq" -> physical_equality Ne
+    | "%equal" -> scalar_equality Eq
+    | "%notequal" -> scalar_equality Ne
+    | "%eq" -> scalar_equality Eq
+    | "%noteq" -> scalar_equality Ne
     | "%lessthan" | "%ltint" -> binary Int63 Lt
     | "%lessequal" | "%leint" -> binary Int63 Le
     | "%greaterthan" | "%gtint" -> binary Int63 Gt

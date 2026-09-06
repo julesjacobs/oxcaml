@@ -76,8 +76,9 @@ let opaque_argument_congruence (x : Opaque.t) (y : {y : Opaque.t | y === x})
 [%%expect{|
 val opaque_argument_congruence :
   (x : Opaque.t) ->
-  (y : {y : Opaque.t | y === x}) ->
-  {u : unit | let refine_ y = y in (Opaque.observe y) === (Opaque.observe x)} =
+  (y' : {y : Opaque.t | y === x}) ->
+  {u : unit
+    | let refine_ y = y' in (Opaque.observe y) === (Opaque.observe x)} =
   <fun>
 |}]
 
@@ -135,4 +136,24 @@ Line 1, characters 30-37:
 1 | let ordinary_expression x y = x === y;;
                                   ^^^^^^^
 Error: "===" is available only in refinement predicates
+|}]
+
+let float_reflexive (x : float) : {b : bool | b} =
+  let b = Stdlib.(=) x x in
+  refine_ b;;
+[%%expect{|
+Line 3, characters 2-11:
+3 |   refine_ b;;
+      ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let float_irreflexive (x : float) : {b : bool | b === false} =
+  let b = Stdlib.(<>) x x in
+  refine_ b;;
+[%%expect{|
+Line 3, characters 2-11:
+3 |   refine_ b;;
+      ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]
