@@ -132,7 +132,7 @@ relational laws can compare overlays without constructing refined arguments
 inside predicates. Removal fallback and independent-update commutation are
 proved for every index, including out-of-range ones. A proof functor accepts
 an abstract `immutable_data` element type; integer and record clients instantiate
-it. The record client derives equality of
+it and erase proof calls with `ghost_`. The record client derives equality of
 reads and restoration of base values from these contracts. The examples check
 bounds and comparator-class distinction at runtime.
 
