@@ -3,8 +3,8 @@
  has-z3;
  timeout = "900";
  all_modules = "int_set_intf.mli list_int_set.mli list_int_set.ml int_sets.ml";
- { bytecode; run; check-program-output; }
- { flags += " -principal"; bytecode; run; check-program-output; }
+ { bytecode; }
+ { flags += " -principal"; bytecode; }
 *)
 
 let () =

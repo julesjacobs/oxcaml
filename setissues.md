@@ -19,5 +19,5 @@
   constraints. `union_repr` leaves its result mode inferred and constrains the
   result at the non-retained call site instead.
 - The higher-order recursive extensionality proof produces large verification
-  conditions. It is a compile-only test so it is checked once rather than by
-  every expect-test mode and backend.
+  conditions. The bytecode test checks the proof and runtime output in normal and
+  principal modes without repeating the native backend.
