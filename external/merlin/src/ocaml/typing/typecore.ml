@@ -11261,6 +11261,7 @@ and type_label_access
     let make_fake_label (type rep) (record_form : rep record_form) : rep gen_label_description =
       {
         lbl_name = "";
+        lbl_ghost = false;
         lbl_res = ty_exp;
         lbl_arg = newvar arg_kind;
         lbl_mut = Mutable { mode = Mode.Value.Comonadic.legacy; atomic = Nonatomic };

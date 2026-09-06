@@ -95,12 +95,12 @@
           pattern (test.ml[2,15+4]..test.ml[2,15+5])
             Tpat_var \"f\"
             sort value
-            value_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful)(modevar#4[global,many,portable,forkable,unyielding,total,stateless .. global,once,nonportable,unforkable,yielding,partial,stateful]);meet(unique,uncontended,read_write,static,imply(unique,uncontended,read_write,static)(modevar#5[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
+            value_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)(modevar#4[global,many,portable,forkable,unyielding,total,stateless,real .. global,once,nonportable,unforkable,yielding,partial,stateful,real]);meet(unique,uncontended,read_write,static,imply(unique,uncontended,read_write,static)(modevar#5[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
           expression (test.ml[2,15+6]..test.ml[6,69+12]) ghost
             Texp_function
-            alloc_mode id(modevar#6[global,many,portable,forkable,unyielding,total,stateless .. global,once,nonportable,unforkable,yielding,partial,stateful]);id(modevar#7[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
+            alloc_mode id(modevar#6[global,many,portable,forkable,unyielding,total,stateless,real .. global,once,nonportable,unforkable,yielding,partial,stateful,real]);id(modevar#7[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
             yielding_mode unyielding
-            id(modevar#a[global,many,portable,forkable,unyielding,total,stateless .. local,once,nonportable,unforkable,yielding,partial,stateful]);id(modevar#b[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,dynamic])
+            id(modevar#a[global,many,portable,forkable,unyielding,total,stateless,real .. local,once,nonportable,unforkable,yielding,partial,stateful,ghost]);id(modevar#b[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,dynamic])
             []
             [
               Nolabel
@@ -112,12 +112,12 @@
                       core_type (test.ml[2,15+11]..test.ml[2,15+12])
                         Ttyp_constr \"t\"
                         []
-                    global,many,nonportable,forkable,unyielding,partial,stateful,aliased,uncontended,read_write,dynamic
+                    global,many,nonportable,forkable,unyielding,partial,stateful,real,aliased,uncontended,read_write,dynamic
                     []
                   Tpat_var \"x\"
                   sort value
-                  value_mode global,many,portable,forkable,unyielding,total,stateless;meet(unique,uncontended,read_write,static,imply(aliased,contended,immutable,static)(modevar#9[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
-                id(modevar#8[global,many,portable,forkable,unyielding,total,stateless .. local,once,nonportable,unforkable,unyielding,partial,stateful]);id(modevar#9[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
+                  value_mode global,many,portable,forkable,unyielding,total,stateless,real;meet(unique,uncontended,read_write,static,imply(aliased,contended,immutable,static)(modevar#9[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
+                id(modevar#8[global,many,portable,forkable,unyielding,total,stateless,real .. local,once,nonportable,unforkable,unyielding,partial,stateful,real]);id(modevar#9[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
                 []
             ]
             Tfunction_body
@@ -282,12 +282,12 @@
           pattern (test2.ml[2,15+4]..test2.ml[2,15+5])
             Tpat_var \"f\"
             sort value
-            value_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful)(modevar#4[global,many,portable,forkable,unyielding,total,stateless .. global,once,nonportable,unforkable,yielding,partial,stateful]);meet(unique,uncontended,read_write,static,imply(unique,uncontended,read_write,static)(modevar#5[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
+            value_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)(modevar#4[global,many,portable,forkable,unyielding,total,stateless,real .. global,once,nonportable,unforkable,yielding,partial,stateful,real]);meet(unique,uncontended,read_write,static,imply(unique,uncontended,read_write,static)(modevar#5[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
           expression (test2.ml[2,15+6]..test2.ml[2,15+24]) ghost
             Texp_function
-            alloc_mode id(modevar#6[global,many,portable,forkable,unyielding,total,stateless .. global,once,nonportable,unforkable,yielding,partial,stateful]);id(modevar#7[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
+            alloc_mode id(modevar#6[global,many,portable,forkable,unyielding,total,stateless,real .. global,once,nonportable,unforkable,yielding,partial,stateful,real]);id(modevar#7[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
             yielding_mode unyielding
-            id(modevar#a[global,many,portable,forkable,unyielding,total,stateless .. local,once,nonportable,unforkable,yielding,partial,stateful]);id(modevar#b[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
+            id(modevar#a[global,many,portable,forkable,unyielding,total,stateless,real .. local,once,nonportable,unforkable,yielding,partial,stateful,ghost]);id(modevar#b[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
             []
             [
               Nolabel
@@ -301,10 +301,10 @@
                       core_type (test2.ml[2,15+11]..test2.ml[2,15+12])
                         Ttyp_constr \"t\"
                         []
-                    global,many,nonportable,forkable,unyielding,partial,stateful,aliased,uncontended,read_write,dynamic
+                    global,many,nonportable,forkable,unyielding,partial,stateful,real,aliased,uncontended,read_write,dynamic
                     []
                   Tpat_any
-                id(modevar#8[global,many,portable,forkable,unyielding,total,stateless .. local,once,nonportable,unforkable,unyielding,partial,stateful]);id(modevar#9[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
+                id(modevar#8[global,many,portable,forkable,unyielding,total,stateless,real .. local,once,nonportable,unforkable,unyielding,partial,stateful,real]);id(modevar#9[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
                 []
             ]
             Tfunction_body
@@ -379,7 +379,7 @@ First a simple case:
           Ttyp_constr \"int!\"
           []
         []
-        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
         []
     signature_item (test.mli[3,16+0]..test.mli[3,16+21])
       Tsig_value
@@ -397,7 +397,7 @@ First a simple case:
               None
           ]
         []
-        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
         []
     signature_item (test.mli[5,39+0]..test.mli[5,39+21])
       Tsig_value
@@ -415,7 +415,7 @@ First a simple case:
               []
           ]
         []
-        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
         []
   ]
   
@@ -474,7 +474,7 @@ And now, with an error deep in a submodule:
           Ttyp_constr \"int!\"
           []
         []
-        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
         []
     signature_item (test2.mli[3,16+0]..test2.mli[10,149+3])
       Tsig_module (Present)
@@ -489,7 +489,7 @@ And now, with an error deep in a submodule:
                   Ttyp_constr \"int!\"
                   []
                 []
-                join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+                join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
                 []
             signature_item (test2.mli[5,49+2]..test2.mli[9,143+5])
               Tsig_module (Present)
@@ -504,7 +504,7 @@ And now, with an error deep in a submodule:
                           Ttyp_constr \"int!\"
                           []
                         []
-                        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+                        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
                         []
                     signature_item (test2.mli[7,87+4]..test2.mli[7,87+27])
                       Tsig_value
@@ -522,7 +522,7 @@ And now, with an error deep in a submodule:
                               None
                           ]
                         []
-                        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+                        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
                         []
                     signature_item (test2.mli[8,115+4]..test2.mli[8,115+27])
                       Tsig_value
@@ -540,13 +540,13 @@ And now, with an error deep in a submodule:
                               []
                           ]
                         []
-                        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+                        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
                         []
                   ]
-                  join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+                  join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
                   []
           ]
-          join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+          join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
           []
     signature_item (test2.mli[12,154+0]..test2.mli[12,154+21])
       Tsig_value
@@ -564,7 +564,7 @@ And now, with an error deep in a submodule:
               []
           ]
         []
-        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful)
+        join_const(unique,uncontended,read_write,static);meet_const(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)
         []
   ]
   
@@ -623,11 +623,11 @@ make sure we also handle that correctly in structures:
                 core_type (test_ct.ml[1,0+11]..test_ct.ml[1,0+14])
                   Ttyp_constr \"int!\"
                   []
-              global,many,nonportable,forkable,unyielding,partial,stateful,aliased,uncontended,read_write,dynamic
+              global,many,nonportable,forkable,unyielding,partial,stateful,real,aliased,uncontended,read_write,dynamic
               []
             Tpat_var \"foo1\"
             sort value
-            value_mode global,many,portable,forkable,unyielding,total,stateless;meet(unique,uncontended,read_write,static,imply(aliased,contended,immutable,static)(modevar#3[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
+            value_mode global,many,portable,forkable,unyielding,total,stateless,real;meet(unique,uncontended,read_write,static,imply(aliased,contended,immutable,static)(modevar#3[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
           expression (test_ct.ml[1,0+17]..test_ct.ml[1,0+18])
             extra (test_ct.ml[1,0+4]..test_ct.ml[1,0+18]) ghost
               Texp_constraint
@@ -656,11 +656,11 @@ make sure we also handle that correctly in structures:
                       Ttyp_var _
                       None
                   ]
-              global,many,nonportable,forkable,unyielding,partial,stateful,aliased,uncontended,read_write,dynamic
+              global,many,nonportable,forkable,unyielding,partial,stateful,real,aliased,uncontended,read_write,dynamic
               []
             Tpat_var \"foo2\"
             sort value
-            value_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful)(modevar#9[global,many,portable,forkable,unyielding,total,stateless .. global,once,nonportable,unforkable,yielding,partial,stateful]);meet(unique,uncontended,read_write,static,imply(unique,uncontended,read_write,static)(modevar#a[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
+            value_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)(modevar#9[global,many,portable,forkable,unyielding,total,stateless,real .. global,once,nonportable,unforkable,yielding,partial,stateful,real]);meet(unique,uncontended,read_write,static,imply(unique,uncontended,read_write,static)(modevar#a[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
           expression (test_ct.ml[3,20+24]..test_ct.ml[3,20+28])
             extra (test_ct.ml[3,20+4]..test_ct.ml[3,20+28]) ghost
               Texp_constraint
@@ -677,7 +677,7 @@ make sure we also handle that correctly in structures:
                     None
                 ]
             Texp_tuple
-            alloc_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful,regional_to_global_full . imply(local,once,nonportable,unforkable,yielding,partial,stateful)(modevar#9[global,many,portable,forkable,unyielding,total,stateless .. global,once,nonportable,unforkable,yielding,partial,stateful]));meet(unique,uncontended,read_write,static)(modevar#a[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
+            alloc_mode meet(local,once,nonportable,unforkable,yielding,partial,stateful,ghost,regional_to_global_full . imply(local,once,nonportable,unforkable,yielding,partial,stateful,ghost)(modevar#9[global,many,portable,forkable,unyielding,total,stateless,real .. global,once,nonportable,unforkable,yielding,partial,stateful,real]));meet(unique,uncontended,read_write,static)(modevar#a[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
             [
               Label: None
                 expression (test_ct.ml[3,20+24]..test_ct.ml[3,20+25])
@@ -707,11 +707,11 @@ make sure we also handle that correctly in structures:
                       Ttyp_constr \"int!\"
                       []
                   ]
-              global,many,nonportable,forkable,unyielding,partial,stateful,aliased,uncontended,read_write,dynamic
+              global,many,nonportable,forkable,unyielding,partial,stateful,real,aliased,uncontended,read_write,dynamic
               []
             Tpat_var \"foo3\"
             sort value
-            value_mode global,many,portable,forkable,unyielding,total,stateless;meet(unique,uncontended,read_write,static,imply(unique,contended,immutable,static)(modevar#11[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
+            value_mode global,many,portable,forkable,unyielding,total,stateless,real;meet(unique,uncontended,read_write,static,imply(unique,contended,immutable,static)(modevar#11[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static]))
           expression (test_ct.ml[5,50+23]..test_ct.ml[5,50+27])
             extra (test_ct.ml[5,50+4]..test_ct.ml[5,50+27]) ghost
               Texp_constraint
@@ -728,7 +728,7 @@ make sure we also handle that correctly in structures:
                     []
                 ]
             Texp_tuple
-            alloc_mode global,once,nonportable,unforkable,yielding,partial,stateful;meet(unique,contended,immutable,static)(modevar#11[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
+            alloc_mode global,once,nonportable,unforkable,yielding,partial,stateful,real;meet(unique,contended,immutable,static)(modevar#11[aliased,contended,immutable,dynamic .. unique,uncontended,read_write,static])
             [
               Label: None
                 expression (test_ct.ml[5,50+23]..test_ct.ml[5,50+24])

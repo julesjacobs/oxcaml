@@ -257,6 +257,10 @@ let get_mode_doc (Atom (axis, mode) : Mode.Alloc.atom) =
       Some "Functions with this mode cannot access mutable data"
     | Comonadic Statefulness, Writing ->
       Some "Functions with this mode can write but not read mutable data"
+    | Comonadic Ghostliness, Real ->
+      Some "Values with this mode may be read by runtime computations"
+    | Comonadic Ghostliness, Ghost ->
+      Some "Values with this mode may only be used in ghost positions"
     | Comonadic Totality, Total ->
       Some
         "Functions with this mode do not themselves diverge, raise exceptions, \
@@ -286,6 +290,7 @@ let get_mode_doc (Atom (axis, mode) : Mode.Alloc.atom) =
       | Monadic Visibility -> "modes/intro/"
       | Comonadic Statefulness -> "modes/intro/"
       | Comonadic Totality -> "modes/intro/"
+      | Comonadic Ghostliness -> "modes/intro/"
       | Comonadic Forkable -> "modes/intro/"
       | Monadic Staticity -> "modes/intro/"
     in
