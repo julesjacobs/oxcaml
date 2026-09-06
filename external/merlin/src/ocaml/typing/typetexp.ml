@@ -1123,7 +1123,22 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
         | (l, arg_mode, arg_cty, arg_ty, typed_binder, binder) :: rest ->
             let arg_mode_desc =
               match binder with
-              | Some _ -> dependent_mode
+              | Some _ ->
+                  let annotations =
+                    Typemode.transl_mode_annots
+                      (Typemode.untransl_mode arg_mode)
+                  in
+                  let mode =
+                    Alloc.Const.Option.value annotations.mode_modes
+                      ~default:dependent_mode
+                  in
+                  if mode.totality <> dependent_mode.totality
+                     || mode.statefulness <> dependent_mode.statefulness
+                     || mode.portability <> dependent_mode.portability
+                  then
+                    Location.raise_errorf ~loc:arg_cty.ctyp_loc
+                      "Dependent arguments must be total, stateless, portable";
+                  mode
               | None -> arg_mode.mode_modes
             in
             let acc_mode = curry_mode acc_mode arg_mode_desc in
