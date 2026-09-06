@@ -178,8 +178,10 @@ let name ctx s = function
   | value -> s, value
 
 let rec expose_head ctx = function
-  | Var symbol as value -> (match Hashtbl.find_opt ctx.named_terms symbol with
-      | Some term -> expose_head ctx term | None -> value)
+  | Var symbol as value -> (
+    match Hashtbl.find_opt ctx.named_terms symbol with
+    | Some term -> expose_head ctx term
+    | None -> value)
   | value -> value
 
 let rec added_prefix ~base = function
@@ -310,11 +312,17 @@ let path_constructor_name = function
   | Path.Pextra_ty (_, Path.Pcstr_ty name) -> Some name
   | _ -> None
 
-let select constructor index value =
-  match value with
+let rec select ctx constructor index value =
+  match expose_head ctx value with
   | Construct (actual, fields) when actual = constructor ->
     List.nth fields index
-  | value -> Select (constructor, index, value)
+  | App (Ite, [condition; left; right]) ->
+    App
+      ( Ite,
+        [ condition;
+          select ctx constructor index left;
+          select ctx constructor index right ] )
+  | _ -> Select (constructor, index, value)
 
 let construct ctx env ty name values =
   match data_of_type ctx env ty with
@@ -340,7 +348,7 @@ let select_field ctx env ty name value =
         (fun index (label, _) -> if label = name then Some index else None)
         (Constructor.fields constructor)
     with
-    | Some index -> scalar_value (select constructor index value)
+    | Some index -> scalar_value (select ctx constructor index value)
     | None -> None
     end
   | _ -> None
@@ -455,7 +463,11 @@ and expand_set_mem ctx set_sort element set =
   in
   match expose_head ctx set with
   | App (Ite, [condition; left; right]) ->
-    App (Ite, [condition; set_mem ctx set_sort element left; set_mem ctx set_sort element right])
+    App
+      ( Ite,
+        [ condition;
+          set_mem ctx set_sort element left;
+          set_mem ctx set_sort element right ] )
   | Call (function_, arguments) ->
     begin match Hashtbl.find_opt ctx.set_origins function_, arguments with
     | Some Set_empty, [] -> Boolean false
@@ -518,7 +530,11 @@ let rec map_mem ctx map_sort key map =
   in
   match expose_head ctx map with
   | App (Ite, [condition; left; right]) ->
-    App (Ite, [condition; map_mem ctx map_sort key left; map_mem ctx map_sort key right])
+    App
+      ( Ite,
+        [ condition;
+          map_mem ctx map_sort key left;
+          map_mem ctx map_sort key right ] )
   | Call (function_, arguments) ->
     begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
     | Some Map_empty, [] -> Boolean false
@@ -545,7 +561,11 @@ let rec map_find ctx map_sort value_sort key map =
   in
   match expose_head ctx map with
   | App (Ite, [condition; left; right]) ->
-    App (Ite, [condition; map_find ctx map_sort value_sort key left; map_find ctx map_sort value_sort key right])
+    App
+      ( Ite,
+        [ condition;
+          map_find ctx map_sort value_sort key left;
+          map_find ctx map_sort value_sort key right ] )
   | Call (function_, arguments) ->
     begin match Hashtbl.find_opt ctx.map_origins function_, arguments with
     | Some Map_singleton, [_; data] when term_sort data = value_sort -> data
@@ -960,7 +980,8 @@ let rec predicate ctx env s e =
     | Rexp_var id -> s, lookup ctx s env e.rexp_type (Path.Pident id)
     | Rexp_ident path ->
       begin match primitive env path with
-      | Some (("%set_empty" | "%map_empty"), 0) -> s, lookup ctx s env e.rexp_type path
+      | Some (("%set_empty" | "%map_empty"), 0) ->
+        s, lookup ctx s env e.rexp_type path
       | Some (_, 0) -> unsupported e.rexp_loc
       | _ -> s, lookup ctx s env e.rexp_type path
       end
@@ -1016,26 +1037,40 @@ let rec predicate ctx env s e =
       | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
         short_circuit ctx eval e.rexp_loc ~is_and:(op = "%sequand") s a b
       | _ ->
-        let s, args = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
+        let s, args =
+          arguments_right_to_left (fun s (_, e) -> eval s e) s args
+        in
         let s, value = eval s fn in
         let prim = stored_primitive prim value in
-        if s.dead then s, None else
-        let result = apply_function ctx env fn.rexp_type e.rexp_type prim value args ~total:true in
-        let s = match prim with
-          | Some ("%array_length", 1) -> normal_iarray_length ctx args s
-          | Some ((("%set_find" | "%set_refined_find") as op_name), 2) -> normal_set_find ctx op_name args result s
-          | Some ((("%map_find" | "%map_refined_find") as op_name), 2) -> normal_map_find ctx op_name args s
-          | _ -> s in
-        name ctx s (scalar_value (required e.rexp_loc result))
+        if s.dead
+        then s, None
+        else
+          let result =
+            apply_function ctx env fn.rexp_type e.rexp_type prim value args
+              ~total:true
+          in
+          let s =
+            match prim with
+            | Some ("%array_length", 1) -> normal_iarray_length ctx args s
+            | Some ((("%set_find" | "%set_refined_find") as op_name), 2) ->
+              normal_set_find ctx op_name args result s
+            | Some ((("%map_find" | "%map_refined_find") as op_name), 2) ->
+              normal_map_find ctx op_name args s
+            | _ -> s
+          in
+          name ctx s (scalar_value (required e.rexp_loc result))
       end
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
       let s, left = eval s left in
-      if s.dead then s, None else
-      let left = required e.rexp_loc left in
-      let right = required e.rexp_loc right in
-      if sort_has_unsupported_logical_equality ctx.encoding (term_sort left) then unsupported e.rexp_loc
-      else name ctx s (scalar_value (both Eq left right))
+      if s.dead
+      then s, None
+      else
+        let left = required e.rexp_loc left in
+        let right = required e.rexp_loc right in
+        if sort_has_unsupported_logical_equality ctx.encoding (term_sort left)
+        then unsupported e.rexp_loc
+        else name ctx s (scalar_value (both Eq left right))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose ctx s
@@ -1147,7 +1182,7 @@ and predicate_pattern_selected_fields ctx env s value constructor patterns =
           List.map
             (fun (s, field_condition) -> s, both And condition field_condition)
             (predicate_pattern ctx env s
-               (scalar_value (select constructor index value))
+               (scalar_value (select ctx constructor index value))
                pattern))
         outcomes)
     [s, Is (constructor, value)]
@@ -1237,7 +1272,9 @@ and pattern_selected_fields ctx s value constructor patterns =
         (fun (s, condition) ->
           List.map
             (fun (s, field_condition) -> s, both And condition field_condition)
-            (pattern ctx s (scalar_value (select constructor index value)) pat))
+            (pattern ctx s
+               (scalar_value (select ctx constructor index value))
+               pat))
         outcomes)
     [s, Is (constructor, value)]
     patterns
@@ -1432,7 +1469,11 @@ and expression_desc ctx s e =
     let s, right = eval s right in
     let s, left = eval s left in
     match scalar left, scalar right with
-    | Some left, Some right when term_sort left = term_sort right && not (sort_has_unsupported_logical_equality ctx.encoding (term_sort left)) ->
+    | Some left, Some right
+      when term_sort left = term_sort right
+           && not
+                (sort_has_unsupported_logical_equality ctx.encoding
+                   (term_sort left)) ->
       name ctx s (scalar_value (both Eq left right))
     | _ -> s, opaque ())
   | Texp_sequence (a, _, b) ->
@@ -1478,13 +1519,21 @@ and expression_desc ctx s e =
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
         branch s (Boolean false), None
       | Some ("%array_length", 1) ->
-        name ctx (normal_iarray_length ctx args s) (match value with Some _ -> value | None -> opaque ())
+        name ctx
+          (normal_iarray_length ctx args s)
+          (match value with Some _ -> value | None -> opaque ())
       | Some ("%array_safe_get", 2) ->
-        name ctx (normal_iarray_get ctx args s) (match value with Some _ -> value | None -> opaque ())
+        name ctx
+          (normal_iarray_get ctx args s)
+          (match value with Some _ -> value | None -> opaque ())
       | Some ((("%set_find" | "%set_refined_find") as op_name), 2) ->
-        name ctx (normal_set_find ctx op_name args value s) (match value with Some _ -> value | None -> opaque ())
+        name ctx
+          (normal_set_find ctx op_name args value s)
+          (match value with Some _ -> value | None -> opaque ())
       | Some ((("%map_find" | "%map_refined_find") as op_name), 2) ->
-        name ctx (normal_map_find ctx op_name args s) (match value with Some _ -> value | None -> opaque ())
+        name ctx
+          (normal_map_find ctx op_name args s)
+          (match value with Some _ -> value | None -> opaque ())
       | _ -> name ctx s (match value with Some _ -> value | None -> opaque ()))
     end
   | Texp_function { params; body; _ } ->
@@ -1593,8 +1642,8 @@ and cases_with_pattern : type k.
     | c :: cases ->
       let matched = pattern ctx s value c.c_lhs in
       let rest s = cases_with_pattern ctx s value cases in
-      guarded_case ctx (expression ctx) c.c_rhs.exp_loc s matched c.c_guard c.c_rhs
-        rest
+      guarded_case ctx (expression ctx) c.c_rhs.exp_loc s matched c.c_guard
+        c.c_rhs rest
 
 and structure ctx s str =
   List.fold_left

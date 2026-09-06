@@ -28,6 +28,15 @@ module Demo : sig end = struct
   let to_more_labels : 'a. 'a M.t -> 'a More_labeled.t = fun map -> map
   let from_more_labels : 'a. 'a More_labeled.t -> 'a M.t = fun map -> map
 
+  let (joined_lookup @ total) b (key @ total) =
+    let left = M.Refined.singleton key 10 in
+    let right = M.Refined.singleton key 20 in
+    let wrapped = if b then {map = left} else {map = right} in
+    let map = wrapped.map in
+    let found = M.Refined.find map (refine_ key) in
+    let (_ : {r : int | r = 10 || r = 20}) = refine_ found in
+    ()
+
   let (constructor_laws @ total) (key @ total) =
     let empty = M.Refined.empty () in
     let singleton = M.Refined.singleton key 10 in
