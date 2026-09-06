@@ -154,7 +154,59 @@ let prim_logical_equal =
   Pccall
     (Lambda.simple_prim_on_values ~name:"caml_equal" ~arity:2 ~alloc:true)
 
-let transl_opaque_logical_equal ~scopes exp left right =
+(* Erasure may merge records with different ghost fields. Physical identity
+   establishes logical equality only when the type rules this out. *)
+let can_check_logical_identity env ty =
+  let rec check seen ty =
+    match Vox_type.classify_payload env ty with
+    | Some _ -> true
+    | None ->
+      match get_desc (Ctype.expand_head env ty) with
+      | Tpoly (ty, []) -> check seen ty
+      | Trefine refinement -> check seen refinement.ref_payload
+      | Ttuple fields -> List.for_all (fun (_, ty) -> check seen ty) fields
+      | Tarrow ((_, arg_mode, ret_mode, _), arg, ret, _) ->
+        let real mode =
+          (Mode.Alloc.zap_to_legacy mode).ghostliness
+          = Mode.Ghostliness.Const.Real
+        in
+        real arg_mode && real ret_mode && check seen arg && check seen ret
+      | Tconstr (path, args, _) ->
+        List.for_all (check seen) args &&
+        (Path.Set.mem path seen ||
+         List.exists (Path.same path)
+           [Predef.path_string; Predef.path_bytes; Predef.path_char;
+            Predef.path_float; Predef.path_int32; Predef.path_int64;
+            Predef.path_nativeint] ||
+         let seen = Path.Set.add path seen in
+         match Env.find_type path env with
+         | declaration ->
+           let field ty =
+             match Ctype.apply env declaration.type_params ty args with
+             | ty -> check seen ty
+             | exception Ctype.Cannot_apply -> false
+           in
+           let labels labels =
+             List.for_all (fun (label : Types.label_declaration) ->
+               not label.ld_ghost && field label.ld_type)
+               labels
+           in
+           (match declaration.type_kind with
+            | Type_record (fields, _, _) -> labels fields
+            | Type_variant (constructors, _, _) ->
+              List.for_all (fun (constructor : Types.constructor_declaration) ->
+                constructor.cd_res = None &&
+                match constructor.cd_args with
+                | Cstr_tuple args ->
+                  List.for_all (fun arg -> field arg.Types.ca_type) args
+                | Cstr_record fields -> labels fields) constructors
+            | _ -> false)
+         | exception Not_found -> false)
+      | _ -> false
+  in
+  check Path.Set.empty ty
+
+let transl_opaque_logical_equal ~scopes exp ~ty left right =
   let loc = of_location ~scopes exp.exp_loc in
   let invalid_argument =
     transl_extension_path loc (Lazy.force Env.initial)
@@ -174,7 +226,9 @@ let transl_opaque_logical_equal ~scopes exp left right =
         ],
         loc )
   in
-  Lifthenelse
+  if not (can_check_logical_identity exp.exp_env ty)
+  then Lsequence (left, Lsequence (right, failure))
+  else Lifthenelse
     ( Lambda.phys_equal left right ~loc,
       Lambda.of_bool true,
       failure,
@@ -465,6 +519,22 @@ let zero_alloc_of_application
     end
   | None, _ -> Zero_alloc_utils.Assume_info.none
 
+(* Whether an expression is [ghost_ e]. Ghost expressions are deleted from
+   compilation: they are not evaluated, and translate to a placeholder of
+   whatever layout the context requests. The mode system guarantees the
+   placeholder is never read by real code. *)
+let is_ghost_exp e =
+  List.exists
+    (function (Texp_ghost, _, _) -> true | _ -> false)
+    e.exp_extra
+
+(* Ghost record fields have no slot: their shape entry is [Void], the
+   operand passed for them is the empty unboxed product, and reads fabricate
+   a placeholder (see [transl_ghost]). *)
+let layout_ghost = Lambda.layout_unboxed_unit
+
+let void_value loc = Lprim (Pmake_unboxed_product [], [], loc)
+
 let rec transl_exp ~scopes layout e =
   transl_exp1 ~scopes ~in_new_scope:false layout e
 
@@ -486,6 +556,18 @@ and transl_exp1 ~scopes ~in_new_scope layout e =
   Translobj.oo_wrap e.exp_env true (transl_exp0 ~scopes ~in_new_scope layout) e
 
 and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
+  if is_ghost_exp e
+  then transl_ghost ~scopes layout e
+  else transl_exp0_desc ~in_new_scope ~scopes layout e
+
+(* A ghost expression is deleted from compilation: it is not evaluated.
+   We emit a placeholder of the layout the context requests; the mode system
+   ensures the placeholder is only ever consumed by ghost positions, so it
+   is never read. *)
+and transl_ghost ~scopes (layout : Lambda.layout) e =
+  Lambda.placeholder_of_layout (of_location ~scopes e.exp_loc) layout
+
+and transl_exp0_desc ~in_new_scope ~scopes (layout : Lambda.layout) e =
   match e.exp_desc with
   | Texp_ident { path; desc; kind; _ } ->
       transl_ident (of_location ~scopes e.exp_loc)
@@ -883,6 +965,11 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
       let arg_sort = Jkind.Sort.default_for_transl_and_get arg_sort in
       let arg_layout = layout_exp arg_sort arg in
       let targ = transl_exp ~scopes arg_layout arg in
+      if lbl.lbl_ghost then
+        (* A ghost field has no slot. The record is still evaluated; the
+           result is a placeholder, which the mode system keeps unread. *)
+        Lsequence (targ, transl_ghost ~scopes layout e)
+      else
       let sem =
         if Types.is_mutable lbl.lbl_mut then Reads_vary else Reads_agree
       in
@@ -1355,7 +1442,8 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
             assert_failed e.exp_loc ~scopes e,
             layout))
   | Texp_logical_equal (left, right) ->
-      let payload = Vox_type.classify_payload e.exp_env left.exp_type in
+      let ty = left.exp_type in
+      let payload = Vox_type.classify_payload e.exp_env ty in
       let left = transl_exp ~scopes Lambda.layout_any_value left in
       let right = transl_exp ~scopes Lambda.layout_any_value right in
       begin match payload with
@@ -1364,7 +1452,7 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
             ( prim_logical_equal,
               [left; right],
               of_location ~scopes e.exp_loc )
-      | None -> transl_opaque_logical_equal ~scopes e left right
+      | None -> transl_opaque_logical_equal ~scopes e ~ty left right
       end
   | Texp_assert (cond, loc) ->
       if !Clflags.noassert
@@ -2482,13 +2570,18 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
   (* Determine if there are "enough" fields (only relevant if this is a
      functional-style record update *)
   let size = Array.length fields in
+  let all_ghost =
+    (* An all-ghost record has kind void: there is no block to copy, so the
+       large-update path below (Pduprecord) must not fire for it. *)
+    Array.for_all (fun (lbl, _, _) -> lbl.Data_types.lbl_ghost) fields
+  in
   let on_heap = match mode with
     | None -> false (* unboxed is not on heap *)
     | Some m -> is_heap_mode m
   in
   match opt_init_expr with
   | Some (init_expr, init_expr_sort, _)
-    when on_heap && size >= Config.max_young_wosize ->
+    when (not all_ghost) && on_heap && size >= Config.max_young_wosize ->
     (* Take a shallow copy of the init record, then mutate the fields
        of the copy *)
     let copy_id = Ident.create_local "newrecord" in
@@ -2504,6 +2597,10 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
           fatal_error
             "transl_record: update expr implicitly copies atomic field";
         cont
+      | Overridden (_lid, expr) when lbl.lbl_ghost ->
+          (* No slot: the expression is evaluated for its effects only. *)
+          let field_layout = layout_exp lbl_sort expr in
+          Lsequence (transl_exp ~scopes field_layout expr, cont)
       | Overridden (_lid, expr) ->
           let upd =
             match repres with
@@ -2575,6 +2672,16 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
         (fun i (lbl, lbl_sort, definition) ->
            let lbl_sort = Jkind.Sort.default_for_transl_and_get lbl_sort in
            match definition with
+           | Kept _ when lbl.lbl_ghost ->
+               (* No slot to copy from the extended record. *)
+               void_value (of_location ~scopes loc), layout_ghost
+           | Overridden (_lid, expr) when lbl.lbl_ghost ->
+               (* Evaluated for effects; nothing is stored. *)
+               let field_layout = layout_exp lbl_sort expr in
+               Lsequence
+                 (transl_exp ~scopes field_layout expr,
+                  void_value (of_location ~scopes loc)),
+               layout_ghost
            | Kept (typ, mut, _) ->
                if Types.is_atomic lbl.lbl_mut then
                  fatal_error
@@ -2652,6 +2759,25 @@ and transl_record ~scopes loc env mode fields repres opt_init_expr =
         fields
     in
     let ll, shape = List.split (Array.to_list lv) in
+    if all_ghost
+    then begin
+      (* An all-ghost record has kind void: no value exists at run time.
+         Field expressions (and an extended expression) are still evaluated
+         for their effects. *)
+      let body =
+        List.fold_right (fun l acc -> Lsequence (l, acc)) ll
+          (void_value (of_location ~scopes loc))
+      in
+      match opt_init_expr with
+      | None -> body
+      | Some (init_expr, init_expr_sort, _) ->
+          let init_expr_sort =
+            Jkind.Sort.default_for_transl_and_get init_expr_sort
+          in
+          let init_expr_layout = layout_exp init_expr_sort init_expr in
+          Lsequence (transl_exp ~scopes init_expr_layout init_expr, body)
+    end
+    else
     let mut : Lambda.mutable_flag =
       if Array.exists (fun (lbl, _, _) -> Types.is_mutable lbl.lbl_mut) fields
       then Mutable
@@ -2996,7 +3122,8 @@ and transl_match ~scopes ~arg_sort ~return_layout e arg pat_expr_list partial =
   in
   let classic =
     match arg, exn_cases with
-    | {exp_desc = Texp_tuple (argl, alloc_mode)}, [] ->
+    | {exp_desc = Texp_tuple (argl, alloc_mode)}, []
+      when not (is_ghost_exp arg) ->
       (* CR layouts v7.1: This case and the one below it give special treatment
          to matching on literal tuples. This optimization is irrelevant for
          unboxed tuples in native code, but not doing it for unboxed tuples in
@@ -3009,7 +3136,8 @@ and transl_match ~scopes ~arg_sort ~return_layout e arg pat_expr_list partial =
       in
       Matching.for_multiple_match ~scopes ~return_layout e.exp_loc
         (transl_list_with_layout ~scopes argl) mode val_cases partial
-    | {exp_desc = Texp_tuple (argl, alloc_mode)}, _ :: _ ->
+    | {exp_desc = Texp_tuple (argl, alloc_mode)}, _ :: _
+      when not (is_ghost_exp arg) ->
         let argl =
           List.map (fun (_, a) -> (a, Jkind.Sort.Const.for_tuple_element)) argl
         in

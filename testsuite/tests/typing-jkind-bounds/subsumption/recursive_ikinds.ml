@@ -8,9 +8,9 @@ type 'a my_list : immutable_data with 'a = Nil | Cons of 'a * 'a my_list
 type 'a my_list = Nil | Cons of 'a * 'a my_list
 |}]
 
-type 'a my_list : immutable_data with 'a = 'a list = [] | ( :: ) of 'a * 'a my_list
+type 'a my_list : immutable_data with 'a = 'a list = [] | ( :: ) of 'a * 'a my_list [@@inductive]
 [%%expect {|
-type 'a my_list = 'a list = [] | (::) of 'a * 'a my_list
+type 'a my_list = 'a list = [] | (::) of 'a * 'a my_list [@@inductive]
 |}]
 
 type 'a my_list : immutable_data with 'a = Nil | Cons of 'a * 'a foo
@@ -72,8 +72,7 @@ Line 2, characters 2-70:
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data with 'a,
-       because My_list.t is not mod forkable unyielding many stateless
-                 immutable.
+       because My_list.t is not mod forkable unyielding many total immutable.
 |}]
 
 module rec My_list : sig

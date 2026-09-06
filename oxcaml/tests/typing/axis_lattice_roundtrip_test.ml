@@ -103,6 +103,9 @@ let mod_bounds_of_sample sample =
       ~statefulness:
         (Mode.Crossing.Comonadic.Atom.Modality
            (Mode.Modality.Comonadic.Atom.Meet_const sample.statefulness))
+      ~ghostliness:
+        (Mode.Crossing.Comonadic.Atom.Modality
+           (Mode.Modality.Comonadic.Atom.Meet_const Mode.Ghostliness.Const.Ghost))
   in
   Btype.Jkind0.Mod_bounds.create { monadic; comonadic }
     ~externality:sample.externality
@@ -202,36 +205,37 @@ let mask_of_axis : type a. a Jkind_axis.Axis.t -> t =
   let open Mode.Axis in
   let open Mode.Crossing.Axis in
   let sample = sample_of_lattice bot in
+  let ghost_mask = lattice_of_sample sample in
+  let non_ghost_mask sample = co_sub (lattice_of_sample sample) ghost_mask in
   match axis with
   | Modal (Comonadic Areality) ->
-    lattice_of_sample { sample with areality = Mode.Regionality.Const.Local }
+    non_ghost_mask { sample with areality = Mode.Regionality.Const.Local }
   | Modal (Monadic Uniqueness) ->
-    lattice_of_sample { sample with uniqueness = Mode.Uniqueness.Const.Unique }
+    non_ghost_mask { sample with uniqueness = Mode.Uniqueness.Const.Unique }
   | Modal (Comonadic Linearity) ->
-    lattice_of_sample { sample with linearity = Mode.Linearity.Const.Once }
+    non_ghost_mask { sample with linearity = Mode.Linearity.Const.Once }
   | Modal (Monadic Contention) ->
-    lattice_of_sample
+    non_ghost_mask
       { sample with contention = Mode.Contention.Const.Uncontended }
   | Modal (Comonadic Portability) ->
-    lattice_of_sample
+    non_ghost_mask
       { sample with portability = Mode.Portability.Const.Nonportable }
   | Modal (Comonadic Forkable) ->
-    lattice_of_sample { sample with forkable = Mode.Forkable.Const.Unforkable }
+    non_ghost_mask { sample with forkable = Mode.Forkable.Const.Unforkable }
   | Modal (Comonadic Yielding) ->
-    lattice_of_sample { sample with yielding = Mode.Yielding.Const.Yielding }
+    non_ghost_mask { sample with yielding = Mode.Yielding.Const.Yielding }
   | Modal (Comonadic Totality) ->
-    lattice_of_sample { sample with totality = Mode.Totality.Const.Partial }
+    non_ghost_mask { sample with totality = Mode.Totality.Const.Partial }
   | Modal (Comonadic Statefulness) ->
-    lattice_of_sample
+    non_ghost_mask
       { sample with statefulness = Mode.Statefulness.Const.Stateful }
   | Modal (Monadic Visibility) ->
-    lattice_of_sample
-      { sample with visibility = Mode.Visibility.Const.Read_write }
+    non_ghost_mask { sample with visibility = Mode.Visibility.Const.Read_write }
   | Modal (Monadic Staticity) ->
-    lattice_of_sample { sample with staticity = Mode.Staticity.Static }
+    non_ghost_mask { sample with staticity = Mode.Staticity.Static }
+  | Modal (Comonadic Ghostliness) -> ghost_mask
   | Nonmodal Externality ->
-    lattice_of_sample
-      { sample with externality = Jkind_axis.Externality.Internal }
+    non_ghost_mask { sample with externality = Jkind_axis.Externality.Internal }
 
 let of_axis_set' (set : Jkind_axis.Axis_set.t) : t =
   Jkind_axis.Axis_set.to_seq set
