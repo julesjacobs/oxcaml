@@ -302,6 +302,12 @@ a real context: it cannot read a ghost operand or ghost data in its predicate.
 Proof calls can be erased while their result refinements remain available:
 `let refine_ proof = ghost_ (lemma x) in ...`.
 
+The predicate representation retains `ghost_`, including in generated
+`[@def]` equations and serialized interfaces. Logical evaluation uses the
+expression's value. Printing and runtime replay reconstruct the erasure
+annotation, so replay checks the same ghost/real uses as the source.
+Definition bodies can erase local proofs directly.
+
 A ghost field stores a total logical value. Construction may evaluate an
 ordinary expression for effects, but the resulting value must be total.
 This makes the field's total ghost read valid even when its enclosing record

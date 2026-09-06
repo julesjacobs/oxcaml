@@ -1060,6 +1060,7 @@ let rec predicate ctx env s e =
           in
           name ctx s (scalar_value (required e.rexp_loc result))
       end
+    | Rexp_ghost body -> eval s body
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
       let s, left = eval s left in

@@ -155,3 +155,52 @@ module Ghost_record :
 let () = assert (Ghost_record.compare ());;
 [%%expect{|
 |}]
+
+module Ghost_definitions = struct
+  let[@def] (value @ total) (x : int) : {y : int | y >= 0} =
+    let y = Nonnegative.value x in
+    let refine_ proof = ghost_ (
+      let refine_ nonnegative = Nonnegative.lemma x in
+      let u = () in
+      (refine_ u : {u : unit | y >= 0}))
+    in
+    refine_ y
+
+  let (unfold @ total) (x : int) :
+      {u : unit | (let refine_ y = value x in y) === Nonnegative.value x} =
+    let refine_ equation = ghost_ (value_def x) in
+    let u = () in refine_ u
+end;;
+[%%expect{|
+module Ghost_definitions :
+  sig
+    val value : int -> {y : int | y >= 0}
+    val value_def :
+      (x : int) ->
+      {u : unit | (value x) === (let y = Nonnegative.value x in y : int)}
+    val unfold :
+      (x : int) ->
+      {u : unit | (let refine_ y = value x in y) === (Nonnegative.value x)}
+  end
+|}]
+
+let static_ghost (x : int) : {y : int | y === ghost_ x} =
+  let y = x in refine_ y;;
+[%%expect{|
+val static_ghost : (x : int) -> {y : int | y === (ghost_ x)} = <fun>
+|}]
+
+let runtime_ghost (x : int) : {y : int | y === ghost_ x} = assume_ x;;
+[%%expect{|
+Line 1, characters 54-55:
+1 | let runtime_ghost (x : int) : {y : int | y === ghost_ x} = assume_ x;;
+                                                          ^
+Error: This value is "ghost" but is expected to be "real".
+|}]
+
+type ghost_elimination =
+  {x : {z : int | true} | (ghost_ (let refine_ y = x in y)) === 0};;
+[%%expect{|
+type ghost_elimination =
+    {x : {z : int | true} | (ghost_ (let refine_ y = x in y)) === 0}
+|}]

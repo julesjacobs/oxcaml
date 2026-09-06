@@ -32,3 +32,16 @@ let () = ignore (verified ()); ignore (multiple ()); ignore (datatype 0)
 
 let dependent : (x : int) -> {v : int | v = x} -> unit =
   fun x y -> let refine_ proof = Alias.dependent_def x y in ()
+
+let witnessed (x : int) : {y : int | y === x} =
+  let result = Same.witnessed x in
+  let refine_ proof = ghost_ (Same.witnessed_def x) in
+  refine_ result
+
+let static_identity (x : int) : Same.ghost_identity = refine_ x
+
+let () =
+  let seven = 7 in
+  let refine_ result = witnessed seven in
+  assert (result = 7);
+  ignore (static_identity 9)
