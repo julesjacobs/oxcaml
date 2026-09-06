@@ -7558,7 +7558,9 @@ and type_expect_
           exp_attributes = sexp.pexp_attributes;
           exp_env = env
         }
-  | Pexp_ident lid when String.equal (Longident.last lid.txt) "===" ->
+  | Pexp_ident lid
+    when Language_extension.is_enabled Refinement_types
+         && String.equal (Longident.last lid.txt) "===" ->
       raise
         (Error_forward
            (Location.errorf ~loc
@@ -7814,7 +7816,8 @@ and type_expect_
         ~attributes:sexp.pexp_attributes (params, body_constraint, body)
   | Pexp_apply
       ({ pexp_desc = Pexp_ident { txt = Longident.Lident "==="; _ } },
-       [Nolabel, left; Nolabel, right]) ->
+       [Nolabel, left; Nolabel, right])
+    when Language_extension.is_enabled Refinement_types ->
       if not (!typing_refinement_predicate || Resolved_predicate.active ())
       then
         raise
