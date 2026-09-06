@@ -110,10 +110,9 @@ explicit definition lemmas.
 `expressions.ml` now proves constant folding preserves evaluation for every
 expression and input. Both evaluations use machine-integer wrapping semantics.
 
-`array_search.ml` proves that returned indices are in range and contain the
-target. It does not prove absence or first-match correctness. Its total `at`
-observer returns zero outside the array; the result contract separately
-establishes bounds.
+`array_search.ml` proves first-match correctness within the requested interval
+and absence throughout that interval on `None`. Its total `at` observer returns
+zero outside the array; the result contract separately establishes bounds.
 
 The queue proves its tail-recursive reversal against an explicit
 append/reverse model. Its representation stays behind a `.mli`. Operations
