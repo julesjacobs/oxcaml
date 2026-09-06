@@ -152,7 +152,8 @@ let keep_immutable (box @ immutable) :
   refine_ box;;
 [%%expect{|
 val keep_immutable :
-  (box : box) -> {result : box | same_box result box} @ immutable = <fun>
+  (box : box) @ immutable -> {result : box | same_box result box} @ immutable =
+  <fun>
 |}]
 
 let bad_pattern :
@@ -277,4 +278,41 @@ let (contain_contended @ total) :
 [%%expect{|
 type cell = Cell of int
 val contain_contended : int -> {r : cell | true} @ immutable = <fun>
+|}]
+
+module type Immutable_arguments = sig
+  type t
+  val observe : t @ immutable -> bool @@ total
+  val keep : (x : t) @ immutable -> {u : unit | observe x}
+end
+;;
+[%%expect{|
+module type Immutable_arguments =
+  sig
+    type t
+    val observe : t @ immutable -> bool @@ total
+    val keep : (x : t) @ immutable -> {u : unit | observe x}
+  end
+|}]
+
+type partial_argument =
+  (x : int) @ partial -> {y : int | eq y x}
+;;
+[%%expect{|
+Line 2, characters 7-10:
+2 |   (x : int) @ partial -> {y : int | eq y x}
+           ^^^
+Error: Dependent arguments must be total, stateless, portable
+|}]
+
+module Inferred = struct
+  let identity (x : int) : {y : int | eq y x} = assume_ x
+end
+module Checked : sig
+  val identity : (x : int) -> {y : int | eq y x}
+end = Inferred
+;;
+[%%expect{|
+module Inferred : sig val identity : (x : int) -> {y : int | eq y x} end
+module Checked : sig val identity : (x : int) -> {y : int | eq y x} end
 |}]

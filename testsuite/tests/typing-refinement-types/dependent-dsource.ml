@@ -15,3 +15,12 @@ external equal : int -> int -> bool = "%equal"
 type higher_order = (f : (int -> int)) -> {result : int | equal result (f 0)};;
 type higher_order = (f : (int -> int)) -> {result : int | equal result (f 0)}
 |}]
+
+type immutable_argument =
+  (x : int) @ immutable -> {y : int | equal y x}
+;;
+[%%expect{|
+
+type immutable_argument = (x : int) @ immutable -> {y : int | equal y x};;
+type immutable_argument = (x : int) @ immutable -> {y : int | equal y x}
+|}]

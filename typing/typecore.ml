@@ -10179,9 +10179,20 @@ and type_function
       let arg_mode =
         match expected_binder, binder with
         | None, Some _ ->
-            Totality.equate_exn
-              (Alloc.proj_comonadic Totality arg_mode)
-              Totality.total;
+            if Result.is_error
+                 (Totality.equate (Alloc.proj_comonadic Totality arg_mode)
+                    Totality.total)
+               || Result.is_error
+                    (Statefulness.equate
+                       (Alloc.proj_comonadic Statefulness arg_mode)
+                       Statefulness.stateless)
+               || Result.is_error
+                    (Portability.equate
+                       (Alloc.proj_comonadic Portability arg_mode)
+                       (Portability.of_const Portability.Const.Portable))
+            then
+              Location.raise_errorf ~loc:pparam_loc
+                "Dependent arguments must be total, stateless, portable";
             arg_mode
         | _ -> arg_mode
       in
