@@ -37,9 +37,9 @@ legacy-mode defaults.
 | Int-set proofs | `int_set_intf.mli`, `list_int_set.mli`, `int_sets.ml` | A canonical list set exposes verified membership, size, and `===` extensionality through an abstract interface. |
 | AVL-set proofs | `avl_sets.mli`, `avl_set_client.ml` | A valid AVL set exposes semantic `equal`; the demo distinguishes it from representation `=`. |
 | Immutable arrays | `iarrays.ml`, `iarrays_ordinary.ml` | Immutable-array literals expose exact lengths and elements; safe reads expose normal-return bounds. |
-| Bounded search | `array_search.ml` | A decreasing interval establishes termination, safe reads, and matching returned indices. |
+| Bounded search | `array_search.ml` | A decreasing interval establishes termination and safe reads; `Some` is the first match, and `None` proves absence throughout the interval. |
 | Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
-| Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract two-list queue implements a sequence model; a separate client proves FIFO behavior and rejects empty dequeue. |
+| Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract polymorphic two-list queue over `immutable_data` elements implements a sequence model; a separate client proves generic FIFO behavior and rejects empty dequeue. |
 | Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
 | Standard maps | `maps.ml` | Total comparators enable total operations; refined updates and lookup expose membership and value facts while preserving key and value access. |
 | Persistent environments | `environments.ml` | Binding shadows its comparator class and preserves observations in a distinct class; retaining the outer environment restores scope. |

@@ -468,20 +468,20 @@ module List_proofs = struct
           (match right with
            | Nil -> refine_ u
            | Cons (right_head, _) ->
-             let refine_ same_lookup = premise right_head in
+             premise right_head;
              lookup_repr_def right_head left;
              lookup_repr_def right_head right;
              refine_ u)
         | Cons (left_head, left_tail) ->
           match right with
           | Nil ->
-            let refine_ same_lookup = premise left_head in
+            premise left_head;
             lookup_repr_def left_head left;
             lookup_repr_def left_head right;
             refine_ u
           | Cons (right_head, right_tail) ->
-            let refine_ left_lookup = premise left_head in
-            let refine_ right_lookup = premise right_head in
+            premise left_head;
+            premise right_head;
             lookup_repr_def left_head left;
             lookup_repr_def left_head right;
             lookup_repr_def right_head left;
@@ -499,7 +499,7 @@ module List_proofs = struct
                     lookup_repr element left_tail
                     === lookup_repr element right_tail} =
                 fun element ->
-                let refine_ same_lookup = premise element in
+                premise element;
                 lookup_repr_def element left;
                 lookup_repr_def element right;
                 if element = left_head then
@@ -2722,7 +2722,7 @@ module Validity_proofs : sig
               List_set.lookup_repr element left_elements
               === List_set.lookup_repr element right_elements} =
           fun element ->
-          let refine_ same_lookup = premise element in
+          premise element;
           Element_proofs.lookup_tree_elements element left_tree left_validity;
           Element_proofs.lookup_tree_elements element right_tree
               right_validity;

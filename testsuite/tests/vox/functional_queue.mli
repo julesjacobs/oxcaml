@@ -1,19 +1,27 @@
-type t : immutable_data
+type ('a : immutable_data) t : immutable_data
 
-val contents : t -> int list @@ total
+val contents : ('a : immutable_data).
+  'a t @ immutable total -> 'a list @ immutable total @@ total
 
-val append : int list -> int list -> int list @@ total
-val append_def : (xs : int list) -> (ys : int list) ->
+val append : ('a : immutable_data).
+  'a list @ immutable total -> 'a list @ immutable total ->
+  'a list @ immutable total @@ total
+val append_def : ('a : immutable_data).
+  (xs : 'a list) @ immutable -> (ys : 'a list) @ immutable ->
   {u : unit |
     append xs ys ===
       (match xs with [] -> ys | h :: t -> h :: append t ys)}
   @@ total
 
-val empty : {q : t | contents q === []} @@ total
-val enqueue : (q : t) -> (value : int) ->
-  {r : t | contents r === append (contents q) [value]} @@ total
-val dequeue : (q : {q : t | (contents q === []) === false}) ->
-  {r : int * t |
+val empty : ('a : immutable_data).
+  {q : 'a t | contents q === []} @@ total immutable
+val enqueue : ('a : immutable_data).
+  (q : 'a t) @ immutable -> (value : 'a) @ immutable ->
+  {r : 'a t | contents r === append (contents q) [value]}
+  @ immutable total @@ total
+val dequeue : ('a : immutable_data).
+  (q : {q : 'a t | (contents q === []) === false}) @ immutable ->
+  {r : 'a * 'a t |
     let refine_ original = q in
     match r with head, tail -> contents original === head :: contents tail}
-  @@ total
+  @ immutable total @@ total
