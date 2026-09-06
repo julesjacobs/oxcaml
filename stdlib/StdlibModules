@@ -91,6 +91,7 @@ STDLIB_MODULE_BASENAMES = \
   hashtbl \
   weak \
   format \
+  bigint \
   scanf \
   callback \
   camlinternalOO \

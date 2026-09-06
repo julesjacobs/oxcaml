@@ -2702,6 +2702,14 @@ module Resolved_predicate = struct
 
   let current = ref None
 
+  let with_values values f =
+    let input = match !current with
+      | None -> { expressions = []; values; constructors = []; labels = [];
+                  locals = [] }
+      | Some input -> { input with values = values @ input.values }
+    in
+    Misc.protect_refs [Misc.R (current, Some input)] f
+
   let with_input input f =
     let warnings = Warnings.backup () in
     Misc.try_finally ~always:(fun () -> Warnings.restore warnings) (fun () ->
@@ -3861,6 +3869,8 @@ and type_pat_aux
         pat_attributes = sp.ppat_attributes;
         pat_env = !!penv;
         pat_unique_barrier = Unique_barrier.not_computed () }
+  | Ppat_constant {pconst_desc = Pconst_integer (_, Some 'Z'); _} ->
+      Location.raise_errorf ~loc "Bigint literal patterns are not supported"
   | Ppat_constant cst ->
       let cst = constant_or_raise !!penv loc cst in
       rvp @@ solve_expected {
@@ -7708,6 +7718,48 @@ and type_expect_
         exp_type = instance Predef.type_unboxed_bool;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
+  | Pexp_constant {pconst_desc = Pconst_integer (text, Some 'Z'); _} ->
+      let len = String.length text in
+      let negative = len > 0 && text.[0] = '-' in
+      let start = if negative || (len > 0 && text.[0] = '+') then 1 else 0 in
+      let digits = Buffer.create len in
+      for i = start to len - 1 do
+        match text.[i] with
+        | '0' .. '9' as c -> Buffer.add_char digits c
+        | '_' -> ()
+        | _ ->
+            Location.raise_errorf ~loc "Bigint literals require decimal digits"
+      done;
+      let digits = Buffer.contents digits in
+      if digits = "" then
+        Location.raise_errorf ~loc "Bigint literals require decimal digits";
+      let values = ref [] in
+      let call name args =
+        let lid = Longident.Ldot
+          (Location.mkloc (Longident.Lident "Bigint") loc,
+           Location.mkloc name loc) in
+        values := (lid, Vox_type.bigint_path name) :: !values;
+        Ast_helper.Exp.apply ~loc
+          (Ast_helper.Exp.ident ~loc (Location.mkloc lid loc))
+          (List.map (fun arg -> Asttypes.Nolabel, arg) args)
+      in
+      let of_int digits =
+        call "of_int" [Ast_helper.Exp.constant ~loc
+          {pconst_desc = Pconst_integer (digits, None); pconst_loc = loc}]
+      in
+      let count = String.length digits in
+      let first = (count - 1) mod 9 + 1 in
+      let result = ref (of_int (String.sub digits 0 first)) in
+      for chunk = 0 to (count - first) / 9 - 1 do
+        let digits = String.sub digits (first + chunk * 9) 9 in
+        result := call "add"
+            [call "mul" [!result; of_int "1000000000"]; of_int digits]
+      done;
+      let result = if negative then call "neg" [!result] else !result in
+      Resolved_predicate.with_values !values (fun () ->
+        type_expect env expected_mode
+          {result with pexp_attributes = sexp.pexp_attributes}
+          ty_expected_explained)
   | Pexp_constant cst ->
       let cst = constant_or_raise env loc cst in
       rue {
@@ -9934,7 +9986,7 @@ and type_ident env ?(recarg=Rejected) lid =
             match get_desc (expand_head env ty) with
             | Tpoly (ty, []) -> is_scalar ty
             | _ -> begin match Vox_type.classify env ty with
-                | Some (Int | Bool) -> true
+                | Some (Int | Bool | Bigint) -> true
                 | None -> false
               end
           in
@@ -15170,11 +15222,17 @@ let () = type_decreases := (fun self fn measure ->
       (measure.pexp_loc, Mode.Hint.Expression) body.exp_env in
   let env = List.fold_left (fun env (id, pat) ->
       add_total_immutable_value env id pat.pat_type pat.pat_loc) env params in
+  let sexp = measure in
   let measure =
     Ctype.with_refinement_predicate_scope (fun () ->
       type_expect env ~mode:(total_immutable_mode ()) measure
-        (mk_expected Predef.type_int))
+        (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind))))
   in
+  begin match Vox_type.classify env measure.exp_type with
+  | Some Bigint -> ()
+  | Some (Int | Bool) | None ->
+      unify_exp ~sexp env measure (instance Predef.type_int)
+  end;
   Recursive_function.check_predicates self measure;
   let default = Tast_iterator.default_iterator in
   let it = {default with expr = (fun it exp ->
