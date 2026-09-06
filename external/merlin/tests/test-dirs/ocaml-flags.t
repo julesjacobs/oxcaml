@@ -1,9 +1,9 @@
 Get a list of all flags that ocaml understands.
   $ OCAMLOPT="$MERLIN_TEST_OCAML_PATH/bin/ocamlopt.opt"
-  $ "$OCAMLOPT" --help | grep -oP '(?<=  )-[a-zA-Z\-_0-9]+(?= )' > ocamlopt-flags.txt
+  $ "$OCAMLOPT" --help | sed -nE 's/^  (-[a-zA-Z_0-9-]+) .*/\1/p' > ocamlopt-flags.txt
 
   $ OCAMLC="$MERLIN_TEST_OCAML_PATH/bin/ocamlc"
-  $ "$OCAMLC" --help | grep -oP '(?<=  )-[a-zA-Z\-_0-9]+(?= )' > ocamlc-flags.txt
+  $ "$OCAMLC" --help | sed -nE 's/^  (-[a-zA-Z_0-9-]+) .*/\1/p' > ocamlc-flags.txt
 
   $ OCAML_FLAGS=$(sort -u ocamlopt-flags.txt ocamlc-flags.txt)
 

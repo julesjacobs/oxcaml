@@ -127,6 +127,7 @@ let print_symbol = function
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_GREATERDOT) -> ">."
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_GREATER) -> ">"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_GLOBAL) -> "global_"
+  | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_GHOST) -> "ghost_"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_FUNCTOR) -> "functor"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_FUNCTION) -> "function"
   | MenhirInterpreter.X (MenhirInterpreter.T MenhirInterpreter.T_FUN) -> "fun"
@@ -570,6 +571,7 @@ let print_value (type a) : a MenhirInterpreter.symbol -> a -> string = function
   | MenhirInterpreter.T MenhirInterpreter.T_GREATERDOT -> (fun _ -> ">.")
   | MenhirInterpreter.T MenhirInterpreter.T_GREATER -> (fun _ -> ">")
   | MenhirInterpreter.T MenhirInterpreter.T_GLOBAL -> (fun _ -> "global_")
+  | MenhirInterpreter.T MenhirInterpreter.T_GHOST -> (fun _ -> "ghost_")
   | MenhirInterpreter.T MenhirInterpreter.T_FUNCTOR -> (fun _ -> "functor")
   | MenhirInterpreter.T MenhirInterpreter.T_FUNCTION -> (fun _ -> "function")
   | MenhirInterpreter.T MenhirInterpreter.T_FUN -> (fun _ -> "fun")
@@ -1012,6 +1014,7 @@ let print_token = function
   | GREATERDOT -> print_value (MenhirInterpreter.T MenhirInterpreter.T_GREATERDOT) ()
   | GREATER -> print_value (MenhirInterpreter.T MenhirInterpreter.T_GREATER) ()
   | GLOBAL -> print_value (MenhirInterpreter.T MenhirInterpreter.T_GLOBAL) ()
+  | GHOST -> print_value (MenhirInterpreter.T MenhirInterpreter.T_GHOST) ()
   | FUNCTOR -> print_value (MenhirInterpreter.T MenhirInterpreter.T_FUNCTOR) ()
   | FUNCTION -> print_value (MenhirInterpreter.T MenhirInterpreter.T_FUNCTION) ()
   | FUN -> print_value (MenhirInterpreter.T MenhirInterpreter.T_FUN) ()
@@ -1176,6 +1179,7 @@ let token_of_terminal (type a) (t : a MenhirInterpreter.terminal) (v : a) : toke
   | MenhirInterpreter.T_GREATERDOT -> GREATERDOT
   | MenhirInterpreter.T_GREATER -> GREATER
   | MenhirInterpreter.T_GLOBAL -> GLOBAL
+  | MenhirInterpreter.T_GHOST -> GHOST
   | MenhirInterpreter.T_FUNCTOR -> FUNCTOR
   | MenhirInterpreter.T_FUNCTION -> FUNCTION
   | MenhirInterpreter.T_FUN -> FUN
