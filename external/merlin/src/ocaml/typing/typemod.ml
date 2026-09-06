@@ -86,6 +86,8 @@ type error =
   | Cannot_scrape_package_type of Path.t
   | Badly_formed_signature of string * Typedecl.error
   | Inductive_type_in_recursive_module of string
+  | Exposed_total_value_in_recursive_module of string
+  | Dependent_item_in_recursive_module of string
   | Cannot_hide_id of hiding_error
   | Invalid_type_subst_rhs
   | Non_packable_local_modtype_subst of Path.t
@@ -2696,7 +2698,213 @@ and transl_modtype_decl_aux env
   newenv, mtd, decl
 
 and transl_recmodule_modtypes env ~sig_modalities sdecls =
-  let find_inductive_type env item =
+  let scope = Ctype.create_scope () in
+  let ids =
+    List.map (fun (x, _) -> Option.map (Ident.create_scoped ~scope)
+      x.pmd_name.txt)
+      sdecls
+  in
+  let group_ids = List.filter_map Fun.id ids in
+  let modality_is_total modality =
+    match
+      Mode.Modality.Const.proj
+        (Mode.Modality.Axis.Comonadic Mode.Axis.Totality)
+        modality
+    with
+    | Mode.Modality.Comonadic.Atom.Meet_const Totality.Const.Total -> true
+    | Mode.Modality.Comonadic.Atom.Meet_const Totality.Const.Partial -> false
+  in
+  let type_depends_on env dependent_ids ty =
+    match Ctype.nondep_type env dependent_ids ty with
+    | _ -> false
+    | exception Ctype.Nondep_cannot_erase _ -> true
+  in
+  let has_obtainable_dependency env dependent_ids ty =
+    let exception Found in
+    try
+      with_type_mark begin fun mark ->
+        let super = Btype.type_iterators mark in
+        let iterator =
+          { super with
+            Btype.it_do_type_expr = (fun self ty ->
+              match get_desc ty with
+              | Tarrow (_, _, ret, _) ->
+                self.Btype.it_type_expr self ret
+              | Tconstr _ ->
+                let expanded = Ctype.expand_head env ty in
+                if eq_type expanded ty
+                then begin
+                  if type_depends_on env dependent_ids ty
+                  then raise_notrace Found
+                end
+                else self.Btype.it_type_expr self expanded
+              | Tmod _ | Tpackage _ ->
+                if type_depends_on env dependent_ids ty
+                then raise_notrace Found
+              | _ -> super.Btype.it_do_type_expr self ty)
+          }
+        in
+        iterator.Btype.it_type_expr iterator ty
+      end;
+      false
+    with Found -> true
+  in
+  let type_exposes_total_dependency
+      ?(dependent_container = false) env dependent_ids ty =
+    (* A partial value can reveal a total capability through a returned
+       closure or through projections from its result. *)
+    let rec exposes active_types active_declarations dependent_container ty =
+      let visited =
+        match Btype.TypeMap.find ty active_types with
+        | was_dependent -> was_dependent || not dependent_container
+        | exception Not_found -> false
+      in
+      if visited then false else
+      let active_types =
+        match get_desc ty with
+        | Tconstr _ -> active_types
+        | _ -> Btype.TypeMap.add ty dependent_container active_types
+      in
+      let exposes = exposes active_types in
+      let check_obtainable dependent_container modalities ty =
+        (modality_is_total modalities
+         && (dependent_container
+             || has_obtainable_dependency env dependent_ids ty))
+        || exposes active_declarations dependent_container ty
+      in
+      match get_desc ty with
+      | Tarrow ((_, _, ret_mode, _), _, ret, _) ->
+        let totality =
+          Mode.Alloc.proj_comonadic Mode.Axis.Totality ret_mode
+        in
+        (Totality.is_total totality
+         && (dependent_container
+             || has_obtainable_dependency env dependent_ids ret))
+        || exposes active_declarations dependent_container ret
+      | Ttuple fields | Tunboxed_tuple fields ->
+        let dependent_container =
+          dependent_container
+          || has_obtainable_dependency env dependent_ids ty
+        in
+        List.exists
+          (fun (_, field) ->
+            check_obtainable
+              dependent_container Mode.Modality.Const.id field)
+          fields
+      | Tconstr (path, args, _) ->
+        let expanded = Ctype.expand_head env ty in
+        if not (eq_type expanded ty)
+        then exposes active_declarations dependent_container expanded
+        else
+          (* Equality evidence can relate any fields of a dependent GADT. *)
+          let dependent_container =
+            dependent_container || type_depends_on env dependent_ids ty
+          in
+          begin match Path.Map.find_opt path active_declarations with
+        | Some active_args ->
+          not (Ctype.is_equal env false args active_args)
+          && type_depends_on env dependent_ids ty
+        | None ->
+          begin match Env.find_type path env with
+          | ({ type_params; type_kind; type_manifest; _ } as declaration) ->
+            let active_declarations =
+              Path.Map.add path args active_declarations
+            in
+            let check modalities field =
+              match Ctype.apply env type_params field args with
+              | field ->
+                (modality_is_total modalities
+                 && (dependent_container
+                     || has_obtainable_dependency
+                          env dependent_ids field))
+                || exposes active_declarations dependent_container field
+              | exception Ctype.Cannot_apply -> true
+            in
+            begin match type_kind with
+            | Type_record (labels, _, _)
+            | Type_record_unboxed_product (labels, _, _) ->
+              List.exists
+                (fun (label : Types.label_declaration) ->
+                  check label.ld_modalities label.ld_type)
+                labels
+            | Type_variant _ ->
+              Datarepr.constructors_of_type
+                ~current_unit:(Env.get_current_unit ()) path declaration
+              |> List.exists (fun (_, constructor) ->
+                let snapshot = Btype.snapshot () in
+                Misc.try_finally
+                  (fun () ->
+                    let arguments, result, _ =
+                      Ctype.instance_constructor
+                        Keep_existentials_flexible constructor
+                    in
+                    match Ctype.unify env result ty with
+                    | () ->
+                      List.exists
+                        (fun (argument : Types.constructor_argument) ->
+                          check argument.ca_modalities argument.ca_type)
+                        arguments
+                    | exception Ctype.Unify _ -> false)
+                  ~always:(fun () -> Btype.backtrack snapshot))
+            | Type_open -> type_depends_on env dependent_ids ty
+            | Type_abstract _ ->
+              begin match type_manifest with
+              | Some manifest ->
+                begin match Ctype.apply env type_params manifest args with
+                | manifest ->
+                  exposes active_declarations dependent_container manifest
+                | exception Ctype.Cannot_apply -> true
+                end
+              | None ->
+                let direct_carrier =
+                  args = []
+                && (match Path.flatten path with
+                    | `Ok _ -> true
+                    | `Contains_apply -> false)
+                && Path.exists_free dependent_ids path
+                in
+                not direct_carrier
+                && (Path.exists_free dependent_ids path
+                    || List.exists (type_depends_on env dependent_ids) args)
+              end
+            end
+          | exception Not_found -> false
+          end
+        end
+      | Tvariant row ->
+        let dependent_container =
+          dependent_container
+          || has_obtainable_dependency env dependent_ids ty
+        in
+        Btype.fold_row
+          (fun found field ->
+            found
+            || check_obtainable
+                 dependent_container Mode.Modality.Const.id field)
+          false row
+      | Tmod (inner, _) ->
+        type_depends_on env dependent_ids inner
+        || exposes active_declarations dependent_container inner
+      | Tpoly (inner, _) | Trepr (inner, _)
+      | Tquote inner | Tsplice inner | Tquote_eval inner | Tbox inner
+      | Trefine { ref_payload = inner; _ } ->
+        exposes active_declarations dependent_container inner
+      | Tobject (fields, _) ->
+        let dependent_container =
+          dependent_container
+          || has_obtainable_dependency env dependent_ids ty
+        in
+        exposes active_declarations dependent_container fields
+      | Tfield (_, _, method_type, rest) ->
+        exposes active_declarations dependent_container method_type
+        || exposes active_declarations dependent_container rest
+      | Tpackage _ -> type_depends_on env dependent_ids ty
+      | Tvar _ | Tunivar _ | Tnil | Tlink _
+      | Tsubst _ | Tof_kind _ -> false
+    in
+    exposes Btype.TypeMap.empty Path.Map.empty dependent_container ty
+  in
+  let find_dependent_inductive_type env dependent_ids item =
     let exception Found of string in
     try
       with_type_mark begin fun mark ->
@@ -2708,7 +2916,11 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
               | Tconstr (path, _, _) ->
                 begin match Env.find_type path env with
                 | { type_inductive = true; _ } ->
-                  raise_notrace (Found (Path.name path))
+                  begin match Ctype.nondep_type env dependent_ids ty with
+                  | _ -> ()
+                  | exception Ctype.Nondep_cannot_erase _ ->
+                    raise_notrace (Found (Path.name path))
+                  end
                 | _ | exception Not_found ->
                   let expanded = Ctype.expand_head env ty in
                   if eq_type expanded ty
@@ -2723,35 +2935,168 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
       None
     with Found name -> Some name
   in
-  let rec find_inductive_guarantee env mty =
-    match Mtype.scrape env mty with
-    | Mty_ident _ | Mty_alias _ | Mty_for_hole -> None
-    | Mty_functor (param, result, _) ->
-        let env =
-          match param with
-          | Unit | Named (None, _, _) -> env
-          | Named (Some id, param, mode) ->
+  let structure_depends_on env dependent_ids visit =
+    let exception Found in
+    try
+      with_type_mark begin fun mark ->
+        let super = Btype.type_iterators mark in
+        let iterator =
+          { super with
+            Btype.it_type_expr = (fun self ty ->
+              if type_depends_on env dependent_ids ty then raise_notrace Found;
+              super.Btype.it_type_expr self ty);
+            it_path = (fun path ->
+              if Path.exists_free dependent_ids path
+              then raise_notrace Found)
+          }
+        in
+        visit iterator
+      end;
+      false
+    with Found -> true
+  in
+  let module_type_depends_on env dependent_ids mty =
+    structure_depends_on env dependent_ids (fun iterator ->
+      iterator.Btype.it_module_type iterator mty)
+  in
+  let rec class_type_exposes_total_dependency
+      env dependent_ids = function
+    | Cty_constr (_, _, class_type) ->
+      class_type_exposes_total_dependency
+        env dependent_ids class_type
+    | Cty_signature signature ->
+      let member_exists predicate =
+        Vars.exists
+          (fun _ (_, _, ty) -> predicate ty)
+          signature.csig_vars
+        || Meths.exists
+             (fun _ (_, _, ty) -> predicate ty)
+             signature.csig_meths
+      in
+      let dependent_container =
+        member_exists
+          (has_obtainable_dependency env dependent_ids)
+      in
+      member_exists
+        (fun member_type ->
+          type_exposes_total_dependency
+            ~dependent_container env dependent_ids member_type)
+    | Cty_arrow (_, _, result) ->
+      class_type_exposes_total_dependency
+        env dependent_ids result
+  in
+  let extension_exposes_total_dependency
+      env dependent_ids extension =
+    let fields =
+      match extension.ext_args with
+      | Cstr_tuple arguments ->
+        List.map
+          (fun (argument : Types.constructor_argument) ->
+            argument.ca_modalities, argument.ca_type)
+          arguments
+      | Cstr_record labels ->
+        List.map
+          (fun (label : Types.label_declaration) ->
+            label.ld_modalities, label.ld_type)
+          labels
+    in
+    let result_depends =
+      match extension.ext_ret_type with
+      | None -> false
+      | Some ty -> has_obtainable_dependency env dependent_ids ty
+    in
+    let dependent_container =
+      result_depends
+      || List.exists
+           (fun (_, ty) ->
+             has_obtainable_dependency env dependent_ids ty)
+           fields
+    in
+    result_depends
+    || List.exists
+         (fun (modalities, ty) ->
+           (modality_is_total modalities
+            && (dependent_container
+                || has_obtainable_dependency env dependent_ids ty))
+           || type_exposes_total_dependency
+                ~dependent_container env dependent_ids ty)
+         fields
+  in
+  let rec find_forbidden_recursive_signature
+      env dependent_ids mty =
+    match mty with
+    | Mty_strengthen (_, path, _) when Path.exists_free dependent_ids path ->
+      Some (`Unsupported (Path.name path, None))
+    | _ ->
+      match Mtype.scrape env mty with
+      | Mty_ident _ | Mty_alias _ | Mty_for_hole -> None
+      | Mty_functor (param, result, _) ->
+        begin match param with
+        | Unit | Named (None, _, _) ->
+          find_forbidden_recursive_signature env dependent_ids result
+        | Named (Some id, param, mode) ->
+          if module_type_depends_on env dependent_ids param
+          then Some (`Unsupported (Ident.name id, None))
+          else
               let mode =
                 Mode.(mode |> alloc_as_value |> Value.disallow_right)
               in
-              Env.add_module ~arg:true id Mp_present param ~mode env
-        in
-        find_inductive_guarantee env result
-    | Mty_strengthen (result, _, _) ->
-        find_inductive_guarantee env result
-    | Mty_signature signature ->
+              let env =
+                Env.add_module ~arg:true id Mp_present param ~mode env
+              in
+              find_forbidden_recursive_signature env dependent_ids result
+        end
+      | Mty_strengthen (result, _, _) ->
+        find_forbidden_recursive_signature env dependent_ids result
+      | Mty_signature signature ->
         let env = Env.add_signature signature env in
-        List.find_map (find_inductive_guarantee_in_item env) signature
-  and find_inductive_guarantee_in_item env = function
+        let dependent_ids =
+          List.rev_append
+            (List.map Types.signature_item_id signature)
+            dependent_ids
+        in
+        List.find_map
+          (find_forbidden_recursive_signature_item
+             env dependent_ids)
+          signature
+  and find_forbidden_recursive_signature_item env dependent_ids = function
     | Sig_type (id, decl, _, _) when decl.type_inductive ->
-        Some (Ident.name id)
+        Some (`Inductive (Ident.name id))
     | Sig_module (_, _, decl, _, _) ->
-        find_inductive_guarantee env decl.md_type
+        find_forbidden_recursive_signature
+          env dependent_ids decl.md_type
     | Sig_modtype (_, { mtd_type = Some mty; _ }, _) ->
-        find_inductive_guarantee env mty
-    | (Sig_value _ | Sig_type _ | Sig_typext _ | Sig_modtype _ | Sig_class _
-      | Sig_class_type _ | Sig_jkind _) as item ->
-        find_inductive_type env item
+        find_forbidden_recursive_signature
+          env dependent_ids mty
+    | Sig_value (id, desc, _) ->
+        let modality = Mode.Modality.to_const_exn desc.val_modalities in
+        let forbidden =
+          if modality_is_total modality
+          then type_depends_on env dependent_ids desc.val_type
+          else
+            type_exposes_total_dependency
+              env dependent_ids desc.val_type
+        in
+        if forbidden
+        then Some (`Total_value (Ident.name id, desc.val_loc))
+        else None
+    | (Sig_type _ as item) ->
+        Option.map
+          (fun name -> `Inductive name)
+          (find_dependent_inductive_type env dependent_ids item)
+    | Sig_typext (id, extension, _, _) ->
+      if
+        extension_exposes_total_dependency
+          env dependent_ids extension
+      then Some (`Unsupported (Ident.name id, Some extension.ext_loc))
+      else None
+    | Sig_class (id, declaration, _, _) ->
+      if
+        class_type_exposes_total_dependency
+          env dependent_ids declaration.cty_type
+      then Some (`Unsupported (Ident.name id, Some declaration.cty_loc))
+      else None
+    | Sig_class_type _ | Sig_modtype _ | Sig_jkind _ -> None
   in
   let make_env curr =
     List.fold_left (fun env (id_shape, _, md, mode, _, _) ->
@@ -2787,12 +3132,6 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
       (fun (id_shape, _, md, _, _, _) ->
          Option.map (fun (id, _) -> (id, md)) id_shape)
       curr
-  in
-  let scope = Ctype.create_scope () in
-  let ids =
-    List.map (fun (x, _) -> Option.map (Ident.create_scoped ~scope)
-      x.pmd_name.txt)
-      sdecls
   in
   let approx_env container =
     List.fold_left
@@ -2860,14 +3199,29 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
   check_recmod_decls env2 (map_mtys dcl2);
   List.iter2
     (fun (pmd, _) (_, _, (md : Types.module_declaration), _, _, _) ->
-       match find_inductive_guarantee env2 md.md_type with
+       match
+         find_forbidden_recursive_signature
+           env2 group_ids md.md_type
+       with
        | None -> ()
-       | Some name ->
+       | Some (`Inductive name) ->
            raise
              (Error
                 ( pmd.pmd_type.pmty_loc,
                   env2,
-                  Inductive_type_in_recursive_module name )))
+                  Inductive_type_in_recursive_module name ))
+       | Some (`Total_value (name, loc)) ->
+           raise
+             (Error
+                ( loc,
+                  env2,
+                  Exposed_total_value_in_recursive_module name ))
+       | Some (`Unsupported (name, loc)) ->
+           raise
+             (Error
+                ( Option.value loc ~default:pmd.pmd_type.pmty_loc,
+                  env2,
+                  Dependent_item_in_recursive_module name )))
     sdecls dcl2;
   let dcl2 =
     List.map2 (fun (pmd, _) (id_shape, id_loc, md, mmode, md_modalities, mty) ->
@@ -5572,6 +5926,16 @@ let report_error ~loc _env = function
       Location.errorf ~loc
         "Type %a has an [@@@@inductive] guarantee, which is not allowed in a \
          recursive module signature."
+        Style.inline_code name
+  | Exposed_total_value_in_recursive_module name ->
+      Location.errorf ~loc
+        "The value %a exposes a total value whose type depends on the \
+         current recursive module group."
+        Style.inline_code name
+  | Dependent_item_in_recursive_module name ->
+      Location.errorf ~loc
+        "The signature item %a depends on the current recursive module group \
+         in a form that is not allowed in a recursive module signature."
         Style.inline_code name
   | Cannot_hide_id Illegal_shadowing
       { shadowed_item_kind; shadowed_item_id; shadowed_item_loc;
