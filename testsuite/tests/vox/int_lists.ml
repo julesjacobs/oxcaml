@@ -130,12 +130,12 @@ let () =
   in
   let xs = Cons (1, Cons (2, Nil)) in
   let ys = Cons (3, Cons (4, Cons (5, Nil))) in
-  let zs = Cons (6, Nil) in
-  Laws.append_nil_left xs;
-  Laws.append_nil_right xs;
-  Laws.append_associative xs ys zs;
-  Laws.length_append xs ys;
-  Laws.sum_append xs ys;
+  let zs = ghost_ (Cons (6, Nil)) in
+  ghost_ (Laws.append_nil_left xs);
+  ghost_ (Laws.append_nil_right xs);
+  ghost_ (Laws.append_associative xs ys zs);
+  ghost_ (Laws.length_append xs ys);
+  ghost_ (Laws.sum_append xs ys);
   let result = append xs ys in
   Format.printf "length = %d, sum = %d@." (length result) (sum result);;
 [%%expect{|

@@ -58,20 +58,23 @@ let () =
   let right = Set.add equivalent empty in
   let larger = Set.add second left in
   let combined = Set.union left larger in
-  Set.lookup_empty first;
-  Set.lookup_add equivalent first empty;
-  Set.lookup_union second left larger;
-  Set.size_zero empty;
-  Set.equal_lookup left right first;
-  let (same_lookup @ total) :
-      (element : Key.t) ->
-      {u : unit |
-        Set.lookup element larger === Set.lookup element larger} =
-    fun _element ->
-    let u = () in
-    refine_ u
+  let _proofs = ghost_ (
+    Set.lookup_empty first;
+    Set.lookup_add equivalent first empty;
+    Set.lookup_union second left larger;
+    Set.size_zero empty;
+    Set.equal_lookup left right first;
+    let (same_lookup @ total) :
+        (element : Key.t) ->
+        {u : unit |
+          Set.lookup element larger === Set.lookup element larger} =
+      fun _element ->
+      let u = () in
+      refine_ u
+    in
+    Set.extensional larger larger same_lookup;
+    ())
   in
-  Set.extensional larger larger same_lookup;
   Format.printf
     "equivalent member = %b; semantic equal = %b; representation equal = %b; size = %s@."
     (Set.lookup equivalent combined)

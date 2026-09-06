@@ -71,6 +71,40 @@ Line 3, characters 2-11:
 Error: Refinement could not be proved (counterexample)
 |}]
 
+let (proof_block @ total) x : {y : int | y >= 0} =
+  let y = Nonnegative.value x in
+  let refine_ proof = ghost_ (
+    let refine_ nonnegative = Nonnegative.lemma x in
+    let u = () in
+    (refine_ u : {u : unit | y >= 0}))
+  in
+  refine_ y;;
+[%%expect{|
+val proof_block : int @ total -> {y : int | y >= 0} = <fun>
+|}]
+
+module No_conclusion : sig
+  val check : int -> unit @@ total
+end = struct
+  let (check @ total) (x : int) =
+    let refine_ nonnegative = ghost_ (Nonnegative.lemma x) in
+    ()
+end;;
+[%%expect{|
+module No_conclusion : sig val check : int -> unit @@ total end
+|}]
+
+let missing_conclusion x : {y : int | y >= 0} =
+  let y = Nonnegative.value x in
+  let _proof = ghost_ (No_conclusion.check x) in
+  refine_ y;;
+[%%expect{|
+Line 4, characters 2-11:
+4 |   refine_ y;;
+      ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
 let rejected_effect () = ghost_ (print_endline "erased");;
 [%%expect{|
 Line 1, characters 33-46:

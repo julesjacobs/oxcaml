@@ -32,7 +32,7 @@ end = struct
       let j = i + 1Z in
       let k = j + 1Z in
       let c = a + b in
-      fib_def k;
+      ghost_ (fib_def k);
       let next : {i : t | 0Z <= i && i <= n} = refine_ j in
       (tail_loop[@tailcall]) n next (refine_ b) (refine_ c)
   [@@decreases let refine_ i = index in n - i]
@@ -40,12 +40,12 @@ end = struct
   let (tail @ total) (n : t) : {r : t | r = fib n} =
     let zero = 0Z in
     if n <= zero then
-      (fib_def n;
+      (ghost_ (fib_def n);
       refine_ zero)
     else
       let one = 1Z in
-      fib_def zero;
-      fib_def one;
+      ghost_ (fib_def zero);
+      ghost_ (fib_def one);
       let index : {i : t | 0Z <= i && i <= n} = refine_ zero in
       tail_loop n index (refine_ zero) (refine_ one)
 
@@ -82,8 +82,8 @@ end = struct
     if n = 0Z then
       let zero = 0Z in
       let one = 1Z in
-      fib_def zero;
-      fib_def one;
+      ghost_ (fib_def zero);
+      ghost_ (fib_def one);
       (refine_ zero, refine_ one)
     else
       let k = n / 2Z in
@@ -91,20 +91,20 @@ end = struct
       let a, b = doubling_pair smaller in
       let refine_ a = a in
       let refine_ b = b in
-      doubling_identity k;
+      ghost_ (doubling_identity k);
       let c = a * (2Z * b - a) in
       let d = a * a + b * b in
       if n mod 2Z = 0Z then (refine_ c, refine_ d)
       else
         let next = n + 1Z in
-        fib_def next;
+        ghost_ (fib_def next);
         let e = c + d in
         (refine_ d, refine_ e)
   [@@decreases let refine_ n = index in n]
 
   let (doubling @ total) (n : t) : {r : t | r = fib n} =
     if n <= 0Z then
-      (fib_def n;
+      (ghost_ (fib_def n);
       let zero = 0Z in refine_ zero)
     else
       let index : {n : t | 0Z <= n} = refine_ n in

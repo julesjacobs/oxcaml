@@ -14,20 +14,23 @@ let () =
   let descending_two = add two descending_three in
   let descending = add one descending_two in
   let _union_result = union ascending descending in
-  lookup_empty one;
-  lookup_add four four ascending_three;
-  lookup_union two ascending descending;
-  size_zero empty_set;
-  equal_lookup ascending descending two;
-  let (same_lookup @ total) :
-      (element : int) ->
-      {u : unit |
-        lookup element ascending === lookup element ascending} =
-    fun _element ->
-    let u = () in
-    refine_ u
+  let _proofs = ghost_ (
+    lookup_empty one;
+    lookup_add four four ascending_three;
+    lookup_union two ascending descending;
+    size_zero empty_set;
+    equal_lookup ascending descending two;
+    let (same_lookup @ total) :
+        (element : int) ->
+        {u : unit |
+          lookup element ascending === lookup element ascending} =
+      fun _element ->
+      let u = () in
+      refine_ u
+    in
+    extensional ascending ascending same_lookup;
+    ())
   in
-  extensional ascending ascending same_lookup;
   Format.printf "semantic equal = %b; representation equal = %b@."
     (equal ascending descending)
     (ascending = descending)

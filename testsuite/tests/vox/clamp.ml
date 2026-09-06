@@ -20,7 +20,7 @@ module Clamp = struct
     fun lo hi x ->
     let refine_ hi = hi in
     let result = clamp lo hi x in
-    clamp_def lo hi x;
+    ghost_ (clamp_def lo hi x);
     refine_ result
 
   let (identity @ total) (lo : int) (hi : int) (x : int) :
@@ -80,10 +80,12 @@ module Clamp :
 let () =
   let lo = 0 in
   let hi = 10 in
-  List.iter (fun x ->
-    Clamp.identity lo hi x;
-    Clamp.idempotent lo hi x;
-    Format.printf "%d -> %d@." x (Clamp.clamp 0 10 x)) [-3; 4; 12]
+  List.iter (fun (x : int) ->
+    ghost_ (Clamp.identity lo hi x);
+    ghost_ (Clamp.idempotent lo hi x);
+    let ordered : {hi : int | lo <= hi} = refine_ hi in
+    let refine_ result = Clamp.bounds lo ordered x in
+    Format.printf "%d -> %d@." x result) [-3; 4; 12]
 ;;
 [%%expect{|
 -3 -> 0
