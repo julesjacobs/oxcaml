@@ -132,8 +132,13 @@ repetitions by structural recursion on the derivation.
 
 `matches` runs the Boolean derivative algorithm without proof calls.
 `recognize` additionally constructs a checked membership derivation on success.
-The demo uses integer symbols and unsimplified regexes; it makes no complexity
-claim. Executable checks compare all 3,244 regexes of depth at most two over
+Smart constructors remove empty alternatives, collapse identical alternatives,
+annihilate concatenations with `Empty`, and eliminate `Epsilon` operands from
+concatenation. Checked derivation transformations in both directions establish
+that each rewrite preserves membership. These local rewrites run while
+constructing derivatives.
+
+The demo uses integer symbols and makes no complexity claim. Executable checks compare all 3,244 regexes of depth at most two over
 symbols 0 and 1 against an independent split-based matcher on all 15 words of
 length at most three. Rejection fixtures exercise the soundness and
 completeness contracts.

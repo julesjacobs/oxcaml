@@ -87,6 +87,167 @@ end = struct
 
   open Membership
 
+  let rec (append_nil @ total) : (xs : int list) ->
+      {u : unit | append xs [] === xs} @ immutable contended =
+    fun xs ->
+    let nil = [] in
+    let refine_ equation = append_def xs nil in
+    let u = () in
+    match xs with
+    | [] -> refine_ u
+    | _ :: rest ->
+      let refine_ induction = append_nil rest in
+      refine_ u
+
+  let[@def] rec equal a b =
+    match a with
+    | Empty -> (match b with Empty -> true | _ -> false)
+    | Epsilon -> (match b with Epsilon -> true | _ -> false)
+    | Symbol c -> (match b with Symbol d -> c = d | _ -> false)
+    | Alt (a1, a2) ->
+      (match b with Alt (b1, b2) -> equal a1 b1 && equal a2 b2 | _ -> false)
+    | Seq (a1, a2) ->
+      (match b with Seq (b1, b2) -> equal a1 b1 && equal a2 b2 | _ -> false)
+    | Star a -> (match b with Star b -> equal a b | _ -> false)
+
+  let rec (equal_correct @ total) : (a : t) -> (b : t) ->
+      {u : unit | equal a b === (a === b)} @ immutable contended =
+    fun a b ->
+    let refine_ equation = equal_def a b in
+    let u = () in
+    match a with
+    | Empty | Epsilon | Symbol _ -> refine_ u
+    | Alt (a1, a2) ->
+      (match b with
+       | Alt (b1, b2) ->
+         let refine_ induction = equal_correct a1 b1 in
+         let refine_ induction = equal_correct a2 b2 in
+         refine_ u
+       | _ -> refine_ u)
+    | Seq (a1, a2) ->
+      (match b with
+       | Seq (b1, b2) ->
+         let refine_ induction = equal_correct a1 b1 in
+         let refine_ induction = equal_correct a2 b2 in
+         refine_ u
+       | _ -> refine_ u)
+    | Star a ->
+      (match b with
+       | Star b ->
+         let refine_ induction = equal_correct a b in
+         refine_ u
+       | _ -> refine_ u)
+
+  let[@def] alt (a @ total) (b @ total) : t @ total =
+    match a, b with
+    | Empty, _ -> b
+    | _, Empty -> a
+    | _ -> if equal a b then a else Alt (a, b)
+
+  let[@def] seq (a @ total) (b @ total) : t @ total =
+    match a, b with
+    | Empty, _ | _, Empty -> Empty
+    | Epsilon, _ -> b
+    | _, Epsilon -> a
+    | _ -> Seq (a, b)
+
+  let (alt_expand @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (alt a b) p then valid (Alt (a, b)) q && word q === word p
+        else true} =
+    let simplified = alt a b in
+    let original = Alt (a, b) in
+    let refine_ equation = alt_def a b in
+    let refine_ equation = equal_correct a b in
+    let refine_ equation = valid_def simplified p in
+    let q = match a, b with
+      | Empty, _ -> Alt_right p
+      | _, Empty -> Alt_left p
+      | _ -> if equal a b then Alt_left p else p
+    in
+    let refine_ equation = valid_def original q in
+    let refine_ equation = word_def q in
+    refine_ q
+
+  let (alt_contract @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (Alt (a, b)) p then valid (alt a b) q && word q === word p
+        else true} =
+    let original = Alt (a, b) in
+    let refine_ equation = alt_def a b in
+    let refine_ equation = equal_correct a b in
+    let refine_ equation = valid_def original p in
+    let refine_ equation = word_def p in
+    let q = match p with
+      | Alt_left inner ->
+        let refine_ equation = valid_def a inner in
+        (match a, b with
+         | Empty, _ -> Epsilon_match
+         | _, Empty -> inner
+         | _ -> if equal a b then inner else p)
+      | Alt_right inner ->
+        let refine_ equation = valid_def b inner in
+        (match a, b with
+         | Empty, _ -> inner
+         | _, Empty -> Epsilon_match
+         | _ -> if equal a b then inner else p)
+      | _ -> Epsilon_match
+    in
+    refine_ q
+
+  let (seq_expand @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (seq a b) p then valid (Seq (a, b)) q && word q === word p
+        else true} =
+    let simplified = seq a b in
+    let original = Seq (a, b) in
+    let refine_ equation = seq_def a b in
+    let refine_ equation = valid_def simplified p in
+    let empty = Epsilon_match in
+    let refine_ equation = word_def empty in
+    let epsilon = Epsilon in
+    let refine_ equation = valid_def epsilon empty in
+    let q = match a, b with
+      | Empty, _ | _, Empty -> Epsilon_match
+      | Epsilon, _ -> Seq_match (empty, p)
+      | _, Epsilon -> Seq_match (p, empty)
+      | _ -> p
+    in
+    let refine_ equation = valid_def original q in
+    let refine_ equation = word_def q in
+    let nil = [] in
+    let pw = word p in
+    let refine_ equation = append_def nil pw in
+    let refine_ equation = append_nil pw in
+    refine_ q
+
+  let (seq_contract @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (Seq (a, b)) p then valid (seq a b) q && word q === word p
+        else true} =
+    let original = Seq (a, b) in
+    let refine_ equation = seq_def a b in
+    let refine_ equation = valid_def original p in
+    let refine_ equation = word_def p in
+    let q = match p with
+      | Seq_match (left, right) ->
+        let refine_ equation = valid_def a left in
+        let refine_ equation = valid_def b right in
+        let refine_ equation = word_def left in
+        let refine_ equation = word_def right in
+        let lw = word left in
+        let rw = word right in
+        let refine_ equation = append_def lw rw in
+        let refine_ equation = append_nil lw in
+        (match a, b with
+         | Empty, _ | _, Empty -> Epsilon_match
+         | Epsilon, _ -> right
+         | _, Epsilon -> left
+         | _ -> p)
+      | _ -> Epsilon_match
+    in
+    refine_ q
+
   let[@def] rec nullable r =
     match r with
     | Empty | Symbol _ -> false
@@ -98,11 +259,11 @@ end = struct
     match r with
     | Empty | Epsilon -> Empty
     | Symbol d -> if c = d then Epsilon else Empty
-    | Alt (a, b) -> Alt (derive c a, derive c b)
+    | Alt (a, b) -> alt (derive c a) (derive c b)
     | Seq (a, b) ->
-      if nullable a then Alt (Seq (derive c a, b), derive c b)
-      else Seq (derive c a, b)
-    | Star a -> Seq (derive c a, Star a)
+      if nullable a then alt (seq (derive c a) b) (derive c b)
+      else seq (derive c a) b
+    | Star a -> seq (derive c a) (Star a)
 
   let[@def] rec matches r (s : int list) =
     match s with [] -> nullable r | c :: rest -> matches (derive c r) rest
@@ -157,6 +318,12 @@ end = struct
       | Empty | Epsilon -> Epsilon_match
       | Symbol _ -> Symbol_match c
       | Alt (a, b) ->
+        let da = derive c a in
+        let db = derive c b in
+        let refine_ p = alt_expand da db p in
+        let original = Alt (da, db) in
+        let refine_ equation = valid_def original p in
+        let refine_ equation = word_def p in
         (match p with
          | Alt_left inner ->
            let refine_ q = expand a c inner in
@@ -172,9 +339,17 @@ end = struct
            result
          | _ -> Epsilon_match)
       | Seq (a, b) ->
+        let da = derive c a in
+        let db = derive c b in
+        let product = seq da b in
         if nullable a then
+          let refine_ p = alt_expand product db p in
+          let original = Alt (product, db) in
+          let refine_ equation = valid_def original p in
+          let refine_ equation = word_def p in
           (match p with
            | Alt_left inner ->
+             let refine_ inner = seq_expand da b inner in
              let left_derivative = Seq (derive c a, b) in
              let refine_ equation = valid_def left_derivative inner in
              let refine_ equation = word_def inner in
@@ -201,6 +376,10 @@ end = struct
              result
            | _ -> Epsilon_match)
         else
+          let refine_ p = seq_expand da b p in
+          let original = Seq (da, b) in
+          let refine_ equation = valid_def original p in
+          let refine_ equation = word_def p in
           (match p with
            | Seq_match (left, right) ->
              let refine_ q = expand a c left in
@@ -213,6 +392,11 @@ end = struct
              result
            | _ -> Epsilon_match)
       | Star a ->
+        let da = derive c a in
+        let refine_ p = seq_expand da r p in
+        let original = Seq (da, r) in
+        let refine_ equation = valid_def original p in
+        let refine_ equation = word_def p in
         (match p with
          | Seq_match (left, right) ->
            let refine_ q = expand a c left in
@@ -283,25 +467,37 @@ end = struct
       | Epsilon_match | Star_empty | Symbol_match _ -> Epsilon_match
       | Alt_left inner ->
         (match r with
-         | Alt (a, _) ->
+         | Alt (a, b) ->
            let refine_ q = contract a c s inner in
+           let da = derive c a in
+           let db = derive c b in
+           let original = Alt (da, db) in
            let result = Alt_left q in
-           let refine_ equation = valid_def derivative result in
+           let refine_ equation = valid_def original result in
            let refine_ equation = word_def result in
+           let refine_ result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
       | Alt_right inner ->
         (match r with
-         | Alt (_, b) ->
+         | Alt (a, b) ->
            let refine_ q = contract b c s inner in
+           let da = derive c a in
+           let db = derive c b in
+           let original = Alt (da, db) in
            let result = Alt_right q in
-           let refine_ equation = valid_def derivative result in
+           let refine_ equation = valid_def original result in
            let refine_ equation = word_def result in
+           let refine_ result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
       | Seq_match (left, right) ->
         (match r with
          | Seq (a, b) ->
+           let da = derive c a in
+           let db = derive c b in
+           let product = seq da b in
+           let sum = Alt (product, db) in
            let lw = word left in
            let rw = word right in
            let refine_ equation = append_def lw rw in
@@ -310,8 +506,9 @@ end = struct
               let refine_ empty_law = empty_complete a left in
               let refine_ q = contract b c s right in
               let result = Alt_right q in
-              let refine_ equation = valid_def derivative result in
+              let refine_ equation = valid_def sum result in
               let refine_ equation = word_def result in
+              let refine_ result = alt_contract product db result in
               result
             | h :: rest ->
               let refine_ q = contract a h rest left in
@@ -319,10 +516,14 @@ end = struct
               let pair_regex = Seq (derive c a, b) in
               let refine_ equation = valid_def pair_regex pair in
               let refine_ equation = word_def pair in
-              let result = if nullable a then Alt_left pair else pair in
-              let refine_ equation = valid_def derivative result in
-              let refine_ equation = word_def result in
-              result)
+              let refine_ pair = seq_contract da b pair in
+              if nullable a then
+                let result = Alt_left pair in
+                let refine_ equation = valid_def sum result in
+                let refine_ equation = word_def result in
+                let refine_ result = alt_contract product db result in
+                result
+              else pair)
          | _ -> Epsilon_match)
       | Star_step (left, right) ->
         (match r with
@@ -336,9 +537,12 @@ end = struct
               q
             | h :: rest ->
               let refine_ q = contract a h rest left in
+              let da = derive c a in
+              let original = Seq (da, r) in
               let result = Seq_match (q, right) in
-              let refine_ equation = valid_def derivative result in
+              let refine_ equation = valid_def original result in
               let refine_ equation = word_def result in
+              let refine_ result = seq_contract da r result in
               result)
          | _ -> Epsilon_match)
     in
@@ -508,6 +712,28 @@ let () =
   let refine_ proof = complete r s p in
   assert (matches r s);
   Format.printf "completeness: empty repetitions and nested stars@.";
+  let rewrites =
+    [Alt (Empty, Symbol 0), Epsilon;
+     Alt (Symbol 0, Empty), Epsilon;
+     Alt (Symbol 0, Symbol 0), Epsilon;
+     Seq (Symbol 1, Symbol 0), Empty;
+     Seq (Symbol 0, Empty), Empty;
+     Seq (Epsilon, Symbol 0), Epsilon;
+     Seq (Symbol 0, Epsilon), Epsilon;
+     Star (Symbol 0), Star (Symbol 0);
+     Alt (Seq (Symbol 0, Symbol 1), Seq (Symbol 0, Symbol 1)), Symbol 1;
+     Alt (Seq (Symbol 0, Symbol 1), Seq (Symbol 0, Symbol 2)),
+       Alt (Symbol 1, Symbol 2)]
+  in
+  List.iter (fun (r, expected) -> assert (derive 0 r = expected)) rewrites;
+  let residual = Star (Alt (Epsilon, Symbol 0)) in
+  let state = List.fold_left (fun state _ ->
+    let next = derive 0 state in
+    assert (next = residual);
+    next) residual (List.init 128 (fun i -> i)) in
+  assert (nullable state);
+  Format.printf "simplification: %d derivative shapes; stable nullable star@."
+    (List.length rewrites);
   List.iter (fun (label, r, s, expected) ->
     assert (matches r s = expected);
     Format.printf "%s: %b@." label expected)
@@ -522,6 +748,7 @@ let () =
 [%%expect{|
 split-spec agreement: 3244 regexes x 15 words
 completeness: empty repetitions and nested stars
+simplification: 10 derivative shapes; stable nullable star
 empty language: false
 epsilon: true
 nullable concatenation: true
