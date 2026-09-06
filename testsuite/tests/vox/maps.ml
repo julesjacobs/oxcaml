@@ -682,3 +682,36 @@ end;;
 [%%expect{|
 module Refined_accepts_total_closures : sig end
 |}]
+
+module Immutable_collections : sig end = struct
+  module Key = struct
+    type t = int
+    external compare : int -> int -> int @@ total = "%compare"
+  end
+  module S = Map.MakeTotal (Key)
+  module L = MoreLabels.Map.MakeTotal (Key)
+  module A : Map.TotalS with type key = int = S
+  module Unlabeled : sig type t : immutable_data end = struct type t = int S.t end
+  module Labeled : sig type t : immutable_data end = struct type t = int L.t end
+  module Ascribed : sig type t : immutable_data end = struct type t = int A.t end
+end;;
+[%%expect{|
+module Immutable_collections : sig end
+|}]
+
+module Mutable_collection : sig end = struct
+  module Key = struct
+    type t = int
+    external compare : t -> t -> int @@ total = "%compare"
+  end
+  module S = Map.MakeTotal (Key)
+  type t : immutable_data = int ref S.t
+end;;
+[%%expect{|
+Line 7, characters 2-39:
+7 |   type t : immutable_data = int ref S.t
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The kind of type "int ref S.t" is mutable_data.
+       But the kind of type "int ref S.t" must be a subkind of immutable_data
+         because of the definition of t at line 7, characters 2-39.
+|}]

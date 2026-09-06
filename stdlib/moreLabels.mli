@@ -1049,7 +1049,9 @@ module Map : sig
 
   module type TotalS =
     sig
-      include S
+      type key
+      type !+'a t : immutable_data with key with 'a
+      include S with type key := key and type 'a t := 'a t
 
       val empty: 'a t @@ total
       val add: key:key -> data:'a -> 'a t -> 'a t @@ total
