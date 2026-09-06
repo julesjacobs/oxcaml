@@ -31,6 +31,7 @@ module Regex : sig
   end
 
   open Membership
+  val alt : t -> t -> t @@ total
   val nullable : t -> bool @@ total
   val derive : int -> t -> t @@ total
   val matches : t -> int list -> bool @@ total
@@ -138,18 +139,167 @@ end = struct
          refine_ u
        | _ -> refine_ u)
 
-  let[@def] alt (a @ total) (b @ total) : t @ total =
-    match a, b with
-    | Empty, _ -> b
-    | _, Empty -> a
-    | _ -> if equal a b then a else Alt (a, b)
+  let (rank @ total) r =
+    match r with
+    | Empty -> 0 | Epsilon -> 1 | Symbol _ -> 2
+    | Alt _ -> 3 | Seq _ -> 4 | Star _ -> 5
 
-  let[@def] seq (a @ total) (b @ total) : t @ total =
-    match a, b with
-    | Empty, _ | _, Empty -> Empty
-    | Epsilon, _ -> b
-    | _, Epsilon -> a
-    | _ -> Seq (a, b)
+  let rec (compare @ total) a b =
+    match a with
+    | Empty | Epsilon -> rank a - rank b
+    | Symbol c ->
+      (match b with
+       | Symbol d -> if c < d then -1 else if c = d then 0 else 1
+       | _ -> rank a - rank b)
+    | Alt (a1, a2) ->
+      (match b with
+       | Alt (b1, b2) ->
+         let first = compare a1 b1 in
+         if first = 0 then compare a2 b2 else first
+       | _ -> rank a - rank b)
+    | Seq (a1, a2) ->
+      (match b with
+       | Seq (b1, b2) ->
+         let first = compare a1 b1 in
+         if first = 0 then compare a2 b2 else first
+       | _ -> rank a - rank b)
+    | Star inner ->
+      (match b with Star other -> compare inner other | _ -> rank a - rank b)
+
+  let[@def] rec insert (a @ total) (r @ total) : t @ total =
+    match r with
+    | Empty -> a
+    | Alt (head, tail) ->
+      if equal a head then r
+      else if compare a head < 0 then Alt (a, r)
+      else Alt (head, insert a tail)
+    | _ ->
+      if equal a r then r
+      else if compare a r < 0 then Alt (a, r)
+      else Alt (r, a)
+
+  let[@def] rec add_alternatives (a @ total) (acc @ total) : t @ total =
+    match a with
+    | Empty -> acc
+    | Alt (left, right) -> add_alternatives left (add_alternatives right acc)
+    | _ -> insert a acc
+
+  let[@def] alt (a @ total) (b @ total) : t @ total =
+    add_alternatives a (add_alternatives b Empty)
+
+  let[@def] rec contains a r =
+    match r with
+    | Empty -> false
+    | Alt (left, right) -> contains a left || contains a right
+    | _ -> equal a r
+
+  let rec (insert_contains @ total) : (a : t) -> (r : t) -> (query : t) ->
+      {u : unit | contains query (insert a r) ===
+        (contains query a || contains query r)} @ immutable contended =
+    fun a r query ->
+    let result = insert a r in
+    let refine_ equation = insert_def a r in
+    let refine_ equation = contains_def query r in
+    let refine_ equation = contains_def query result in
+    let refine_ equality = equal_correct a r in
+    let u = () in
+    match r with
+    | Empty -> refine_ u
+    | Alt (head, tail) ->
+      let refine_ equality = equal_correct a head in
+      let next = insert a tail in
+      let refine_ induction = insert_contains a tail query in
+      let refine_ equation = contains_def query next in
+      refine_ u
+    | _ -> refine_ u
+
+  let rec (add_contains @ total) : (a : t) -> (acc : t) -> (query : t) ->
+      {u : unit | contains query (add_alternatives a acc) ===
+        (contains query a || contains query acc)} @ immutable contended =
+    fun a acc query ->
+    let refine_ equation = add_alternatives_def a acc in
+    let refine_ equation = contains_def query a in
+    let u = () in
+    match a with
+    | Empty -> refine_ u
+    | Alt (left, right) ->
+      let next = add_alternatives right acc in
+      let refine_ induction = add_contains right acc query in
+      let refine_ induction = add_contains left next query in
+      refine_ u
+    | _ ->
+      let refine_ induction = insert_contains a acc query in
+      refine_ u
+
+  let (alt_contains @ total) (a @ total) (b @ total) query :
+      {u : unit | contains query (alt a b) ===
+        (contains query a || contains query b)} =
+    let empty = Empty in
+    let next = add_alternatives b empty in
+    let refine_ equation = alt_def a b in
+    let refine_ equation = contains_def query empty in
+    let refine_ proof = add_contains b empty query in
+    let refine_ proof = add_contains a next query in
+    let u = () in refine_ u
+
+  let rec (select_alternative @ total) : (r : t) -> (p : evidence) ->
+      {choice : t * evidence |
+        if valid r p then
+          match choice with a, q ->
+            contains a r && valid a q && word q === word p
+        else true} @ immutable contended =
+    fun r p ->
+    let refine_ equation = valid_def r p in
+    let refine_ equation = word_def p in
+    let result =
+      match r with
+      | Alt (left, right) ->
+        (match p with
+         | Alt_left inner ->
+           let refine_ choice = select_alternative left inner in
+           let a, _ = choice in
+           let refine_ equation = contains_def a r in
+           choice
+         | Alt_right inner ->
+           let refine_ choice = select_alternative right inner in
+           let a, _ = choice in
+           let refine_ equation = contains_def a r in
+           choice
+         | _ -> r, p)
+      | _ ->
+        let refine_ equation = contains_def r r in
+        let refine_ equation = equal_correct r r in
+        r, p
+    in
+    refine_ result
+
+  let rec (inject_alternative @ total) :
+      (r : t) -> (a : t) -> (p : evidence) ->
+      {q : evidence |
+        if contains a r && valid a p then valid r q && word q === word p
+        else true} @ immutable contended =
+    fun r a p ->
+    let refine_ equation = contains_def a r in
+    let result =
+      match r with
+      | Alt (left, right) ->
+        if contains a left then
+          let refine_ q = inject_alternative left a p in
+          let result = Alt_left q in
+          let refine_ equation = valid_def r result in
+          let refine_ equation = word_def result in
+          result
+        else
+          let refine_ q = inject_alternative right a p in
+          let result = Alt_right q in
+          let refine_ equation = valid_def r result in
+          let refine_ equation = word_def result in
+          result
+      | _ ->
+        let refine_ equation = equal_correct a r in
+        p
+    in
+    refine_ result
 
   let (alt_expand @ total) (a @ total) (b @ total) p :
       {q : evidence |
@@ -157,43 +307,32 @@ end = struct
         else true} =
     let simplified = alt a b in
     let original = Alt (a, b) in
-    let refine_ equation = alt_def a b in
-    let refine_ equation = equal_correct a b in
-    let refine_ equation = valid_def simplified p in
-    let q = match a, b with
-      | Empty, _ -> Alt_right p
-      | _, Empty -> Alt_left p
-      | _ -> if equal a b then Alt_left p else p
-    in
-    let refine_ equation = valid_def original q in
-    let refine_ equation = word_def q in
+    let refine_ choice = select_alternative simplified p in
+    let leaf, inner = choice in
+    let refine_ proof = alt_contains a b leaf in
+    let refine_ equation = contains_def leaf original in
+    let refine_ q = inject_alternative original leaf inner in
     refine_ q
 
   let (alt_contract @ total) (a @ total) (b @ total) p :
       {q : evidence |
         if valid (Alt (a, b)) p then valid (alt a b) q && word q === word p
         else true} =
+    let simplified = alt a b in
     let original = Alt (a, b) in
-    let refine_ equation = alt_def a b in
-    let refine_ equation = equal_correct a b in
-    let refine_ equation = valid_def original p in
-    let refine_ equation = word_def p in
-    let q = match p with
-      | Alt_left inner ->
-        let refine_ equation = valid_def a inner in
-        (match a, b with
-         | Empty, _ -> Epsilon_match
-         | _, Empty -> inner
-         | _ -> if equal a b then inner else p)
-      | Alt_right inner ->
-        let refine_ equation = valid_def b inner in
-        (match a, b with
-         | Empty, _ -> inner
-         | _, Empty -> Epsilon_match
-         | _ -> if equal a b then inner else p)
-      | _ -> Epsilon_match
-    in
+    let refine_ choice = select_alternative original p in
+    let leaf, inner = choice in
+    let refine_ equation = contains_def leaf original in
+    let refine_ proof = alt_contains a b leaf in
+    let refine_ q = inject_alternative simplified leaf inner in
     refine_ q
+
+  let[@def] seq (a @ total) (b @ total) : t @ total =
+    match a, b with
+    | Empty, _ | _, Empty -> Empty
+    | Epsilon, _ -> b
+    | _, Epsilon -> a
+    | _ -> Seq (a, b)
 
   let (seq_expand @ total) (a @ total) (b @ total) p :
       {q : evidence |
@@ -616,6 +755,7 @@ module Regex :
         val word : evidence -> int list @@ total
         val valid : t -> evidence -> bool @@ total
       end
+    val alt : t -> t -> t @@ total
     val nullable : t -> bool @@ total
     val derive : int -> t -> t @@ total
     val matches : t -> int list -> bool @@ total
@@ -734,6 +874,52 @@ let () =
   assert (nullable state);
   Format.printf "simplification: %d derivative shapes; stable nullable star@."
     (List.length rewrites);
+  let samples = layer atoms in
+  List.iter (fun a ->
+    let canonical = alt a Empty in
+    assert (alt canonical canonical = canonical);
+    assert (alt canonical Empty = canonical);
+    List.iter (fun b ->
+      assert (alt a b = alt b a);
+      List.iter (fun c ->
+        assert (alt (alt a b) c = alt a (alt b c))) samples) samples) samples;
+  let extreme = alt (Symbol max_int) (alt (Symbol 0) (Symbol min_int)) in
+  assert (extreme = Alt (Symbol min_int, Alt (Symbol 0, Symbol max_int)));
+  let star = Star (Symbol 0) in
+  let repeated = Seq (star, star) in
+  let first = derive 0 repeated in
+  assert (first = Alt (repeated, star));
+  let last = List.fold_left (fun state _ ->
+    let next = derive 0 state in
+    assert (next = first);
+    next) first (List.init 128 (fun i -> i)) in
+  assert (derive 1 last = Empty);
+  Format.printf "ACI: canonical alternatives; stable a*a* derivatives@.";
+  let closure r =
+    let seen = Hashtbl.create 16 in
+    let pending = Queue.create () in
+    let add r =
+      if not (Hashtbl.mem seen r) then begin
+        assert (Hashtbl.length seen < 128);
+        Hashtbl.add seen r ();
+        Queue.add r pending
+      end
+    in
+    add r;
+    while not (Queue.is_empty pending) do
+      let state = Queue.take pending in
+      List.iter (fun c -> add (derive c state)) [0; 1; 2]
+    done;
+    Hashtbl.length seen
+  in
+  let maximum = List.fold_left (fun largest r -> max largest (closure r)) 0 regexes in
+  Format.printf "derivative closures: %d regexes; maximum %d states@."
+    (List.length regexes) maximum;
+  let alphabet = Alt (Symbol 0, Symbol 1) in
+  let suffix = Seq (alphabet, Seq (alphabet, Seq (alphabet, alphabet))) in
+  let lookback = Seq (Star alphabet, Seq (Symbol 0, suffix)) in
+  List.iter (fun s -> assert (matches lookback s = member lookback s)) (words 6);
+  Format.printf "fifth-from-last symbol: %d derivative states@." (closure lookback);
   List.iter (fun (label, r, s, expected) ->
     assert (matches r s = expected);
     Format.printf "%s: %b@." label expected)
@@ -749,6 +935,9 @@ let () =
 split-spec agreement: 3244 regexes x 15 words
 completeness: empty repetitions and nested stars
 simplification: 10 derivative shapes; stable nullable star
+ACI: canonical alternatives; stable a*a* derivatives
+derivative closures: 3244 regexes; maximum 6 states
+fifth-from-last symbol: 33 derivative states
 empty language: false
 epsilon: true
 nullable concatenation: true
