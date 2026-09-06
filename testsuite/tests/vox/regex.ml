@@ -262,26 +262,26 @@ end = struct
             contains a r && valid a q && word q === word p
         else true} @ immutable contended =
     fun r p ->
-    let refine_ equation = valid_def r p in
-    let refine_ equation = word_def p in
+    let refine_ equation = ghost_ (valid_def r p) in
+    let refine_ equation = ghost_ (word_def p) in
     let result =
       match r with
       | Alt (left, right) ->
         (match p with
          | Alt_left inner ->
            let refine_ choice = select_alternative left inner in
-           let a, _ = choice in
-           let refine_ equation = contains_def a r in
+           let (a : t), _ = choice in
+           let refine_ equation = ghost_ (contains_def a r) in
            choice
          | Alt_right inner ->
            let refine_ choice = select_alternative right inner in
-           let a, _ = choice in
-           let refine_ equation = contains_def a r in
+           let (a : t), _ = choice in
+           let refine_ equation = ghost_ (contains_def a r) in
            choice
          | _ -> r, p)
       | _ ->
-        let refine_ equation = contains_def r r in
-        let refine_ equation = equal_correct r r in
+        let refine_ equation = ghost_ (contains_def r r) in
+        let refine_ equation = ghost_ (equal_correct r r) in
         r, p
     in
     refine_ result
@@ -292,24 +292,24 @@ end = struct
         if contains a r && valid a p then valid r q && word q === word p
         else true} @ immutable contended =
     fun r a p ->
-    let refine_ equation = contains_def a r in
+    let refine_ equation = ghost_ (contains_def a r) in
     let result =
       match r with
       | Alt (left, right) ->
         if contains a left then
           let refine_ q = inject_alternative left a p in
           let result = Alt_left q in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          let refine_ equation = ghost_ (valid_def r result) in
+          let refine_ equation = ghost_ (word_def result) in
           result
         else
           let refine_ q = inject_alternative right a p in
           let result = Alt_right q in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          let refine_ equation = ghost_ (valid_def r result) in
+          let refine_ equation = ghost_ (word_def result) in
           result
       | _ ->
-        let refine_ equation = equal_correct a r in
+        let refine_ equation = ghost_ (equal_correct a r) in
         p
     in
     refine_ result
@@ -321,9 +321,9 @@ end = struct
     let simplified = alt a b in
     let original = Alt (a, b) in
     let refine_ choice = select_alternative simplified p in
-    let leaf, inner = choice in
-    let refine_ proof = alt_contains a b leaf in
-    let refine_ equation = contains_def leaf original in
+    let (leaf : t), (inner : evidence) = choice in
+    let refine_ proof = ghost_ (alt_contains a b leaf) in
+    let refine_ equation = ghost_ (contains_def leaf original) in
     let refine_ q = inject_alternative original leaf inner in
     refine_ q
 
@@ -334,9 +334,9 @@ end = struct
     let simplified = alt a b in
     let original = Alt (a, b) in
     let refine_ choice = select_alternative original p in
-    let leaf, inner = choice in
-    let refine_ equation = contains_def leaf original in
-    let refine_ proof = alt_contains a b leaf in
+    let (leaf : t), (inner : evidence) = choice in
+    let refine_ equation = ghost_ (contains_def leaf original) in
+    let refine_ proof = ghost_ (alt_contains a b leaf) in
     let refine_ q = inject_alternative simplified leaf inner in
     refine_ q
 
@@ -351,46 +351,46 @@ end = struct
       {q : evidence |
         if valid (seq a b) p then valid (Seq (a, b)) q && word q === word p
         else true} =
-    let simplified = seq a b in
-    let original = Seq (a, b) in
-    let refine_ equation = seq_def a b in
-    let refine_ equation = valid_def simplified p in
+    let simplified = ghost_ (seq a b) in
+    let original = ghost_ (Seq (a, b)) in
+    let refine_ equation = ghost_ (seq_def a b) in
+    let refine_ equation = ghost_ (valid_def simplified p) in
     let empty = Epsilon_match in
-    let refine_ equation = word_def empty in
+    let refine_ equation = ghost_ (word_def empty) in
     let epsilon = Epsilon in
-    let refine_ equation = valid_def epsilon empty in
+    let refine_ equation = ghost_ (valid_def epsilon empty) in
     let q = match a, b with
       | Empty, _ | _, Empty -> Epsilon_match
       | Epsilon, _ -> Seq_match (empty, p)
       | _, Epsilon -> Seq_match (p, empty)
       | _ -> p
     in
-    let refine_ equation = valid_def original q in
-    let refine_ equation = word_def q in
+    let refine_ equation = ghost_ (valid_def original q) in
+    let refine_ equation = ghost_ (word_def q) in
     let nil = [] in
-    let pw = word p in
-    let refine_ equation = append_def nil pw in
-    let refine_ equation = append_nil pw in
+    let pw = ghost_ (word p) in
+    let refine_ equation = ghost_ (append_def nil pw) in
+    let refine_ equation = ghost_ (append_nil pw) in
     refine_ q
 
   let (seq_contract @ total) (a @ total) (b @ total) p :
       {q : evidence |
         if valid (Seq (a, b)) p then valid (seq a b) q && word q === word p
         else true} =
-    let original = Seq (a, b) in
-    let refine_ equation = seq_def a b in
-    let refine_ equation = valid_def original p in
-    let refine_ equation = word_def p in
+    let original = ghost_ (Seq (a, b)) in
+    let refine_ equation = ghost_ (seq_def a b) in
+    let refine_ equation = ghost_ (valid_def original p) in
+    let refine_ equation = ghost_ (word_def p) in
     let q = match p with
       | Seq_match (left, right) ->
-        let refine_ equation = valid_def a left in
-        let refine_ equation = valid_def b right in
-        let refine_ equation = word_def left in
-        let refine_ equation = word_def right in
-        let lw = word left in
-        let rw = word right in
-        let refine_ equation = append_def lw rw in
-        let refine_ equation = append_nil lw in
+        let refine_ equation = ghost_ (valid_def a left) in
+        let refine_ equation = ghost_ (valid_def b right) in
+        let refine_ equation = ghost_ (word_def left) in
+        let refine_ equation = ghost_ (word_def right) in
+        let lw = ghost_ (word left) in
+        let rw = ghost_ (word right) in
+        let refine_ equation = ghost_ (append_def lw rw) in
+        let refine_ equation = ghost_ (append_nil lw) in
         (match a, b with
          | Empty, _ | _, Empty -> Epsilon_match
          | Epsilon, _ -> right
@@ -424,7 +424,7 @@ end = struct
       {p : evidence | if nullable r then valid r p && word p === [] else true}
         @ immutable contended =
     fun r ->
-    let refine_ equation = nullable_def r in
+    let refine_ equation = ghost_ (nullable_def r) in
     let result =
       match r with
       | Empty | Epsilon | Symbol _ -> Epsilon_match
@@ -433,38 +433,38 @@ end = struct
         if nullable a then
           let refine_ p = epsilon a in
           let result = Alt_left p in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          let refine_ equation = ghost_ (valid_def r result) in
+          let refine_ equation = ghost_ (word_def result) in
           result
         else
           let refine_ p = epsilon b in
           let result = Alt_right p in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          let refine_ equation = ghost_ (valid_def r result) in
+          let refine_ equation = ghost_ (word_def result) in
           result
       | Seq (a, b) ->
         let refine_ p = epsilon a in
         let refine_ q = epsilon b in
         let result = Seq_match (p, q) in
-        let refine_ equation = valid_def r result in
-        let refine_ equation = word_def result in
-        let left = word p in
-        let right = word q in
-        let refine_ equation = append_def left right in
+        let refine_ equation = ghost_ (valid_def r result) in
+        let refine_ equation = ghost_ (word_def result) in
+        let left = ghost_ (word p) in
+        let right = ghost_ (word q) in
+        let refine_ equation = ghost_ (append_def left right) in
         result
     in
-    let refine_ equation = valid_def r result in
-    let refine_ equation = word_def result in
+    let refine_ equation = ghost_ (valid_def r result) in
+    let refine_ equation = ghost_ (word_def result) in
     refine_ result
   let rec (expand @ total) : (r : t) -> (c : int) -> (p : evidence) ->
       {q : evidence |
         if valid (derive c r) p then valid r q && word q === c :: word p
         else true} @ immutable contended =
     fun r c p ->
-    let derivative = derive c r in
-    let refine_ equation = derive_def c r in
-    let refine_ equation = valid_def derivative p in
-    let refine_ equation = word_def p in
+    let derivative = ghost_ (derive c r) in
+    let refine_ equation = ghost_ (derive_def c r) in
+    let refine_ equation = ghost_ (valid_def derivative p) in
+    let refine_ equation = ghost_ (word_def p) in
     let result =
       match r with
       | Empty | Epsilon -> Epsilon_match
@@ -473,21 +473,21 @@ end = struct
         let da = derive c a in
         let db = derive c b in
         let refine_ p = alt_expand da db p in
-        let original = Alt (da, db) in
-        let refine_ equation = valid_def original p in
-        let refine_ equation = word_def p in
+        let original = ghost_ (Alt (da, db)) in
+        let refine_ equation = ghost_ (valid_def original p) in
+        let refine_ equation = ghost_ (word_def p) in
         (match p with
          | Alt_left inner ->
            let refine_ q = expand a c inner in
            let result = Alt_left q in
-           let refine_ equation = valid_def r result in
-           let refine_ equation = word_def result in
+           let refine_ equation = ghost_ (valid_def r result) in
+           let refine_ equation = ghost_ (word_def result) in
            result
          | Alt_right inner ->
            let refine_ q = expand b c inner in
            let result = Alt_right q in
-           let refine_ equation = valid_def r result in
-           let refine_ equation = word_def result in
+           let refine_ equation = ghost_ (valid_def r result) in
+           let refine_ equation = ghost_ (word_def result) in
            result
          | _ -> Epsilon_match)
       | Seq (a, b) ->
@@ -496,73 +496,73 @@ end = struct
         let product = seq da b in
         if nullable a then
           let refine_ p = alt_expand product db p in
-          let original = Alt (product, db) in
-          let refine_ equation = valid_def original p in
-          let refine_ equation = word_def p in
+          let original = ghost_ (Alt (product, db)) in
+          let refine_ equation = ghost_ (valid_def original p) in
+          let refine_ equation = ghost_ (word_def p) in
           (match p with
            | Alt_left inner ->
              let refine_ inner = seq_expand da b inner in
-             let left_derivative = Seq (derive c a, b) in
-             let refine_ equation = valid_def left_derivative inner in
-             let refine_ equation = word_def inner in
+             let left_derivative = ghost_ (Seq (derive c a, b)) in
+             let refine_ equation = ghost_ (valid_def left_derivative inner) in
+             let refine_ equation = ghost_ (word_def inner) in
              (match inner with
               | Seq_match (left, right) ->
                 let refine_ q = expand a c left in
                 let result = Seq_match (q, right) in
-                let refine_ equation = valid_def r result in
-                let refine_ equation = word_def result in
-                let qw = word q in
-                let rw = word right in
-                let refine_ equation = append_def qw rw in
+                let refine_ equation = ghost_ (valid_def r result) in
+                let refine_ equation = ghost_ (word_def result) in
+                let qw = ghost_ (word q) in
+                let rw = ghost_ (word right) in
+                let refine_ equation = ghost_ (append_def qw rw) in
                 result
               | _ -> Epsilon_match)
            | Alt_right right ->
              let refine_ left = epsilon a in
              let refine_ q = expand b c right in
              let result = Seq_match (left, q) in
-             let refine_ equation = valid_def r result in
-             let refine_ equation = word_def result in
-             let lw = word left in
-             let qw = word q in
-             let refine_ equation = append_def lw qw in
+             let refine_ equation = ghost_ (valid_def r result) in
+             let refine_ equation = ghost_ (word_def result) in
+             let lw = ghost_ (word left) in
+             let qw = ghost_ (word q) in
+             let refine_ equation = ghost_ (append_def lw qw) in
              result
            | _ -> Epsilon_match)
         else
           let refine_ p = seq_expand da b p in
-          let original = Seq (da, b) in
-          let refine_ equation = valid_def original p in
-          let refine_ equation = word_def p in
+          let original = ghost_ (Seq (da, b)) in
+          let refine_ equation = ghost_ (valid_def original p) in
+          let refine_ equation = ghost_ (word_def p) in
           (match p with
            | Seq_match (left, right) ->
              let refine_ q = expand a c left in
              let result = Seq_match (q, right) in
-             let refine_ equation = valid_def r result in
-             let refine_ equation = word_def result in
-             let qw = word q in
-             let rw = word right in
-             let refine_ equation = append_def qw rw in
+             let refine_ equation = ghost_ (valid_def r result) in
+             let refine_ equation = ghost_ (word_def result) in
+             let qw = ghost_ (word q) in
+             let rw = ghost_ (word right) in
+             let refine_ equation = ghost_ (append_def qw rw) in
              result
            | _ -> Epsilon_match)
       | Star a ->
         let da = derive c a in
         let refine_ p = seq_expand da r p in
-        let original = Seq (da, r) in
-        let refine_ equation = valid_def original p in
-        let refine_ equation = word_def p in
+        let original = ghost_ (Seq (da, r)) in
+        let refine_ equation = ghost_ (valid_def original p) in
+        let refine_ equation = ghost_ (word_def p) in
         (match p with
          | Seq_match (left, right) ->
            let refine_ q = expand a c left in
            let result = Star_step (q, right) in
-           let refine_ equation = valid_def r result in
-           let refine_ equation = word_def result in
-           let qw = word q in
-           let rw = word right in
-           let refine_ equation = append_def qw rw in
+           let refine_ equation = ghost_ (valid_def r result) in
+           let refine_ equation = ghost_ (word_def result) in
+           let qw = ghost_ (word q) in
+           let rw = ghost_ (word right) in
+           let refine_ equation = ghost_ (append_def qw rw) in
            result
          | _ -> Epsilon_match)
     in
-    let refine_ equation = valid_def r result in
-    let refine_ equation = word_def result in
+    let refine_ equation = ghost_ (valid_def r result) in
+    let refine_ equation = ghost_ (word_def result) in
     refine_ result
   let (append_empty @ total) (xs : int list) (ys : int list) :
       {u : unit | (append xs ys === []) === (xs === [] && ys === [])} =
@@ -610,10 +610,10 @@ end = struct
         then valid (derive c r) q && word q === s else true}
         @ immutable contended =
     fun r c s p ->
-    let derivative = derive c r in
-    let refine_ equation = derive_def c r in
-    let refine_ equation = valid_def r p in
-    let refine_ equation = word_def p in
+    let derivative = ghost_ (derive c r) in
+    let refine_ equation = ghost_ (derive_def c r) in
+    let refine_ equation = ghost_ (valid_def r p) in
+    let refine_ equation = ghost_ (word_def p) in
     let result =
       match p with
       | Epsilon_match | Star_empty | Symbol_match _ -> Epsilon_match
@@ -623,10 +623,10 @@ end = struct
            let refine_ q = contract a c s inner in
            let da = derive c a in
            let db = derive c b in
-           let original = Alt (da, db) in
+           let original = ghost_ (Alt (da, db)) in
            let result = Alt_left q in
-           let refine_ equation = valid_def original result in
-           let refine_ equation = word_def result in
+           let refine_ equation = ghost_ (valid_def original result) in
+           let refine_ equation = ghost_ (word_def result) in
            let refine_ result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
@@ -636,10 +636,10 @@ end = struct
            let refine_ q = contract b c s inner in
            let da = derive c a in
            let db = derive c b in
-           let original = Alt (da, db) in
+           let original = ghost_ (Alt (da, db)) in
            let result = Alt_right q in
-           let refine_ equation = valid_def original result in
-           let refine_ equation = word_def result in
+           let refine_ equation = ghost_ (valid_def original result) in
+           let refine_ equation = ghost_ (word_def result) in
            let refine_ result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
@@ -649,30 +649,30 @@ end = struct
            let da = derive c a in
            let db = derive c b in
            let product = seq da b in
-           let sum = Alt (product, db) in
+           let sum = ghost_ (Alt (product, db)) in
            let lw = word left in
-           let rw = word right in
-           let refine_ equation = append_def lw rw in
+           let rw = ghost_ (word right) in
+           let refine_ equation = ghost_ (append_def lw rw) in
            (match lw with
             | [] ->
-              let refine_ empty_law = empty_complete a left in
+              let refine_ empty_law = ghost_ (empty_complete a left) in
               let refine_ q = contract b c s right in
               let result = Alt_right q in
-              let refine_ equation = valid_def sum result in
-              let refine_ equation = word_def result in
+              let refine_ equation = ghost_ (valid_def sum result) in
+              let refine_ equation = ghost_ (word_def result) in
               let refine_ result = alt_contract product db result in
               result
             | h :: rest ->
               let refine_ q = contract a h rest left in
               let pair = Seq_match (q, right) in
-              let pair_regex = Seq (derive c a, b) in
-              let refine_ equation = valid_def pair_regex pair in
-              let refine_ equation = word_def pair in
+              let pair_regex = ghost_ (Seq (derive c a, b)) in
+              let refine_ equation = ghost_ (valid_def pair_regex pair) in
+              let refine_ equation = ghost_ (word_def pair) in
               let refine_ pair = seq_contract da b pair in
               if nullable a then
                 let result = Alt_left pair in
-                let refine_ equation = valid_def sum result in
-                let refine_ equation = word_def result in
+                let refine_ equation = ghost_ (valid_def sum result) in
+                let refine_ equation = ghost_ (word_def result) in
                 let refine_ result = alt_contract product db result in
                 result
               else pair)
@@ -681,8 +681,8 @@ end = struct
         (match r with
          | Star a ->
            let lw = word left in
-           let rw = word right in
-           let refine_ equation = append_def lw rw in
+           let rw = ghost_ (word right) in
+           let refine_ equation = ghost_ (append_def lw rw) in
            (match lw with
             | [] ->
               let refine_ q = contract r c s right in
@@ -690,22 +690,22 @@ end = struct
             | h :: rest ->
               let refine_ q = contract a h rest left in
               let da = derive c a in
-              let original = Seq (da, r) in
+              let original = ghost_ (Seq (da, r)) in
               let result = Seq_match (q, right) in
-              let refine_ equation = valid_def original result in
-              let refine_ equation = word_def result in
+              let refine_ equation = ghost_ (valid_def original result) in
+              let refine_ equation = ghost_ (word_def result) in
               let refine_ result = seq_contract da r result in
               result)
          | _ -> Epsilon_match)
     in
-    let refine_ equation = valid_def derivative result in
-    let refine_ equation = word_def result in
+    let refine_ equation = ghost_ (valid_def derivative result) in
+    let refine_ equation = ghost_ (word_def result) in
     refine_ result
   let rec (sound @ total) : (r : t) -> (s : int list) ->
       {p : evidence | if matches r s then valid r p && word p === s else true}
         @ immutable contended =
     fun r s ->
-    let refine_ equation = matches_def r s in
+    let refine_ equation = ghost_ (matches_def r s) in
     match s with
     | [] ->
       let refine_ p = epsilon r in
@@ -1742,7 +1742,7 @@ end = struct
     let (sound @ total) (root @ total) (s : int list) :
         {p : evidence | if run (compile root) s then valid root p && word p === s
           else true} =
-      let refine_ proof = correct root s in
+      let refine_ proof = ghost_ (correct root s) in
       let refine_ p = sound root s in
       refine_ p
 
@@ -1905,18 +1905,18 @@ let () =
   in
   let inputs = words 3 in
   let dfa_inputs = inputs @ [[2]; [0; 2]; [2; 0]; [min_int]; [max_int]] in
-  List.iter (fun r ->
+  List.iter (fun (r : t) ->
     let dfa = Dfa.compile r in
     List.iter (fun s -> assert (Dfa.run dfa s = member r s)) dfa_inputs;
-    List.iter (fun s ->
+    List.iter (fun (s : int list) ->
       let expected = member r s in
       assert (matches r s = expected);
       let refine_ result = recognize r s in
       match result with
       | None -> assert (not expected)
-      | Some p ->
+      | Some (p : evidence) ->
         assert (expected && valid r p && word p = s);
-        let refine_ proof = complete r s p in
+        let refine_ proof = ghost_ (complete r s p) in
         ()) inputs) regexes;
   Format.printf "split-spec agreement: %d regexes x %d words@."
     (List.length regexes) (List.length inputs);
@@ -1929,8 +1929,8 @@ let () =
       Star_step (Alt_left Epsilon_match, Star_empty))) in
   let s = [0] in
   assert (valid r p && word p = s);
-  let refine_ proof = complete r s p in
-  let refine_ proof = Dfa.complete r s p in
+  let refine_ proof = ghost_ (complete r s p) in
+  let refine_ proof = ghost_ (Dfa.complete r s p) in
   let refine_ witness = Dfa.sound r s in
   assert (valid r witness && word witness = s);
   assert (Dfa.run (Dfa.compile r) s);
@@ -1939,8 +1939,8 @@ let () =
   let p = Star_step (Star_empty,
     Star_step (Star_step (Symbol_match 0, Star_empty), Star_empty)) in
   assert (valid r p && word p = s);
-  let refine_ proof = complete r s p in
-  let refine_ proof = Dfa.complete r s p in
+  let refine_ proof = ghost_ (complete r s p) in
+  let refine_ proof = ghost_ (Dfa.complete r s p) in
   let refine_ witness = Dfa.sound r s in
   assert (valid r witness && word witness = s);
   assert (Dfa.run (Dfa.compile r) s);

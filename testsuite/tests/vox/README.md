@@ -59,6 +59,14 @@ refinement predicates under `-principal`.
 combinator's signature. It supplies no implementation of that combinator and
 does not establish termination through unchecked refinement introductions.
 
+## Verification idiom
+
+Follow [Verification programming in Vox](../../../design-docs/verification-programming.md):
+expose guarantees in result refinements, write reusable total refined-unit
+lemmas, and erase correctness-only work with `ghost_`. Grouped proof blocks
+export explicit refined-unit conclusions. Keep runtime validation, executable
+evidence, and comparison oracles executable.
+
 ## Solver demo
 
 At the SMT stage, `smt.ml` runs without Z3 and shows the actual serialization.
@@ -74,15 +82,18 @@ This runs `smt_solver.ml` against Z3 and compares its output with
 4.16.0 explicitly; the test does not download it. Run this command separately
 from `./dev`, since both use the worktree's Dune lock.
 
-## Next milestones
+## Arithmetic proof boundaries
 
-`fibonacci.ml` uses static proofs and ordinary wrapping arithmetic. Both
+`fibonacci.ml` combines static unfolding with runtime-checked arithmetic
+identities and ordinary wrapping arithmetic. Both
 implementations accept indices 0 through 90 and raise outside that range.
 At 90, fast doubling's unused second component wraps; its result still fits.
-The inductive proof helper still runs at runtime, pending ghost-code erasure.
+The inductive proof helper still runs at runtime because its checked arithmetic
+identities use `assume_`; ghost expressions require total computations.
 
 `bigint_fibonacci.ml` gives both indices and results type `Bigint.t`, maps
 negative inputs to zero, and computes Fibonacci 100 without overflow guards.
+Its inductive proof erases at the fast-doubling operation boundary.
 
 Structural recursion does not fix the existing totality loophole through
 ordinary negative datatypes. A successful demo is not a claim of global
@@ -115,7 +126,8 @@ shadowed value.
 
 Sparse-array removal and commutation are refined-unit lemmas about the actual
 `get` operation at an arbitrary valid probe. A proof functor accepts an abstract
-`immutable_data` element type; integer and record clients instantiate it. The record client derives equality of reads
+`immutable_data` element type; integer and record clients instantiate it and
+erase proof calls with `ghost_`. The record client derives equality of reads
 and restoration of base values from these contracts. The examples check bounds
 and comparator-class distinction at runtime. The generic `get` operation also
 preserves writable access to mutable elements.

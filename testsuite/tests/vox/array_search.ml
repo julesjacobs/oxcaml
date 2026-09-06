@@ -44,7 +44,7 @@ module Search = struct
         refine_ lower
       in
       let value = Iarray.Refined.get array index in
-      let refine_ equation = at_def array lower in
+      let refine_ equation = ghost_ (at_def array lower) in
       if value = target then
         let result = Some lower in
         refine_ result

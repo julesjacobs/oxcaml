@@ -17,10 +17,10 @@ let () =
   let nil = [] in
   let one = [first] in
   let two = [second] in
-  let refine_ equation = append_def nil one in
+  let refine_ equation = ghost_ (append_def nil one) in
   let refine_ q2 = enqueue q1 second in
-  let refine_ equation = append_def one two in
-  let refine_ equation = append_def nil two in
+  let refine_ equation = ghost_ (append_def one two) in
+  let refine_ equation = ghost_ (append_def nil two) in
   let nonempty : {q : t | (contents q === []) === false} = refine_ q2 in
   let refine_ first_result = dequeue nonempty in
   let (a : int), q3 = first_result in

@@ -64,6 +64,12 @@ module Expr = struct
       let right = fold right in
       let refine_ local_proof = add_correct left right input in
       refine_ u
+
+  let (eval_folded @ total) (expression @ total) input :
+      {result : int | result === eval expression input} =
+    let (result @ total) = (eval (fold expression) input : int @ total) in
+    let refine_ proof = ghost_ (fold_correct expression input) in
+    refine_ result
 end
 ;;
 [%%expect{|
@@ -113,6 +119,9 @@ module Expr :
        {u : unit
          | (eval (fold expression) input) === (eval expression input)} @ immutable) @ total
       stateful
+    val eval_folded :
+      (expression : t) ->
+      (input : int) -> {result : int | result === (eval expression input)}
   end
 |}]
 
@@ -122,13 +131,13 @@ let () =
   Format.printf "input=4 result=%d; input=10 result=%d@."
     (eval expression 4) (eval expression 10);
   let input = 4 in
-  let refine_ proof = fold_correct expression input in
-  Format.printf "folded=%d@." (eval (fold expression) 4);
+  let refine_ result = eval_folded expression input in
+  Format.printf "folded=%d@." result;
   let overflow = Add (Lit max_int, Lit 1) in
   let input = 0 in
-  let refine_ proof = fold_correct overflow input in
+  let refine_ result = eval_folded overflow input in
   Format.printf "wrapping addition preserved=%b@."
-    (eval (fold overflow) 0 = min_int)
+    (result = min_int)
 ;;
 [%%expect{|
 input=4 result=9; input=10 result=15

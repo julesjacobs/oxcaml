@@ -145,7 +145,7 @@ module Demo : sig end = struct
       refine_ index
     in
     let result = get base updates bounded in
-    let refine_ equation = get_def base updates bounded in
+    let refine_ equation = ghost_ (get_def base updates bounded) in
     refine_ result
 
   type mutable_value = {mutable payload : int}
@@ -181,9 +181,9 @@ module Demo : sig end = struct
     let updates = Updates.Refined.empty () in
     let left_value = 77 in
     let right_value = 88 in
-    let refine_ proof =
+    let refine_ proof = ghost_ (
       Int_laws.independent_updates base updates left right
-        left_value right_value bounded
+        left_value right_value bounded)
     in
     let refine_ right = right in
     let left_first = Updates.Refined.add left left_value updates in
@@ -212,12 +212,12 @@ module Demo : sig end = struct
     List.iter (fun (index : int) ->
       let bounded : {index : int |
         0 <= index && index < Iarray.length base} = assume_ index in
-      let refine_ commutation =
+      let refine_ commutation = ghost_ (
         Item_laws.independent_updates base updates left distinct
-          left_value right_value bounded
+          left_value right_value bounded)
       in
-      let refine_ removal =
-        Item_laws.clear_reads_base base left_first bounded
+      let refine_ removal = ghost_ (
+        Item_laws.clear_reads_base base left_first bounded)
       in
       let before = get base left_first bounded in
       let after = get base right_first bounded in

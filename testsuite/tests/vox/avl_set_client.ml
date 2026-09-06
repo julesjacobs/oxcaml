@@ -14,21 +14,24 @@ let () =
   let descending_two = add two descending_three in
   let descending = add one descending_two in
   let _union_result = union ascending descending in
-  let refine_ empty_law = lookup_empty one in
-  let refine_ add_law = lookup_add four four ascending_three in
-  let refine_ union_law = lookup_union two ascending descending in
-  let refine_ size_law = size_zero empty_set in
-  let refine_ equal_lookup_law = equal_lookup ascending descending two in
-  let (same_lookup @ total) :
-      (element : int) ->
-      {u : unit |
-        lookup element ascending === lookup element ascending} =
-    fun _element ->
-    let u = () in
-    refine_ u
-  in
-  let refine_ extensional_law =
-    extensional ascending ascending same_lookup
+  let _proofs = ghost_ (
+    let refine_ empty_law = lookup_empty one in
+    let refine_ add_law = lookup_add four four ascending_three in
+    let refine_ union_law = lookup_union two ascending descending in
+    let refine_ size_law = size_zero empty_set in
+    let refine_ equal_lookup_law = equal_lookup ascending descending two in
+    let (same_lookup @ total) :
+        (element : int) ->
+        {u : unit |
+          lookup element ascending === lookup element ascending} =
+      fun _element ->
+      let u = () in
+      refine_ u
+    in
+    let refine_ extensional_law =
+      extensional ascending ascending same_lookup
+    in
+    ())
   in
   Format.printf "semantic equal = %b; representation equal = %b@."
     (equal ascending descending)

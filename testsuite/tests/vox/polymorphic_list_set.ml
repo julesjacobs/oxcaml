@@ -170,7 +170,7 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
 
   let (empty @ total) : t =
     let xs = Nil in
-    let refine_ equation = valid_def xs in
+    let refine_ equation = ghost_ (valid_def xs) in
     refine_ xs
 
   let[@def] rec (lookup_repr @ total) element xs =
@@ -371,7 +371,7 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
     fun element set ->
     let refine_ xs = set in
     let (result @ total) = (add_repr element xs : repr @ total) in
-    let refine_ invariant = add_valid element xs in
+    let refine_ invariant = ghost_ (add_valid element xs) in
     refine_ result
 
   let (lookup_empty @ total) element :
@@ -482,7 +482,7 @@ module Make (Element : Polymorphic_set_intf.Ordered) = struct
     let refine_ xs = left in
     let refine_ ys = right in
     let (result @ total) = (union_repr xs ys : repr @ total) in
-    let refine_ invariant = union_valid xs ys in
+    let refine_ invariant = ghost_ (union_valid xs ys) in
     refine_ result
 
   let (lookup_union @ total) :
