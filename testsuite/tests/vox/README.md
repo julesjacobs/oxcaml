@@ -110,3 +110,8 @@ execute at runtime, so this demo makes no amortized-cost claim.
 then statically proves preservation of optional lookup results. It restores
 scope using the saved outer map; removing an inner binding does not restore a
 shadowed value.
+
+Sparse-array commutation is a pointwise theorem over an arbitrary valid probe.
+The example checks comparator-class distinction at runtime; the theorem itself
+is static. It compares read results, not map or iarray representation
+equality.
