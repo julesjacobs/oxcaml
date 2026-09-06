@@ -21,3 +21,12 @@
 - The higher-order recursive extensionality proof produces large verification
   conditions. The bytecode test checks the proof and runtime output in normal and
   principal modes without repeating the native backend.
+
+## AVL demo
+
+- A refinement-wrapped inductive argument is not recognized as a structural
+  recursion argument. The insertion proof passes validity as a refined `unit`
+  witness while keeping the tree as the recursive argument.
+- AVL shape depends on insertion order. Its interface therefore uses semantic
+  `equal`, defined by the canonical inorder sequence; `===` remains
+  representation equality.
