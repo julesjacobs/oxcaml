@@ -15142,7 +15142,7 @@ let with_resolved_refinement predicate_env loc predicate f =
   in
   Resolved_predicate.with_input input (fun () -> f syntax)
 
-let make_definition_lemma env binding =
+let make_definition_lemma_at_level env binding =
   let loc = binding.vb_loc in
   let reject loc =
     Location.raise_errorf ~loc
@@ -15225,13 +15225,6 @@ let make_definition_lemma env binding =
          (Rexp_ident (Path.Pident id)),
        List.map (fun (id, ty) -> Asttypes.Nolabel, mk ty (Rexp_var id))
          type_params)) in
-  let arrow id arg ret =
-    let binder =
-      if Ctype.refinement_ident_occurs id ret then Some id else None
-    in
-    newty (Tarrow ((Nolabel, Alloc.of_const Typemode.dependent_argument_mode,
-                Alloc.legacy, binder),
-               newmono arg, ret, commu_ok)) in
   let validation = mk Predef.type_bool (Rexp_logical_equal (call, call)) in
   ignore
     (with_resolved_refinement predicate_env loc validation (fun syntax ->
@@ -15239,6 +15232,24 @@ let make_definition_lemma env binding =
          !Typetexp.type_refinement_predicate predicate_env
            (Ident.Set.of_list (List.map fst type_params))
            binder Predef.type_unit syntax)));
+  let rec argument_modes ty params =
+    match params, get_desc (expand_head env ty) with
+    | [], _ -> []
+    | (id, _) :: params, Tarrow ((_, mode, _, _), _, ret, _) ->
+        let source = Alloc.zap_to_legacy mode in
+        (id, {Typemode.dependent_argument_mode with
+          visibility = source.visibility; contention = source.contention})
+        :: argument_modes ret params
+    | _ -> assert false
+  in
+  let argument_modes = argument_modes binding.vb_expr.exp_type type_params in
+  let arrow id arg ret =
+    let binder =
+      if Ctype.refinement_ident_occurs id ret then Some id else None
+    in
+    newty (Tarrow ((Nolabel, Alloc.of_const (List.assoc id argument_modes),
+                Alloc.legacy, binder),
+               newmono arg, ret, commu_ok)) in
   let body_ir = Refinement_predicate.logical_definition_body body_ir in
   let predicate =
     mk Predef.type_bool (Rexp_logical_equal (call, body_ir))
@@ -15248,15 +15259,25 @@ let make_definition_lemma env binding =
     (Refinement_predicate.map
        ~type_expr:(fun ty -> types := ty :: !types; ty) predicate);
   let types = List.rev !types in
-  let carrier = newty (Ttuple (List.map (fun ty -> None, ty) types)) in
-  let copy_subst =
-    Subst.with_additional_action Subst.Duplicate_variables Subst.identity
-  in
-  let copied_types =
-    match get_desc (Subst.type_expr copy_subst carrier) with
+  let copy_types subst types =
+    let carrier = newty (Ttuple (List.map (fun ty -> None, ty) types)) in
+    match get_desc (Subst.type_expr subst carrier) with
     | Ttuple components -> List.map snd components
     | _ -> assert false
   in
+  let copied_types = instance_list (List.map snd type_params @ types) in
+  let rec split_params params types =
+    match params, types with
+    | [], types -> [], types
+    | (id, _) :: params, ty :: types ->
+        let params, types = split_params params types in
+        (id, ty) :: params, types
+    | _ -> assert false
+  in
+  let type_params, copied_types = split_params type_params copied_types in
+  (* Share variables with the arguments, but keep their runtime modes separate
+     from the normalized logical types. *)
+  let copied_types = copy_types Subst.identity copied_types in
   let visited = ref TypeSet.empty in
   let rec normalize_logical_type ty =
     if not (TypeSet.mem ty !visited) then begin
@@ -15333,7 +15354,6 @@ let make_definition_lemma env binding =
                {unit with exp_type = result_in_body}};
          exp_type = contract stub.exp_type type_params}
     | _ -> assert false in
-  generalize stub.exp_type;
   let lemma_id = Ident.create_local name in
   let description = {definition_description with
       val_type = stub.exp_type; val_attributes = [];
@@ -15352,6 +15372,11 @@ let make_definition_lemma env binding =
       pat_unique_barrier = Unique_barrier.not_computed ()} in
   {binding with vb_pat = pat; vb_expr = stub; vb_attributes = []},
   Env.add_value ~mode:(total_mode ()) lemma_id description env
+
+let make_definition_lemma env binding =
+  with_local_level
+    ~post:(fun (lemma, _) -> generalize lemma.vb_expr.exp_type)
+    (fun () -> make_definition_lemma_at_level env binding)
 
 let () =
   definition_lemma := make_definition_lemma;
