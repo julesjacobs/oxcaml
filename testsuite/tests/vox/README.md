@@ -132,13 +132,22 @@ repetitions by structural recursion on the derivation.
 
 `matches` runs the Boolean derivative algorithm without proof calls.
 `recognize` additionally constructs a checked membership derivation on success.
-Smart constructors remove empty alternatives, collapse identical alternatives,
-annihilate concatenations with `Empty`, and eliminate `Epsilon` operands from
-concatenation. Checked derivation transformations in both directions establish
-that each rewrite preserves membership. These local rewrites run while
-constructing derivatives.
+`alt` flattens alternative trees, sorts their nonempty alternatives by a
+structural order, and removes duplicates across the whole collection. It
+rebuilds a canonical right-associated tree, implementing associativity,
+commutativity, and idempotence (ACI) of alternatives. Concatenation still
+eliminates `Empty` and `Epsilon` operands.
 
-The demo uses integer symbols and makes no complexity claim. Executable checks compare all 3,244 regexes of depth at most two over
-symbols 0 and 1 against an independent split-based matcher on all 15 words of
-length at most three. Rejection fixtures exercise the soundness and
-completeness contracts.
+The checked normalization proof preserves membership of each alternative.
+Selecting and reinserting an alternative then transfers regex membership
+derivations in both directions. The separate finiteness theorem for
+ACI-normalized derivatives is not formalized in this demo.
+
+The demo uses integer symbols and makes no complexity claim. Executable checks
+compare all 3,244 regexes of depth at most two over symbols 0 and 1 against an
+independent split-based matcher on all 15 words of length at most three.
+Additional checks exercise ACI laws, the formerly growing `a*` followed by
+`a*`, and complete derivative closures. The small regexes have at most six
+states; a fifth-from-last-symbol example has 33. Closure exploration includes a
+symbol outside the regex alphabet. Rejection fixtures exercise the soundness
+and completeness contracts.
