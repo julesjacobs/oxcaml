@@ -15734,17 +15734,18 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
       | Texp_quote _ | Texp_splice _ ->
           unsupported_refinement_syntax exp.exp_loc "This expression form"
     in
-    List.fold_left
-      (fun result (extra, loc, _) ->
+    List.fold_right
+      (fun (extra, loc, _) result ->
          match extra with
          | Texp_inspected_type _ | Texp_mode _ -> result
+         | Texp_ghost -> { result with rexp_desc = Rexp_ghost result }
          | Texp_constraint _ -> { result with rexp_type_constraint = true }
          | Texp_refine when definition_body -> result
          | Texp_refine ->
              unsupported_refinement_syntax loc "This expression annotation"
          | Texp_coerce _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
-         | Texp_borrowed | Texp_ghost_region | Texp_ghost ->
+         | Texp_borrowed | Texp_ghost_region ->
              unsupported_refinement_syntax loc "This expression annotation"
          | Texp_let_refine (id, _) -> begin
              match result.rexp_desc with
@@ -15752,7 +15753,7 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
                when Ident.same id rb_ident -> result
              | _ -> assert false
            end)
-      result exp.exp_extra
+      exp.exp_extra result
   and case locals case =
     let locals, rc_lhs = refinement_pattern_of_typed locals case.c_lhs in
     { rc_lhs;
