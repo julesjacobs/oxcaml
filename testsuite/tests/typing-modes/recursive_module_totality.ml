@@ -302,3 +302,32 @@ Error: This module type is recursive.
        the module type of "Strengthened_base".
        Such recursive definitions of module types are not allowed.
 |}]
+
+module _ = struct
+  module rec Recursive_results : sig
+    val object_ : unit -> (< next : 'a > as 'a)
+    val variant : unit -> ([ `Done | `Next of 'a ] as 'a)
+  end = struct
+    let object_ () = object (self) method next = self end
+    let variant () = `Done
+  end
+end
+[%%expect{|
+|}]
+
+module _ = struct
+  module rec Recursive_object : sig
+    type t
+    val make : unit -> (< next : 'a; produce : unit -> t @ total > as 'a)
+  end = struct
+    type t = unit
+    let make () = object (self)
+      method next = self
+      method produce : unit -> t @ total = fun () -> ()
+    end
+  end
+end
+[%%expect{|
+Line 4, characters 4-73:
+Error: The value "make" exposes a total value whose type depends on the current recursive module group.
+|}]
