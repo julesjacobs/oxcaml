@@ -1368,7 +1368,9 @@ module Set : sig
 
   module type TotalS =
     sig
-      include S
+      type elt
+      type t : immutable_data with elt
+      include S with type elt := elt and type t := t
 
       val empty: t @@ total
       val add: elt -> t -> t @@ total
