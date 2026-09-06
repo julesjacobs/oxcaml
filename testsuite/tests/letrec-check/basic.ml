@@ -30,17 +30,22 @@ Line 1, characters 12-27:
 Error: This kind of expression is not allowed as right-hand side of "let rec"
 |}];;
 
-let rec x = [y]
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list;;
+[%%expect{|
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+|}];;
+
+let rec x = Cons (y, Nil)
 and y = let x = () in x;;
 [%%expect{|
-val x : unit list = [()]
+val x : unit recursive_list = Cons ((), Nil)
 val y : unit = ()
 |}];;
 
-let rec x = [y]
+let rec x = Cons (y, Nil)
 and y = let rec x = () in x;;
 [%%expect{|
-val x : unit list = [()]
+val x : unit recursive_list = Cons ((), Nil)
 val y : unit = ()
 |}];;
 
@@ -48,10 +53,10 @@ let rec x =
   let a = x in
   fun () -> a ()
 and y =
-  [x];;
+  Cons (x, Nil);;
 [%%expect{|
 val x : unit -> 'a = <fun>
-val y : (unit -> 'a) list = [<fun>]
+val y : (unit -> 'a) recursive_list = Cons (<fun>, Nil)
 |}];;
 
 let rec x = [|y|] and y = 0;;
