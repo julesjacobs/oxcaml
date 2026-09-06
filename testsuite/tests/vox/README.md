@@ -45,7 +45,7 @@ legacy-mode defaults.
 | Persistent environments | `environments.ml` | Binding shadows its comparator class and preserves observations in a distinct class; retaining the outer environment restores scope. |
 | Standard-set model | `avl_stdlib_set.ml` | Pointwise refinement relates the verified AVL implementation to `Set.MakeTotal`, with comparator compatibility explicit. |
 | Sparse immutable arrays | `sparse_iarrays.ml` | A polymorphic `Map.MakeTotal` overlay proves read-after-write, overwrite, removal fallback, and safe base-array reads. |
-| Regex matching | `regex.ml` | Derivative matching is sound and complete for an independent membership-derivation spec, including nullable and nested stars. |
+| Regex matching | `regex.ml` | Derivative matching and a total DFA construction are sound and complete for an independent membership-derivation spec. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -143,6 +143,28 @@ Selecting and reinserting an alternative then transfers regex membership
 derivations in both directions. The separate finiteness theorem for
 ACI-normalized derivatives is not formalized in this demo.
 
+`Dfa.compile` constructs a finite transition table by checked total functions.
+Its carrier uses partial derivatives: each transition produces a list of
+residual regexes whose languages are unioned. A structurally computed
+`support r` contains every partial derivative of `r` and is closed under
+further partial derivatives. DFA states are subsets of `r :: support r`,
+represented by sublists; filtering this universe puts each transition target
+in the enumerated powerset. The universe may contain duplicate regexes, so
+the enumeration may contain duplicate states.
+
+Construction enumerates the full powerset, including unreachable states. Each
+row contains transitions for the finitely many symbol occurrences in the
+universe; all other integers go to the empty state. Both enumerations use
+structural recursion, without fuel or a failure result. Construction is
+exponential in the universe length. Rows and states use association lists;
+this is a total construction proof, not an optimized DFA representation.
+
+`Dfa.run` executes only table lookups. The checked `Dfa.correct` theorem proves
+`Dfa.run (Dfa.compile r) s === matches r s` for every regex and word.
+`Dfa.sound` and `Dfa.complete` connect this equality to the independent
+membership derivations. These proof functions are separate from compilation
+and table execution.
+
 The demo uses integer symbols and makes no complexity claim. Executable checks
 compare all 3,244 regexes of depth at most two over symbols 0 and 1 against an
 independent split-based matcher on all 15 words of length at most three.
@@ -151,3 +173,9 @@ Additional checks exercise ACI laws, the formerly growing `a*` followed by
 states; a fifth-from-last-symbol example has 33. Closure exploration includes a
 symbol outside the regex alphabet. Rejection fixtures exercise the soundness
 and completeness contracts.
+
+The DFA checks reuse one compiled table per regex on the same 15 words plus
+five words containing other integers. They also cover nullable and nested
+stars, the extreme integer symbols, and the fifth-from-last-symbol example.
+A rejection fixture checks that DFA completeness cannot prove rejection of a
+valid membership derivation.
