@@ -28,6 +28,7 @@ legacy-mode defaults.
 | Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
 | Clamp laws | `clamp.ml` | Explicit equations prove interval bounds, identity, and idempotence. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
+| Expression evaluation | `expressions.ml` | Structural recursion establishes terminating evaluation of an inductive expression tree. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -71,3 +72,6 @@ input, and derives the width with `refine_`.
 
 `clamp.ml` proves bounds, identity, and idempotence for arbitrary inputs using
 explicit definition lemmas.
+
+`expressions.ml` evaluates an inductive expression tree with a caller-supplied
+input. At this stage it establishes termination.
