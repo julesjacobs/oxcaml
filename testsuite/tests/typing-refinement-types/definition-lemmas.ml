@@ -213,3 +213,35 @@ Line 2, characters 26-34:
                               ^^^^^^^^
 Error: Definition lemmas cannot preserve zero-argument primitive values
 |}]
+
+module Reader : sig val read : int -> int @@ total reading end = struct
+  let read x = x
+end;;
+[%%expect{|
+module Reader : sig val read : int -> int @@ total reading shareable end
+|}]
+
+let[@def] (reading @ reading) x = Reader.read x;;
+[%%expect{|
+Line 1, characters 3-47:
+1 | let[@def] (reading @ reading) x = Reader.read x;;
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This value is "reading" but is expected to be "stateless".
+|}]
+
+let[@def] dependent_parameter : (x : int) -> {v : int | v = x} -> int =
+  fun x y -> let refine_ value = y in value;;
+[%%expect{|
+val dependent_parameter :
+  (x : int) -> ({v : int | v = x} -> int) @ total stateful = <fun>
+val dependent_parameter_def :
+  (x : int) ->
+  (y : {v : int | v = x}) ->
+  {u : unit | (dependent_parameter x y) === (let value = y in value)} = <fun>
+|}]
+
+let use_dependent_parameter : (x : int) -> {v : int | v = x} -> unit =
+  fun x y -> let refine_ proof = dependent_parameter_def x y in ();;
+[%%expect{|
+val use_dependent_parameter : (x : int) -> {v : int | v = x} -> unit = <fun>
+|}]

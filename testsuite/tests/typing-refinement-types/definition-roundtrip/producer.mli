@@ -9,3 +9,8 @@ type 'a box = Box of 'a
 
 val box : 'a @ immutable -> 'a box @ immutable @@ total
 val box_def : (x : 'a) -> {u : unit | box x === Box x} @@ total
+
+val dependent : (x : int) -> {v : int | v = x} -> int @@ total
+val dependent_def :
+  (x : int) -> (y : {v : int | v = x}) ->
+  {u : unit | dependent x y === x} @@ total

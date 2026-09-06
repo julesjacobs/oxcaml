@@ -29,3 +29,6 @@ let datatype x =
   ()
 
 let () = ignore (verified ()); ignore (multiple ()); ignore (datatype 0)
+
+let dependent : (x : int) -> {v : int | v = x} -> unit =
+  fun x y -> let refine_ proof = Alias.dependent_def x y in ()

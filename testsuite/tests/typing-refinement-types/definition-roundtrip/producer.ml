@@ -4,3 +4,6 @@ let[@def] choose b x y = if b then x + 1 else y - 1
 type 'a box = Box of 'a
 
 let[@def] box x = Box x
+
+let[@def] dependent : (x : int) -> {v : int | v = x} -> int =
+  fun x y -> x
