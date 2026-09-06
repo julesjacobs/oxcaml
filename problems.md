@@ -16,12 +16,13 @@ the dependent function. This is a dependent-type inference limitation.
 
 ## Logical definitions of access-preserving observers
 
-`[@def]` rejects a polymorphic observer that returns a mutable element at
-ordinary access. The generated definition checks its parameters under the
-immutable logical lock, while operations such as `Map.Refined.find` preserve
-the element's access. State the proof using the observer's operations directly.
-A future logical-definition design should represent access-preserving observers
-without weakening their runtime types.
+Generated definition lemmas retain the already-checked body, so an observer
+can return mutable elements at ordinary access. Explicit source predicates
+still check calls under an immutable lock. Relational laws that call such
+observers therefore need sufficient mode-crossing information. The sparse-array
+proof functor uses an abstract `immutable_data` element type, which keeps this
+information available under principal typing while the runtime observer remains
+polymorphic over mutable elements too.
 
 ## Polymorphic constants in total functions
 
