@@ -12973,6 +12973,10 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
           ~entirely_functions
           ~exp_env ~new_env ~spat_sexp_list ~attrs_list ~mode_pat_typ_list ~pvs
           (fun exp_env ({pvb_attributes; _} as vb) mode expected_ty ->
+            let mode =
+              if definitions = [] then mode
+              else mode_coerce (refinement_operand_mode ()) mode
+            in
             let sexp = vb_exp_constraint vb in
             match get_desc expected_ty with
             | Tpoly (ty, tl) ->
@@ -15693,6 +15697,8 @@ let make_definition_lemma env binding =
   in
   let definition_description = Subst.Lazy.force_value_description
       (Env.find_value (Path.Pident id) predicate_env) in
+  (* Top-level bindings are stored at legacy modes; [@def] checks the RHS
+     separately at total, stateless, and portable. *)
   let predicate_env =
     Env.add_value ~mode:(total_mode ()) id definition_description predicate_env
   in
@@ -15704,9 +15710,12 @@ let make_definition_lemma env binding =
          (Rexp_ident (Path.Pident id)),
        List.map (fun (id, ty) -> Asttypes.Nolabel, mk ty (Rexp_var id))
          type_params)) in
-  let arrow arg ret = newty
-      (Tarrow ((Nolabel, Alloc.of_const Typemode.dependent_argument_mode,
-                Alloc.legacy, None),
+  let arrow id arg ret =
+    let binder =
+      if Ctype.refinement_ident_occurs id ret then Some id else None
+    in
+    newty (Tarrow ((Nolabel, Alloc.of_const Typemode.dependent_argument_mode,
+                Alloc.legacy, binder),
                newmono arg, ret, commu_ok)) in
   let validation = mk Predef.type_bool (Rexp_logical_equal (call, call)) in
   ignore
@@ -15779,8 +15788,8 @@ let make_definition_lemma env binding =
        ret_type_constraint = None}
       (Pfunction_body (Ast_helper.Exp.construct ~loc
           (Location.mkloc (Longident.Lident "()") loc) None)) in
-  let stub_type = List.fold_right (fun (_, ty) ret -> arrow ty ret)
-      params Predef.type_unit in
+  let stub_type = List.fold_right (fun (id, ty) ret -> arrow id ty ret)
+      type_params Predef.type_unit in
   let stub = Resolved_predicate.with_input
       {expressions = []; values = []; constructors = [];
        labels = []; locals = []}
