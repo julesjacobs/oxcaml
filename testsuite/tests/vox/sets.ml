@@ -26,6 +26,14 @@ module Demo : sig end = struct
   let to_more_labels (set : Int_set.t) : More_labeled_set.t = set
   let from_more_labels (set : More_labeled_set.t) : Int_set.t = set
 
+  let (joined_membership @ total) b x (set @ total) =
+    let singleton = Int_set.Refined.singleton x in
+    let added = Int_set.Refined.add x set in
+    let joined = if b then singleton else added in
+    let present = Int_set.mem x joined in
+    let (_ : {r : bool | r}) = refine_ present in
+    ()
+
   let (membership_laws @ total) x (set @ total) =
     let singleton = Int_set.Refined.singleton x in
     let added = Int_set.Refined.add x set in
