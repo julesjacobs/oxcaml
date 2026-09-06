@@ -46,17 +46,16 @@ let install () =
   if not !installed
   then begin
     installed := true;
-    Verification.install (fun structure ->
-        let int_width = if Target_system.is_64_bit () then 63 else 31 in
-        let dump =
-          if !dump_smtlib
-          then Some (fun bytes -> Format.eprintf "%s%!" bytes)
-          else None
-        in
-        Vox_smt_solver.with_session
-          ~config:{ executable = !executable; timeout_ms = !timeout_ms }
-          ?dump ~int_width (fun check ->
-            Vox_vc.generate ~prove:(prove check) structure));
+    let with_prover f =
+      let int_width = if Target_system.is_64_bit () then 63 else 31 in
+      let dump = if !dump_smtlib then Some (fun bytes -> Format.eprintf "%s%!" bytes) else None in
+      Vox_smt_solver.with_session
+        ~config:{ executable = !executable; timeout_ms = !timeout_ms }
+        ?dump ~int_width (fun check -> f (prove check))
+    in
+    Verification.install (fun structure -> with_prover (fun prove -> Vox_vc.generate ~prove structure));
+    Verification.install_termination (fun ~self ~fn ~measure ->
+      with_prover (fun prove -> Vox_vc.check_termination ~prove ~self ~fn ~measure));
     Clflags.add_arguments __LOC__
       [ "-dvc", Arg.Set dump_vc, " Dump refinement verification conditions";
         ( "-dsmtlib",
