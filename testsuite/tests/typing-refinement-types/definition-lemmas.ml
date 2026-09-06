@@ -75,7 +75,43 @@ Error: The def attribute requires a single nonrecursive function binding
 let[@def] polymorphic x = x;;
 [%%expect{|
 val polymorphic : 'a @ immutable -> 'a @ immutable = <fun>
-val polymorphic_def : (x : 'a) -> {u : unit | (polymorphic x) === x} = <fun>
+val polymorphic_def :
+  (x : 'a) @ immutable -> {u : unit | (polymorphic x) === x} = <fun>
+|}]
+
+let instantiate_int (x : int) =
+  let refine_ _equation = polymorphic_def x in ();;
+[%%expect{|
+val instantiate_int : int -> unit = <fun>
+|}]
+
+let instantiate_bool (x : bool) =
+  let refine_ _equation = polymorphic_def x in ();;
+[%%expect{|
+val instantiate_bool : bool -> unit = <fun>
+|}]
+
+let captured (g @ total) =
+  let[@def] f y = g y in
+  let i = 1 in
+  let b = true in
+  let refine_ p = f_def i in
+  let refine_ q = f_def b in
+  ();;
+[%%expect{|
+Line 6, characters 24-25:
+6 |   let refine_ q = f_def b in
+                            ^
+Error: The value "b" has type "bool" but an expression was expected of type "int"
+|}]
+
+type fn = int -> int
+let[@def] alias_identity : fn = fun x -> x;;
+[%%expect{|
+type fn = int -> int
+val alias_identity : fn = <fun>
+val alias_identity_def : (x : int) -> {u : unit | (alias_identity x) === x} =
+  <fun>
 |}]
 
 let[@def] dependent : (x : int) -> { y : int | y = x } =
@@ -90,7 +126,7 @@ let[@def] apply (f @ total) x = f x;;
 val apply : ('a @ immutable -> 'b) @ total -> 'a @ immutable -> 'b = <fun>
 val apply_def :
   (f : ('a @ immutable -> 'b)) ->
-  (x : 'a) -> {u : unit | (apply f x) === (f x)} = <fun>
+  (x : 'a) @ immutable -> {u : unit | (apply f x) === (f x)} = <fun>
 |}]
 
 type 'a box = Box of 'a
@@ -98,7 +134,8 @@ let[@def] box x = Box x;;
 [%%expect{|
 type 'a box = Box of 'a
 val box : 'a @ immutable -> 'a box @ immutable = <fun>
-val box_def : (x : 'a) -> {u : unit | (box x) === (Box x)} = <fun>
+val box_def : (x : 'a) @ immutable -> {u : unit | (box x) === (Box x)} =
+  <fun>
 |}]
 
 let[@def] labelled ~x = x + 1;;

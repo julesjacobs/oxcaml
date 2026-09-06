@@ -8,7 +8,8 @@ let[@def] eq_body x =
 [%%expect{|
 val eq_body : 'a @ immutable -> int -> int -> bool = <fun>
 val eq_body_def :
-  (x : 'a) -> {u : unit | (eq_body x) === ((=) : int -> int -> bool)} = <fun>
+  (x : 'a) @ immutable ->
+  {u : unit | (eq_body x) === ((=) : int -> int -> bool)} = <fun>
 |}]
 
 let[@def] eq_outer x =
@@ -16,6 +17,6 @@ let[@def] eq_outer x =
 [%%expect{|
 val eq_outer : 'a @ immutable -> int -> int -> bool = <fun>
 val eq_outer_def :
-  (x : 'a) -> {u : unit | (eq_outer x) === ((=) : int -> int -> bool)} =
-  <fun>
+  (x : 'a) @ immutable ->
+  {u : unit | (eq_outer x) === ((=) : int -> int -> bool)} = <fun>
 |}]
