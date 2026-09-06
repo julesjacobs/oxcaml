@@ -114,13 +114,24 @@ let applied env declaration arguments ty =
   try Some (Ctype.apply env declaration.type_params ty arguments)
   with Ctype.Cannot_apply -> None
 
+let rec nested_type_key key = function
+  | Variable _ -> false
+  | Constructor (_, arguments) ->
+    List.exists
+      (fun argument -> argument = key || nested_type_key key argument)
+      arguments
+  | Tuple components ->
+    List.exists (fun (_, ty) -> ty = key || nested_type_key key ty) components
+  | Box ty -> ty = key || nested_type_key key ty
+
 let nonregular_recursive_instance key stack =
   match key with
   | Constructor (path, _) ->
     List.exists
       (fun (stack_key, _) ->
         match stack_key with
-        | Constructor (stack_path, _) -> Path.same path stack_path
+        | Constructor (stack_path, _) ->
+          Path.same path stack_path && not (nested_type_key key stack_key)
         | Variable _ | Tuple _ | Box _ -> false)
       stack
   | Variable _ | Tuple _ | Box _ -> false
