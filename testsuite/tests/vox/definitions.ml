@@ -261,3 +261,37 @@ module Datatype_definition :
     val use : unit -> {n : int | n = 0}
   end
 |}]
+
+module Polymorphic = struct
+  let[@def] identity (x : 'a @ immutable) = x
+
+  let (identity_law @ total) :
+      (x : ('a : immutable_data)) -> {u : unit | identity x === x} =
+    fun x ->
+    let refine_ equation = identity_def x in
+    let u = () in
+    refine_ u
+
+  let integer (x : int) : {y : int | y === x} =
+    let result = identity x in
+    let refine_ equation = identity_def x in
+    refine_ result
+
+  let boolean (x : bool) : {y : bool | y === x} =
+    let result = identity x in
+    let refine_ equation = identity_def x in
+    refine_ result
+end
+;;
+[%%expect{|
+module Polymorphic :
+  sig
+    val identity : 'a @ immutable -> 'a @ immutable
+    val identity_def :
+      (x : 'a) @ immutable -> {u : unit | (identity x) === x}
+    val identity_law :
+      ('a : immutable_data). (x : 'a) -> {u : unit | (identity x) === x}
+    val integer : (x : int) -> {y : int | y === x}
+    val boolean : (x : bool) -> {y : bool | y === x}
+  end
+|}]
