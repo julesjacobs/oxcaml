@@ -60,9 +60,9 @@ let separate_instances (i : int @ immutable) (b : bool @ immutable) :
 type pair = Pair of int * int
 type 'a box = Box of 'a
 val separate_instances :
-  (i : int) ->
-  (b : bool) -> {u : unit | ((Box i) === (Box i)) && ((Box b) === (Box b))} =
-  <fun>
+  (i : int) @ immutable ->
+  (b : bool) @ immutable ->
+  {u : unit | ((Box i) === (Box i)) && ((Box b) === (Box b))} = <fun>
 |}]
 
 module Nullary = struct
@@ -174,19 +174,19 @@ type sum = First of int | Second of int
 type token
 type wrapped = Wrap of token
 val opaque_payload_injective :
-  (left : token) ->
-  (right : token) ->
+  (left : token) @ immutable ->
+  (right : token) @ immutable ->
   {u : unit | (Wrap left) === (Wrap right)} -> {u : unit | left === right} =
   <fun>
 val injective :
-  (left : int) ->
-  (right : int) ->
+  (left : int) @ immutable ->
+  (right : int) @ immutable ->
   {u : unit | (First left) === (First right)} -> {u : unit | left === right} =
   <fun>
 val disjoint :
-  (left : int) ->
-  (right : int) -> {u : unit | ((First left) === (Second right)) === false} =
-  <fun>
+  (left : int) @ immutable ->
+  (right : int) @ immutable ->
+  {u : unit | ((First left) === (Second right)) === false} = <fun>
 |}]
 
 type 'a tree = Leaf of 'a | Node of 'a * 'a tree [@@inductive]
@@ -405,8 +405,8 @@ type non_well_with_point =
     Loop_with_point of non_well_with_point * finite_point
 [@@inductive]
 val finite_dependency_survives :
-  (loop : non_well_with_point) ->
-  (point : finite_point) ->
+  (loop : non_well_with_point) @ immutable ->
+  (point : finite_point) @ immutable ->
   {u : unit | (loop === loop) && (point.value = point.value)} = <fun>
 |}]
 
@@ -473,7 +473,7 @@ let record_update_predicate (p : int changing_record @ immutable) :
   refine_ u;;
 [%%expect{|
 val record_update_predicate :
-  (p : int changing_record) ->
+  (p : int changing_record) @ immutable ->
   {u : unit | { p with payload = true }.count = p.count} = <fun>
 |}]
 
