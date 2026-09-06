@@ -2730,7 +2730,19 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
       ?(dependent_container = false) env dependent_ids ty =
     (* A partial value can reveal a total capability through a returned
        closure or through projections from its result. *)
-    let rec exposes active_declarations dependent_container ty =
+    let rec exposes active_types active_declarations dependent_container ty =
+      let visited =
+        match Btype.TypeMap.find ty active_types with
+        | was_dependent -> was_dependent || not dependent_container
+        | exception Not_found -> false
+      in
+      if visited then false else
+      let active_types =
+        match get_desc ty with
+        | Tconstr _ -> active_types
+        | _ -> Btype.TypeMap.add ty dependent_container active_types
+      in
+      let exposes = exposes active_types in
       let check_obtainable dependent_container modalities ty =
         (modality_is_total modalities
          && (dependent_container
@@ -2867,7 +2879,7 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
       | Tvar _ | Tunivar _ | Tnil | Tlink _
       | Tsubst _ | Tof_kind _ -> false
     in
-    exposes Path.Map.empty dependent_container ty
+    exposes Btype.TypeMap.empty Path.Map.empty dependent_container ty
   in
   let find_dependent_inductive_type env dependent_ids item =
     let exception Found of string in
