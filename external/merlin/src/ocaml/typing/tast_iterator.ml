@@ -345,6 +345,7 @@ let extra sub = function
   | Texp_refine -> ()
   | Texp_let_refine (_, name) -> iter_loc sub name
   | Texp_stack -> ()
+  | Texp_ghost -> ()
   | Texp_mode modes -> sub.modes sub modes
   | Texp_inspected_type (Label_disambiguation _) -> ()
   | Texp_inspected_type (Polymorphic_parameter (Method _)) -> ()
