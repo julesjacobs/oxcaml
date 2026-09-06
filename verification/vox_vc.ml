@@ -104,6 +104,7 @@ type context =
     iarray_reads : (sort * term * term, term) Hashtbl.t;
     set_origins : (Function.t, set_origin) Hashtbl.t;
     set_class_sorts : (sort, sort) Hashtbl.t;
+    set_membership : (sort * term * term, term) Hashtbl.t;
     observation_definitions : (Symbol.t, term) Hashtbl.t;
     mutable free : value option Path.Map.t;
     mutable batches : command list list;
@@ -545,6 +546,16 @@ let set_same_element ctx set_sort left right =
   both Eq (set_class ctx set_sort left) (set_class ctx set_sort right)
 
 let rec set_mem ctx set_sort element set =
+  let key = set_sort, element, set in
+  match Hashtbl.find_opt ctx.set_membership key with
+  | Some value -> value
+  | None ->
+    let term = expand_set_mem ctx set_sort element set in
+    let value = share_observation ctx term in
+    Hashtbl.add ctx.set_membership key value;
+    value
+
+and expand_set_mem ctx set_sort element set =
   let class_ = set_class ctx set_sort element in
   let unknown () =
     let function_ =
@@ -1726,6 +1737,7 @@ let context ~prove ~verify_introductions =
     iarray_reads = Hashtbl.create 16;
     set_origins = Hashtbl.create 16;
     set_class_sorts = Hashtbl.create 8;
+    set_membership = Hashtbl.create 32;
     observation_definitions = Hashtbl.create 32;
     free = Path.Map.empty;
     batches = [];
