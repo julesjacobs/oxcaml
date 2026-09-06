@@ -126,6 +126,7 @@ type error =
       ; err : Jkind.Violation.t
       }
   | Jkind_empty_record
+  | Ghost_mutable_label of string
   | Non_representable_in_module of Env.t * Jkind.Violation.t * type_expr
   | Invalid_jkind_in_block of type_expr * Jkind.Sort.Const.t * jkind_sort_loc
   | Illegal_mixed_product of mixed_product_violation
@@ -583,6 +584,23 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
           pld_type=arg;pld_loc=loc;pld_attributes=attrs} =
     Builtin_attributes.warning_scope attrs
       (fun () ->
+         (* The [ghost] modality is representation-bearing (the field
+            occupies no slot) and is carried as a flag on the label rather
+            than as a mode modality. It is only meaningful on boxed record
+            fields; anywhere else it is left in the list for
+            [Typemode.transl_modalities] to reject. *)
+         let ghost, modalities =
+           match kloc with
+           | Record { unboxed = false } ->
+             let ghost, rest =
+               List.partition
+                 (fun {Location.txt = Parsetree.Modality m; _} ->
+                    String.equal m "ghost")
+                 modalities
+             in
+             ghost <> [], rest
+           | _ -> false, modalities
+         in
          let is_atomic = Builtin_attributes.has_atomic attrs in
          let mut : mutability =
           match mut, is_atomic with
@@ -597,6 +615,10 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
               }
               | Unboxed_product -> raise(Error(loc, Unboxed_mutable_label))
          in
+         (if ghost then
+            match mut with
+            | Mutable _ -> raise (Error (loc, Ghost_mutable_label name.txt))
+            | Immutable -> ());
          let modalities =
           Typemode.transl_modalities ~maturity:Stable mut modalities
          in
@@ -608,6 +630,7 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
           ld_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
           ld_mutable = mut;
           ld_modalities = modalities;
+          ld_ghost = ghost;
           ld_type = cty; ld_loc = loc; ld_attributes = attrs}
       )
   in
@@ -625,6 +648,7 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
          {Types.ld_id = ld.ld_id;
           ld_mutable = ld.ld_mutable;
           ld_modalities = ld.ld_modalities.moda_modalities;
+          ld_ghost = ld.ld_ghost;
           ld_sort = None;
             (* Updated by [update_label_sorts] *)
           ld_type = ty;
@@ -1193,6 +1217,11 @@ let transl_declaration env sdecl (id, uid) =
             if unbox then
               Record_unboxed,
               Jkind.Builtin.any ~why:Old_style_unboxed_type
+            else if List.for_all (fun l -> l.Types.ld_ghost) lbls' then
+              (* An all-ghost record has kind void (nothing exists at run
+                 time); see [compute_record_kind]. *)
+              Record_dummy { represent_as_float_array; flatten_floats },
+              Jkind.Builtin.void ~why:Ghost_record
             else
               (* See Note [Record_dummy] in [typing/types.mli] *)
               Record_dummy { represent_as_float_array; flatten_floats },
@@ -1418,6 +1447,10 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
             { Types.ld_id = Ident.create_local (Ident.name ld.ld_id);
             ld_mutable = Immutable;
             ld_modalities = ld.ld_modalities;
+            ld_ghost = false;
+              (* Ghostliness is not inherited: the unboxed version is an
+                 independent unboxed product, every field of which is
+                 manifest in its layout. *)
               (* Inherit modalities from the boxed version. Note that these
                   are affected by the mutability of the boxed label, even
                   though the unboxed version is always immutable. *)
@@ -1880,8 +1913,12 @@ let eagerly_check_record_not_all_void loc sorts =
 (* [update_label_sorts] additionally returns the jkinds of the labels *)
 let update_label_sorts (type rep) env loc types ~(form : rep record_form) =
   let sorts_and_jkinds =
-    List.map (fun ld_type ->
+    List.map (fun (ghost, ld_type) ->
       let jkind = Ctype.type_jkind env ld_type in
+      if ghost then
+        Some (Jkind.Sort.of_const Jkind.Sort.Const.void),
+        (Some Jkind_types.Sort.Const.(Base Void), jkind)
+      else begin
       let sort = Jkind.sort_option_of_jkind env jkind in
       let ld_sort =
         (* CR-soon rtjoa: Declaration checking (this function, and
@@ -1899,17 +1936,22 @@ let update_label_sorts (type rep) env loc types ~(form : rep record_form) =
         Option.bind sort Jkind.Sort.get_concrete_defaulting_to_scannable
       in
       sort, (ld_sort, jkind)
+      end
     ) types
   in
   let live_sorts, sorts_and_jkinds = List.split sorts_and_jkinds in
   let sorts, jkinds = List.split sorts_and_jkinds in
   (match form with
-   | Legacy -> eagerly_check_record_not_all_void loc live_sorts
+   | Legacy ->
+      if not (List.for_all fst types) then
+        eagerly_check_record_not_all_void loc live_sorts
    | Unboxed_product -> ());
   sorts, jkinds
 
 let update_label_sorts_in_place env loc lbls ~form =
-  let types = List.map (fun lbl -> lbl.Types.ld_type) lbls in
+  let types =
+    List.map (fun lbl -> lbl.Types.ld_ghost, lbl.Types.ld_type) lbls
+  in
   let sorts, jkinds = update_label_sorts env loc types ~form in
   let lbls =
     List.map2 (fun lbl sort -> { lbl with ld_sort = sort }) lbls sorts
@@ -2287,7 +2329,15 @@ let compute_record_repr
     Ok Record_boxed
   | ~values:false, ~floats:false, ~atomic_floats:false,
       ~float64s:false, ~non_float64_unboxed_fields:false,
-      ~voids:_, ~atomic_fields:_, ~first_any:None, ..
+      ~voids:true, ~atomic_fields:_, ~first_any:None, .. ->
+    (* All fields ghost: only reachable through ghost fields, which keep
+       the empty-record check from firing. The record has kind void (see
+       [compute_record_kind]) and no value exists; the all-void mixed shape
+       records that no field has a slot. *)
+    mixed_record ()
+  | ~values:false, ~floats:false, ~atomic_floats:false,
+      ~float64s:false, ~non_float64_unboxed_fields:false,
+      ~voids:false, ~atomic_fields:_, ~first_any:None, ..
     [@warning "+9"] ->
     Misc.fatal_error "Typedecl.compute_record_repr: empty record"
 
@@ -2313,9 +2363,12 @@ type element_repr_summary =
 let compute_repr_summary env lbls jkinds =
   let reprs =
     List.map2
-      (fun (_lbl, ld_type) jkind ->
-          Element_repr.classify env ld_type jkind ~default_to_scannable:true,
-          ld_type)
+      (fun (lbl, ld_type) jkind ->
+          (* A ghost field occupies no slot, whatever its type. *)
+          if lbl.Types.ld_ghost then Some Element_repr.Void, ld_type
+          else
+            Element_repr.classify env ld_type jkind ~default_to_scannable:true,
+            ld_type)
       lbls jkinds
   in
   let repr_summary =
@@ -2379,16 +2432,25 @@ let compute_record_kind (type rep) env loc (form : rep record_form)
     [ld_sort], rep, jkind
   | Legacy, _, Record_dummy _
   | Unboxed_product, _, _ ->
-    let types = List.map snd lbls in
+    let types =
+      List.map (fun (lbl, ty) -> lbl.Types.ld_ghost, ty) lbls
+    in
     let sorts, jkinds = update_label_sorts env loc types ~form in
     let reprs, repr_summary = compute_repr_summary env lbls jkinds in
     let jkind =
       match form with
       | Legacy ->
-          let lbls_with_sorts =
-            List.map2 (fun (lbl, ty) sort -> (lbl, ty, sort)) lbls sorts
-          in
-          Jkind.for_boxed_record_with_updates lbls_with_sorts
+          if List.for_all (fun (lbl, _) -> lbl.Types.ld_ghost) lbls then
+            (* An all-ghost record has no runtime representation at all: its
+               kind is void, so it vanishes from ABIs (no register, no slot)
+               like any other void value. This is what makes ['a Ghost.t]
+               erase what it wraps. *)
+            Jkind.Builtin.void ~why:Ghost_record
+          else
+            let lbls_with_sorts =
+              List.map2 (fun (lbl, ty) sort -> (lbl, ty, sort)) lbls sorts
+            in
+            Jkind.for_boxed_record_with_updates lbls_with_sorts
       | Unboxed_product ->
         let lbls_with_layouts =
           List.map2
@@ -5995,6 +6057,11 @@ let report_error ~loc = function
          env) err
   | Jkind_empty_record ->
     Location.errorf ~loc "Records must contain at least one runtime value."
+  | Ghost_mutable_label name ->
+    Location.errorf ~loc
+      "The field %a cannot be both mutable and ghost:@ a ghost field@ \
+       occupies no slot, so there is nothing to mutate."
+      Style.inline_code name
   | Non_representable_in_module (env, err, ty) ->
     let offender ppf = fprintf ppf "type %a" Printtyp.type_expr ty in
     Location.errorf ~loc "The type of a module-level value must have a@ \

@@ -522,6 +522,7 @@ module Mod_bounds = struct
     @@ Sub_result.combine (modal_less_or_equal (Comonadic Statefulness))
     @@ Sub_result.combine (modal_less_or_equal (Monadic Visibility))
     @@ Sub_result.combine (modal_less_or_equal (Monadic Staticity))
+    @@ Sub_result.combine (modal_less_or_equal (Comonadic Ghostliness))
     @@ axis_less_or_equal ~le:Externality.le ~axis:(Pack (Nonmodal Externality))
          (externality t1) (externality t2)
 
@@ -555,6 +556,7 @@ module Mod_bounds = struct
     |> add_crossing_if (Comonadic Statefulness)
     |> add_crossing_if (Monadic Visibility)
     |> add_crossing_if (Monadic Staticity)
+    |> add_crossing_if (Comonadic Ghostliness)
     |> add_if
          (Externality.le Externality.max (externality t))
          (Nonmodal Externality)
@@ -1263,6 +1265,8 @@ module Base_and_axes = struct
                   ~totality:(value_for_axis ~axis:(Modal (Comonadic Totality)))
                   ~statefulness:
                     (value_for_axis ~axis:(Modal (Comonadic Statefulness)))
+                  ~ghostliness:
+                    (value_for_axis ~axis:(Modal (Comonadic Ghostliness)))
               in
               let crossing : Mod_bounds.Crossing.t = { monadic; comonadic } in
               Mod_bounds.create crossing
@@ -2432,7 +2436,7 @@ let for_abbreviation ~type_jkind_purely ~modality ty =
   in
   fresh_jkind_poly
     { base = jkind.jkind.base;
-      mod_bounds = Mod_bounds.min;
+      mod_bounds = Mod_bounds.min_crossable;
       with_bounds = With_bounds with_bounds_types
     }
     ~annotation:None ~why:Abbreviation
@@ -3192,7 +3196,8 @@ module Format_history = struct
       format_immediate_or_null_creation_reason ppf immediate
     | Scannable_creation scannable ->
       format_scannable_creation_reason ppf scannable
-    | Void_creation _ -> .
+    | Void_creation Ghost_record ->
+      fprintf ppf "it is a record all of whose fields are ghost, which is void"
     | Value_or_null_creation value ->
       format_value_or_null_creation_reason ppf value ~layout_or_kind
     | Value_creation value ->
@@ -4194,7 +4199,7 @@ module Debug_printers = struct
         value
     | Value_creation value ->
       fprintf ppf "Value_creation %a" value_creation_reason value
-    | Void_creation _ -> .
+    | Void_creation Ghost_record -> fprintf ppf "Void_creation Ghost_record"
     | Product_creation product ->
       fprintf ppf "Product_creation %a" product_creation_reason product
     | Concrete_creation concrete ->

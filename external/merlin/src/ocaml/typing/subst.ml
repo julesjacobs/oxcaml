@@ -905,6 +905,7 @@ let label_declaration copy_scope s l =
     ld_id = rename_decl_ident s l.ld_id;
     ld_mutable = l.ld_mutable;
     ld_modalities = l.ld_modalities;
+    ld_ghost = l.ld_ghost;
     ld_sort = l.ld_sort;
     ld_type = typexp copy_scope s l.ld_loc l.ld_type;
     ld_loc = loc s l.ld_loc;

@@ -260,6 +260,7 @@ and exp_extra =
   | Texp_newtype of Ident.t * string loc *
                     Parsetree.jkind_annotation option * Uid.t
   | Texp_stack
+  | Texp_ghost
   | Texp_mode of Mode.Alloc.Const.Option.t modes
   | Texp_inspected_type of [ `exp ] type_inspection
   | Texp_borrowed
@@ -954,6 +955,7 @@ and label_declaration =
      ld_uid: Uid.t;
      ld_mutable: mutability;
      ld_modalities: modalities;
+     ld_ghost: bool;
      ld_type: core_type;
      ld_loc: Location.t;
      ld_attributes: attribute list;
