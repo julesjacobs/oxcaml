@@ -453,3 +453,51 @@ Error: The expression is "partial"
        but is expected to be "total"
          because it is used in an expression (at lines 7-9, characters 6-33).
 |}]
+
+type 'a changing_record = {payload : 'a; count : int}
+
+let change_record_type (p : int changing_record) :
+    {r : bool changing_record | r.payload && r.count = p.count} =
+  let r = {p with payload = true} in
+  refine_ r;;
+[%%expect{|
+type 'a changing_record = { payload : 'a; count : int; }
+val change_record_type :
+  (p : int changing_record) ->
+  {r : bool changing_record | r.payload && (r.count = p.count)} = <fun>
+|}]
+
+let record_update_predicate (p : int changing_record @ immutable) :
+    {u : unit | ({p with payload = true}).count = p.count} =
+  let u = () in
+  refine_ u;;
+[%%expect{|
+val record_update_predicate :
+  (p : int changing_record) ->
+  {u : unit | { p with payload = true }.count = p.count} = <fun>
+|}]
+
+module Nested_box = struct
+  type 'a t = Box of 'a
+  let unwrap (nested : int t t) :
+      {r : int | nested === Box (Box r)} =
+    match nested with
+    | Box (Box r) -> refine_ r
+end;;
+[%%expect{|
+module Nested_box :
+  sig
+    type 'a t = Box of 'a
+    val unwrap : (nested : int t t) -> {r : int | nested === (Box (Box r))}
+  end
+|}]
+
+let polymorphic_tuple (x : 'a) :
+    {r : 'a * 'a | match r with a, b -> a === x && b === x} =
+  let r = x, x in
+  refine_ r;;
+[%%expect{|
+val polymorphic_tuple :
+  (x : 'a) -> {r : 'a * 'a | match r with | (a, b) -> (a === x) && (b === x)} =
+  <fun>
+|}]

@@ -312,16 +312,15 @@ let select_field ctx env ty name value =
 let record_value ctx env ty base fields =
   match data_of_type ctx env ty with
   | Some { kind = Record_data constructor; _ } ->
-    let field name index =
+    let field name =
       match List.assoc_opt name fields with
       | Some value -> scalar value
       | None ->
-        Option.map (fun base -> Select (constructor, index, base)) (scalar base)
+        Option.bind base (fun (ty, value) ->
+            scalar (select_field ctx env ty name value))
     in
     let values =
-      List.mapi
-        (fun index (name, _) -> field name index)
-        (Constructor.fields constructor)
+      List.map (fun (name, _) -> field name) (Constructor.fields constructor)
     in
     begin match Misc.Stdlib.List.map_option Fun.id values with
     | Some values -> scalar_value (Construct (constructor, values))
@@ -541,7 +540,11 @@ let rec predicate ctx env s e =
       name s (scalar_value (required e.rexp_loc value))
     | Rexp_record (fields, extended) ->
       let s, base =
-        match extended with None -> s, None | Some e -> eval s e
+        match extended with
+        | None -> s, None
+        | Some e ->
+          let s, value = eval s e in
+          s, Some (e.rexp_type, value)
       in
       let s, values =
         arguments_right_to_left (fun s (_, _, e) -> eval s e) s fields
@@ -939,7 +942,9 @@ and expression_desc ctx s e =
     let s, base =
       match extended_expression with
       | None -> s, None
-      | Some (e, _, _) -> eval s e
+      | Some (e, _, _) ->
+        let s, value = eval s e in
+        s, Some (e.exp_type, value)
     in
     let fields = Array.to_list fields in
     let s, values =
