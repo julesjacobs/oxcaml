@@ -99,15 +99,15 @@ let () =
   assert (
     solve
       "let f (b : bool) = let g x = x in let h x = add x 1 in let chosen = if \
-       b then g else h in let a = chosen 0 in let c = chosen 0 in let (_ : \
-       {r : int | r === c}) = refine_ a in ()"
+       b then g else h in let a = chosen 0 in let c = chosen 0 in let (_ : {r \
+       : int | r === c}) = refine_ a in ()"
     = Valid);
   assert (
     match
       solve
         "let f (b : bool) = let g x = x in let h x = add x 1 in let chosen = \
-         if b then g else h in let a = chosen 0 in let c = g 0 in let (_ : \
-         {r : int | r === c}) = refine_ a in ()"
+         if b then g else h in let a = chosen 0 in let c = g 0 in let (_ : {r \
+         : int | r === c}) = refine_ a in ()"
     with
     | Invalid _ -> true
     | _ -> false)
