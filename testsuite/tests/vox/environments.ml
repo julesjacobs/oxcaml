@@ -34,7 +34,7 @@ let () =
           match r with before, after -> before === after} =
       fun outer key value query ->
       let refine_ query = query in
-      let refine_ separation = distinct_def query key in
+      let refine_ separation = ghost_ (distinct_def query key) in
       let inner = M.Refined.add key value outer in
       let before =
         if M.mem query outer then
@@ -66,7 +66,7 @@ let () =
   let key = 2 in
   let separated : {q : int | distinct q key} = assume_ query in
   let value = 99 in
-  let refine_ preservation = preserve outer key value separated in
+  let refine_ preservation = ghost_ (preserve outer key value separated) in
   let identifier = 1 in
   let original = 10 in
   let refine_ result = nested identifier original value in

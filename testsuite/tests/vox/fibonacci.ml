@@ -35,7 +35,7 @@ module Fibonacci = struct
     let refine_ a = a in
     let refine_ b = b in
     let next = n + 1 in
-    let refine_ proof = fib_def next in
+    let refine_ proof = ghost_ (fib_def next) in
     let r = a + b in
     refine_ r
 
@@ -51,7 +51,7 @@ module Fibonacci = struct
       else
         let c = a + b in
         let k = j + 1 in
-        let refine_ proof = fib_def k in
+        let refine_ proof = ghost_ (fib_def k) in
         let a : {v : int | v = fib j} = refine_ b in
         let b : {v : int | v = fib (j + 1)} = refine_ c in
         (tail_loop[@tailcall]) n j a b
@@ -62,8 +62,8 @@ module Fibonacci = struct
     if n < 0 || n > 90 then raise Overflow;
     let zero = 0 in
     let one = 1 in
-    let refine_ proof = fib_def zero in
-    let refine_ proof = fib_def one in
+    let refine_ proof = ghost_ (fib_def zero) in
+    let refine_ proof = ghost_ (fib_def one) in
     let a : {a : int | a = fib zero} = refine_ zero in
     let b : {b : int | b = fib (zero + 1)} = refine_ one in
     tail_loop n zero a b
@@ -79,8 +79,8 @@ module Fibonacci = struct
     if n = 0 then
       let zero = 0 in
       let one = 1 in
-      let refine_ proof = fib_def zero in
-      let refine_ proof = fib_def one in
+      let refine_ proof = ghost_ (fib_def zero) in
+      let refine_ proof = ghost_ (fib_def one) in
       let refine_ proof = mul_identity zero in
       let refine_ proof = mul_identity one in
       let refine_ proof = doubling_step zero one in
@@ -92,9 +92,9 @@ module Fibonacci = struct
       let next = n + 1 in
       let twice = 2 * n in
       let twice_next = twice + 1 in
-      let refine_ proof = fib_def next in
-      let refine_ proof = fib_def twice in
-      let refine_ proof = fib_def twice_next in
+      let refine_ proof = ghost_ (fib_def next) in
+      let refine_ proof = ghost_ (fib_def twice) in
+      let refine_ proof = ghost_ (fib_def twice_next) in
       let p = tail prev in
       let q = tail n in
       let refine_ p = p in
@@ -109,8 +109,8 @@ module Fibonacci = struct
     if n = 0 then
       let zero = 0 in
       let one = 1 in
-      let refine_ proof = fib_def zero in
-      let refine_ proof = fib_def one in
+      let refine_ proof = ghost_ (fib_def zero) in
+      let refine_ proof = ghost_ (fib_def one) in
       (refine_ zero, refine_ one)
     else
       let k = n / 2 in

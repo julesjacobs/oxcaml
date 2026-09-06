@@ -16,7 +16,7 @@ let (empty_refines @ total) query :
       === Model.mem query result.model} =
   let implementation = Avl_sets.empty in
   let model = Model.empty in
-  let refine_ implementation_law = Avl_sets.lookup_empty query in
+  let refine_ implementation_law = ghost_ (Avl_sets.lookup_empty query) in
   let result =
     { implementation;
       model
@@ -42,7 +42,7 @@ let (add_refines_at @ total) :
   let implementation = input.implementation in
   let model = input.model in
   let refine_ implementation_law =
-    Avl_sets.lookup_add query added implementation
+    ghost_ (Avl_sets.lookup_add query added implementation)
   in
   let result =
     { implementation = Avl_sets.add added implementation;
@@ -70,7 +70,7 @@ let (union_refines_at @ total) :
   let left_model = left.model in
   let right_model = right.model in
   let refine_ implementation_law =
-    Avl_sets.lookup_union query left_implementation right_implementation
+    ghost_ (Avl_sets.lookup_union query left_implementation right_implementation)
   in
   let result =
     { implementation =
@@ -87,7 +87,7 @@ let (inserted_key_refines @ total) added input :
   let implementation = input.implementation in
   let model = input.model in
   let refine_ implementation_law =
-    Avl_sets.lookup_add added added implementation
+    ghost_ (Avl_sets.lookup_add added added implementation)
   in
   let result =
     { implementation = Avl_sets.add added implementation;

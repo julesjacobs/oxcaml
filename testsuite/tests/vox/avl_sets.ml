@@ -2766,10 +2766,10 @@ module Validity_proofs : sig
       let result = add_tree element tree in
       let refine_ valid_unit = validity in
       let refine_ result_validity =
-        Validity_proofs.add_valid_height element tree validity
+        ghost_ (Validity_proofs.add_valid_height element tree validity)
       in
       let refine_ result_elements =
-        Insertion_model_proofs.add_tree_elements element tree
+        ghost_ (Insertion_model_proofs.add_tree_elements element tree)
       in
       refine_ result
 
@@ -2824,7 +2824,7 @@ module Validity_proofs : sig
       let left_elements = elements left in
       let result = add_elements left_elements right in
       let refine_ result_spec =
-        add_elements_spec left_elements right right_validity
+        ghost_ (add_elements_spec left_elements right right_validity)
       in
       refine_ result
 
@@ -2839,7 +2839,7 @@ module Validity_proofs : sig
 
       let (empty @ total) : t =
         let tree = Empty in
-        let refine_ invariant = valid_def tree in
+        let refine_ invariant = ghost_ (valid_def tree) in
         refine_ tree
 
       let[@def] (lookup @ total) element (set : t) =
