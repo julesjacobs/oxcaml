@@ -42,6 +42,7 @@ legacy-mode defaults.
 | Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract two-list queue implements a sequence model; a separate client proves FIFO behavior and rejects empty dequeue. |
 | Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
 | Standard maps | `maps.ml` | Total comparators enable total operations; refined updates and lookup expose membership and value facts while preserving key and value access. |
+| Persistent environments | `environments.ml` | Binding shadows its comparator class and preserves observations in a distinct class; retaining the outer environment restores scope. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -102,3 +103,8 @@ establishes bounds.
 The queue proves its tail-recursive reversal against an explicit
 append/reverse model. Its representation stays behind a `.mli`. Proof helpers
 execute at runtime, so this demo makes no amortized-cost claim.
+
+`environments.ml` checks comparator-class distinction at the example boundary,
+then statically proves preservation of optional lookup results. It restores
+scope using the saved outer map; removing an inner binding does not restore a
+shadowed value.
