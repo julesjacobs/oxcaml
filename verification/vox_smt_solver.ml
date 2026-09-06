@@ -157,9 +157,33 @@ let rec waitpid flags pid =
   try Unix.waitpid flags pid
   with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid flags pid
 
-let check ?(config = default_config) ?(dump = fun _ -> ())
+type connection =
+  { pid : int;
+    input : Unix.file_descr;
+    output : Unix.file_descr;
+    errors : Unix.file_descr
+  }
+
+type session = { mutable connection : connection option }
+
+let dispose connection =
+  (try Unix.kill connection.pid Sys.sigkill with Unix.Unix_error _ -> ());
+  ignore (waitpid [] connection.pid);
+  List.iter
+    (fun fd -> try Unix.close fd with Unix.Unix_error _ -> ())
+    [connection.input; connection.output; connection.errors]
+
+let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
     ?(cancelled = fun () -> false) ~int_width q =
   let input = to_smtlib ~int_width ~timeout_ms:config.timeout_ms q in
+  let input =
+    "(push 1)\n"
+    ^ String.concat "\n"
+        (List.filter
+           (fun line -> not (String.starts_with ~prefix:"(set-logic " line))
+           (String.split_on_char '\n' input))
+  in
+  let keep = ref false in
   let deadline = monotonic_time () +. (float config.timeout_ms /. 1000.) in
   let stderr = Buffer.create 128 in
   let descriptors = ref [] and child = ref None and exit_status = ref None in
@@ -175,29 +199,34 @@ let check ?(config = default_config) ?(dump = fun _ -> ())
     r, w
   in
   let cleanup () =
-    (match !child, !exit_status with
-    | Some pid, None ->
-      (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-      ignore (waitpid [] pid)
-    | _ -> ());
-    (match !stderr_fd with
-    | Some fd when List.mem fd !descriptors ->
-      let bytes = Bytes.create 4096 in
-      let rec drain () =
-        let remaining = output_limit - Buffer.length stderr in
-        if remaining > 0
-        then
-          match Unix.read fd bytes 0 (min remaining (Bytes.length bytes)) with
-          | 0 -> ()
-          | n ->
-            Buffer.add_subbytes stderr bytes 0 n;
-            drain ()
-          | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain ()
-          | exception Unix.Unix_error _ -> ()
-      in
-      drain ()
-    | _ -> ());
-    List.iter close !descriptors
+    if not !keep
+    then begin
+      Option.iter dispose session.connection;
+      session.connection <- None;
+      (match !child, !exit_status with
+      | Some pid, None ->
+        (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+        ignore (waitpid [] pid)
+      | _ -> ());
+      (match !stderr_fd with
+      | Some fd when List.mem fd !descriptors ->
+        let bytes = Bytes.create 4096 in
+        let rec drain () =
+          let remaining = output_limit - Buffer.length stderr in
+          if remaining > 0
+          then
+            match Unix.read fd bytes 0 (min remaining (Bytes.length bytes)) with
+            | 0 -> ()
+            | n ->
+              Buffer.add_subbytes stderr bytes 0 n;
+              drain ()
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain ()
+            | exception Unix.Unix_error _ -> ()
+        in
+        drain ()
+      | _ -> ());
+      List.iter close !descriptors
+    end
   in
   let poll () =
     if callback cancelled () then raise Cancelled;
@@ -212,24 +241,55 @@ let check ?(config = default_config) ?(dump = fun _ -> ())
   in
   let run () =
     ignore (poll ());
-    let stdin_r, stdin_w = pipe () in
-    let stdout_r, stdout_w = pipe () in
-    let stderr_r, stderr_w = pipe () in
-    let pid =
-      Unix.create_process config.executable
-        [| config.executable; "-in"; "-smt2" |]
-        stdin_r stdout_w stderr_w
+    let connection, started =
+      match session.connection with
+      | Some connection ->
+        session.connection <- None;
+        descriptors := [connection.input; connection.output; connection.errors];
+        connection, false
+      | None ->
+        let stdin_r, stdin_w = pipe () in
+        let stdout_r, stdout_w = pipe () in
+        let stderr_r, stderr_w = pipe () in
+        let pid =
+          Unix.create_process config.executable
+            [| config.executable; "-in"; "-smt2" |]
+            stdin_r stdout_w stderr_w
+        in
+        child := Some pid;
+        List.iter close [stdin_r; stdout_w; stderr_w];
+        List.iter Unix.set_nonblock [stdin_w; stdout_r; stderr_r];
+        { pid; input = stdin_w; output = stdout_r; errors = stderr_r }, true
+    in
+    let { pid; input = stdin_w; output = stdout_r; errors = stderr_r } =
+      connection
     in
     child := Some pid;
-    List.iter close [stdin_r; stdout_w; stderr_w];
-    List.iter Unix.set_nonblock [stdin_w; stdout_r; stderr_r];
     stderr_fd := Some stderr_r;
+    let input = if started then "(set-logic ALL)\n" ^ input else input in
     let pending = ref input and offset = ref 0 in
     let status = ref None and first_line = Buffer.create 16 in
     let response = Buffer.create 128 in
+    let complete = ref false and response_line = Buffer.create 128 in
+    let rec response_output s =
+      match String.index_opt s '\n' with
+      | None -> bounded_add response_line s
+      | Some end_line ->
+        bounded_add response_line (String.sub s 0 end_line);
+        let line = Buffer.contents response_line in
+        Buffer.clear response_line;
+        if line = "vox-query-done"
+        then complete := true
+        else bounded_add response (line ^ "\n");
+        let tail =
+          String.sub s (end_line + 1) (String.length s - end_line - 1)
+        in
+        if !complete && tail <> "" then protocol "Output after query terminator";
+        if tail <> "" then response_output tail
+    in
     let rec output s =
       match !status with
-      | Some _ -> bounded_add response s
+      | Some _ -> response_output s
       | None -> (
         match String.index_opt s '\n' with
         | None -> bounded_add first_line s
@@ -261,8 +321,9 @@ let check ?(config = default_config) ?(dump = fun _ -> ())
                      (String.sub answer 0 (min 200 (String.length answer))))
             in
             status := Some answer;
-            pending := !pending ^ followup ^ "(exit)\n";
-            bounded_add response tail
+            pending
+              := !pending ^ followup ^ "(pop 1)\n(echo \"vox-query-done\")\n";
+            response_output tail
           end)
     in
     let readers = ref [stdout_r; stderr_r] and stdin_open = ref true in
@@ -282,7 +343,7 @@ let check ?(config = default_config) ?(dump = fun _ -> ())
         ->
         ()
     in
-    while !exit_status = None || !readers <> [] do
+    while (not !complete) && (!exit_status = None || !readers <> []) do
       let timeout = poll () in
       let writes =
         if !stdin_open && !offset < String.length !pending
@@ -312,10 +373,6 @@ let check ?(config = default_config) ?(dump = fun _ -> ())
             close stdin_w;
             stdin_open := false)
         writable;
-      if !stdin_open && !status <> None && !offset = String.length !pending
-      then (
-        close stdin_w;
-        stdin_open := false);
       if !exit_status = None
       then
         match waitpid [Unix.WNOHANG] pid with
@@ -323,14 +380,31 @@ let check ?(config = default_config) ?(dump = fun _ -> ())
         | _, status -> exit_status := Some status
     done;
     match !exit_status, !status with
-    | Some (Unix.WEXITED 0), Some answer ->
+    | None, Some answer when !complete ->
+      let rec drain_errors () =
+        match Unix.read stderr_r bytes 0 (Bytes.length bytes) with
+        | 0 -> ()
+        | n ->
+          bounded_add stderr (Bytes.sub_string bytes 0 n);
+          drain_errors ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain_errors ()
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          ()
+      in
+      drain_errors ();
       if !offset <> String.length !pending
-      then protocol "Solver closed its input before receiving the full query";
+      then protocol "Incomplete query write";
       ignore (poll ());
       let result = interpret q.symbols answer (Buffer.contents response) in
       ignore (poll ());
+      (match result with
+      | Timeout | Failure _ -> ()
+      | Valid | Invalid _ | Unknown _ ->
+        session.connection <- Some connection;
+        keep := true);
       result
-    | Some (Unix.WEXITED 0), None -> protocol "Solver exited without an answer"
+    | Some (Unix.WEXITED 0), _ ->
+      protocol "Solver exited without completing the query"
     | Some (Unix.WEXITED code), _ ->
       protocol (Printf.sprintf "Solver exited with status %d" code)
     | Some (Unix.WSIGNALED signal | Unix.WSTOPPED signal), _ ->
@@ -363,3 +437,24 @@ let check ?(config = default_config) ?(dump = fun _ -> ())
       Printexc.raise_with_backtrace exn backtrace
   in
   { validity; stderr = Buffer.contents stderr }
+
+let with_session ?config ?dump ?cancelled ~int_width f =
+  let session = { connection = None } in
+  let closed = ref false and busy = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      closed := true;
+      Option.iter dispose session.connection;
+      session.connection <- None)
+    (fun () ->
+      f (fun query ->
+          if !closed then invalid_arg "Vox_smt_solver: closed session";
+          if !busy then invalid_arg "Vox_smt_solver: recursive session query";
+          busy := true;
+          Fun.protect
+            ~finally:(fun () -> busy := false)
+            (fun () ->
+              check_impl session ?config ?dump ?cancelled ~int_width query)))
+
+let check ?config ?dump ?cancelled ~int_width query =
+  with_session ?config ?dump ?cancelled ~int_width (fun check -> check query)

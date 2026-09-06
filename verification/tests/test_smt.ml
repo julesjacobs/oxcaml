@@ -190,7 +190,14 @@ let () =
         = Valid);
       assert (
         Buffer.contents dump
-        = to_smtlib ~int_width:63 ~timeout_ms:2000 q ^ "(exit)\n");
+        = "(set-logic ALL)\n(push 1)\n"
+          ^ String.concat "\n"
+              (List.filter
+                 (fun line ->
+                   not (String.starts_with ~prefix:"(set-logic " line))
+                 (String.split_on_char '\n'
+                    (to_smtlib ~int_width:63 ~timeout_ms:2000 q)))
+          ^ "(pop 1)\n(echo \"vox-query-done\")\n");
       let x = Symbol.create ~label:"x" Int63 in
       let sat = query ~symbols:[x] (app Eq [Var x; integer 0]) in
       List.iter
@@ -274,7 +281,7 @@ let () =
       (match
          run
            ~dump:(fun s ->
-             if String.starts_with ~prefix:"(exit)" s then raise Exit)
+             if String.starts_with ~prefix:"(pop 1)" s then raise Exit)
            "unsat" q
        with
       | _ -> failwith "Expected dump exception"
@@ -282,7 +289,7 @@ let () =
       (match
          run
            ~dump:(fun s ->
-             if String.starts_with ~prefix:"(exit)" s
+             if String.starts_with ~prefix:"(pop 1)" s
              then raise (Unix.Unix_error (Unix.EPIPE, "callback", "")))
            "unsat" q
        with
@@ -308,6 +315,44 @@ let () =
           assert (
             validity (Vox_smt_solver.check ~config ~int_width:63 q) = Valid);
           reaped ());
+      let read_pid () =
+        let input = open_in pid_file in
+        Fun.protect
+          ~finally:(fun () -> close_in input)
+          (fun () -> int_of_string (input_line input))
+      in
+      Unix.putenv "VOX_FAKE_MODE" "unsat";
+      Vox_smt_solver.with_session ~config:(config 2000) ~int_width:63
+        (fun check ->
+          assert ((check q).validity = Valid);
+          let pid = read_pid () in
+          assert ((check q).validity = Valid);
+          assert (read_pid () = pid));
+      reaped ();
+      List.iter
+        (fun mode ->
+          Unix.putenv "VOX_FAKE_MODE" mode;
+          Vox_smt_solver.with_session ~config:(config 100) ~int_width:63
+            (fun check ->
+              let failed = check q in
+              assert (failed.validity = Timeout || is_failure failed.validity);
+              reaped ();
+              Unix.putenv "VOX_FAKE_MODE" "unsat";
+              assert ((check q).validity = Valid));
+          reaped ())
+        ["unsat-hang"; "unsat-junk"];
+      let cancelled = ref false in
+      Vox_smt_solver.with_session ~config:(config 2000) ~int_width:63
+        ~cancelled:(fun () -> !cancelled)
+        (fun check ->
+          assert ((check q).validity = Valid);
+          cancelled := true;
+          (match check q with
+          | _ -> failwith "Expected cancellation of an idle session"
+          | exception Vox_smt_solver.Cancelled -> reaped ());
+          cancelled := false;
+          assert ((check q).validity = Valid));
+      reaped ();
       let missing =
         { Vox_smt_solver.executable = pid_file ^ ".missing"; timeout_ms = 100 }
       in

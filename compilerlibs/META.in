@@ -19,8 +19,16 @@ package "frontend" (
   archive(native) = "ocamlfrontend.cmxa"
 )
 
+package "verification" (
+  requires = "compiler-libs.frontend unix"
+  version = "@VERSION@"
+  description = "Refinement verification"
+  archive(byte) = "vox_smt.cma vox_vc.cma vox_smt_solver.cma vox_verify.cma"
+  archive(native) = "vox_smt.cmxa vox_vc.cmxa vox_smt_solver.cmxa vox_verify.cmxa"
+)
+
 package "bytecomp" (
-  requires = "compiler-libs.frontend"
+  requires = "compiler-libs.verification"
   version = "@VERSION@"
   description = "Bytecode compiler"
   archive(byte) = "ocamlbytecomp.cma"
@@ -28,7 +36,7 @@ package "bytecomp" (
 )
 
 package "optcomp" (
-  requires = "compiler-libs.frontend"
+  requires = "compiler-libs.verification"
   version = "@VERSION@"
   description = "Native-code compiler"
   archive(byte) = "ocamloptcomp.cma"

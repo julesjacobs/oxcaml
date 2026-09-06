@@ -48,6 +48,9 @@ let () =
          then "(:reason-unknown \"timeout\")"
          else "(:reason-unknown \"incomplete\")");
       commands ()
+    | "(echo \"vox-query-done\")" ->
+      print_endline "vox-query-done";
+      commands ()
     | "(exit)" -> ()
     | line when String.starts_with ~prefix:"(get-value" line ->
       (match mode with

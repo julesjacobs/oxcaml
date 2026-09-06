@@ -37,3 +37,11 @@
   (progn
    (with-stdout-to smt_solver.output (run %{exe:smt_solver.exe} %{bin:z3}))
    (diff smt_solver.reference smt_solver.output))))
+
+(test
+ (name test_vc)
+ (modules test_vc)
+ (libraries vox_vc vox_smt vox_smt_solver ocamlfrontend)
+ (enabled_if
+  (and (= %{context_name} main) (= %{env:VOX_TEST_Z3=false} true)))
+ (action (run %{test} %{bin:z3})))

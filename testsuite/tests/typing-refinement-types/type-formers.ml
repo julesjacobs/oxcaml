@@ -1,4 +1,5 @@
 (* TEST
+ has-z3;
  flags = "-extension refinement_types";
  expect;
 *)
@@ -140,7 +141,10 @@ type impossible = { x : int | false }
 let unchecked : impossible = let raw = 0 in refine_ raw;;
 [%%expect{|
 type impossible = {x : int | false}
-val unchecked : impossible = 0
+Line 2, characters 44-55:
+2 | let unchecked : impossible = let raw = 0 in refine_ raw;;
+                                                ^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]
 
 let no_implicit_unwrap : int = one;;

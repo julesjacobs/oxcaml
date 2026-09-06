@@ -24,6 +24,8 @@ open Parsetree
 open Outcometree
 open Ast_helper
 
+let () = Vox_verify.install ()
+
 (* Hooks for parsing functions *)
 
 let parse_toplevel_phrase = ref Parse.toplevel_phrase
@@ -260,6 +262,7 @@ let typecheck_phrase ppf oldenv oldsig sstr =
   let modes = Includemod.modes_toplevel in
   Includemod.check_implementation oldenv ~modes sg sg';
   Typecore.force_delayed_checks ();
+  Verification.run str;
   let shape = Shape_reduce.local_reduce Env.empty shape in
   if !Clflags.dump_shape then Shape.print ppf shape;
   (str, sg', newenv)

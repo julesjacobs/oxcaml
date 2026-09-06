@@ -1,9 +1,13 @@
 (* TEST
+ has-z3;
  flags = "-extension refinement_types";
  expect;
 *)
 
-let currently_unchecked x : {n : int | false} = refine_ x;;
+let impossible x : {n : int | false} = refine_ x;;
 [%%expect{|
-val currently_unchecked : int @ total -> {n : int | false} = <fun>
+Line 1, characters 39-48:
+1 | let impossible x : {n : int | false} = refine_ x;;
+                                           ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]
