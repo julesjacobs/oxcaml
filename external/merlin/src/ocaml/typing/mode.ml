@@ -5913,6 +5913,8 @@ module Statefulness = struct
 
   let stateful = of_const Stateful
 
+  let is_stateless m = Const.le (Guts.get_floor m) Const.Stateless
+
   let legacy = of_const Const.legacy
 
   let zap_to_legacy = zap_to_ceil
@@ -5932,6 +5934,8 @@ module Totality = struct
   let total = of_const Total
 
   let partial = of_const Partial
+
+  let is_total m = Const.le (Guts.get_floor m) Const.Total
 
   let legacy = of_const Const.legacy
 

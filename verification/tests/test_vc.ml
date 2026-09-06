@@ -84,3 +84,30 @@ let () =
   in
   assert (result.validity = Valid);
   print_endline "VC sharing and batching tests passed"
+
+let () =
+  let solve source =
+    match queries (prelude ^ source) with
+    | [q] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    | _ -> failwith "Expected one function-join query"
+  in
+  assert (
+    solve
+      "let f (b : bool) = let g x = x in let h x = add x 1 in let chosen = if \
+       b then g else h in let a = chosen 0 in let c = chosen 0 in let (_ : \
+       {r : int | r === c}) = refine_ a in ()"
+    = Valid);
+  assert (
+    match
+      solve
+        "let f (b : bool) = let g x = x in let h x = add x 1 in let chosen = \
+         if b then g else h in let a = chosen 0 in let c = g 0 in let (_ : \
+         {r : int | r === c}) = refine_ a in ()"
+    with
+    | Invalid _ -> true
+    | _ -> false)

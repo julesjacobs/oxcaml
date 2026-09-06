@@ -2,6 +2,48 @@ open Types
 open Typedtree
 open Vox_smt
 
+type function_value =
+  { label : string;
+    instances : Function.t list ref;
+    choice : (term * function_value * function_value) option;
+    total : bool
+  }
+
+type value =
+  | Scalar of term
+  | Function of function_value
+
+let scalar = function Some (Scalar t) -> Some t | _ -> None
+
+let scalar_value t = Some (Scalar t)
+
+let scalar_option = Option.map (fun t -> Scalar t)
+
+let equal_value a b =
+  match a, b with
+  | None, None -> true
+  | Some (Scalar a), Some (Scalar b) -> a = b
+  | Some (Function a), Some (Function b) ->
+    a.instances == b.instances && a.total = b.total
+  | _ -> false
+
+let join_value condition a b =
+  if equal_value a b
+  then a
+  else
+    match a, b with
+    | Some (Scalar a), Some (Scalar b) ->
+      Some (Scalar (App (Ite, [condition; a; b])))
+    | Some (Function a), Some (Function b) ->
+      Some
+        (Function
+           { label = "choice";
+             instances = ref [];
+             choice = Some (condition, a, b);
+             total = a.total && b.total
+           })
+    | _ -> None
+
 type obligation =
   { loc : Location.t;
     goal : term;
@@ -19,14 +61,15 @@ type command =
   | Check of command list
 
 type state =
-  { values : term option Path.Map.t;
+  { values : value option Path.Map.t;
     code : command list;
     dead : bool;
     omitted_premises : (Location.t * Location.error) list
   }
 
 type context =
-  { mutable free : term option Path.Map.t;
+  { mutable functions : Function.t list;
+    mutable free : value option Path.Map.t;
     mutable batches : command list list
   }
 
@@ -61,19 +104,31 @@ let impossible s = s.dead
 let unsupported loc =
   Location.raise_errorf ~loc "Unsupported refinement predicate in VC generation"
 
-let required loc = function Some t -> t | None -> unsupported loc
+let required loc value =
+  match scalar value with Some t -> t | None -> unsupported loc
+
+let logical_function_mode mode =
+  Mode.Totality.is_total (Mode.Value.proj_comonadic Mode.Axis.Totality mode)
+  && Mode.Statefulness.is_stateless
+       (Mode.Value.proj_comonadic Mode.Axis.Statefulness mode)
+
+let at_mode mode = function
+  | Some (Function f) when logical_function_mode mode ->
+    Some (Function { f with total = true })
+  | value -> value
 
 let fresh_symbol sort label = Var (Symbol.create ~label sort)
 
 let name s = function
-  | Some (App (op, args) as term) ->
+  | Some (Scalar ((App _ | Call _) as term)) ->
     let s =
-      match op, args with
-      | (Div | Rem), [_; divisor] -> branch s (App (Ne, [divisor; Integer 0L]))
+      match term with
+      | App ((Div | Rem), [_; divisor]) ->
+        branch s (App (Ne, [divisor; Integer 0L]))
       | _ -> s
     in
     let value = fresh_symbol (term_sort term) "value" in
-    { s with code = Define (both Eq value term) :: s.code }, Some value
+    { s with code = Define (both Eq value term) :: s.code }, scalar_value value
   | value -> s, value
 
 let rec added_prefix ~base = function
@@ -96,12 +151,7 @@ let choose s condition ifso ifnot =
         then b
         else if right.dead
         then a
-        else if a = b
-        then a
-        else
-          match a, b with
-          | Some a, Some b -> Some (App (Ite, [condition; a; b]))
-          | _ -> None
+        else join_value condition a b
       in
       let s =
         { s with
@@ -134,9 +184,13 @@ let short_circuit eval loc ~is_and s a b =
     let condition = required loc a in
     if is_and
     then
-      choose s condition (fun s -> eval s b) (fun s -> s, Some (Boolean false))
+      choose s condition
+        (fun s -> eval s b)
+        (fun s -> s, scalar_value (Boolean false))
     else
-      choose s condition (fun s -> s, Some (Boolean true)) (fun s -> eval s b)
+      choose s condition
+        (fun s -> s, scalar_value (Boolean true))
+        (fun s -> eval s b)
 
 let guarded_case eval loc s (matched, condition) guard body rest =
   let values = s.values in
@@ -147,7 +201,7 @@ let guarded_case eval loc s (matched, condition) guard body rest =
       let state, value =
         choose matched condition
           (fun s -> eval s g)
-          (fun s -> s, Some (Boolean false))
+          (fun s -> s, scalar_value (Boolean false))
       in
       state, if state.dead then Boolean false else required loc value
   in
@@ -165,15 +219,24 @@ let rec erase_assertions code =
 
 let rec sort env ty =
   match get_desc (Ctype.expand_head env ty) with
+  | Tpoly (ty, []) -> sort env ty
   | Trefine r -> sort env r.ref_payload
   | Tconstr (p, [], _) when Path.same p Predef.path_int -> Some Int63
   | Tconstr (p, [], _) when Path.same p Predef.path_bool -> Some Bool
   | _ -> None
 
 let fresh _ctx env ty label =
-  Option.map (fun sort -> fresh_symbol sort label) (sort env ty)
+  match sort env ty with
+  | Some sort -> scalar_value (fresh_symbol sort label)
+  | None -> (
+    match get_desc (Ctype.expand_head env ty) with
+    | Tarrow _ ->
+      Some
+        (Function { label; instances = ref []; choice = None; total = false })
+    | _ -> None)
 
 let lookup ctx s env ty path =
+  let path = Env.normalize_value_path None env path in
   match Path.Map.find_opt path s.values with
   | Some value -> value
   | None -> (
@@ -191,6 +254,7 @@ let primitive env path =
   | exception Not_found -> None
 
 let operation env ty name args =
+  let args = List.map scalar args in
   let unary sort op =
     match args with
     | [Some x] when term_sort x = sort -> Some (App (op, [x]))
@@ -231,22 +295,77 @@ let operation env ty name args =
     | _ -> None
   in
   match result with
-  | Some value when Some (term_sort value) = sort env ty -> result
+  | Some value when Some (term_sort value) = sort env ty -> scalar_option result
   | _ -> None
 
+let rec signature env ty arity =
+  if arity = 0
+  then Option.map (fun result -> [], result) (sort env ty)
+  else
+    match get_desc (Ctype.expand_head env ty) with
+    | Tarrow ((Nolabel, _, _, _), arg, ret, _) ->
+      begin match sort env arg, signature env ret (arity - 1) with
+      | Some arg, Some (args, result) -> Some (arg :: args, result)
+      | _ -> None
+      end
+    | _ -> None
+
+let rec function_call ctx env ty fn args =
+  match fn with
+  | Some (Function { choice = Some (condition, a, b); _ }) ->
+    join_value condition
+      (function_call ctx env ty (Some (Function a)) args)
+      (function_call ctx env ty (Some (Function b)) args)
+  | _ -> (
+    match fn, signature env ty (List.length args) with
+    | Some (Function fn), Some (arguments, result) ->
+      let args = List.filter_map scalar args in
+      if List.map term_sort args <> arguments
+      then None
+      else
+        let f =
+          match
+            List.find_opt
+              (fun f ->
+                Function.arguments f = arguments && Function.result f = result)
+              !(fn.instances)
+          with
+          | Some f -> f
+          | None ->
+            let f = Function.create ~label:fn.label ~arguments ~result in
+            fn.instances := f :: !(fn.instances);
+            ctx.functions <- f :: ctx.functions;
+            f
+        in
+        scalar_value (Call (f, args))
+    | _ -> None)
+
+let apply_function ctx env fn_type result_type prim fn args ~total =
+  let value =
+    match prim with
+    | Some (name, arity) when arity = List.length args ->
+      operation env result_type name args
+    | _ -> None
+  in
+  match value with
+  | Some _ -> value
+  | None when total -> function_call ctx env fn_type fn args
+  | None -> None
+
 let constant = function
-  | Typedtree.Const_int n -> Some (Integer (Int64.of_int n))
+  | Typedtree.Const_int n -> scalar_value (Integer (Int64.of_int n))
   | _ -> None
 
 let rconstant c =
   match c.Parsetree.pconst_desc with
-  | Parsetree.Pconst_integer (n, None) -> Some (Integer (Int64.of_string n))
+  | Parsetree.Pconst_integer (n, None) ->
+    scalar_value (Integer (Int64.of_string n))
   | _ -> None
 
 let constructor env ty name =
   match sort env ty, name with
-  | Some Bool, "true" -> Some (Boolean true)
-  | Some Bool, "false" -> Some (Boolean false)
+  | Some Bool, "true" -> scalar_value (Boolean true)
+  | Some Bool, "false" -> scalar_value (Boolean false)
   | _ -> None
 
 let rconstructor env ty = function
@@ -271,22 +390,30 @@ let rec predicate ctx env s e =
       | Some (_, 0) -> unsupported e.rexp_loc
       | _ -> s, lookup ctx s env e.rexp_type path
       end
-    | Rexp_constant c -> s, Some (required e.rexp_loc (rconstant c))
+    | Rexp_constant c -> s, scalar_value (required e.rexp_loc (rconstant c))
     | Rexp_construct (p, []) -> s, rconstructor env e.rexp_type p
-    | Rexp_apply ({ rexp_desc = Rexp_ident path; _ }, args) ->
-      begin match primitive env path, args with
+    | Rexp_apply (fn, args) ->
+      let prim =
+        match fn.rexp_desc with
+        | Rexp_ident path -> primitive env path
+        | _ -> None
+      in
+      begin match prim, args with
       | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
         short_circuit eval e.rexp_loc ~is_and:(op = "%sequand") s a b
-      | Some (op, arity), _ when arity = List.length args ->
+      | _ ->
         let s, args =
           arguments_right_to_left (fun s (_, e) -> eval s e) s args
         in
+        let s, value = eval s fn in
         if s.dead
         then s, None
         else
           name s
-            (Some (required e.rexp_loc (operation env e.rexp_type op args)))
-      | _ -> unsupported e.rexp_loc
+            (scalar_value
+               (required e.rexp_loc
+                  (apply_function ctx env fn.rexp_type e.rexp_type prim value
+                     args ~total:true)))
       end
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
@@ -295,7 +422,8 @@ let rec predicate ctx env s e =
       then s, None
       else
         name s
-          (Some (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
+          (scalar_value
+             (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose s
@@ -357,21 +485,23 @@ and predicate_cases ctx env s value cases =
         case.rc_guard case.rc_rhs rest
 
 let rec pattern : type k.
-    context -> state -> term option -> k general_pattern -> state * term =
+    context -> state -> value option -> k general_pattern -> state * term =
  fun ctx s value p ->
   match p.pat_desc with
   | Tpat_any -> s, Boolean true
-  | Tpat_var { id; _ } -> bind s id value, Boolean true
+  | Tpat_var { id; mode; _ } -> bind s id (at_mode mode value), Boolean true
   | Tpat_alias { pattern = p; id; _ } -> pattern ctx (bind s id value) value p
   | Tpat_value p -> pattern ctx s value (p :> Typedtree.pattern)
   | Tpat_constant c ->
-    begin match value, constant c with
+    begin match scalar value, scalar (constant c) with
     | Some x, Some c -> s, both Eq x c
     | _ ->
       s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")
     end
   | Tpat_construct (_, c, _, [], _) ->
-    begin match value, constructor p.pat_env p.pat_type c.cstr_name with
+    begin match
+      scalar value, scalar (constructor p.pat_env p.pat_type c.cstr_name)
+    with
     | Some x, Some c -> s, both Eq x c
     | _ ->
       s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")
@@ -409,6 +539,41 @@ let has_elim e =
   List.exists
     (function Texp_let_refine _, _, _ -> true | _ -> false)
     e.exp_extra
+
+let rec module_structure m =
+  match m.mod_desc with
+  | Tmod_structure str -> Some str
+  | Tmod_constraint (m, _, _, _) -> module_structure m
+  | _ -> None
+
+let export_module ctx id str s =
+  let fields = Hashtbl.create 8 in
+  List.iter
+    (function
+      | Sig_value (id, _, Exported) | Sig_module (id, _, _, _, Exported) ->
+        Hashtbl.replace fields (Ident.name id) id
+      | _ -> ())
+    str.str_type;
+  let exports =
+    Hashtbl.fold (fun _ id ids -> Ident.Set.add id ids) fields Ident.Set.empty
+  in
+  let rec exported = function
+    | Path.Pident field when Ident.Set.mem field exports ->
+      Some (Path.Pdot (Path.Pident id, Ident.name field))
+    | Path.Pdot (prefix, field) ->
+      Option.map (fun p -> Path.Pdot (p, field)) (exported prefix)
+    | _ -> None
+  in
+  let values = Path.Map.union (fun _ inner _ -> Some inner) s.values ctx.free in
+  let values =
+    Path.Map.fold
+      (fun path value values ->
+        match exported path with
+        | None -> values
+        | Some path -> Path.Map.add path value values)
+      values s.values
+  in
+  { s with values }
 
 let rec expression ctx s e =
   if impossible s
@@ -448,16 +613,22 @@ and expression_desc ctx s e =
   let eval = expression ctx in
   let opaque () = fresh ctx e.exp_env e.exp_type "result" in
   match e.exp_desc with
-  | Texp_ident { path; desc; _ } ->
+  | Texp_ident { path; desc; mode; _ } ->
     let value =
       match desc.val_kind with
-      | Val_mut _ | Val_ivar _ | Val_prim _ -> opaque ()
-      | _ -> lookup ctx s e.exp_env e.exp_type path
+      | Val_mut _ | Val_ivar _ -> opaque ()
+      | Val_prim p when p.prim_arity = 0 -> opaque ()
+      | _ -> at_mode mode (lookup ctx s e.exp_env e.exp_type path)
     in
     s, value
   | Texp_constant c -> s, constant c
   | Texp_construct (_, c, _, [], _) ->
     s, constructor e.exp_env e.exp_type c.cstr_name
+  | Texp_letmodule (Some id, _, _, m, body)
+    when Option.is_some (module_structure m) ->
+    let str = Option.get (module_structure m) in
+    let s, _ = structure ctx s str in
+    eval (export_module ctx id str s) body
   | Texp_let (rec_flag, bindings, body) ->
     let s, _ = value_bindings ctx s rec_flag bindings (has_elim e) in
     eval s body
@@ -467,9 +638,9 @@ and expression_desc ctx s e =
   | Texp_logical_equal (left, right) -> (
     let s, right = eval s right in
     let s, left = eval s left in
-    match left, right with
+    match scalar left, scalar right with
     | Some left, Some right when term_sort left = term_sort right ->
-      name s (Some (both Eq left right))
+      name s (scalar_value (both Eq left right))
     | _ -> s, opaque ())
   | Texp_sequence (a, _, b) ->
     let s, _ = eval s a in
@@ -477,7 +648,7 @@ and expression_desc ctx s e =
   | Texp_ifthenelse (c, t, f) ->
     let s, c = eval s c in
     let c =
-      match c with
+      match scalar c with
       | Some c -> c
       | None ->
         required e.exp_loc (fresh ctx e.exp_env Predef.type_bool "condition")
@@ -500,12 +671,13 @@ and expression_desc ctx s e =
         match arg with Omitted _ -> s, None | Arg (e, _) -> eval s e
       in
       let s, args = arguments_right_to_left argument s args in
-      let s, _ = eval s fn in
+      let s, fn_value = eval s fn in
+      let total =
+        match fn_value with Some (Function { total; _ }) -> total | _ -> false
+      in
       let value =
-        match prim with
-        | Some (op, arity) when arity = List.length args ->
-          operation e.exp_env e.exp_type op args
-        | _ -> None
+        apply_function ctx e.exp_env fn.exp_type e.exp_type prim fn_value args
+          ~total
       in
       match prim with
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
@@ -548,7 +720,7 @@ and expression_desc ctx s e =
         end
     in
     ctx.batches <- s.code :: ctx.batches;
-    captured, None
+    captured, opaque ()
   | Texp_match (scrutinee, _, cases, [], _)
     when List.for_all (fun c -> snd (split_pattern c.c_lhs) = None) cases ->
     let s, value = eval s scrutinee in
@@ -605,7 +777,7 @@ and value_cases ctx s value cases = cases_with_pattern ctx s value cases
 and computation_cases ctx s value cases = cases_with_pattern ctx s value cases
 
 and cases_with_pattern : type k.
-    context -> state -> term option -> k case list -> state * term option =
+    context -> state -> value option -> k case list -> state * value option =
  fun ctx s value cases ->
   if impossible s
   then s, None
@@ -628,6 +800,11 @@ and structure ctx s str =
         | Tstr_value (rec_flag, bindings) ->
           value_bindings ctx s rec_flag bindings false
         | Tstr_eval (e, _, _) -> expression ctx s e
+        | Tstr_module { mb_id = Some id; mb_expr; _ }
+          when Option.is_some (module_structure mb_expr) ->
+          let str = Option.get (module_structure mb_expr) in
+          let s, _ = structure ctx s str in
+          export_module ctx id str s, None
         | _ ->
           let state = ref s in
           let iterator = iterator ctx state in
@@ -652,7 +829,7 @@ and iterator ctx state =
     structure = (fun _ str -> checked (fun s -> structure ctx s str))
   }
 
-let query code =
+let query ctx code =
   let definitions = ref [] in
   let share = function
     | App _ as term ->
@@ -696,15 +873,20 @@ let query code =
     | Var s when not (Hashtbl.mem seen s) ->
       Hashtbl.add seen s ();
       symbols := s :: !symbols
-    | App (_, args) -> List.iter visit args
+    | App (_, args) | Call (_, args) -> List.iter visit args
     | _ -> ()
   in
   List.iter (fun f -> visit f.term) facts;
   visit goal.term;
-  { symbols = List.rev !symbols; facts; goal }, goals
+  ( { symbols = List.rev !symbols;
+      functions = List.rev ctx.functions;
+      facts;
+      goal
+    },
+    goals )
 
-let verify_batch prove code =
-  let query, goals = query code in
+let verify_batch ctx prove code =
+  let query, goals = query ctx code in
   let prove_one (o : obligation) q =
     try prove o.loc q
     with Location.Error error ->
@@ -737,7 +919,7 @@ let generate ~prove str =
   match scan.structure scan str with
   | () -> ()
   | exception Has_obligation ->
-    let ctx = { free = Path.Map.empty; batches = [] } in
+    let ctx = { functions = []; free = Path.Map.empty; batches = [] } in
     let result, _ = structure ctx empty str in
-    List.iter (verify_batch prove) (List.rev ctx.batches);
-    verify_batch prove result.code
+    List.iter (verify_batch ctx prove) (List.rev ctx.batches);
+    verify_batch ctx prove result.code

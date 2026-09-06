@@ -516,6 +516,27 @@ Line 3, characters 2-15:
 Error: the refinement type of this expression escapes the scope of binding "x"
 |}]
 
+let escape_definition_argument () =
+  let[@def] increment x = x + 1 in
+  let x = 3 in
+  increment_def x;;
+[%%expect{|
+Line 4, characters 2-17:
+4 |   increment_def x;;
+      ^^^^^^^^^^^^^^^
+Error: the refinement type of this expression escapes the scope of binding "x"
+|}]
+
+let escape_definition_function slot =
+  let[@def] increment x = x + 1 in
+  slot := increment_def;;
+[%%expect{|
+Line 3, characters 10-23:
+3 |   slot := increment_def;;
+              ^^^^^^^^^^^^^
+Error: the refinement type of this expression escapes the scope of binding "increment"
+|}]
+
 class virtual escape_class_let =
   let n = 0 in
   object
