@@ -1231,6 +1231,8 @@ and expression ctxt f x =
         pp f "@[<hov2>borrow_@ %a@]" (expression2 (reset_flags ctxt))  e
     | Pexp_refine e ->
         pp f "@[<hov2>refine_@ %a@]" (expression2 (reset_flags ctxt)) e
+    | Pexp_assume e ->
+        pp f "@[<hov2>assume_@ %a@]" (expression2 (reset_flags ctxt)) e
     | Pexp_let_refine (name, bound, body) ->
         pp f "@[<2>let refine_ %a =@ %a@ in@]@ %a"
           ident_of_name name.txt (expression (reset_flags ctxt)) bound

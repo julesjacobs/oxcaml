@@ -14,7 +14,7 @@ open Types
 
 (* Rebuilding *)
 
-let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
+let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
     ?value_path ?constructor_path ?type_path ?(type_expr = Fun.id)
     ?(location = Fun.id) rexp =
   let map_constant (constant : Parsetree.constant) =
@@ -33,7 +33,7 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
     | Some rename_bound ->
       let id' = rename_bound id in
       Ident.Map.add id id' rename, id'
-    | None -> rename, id
+    | None -> Ident.Map.add id id rename, id
   in
   let rec map_rexp rename rexp =
     let rexp_desc =
@@ -42,7 +42,7 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?unbind_value
           match Ident.Map.find_opt id rename with
           | Some id -> Rexp_var id
           | None ->
-              match Option.bind unbind_value (fun f -> f id) with
+              match Option.bind free_var_path (fun f -> f id) with
               | Some path -> Rexp_ident path
               | None -> Rexp_var id
         end
@@ -424,6 +424,8 @@ let equal ~pairs rexp1 rexp2 =
 (* Back to surface syntax *)
 
 let untype ?(type_constraint = fun _ -> None)
+    ?(expression = fun _ exp -> exp)
+    ?(function_label = fun _ -> Asttypes.Nolabel)
     ~var_name ~value_ident ~constructor_ident ~label_ident rexp =
   let open Ast_helper in
   let lid_of_name name = Location.mknoloc (Longident.Lident name) in
@@ -434,7 +436,7 @@ let untype ?(type_constraint = fun _ -> None)
   in
   let rec untype_rexp rexp =
     let loc = rexp.rexp_loc in
-    let expression = match rexp.rexp_desc with
+    let exp = match rexp.rexp_desc with
     | Rexp_var id -> Exp.ident ~loc (lid_of_name (var_name id))
     | Rexp_ident path -> Exp.ident ~loc (value_ident path)
     | Rexp_constant const -> Exp.constant ~loc const
@@ -494,7 +496,7 @@ let untype ?(type_constraint = fun _ -> None)
         Exp.function_ ~loc
           [ { pparam_desc =
                 Pparam_val
-                  ( Asttypes.Nolabel, None,
+                  ( function_label rexp, None,
                     constrain_pattern constrained param_type
                       (Pat.var (Location.mknoloc (var_name param))) );
               pparam_loc = Location.none } ]
@@ -505,10 +507,12 @@ let untype ?(type_constraint = fun _ -> None)
     | Rexp_match (scrutinee, cases) ->
         Exp.match_ ~loc (untype_rexp scrutinee) (List.map untype_case cases)
     in
-    match if rexp.rexp_type_constraint
+    let exp = match if rexp.rexp_type_constraint
           then type_constraint rexp.rexp_type else None with
-    | None -> expression
-    | Some ty -> Exp.constraint_ ~loc expression (Some ty) []
+    | None -> exp
+    | Some ty -> Exp.constraint_ ~loc exp (Some ty) []
+    in
+    expression rexp exp
   and untype_case { rc_lhs; rc_guard; rc_rhs } =
     Exp.case (untype_pat rc_lhs)
       ?guard:(Option.map untype_rexp rc_guard)
