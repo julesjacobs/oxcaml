@@ -15690,18 +15690,9 @@ let make_definition_lemma_at_level env binding =
     Refinement_predicate.map ~rename
       ~type_expr:(Subst.type_expr subst) body_ir
   in
-  let predicate_env =
-    List.fold_left
-      (fun env (id, ty) -> add_total_immutable_value env id ty loc)
-      env type_params
-  in
   let definition_description = Subst.Lazy.force_value_description
-      (Env.find_value (Path.Pident id) predicate_env) in
-  (* Top-level bindings are stored at legacy modes; [@def] checks the RHS
-     separately at total, stateless, and portable. *)
-  let predicate_env =
-    Env.add_value ~mode:(total_mode ()) id definition_description predicate_env
-  in
+      (Env.find_value (Path.Pident id) env) in
+  Env.mark_value_used definition_description.val_uid;
   let mk rexp_type rexp_desc =
     {rexp_type; rexp_desc; rexp_type_constraint = false; rexp_loc = loc}
   in
@@ -15710,13 +15701,9 @@ let make_definition_lemma_at_level env binding =
          (Rexp_ident (Path.Pident id)),
        List.map (fun (id, ty) -> Asttypes.Nolabel, mk ty (Rexp_var id))
          type_params)) in
-  let validation = mk Predef.type_bool (Rexp_logical_equal (call, call)) in
-  ignore
-    (with_resolved_refinement predicate_env loc validation (fun syntax ->
-       Typetexp.TyVarEnv.protect_reentrant (fun () ->
-         !Typetexp.type_refinement_predicate predicate_env
-           (Ident.Set.of_list (List.map fst type_params))
-           binder Predef.type_unit syntax)));
+  (* The RHS was checked at total, stateless, portable modes. Rechecking its
+     application under the predicate lock would reject access-preserving
+     observers whose runtime arguments require ordinary access. *)
   let rec argument_modes ty params =
     match params, get_desc (expand_head env ty) with
     | [], _ -> []
