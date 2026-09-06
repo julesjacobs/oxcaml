@@ -26,6 +26,7 @@ legacy-mode defaults.
 | Checked windows | `checked_windows.ml` | Runtime validation establishes ordered bounds; subtraction and a client budget are proved safe. |
 | Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
 | Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
+| Clamp laws | `clamp.ml` | Explicit equations prove interval bounds, identity, and idempotence. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
@@ -67,3 +68,6 @@ soundness; never execute known-divergent examples.
 
 `checked_windows.ml` checks input bounds with `assume_`, catches invalid
 input, and derives the width with `refine_`.
+
+`clamp.ml` proves bounds, identity, and idempotence for arbitrary inputs using
+explicit definition lemmas.
