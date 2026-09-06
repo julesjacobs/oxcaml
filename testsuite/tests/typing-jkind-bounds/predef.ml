@@ -185,6 +185,7 @@ Error: The kind of type "'a ref" is
        The first mode-crosses less than the second along:
          portability: mod portable with 'a ≰ mod portable
          statefulness: mod stateless with 'a ≰ mod stateless
+         totality: mod total with 'a ≰ mod total
 |}]
 
 type t_test = int ref require_portable

@@ -19,13 +19,15 @@ type t
       mod forkable
           unyielding
           many
-          stateless
+          total
           immutable
+          stateless
           portable
           contended
           local
           unique
           static
+          ghost
           internal
 |}]
 
@@ -35,15 +37,17 @@ type t
   : value non_pointer non_null
       mod global
           many
-          stateless
+          total
           immutable
           forkable
           unyielding
           aliased
+          stateless
           portable
           contended
           external_
           static
+          ghost
 |}]
 
 type t : float64
@@ -56,11 +60,13 @@ type t
           yielding
           once
           unique
+          partial
           stateful
           read_write
           nonportable
           uncontended
           static
+          ghost
 |}]
 
 type t : any
@@ -72,11 +78,13 @@ type t
           yielding
           once
           unique
+          partial
           stateful
           read_write
           nonportable
           uncontended
           static
+          ghost
           internal
 |}]
 
@@ -90,10 +98,12 @@ type t
           yielding
           once
           unique
+          partial
           stateful
           read_write
           uncontended
           static
+          ghost
           internal
 |}]
 
@@ -108,9 +118,11 @@ type t
           yielding
           once
           unique
+          partial
           read_write
           uncontended
           static
+          ghost
           internal
 |}]
 
@@ -121,13 +133,15 @@ type 'a t
       mod forkable
           unyielding
           many
-          stateless
+          total
           immutable
+          stateless
           portable
           contended
           local
           unique
           static
+          ghost
           internal
       with 'a
 |}]
@@ -139,13 +153,15 @@ type ('a
          mod forkable
              unyielding
              many
-             stateless
+             total
              immutable
+             stateless
              portable
              contended
              local
              unique
              static
+             ghost
              internal)
      t
 |}]
@@ -161,9 +177,11 @@ type ('a
              yielding
              once
              unique
+             partial
              read_write
              uncontended
              static
+             ghost
              internal)
      t
 |}]
@@ -179,10 +197,12 @@ type 'a t
           yielding
           once
           unique
+          partial
           stateful
           read_write
           uncontended
           static
+          ghost
       with 'a @@ external_
 |}]
 
@@ -196,11 +216,13 @@ type 'a t
           yielding
           once
           unique
+          partial
           stateful
           read_write
           nonportable
           uncontended
           static
+          ghost
 |}]
 
 type 'a t : immutable_data with 'a @@ external_
@@ -210,13 +232,15 @@ type 'a t
       mod forkable
           unyielding
           many
-          stateless
+          total
           immutable
+          stateless
           portable
           contended
           local
           unique
           static
+          ghost
           internal
       with 'a
 |}]

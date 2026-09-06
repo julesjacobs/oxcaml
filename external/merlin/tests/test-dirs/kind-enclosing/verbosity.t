@@ -27,6 +27,7 @@
         contended
         external_
         static
+        ghost
 
   $ run 1:17 <<EOF
   > type 'a t = 'a option
@@ -45,6 +46,7 @@
         local
         unique
         static
+        ghost
         internal
     with 'a
 
@@ -66,6 +68,7 @@
         local
         unique
         static
+        ghost
         internal
     with int t1
 
@@ -85,6 +88,7 @@
         read_write
         uncontended
         static
+        ghost
         internal
   Verbosity 2: value separable non_null
     mod portable
@@ -98,6 +102,7 @@
         read_write
         uncontended
         static
+        ghost
         internal
 
   $ run 1:5 <<EOF
@@ -116,6 +121,7 @@
         read_write
         uncontended
         static
+        ghost
         internal
   Verbosity 2: value separable non_null
     mod stateless
@@ -129,4 +135,5 @@
         read_write
         uncontended
         static
+        ghost
         internal

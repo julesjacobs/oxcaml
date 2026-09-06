@@ -46,6 +46,7 @@ legacy-mode defaults.
 | Standard-set model | `avl_stdlib_set.ml` | Pointwise refinement relates the verified AVL implementation to `Set.MakeTotal`, with comparator compatibility explicit. |
 | Sparse immutable arrays | `sparse_iarrays.ml` | A polymorphic `Map.MakeTotal` overlay proves read-after-write, overwrite, removal fallback, and safe base-array reads. |
 | Regex matching | `regex.ml` | Derivative matching and a total DFA construction are sound and complete for an independent membership-derivation spec. |
+| Ghost code | `ghost*.ml` | Total proof computations erase; ghost values remain usable in static predicates and cannot be read by runtime checks. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -104,8 +105,8 @@ observer returns zero outside the array; the result contract separately
 establishes bounds.
 
 The queue proves its tail-recursive reversal against an explicit
-append/reverse model. Its representation stays behind a `.mli`. Proof helpers
-execute at runtime, so this demo makes no amortized-cost claim.
+append/reverse model. Its representation stays behind a `.mli`. Operations
+erase their proof calls and proof-only model traversals with `ghost_`.
 
 `environments.ml` checks comparator-class distinction at the example boundary,
 then statically proves preservation of optional lookup results. It restores
@@ -179,3 +180,15 @@ five words containing other integers. They also cover nullable and nested
 stars, the extreme integer symbols, and the fifth-from-last-symbol example.
 A rejection fixture checks that DFA completeness cannot prove rejection of a
 valid membership derivation.
+
+`ghost_refinements.ml` demonstrates a client that obtains a required fact
+from an erased lemma; omitting the lemma is rejected. Erased expressions
+and ghost field values must be total. Static predicates may refer to ghost
+values; `assume_` checks runtime predicates at real mode. Physical identity
+cannot establish logical equality when the type may contain erased data.
+
+`ghost_erasure.ml` prints the generated Lambda code: the client contains no
+call to its recursive proof helper. `Dfa_client.verified` in `regex.ml` runs
+one compiled DFA and erases the correctness proof, while exposing equivalence
+to regex matching in its result type. Evidence-producing APIs remain ordinary
+functions for clients that want to inspect the derivation at runtime.

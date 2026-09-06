@@ -200,6 +200,7 @@ Error: This type "int ref" should be an instance of type "('a : immutable_data)"
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 let foo (t : int t @ local) = use_global t [@nontail]
@@ -353,6 +354,7 @@ Error: This type "int ref" should be an instance of type "('a : immutable_data)"
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 let foo (t : int t @ aliased) = use_unique t

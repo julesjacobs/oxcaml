@@ -1842,6 +1842,34 @@ module Regex :
   end
 |}]
 
+module Dfa_client = struct
+  let (verified @ total) (r @ total) (s : int list) :
+      {result : bool | result === Regex.matches r s} =
+    let dfa = Regex.Dfa.compile r in
+    let result = Regex.Dfa.run dfa s in
+    let refine_ proof = ghost_ (Regex.Dfa.correct r s) in
+    refine_ result
+end;;
+[%%expect{|
+module Dfa_client :
+  sig
+    val verified :
+      (r : Regex.t) ->
+      (s : int list) -> {result : bool | result === (Regex.matches r s)}
+  end
+|}]
+
+let () =
+  let r = Regex.Star (Regex.Symbol 0) in
+  let yes = [0; 0] in
+  let no = [0; 1] in
+  let refine_ accepted = Dfa_client.verified r yes in
+  let refine_ rejected = Dfa_client.verified r no in
+  assert (accepted && not rejected)
+;;
+[%%expect{|
+|}]
+
 let () =
   let open Regex in
   let open Membership in

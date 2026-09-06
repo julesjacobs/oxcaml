@@ -720,6 +720,7 @@ let stamped_create n =
   Stamped_hashtable.create !stamped_changelog n
 
 let in_signature_flag = 0x01
+let ghost_context_flag = 0x02
 
 type t = {
   values: (lock_or_stage, value_entry, value_data) IdTbl.t;
@@ -1081,6 +1082,13 @@ let in_signature b env =
   {env with flags}
 
 let is_in_signature env = env.flags land in_signature_flag <> 0
+
+(* A ghost context is deleted from compilation, so nothing is checked on
+   the ghostliness axis inside it; see [Typecore.submode]. *)
+let enter_ghost_context env =
+  { env with flags = env.flags lor ghost_context_flag }
+
+let in_ghost_context env = env.flags land ghost_context_flag <> 0
 
 let has_local_constraints env =
   not (StagedPath.Map.is_empty env.local_constraints)
@@ -3905,8 +3913,14 @@ let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0 =
   let hint_comonadic : _ Mode.Hint.morph =
     Is_closed_by (Comonadic, {closure = closure_context; closed = pp})
   in
+  (* Ghostliness is excluded from the closure lock: a captured ghost value
+     is stored physically (possibly as a placeholder), but its content can
+     never be read as real, so the capture does not taint the closure.
+     Uses of the capture inside the body still see its true ghostliness. *)
   Mode.Value.Comonadic.submode_err pp
-    comonadic (Mode.Value.Comonadic.apply_hint hint_comonadic comonadic0);
+    (Mode.Value.meet_const_with Ghostliness Mode.Ghostliness.Const.Real
+       {Mode.monadic; comonadic}).comonadic
+    (Mode.Value.Comonadic.apply_hint hint_comonadic comonadic0);
   let hint_monadic : _ Mode.Hint.morph =
     Is_closed_by (Monadic, {closure = closure_context; closed = pp})
   in
@@ -3919,7 +3933,10 @@ let closure_mode pp {Mode.monadic; comonadic} closure_context comonadic0 =
 
 let const_closure_mode pp {Mode.monadic; comonadic}
   closure_context comonadic0 =
-  Mode.Value.Comonadic.(submode_err pp comonadic
+  (* Ghostliness is excluded from the closure lock; see [closure_mode]. *)
+  Mode.Value.Comonadic.(submode_err pp
+    (Mode.Value.meet_const_with Ghostliness Mode.Ghostliness.Const.Real
+       {Mode.monadic; comonadic}).Mode.comonadic
     (of_const ~hint:(Is_used_in closure_context) comonadic0));
   let monadic =
     Mode.Value.(Monadic.join

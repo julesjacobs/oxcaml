@@ -1126,6 +1126,7 @@ let merloc startpos ?endpos x =
 %token EOF
 %token EQUAL [@symbol "="]
 %token EXCEPTION [@symbol "exception"]
+%token GHOST [@symbol "ghost_"]
 %token EXCLAVE [@symbol "exclave_"]
 %token EXTERNAL [@symbol "external"]
 %token FALSE [@symbol "false"]
@@ -3036,6 +3037,8 @@ fun_:
      { mkexp_constraint ~loc:$sloc ~exp ~cty:None ~modes:[mode] }
   | EXCLAVE seq_expr
      { mkexp_exclave ~loc:$sloc ~kwd_loc:($loc($1)) $2 }
+  | GHOST seq_expr
+     { mkexp ~loc:$sloc (Pexp_ghost $2) }
 ;
 %public %inline expr :
   | or_function(fun_expr) { $1 }

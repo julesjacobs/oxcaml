@@ -19,7 +19,7 @@ column, with the identifiers defined in env.ml in scope.
   >   # Create a file test.ml that is env.ml, but with $line appended to the end of it
   >   cat env.ml > test.ml
   >   echo "$line" >> test.ml
-  >   line_num="$(wc -l < test.ml)"
+  >   line_num=$(( $(wc -l < test.ml) ))
   >   $MERLIN single complete-prefix -position "$line_num":"$col_num" -filename test.ml < test.ml \
   >     | revert-newlines \
   >     | jq '.value.entries | .[] | select(.name == "foobar" or .name == "Foobar")' \
