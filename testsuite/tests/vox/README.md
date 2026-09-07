@@ -38,7 +38,7 @@ legacy-mode defaults.
 | AVL-set proofs | `avl_sets.mli`, `avl_set_client.ml` | A valid AVL set exposes semantic `equal`; the demo distinguishes it from representation `=`. |
 | Immutable arrays | `iarrays.ml`, `iarrays_ordinary.ml` | Immutable-array literals expose exact lengths and elements; safe reads expose normal-return bounds. |
 | Bounded search | `array_search.ml` | A decreasing interval establishes termination and safe reads; `Some` is the first match, and `None` proves absence throughout the interval. |
-| Binary search | `binary_search.ml` | A midpoint contract drives total transition search; sortedness gives equal ranges, first/last matches, and membership with proved absence. |
+| Sorted arrays | `sorted_arrays.ml` | Total binary search gives equal ranges and membership; insertion and removal preserve sortedness and every copied element. |
 | Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
 | Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract polymorphic two-list queue over `immutable_data` elements implements a sequence model; a separate client proves generic FIFO behavior and rejects empty dequeue. |
 | Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
@@ -115,7 +115,7 @@ expression and input. Both evaluations use machine-integer wrapping semantics.
 and absence throughout that interval on `None`. Its total `at` observer returns
 zero outside the array; the result contract separately establishes bounds.
 
-`binary_search.ml` follows [Binary Search a Little Simpler & More Generic](https://julesjacobs.com/notes/binarysearch/binarysearch.pdf).
+`sorted_arrays.ml` follows [Binary Search a Little Simpler & More Generic](https://julesjacobs.com/notes/binarysearch/binarysearch.pdf).
 Its generic search returns adjacent false/true endpoints and evaluates the
 predicate strictly inside the original interval. Monotonicity is unnecessary.
 A refined midpoint interface supports binary, forward, and backward search.
@@ -142,6 +142,17 @@ absence, and `mem` returns the specified membership Boolean. These operations
 reuse equal-range, and their correctness proofs are erased. The array oracle
 checks every operation and rejects false absence, non-first matches, and
 non-last matches.
+
+`insert` returns the insertion index and array; `remove_at` removes a valid
+index, and `remove_one` uses first-match search and returns `None` for absence.
+The recursive `edited` specification describes every output element, and
+`edited_at` exposes that relation at an arbitrary index. Both copying operations
+prove the exact length and preserve sortedness using `Iarray.sub` and
+`Iarray.append`. Their correctness proofs are total and erased; allocation
+remains partial. The clients prove that insertion makes membership true and
+that insertion followed by removal at its returned index restores every source
+element. The runtime oracle checks insertion, first-match removal, and the
+round trip against lists, including duplicates and integer extrema.
 
 The queue proves its tail-recursive reversal against an explicit
 append/reverse model. Its representation stays behind a `.mli`. Operations
