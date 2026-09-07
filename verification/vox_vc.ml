@@ -888,9 +888,9 @@ let iarray_call ctx value =
     let sort = term_sort value in
     if is_iarray_sort ctx.encoding sort then Some (sort, value) else None
 
-let borrow_model_length ctx values =
+let vox_sequence_length ctx values =
   Call
-    (intern_function ctx "Borrow.Model.length" [term_sort values] Int, [values])
+    (intern_function ctx "Vox_sequence.length" [term_sort values] Int, [values])
 
 let first_argument_type env ty =
   match get_desc (Ctype.expand_head env ty) with
@@ -903,7 +903,7 @@ let borrow_projection ctx name result handle =
 let borrow_extent ctx handle =
   borrow_projection ctx "Borrow.extent" Int63 handle
 
-let borrow_model_sort ctx env ty =
+let borrow_sequence_sort ctx env ty =
   match get_desc (Ctype.expand_head env ty) with
   | Tconstr (_, [element], _) ->
     sort ctx.encoding env
@@ -934,7 +934,7 @@ let normal_borrow_projection ctx name args value s =
       fact
         (fact s "borrow extent" (both Le (Integer 0L) extent))
         "borrow model length"
-        (both Eq (borrow_model_length ctx model) size)
+        (both Eq (vox_sequence_length ctx model) size)
     end
   | _ -> s
 
@@ -951,7 +951,7 @@ let tuple_fields ctx env ty value =
 let normal_borrow_transition ctx env fn_type result_type name args value s =
   match first_argument_type env fn_type, args with
   | Some receiver_type, receiver :: _ ->
-    begin match borrow_model_sort ctx env receiver_type, scalar receiver with
+    begin match borrow_sequence_sort ctx env receiver_type, scalar receiver with
     | Some model_sort, Some receiver ->
       let project name x = borrow_projection ctx name model_sort x in
       let current = project "caml_borrow_current" in
@@ -1008,7 +1008,7 @@ let normal_borrow_transition ctx env fn_type result_type name args value s =
     end
   | _ -> s
 
-let normal_borrow_model_length ctx env function_type args s =
+let normal_vox_sequence_length ctx env function_type args s =
   match first_argument_type env function_type, args with
   | Some ty, [values] ->
     begin match data_of_type ctx env ty, scalar values with
@@ -1017,7 +1017,7 @@ let normal_borrow_model_length ctx env function_type args s =
         List.assoc_opt "[]" constructors, List.assoc_opt "::" constructors
       with
       | Some nil, Some cons when List.length (Constructor.fields cons) = 2 ->
-        let length = borrow_model_length ctx values in
+        let length = vox_sequence_length ctx values in
         let tail = select ctx cons 1 values in
         let equation =
           both Eq length
@@ -1025,7 +1025,7 @@ let normal_borrow_model_length ctx env function_type args s =
                ( Ite,
                  [ Is (nil, values);
                    Big_integer "0";
-                   App (Int_add, [Big_integer "1"; borrow_model_length ctx tail])
+                   App (Int_add, [Big_integer "1"; vox_sequence_length ctx tail])
                  ] ))
         in
         fact
@@ -1040,9 +1040,9 @@ let normal_borrow_model_length ctx env function_type args s =
 
 let operation ctx env function_type result_type name args =
   match name, args with
-  | "caml_borrow_model_length", [values] ->
+  | "caml_vox_sequence_length", [values] ->
     Option.bind (scalar values) (fun values ->
-        scalar_value (borrow_model_length ctx values))
+        scalar_value (vox_sequence_length ctx values))
   | name, [handle] when List.mem name borrow_projections ->
     begin match scalar handle, sort ctx.encoding env result_type with
     | Some handle, Some result ->
@@ -1465,8 +1465,8 @@ let rec predicate ctx env s e =
           in
           let s =
             match prim with
-            | Some ("caml_borrow_model_length", 1) ->
-              normal_borrow_model_length ctx env fn.rexp_type args s
+            | Some ("caml_vox_sequence_length", 1) ->
+              normal_vox_sequence_length ctx env fn.rexp_type args s
             | Some (name, 1) when List.mem name borrow_projections ->
               normal_borrow_projection ctx name args result s
             | Some ("%array_length", 1) -> normal_iarray_length ctx args s
@@ -1942,9 +1942,9 @@ and expression_desc ctx s e =
           ~total
       in
       match prim with
-      | Some ("caml_borrow_model_length", 1) ->
+      | Some ("caml_vox_sequence_length", 1) ->
         name ctx
-          (normal_borrow_model_length ctx e.exp_env fn.exp_type args s)
+          (normal_vox_sequence_length ctx e.exp_env fn.exp_type args s)
           value
       | Some (primitive_name, 1) when List.mem primitive_name borrow_projections
         ->

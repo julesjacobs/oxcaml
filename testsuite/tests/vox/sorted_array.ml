@@ -3,6 +3,9 @@ open Sorted_array_proofs
 type t = {array : int iarray |
   0 < Iarray.length array + 1 && Arrays.sorted array 0 (Iarray.length array)}
 
+let[@def] (contents @ total) (array : t) =
+  let refine_ array = array in ghost_ (Vox_sequence.of_iarray array)
+
 let[@def] (length @ total) (array : t) =
   let refine_ array = array in Iarray.length array
 
@@ -241,3 +244,27 @@ let (find_last @ total) : (array : t) -> (value : int) ->
     let stop = length array in
     ghost_ (occurs_between_def array value next stop);
     refine_ result
+
+let (contents_length @ total) : (array : t) ->
+    {u : unit | Vox_sequence.length (contents array) ===
+      Bigint.of_int (length array)} = fun array ->
+  let refine_ source = array in
+  ghost_ (length_def array);
+  ghost_ (contents_def array);
+  ghost_ (Vox_sequence.of_iarray_length source);
+  let u = () in refine_ u
+
+let (contents_at @ total) : (array : t) ->
+    (index : {i : int | 0 <= i && i < length array}) ->
+    {u : unit | let refine_ i = index in
+      Vox_sequence.at (contents array) (Bigint.of_int i) === Some (at array i)} =
+    fun array index ->
+  let refine_ source = array in
+  let refine_ i = index in
+  ghost_ (length_def array);
+  let bounded : {j : int | 0 <= j && j < Iarray.length source} = refine_ i in
+  let refine_ value = Vox_sequence.Iarray.get source bounded in
+  ghost_ (contents_def array);
+  ghost_ (at_def array i);
+  ghost_ (Arrays.at_def source i);
+  let u = () in refine_ u

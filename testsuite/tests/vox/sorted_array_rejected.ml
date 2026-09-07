@@ -1,8 +1,11 @@
 (* TEST
  has-z3;
- readonly_files = "sorted_array.mli";
+ source_directories = "${test_source_directory}/../../../verification/library";
+ readonly_files = "vox_sequence.mli sorted_array.mli";
  setup-ocamlc.byte-build-env;
  flags = "-extension refinement_types -principal";
+ module = "vox_sequence.mli";
+ ocamlc.byte;
  module = "sorted_array.mli";
  ocamlc.byte;
  expect;

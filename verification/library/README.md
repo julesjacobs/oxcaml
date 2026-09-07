@@ -7,7 +7,7 @@ make vox-library
 ```
 
 This builds and installs the final compiler, verifies the library with
-`-principal` in bytecode and native modes, and installs `Borrow_model`, `Borrow`,
+`-principal` in bytecode and native modes, and installs `Vox_sequence`, `Borrow`,
 and `vox_borrow` under the configured prefix's `lib/ocaml/vox`.
 
 With the worktree-local prefix from the agent guide, compile a client with:

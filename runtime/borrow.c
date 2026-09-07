@@ -148,7 +148,7 @@ CAMLprim value caml_borrow_frame_final(value frame) { return Val_unit; }
 CAMLprim value caml_borrow_frame_left(value frame) { return Val_unit; }
 CAMLprim value caml_borrow_frame_right(value frame) { return Val_unit; }
 
-CAMLprim value caml_borrow_model_length(value sequence)
+CAMLprim value caml_vox_sequence_length(value sequence)
 {
   intnat length = 0;
   while (sequence != Val_emptylist) {

@@ -1,6 +1,6 @@
 open! Stdlib
 
-module Model = Borrow_model
+module Model = Vox_sequence
 
 type ('value, 'state) step =
   { value : 'value @@ global;

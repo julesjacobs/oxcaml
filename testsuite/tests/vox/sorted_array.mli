@@ -1,5 +1,7 @@
 type t : immutable_data
 
+val contents : t -> int Vox_sequence.t @ immutable total ghost @@ total
+
 val length : t -> int @@ total
 val at : t -> int -> int @@ total
 val occurs : t -> int -> bool @@ total
@@ -70,3 +72,12 @@ val find_last : (array : t) -> (value : int) ->
     | Some index -> 0 <= index && index < length array
       && at array index = value
       && not (occurs_between array value (index + 1) (length array))} @@ total
+
+val contents_length : (array : t) ->
+  {u : unit | Vox_sequence.length (contents array) ===
+    Bigint.of_int (length array)} @@ total
+val contents_at : (array : t) ->
+  (index : {i : int | 0 <= i && i < length array}) ->
+  {u : unit | let refine_ i = index in
+    Vox_sequence.at (contents array) (Bigint.of_int i) === Some (at array i)}
+  @@ total

@@ -226,6 +226,72 @@ under the configured prefix's `lib/ocaml/vox`. It is an explicit target so
 bootstrap and ordinary compiler installation do not acquire a Z3 requirement.
 See `verification/library/README.md` for client commands.
 
+## Design experiments
+
+Baseline: `a7bd9bf43b` on `jujacobs/vox/borrows-slices-20260907`.
+The experiments preserve separate branches. An experiment is complete only
+when its implementation, representative clients, and evaluation are recorded.
+
+| Task | Branch | Status |
+| --- | --- | --- |
+| Shared sequence model | `jujacobs/vox/shared-sequence-20260908` | Evaluated: revise |
+| Callback predicate arguments | `jujacobs/vox/callback-predicates-20260908` | Evaluated: adopt |
+| Reusable collection mathematics | `jujacobs/vox/collection-theory-20260908` | Pending |
+| Borrow interface and transitions | `jujacobs/vox/borrow-interface-20260908` | Pending |
+| Scoped callback termination | `jujacobs/vox/scoped-termination-20260908` | Pending |
+
+### Shared sequence model: verdict
+
+The checked list theory now belongs to `Vox_sequence`. Slices use that module,
+and its immutable-array readers expose both native array observations and
+sequence observations in their result refinements. The abstract sorted-array
+API exposes the same sequence model, with checked length and element bridges.
+The model still exposes its list representation, preserving existing induction
+proofs and finite extensional equality. This prototype does not replace the
+compiler's immutable-array observation encoding.
+
+**Revise before adopting the whole proposal.** Extracting the common theory is
+a useful foundation, but adding a second observation interface to sorted arrays
+adds proof obligations and does not yet remove their existing observation
+interface. The subsequent collection-theory experiment must demonstrate actual
+reuse before this becomes a clear overall improvement. Avoid claiming that a
+module extraction alone unifies the SMT encodings.
+
+`verification/benchmarks/sequence_models.py` compares symbolic read-after-write,
+unchanged-index framing, and split reconstruction, using ground read equations,
+native arrays, and native sequences. Each valid equation also has an incorrect
+variant checked for satisfiability. With Z3 4.16.0, three repetitions, and a
+2-second query timeout, the tested ground/array queries took about 5--8 ms
+including solver startup. Native sequences proved last-write reads and split
+reconstruction, but timed out on unchanged-index framing for both one and eight
+writes. A diagnostic with an explicit prefix/suffix case split still timed
+out in the prefix case; using `seq.at` instead of `seq.nth` also timed out.
+Z3 4.16.0 rejected the tested `seq.update a i (seq.unit x)` operation. This argues against selecting the
+tested native sequence encoding as the default. These are observation VCs, not complete sorting proofs or a comparison
+of induction strategies; arrays and ground equations remain viable candidates.
+
+`verification/benchmarks/sequence_demos.py` uses the compiler from `make install`
+to compile complete demo sources with `-principal`. The baseline's length
+primitive is renamed to match the candidate compiler; its semantics is
+unchanged. Three repetitions on this machine gave:
+
+| Sources compiled | Baseline median | Candidate median |
+| --- | --- | --- |
+| Sequence library, borrows, end swap | 433 ms | 439 ms |
+| Sorted-array implementation and client, including new library dependency | 525 ms | 681 ms |
+| Sequence library, borrows, quicksort and client | 1068 ms | 1094 ms |
+
+The sorted-array difference includes compiling the newly used sequence library
+on every run. This is an uncached source-build comparison, not incremental
+client compilation or a runtime benchmark. Native array integration remains
+unevaluated at the complete-demo level.
+
+Verification: `make -s test-one DIR=vox` passed all 61 files, including the
+borrow runtime, sequential/parallel quicksort, abstract sorted-array clients,
+and rejection tests. The focused clients passed bytecode/native compilation
+with and without `-principal`. The installed library also compiled and verified
+in both backends with `-principal`. `make -s fmt` passed.
+
 ## Callback predicate experiment
 
 Branch: `jujacobs/vox/callback-predicates-20260908`. The semantic baseline is

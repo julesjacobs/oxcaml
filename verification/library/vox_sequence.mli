@@ -1,7 +1,7 @@
 type ('a : immutable_data) t = 'a list
 
 external length : ('a : immutable_data).
-  'a t @ immutable -> Bigint.t @@ total = "caml_borrow_model_length"
+  'a t @ immutable -> Bigint.t @@ total = "caml_vox_sequence_length"
 
 val length_def : ('a : immutable_data).
   (values : 'a t) @ immutable ->
@@ -125,3 +125,17 @@ val of_iarray_at : ('a : immutable_data).
   {u : unit | let refine_ i = index in
     at (of_iarray values) (Bigint.of_int i) === Some (iarray_get values index)}
       @@ total
+
+module Iarray : sig
+  val length : ('a : immutable_data).
+    (values : 'a iarray) @ immutable ->
+    {n : int | n = Iarray.length values
+        && Bigint.of_int n === length (of_iarray values)} @@ total
+  val get : ('a : immutable_data).
+    (values : 'a iarray) @ immutable ->
+    (index : {i : int | 0 <= i && i < Iarray.length values}) ->
+    {value : 'a | let refine_ i = index in
+      at (of_iarray values) (Bigint.of_int i) === Some value
+        && value === iarray_get values index}
+    @ immutable total @@ total
+end

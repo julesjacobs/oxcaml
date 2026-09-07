@@ -1,7 +1,8 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "sorted_array_proofs.ml sorted_array.mli sorted_array.ml sorted_array_client.ml";
+ source_directories = "${test_source_directory}/../../../verification/library";
+ all_modules = "vox_sequence.mli vox_sequence.ml sorted_array_proofs.ml sorted_array.mli sorted_array.ml sorted_array_client.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
@@ -101,3 +102,13 @@ let () =
       List.map (fun head -> head :: tail) [0; 1; 2]) (sequences (length - 1)) in
   for length = 0 to 4 do List.iter check (sequences length) done;
   Format.printf "abstract sorted-array oracle: 121 input sequences@."
+
+let observe_sequence : (array : t) -> (index : int) ->
+    {u : unit | 0 <= index && index < length array} @ ghost ->
+    {u : unit | Vox_sequence.at (contents array) (Bigint.of_int index)
+      === Some (at array index)} @ ghost = fun array index premise ->
+  premise;
+  let bounded : {i : int | 0 <= i && i < length array} = refine_ index in
+  ghost_ (
+    contents_at array bounded;
+    let u = () in refine_ u)

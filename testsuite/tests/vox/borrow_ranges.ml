@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "borrow_model.mli borrow_model.ml borrow.mli borrow.ml borrow_ranges.ml";
+ all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml borrow_ranges.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }

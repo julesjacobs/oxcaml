@@ -1,4 +1,4 @@
-open Borrow_model
+open Vox_sequence
 
 external ( + ) : Bigint.t -> Bigint.t -> Bigint.t @@ total = "caml_bigint_add"
 external ( - ) : Bigint.t -> Bigint.t -> Bigint.t @@ total = "caml_bigint_sub"
@@ -96,7 +96,7 @@ let rec (element_set @ total) : (values : int list) ->
         element_def tail next_query;
         element_def changed_tail next_query;
         element_at tail next_query;
-        let refine_ size = set_length tail next_index value in
+        set_length tail next_index value;
         element_at changed_tail next_query;
         let u = () in refine_ u)
 
@@ -363,7 +363,7 @@ let (element_swap @ total) : (values : int list) -> (first : Bigint.t) ->
   let y = element values second in
   let intermediate = set values first y in
   swap_equation values first second;
-  let refine_ size = set_length values first y in
+  set_length values first y;
   element_set values first query y;
   element_set intermediate second query x;
   let u = () in refine_ u
@@ -387,8 +387,8 @@ let (swap_partition @ total) : (values : int list) -> (pivot : int) ->
   let intermediate = set values lower y in
   let swapped = swap values lower scan in
   swap_equation values lower scan;
-  let refine_ size = set_length values lower y in
-  let refine_ size = set_length intermediate scan x in
+  set_length values lower y;
+  set_length intermediate scan x;
   element_swap values lower scan lower;
   element_swap values lower scan scan;
   range_set values pivot low_side zero lower lower y;
@@ -661,7 +661,7 @@ let (decompose3 @ total) : (values : int list) -> (first : Bigint.t) -> (past : 
   let refine_ front = cut values first in
   let refine_ back = cut rest width in
   sub_def values first past;
-  let refine_ last = drop_add values first width in
+  drop_add values first width;
   let u = () in refine_ u
 
 let (partition_bounds @ total) : (values : int list) -> (pivot : int) -> (index : Bigint.t) ->
