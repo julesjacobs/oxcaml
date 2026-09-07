@@ -28,7 +28,7 @@ legacy-mode defaults.
 | Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
 | Clamp laws | `clamp.ml` | Explicit equations prove interval bounds, identity, and idempotence. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
-| Expression evaluation | `expressions.ml` | Structural recursion establishes terminating evaluation of an inductive expression tree. |
+| Expression evaluation | `expressions.ml` | Structural recursion establishes termination; induction proves constant folding preserves wrapping-integer evaluation. |
 | Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |
 | SMT encoding | `verification.ml`, `equality.ml` | Source types map consistently to scalar and opaque SMT sorts. |
 | Bigints | `bigints.ml`, `bigint_fibonacci.ml` | Unbounded arithmetic, nonnegative decreasing measures, and Fibonacci proofs beyond machine bounds. |
@@ -82,5 +82,5 @@ input, and derives the width with `refine_`.
 `clamp.ml` proves bounds, identity, and idempotence for arbitrary inputs using
 explicit definition lemmas.
 
-`expressions.ml` evaluates an inductive expression tree with a caller-supplied
-input. At this stage it establishes termination.
+`expressions.ml` now proves constant folding preserves evaluation for every
+expression and input. Both evaluations use machine-integer wrapping semantics.
