@@ -60,6 +60,8 @@ let map ?(rename = Ident.Map.empty) ?rename_bound ?bind_value ?free_var_path
           Rexp_apply
             ( map_rexp rename fn,
               List.map (fun (lbl, arg) -> lbl, map_rexp rename arg) args )
+      | Rexp_logical_equal (left, right) ->
+          Rexp_logical_equal (map_rexp rename left, map_rexp rename right)
       | Rexp_tuple components ->
           Rexp_tuple
             (List.map (fun (lbl, c) -> lbl, map_rexp rename c) components)
@@ -180,6 +182,8 @@ let fold_types_gen ~constraints_only f init rexp =
         List.fold_left
           (fun init (_, arg) -> expression init arg)
           (expression init fn) args
+    | Rexp_logical_equal (left, right) ->
+        expression (expression init left) right
     | Rexp_tuple components ->
         List.fold_left
           (fun init (_, component) -> expression init component)
@@ -282,6 +286,9 @@ let iter_scoped_dependencies ~bound ~ident ~type_expr rexp =
     | Rexp_sequence (first, second) ->
         expression bound first;
         expression bound second
+    | Rexp_logical_equal (left, right) ->
+        expression bound left;
+        expression bound right
     | Rexp_let ({ rb_ident; rb_type; rb_expr; _ }, body) ->
         type_expr ~bound rb_type;
         expression bound rb_expr;
@@ -336,6 +343,8 @@ let equal ~pairs rexp1 rexp2 =
         && List.for_all2
              (fun (l1, a1) (l2, a2) -> l1 = l2 && eq pairs a1 a2)
              args1 args2
+    | Rexp_logical_equal (l1, r1), Rexp_logical_equal (l2, r2) ->
+        eq pairs l1 l2 && eq pairs r1 r2
     | Rexp_tuple c1, Rexp_tuple c2 ->
         List.compare_lengths c1 c2 = 0
         && List.for_all2
@@ -379,7 +388,8 @@ let equal ~pairs rexp1 rexp2 =
         && List.compare_lengths cases1 cases2 = 0
         && List.for_all2 (eq_case pairs) cases1 cases2
     | ( ( Rexp_var _ | Rexp_ident _ | Rexp_constant _
-        | Rexp_apply _ | Rexp_tuple _ | Rexp_construct _ | Rexp_record _
+        | Rexp_apply _ | Rexp_logical_equal _ | Rexp_tuple _
+        | Rexp_construct _ | Rexp_record _
         | Rexp_record_unboxed_product _ | Rexp_array _ | Rexp_field _
         | Rexp_ifthenelse _ | Rexp_sequence _ | Rexp_let _ | Rexp_fun _
         | Rexp_match _ ), _ ) ->
@@ -443,6 +453,10 @@ let untype ?(type_constraint = fun _ -> None)
     | Rexp_apply (fn, args) ->
         Exp.apply ~loc (untype_rexp fn)
           (List.map (fun (lbl, arg) -> lbl, untype_rexp arg) args)
+    | Rexp_logical_equal (left, right) ->
+        Exp.apply ~loc
+          (Exp.ident ~loc (lid_of_name "==="))
+          [ Nolabel, untype_rexp left; Nolabel, untype_rexp right ]
     | Rexp_tuple components ->
         Exp.tuple ~loc
           (List.map (fun (lbl, c) -> lbl, untype_rexp c) components)
@@ -558,6 +572,7 @@ let exists_rexp pred rexp =
     | Rexp_apply (fn, args) ->
         walk fn;
         List.iter (fun (_, arg) -> walk arg) args
+    | Rexp_logical_equal (left, right) -> walk left; walk right
     | Rexp_tuple components -> List.iter (fun (_, c) -> walk c) components
     | Rexp_construct (_, args) -> List.iter walk args
     | Rexp_record (fields, extended)
@@ -661,6 +676,8 @@ let bound_idents rexp =
         List.fold_left
           (fun ids (_, arg) -> expression ids arg)
           (expression ids fn) args
+    | Rexp_logical_equal (left, right) ->
+        expression (expression ids left) right
     | Rexp_tuple components ->
         List.fold_left
           (fun ids (_, component) -> expression ids component)
