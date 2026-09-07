@@ -246,3 +246,24 @@ Line 3, characters 2-11:
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+module Polymorphic_pair = struct
+  let duplicate : ('a : immutable_data).
+      (value : 'a) ->
+      {result : 'a * 'a | match result with left, right ->
+        left === value && right === value} =
+    fun value ->
+    let result = value, value in
+    refine_ result
+end;;
+[%%expect{|
+module Polymorphic_pair :
+  sig
+    val duplicate :
+      ('a : immutable_data).
+        (value : 'a) ->
+        {result : 'a * 'a
+          | match result with
+            | (left, right) -> (left === value) && (right === value)}
+  end
+|}]
