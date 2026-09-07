@@ -41,6 +41,7 @@ legacy-mode defaults.
 | Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
 | Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract two-list queue implements a sequence model; a separate client proves FIFO behavior and rejects empty dequeue. |
 | Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
+| Standard maps | `maps.ml` | Total comparators enable total operations; refined updates and lookup expose membership and value facts while preserving key and value access. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
