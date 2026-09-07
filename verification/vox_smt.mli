@@ -14,6 +14,18 @@ module Symbol : sig
   val sort : t -> sort
 end
 
+module Function : sig
+  type t
+
+  val create : label:string -> arguments:sort list -> result:sort -> t
+
+  val label : t -> string
+
+  val arguments : t -> sort list
+
+  val result : t -> sort
+end
+
 (** Arithmetic wraps modulo [2^63]; comparisons use signed order. General
     multiplication is uninterpreted. *)
 type op =
@@ -40,6 +52,7 @@ type term =
   | Integer of int64
   | Var of Symbol.t
   | App of op * term list
+  | Call of Function.t * term list
 
 type labelled_term =
   { label : string;
@@ -48,6 +61,7 @@ type labelled_term =
 
 type query =
   { symbols : Symbol.t list;
+    functions : Function.t list;
     facts : labelled_term list;
     goal : labelled_term
   }
