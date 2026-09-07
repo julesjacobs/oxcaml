@@ -37,7 +37,6 @@ module Raw = struct
   external right_final : ('a : immutable_data).
     'a split_frame @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_frame_right"
-
   external open_ : ('a : immutable_data).
     'a owned @ unique -> ('a root_frame * 'a loan) @ unique @@ portable =
       "caml_borrow_open"
@@ -52,7 +51,6 @@ module Raw = struct
       "caml_borrow_length"
   external finish : ('a : immutable_data).
     'a loan @ local unique -> unit @@ portable = "caml_borrow_finish"
-
   external split : ('a : immutable_data).
     (s : 'a loan) @ local unique ->
     (index : {k : int |
@@ -83,14 +81,12 @@ let (await_both @ portable) left (right : (unit -> 'b) @ local once) =
 
 module Slice = struct
   type ('a : immutable_data) t = 'a loan
-
   external current : ('a : immutable_data).
     'a t @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_current"
   external final : ('a : immutable_data).
     'a t @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_final"
-
   let length : ('a : immutable_data).
       (s : 'a t) @ local unique ->
       {r : (int, 'a t) step |
@@ -101,7 +97,6 @@ module Slice = struct
     exclave_ (
       let r = Raw.length s in
       refine_ r)
-
   external get : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int |
@@ -127,7 +122,6 @@ module Slice = struct
       Model.of_iarray r.value === current s
       && current r.state === current s && final r.state === final s}
     @ local unique @@ portable = "caml_borrow_snapshot"
-
   let swap : ('a : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
@@ -165,7 +159,6 @@ module Slice = struct
       ghost_ (Model.set_length intermediate bj x);
       ghost_ (Model.swap_def before bi bj);
       refine_ s4)
-
   let split_at : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (index : {k : int | 0 <= k
@@ -208,13 +201,11 @@ module Slice = struct
       ghost_ (Model.append_length left_end right_end);
       let result = {value; state} in
       refine_ result)
-
   let finish : ('a : immutable_data).
       (s : 'a t) @ local unique ->
       {u : unit | final s === current s} = fun s ->
     let u = Raw.finish s in
     refine_ u
-
   let split3 : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
@@ -254,31 +245,26 @@ module Slice = struct
       let bi = ghost_ (Bigint.of_int i) in
       let bj = ghost_ (Bigint.of_int j) in
       let bw = ghost_ (Bigint.of_int width) in
-      let[@def] (outer_post @ total) (r : 'r @ immutable)
-          (left : 'a Model.t @ immutable) (rest : 'a Model.t @ immutable) =
-        ghost_ (post r left (Model.take bw rest) (Model.drop bw rest)) in
-      let erased_outer = ghost_ outer_post in
-      let refine_ result = split_at s first erased_outer (fun left_arg rest_arg
-        ->
+      let outer_post = ghost_ (fun (r : 'r @ immutable)
+          (left : 'a Model.t @ immutable) (rest : 'a Model.t @ immutable) ->
+        post r left (Model.take bw rest) (Model.drop bw rest)) in
+      let refine_ result = split_at s first outer_post (fun left_arg rest_arg ->
         let refine_ left = left_arg in
         let refine_ rest = rest_arg in
         let left_end = ghost_ (final (borrow_ left)) in
-        let rest_end = ghost_ (final (borrow_ rest)) in
         ghost_ (Model.cut before bi);
         let bounded : {k : int | 0 <= k
           && Bigint.compare (Bigint.of_int k) (Model.length (current rest)) <=
             0} =
           refine_ width in
-        let[@def] (inner_post @ total) (r : 'r @ immutable)
-            (middle : 'a Model.t @ immutable) (right : 'a Model.t @ immutable) =
-          ghost_ (post r left_end middle right) in
-        let erased_inner = ghost_ inner_post in
-        let refine_ inner = split_at rest bounded erased_inner (fun middle_arg
+        let inner_post = ghost_ (fun (r : 'r @ immutable)
+            (middle : 'a Model.t @ immutable) (right : 'a Model.t @ immutable)
+              ->
+        post r left_end middle right) in
+        let refine_ inner = split_at rest bounded inner_post (fun middle_arg
           right_arg ->
           let refine_ middle = middle_arg in
           let refine_ right = right_arg in
-          let middle_end = ghost_ (final (borrow_ middle)) in
-          let right_end = ghost_ (final (borrow_ right)) in
           ghost_ (Model.sub_def before bi bj);
           ghost_ (Model.drop_add before bi bw);
           let left : {left : 'a t | let refine_ i = first in
@@ -293,28 +279,16 @@ module Slice = struct
             current right === Model.drop (Bigint.of_int j) (current s)} =
             refine_ right in
           let refine_ value = body left middle right in
-          ghost_ (inner_post_def value middle_end
-            right_end);
           refine_ value) in
         let {value; state = rest} = inner in
-        let rest_after = ghost_ (current (borrow_ rest)) in
-        let middle_after = ghost_ (Model.take bw rest_after) in
-        let right_after = ghost_ (Model.drop bw rest_after) in
-        ghost_ (inner_post_def value middle_after
-          right_after);
         finish rest;
-        ghost_ (outer_post_def value left_end rest_end);
         refine_ value) in
       let {value; state} = result in
       let after = ghost_ (current (borrow_ state)) in
-      let left_after = ghost_ (Model.take bi after) in
-      let rest_after = ghost_ (Model.drop bi after) in
-      ghost_ (outer_post_def value left_after rest_after);
       ghost_ (Model.sub_def after bi bj);
       ghost_ (Model.drop_add after bi bw);
       let result = {value; state} in
       refine_ result)
-
 
   let with_range : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
@@ -349,20 +323,16 @@ module Slice = struct
       let bi = ghost_ (Bigint.of_int i) in
       let bj = ghost_ (Bigint.of_int j) in
       let bw = ghost_ (Bigint.sub bj bi) in
-      let[@def] (framed_post @ total) (r : 'r @ immutable)
+      let framed_post = ghost_ (fun (r : 'r @ immutable)
           (left : 'a Model.t @ immutable) (middle : 'a Model.t @ immutable)
-          (right : 'a Model.t @ immutable) =
-        ghost_ (post r middle && left === Model.take bi before
+          (right : 'a Model.t @ immutable) ->
+        post r middle && left === Model.take bi before
           && right === Model.drop bj before) in
-      let erased_post = ghost_ framed_post in
-      let refine_ result = split3 s first past erased_post (fun left_arg middle
+      let refine_ result = split3 s first past framed_post (fun left_arg middle
         right_arg ->
         let refine_ left = left_arg in
         let refine_ right = right_arg in
-        let left_end = ghost_ (final (borrow_ left)) in
-        let right_end = ghost_ (final (borrow_ right)) in
         let refine_ middle_loan = middle in
-        let middle_end = ghost_ (final (borrow_ middle_loan)) in
         let middle : {middle : 'a t | let refine_ i = first in let refine_ j =
           past in
           current middle === Model.sub (current s) (Bigint.of_int i)
@@ -371,24 +341,16 @@ module Slice = struct
         let refine_ value = body middle in
         finish left;
         finish right;
-        ghost_ (framed_post_def value left_end middle_end
-          right_end);
         refine_ value) in
       let {value; state} = result in
       let after = ghost_ (current (borrow_ state)) in
-      let left_after = ghost_ (Model.take bi after) in
-      let middle_after = ghost_ (Model.sub after bi bj) in
-      let right_after = ghost_ (Model.drop bj after) in
       let rest_after = ghost_ (Model.drop bi after) in
-      ghost_ (framed_post_def value left_after
-        middle_after right_after);
       ghost_ (Model.cut after bi);
       ghost_ (Model.cut rest_after bw);
       ghost_ (Model.drop_add after bi bw);
       ghost_ (Model.sub_def after bi bj);
       let result = {value; state} in
       refine_ result)
-
   let parallel : ('a : immutable_data).
       (spawn : bool) ->
       (left : 'a t) @ local unique -> (right : 'a t) @ local unique ->
@@ -424,11 +386,9 @@ end
 
 module Owned_array = struct
   type ('a : immutable_data) t = 'a owned
-
   external contents : ('a : immutable_data).
     'a t @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_contents"
-
   external of_iarray : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     {a : 'a t | contents a === Model.of_iarray values} @ unique @@ portable =
@@ -437,7 +397,6 @@ module Owned_array = struct
     (a : 'a t) @ unique ->
     {values : 'a iarray | Model.of_iarray values === contents a} @@ portable =
       "caml_borrow_into_iarray"
-
   let with_mut : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost))

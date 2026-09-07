@@ -149,15 +149,14 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
     let past : {j : int | let refine_ i = first in i <= j
       && Bigint.compare (Bigint.of_int j) (Model.length (Slice.current s2)) <= 0} =
       refine_ past in
-    let[@def] (post @ total) (u : unit @ immutable) (left : int Model.t @ immutable)
-        (middle : int Model.t @ immutable) (right : int Model.t @ immutable) =
-      ghost_ (Spec.sorted (Model.append left (Model.append middle right))
+    let post = ghost_ (fun (_ : unit @ immutable) (left : int Model.t @ immutable)
+        (middle : int Model.t @ immutable) (right : int Model.t @ immutable) ->
+        Spec.sorted (Model.append left (Model.append middle right))
         && Spec.permutation divided (Model.append left (Model.append middle right))) in
-    let erased_post = ghost_ post in
     let spawn = domains > 1 && boundary >= cutoff && right_size >= cutoff in
     let left_domains = if spawn then domains / 2 else domains in
     let right_domains = if spawn then domains - left_domains else domains in
-    let refine_ result = Slice.split3 s2 first past erased_post (fun l m r ->
+    let refine_ result = Slice.split3 s2 first past post (fun l m r ->
       let refine_ left = l in
       let refine_ middle = m in
       let refine_ right = r in
@@ -166,44 +165,31 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
       let left_end = ghost_ (Slice.final (borrow_ left)) in
       let middle_end = ghost_ (Slice.final (borrow_ middle)) in
       let right_end = ghost_ (Slice.final (borrow_ right)) in
-      let[@def] (left_post @ total) (after : int Model.t @ immutable) =
-        ghost_ (Spec.sorted after && Spec.permutation left_before after) in
-      let[@def] (right_post @ total) (after : int Model.t @ immutable) =
-        ghost_ (Spec.sorted after && Spec.permutation right_before after) in
-      let left_post_value = ghost_ left_post in
-      let right_post_value = ghost_ right_post in
+      let left_post = ghost_ (fun (after : int Model.t @ immutable) ->
+        Spec.sorted after && Spec.permutation left_before after) in
+      let right_post = ghost_ (fun (after : int Model.t @ immutable) ->
+        Spec.sorted after && Spec.permutation right_before after) in
       ghost_ (Model.cut divided bboundary);
       ghost_ (Model.cut divided bpast);
-      let refine_ children = Slice.parallel spawn left right left_post_value right_post_value
+      let refine_ children = Slice.parallel spawn left right left_post right_post
         (fun child ->
           let refine_ child = child in
-          let after = ghost_ (Slice.final (borrow_ child)) in
           let sized : {s : int Slice.t | 0 <= boundary
             && Model.length (Slice.current s) === Bigint.of_int boundary} = refine_ child in
           let refine_ u = sort_sized left_domains cutoff boundary sized in
-          ghost_ (left_post_def after);
           refine_ u)
         (fun child ->
           let refine_ child = child in
-          let after = ghost_ (Slice.final (borrow_ child)) in
           let sized : {s : int Slice.t | 0 <= right_size
             && Model.length (Slice.current s) === Bigint.of_int right_size} = refine_ child in
           let refine_ u = sort_sized right_domains cutoff right_size sized in
-          ghost_ (right_post_def after);
           refine_ u) in
-      ghost_ (left_post_def left_end);
-      ghost_ (right_post_def right_end);
       Slice.finish middle;
       ghost_ (Spec.glue_partition divided pivot bboundary left_end middle_end right_end);
       let u = () in
-      ghost_ (post_def u left_end middle_end right_end);
       refine_ u) in
     let {value = u; state} = result in
     let after = ghost_ (Slice.current (borrow_ state)) in
-    let left = ghost_ (Model.take bboundary after) in
-    let middle = ghost_ (Model.sub after bboundary bpast) in
-    let right = ghost_ (Model.drop bpast after) in
-    ghost_ (post_def u left middle right);
     ghost_ (Spec.decompose3 after bboundary bpast);
     ghost_ (Spec.permutation_trans before divided after);
     Slice.finish state;
@@ -225,18 +211,13 @@ let (sort_array_with_budget @ portable) : (domains : int) -> (cutoff : int) ->
       && Spec.permutation (Owned_array.contents a) (Owned_array.contents r)} @ unique =
     fun domains cutoff a ->
   let before = ghost_ (Owned_array.contents (borrow_ a)) in
-  let[@def] (post @ total) (u : unit @ immutable) (after : int Model.t @ immutable) =
-    ghost_ (Spec.sorted after && Spec.permutation before after) in
-  let erased_post = ghost_ post in
-  let refine_ result = Owned_array.with_mut a erased_post (fun loan ->
+  let post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
+        Spec.sorted after && Spec.permutation before after) in
+  let refine_ result = Owned_array.with_mut a post (fun loan ->
     let refine_ s = loan in
-    let eventual = ghost_ (Slice.final (borrow_ s)) in
     let refine_ u = sort_with_budget domains cutoff s in
-    ghost_ (post_def u eventual);
     refine_ u) in
   let {value = u; state} = result in
-  let after = ghost_ (Owned_array.contents (borrow_ state)) in
-  ghost_ (post_def u after);
   refine_ state
 
 let (sort @ portable) : (s : int Slice.t) @ local unique ->

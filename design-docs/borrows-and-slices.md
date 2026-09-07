@@ -105,11 +105,11 @@ val with_mut : ('a : immutable_data) ('r : immutable_data).
        === Model.length (Owned_array.contents a)} @ unique
 ```
 
-The caller supplies a named total `[@def]` postcondition with ghost Boolean
-result and passes `ghost_ post`. Inside the callback, name the final model,
-perform the writes, call `finish`, expose `post_def`, and return a refined
-result. After `with_mut`, expose `post_def` again to use the concrete theorem.
-`borrow_demo.ml` is the smallest complete mutation example.
+The caller supplies a ghost lambda describing the postcondition. Inside the
+callback, perform the writes, call `finish`, and return a refined result. The
+verifier substitutes the predicate at its applications, so neither side needs
+`post_def` calls. `borrow_demo.ml` is the smallest complete mutation example.
+Named predicates with explicit `[@def]` lemmas remain supported.
 
 A root frame links the callback's final prophecy to the restored owner's
 contents. A split frame links each child's final prophecy to its part of the
@@ -225,3 +225,66 @@ native versions of the library into `_build/vox-library` and installs them
 under the configured prefix's `lib/ocaml/vox`. It is an explicit target so
 bootstrap and ordinary compiler installation do not acquire a Z3 requirement.
 See `verification/library/README.md` for client commands.
+
+## Callback predicate experiment
+
+Branch: `jujacobs/vox/callback-predicates-20260908`. The semantic baseline is
+`a7bd9bf43b`; `68b3b6a07d` separately formats the existing library and is the
+benchmark baseline. The shared-sequence experiment remains on
+`jujacobs/vox/shared-sequence-20260908` (`316979b039`), with a revise verdict.
+Collection theory, borrow-interface elaboration, and scoped termination remain
+pending on their separate branches.
+
+**Verdict: adopt explicit ghost lambdas for local callback predicates.** Vox
+already accepts predicate arguments. Retaining and substituting their local
+logical expressions removes the manual definition-lemma transport without
+requiring new syntax, interface metadata, or higher-order SMT. The change adds
+139 compiler lines after formatting, and removes 22 postcondition-unfolding
+calls and 11 generated definition lemmas from the migrated library and demos.
+
+`split3`, `with_range`, end swap, range editing, runtime validation, and
+sequential/parallel quicksort use the same public contracts as before. Ordinary
+named definitions remain opaque. Recursive definitions retain explicit
+unfolding. Exported predicate definitions still need contracts or definition
+lemmas: local lambda bodies are not exported through compiled interfaces.
+
+The retained expression is instantiated only for fully applied, unlabelled
+arguments with matching SMT sorts. Parameter patterns are supported when the
+body has a logical encoding. Unsupported expressions and sort-changing
+polymorphic applications retain their opaque interpretation. This restriction
+keeps the prototype small; the successful polymorphic borrow clients use
+predicates with the local function's fixed abstract element sort. The change
+does not infer postconditions.
+
+The implementation retains only captured symbols and parameters as free
+variables. Body-local definitions form a DAG; substitution preserves sharing.
+An unmodelled fresh result prevents transparency. Body proof obligations remain
+in their original verification batch rather than becoming assumptions of an
+application. Recursive bindings discard transparency.
+
+`verification/benchmarks/callback_demos.py` compiles baseline and candidate
+sources using the same compiler from `make install`, with `-principal`. Three
+repetitions gave these medians; query and byte counts come from a separate
+`-dsmtlib` run to exclude dump overhead from timings:
+
+| Complete sources | Baseline | Candidate | Queries before/after | SMT bytes before/after |
+| --- | --- | --- | --- | --- |
+| Library and end swap | 453 ms | 462 ms | 29 / 29 | 523961 / 512004 |
+| Unchanged sorted-array control | 579 ms | 598 ms | 46 / 46 | 635572 / 635572 |
+| Library and quicksort | 1190 ms | 1093 ms | 81 / 81 | 1693195 / 1672612 |
+
+The unchanged control also varied, so these timings do not establish a general
+speedup. The reduced SMT input and unchanged query counts show that the simpler
+proof source does not require additional solver queries on these examples.
+Library plus swap shrinks from 1135 to 1087 source lines; library plus quicksort
+shrinks from 2152 to 2090, against the equally formatted baseline.
+
+Validation: all 62 Vox files pass. Ghost-predicate tests cover callbacks,
+lexical captures, different arguments, matches, tuple parameters, conditional
+predicate selection, and polymorphic specialization. VC unit tests check both
+valid and invalid applications, preservation of body obligations, ordinary
+function opacity through ghost aliases, and linear substitution size. The
+installed library verifies in bytecode/native modes with `-principal`, and a
+separately compiled end-swap client runs successfully with both archives.
+Its Lambda output contains the erased-value marker for the predicate; its
+native assembly contains no predicate closure or model-projection calls.

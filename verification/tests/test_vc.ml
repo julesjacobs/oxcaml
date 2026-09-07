@@ -136,3 +136,49 @@ let () =
   assert (large < 3 * small);
   assert (large < 500_000);
   print_endline "Array-copy query expansion is bounded"
+
+let () =
+  let solve source =
+    match queries (prelude ^ source) with
+    | [q] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    | _ -> failwith "Expected one ghost-lambda query"
+  in
+  let application value =
+    "let f () = let p = ghost_ (fun (x : int) -> ge x 0) in\n" ^ "let value = "
+    ^ value ^ " in let u = () in\n"
+    ^ "let (_ : {u : unit | p value}) = refine_ u in ()"
+  in
+  assert (solve (application "1") = Valid);
+  let opaque_alias =
+    "let f () = let p (x : int) = ge x 0 in let q = ghost_ p in\n"
+    ^ "let value = 1 in let u = () in\n"
+    ^ "let (_ : {u : unit | q value}) = refine_ u in ()"
+  in
+  assert (match solve opaque_alias with Invalid _ -> true | _ -> false);
+  assert (match solve (application "-1") with Invalid _ -> true | _ -> false);
+  let checked_body =
+    "let f () = let _p = ghost_ (fun (x : int) ->\n"
+    ^ "let negative = -1 in let (_ : nonnegative) = refine_ negative in\n"
+    ^ "ge x 0) in ()"
+  in
+  assert (match solve checked_body with Invalid _ -> true | _ -> false);
+  let lambda_size count =
+    let source =
+      prelude ^ "let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init count (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n"
+      ^ "let (_ : {u : unit | ge (p x) 0}) = refine_ u in ()"
+    in
+    match queries source with
+    | [q] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+    | _ -> failwith "Expected one shared ghost-lambda query"
+  in
+  let small = lambda_size 20 in
+  let large = lambda_size 80 in
+  assert (large < 5 * small);
+  print_endline "Ghost lambdas preserve obligations and share substitutions"

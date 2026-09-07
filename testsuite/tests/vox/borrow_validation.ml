@@ -23,18 +23,14 @@ let validate_slice : (s : int Slice.t) @ local unique ->
 
 let validate : (a : int Owned_array.t) @ unique ->
     {r : int Owned_array.t | Spec.sorted (Owned_array.contents r)} @ unique = fun a ->
-  let[@def] (post @ total) (u : unit @ immutable) (after : int Model.t @ immutable) =
-    ghost_ (Spec.sorted after) in
-  let erased_post = ghost_ post in
-  let refine_ result = Owned_array.with_mut a erased_post (fun loan ->
+  let post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
+        Spec.sorted after) in
+  let refine_ result = Owned_array.with_mut a post (fun loan ->
     let refine_ s = loan in
-    let eventual = ghost_ (Slice.final (borrow_ s)) in
     let refine_ u = validate_slice s in
-    let refine_ equation = ghost_ (post_def u eventual) in
     refine_ u) in
-  let {value = u; state} = result in
-  let after = ghost_ (Owned_array.contents (borrow_ state)) in
-  let refine_ equation = ghost_ (post_def u after) in
+  let {state; _} = result in
+
   refine_ state
 
 let check (values : int list) =

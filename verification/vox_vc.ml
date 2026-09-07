@@ -3,12 +3,19 @@ open Typedtree
 open Vox_smt
 open Vox_encoding
 
+type logical_lambda =
+  { parameters : Symbol.t list;
+    body : term;
+    definitions : (Symbol.t, term) Hashtbl.t
+  }
+
 type function_value =
   { label : string;
     instances : Function.t list ref;
     primitive : (string * int) option;
     choice : (term * function_value * function_value) option;
-    total : bool
+    total : bool;
+    lambda : logical_lambda option
   }
 
 type value =
@@ -64,7 +71,8 @@ let join_value condition a b =
              choice = Some (condition, a, b);
              primitive =
                (if a.primitive = b.primitive then a.primitive else None);
-             total = a.total && b.total
+             total = a.total && b.total;
+             lambda = None
            })
     | _ -> None
 
@@ -410,6 +418,80 @@ let share_observation ctx term =
     Hashtbl.add ctx.named_terms symbol term;
     Var symbol
 
+let map_term_children f = function
+  | App (op, args) -> App (op, List.map f args)
+  | Call (fn, args) -> Call (fn, List.map f args)
+  | Construct (constructor, args) -> Construct (constructor, List.map f args)
+  | Is (constructor, arg) -> Is (constructor, f arg)
+  | Select (constructor, field, arg) -> Select (constructor, field, f arg)
+  | (Boolean _ | Integer _ | Big_integer _ | Var _) as term -> term
+
+(* Unresolved body results are not captures: keeping them free would identify
+   different applications of a function whose body we cannot model. *)
+let logical_lambda ctx captured parameters body =
+  let retained = Hashtbl.create 16 in
+  let rec retain term =
+    match term with
+    | Var symbol when not (Hashtbl.mem retained symbol) ->
+      Hashtbl.add retained symbol ();
+      Option.iter retain (Hashtbl.find_opt ctx.named_terms symbol)
+    | _ ->
+      ignore
+        (map_term_children
+           (fun term ->
+             retain term;
+             term)
+           term)
+  in
+  let retain_value _ value = Option.iter retain (scalar value) in
+  Path.Map.iter retain_value captured.values;
+  Path.Map.iter retain_value ctx.free;
+  Symbolic_keys.iter retain_value ctx.symbolic;
+  List.iter (fun symbol -> Hashtbl.replace retained symbol ()) parameters;
+  let definitions = Hashtbl.create 16 in
+  let rec visit term =
+    match term with
+    | Var symbol
+      when (not (Hashtbl.mem retained symbol))
+           && not (Hashtbl.mem definitions symbol) ->
+      begin match Hashtbl.find_opt ctx.named_terms symbol with
+      | None -> raise Exit
+      | Some term ->
+        Hashtbl.add definitions symbol term;
+        visit term
+      end
+    | _ ->
+      ignore
+        (map_term_children
+           (fun term ->
+             visit term;
+             term)
+           term)
+  in
+  match visit body with
+  | () -> Some { parameters; body; definitions }
+  | exception Exit -> None
+
+let instantiate_lambda ctx lambda args =
+  let values = Hashtbl.create 16 in
+  List.iter2 (Hashtbl.add values) lambda.parameters args;
+  let rec instantiate = function
+    | Var symbol as term ->
+      begin match Hashtbl.find_opt values symbol with
+      | Some value -> value
+      | None ->
+        begin match Hashtbl.find_opt lambda.definitions symbol with
+        | None -> term
+        | Some definition ->
+          let value = instantiate definition in
+          Hashtbl.add values symbol value;
+          value
+        end
+      end
+    | term -> share_observation ctx (map_term_children instantiate term)
+  in
+  instantiate lambda.body
+
 let iarray_origin ctx array =
   match expose_head ctx array with
   | Var symbol -> Hashtbl.find_opt ctx.iarray_origins symbol
@@ -731,7 +813,8 @@ let fresh ?primitive ctx env ty label =
              instances = ref [];
              choice = None;
              primitive;
-             total = false
+             total = false;
+             lambda = None
            })
     | _ -> None)
 
@@ -1195,6 +1278,26 @@ let rec function_call ctx env ty fn args =
     join_value condition
       (function_call ctx env ty (Some (Function a)) args)
       (function_call ctx env ty (Some (Function b)) args)
+  | Some (Function { lambda = Some lambda; _ })
+    when List.length lambda.parameters = List.length args ->
+    begin match
+      ( Misc.Stdlib.List.map_option scalar args,
+        signature ctx.encoding env ty (List.length args) )
+    with
+    | Some args, Some (_, result)
+      when List.map term_sort args = List.map Symbol.sort lambda.parameters
+           && term_sort lambda.body = result ->
+      scalar_value (instantiate_lambda ctx lambda args)
+    | _ ->
+      let fn =
+        Option.map
+          (function
+            | Function fn -> Function { fn with lambda = None }
+            | Scalar _ as value -> value)
+          fn
+      in
+      function_call ctx env ty fn args
+    end
   | _ -> (
     match fn, signature ctx.encoding env ty (List.length args) with
     | Some (Function fn), Some (arguments, result) ->
@@ -1912,7 +2015,20 @@ and expression_desc ctx s e =
           branch s condition)
         s params
     in
-    let s, _ =
+    let arguments =
+      Misc.Stdlib.List.map_option
+        (fun p ->
+          match
+            ( p.fp_arg_label,
+              p.fp_kind,
+              Path.Map.find_opt (Path.Pident p.fp_param) s.values )
+          with
+          | Nolabel, Tparam_pat _, Some (Some (Scalar (Var symbol))) ->
+            Some symbol
+          | _ -> None)
+        params
+    in
+    let s, result =
       match body with
       | Tfunction_body body -> eval s body
       | Tfunction_cases cases ->
@@ -1924,7 +2040,24 @@ and expression_desc ctx s e =
         end
     in
     ctx.batches <- s.code :: ctx.batches;
-    captured, opaque ()
+    let value = opaque () in
+    let value =
+      if
+        s.dead
+        || not
+             (List.exists
+                (function Texp_ghost, _, _ -> true | _ -> false)
+                e.exp_extra)
+      then value
+      else
+        match value, arguments, scalar result with
+        | Some (Function fn), Some parameters, Some body ->
+          Some
+            (Function
+               { fn with lambda = logical_lambda ctx captured parameters body })
+        | _ -> value
+    in
+    captured, value
   | Texp_match (scrutinee, _, cases, [], _)
     when List.for_all (fun c -> snd (split_pattern c.c_lhs) = None) cases ->
     let s, value = eval s scrutinee in
@@ -1965,6 +2098,12 @@ and value_bindings ctx s rec_flag bindings eliminate =
     | _ when impossible s -> s, None
     | vb :: rest ->
       let s, value = expression ctx s vb.vb_expr in
+      let value =
+        match rec_flag, value with
+        | Asttypes.Recursive, Some (Function fn) ->
+          Some (Function { fn with lambda = None })
+        | _ -> value
+      in
       let s, value =
         if eliminate
         then

@@ -19,15 +19,13 @@ let swap_ends : ('a : immutable_data). (a : 'a Owned_array.t) @ unique ->
             (Bigint.sub (Model.length (Owned_array.contents a)) 1Z)
         else Owned_array.contents a)} @ unique = fun a ->
   let before = ghost_ (Owned_array.contents (borrow_ a)) in
-  let[@def] (post @ total) (u : unit @ immutable) (after : 'a Model.t @ immutable) =
-    ghost_ (after ===
+  let post = ghost_ (fun (_ : unit @ immutable)
+      (after : 'a Model.t @ immutable) -> after ===
       (if Bigint.compare (Model.length before) 0Z > 0 then
         Model.swap before 0Z (Bigint.sub (Model.length before) 1Z)
        else before)) in
-  let erased_post = ghost_ post in
-  let refine_ result = Owned_array.with_mut a erased_post (fun loan ->
+  let refine_ result = Owned_array.with_mut a post (fun loan ->
     let refine_ s = loan in
-    let eventual = ghost_ (Slice.final (borrow_ s)) in
     let refine_ sized = Slice.length s in
     let {value = n; state = s1} = sized in
     let s2 =
@@ -45,11 +43,8 @@ let swap_ends : ('a : immutable_data). (a : 'a Owned_array.t) @ unique ->
       else s1 in
     Slice.finish s2;
     let u = () in
-    ghost_ (post_def u eventual);
     refine_ u) in
-  let {value = u; state} = result in
-  let after = ghost_ (Owned_array.contents (borrow_ state)) in
-  ghost_ (post_def u after);
+  let {state; _} = result in
   refine_ state
 
 let check (values : int list) (expected : int list) =

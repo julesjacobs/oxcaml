@@ -89,6 +89,31 @@ about the value of a ghost expression; runtime predicate replay preserves its
 erasure and checks whether the result may be used at real mode. A `[@def]`
 operation can put `ghost_` directly around its proof calls.
 
+## Callback predicates
+
+Supply a local callback predicate as an explicit ghost lambda:
+
+```ocaml
+let post = ghost_ (fun (_ : unit @ immutable)
+    (after : int Model.t @ immutable) ->
+  Spec.sorted after && Spec.permutation before after) in
+```
+
+The verifier substitutes arguments into a nonrecursive ghost lambda's logical
+expression. The callback establishes `post` in its result refinement, and the
+combinator carries that refinement to its caller. No definition-lemma calls
+are needed to interpret this local predicate. `ghost_` erases the lambda.
+
+Ordinary definitions retain their existing opacity, including when a function
+identifier is passed through `ghost_`. Use `[@def]` and explicit definition
+lemmas for recursive definitions and exported predicates whose bodies clients
+need to use. A compiled interface preserves contracts, not local lambda bodies.
+
+The prototype substitutes fully applied, unlabelled parameters whose argument
+and result sorts match its retained logical expression. Other applications
+retain their opaque meaning. This is explicit predicate construction; it does
+not infer a callback's postcondition.
+
 ## Models, evidence, and runtime checks
 
 Use a local ghost value for a local proof. Use `Ghost.t` or a `@@ ghost` record

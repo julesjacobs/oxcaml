@@ -67,13 +67,11 @@ let edit : (a : int Owned_array.t) @ unique ->
       Model.of_iarray r.value === Owned_array.contents a
       && Owned_array.contents r.state === rewritten (Owned_array.contents a)} @ unique = fun a ->
   let before = ghost_ (Owned_array.contents (borrow_ a)) in
-  let[@def] (post @ total) (copy : snapshot @ immutable total)
-      (after : int Model.t @ immutable) =
-    ghost_ (Model.of_iarray copy === before && after === rewritten before) in
-  let erased_post = ghost_ post in
-  let refine_ result = Owned_array.with_mut a erased_post (fun loan ->
+  let post = ghost_ (fun (copy : snapshot @ immutable total)
+      (after : int Model.t @ immutable) ->
+        Model.of_iarray copy === before && after === rewritten before) in
+  let refine_ result = Owned_array.with_mut a post (fun loan ->
     let refine_ s = loan in
-    let eventual = ghost_ (Slice.final (borrow_ s)) in
     let refine_ snapshot = Slice.snapshot s in
     let {value = (copy : snapshot); state = s1} = snapshot in
     let refine_ sized = Slice.length s1 in
@@ -89,20 +87,16 @@ let edit : (a : int Owned_array.t) @ unique ->
           && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s2)) <= 0} = refine_ first in
         let past : {j : int | let refine_ i = first in i <= j
           && Bigint.compare (Bigint.of_int j) (Model.length (Slice.current s2)) <= 0} = refine_ past in
-        let[@def] (pair_post @ total) (u : unit @ immutable) (after : int Model.t @ immutable) =
-          ghost_ (after === [99; 88]) in
-        let erased_pair = ghost_ pair_post in
-        let refine_ range = Slice.with_range s2 first past erased_pair (fun middle ->
+        let pair_post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
+        after === [99; 88]) in
+        let refine_ range = Slice.with_range s2 first past pair_post (fun middle ->
           let refine_ middle = middle in
-          let eventual = ghost_ (Slice.final (borrow_ middle)) in
           let sized : {s : int Slice.t | Model.length (Slice.current s) === 2Z} = refine_ middle in
           let refine_ u = write_pair sized in
-          ghost_ (pair_post_def u eventual);
           refine_ u) in
         let {value = u; state} = range in
-        let current = ghost_ (Slice.current (borrow_ state)) in
-        let middle = ghost_ (Model.sub current bfirst bpast) in
-        ghost_ (pair_post_def u middle);
+
+
         let zero = 0 in
         let index : {i : int | 0 <= i
           && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} = refine_ zero in
@@ -112,11 +106,9 @@ let edit : (a : int Owned_array.t) @ unique ->
       else s2 in
     Slice.finish state;
     ghost_ (rewritten_def before);
-    ghost_ (post_def copy eventual);
     refine_ copy) in
   let {value = copy; state} = result in
-  let after = ghost_ (Owned_array.contents (borrow_ state)) in
-  ghost_ (post_def copy after);
+
   let result = {value = copy; state} in
   refine_ result
 
