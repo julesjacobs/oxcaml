@@ -422,3 +422,83 @@ let copied_alias () : {value : int | value = 7} =
 [%%expect{|
 val copied_alias : unit -> {value : int | value = 7} = <fun>
 |}]
+
+module Record_bounds = struct
+  type t = { data : int iarray }
+
+  let get : (container : t) ->
+      {i : int | 0 <= i && i < Iarray.length container.data} -> int =
+    fun container index ->
+    let data = container.data in
+    let refine_ index = index in
+    let bounded : {i : int | 0 <= i && i < Iarray.length data} =
+      refine_ index in
+    Iarray.Refined.get data bounded
+end;;
+[%%expect{|
+module Record_bounds :
+  sig
+    type t = { data : int iarray; }
+    val get :
+      (container : t) ->
+      {i : int | (0 <= i) && (i < (Iarray.length container.data))} -> int
+  end
+|}]
+
+module Polymorphic_record_bounds = struct
+  type 'a t = { data : 'a iarray }
+
+  let get : ('a : value mod separable).
+      (container : 'a t) ->
+      {i : int | 0 <= i && i < Iarray.length container.data} -> 'a =
+    fun container index ->
+    let data = container.data in
+    let refine_ index = index in
+    let bounded : {i : int | 0 <= i && i < Iarray.length data} =
+      refine_ index in
+    Iarray.Refined.get data bounded
+end;;
+[%%expect{|
+module Polymorphic_record_bounds :
+  sig
+    type 'a t = { data : 'a iarray; }
+    val get :
+      (container : 'a t) ->
+      {i : int | (0 <= i) && (i < (Iarray.length container.data))} -> 'a
+  end
+|}]
+
+module Separate_record_bounds = struct
+  type 'a t = { data : 'a iarray }
+
+  let get : ('a : value mod separable).
+      (container : 'a t) -> (other : 'a t) @ total ->
+      {i : int | 0 <= i && i < Iarray.length container.data} -> 'a =
+    fun container other index ->
+    let data = other.data in
+    let refine_ index = index in
+    let bounded : {i : int | 0 <= i && i < Iarray.length data} =
+      refine_ index in
+    Iarray.Refined.get data bounded
+end;;
+[%%expect{|
+Line 11, characters 6-19:
+11 |       refine_ index in
+           ^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+
+let () =
+  let container = Polymorphic_record_bounds.{ data = [: 42 :] } in
+  let zero = 0 in
+  let index : {i : int | 0 <= i && i < Iarray.length container.data} =
+    refine_ zero in
+  assert (Polymorphic_record_bounds.get container index = 42);
+  let container = Polymorphic_record_bounds.{ data = [: true :] } in
+  let index : {i : int | 0 <= i && i < Iarray.length container.data} =
+    refine_ zero in
+  assert (Polymorphic_record_bounds.get container index)
+;;
+[%%expect{|
+|}]
