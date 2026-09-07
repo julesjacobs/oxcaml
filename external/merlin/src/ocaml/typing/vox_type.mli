@@ -1,4 +1,6 @@
-type t = Int | Bool
+type t = Int | Bool | Bigint
+
+val bigint_path : string -> Path.t
 
 (** Expand transparent aliases, but leave polymorphic and refinement wrappers
     to the caller's acceptance policy. *)

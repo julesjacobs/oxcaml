@@ -5,6 +5,8 @@ val sort : Env.t -> Types.type_expr -> Vox_smt.sort option
 
 val primitive : Env.t -> Path.t -> (string * int) option
 
+val value_constant : Env.t -> Types.type_expr -> Path.t -> Vox_smt.term option
+
 val operation :
   Env.t ->
   function_type:Types.type_expr ->
