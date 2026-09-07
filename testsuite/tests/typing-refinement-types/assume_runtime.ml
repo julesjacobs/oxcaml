@@ -1,6 +1,7 @@
 (* TEST
  modules = "assume_stubs.c";
  flags = "-extension refinement_types";
+ has-z3;
  { bytecode; }
  { native; }
  { flags += " -noassert"; bytecode; }

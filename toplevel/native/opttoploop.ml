@@ -492,6 +492,7 @@ let execute_phrase print_outcome ppf phr =
       in
       Compilenv.reset unit_info;
       Typecore.reset_delayed_checks ();
+      Vox_verify.install ();
       let (str, sg, names, _shape, newenv) =
         Typemod.type_toplevel_phrase oldenv oldsig sstr
       in
@@ -502,6 +503,7 @@ let execute_phrase print_outcome ppf phr =
         Includemod.signatures oldenv ~mark:true ~modes sg sg'
       in
       Typecore.force_delayed_checks ();
+      Verification.run str;
       let str, sg', rewritten =
         match str.str_items with
         | [ { str_desc = Tstr_eval (e, sort, attrs) ; str_loc = loc } ]

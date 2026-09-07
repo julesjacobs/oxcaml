@@ -33,6 +33,7 @@ module Options = Oxcaml_args.Make_opttop_options (struct
 end);;
 
 let () =
+  Vox_verify.install ();
   Expectcommon.register_assembly_callback :=
     Some Emit.register_expect_asm_callback;
   Expectcommon.set_assembly_whole_function :=
@@ -41,7 +42,7 @@ let () =
     Some Flambda2.register_compilation_unit_callback;
   Expectcommon.run
     ~read_anonymous_arg
-    ~extra_args:Options.list
+    ~extra_args:(Options.list @ !Clflags.arg_spec)
     ~extra_init:(fun () ->
       Clflags.native_code := true;
       Clflags.Opt_flag_handler.set Oxcaml_flags.opt_flag_handler)

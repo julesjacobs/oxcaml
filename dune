@@ -276,6 +276,7 @@
   type_shape
   tast_iterator
   tast_mapper
+  verification
   signature_group
   cmt_format
   cms_format
@@ -399,7 +400,7 @@
   (:standard -strict-sequence -w +67 -bin-annot -safe-string -strict-formats))
  (ocamlopt_flags
   (:standard (:include %{project_root}/ocamlopt_flags.sexp)))
- (libraries ocamlfrontend)
+ (libraries ocamlfrontend vox_verify)
  (modules
   ;; bytecomp/
   blambda
@@ -785,6 +786,7 @@
   compiler_owee
   gc_timings
   arm64_ast
+  vox_verify
   dwarf_low
   dwarf_high
   binary_emitter_intf))

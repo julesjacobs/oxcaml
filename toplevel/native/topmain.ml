@@ -94,9 +94,10 @@ let () =
 
 let main () =
   let ppf = Format.err_formatter in
+  Vox_verify.install ();
   Clflags.native_code := true;
   Clflags.Opt_flag_handler.set Oxcaml_flags.opt_flag_handler;
-  let list = ref Options.list in
+  let list = ref (Options.list @ !Clflags.arg_spec) in
   begin
     try
       Arg.parse_and_expand_argv_dynamic current argv list file_argument usage;

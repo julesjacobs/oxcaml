@@ -1,4 +1,5 @@
 (* TEST
+ has-z3;
  flags = "-extension refinement_types";
  expect;
 *)
@@ -15,11 +16,9 @@ type nonnegative = {n : int | n >= 0};;
 type nonnegative = {n : int | n >= 0}
 |}]
 
-let input = 42
-let wrapped : nonnegative = refine_ input
+let wrapped : nonnegative = let input = 42 in refine_ input
 let payload = let refine_ n = wrapped in n;;
 [%%expect{|
-val input : int = 42
 val wrapped : nonnegative = 42
 val payload : int = 42
 |}]

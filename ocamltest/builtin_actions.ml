@@ -43,6 +43,22 @@ let skip = make
     let result = Result.skip_with_reason reason in
     (result, env))
 
+let has_z3 = make
+  ~name:"has-z3"
+  ~description:"Pass if Z3 is available on PATH"
+  ~does_something:false
+  (fun log env ->
+    let path = Option.value ~default:"" (Sys.getenv_opt "PATH") in
+    let separator, executable =
+      if Sys.win32 then ';', "z3.exe" else ':', "z3" in
+    let available = List.exists (fun directory ->
+      let file = Filename.concat directory executable in
+      Unix.is_executable file && not (Sys.is_directory file))
+      (String.split_on_char separator path)
+    in
+    Actions_helpers.predicate available
+      "Z3 is available" "Z3 is unavailable" log env)
+
 let fail = make
   ~name:"fail"
   ~description:"Always fail"
@@ -421,33 +437,33 @@ let check_program_output = make
     Builtin_variables.output
     Builtin_variables.reference)
 
-let file_exists_action _log env =
+let file_exists_action expected _log env =
   match Environments.lookup Builtin_variables.file env with
     | None ->
       let reason = reason_with_fallback env "the file variable is undefined" in
       let result = Result.fail_with_reason reason in
       (result, env)
     | Some filename ->
-      if Sys.file_exists filename
-      then begin
-        let default_reason = Printf.sprintf "File %s exists" filename in
-        let reason = reason_with_fallback env default_reason in
-        let result = Result.pass_with_reason reason in
-        (result, env)
-      end else begin
-        let default_reason =
-          Printf.sprintf "File %s does not exist" filename
-        in
-        let reason = reason_with_fallback env default_reason in
-        let result = Result.fail_with_reason reason in
-        (result, env)
-      end
+      let exists = Sys.file_exists filename in
+      let default_reason = Printf.sprintf "File %s %s" filename
+        (if exists then "exists" else "does not exist") in
+      let reason = reason_with_fallback env default_reason in
+      let result = if exists = expected
+        then Result.pass_with_reason reason
+        else Result.fail_with_reason reason in
+      (result, env)
 let file_exists = make
   ~name:"file-exists"
   ~description:"Pass if there is a file at the path contained in variable \
     `file`"
   ~does_something:true
-  file_exists_action
+  (file_exists_action true)
+
+let file_not_exists = make
+  ~name:"file-not-exists"
+  ~description:"Pass if the path contained in variable `file` does not exist"
+  ~does_something:true
+  (file_exists_action false)
 
 let copy_action log env =
   let do_copy src dst =
@@ -494,6 +510,7 @@ let init () =
   [
     pass;
     skip;
+    has_z3;
     fail;
     cd;
     dumpenv;
@@ -535,6 +552,7 @@ let init () =
     no_frame_pointers;
     naked_pointers;
     file_exists;
+    file_not_exists;
     copy;
     probes;
     tsan;
