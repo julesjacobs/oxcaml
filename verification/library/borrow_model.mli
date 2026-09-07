@@ -117,9 +117,11 @@ external iarray_get : ('a : immutable_data).
   'a @ immutable total @@ total = "%array_safe_get"
 val of_iarray_length : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
-  {u : unit | length (of_iarray values) === Bigint.of_int (Iarray.length values)} @@ total
+  {u : unit | length (of_iarray values) === Bigint.of_int (Iarray.length
+    values)} @@ total
 val of_iarray_at : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
   (index : {i : int | 0 <= i && i < Iarray.length values}) ->
   {u : unit | let refine_ i = index in
-    at (of_iarray values) (Bigint.of_int i) === Some (iarray_get values index)} @@ total
+    at (of_iarray values) (Bigint.of_int i) === Some (iarray_get values index)}
+      @@ total

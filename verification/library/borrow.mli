@@ -28,7 +28,8 @@ module Slice : sig @@ portable
   val get : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int |
-      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
+      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <
+        0}) ->
     {r : ('a, 'a t) step |
       let refine_ index = index in
       Some r.value === Model.at (current s) (Bigint.of_int index)
@@ -38,7 +39,8 @@ module Slice : sig @@ portable
   val set : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int |
-      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
+      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <
+        0}) ->
     (value : 'a) @ immutable ->
     {r : 'a t | let refine_ index = index in
       current r === Model.set (current s) (Bigint.of_int index) value
@@ -96,16 +98,22 @@ module Slice : sig @@ portable
       (past : {j : int | let refine_ i = first in i <= j
         && Bigint.compare (Bigint.of_int j) (Model.length (current s)) <= 0}) ->
       (post : ('r @ immutable total -> 'a Model.t @ immutable ->
-        'a Model.t @ immutable -> 'a Model.t @ immutable -> bool @ ghost)) @ ghost ->
+        'a Model.t @ immutable -> 'a Model.t @ immutable -> bool @ ghost)) @
+          ghost ->
       ((left : {left : 'a t | let refine_ i = first in
-          current left === Model.take (Bigint.of_int i) (current s)}) @ local unique ->
-        (middle : {middle : 'a t | let refine_ i = first in let refine_ j = past in
-          current middle === Model.sub (current s) (Bigint.of_int i) (Bigint.of_int j)})
+          current left === Model.take (Bigint.of_int i) (current s)}) @ local
+            unique ->
+        (middle : {middle : 'a t | let refine_ i = first in let refine_ j = past
+          in
+          current middle === Model.sub (current s) (Bigint.of_int i)
+            (Bigint.of_int j)})
           @ local unique ->
         (right : {right : 'a t | let refine_ j = past in
-          current right === Model.drop (Bigint.of_int j) (current s)}) @ local unique ->
+          current right === Model.drop (Bigint.of_int j) (current s)}) @ local
+            unique ->
         {r : 'r | let refine_ left = left in let refine_ middle = middle in
-          let refine_ right = right in post r (final left) (final middle) (final right)})
+          let refine_ right = right in post r (final left) (final middle) (final
+            right)})
         @ local once ->
       {r : ('r, 'a t) step | let refine_ i = first in let refine_ j = past in
         post r.value (Model.take (Bigint.of_int i) (current r.state))
@@ -122,15 +130,22 @@ module Slice : sig @@ portable
         && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <= 0}) ->
       (past : {j : int | let refine_ i = first in i <= j
         && Bigint.compare (Bigint.of_int j) (Model.length (current s)) <= 0}) ->
-      (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost)) @ ghost ->
-      ((middle : {middle : 'a t | let refine_ i = first in let refine_ j = past in
-          current middle === Model.sub (current s) (Bigint.of_int i) (Bigint.of_int j)})
+      (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost))
+        @ ghost ->
+      ((middle : {middle : 'a t | let refine_ i = first in let refine_ j = past
+        in
+          current middle === Model.sub (current s) (Bigint.of_int i)
+            (Bigint.of_int j)})
           @ local unique ->
-        {r : 'r | let refine_ middle = middle in post r (final middle)}) @ local once ->
+        {r : 'r | let refine_ middle = middle in post r (final middle)}) @ local
+          once ->
       {r : ('r, 'a t) step | let refine_ i = first in let refine_ j = past in
-        post r.value (Model.sub (current r.state) (Bigint.of_int i) (Bigint.of_int j))
-        && current r.state === Model.append (Model.take (Bigint.of_int i) (current s))
-          (Model.append (Model.sub (current r.state) (Bigint.of_int i) (Bigint.of_int j))
+        post r.value (Model.sub (current r.state) (Bigint.of_int i)
+          (Bigint.of_int j))
+        && current r.state === Model.append (Model.take (Bigint.of_int i)
+          (current s))
+          (Model.append (Model.sub (current r.state) (Bigint.of_int i)
+            (Bigint.of_int j))
             (Model.drop (Bigint.of_int j) (current s)))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}

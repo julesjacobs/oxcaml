@@ -39,21 +39,25 @@ module Raw = struct
     @@ total = "caml_borrow_frame_right"
 
   external open_ : ('a : immutable_data).
-    'a owned @ unique -> ('a root_frame * 'a loan) @ unique @@ portable = "caml_borrow_open"
+    'a owned @ unique -> ('a root_frame * 'a loan) @ unique @@ portable =
+      "caml_borrow_open"
   external restore : ('a : immutable_data).
-    'a root_frame @ unique -> 'a owned @ unique @@ portable = "caml_borrow_restore"
+    'a root_frame @ unique -> 'a owned @ unique @@ portable =
+      "caml_borrow_restore"
   external transfer : ('a : immutable_data).
     'a loan @ local unique -> 'a loan @ unique
     @@ portable = "caml_borrow_transfer"
   external length : ('a : immutable_data).
-    'a loan @ local unique -> (int, 'a loan) step @ local unique @@ portable = "caml_borrow_length"
+    'a loan @ local unique -> (int, 'a loan) step @ local unique @@ portable =
+      "caml_borrow_length"
   external finish : ('a : immutable_data).
     'a loan @ local unique -> unit @@ portable = "caml_borrow_finish"
 
   external split : ('a : immutable_data).
     (s : 'a loan) @ local unique ->
     (index : {k : int |
-      0 <= k && Bigint.compare (Bigint.of_int k) (Model.length (current s)) <= 0}) ->
+      0 <= k && Bigint.compare (Bigint.of_int k) (Model.length (current s)) <=
+        0}) ->
     {r : 'a split_frame * 'a loan * 'a loan |
       let refine_ index = index in
       match r with _, left, right ->
@@ -101,7 +105,8 @@ module Slice = struct
   external get : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int |
-      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
+      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <
+        0}) ->
     {r : ('a, 'a t) step |
       let refine_ index = index in
       Some r.value === Model.at (current s) (Bigint.of_int index)
@@ -110,7 +115,8 @@ module Slice = struct
   external set : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int |
-      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
+      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <
+        0}) ->
     (value : 'a) @ immutable ->
     {r : 'a t | let refine_ index = index in
       current r === Model.set (current s) (Bigint.of_int index) value
@@ -183,7 +189,8 @@ module Slice = struct
     exclave_ (
       let refine_ k = index in
       let raw_index : {k : int | 0 <= k
-        && Bigint.compare (Bigint.of_int k) (Model.length (Raw.current s)) <= 0} =
+        && Bigint.compare (Bigint.of_int k) (Model.length (Raw.current s)) <= 0}
+          =
         refine_ k in
       let refine_ pieces = Raw.split s raw_index in
       let frame, left, right = pieces in
@@ -215,16 +222,22 @@ module Slice = struct
       (past : {j : int | let refine_ i = first in i <= j
         && Bigint.compare (Bigint.of_int j) (Model.length (current s)) <= 0}) ->
       (post : ('r @ immutable total -> 'a Model.t @ immutable ->
-        'a Model.t @ immutable -> 'a Model.t @ immutable -> bool @ ghost)) @ ghost ->
+        'a Model.t @ immutable -> 'a Model.t @ immutable -> bool @ ghost)) @
+          ghost ->
       ((left : {left : 'a t | let refine_ i = first in
-          current left === Model.take (Bigint.of_int i) (current s)}) @ local unique ->
-        (middle : {middle : 'a t | let refine_ i = first in let refine_ j = past in
-          current middle === Model.sub (current s) (Bigint.of_int i) (Bigint.of_int j)})
+          current left === Model.take (Bigint.of_int i) (current s)}) @ local
+            unique ->
+        (middle : {middle : 'a t | let refine_ i = first in let refine_ j = past
+          in
+          current middle === Model.sub (current s) (Bigint.of_int i)
+            (Bigint.of_int j)})
           @ local unique ->
         (right : {right : 'a t | let refine_ j = past in
-          current right === Model.drop (Bigint.of_int j) (current s)}) @ local unique ->
+          current right === Model.drop (Bigint.of_int j) (current s)}) @ local
+            unique ->
         {r : 'r | let refine_ left = left in let refine_ middle = middle in
-          let refine_ right = right in post r (final left) (final middle) (final right)})
+          let refine_ right = right in post r (final left) (final middle) (final
+            right)})
         @ local once ->
       {r : ('r, 'a t) step | let refine_ i = first in let refine_ j = past in
         post r.value (Model.take (Bigint.of_int i) (current r.state))
@@ -245,20 +258,23 @@ module Slice = struct
           (left : 'a Model.t @ immutable) (rest : 'a Model.t @ immutable) =
         ghost_ (post r left (Model.take bw rest) (Model.drop bw rest)) in
       let erased_outer = ghost_ outer_post in
-      let refine_ result = split_at s first erased_outer (fun left_arg rest_arg ->
+      let refine_ result = split_at s first erased_outer (fun left_arg rest_arg
+        ->
         let refine_ left = left_arg in
         let refine_ rest = rest_arg in
         let left_end = ghost_ (final (borrow_ left)) in
         let rest_end = ghost_ (final (borrow_ rest)) in
         ghost_ (Model.cut before bi);
         let bounded : {k : int | 0 <= k
-          && Bigint.compare (Bigint.of_int k) (Model.length (current rest)) <= 0} =
+          && Bigint.compare (Bigint.of_int k) (Model.length (current rest)) <=
+            0} =
           refine_ width in
         let[@def] (inner_post @ total) (r : 'r @ immutable)
             (middle : 'a Model.t @ immutable) (right : 'a Model.t @ immutable) =
           ghost_ (post r left_end middle right) in
         let erased_inner = ghost_ inner_post in
-        let refine_ inner = split_at rest bounded erased_inner (fun middle_arg right_arg ->
+        let refine_ inner = split_at rest bounded erased_inner (fun middle_arg
+          right_arg ->
           let refine_ middle = middle_arg in
           let refine_ right = right_arg in
           let middle_end = ghost_ (final (borrow_ middle)) in
@@ -266,21 +282,26 @@ module Slice = struct
           ghost_ (Model.sub_def before bi bj);
           ghost_ (Model.drop_add before bi bw);
           let left : {left : 'a t | let refine_ i = first in
-            current left === Model.take (Bigint.of_int i) (current s)} = refine_ left in
-          let middle : {middle : 'a t | let refine_ i = first in let refine_ j = past in
-            current middle === Model.sub (current s) (Bigint.of_int i) (Bigint.of_int j)} =
+            current left === Model.take (Bigint.of_int i) (current s)} = refine_
+              left in
+          let middle : {middle : 'a t | let refine_ i = first in let refine_ j =
+            past in
+            current middle === Model.sub (current s) (Bigint.of_int i)
+              (Bigint.of_int j)} =
             refine_ middle in
           let right : {right : 'a t | let refine_ j = past in
             current right === Model.drop (Bigint.of_int j) (current s)} =
             refine_ right in
           let refine_ value = body left middle right in
-          ghost_ (inner_post_def value middle_end right_end);
+          ghost_ (inner_post_def value middle_end
+            right_end);
           refine_ value) in
         let {value; state = rest} = inner in
         let rest_after = ghost_ (current (borrow_ rest)) in
         let middle_after = ghost_ (Model.take bw rest_after) in
         let right_after = ghost_ (Model.drop bw rest_after) in
-        ghost_ (inner_post_def value middle_after right_after);
+        ghost_ (inner_post_def value middle_after
+          right_after);
         finish rest;
         ghost_ (outer_post_def value left_end rest_end);
         refine_ value) in
@@ -301,15 +322,22 @@ module Slice = struct
         && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <= 0}) ->
       (past : {j : int | let refine_ i = first in i <= j
         && Bigint.compare (Bigint.of_int j) (Model.length (current s)) <= 0}) ->
-      (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost)) @ ghost ->
-      ((middle : {middle : 'a t | let refine_ i = first in let refine_ j = past in
-          current middle === Model.sub (current s) (Bigint.of_int i) (Bigint.of_int j)})
+      (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost))
+        @ ghost ->
+      ((middle : {middle : 'a t | let refine_ i = first in let refine_ j = past
+        in
+          current middle === Model.sub (current s) (Bigint.of_int i)
+            (Bigint.of_int j)})
           @ local unique ->
-        {r : 'r | let refine_ middle = middle in post r (final middle)}) @ local once ->
+        {r : 'r | let refine_ middle = middle in post r (final middle)}) @ local
+          once ->
       {r : ('r, 'a t) step | let refine_ i = first in let refine_ j = past in
-        post r.value (Model.sub (current r.state) (Bigint.of_int i) (Bigint.of_int j))
-        && current r.state === Model.append (Model.take (Bigint.of_int i) (current s))
-          (Model.append (Model.sub (current r.state) (Bigint.of_int i) (Bigint.of_int j))
+        post r.value (Model.sub (current r.state) (Bigint.of_int i)
+          (Bigint.of_int j))
+        && current r.state === Model.append (Model.take (Bigint.of_int i)
+          (current s))
+          (Model.append (Model.sub (current r.state) (Bigint.of_int i)
+            (Bigint.of_int j))
             (Model.drop (Bigint.of_int j) (current s)))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
@@ -327,20 +355,24 @@ module Slice = struct
         ghost_ (post r middle && left === Model.take bi before
           && right === Model.drop bj before) in
       let erased_post = ghost_ framed_post in
-      let refine_ result = split3 s first past erased_post (fun left_arg middle right_arg ->
+      let refine_ result = split3 s first past erased_post (fun left_arg middle
+        right_arg ->
         let refine_ left = left_arg in
         let refine_ right = right_arg in
         let left_end = ghost_ (final (borrow_ left)) in
         let right_end = ghost_ (final (borrow_ right)) in
         let refine_ middle_loan = middle in
         let middle_end = ghost_ (final (borrow_ middle_loan)) in
-        let middle : {middle : 'a t | let refine_ i = first in let refine_ j = past in
-          current middle === Model.sub (current s) (Bigint.of_int i) (Bigint.of_int j)} =
+        let middle : {middle : 'a t | let refine_ i = first in let refine_ j =
+          past in
+          current middle === Model.sub (current s) (Bigint.of_int i)
+            (Bigint.of_int j)} =
           refine_ middle_loan in
         let refine_ value = body middle in
         finish left;
         finish right;
-        ghost_ (framed_post_def value left_end middle_end right_end);
+        ghost_ (framed_post_def value left_end middle_end
+          right_end);
         refine_ value) in
       let {value; state} = result in
       let after = ghost_ (current (borrow_ state)) in
@@ -348,7 +380,8 @@ module Slice = struct
       let middle_after = ghost_ (Model.sub after bi bj) in
       let right_after = ghost_ (Model.drop bj after) in
       let rest_after = ghost_ (Model.drop bi after) in
-      ghost_ (framed_post_def value left_after middle_after right_after);
+      ghost_ (framed_post_def value left_after
+        middle_after right_after);
       ghost_ (Model.cut after bi);
       ghost_ (Model.cut rest_after bw);
       ghost_ (Model.drop_add after bi bw);
@@ -376,7 +409,8 @@ module Slice = struct
         && final s === final right} = refine_ right in
     let l, r =
       if spawn then
-        let domain = (Domain.Safe.spawn [@alert "-do_not_spawn_domains"]) (fun () -> lf left1) in
+        let domain = (Domain.Safe.spawn [@alert "-do_not_spawn_domains"]) (fun
+          () -> lf left1) in
         await_both domain (fun () -> rf right1)
       else
         let l = lf left1 in
@@ -397,10 +431,12 @@ module Owned_array = struct
 
   external of_iarray : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
-    {a : 'a t | contents a === Model.of_iarray values} @ unique @@ portable = "caml_borrow_of_iarray"
+    {a : 'a t | contents a === Model.of_iarray values} @ unique @@ portable =
+      "caml_borrow_of_iarray"
   external into_iarray : ('a : immutable_data).
     (a : 'a t) @ unique ->
-    {values : 'a iarray | Model.of_iarray values === contents a} @@ portable = "caml_borrow_into_iarray"
+    {values : 'a iarray | Model.of_iarray values === contents a} @@ portable =
+      "caml_borrow_into_iarray"
 
   let with_mut : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->

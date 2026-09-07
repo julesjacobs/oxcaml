@@ -31,7 +31,8 @@ let[@def] rec set (values : ('a : immutable_data) t @ immutable total)
     else head :: set tail (Bigint.sub index 1Z) value
 
 let[@def] rec take (count : Bigint.t)
-    (values : ('a : immutable_data) t @ immutable total) : 'a t @ immutable total =
+    (values : ('a : immutable_data) t @ immutable total) : 'a t @ immutable
+      total =
   match values with
   | [] -> []
   | head :: tail ->
@@ -39,7 +40,8 @@ let[@def] rec take (count : Bigint.t)
     else head :: take (Bigint.sub count 1Z) tail
 
 let[@def] rec drop (count : Bigint.t)
-    (values : ('a : immutable_data) t @ immutable total) : 'a t @ immutable total =
+    (values : ('a : immutable_data) t @ immutable total) : 'a t @ immutable
+      total =
   match values with
   | [] -> []
   | _ :: tail ->
@@ -179,7 +181,8 @@ let rec (drop_add @ total) : ('a : immutable_data).
 
 let (sub_length @ total) : ('a : immutable_data).
     (values : 'a t) @ immutable -> (first : Bigint.t) -> (past : Bigint.t) ->
-    {u : unit | if Bigint.compare first 0Z >= 0 && Bigint.compare first past <= 0
+    {u : unit | if Bigint.compare first 0Z >= 0 && Bigint.compare first past <=
+      0
       && Bigint.compare past (length values) <= 0 then
       length (sub values first past) === Bigint.sub past first else true} =
     fun values first past ->
@@ -191,14 +194,17 @@ let (sub_length @ total) : ('a : immutable_data).
   let u = () in refine_ u
 
 let rec (from_iarray_length @ total) : ('a : immutable_data).
-    (values : 'a iarray) @ immutable -> (count : int) -> (suffix : 'a t) @ immutable ->
+    (values : 'a iarray) @ immutable -> (count : int) -> (suffix : 'a t) @
+      immutable ->
     {u : unit | if 0 <= count && count <= Iarray.length values then
       length (from_iarray values count suffix) ===
-        Bigint.add (Bigint.of_int count) (length suffix) else true} = fun values count suffix ->
+        Bigint.add (Bigint.of_int count) (length suffix) else true} = fun values
+          count suffix ->
   let refine_ equation = from_iarray_def values count suffix in
   if 0 < count && count <= Iarray.length values then
     let index = count - 1 in
-    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index in
+    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index
+      in
     let head = iarray_get values bounded in
     let suffix1 = head :: suffix in
     let refine_ size = length_def suffix1 in
@@ -209,7 +215,8 @@ let rec (from_iarray_length @ total) : ('a : immutable_data).
 
 let (of_iarray_length @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
-    {u : unit | length (of_iarray values) === Bigint.of_int (Iarray.length values)} = fun values ->
+    {u : unit | length (of_iarray values) === Bigint.of_int (Iarray.length
+      values)} = fun values ->
   let count = Iarray.length values in
   let nil = [] in
   let refine_ equation = of_iarray_def values in
@@ -220,12 +227,14 @@ let (of_iarray_length @ total) : ('a : immutable_data).
 let[@def] iarray_at (values : ('a : immutable_data) iarray @ immutable total)
     (index : int) : 'a option @ immutable total =
   if 0 <= index && index < Iarray.length values then
-    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index in
+    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index
+      in
     Some (iarray_get values bounded)
   else None
 
 let rec (from_iarray_at @ total) : ('a : immutable_data).
-    (values : 'a iarray) @ immutable -> (count : int) -> (suffix : 'a t) @ immutable ->
+    (values : 'a iarray) @ immutable -> (count : int) -> (suffix : 'a t) @
+      immutable ->
     (query : int) ->
     {u : unit | if 0 <= count && count <= Iarray.length values then
       at (from_iarray values count suffix) (Bigint.of_int query) ===
@@ -237,7 +246,8 @@ let rec (from_iarray_at @ total) : ('a : immutable_data).
   let refine_ query_value = iarray_at_def values query in
   if 0 < count && count <= Iarray.length values then
     let index = count - 1 in
-    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index in
+    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index
+      in
     let head = iarray_get values bounded in
     let suffix1 = head :: suffix in
     let shifted = Bigint.sub (Bigint.of_int query) (Bigint.of_int index) in
@@ -251,7 +261,8 @@ let (of_iarray_at @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length values}) ->
     {u : unit | let refine_ i = index in
-      at (of_iarray values) (Bigint.of_int i) === Some (iarray_get values index)} =
+      at (of_iarray values) (Bigint.of_int i) === Some (iarray_get values
+        index)} =
     fun values index ->
   let refine_ query = index in
   let count = Iarray.length values in
