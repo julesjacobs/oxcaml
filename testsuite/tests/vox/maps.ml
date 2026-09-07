@@ -715,3 +715,51 @@ Error: The kind of type "int ref S.t" is mutable_data.
        But the kind of type "int ref S.t" must be a subkind of immutable_data
          because of the definition of t at line 7, characters 2-39.
 |}]
+
+module Polymorphic_sparse_pair : sig end = struct
+  module Index = struct
+    type t = int
+    external compare : int -> int -> int @@ total = "%compare"
+  end
+
+  module Updates = Map.MakeTotal (Index)
+
+  let (clear_reads_base @ total) :
+      ('a : value mod separable).
+      (base : 'a iarray) ->
+      'a Updates.t @ total ->
+      (index : {index : int |
+        0 <= index && index < Iarray.length base}) ->
+      {results : 'a * 'a |
+        match results with result, base_result -> result === base_result} =
+    fun base updates index ->
+    let refine_ raw_index = index in
+    let updates = Updates.Refined.remove raw_index updates in
+    let base_result = Iarray.Refined.get base index in
+    let result =
+      if Updates.mem raw_index updates then
+        let member : {key : int | Updates.mem key updates} = refine_ raw_index in
+        Updates.Refined.find updates member
+      else Iarray.Refined.get base index
+    in
+    let results = result, base_result in
+    refine_ results
+
+  let () =
+    let base = [: 10 :] in
+    let updates = Updates.Refined.singleton 0 99 in
+    let zero = 0 in
+    let index : {i : int | 0 <= i && i < Iarray.length base} = refine_ zero in
+    let refine_ pair = clear_reads_base base updates index in
+    let left, right = pair in
+    assert (left = 10 && right = 10);
+    let base = [: true :] in
+    let updates = Updates.Refined.singleton 0 false in
+    let index : {i : int | 0 <= i && i < Iarray.length base} = refine_ zero in
+    let refine_ pair = clear_reads_base base updates index in
+    let left, right = pair in
+    assert (left && right)
+end;;
+[%%expect{|
+module Polymorphic_sparse_pair : sig end
+|}]
