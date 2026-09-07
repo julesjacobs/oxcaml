@@ -24,6 +24,7 @@
    -g
    -absname
    -bin-annot
+   -extension refinement_types
    -extension runtime_metaprogramming
    -nostdlib
    -safe-string

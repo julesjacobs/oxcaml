@@ -15,6 +15,11 @@ type value =
   | Scalar of term
   | Function of function_value
 
+type iarray_origin =
+  | Iarray_literal of term option list
+  | Iarray_append of term * term
+  | Iarray_sub of term * term * term
+
 let scalar = function Some (Scalar t) -> Some t | _ -> None
 
 let scalar_value t = Some (Scalar t)
@@ -84,6 +89,12 @@ type context =
   { encoding : Vox_encoding.context;
     mutable datatypes : datatype_declaration list;
     mutable functions : Function.t list;
+    function_cache : (string * sort list * sort, Function.t) Hashtbl.t;
+    iarray_origins : (Symbol.t, iarray_origin) Hashtbl.t;
+    iarray_lengths : (term, term) Hashtbl.t;
+    iarray_reads : (sort * term * term, term) Hashtbl.t;
+    observation_definitions : (Symbol.t, term) Hashtbl.t;
+    named_terms : (Symbol.t, term) Hashtbl.t;
     mutable free : value option Path.Map.t;
     mutable batches : command list list;
     symbolic : value option Symbolic_keys.t;
@@ -139,7 +150,7 @@ let at_mode mode = function
 
 let fresh_symbol sort label = Var (Symbol.create ~label sort)
 
-let name s = function
+let name ctx s = function
   | Some (Scalar (Construct (_, []))) as value -> s, value
   | Some (Scalar ((App _ | Call _ | Construct _ | Is _ | Select _) as term)) ->
     let s =
@@ -148,16 +159,25 @@ let name s = function
         branch s (App (Ne, [divisor; Integer 0L]))
       | _ -> s
     in
-    let value = fresh_symbol (term_sort term) "value" in
+    let symbol = Symbol.create ~label:"value" (term_sort term) in
+    Hashtbl.add ctx.named_terms symbol term;
+    let value = Var symbol in
     { s with code = Define (both Eq value term) :: s.code }, scalar_value value
   | value -> s, value
+
+let rec expose_head ctx = function
+  | Var symbol as value -> (
+    match Hashtbl.find_opt ctx.named_terms symbol with
+    | Some term -> expose_head ctx term
+    | None -> value)
+  | value -> value
 
 let rec added_prefix ~base = function
   | current when current == base -> []
   | item :: rest -> item :: added_prefix ~base rest
   | [] -> Misc.fatal_error "VC: state does not extend its input"
 
-let choose s condition ifso ifnot =
+let choose ctx s condition ifso ifnot =
   if s.dead
   then s, None
   else
@@ -188,7 +208,7 @@ let choose s condition ifso ifnot =
             @ s.omitted_premises
         }
       in
-      name s value
+      name ctx s value
 
 let rec arguments_right_to_left eval s = function
   | [] -> s, []
@@ -197,7 +217,7 @@ let rec arguments_right_to_left eval s = function
     let s, value = eval s arg in
     s, value :: values
 
-let short_circuit eval loc ~is_and s a b =
+let short_circuit ctx eval loc ~is_and s a b =
   let s, a = eval s a in
   if s.dead
   then s, None
@@ -205,11 +225,11 @@ let short_circuit eval loc ~is_and s a b =
     let condition = required loc a in
     if is_and
     then
-      choose s condition
+      choose ctx s condition
         (fun s -> eval s b)
         (fun s -> s, scalar_value (Boolean false))
     else
-      choose s condition
+      choose ctx s condition
         (fun s -> s, scalar_value (Boolean true))
         (fun s -> eval s b)
 
@@ -229,7 +249,7 @@ let merge_patterns base outcomes =
   in
   { base with values }, disjunction (List.map snd outcomes)
 
-let guarded_case eval loc s matched guard body rest =
+let guarded_case ctx eval loc s matched guard body rest =
   let matched, condition = merge_patterns s matched in
   let values = s.values in
   let s, accepted =
@@ -237,13 +257,13 @@ let guarded_case eval loc s matched guard body rest =
     | None -> matched, condition
     | Some g ->
       let state, value =
-        choose matched condition
+        choose ctx matched condition
           (fun s -> eval s g)
           (fun s -> s, scalar_value (Boolean false))
       in
       state, if state.dead then Boolean false else required loc value
   in
-  choose s accepted
+  choose ctx s accepted
     (fun s -> eval s body)
     (fun state -> rest { state with values })
 
@@ -336,6 +356,165 @@ let rec erase_assertions code =
       | Choice (a, b) -> Some (Choice (erase_assertions a, erase_assertions b)))
     code
 
+let fact s _label term = branch s term
+
+let intern_function ctx label arguments result =
+  List.iter (register_sort ctx) (result :: arguments);
+  let key = label, arguments, result in
+  match Hashtbl.find_opt ctx.function_cache key with
+  | Some function_ -> function_
+  | None ->
+    let function_ = Function.create ~label ~arguments ~result in
+    Hashtbl.add ctx.function_cache key function_;
+    ctx.functions <- function_ :: ctx.functions;
+    function_
+
+let share_observation ctx term =
+  match term with
+  | Boolean _ | Integer _ | Var _ -> term
+  | _ ->
+    let symbol = Symbol.create ~label:"observation" (term_sort term) in
+    Hashtbl.add ctx.observation_definitions symbol term;
+    Hashtbl.add ctx.named_terms symbol term;
+    Var symbol
+
+let iarray_origin ctx array =
+  match expose_head ctx array with
+  | Var symbol -> Hashtbl.find_opt ctx.iarray_origins symbol
+  | _ -> None
+
+let rec iarray_length ctx iarray_sort array =
+  match Hashtbl.find_opt ctx.iarray_lengths array with
+  | Some value -> value
+  | None ->
+    let value =
+      share_observation ctx (expand_iarray_length ctx iarray_sort array)
+    in
+    Hashtbl.add ctx.iarray_lengths array value;
+    value
+
+and expand_iarray_length ctx iarray_sort array =
+  match iarray_origin ctx array with
+  | Some (Iarray_literal elements) ->
+    Integer (Int64.of_int (List.length elements))
+  | Some (Iarray_append (left, right)) ->
+    App
+      ( Add,
+        [iarray_length ctx iarray_sort left; iarray_length ctx iarray_sort right]
+      )
+  | Some (Iarray_sub (_, _, length)) -> length
+  | None -> (
+    match expose_head ctx array with
+    | App (Ite, [condition; left; right]) ->
+      App
+        ( Ite,
+          [ condition;
+            iarray_length ctx iarray_sort left;
+            iarray_length ctx iarray_sort right ] )
+    | _ ->
+      let function_ = intern_function ctx "Iarray.length" [iarray_sort] Int63 in
+      Call (function_, [array]))
+
+let rec iarray_get_with_budget ctx budget iarray_sort element_sort array index =
+  let key = element_sort, array, index in
+  match Hashtbl.find_opt ctx.iarray_reads key with
+  | Some value -> value
+  | None when !budget = 0 ->
+    let function_ =
+      intern_function ctx "Iarray.get" [iarray_sort; Int63] element_sort
+    in
+    Call (function_, [array; index])
+  | None ->
+    decr budget;
+    let value =
+      share_observation ctx
+        (expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
+           index)
+    in
+    Hashtbl.add ctx.iarray_reads key value;
+    value
+
+and expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
+    index =
+  let unknown () =
+    let function_ =
+      intern_function ctx "Iarray.get" [iarray_sort; Int63] element_sort
+    in
+    Call (function_, [array; index])
+  in
+  let bounded value =
+    App
+      ( Ite,
+        [ both And
+            (both Le (Integer 0L) index)
+            (both Lt index (iarray_length ctx iarray_sort array));
+          value;
+          unknown () ] )
+  in
+  match iarray_origin ctx array with
+  | Some (Iarray_literal elements) ->
+    List.fold_right
+      (fun (position, element) rest ->
+        match element with
+        | Some value when term_sort value = element_sort ->
+          App
+            (Ite, [both Eq index (Integer (Int64.of_int position)); value; rest])
+        | _ -> rest)
+      (List.mapi (fun position element -> position, element) elements)
+      (unknown ())
+  | Some (Iarray_append (left, right)) ->
+    let length = iarray_length ctx iarray_sort left in
+    let shifted = share_observation ctx (App (Sub, [index; length])) in
+    if left = right
+    then
+      let index =
+        share_observation ctx
+          (App (Ite, [both Lt index length; index; shifted]))
+      in
+      bounded
+        (iarray_get_with_budget ctx budget iarray_sort element_sort left index)
+    else
+      bounded
+        (App
+           ( Ite,
+             [ both Lt index length;
+               iarray_get_with_budget ctx budget iarray_sort element_sort left
+                 index;
+               iarray_get_with_budget ctx budget iarray_sort element_sort right
+                 shifted ] ))
+  | Some (Iarray_sub (source, position, _)) ->
+    bounded
+      (iarray_get_with_budget ctx budget iarray_sort element_sort source
+         (share_observation ctx (App (Add, [position; index]))))
+  | None -> (
+    match expose_head ctx array with
+    | App (Ite, [condition; left; right]) ->
+      App
+        ( Ite,
+          [ condition;
+            iarray_get_with_budget ctx budget iarray_sort element_sort left
+              index;
+            iarray_get_with_budget ctx budget iarray_sort element_sort right
+              index ] )
+    | _ -> unknown ())
+
+(* Branching copy histories may expose exponentially many source indices. Beyond
+   this budget, reads retain their uninterpreted meaning. *)
+let iarray_get ctx iarray_sort element_sort array index =
+  iarray_get_with_budget ctx (ref 256) iarray_sort element_sort array index
+
+let iarray_copy ctx iarray_sort origin =
+  let symbol = Symbol.create ~label:"iarray copy" iarray_sort in
+  register_sort ctx iarray_sort;
+  Hashtbl.add ctx.iarray_origins symbol origin;
+  scalar_value (Var symbol)
+
+let iarray_value ctx env ty s values =
+  match iarray ctx.encoding env ty with
+  | Some (iarray_sort, _) ->
+    s, iarray_copy ctx iarray_sort (Iarray_literal (List.map scalar values))
+  | None -> s, None
+
 let fresh ?primitive ctx env ty label =
   match sort ctx.encoding env ty with
   | Some sort ->
@@ -409,10 +588,106 @@ let lookup ctx s env ty path =
         ctx.free <- Path.Map.add path value ctx.free;
         value))
 
+let iarray_call ctx value =
+  match scalar value with
+  | None -> None
+  | Some value ->
+    let sort = term_sort value in
+    if is_iarray_sort ctx.encoding sort then Some (sort, value) else None
+
 let operation ctx env function_type result_type name args =
-  scalar_option
-    (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
-       (List.map scalar args))
+  match name, args with
+  | "caml_array_append", [left; right] ->
+    begin match
+      ( iarray_call ctx left,
+        iarray_call ctx right,
+        iarray ctx.encoding env result_type )
+    with
+    | Some (sort, left), Some (_, right), Some _ ->
+      iarray_copy ctx sort (Iarray_append (left, right))
+    | _ -> None
+    end
+  | "%iarray_sub", [source; position; length] ->
+    begin match
+      ( iarray_call ctx source,
+        scalar position,
+        scalar length,
+        iarray ctx.encoding env result_type )
+    with
+    | Some (sort, source), Some position, Some length, Some _
+      when term_sort position = Int63 && term_sort length = Int63 ->
+      iarray_copy ctx sort (Iarray_sub (source, position, length))
+    | _ -> None
+    end
+  | "%array_length", [array] ->
+    begin match iarray_call ctx array with
+    | Some (iarray_sort, array) ->
+      scalar_value (iarray_length ctx iarray_sort array)
+    | None -> None
+    end
+  | "%array_safe_get", [array; index] ->
+    begin match
+      iarray_call ctx array, scalar index, sort ctx.encoding env result_type
+    with
+    | Some (iarray_sort, array), Some index, Some element_sort
+      when term_sort index = Int63 ->
+      scalar_value (iarray_get ctx iarray_sort element_sort array index)
+    | _ -> None
+    end
+  | _ ->
+    scalar_option
+      (Vox_encoding.operation ctx.encoding env ~function_type ~result_type name
+         (List.map scalar args))
+
+let normal_iarray_copy ctx value s =
+  match scalar value with
+  | None -> s
+  | Some array -> (
+    let length source = iarray_length ctx (term_sort array) source in
+    match iarray_origin ctx array with
+    | Some (Iarray_append (left, right)) ->
+      let left = length left and right = length right in
+      let sum = App (Add, [left; right]) in
+      List.fold_left
+        (fun s term -> fact s "iarray copy" term)
+        s
+        [ both Le (Integer 0L) left;
+          both Le (Integer 0L) right;
+          both Le left sum;
+          both Le right sum ]
+    | Some (Iarray_sub (source, position, size)) ->
+      let length = length source in
+      List.fold_left
+        (fun s term -> fact s "iarray copy" term)
+        s
+        [ both Le (Integer 0L) position;
+          both Le (Integer 0L) size;
+          both Le position length;
+          both Le size (App (Sub, [length; position])) ]
+    | Some (Iarray_literal _) | None -> s)
+
+let normal_iarray_length ctx args s =
+  match args with
+  | [array] ->
+    begin match iarray_call ctx array with
+    | Some (iarray_sort, array) ->
+      fact s "iarray length"
+        (both Le (Integer 0L) (iarray_length ctx iarray_sort array))
+    | None -> s
+    end
+  | _ -> s
+
+let normal_iarray_get ctx args s =
+  match args with
+  | [array; index] ->
+    begin match iarray_call ctx array, scalar index with
+    | Some (iarray_sort, array), Some index when term_sort index = Int63 ->
+      let length = iarray_length ctx iarray_sort array in
+      fact s "normal return"
+        (both And (both Le (Integer 0L) index) (both Lt index length))
+    | _ -> s
+    end
+  | _ -> s
 
 let rec function_call ctx env ty fn args =
   match fn with
@@ -524,7 +799,7 @@ let rec predicate ctx env s e =
       let s, values =
         arguments_right_to_left (fun s (_, e) -> eval s e) s components
       in
-      name s
+      name ctx s
         (scalar_value
            (required e.rexp_loc (construct ctx env e.rexp_type "" values)))
     | Rexp_construct (path, args) ->
@@ -537,7 +812,7 @@ let rec predicate ctx env s e =
           | Some name -> construct ctx env e.rexp_type name values
           | None -> None)
       in
-      name s (scalar_value (required e.rexp_loc value))
+      name ctx s (scalar_value (required e.rexp_loc value))
     | Rexp_record (fields, extended) ->
       let s, base =
         match extended with
@@ -552,12 +827,12 @@ let rec predicate ctx env s e =
       let fields =
         List.map2 (fun (_, name, _) value -> name, value) fields values
       in
-      name s
+      name ctx s
         (scalar_value
            (required e.rexp_loc (record_value ctx env e.rexp_type base fields)))
     | Rexp_field (record_exp, _, field_name) ->
       let s, record = eval s record_exp in
-      name s
+      name ctx s
         (scalar_value
            (required e.rexp_loc
               (select_field ctx env record_exp.rexp_type field_name record)))
@@ -569,17 +844,18 @@ let rec predicate ctx env s e =
       in
       begin match prim, args with
       | Some ((("%sequand" | "%sequor") as op), 2), [(_, a); (_, b)] ->
-        short_circuit eval e.rexp_loc ~is_and:(op = "%sequand") s a b
+        short_circuit ctx eval e.rexp_loc ~is_and:(op = "%sequand") s a b
       | _ ->
         let s, args =
           arguments_right_to_left (fun s (_, e) -> eval s e) s args
         in
         let s, value = eval s fn in
         let prim = stored_primitive prim value in
+        let s = match prim with Some ("%array_length", 1) -> normal_iarray_length ctx args s | _ -> s in
         if s.dead
         then s, None
         else
-          name s
+          name ctx s
             (scalar_value
                (required e.rexp_loc
                   (apply_function ctx env fn.rexp_type e.rexp_type prim value
@@ -588,15 +864,14 @@ let rec predicate ctx env s e =
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
       let s, left = eval s left in
-      if s.dead
-      then s, None
-      else
-        name s
-          (scalar_value
-             (both Eq (required e.rexp_loc left) (required e.rexp_loc right)))
+      if s.dead then s, None else
+      let left = required e.rexp_loc left in
+      let right = required e.rexp_loc right in
+      if sort_has_iarray ctx.encoding (term_sort left) then unsupported e.rexp_loc
+      else name ctx s (scalar_value (both Eq left right))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
-      choose s
+      choose ctx s
         (if s.dead then Boolean false else required e.rexp_loc c)
         (fun s -> eval s t)
         (fun s -> eval s f)
@@ -720,7 +995,7 @@ and predicate_cases ctx env s value cases =
     | case :: cases ->
       let matched = predicate_pattern ctx env s value case.rc_lhs in
       let rest s = predicate_cases ctx env s value cases in
-      guarded_case (predicate ctx env) case.rc_rhs.rexp_loc s matched
+      guarded_case ctx (predicate ctx env) case.rc_rhs.rexp_loc s matched
         case.rc_guard case.rc_rhs rest
 
 let rec pattern : type k.
@@ -928,7 +1203,7 @@ and expression_desc ctx s e =
     let s, values =
       arguments_right_to_left (fun s (_, e) -> eval s e) s components
     in
-    name s
+    name ctx s
       (opaque_if_unsupported (construct ctx e.exp_env e.exp_type "" values))
   | Texp_construct (_, c, _, args, _) ->
     let s, values = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
@@ -937,7 +1212,7 @@ and expression_desc ctx s e =
       | [] -> expression_constructor ctx e.exp_env e.exp_type c
       | _ -> construct ctx e.exp_env e.exp_type c.cstr_name values
     in
-    name s (opaque_if_unsupported value)
+    name ctx s (opaque_if_unsupported value)
   | Texp_record { fields; extended_expression; _ } ->
     let s, base =
       match extended_expression with
@@ -962,12 +1237,16 @@ and expression_desc ctx s e =
              | Overridden _ -> Some (label.Data_types.lbl_name, value))
            fields values)
     in
-    name s
+    name ctx s
       (opaque_if_unsupported
          (record_value ctx e.exp_env e.exp_type base fields))
+  | Texp_array (Immutable, _, elements, _) ->
+    let s, values = arguments_right_to_left eval s elements in
+    let s, value = iarray_value ctx e.exp_env e.exp_type s values in
+    s, opaque_if_unsupported value
   | Texp_field { record; label; _ } ->
     let s, value = eval s record in
-    name s
+    name ctx s
       (opaque_if_unsupported
          (select_field ctx e.exp_env record.exp_type label.Data_types.lbl_name
             value))
@@ -988,8 +1267,8 @@ and expression_desc ctx s e =
     let s, right = eval s right in
     let s, left = eval s left in
     match scalar left, scalar right with
-    | Some left, Some right when term_sort left = term_sort right ->
-      name s (scalar_value (both Eq left right))
+    | Some left, Some right when term_sort left = term_sort right && not (sort_has_iarray ctx.encoding (term_sort left)) ->
+      name ctx s (scalar_value (both Eq left right))
     | _ -> s, opaque ())
   | Texp_sequence (a, _, b) ->
     let s, _ = eval s a in
@@ -1002,7 +1281,7 @@ and expression_desc ctx s e =
       | None ->
         required e.exp_loc (fresh ctx e.exp_env Predef.type_bool "condition")
     in
-    choose s c
+    choose ctx s c
       (fun s -> eval s t)
       (fun s -> match f with None -> s, None | Some f -> eval s f)
   | Texp_apply (fn, args, _, _, _, _) ->
@@ -1014,7 +1293,7 @@ and expression_desc ctx s e =
     begin match prim, args with
     | ( Some ((("%sequand" | "%sequor") as op), 2),
         [(_, Arg (a, _)); (_, Arg (b, _))] ) ->
-      short_circuit eval e.exp_loc ~is_and:(op = "%sequand") s a b
+      short_circuit ctx eval e.exp_loc ~is_and:(op = "%sequand") s a b
     | _ -> (
       let argument s (_, arg) =
         match arg with Omitted _ -> s, None | Arg (e, _) -> eval s e
@@ -1033,7 +1312,15 @@ and expression_desc ctx s e =
       match prim with
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
         branch s (Boolean false), None
-      | _ -> name s (match value with Some _ -> value | None -> opaque ()))
+      | Some ("caml_array_append", 2) | Some ("%iarray_sub", 3) ->
+        name ctx
+          (normal_iarray_copy ctx value s)
+          (match value with Some _ -> value | None -> opaque ())
+      | Some ("%array_length", 1) ->
+        name ctx (normal_iarray_length ctx args s) (match value with Some _ -> value | None -> opaque ())
+      | Some ("%array_safe_get", 2) ->
+        name ctx (normal_iarray_get ctx args s) (match value with Some _ -> value | None -> opaque ())
+      | _ -> name ctx s (match value with Some _ -> value | None -> opaque ()))
     end
   | Texp_function { params; body; _ } ->
     let captured = s in
@@ -1141,7 +1428,7 @@ and cases_with_pattern : type k.
     | c :: cases ->
       let matched = pattern ctx s value c.c_lhs in
       let rest s = cases_with_pattern ctx s value cases in
-      guarded_case (expression ctx) c.c_rhs.exp_loc s matched c.c_guard c.c_rhs
+      guarded_case ctx (expression ctx) c.c_rhs.exp_loc s matched c.c_guard c.c_rhs
         rest
 
 and structure ctx s str =
@@ -1226,7 +1513,14 @@ let query ctx code =
   let rec visit = function
     | Var s when not (Hashtbl.mem seen s) ->
       Hashtbl.add seen s ();
-      symbols := s :: !symbols
+      symbols := s :: !symbols;
+      Option.iter
+        (fun term ->
+          definitions
+            := { label = "observation"; term = both Eq (Var s) term }
+               :: !definitions;
+          visit term)
+        (Hashtbl.find_opt ctx.observation_definitions s)
     | App (_, args) | Call (_, args) | Construct (_, args) ->
       List.iter visit args
     | Is (_, arg) | Select (_, _, arg) -> visit arg
@@ -1237,7 +1531,7 @@ let query ctx code =
   ( { datatypes = List.rev ctx.datatypes;
       symbols = List.rev !symbols;
       functions = List.rev ctx.functions;
-      facts;
+      facts = List.rev !definitions;
       goal
     },
     goals )
@@ -1267,6 +1561,12 @@ let context ~prove ~verify_introductions =
   { encoding = Vox_encoding.create_context ();
     datatypes = [];
     functions = [];
+    function_cache = Hashtbl.create 32;
+    iarray_origins = Hashtbl.create 16;
+    iarray_lengths = Hashtbl.create 16;
+    iarray_reads = Hashtbl.create 16;
+    observation_definitions = Hashtbl.create 32;
+    named_terms = Hashtbl.create 32;
     free = Path.Map.empty;
     batches = [];
     symbolic = Symbolic_keys.create 16;

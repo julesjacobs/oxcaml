@@ -53,17 +53,30 @@ type (+'a : any mod separable) t = 'a iarray
 
 (* Array operations *)
 
-external length : ('a : any mod separable). local_ 'a iarray -> int @@ portable
-  = "%array_length"
+external length :
+  ('a : any mod separable).
+  ('a iarray[@local_opt]) @ immutable contended -> int
+  @@ portable total = "%array_length"
 [@@layout_poly]
 external get :
   ('a : any mod separable). ('a iarray[@local_opt]) -> int -> ('a[@local_opt])
   @@ portable = "%array_safe_get"
 [@@layout_poly]
+
+module Refined = struct
+  external get :
+    ('a : any mod separable).
+    (a : ('a iarray[@local_opt])) ->
+    {i : int | 0 <= i && i < length a} ->
+    ('a[@local_opt]) @ total @@ portable total = "%array_safe_get"
+  [@@layout_poly]
+end
+
 external unsafe_get :
   ('a : any mod separable). ('a iarray[@local_opt]) -> int -> ('a[@local_opt])
   @@ portable = "%array_unsafe_get"
 [@@layout_poly]
+external trust_total : ('a : value). 'a -> 'a @ total = "%identity"
 external concat : ('a : any mod separable). 'a iarray list -> 'a iarray
   @@ portable = "caml_array_concat"
 
@@ -111,6 +124,7 @@ let sub a ~pos ~len =
 
 let iter f a =
   for i = 0 to length a - 1 do f(unsafe_get a i) done
+let iter = trust_total iter
 
 let iter2 f a b =
   if length a <> length b then
@@ -147,6 +161,7 @@ let map2 f a b =
 
 let iteri f a =
   for i = 0 to length a - 1 do f i (unsafe_get a i) done
+let iteri = trust_total iteri
 
 let mapi f a =
   let l = length a in
@@ -163,6 +178,7 @@ let to_list a =
   let rec tolist i res =
     if i < 0 then res else tolist (i - 1) (unsafe_get a i :: res) in
   tolist (length a - 1) []
+let to_list = trust_total to_list
 
 let of_list l = unsafe_of_array (Array.of_list l)
 
@@ -176,6 +192,7 @@ let fold_left f x a =
     r := f !r (unsafe_get a i)
   done;
   !r
+let fold_left = trust_total fold_left
 
 let fold_left_map f acc input_array =
   let len = length input_array in
@@ -197,6 +214,7 @@ let fold_right f a x =
     r := f (unsafe_get a i) !r
   done;
   !r
+let fold_right = trust_total fold_right
 
 let exists p a =
   let n = length a in
@@ -205,6 +223,7 @@ let exists p a =
     else if p (unsafe_get a i) then true
     else loop (succ i) in
   loop 0 [@nontail]
+let exists = trust_total exists
 
 let for_all p a =
   let n = length a in
@@ -213,6 +232,7 @@ let for_all p a =
     else if p (unsafe_get a i) then loop (succ i)
     else false in
   loop 0 [@nontail]
+let for_all = trust_total for_all
 
 let for_all2 p l1 l2 =
   let n1 = length l1
@@ -236,6 +256,7 @@ let exists2 p l1 l2 =
 
 let equal eq a1 a2 =
   length a1 = length a2 && for_all2 eq a1 a2
+let equal = trust_total equal
 
 let compare cmp a1 a2 =
   if length a1 <> length a2 then length a1 - length a2
@@ -249,6 +270,7 @@ let compare cmp a1 a2 =
     in
     loop 0 [@nontail]
   )
+let compare = trust_total compare
 
 let mem x a =
   let n = length a in
@@ -276,6 +298,7 @@ let find_opt p a =
       else loop (succ i)
   in
   loop 0 [@nontail]
+let find_opt = trust_total find_opt
 
 let find_index p a =
   let n = length a in
@@ -284,6 +307,7 @@ let find_index p a =
     else if p (unsafe_get a i) then Some i
     else loop (succ i) in
   loop 0 [@nontail]
+let find_index = trust_total find_index
 
 let find_map f a =
   let n = length a in
@@ -295,6 +319,7 @@ let find_map f a =
       | Some _ as r -> r
   in
   loop 0 [@nontail]
+let find_map = trust_total find_map
 
 let find_mapi f a =
   let n = length a in
@@ -306,6 +331,7 @@ let find_mapi f a =
       | Some _ as r -> r
   in
   loop 0 [@nontail]
+let find_mapi = trust_total find_mapi
 
 let split x =
   if equal (=) (* unused *) x [||] then ([||], [||] : _ iarray * _ iarray)
@@ -343,8 +369,11 @@ let lift_sort sorter cmp iarr =
   unsafe_of_array arr
 
 let sort cmp iarr = lift_sort Array.sort cmp iarr
+let sort = trust_total sort
 let stable_sort cmp iarr = lift_sort Array.stable_sort cmp iarr
+let stable_sort = trust_total stable_sort
 let fast_sort cmp iarr = lift_sort Array.fast_sort cmp iarr
+let fast_sort = trust_total fast_sort
 
 let to_seq a =
   let rec aux i () =
@@ -355,6 +384,7 @@ let to_seq a =
     else Seq.Nil
   in
   aux 0
+let to_seq = trust_total to_seq
 
 let to_seqi a =
   let rec aux i () =
@@ -365,5 +395,6 @@ let to_seqi a =
     else Seq.Nil
   in
   aux 0
+let to_seqi = trust_total to_seqi
 
 let of_seq i = unsafe_of_array (Array.of_seq i)
