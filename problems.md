@@ -25,14 +25,6 @@ binder. If a total function retains an earlier argument after accepting a
 later argument, annotate the earlier argument `@ total` or reorder the
 arguments. This follows argument-relative modes but is easy to miss.
 
-## Polymorphic tuple refinements
-
-A refinement over a tuple of polymorphic results can fail during SMT
-translation with two apparently identical tuple sorts. Separate
-instantiations of the type variable currently produce distinct datatype
-identities. Specialize the theorem or avoid the tuple result. This is an
-implementation bug.
-
 ## Refinement introduction
 
 `refine_ value` requires a known expected refinement type and `value` must be a
