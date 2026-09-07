@@ -5,6 +5,8 @@ type context
 
 val create_context : unit -> context
 
+val fresh_opaque_sort : context -> Vox_smt.sort
+
 val sort : context -> Env.t -> Types.type_expr -> Vox_smt.sort option
 
 type data_kind =
@@ -26,9 +28,11 @@ val declarations : context -> data -> Vox_smt.datatype_declaration list
 val declarations_of_sort :
   context -> Vox_smt.sort -> Vox_smt.datatype_declaration list
 
-val sort_has_iarray : context -> Vox_smt.sort -> bool
+val sort_has_unsupported_logical_equality : context -> Vox_smt.sort -> bool
 
 val is_iarray_sort : context -> Vox_smt.sort -> bool
+
+val is_set_sort : context -> Vox_smt.sort -> bool
 
 val iarray :
   context ->
@@ -37,6 +41,8 @@ val iarray :
   (Vox_smt.sort * Vox_smt.sort option) option
 
 val primitive : Env.t -> Path.t -> (string * int) option
+
+val is_set_empty : Env.t -> Path.t -> bool
 
 val value_constant :
   context -> Env.t -> Types.type_expr -> Path.t -> Vox_smt.term option

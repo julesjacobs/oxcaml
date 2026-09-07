@@ -26,6 +26,12 @@ module type OrderedType =
     val compare: t -> t -> int
   end
 
+module type TotalOrderedType =
+  sig
+    type t
+    val compare: t -> t -> int @@ total
+  end
+
 module type S =
   sig
     type elt
@@ -73,6 +79,75 @@ module type S =
     val to_rev_seq : t -> elt Seq.t
     val add_seq : elt Seq.t -> t -> t
     val of_seq : elt Seq.t -> t
+  end
+
+module type TotalS =
+  sig
+    type elt
+    type t : immutable_data with elt
+    include S with type elt := elt and type t := t
+    val empty: t @@ total
+    val add: elt -> t -> t @@ total
+    val singleton: elt -> t @@ total
+    val remove: elt -> t -> t @@ total
+    val union: t -> t -> t @@ total
+    val inter: t -> t -> t @@ total
+    val disjoint: t -> t -> bool @@ total
+    val diff: t -> t -> t @@ total
+    val cardinal: t -> int @@ total
+    val elements: t -> elt list @@ total
+    val min_elt_opt: t -> elt option @@ total
+    val max_elt_opt: t -> elt option @@ total
+    val choose_opt: t -> elt option @@ total
+    val find_opt: elt -> t -> elt option @@ total
+    val find_first_opt: (elt -> bool) -> t -> elt option @@ total
+    val find_last_opt: (elt -> bool) -> t -> elt option @@ total
+    val iter: (elt -> unit) -> t -> unit @@ total
+    val fold: (elt -> 'a -> 'a) -> t -> 'a -> 'a @@ total
+    val map: (elt -> elt) -> t -> t @@ total
+    val filter: (elt -> bool) -> t -> t @@ total
+    val filter_map: (elt -> elt option) -> t -> t @@ total
+    val partition: (elt -> bool) -> t -> t * t @@ total
+    val split: elt -> t -> t * bool * t @@ total
+    val is_empty: t -> bool @@ total
+    val mem: elt @ immutable -> t @ immutable -> bool @@ total
+    val equal: t -> t -> bool @@ total
+    val compare: t -> t -> int @@ total
+    val subset: t -> t -> bool @@ total
+    val for_all: (elt -> bool) -> t -> bool @@ total
+    val exists: (elt -> bool) -> t -> bool @@ total
+    val to_list: t -> elt list @@ total
+    val of_list: elt list -> t @@ total
+    val to_seq_from: elt -> t -> elt Seq.t @@ total
+    val to_seq: t -> elt Seq.t @@ total
+    val to_rev_seq: t -> elt Seq.t @@ total
+    module Refined : sig
+      val singleton: elt @ total -> t @ total @@ total
+      val add:
+        elt @ total ->
+        t @ total ->
+        t @ total @@ total
+      val remove:
+        elt ->
+        t @ total ->
+        t @ total @@ total
+      val union:
+        t @ total ->
+        t @ total ->
+        t @ total @@ total
+      val inter:
+        t @ total ->
+        t @ total ->
+        t @ total @@ total
+      val diff:
+        t @ total ->
+        t @ total ->
+        t @ total @@ total
+      val find:
+        (set : t) ->
+        {elt : elt | mem elt set} ->
+        elt @ total @@ total
+    end
   end
 
 module Make(Ord: OrderedType) =
@@ -1178,3 +1253,103 @@ module MakePortable(Ord: sig @@ portable include OrderedType end) =
       in
       seq_of_enum_ (aux low s End)
  end [@@inline available]
+
+external trust_total : ('a : value). 'a -> 'a @ total = "%identity"
+external trust_total_immutable2 :
+  ('a : value) ('b : value) ('c : value).
+  ('a -> 'b -> 'c) -> ('a @ immutable -> 'b @ immutable -> 'c) @ total
+  = "%identity"
+
+module MakeTotal(Ord: TotalOrderedType) : TotalS with type elt = Ord.t =
+  struct
+    module Base = Make(Ord)
+    type elt = Ord.t
+    type t = Base.t
+
+    let empty = trust_total Base.empty
+    let add = trust_total Base.add
+    let singleton = trust_total Base.singleton
+    let remove = trust_total Base.remove
+    let union = trust_total Base.union
+    let inter = trust_total Base.inter
+    let disjoint = trust_total Base.disjoint
+    let diff = trust_total Base.diff
+    let cardinal = trust_total Base.cardinal
+    let elements = trust_total Base.elements
+    let min_elt_opt = trust_total Base.min_elt_opt
+    let max_elt_opt = trust_total Base.max_elt_opt
+    let choose_opt = trust_total Base.choose_opt
+    let find_opt = trust_total Base.find_opt
+    let find_first_opt = trust_total Base.find_first_opt
+    let find_last_opt = trust_total Base.find_last_opt
+    let iter = trust_total Base.iter
+    let fold = trust_total Base.fold
+    let map = trust_total Base.map
+    let filter = trust_total Base.filter
+    let filter_map = trust_total Base.filter_map
+    let partition = trust_total Base.partition
+    let split = trust_total Base.split
+    let is_empty = trust_total Base.is_empty
+    let mem = trust_total_immutable2 Base.mem
+    let equal = trust_total Base.equal
+    let compare = trust_total Base.compare
+    let subset = trust_total Base.subset
+    let for_all = trust_total Base.for_all
+    let exists = trust_total Base.exists
+    let to_list = trust_total Base.to_list
+    let of_list = trust_total Base.of_list
+    let to_seq_from = trust_total Base.to_seq_from
+    let to_seq = trust_total Base.to_seq
+    let to_rev_seq = trust_total Base.to_rev_seq
+    let min_elt = Base.min_elt
+    let max_elt = Base.max_elt
+    let choose = Base.choose
+    let find = Base.find
+    let find_first = Base.find_first
+    let find_last = Base.find_last
+    let add_seq = Base.add_seq
+    let of_seq = Base.of_seq
+
+    module Refined = struct
+      external trust_constructor1 :
+        ('a : value) ('b : value).
+        ('a -> 'b) ->
+        ('a @ total -> 'b @ total) @ total
+        = "%identity"
+      external trust_constructor2 :
+        ('a : value) ('b : value) ('c : value).
+        ('a -> 'b -> 'c) ->
+        ('a @ total ->
+         'b @ total ->
+         'c @ total) @ total
+        = "%identity"
+      external trust_set_constructor2 :
+        ('a : value).
+        ('a -> 'a -> 'a) ->
+        ('a @ total ->
+         'a @ total ->
+         'a @ total) @ total
+        = "%identity"
+      external trust_remove :
+        ('a : value) ('b : value).
+        ('a -> 'b -> 'b) ->
+        ('a ->
+         'b @ total ->
+         'b @ total) @ total
+        = "%identity"
+      external trust_find :
+        (Base.t -> Ord.t -> Ord.t) ->
+        ((set : Base.t) ->
+         {elt : Ord.t | mem elt set} ->
+         Ord.t @ total) @ total
+        = "%identity"
+
+      let singleton = trust_constructor1 Base.singleton
+      let add = trust_constructor2 Base.add
+      let remove = trust_remove Base.remove
+      let union = trust_set_constructor2 Base.union
+      let inter = trust_set_constructor2 Base.inter
+      let diff = trust_set_constructor2 Base.diff
+      let find = trust_find (fun set elt -> Base.find elt set)
+    end
+  end
