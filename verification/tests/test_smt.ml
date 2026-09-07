@@ -22,7 +22,9 @@ let () =
   List.iter
     (fun (term, expected) ->
       assert (term_sort term = expected);
-      let witness = match expected with Bool -> p | Int63 -> n in
+      let witness =
+        match expected with Bool -> p | Int63 -> n | Opaque _ -> assert false
+      in
       check ~int_width:63
         (query ~symbols:[x; b] ~functions:[f] (app Eq [term; witness])))
     [ p, Bool;
@@ -167,6 +169,23 @@ let () =
        (assert (= (int63_mul v0 2) (int63_mul v0 2)))\n\
        (assert (not (= (int63_mul v0 2) (int63_mul v0 2))))\n\
        (check-sat)\n")
+
+let () =
+  let a = Symbol.create ~label:"a" (Opaque 41) in
+  let b = Symbol.create ~label:"b" (Opaque 41) in
+  let other = Symbol.create ~label:"other" (Opaque 42) in
+  assert (
+    serialize (query ~symbols:[a; b] (app Eq [Var a; Var b]))
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-logic ALL)\n\
+       (declare-sort s0 0)\n\
+       (declare-fun v0 () s0)\n\
+       (declare-fun v1 () s0)\n\
+       (assert (not (= v0 v1)))\n\
+       (check-sat)\n");
+  sort_error (query ~symbols:[a; other] (app Eq [Var a; Var other]))
 
 let fake =
   if Filename.is_relative Sys.argv.(1)

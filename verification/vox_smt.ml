@@ -1,6 +1,7 @@
 type sort =
   | Bool
   | Int63
+  | Opaque of int
 
 module Symbol = struct
   type t =
@@ -106,7 +107,10 @@ let operator = function
   | Implies -> "=>"
   | Ite -> "ite"
 
-let sort_name = function Bool -> "Bool" | Int63 -> "Int"
+let sort_name = function
+  | Bool -> "Bool"
+  | Int63 -> "Int"
+  | Opaque id -> Printf.sprintf "opaque(%d)" id
 
 let error fmt = Printf.ksprintf (fun s -> raise (Sort_error s)) fmt
 
@@ -276,6 +280,33 @@ let to_smtlib ~int_width ~timeout_ms q =
     then add (Printf.sprintf "(- %Ld)" (Int64.neg value))
     else add (Int64.to_string value)
   in
+  let opaque_ids =
+    let add ids = function
+      | Opaque id -> if List.mem id ids then ids else id :: ids
+      | Bool | Int63 -> ids
+    in
+    let ids =
+      List.fold_left (fun ids s -> add ids (Symbol.sort s)) [] q.symbols
+    in
+    let ids =
+      List.fold_left
+        (fun ids f ->
+          List.fold_left add
+            (add ids (Function.result f))
+            (Function.arguments f))
+        ids q.functions
+    in
+    List.sort Int.compare ids
+  in
+  let opaque_names = Hashtbl.create 8 in
+  List.iteri
+    (fun index id -> Hashtbl.add opaque_names id ("s" ^ string_of_int index))
+    opaque_ids;
+  let smt_sort = function
+    | Bool -> "Bool"
+    | Int63 -> "Int"
+    | Opaque id -> Hashtbl.find opaque_names id
+  in
   let rec term = function
     | Boolean v -> add (string_of_bool v)
     | Integer value -> integer value
@@ -330,7 +361,7 @@ let to_smtlib ~int_width ~timeout_ms q =
   add "(set-option :produce-models true)\n";
   add (Printf.sprintf "(set-option :timeout %d)\n" timeout_ms);
   add
-    (if uses_general Div || uses_general Rem
+    (if opaque_ids <> [] || uses_general Div || uses_general Rem
      then "(set-logic ALL)\n"
      else if multiplications = [] && q.functions = []
      then "(set-logic QF_LIA)\n"
@@ -379,19 +410,24 @@ let to_smtlib ~int_width ~timeout_ms q =
       \      (ite (< x 0) (- r) r))))\n";
   if multiplications <> [] then add "(declare-fun int63_mul (Int Int) Int)\n";
   List.iter
+    (fun id ->
+      add
+        (Printf.sprintf "(declare-sort %s 0)\n" (Hashtbl.find opaque_names id)))
+    opaque_ids;
+  List.iter
     (fun s ->
       add
         (Printf.sprintf "(declare-fun %s () %s)\n"
            (Hashtbl.find names s.Symbol.id)
-           (sort_name (Symbol.sort s))))
+           (smt_sort (Symbol.sort s))))
     q.symbols;
   List.iter
     (fun f ->
       add
         (Printf.sprintf "(declare-fun %s (%s) %s)\n"
            (Hashtbl.find functions f.Function.id)
-           (String.concat " " (List.map sort_name (Function.arguments f)))
-           (sort_name (Function.result f))))
+           (String.concat " " (List.map smt_sort (Function.arguments f)))
+           (smt_sort (Function.result f))))
     q.functions;
   let bounded value =
     add "(assert (and (<= ";
@@ -406,7 +442,9 @@ let to_smtlib ~int_width ~timeout_ms q =
   in
   List.iter
     (fun symbol ->
-      match Symbol.sort symbol with Bool -> () | Int63 -> bounded (Var symbol))
+      match Symbol.sort symbol with
+      | Bool | Opaque _ -> ()
+      | Int63 -> bounded (Var symbol))
     q.symbols;
   List.iter bounded multiplications;
   List.iter bounded int_calls;
