@@ -248,7 +248,7 @@ Error: Refinement could not be proved (counterexample)
 |}]
 
 module Polymorphic_pair = struct
-  let duplicate : ('a : immutable_data).
+  let duplicate : ('a : value mod separable).
       (value : 'a) ->
       {result : 'a * 'a | match result with left, right ->
         left === value && right === value} =
@@ -260,10 +260,22 @@ end;;
 module Polymorphic_pair :
   sig
     val duplicate :
-      ('a : immutable_data).
-        (value : 'a) ->
-        {result : 'a * 'a
-          | match result with
-            | (left, right) -> (left === value) && (right === value)}
+      (value : 'a) ->
+      {result : 'a * 'a
+        | match result with
+          | (left, right) -> (left === value) && (right === value)}
   end
+|}]
+
+let unrelated_pair : ('a : value mod separable).
+    'a @ total -> 'a @ total ->
+    {result : 'a * 'a | match result with left, right -> left === right} =
+  fun left right ->
+  let result = left, right in
+  refine_ result;;
+[%%expect{|
+Line 6, characters 2-16:
+6 |   refine_ result;;
+      ^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]
