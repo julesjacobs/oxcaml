@@ -145,6 +145,7 @@ let rec nested_type_key key = function
 
 let nonregular_recursive_instance key stack =
   match key with
+  | Constructor (path, _) when Path.same path Predef.path_list -> false
   | Constructor (path, _) ->
     List.exists
       (fun (stack_key, _) ->

@@ -316,7 +316,7 @@ let float_of_string_opt s =
 
 (* List operations -- more in module List *)
 
-let[@tail_mod_cons] rec ( @ ) l1 l2 =
+let[@tail_mod_cons] rec (( @ ) @ total) l1 l2 =
   match l1 with
   | [] -> l2
   | h1 :: [] -> h1 :: l2
