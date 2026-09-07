@@ -759,7 +759,7 @@ let typ sub {ctyp_loc; ctyp_desc; ctyp_env; ctyp_attributes; _} =
   match ctyp_desc with
   | Ttyp_var (_, jkind) ->
       Option.iter (sub.jkind_annotation sub) jkind
-  | Ttyp_arrow (_, ct1, ma1, ct2, ma2) ->
+  | Ttyp_arrow (_, ct1, ma1, ct2, ma2, _) ->
       sub.typ sub ct1;
       sub.modes sub ma1;
       sub.typ sub ct2;

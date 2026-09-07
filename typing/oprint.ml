@@ -389,9 +389,22 @@ and print_out_type_mode ~arg mode ppf ty =
 
 and print_out_type_1 ppf =
   function
-  | Otyp_arrow (lab, am, ty1, ty2) ->
+  | Otyp_arrow (lab, am, ty1, ty2, binder) ->
       pp_open_box ppf 0;
-      print_arg_label_and_out_type ppf lab ty1 ~print_type:(print_out_arg am);
+      begin match binder with
+      | None ->
+          print_arg_label_and_out_type ppf lab ty1
+            ~print_type:(print_out_arg am)
+      | Some binder ->
+          let modes =
+            List.filter
+              (fun mode ->
+                not (List.mem mode ["total"; "stateless"; "portable"]))
+              am
+          in
+          fprintf ppf "(%s : %a)%a" binder print_simple_out_type ty1
+            print_out_modes modes
+      end;
       pp_print_string ppf " ->";
       pp_print_space ppf ();
       print_out_ret ppf ty2;

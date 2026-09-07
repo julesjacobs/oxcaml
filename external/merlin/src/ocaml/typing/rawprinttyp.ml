@@ -107,11 +107,14 @@ and raw_type_desc ppf ty =
     Tvar { name; jkind } ->
       fprintf ppf "Tvar (@,%a,@,%a)"
         print_name name (Format_doc.compat (Jkind.format env)) jkind
-  | Tarrow((l,arg,ret),t1,t2,c) ->
-      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a),@,%a,@,%a,@,%s)@]"
+  | Tarrow((l,arg,ret,binder),t1,t2,c) ->
+      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a,%s),@,%a,@,%a,@,%s)@]"
         (string_of_label l)
         (Format_doc.compat (Alloc.print ~verbose:true ())) arg
         (Format_doc.compat (Alloc.print ~verbose:true ())) ret
+        (match binder with
+         | None -> "None"
+         | Some binder -> "Some " ^ Ident.unique_name binder)
         raw_type t1 raw_type t2
         (if is_commu_ok c then "Cok" else "Cunknown")
   | Trefine { ref_payload; ref_pred = _; _ } ->

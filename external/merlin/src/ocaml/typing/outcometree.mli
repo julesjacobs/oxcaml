@@ -127,7 +127,7 @@ and out_type =
   | Otyp_abstract
   | Otyp_open
   | Otyp_alias of {non_gen:bool; aliased:out_type; alias:string}
-  | Otyp_arrow of arg_label * out_arg_mode * out_type * out_type
+  | Otyp_arrow of arg_label * out_arg_mode * out_type * out_type * string option
   (** INVARIANT: the [out_type] for the return must be [Otyp_ret]. *)
   | Otyp_refine of string * out_type * Parsetree.expression
       * (Parsetree.core_type * out_type) list

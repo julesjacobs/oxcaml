@@ -575,9 +575,17 @@ and core_type ctxt f x =
       (attributes ctxt) x.ptyp_attributes
   end
   else match x.ptyp_desc with
-    | Ptyp_arrow (l, ct1, ct2, m1, m2) ->
-        pp f "@[<2>%a@;->@;%a@]" (* FIXME remove parens later *)
-          (type_with_label ctxt) (l,ct1,m1) (return_type ctxt) (ct2,m2)
+    | Ptyp_arrow (l, ct1, ct2, m1, m2, binder) ->
+        begin match binder with
+        | None ->
+            pp f "@[<2>%a@;->@;%a@]" (* FIXME remove parens later *)
+              (type_with_label ctxt) (l,ct1,m1)
+              (return_type ctxt) (ct2,m2)
+        | Some binder ->
+            pp f "@[<2>(%a : %a)%a@;->@;%a@]"
+              ident_of_name binder.txt (core_type1 ctxt) ct1
+              optional_at_modes m1 (return_type ctxt) (ct2,m2)
+        end
     | Ptyp_alias (ct, s, j) ->
         pp f "@[<2>%a@;as@;%a@]" (core_type1 ctxt) ct
           tyvar_loc_option_jkind (s, j)

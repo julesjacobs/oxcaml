@@ -1525,6 +1525,61 @@ type typvariant_repr = {
   tags : string list option
 }
 
+let refinement_names = ref Ident.Map.empty
+
+let refinement_name id =
+  match Ident.Map.find_opt id !refinement_names with
+  | Some name -> name
+  | None -> Ident.name id
+
+let with_refinement_names binders ty f =
+  if Ident.Set.is_empty binders then f () else
+  let ids = ref Ident.Set.empty in
+  let add id = ids := Ident.Set.add id !ids in
+  let visited = TypeHash.create 17 in
+  let rec visit ty =
+    if not (TypeHash.mem visited ty) then begin
+      TypeHash.add visited ty ();
+      match get_desc ty with
+      | Tarrow ((_, _, _, binder), arg, ret, _) ->
+          Option.iter add binder;
+          visit arg;
+          visit ret
+      | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+          add ref_binder;
+          Ident.Set.iter add (Refinement_predicate.bound_idents ref_pred);
+          visit ref_payload;
+          Refinement_predicate.iter_value_idents add ref_pred;
+          ignore (Refinement_predicate.fold_type_constraints
+            (fun () ty -> visit ty) () ref_pred : unit)
+      | _ -> Btype.iter_type_expr visit ty
+    end
+  in
+  visit ty;
+  let names =
+    Ident.Set.fold
+      (fun binder names ->
+        let name id =
+          match Ident.Map.find_opt id names with
+          | Some name -> name
+          | None -> Ident.name id
+        in
+        let used =
+          Ident.Set.fold
+            (fun id used ->
+              if Ident.same binder id then used
+              else String.Set.add (name id) used)
+            !ids String.Set.empty
+        in
+        let rec fresh candidate =
+          if String.Set.mem candidate used then fresh (candidate ^ "'")
+          else candidate
+        in
+        Ident.Map.add binder (fresh (Ident.name binder)) names)
+      binders !refinement_names
+  in
+  Misc.protect_refs [Misc.R (refinement_names, names)] f
+
 let rec tree_of_modal_typexp mode modal ty =
   let not_arrow tree =
     match modal with
@@ -1555,7 +1610,7 @@ let rec tree_of_modal_typexp mode modal ty =
         let non_gen = is_non_gen mode ty in
         let name_gen = Variable_names.new_var_name ~non_gen ty in
         Otyp_var (non_gen, Variable_names.name_of_type name_gen tty)
-    | Tarrow ((l, marg, mret), ty1, ty2, _) ->
+    | Tarrow ((l, marg, mret, binder), ty1, ty2, _) ->
         let lab =
           if !print_labels || is_omittable l then outcome_label l
           else Nolabel
@@ -1579,18 +1634,23 @@ let rec tree_of_modal_typexp mode modal ty =
         in
         let acc_mode = curry_mode alloc_mode arg_mode in
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
-        let t2 = tree_of_modal_typexp mode modal ty2 in
-        Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
+        let binders =
+          Option.fold ~none:Ident.Set.empty ~some:Ident.Set.singleton binder
+        in
+        with_refinement_names binders ty2 (fun () ->
+          let t2 = tree_of_modal_typexp mode modal ty2 in
+          Otyp_arrow
+            (lab, tree_of_modes arg_mode, t1, t2,
+             Option.map refinement_name binder))
     | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
         let payload = tree_of_typexp mode Alloc.Const.legacy ref_payload in
+        with_refinement_names
+          (Ident.Set.add ref_binder
+             (Refinement_predicate.bound_idents ref_pred)) ty (fun () ->
         let bound_names =
-          let ids =
-            Ident.Set.add ref_binder
-              (Refinement_predicate.bound_idents ref_pred)
-          in
-          Ident.Set.fold
-            (fun id names -> String.Set.add (Ident.name id) names)
-            ids String.Set.empty
+          Ident.Map.fold
+            (fun _ name names -> String.Set.add name names)
+            !refinement_names String.Set.empty
         in
         (* Names render through the printer's path machinery, so that
            shortening and substitution are reflected. *)
@@ -1655,11 +1715,11 @@ let rec tree_of_modal_typexp mode modal ty =
         in
         let predicate =
           Refinement_predicate.untype ~type_constraint
-            ~var_name:Ident.name ~value_ident
+            ~var_name:refinement_name ~value_ident
             ~constructor_ident ~label_ident ref_pred
         in
         Otyp_refine
-          (Ident.name ref_binder, payload, predicate, !type_overrides)
+          (refinement_name ref_binder, payload, predicate, !type_overrides))
     | Ttuple labeled_tyl ->
         Otyp_tuple (tree_of_labeled_typlist mode labeled_tyl)
     | Tunboxed_tuple labeled_tyl ->
