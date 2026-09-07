@@ -174,6 +174,8 @@ module TyVarEnv : sig
   val with_local_scope : (unit -> 'a) -> 'a
   (* see mli file *)
 
+  val protect_reentrant : (unit -> 'a) -> 'a
+
   type poly_univars
   val with_univars : poly_univars -> (unit -> 'a) -> 'a
   (* evaluate with a locally extended set of univars *)
@@ -385,6 +387,17 @@ end = struct
   type poly_univars = (string * pending_univar * Env.stage) list
 
   let univars = ref ([] : poly_univars)
+
+  let protect_reentrant f =
+    Misc.protect_refs
+      [ Misc.R (type_variables, !type_variables);
+        Misc.R (used_variables, !used_variables);
+        Misc.R (used_anonymous_variables, !used_anonymous_variables);
+        Misc.R (warned_imprecise_locs, !warned_imprecise_locs);
+        Misc.R (pre_univars, !pre_univars);
+        Misc.R (univars, !univars)
+      ]
+      f
   let assert_univars uvs =
     assert (List.for_all (fun (_name, v, _stage) -> not_generic v.univar) uvs)
 
@@ -954,6 +967,13 @@ let type_open :
     ref =
   ref (fun ?used_slot:_ _ -> assert false)
 
+let type_refinement_predicate =
+  ref
+    (fun _env _binder _payload _predicate ->
+      assert false
+      : Env.t -> Ident.t -> type_expr -> Parsetree.expression ->
+        Typedtree.expression * refinement_expression)
+
 let rec transl_type env ~policy ?(aliased=false) ~row_context mode styp =
   Builtin_attributes.warning_scope styp.ptyp_attributes
     (fun () -> transl_type_aux env ~policy ~aliased ~row_context mode styp)
@@ -1339,6 +1359,26 @@ and transl_type_aux env ~row_context ~aliased ~policy mode styp =
       let new_env = Env.enter_splice ~loc env in
       let cty = transl_type new_env ~policy ~row_context mode t in
       ctyp (Ttyp_splice cty) (newty (Tsplice cty.ctyp_type))
+  | Ptyp_refine (sbinder, spayload, spred) ->
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let payload_cty =
+        with_local_level_generalize_structure_if_principal (fun () ->
+          transl_type env ~policy ~row_context mode spayload)
+      in
+      let binder =
+        Ident.create_scoped ~scope:Ident.lowest_scope sbinder.txt
+      in
+      let typed_pred, pred =
+        TyVarEnv.protect_reentrant (fun () ->
+          !type_refinement_predicate env binder payload_cty.ctyp_type spred)
+      in
+      let ty =
+        newty (Trefine { ref_structural_scope = Ident.lowest_scope;
+                         ref_binder = binder;
+                         ref_payload = payload_cty.ctyp_type;
+                         ref_pred = pred })
+      in
+      ctyp (Ttyp_refine (binder, sbinder, payload_cty, typed_pred)) ty
   | Ptyp_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 

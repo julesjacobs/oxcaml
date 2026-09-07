@@ -69,15 +69,19 @@ let rec batch_add_subst args vals subst =
 (* Expand a type, looking through ordinary synonyms, private synonyms,
    links, and [@@unboxed] types. The returned type will therefore be none
    of these cases (except in case of missing cmis). *)
-let scrape_ty env ty =
+let rec scrape_ty env ty =
   let ty = match get_desc ty with Tpoly (ty, _) -> ty | _ -> ty in
   match get_desc ty with
+  | Trefine { ref_payload; _ } -> scrape_ty env ref_payload
   | Tconstr _ -> (
     let ty' = Ctype.expand_head_opt env ty in
     match get_desc ty' with
+    | Trefine { ref_payload; _ } -> scrape_ty env ref_payload
     | Tconstr (p, _, _) -> (
       match find_unboxed_type (Env.find_type p env) with
-      | Some _ -> (Ctype.get_unboxed_type_approximation env ty').ty
+      | Some _ ->
+        let approximation = (Ctype.get_unboxed_type_approximation env ty').ty in
+        if eq_type approximation ty' then ty' else scrape_ty env approximation
       | None -> ty'
       | exception Not_found -> ty (* missing cmi file *))
     | _ -> ty')
@@ -155,6 +159,8 @@ let classify env ty : classification =
       raise (Vicuna_unsupported (Other "Unexpected type constructor Trepr"))
     | Tbox _ ->
       raise (Vicuna_unsupported (Other "Unexpected type constructor Tbox"))
+    | Trefine _ ->
+      raise (Vicuna_unsupported (Other "Unexpected type constructor Trefine"))
 
 type can_be_float_array =
   | YesFloatArray
@@ -182,6 +188,9 @@ let rec value_kind env (subst : value_shape Subst.t) ~visited ~depth ty :
   in
   let scty = scrape_ty env ty in
   match get_desc scty with
+  | Trefine _ ->
+    Misc.fatal_error
+      "Vicuna_traverse_typed_tree.value_kind: Trefine after scrape_ty"
   | Tmod _ ->
     Misc.fatal_error "Vicuna_traverse_typed_tree.value_kind: unexpected Tmod"
   | Tconstr (p, _, _) when Path.same p Predef.path_int -> Imm

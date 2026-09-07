@@ -1,0 +1,6 @@
+File "inferred_consumer.ml", line 3, characters 49-50:
+3 | let distinct (x : Inferred.A.t) : Inferred.B.t = x
+                                                     ^
+Error: The value x has type Inferred.A.t = {x : int | Inferred.A.holds x}
+       but an expression was expected of type
+         Inferred.B.t = {x : int | Inferred.B.holds x}

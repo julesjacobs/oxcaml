@@ -29,9 +29,8 @@ These are different claims: **typechecked**, **runtime-checked**, and
 the current lack of VC checking. When VC generation lands, change that demo
 to expect rejection; do not preserve acceptance as intended behavior.
 
-`principal.ml` exposes the current mode-crossing failure for ordinary
-polymorphic comparisons under `-principal`. Other predicate demos bind the
-same integer primitives at monomorphic types to keep their purpose visible.
+`principal.ml` checks mode crossing for ordinary polymorphic comparisons in
+refinement predicates under `-principal`.
 
 `dependent.ml` checks a client against a proposed well-founded recursion
 combinator's signature. It supplies no implementation of that combinator and

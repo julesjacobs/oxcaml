@@ -39,10 +39,10 @@
 /external/merlin/src/ocaml/preprocess/menhirLib.ml linguist-generated
 /external/merlin/src/ocaml/preprocess/menhirLib.mli linguist-generated
 /external/merlin/src/ocaml/preprocess/parser_explain.ml linguist-generated
-/external/merlin/src/ocaml/preprocess/parser_printer.ml linguist-generated
-/external/merlin/src/ocaml/preprocess/parser_raw.ml linguist-generated
-/external/merlin/src/ocaml/preprocess/parser_raw.mli linguist-generated
-/external/merlin/src/ocaml/preprocess/parser_recover.ml linguist-generated
+/external/merlin/src/ocaml/preprocess/parser_printer.ml -diff linguist-generated
+/external/merlin/src/ocaml/preprocess/parser_raw.ml -diff linguist-generated
+/external/merlin/src/ocaml/preprocess/parser_raw.mli -diff linguist-generated
+/external/merlin/src/ocaml/preprocess/parser_recover.ml -diff linguist-generated
 /external/merlin/src/sherlodoc/type_parser.ml linguist-generated
 /external/merlin/src/sherlodoc/type_parser.mli linguist-generated
 

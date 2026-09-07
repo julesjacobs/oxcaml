@@ -27,6 +27,13 @@ val longident : Format.formatter -> Longident.t -> unit
 val constr : Format.formatter -> Longident.t -> unit
 
 val expression : Format.formatter -> Parsetree.expression -> unit
+
+(** Print an expression, replacing types identified by physical equality with
+    the supplied printers. Replacement types are parenthesized where
+    precedence requires it. *)
+val expression_with_type_overrides :
+  (Parsetree.core_type * (Format.formatter -> unit)) list ->
+  Format.formatter -> Parsetree.expression -> unit
 val string_of_expression : Parsetree.expression -> string
 
 val pattern: Format.formatter -> Parsetree.pattern -> unit

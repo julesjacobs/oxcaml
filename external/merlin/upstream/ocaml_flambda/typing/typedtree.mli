@@ -428,6 +428,10 @@ and exp_extra =
         (* NB. If an expression has both [Texp_borrowed] and
         [Texp_ghost_region], we assume the [Texp_borrowed] is inner than
         [Texp_ghost_region]. Currently it's impossible. *)
+  | Texp_refine
+        (** The source expression was introduced by [refine_]. *)
+  | Texp_let_refine of Ident.t * string loc
+        (** The source expression was [let refine_ x = ... in ...]. *)
 
 and arg_label = Types.arg_label =
   | Nolabel
@@ -1306,6 +1310,8 @@ and core_type_desc =
   | Ttyp_quote of core_type
   | Ttyp_splice of core_type
   | Ttyp_repr of string list * core_type
+  | Ttyp_refine of Ident.t * string loc * core_type * expression
+      (** [{x : T | P}]. The type graph carries the resolved predicate. *)
   | Ttyp_newlayout of string loc list * core_type
       (** [Ttyp_newlayout (vars, ty)] represents layout-polymorphic types in
           which [vars] are generalised sort variables.

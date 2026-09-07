@@ -922,12 +922,12 @@ let proxy ty = Transient_expr.repr (proxy ty)
 
 (* When printing a type scheme, we print weak names.  When printing a plain
    type, we do not.  This type controls that behavior *)
-type type_or_scheme = Type | Type_scheme
+type type_or_scheme = Type | Type_scheme | Type_constraint
 
 let is_non_gen mode ty =
   match mode with
   | Type_scheme -> is_Tvar ty && get_level ty <> generic_level
-  | Type        -> false
+  | Type | Type_constraint -> false
 
 let nameable_row row =
   row_name row <> None &&
@@ -978,6 +978,9 @@ let printer_iter_type_expr f ty =
       f ty2
   | Tmod (ty, _) ->
       f ty
+  | Trefine { ref_payload; ref_pred; _ } ->
+      f ref_payload;
+      Refinement_predicate.fold_type_constraints (fun () ty -> f ty) () ref_pred
   | _ ->
       Btype.iter_type_expr f ty
 
@@ -1315,6 +1318,7 @@ module Aliases = struct
       | Tquote_eval ty
       | Tbox ty
       | Trepr (ty, _)
+      | Trefine { ref_payload = ty; _ }
       | Tmod (ty, _) -> mark_loops_rec visited ty
       | Tof_kind _ -> ()
       | Tsubst _ -> ()
@@ -1542,6 +1546,11 @@ let rec tree_of_modal_typexp mode modal ty =
   let pr_typ alloc_mode =
     let tty = Transient_expr.repr ty in
     match tty.desc with
+    | Tvar { name = None }
+      when mode = Type_constraint && get_level ty = generic_level ->
+        (* Naming an anonymous generalized variable would make a local
+           annotation monomorphic when the predicate is checked again. *)
+        Otyp_stuff "_"
     | Tvar _ ->
         let non_gen = is_non_gen mode ty in
         let name_gen = Variable_names.new_var_name ~non_gen ty in
@@ -1572,6 +1581,85 @@ let rec tree_of_modal_typexp mode modal ty =
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
         let t2 = tree_of_modal_typexp mode modal ty2 in
         Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
+    | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+        let payload = tree_of_typexp mode Alloc.Const.legacy ref_payload in
+        let bound_names =
+          let ids =
+            Ident.Set.add ref_binder
+              (Refinement_predicate.bound_idents ref_pred)
+          in
+          Ident.Set.fold
+            (fun id names -> String.Set.add (Ident.name id) names)
+            ids String.Set.empty
+        in
+        (* Names render through the printer's path machinery, so that
+           shortening and substitution are reflected. *)
+        let rec longident : Outcometree.out_ident -> Longident.t = function
+          | Oide_ident { printed_name } -> Lident printed_name
+          | Oide_dot (id, s) ->
+              Ldot (Location.mknoloc (longident id), Location.mknoloc s)
+          | Oide_apply (a, b) ->
+              Lapply
+                (Location.mknoloc (longident a),
+                 Location.mknoloc (longident b))
+          | Oide_hash id -> longident id
+        in
+        let value_ident path =
+          match path with
+          | Pdot (module_path, name) when String.Set.mem name bound_names ->
+              Location.mknoloc
+                (Longident.Ldot
+                   ( Location.mknoloc
+                       (longident (tree_of_path (Some Module) module_path)),
+                     Location.mknoloc name ))
+          | path ->
+              Location.mknoloc (longident (tree_of_path (Some Value) path))
+        in
+        let constructor_ident path =
+          (* A constructor is qualified by the module of its type. *)
+          match (path : Path.t) with
+          | Pextra_ty (tp, Pcstr_ty name) -> (
+              match tp with
+              | Pdot (m, _) | Pextra_ty (Pdot (m, _), _) ->
+                  Location.mknoloc
+                    (Longident.Ldot
+                       (Location.mknoloc
+                          (longident (tree_of_path (Some Module) m)),
+                        Location.mknoloc name))
+              | _ -> Location.mknoloc (Longident.Lident name))
+          | path ->
+              (* extension constructor *)
+              Location.mknoloc (longident (tree_of_path None path))
+        in
+        let label_ident type_path name =
+          let rec defining_module = function
+            | Pdot (module_path, _) -> Some module_path
+            | Pextra_ty (path, _) -> defining_module path
+            | Pident _ | Papply _ -> None
+          in
+          match defining_module type_path with
+          | Some module_path ->
+              Location.mknoloc
+                (Longident.Ldot
+                   ( Location.mknoloc
+                       (longident (tree_of_path (Some Module) module_path)),
+                     Location.mknoloc name ))
+          | None -> Location.mknoloc (Longident.Lident name)
+        in
+        let type_overrides = ref [] in
+        let type_constraint ty =
+          let placeholder = Ast_helper.Typ.any None in
+          let printed = tree_of_typexp Type_constraint Alloc.Const.legacy ty in
+          type_overrides := (placeholder, printed) :: !type_overrides;
+          Some placeholder
+        in
+        let predicate =
+          Refinement_predicate.untype ~type_constraint
+            ~var_name:Ident.name ~value_ident
+            ~constructor_ident ~label_ident ref_pred
+        in
+        Otyp_refine
+          (Ident.name ref_binder, payload, predicate, !type_overrides)
     | Ttuple labeled_tyl ->
         Otyp_tuple (tree_of_labeled_typlist mode labeled_tyl)
     | Tunboxed_tuple labeled_tyl ->

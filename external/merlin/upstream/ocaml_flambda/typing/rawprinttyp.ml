@@ -114,6 +114,8 @@ and raw_type_desc ppf ty =
         (Format_doc.compat (Alloc.print ~verbose:true ())) ret
         raw_type t1 raw_type t2
         (if is_commu_ok c then "Cok" else "Cunknown")
+  | Trefine { ref_payload; ref_pred = _; _ } ->
+      fprintf ppf "@[<1>Trefine@,%a@]" raw_type ref_payload
   | Ttuple tl ->
       fprintf ppf "@[<1>Ttuple@,%a@]" labeled_type_list tl
   | Tunboxed_tuple tl ->

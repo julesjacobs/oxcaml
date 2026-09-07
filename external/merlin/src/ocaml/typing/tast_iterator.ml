@@ -342,6 +342,8 @@ let extra sub = function
   | Texp_poly cto -> Option.iter (sub.typ sub) cto
   | Texp_borrowed -> ()
   | Texp_ghost_region -> ()
+  | Texp_refine -> ()
+  | Texp_let_refine (_, name) -> iter_loc sub name
   | Texp_stack -> ()
   | Texp_mode modes -> sub.modes sub modes
   | Texp_inspected_type (Label_disambiguation _) -> ()
@@ -762,6 +764,9 @@ let typ sub {ctyp_loc; ctyp_desc; ctyp_env; ctyp_attributes; _} =
       sub.modes sub ma1;
       sub.typ sub ct2;
       sub.modes sub ma2
+  | Ttyp_refine (_, _, payload, pred) ->
+      sub.typ sub payload;
+      sub.expr sub pred
   | Ttyp_tuple list -> List.iter (fun (_, t) -> sub.typ sub t) list
   | Ttyp_unboxed_tuple list -> List.iter (fun (_, t) -> sub.typ sub t) list
   | Ttyp_constr (_, lid, list) ->

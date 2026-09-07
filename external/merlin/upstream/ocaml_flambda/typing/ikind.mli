@@ -78,6 +78,8 @@ val crossing_of_jkind :
 
 val crossing_of_type : Env.t -> Types.type_expr -> Mode.Crossing.t
 
+val enforce_refinement_crossings : Types.jkind_l -> Types.jkind_l
+
 val instance_poly_for_jkind' :
   (Types.type_expr list -> Types.type_expr -> Types.type_expr) ref
 

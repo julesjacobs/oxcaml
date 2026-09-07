@@ -165,6 +165,56 @@ and strengthen_lazy_sig' ~aliasable sg p =
       in
       sigelt :: strengthen_lazy_sig' ~aliasable rem p
 
+(* This is a comparison copy, so preserve bound signature identifiers.
+   [Subst.signature Keep] refreshes them. *)
+and subst_signature_value_paths subst (sg : Types.signature) : Types.signature =
+  List.map
+    (function
+      | Sig_value (id, decl, vis) ->
+          Sig_value (id, Subst.value_description subst decl, vis)
+      | Sig_type (id, decl, rs, vis) ->
+          Sig_type (id, Subst.type_declaration subst decl, rs, vis)
+      | Sig_typext (id, ext, es, vis) ->
+          Sig_typext (id, Subst.extension_constructor subst ext, es, vis)
+      | Sig_module (id, pres, decl, rs, vis) ->
+          Sig_module
+            (id, pres,
+             { decl with
+               md_type = subst_module_type_value_paths subst decl.md_type
+             },
+             rs, vis)
+      | Sig_modtype (id, decl, vis) ->
+          Sig_modtype
+            (id,
+             { decl with
+               mtd_type =
+                 Option.map (subst_module_type_value_paths subst) decl.mtd_type
+             },
+             vis)
+      | Sig_class (id, decl, rs, vis) ->
+          Sig_class (id, Subst.class_declaration subst decl, rs, vis)
+      | Sig_class_type (id, decl, rs, vis) ->
+          Sig_class_type (id, Subst.cltype_declaration subst decl, rs, vis)
+      | Sig_jkind (id, decl, vis) ->
+          Sig_jkind (id, Subst.jkind_declaration subst decl, vis))
+    sg
+
+and subst_module_type_value_paths subst (mty : Types.module_type) =
+  match mty with
+  | Mty_signature sg ->
+      Mty_signature (subst_signature_value_paths subst sg)
+  | Mty_functor (Unit, result, result_mode) ->
+      Mty_functor
+        (Unit, subst_module_type_value_paths subst result, result_mode)
+  | Mty_functor (Named (param, arg, arg_mode), result, result_mode) ->
+      Mty_functor
+        (Named (param, subst_module_type_value_paths subst arg, arg_mode),
+         subst_module_type_value_paths subst result, result_mode)
+  | Mty_strengthen (mty, path, aliasability) ->
+      Mty_strengthen
+        (subst_module_type_value_paths subst mty, path, aliasability)
+  | (Mty_ident _ | Mty_alias _ | Mty_for_hole) as mty -> mty
+
 and strengthen_lazy_sig ~aliasable sg p =
   let sg = Subst.Lazy.force_signature_once sg in
   let sg = strengthen_lazy_sig' ~aliasable sg p in
@@ -185,10 +235,54 @@ let strengthen_decl ~aliasable md p =
   let md = strengthen_lazy_decl ~aliasable (Subst.Lazy.of_module_decl md) p in
   Subst.Lazy.force_module_decl md
 
+let rec subst_module_type_head_paths subst = function
+  | Subst.Lazy.Mty_ident path ->
+      Subst.Lazy.Mty_ident (Subst.modtype_path subst path)
+  | Subst.Lazy.Mty_strengthen (mty, path, aliasability) ->
+      Subst.Lazy.Mty_strengthen
+        (subst_module_type_head_paths subst mty,
+         Subst.module_path subst path,
+         aliasability)
+  | Subst.Lazy.Mty_alias path ->
+      Subst.Lazy.Mty_alias (Subst.module_path subst path)
+  | (Subst.Lazy.Mty_signature _ | Subst.Lazy.Mty_functor _
+    | Subst.Lazy.Mty_for_hole) as mty -> mty
+
+let rec prefix_refinement_paths_lazy env outer_subst mty p =
+  let open Subst.Lazy in
+  if not (may_have_refinement_types ()) then mty else
+  let mty = subst_module_type_head_paths outer_subst mty in
+  match mty with
+  | Mty_signature sg ->
+      let sg = List.map force_signature_item (force_signature_once sg) in
+      let subst =
+        List.fold_left
+          (fun subst item ->
+             match item with
+             | Types.Sig_value (id, _, Exported)
+             | Types.Sig_typext (id, _, _, Exported) ->
+                 Subst.add_value id (Pdot (p, Ident.name id)) subst
+             | Types.Sig_value (_, _, Hidden)
+             | Types.Sig_typext (_, _, _, Hidden)
+             | Types.Sig_type _ | Types.Sig_module _ | Types.Sig_modtype _
+             | Types.Sig_class _ | Types.Sig_class_type _
+             | Types.Sig_jkind _ -> subst)
+          Subst.identity sg
+      in
+      let sg = subst_signature_value_paths subst sg in
+      Mty_signature (of_signature sg)
+  | Mty_ident _ | Mty_strengthen _ ->
+      begin match reduce_lazy ~aliases:false env mty with
+      | Some mty ->
+          prefix_refinement_paths_lazy env Subst.identity mty p
+      | None -> mty
+      end
+  | Mty_alias _ | Mty_functor _ | Mty_for_hole -> mty
+
 (* Perform one reduction on a module type, returning None is it couldn't be
   reduced. Possible reductions are unfolding type abbreviations, pushing
   strengthening inwards and, if aliases is true, resolving module aliases. *)
-let rec reduce_lazy ~aliases env mty =
+and reduce_lazy ~aliases env mty =
   let open Subst.Lazy in
   match mty with
     Mty_ident p ->

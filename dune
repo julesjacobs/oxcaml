@@ -248,6 +248,7 @@
   shape_reduce
   zero_alloc
   types
+  refinement_predicate
   btype
   oprint
   subst

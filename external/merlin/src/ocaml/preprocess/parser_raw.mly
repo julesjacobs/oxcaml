@@ -1101,6 +1101,7 @@ let merloc startpos ?endpos x =
 %token BARRBRACKET [@symbol "|]"]
 %token BEGIN [@symbol "begin"]
 %token BORROW [@symbol "borrow_"]
+%token REFINE [@symbol "refine_"]
 %token <char> CHAR [@cost 2] [@recovery '_']
 %token <char> HASH_CHAR [@cost 2] [@recovery '_']
 %token CLASS [@symbol "class"]
@@ -3008,6 +3009,9 @@ fun_:
       { $1 }
   | let_bindings(ext) IN seq_expr
       { expr_of_let_bindings ~loc:$sloc $1 (merloc $endpos($2) $3) }
+  | LET REFINE binder = mkrhs(LIDENT) EQUAL bound = seq_expr
+      IN body = seq_expr
+      { mkexp ~loc:$sloc (Pexp_let_refine (binder, bound, body)) }
   | pbop_op = mkrhs(LETOP) bindings = letop_bindings IN body = seq_expr
       { let (pbop_pat, pbop_exp, rev_ands) = bindings in
         let ands = List.rev rev_ands in
@@ -3087,6 +3091,8 @@ fun_:
   | stack(simple_expr) %prec below_HASH { $1 }
   | BORROW simple_expr %prec below_HASH
       { Exp.borrow ~loc:(make_loc $sloc) $2 }
+  | REFINE simple_expr %prec below_HASH
+      { Exp.refine ~loc:(make_loc $sloc) $2 }
   | labeled_tuple %prec below_COMMA
       { mkexp ~loc:$sloc (Pexp_tuple $1) }
   | maybe_stack (
@@ -4553,6 +4559,11 @@ label_declarations:
   | label_declaration_semi                      { [$1] }
   | label_declaration_semi label_declarations   { $1 :: $2 }
 ;
+refinement_type_head:
+    flags = mutable_or_global_flag name = mkrhs(label)
+    COLON ty = poly_type_no_attr
+      { flags, name, ty }
+;
 label_declaration:
     mutable_or_global_flag mkrhs(label) COLON poly_type_no_attr m1=optional_atat_modalities_expr attrs=attributes
       { let info = symbol_info $endpos in
@@ -5160,6 +5171,14 @@ spliceable_type:
 atomic_type:
   | type_ = delimited_type
       { type_ }
+  | LBRACE head = refinement_type_head BAR predicate = seq_expr RBRACE
+      { let (mut, modalities), binder, payload = head in
+        match mut, modalities with
+        | Immutable, [] ->
+            mktyp ~loc:$sloc (Ptyp_refine (binder, payload, predicate))
+        | _ -> raise Parsing.Parse_error }
+  | LBRACE refinement_type_head BAR seq_expr error
+      { unclosed "{" $loc($1) "}" $loc($5) }
   | mktyp( /* begin mktyp group */
       tys = actual_type_parameters
       tid = mkrhs(type_longident)
@@ -5633,6 +5652,7 @@ single_attr_id:
   | ASSERT { "assert" }
   | BEGIN { "begin" }
   | BORROW { "borrow_" }
+  | REFINE { "refine_" }
   | CLASS { "class" }
   | CONSTRAINT { "constraint" }
   | DO { "do" }

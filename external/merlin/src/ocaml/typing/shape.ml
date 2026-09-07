@@ -193,8 +193,7 @@ module Sig_component_kind = struct
 
   let can_appear_in_types = function
     | Value
-    | Extension_constructor ->
-        false
+    | Extension_constructor
     | Type
     | Constructor
     | Label
@@ -203,8 +202,7 @@ module Sig_component_kind = struct
     | Module_type
     | Class
     | Class_type
-    | Jkind ->
-        true
+    | Jkind -> true
 
   let rank = function
     | Value -> 0

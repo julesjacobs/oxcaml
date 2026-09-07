@@ -451,6 +451,9 @@ let extra sub = function
   | Texp_poly cto -> Texp_poly (Option.map (sub.typ sub) cto)
   | Texp_borrowed as d -> d
   | Texp_ghost_region as d -> d
+  | Texp_refine as d -> d
+  | Texp_let_refine (id, name) ->
+      Texp_let_refine (id, map_loc sub name)
   | Texp_stack as d -> d
   | Texp_mode modes -> Texp_mode (sub.modes sub modes)
   | Texp_inspected_type (Label_disambiguation _) as d -> d
@@ -1057,6 +1060,9 @@ let typ sub x =
     | Ttyp_arrow (label, ct1, ma1, ct2, ma2) ->
         Ttyp_arrow (label, sub.typ sub ct1, sub.modes sub ma1,
                     sub.typ sub ct2, sub.modes sub ma2)
+    | Ttyp_refine (binder, name, payload, pred) ->
+        Ttyp_refine
+          (binder, name, sub.typ sub payload, sub.expr sub pred)
     | Ttyp_tuple list ->
         Ttyp_tuple (List.map (fun (label, t) -> label, sub.typ sub t) list)
     | Ttyp_unboxed_tuple list ->

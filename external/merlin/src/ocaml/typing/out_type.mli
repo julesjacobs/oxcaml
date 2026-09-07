@@ -98,7 +98,9 @@ val add_type_to_preparation: type_expr -> unit
 
 (** In [Type_scheme] mode, non-generic types variables are printed as weakly
     polymorphic type variables. *)
-type type_or_scheme = Type | Type_scheme
+type type_or_scheme = Type | Type_scheme | Type_constraint
+(** [Type_constraint] preserves anonymous generalized variables as wildcards
+    when printing explicit constraints in refinement predicates. *)
 val tree_of_typexp: type_or_scheme -> type_expr -> out_type
 (** [tree_of_typexp] generate the [outcometree] for a prepared type
     expression.*)

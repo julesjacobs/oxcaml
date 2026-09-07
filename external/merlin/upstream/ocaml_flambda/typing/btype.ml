@@ -371,6 +371,7 @@ let fold_type_expr f init ty =
     List.fold_left (fun result (_n, ty) -> f result ty) init pack.pack_cstrs
   | Tof_kind _ -> init
   | Tbox ty -> f init ty
+  | Trefine { ref_payload; _ } -> f init ref_payload
 
 let iter_type_expr f ty =
   fold_type_expr (fun () v -> f v) () ty
@@ -615,6 +616,13 @@ let rec copy_type_desc ?(keep_names=false) f = function
         pack_cstrs = List.map (fun (n, ty) -> (n, f ty)) pack.pack_cstrs}
   | Tof_kind jk -> Tof_kind jk
   | Tbox ty -> Tbox (f ty)
+  | Trefine { ref_structural_scope; ref_binder; ref_payload; ref_pred } ->
+      (* The binder stamp is kept here; [Subst] freshens it on import. *)
+      Trefine { ref_structural_scope;
+                ref_binder;
+                ref_payload = f ref_payload;
+                ref_pred =
+                  Refinement_predicate.map ~type_expr:f ref_pred }
 
 (* TODO: rename to [module Copy_scope] *)
 module For_copy : sig

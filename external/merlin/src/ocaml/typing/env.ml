@@ -2316,7 +2316,9 @@ let prefix_idents root prefixing_sub sg =
     | Sig_value(id, _, _) as item :: rem ->
       let p = Pdot(root, Ident.name id) in
       prefix_idents root
-        ((item, p) :: items_and_paths) prefixing_sub rem
+        ((item, p) :: items_and_paths)
+        (Subst.add_value id p prefixing_sub)
+        rem
     | Sig_type(id, td, rs, vis) :: rem ->
       let p = Pdot(root, Ident.name id) in
       prefix_idents root
@@ -2328,7 +2330,7 @@ let prefix_idents root prefixing_sub sg =
       (* we extend the substitution in case of an inlined record *)
       prefix_idents root
         ((Sig_typext(id, ec, es, vis), p) :: items_and_paths)
-        (Subst.add_type id p prefixing_sub)
+        (Subst.add_value id p (Subst.add_type id p prefixing_sub))
         rem
     | Sig_module(id, pres, md, rs, vis) :: rem ->
       let p = Pdot(root, Ident.name id) in
@@ -3257,6 +3259,16 @@ let add_lock lock env =
 let add_const_closure_lock ?(ghost = false) closure_context comonadic env =
   let lock = Const_closure_lock (ghost, closure_context, comonadic) in
   add_lock lock env
+
+let add_total_closure_lock closure_context env =
+  let comonadic =
+    { Mode.Value.Comonadic.Const.legacy with
+      totality = Mode.Totality.Const.Total;
+      statefulness = Mode.Statefulness.Const.Stateless;
+      portability = Mode.Portability.Const.Portable
+    }
+  in
+  add_const_closure_lock closure_context comonadic env
 
 let add_closure_lock closure_context comonadic env =
   let lock = Closure_lock

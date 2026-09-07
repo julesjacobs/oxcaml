@@ -2330,6 +2330,8 @@ and transl_signature ?(interface_toplevel = false) env
               (Value.disallow_right md_mode, sig_modalities.moda_modalities))
             ~why:Signature_item
         in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [tdesc.val_id];
         Signature_names.check_value names tdesc.val_loc tdesc.val_id;
         mksig (Tsig_value tdesc) env loc,
         [Sig_value(tdesc.val_id, tdesc.val_val, Exported)],
@@ -3969,6 +3971,8 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
         in
         let val_val = {desc.val_val with val_modalities} in
         let desc = {desc with val_val} in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [desc.val_id];
         Signature_names.check_value names desc.val_loc desc.val_id;
         Tstr_primitive desc,
         [Sig_value(desc.val_id, desc.val_val, Exported)],
@@ -4360,7 +4364,15 @@ let remove_mode_and_jkind_variables_for_toplevel str =
      Ctype.remove_mode_and_jkind_variables exp.exp_type
   | _ -> ()
 
+let check_refinement_types_options () =
+  if !Clflags.recursive_types
+     && Language_extension.is_enabled Language_extension.Refinement_types
+  then
+    Location.raise_errorf ~loc:Location.none
+      "The -rectypes option cannot be used with the refinement_types extension"
+
 let type_toplevel_phrase env sig_acc s =
+  check_refinement_types_options ();
   Env.reset_required_globals ();
   Env.reset_probes ();
   Typecore.reset_allocations ();
@@ -4376,12 +4388,14 @@ let type_module_alias env smod =
   type_module_maybe_hold_locks ~alias:true ~hold_locks:true ~strengthen:true
     ~funct_body:false None env smod
 
-let type_module =
-  type_module ~strengthen:true ~funct_body:false None
+let type_module env smod =
+  check_refinement_types_options ();
+  type_module ~strengthen:true ~funct_body:false None env smod
 let type_module_maybe_hold_locks =
   type_module_maybe_hold_locks ~strengthen:true ~funct_body:false None
-let type_structure =
-  type_structure ~funct_body:false None
+let type_structure env sstr =
+  check_refinement_types_options ();
+  type_structure ~funct_body:false None env sstr
 
 (* Normalize types in a signature *)
 
@@ -4894,6 +4908,7 @@ let cms_register_toplevel_signature_attributes ~sourcefile ~uid ast =
         | _ -> None)
 
 let type_interface ~sourcefile modulename env ast =
+  check_refinement_types_options ();
   let error e =
     raise (Error (Location.none, Env.empty, e))
   in

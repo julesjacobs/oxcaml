@@ -174,6 +174,7 @@ module T = struct
         sub.jkind_annotation sub jkind
     | Ptyp_repr (_, t) -> sub.typ sub t
     | Ptyp_newlayout (_, t) -> sub.typ sub t
+    | Ptyp_refine (_, t, predicate) -> sub.typ sub t; sub.expr sub predicate
     | Ptyp_extension x -> sub.extension sub x
 
   let iter_type_declaration sub
@@ -582,6 +583,11 @@ module E = struct
     | Pexp_splice e -> sub.expr sub e
     | Pexp_hole -> ()
     | Pexp_borrow e -> sub.expr sub e
+    | Pexp_refine e -> sub.expr sub e
+    | Pexp_let_refine (name, bound, body) ->
+        iter_loc sub name;
+        sub.expr sub bound;
+        sub.expr sub body
 
   let iter_binding_op sub {pbop_op; pbop_pat; pbop_exp; pbop_loc} =
     iter_loc sub pbop_op;

@@ -27,6 +27,30 @@ let reset_constructor_ikind_on_substitution = false
 
 module Ldd = Types.Ldd
 
+let refinement_crossings =
+  let top = Axis_lattice.top in
+  Axis_lattice.create
+    ~areality:(Axis_lattice.areality top)
+    ~linearity:(Axis_lattice.linearity top)
+    ~uniqueness:(Axis_lattice.uniqueness top)
+    ~portability:Mode.Portability.Const.Portable
+    ~contention:(Axis_lattice.contention top)
+    ~forkable:(Axis_lattice.forkable top)
+    ~yielding:(Axis_lattice.yielding top)
+    ~totality:Mode.Totality.Const.Total
+    ~statefulness:Mode.Statefulness.Const.Stateless
+    ~visibility:(Axis_lattice.visibility top)
+    ~staticity:(Axis_lattice.staticity top)
+    ~externality:(Axis_lattice.externality top)
+
+let enforce_refinement_crossings (jkind : Types.jkind_l) =
+  let mod_bounds =
+    jkind.jkind.mod_bounds |> Jkind.Mod_bounds.to_axis_lattice
+    |> Axis_lattice.meet refinement_crossings
+    |> Jkind.Mod_bounds.of_axis_lattice
+  in
+  { jkind with jkind = { jkind.jkind with mod_bounds } }
+
 let instance_poly_for_jkind' =
   ref (fun _univars _ty -> Misc.fatal_error "instance_poly_for_jkind")
 
@@ -610,7 +634,7 @@ module Solver = struct
     let self_provenance, child_ctx =
       match desc with
       | Types.Tlink _ | Types.Tsubst _ | Types.Trepr _ | Types.Tpoly _
-      | Types.Tmod _ | Types.Tfield _ | Types.Tnil ->
+      | Types.Tmod _ | Types.Trefine _ | Types.Tfield _ | Types.Tnil ->
         Fun.id, ctx
       | _ -> provenance_and_child_ctx ctx ty
     in
@@ -641,6 +665,10 @@ module Solver = struct
     | Types.Tlink _ -> failwith "Tlink shouldn't appear in kind"
     | Types.Tsubst _ -> failwith "Tsubst shouldn't appear in kind"
     | Types.Trepr (ty, _sort_vars) -> kind ~use_tables:true ctx ty
+    | Types.Trefine { ref_payload; _ } ->
+      Ldd.meet
+        (kind ~use_tables:true ctx ref_payload)
+        (Ldd.const refinement_crossings)
     | Types.Tpoly (ty, univars) ->
       (* CR ikinds: this is sound but not fully precise.
         Internal ticket 5746. *)

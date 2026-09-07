@@ -24,6 +24,7 @@ type token =
   | SEMI
   | RPAREN
   | REPR
+  | REFINE
   | REC
   | RBRACKETGREATER
   | RBRACKET
@@ -230,6 +231,7 @@ module MenhirInterpreter : sig
     | T_SEMI : unit terminal
     | T_RPAREN : unit terminal
     | T_REPR : unit terminal
+    | T_REFINE : unit terminal
     | T_REC : unit terminal
     | T_RBRACKETGREATER : unit terminal
     | T_RBRACKET : unit terminal
@@ -452,6 +454,8 @@ module MenhirInterpreter : sig
     | N_reversed_bar_llist_constructor_declaration_ : (Parsetree.constructor_declaration list) nonterminal
     | N_reverse_product_jkind_gen_jkind_desc_no_with_kinds_ : (Parsetree.jkind_annotation list) nonterminal
     | N_reverse_product_jkind_gen_jkind_desc_ : (Parsetree.jkind_annotation list) nonterminal
+    | N_refinement_type_head : ((Asttypes.mutable_flag * Parsetree.modality Location.loc list) *
+  string Location.loc * Parsetree.core_type) nonterminal
     | N_record_expr_content : (Parsetree.expression option *
   (Longident.t Location.loc * Parsetree.expression) list) nonterminal
     | N_rec_flag : (Asttypes.rec_flag) nonterminal

@@ -465,6 +465,15 @@ let exp_extra sub (extra, loc, attrs) sexp =
         sexp.pexp_desc
     | Texp_borrowed -> Pexp_borrow sexp
     | Texp_ghost_region ->sexp.pexp_desc
+    | Texp_refine -> Pexp_refine sexp
+    | Texp_let_refine (_, name) -> begin
+        match sexp.pexp_desc with
+        | Pexp_let (Immutable, Nonrecursive,
+            [{ pvb_expr = bound; _ }], body) ->
+            Pexp_let_refine (name, bound, body)
+        | _ ->
+            Misc.fatal_error "Untypeast: malformed Texp_let_refine"
+      end
   in
   Exp.mk ~loc ~attrs desc
 
@@ -585,7 +594,8 @@ let expression sub exp =
                         [], modes
                       | Texp_poly _ | Texp_newtype _ | Texp_stack
                       | Texp_inspected_type _ -> [], []
-                      | Texp_ghost_region | Texp_borrowed -> [], []
+                      | Texp_ghost_region | Texp_borrowed | Texp_refine
+                      | Texp_let_refine _ -> [], []
                     in
                     new_type_constraints @ ret_type_constraints,
                     new_mode_annotations @ ret_mode_annotations)
@@ -1118,6 +1128,8 @@ let core_type sub ct =
         let modes2 = Typemode.untransl_mode modes2 in
         Ptyp_arrow
           (label arg_label, sub.typ sub ct1, sub.typ sub ct2, modes1, modes2)
+    | Ttyp_refine (_, binder, payload, pred) ->
+        Ptyp_refine (binder, sub.typ sub payload, sub.expr sub pred)
     | Ttyp_tuple list ->
         Ptyp_tuple (List.map (fun (l, typ) -> l, sub.typ sub typ) list)
     | Ttyp_unboxed_tuple list ->
