@@ -44,7 +44,7 @@ legacy-mode defaults.
 | Standard maps | `maps.ml` | Total comparators enable total operations; refined updates and lookup expose membership and value facts while preserving key and value access. |
 | Persistent environments | `environments.ml` | Binding shadows its comparator class and preserves observations in a distinct class; retaining the outer environment restores scope. |
 | Standard-set model | `avl_stdlib_set.ml` | Pointwise refinement relates the verified AVL implementation to `Set.MakeTotal`, with comparator compatibility explicit. |
-| Sparse immutable arrays | `sparse_iarrays.ml` | A polymorphic `Map.MakeTotal` overlay proves read-after-write, overwrite, removal fallback, and safe base-array reads. |
+| Sparse immutable arrays | `sparse_iarrays.ml` | A polymorphic record API proves read-after-write, overwrite, removal fallback, and safe base-array reads; a total optional observer states relational laws. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -111,9 +111,14 @@ then statically proves preservation of optional lookup results. It restores
 scope using the saved outer map; removing an inner binding does not restore a
 shadowed value.
 
-Sparse-array removal and commutation are refined-unit lemmas about the actual
-`get` operation at an arbitrary valid probe. A proof functor accepts an abstract
-`immutable_data` element type; integer and record clients instantiate it. The record client derives equality of reads
-and restoration of base values from these contracts. The examples check bounds
-and comparator-class distinction at runtime. The generic `get` operation also
-preserves writable access to mutable elements.
+The sparse-array `get` accepts an overlay record and an index refined against
+`Iarray.length overlay.base`, preserving writable access to mutable elements.
+A read from an updated overlay explicitly reintroduces the corresponding bound.
+The total `lookup` observer returns an option for every integer index, so
+relational laws can compare overlays without constructing refined arguments
+inside predicates. Removal fallback and independent-update commutation are
+proved for every index, including out-of-range ones. A proof functor accepts
+an abstract `immutable_data` element type; integer and record clients instantiate
+it. The record client derives equality of
+reads and restoration of base values from these contracts. The examples check
+bounds and comparator-class distinction at runtime.
