@@ -38,6 +38,7 @@ legacy-mode defaults.
 | AVL-set proofs | `avl_sets.mli`, `avl_set_client.ml` | A valid AVL set exposes semantic `equal`; the demo distinguishes it from representation `=`. |
 | Immutable arrays | `iarrays.ml`, `iarrays_ordinary.ml` | Immutable-array literals expose exact lengths and elements; safe reads expose normal-return bounds. |
 | Bounded search | `array_search.ml` | A decreasing interval establishes termination and safe reads; `Some` is the first match, and `None` proves absence throughout the interval. |
+| Binary search | `binary_search.ml` | A midpoint contract drives total transition search; sortedness turns array transitions into lower and upper bounds. |
 | Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
 | Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract polymorphic two-list queue over `immutable_data` elements implements a sequence model; a separate client proves generic FIFO behavior and rejects empty dequeue. |
 | Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
@@ -113,6 +114,23 @@ expression and input. Both evaluations use machine-integer wrapping semantics.
 `array_search.ml` proves first-match correctness within the requested interval
 and absence throughout that interval on `None`. Its total `at` observer returns
 zero outside the array; the result contract separately establishes bounds.
+
+`binary_search.ml` follows [Binary Search a Little Simpler & More Generic](https://julesjacobs.com/notes/binarysearch/binarysearch.pdf).
+Its generic search returns adjacent false/true endpoints and evaluates the
+predicate strictly inside the original interval. Monotonicity is unnecessary.
+A refined midpoint interface supports binary, forward, and backward search.
+The integer interval starts at or above -1 and has positive, non-wrapping
+machine-integer distance. Division uses a local total primitive declaration
+whose refined divisor excludes zero; the existing integer encoding supplies
+its arithmetic meaning.
+
+The array instance uses sentinels -1 and length. A separate sortedness lemma
+proves the global partition at an arbitrary valid index, and a client derives
+inequalities about actual reads. Correctness-only proofs and premise arguments
+are erased. The examples validate sorted inputs at runtime and compare both
+bounds against linear search on 126 sorted arrays, including empty arrays,
+singletons, and duplicates. They also exercise extreme integers and reject
+midpoints at an endpoint, premature termination, and division by zero.
 
 The queue proves its tail-recursive reversal against an explicit
 append/reverse model. Its representation stays behind a `.mli`. Operations
