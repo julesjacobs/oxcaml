@@ -15393,16 +15393,30 @@ let rec refinement_pattern_of_typed :
         in
         locals,
         mk (Rpat_construct (refinement_constructor_path cstr, args))
+    | Tpat_record (fields, _, closed) ->
+        let locals, fields =
+          List.fold_left_map
+            (fun locals (_, label, pat) ->
+               let locals, pat = refinement_pattern_of_typed locals pat in
+               locals,
+               (Data_types.lbl_res_type_path label, label.lbl_name, pat))
+            locals fields
+        in
+        locals, mk (Rpat_record (closed, fields))
     | Tpat_alias { pattern; id; _ } ->
         let locals, pattern = refinement_pattern_of_typed locals pattern in
         Ident.Set.add id locals, mk (Rpat_alias (pattern, id))
+    | Tpat_or (left, right, None) ->
+        let left_locals, left = refinement_pattern_of_typed locals left in
+        let right_locals, right = refinement_pattern_of_typed locals right in
+        Ident.Set.union left_locals right_locals, mk (Rpat_or (left, right))
     | Tpat_value pat ->
         refinement_pattern_of_typed locals (pat :> value general_pattern)
     | Tpat_unboxed_unit | Tpat_unboxed_bool _ | Tpat_unboxed_tuple _
     | Tpat_fun_layout _
     | Tpat_construct (_, _, _, _, Some _)
-    | Tpat_variant _ | Tpat_record _ | Tpat_record_unboxed_product _
-    | Tpat_array _ | Tpat_lazy _ | Tpat_exception _ | Tpat_or _ ->
+    | Tpat_variant _ | Tpat_record_unboxed_product _
+    | Tpat_array _ | Tpat_lazy _ | Tpat_exception _ | Tpat_or (_, _, Some _) ->
         unsupported_refinement_syntax pat.pat_loc "This pattern"
 
 let refinement_argument_label : Typedtree.arg_label -> Asttypes.arg_label =

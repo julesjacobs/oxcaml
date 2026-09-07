@@ -17,6 +17,17 @@ let reflexive (x : int) : {r : int | r === x} =
 val reflexive : (x : int) -> {r : int | r === x} = <fun>
 |}]
 
+module Definitions = struct
+  let[@def] next x = x + 1
+end;;
+[%%expect{|
+module Definitions :
+  sig
+    val next : int -> int
+    val next_def : (x : int) -> {u : unit | (next x) === (x + 1)}
+  end
+|}]
+
 module Opaque : sig
   type t
   val zero : t
@@ -67,6 +78,56 @@ type token = Token
 val constructor_reflexive : {r : token | r === Token} = Token
 |}]
 
+type 'a nothing = Nothing
+
+let int_nothing : {r : int nothing | r === Nothing} =
+  let (r : int nothing) = Nothing in
+  refine_ r
+
+let bool_nothing : {r : bool nothing | r === Nothing} =
+  let (r : bool nothing) = Nothing in
+  refine_ r;;
+[%%expect{|
+type 'a nothing = Nothing
+val int_nothing : {r : int nothing | r === Nothing} = Nothing
+val bool_nothing : {r : bool nothing | r === Nothing} = Nothing
+|}]
+
+let polymorphic_nothing = Nothing;;
+[%%expect{|
+val polymorphic_nothing : 'a nothing = Nothing
+|}]
+
+let int_polymorphic : {r : int nothing | r === polymorphic_nothing} =
+  let r = polymorphic_nothing in
+  refine_ r;;
+[%%expect{|
+val int_polymorphic : {r : int nothing | r === polymorphic_nothing} = Nothing
+|}]
+
+let bool_polymorphic : {r : bool nothing | r === polymorphic_nothing} =
+  let r = polymorphic_nothing in
+  refine_ r;;
+[%%expect{|
+val bool_polymorphic : {r : bool nothing | r === polymorphic_nothing} =
+  Nothing
+|}]
+
+type side = Left | Right
+
+let preserve_side (x : side) : {r : side | r === x} =
+  match x with
+  | Left ->
+    let r = Left in
+    refine_ r
+  | Right ->
+    let r = Right in
+    refine_ r;;
+[%%expect{|
+type side = Left | Right
+val preserve_side : (x : side) -> {r : side | r === x} = <fun>
+|}]
+
 let opaque_argument_congruence (x : Opaque.t) (y : {y : Opaque.t | y === x})
     : {u : unit |
         let refine_ y = y in
@@ -94,6 +155,16 @@ Error: The value "ref" is "partial"
          because it is used in an expression (at line 1, characters 36-51).
 |}]
 
+let unknown =
+  let x = Opaque.zero in
+  let y = Opaque.one in
+  match (assume_ x : {r : Opaque.t | r === y}) with
+  | _ -> false
+  | exception Invalid_argument _ -> true;;
+[%%expect{|
+val unknown : bool = true
+|}]
+
 let scalar_failure =
   let x = 0 in
   match (assume_ x : {r : int | r === 1}) with
@@ -101,6 +172,24 @@ let scalar_failure =
   | exception Assert_failure _ -> true;;
 [%%expect{|
 val scalar_failure : bool = true
+|}]
+
+type any_int = {x : int | x === x};;
+[%%expect{|
+type any_int = {x : int | x === x}
+|}]
+
+let refined_scalar_failure =
+  let raw_x = 0 in
+  let raw_y = 1 in
+  let x = (assume_ raw_x : any_int) in
+  let y = (assume_ raw_y : any_int) in
+  match (assume_ x : {r : any_int | r === y}) with
+  | _ -> false
+  | exception Assert_failure _ -> true
+  | exception Invalid_argument _ -> false;;
+[%%expect{|
+val refined_scalar_failure : bool = true
 |}]
 
 module Functions = struct
@@ -155,5 +244,38 @@ let float_irreflexive (x : float) : {b : bool | b === false} =
 Line 3, characters 2-11:
 3 |   refine_ b;;
       ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Polymorphic_pair = struct
+  let duplicate : ('a : value mod separable).
+      (value : 'a) ->
+      {result : 'a * 'a | match result with left, right ->
+        left === value && right === value} =
+    fun value ->
+    let result = value, value in
+    refine_ result
+end;;
+[%%expect{|
+module Polymorphic_pair :
+  sig
+    val duplicate :
+      (value : 'a) ->
+      {result : 'a * 'a
+        | match result with
+          | (left, right) -> (left === value) && (right === value)}
+  end
+|}]
+
+let unrelated_pair : ('a : value mod separable).
+    'a @ total -> 'a @ total ->
+    {result : 'a * 'a | match result with left, right -> left === right} =
+  fun left right ->
+  let result = left, right in
+  refine_ result;;
+[%%expect{|
+Line 6, characters 2-16:
+6 |   refine_ result;;
+      ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
