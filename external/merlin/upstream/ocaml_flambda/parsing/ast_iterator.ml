@@ -584,7 +584,7 @@ module E = struct
     | Pexp_splice e -> sub.expr sub e
     | Pexp_hole -> ()
     | Pexp_borrow e -> sub.expr sub e
-    | Pexp_refine e -> sub.expr sub e
+    | Pexp_refine e | Pexp_assume e -> sub.expr sub e
     | Pexp_let_refine (name, bound, body) ->
         iter_loc sub name;
         sub.expr sub bound;

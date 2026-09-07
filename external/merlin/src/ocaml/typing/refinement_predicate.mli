@@ -19,13 +19,13 @@ open Types
     inside the predicate;
     [rename] maps externally-bound idents;
     [bind_value] turns selected free value paths into bound variables;
-    [unbind_value] turns selected bound variables into free value paths;
+    [free_var_path] turns selected bound variables into free value paths;
     [value_path] rewrites the paths of free idents. *)
 val map :
   ?rename:Ident.t Ident.Map.t ->
   ?rename_bound:(Ident.t -> Ident.t) ->
   ?bind_value:(Path.t -> Ident.t option) ->
-  ?unbind_value:(Ident.t -> Path.t option) ->
+  ?free_var_path:(Ident.t -> Path.t option) ->
   ?value_path:(Path.t -> Path.t) ->
   ?constructor_path:(Path.t -> Path.t) ->
   ?type_path:(Path.t -> Path.t) ->
@@ -50,9 +50,14 @@ val equal :
 (** Back to surface syntax, for printing.  [var_name] chooses the printed
     name of a bound ident; [value_ident] renders a free ident from its
     resolved (possibly substituted) path. [type_constraint] optionally
-    restores explicit type constraints. *)
+    restores explicit type constraints. [expression] postprocesses each node
+    for resolved elaboration; it is not represented by a source attribute.
+    [function_label] recovers lambda labels for resolved elaboration. *)
 val untype :
   ?type_constraint:(type_expr -> Parsetree.core_type option) ->
+  ?expression:(refinement_expression -> Parsetree.expression ->
+               Parsetree.expression) ->
+  ?function_label:(refinement_expression -> Asttypes.arg_label) ->
   var_name:(Ident.t -> string) ->
   value_ident:(Path.t -> Longident.t Location.loc) ->
   constructor_ident:(Path.t -> Longident.t Location.loc) ->

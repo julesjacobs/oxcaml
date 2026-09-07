@@ -537,6 +537,9 @@ and expression i ppf x =
   | Pexp_refine e ->
       line i ppf "Pexp_refine\n";
       expression i ppf e
+  | Pexp_assume e ->
+      line i ppf "Pexp_assume\n";
+      expression i ppf e
   | Pexp_let_refine (name, bound, body) ->
       line i ppf "Pexp_let_refine %a %s\n" fmt_location name.loc name.txt;
       expression i ppf bound;

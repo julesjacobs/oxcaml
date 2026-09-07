@@ -1761,6 +1761,8 @@ and Exp_desc : sig
 
   val wrap : t' -> t
 
+  val delay : t -> t'
+
   val ident : Debuginfo.Scoped_location.t -> Identifier.Value.t -> t'
 
   val constant : Debuginfo.Scoped_location.t -> Constant.t -> t'
@@ -1905,6 +1907,8 @@ end = struct
   type t = s lam
 
   let wrap = inject_force
+
+  let delay t = lazy (extract t)
 
   let ident loc a1 = apply1 "Exp_desc" "ident" loc (extract a1)
 
@@ -3744,6 +3748,30 @@ and quote_expression_desc ~scopes ~transl stage e : Exp_desc.t =
     | Texp_assert (exp, _) ->
       let exp = quote_expression ~scopes ~transl stage exp in
       Exp_desc.assert_ loc exp
+    | Texp_assume (binding, predicate, body) ->
+      let false_lid = Lident "false" in
+      let cstr =
+        Env.find_constructor_by_name false_lid (Lazy.force Env.initial)
+      in
+      let false_exp =
+        { predicate with
+          exp_desc =
+            Texp_construct
+              (Location.mkloc false_lid loc', cstr, cstr.cstr_shape, [], None);
+          exp_extra = [];
+          exp_attributes = []
+        }
+      in
+      let failure = { body with exp_desc = Texp_assert (false_exp, loc') } in
+      let body =
+        { body with exp_desc = Texp_ifthenelse (predicate, body, Some failure) }
+      in
+      quote_expression_desc ~scopes ~transl stage
+        { e with
+          exp_desc = Texp_let (Nonrecursive, [binding], body);
+          exp_extra = []
+        }
+      |> Exp_desc.delay
     | Texp_lazy exp ->
       let exp = quote_expression ~scopes ~transl stage exp in
       Exp_desc.lazy_ loc exp

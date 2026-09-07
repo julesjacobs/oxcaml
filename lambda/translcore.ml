@@ -1317,6 +1317,13 @@ and transl_exp0 ~in_new_scope ~scopes (layout : Lambda.layout) e =
   | Texp_assert ({exp_desc=Texp_construct(_, {cstr_name="false"}, _, _, _)},
                  loc) ->
       assert_failed loc ~scopes e
+  | Texp_assume (binding, predicate, body) ->
+      transl_let ~scopes ~return_layout:layout Nonrecursive [binding]
+        (Lifthenelse
+           (transl_exp ~scopes Lambda.layout_bool predicate,
+            transl_exp ~scopes layout body,
+            assert_failed e.exp_loc ~scopes e,
+            layout))
   | Texp_assert (cond, loc) ->
       if !Clflags.noassert
       then lambda_unit

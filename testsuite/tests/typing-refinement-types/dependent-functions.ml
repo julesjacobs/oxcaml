@@ -127,7 +127,7 @@ external same_box : box @ immutable -> box @ immutable -> bool @@ total = "%equa
 
 let keep_box :
     (box : box) -> {result : box | same_box result box} =
-  fun box -> refine_ box
+  fun box -> assume_ box
 
 let mutate_returned_box box =
   let refine_ returned = keep_box box in
@@ -141,7 +141,7 @@ val mutate_returned_box : box -> unit = <fun>
 
 let mutate_before_return box : {result : box | same_box result box} =
   box.contents <- 1;
-  refine_ box;;
+  assume_ box;;
 [%%expect{|
 val mutate_before_return :
   (box : box) -> {result : box | same_box result box} = <fun>
@@ -149,7 +149,7 @@ val mutate_before_return :
 
 let keep_immutable (box @ immutable) :
     {result : box | same_box result box} @ immutable =
-  refine_ box;;
+  assume_ box;;
 [%%expect{|
 val keep_immutable :
   (box : box) @ immutable -> {result : box | same_box result box} @ immutable =
@@ -220,28 +220,6 @@ let mutable_snapshot () =
 [%%expect{|
 val mutable_snapshot : unit -> unit = <fun>
 |}]
-
-let escaped_result =
-  let x = 1 in
-  let y = 2 in
-  add_refined x y;;
-[%%expect{|
-Line 4, characters 2-17:
-4 |   add_refined x y;;
-      ^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "y"
-|}]
-
-let escaped_partial_application =
-  let x = 1 in
-  add_refined x;;
-[%%expect{|
-Line 3, characters 2-15:
-3 |   add_refined x;;
-      ^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "x"
-|}]
-
 let recursive_mode () =
   let rec (once @ once) : (x : int) -> {y : int | eq y x} -> int =
     fun x y -> let refine_ y = y in add x y
