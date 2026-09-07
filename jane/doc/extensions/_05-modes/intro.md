@@ -407,10 +407,23 @@ end
 ```
 
 The guarantee cannot be used to close a cycle through a recursive module.
-Recursive module signatures therefore cannot mention a guaranteed inductive
-type, directly or through value types, aliases, module type abbreviations, or
-nested signatures. This restriction also covers first-class packages produced
-from recursive modules.
+Recursive module signatures therefore cannot declare an inductive guarantee
+or establish a group-dependent alias to one, including through module type
+abbreviations or nested signatures. An existing inductive type may still
+appear in a value type.
+
+A concrete container whose instantiation depends on the recursive module group
+is a dependent container. Existential equality evidence can relate any of its
+fields, so an apparently unrelated field marked `@@ total` is conservatively
+rejected. A dependent container with no total field or total arrow return
+remains allowed.
+
+This rule covers nominal and structural containers, including tuples,
+polymorphic variants, and objects. An arrow domain is supplied by the caller,
+so a structural dependency confined to an arrow domain remains allowed.
+Nominal applications remain conservative because their representation may
+hide equality evidence.
+
 The traversal also terminates when recursive modules transform type arguments
 on each step. Such a cycle is rejected when the same declaration is reached
 with different arguments:
