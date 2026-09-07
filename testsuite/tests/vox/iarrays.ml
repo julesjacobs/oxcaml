@@ -259,3 +259,166 @@ Line 7, characters 2-11:
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+let slice_contents (source : int iarray) (position : int) (size : int)
+    (index : int) =
+  let result = Iarray.sub source ~pos:position ~len:size in
+  let value = Iarray.get result index in
+  let expected = Iarray.get source (position + index) in
+  let certificate : {n : int | n = expected} = refine_ value in
+  let refine_ certificate = certificate in
+  ()
+;;
+
+let append_contents (left : int iarray) (right : int iarray) (index : int) =
+  let result = Iarray.append left right in
+  let value = Iarray.get result index in
+  let expected = if index < Iarray.length left then Iarray.get left index
+    else Iarray.get right (index - Iarray.length left) in
+  let certificate : {n : int | n = expected} = refine_ value in
+  let refine_ certificate = certificate in
+  ()
+;;
+
+let copy_lengths (source : int iarray) (position : int) (size : int) :
+    {length : int | length = size + 1 && 0 <= position && 0 <= size
+      && position <= Iarray.length source
+      && size <= Iarray.length source - position} =
+  let sub = Iarray.sub in
+  let append = Iarray.append in
+  let slice = sub source ~pos:position ~len:size in
+  let result = append slice [: 42 :] in
+  let length = Iarray.length result in
+  refine_ length
+;;
+
+let copy_composition () : {value : int | value = 20} =
+  let source = [: 10; 20; 30 :] in
+  let result = Iarray.append [: 0 :] (Iarray.sub source ~pos:1 ~len:2) in
+  let value = Iarray.get result 1 in
+  refine_ value
+;;
+
+let conditional_copy (choose : bool) :
+    {value : int | value = (if choose then 20 else 40)} =
+  let result = if choose then Iarray.sub [: 10; 20 :] ~pos:1 ~len:1
+    else Iarray.append [: :] [: 40 :] in
+  let value = Iarray.get result 0 in
+  refine_ value
+;;
+[%%expect{|
+val slice_contents : int iarray -> int -> int -> int -> unit = <fun>
+val append_contents : int iarray -> int iarray -> int -> unit = <fun>
+val copy_lengths :
+  (source : int iarray) ->
+  (position : int) ->
+  (size : int) ->
+  {length : int
+    | (length = (size + 1)) &&
+        ((0 <= position) &&
+           ((0 <= size) &&
+              ((position <= (Iarray.length source)) &&
+                 (size <= ((Iarray.length source) - position)))))} =
+  <fun>
+val copy_composition : unit -> {value : int | value = 20} = <fun>
+val conditional_copy :
+  (choose : bool) -> {value : int | value = (if choose then 20 else 40)} =
+  <fun>
+|}]
+
+let caught_slice (source : int iarray) (position : int) (size : int) :
+    {result : int | 0 <= result} =
+  (try ignore (Iarray.sub source ~pos:position ~len:size)
+   with Invalid_argument _ -> ());
+  refine_ position
+;;
+[%%expect{|
+Line 5, characters 2-18:
+5 |   refine_ position
+      ^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let wrong_copy () : {value : int | value = 10} =
+  let result = Iarray.sub [: 10; 20 :] ~pos:1 ~len:1 in
+  let value = Iarray.get result 0 in
+  refine_ value
+;;
+[%%expect{|
+Line 4, characters 2-15:
+4 |   refine_ value
+      ^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+
+let shared_copies () : {length : int | length = 0} =
+  let array : int iarray = [: :] in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let length = Iarray.length array in
+  refine_ length
+;;
+[%%expect{|
+val shared_copies : unit -> {length : int | length = 0} = <fun>
+|}]
+
+let shared_contents (index : int) : {value : int | value = 7} =
+  let array = [: 7 :] in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let array = Iarray.append array array in
+  let value = Iarray.get array index in
+  refine_ value
+;;
+[%%expect{|
+val shared_contents : int -> {value : int | value = 7} = <fun>
+|}]
+
+
+let copied_alias () : {value : int | value = 7} =
+  let slice = Iarray.sub [: 7 :] ~pos:0 ~len:1 in
+  let row = Iarray.get [: slice :] 0 in
+  let length = Iarray.length row in
+  let (_ : {n : int | n = 1}) = refine_ length in
+  let value = Iarray.get row 0 in
+  refine_ value
+;;
+[%%expect{|
+val copied_alias : unit -> {value : int | value = 7} = <fun>
+|}]

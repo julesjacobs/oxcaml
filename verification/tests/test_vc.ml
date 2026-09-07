@@ -111,3 +111,28 @@ let () =
     with
     | Invalid _ -> true
     | _ -> false)
+
+let () =
+  let copy_query_size count =
+    let source =
+      "external append : int iarray -> int iarray -> int iarray = \
+       \"caml_array_append\"\n"
+      ^ "external get : int iarray -> int -> int = \"%array_safe_get\"\n"
+      ^ "external eq : int -> int -> bool @@ total = \"%equal\"\n"
+      ^ "let f (index : int) : {value : int | eq value value} =\n"
+      ^ "let array = [: 7 :] in\n"
+      ^ String.concat ""
+          (List.init count (fun _ ->
+               "let copy = append array [: :] in\n"
+               ^ "let array = append array copy in\n"))
+      ^ "let value = get array index in refine_ value"
+    in
+    match queries source with
+    | [query] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 query)
+    | _ -> failwith "Expected one array-copy query"
+  in
+  let small = copy_query_size 12 in
+  let large = copy_query_size 24 in
+  assert (large < 3 * small);
+  assert (large < 500_000);
+  print_endline "Array-copy query expansion is bounded"
