@@ -1,19 +1,5 @@
 # Language problems
 
-## Dependent bounds through record fields
-
-For a function of the form
-
-```ocaml
-(overlay : 'a overlay) ->
-{i : int | i < Iarray.length overlay.base} -> ...
-```
-
-the checker can fail to transfer the bound from `overlay.base` to a local
-binding of that field. The explicit dependent binder and the runtime parameter
-can receive distinct logical identities. Pass `base` as a separate argument to
-the dependent function. This is a dependent-type inference limitation.
-
 ## Logical definitions of access-preserving observers
 
 Generated definition lemmas retain the already-checked body, so an observer
