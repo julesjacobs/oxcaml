@@ -1,0 +1,3 @@
+description = "Vox verified owned arrays and scoped slices"
+archive(byte) = "vox_borrow.cma"
+archive(native) = "vox_borrow.cmxa"

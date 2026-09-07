@@ -805,8 +805,167 @@ let iarray_call ctx value =
     let sort = term_sort value in
     if is_iarray_sort ctx.encoding sort then Some (sort, value) else None
 
+let borrow_model_length ctx values =
+  Call
+    (intern_function ctx "Borrow.Model.length" [term_sort values] Int, [values])
+
+let first_argument_type env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tarrow (_, argument, _, _) -> Some (Btype.tpoly_get_mono argument)
+  | _ -> None
+
+let borrow_projection ctx name result handle =
+  Call (intern_function ctx name [term_sort handle] result, [handle])
+
+let borrow_extent ctx handle =
+  borrow_projection ctx "Borrow.extent" Int63 handle
+
+let borrow_model_sort ctx env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tconstr (_, [element], _) ->
+    sort ctx.encoding env
+      (Btype.newgenty (Tconstr (Predef.path_list, [element], ref Mnil)))
+  | _ -> None
+
+let borrow_projections =
+  [ "caml_borrow_contents";
+    "caml_borrow_current";
+    "caml_borrow_final";
+    "caml_borrow_frame_final";
+    "caml_borrow_frame_left";
+    "caml_borrow_frame_right" ]
+
+let normal_borrow_projection ctx name args value s =
+  match args, scalar value with
+  | [handle], Some model
+    when List.mem name
+           [ "caml_borrow_contents";
+             "caml_borrow_current";
+             "caml_borrow_final";
+             "caml_borrow_frame_final" ] ->
+    begin match scalar handle with
+    | None -> s
+    | Some handle ->
+      let extent = borrow_extent ctx handle in
+      let size = App (Int_of_int63, [extent]) in
+      fact
+        (fact s "borrow extent" (both Le (Integer 0L) extent))
+        "borrow model length"
+        (both Eq (borrow_model_length ctx model) size)
+    end
+  | _ -> s
+
+let tuple_fields ctx env ty value =
+  match data_of_type ctx env ty, scalar value with
+  | ( Some { kind = Tuple_data constructor | Record_data constructor; _ },
+      Some value ) ->
+    Some
+      (List.mapi
+         (fun i _ -> select ctx constructor i value)
+         (Constructor.fields constructor))
+  | _ -> None
+
+let normal_borrow_transition ctx env fn_type result_type name args value s =
+  match first_argument_type env fn_type, args with
+  | Some receiver_type, receiver :: _ ->
+    begin match borrow_model_sort ctx env receiver_type, scalar receiver with
+    | Some model_sort, Some receiver ->
+      let project name x = borrow_projection ctx name model_sort x in
+      let current = project "caml_borrow_current" in
+      let final = project "caml_borrow_final" in
+      let contents = project "caml_borrow_contents" in
+      let frame_final = project "caml_borrow_frame_final" in
+      let frame_left = project "caml_borrow_frame_left" in
+      let frame_right = project "caml_borrow_frame_right" in
+      let same_size x y = both Eq (borrow_extent ctx x) (borrow_extent ctx y) in
+      let facts =
+        match name, scalar value, tuple_fields ctx env result_type value with
+        | "caml_borrow_open", _, Some [frame; loan] ->
+          [ both Eq (current loan) (contents receiver);
+            both Eq (final loan) (frame_final frame);
+            same_size loan receiver;
+            same_size frame receiver ]
+        | "caml_borrow_restore", Some owner, _ ->
+          [ both Eq (contents owner) (frame_final receiver);
+            same_size owner receiver ]
+        | "caml_borrow_split", _, Some [frame; left; right] ->
+          begin match args with
+          | [_; index] ->
+            begin match scalar index with
+            | Some index ->
+              [ both Eq (frame_final frame) (final receiver);
+                both Eq (final left) (frame_left frame);
+                both Eq (final right) (frame_right frame);
+                same_size frame receiver;
+                both Eq (borrow_extent ctx left) index;
+                both Eq (borrow_extent ctx right)
+                  (App (Sub, [borrow_extent ctx receiver; index])) ]
+            | None -> []
+            end
+          | _ -> []
+          end
+        | "caml_borrow_recombine", Some loan, _ ->
+          [both Eq (final loan) (frame_final receiver); same_size loan receiver]
+        | "caml_borrow_finish", _, _ ->
+          [both Eq (final receiver) (current receiver)]
+        | "caml_borrow_transfer", Some loan, _ ->
+          [ both Eq (current loan) (current receiver);
+            both Eq (final loan) (final receiver);
+            same_size loan receiver ]
+        | "caml_borrow_length", _, Some [length; loan] ->
+          [ both Eq length (borrow_extent ctx receiver);
+            both Eq (current loan) (current receiver);
+            both Eq (final loan) (final receiver);
+            same_size loan receiver;
+            both Le (Integer 0L) length ]
+        | _ -> []
+      in
+      List.fold_left (fun s fact_ -> fact s "borrow transition" fact_) s facts
+    | _ -> s
+    end
+  | _ -> s
+
+let normal_borrow_model_length ctx env function_type args s =
+  match first_argument_type env function_type, args with
+  | Some ty, [values] ->
+    begin match data_of_type ctx env ty, scalar values with
+    | Some { kind = Variant_data constructors; _ }, Some values ->
+      begin match
+        List.assoc_opt "[]" constructors, List.assoc_opt "::" constructors
+      with
+      | Some nil, Some cons when List.length (Constructor.fields cons) = 2 ->
+        let length = borrow_model_length ctx values in
+        let tail = select ctx cons 1 values in
+        let equation =
+          both Eq length
+            (App
+               ( Ite,
+                 [ Is (nil, values);
+                   Big_integer "0";
+                   App (Int_add, [Big_integer "1"; borrow_model_length ctx tail])
+                 ] ))
+        in
+        fact
+          (fact s "sequence length" equation)
+          "sequence length nonnegative"
+          (App (Int_le, [Big_integer "0"; length]))
+      | _ -> s
+      end
+    | _ -> s
+    end
+  | _ -> s
+
 let operation ctx env function_type result_type name args =
   match name, args with
+  | "caml_borrow_model_length", [values] ->
+    Option.bind (scalar values) (fun values ->
+        scalar_value (borrow_model_length ctx values))
+  | name, [handle] when List.mem name borrow_projections ->
+    begin match scalar handle, sort ctx.encoding env result_type with
+    | Some handle, Some result ->
+      scalar_value (borrow_projection ctx name result handle)
+    | _ -> None
+    end
   | "%set_singleton", [element] ->
     begin match scalar element, sort ctx.encoding env result_type with
     | Some element, Some set_sort when is_set_sort ctx.encoding set_sort ->
@@ -1203,6 +1362,10 @@ let rec predicate ctx env s e =
           in
           let s =
             match prim with
+            | Some ("caml_borrow_model_length", 1) ->
+              normal_borrow_model_length ctx env fn.rexp_type args s
+            | Some (name, 1) when List.mem name borrow_projections ->
+              normal_borrow_projection ctx name args result s
             | Some ("%array_length", 1) -> normal_iarray_length ctx args s
             | Some ((("%set_find" | "%set_refined_find") as op_name), 2) ->
               normal_set_find ctx op_name args result s
@@ -1676,6 +1839,29 @@ and expression_desc ctx s e =
           ~total
       in
       match prim with
+      | Some ("caml_borrow_model_length", 1) ->
+        name ctx
+          (normal_borrow_model_length ctx e.exp_env fn.exp_type args s)
+          value
+      | Some (primitive_name, 1) when List.mem primitive_name borrow_projections
+        ->
+        name ctx
+          (normal_borrow_projection ctx primitive_name args value s)
+          value
+      | Some (primitive_name, _)
+        when List.mem primitive_name
+               [ "caml_borrow_open";
+                 "caml_borrow_restore";
+                 "caml_borrow_split";
+                 "caml_borrow_recombine";
+                 "caml_borrow_finish";
+                 "caml_borrow_transfer";
+                 "caml_borrow_length" ] ->
+        let value = match value with Some _ -> value | None -> opaque () in
+        name ctx
+          (normal_borrow_transition ctx e.exp_env fn.exp_type e.exp_type
+             primitive_name args value s)
+          value
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
         branch s (Boolean false), None
       | Some ("caml_array_append", 2) | Some ("%iarray_sub", 3) ->

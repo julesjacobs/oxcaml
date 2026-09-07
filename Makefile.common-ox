@@ -275,6 +275,11 @@ install: _install
 	mkdir -p '$(prefix)'
 	rsync --chmod=u+rw,go+r -rl _install/ '$(prefix)'
 
+# The verified library needs the installed compiler and Z3, after bootstrap.
+.PHONY: vox-library
+vox-library: install
+	bash verification/library/build.sh '$(prefix)'
+
 # Same as above, but relies on a successfull earlier _install
 install_for_opam:
 	mkdir -p '$(prefix)'
@@ -293,6 +298,7 @@ install_for_test: install
 	ln -s ../_install _runtest/_install
 	mkdir _runtest/verification
 	cp $(ocamldir)/verification/vox_smt.{ml,mli} _runtest/verification/
+	cp -R $(ocamldir)/verification/library _runtest/verification/
 	# Use rsync to ensure hardlinks are created on both Linux and macOS
 	rsync --link-dest=../../$(ocamldir)/testsuite/ -a $(ocamldir)/testsuite/ _runtest/testsuite/
 	 # replace backend-specific testsuite/tools with their new versions

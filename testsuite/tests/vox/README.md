@@ -47,6 +47,10 @@ legacy-mode defaults.
 | Standard-set model | `avl_stdlib_set.ml` | Pointwise refinement relates the verified AVL implementation to `Set.MakeTotal`, with comparator compatibility explicit. |
 | Sparse immutable arrays | `sparse_iarrays.ml` | A polymorphic record API proves read-after-write, overwrite, removal fallback, and safe base-array reads; a total optional observer states relational laws. |
 | Regex matching | `regex.ml` | Derivative matching and a total DFA construction are sound and complete for an independent membership-derivation spec. |
+| Scoped borrows | `borrow_demo.ml`, `borrow_ranges.ml`, `borrow_rejected.ml` | Exact updates, split/reborrow reconstruction, preserved frames, snapshots, and ownership/proof rejections. |
+| Runtime slice validation | `borrow_validation.ml` | `assume_` checks a real snapshot and exports its sortedness through the borrow. |
+| Parallel slices | `borrow_parallel.ml` | Disjoint callbacks, sequential fallback, and joining before exception propagation. |
+| Quicksort | `quicksort.mli`, `quicksort_client.ml` | Sequential and parallel in-place sorting establish sortedness and multiplicity-preserving permutation on normal return. |
 | Ghost code | `ghost*.ml` | Total proof computations erase; ghost values remain usable in static predicates and cannot be read by runtime checks. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
@@ -262,3 +266,14 @@ call to its recursive proof helper. `Dfa_client.verified` in `regex.ml` runs
 one compiled DFA and erases the correctness proof, while exposing equivalence
 to regex matching in its result type. Evidence-producing APIs remain ordinary
 functions for clients that want to inspect the derivation at runtime.
+
+## Borrow library
+
+The canonical sources are in `verification/library`; test headers use
+`source_directories` to compile those sources against their sealed interfaces.
+`make vox-library` installs a separately usable verified bytecode/native library.
+The actual-domain test requires a compiler configured with
+`--enable-poll-insertion --enable-multidomain`. The quicksort client also works
+with a single-domain runtime, where its domain budget selects sequential work.
+See [Borrows and slices](../../../design-docs/borrows-and-slices.md) for the API,
+proof boundary, and current termination scope.

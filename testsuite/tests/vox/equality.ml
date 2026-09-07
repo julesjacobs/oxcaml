@@ -224,7 +224,7 @@ let ordinary_expression x y = x === y;;
 Line 1, characters 30-37:
 1 | let ordinary_expression x y = x === y;;
                                   ^^^^^^^
-Error: "===" is available only in refinement predicates
+Error: "===" is available only in refinement predicates or ghost code
 |}]
 
 let float_reflexive (x : float) : {b : bool | b} =

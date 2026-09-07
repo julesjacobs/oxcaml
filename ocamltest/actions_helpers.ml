@@ -76,10 +76,19 @@ let readonly_files env = words_of_variable env Builtin_variables.readonly_files
 
 let subdirectories env = words_of_variable env Builtin_variables.subdirectories
 
-let setup_symlinks test_source_directory build_directory files =
+let setup_symlinks ?(source_directories = []) test_source_directory
+    build_directory files =
+  let source filename =
+    let directories = test_source_directory :: source_directories in
+    match List.find_opt
+      (fun directory -> Sys.file_exists (Filename.concat directory filename))
+      directories with
+    | Some directory -> Filename.concat directory filename
+    | None -> Filename.concat test_source_directory filename
+  in
   let symlink filename =
     (* Emulate ln -sfT *)
-    let src = Filename.concat test_source_directory filename in
+    let src = source filename in
     let dst = Filename.concat build_directory filename in
     let () =
       if Sys.file_exists dst then
@@ -93,7 +102,7 @@ let setup_symlinks test_source_directory build_directory files =
     in
       Unix.symlink src dst in
   let copy filename =
-    let src = Filename.concat test_source_directory filename in
+    let src = source filename in
     let dst = Filename.concat build_directory filename in
     Sys.copy_file src dst in
   let f = if Unix.has_symlink () then symlink else copy in
@@ -116,7 +125,9 @@ let setup_build_env add_testfile additional_files (_log : out_channel) env =
     if add_testfile
     then (testfile env) :: some_files
     else some_files in
-  setup_symlinks source_dir build_dir files;
+  let source_directories =
+    words_of_variable env Builtin_variables.source_directories in
+  setup_symlinks ~source_directories source_dir build_dir files;
   let subdirs = subdirectories env in
   setup_subdirectories source_dir build_dir subdirs;
   Sys.chdir build_dir;

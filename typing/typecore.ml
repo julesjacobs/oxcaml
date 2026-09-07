@@ -569,6 +569,18 @@ let total_immutable_mode () =
       visibility = Visibility.Const.Immutable
     }
 
+let enter_total_ghost_context loc env =
+  Env.add_const_closure_lock (loc, Mode.Hint.Expression)
+    {Value.Comonadic.Const.legacy with
+      areality = Regionality.Const.Local;
+      forkable = Forkable.Const.Unforkable;
+      yielding = Yielding.Const.Yielding;
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable}
+    env
+  |> Env.enter_ghost_context
+
 let refinement_operand_mode () =
   Value.of_const
     { Value.Const.max with
@@ -7666,7 +7678,7 @@ and type_expect_
         (Error_forward
            (Location.errorf ~loc
               "%a must be used as an unqualified binary operator in a \
-               refinement predicate"
+               refinement predicate or ghost code"
               Style.inline_code "==="))
   | Pexp_ident lid ->
       let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
@@ -7961,12 +7973,12 @@ and type_expect_
       ({ pexp_desc = Pexp_ident { txt = Longident.Lident "==="; _ } },
        [Nolabel, left; Nolabel, right])
     when Language_extension.is_enabled Refinement_types ->
-      if not (!typing_refinement_predicate || Resolved_predicate.active ())
+      if not (Env.in_ghost_context env || Resolved_predicate.active ())
       then
         raise
           (Error_forward
              (Location.errorf ~loc
-                "%a is available only in refinement predicates"
+                "%a is available only in refinement predicates or ghost code"
                 Style.inline_code "==="));
       Language_extension.assert_enabled ~loc Refinement_types ();
       let operand_type =
@@ -9585,8 +9597,7 @@ and type_expect_
       submode ~loc ~env
         (Value.of_const { Value.Const.min with ghostliness = Ghost })
         expected_mode;
-      let env = Env.enter_ghost_context env in
-      let env = Env.add_total_closure_lock (loc, Mode.Hint.Expression) env in
+      let env = enter_total_ghost_context loc env in
       let mode =
         Value.meet
           [as_single_mode expected_mode;
@@ -15707,8 +15718,7 @@ let () =
     (fun env bound_values binder payload predicate ->
        let loc = predicate.pexp_loc in
        let env =
-         Env.add_total_closure_lock (loc, Mode.Hint.Expression) env
-         |> Env.enter_ghost_context
+         enter_total_ghost_context loc env
        in
        let env = add_total_immutable_value env binder payload loc in
        let typed_predicate =

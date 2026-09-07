@@ -8,10 +8,16 @@ subtree_prefix="$(git rev-parse --show-prefix)"
 commitish=HEAD
 repository=.
 subdirectory=.
+working_tree=false
+compiler_root="$(git rev-parse --show-toplevel)"
 
 function usage () {
   cat <<USAGE
 Usage: $0 [COMMITISH [REPO [SUBDIRECTORY]]]
+       $0 --working-tree
+
+--working-tree imports the current compiler files without staging or committing.
+The Merlin source and upstream directories must be clean before importing.
 
 Fetch the new compiler sources and patch Merlin to keep Merlin's local copies of
 things in sync. By default, this will pull in compiler changes from the local
@@ -78,7 +84,9 @@ case "${1-unused}" in
     ;;
 esac
 
-if [[ $# -le 3 ]]; then
+if [[ $# -eq 1 && "$1" = "--working-tree" ]]; then
+  working_tree=true
+elif [[ $# -le 3 ]]; then
   commitish="${1-$commitish}"
   repository="${2-$repository}"
   # Although the subdirectory argument is probably no longer useful, it doesn't
@@ -89,8 +97,13 @@ else
   exit 1
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Working directory must be clean before using this script,"
+if $working_tree; then
+  dirty="$(git status --porcelain -- upstream/ocaml_flambda src/ocaml)"
+else
+  dirty="$(git status --porcelain)"
+fi
+if [ -n "$dirty" ]; then
+  echo "Import destinations must be clean before using this script,"
   echo "but currently has the following changes:"
   git status
   exit 1
@@ -121,21 +134,36 @@ fi
 # to upstream/ocaml_flambda, minus those with the merlin-exclude attribute set
 # (git check-attr resolves the paths against the .gitattributes in the current
 # directory)
-upstream_files="$(git ls-tree --full-tree -r --name-only "$rev" \
-                    -- "${dirs[@]/#/$fetch_prefix}" \
+if $working_tree; then
+  compiler_files="$(git -C "$compiler_root" ls-files --cached --others \
+    --exclude-standard -- "${dirs[@]}" | while IFS= read -r file; do
+      if [[ -f "$compiler_root/$file" ]]; then printf '%s\n' "$file"; fi
+    done)"
+else
+  compiler_files="$(git ls-tree --full-tree -r --name-only "$rev" \
+    -- "${dirs[@]/#/$fetch_prefix}")"
+fi
+upstream_files="$(printf '%s\n' "$compiler_files" \
                   | sed "s|^$fetch_prefix||" \
                   | git check-attr --stdin merlin-exclude \
                   | sed -e '/: merlin-exclude: set$/d' \
                         -e 's/: merlin-exclude: [a-z]*$//')"
+function copy-source () {
+  if $working_tree; then
+    cp "$compiler_root/$1" "$1"
+  else
+    git show "$rev:$fetch_prefix$1" > "$1"
+  fi
+}
 for file in $upstream_files; do
   if [[ -e "$file" ]]; then
-    git show "$rev:$fetch_prefix$file" > "$file"
+    copy-source "$file"
   else
     read -p "Import new file $file? [Y/n] " answer
     case "$answer" in
       y|Y|"")
         echo "Importing $file"
-        git show "$rev:$fetch_prefix$file" > "$file"
+        copy-source "$file"
         new_files+=("$file")
         ;;
       *)
@@ -161,11 +189,12 @@ cd ../..
 old_marker="Merlin:$current_head"
 parent_marker="Compiler:last-imported"
 new_marker="Compiler:$commitish"
+if $working_tree; then new_marker="Compiler:working-tree"; fi
 
 # Then patch src/ocaml using the changes you just imported. Newly-imported
 # files are still untracked at this point so they don't show up in the diff;
 # they are instead copied over verbatim below.
-for file in $(git diff --no-ext-diff --name-only); do
+for file in $(git diff --no-ext-diff --name-only -- upstream/ocaml_flambda); do
   file=${file#${subtree_prefix}}
   base=${file#upstream/ocaml_flambda/}
   tgt="$(merlin-target "$base")"
@@ -225,7 +254,7 @@ for file in $(git diff --no-ext-diff --name-only); do
 done
 
 # Copy any newly-imported files into src/ocaml
-for file in "${new_files[@]}"; do
+for file in ${new_files[@]+"${new_files[@]}"}; do
   tgt="$(merlin-target "$file")"
   if [[ -z "$tgt" ]]; then continue; fi
   tgt=src/ocaml/$tgt
@@ -236,6 +265,11 @@ for file in "${new_files[@]}"; do
   fi
   cp "upstream/ocaml_flambda/$file" "$tgt"
 done
+
+if $working_tree; then
+  echo "Imported compiler working tree; changes remain unstaged."
+  exit 0
+fi
 
 # Commit any changes to the .gitattributes file separately from the import
 # itself, since they should be included in review.

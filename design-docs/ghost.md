@@ -338,3 +338,11 @@ Runtime physical identity establishes logical equality only when the type
 is known to preserve its data through erasure. Ghost fields and abstract or
 polymorphic types prevent that check; `assume_` raises `Invalid_argument`
 instead. Static logical equality remains available for these types.
+
+### Local model observations
+
+Total, stateless, portable computations in `ghost_` may capture local values.
+This permits erased `Slice.current`/`Slice.final` observations of a local loan.
+Runtime locality checks still prevent escaping the loan; mutable reads and
+partial computations remain rejected in ghost code. Logical equality `===`
+is available in ghost code as well as refinement predicates.

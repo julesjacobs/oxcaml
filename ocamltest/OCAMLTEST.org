@@ -808,3 +808,19 @@ running =ocamltest -show-actions=.
 # Local Variables:
 # ispell-local-dictionary: "english"
 # End:
+
+** Shared source directories
+
+The =source_directories= variable gives additional whitespace-separated
+source directories for build setup. Files are searched first in
+=test_source_directory=, then in these directories in order. The selected
+files are linked or copied into the test build directory using their original
+names. For example:
+
+#+begin_src ocaml
+source_directories = "${test_source_directory}/../../../verification/library";
+all_modules = "borrow_model.mli borrow_model.ml borrow.mli borrow.ml client.ml";
+#+end_src
+
+This compiles the canonical library sources alongside the test and works in
+both the incremental loop and the installed test tree.

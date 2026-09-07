@@ -37,7 +37,8 @@ val exit_status_of_variable : Environments.t -> Variables.t -> int
 
 val readonly_files : Environments.t -> string list
 
-val setup_symlinks : string -> string -> string list -> unit
+val setup_symlinks :
+  ?source_directories:string list -> string -> string -> string list -> unit
 
 val setup_build_env : bool -> string list -> Actions.code
 
