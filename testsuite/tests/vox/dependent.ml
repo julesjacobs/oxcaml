@@ -80,3 +80,31 @@ Error: The value "Step.step" has type
        but an expression was expected of type
          "(n : int) -> (({m : int | m < n} -> 'a) -> 'a) @ total"
 |}]
+
+let borrowed_sum : (left : int) -> (right : int) ->
+    {n : int | n = left + right} = fun left right ->
+  let refine_ sum = add (borrow_ left) (borrow_ right) in
+  refine_ sum;;
+[%%expect{|
+val borrowed_sum :
+  (left : int) -> (right : int) -> {n : int | n = (left + right)} = <fun>
+|}]
+
+let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
+[%%expect{|
+Line 1, characters 31-48:
+1 | let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
+                                   ^^^^^^^^^^^^^^^^^
+Error: A dependent function argument must be a plain local variable
+|}]
+
+let borrowed_mutable () =
+  let mutable current = 1 in
+  let refine_ result = add (borrow_ current) y in
+  result;;
+[%%expect{|
+Line 3, characters 27-44:
+3 |   let refine_ result = add (borrow_ current) y in
+                               ^^^^^^^^^^^^^^^^^
+Error: A dependent function argument must have a stable binding; bind the current value with [let] first
+|}]

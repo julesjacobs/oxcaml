@@ -5586,7 +5586,8 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
               | Some binder, Some (sarg, _, ~commuted:_) ->
                   let path =
                     match sarg.pexp_desc with
-                    | Pexp_ident lid ->
+                    | Pexp_ident lid
+                    | Pexp_borrow { pexp_desc = Pexp_ident lid; _ } ->
                         let path, desc, _ =
                           Resolved_predicate.lookup_value ~use:false
                             ~loc:lid.loc lid.txt env

@@ -72,10 +72,8 @@ let edit : (a : int Owned_array.t) @ unique ->
         Model.of_iarray copy === before && after === rewritten before) in
   let refine_ result = Owned_array.with_mut a post (fun loan ->
     let refine_ s = loan in
-    let refine_ snapshot = Slice.snapshot s in
-    let {value = (copy : snapshot); state = s1} = snapshot in
-    let refine_ sized = Slice.length s1 in
-    let {value = n; state = s2} = sized in
+    let refine_ copy = Slice.snapshot (borrow_ s) in
+    let refine_ n = Slice.length (borrow_ s) in
     let state =
       if n >= 4 then (
         let first = 1 in
@@ -84,12 +82,12 @@ let edit : (a : int Owned_array.t) @ unique ->
         let bpast = ghost_ 3Z in
         ghost_ (Model.sub_length before bfirst bpast);
         let first : {i : int | 0 <= i
-          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s2)) <= 0} = refine_ first in
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) <= 0} = refine_ first in
         let past : {j : int | let refine_ i = first in i <= j
-          && Bigint.compare (Bigint.of_int j) (Model.length (Slice.current s2)) <= 0} = refine_ past in
+          && Bigint.compare (Bigint.of_int j) (Model.length (Slice.current s)) <= 0} = refine_ past in
         let pair_post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
         after === [99; 88]) in
-        let refine_ range = Slice.with_range s2 first past pair_post (fun middle ->
+        let refine_ range = Slice.with_range s first past pair_post (fun middle ->
           let refine_ middle = middle in
           let sized : {s : int Slice.t | Model.length (Slice.current s) === 2Z} = refine_ middle in
           let refine_ u = write_pair sized in
@@ -103,7 +101,7 @@ let edit : (a : int Owned_array.t) @ unique ->
         let value = 7 in
         let refine_ state = Slice.set state index value in
         state)
-      else s2 in
+      else s in
     Slice.finish state;
     ghost_ (rewritten_def before);
     refine_ copy) in

@@ -39,17 +39,18 @@ open Borrow;;
 
 module Stale_handle = struct
   let rejected (s : int Slice.t @ local unique) =
-    let refine_ first = Slice.length s in
-    let refine_ second = Slice.length s in
+    let refine_ first = Slice.finish s in
+    let refine_ second = Slice.length (borrow_ s) in
     ()
 end;;
 [%%expect{|
-Line 4, characters 38-39:
-4 |     let refine_ second = Slice.length s in
-                                          ^
-Error: This value is used here, but it has already been used as unique at:
+Line 4, characters 38-49:
+4 |     let refine_ second = Slice.length (borrow_ s) in
+                                          ^^^^^^^^^^^
+Error: This value is borrowed here,
+       but it has already been used as unique at:
 Line 3, characters 37-38:
-3 |     let refine_ first = Slice.length s in
+3 |     let refine_ first = Slice.finish s in
                                          ^
 
 |}]
@@ -105,12 +106,12 @@ Error: Refinement could not be proved (counterexample)
 
 module Out_of_bounds = struct
   let rejected (s : int Slice.t @ local unique) =
-    let refine_ sized = Slice.length s in
-    let {value = (size : int); state} = sized in
+    let refine_ size = Slice.length (borrow_ s) in
+    let state = s in
     let index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} =
       refine_ size in
-    let refine_ result = Slice.get state index in
+    let refine_ result = Slice.get (borrow_ state) index in
     ()
 end;;
 [%%expect{|
@@ -167,17 +168,14 @@ module Shared_element = struct
       (index : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0}) -> unit =
       fun s index ->
-    let refine_ result = Slice.get s index in
-    let {value; state} = result in
+    let refine_ value = Slice.get (borrow_ s) index in
     require_unique value
 end;;
 [%%expect{|
-Line 10, characters 19-24:
-10 |     require_unique value
-                        ^^^^^
-Error: This value is "aliased"
-         because it is the field "value" (with some modality) of the record at line 9, characters 8-22.
-       However, the highlighted expression is expected to be "unique".
+Line 9, characters 19-24:
+9 |     require_unique value
+                       ^^^^^
+Error: This value is "aliased" but is expected to be "unique".
 |}]
 
 module Raw_is_sealed = struct
@@ -256,8 +254,8 @@ module Split_consistency = struct
     let[@def] (post @ total) (u : unit @ immutable)
         (left : int Model.t @ immutable) (right : int Model.t @ immutable) = ghost_ true in
     let erased = ghost_ post in
-    let refine_ size = Slice.length s in
-    let {value = n; state} = size in
+    let refine_ n = Slice.length (borrow_ s) in
+    let state = s in
     let half = n / 2 in
     let cut : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) <= 0} =
@@ -293,8 +291,8 @@ module Frame_child_extent = struct
     @@ total = "caml_borrow_frame_left"
 
   let rejected (s : int Slice.t @ local unique) =
-    let refine_ sized = Slice.length s in
-    let {value = n; state} = sized in
+    let refine_ n = Slice.length (borrow_ s) in
+    let state = s in
     if n = 2 then (
       let frame, left, right = split state 1 in
       let _lf = ghost_ (Slice.final (borrow_ left)) in
@@ -321,4 +319,28 @@ Line 2, characters 45-55:
 Error: The value "Array.get" is "partial"
        but is expected to be "total"
          because it is used in an expression (at line 2, characters 38-55).
+|}]
+
+module Overlapping_access = struct
+  let rejected (s : int Slice.t @ local unique) =
+    let view = borrow_ s in
+    let refine_ closed = Slice.finish s in
+    let refine_ size = Slice.length view in
+    ()
+end;;
+[%%expect{|
+Line 4, characters 38-39:
+4 |     let refine_ closed = Slice.finish s in
+                                          ^
+Error: This value is used as "unique" here, but it is being borrowed.
+Line 3, characters 15-24:
+3 |     let view = borrow_ s in
+                   ^^^^^^^^^
+  The value is being borrowed
+Lines 3-6, characters 4-6:
+3 | ....let view = borrow_ s in
+4 |     let refine_ closed = Slice.finish s in
+5 |     let refine_ size = Slice.length view in
+6 |     ()
+  during this borrow context
 |}]

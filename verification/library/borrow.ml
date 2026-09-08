@@ -47,7 +47,7 @@ module Raw = struct
     'a loan @ local unique -> 'a loan @ unique
     @@ portable = "caml_borrow_transfer"
   external length : ('a : immutable_data).
-    'a loan @ local unique -> (int, 'a loan) step @ local unique @@ portable =
+    'a loan @ local immutable -> int @@ portable =
       "caml_borrow_length"
   external finish : ('a : immutable_data).
     'a loan @ local unique -> unit @@ portable = "caml_borrow_finish"
@@ -88,25 +88,18 @@ module Slice = struct
     'a t @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_final"
   let length : ('a : immutable_data).
-      (s : 'a t) @ local unique ->
-      {r : (int, 'a t) step |
-        0 <= r.value
-        && Bigint.of_int r.value === Model.length (current s)
-        && current r.state === current s && final r.state === final s}
-      @ local unique = fun s ->
-    exclave_ (
-      let r = Raw.length s in
-      refine_ r)
+    (s : 'a t) @ local immutable ->
+    {n : int | 0 <= n
+      && Bigint.of_int n === Model.length (current s)} = fun s ->
+    let n = Raw.length s in
+    refine_ n
   external get : ('a : immutable_data).
-    (s : 'a t) @ local unique ->
-    (index : {i : int |
-      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <
-        0}) ->
-    {r : ('a, 'a t) step |
-      let refine_ index = index in
-      Some r.value === Model.at (current s) (Bigint.of_int index)
-      && current r.state === current s && final r.state === final s}
-    @ local unique @@ portable = "caml_borrow_get"
+    (s : 'a t) @ local immutable ->
+    (index : {i : int | 0 <= i
+      && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
+    {value : 'a | let refine_ index = index in
+      Some value === Model.at (current s) (Bigint.of_int index)} @@
+        portable = "caml_borrow_get"
   external set : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int |
@@ -117,11 +110,9 @@ module Slice = struct
       current r === Model.set (current s) (Bigint.of_int index) value
       && final r === final s} @ local unique @@ portable = "caml_borrow_set"
   external snapshot : ('a : immutable_data).
-    (s : 'a t) @ local unique ->
-    {r : ('a iarray, 'a t) step |
-      Model.of_iarray r.value === current s
-      && current r.state === current s && final r.state === final s}
-    @ local unique @@ portable = "caml_borrow_snapshot"
+    (s : 'a t) @ local immutable ->
+    {values : 'a iarray | Model.of_iarray values === current s} @@
+      portable = "caml_borrow_snapshot"
   let swap : ('a : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
@@ -139,26 +130,18 @@ module Slice = struct
       let refine_ j = second in
       let bi = ghost_ (Bigint.of_int i) in
       let bj = ghost_ (Bigint.of_int j) in
-      let refine_ read = get s first in
-      let {value = x; state = s1} = read in
+      let refine_ x = get (borrow_ s) first in
+      let refine_ y = get (borrow_ s) second in
+      let refine_ s1 = set s first y in
+      ghost_ (Model.set_length before bi y);
       let second : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (current s1)) < 0} =
         refine_ j in
-      let refine_ read = get s1 second in
-      let {value = y; state = s2} = read in
-      let first : {i : int | 0 <= i
-        && Bigint.compare (Bigint.of_int i) (Model.length (current s2)) < 0} =
-        refine_ i in
-      let refine_ s3 = set s2 first y in
-      ghost_ (Model.set_length before bi y);
-      let second : {i : int | 0 <= i
-        && Bigint.compare (Bigint.of_int i) (Model.length (current s3)) < 0} =
-        refine_ j in
-      let intermediate = ghost_ (current (borrow_ s3)) in
-      let refine_ s4 = set s3 second x in
+      let intermediate = ghost_ (current (borrow_ s1)) in
+      let refine_ s2 = set s1 second x in
       ghost_ (Model.set_length intermediate bj x);
       ghost_ (Model.swap_def before bi bj);
-      refine_ s4)
+      refine_ s2)
   let split_at : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (index : {k : int | 0 <= k

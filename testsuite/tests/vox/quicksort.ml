@@ -31,19 +31,18 @@ let rec partition : (pivot : int) -> (size : int) -> (lower : int) -> (scan : in
     let index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
       refine_ scan in
-    let refine_ read = Slice.get s index in
-    let {value; state = s1} = read in
+    let refine_ value = Slice.get (borrow_ s) index in
     ghost_ (Spec.element_def before bscan);
     let next_scan = scan + 1 in
     let next_lower, s2 =
       if value < pivot || (value = pivot && scan land 1 = 0) then (
         let first : {i : int | 0 <= i
-          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} =
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
           refine_ lower in
         let second : {i : int | 0 <= i
-          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} =
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
           refine_ scan in
-        let refine_ s2 = Slice.swap s1 first second in
+        let refine_ s2 = Slice.swap s first second in
         ghost_ (Quicksort_model.swap_partition before pivot blo bscan);
         ghost_ (Spec.element_swap before blo bscan blast);
         ghost_ (Spec.permutation_swap before blo bscan);
@@ -52,7 +51,7 @@ let rec partition : (pivot : int) -> (size : int) -> (lower : int) -> (scan : in
         ghost_ (Spec.accepts_def value pivot high_side);
         ghost_ (Spec.range_grow before pivot high_side blo bscan);
         ghost_ (Spec.permutation_refl before);
-        lower, s1) in
+        lower, s) in
     let intermediate = ghost_ (Slice.current (borrow_ s2)) in
     let next : {s : int Slice.t |
       0 < size && 0 <= next_lower && next_lower <= next_scan && next_scan < size
@@ -123,8 +122,8 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
     let index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
       refine_ last in
-    let refine_ read = Slice.get s index in
-    let {value = (pivot : int); state = s1} = read in
+    let refine_ pivot = Slice.get (borrow_ s) index in
+    let (pivot : int) = pivot in
     ghost_ (Spec.element_def seeded blast);
     ghost_ (Spec.range_empty seeded pivot low_side bzero bzero);
     ghost_ (Spec.range_empty seeded pivot high_side bzero bzero);
@@ -134,7 +133,7 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
       && Spec.element (Slice.current s) (Bigint.of_int (size - 1)) = pivot
       && Spec.range (Slice.current s) pivot true 0Z (Bigint.of_int zero)
       && Spec.range (Slice.current s) pivot false (Bigint.of_int zero) (Bigint.of_int zero)} =
-      refine_ s1 in
+      refine_ s in
     let refine_ partitioned = partition pivot size zero zero initial in
     let {value = (boundary : int); state = s2} = partitioned in
     let divided = ghost_ (Slice.current (borrow_ s2)) in
@@ -198,10 +197,10 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
 let (sort_with_budget @ portable) : (domains : int) -> (cutoff : int) -> (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)
       && Spec.permutation (Slice.current s) (Slice.final s)} = fun domains cutoff s ->
-  let refine_ sized = Slice.length s in
-  let {value = (size : int); state} = sized in
+  let refine_ size = Slice.length (borrow_ s) in
+  let (size : int) = size in
   let sized : {s : int Slice.t | 0 <= size
-    && Model.length (Slice.current s) === Bigint.of_int size} = refine_ state in
+    && Model.length (Slice.current s) === Bigint.of_int size} = refine_ s in
   let refine_ u = sort_sized domains cutoff size sized in
   refine_ u
 

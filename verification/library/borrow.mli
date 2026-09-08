@@ -18,23 +18,16 @@ module Slice : sig @@ portable
     @@ total = "caml_borrow_final"
 
   val length : ('a : immutable_data).
-      (s : 'a t) @ local unique ->
-      {r : (int, 'a t) step |
-        0 <= r.value
-        && Bigint.of_int r.value === Model.length (current s)
-        && current r.state === current s && final r.state === final s}
-      @ local unique
+    (s : 'a t) @ local immutable ->
+    {n : int | 0 <= n
+      && Bigint.of_int n === Model.length (current s)}
 
   val get : ('a : immutable_data).
-    (s : 'a t) @ local unique ->
-    (index : {i : int |
-      0 <= i && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <
-        0}) ->
-    {r : ('a, 'a t) step |
-      let refine_ index = index in
-      Some r.value === Model.at (current s) (Bigint.of_int index)
-      && current r.state === current s && final r.state === final s}
-    @ local unique
+    (s : 'a t) @ local immutable ->
+    (index : {i : int | 0 <= i
+      && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
+    {value : 'a | let refine_ index = index in
+      Some value === Model.at (current s) (Bigint.of_int index)}
 
   val set : ('a : immutable_data).
     (s : 'a t) @ local unique ->
@@ -47,11 +40,8 @@ module Slice : sig @@ portable
       && final r === final s} @ local unique
 
   val snapshot : ('a : immutable_data).
-    (s : 'a t) @ local unique ->
-    {r : ('a iarray, 'a t) step |
-      Model.of_iarray r.value === current s
-      && current r.state === current s && final r.state === final s}
-    @ local unique
+    (s : 'a t) @ local immutable ->
+    {values : 'a iarray | Model.of_iarray values === current s}
 
   val swap : ('a : immutable_data).
       (s : 'a t) @ local unique ->

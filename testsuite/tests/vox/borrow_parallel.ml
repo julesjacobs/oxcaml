@@ -21,17 +21,16 @@ let[@def] (split_post @ total) (u : unit @ immutable)
 let write_first : (s : int Slice.t) @ local unique -> (value : int) ->
     {u : unit | anything (Slice.final s)} = fun s value ->
   let eventual = ghost_ (Slice.final (borrow_ s)) in
-  let refine_ size = Slice.length s in
-  let {value = n; state} = size in
+  let refine_ n = Slice.length (borrow_ s) in
   let state =
     if n > 0 then
       let zero = 0 in
       let index : {i : int | 0 <= i
-        && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} =
+        && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
         refine_ zero in
-      let refine_ state = Slice.set state index value in
+      let refine_ state = Slice.set s index value in
       state
-    else state in
+    else s in
   Slice.finish state;
   ghost_ (anything_def eventual);
   let u = () in refine_ u
@@ -44,13 +43,12 @@ let run_pair spawn a left_body right_body =
   let refine_ result = Owned_array.with_mut a root (fun loan ->
     let refine_ s = loan in
     let eventual = ghost_ (Slice.final (borrow_ s)) in
-    let refine_ size = Slice.length s in
-    let {value = n; state} = size in
+    let refine_ n = Slice.length (borrow_ s) in
     let middle = n / 2 in
     let cut : {i : int | 0 <= i
-      && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) <= 0} =
+      && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) <= 0} =
       refine_ middle in
-    let refine_ result = Slice.split_at state cut split (fun l r ->
+    let refine_ result = Slice.split_at s cut split (fun l r ->
       let refine_ left = l in
       let refine_ right = r in
       let left_end = ghost_ (Slice.final (borrow_ left)) in

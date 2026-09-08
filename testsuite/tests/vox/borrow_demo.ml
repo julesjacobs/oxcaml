@@ -26,21 +26,20 @@ let swap_ends : ('a : immutable_data). (a : 'a Owned_array.t) @ unique ->
        else before)) in
   let refine_ result = Owned_array.with_mut a post (fun loan ->
     let refine_ s = loan in
-    let refine_ sized = Slice.length s in
-    let {value = n; state = s1} = sized in
+    let refine_ n = Slice.length (borrow_ s) in
     let s2 =
       if n > 0 then
         let zero = 0 in
         let last = n - 1 in
         let first : {i : int | 0 <= i
-          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} =
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
           refine_ zero in
         let second : {i : int | 0 <= i
-          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} =
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
           refine_ last in
-        let refine_ swapped = Slice.swap s1 first second in
+        let refine_ swapped = Slice.swap s first second in
         swapped
-      else s1 in
+      else s in
     Slice.finish s2;
     let u = () in
     refine_ u) in

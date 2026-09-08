@@ -938,6 +938,19 @@ let normal_borrow_projection ctx name args value s =
     end
   | _ -> s
 
+let normal_borrow_length ctx args value s =
+  match args, scalar value with
+  | [handle], Some length ->
+    begin match scalar handle with
+    | Some handle ->
+      fact
+        (fact s "borrow length" (both Eq length (borrow_extent ctx handle)))
+        "borrow extent"
+        (both Le (Integer 0L) length)
+    | None -> s
+    end
+  | _ -> s
+
 let tuple_fields ctx env ty value =
   match data_of_type ctx env ty, scalar value with
   | ( Some { kind = Tuple_data constructor | Record_data constructor; _ },
@@ -995,12 +1008,6 @@ let normal_borrow_transition ctx env fn_type result_type name args value s =
           [ both Eq (current loan) (current receiver);
             both Eq (final loan) (final receiver);
             same_size loan receiver ]
-        | "caml_borrow_length", _, Some [length; loan] ->
-          [ both Eq length (borrow_extent ctx receiver);
-            both Eq (current loan) (current receiver);
-            both Eq (final loan) (final receiver);
-            same_size loan receiver;
-            both Le (Integer 0L) length ]
         | _ -> []
       in
       List.fold_left (fun s fact_ -> fact s "borrow transition" fact_) s facts
@@ -1951,6 +1958,9 @@ and expression_desc ctx s e =
         name ctx
           (normal_borrow_projection ctx primitive_name args value s)
           value
+      | Some ("caml_borrow_length", 1) ->
+        let value = match value with Some _ -> value | None -> opaque () in
+        name ctx (normal_borrow_length ctx args value s) value
       | Some (primitive_name, _)
         when List.mem primitive_name
                [ "caml_borrow_open";
@@ -1958,8 +1968,7 @@ and expression_desc ctx s e =
                  "caml_borrow_split";
                  "caml_borrow_recombine";
                  "caml_borrow_finish";
-                 "caml_borrow_transfer";
-                 "caml_borrow_length" ] ->
+                 "caml_borrow_transfer" ] ->
         let value = match value with Some _ -> value | None -> opaque () in
         name ctx
           (normal_borrow_transition ctx e.exp_env fn.exp_type e.exp_type

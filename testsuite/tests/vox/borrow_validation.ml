@@ -14,11 +14,10 @@ module Spec = Vox_int_sequence
 
 let validate_slice : (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)} = fun s ->
-  let refine_ snapshot = Slice.snapshot s in
-  let {value = (values : int iarray); state} = snapshot in
+  let refine_ values = Slice.snapshot (borrow_ s) in
   let checked : {xs : int iarray | Spec.sorted (Model.of_iarray xs)} = assume_ values in
   let refine_ checked = checked in
-  let refine_ closed = Slice.finish state in
+  let refine_ closed = Slice.finish s in
   let u = () in refine_ u
 
 let validate : (a : int Owned_array.t) @ unique ->

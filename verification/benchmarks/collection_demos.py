@@ -27,6 +27,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", default="7809359026")
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument("--current-only", action="store_true")
     args = parser.parse_args()
     compiler = ROOT / "_install/bin/ocamlc"
     if not compiler.is_file():
@@ -35,7 +36,8 @@ def main():
     output.writerow(["version", "demo", "scope", "median_ms", "min_ms", "max_ms",
                      "source_lines", "queries", "smt_bytes"])
     for demo, files in WORKLOADS.items():
-        for version in ["baseline", "candidate"]:
+        versions = ["candidate"] if args.current_only else ["baseline", "candidate"]
+        for version in versions:
             modules = [LIBRARY / "vox_sequence.mli",
                        LIBRARY / "vox_sequence.ml"]
             if demo == "quicksort" and version == "candidate":

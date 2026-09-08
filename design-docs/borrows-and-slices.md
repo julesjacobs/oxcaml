@@ -6,10 +6,11 @@ checks the wrappers and demos against a small storage boundary implemented in
 
 ## Ownership and models
 
-Use scoped exclusive loans. Every operation consumes its input handle; an
-operation that leaves the loan open returns a successor handle. OxCaml's
-uniqueness and locality checks prevent reuse of the consumed handle, access to
-a suspended parent, and escape of a local loan.
+Use scoped exclusive loans. Reads temporarily borrow the handle. Writes,
+splits, and completion consume it; a consuming operation that leaves the loan
+open returns a successor handle. OxCaml's uniqueness and locality checks
+prevent reuse of a consumed handle, mutation during a read borrow, access to a
+suspended parent, and escape of a local loan.
 
 | Type | Meaning | Runtime representation |
 | --- | --- | --- |
@@ -58,11 +59,11 @@ The table uses `C = current s`, `F = final s`, and bigint model indices.
 | `Owned_array.of_iarray xs` | Fresh copy with model `Model.of_iarray xs` |
 | `Owned_array.into_iarray a` | Consume ownership; freeze the underlying array without copying |
 | `Owned_array.with_mut a post body` | Root loan; return the callback result and owner satisfying `post` |
-| `Slice.length s` | Length and successor, with unchanged current/final models |
-| `Slice.get s i` | Shared element and successor; `Some value === Model.at C i` |
+| `Slice.length (borrow_ s)` | Length of the current model |
+| `Slice.get (borrow_ s) i` | Shared element; `Some value === Model.at C i` |
 | `Slice.set s i x` | Successor with `current = Model.set C i x` and unchanged final |
 | `Slice.swap s i j` | Successor with `current = Model.swap C i j` and unchanged final |
-| `Slice.snapshot s` | Real immutable-array copy and unchanged successor |
+| `Slice.snapshot (borrow_ s)` | Real immutable-array copy of the current model |
 | `Slice.finish s` | Consume loan; refined unit establishing `F === C` |
 | `Slice.split_at s k post body` | Lend adjacent disjoint children; reconstruct parent from their finals |
 | `Slice.split3 s lo hi post body` | Lend prefix, `[lo, hi)`, and suffix |
@@ -73,7 +74,7 @@ All indices have checked bounds. Empty/full splits and empty ranges are
 allowed. Loan length is invariant; resizing and arbitrary joining are absent.
 `swap`, `split3`, and `with_range` are verified library implementations.
 
-Operations returning a value and a handle use:
+Scoped operations returning a callback result and a restored handle use:
 
 ```ocaml
 type ('value, 'state) step = {
@@ -83,9 +84,12 @@ type ('value, 'state) step = {
 ```
 
 The `value` field is global and shared; the `state` field retains the result's
-local/unique modes. This prevents a read from granting unique ownership of an
-element still present in the array. Unpack results with `let refine_ result =
-...` followed by `let {value; state} = result in ...`.
+local/unique modes. Unpack these results with `let refine_ result = ...` followed
+by `let {value; state} = result in ...`. Reads return their refined result
+directly. Elements read from a slice are shared, including composite elements
+that remain in the array. A borrowed variable can serve as a dependent function
+argument; its contract refers to the same stable binding. Computed expressions
+and mutable bindings still require a separate stable binding.
 
 ## Exporting a callback proof
 
@@ -237,7 +241,7 @@ when its implementation, representative clients, and evaluation are recorded.
 | Shared sequence model | `jujacobs/vox/shared-sequence-20260908` | Evaluated: revise |
 | Callback predicate arguments | `jujacobs/vox/callback-predicates-20260908` | Evaluated: adopt |
 | Reusable collection mathematics | `jujacobs/vox/collection-theory-20260908` | Evaluated: adopt |
-| Borrow interface and transitions | `jujacobs/vox/borrow-interface-20260908` | Pending |
+| Borrow interface and transitions | `jujacobs/vox/borrow-interface-20260908` | Evaluated: adopt |
 | Scoped callback termination | `jujacobs/vox/scoped-termination-20260908` | Pending |
 
 ### Shared sequence model: verdict
@@ -424,3 +428,65 @@ An existing refinement-symbol scope limitation prevented re-exporting the
 library with `include`; an ordinary module alias preserves the intended public
 specification and its symbol identities. This experiment does not fix that
 compiler limitation.
+
+## Borrowed read experiment
+
+Branch: `jujacobs/vox/borrow-interface-20260908`, baseline `d9d6a7f6d3`.
+**Verdict: adopt borrowed reads.** `length`, `get`, and `snapshot` accept a
+read borrow and return only their refined result. Writes, splits, and completion
+retain their consuming interfaces. Reads do not create logical successor states.
+The public specification continues to describe immutable sequence observations
+of each state, while loan transitions carry the final prophecy between states.
+
+A dependent argument may now be `borrow_ variable`. Substitution uses the same
+stable binding as an ordinary variable; the ordinary borrow context still
+controls its lifetime and access permissions. Computed expressions and mutable
+bindings remain rejected. This is one additional frontend pattern, imported
+into Merlin. The VC generator handles the length observation separately from
+loan transitions; it no longer invents a successor for that read.
+
+The public library loses 27 lines, including repeated index conversions in
+`swap`. Its two reads share the initial handle, followed by two consuming
+writes. End swap, range editing, runtime validation, parallel callbacks, and
+quicksort use the new interface. Elements returned by `get` remain shared;
+the `immutable_data` element restriction is unchanged. Reads, snapshots, and
+callback results preserve the same useful output permissions as the previous
+`step.value` field. Quicksort retains explicit `int` annotations for the pivot
+and size under `-principal`, now as ordinary bindings after refinement
+elimination. Explicit refinement elimination remains part of the idiom.
+
+The runtime removes one three-word result pair per read.
+`verification/benchmarks/borrow_reads.py` compiles the baseline C source with
+renamed symbols and measures both versions in one executable built by the
+installed native compiler. It alternates their order over five repetitions and
+checks equal results. The array has 16 integers; these are primitive
+microbenchmarks, without a claim about whole-quicksort runtime speedup.
+
+| Operation | Iterations | Baseline/candidate median CPU time | Baseline/candidate bytes per operation |
+| --- | --- | --- | --- |
+| Length | 2000000 | 11.905 / 4.335 ms | 24 / 0 |
+| Get | 2000000 | 17.660 / 9.435 ms | 24 / 0 |
+| Snapshot | 200000 | 3.203 / 2.606 ms | 160 / 136 |
+
+`collection_demos.py --current-only` measures verification using the installed
+compiler. Complete source builds take 412 ms for library plus end swap, 656 ms
+for sorted arrays, and 1069 ms for quicksort; final-client medians are 30, 55,
+and 22 ms. Against the preceding branch's recorded output, query counts remain
+35, 71, and 95. The end-swap SMT input shrinks from 617500 to 603565 bytes, and
+quicksort from 1878914 to 1851429 bytes; sorted arrays are unchanged. Those
+baseline timings were collected in a separate run, so the evidence supports
+simpler VCs and comparable verification cost rather than a timing speedup.
+
+Validation covers all 64 Vox tests: 63 passed in the refreshed full run, then
+quicksort passed after restoring its size annotation. The 42 refinement-typing
+tests, the existing borrowing-mode test, and `make merlin-test` pass. Rejection
+tests cover borrowing a consumed handle, using the owner during a read borrow,
+claiming unique ownership of an element, incorrect bounds, and unproved
+postconditions. The runtime tests include split offsets, snapshots, empty
+arrays, and flat float storage. The installed library verifies in both backends
+with `-principal`, and separately linked end-swap clients run with both archives.
+`make fmt` passes.
+
+This branch keeps scoped operations and parallel joining partial. Their
+termination contracts are evaluated separately in the scoped-termination
+experiment.

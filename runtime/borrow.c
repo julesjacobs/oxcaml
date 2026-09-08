@@ -70,7 +70,7 @@ CAMLprim value caml_borrow_restore(value frame)
 
 CAMLprim value caml_borrow_length(value loan)
 {
-  return borrow_pair(Field(loan, 2), loan);
+  return Field(loan, 2);
 }
 
 static intnat borrow_index(value loan, value index)
@@ -87,7 +87,7 @@ CAMLprim value caml_borrow_get(value loan, value index)
   CAMLlocal1(element);
   intnat i = borrow_index(loan, index);
   element = caml_array_get(Field(loan, 0), Val_long(i));
-  CAMLreturn(borrow_pair(element, loan));
+  CAMLreturn(element);
 }
 
 CAMLprim value caml_borrow_set(value loan, value index, value element)
@@ -103,7 +103,7 @@ CAMLprim value caml_borrow_snapshot(value loan)
   CAMLparam1(loan);
   CAMLlocal1(copy);
   copy = caml_array_sub(Field(loan, 0), Field(loan, 1), Field(loan, 2));
-  CAMLreturn(borrow_pair(copy, loan));
+  CAMLreturn(copy);
 }
 
 CAMLprim value caml_borrow_split(value loan, value index)
