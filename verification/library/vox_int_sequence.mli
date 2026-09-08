@@ -206,4 +206,3 @@ val count_append : (left : int list) -> (right : int list) ->
 
 val permutation_rotate : (left : int list) -> (right : int list) ->
     {u : unit | permutation (append left right) (append right left)} @@ total
-

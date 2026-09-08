@@ -343,4 +343,3 @@ let (decompose3 @ total) : ('a : immutable_data).
   sub_def values first past;
   drop_add values first width;
   let u = () in refine_ u
-

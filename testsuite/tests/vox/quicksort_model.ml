@@ -93,4 +93,3 @@ let (glue_partition @ total) : (before : int list) -> (pivot : int) -> (index : 
   append_def nil right;
   sorted_glue left pivot right;
   let u = () in refine_ u
-
