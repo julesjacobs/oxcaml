@@ -829,3 +829,160 @@ let (permutation_rotate @ total) : (left : int list) -> (right : int list) ->
     let u = () in refine_ u in
   count_extensional before after same;
   let u = () in refine_ u
+
+let rec (all_get @ total) : (values : int list) -> (bound : int) ->
+    (lower : bool) -> (index : Bigint.t) ->
+    {u : unit | if all values bound lower && 0Z <= index
+      && index < length values then accepts (element values index) bound lower
+      else true} = fun values bound lower index ->
+  all_def values bound lower;
+  length_def values;
+  element_equation values index;
+  match values with
+  | [] -> let u = () in refine_ u
+  | _ :: tail ->
+    let previous = Bigint.sub index 1Z in
+    all_get tail bound lower previous;
+    let u = () in refine_ u
+
+let rec (ordered @ total) : (values : int list) ->
+    (first : Bigint.t) -> (last : Bigint.t) ->
+    {u : unit | if sorted values && 0Z <= first && first <= last
+      && last < length values then element values first <= element values last
+      else true} = fun values first last ->
+  sorted_def values;
+  length_def values;
+  element_equation values first;
+  element_equation values last;
+  match values with
+  | [] -> let u = () in refine_ u
+  | head :: tail ->
+    let i = Bigint.sub first 1Z in
+    let j = Bigint.sub last 1Z in
+    let lower = false in
+    let value = element tail j in
+    all_get tail head lower j;
+    accepts_def value head lower;
+    ordered tail i j;
+    let u = () in refine_ u
+
+let rec (sorted_take @ total) : (values : int list) -> (count : Bigint.t) ->
+    {u : unit | if sorted values && 0Z <= count && count <= length values then
+      sorted (take count values) else true} =
+    fun values count ->
+  let selected = take count values in
+  sorted_def values;
+  take_def count values;
+  sorted_def selected;
+  match values with
+  | [] -> let u = () in refine_ u
+  | head :: tail ->
+    let next = Bigint.sub count 1Z in
+    let prefix = take next tail in
+    let suffix = drop next tail in
+    let lower = false in
+    sorted_take tail next;
+    let refine_ partition = cut tail next in
+    all_append prefix suffix head lower;
+    let u = () in refine_ u
+
+let rec (sorted_drop @ total) : (values : int list) -> (count : Bigint.t) ->
+    {u : unit | if sorted values then sorted (drop count values) else true} =
+    fun values count ->
+  let selected = drop count values in
+  sorted_def values;
+  drop_def count values;
+  sorted_def selected;
+  match values with
+  | [] -> let u = () in refine_ u
+  | _ :: tail ->
+    let next = Bigint.sub count 1Z in
+    sorted_drop tail next;
+    let u = () in refine_ u
+
+let (sorted_sub @ total) : (values : int list) -> (first : Bigint.t) ->
+    (past : Bigint.t) ->
+    {u : unit | if sorted values && 0Z <= first && first <= past
+      && past <= length values then sorted (sub values first past) else true}
+    = fun values first past ->
+  let rest = drop first values in
+  let count = Bigint.sub past first in
+  sub_def values first past;
+  let refine_ partition = cut values first in
+  sorted_drop values first;
+  sorted_take rest count;
+  let u = () in refine_ u
+
+let rec (all_intro @ total) : (values : int list) -> (bound : int) ->
+    (lower : bool) ->
+    ((index : Bigint.t) -> {u : unit | if 0Z <= index && index < length values
+      then accepts (element values index) bound lower else true}) @ total ->
+    {u : unit | all values bound lower} = fun values bound lower proof ->
+  let zero = 0Z in
+  length_def values;
+  all_def values bound lower;
+  element_equation values zero;
+  let refine_ head = proof zero in
+  match values with
+  | [] -> let u = () in refine_ u
+  | _ :: tail ->
+    all_intro tail bound lower (fun index ->
+      let next = Bigint.add index 1Z in
+      let refine_ known = proof next in
+      element_equation values next;
+      let u = () in refine_ u);
+    let u = () in refine_ u
+
+let rec (sorted_intro @ total) : (values : int list) ->
+    ((first : Bigint.t) -> (last : Bigint.t) ->
+      {u : unit | if 0Z <= first && first <= last && last < length values then
+        element values first <= element values last else true}) @ total ->
+    {u : unit | sorted values} = fun values proof ->
+  let zero = 0Z in
+  let lower = false in
+  sorted_def values;
+  length_def values;
+  let refine_ first = element_equation values zero in
+  match values with
+  | [] -> let u = () in refine_ u
+  | head :: tail ->
+    all_intro tail head lower (fun index ->
+      let next = Bigint.add index 1Z in
+      let value = element tail index in
+      let refine_ known = proof zero next in
+      element_equation values next;
+      accepts_def value head lower;
+      let u = () in refine_ u);
+    sorted_intro tail (fun first last ->
+      let i = Bigint.add first 1Z in
+      let j = Bigint.add last 1Z in
+      let refine_ known = proof i j in
+      element_equation values i;
+      element_equation values j;
+      let u = () in refine_ u);
+    let u = () in refine_ u
+
+let (sorted_set @ total) : (values : int list) -> (index : Bigint.t) ->
+    (value : int) ->
+    {u : unit | if sorted values && 0Z <= index && index < length values
+      && (index = 0Z || element values (Bigint.sub index 1Z) <= value)
+      && (Bigint.add index 1Z = length values ||
+        value <= element values (Bigint.add index 1Z)) then
+      sorted (set values index value) else true} = fun values index value ->
+  if sorted values && 0Z <= index && index < length values
+    && (index = 0Z || element values (Bigint.sub index 1Z) <= value)
+    && (Bigint.add index 1Z = length values ||
+      value <= element values (Bigint.add index 1Z)) then
+    let changed = set values index value in
+    let previous = Bigint.sub index 1Z in
+    let next = Bigint.add index 1Z in
+    set_length values index value;
+    sorted_intro changed (fun first last ->
+      element_set values index first value;
+      element_set values index last value;
+      ordered values first last;
+      ordered values first previous;
+      ordered values next last;
+      let u = () in refine_ u);
+    let u = () in refine_ u
+  else let u = () in refine_ u

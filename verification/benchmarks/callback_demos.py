@@ -41,6 +41,10 @@ def main():
                 modules += [LIBRARY / "borrow_model.mli",
                             LIBRARY / "borrow_model.ml",
                             LIBRARY / "borrow.mli", LIBRARY / "borrow.ml"]
+            if demo == "sorted-array" and version == "candidate":
+                modules += [LIBRARY / (name + suffix)
+                            for name in ["vox_sequence", "vox_int_sequence", "vox_iarray"]
+                            for suffix in [".mli", ".ml"]]
             modules += [DEMOS / name for name in files]
             elapsed = []
             with tempfile.TemporaryDirectory(prefix="vox-seq-") as directory:

@@ -118,14 +118,8 @@ let equality_goal (values : int iarray) :
   refine_ result
 ;;
 [%%expect{|
-Line 2, characters 27-44:
-2 |     {result : int iarray | result === values} =
-                               ^^^^^^^^^^^^^^^^^
-Error: Unsupported refinement predicate in VC generation
-Line 4, characters 2-16:
-4 |   refine_ result
-      ^^^^^^^^^^^^^^
-  Required by this refinement introduction
+val equality_goal :
+  (values : int iarray) -> {result : int iarray | result === values} = <fun>
 |}]
 
 type recursive_container = Empty | More of int iarray * recursive_container
@@ -139,14 +133,9 @@ let recursive_equality_goal (value : recursive_container) :
 [%%expect{|
 type recursive_container = Empty | More of int iarray * recursive_container
 [@@inductive]
-Line 5, characters 36-52:
-5 |     {result : recursive_container | result === value} =
-                                        ^^^^^^^^^^^^^^^^
-Error: Unsupported refinement predicate in VC generation
-Line 7, characters 2-16:
-7 |   refine_ result
-      ^^^^^^^^^^^^^^
-  Required by this refinement introduction
+val recursive_equality_goal :
+  (value : recursive_container) ->
+  {result : recursive_container | result === value} = <fun>
 |}]
 
 let invalid_refined_get () =
@@ -501,4 +490,56 @@ let () =
   assert (Polymorphic_record_bounds.get container index)
 ;;
 [%%expect{|
+|}]
+
+external equal_copy : (values : int iarray) ->
+  {a : int iarray | a === values} @ total = "%obj_dup"
+external equal_rows : (values : int iarray iarray) ->
+  {a : int iarray iarray | a === values} @ total = "%obj_dup";;
+[%%expect{|
+external equal_copy :
+  (values : int iarray) -> {a : int iarray | a === values} @ total
+  = "%obj_dup"
+external equal_rows :
+  (values : int iarray iarray) ->
+  {a : int iarray iarray | a === values} @ total = "%obj_dup"
+|}]
+
+external read_int : int iarray -> int -> int @ total = "%array_safe_get"
+external read_row : int iarray iarray -> int -> int iarray @ total =
+  "%array_safe_get";;
+[%%expect{|
+external read_int : int iarray -> int -> int @ total = "%array_safe_get"
+external read_row : int iarray iarray -> int -> int iarray @ total
+  = "%array_safe_get"
+|}]
+
+let equal_array_read () : {n : int | n = 20} =
+  let source = [: 10; 20 :] in
+  let refine_ values = equal_copy source in
+  let n = read_int values 1 in
+  refine_ n;;
+[%%expect{|
+val equal_array_read : unit -> {n : int | n = 20} = <fun>
+|}]
+
+let equal_nested_read () : {n : int | n = 20} =
+  let source = [: [: 10; 20 :] :] in
+  let refine_ values = equal_rows source in
+  let row = read_row values 0 in
+  let n = read_int row 1 in
+  refine_ n;;
+[%%expect{|
+val equal_nested_read : unit -> {n : int | n = 20} = <fun>
+|}]
+
+let unequal_arrays () =
+  let first = [: 1 :] in
+  let second = [: 2 :] in
+  let (_ : {a : int iarray | a === second}) = refine_ first in ();;
+[%%expect{|
+Line 4, characters 46-59:
+4 |   let (_ : {a : int iarray | a === second}) = refine_ first in ();;
+                                                  ^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]

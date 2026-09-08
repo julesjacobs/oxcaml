@@ -1,17 +1,9 @@
+open Vox_sequence
+
 type ('a : immutable_data) t : immutable_data
 
 val contents : ('a : immutable_data).
   'a t @ immutable total -> 'a list @ immutable total @@ total
-
-val append : ('a : immutable_data).
-  'a list @ immutable total -> 'a list @ immutable total ->
-  'a list @ immutable total @@ total
-val append_def : ('a : immutable_data).
-  (xs : 'a list) @ immutable -> (ys : 'a list) @ immutable ->
-  {u : unit |
-    append xs ys ===
-      (match xs with [] -> ys | h :: t -> h :: append t ys)}
-  @@ total
 
 val empty : ('a : immutable_data).
   {q : 'a t | contents q === []} @@ total immutable

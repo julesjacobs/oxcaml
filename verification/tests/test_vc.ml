@@ -182,3 +182,30 @@ let () =
   let large = lambda_size 80 in
   assert (large < 5 * small);
   print_endline "Ghost lambdas preserve obligations and share substitutions"
+
+let () =
+  let nested_copy expected =
+    "external copy : (a : int iarray iarray) -> "
+    ^ "{b : int iarray iarray | b === a} @ total = \"%obj_dup\"\n"
+    ^ "external row : int iarray iarray -> int -> int iarray @ total = "
+    ^ "\"%array_safe_get\"\n"
+    ^ "external get : int iarray -> int -> int @ total = "
+    ^ "\"%array_safe_get\"\n" ^ "let f () : {n : int | n === "
+    ^ string_of_int expected ^ "} =\n" ^ "let source = [: [: 10; 20 :] :] in\n"
+    ^ "let refine_ values = copy source in\n"
+    ^ "let selected = row values 0 in\n"
+    ^ "let value = get selected 1 in refine_ value"
+  in
+  let solve expected =
+    match queries (nested_copy expected) with
+    | [query] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 query)
+        .validity
+    | _ -> failwith "Expected one nested-array query"
+  in
+  assert (solve 20 = Valid);
+  assert (match solve 10 with Invalid _ -> true | _ -> false);
+  print_endline "Iarray equality transports nested observations"

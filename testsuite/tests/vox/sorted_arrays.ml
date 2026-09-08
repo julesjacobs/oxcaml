@@ -1,16 +1,34 @@
 (* TEST
  has-z3;
- readonly_files = "sorted_array_proofs.ml";
+ source_directories = "${test_source_directory}/../../../verification/library ${test_source_directory}/../../../runtime";
+ readonly_files = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml sorted_array_proofs.ml borrow.c";
+ setup-ocamlc.byte-build-env;
+ flags = "-extension refinement_types -principal -I ocamlc.byte";
+ module = "vox_sequence.mli"; ocamlc.byte;
+ module = "vox_sequence.ml"; ocamlc.byte; ocamlopt.byte;
+ module = "vox_int_sequence.mli"; ocamlc.byte;
+ module = "vox_int_sequence.ml"; ocamlc.byte; ocamlopt.byte;
+ module = "vox_iarray.mli"; ocamlc.byte;
+ module = "vox_iarray.ml"; ocamlc.byte; ocamlopt.byte;
+ unset module;
+ all_modules = "borrow.c";
+ program = "collection_runtime.cmxs";
+ flags = "-shared";
+ ocamlopt.byte;
+ all_modules = "sorted_arrays.ml";
+ binary_modules = "ocamlc.byte/vox_sequence ocamlc.byte/vox_int_sequence ocamlc.byte/vox_iarray";
  {
-   flags = "-extension refinement_types";
+   flags = "-extension refinement_types -I ocamlc.byte";
    { expect; }
-   { expect.opt; }
+   { flags += " ocamlc.byte/collection_runtime.cmxs"; expect.opt; }
  }{
-   flags = "-extension refinement_types -principal";
+   flags = "-extension refinement_types -principal -I ocamlc.byte";
    { expect; }
-   { expect.opt; }
+   { flags += " ocamlc.byte/collection_runtime.cmxs"; expect.opt; }
  }
 *)
+
+#directory "ocamlc.byte";;
 
 #use "sorted_array_proofs.ml";;
 [%%expect{|
@@ -90,33 +108,19 @@ module Arrays :
                        ((not (above array target strict left)) &&
                           (above array target strict right))))}) @ total
       stateful
-    val sorted : int iarray -> int -> int -> bool
-    val sorted_def :
+    val at_model :
       (array : int iarray) ->
-      (start : int) ->
-      (stop : int) ->
-      {u : unit
-        | (sorted array start stop) ===
-            (if (0 <= start) && (start < stop)
-             then
-               let next = start + 1 in
-               (if next < stop
-                then
-                  ((at array start) <= (at array next)) &&
-                    (sorted array next stop)
-                else true)
-             else true)}
+      ((index : int) ->
+       {u : unit | (at array index) = (Vox_iarray.Int.element array index)}) @ total
+      stateful
     val ordered :
       (array : int iarray) ->
-      ((start : int) ->
-       (i : int) ->
+      ((i : int) ->
        (j : int) ->
        {u : unit
-         | (0 <= start) &&
-             ((start <= i) &&
-                ((i <= j) &&
-                   ((j < (Iarray.length array)) &&
-                      (sorted array start (Iarray.length array)))))} @ ghost ->
+         | (0 <= i) &&
+             ((i <= j) &&
+                ((j < (Iarray.length array)) && (Vox_iarray.Int.sorted array)))} @ ghost ->
        {u : unit | (at array i) <= (at array j)}) @ total
       stateful
     val partition :
@@ -129,7 +133,7 @@ module Arrays :
        {u : unit
          | (0 <= index) &&
              ((index < (Iarray.length array)) &&
-                ((sorted array 0 (Iarray.length array)) &&
+                ((Vox_iarray.Int.sorted array) &&
                    (((-1) <= left) &&
                       ((right <= (Iarray.length array)) &&
                          ((right = (left + 1)) &&
@@ -157,7 +161,7 @@ module Arrays :
             ((0 <= first) &&
                ((first <= past) &&
                   ((past <= (Iarray.length array)) &&
-                     ((sorted array 0 (Iarray.length array)) &&
+                     ((Vox_iarray.Int.sorted array) &&
                         ((not (above array target false (first - 1))) &&
                            ((above array target false first) &&
                               ((not (above array target true (past - 1))) &&
@@ -212,8 +216,7 @@ module Arrays :
       (array : int iarray) ->
       ((target : int) ->
        {u : unit
-         | (0 < ((Iarray.length array) + 1)) &&
-             (sorted array 0 (Iarray.length array))} @ ghost ->
+         | (0 < ((Iarray.length array) + 1)) && (Vox_iarray.Int.sorted array)} @ ghost ->
        {result : int * int
          | match result with
            | (first, past) ->
@@ -225,8 +228,7 @@ module Arrays :
       (array : int iarray) ->
       ((target : int) ->
        {u : unit
-         | (0 < ((Iarray.length array) + 1)) &&
-             (sorted array 0 (Iarray.length array))} @ ghost ->
+         | (0 < ((Iarray.length array) + 1)) && (Vox_iarray.Int.sorted array)} @ ghost ->
        {result : int option
          | match result with
            | None -> not (occurs array target 0 (Iarray.length array))
@@ -240,8 +242,7 @@ module Arrays :
       (array : int iarray) ->
       ((target : int) ->
        {u : unit
-         | (0 < ((Iarray.length array) + 1)) &&
-             (sorted array 0 (Iarray.length array))} @ ghost ->
+         | (0 < ((Iarray.length array) + 1)) && (Vox_iarray.Int.sorted array)} @ ghost ->
        {result : int option
          | match result with
            | None -> not (occurs array target 0 (Iarray.length array))
@@ -257,8 +258,7 @@ module Arrays :
       (array : int iarray) ->
       ((target : int) ->
        {u : unit
-         | (0 < ((Iarray.length array) + 1)) &&
-             (sorted array 0 (Iarray.length array))} @ ghost ->
+         | (0 < ((Iarray.length array) + 1)) && (Vox_iarray.Int.sorted array)} @ ghost ->
        {result : bool
          | result = (occurs array target 0 (Iarray.length array))}) @ total
       stateful
@@ -321,7 +321,7 @@ module Arrays :
       (value : int) ->
       {u : unit
         | (0 < ((Iarray.length source) + 1)) &&
-            (sorted source 0 (Iarray.length source))} @ ghost ->
+            (Vox_iarray.Int.sorted source)} @ ghost ->
       {pair : int * int iarray
         | match pair with
           | (position, result) ->
@@ -329,7 +329,7 @@ module Arrays :
                 ((position <= (Iarray.length source)) &&
                    (((Iarray.length result) = ((Iarray.length source) + 1))
                       &&
-                      ((sorted result 0 (Iarray.length result)) &&
+                      ((Vox_iarray.Int.sorted result) &&
                          (edited source result position value true 0
                             (Iarray.length result)))))}
     val remove_at :
@@ -338,10 +338,10 @@ module Arrays :
       {u : unit
         | (0 <= position) &&
             ((position < (Iarray.length source)) &&
-               (sorted source 0 (Iarray.length source)))} @ ghost ->
+               (Vox_iarray.Int.sorted source))} @ ghost ->
       {result : int iarray
         | ((Iarray.length result) = ((Iarray.length source) - 1)) &&
-            ((sorted result 0 (Iarray.length result)) &&
+            ((Vox_iarray.Int.sorted result) &&
                (edited source result position 0 false 0
                   (Iarray.length result)))}
     val remove_one :
@@ -349,7 +349,7 @@ module Arrays :
       (value : int) ->
       {u : unit
         | (0 < ((Iarray.length source) + 1)) &&
-            (sorted source 0 (Iarray.length source))} @ ghost ->
+            (Vox_iarray.Int.sorted source)} @ ghost ->
       {result : (int * int iarray) option
         | match result with
           | None -> not (occurs source value 0 (Iarray.length source))
@@ -361,7 +361,7 @@ module Arrays :
                          (((Iarray.length array) =
                              ((Iarray.length source) - 1))
                             &&
-                            ((sorted array 0 (Iarray.length array)) &&
+                            ((Vox_iarray.Int.sorted array) &&
                                (edited source array position 0 false 0
                                   (Iarray.length array)))))))}
   end
@@ -428,10 +428,10 @@ module Examples : sig end = struct
   let round_trip :
       (source : int iarray) -> (value : int) -> (index : int) ->
       {u : unit | 0 < Iarray.length source + 1
-        && Arrays.sorted source 0 (Iarray.length source)
+        && Vox_iarray.Int.sorted source
         && 0 <= index && index < Iarray.length source} @ ghost ->
       {result : int iarray | Iarray.length result = Iarray.length source
-        && Arrays.sorted result 0 (Iarray.length result)
+        && Vox_iarray.Int.sorted result
         && Arrays.at result index = Arrays.at source index} =
     fun source value index premise ->
     premise;
@@ -459,7 +459,7 @@ module Examples : sig end = struct
   let insert_and_search :
       (source : int iarray) -> (value : int) ->
       {u : unit | 0 < Iarray.length source + 2
-        && Arrays.sorted source 0 (Iarray.length source)} @ ghost ->
+        && Vox_iarray.Int.sorted source} @ ghost ->
       {result : bool | result} =
     fun source value premise ->
     premise;
@@ -484,16 +484,15 @@ module Examples : sig end = struct
   let check_array (values : int list) (target : int) =
     let array : int iarray = Iarray.of_list values in
     let length = Iarray.length array in
-    let zero = 0 in
     let u = () in
     let size : {u : unit | 0 < Iarray.length array + 1} = assume_ u in
-    let sorted : {u : unit | Arrays.sorted array zero length} = assume_ u in
+    let sorted : {u : unit | Vox_iarray.Int.sorted array} = assume_ u in
     let check (strict : bool) =
       let refine_ result = Arrays.bounds array target strict size in
       let (left : int), (right : int) = result in
       sorted;
       let premise : {u : unit |
-        Arrays.sorted array 0 (Iarray.length array)
+        Vox_iarray.Int.sorted array
         && -1 <= left && right <= Iarray.length array && right = left + 1
         && not (Arrays.above array target strict left)
         && Arrays.above array target strict right} = refine_ u in
@@ -532,7 +531,7 @@ module Examples : sig end = struct
       size;
       sorted;
       (refine_ u : {u : unit | 0 < Iarray.length array + 1
-        && Arrays.sorted array 0 (Iarray.length array)}))
+        && Vox_iarray.Int.sorted array}))
     in
     let refine_ range = Arrays.equal_range array target premise in
     let (first : int), (past : int) = range in
@@ -577,7 +576,7 @@ module Examples : sig end = struct
     let restored_premise = ghost_ (
       (refine_ u : {u : unit | 0 <= position
         && position < Iarray.length inserted
-        && Arrays.sorted inserted 0 (Iarray.length inserted)})) in
+        && Vox_iarray.Int.sorted inserted})) in
     let refine_ restored =
       Arrays.remove_at inserted position restored_premise in
     assert (Iarray.to_list restored = values);
@@ -593,7 +592,7 @@ module Examples : sig end = struct
        assert (expected_member && index = expected_first);
        assert (Iarray.to_list result = remove_list values));
     let search_premise : {u : unit | 0 < Iarray.length array + 2
-      && Arrays.sorted array 0 (Iarray.length array)} = assume_ u in
+      && Vox_iarray.Int.sorted array} = assume_ u in
     let refine_ present = insert_and_search array target search_premise in
     assert present
 

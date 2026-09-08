@@ -28,6 +28,8 @@ def main():
     parser.add_argument("--baseline", default="7809359026")
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--current-only", action="store_true")
+    parser.add_argument("--iarray-model", action="store_true",
+                        help="compare the direct iarray quicksort prototype")
     args = parser.parse_args()
     compiler = ROOT / "_install/bin/ocamlc"
     if not compiler.is_file():
@@ -36,6 +38,8 @@ def main():
     output.writerow(["version", "demo", "scope", "median_ms", "min_ms", "max_ms",
                      "source_lines", "queries", "smt_bytes"])
     for demo, files in WORKLOADS.items():
+        if args.iarray_model and demo != "quicksort":
+            continue
         versions = ["candidate"] if args.current_only else ["baseline", "candidate"]
         for version in versions:
             modules = [LIBRARY / "vox_sequence.mli",
@@ -49,7 +53,18 @@ def main():
                             LIBRARY / "vox_int_sequence.ml"]
             if demo != "sorted-array":
                 modules += [LIBRARY / "borrow.mli", LIBRARY / "borrow.ml"]
+            if demo == "sorted-array" and version == "candidate":
+                modules += [LIBRARY / (name + suffix)
+                            for name in ["vox_int_sequence", "vox_iarray"]
+                            for suffix in [".mli", ".ml"]]
             modules += [DEMOS / name for name in files]
+            if args.iarray_model and version == "candidate":
+                modules = [LIBRARY / (name + suffix)
+                           for name in ["vox_sequence", "vox_int_sequence",
+                                        "vox_iarray", "borrow_iarray"]
+                           for suffix in [".mli", ".ml"]]
+                modules += [DEMOS / name.replace("quicksort", "quicksort_iarray")
+                            for name in files]
             with tempfile.TemporaryDirectory(prefix="vox-seq-") as directory:
                 for module in modules:
                     if version == "candidate":

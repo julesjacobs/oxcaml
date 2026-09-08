@@ -16,6 +16,7 @@ let () =
   let nested_iarray = Predef.type_iarray int_iarray in
   let sort = Option.get (Vox_encoding.sort context Env.empty int_iarray) in
   assert (Vox_encoding.is_iarray_sort context sort);
+  assert (not (Vox_encoding.sort_has_unsupported_logical_equality context sort));
   assert (Vox_encoding.sort context Env.empty nested_iarray = Some sort);
   assert (
     Vox_encoding.iarray context Env.empty nested_iarray = Some (sort, Some sort))

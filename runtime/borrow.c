@@ -157,3 +157,23 @@ CAMLprim value caml_vox_sequence_length(value sequence)
   }
   return caml_bigint_of_int(Val_long(length));
 }
+
+CAMLprim value caml_vox_iarray_extensional(value left, value right, value proof)
+{
+  return Val_unit;
+}
+
+CAMLprim value caml_vox_iarray_sub(value array, value position, value size)
+{
+  return caml_array_sub(array, position, size);
+}
+
+CAMLprim value caml_vox_iarray_set(value array, value index, value element)
+{
+  CAMLparam3(array, index, element);
+  CAMLlocal1(copy);
+  copy = caml_array_sub(array, Val_long(0),
+                        Val_long(caml_array_length(array)));
+  caml_array_set(copy, index, element);
+  CAMLreturn(copy);
+}

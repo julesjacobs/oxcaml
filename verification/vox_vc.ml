@@ -41,6 +41,7 @@ type iarray_origin =
   | Iarray_literal of term option list
   | Iarray_append of term * term
   | Iarray_sub of term * term * term
+  | Iarray_set of term * term * term
 
 let scalar = function Some (Scalar t) -> Some t | _ -> None
 
@@ -119,6 +120,9 @@ type context =
     observation_definitions : (Symbol.t, term) Hashtbl.t;
     map_origins : (Function.t, map_origin) Hashtbl.t;
     iarray_origins : (Symbol.t, iarray_origin) Hashtbl.t;
+    iarray_constructors :
+      (Function.t, [`Literal | `Append | `Sub | `Set]) Hashtbl.t;
+    observation_equations : (term, term) Hashtbl.t;
     iarray_lengths : (term, term) Hashtbl.t;
     iarray_reads : (sort * term * term, term) Hashtbl.t;
     map_class_sorts : (sort, sort) Hashtbl.t;
@@ -495,15 +499,34 @@ let instantiate_lambda ctx lambda args =
 let iarray_origin ctx array =
   match expose_head ctx array with
   | Var symbol -> Hashtbl.find_opt ctx.iarray_origins symbol
+  | Call (fn, args) ->
+    begin match Hashtbl.find_opt ctx.iarray_constructors fn, args with
+    | Some `Literal, elements ->
+      Some (Iarray_literal (List.map Option.some elements))
+    | Some `Append, [left; right] -> Some (Iarray_append (left, right))
+    | Some `Sub, [source; position; length] ->
+      Some (Iarray_sub (source, position, length))
+    | Some `Set, [source; index; value] ->
+      Some (Iarray_set (source, index, value))
+    | _ -> None
+    end
   | _ -> None
+
+let observe_iarray ctx call value =
+  if call <> value
+  then
+    Hashtbl.replace ctx.observation_equations call (share_observation ctx value);
+  call
 
 let rec iarray_length ctx iarray_sort array =
   match Hashtbl.find_opt ctx.iarray_lengths array with
   | Some value -> value
   | None ->
-    let value =
-      share_observation ctx (expand_iarray_length ctx iarray_sort array)
+    let value = expand_iarray_length ctx iarray_sort array in
+    let call =
+      Call (intern_function ctx "Iarray.length" [iarray_sort] Int63, [array])
     in
+    let value = observe_iarray ctx call value in
     Hashtbl.add ctx.iarray_lengths array value;
     value
 
@@ -517,6 +540,7 @@ and expand_iarray_length ctx iarray_sort array =
         [iarray_length ctx iarray_sort left; iarray_length ctx iarray_sort right]
       )
   | Some (Iarray_sub (_, _, length)) -> length
+  | Some (Iarray_set (source, _, _)) -> iarray_length ctx iarray_sort source
   | None -> (
     match expose_head ctx array with
     | App (Ite, [condition; left; right]) ->
@@ -541,10 +565,15 @@ let rec iarray_get_with_budget ctx budget iarray_sort element_sort array index =
   | None ->
     decr budget;
     let value =
-      share_observation ctx
-        (expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
-           index)
+      expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
+        index
     in
+    let call =
+      Call
+        ( intern_function ctx "Iarray.get" [iarray_sort; Int63] element_sort,
+          [array; index] )
+    in
+    let value = observe_iarray ctx call value in
     Hashtbl.add ctx.iarray_reads key value;
     value
 
@@ -596,6 +625,14 @@ and expand_iarray_get_with_budget ctx budget iarray_sort element_sort array
                  index;
                iarray_get_with_budget ctx budget iarray_sort element_sort right
                  shifted ] ))
+  | Some (Iarray_set (source, changed, value)) ->
+    bounded
+      (App
+         ( Ite,
+           [ both Eq index changed;
+             value;
+             iarray_get_with_budget ctx budget iarray_sort element_sort source
+               index ] ))
   | Some (Iarray_sub (source, position, _)) ->
     bounded
       (iarray_get_with_budget ctx budget iarray_sort element_sort source
@@ -618,10 +655,28 @@ let iarray_get ctx iarray_sort element_sort array index =
   iarray_get_with_budget ctx (ref 256) iarray_sort element_sort array index
 
 let iarray_copy ctx iarray_sort origin =
-  let symbol = Symbol.create ~label:"iarray copy" iarray_sort in
-  register_sort ctx iarray_sort;
-  Hashtbl.add ctx.iarray_origins symbol origin;
-  scalar_value (Var symbol)
+  let constructor =
+    match origin with
+    | Iarray_literal elements when List.for_all Option.is_some elements ->
+      Some (`Literal, "%vox.iarray.literal", List.map Option.get elements)
+    | Iarray_append (left, right) ->
+      Some (`Append, "%vox.iarray.append", [left; right])
+    | Iarray_sub (source, position, length) ->
+      Some (`Sub, "%vox.iarray.sub", [source; position; length])
+    | Iarray_set (source, index, value) ->
+      Some (`Set, "%vox.iarray.set", [source; index; value])
+    | Iarray_literal _ -> None
+  in
+  match constructor with
+  | Some (kind, label, args) ->
+    let fn = intern_function ctx label (List.map term_sort args) iarray_sort in
+    Hashtbl.replace ctx.iarray_constructors fn kind;
+    scalar_value (share_observation ctx (Call (fn, args)))
+  | None ->
+    let symbol = Symbol.create ~label:"iarray copy" iarray_sort in
+    register_sort ctx iarray_sort;
+    Hashtbl.add ctx.iarray_origins symbol origin;
+    scalar_value (Var symbol)
 
 let set_constructor ctx origin label arguments set_sort terms =
   let function_ = intern_function ctx label arguments set_sort in
@@ -903,8 +958,9 @@ let borrow_projection ctx name result handle =
 let borrow_extent ctx handle =
   borrow_projection ctx "Borrow.extent" Int63 handle
 
-let borrow_sequence_sort ctx env ty =
+let borrow_model_sort ctx env ty =
   match get_desc (Ctype.expand_head env ty) with
+  | Tconstr (_, [_; model], _) -> sort ctx.encoding env model
   | Tconstr (_, [element], _) ->
     sort ctx.encoding env
       (Btype.newgenty (Tconstr (Predef.path_list, [element], ref Mnil)))
@@ -934,7 +990,9 @@ let normal_borrow_projection ctx name args value s =
       fact
         (fact s "borrow extent" (both Le (Integer 0L) extent))
         "borrow model length"
-        (both Eq (vox_sequence_length ctx model) size)
+        (if is_iarray_sort ctx.encoding (term_sort model)
+         then both Eq (iarray_length ctx (term_sort model) model) extent
+         else both Eq (vox_sequence_length ctx model) size)
     end
   | _ -> s
 
@@ -964,7 +1022,7 @@ let tuple_fields ctx env ty value =
 let normal_borrow_transition ctx env fn_type result_type name args value s =
   match first_argument_type env fn_type, args with
   | Some receiver_type, receiver :: _ ->
-    begin match borrow_sequence_sort ctx env receiver_type, scalar receiver with
+    begin match borrow_model_sort ctx env receiver_type, scalar receiver with
     | Some model_sort, Some receiver ->
       let project name x = borrow_projection ctx name model_sort x in
       let current = project "caml_borrow_current" in
@@ -1166,7 +1224,7 @@ let operation ctx env function_type result_type name args =
       iarray_copy ctx sort (Iarray_append (left, right))
     | _ -> None
     end
-  | "%iarray_sub", [source; position; length] ->
+  | ("%iarray_sub" | "caml_vox_iarray_sub"), [source; position; length] ->
     begin match
       ( iarray_call ctx source,
         scalar position,
@@ -1176,6 +1234,12 @@ let operation ctx env function_type result_type name args =
     | Some (sort, source), Some position, Some length, Some _
       when term_sort position = Int63 && term_sort length = Int63 ->
       iarray_copy ctx sort (Iarray_sub (source, position, length))
+    | _ -> None
+    end
+  | "caml_vox_iarray_set", [source; index; value] ->
+    begin match iarray_call ctx source, scalar index, scalar value with
+    | Some (sort, source), Some index, Some value ->
+      iarray_copy ctx sort (Iarray_set (source, index, value))
     | _ -> None
     end
   | "%array_length", [array] ->
@@ -1223,7 +1287,7 @@ let normal_iarray_copy ctx value s =
           both Le (Integer 0L) size;
           both Le position length;
           both Le size (App (Sub, [length; position])) ]
-    | Some (Iarray_literal _) | None -> s)
+    | Some (Iarray_literal _ | Iarray_set _) | None -> s)
 
 let normal_iarray_length ctx args s =
   match args with
@@ -2221,25 +2285,106 @@ let query ctx code =
     }
   in
   let facts = List.rev !definitions in
+  (* These edges request observations; they do not assert array equality.
+     Equality still follows from the original, possibly guarded facts. *)
+  let array_equalities = Hashtbl.create 16 in
+  let array_observations = Hashtbl.create 16 in
+  let pending = Queue.create () in
+  (* Equalities through subarrays can revisit an array at shifted indices. Stop
+     expanding at a fixed budget and retain uninterpreted observations. *)
+  let observation_budget = ref 1024 in
+  let propagate observe alias =
+    if !observation_budget > 0
+    then begin
+      decr observation_budget;
+      Queue.add (observe alias) pending
+    end
+  in
+  let entries table key =
+    Option.value (Hashtbl.find_opt table key) ~default:[]
+  in
+  let relate left right =
+    let previous = entries array_equalities left in
+    let same_origin =
+      expose_head ctx left = expose_head ctx right
+      && Option.is_some (iarray_origin ctx left)
+    in
+    if left <> right && (not same_origin) && not (List.mem right previous)
+    then begin
+      Hashtbl.replace array_equalities left (right :: previous);
+      List.iter
+        (fun observe -> propagate observe right)
+        (entries array_observations left)
+    end
+  in
+  let observation_function label fn =
+    Hashtbl.find_opt ctx.function_cache
+      (label, Function.arguments fn, Function.result fn)
+    = Some fn
+  in
   let seen = Hashtbl.create 16 and symbols = ref [] in
-  let rec visit = function
-    | Var s when not (Hashtbl.mem seen s) ->
-      Hashtbl.add seen s ();
-      symbols := s :: !symbols;
+  let rec visit term =
+    if not (Hashtbl.mem seen term)
+    then begin
+      Hashtbl.add seen term ();
+      begin match term with
+      | App (Eq, [left; right])
+        when is_iarray_sort ctx.encoding (term_sort left) ->
+        relate left right;
+        relate right left
+      | _ -> ()
+      end;
+      let observation =
+        match term with
+        | Call (fn, [array; index]) when observation_function "Iarray.get" fn ->
+          Some
+            ( array,
+              fun alias ->
+                iarray_get ctx (term_sort alias) (Function.result fn) alias
+                  index )
+        | Call (fn, [array]) when observation_function "Iarray.length" fn ->
+          Some (array, fun alias -> iarray_length ctx (term_sort alias) alias)
+        | _ -> None
+      in
       Option.iter
-        (fun term ->
-          definitions
-            := { label = "observation"; term = both Eq (Var s) term }
-               :: !definitions;
-          visit term)
-        (Hashtbl.find_opt ctx.observation_definitions s)
-    | App (_, args) | Call (_, args) | Construct (_, args) ->
-      List.iter visit args
-    | Is (_, arg) | Select (_, _, arg) -> visit arg
-    | _ -> ()
+        (fun (array, read) ->
+          let observe alias =
+            let value = read alias in
+            if is_iarray_sort ctx.encoding (term_sort term)
+            then begin
+              relate term value;
+              relate value term
+            end;
+            value
+          in
+          Hashtbl.replace array_observations array
+            (observe :: entries array_observations array);
+          List.iter (propagate observe) (entries array_equalities array))
+        observation;
+      Option.iter
+        (define "iarray observation" term)
+        (Hashtbl.find_opt ctx.observation_equations term);
+      match term with
+      | Var symbol ->
+        symbols := symbol :: !symbols;
+        Option.iter
+          (define "observation" term)
+          (Hashtbl.find_opt ctx.observation_definitions symbol)
+      | App (_, args) | Call (_, args) | Construct (_, args) ->
+        List.iter visit args
+      | Is (_, arg) | Select (_, _, arg) -> visit arg
+      | _ -> ()
+    end
+  and define label term value =
+    let equation = both Eq term value in
+    definitions := { label; term = equation } :: !definitions;
+    visit equation
   in
   List.iter (fun f -> visit f.term) facts;
   visit goal.term;
+  while not (Queue.is_empty pending) do
+    visit (Queue.take pending)
+  done;
   ( { datatypes = List.rev ctx.datatypes;
       symbols = List.rev !symbols;
       functions = List.rev ctx.functions;
@@ -2280,6 +2425,8 @@ let context ~prove ~verify_introductions =
     observation_definitions = Hashtbl.create 32;
     map_origins = Hashtbl.create 16;
     iarray_origins = Hashtbl.create 16;
+    iarray_constructors = Hashtbl.create 16;
+    observation_equations = Hashtbl.create 32;
     iarray_lengths = Hashtbl.create 16;
     iarray_reads = Hashtbl.create 16;
     map_class_sorts = Hashtbl.create 8;

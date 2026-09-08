@@ -1,13 +1,15 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "functional_queue.mli functional_queue.ml queue_client.ml";
+ source_directories = "${test_source_directory}/../../../verification/library";
+ all_modules = "vox_sequence.mli vox_sequence.ml functional_queue.mli functional_queue.ml queue_client.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
  { flags += " -principal"; native; }
 *)
 
+open Vox_sequence
 open Functional_queue
 
 let (fifo @ total) :

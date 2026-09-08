@@ -1,36 +1,4 @@
-let[@def] rec append (xs : ('a : immutable_data) list @ immutable)
-    (ys : ('a : immutable_data) list @ immutable) : 'a list @ total =
-  match xs with [] -> ys | head :: tail -> head :: append tail ys
-
-let rec (append_nil @ total) : (xs : ('a : immutable_data) list) @ immutable ->
-    {u : unit | append xs [] === xs} @ immutable contended =
-  fun xs ->
-  let nil : 'a list = [] in
-  append_def xs nil;
-  let u = () in
-  match xs with
-  | [] -> refine_ u
-  | _ :: tail ->
-    append_nil tail;
-    refine_ u
-
-let rec (append_associative @ total) :
-    (xs : ('a : immutable_data) list) @ immutable ->
-    (ys : 'a list) @ immutable -> (zs : 'a list) @ immutable ->
-    {u : unit | append (append xs ys) zs === append xs (append ys zs)}
-      @ immutable contended =
-  fun xs ys zs ->
-  let xy = append xs ys in
-  let yz = append ys zs in
-  append_def xs ys;
-  append_def xy zs;
-  append_def xs yz;
-  let u = () in
-  match xs with
-  | [] -> refine_ u
-  | _ :: tail ->
-    append_associative tail ys zs;
-    refine_ u
+open Vox_sequence
 
 let[@def] rec reverse (xs : ('a : immutable_data) list @ immutable)
     : 'a list @ total =

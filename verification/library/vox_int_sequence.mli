@@ -206,3 +206,54 @@ val count_append : (left : int list) -> (right : int list) ->
 
 val permutation_rotate : (left : int list) -> (right : int list) ->
     {u : unit | permutation (append left right) (append right left)} @@ total
+
+val all_get : (values : int list) -> (bound : int) ->
+    (lower : bool) -> (index : Bigint.t) ->
+    {u : unit | if all values bound lower && 0Z <= index
+      && index < length values then accepts (element values index) bound lower
+      else true} @@ total
+
+val ordered : (values : int list) ->
+    (first : Bigint.t) -> (last : Bigint.t) ->
+    {u : unit | if sorted values && 0Z <= first && first <= last
+      && last < length values then element values first <= element values last
+      else true} @@ total
+
+val sorted_take : (values : int list) -> (count : Bigint.t) ->
+    {u : unit | if sorted values && 0Z <= count && count <= length values then
+      sorted (take count values) else true} @@ total
+
+val sorted_drop : (values : int list) -> (count : Bigint.t) ->
+    {u : unit | if sorted values then sorted (drop count values) else true} @@
+      total
+
+val sorted_sub : (values : int list) -> (first : Bigint.t) ->
+    (past : Bigint.t) ->
+    {u : unit | if sorted values && 0Z <= first && first <= past
+      && past <= length values then sorted (sub values first past) else true} @@
+        total
+
+val insert : int -> int list -> int list @@ total
+val insert_sorted : (value : int) -> (values : int list) ->
+  {u : unit | if sorted values then sorted (insert value values) else true}
+  @@ total
+
+val all_intro : (values : int list) -> (bound : int) ->
+    (lower : bool) ->
+    ((index : Bigint.t) -> {u : unit | if 0Z <= index && index < length values
+      then accepts (element values index) bound lower else true}) @ total ->
+    {u : unit | all values bound lower} @@ total
+
+val sorted_intro : (values : int list) ->
+    ((first : Bigint.t) -> (last : Bigint.t) ->
+      {u : unit | if 0Z <= first && first <= last && last < length values then
+        element values first <= element values last else true}) @ total ->
+    {u : unit | sorted values} @@ total
+
+val sorted_set : (values : int list) -> (index : Bigint.t) ->
+    (value : int) ->
+    {u : unit | if sorted values && 0Z <= index && index < length values
+      && (index = 0Z || element values (Bigint.sub index 1Z) <= value)
+      && (Bigint.add index 1Z = length values ||
+        value <= element values (Bigint.add index 1Z)) then
+      sorted (set values index value) else true} @@ total

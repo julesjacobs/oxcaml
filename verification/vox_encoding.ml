@@ -71,7 +71,6 @@ let iarray_sort ctx =
   | None ->
     let sort = fresh_opaque_sort ctx in
     ctx.iarray_sort <- Some sort;
-    Hashtbl.replace ctx.unsupported_logical_equality sort ();
     sort
 
 let iarray_element env ty =

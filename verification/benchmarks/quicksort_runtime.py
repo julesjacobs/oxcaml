@@ -44,6 +44,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline", default="13c52c9fe7")
     parser.add_argument("--repeats", type=int, default=5)
+    parser.add_argument("--iarray-model", action="store_true")
     args = parser.parse_args()
     compiler = ROOT / "_install/bin/ocamlopt"
     if not compiler.is_file():
@@ -58,18 +59,30 @@ def main():
         for version in ["baseline", "candidate"]:
             output = Path(directory, version)
             output.mkdir()
-            for module in modules:
+            selected = modules
+            program = PROGRAM
+            if args.iarray_model and version == "candidate":
+                selected = [Path("verification/library") / (name + suffix)
+                            for name in ["vox_sequence", "vox_int_sequence",
+                                         "vox_iarray", "borrow_iarray"]
+                            for suffix in [".mli", ".ml"]]
+                selected += [Path("testsuite/tests/vox") / name for name in
+                             ["quicksort_iarray_model.ml", "quicksort_iarray.mli",
+                              "quicksort_iarray.ml"]]
+                program = PROGRAM.replace("open Borrow", "open Borrow_iarray")
+                program = program.replace("Quicksort.", "Quicksort_iarray.")
+            for module in selected:
                 source = ((ROOT / module).read_text() if version == "candidate"
                           else subprocess.check_output(
                               ["git", "show", f"{args.baseline}:{module}"],
                               cwd=ROOT, text=True))
                 (output / module.name).write_text(source)
-            (output / "measure.ml").write_text(PROGRAM)
+            (output / "measure.ml").write_text(program)
             executable = output / "measure"
             subprocess.run([str(compiler), "-extension", "refinement_types",
                             "-principal", "-alert", "-unsafe_multidomain",
                             "-alert", "-do_not_spawn_domains",
-                            *[module.name for module in modules],
+                            *[module.name for module in selected],
                             "measure.ml", "-o", str(executable)],
                            cwd=output, check=True, timeout=180)
             executables[version] = executable

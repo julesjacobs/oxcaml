@@ -1,7 +1,7 @@
 open Sorted_array_proofs
 
 type t = {array : int iarray |
-  0 < Iarray.length array + 1 && Arrays.sorted array 0 (Iarray.length array)}
+  0 < Iarray.length array + 1 && Vox_iarray.Int.sorted array}
 
 let[@def] (contents @ total) (array : t) =
   let refine_ array = array in ghost_ (Vox_sequence.of_iarray array)
@@ -32,8 +32,8 @@ let[@def] (edited @ total) (source : t) (result : t)
 
 let (empty @ total) : {array : t | length array = 0} =
   let array = [: :] in
-  let zero = 0 in
-  ghost_ (Arrays.sorted_def array zero zero);
+  ghost_ (Vox_iarray.Int.sorted_intro array
+    (fun index -> let u = () in refine_ u));
   let wrapped : t = refine_ array in
   ghost_ (length_def wrapped);
   refine_ wrapped
@@ -155,9 +155,8 @@ let (ordered @ total) : (array : t) -> (left : int) -> (right : int) ->
   let refine_ bounds = bounds in
   let refine_ raw = array in
   length_def array;
-  let zero = 0 in
   let u = () in
-  Arrays.ordered raw zero left right (refine_ u);
+  Arrays.ordered raw left right (refine_ u);
   at_def array left;
   at_def array right;
   refine_ u
