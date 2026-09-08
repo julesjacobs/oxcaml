@@ -1,5 +1,5 @@
 open Borrow
-module Spec = Quicksort_model
+module Spec = Vox_int_sequence
 
 let rec partition : (pivot : int) -> (size : int) -> (lower : int) -> (scan : int) ->
     (loan : {s : int Slice.t |
@@ -44,7 +44,7 @@ let rec partition : (pivot : int) -> (size : int) -> (lower : int) -> (scan : in
           && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} =
           refine_ scan in
         let refine_ s2 = Slice.swap s1 first second in
-        ghost_ (Spec.swap_partition before pivot blo bscan);
+        ghost_ (Quicksort_model.swap_partition before pivot blo bscan);
         ghost_ (Spec.element_swap before blo bscan blast);
         ghost_ (Spec.permutation_swap before blo bscan);
         lower + 1, s2)
@@ -77,7 +77,7 @@ let rec partition : (pivot : int) -> (size : int) -> (lower : int) -> (scan : in
     let refine_ state = Slice.swap s first second in
     let after = ghost_ (Slice.current (borrow_ state)) in
     let next_lower = ghost_ (Bigint.add blo 1Z) in
-    ghost_ (Spec.swap_partition before pivot blo bscan);
+    ghost_ (Quicksort_model.swap_partition before pivot blo bscan);
     ghost_ (Spec.range_shrink after pivot low_side zero next_lower zero blo);
     ghost_ (Spec.element_swap before blo bscan blo);
     ghost_ (Spec.permutation_swap before blo bscan);
@@ -185,12 +185,12 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
           let refine_ u = sort_sized right_domains cutoff right_size sized in
           refine_ u) in
       Slice.finish middle;
-      ghost_ (Spec.glue_partition divided pivot bboundary left_end middle_end right_end);
+      ghost_ (Quicksort_model.glue_partition divided pivot bboundary left_end middle_end right_end);
       let u = () in
       refine_ u) in
     let {value = u; state} = result in
     let after = ghost_ (Slice.current (borrow_ state)) in
-    ghost_ (Spec.decompose3 after bboundary bpast);
+    ghost_ (Model.decompose3 after bboundary bpast);
     ghost_ (Spec.permutation_trans before divided after);
     Slice.finish state;
     refine_ u)

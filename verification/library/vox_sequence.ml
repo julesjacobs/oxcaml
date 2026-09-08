@@ -292,3 +292,55 @@ module Iarray = struct
     ghost_ (of_iarray_at values index);
     refine_ value
 end
+
+let rec (take_all @ total) : ('a : immutable_data).
+    (values : 'a t) @ immutable ->
+    {u : unit | take (length values) values === values} = fun values ->
+  let size = length values in
+  length_def values;
+  take_def size values;
+  match values with
+  | [] -> let u = () in refine_ u
+  | _ :: tail ->
+    take_all tail;
+    let u = () in refine_ u
+
+
+let (sub_prefix @ total) : ('a : immutable_data).
+    (values : 'a t) @ immutable -> (past : Bigint.t) ->
+    {u : unit | sub values 0Z past === take past values} = fun values past ->
+  let zero = 0Z in
+  sub_def values zero past;
+  drop_def zero values;
+  let u = () in refine_ u
+
+
+let (sub_suffix @ total) : ('a : immutable_data).
+    (values : 'a t) @ immutable -> (first : Bigint.t) ->
+    {u : unit | if Bigint.compare 0Z first <= 0 && Bigint.compare first (length
+      values) <= 0 then
+      sub values first (length values) === drop first values else true} = fun
+        values first ->
+  let size = length values in
+  let rest = drop first values in
+  sub_def values first size;
+  cut values first;
+  take_all rest;
+  let u = () in refine_ u
+
+
+let (decompose3 @ total) : ('a : immutable_data).
+    (values : 'a t) @ immutable -> (first : Bigint.t) -> (past : Bigint.t) ->
+    {u : unit | if Bigint.compare 0Z first <= 0 && Bigint.compare first past <=
+      0 && Bigint.compare past (length values) <= 0 then
+      values === append (take first values) (append (sub values first past)
+        (drop past values))
+      else true} = fun values first past ->
+  let rest = drop first values in
+  let width = Bigint.sub past first in
+  cut values first;
+  cut rest width;
+  sub_def values first past;
+  drop_add values first width;
+  let u = () in refine_ u
+

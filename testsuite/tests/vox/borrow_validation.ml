@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml quicksort_model.ml borrow_validation.ml";
+ all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml vox_int_sequence.mli vox_int_sequence.ml borrow_validation.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
@@ -10,7 +10,7 @@
 *)
 
 open Borrow
-module Spec = Quicksort_model
+module Spec = Vox_int_sequence
 
 let validate_slice : (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)} = fun s ->

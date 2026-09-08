@@ -277,3 +277,9 @@ The actual-domain test requires a compiler configured with
 with a single-domain runtime, where its domain budget selects sequential work.
 See [Borrows and slices](../../../design-docs/borrows-and-slices.md) for the API,
 proof boundary, and current termination scope.
+
+The shared `Vox_sequence` and `Vox_int_sequence` libraries provide the sequence,
+range, and permutation mathematics used by quicksort and `collection_theory.ml`.
+The latter verifies rotation and observes preserved multiplicities through an
+abstract multiset interface. `collection_rejected.ml` checks representation
+abstraction and the premises required by the count laws.

@@ -139,3 +139,25 @@ module Iarray : sig
         && value === iarray_get values index}
     @ immutable total @@ total
 end
+
+val take_all : ('a : immutable_data).
+    (values : 'a t) @ immutable ->
+    {u : unit | take (length values) values === values} @@ total
+
+val sub_prefix : ('a : immutable_data).
+    (values : 'a t) @ immutable -> (past : Bigint.t) ->
+    {u : unit | sub values 0Z past === take past values} @@ total
+
+val sub_suffix : ('a : immutable_data).
+    (values : 'a t) @ immutable -> (first : Bigint.t) ->
+    {u : unit | if Bigint.compare 0Z first <= 0 && Bigint.compare first (length
+      values) <= 0 then
+      sub values first (length values) === drop first values else true} @@ total
+
+val decompose3 : ('a : immutable_data).
+    (values : 'a t) @ immutable -> (first : Bigint.t) -> (past : Bigint.t) ->
+    {u : unit | if Bigint.compare 0Z first <= 0 && Bigint.compare first past <=
+      0 && Bigint.compare past (length values) <= 0 then
+      values === append (take first values) (append (sub values first past)
+        (drop past values))
+      else true} @@ total

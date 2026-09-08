@@ -236,7 +236,7 @@ when its implementation, representative clients, and evaluation are recorded.
 | --- | --- | --- |
 | Shared sequence model | `jujacobs/vox/shared-sequence-20260908` | Evaluated: revise |
 | Callback predicate arguments | `jujacobs/vox/callback-predicates-20260908` | Evaluated: adopt |
-| Reusable collection mathematics | `jujacobs/vox/collection-theory-20260908` | Pending |
+| Reusable collection mathematics | `jujacobs/vox/collection-theory-20260908` | Evaluated: adopt |
 | Borrow interface and transitions | `jujacobs/vox/borrow-interface-20260908` | Pending |
 | Scoped callback termination | `jujacobs/vox/scoped-termination-20260908` | Pending |
 
@@ -298,8 +298,7 @@ Branch: `jujacobs/vox/callback-predicates-20260908`. The semantic baseline is
 `a7bd9bf43b`; `68b3b6a07d` separately formats the existing library and is the
 benchmark baseline. The shared-sequence experiment remains on
 `jujacobs/vox/shared-sequence-20260908` (`316979b039`), with a revise verdict.
-Collection theory, borrow-interface elaboration, and scoped termination remain
-pending on their separate branches.
+The experiment index above records the subsequent branches and their status.
 
 **Verdict: adopt explicit ghost lambdas for local callback predicates.** Vox
 already accepts predicate arguments. Retaining and substituting their local
@@ -354,3 +353,74 @@ installed library verifies in bytecode/native modes with `-principal`, and a
 separately compiled end-swap client runs successfully with both archives.
 Its Lambda output contains the erased-value marker for the predicate; its
 native assembly contains no predicate closure or model-projection calls.
+
+## Collection theory experiment
+
+Branch: `jujacobs/vox/collection-theory-20260908`. Baseline `7809359026` combines
+the sequence and callback prototypes. **Verdict: adopt the shared mathematics
+and the integer multiset specification.** This experiment adds no compiler code.
+
+`Vox_sequence` gains polymorphic take, subrange, and decomposition laws.
+`Vox_int_sequence` contains integer bounds, sortedness, and permutation laws.
+Quicksort's model shrinks from 757 to 96 lines, containing only
+`swap_partition`, `partition_bounds`, and `glue_partition`. Its public `Spec` is
+a module alias to the shared library. Runtime validation now obtains sortedness
+from the library, and a separate rotation client reuses the permutation laws.
+
+The multiset representation is abstract. `bag` maps a sequence to a multiset;
+`multiplicity` observes that multiset, while `count` directly counts a sequence.
+The checked `bag_multiplicity` law equates those observations.
+`permutation_count` derives equal counts from permutation; `count_extensional`
+establishes permutation from a total proof function supplying equal counts at
+any integer. Thus the public laws characterize permutation by multiplicity in
+both directions. Bounds, sortedness, and count definitions are exported as
+checked definition lemmas. Canonical insertion remains private.
+
+Internally, bags use canonical sorted lists. The new proof establishes sortedness
+of that representation and uniqueness from equal counts, using structural
+induction. This requires no quantifier axioms or higher-order SMT. Executing
+`bag` can take quadratic time; specification clients enclose model computations
+and proof calls in `ghost_`, so they are erased. This is an integer multiset
+specification; a polymorphic multiset implementation remains future work.
+
+The complete quicksort source set grows by 455 lines, including the library's
+209-line interface and the new count-extensionality proofs. That is a reasonable
+cost for a public mathematical interface and stronger specification laws. It
+moves reusable proof work into an installed library and provides actual reuse
+across pure rotation, slice sorting, and runtime validation. The additional
+sorted-array observation interface from the sequence experiment still needs
+revision; this branch does not change the compiler's native-array encoding.
+
+`verification/benchmarks/collection_demos.py` uses the compiler from
+`make install`, with `-principal`, against the same baseline compiler. Three
+repetitions gave these medians. Complete-source timings recompile dependencies;
+client timings compile only the final client after those dependencies exist.
+SMT dumps are collected separately from timed runs.
+
+| Workload | Complete sources, before/after | Client, before/after | Source queries, before/after |
+| --- | --- | --- | --- |
+| Library and end swap | 389 / 416 ms | 32 / 32 ms | 31 / 35 |
+| Library and sorted array | 633 / 642 ms | 56 / 54 ms | 67 / 71 |
+| Library and quicksort | 962 / 1049 ms | 22 / 23 ms | 83 / 95 |
+
+The complete quicksort build costs 87 ms more, with 12 additional proof queries;
+its SMT input grows from 1698664 to 1878914 bytes. Final-client query counts and
+SMT input are unchanged for all three workloads. These measurements support
+adopting the abstraction and proof reuse, without claiming a verification
+speedup.
+
+Verification covers all 64 Vox tests: 63 passed in the full `test-one DIR=vox`
+run, and the remaining runtime-validation dependency was corrected and passed
+separately. The final collection library, rotation, quicksort, runtime
+validation, and rejection clients passed focused checks. Rotation runs 153
+empty/full/interior splits with duplicates. The installed library verifies in
+bytecode and native modes with `-principal`. Representation construction,
+unproved count callbacks, and using permutation-count without its premise are
+rejected. Separately compiled installed-library rotation clients run with both
+archives; Lambda output erases the three proof calls in `rotate_at` to ghost
+markers. `make fmt` passes.
+
+An existing refinement-symbol scope limitation prevented re-exporting the
+library with `include`; an ordinary module alias preserves the intended public
+specification and its symbol identities. This experiment does not fix that
+compiler limitation.

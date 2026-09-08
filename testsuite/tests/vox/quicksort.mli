@@ -1,6 +1,6 @@
 @@ portable
 
-module Spec = Quicksort_model
+module Spec = Vox_int_sequence
 
 val sort : (s : int Borrow.Slice.t) @ local unique ->
   {u : unit | Spec.sorted (Borrow.Slice.final s)

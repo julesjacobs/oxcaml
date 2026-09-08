@@ -7,7 +7,7 @@ make vox-library
 ```
 
 This builds and installs the final compiler, verifies the library with
-`-principal` in bytecode and native modes, and installs `Vox_sequence`, `Borrow`,
+`-principal` in bytecode and native modes, and installs `Vox_sequence`, `Vox_int_sequence`, `Borrow`,
 and `vox_borrow` under the configured prefix's `lib/ocaml/vox`.
 
 With the worktree-local prefix from the agent guide, compile a client with:
@@ -31,3 +31,15 @@ normal-return correctness guarantee. Complete verified clients live in
 
 Proof-only observations and lemma calls must be enclosed in `ghost_`. A
 `Slice.snapshot` is a real copy suitable for executable `assume_` checks.
+
+`Vox_sequence` contains polymorphic sequence operations and decomposition laws.
+`Vox_int_sequence` adds integer bounds, sortedness, and permutation laws. Its
+abstract `multiset` model exposes `bag`, `multiplicity`, and sequence `count`.
+`permutation_count` derives equal counts from permutation; `count_extensional`
+proves permutation from a total proof function establishing equal counts at
+any integer. Clients do not depend on canonical insertion or its ordering.
+
+`collection_theory.ml` uses those laws to verify rotation, while quicksort
+uses them for slice swaps and recombination. Only the three partition lemmas
+remain in `quicksort_model.ml`. Integer ordering and counting remain specialized
+to integers; the sequence decomposition laws apply to any `immutable_data`.
