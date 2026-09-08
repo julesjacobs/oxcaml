@@ -38,19 +38,19 @@ module Raw = struct
     'a split_frame @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_frame_right"
   external open_ : ('a : immutable_data).
-    'a owned @ unique -> ('a root_frame * 'a loan) @ unique @@ portable =
+    'a owned @ unique -> ('a root_frame * 'a loan) @ unique @@ portable total =
       "caml_borrow_open"
   external restore : ('a : immutable_data).
-    'a root_frame @ unique -> 'a owned @ unique @@ portable =
+    'a root_frame @ unique -> 'a owned @ unique @@ portable total =
       "caml_borrow_restore"
   external transfer : ('a : immutable_data).
     'a loan @ local unique -> 'a loan @ unique
-    @@ portable = "caml_borrow_transfer"
+    @@ portable total = "caml_borrow_transfer"
   external length : ('a : immutable_data).
-    'a loan @ local immutable -> int @@ portable =
+    'a loan @ local immutable -> int @@ portable total =
       "caml_borrow_length"
   external finish : ('a : immutable_data).
-    'a loan @ local unique -> unit @@ portable = "caml_borrow_finish"
+    'a loan @ local unique -> unit @@ portable total = "caml_borrow_finish"
   external split : ('a : immutable_data).
     (s : 'a loan) @ local unique ->
     (index : {k : int |
@@ -61,12 +61,12 @@ module Raw = struct
       match r with _, left, right ->
         current left === Model.take (Bigint.of_int index) (current s)
         && current right === Model.drop (Bigint.of_int index) (current s)}
-    @ unique @@ portable = "caml_borrow_split"
+    @ unique @@ portable total = "caml_borrow_split"
   external recombine : ('a : immutable_data).
     (frame : 'a split_frame) @ unique ->
     {s : 'a loan |
       current s === Model.append (left_final frame) (right_final frame)}
-    @ unique @@ portable = "caml_borrow_recombine"
+    @ unique @@ portable total = "caml_borrow_recombine"
 end
 
 let (await_both @ portable) left (right : (unit -> 'b) @ local once) =
@@ -87,7 +87,7 @@ module Slice = struct
   external final : ('a : immutable_data).
     'a t @ local immutable -> 'a Model.t @ immutable total ghost
     @@ total = "caml_borrow_final"
-  let length : ('a : immutable_data).
+  let (length @ total) : ('a : immutable_data).
     (s : 'a t) @ local immutable ->
     {n : int | 0 <= n
       && Bigint.of_int n === Model.length (current s)} = fun s ->
@@ -99,7 +99,7 @@ module Slice = struct
       && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
     {value : 'a | let refine_ index = index in
       Some value === Model.at (current s) (Bigint.of_int index)} @@
-        portable = "caml_borrow_get"
+        portable total = "caml_borrow_get"
   external set : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int |
@@ -108,12 +108,13 @@ module Slice = struct
     (value : 'a) @ immutable ->
     {r : 'a t | let refine_ index = index in
       current r === Model.set (current s) (Bigint.of_int index) value
-      && final r === final s} @ local unique @@ portable = "caml_borrow_set"
+      && final r === final s} @ local unique @@ portable total
+    = "caml_borrow_set"
   external snapshot : ('a : immutable_data).
     (s : 'a t) @ local immutable ->
     {values : 'a iarray | Model.of_iarray values === current s} @@
-      portable = "caml_borrow_snapshot"
-  let swap : ('a : immutable_data).
+      portable total = "caml_borrow_snapshot"
+  let (swap @ total) : ('a : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
@@ -142,7 +143,7 @@ module Slice = struct
       ghost_ (Model.set_length intermediate bj x);
       ghost_ (Model.swap_def before bi bj);
       refine_ s2)
-  let split_at : ('a : immutable_data) ('r : immutable_data).
+  let (split_at @ total) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (index : {k : int | 0 <= k
         && Bigint.compare (Bigint.of_int k) (Model.length (current s)) <= 0}) ->
@@ -184,12 +185,12 @@ module Slice = struct
       ghost_ (Model.append_length left_end right_end);
       let result = {value; state} in
       refine_ result)
-  let finish : ('a : immutable_data).
+  let (finish @ total) : ('a : immutable_data).
       (s : 'a t) @ local unique ->
       {u : unit | final s === current s} = fun s ->
     let u = Raw.finish s in
     refine_ u
-  let split3 : ('a : immutable_data) ('r : immutable_data).
+  let (split3 @ total) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <= 0}) ->
@@ -273,7 +274,7 @@ module Slice = struct
       let result = {value; state} in
       refine_ result)
 
-  let with_range : ('a : immutable_data) ('r : immutable_data).
+  let (with_range @ total) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (current s)) <= 0}) ->
@@ -374,13 +375,13 @@ module Owned_array = struct
     @@ total = "caml_borrow_contents"
   external of_iarray : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
-    {a : 'a t | contents a === Model.of_iarray values} @ unique @@ portable =
-      "caml_borrow_of_iarray"
+    {a : 'a t | contents a === Model.of_iarray values} @ unique
+    @@ portable total = "caml_borrow_of_iarray"
   external into_iarray : ('a : immutable_data).
     (a : 'a t) @ unique ->
-    {values : 'a iarray | Model.of_iarray values === contents a} @@ portable =
-      "caml_borrow_into_iarray"
-  let with_mut : ('a : immutable_data) ('r : immutable_data).
+    {values : 'a iarray | Model.of_iarray values === contents a}
+    @@ portable total = "caml_borrow_into_iarray"
+  let (with_mut @ total) : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost))
         @ ghost ->

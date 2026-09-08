@@ -20,14 +20,14 @@ module Slice : sig @@ portable
   val length : ('a : immutable_data).
     (s : 'a t) @ local immutable ->
     {n : int | 0 <= n
-      && Bigint.of_int n === Model.length (current s)}
+      && Bigint.of_int n === Model.length (current s)} @@ total
 
   val get : ('a : immutable_data).
     (s : 'a t) @ local immutable ->
     (index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (current s)) < 0}) ->
     {value : 'a | let refine_ index = index in
-      Some value === Model.at (current s) (Bigint.of_int index)}
+      Some value === Model.at (current s) (Bigint.of_int index)} @@ total
 
   val set : ('a : immutable_data).
     (s : 'a t) @ local unique ->
@@ -37,11 +37,11 @@ module Slice : sig @@ portable
     (value : 'a) @ immutable ->
     {r : 'a t | let refine_ index = index in
       current r === Model.set (current s) (Bigint.of_int index) value
-      && final r === final s} @ local unique
+      && final r === final s} @ local unique @@ total
 
   val snapshot : ('a : immutable_data).
     (s : 'a t) @ local immutable ->
-    {values : 'a iarray | Model.of_iarray values === current s}
+    {values : 'a iarray | Model.of_iarray values === current s} @@ total
 
   val swap : ('a : immutable_data).
       (s : 'a t) @ local unique ->
@@ -53,7 +53,7 @@ module Slice : sig @@ portable
         current r === Model.swap (current s) (Bigint.of_int i) (Bigint.of_int j)
         && final r === final s
         && Model.length (current r) === Model.length (current s)}
-      @ local unique
+      @ local unique @@ total
 
   val split_at : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
@@ -74,11 +74,11 @@ module Slice : sig @@ portable
           (Model.drop (Bigint.of_int k) (current r.state))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique
+      @ local unique @@ total
 
   val finish : ('a : immutable_data).
       (s : 'a t) @ local unique ->
-      {u : unit | final s === current s}
+      {u : unit | final s === current s} @@ total
 
 
   val split3 : ('a : immutable_data) ('r : immutable_data).
@@ -111,7 +111,7 @@ module Slice : sig @@ portable
           (Model.drop (Bigint.of_int j) (current r.state))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique
+      @ local unique @@ total
 
 
   val with_range : ('a : immutable_data) ('r : immutable_data).
@@ -139,7 +139,7 @@ module Slice : sig @@ portable
             (Model.drop (Bigint.of_int j) (current s)))
         && final r.state === final s
         && Model.length (current r.state) === Model.length (current s)}
-      @ local unique
+      @ local unique @@ total
 
   val parallel : ('a : immutable_data).
       (spawn : bool) ->
@@ -165,11 +165,11 @@ module Owned_array : sig @@ portable
 
   val of_iarray : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
-    {a : 'a t | contents a === Model.of_iarray values} @ unique
+    {a : 'a t | contents a === Model.of_iarray values} @ unique @@ total
 
   val into_iarray : ('a : immutable_data).
     (a : 'a t) @ unique ->
-    {values : 'a iarray | Model.of_iarray values === contents a}
+    {values : 'a iarray | Model.of_iarray values === contents a} @@ total
 
   val with_mut : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
@@ -180,5 +180,5 @@ module Owned_array : sig @@ portable
         {r : 'r | let refine_ s = s in post r (Slice.final s)}) @ local once ->
       {r : ('r, 'a t) step | post r.value (contents r.state)
         && Model.length (contents r.state) === Model.length (contents a)}
-      @ unique
+      @ unique @@ total
 end

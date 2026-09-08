@@ -77,6 +77,16 @@ let check_uses self exp =
               | Types.Nolabel, Arg (arg, _) -> it.expr it arg
               | _ -> reject exp.exp_loc
                   "recursive calls must be unlabelled and fully applied") args
+        | Texp_apply (fn, args, _, _, _, _)
+          when List.for_all (function _, Arg _ -> true | _ -> false) args ->
+            it.expr it fn;
+            List.iter (function
+              | _, Arg (arg, _) ->
+                  begin match arg.exp_desc with
+                  | Texp_function _ -> default.expr it arg
+                  | _ -> it.expr it arg
+                  end
+              | _ -> assert false) args
         | Texp_ident {path = Path.Pident id; _} when Ident.same id self ->
             reject exp.exp_loc "the recursive function must be called directly"
         | Texp_function _ | Texp_lazy _ | Texp_quote _ | Texp_letop _ ->

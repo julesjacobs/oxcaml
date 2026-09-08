@@ -1,7 +1,39 @@
 open Borrow
 module Spec = Vox_int_sequence
 
-let rec partition : (pivot : int) -> (size : int) -> (lower : int) -> (scan : int) ->
+external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+let (half @ total) : (value : int) ->
+    {result : int | if value > 0 then 0 <= result && result < value else true} =
+    fun value ->
+  let two = 2 in
+  let result = divide value (refine_ two) in
+  refine_ result
+
+type runner =
+  (spawn : bool) ->
+  (left : int Slice.t) @ local unique -> (right : int Slice.t) @ local unique ->
+  (lp : (int Model.t @ immutable -> bool @ ghost)) @ ghost ->
+  (rp : (int Model.t @ immutable -> bool @ ghost)) @ ghost ->
+  ((s : {s : int Slice.t | Slice.current s === Slice.current left
+      && Slice.final s === Slice.final left}) @ local unique ->
+    {u : unit | let refine_ s = s in lp (Slice.final s)}) @ portable once ->
+  ((s : {s : int Slice.t | Slice.current s === Slice.current right
+      && Slice.final s === Slice.final right}) @ local unique ->
+    {u : unit | let refine_ s = s in rp (Slice.final s)}) @ portable once ->
+  {u : unit | lp (Slice.final left) && rp (Slice.final right)}
+
+let (sequential_runner @ portable total) : runner =
+    fun _spawn left right lp rp lf rf ->
+  let left_arg : {s : int Slice.t | Slice.current s === Slice.current left
+    && Slice.final s === Slice.final left} = refine_ left in
+  let right_arg : {s : int Slice.t | Slice.current s === Slice.current right
+    && Slice.final s === Slice.final right} = refine_ right in
+  let refine_ l = lf left_arg in
+  let refine_ r = rf right_arg in
+  let u = () in refine_ u
+
+let rec (partition @ total) : (pivot : int) -> (size : int) ->
+    (lower : int) -> (scan : int) ->
     (loan : {s : int Slice.t |
       0 < size && 0 <= lower && lower <= scan && scan < size
       && Model.length (Slice.current s) === Bigint.of_int size
@@ -87,13 +119,14 @@ let rec partition : (pivot : int) -> (size : int) -> (lower : int) -> (scan : in
   let scan : int = scan in
   size - scan]
 
-let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : int) ->
+let rec (sort_sized @ portable total) : (run : runner) @ portable ->
+    (domains : int) -> (cutoff : int) -> (size : int) ->
     (loan : {s : int Slice.t | 0 <= size
       && Model.length (Slice.current s) === Bigint.of_int size}) @ local unique ->
     {u : unit | let refine_ s = loan in
       Spec.sorted (Slice.final s)
       && Spec.permutation (Slice.current s) (Slice.final s)} =
-    fun domains cutoff size loan ->
+    fun run domains cutoff size loan ->
   let refine_ s = loan in
   let before = ghost_ (Slice.current (borrow_ s)) in
   if size <= 1 then (
@@ -105,7 +138,7 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
     let zero = 0 in
     let last = size - 1 in
     let blast = ghost_ (Bigint.of_int last) in
-    let middle = size / 2 in
+    let refine_ middle = half size in
     let bmiddle = ghost_ (Bigint.of_int middle) in
     let middle_index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
@@ -153,7 +186,8 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
         Spec.sorted (Model.append left (Model.append middle right))
         && Spec.permutation divided (Model.append left (Model.append middle right))) in
     let spawn = domains > 1 && boundary >= cutoff && right_size >= cutoff in
-    let left_domains = if spawn then domains / 2 else domains in
+    let left_domains =
+      if spawn then let refine_ n = half domains in n else domains in
     let right_domains = if spawn then domains - left_domains else domains in
     let refine_ result = Slice.split3 s2 first past post (fun l m r ->
       let refine_ left = l in
@@ -170,18 +204,18 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
         Spec.sorted after && Spec.permutation right_before after) in
       ghost_ (Model.cut divided bboundary);
       ghost_ (Model.cut divided bpast);
-      let refine_ children = Slice.parallel spawn left right left_post right_post
+      let refine_ children = run spawn left right left_post right_post
         (fun child ->
           let refine_ child = child in
           let sized : {s : int Slice.t | 0 <= boundary
             && Model.length (Slice.current s) === Bigint.of_int boundary} = refine_ child in
-          let refine_ u = sort_sized left_domains cutoff boundary sized in
+          let refine_ u = sort_sized run left_domains cutoff boundary sized in
           refine_ u)
         (fun child ->
           let refine_ child = child in
           let sized : {s : int Slice.t | 0 <= right_size
             && Model.length (Slice.current s) === Bigint.of_int right_size} = refine_ child in
-          let refine_ u = sort_sized right_domains cutoff right_size sized in
+          let refine_ u = sort_sized run right_domains cutoff right_size sized in
           refine_ u) in
       Slice.finish middle;
       ghost_ (Quicksort_model.glue_partition divided pivot bboundary left_end middle_end right_end);
@@ -193,42 +227,45 @@ let rec (sort_sized @ portable) : (domains : int) -> (cutoff : int) -> (size : i
     ghost_ (Spec.permutation_trans before divided after);
     Slice.finish state;
     refine_ u)
+[@@decreases size]
 
-let (sort_with_budget @ portable) : (domains : int) -> (cutoff : int) -> (s : int Slice.t) @ local unique ->
+let (sort_with_budget @ portable total) : (run : runner) @ portable ->
+    (domains : int) -> (cutoff : int) -> (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)
-      && Spec.permutation (Slice.current s) (Slice.final s)} = fun domains cutoff s ->
+      && Spec.permutation (Slice.current s) (Slice.final s)} = fun run domains cutoff s ->
   let refine_ size = Slice.length (borrow_ s) in
   let (size : int) = size in
   let sized : {s : int Slice.t | 0 <= size
     && Model.length (Slice.current s) === Bigint.of_int size} = refine_ s in
-  let refine_ u = sort_sized domains cutoff size sized in
+  let refine_ u = sort_sized run domains cutoff size sized in
   refine_ u
 
-let (sort_array_with_budget @ portable) : (domains : int) -> (cutoff : int) ->
+let (sort_array_with_budget @ portable total) : (run : runner) @ portable ->
+    (domains : int) -> (cutoff : int) ->
     (a : int Owned_array.t) @ unique ->
     {r : int Owned_array.t | Spec.sorted (Owned_array.contents r)
       && Spec.permutation (Owned_array.contents a) (Owned_array.contents r)} @ unique =
-    fun domains cutoff a ->
+    fun run domains cutoff a ->
   let before = ghost_ (Owned_array.contents (borrow_ a)) in
   let post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
         Spec.sorted after && Spec.permutation before after) in
   let refine_ result = Owned_array.with_mut a post (fun loan ->
     let refine_ s = loan in
-    let refine_ u = sort_with_budget domains cutoff s in
+    let refine_ u = sort_with_budget run domains cutoff s in
     refine_ u) in
   let {value = u; state} = result in
   refine_ state
 
-let (sort @ portable) : (s : int Slice.t) @ local unique ->
+let (sort @ portable total) : (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)
       && Spec.permutation (Slice.current s) (Slice.final s)} = fun s ->
-  let refine_ u = sort_with_budget 1 512 s in
+  let refine_ u = sort_with_budget sequential_runner 1 512 s in
   refine_ u
 
-let (sort_array @ portable) : (a : int Owned_array.t) @ unique ->
+let (sort_array @ portable total) : (a : int Owned_array.t) @ unique ->
     {r : int Owned_array.t | Spec.sorted (Owned_array.contents r)
       && Spec.permutation (Owned_array.contents a) (Owned_array.contents r)} @ unique = fun a ->
-  let refine_ result = sort_array_with_budget 1 512 a in
+  let refine_ result = sort_array_with_budget sequential_runner 1 512 a in
   refine_ result
 
 let (parallel_sort @ portable) : ?max_domains:int -> ?cutoff:int -> (s : int Slice.t) @ local unique ->
@@ -237,7 +274,7 @@ let (parallel_sort @ portable) : ?max_domains:int -> ?cutoff:int -> (s : int Sli
     fun ?(max_domains = Domain.recommended_domain_count ()) ?(cutoff = 512) s ->
   let domains = max 1 (min max_domains (Domain.recommended_domain_count ())) in
   let cutoff = max 2 cutoff in
-  let refine_ u = sort_with_budget domains cutoff s in
+  let refine_ u = sort_with_budget Slice.parallel domains cutoff s in
   refine_ u
 
 let (parallel_sort_array @ portable) : ?max_domains:int -> ?cutoff:int -> (a : int Owned_array.t) @ unique ->
@@ -246,5 +283,5 @@ let (parallel_sort_array @ portable) : ?max_domains:int -> ?cutoff:int -> (a : i
     fun ?(max_domains = Domain.recommended_domain_count ()) ?(cutoff = 512) a ->
   let domains = max 1 (min max_domains (Domain.recommended_domain_count ())) in
   let cutoff = max 2 cutoff in
-  let refine_ result = sort_array_with_budget domains cutoff a in
+  let refine_ result = sort_array_with_budget Slice.parallel domains cutoff a in
   refine_ result

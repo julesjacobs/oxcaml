@@ -114,7 +114,8 @@ external ( mod ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "
 
 let abs x = if x >= 0 then x else -x
 
-external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%andint"
+external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ portable total = "%andint"
 external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%orint"
 external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%xorint"
 

@@ -40,7 +40,11 @@ def main():
         for version in versions:
             modules = [LIBRARY / "vox_sequence.mli",
                        LIBRARY / "vox_sequence.ml"]
-            if demo == "quicksort" and version == "candidate":
+            if demo == "quicksort" and (version == "candidate" or
+                    subprocess.run(["git", "cat-file", "-e",
+                        f"{args.baseline}:{LIBRARY}/vox_int_sequence.ml"],
+                        cwd=ROOT, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL).returncode == 0):
                 modules += [LIBRARY / "vox_int_sequence.mli",
                             LIBRARY / "vox_int_sequence.ml"]
             if demo != "sorted-array":

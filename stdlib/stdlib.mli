@@ -368,7 +368,8 @@ val min_int : int
 
 (** {2 Bitwise operations} *)
 
-external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%andint"
+external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%andint"
 (** Bitwise logical and.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)

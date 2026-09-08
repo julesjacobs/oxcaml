@@ -208,9 +208,9 @@ the full budget for later splits. The public API accepts
 ordered/reverse-ordered inputs, and deterministic random inputs.
 
 Pure model functions and lemmas are total. Partition also has a checked
-numeric decreases measure. The effectful recursive sort exposes normal-return
-correctness: Vox does not yet prove termination of recursive calls through
-scoped callbacks. Effect-aware termination, element borrows, shared read loans,
+numeric decreases measure. Sequential sorting also checks its size decrease through scoped callbacks
+and exposes a total contract. Parallel sorting exposes normal-return
+correctness: domain joining remains partial. Element borrows, shared read loans,
 and a reusable parallel worker pool remain separate extensions.
 
 ## Building
@@ -242,7 +242,7 @@ when its implementation, representative clients, and evaluation are recorded.
 | Callback predicate arguments | `jujacobs/vox/callback-predicates-20260908` | Evaluated: adopt |
 | Reusable collection mathematics | `jujacobs/vox/collection-theory-20260908` | Evaluated: adopt |
 | Borrow interface and transitions | `jujacobs/vox/borrow-interface-20260908` | Evaluated: adopt |
-| Scoped callback termination | `jujacobs/vox/scoped-termination-20260908` | Pending |
+| Scoped callback termination | `jujacobs/vox/scoped-termination-20260908` | Evaluated: adopt |
 
 ### Shared sequence model: verdict
 
@@ -490,3 +490,94 @@ with `-principal`, and separately linked end-swap clients run with both archives
 This branch keeps scoped operations and parallel joining partial. Their
 termination contracts are evaluated separately in the scoped-termination
 experiment.
+
+
+## Callback termination experiment
+
+Branch: `jujacobs/vox/scoped-termination-20260908`, baseline `13c52c9fe7`.
+**Verdict: adopt direct callback recursion and sequential totality.**
+The recursion-use checker now traverses directly supplied callback bodies with
+its current permission to call the recursive function. Numeric recursion still
+proves the existing nonnegative, strictly decreasing measure at each recursive
+call; structural recursion still requires a strict descendant. A callback
+inside an already delayed body does not regain that permission. Bare recursive
+function values, aliases, and let-bound recursive closures remain rejected.
+
+This is a direct-callback rule. It does not prove that an arbitrary callee
+invokes its callback immediately, once, or before returning. The decrease
+obligations establish the recursive call relation; the existing totality modes
+independently constrain the callee and its captures. Neither `local` nor `once`
+is used as evidence that the callee terminates. No callee whitelist, new effect,
+SMT axiom, or callback-specific termination measure is introduced.
+
+Finite borrow primitives receive total declarations after inspecting their
+runtime implementations. Checked wrappers propagate totality through callbacks
+using the existing modes. Runtime array bounds are justified by their refinement
+preconditions. `Slice.parallel` and domain joining retain partial contracts;
+passing a blocking callback also prevents a total contract. Marking finite
+mutators total does not allow ghost code to consume a real unique handle.
+
+Quicksort takes a private runner with the existing two-child postcondition.
+Its sequential runner calls both children; its parallel runner is
+`Slice.parallel`. The same partition and recursive sort prove sortedness,
+permutation, and size decrease. Public sequential sorting exposes `total`;
+public parallel sorting retains normal-return correctness. Checked division
+by two supplies explicit midpoint bounds. A shift-based prototype failed those
+bounds because shifts lack the required arithmetic encoding; it was discarded.
+Only the finite `land` primitive gains a total declaration in Stdlib.
+
+The compiler change adds ten lines, plus its two generated Merlin copies.
+Quicksort adds roughly forty net lines for the private runner, checked midpoint,
+and total contracts, without duplicating its sorting algorithm. This is a
+reasonable cost for distinct sequential and parallel termination contracts.
+The runner contract does repeat the parallel interface; it should stay private
+until another algorithm needs this abstraction.
+
+A concrete well-founded recursion combinator also verifies. Its step function
+receives a callback restricted to smaller integers. The returned function is
+`stateful`, reflecting its captured step function; this does not implement a
+stronger interface promising a stateless result. This example and structural
+list recursion exercise the rule independently of the borrow implementation.
+
+
+`collection_demos.py --baseline 13c52c9fe7` compares both source versions using
+the same installed compiler, with `-principal` and three repetitions:
+
+| Workload | Complete sources, before/after | Client, before/after | Source queries, before/after |
+| --- | --- | --- | --- |
+| Library and end swap | 506 / 506 ms | 38 / 37 ms | 35 / 35 |
+| Library and sorted array | 795 / 809 ms | 68 / 70 ms | 71 / 71 |
+| Library and quicksort | 1289 / 1344 ms | 27 / 27 ms | 95 / 99 |
+
+Runner, arithmetic, and termination obligations add four quicksort queries. Its source SMT input grows from 1852085 to 1987241 bytes. The
+sorted-array source is unchanged and provides a timing control. The additional
+55 ms is about 4% of the complete quicksort source build in this run.
+
+`quicksort_runtime.py` builds both versions with the installed native compiler
+and checks their outputs against `List.sort`. Five runs alternate version
+order. Each workload sorts a 4096-element input 20 times; the table reports the
+median per-sort CPU time and allocation across those runs. Measurement includes
+copying the input into an owned array, sorting, and returning an immutable array.
+Correctness comparisons and explicit pre-run collections are outside the timed
+interval. These measurements cover sequential sorting only.
+
+| Input | CPU time, before/after | Bytes per sort, before/after |
+| --- | --- | --- |
+| Ordered | 1.014 / 1.013 ms | 622760 / 655528 |
+| Reverse ordered | 1.129 / 1.138 ms | 767912 / 808744 |
+| Five repeated values | 1.200 / 1.196 ms | 717800 / 755848 |
+| Deterministic random | 1.527 / 1.533 ms | 821768 / 865592 |
+
+Timings are close; allocations rise by roughly 5%. The stronger totality contract
+and shared sequential/parallel implementation justify this measured cost, but
+this is not a runtime optimization.
+
+All 66 Vox tests pass, including bytecode/native quicksort with and without
+`-principal`, the new callback examples, and rejection of unchanged recursive
+arguments, blocking callees, and ghost consumption of real unique handles.
+The existing structural-recursion test, all 42 refinement-typing tests, Merlin,
+and the actual-Z3 VC and session tests pass. A clean rebuild was needed to
+refresh compiler-library and test-library artifacts after the Stdlib interface
+change; the initial failures were interface-digest mismatches. The installed
+library verifies in both backends with `-principal`; independently linked
+end-swap clients run with both archives. `make fmt` passes.
