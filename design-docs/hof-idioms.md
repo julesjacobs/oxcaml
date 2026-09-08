@@ -419,3 +419,9 @@ with the lambda and substituting them alongside its body. This preserves the
 existing array-expansion budget. Regression checks prove both length and reads
 after substitution and reject an incorrect read result. The measurements above
 remain the baseline measurements.
+
+Tuple and record `let` bindings now use the existing match representation in
+refinement predicates and reflected definitions. The `model_map_accum`
+specification uses two tuple bindings in place of nested matches. Existing
+pattern-totality checks still reject a potentially failing binding in a total
+definition. This changes the accepted syntax without changing the HOF contract.

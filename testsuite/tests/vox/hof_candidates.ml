@@ -190,10 +190,9 @@ let[@def] rec model_map_accum
   match xs with
   | [] -> initial, []
   | x :: tail ->
-    match model x initial with
-    | acc, y ->
-      match model_map_accum model tail acc with
-      | final, ys -> final, y :: ys
+    let acc, y = model x initial in
+    let final, ys = model_map_accum model tail acc in
+    final, y :: ys
 
 let rec map_accum_model :
     (model : (('a : immutable_data) @ immutable total ->
