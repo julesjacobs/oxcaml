@@ -581,3 +581,212 @@ refresh compiler-library and test-library artifacts after the Stdlib interface
 change; the initial failures were interface-digest mismatches. The installed
 library verifies in both backends with `-principal`; independently linked
 end-swap clients run with both archives. `make fmt` passes.
+
+## Experiment: separate list and iarray specifications
+
+The prototype branch `jujacobs/vox/iarray-slice-model-20260909` starts at
+`d8b0bd9e53`. It keeps the earlier list-based implementation for comparison.
+`Vox_iarray` operates on ordinary `'a iarray` values. It introduces no collection
+alias or common sequence type. `Borrow_iarray.Slice.current`, `final`, and
+`Owned_array.contents` return ghost iarrays directly. A snapshot satisfies
+`values === current s`; conversion into or out of an owned array preserves
+that same logical equality. Element kinds remain `immutable_data`, which
+excludes float elements, as in the existing borrow API.
+
+Lengths and positions are OCaml ints. `get`, `set`, and `sub` require bounded
+indices. For use in predicates, `at` is a total optional lookup, `updated`
+leaves an array unchanged when the index is outside its bounds, and `slice`
+clamps its first and past positions into an ordered range within the array.
+The executable borrow operations retain checked bounds. These total extensions
+make mathematical expressions usable without packing refined arguments inside
+predicates.
+
+`Vox_iarray.Int` defines range bounds, adjacent-pair sortedness, and occurrence
+counts by numeric recursion over array indices. Its checked lemmas cover
+updates, swaps, subranges, sortedness introduction and elimination, and count
+preservation. Permutation reuses the existing multiset mathematics through an
+explicit `to_list` conversion. A checked induction relates indexed iarray counts
+to list counts. This conversion appears in the multiset bridge; range and
+sortedness proofs use indexed iarray definitions directly.
+
+Splitting describes child arrays as subranges. Recombination describes the two
+subranges of the returned current array. It does not construct a concatenated
+model. Three-way splitting composes two splits with checked slice-composition
+lemmas. Child final arrays describe the state at recombination; they are not
+identified with subranges of the parent's final prophecy, since the parent may
+be mutated again before its loan ends.
+
+Quicksort's split callback establishes sortedness and permutation of the left
+and right children and preservation of the middle child. After recombination,
+a checked lemma proves sortedness and permutation of the actual current parent
+array. The permutation proof adds counts from three subranges. The sortedness
+proof checks adjacent pairs within each child and across the pivot. Sequential
+sorting remains total; domain joining and parallel sorting retain their existing
+normal-return contracts.
+
+The SMT representation remains an opaque iarray sort with bounded ground
+observations. Constructor identities and raw length/read applications preserve
+congruence through array equality. A work queue propagates observations through
+explicit equalities and through reads returning nested arrays. The existing
+256-step read-expansion limit remains; equality propagation has a separate
+1024-step limit. Exhausting either limit leaves observations uninterpreted.
+Lists retain their existing datatype encoding.
+
+One new trusted principle is explicit: `Vox_iarray.extensional` concludes array
+logical equality from a total ghost proof of equal lengths and equal optional
+lookups at every int index. The runtime implementation is a no-op. Its premise
+is checked at callers, but the extensionality principle itself is not a derived
+lemma of the opaque SMT encoding. Slice identity and slice composition use this
+principle. Adoption must account for this additional mathematical primitive.
+
+
+`collection_demos.py --iarray-model --baseline d8b0bd9e53 --repeats 3`
+compares both source versions with the same compiler from `make install`, using
+`-principal`. The complete build includes the mathematical libraries.
+
+| Scope | List model | Iarray model |
+| --- | --- | --- |
+| Complete sources, median | 1255 ms | 1709 ms |
+| Client only, median | 27 ms | 26 ms |
+| Complete source queries | 99 | 168 |
+| Complete source SMT bytes | 1990773 | 2884706 |
+| Complete source lines, including interfaces | 2588 | 3551 |
+
+The complete source build costs about 36% more and includes the additional
+indexed mathematics and its checked list-count bridge. Client verification is
+unchanged in this measurement. Quicksort's implementation shrinks from 287 to
+281 lines and uses 38 ghost expressions instead of 52. Its separate partition
+and recombination proofs grow from 95 to 118 lines. Together these two files
+add 17 lines. The new iarray library has 780 implementation lines and 292
+interface lines; the prototype retains the old list libraries for the multiset
+bridge and for comparison. The VC generator adds 147 net lines, the encoding
+change removes one restriction, and the runtime adds 20 lines.
+
+`quicksort_runtime.py --iarray-model --baseline d8b0bd9e53 --repeats 5` uses the
+installed native compiler, alternating version order. Each measurement sorts
+a 4096-element input twenty times and checks results against `List.sort`.
+The following are median per-sort CPU times and allocations:
+
+| Input | List model | Iarray model | Bytes per sort, both |
+| --- | --- | --- | --- |
+| Ordered | 0.982 ms | 1.001 ms | 655528 |
+| Reverse ordered | 1.106 ms | 1.112 ms | 808744 |
+| Five repeated values | 1.182 ms | 1.155 ms | 755848 |
+| Deterministic random | 1.478 ms | 1.480 ms | 865592 |
+
+Runtime allocations are identical, and median timings differ by at most 2.3%
+in these workloads. This is a specification design improvement, not a runtime
+optimization.
+
+All 69 Vox tests pass across the suite and the focused rerun of the new runtime
+fixture. Actual-Z3 tests cover nested equality transport, rejection of an
+incorrect nested read, and bounded query expansion. New expect tests reject
+incorrect update claims and insufficient extensionality proofs. A full
+`test-one` rebuild passes the iarray runtime fixture; the installed compiler
+also passes all four quicksort client variants. The installed library verifies
+with both compilers, and separately linked bytecode and native clients pass.
+Generic runtime checks cover int and bool arrays, copied updates, clamped
+slices, swaps, and explicit list conversion. Float elements remain outside the
+existing `immutable_data` interface. Formatting and diff whitespace checks pass.
+
+Verdict: prefer separate list and iarray specifications. The direct iarray
+contracts remove conversion expressions from callers and keep array indices
+as ints. The complete proof development is somewhat larger, but client
+verification and runtime allocation do not regress in this comparison. The
+additional library mathematics is useful independently of borrowing. Keep the
+extensionality principle explicit in the trusted interface. This branch is a
+prototype alongside the existing implementation, not a replacement of every
+borrow demo or an extension of the supported element kinds.
+
+### Checked collection proof surface
+
+The follow-up keeps the separate list and iarray specifications. Both now have
+predicate introduction, lookup, splitting, and update lemmas. List predicates
+recurse over constructors; iarray predicates recurse over an indexed range.
+A named predicate module supplies the element type and total predicate to each
+`For_all` functor. This accommodates the current SMT interface, which supports
+predicate applications but does not encode a function value as an argument to
+a logical collection function. It requires no new function encoding.
+
+The list library adds checked map length/read/concatenation laws, filter
+predicate/length/concatenation/idempotence laws, and the right-fold concatenation
+law. Both integer libraries provide ordering at arbitrary ordered indices,
+sorted slices, and neighbor-bounded updates. The existing list insertion
+sortedness proof is public. List extensionality is derived by structural
+recursion from length and pointwise lookup equality.
+
+`Vox_iarray.to_list` delegates to the existing `Vox_sequence.of_iarray`, with
+length, lookup, update-lookup, and slice-lookup laws. The iarray count bridge
+uses that same conversion implementation. Conversion remains explicit; there
+is no third collection type. The conversion laws use machine-integer lookup
+indices embedded into `Bigint.t`. They do not require a new trusted
+`Bigint.to_int_opt` specification.
+
+`collection_surface.ml` exercises the public interfaces. It verifies map and
+filter clients, predicate-preserving slice updates, and binary search returning
+the first insertion position. The insertion client proves sortedness, length,
+the inserted element, and exact preservation of the prefix and suffix. Runtime
+checks cover empty arrays, duplicates, and targets before, within, and after
+the array's range. `assume_` checks the input sortedness premise at runtime;
+algorithm postconditions and collection lemmas are statically checked. New
+expect cases reject unsupported universal-predicate introductions and an
+incorrect map-length claim.
+
+This extension adds no trusted collection axiom, external primitive, or SMT
+encoding rule beyond the preceding direct-iarray prototype. Proof calls in the
+clients are erased with `ghost_`. General map/filter/fold laws currently live
+in the list library; the direct iarray surface provides indexed observations,
+predicates, and sortedness. Extending executable iarray construction deserves
+a separate API decision about allocation failure and normal-return contracts.
+
+Verdict: a useful improvement without enlarging the trusted collection theory.
+Clients can invoke structural and indexed lemmas through public interfaces,
+and the insertion proof needs no local recursive sortedness theorem. The main
+remaining ergonomic cost is the named-functor idiom and explicit ghost proof
+steps. These additions do not yet migrate every older demo. The benchmarks in
+the preceding section measure the preceding prototype, not this larger proof
+library.
+
+All 70 Vox tests pass after this extension, including the existing borrow,
+quicksort, regex, and sorted-array demos and the new collection-surface and
+rejection cases. The new example passes in bytecode and native modes.
+The installed library also verifies with both compilers, and the example
+passes when separately linked against each installed archive. Formatting and
+whitespace checks pass.
+
+
+### API review and demo migration
+
+The queue now imports list append and its checked identity/associativity laws.
+Its public interface exposes queue operations and a list model; it no longer
+exports a second append operation. The sorted-array demo uses
+`Vox_iarray.Int.sorted`, `ordered`, and `sorted_intro`, while keeping its
+algorithm-specific edit relation. The iarray quicksort demo uses the new
+checked `sorted_glue` lemma for pivot recombination. The list quicksort and
+rotation demos already use shared collection laws.
+
+The temporary binary-search/insertion implementation in `collection_surface.ml`
+is removed now that the canonical sorted-array demo exercises the shared
+library. The small recursive list specifications in the introductory list and
+regex demos remain: they demonstrate structural proof programming or define an
+independent specification. Removing those definitions merely because they
+resemble library operations would obscure the purpose of those examples.
+
+The public conversion interface retains the unrestricted `to_list_at` law;
+the bounded `to_list_get` helper is private. Predicate introduction/elimination,
+range lemmas, and individual observation laws remain public because they serve
+different proof obligations. Library source grows when general proofs move out
+of demos, so this migration does not claim a smaller whole-stack diff.
+
+The explicit-function HOF comparison is recorded separately in
+[`hof-idioms.md`](hof-idioms.md). It compares total models, step relations,
+IH contracts, preservation proofs, and ghost evidence with partial callbacks.
+The capability inventory and remaining API choices are in `vox-v1.md`.
+
+The final combined run passed 69 tests; the remaining native expect test needed
+to load the existing collection runtime primitives after adopting the library.
+Its harness now builds a shared object from `runtime/borrow.c`, and all four
+expect variants pass on the focused rerun. Thus all 70 Vox tests pass across
+those runs. The installed library verifies with both compilers; separately
+linked queue, sorted-array, and collection-surface clients pass in bytecode
+and native modes. Formatting and whitespace checks pass.

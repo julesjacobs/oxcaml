@@ -12,13 +12,18 @@ type logical_lambda =
 type function_value =
   { label : string;
     instances : Function.t list ref;
+    specializations :
+      ((int * function_value * sort list * sort * sort list) list * Function.t)
+      list
+      ref;
     primitive : (string * int) option;
     choice : (term * function_value * function_value) option;
     total : bool;
-    lambda : logical_lambda option
+    lambda : logical_lambda option;
+    application : (type_expr * function_value * value option list) option
   }
 
-type value =
+and value =
   | Scalar of term
   | Function of function_value
 
@@ -69,11 +74,13 @@ let join_value condition a b =
         (Function
            { label = "choice";
              instances = ref [];
+             specializations = ref [];
              choice = Some (condition, a, b);
              primitive =
                (if a.primitive = b.primitive then a.primitive else None);
              total = a.total && b.total;
-             lambda = None
+             lambda = None;
+             application = None
            })
     | _ -> None
 
@@ -866,10 +873,12 @@ let fresh ?primitive ctx env ty label =
         (Function
            { label;
              instances = ref [];
+             specializations = ref [];
              choice = None;
              primitive;
              total = false;
-             lambda = None
+             lambda = None;
+             application = None
            })
     | _ -> None)
 
@@ -1345,6 +1354,8 @@ let normal_map_find ctx name args s =
 
 let rec function_call ctx env ty fn args =
   match fn with
+  | Some (Function { application = Some (original, fn, prefix); _ }) ->
+    function_call ctx env original (Some (Function fn)) (prefix @ args)
   | Some (Function { choice = Some (condition, a, b); _ }) ->
     join_value condition
       (function_call ctx env ty (Some (Function a)) args)
@@ -1369,29 +1380,108 @@ let rec function_call ctx env ty fn args =
       in
       function_call ctx env ty fn args
     end
+  | Some (Function fn)
+    when let rec remaining ty n =
+           match get_desc (Ctype.expand_head env ty), n with
+           | Tarrow _, 0 -> true
+           | Tarrow (_, _, ret, _), n when n > 0 -> remaining ret (n - 1)
+           | _ -> false
+         in
+         remaining ty (List.length args) ->
+    Some
+      (Function
+         { fn with
+           instances = ref [];
+           specializations = ref [];
+           choice = None;
+           lambda = None;
+           application = Some (ty, fn, args)
+         })
   | _ -> (
-    match fn, signature ctx.encoding env ty (List.length args) with
-    | Some (Function fn), Some (arguments, result) ->
+    let rec lift fn =
+      match fn.application with
+      | Some (_, original, prefix) ->
+        begin match Misc.Stdlib.List.map_option scalar prefix with
+        | Some prefix ->
+          let original, captured = lift original in
+          original, captured @ prefix
+        | None -> fn, []
+        end
+      | None -> fn, []
+    in
+    let rec arguments position ty args =
+      match args with
+      | [] ->
+        Option.map (fun result -> [], [], result) (sort ctx.encoding env ty)
+      | value :: rest -> (
+        match get_desc (Ctype.expand_head env ty) with
+        | Tarrow ((Nolabel, _, _, _), arg, ret, _) ->
+          Option.bind
+            (arguments (position + 1) ret rest)
+            (fun (terms, functions, result) ->
+              match value, sort ctx.encoding env arg with
+              | Some (Scalar term), Some expected when term_sort term = expected
+                ->
+                Some (term :: terms, functions, result)
+              | Some (Function function_), None ->
+                let arg = Btype.tpoly_get_mono arg in
+                let rec arity ty =
+                  match get_desc (Ctype.expand_head env ty) with
+                  | Tarrow (_, _, ret, _) -> 1 + arity ret
+                  | _ -> 0
+                in
+                Option.map
+                  (fun (domain, range) ->
+                    let function_, captured = lift function_ in
+                    ( captured @ terms,
+                      ( position,
+                        function_,
+                        domain,
+                        range,
+                        List.map term_sort captured )
+                      :: functions,
+                      result ))
+                  (signature ctx.encoding env arg (arity arg))
+              | _ -> None)
+        | _ -> None)
+    in
+    match fn, arguments 0 ty args with
+    | Some (Function fn), Some (args, higher, result) ->
+      let arguments = List.map term_sort args in
       List.iter (register_sort ctx) (result :: arguments);
-      begin match Misc.Stdlib.List.map_option scalar args with
-      | Some args when List.map term_sort args = arguments ->
-        let f =
-          match
-            List.find_opt
-              (fun f ->
-                Function.arguments f = arguments && Function.result f = result)
-              !(fn.instances)
-          with
-          | Some f -> f
-          | None ->
-            let f = Function.create ~label:fn.label ~arguments ~result in
-            fn.instances := f :: !(fn.instances);
-            ctx.functions <- f :: ctx.functions;
-            f
-        in
-        scalar_value (Call (f, args))
-      | Some _ | None -> None
-      end
+      let same_functions left right =
+        List.length left = List.length right
+        && List.for_all2
+             (fun (i, a, args, result, captures)
+                  (j, b, args', result', captures') ->
+               i = j && a.instances == b.instances && args = args'
+               && result = result' && captures = captures')
+             left right
+      in
+      let matches f =
+        Function.arguments f = arguments && Function.result f = result
+      in
+      let existing =
+        if higher = []
+        then List.find_opt matches !(fn.instances)
+        else
+          Option.map snd
+            (List.find_opt
+               (fun (keys, f) -> same_functions keys higher && matches f)
+               !(fn.specializations))
+      in
+      let f =
+        match existing with
+        | Some f -> f
+        | None ->
+          let f = Function.create ~label:fn.label ~arguments ~result in
+          if higher = []
+          then fn.instances := f :: !(fn.instances)
+          else fn.specializations := (higher, f) :: !(fn.specializations);
+          ctx.functions <- f :: ctx.functions;
+          f
+      in
+      scalar_value (Call (f, args))
     | _ -> None)
 
 let apply_function ctx env fn_type result_type prim fn args ~total =
@@ -1547,7 +1637,10 @@ let rec predicate ctx env s e =
               normal_map_find ctx op_name args s
             | _ -> s
           in
-          name ctx s (scalar_value (required e.rexp_loc result))
+          begin match result with
+          | Some (Function _) -> s, result
+          | _ -> name ctx s (scalar_value (required e.rexp_loc result))
+          end
       end
     | Rexp_ghost body -> eval s body
     | Rexp_logical_equal (left, right) ->
