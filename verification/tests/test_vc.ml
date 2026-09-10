@@ -167,6 +167,21 @@ let () =
     ^ "ge x 0) in ()"
   in
   assert (match solve checked_body with Invalid _ -> true | _ -> false);
+  let array_observation operation expected =
+    "external length : int iarray @ immutable total -> int @@ total = "
+    ^ "\"%array_length\"\n"
+    ^ "external get : int iarray @ immutable total -> int -> int @@ total = "
+    ^ "\"%array_safe_get\"\n" ^ "let f () = let p = ghost_ (fun (x : int) -> "
+    ^ operation ^ ") in let input = 7 in let u = () in\n"
+    ^ "let (_ : {u : unit | p input === " ^ string_of_int expected
+    ^ "}) = refine_ u in ()"
+  in
+  assert (solve (array_observation "length [: x; 20 :]" 2) = Valid);
+  assert (solve (array_observation "get [: x; 20 :] 0" 7) = Valid);
+  assert (
+    match solve (array_observation "get [: x; 20 :] 0" 20) with
+    | Invalid _ -> true
+    | _ -> false);
   let lambda_size count =
     let source =
       prelude ^ "let f (x : int) = let p = ghost_ (fun (y : int) ->\n"

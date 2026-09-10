@@ -6,7 +6,8 @@ open Vox_encoding
 type logical_lambda =
   { parameters : Symbol.t list;
     body : term;
-    definitions : (Symbol.t, term) Hashtbl.t
+    definitions : (Symbol.t, term) Hashtbl.t;
+    observations : (term, term) Hashtbl.t
   }
 
 type function_value =
@@ -460,46 +461,67 @@ let logical_lambda ctx captured parameters body =
   Symbolic_keys.iter retain_value ctx.symbolic;
   List.iter (fun symbol -> Hashtbl.replace retained symbol ()) parameters;
   let definitions = Hashtbl.create 16 in
+  let observations = Hashtbl.create 16 in
+  let visited = Hashtbl.create 16 in
   let rec visit term =
-    match term with
-    | Var symbol
-      when (not (Hashtbl.mem retained symbol))
-           && not (Hashtbl.mem definitions symbol) ->
-      begin match Hashtbl.find_opt ctx.named_terms symbol with
-      | None -> raise Exit
-      | Some term ->
-        Hashtbl.add definitions symbol term;
-        visit term
-      end
-    | _ ->
-      ignore
-        (map_term_children
-           (fun term ->
-             visit term;
+    if not (Hashtbl.mem visited term)
+    then begin
+      Hashtbl.add visited term ();
+      Option.iter
+        (fun equation ->
+          Hashtbl.add observations term equation;
+          visit equation)
+        (Hashtbl.find_opt ctx.observation_equations term);
+      match term with
+      | Var symbol when not (Hashtbl.mem retained symbol) ->
+        begin match Hashtbl.find_opt ctx.named_terms symbol with
+        | None -> raise Exit
+        | Some term ->
+          Hashtbl.add definitions symbol term;
+          visit term
+        end
+      | _ ->
+        ignore
+          (map_term_children
+             (fun term ->
+               visit term;
+               term)
              term)
-           term)
+    end
   in
   match visit body with
-  | () -> Some { parameters; body; definitions }
+  | () -> Some { parameters; body; definitions; observations }
   | exception Exit -> None
 
 let instantiate_lambda ctx lambda args =
   let values = Hashtbl.create 16 in
+  let terms = Hashtbl.create 16 in
   List.iter2 (Hashtbl.add values) lambda.parameters args;
-  let rec instantiate = function
-    | Var symbol as term ->
-      begin match Hashtbl.find_opt values symbol with
-      | Some value -> value
-      | None ->
-        begin match Hashtbl.find_opt lambda.definitions symbol with
-        | None -> term
-        | Some definition ->
-          let value = instantiate definition in
-          Hashtbl.add values symbol value;
-          value
-        end
-      end
-    | term -> share_observation ctx (map_term_children instantiate term)
+  let rec instantiate term =
+    match Hashtbl.find_opt terms term with
+    | Some value -> value
+    | None ->
+      let definition =
+        match term with
+        | Var symbol ->
+          begin match Hashtbl.find_opt values symbol with
+          | Some value -> value
+          | None ->
+            begin match Hashtbl.find_opt lambda.definitions symbol with
+            | None -> term
+            | Some definition -> instantiate definition
+            end
+          end
+        | term -> map_term_children instantiate term
+      in
+      let value = share_observation ctx definition in
+      Hashtbl.add terms term value;
+      Option.iter
+        (fun equation ->
+          Hashtbl.replace ctx.observation_equations definition
+            (instantiate equation))
+        (Hashtbl.find_opt lambda.observations term);
+      value
   in
   instantiate lambda.body
 

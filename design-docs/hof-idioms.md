@@ -411,3 +411,11 @@ Do not add logical existentials solely to give arbitrary folds an endpoint-only
 relation. First resolve finite-map observations, test full indexed traversal,
 and improve the captured-predicate adapters. Those gaps currently limit the
 clients more directly than the absence of an existential `fold_rel`.
+
+## Follow-up changes
+
+The ghost-lambda/iarray limitation is fixed by retaining observation equations
+with the lambda and substituting them alongside its body. This preserves the
+existing array-expansion budget. Regression checks prove both length and reads
+after substitution and reject an incorrect read result. The measurements above
+remain the baseline measurements.
