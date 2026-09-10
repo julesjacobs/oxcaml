@@ -38,6 +38,7 @@ legacy-mode defaults.
 | AVL-set proofs | `avl_sets.mli`, `avl_set_client.ml` | A valid AVL set exposes semantic `equal`; the demo distinguishes it from representation `=`. |
 | Immutable arrays | `iarrays.ml`, `iarrays_ordinary.ml` | Immutable-array literals expose exact lengths and elements; safe reads expose normal-return bounds. |
 | Bounded search | `array_search.ml` | A decreasing interval establishes termination and safe reads; `Some` is the first match, and `None` proves absence throughout the interval. |
+| Sorted arrays | `sorted_arrays.ml`, `sorted_array.mli`, `sorted_array_client.ml` | Total binary search gives equal ranges and membership; insertion and removal preserve sortedness and every copied element. |
 | Standard lists | `standard_lists.ml` | Polymorphic lists support structural total functions, logical equality, refined partial operations, and total higher-order operations. |
 | Functional queue | `functional_queue.mli`, `queue_client.ml`, `queue_rejected.ml` | An abstract polymorphic two-list queue over `immutable_data` elements implements a sequence model; a separate client proves generic FIFO behavior and rejects empty dequeue. |
 | Standard sets | `sets.ml` | Total comparators enable total operations; refined constructors and lookup expose membership facts while preserving element access. |
@@ -113,6 +114,60 @@ expression and input. Both evaluations use machine-integer wrapping semantics.
 `array_search.ml` proves first-match correctness within the requested interval
 and absence throughout that interval on `None`. Its total `at` observer returns
 zero outside the array; the result contract separately establishes bounds.
+
+`sorted_arrays.ml` follows [Binary Search a Little Simpler & More Generic](https://julesjacobs.com/notes/binarysearch/binarysearch.pdf).
+Its generic search returns adjacent false/true endpoints and evaluates the
+predicate strictly inside the original interval. Monotonicity is unnecessary.
+A refined midpoint interface supports binary, forward, and backward search.
+The integer interval starts at or above -1 and has positive, non-wrapping
+machine-integer distance. Division uses a local total primitive declaration
+whose refined divisor excludes zero; the existing integer encoding supplies
+its arithmetic meaning.
+
+The array instance uses sentinels -1 and length. A separate sortedness lemma
+proves the global partition at an arbitrary valid index, and a client derives
+inequalities about actual reads. Correctness-only proofs and premise arguments
+are erased. The examples validate sorted inputs at runtime and compare both
+bounds against linear search on 126 sorted arrays, including empty arrays,
+singletons, and duplicates. They also exercise extreme integers and reject
+midpoints at an endpoint, premature termination, and division by zero.
+
+The algorithms and internal proofs are shared in `sorted_array_proofs.ml`.
+`sorted_array.mli` exposes an abstract sorted-array type implemented by
+`sorted_array.ml`. Construction starts from `empty`; insertion and removal
+preserve the hidden sortedness invariant. Callers supply bounds and capacity
+proofs where required, but never a sortedness proof. The interface exposes
+membership, range, and element-edit observations with lemmas for individual
+indices. Its total `at` observer returns zero outside the array.
+
+`sorted_array_client.ml` compiles against that interface and proves membership
+after insertion, ordering, and pointwise restoration after insertion followed
+by removal. It also checks the public API against list operations on all 121
+sequences of length at most four over three values. `sorted_array_rejected.ml`
+rejects a forged representation, removal from an empty array, and membership
+claimed after a failed search.
+
+`equal_range` combines the boundaries into a half-open interval `[first, past)`.
+The `range_at` lemma proves, for an arbitrary valid index, that values before
+this interval are smaller, values inside equal the target, and values after
+are larger. An independent recursive `occurs` specification connects interval
+nonemptiness to membership. `find_first` and `find_last` prove both the matching
+value and absence of earlier or later matches; `None` proves whole-array
+absence, and `mem` returns the specified membership Boolean. These operations
+reuse equal-range, and their correctness proofs are erased. The array oracle
+checks every operation and rejects false absence, non-first matches, and
+non-last matches.
+
+`insert` returns the insertion index and array; `remove_at` removes a valid
+index, and `remove_one` uses first-match search and returns `None` for absence.
+The recursive `edited` specification describes every output element, and
+`edited_at` exposes that relation at an arbitrary index. Both copying operations
+prove the exact length and preserve sortedness using `Iarray.sub` and
+`Iarray.append`. Their correctness proofs are total and erased; allocation
+remains partial. The clients prove that insertion makes membership true and
+that insertion followed by removal at its returned index restores every source
+element. The runtime oracle checks insertion, first-match removal, and the
+round trip against lists, including duplicates and integer extrema.
 
 The queue proves its tail-recursive reversal against an explicit
 append/reverse model. Its representation stays behind a `.mli`. Operations
