@@ -35,7 +35,7 @@ module Fibonacci = struct
     let refine_ a = a in
     let refine_ b = b in
     let next = n + 1 in
-    fib_def next;
+    ghost_ (fib_def next);
     let r = a + b in
     refine_ r
 
@@ -51,7 +51,7 @@ module Fibonacci = struct
       else
         let c = a + b in
         let k = j + 1 in
-        fib_def k;
+        ghost_ (fib_def k);
         let a : {v : int | v = fib j} = refine_ b in
         let b : {v : int | v = fib (j + 1)} = refine_ c in
         (tail_loop[@tailcall]) n j a b
@@ -62,8 +62,8 @@ module Fibonacci = struct
     if n < 0 || n > 90 then raise Overflow;
     let zero = 0 in
     let one = 1 in
-    fib_def zero;
-    fib_def one;
+    ghost_ (fib_def zero);
+    ghost_ (fib_def one);
     let a : {a : int | a = fib zero} = refine_ zero in
     let b : {b : int | b = fib (zero + 1)} = refine_ one in
     tail_loop n zero a b
@@ -79,8 +79,8 @@ module Fibonacci = struct
     if n = 0 then
       let zero = 0 in
       let one = 1 in
-      fib_def zero;
-      fib_def one;
+      ghost_ (fib_def zero);
+      ghost_ (fib_def one);
       mul_identity zero;
       mul_identity one;
       doubling_step zero one;
@@ -92,9 +92,9 @@ module Fibonacci = struct
       let next = n + 1 in
       let twice = 2 * n in
       let twice_next = twice + 1 in
-      fib_def next;
-      fib_def twice;
-      fib_def twice_next;
+      ghost_ (fib_def next);
+      ghost_ (fib_def twice);
+      ghost_ (fib_def twice_next);
       let p = tail prev in
       let q = tail n in
       let refine_ p = p in
@@ -109,8 +109,8 @@ module Fibonacci = struct
     if n = 0 then
       let zero = 0 in
       let one = 1 in
-      fib_def zero;
-      fib_def one;
+      ghost_ (fib_def zero);
+      ghost_ (fib_def one);
       (refine_ zero, refine_ one)
     else
       let k = n / 2 in

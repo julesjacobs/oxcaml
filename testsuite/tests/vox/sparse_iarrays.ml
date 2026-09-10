@@ -185,7 +185,7 @@ module Demo : sig end = struct
     let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
       refine_ index in
     let result = get overlay bounded in
-    get_def overlay bounded;
+    ghost_ (get_def overlay bounded);
     refine_ result
 
   type mutable_value = {mutable payload : int}
@@ -213,9 +213,9 @@ module Demo : sig end = struct
     let left_value = 77 in
     let right_value = 88 in
     let index = 1 in
-    let refine_ proof = 
+    ghost_ (
       Int_laws.independent_updates overlay left right
-        left_value right_value index in
+        left_value right_value index);
     let refine_ right = right in
     let left_updates = Updates.Refined.add left left_value overlay.updates in
     let left_first = {overlay with
@@ -250,9 +250,11 @@ module Demo : sig end = struct
     let right_first = {overlay with
       updates = Updates.Refined.add left left_value right_updates} in
     List.iter (fun (index : int) ->
-      Item_laws.independent_updates overlay left distinct
-          left_value right_value index;
-      Item_laws.clear_reads_base left_first index;
+      ghost_ (
+        Item_laws.independent_updates overlay left distinct
+          left_value right_value index);
+      ghost_ (
+        Item_laws.clear_reads_base left_first index);
       let cleared = {left_first with
         updates = Updates.Refined.remove index left_first.updates} in
       let original = {left_first with updates = Updates.Refined.empty ()} in

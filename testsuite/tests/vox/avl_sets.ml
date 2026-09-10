@@ -2495,8 +2495,8 @@ module Validity_proofs : sig
       fun element tree validity ->
       let result = add_tree element tree in
       validity;
-      Validity_proofs.add_valid_height element tree validity;
-      Insertion_model_proofs.add_tree_elements element tree;
+      ghost_ (Validity_proofs.add_valid_height element tree validity);
+      ghost_ (Insertion_model_proofs.add_tree_elements element tree);
       refine_ result
 
     let[@def] rec (add_elements @ total) xs tree =
@@ -2545,7 +2545,7 @@ module Validity_proofs : sig
       fun left right right_validity ->
       let left_elements = elements left in
       let result = add_elements left_elements right in
-      add_elements_spec left_elements right right_validity;
+      ghost_ (add_elements_spec left_elements right right_validity);
       refine_ result
 
     let (size @ total) tree =
@@ -2559,7 +2559,7 @@ module Validity_proofs : sig
 
       let (empty @ total) : t =
         let tree = Empty in
-        valid_def tree;
+        ghost_ (valid_def tree);
         refine_ tree
 
       let[@def] (lookup @ total) element (set : t) =
