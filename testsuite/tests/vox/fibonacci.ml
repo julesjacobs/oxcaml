@@ -35,7 +35,7 @@ module Fibonacci = struct
     let refine_ a = a in
     let refine_ b = b in
     let next = n + 1 in
-    let refine_ proof = fib_def next in
+    fib_def next;
     let r = a + b in
     refine_ r
 
@@ -51,7 +51,7 @@ module Fibonacci = struct
       else
         let c = a + b in
         let k = j + 1 in
-        let refine_ proof = fib_def k in
+        fib_def k;
         let a : {v : int | v = fib j} = refine_ b in
         let b : {v : int | v = fib (j + 1)} = refine_ c in
         (tail_loop[@tailcall]) n j a b
@@ -62,8 +62,8 @@ module Fibonacci = struct
     if n < 0 || n > 90 then raise Overflow;
     let zero = 0 in
     let one = 1 in
-    let refine_ proof = fib_def zero in
-    let refine_ proof = fib_def one in
+    fib_def zero;
+    fib_def one;
     let a : {a : int | a = fib zero} = refine_ zero in
     let b : {b : int | b = fib (zero + 1)} = refine_ one in
     tail_loop n zero a b
@@ -75,31 +75,31 @@ module Fibonacci = struct
     fun n ->
     if n < 0 || n > 45 then raise Overflow;
     let u = () in
-    let refine_ proof = double n in
+    double n;
     if n = 0 then
       let zero = 0 in
       let one = 1 in
-      let refine_ proof = fib_def zero in
-      let refine_ proof = fib_def one in
-      let refine_ proof = mul_identity zero in
-      let refine_ proof = mul_identity one in
-      let refine_ proof = doubling_step zero one in
+      fib_def zero;
+      fib_def one;
+      mul_identity zero;
+      mul_identity one;
+      doubling_step zero one;
       refine_ u
     else
       let prev = n - 1 in
-      let refine_ proof = double prev in
-      let refine_ proof = doubling_identity prev in
+      double prev;
+      doubling_identity prev;
       let next = n + 1 in
       let twice = 2 * n in
       let twice_next = twice + 1 in
-      let refine_ proof = fib_def next in
-      let refine_ proof = fib_def twice in
-      let refine_ proof = fib_def twice_next in
+      fib_def next;
+      fib_def twice;
+      fib_def twice_next;
       let p = tail prev in
       let q = tail n in
       let refine_ p = p in
       let refine_ q = q in
-      let refine_ proof = doubling_step p q in
+      doubling_step p q;
       refine_ u
   [@@decreases n]
 
@@ -109,16 +109,16 @@ module Fibonacci = struct
     if n = 0 then
       let zero = 0 in
       let one = 1 in
-      let refine_ proof = fib_def zero in
-      let refine_ proof = fib_def one in
+      fib_def zero;
+      fib_def one;
       (refine_ zero, refine_ one)
     else
       let k = n / 2 in
-      let refine_ proof = double k in
+      double k;
       let a, b = doubling_pair k in
       let refine_ a = a in
       let refine_ b = b in
-      let refine_ proof = doubling_identity k in
+      doubling_identity k;
       let c = a * (2 * b - a) in
       let d = a * a + b * b in
       let c : {r : int | r = fib (2 * k)} = refine_ c in

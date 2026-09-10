@@ -105,12 +105,12 @@ end = struct
       {u : unit | append xs [] === xs} @ immutable contended =
     fun xs ->
     let nil = [] in
-    let refine_ equation = append_def xs nil in
+    append_def xs nil;
     let u = () in
     match xs with
     | [] -> refine_ u
     | _ :: rest ->
-      let refine_ induction = append_nil rest in
+      append_nil rest;
       refine_ u
 
   let[@def] rec equal a b =
@@ -127,28 +127,28 @@ end = struct
   let rec (equal_correct @ total) : (a : t) -> (b : t) ->
       {u : unit | equal a b === (a === b)} @ immutable contended =
     fun a b ->
-    let refine_ equation = equal_def a b in
+    equal_def a b;
     let u = () in
     match a with
     | Empty | Epsilon | Symbol _ -> refine_ u
     | Alt (a1, a2) ->
       (match b with
        | Alt (b1, b2) ->
-         let refine_ induction = equal_correct a1 b1 in
-         let refine_ induction = equal_correct a2 b2 in
+         equal_correct a1 b1;
+         equal_correct a2 b2;
          refine_ u
        | _ -> refine_ u)
     | Seq (a1, a2) ->
       (match b with
        | Seq (b1, b2) ->
-         let refine_ induction = equal_correct a1 b1 in
-         let refine_ induction = equal_correct a2 b2 in
+         equal_correct a1 b1;
+         equal_correct a2 b2;
          refine_ u
        | _ -> refine_ u)
     | Star a ->
       (match b with
        | Star b ->
-         let refine_ induction = equal_correct a b in
+         equal_correct a b;
          refine_ u
        | _ -> refine_ u)
 
@@ -211,18 +211,18 @@ end = struct
         (contains query a || contains query r)} @ immutable contended =
     fun a r query ->
     let result = insert a r in
-    let refine_ equation = insert_def a r in
-    let refine_ equation = contains_def query r in
-    let refine_ equation = contains_def query result in
-    let refine_ equality = equal_correct a r in
+    insert_def a r;
+    contains_def query r;
+    contains_def query result;
+    equal_correct a r;
     let u = () in
     match r with
     | Empty -> refine_ u
     | Alt (head, tail) ->
-      let refine_ equality = equal_correct a head in
+      equal_correct a head;
       let next = insert a tail in
-      let refine_ induction = insert_contains a tail query in
-      let refine_ equation = contains_def query next in
+      insert_contains a tail query;
+      contains_def query next;
       refine_ u
     | _ -> refine_ u
 
@@ -230,18 +230,18 @@ end = struct
       {u : unit | contains query (add_alternatives a acc) ===
         (contains query a || contains query acc)} @ immutable contended =
     fun a acc query ->
-    let refine_ equation = add_alternatives_def a acc in
-    let refine_ equation = contains_def query a in
+    add_alternatives_def a acc;
+    contains_def query a;
     let u = () in
     match a with
     | Empty -> refine_ u
     | Alt (left, right) ->
       let next = add_alternatives right acc in
-      let refine_ induction = add_contains right acc query in
-      let refine_ induction = add_contains left next query in
+      add_contains right acc query;
+      add_contains left next query;
       refine_ u
     | _ ->
-      let refine_ induction = insert_contains a acc query in
+      insert_contains a acc query;
       refine_ u
 
   let (alt_contains @ total) (a @ total) (b @ total) query :
@@ -249,10 +249,10 @@ end = struct
         (contains query a || contains query b)} =
     let empty = Empty in
     let next = add_alternatives b empty in
-    let refine_ equation = alt_def a b in
-    let refine_ equation = contains_def query empty in
-    let refine_ proof = add_contains b empty query in
-    let refine_ proof = add_contains a next query in
+    alt_def a b;
+    contains_def query empty;
+    add_contains b empty query;
+    add_contains a next query;
     let u = () in refine_ u
 
   let rec (select_alternative @ total) : (r : t) -> (p : evidence) ->
@@ -262,8 +262,8 @@ end = struct
             contains a r && valid a q && word q === word p
         else true} @ immutable contended =
     fun r p ->
-    let refine_ equation = valid_def r p in
-    let refine_ equation = word_def p in
+    valid_def r p;
+    word_def p;
     let result =
       match r with
       | Alt (left, right) ->
@@ -271,17 +271,17 @@ end = struct
          | Alt_left inner ->
            let refine_ choice = select_alternative left inner in
            let a, _ = choice in
-           let refine_ equation = contains_def a r in
+           contains_def a r;
            choice
          | Alt_right inner ->
            let refine_ choice = select_alternative right inner in
            let a, _ = choice in
-           let refine_ equation = contains_def a r in
+           contains_def a r;
            choice
          | _ -> r, p)
       | _ ->
-        let refine_ equation = contains_def r r in
-        let refine_ equation = equal_correct r r in
+        contains_def r r;
+        equal_correct r r;
         r, p
     in
     refine_ result
@@ -292,24 +292,24 @@ end = struct
         if contains a r && valid a p then valid r q && word q === word p
         else true} @ immutable contended =
     fun r a p ->
-    let refine_ equation = contains_def a r in
+    contains_def a r;
     let result =
       match r with
       | Alt (left, right) ->
         if contains a left then
           let refine_ q = inject_alternative left a p in
           let result = Alt_left q in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          valid_def r result;
+          word_def result;
           result
         else
           let refine_ q = inject_alternative right a p in
           let result = Alt_right q in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          valid_def r result;
+          word_def result;
           result
       | _ ->
-        let refine_ equation = equal_correct a r in
+        equal_correct a r;
         p
     in
     refine_ result
@@ -322,8 +322,8 @@ end = struct
     let original = Alt (a, b) in
     let refine_ choice = select_alternative simplified p in
     let leaf, inner = choice in
-    let refine_ proof = alt_contains a b leaf in
-    let refine_ equation = contains_def leaf original in
+    alt_contains a b leaf;
+    contains_def leaf original;
     let refine_ q = inject_alternative original leaf inner in
     refine_ q
 
@@ -335,8 +335,8 @@ end = struct
     let original = Alt (a, b) in
     let refine_ choice = select_alternative original p in
     let leaf, inner = choice in
-    let refine_ equation = contains_def leaf original in
-    let refine_ proof = alt_contains a b leaf in
+    contains_def leaf original;
+    alt_contains a b leaf;
     let refine_ q = inject_alternative simplified leaf inner in
     refine_ q
 
@@ -353,24 +353,24 @@ end = struct
         else true} =
     let simplified = seq a b in
     let original = Seq (a, b) in
-    let refine_ equation = seq_def a b in
-    let refine_ equation = valid_def simplified p in
+    seq_def a b;
+    valid_def simplified p;
     let empty = Epsilon_match in
-    let refine_ equation = word_def empty in
+    word_def empty;
     let epsilon = Epsilon in
-    let refine_ equation = valid_def epsilon empty in
+    valid_def epsilon empty;
     let q = match a, b with
       | Empty, _ | _, Empty -> Epsilon_match
       | Epsilon, _ -> Seq_match (empty, p)
       | _, Epsilon -> Seq_match (p, empty)
       | _ -> p
     in
-    let refine_ equation = valid_def original q in
-    let refine_ equation = word_def q in
+    valid_def original q;
+    word_def q;
     let nil = [] in
     let pw = word p in
-    let refine_ equation = append_def nil pw in
-    let refine_ equation = append_nil pw in
+    append_def nil pw;
+    append_nil pw;
     refine_ q
 
   let (seq_contract @ total) (a @ total) (b @ total) p :
@@ -378,19 +378,19 @@ end = struct
         if valid (Seq (a, b)) p then valid (seq a b) q && word q === word p
         else true} =
     let original = Seq (a, b) in
-    let refine_ equation = seq_def a b in
-    let refine_ equation = valid_def original p in
-    let refine_ equation = word_def p in
+    seq_def a b;
+    valid_def original p;
+    word_def p;
     let q = match p with
       | Seq_match (left, right) ->
-        let refine_ equation = valid_def a left in
-        let refine_ equation = valid_def b right in
-        let refine_ equation = word_def left in
-        let refine_ equation = word_def right in
+        valid_def a left;
+        valid_def b right;
+        word_def left;
+        word_def right;
         let lw = word left in
         let rw = word right in
-        let refine_ equation = append_def lw rw in
-        let refine_ equation = append_nil lw in
+        append_def lw rw;
+        append_nil lw;
         (match a, b with
          | Empty, _ | _, Empty -> Epsilon_match
          | Epsilon, _ -> right
@@ -424,7 +424,7 @@ end = struct
       {p : evidence | if nullable r then valid r p && word p === [] else true}
         @ immutable contended =
     fun r ->
-    let refine_ equation = nullable_def r in
+    nullable_def r;
     let result =
       match r with
       | Empty | Epsilon | Symbol _ -> Epsilon_match
@@ -433,28 +433,28 @@ end = struct
         if nullable a then
           let refine_ p = epsilon a in
           let result = Alt_left p in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          valid_def r result;
+          word_def result;
           result
         else
           let refine_ p = epsilon b in
           let result = Alt_right p in
-          let refine_ equation = valid_def r result in
-          let refine_ equation = word_def result in
+          valid_def r result;
+          word_def result;
           result
       | Seq (a, b) ->
         let refine_ p = epsilon a in
         let refine_ q = epsilon b in
         let result = Seq_match (p, q) in
-        let refine_ equation = valid_def r result in
-        let refine_ equation = word_def result in
+        valid_def r result;
+        word_def result;
         let left = word p in
         let right = word q in
-        let refine_ equation = append_def left right in
+        append_def left right;
         result
     in
-    let refine_ equation = valid_def r result in
-    let refine_ equation = word_def result in
+    valid_def r result;
+    word_def result;
     refine_ result
   let rec (expand @ total) : (r : t) -> (c : int) -> (p : evidence) ->
       {q : evidence |
@@ -462,9 +462,9 @@ end = struct
         else true} @ immutable contended =
     fun r c p ->
     let derivative = derive c r in
-    let refine_ equation = derive_def c r in
-    let refine_ equation = valid_def derivative p in
-    let refine_ equation = word_def p in
+    derive_def c r;
+    valid_def derivative p;
+    word_def p;
     let result =
       match r with
       | Empty | Epsilon -> Epsilon_match
@@ -474,20 +474,20 @@ end = struct
         let db = derive c b in
         let refine_ p = alt_expand da db p in
         let original = Alt (da, db) in
-        let refine_ equation = valid_def original p in
-        let refine_ equation = word_def p in
+        valid_def original p;
+        word_def p;
         (match p with
          | Alt_left inner ->
            let refine_ q = expand a c inner in
            let result = Alt_left q in
-           let refine_ equation = valid_def r result in
-           let refine_ equation = word_def result in
+           valid_def r result;
+           word_def result;
            result
          | Alt_right inner ->
            let refine_ q = expand b c inner in
            let result = Alt_right q in
-           let refine_ equation = valid_def r result in
-           let refine_ equation = word_def result in
+           valid_def r result;
+           word_def result;
            result
          | _ -> Epsilon_match)
       | Seq (a, b) ->
@@ -497,76 +497,76 @@ end = struct
         if nullable a then
           let refine_ p = alt_expand product db p in
           let original = Alt (product, db) in
-          let refine_ equation = valid_def original p in
-          let refine_ equation = word_def p in
+          valid_def original p;
+          word_def p;
           (match p with
            | Alt_left inner ->
              let refine_ inner = seq_expand da b inner in
              let left_derivative = Seq (derive c a, b) in
-             let refine_ equation = valid_def left_derivative inner in
-             let refine_ equation = word_def inner in
+             valid_def left_derivative inner;
+             word_def inner;
              (match inner with
               | Seq_match (left, right) ->
                 let refine_ q = expand a c left in
                 let result = Seq_match (q, right) in
-                let refine_ equation = valid_def r result in
-                let refine_ equation = word_def result in
+                valid_def r result;
+                word_def result;
                 let qw = word q in
                 let rw = word right in
-                let refine_ equation = append_def qw rw in
+                append_def qw rw;
                 result
               | _ -> Epsilon_match)
            | Alt_right right ->
              let refine_ left = epsilon a in
              let refine_ q = expand b c right in
              let result = Seq_match (left, q) in
-             let refine_ equation = valid_def r result in
-             let refine_ equation = word_def result in
+             valid_def r result;
+             word_def result;
              let lw = word left in
              let qw = word q in
-             let refine_ equation = append_def lw qw in
+             append_def lw qw;
              result
            | _ -> Epsilon_match)
         else
           let refine_ p = seq_expand da b p in
           let original = Seq (da, b) in
-          let refine_ equation = valid_def original p in
-          let refine_ equation = word_def p in
+          valid_def original p;
+          word_def p;
           (match p with
            | Seq_match (left, right) ->
              let refine_ q = expand a c left in
              let result = Seq_match (q, right) in
-             let refine_ equation = valid_def r result in
-             let refine_ equation = word_def result in
+             valid_def r result;
+             word_def result;
              let qw = word q in
              let rw = word right in
-             let refine_ equation = append_def qw rw in
+             append_def qw rw;
              result
            | _ -> Epsilon_match)
       | Star a ->
         let da = derive c a in
         let refine_ p = seq_expand da r p in
         let original = Seq (da, r) in
-        let refine_ equation = valid_def original p in
-        let refine_ equation = word_def p in
+        valid_def original p;
+        word_def p;
         (match p with
          | Seq_match (left, right) ->
            let refine_ q = expand a c left in
            let result = Star_step (q, right) in
-           let refine_ equation = valid_def r result in
-           let refine_ equation = word_def result in
+           valid_def r result;
+           word_def result;
            let qw = word q in
            let rw = word right in
-           let refine_ equation = append_def qw rw in
+           append_def qw rw;
            result
          | _ -> Epsilon_match)
     in
-    let refine_ equation = valid_def r result in
-    let refine_ equation = word_def result in
+    valid_def r result;
+    word_def result;
     refine_ result
   let (append_empty @ total) (xs : int list) (ys : int list) :
       {u : unit | (append xs ys === []) === (xs === [] && ys === [])} =
-    let refine_ equation = append_def xs ys in
+    append_def xs ys;
     let u = () in
     match xs with [] -> refine_ u | _ :: _ -> refine_ u
 
@@ -574,22 +574,22 @@ end = struct
       {u : unit | if valid r p && word p === [] then nullable r else true}
         @ immutable contended =
     fun r p ->
-    let refine_ equation = valid_def r p in
-    let refine_ equation = word_def p in
-    let refine_ equation = nullable_def r in
+    valid_def r p;
+    word_def p;
+    nullable_def r;
     let u = () in
     match p with
     | Epsilon_match | Symbol_match _ | Star_empty | Star_step _ -> refine_ u
     | Alt_left inner ->
       (match r with
        | Alt (a, _) ->
-         let refine_ induction = empty_complete a inner in
+         empty_complete a inner;
          refine_ u
        | _ -> refine_ u)
     | Alt_right inner ->
       (match r with
        | Alt (_, b) ->
-         let refine_ induction = empty_complete b inner in
+         empty_complete b inner;
          refine_ u
        | _ -> refine_ u)
     | Seq_match (left, right) ->
@@ -597,9 +597,9 @@ end = struct
        | Seq (a, b) ->
          let lw = word left in
          let rw = word right in
-         let refine_ equation = append_empty lw rw in
-         let refine_ induction = empty_complete a left in
-         let refine_ induction = empty_complete b right in
+         append_empty lw rw;
+         empty_complete a left;
+         empty_complete b right;
          refine_ u
        | _ -> refine_ u)
 
@@ -611,9 +611,9 @@ end = struct
         @ immutable contended =
     fun r c s p ->
     let derivative = derive c r in
-    let refine_ equation = derive_def c r in
-    let refine_ equation = valid_def r p in
-    let refine_ equation = word_def p in
+    derive_def c r;
+    valid_def r p;
+    word_def p;
     let result =
       match p with
       | Epsilon_match | Star_empty | Symbol_match _ -> Epsilon_match
@@ -625,8 +625,8 @@ end = struct
            let db = derive c b in
            let original = Alt (da, db) in
            let result = Alt_left q in
-           let refine_ equation = valid_def original result in
-           let refine_ equation = word_def result in
+           valid_def original result;
+           word_def result;
            let refine_ result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
@@ -638,8 +638,8 @@ end = struct
            let db = derive c b in
            let original = Alt (da, db) in
            let result = Alt_right q in
-           let refine_ equation = valid_def original result in
-           let refine_ equation = word_def result in
+           valid_def original result;
+           word_def result;
            let refine_ result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
@@ -652,27 +652,27 @@ end = struct
            let sum = Alt (product, db) in
            let lw = word left in
            let rw = word right in
-           let refine_ equation = append_def lw rw in
+           append_def lw rw;
            (match lw with
             | [] ->
-              let refine_ empty_law = empty_complete a left in
+              empty_complete a left;
               let refine_ q = contract b c s right in
               let result = Alt_right q in
-              let refine_ equation = valid_def sum result in
-              let refine_ equation = word_def result in
+              valid_def sum result;
+              word_def result;
               let refine_ result = alt_contract product db result in
               result
             | h :: rest ->
               let refine_ q = contract a h rest left in
               let pair = Seq_match (q, right) in
               let pair_regex = Seq (derive c a, b) in
-              let refine_ equation = valid_def pair_regex pair in
-              let refine_ equation = word_def pair in
+              valid_def pair_regex pair;
+              word_def pair;
               let refine_ pair = seq_contract da b pair in
               if nullable a then
                 let result = Alt_left pair in
-                let refine_ equation = valid_def sum result in
-                let refine_ equation = word_def result in
+                valid_def sum result;
+                word_def result;
                 let refine_ result = alt_contract product db result in
                 result
               else pair)
@@ -682,7 +682,7 @@ end = struct
          | Star a ->
            let lw = word left in
            let rw = word right in
-           let refine_ equation = append_def lw rw in
+           append_def lw rw;
            (match lw with
             | [] ->
               let refine_ q = contract r c s right in
@@ -692,20 +692,20 @@ end = struct
               let da = derive c a in
               let original = Seq (da, r) in
               let result = Seq_match (q, right) in
-              let refine_ equation = valid_def original result in
-              let refine_ equation = word_def result in
+              valid_def original result;
+              word_def result;
               let refine_ result = seq_contract da r result in
               result)
          | _ -> Epsilon_match)
     in
-    let refine_ equation = valid_def derivative result in
-    let refine_ equation = word_def result in
+    valid_def derivative result;
+    word_def result;
     refine_ result
   let rec (sound @ total) : (r : t) -> (s : int list) ->
       {p : evidence | if matches r s then valid r p && word p === s else true}
         @ immutable contended =
     fun r s ->
-    let refine_ equation = matches_def r s in
+    matches_def r s;
     match s with
     | [] ->
       let refine_ p = epsilon r in
@@ -720,16 +720,16 @@ end = struct
       {u : unit | if valid r p && word p === s then matches r s else true}
         @ immutable contended =
     fun r s p ->
-    let refine_ equation = matches_def r s in
+    matches_def r s;
     let u = () in
     match s with
     | [] ->
-      let refine_ proof = empty_complete r p in
+      empty_complete r p;
       refine_ u
     | c :: rest ->
       let derivative = derive c r in
       let refine_ q = contract r c rest p in
-      let refine_ proof = complete derivative rest q in
+      complete derivative rest q;
       refine_ u
 
   let (recognize @ total) (r @ total) (s : int list) :
@@ -756,14 +756,14 @@ end = struct
           @ immutable contended =
       fun xs ys r ->
       let joined = join xs ys in
-      let refine_ equation = join_def xs ys in
-      let refine_ equation = member_def r xs in
-      let refine_ equation = member_def r joined in
+      join_def xs ys;
+      member_def r xs;
+      member_def r joined;
       let u = () in
       match xs with
       | [] -> refine_ u
       | _ :: rest ->
-        let refine_ induction = join_member rest ys r in
+        join_member rest ys r;
         refine_ u
 
     let[@def] rec suffix (xs : t list) b =
@@ -776,24 +776,24 @@ end = struct
           @ immutable contended =
       fun xs b r ->
       let result = suffix xs b in
-      let refine_ equation = suffix_def xs b in
-      let refine_ equation = member_def r result in
+      suffix_def xs b;
+      member_def r result;
       let u = () in
       match xs with
       | [] ->
         (match r with
          | Seq (a, _) ->
-           let refine_ equation = member_def a xs in
+           member_def a xs;
            refine_ u
          | _ -> refine_ u)
       | a :: rest ->
         let head = Seq (a, b) in
-        let refine_ equality = equal_correct r head in
-        let refine_ induction = suffix_member rest b r in
+        equal_correct r head;
+        suffix_member rest b r;
         (match r with
          | Seq (left, _) ->
-           let refine_ equation = member_def left xs in
-           let refine_ equality = equal_correct left a in
+           member_def left xs;
+           equal_correct left a;
            refine_ u
          | _ -> refine_ u)
 
@@ -811,65 +811,65 @@ end = struct
       fun r p q ->
       let sr = support r in
       let sp = support p in
-      let refine_ equation = support_def r in
-      let refine_ equation = support_def p in
+      support_def r;
+      support_def p;
       let u = () in
       match r with
       | Empty | Epsilon ->
-        let refine_ equation = member_def p sr in
+        member_def p sr;
         refine_ u
       | Symbol _ ->
-        let refine_ equation = member_def p sr in
+        member_def p sr;
         let epsilon = Epsilon in
-        let refine_ equality = equal_correct p epsilon in
+        equal_correct p epsilon;
         let nil = [] in
-        let refine_ equation = member_def p nil in
-        let refine_ equation = member_def q sp in
+        member_def p nil;
+        member_def q sp;
         refine_ u
       | Alt (a, b) ->
         let sa = support a in
         let sb = support b in
-        let refine_ equation = join_member sa sb p in
-        let refine_ equation = join_member sa sb q in
-        let refine_ induction = support_closed a p q in
-        let refine_ induction = support_closed b p q in
+        join_member sa sb p;
+        join_member sa sb q;
+        support_closed a p q;
+        support_closed b p q;
         refine_ u
       | Seq (a, b) ->
         let sa = support a in
         let sb = support b in
         let left = suffix sa b in
-        let refine_ equation = join_member left sb p in
-        let refine_ equation = join_member left sb q in
-        let refine_ equation = suffix_member sa b p in
-        let refine_ equation = suffix_member sa b q in
-        let refine_ induction = support_closed b p q in
+        join_member left sb p;
+        join_member left sb q;
+        suffix_member sa b p;
+        suffix_member sa b q;
+        support_closed b p q;
         (match p with
          | Seq (inner, tail) ->
            let si = support inner in
            let st = support tail in
            let mapped = suffix si tail in
-           let refine_ equation = join_member mapped st q in
-           let refine_ equation = suffix_member si tail q in
+           join_member mapped st q;
+           suffix_member si tail q;
            (match q with
             | Seq (next, _) ->
-              let refine_ induction = support_closed a inner next in
+              support_closed a inner next;
               refine_ u
             | _ -> refine_ u)
          | _ -> refine_ u)
       | Star a ->
         let sa = support a in
-        let refine_ equation = suffix_member sa r p in
-        let refine_ equation = suffix_member sa r q in
+        suffix_member sa r p;
+        suffix_member sa r q;
         (match p with
          | Seq (inner, tail) ->
            let si = support inner in
            let st = support tail in
            let mapped = suffix si tail in
-           let refine_ equation = join_member mapped st q in
-           let refine_ equation = suffix_member si tail q in
+           join_member mapped st q;
+           suffix_member si tail q;
            (match q with
             | Seq (next, _) ->
-              let refine_ induction = support_closed a inner next in
+              support_closed a inner next;
               refine_ u
             | _ -> refine_ u)
          | _ -> refine_ u)
@@ -888,23 +888,23 @@ end = struct
         {u : unit | if member p (partial c r) then member p (support r) else true}
           @ immutable contended =
       fun r c p ->
-      let refine_ equation = partial_def c r in
-      let refine_ equation = support_def r in
+      partial_def c r;
+      support_def r;
       let u = () in
       match r with
       | Empty | Epsilon | Symbol _ ->
         let nil = [] in
-        let refine_ equation = member_def p nil in
+        member_def p nil;
         refine_ u
       | Alt (a, b) ->
         let da = partial c a in
         let db = partial c b in
         let sa = support a in
         let sb = support b in
-        let refine_ equation = join_member da db p in
-        let refine_ equation = join_member sa sb p in
-        let refine_ induction = partial_supported a c p in
-        let refine_ induction = partial_supported b c p in
+        join_member da db p;
+        join_member sa sb p;
+        partial_supported a c p;
+        partial_supported b c p;
         refine_ u
       | Seq (a, b) ->
         let da = partial c a in
@@ -913,24 +913,24 @@ end = struct
         let sb = support b in
         let dl = suffix da b in
         let sl = suffix sa b in
-        let refine_ equation = join_member dl db p in
-        let refine_ equation = join_member sl sb p in
-        let refine_ equation = suffix_member da b p in
-        let refine_ equation = suffix_member sa b p in
-        let refine_ induction = partial_supported b c p in
+        join_member dl db p;
+        join_member sl sb p;
+        suffix_member da b p;
+        suffix_member sa b p;
+        partial_supported b c p;
         (match p with
          | Seq (inner, _) ->
-           let refine_ induction = partial_supported a c inner in
+           partial_supported a c inner;
            refine_ u
          | _ -> refine_ u)
       | Star a ->
         let da = partial c a in
         let sa = support a in
-        let refine_ equation = suffix_member da r p in
-        let refine_ equation = suffix_member sa r p in
+        suffix_member da r p;
+        suffix_member sa r p;
         (match p with
          | Seq (inner, _) ->
-           let refine_ induction = partial_supported a c inner in
+           partial_supported a c inner;
            refine_ u
          | _ -> refine_ u)
     let rec (partial_contract @ total) :
@@ -942,9 +942,9 @@ end = struct
           else true} @ immutable contended =
       fun r c s p ->
       let derivative = partial c r in
-      let refine_ equation = partial_def c r in
-      let refine_ equation = valid_def r p in
-      let refine_ equation = word_def p in
+      partial_def c r;
+      valid_def r p;
+      word_def p;
       let result =
         match p with
         | Epsilon_match | Star_empty | Symbol_match _ -> Epsilon, Epsilon_match
@@ -955,7 +955,7 @@ end = struct
              let k, _ = choice in
              let da = partial c a in
              let db = partial c b in
-             let refine_ equation = join_member da db k in
+             join_member da db k;
              choice
            | _ -> Empty, Epsilon_match)
         | Alt_right inner ->
@@ -965,7 +965,7 @@ end = struct
              let k, _ = choice in
              let da = partial c a in
              let db = partial c b in
-             let refine_ equation = join_member da db k in
+             join_member da db k;
              choice
            | _ -> Empty, Epsilon_match)
         | Seq_match (left, right) ->
@@ -976,23 +976,23 @@ end = struct
              let mapped = suffix da b in
              let lw = word left in
              let rw = word right in
-             let refine_ equation = append_def lw rw in
+             append_def lw rw;
              (match lw with
               | [] ->
-                let refine_ proof = empty_complete a left in
+                empty_complete a left;
                 let refine_ choice = partial_contract b c s right in
                 let k, _ = choice in
-                let refine_ equation = join_member mapped db k in
+                join_member mapped db k;
                 choice
               | h :: rest ->
                 let refine_ choice = partial_contract a h rest left in
                 let k, inner = choice in
                 let target = Seq (k, b) in
                 let q = Seq_match (inner, right) in
-                let refine_ equation = suffix_member da b target in
-                let refine_ equation = join_member mapped db target in
-                let refine_ equation = valid_def target q in
-                let refine_ equation = word_def q in
+                suffix_member da b target;
+                join_member mapped db target;
+                valid_def target q;
+                word_def q;
                 target, q)
            | _ -> Empty, Epsilon_match)
         | Star_step (left, right) ->
@@ -1001,7 +1001,7 @@ end = struct
              let da = partial c a in
              let lw = word left in
              let rw = word right in
-             let refine_ equation = append_def lw rw in
+             append_def lw rw;
              (match lw with
               | [] ->
                 let refine_ choice = partial_contract r c s right in
@@ -1011,20 +1011,20 @@ end = struct
                 let k, inner = choice in
                 let target = Seq (k, r) in
                 let q = Seq_match (inner, right) in
-                let refine_ equation = suffix_member da r target in
-                let refine_ equation = valid_def target q in
-                let refine_ equation = word_def q in
+                suffix_member da r target;
+                valid_def target q;
+                word_def q;
                 target, q)
            | _ -> Empty, Epsilon_match)
       in
       let k, q = result in
-      let refine_ equation = member_def k derivative in
+      member_def k derivative;
       let nil = [] in
-      let refine_ equation = member_def k nil in
+      member_def k nil;
       let epsilon = Epsilon in
-      let refine_ equation = equal_correct k epsilon in
-      let refine_ equation = valid_def k q in
-      let refine_ equation = word_def q in
+      equal_correct k epsilon;
+      valid_def k q;
+      word_def q;
       refine_ result
 
     let rec (partial_expand @ total) :
@@ -1034,14 +1034,14 @@ end = struct
           @ immutable contended =
       fun r c k p ->
       let derivative = partial c r in
-      let refine_ equation = partial_def c r in
-      let refine_ equation = member_def k derivative in
-      let refine_ equation = valid_def k p in
-      let refine_ equation = word_def p in
+      partial_def c r;
+      member_def k derivative;
+      valid_def k p;
+      word_def p;
       let nil = [] in
-      let refine_ equation = member_def k nil in
+      member_def k nil;
       let epsilon_regex = Epsilon in
-      let refine_ equality = equal_correct k epsilon_regex in
+      equal_correct k epsilon_regex;
       let result =
         match r with
         | Empty | Epsilon -> Epsilon_match
@@ -1049,61 +1049,61 @@ end = struct
         | Alt (a, b) ->
           let da = partial c a in
           let db = partial c b in
-          let refine_ equation = join_member da db k in
+          join_member da db k;
           let q =
             if member k da then
               let refine_ q = partial_expand a c k p in Alt_left q
             else
               let refine_ q = partial_expand b c k p in Alt_right q
           in
-          let refine_ equation = valid_def r q in
-          let refine_ equation = word_def q in
+          valid_def r q;
+          word_def q;
           q
         | Seq (a, b) ->
           let da = partial c a in
           let db = partial c b in
           let mapped = suffix da b in
-          let refine_ equation = join_member mapped db k in
-          let refine_ equation = suffix_member da b k in
+          join_member mapped db k;
+          suffix_member da b k;
           if member k mapped then
             (match k, p with
              | Seq (inner, _), Seq_match (left, right) ->
                let refine_ q = partial_expand a c inner left in
                let result = Seq_match (q, right) in
-               let refine_ equation = valid_def r result in
-               let refine_ equation = word_def result in
+               valid_def r result;
+               word_def result;
                let qw = word q in
                let rw = word right in
-               let refine_ equation = append_def qw rw in
+               append_def qw rw;
                result
              | _ -> Epsilon_match)
           else
             let refine_ left = epsilon a in
             let refine_ q = partial_expand b c k p in
             let result = Seq_match (left, q) in
-            let refine_ equation = valid_def r result in
-            let refine_ equation = word_def result in
+            valid_def r result;
+            word_def result;
             let lw = word left in
             let qw = word q in
-            let refine_ equation = append_def lw qw in
+            append_def lw qw;
             result
         | Star a ->
           let da = partial c a in
-          let refine_ equation = suffix_member da r k in
+          suffix_member da r k;
           (match k, p with
            | Seq (inner, _), Seq_match (left, right) ->
              let refine_ q = partial_expand a c inner left in
              let result = Star_step (q, right) in
-             let refine_ equation = valid_def r result in
-             let refine_ equation = word_def result in
+             valid_def r result;
+             word_def result;
              let qw = word q in
              let rw = word right in
-             let refine_ equation = append_def qw rw in
+             append_def qw rw;
              result
            | _ -> Epsilon_match)
       in
-      let refine_ equation = valid_def r result in
-      let refine_ equation = word_def result in
+      valid_def r result;
+      word_def result;
       refine_ result
 
     let[@def] rec accepts (xs : t list) (s : int list) =
@@ -1114,32 +1114,32 @@ end = struct
         {u : unit | if member r xs && matches r s then accepts xs s else true}
           @ immutable contended =
       fun xs r s ->
-      let refine_ equation = member_def r xs in
-      let refine_ equation = accepts_def xs s in
+      member_def r xs;
+      accepts_def xs s;
       let u = () in
       match xs with
       | [] -> refine_ u
       | head :: rest ->
-        let refine_ equality = equal_correct r head in
-        let refine_ induction = accepts_member rest r s in
+        equal_correct r head;
+        accepts_member rest r s;
         refine_ u
 
     let rec (accepts_pick @ total) : (xs : t list) -> (s : int list) ->
         {r : t | if accepts xs s then member r xs && matches r s else true}
           @ immutable contended =
       fun xs s ->
-      let refine_ equation = accepts_def xs s in
+      accepts_def xs s;
       let result =
         match xs with
         | [] -> Empty
         | head :: rest ->
           if matches head s then
-            let refine_ equality = equal_correct head head in
-            let refine_ equation = member_def head xs in
-            head
+            (equal_correct head head;
+            member_def head xs;
+            head)
           else
             let refine_ r = accepts_pick rest s in
-            let refine_ equation = member_def r xs in
+            member_def r xs;
             r
       in
       refine_ result
@@ -1153,14 +1153,14 @@ end = struct
         let refine_ p = sound r whole in
         let refine_ choice = partial_contract r c s p in
         let k, q = choice in
-        let refine_ proof = complete k s q in
-        let refine_ proof = accepts_member derivative k s in
+        complete k s q;
+        accepts_member derivative k s;
         refine_ u
       else if accepts derivative s then
         let refine_ k = accepts_pick derivative s in
         let refine_ p = sound k s in
         let refine_ q = partial_expand r c k p in
-        let refine_ proof = complete r whole q in
+        complete r whole q;
         refine_ u
       else refine_ u
 
@@ -1173,7 +1173,7 @@ end = struct
     let rec (same_state_correct @ total) : (xs : t list) -> (ys : t list) ->
         {u : unit | same_state xs ys === (xs === ys)} @ immutable contended =
       fun xs ys ->
-      let refine_ equation = same_state_def xs ys in
+      same_state_def xs ys;
       let u = () in
       match xs with
       | [] -> refine_ u
@@ -1181,8 +1181,8 @@ end = struct
         (match ys with
          | [] -> refine_ u
          | y :: tail ->
-           let refine_ equality = equal_correct x y in
-           let refine_ induction = same_state_correct rest tail in
+           equal_correct x y;
+           same_state_correct rest tail;
            refine_ u)
 
     let[@def] rec has_state (xs : t list) (states : t list list) =
@@ -1197,14 +1197,14 @@ end = struct
           (has_state state xs || has_state state ys)} @ immutable contended =
       fun xs ys state ->
       let joined = combine xs ys in
-      let refine_ equation = combine_def xs ys in
-      let refine_ equation = has_state_def state xs in
-      let refine_ equation = has_state_def state joined in
+      combine_def xs ys;
+      has_state_def state xs;
+      has_state_def state joined;
       let u = () in
       match xs with
       | [] -> refine_ u
       | _ :: rest ->
-        let refine_ induction = combine_has rest ys state in
+        combine_has rest ys state;
         refine_ u
 
     let[@def] rec prepend r (states : t list list) =
@@ -1217,25 +1217,25 @@ end = struct
           @ immutable contended =
       fun r states state ->
       let result = prepend r states in
-      let refine_ equation = prepend_def r states in
-      let refine_ equation = has_state_def state result in
+      prepend_def r states;
+      has_state_def state result;
       let u = () in
       match states with
       | [] ->
         (match state with
          | [] -> refine_ u
          | _ :: rest ->
-           let refine_ equation = has_state_def rest states in
+           has_state_def rest states;
            refine_ u)
       | first :: tail ->
         let head = r :: first in
-        let refine_ equality = same_state_correct state head in
-        let refine_ induction = prepend_has r tail state in
+        same_state_correct state head;
+        prepend_has r tail state;
         (match state with
          | [] -> refine_ u
          | _ :: rest ->
-           let refine_ equation = has_state_def rest states in
-           let refine_ equality = same_state_correct rest first in
+           has_state_def rest states;
+           same_state_correct rest first;
            refine_ u)
 
     let[@def] rec powerset (universe : t list) =
@@ -1258,15 +1258,15 @@ end = struct
           (member query universe && member query candidates)} @ immutable contended =
       fun universe candidates query ->
       let result = restrict universe candidates in
-      let refine_ equation = restrict_def universe candidates in
-      let refine_ equation = member_def query result in
-      let refine_ equation = member_def query universe in
+      restrict_def universe candidates;
+      member_def query result;
+      member_def query universe;
       let u = () in
       match universe with
       | [] -> refine_ u
       | head :: rest ->
-        let refine_ equality = equal_correct query head in
-        let refine_ induction = restrict_member rest candidates query in
+        equal_correct query head;
+        restrict_member rest candidates query;
         refine_ u
 
     let rec (powerset_cover @ total) : (universe : t list) -> (candidates : t list) ->
@@ -1275,21 +1275,21 @@ end = struct
       fun universe candidates ->
       let result = restrict universe candidates in
       let states = powerset universe in
-      let refine_ equation = restrict_def universe candidates in
-      let refine_ equation = powerset_def universe in
+      restrict_def universe candidates;
+      powerset_def universe;
       let u = () in
       match universe with
       | [] ->
         let nil = [] in
-        let refine_ equality = same_state_correct result nil in
-        let refine_ equation = has_state_def result states in
+        same_state_correct result nil;
+        has_state_def result states;
         refine_ u
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
-        let refine_ induction = powerset_cover rest candidates in
-        let refine_ equation = combine_has smaller extended result in
-        let refine_ equation = prepend_has head smaller result in
+        powerset_cover rest candidates;
+        combine_has smaller extended result;
+        prepend_has head smaller result;
         refine_ u
 
     let rec (powerset_member @ total) :
@@ -1298,32 +1298,32 @@ end = struct
           then member query universe else true} @ immutable contended =
       fun universe state query ->
       let states = powerset universe in
-      let refine_ equation = powerset_def universe in
-      let refine_ equation = member_def query universe in
+      powerset_def universe;
+      member_def query universe;
       let u = () in
       match universe with
       | [] ->
         let nil = [] in
-        let refine_ equation = has_state_def state states in
-        let refine_ equation = has_state_def state nil in
-        let refine_ equality = same_state_correct state nil in
-        let refine_ equation = member_def query state in
+        has_state_def state states;
+        has_state_def state nil;
+        same_state_correct state nil;
+        member_def query state;
         refine_ u
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
-        let refine_ equation = combine_has smaller extended state in
-        let refine_ equation = prepend_has head smaller state in
-        let refine_ induction = powerset_member rest state query in
+        combine_has smaller extended state;
+        prepend_has head smaller state;
+        powerset_member rest state query;
         (match state with
          | [] ->
-           let refine_ equation = member_def query state in
+           member_def query state;
            refine_ u
          | first :: tail ->
-           let refine_ equation = member_def query state in
-           let refine_ equality = equal_correct query first in
-           let refine_ equality = equal_correct query head in
-           let refine_ induction = powerset_member rest tail query in
+           member_def query state;
+           equal_correct query first;
+           equal_correct query head;
+           powerset_member rest tail query;
            refine_ u)
 
     let[@def] rec step c (state : t list) =
@@ -1335,23 +1335,23 @@ end = struct
           @ immutable contended =
       fun state c query ->
       let next = step c state in
-      let refine_ equation = step_def c state in
+      step_def c state;
       let result =
         match state with
         | [] ->
-          let refine_ equation = member_def query next in
+          member_def query next;
           Empty
         | head :: rest ->
           let dh = partial c head in
           let dr = step c rest in
-          let refine_ equation = join_member dh dr query in
+          join_member dh dr query;
           if member query dh then
-            let refine_ equation = member_def head state in
-            let refine_ equality = equal_correct head head in
-            head
+            (member_def head state;
+            equal_correct head head;
+            head)
           else
             let refine_ r = step_pick rest c query in
-            let refine_ equation = member_def r state in
+            member_def r state;
             r
       in
       refine_ result
@@ -1362,12 +1362,12 @@ end = struct
           then member query (root :: support root) else true} =
       let universe = root :: support root in
       let refine_ r = step_pick state c query in
-      let refine_ proof = powerset_member universe state r in
-      let refine_ proof = partial_supported r c query in
-      let refine_ proof = support_closed root r query in
-      let refine_ equation = member_def r universe in
-      let refine_ equality = equal_correct r root in
-      let refine_ equation = member_def query universe in
+      powerset_member universe state r;
+      partial_supported r c query;
+      support_closed root r query;
+      member_def r universe;
+      equal_correct r root;
+      member_def query universe;
       let u = () in refine_ u
 
     let rec (accepts_join @ total) :
@@ -1376,14 +1376,14 @@ end = struct
           @ immutable contended =
       fun xs ys s ->
       let joined = join xs ys in
-      let refine_ equation = join_def xs ys in
-      let refine_ equation = accepts_def xs s in
-      let refine_ equation = accepts_def joined s in
+      join_def xs ys;
+      accepts_def xs s;
+      accepts_def joined s;
       let u = () in
       match xs with
       | [] -> refine_ u
       | _ :: rest ->
-        let refine_ induction = accepts_join rest ys s in
+        accepts_join rest ys s;
         refine_ u
 
     let rec (step_correct @ total) : (state : t list) -> (c : int) -> (s : int list) ->
@@ -1392,19 +1392,19 @@ end = struct
       fun state c s ->
       let next = step c state in
       let whole = c :: s in
-      let refine_ equation = step_def c state in
-      let refine_ equation = accepts_def state whole in
+      step_def c state;
+      accepts_def state whole;
       let u = () in
       match state with
       | [] ->
-        let refine_ equation = accepts_def next s in
+        accepts_def next s;
         refine_ u
       | head :: rest ->
         let dh = partial c head in
         let dr = step c rest in
-        let refine_ proof = accepts_join dh dr s in
-        let refine_ proof = partial_correct head c s in
-        let refine_ induction = step_correct rest c s in
+        accepts_join dh dr s;
+        partial_correct head c s;
+        step_correct rest c s;
         refine_ u
 
     let (next_correct @ total) (root @ total) (state : t list) c s :
@@ -1414,18 +1414,18 @@ end = struct
       let universe = root :: support root in
       let next = step c state in
       let target = restrict universe next in
-      let refine_ proof = step_correct state c s in
+      step_correct state c s;
       let u = () in
       if accepts next s then
         let refine_ query = accepts_pick next s in
-        let refine_ proof = step_supported root state c query in
-        let refine_ proof = restrict_member universe next query in
-        let refine_ proof = accepts_member target query s in
+        step_supported root state c query;
+        restrict_member universe next query;
+        accepts_member target query s;
         refine_ u
       else if accepts target s then
         let refine_ query = accepts_pick target s in
-        let refine_ proof = restrict_member universe next query in
-        let refine_ proof = accepts_member next query s in
+        restrict_member universe next query;
+        accepts_member next query s;
         refine_ u
       else refine_ u
 
@@ -1438,14 +1438,14 @@ end = struct
           (has_letter c xs || has_letter c ys)} @ immutable contended =
       fun xs ys c ->
       let joined = append xs ys in
-      let refine_ equation = append_def xs ys in
-      let refine_ equation = has_letter_def c xs in
-      let refine_ equation = has_letter_def c joined in
+      append_def xs ys;
+      has_letter_def c xs;
+      has_letter_def c joined;
       let u = () in
       match xs with
       | [] -> refine_ u
       | _ :: rest ->
-        let refine_ induction = append_letter rest ys c in
+        append_letter rest ys c;
         refine_ u
 
     let[@def] rec letters r =
@@ -1461,27 +1461,27 @@ end = struct
       fun r c q ->
       let ds = partial c r in
       let alphabet = letters r in
-      let refine_ equation = partial_def c r in
-      let refine_ equation = letters_def r in
+      partial_def c r;
+      letters_def r;
       let u = () in
       match r with
       | Empty | Epsilon ->
-        let refine_ equation = member_def q ds in
+        member_def q ds;
         refine_ u
       | Symbol _ ->
         let nil = [] in
-        let refine_ equation = member_def q nil in
-        let refine_ equation = has_letter_def c alphabet in
+        member_def q nil;
+        has_letter_def c alphabet;
         refine_ u
       | Alt (a, b) ->
         let da = partial c a in
         let db = partial c b in
         let la = letters a in
         let lb = letters b in
-        let refine_ proof = append_letter la lb c in
-        let refine_ proof = join_member da db q in
-        let refine_ induction = partial_letter a c q in
-        let refine_ induction = partial_letter b c q in
+        append_letter la lb c;
+        join_member da db q;
+        partial_letter a c q;
+        partial_letter b c q;
         refine_ u
       | Seq (a, b) ->
         let da = partial c a in
@@ -1489,20 +1489,20 @@ end = struct
         let left = suffix da b in
         let la = letters a in
         let lb = letters b in
-        let refine_ proof = append_letter la lb c in
-        let refine_ proof = join_member left db q in
-        let refine_ proof = suffix_member da b q in
-        let refine_ induction = partial_letter b c q in
+        append_letter la lb c;
+        join_member left db q;
+        suffix_member da b q;
+        partial_letter b c q;
         (match q with
          | Seq (inner, _) ->
-           let refine_ induction = partial_letter a c inner in refine_ u
+           partial_letter a c inner; refine_ u
          | _ -> refine_ u)
       | Star a ->
         let da = partial c a in
-        let refine_ proof = suffix_member da r q in
+        suffix_member da r q;
         (match q with
          | Seq (inner, _) ->
-           let refine_ induction = partial_letter a c inner in refine_ u
+           partial_letter a c inner; refine_ u
          | _ -> refine_ u)
 
     let[@def] rec alphabet (universe : t list) =
@@ -1516,17 +1516,17 @@ end = struct
           then has_letter c (alphabet universe) else true}
           @ immutable contended =
       fun universe r c ->
-      let refine_ equation = member_def r universe in
-      let refine_ equation = alphabet_def universe in
+      member_def r universe;
+      alphabet_def universe;
       let u = () in
       match universe with
       | [] -> refine_ u
       | head :: rest ->
         let lh = letters head in
         let lr = alphabet rest in
-        let refine_ proof = append_letter lh lr c in
-        let refine_ proof = equal_correct r head in
-        let refine_ induction = alphabet_member rest r c in
+        append_letter lh lr c;
+        equal_correct r head;
+        alphabet_member rest r c;
         refine_ u
 
     let (step_letter @ total) (universe : t list) state c query :
@@ -1534,9 +1534,9 @@ end = struct
           && member query (step c state)
           then has_letter c (alphabet universe) else true} =
       let refine_ r = step_pick state c query in
-      let refine_ proof = powerset_member universe state r in
-      let refine_ proof = partial_letter r c query in
-      let refine_ proof = alphabet_member universe r c in
+      powerset_member universe state r;
+      partial_letter r c query;
+      alphabet_member universe r c;
       let u = () in refine_ u
 
     type row = (int * t list) list
@@ -1559,14 +1559,14 @@ end = struct
           @ immutable contended =
       fun universe state labels c ->
       let row = build_row universe state labels in
-      let refine_ equation = build_row_def universe state labels in
-      let refine_ equation = transition_def row c in
-      let refine_ equation = has_letter_def c labels in
+      build_row_def universe state labels;
+      transition_def row c;
+      has_letter_def c labels;
       let u = () in
       match labels with
       | [] -> refine_ u
       | _ :: rest ->
-        let refine_ induction = build_row_correct universe state rest c in
+        build_row_correct universe state rest c;
         refine_ u
 
     let rec (powerset_empty @ total) : (universe : t list) ->
@@ -1574,18 +1574,18 @@ end = struct
       fun universe ->
       let states = powerset universe in
       let nil = [] in
-      let refine_ equation = powerset_def universe in
+      powerset_def universe;
       let u = () in
       match universe with
       | [] ->
-        let refine_ equation = has_state_def nil states in
-        let refine_ proof = same_state_correct nil nil in
+        has_state_def nil states;
+        same_state_correct nil nil;
         refine_ u
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
-        let refine_ proof = combine_has smaller extended nil in
-        let refine_ induction = powerset_empty rest in
+        combine_has smaller extended nil;
+        powerset_empty rest;
         refine_ u
 
     let (row_closed @ total) (root @ total) (state : t list) c :
@@ -1596,13 +1596,13 @@ end = struct
       let universe = root :: support root in
       let labels = alphabet universe in
       let next = step c state in
-      let refine_ proof = build_row_correct universe state labels c in
-      let refine_ proof = powerset_cover universe next in
+      build_row_correct universe state labels c;
+      powerset_cover universe next;
       let u = () in
       if has_letter c labels then refine_ u
       else
-        let refine_ proof = powerset_empty universe in
-        refine_ u
+        (powerset_empty universe;
+        refine_ u)
 
     let (row_correct @ total) (root @ total) (state : t list) c s :
         {u : unit | if has_state state (powerset (root :: support root)) then
@@ -1613,16 +1613,16 @@ end = struct
       let labels = alphabet universe in
       let next = step c state in
       let nil = [] in
-      let refine_ proof = build_row_correct universe state labels c in
-      let refine_ proof = next_correct root state c s in
+      build_row_correct universe state labels c;
+      next_correct root state c s;
       let u = () in
       if has_letter c labels then refine_ u
       else
-        let refine_ proof = step_correct state c s in
+        (step_correct state c s;
         let refine_ query = accepts_pick next s in
-        let refine_ proof = step_letter universe state c query in
-        let refine_ equation = accepts_def nil s in
-        refine_ u
+        step_letter universe state c query;
+        accepts_def nil s;
+        refine_ u)
 
     type table = (t list * bool * row) list
     type automaton = t list * table
@@ -1653,15 +1653,15 @@ end = struct
           @ immutable contended =
       fun universe states state ->
       let table = build_table universe states in
-      let refine_ equation = build_table_def universe states in
-      let refine_ equation = final_def table state in
-      let refine_ equation = has_state_def state states in
+      build_table_def universe states;
+      final_def table state;
+      has_state_def state states;
       let u = () in
       match states with
       | [] -> refine_ u
       | head :: rest ->
-        let refine_ proof = same_state_correct state head in
-        let refine_ induction = table_final universe rest state in
+        same_state_correct state head;
+        table_final universe rest state;
         refine_ u
 
     let rec (table_advance @ total) :
@@ -1672,15 +1672,15 @@ end = struct
           @ immutable contended =
       fun universe states state c ->
       let table = build_table universe states in
-      let refine_ equation = build_table_def universe states in
-      let refine_ equation = advance_def table state c in
-      let refine_ equation = has_state_def state states in
+      build_table_def universe states;
+      advance_def table state c;
+      has_state_def state states;
       let u = () in
       match states with
       | [] -> refine_ u
       | head :: rest ->
-        let refine_ proof = same_state_correct state head in
-        let refine_ induction = table_advance universe rest state c in
+        same_state_correct state head;
+        table_advance universe rest state c;
         refine_ u
 
     let[@def] rec execute (table : table) state (s : int list) =
@@ -1698,18 +1698,18 @@ end = struct
       let universe = root :: support root in
       let states = powerset universe in
       let table = build_table universe states in
-      let refine_ equation = execute_def table state s in
+      execute_def table state s;
       let u = () in
       match s with
       | [] ->
-        let refine_ proof = table_final universe states state in
+        table_final universe states state;
         refine_ u
       | c :: rest ->
         let target = advance table state c in
-        let refine_ proof = table_advance universe states state c in
-        let refine_ proof = row_closed root state c in
-        let refine_ proof = row_correct root state c rest in
-        let refine_ induction = execute_correct root rest target in
+        table_advance universe states state c;
+        row_closed root state c;
+        row_correct root state c rest;
+        execute_correct root rest target;
         refine_ u
 
     let[@def] compile root : automaton =
@@ -1728,29 +1728,29 @@ end = struct
       let initial = [root] in
       let nil = [] in
       let dfa = compile root in
-      let refine_ equation = compile_def root in
-      let refine_ equation = run_def dfa s in
-      let refine_ equation = powerset_def universe in
-      let refine_ proof = combine_has smaller extended initial in
-      let refine_ proof = prepend_has root smaller initial in
-      let refine_ proof = powerset_empty residuals in
-      let refine_ proof = execute_correct root s initial in
-      let refine_ equation = accepts_def initial s in
-      let refine_ equation = accepts_def nil s in
+      compile_def root;
+      run_def dfa s;
+      powerset_def universe;
+      combine_has smaller extended initial;
+      prepend_has root smaller initial;
+      powerset_empty residuals;
+      execute_correct root s initial;
+      accepts_def initial s;
+      accepts_def nil s;
       let u = () in refine_ u
 
     let (sound @ total) (root @ total) (s : int list) :
         {p : evidence | if run (compile root) s then valid root p && word p === s
           else true} =
-      let refine_ proof = correct root s in
+      correct root s;
       let refine_ p = sound root s in
       refine_ p
 
     let (complete @ total) (root @ total) (s : int list) (p : evidence) :
         {u : unit | if valid root p && word p === s then run (compile root) s
           else true} =
-      let refine_ proof = correct root s in
-      let refine_ proof = complete root s p in
+      correct root s;
+      complete root s p;
       let u = () in refine_ u
 
   end
@@ -1842,6 +1842,34 @@ module Regex :
   end
 |}]
 
+module Dfa_client = struct
+  let (verified @ total) (r @ total) (s : int list) :
+      {result : bool | result === Regex.matches r s} =
+    let dfa = Regex.Dfa.compile r in
+    let result = Regex.Dfa.run dfa s in
+    ghost_ (Regex.Dfa.correct r s);
+    refine_ result
+end;;
+[%%expect{|
+module Dfa_client :
+  sig
+    val verified :
+      (r : Regex.t) ->
+      (s : int list) -> {result : bool | result === (Regex.matches r s)}
+  end
+|}]
+
+let () =
+  let r = Regex.Star (Regex.Symbol 0) in
+  let yes = [0; 0] in
+  let no = [0; 1] in
+  let refine_ accepted = Dfa_client.verified r yes in
+  let refine_ rejected = Dfa_client.verified r no in
+  assert (accepted && not rejected)
+;;
+[%%expect{|
+|}]
+
 let () =
   let open Regex in
   let open Membership in
@@ -1888,7 +1916,7 @@ let () =
       | None -> assert (not expected)
       | Some p ->
         assert (expected && valid r p && word p = s);
-        let refine_ proof = complete r s p in
+        complete r s p;
         ()) inputs) regexes;
   Format.printf "split-spec agreement: %d regexes x %d words@."
     (List.length regexes) (List.length inputs);
@@ -1901,8 +1929,8 @@ let () =
       Star_step (Alt_left Epsilon_match, Star_empty))) in
   let s = [0] in
   assert (valid r p && word p = s);
-  let refine_ proof = complete r s p in
-  let refine_ proof = Dfa.complete r s p in
+  complete r s p;
+  Dfa.complete r s p;
   let refine_ witness = Dfa.sound r s in
   assert (valid r witness && word witness = s);
   assert (Dfa.run (Dfa.compile r) s);
@@ -1911,8 +1939,8 @@ let () =
   let p = Star_step (Star_empty,
     Star_step (Star_step (Symbol_match 0, Star_empty), Star_empty)) in
   assert (valid r p && word p = s);
-  let refine_ proof = complete r s p in
-  let refine_ proof = Dfa.complete r s p in
+  complete r s p;
+  Dfa.complete r s p;
   let refine_ witness = Dfa.sound r s in
   assert (valid r witness && word witness = s);
   assert (Dfa.run (Dfa.compile r) s);
@@ -2039,7 +2067,7 @@ let reversed_completeness r s p :
     {u : unit |
       if Regex.Membership.valid r p && Regex.Membership.word p === s
       then Regex.matches r s === false else true} =
-  let refine_ proof = Regex.complete r s p in
+  Regex.complete r s p;
   let u = () in
   refine_ u
 ;;
@@ -2054,7 +2082,7 @@ let reversed_dfa_completeness r s p :
     {u : unit |
       if Regex.Membership.valid r p && Regex.Membership.word p === s
       then Regex.Dfa.run (Regex.Dfa.compile r) s === false else true} =
-  let refine_ proof = Regex.Dfa.complete r s p in
+  Regex.Dfa.complete r s p;
   let u = () in
   refine_ u
 ;;

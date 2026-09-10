@@ -110,6 +110,7 @@ type token =
   | GREATERDOT
   | GREATER
   | GLOBAL
+  | GHOST
   | FUNCTOR
   | FUNCTION
   | FUN
@@ -318,6 +319,7 @@ module MenhirInterpreter : sig
     | T_GREATERDOT : unit terminal
     | T_GREATER : unit terminal
     | T_GLOBAL : unit terminal
+    | T_GHOST : unit terminal
     | T_FUNCTOR : unit terminal
     | T_FUNCTION : unit terminal
     | T_FUN : unit terminal

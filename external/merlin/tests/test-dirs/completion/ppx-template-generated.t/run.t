@@ -11,7 +11,7 @@ Function to list all the completion candidates from a module
   >   file="usage.ml"
   > 
   >   echo "let foo = ${module}." > "$file"
-  >   col=$(cat "$file" | wc -c)
+  >   col=$(( $(wc -c < "$file") ))
   > 
   >   $MERLIN single complete-prefix -prefix "${module}." -position "1:$col" -filename usage.ml < usage.ml \
   >     | jq '.value.entries | map({"name":.name, "ppx_template_generated":.ppx_template_generated})'

@@ -79,15 +79,15 @@ module List_proofs = struct
       fun left middle right ->
       let left_middle = append left middle in
       let middle_right = append middle right in
-      let refine_ left_equation = append_def left middle in
-      let refine_ result_equation = append_def left_middle right in
-      let refine_ right_equation = append_def left middle_right in
+      append_def left middle;
+      append_def left_middle right;
+      append_def left middle_right;
       match left with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ induction = append_associative tail middle right in
+        append_associative tail middle right;
         let u = () in
         refine_ u
 
@@ -101,15 +101,15 @@ module List_proofs = struct
           @ immutable contended =
       fun upper left right ->
       let result = append left right in
-      let refine_ append_equation = append_def left right in
-      let refine_ result_bound = all_less_def upper result in
-      let refine_ left_bound = all_less_def upper left in
+      append_def left right;
+      all_less_def upper result;
+      all_less_def upper left;
       match left with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ induction = all_less_append upper tail right in
+        all_less_append upper tail right;
         let u = () in
         refine_ u
 
@@ -123,15 +123,15 @@ module List_proofs = struct
           @ immutable contended =
       fun lower left right ->
       let result = append left right in
-      let refine_ append_equation = append_def left right in
-      let refine_ result_bound = all_greater_def lower result in
-      let refine_ left_bound = all_greater_def lower left in
+      append_def left right;
+      all_greater_def lower result;
+      all_greater_def lower left;
       match left with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ induction = all_greater_append lower tail right in
+        all_greater_append lower tail right;
         let u = () in
         refine_ u
 
@@ -145,15 +145,15 @@ module List_proofs = struct
           @ immutable contended =
       fun element left right ->
       let appended = append left right in
-      let refine_ append_equation = append_def left right in
-      let refine_ appended_lookup = lookup_repr_def element appended in
-      let refine_ left_lookup = lookup_repr_def element left in
+      append_def left right;
+      lookup_repr_def element appended;
+      lookup_repr_def element left;
       match left with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ induction = lookup_append element tail right in
+        lookup_append element tail right;
         let u = () in
         refine_ u
 
@@ -168,13 +168,13 @@ module List_proofs = struct
       fun element upper xs ->
       let u = () in
       if upper <= element && all_less upper xs then
-        let refine_ bound = all_less_def upper xs in
-        let refine_ lookup = lookup_repr_def element xs in
+        (all_less_def upper xs;
+        lookup_repr_def element xs;
         match xs with
         | Nil -> refine_ u
         | Cons (_, tail) ->
-          let refine_ induction = lookup_above element upper tail in
-          refine_ u
+          lookup_above element upper tail;
+          refine_ u)
       else refine_ u
 
     let rec (lookup_below @ total) :
@@ -188,13 +188,13 @@ module List_proofs = struct
       fun element lower xs ->
       let u = () in
       if element <= lower && all_greater lower xs then
-        let refine_ bound = all_greater_def lower xs in
-        let refine_ lookup = lookup_repr_def element xs in
+        (all_greater_def lower xs;
+        lookup_repr_def element xs;
         match xs with
         | Nil -> refine_ u
         | Cons (_, tail) ->
-          let refine_ induction = lookup_below element lower tail in
-          refine_ u
+          lookup_below element lower tail;
+          refine_ u)
       else refine_ u
 
     let rec (add_left @ total) :
@@ -214,14 +214,14 @@ module List_proofs = struct
         let suffix = Cons (pivot, right) in
         let whole = append left suffix in
         let added_left = add_repr element left in
-        let refine_ whole_equation = append_def left suffix in
-        let refine_ whole_add = add_repr_def element whole in
-        let refine_ left_add = add_repr_def element left in
-        let refine_ result_equation = append_def added_left suffix in
+        append_def left suffix;
+        add_repr_def element whole;
+        add_repr_def element left;
+        append_def added_left suffix;
         match left with
         | Nil -> refine_ u
         | Cons (_, tail) ->
-          let refine_ induction = add_left element tail pivot right in
+          add_left element tail pivot right;
           refine_ u
       else refine_ u
 
@@ -243,16 +243,16 @@ module List_proofs = struct
         let whole = append left suffix in
         let added_right = add_repr element right in
         let result_suffix = Cons (pivot, added_right) in
-        let refine_ bound_equation = all_less_def pivot left in
-        let refine_ whole_equation = append_def left suffix in
-        let refine_ whole_add = add_repr_def element whole in
-        let refine_ result_equation = append_def left result_suffix in
+        all_less_def pivot left;
+        append_def left suffix;
+        add_repr_def element whole;
+        append_def left result_suffix;
         match left with
         | Nil ->
-          let refine_ right_add = add_repr_def element right in
+          add_repr_def element right;
           refine_ u
         | Cons (_, tail) ->
-          let refine_ induction = add_right element tail pivot right in
+          add_right element tail pivot right;
           refine_ u
       else refine_ u
 
@@ -271,13 +271,13 @@ module List_proofs = struct
       if all_less pivot left then
         let suffix = Cons (pivot, right) in
         let whole = append left suffix in
-        let refine_ bound_equation = all_less_def pivot left in
-        let refine_ whole_equation = append_def left suffix in
-        let refine_ add_equation = add_repr_def pivot whole in
+        all_less_def pivot left;
+        append_def left suffix;
+        add_repr_def pivot whole;
         match left with
         | Nil -> refine_ u
         | Cons (_, tail) ->
-          let refine_ induction = add_at_pivot tail pivot right in
+          add_at_pivot tail pivot right;
           refine_ u
       else refine_ u
 
@@ -294,12 +294,12 @@ module List_proofs = struct
       if lower < middle && all_greater middle xs then
         match xs with
         | Nil ->
-          let refine_ lower_equation = all_greater_def lower xs in
+          all_greater_def lower xs;
           refine_ u
         | Cons (_, tail) ->
-          let refine_ middle_equation = all_greater_def middle xs in
-          let refine_ lower_equation = all_greater_def lower xs in
-          let refine_ induction = all_greater_transitive lower middle tail in
+          all_greater_def middle xs;
+          all_greater_def lower xs;
+          all_greater_transitive lower middle tail;
           refine_ u
       else refine_ u
 
@@ -319,22 +319,20 @@ module List_proofs = struct
       then
         let suffix = Cons (pivot, right) in
         let result = append left suffix in
-        let refine_ result_equation = append_def left suffix in
+        append_def left suffix;
         match left with
         | Nil ->
-          let refine_ result_valid = valid_def result in
-          let refine_ suffix_valid = valid_def suffix in
+          valid_def result;
+          valid_def suffix;
           refine_ u
         | Cons (head, tail) ->
-          let refine_ left_valid = valid_def left in
-          let refine_ left_bound = all_less_def pivot left in
-          let refine_ tail_valid = valid_append_pivot tail pivot right in
-          let refine_ result_valid = valid_def result in
-          let refine_ tail_greater = all_greater_append head tail suffix in
-          let refine_ right_transitive =
-            all_greater_transitive head pivot right
-          in
-          let refine_ suffix_greater = all_greater_def head suffix in
+          valid_def left;
+          all_less_def pivot left;
+          valid_append_pivot tail pivot right;
+          valid_def result;
+          all_greater_append head tail suffix;
+          all_greater_transitive head pivot right;
+          all_greater_def head suffix;
           refine_ u
       else refine_ u
 
@@ -348,15 +346,15 @@ module List_proofs = struct
           @ immutable contended =
       fun element added xs ->
       let result = add_repr added xs in
-      let refine_ add_equation = add_repr_def added xs in
-      let refine_ result_equation = lookup_repr_def element result in
-      let refine_ input_equation = lookup_repr_def element xs in
+      add_repr_def added xs;
+      lookup_repr_def element result;
+      lookup_repr_def element xs;
       match xs with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ induction = lookup_add_repr element added tail in
+        lookup_add_repr element added tail;
         let u = () in
         refine_ u
 
@@ -370,17 +368,17 @@ module List_proofs = struct
           @ immutable contended =
       fun element left right ->
       let result = union_repr left right in
-      let refine_ union_equation = union_repr_def left right in
-      let refine_ result_equation = lookup_repr_def element result in
-      let refine_ left_equation = lookup_repr_def element left in
+      union_repr_def left right;
+      lookup_repr_def element result;
+      lookup_repr_def element left;
       match left with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (head, tail) ->
         let added = add_repr head right in
-        let refine_ added_equation = lookup_add_repr element head right in
-        let refine_ induction = lookup_union_repr element tail added in
+        lookup_add_repr element head right;
+        lookup_union_repr element tail added;
         let u = () in
         refine_ u
 
@@ -388,13 +386,13 @@ module List_proofs = struct
         (xs : repr) ->
         {u : unit | same_repr xs xs === true} @ immutable contended =
       fun xs ->
-      let refine_ equation = same_repr_def xs xs in
+      same_repr_def xs xs;
       match xs with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ induction = same_repr_reflexive tail in
+        same_repr_reflexive tail;
         let u = () in
         refine_ u
 
@@ -407,28 +405,28 @@ module List_proofs = struct
       fun left right ->
       let u = () in
       if same_repr left right then
-        let refine_ equation = same_repr_def left right in
+        (same_repr_def left right;
         match left with
         | Nil -> refine_ u
         | Cons (_, left_tail) ->
           match right with
           | Nil -> refine_ u
           | Cons (_, right_tail) ->
-            let refine_ induction = same_repr_equal left_tail right_tail in
-            refine_ u
+            same_repr_equal left_tail right_tail;
+            refine_ u)
       else refine_ u
 
     let rec (size_nonnegative @ total) :
         (xs : repr) ->
         {u : unit | size_repr xs >= 0Z} @ immutable contended =
       fun xs ->
-      let refine_ equation = size_repr_def xs in
+      size_repr_def xs;
       match xs with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ induction = size_nonnegative tail in
+        size_nonnegative tail;
         let u = () in
         refine_ u
 
@@ -439,14 +437,14 @@ module List_proofs = struct
           @ immutable contended =
       fun xs ->
       let nil = Nil in
-      let refine_ size_equation = size_repr_def xs in
-      let refine_ equal_equation = same_repr_def xs nil in
+      size_repr_def xs;
+      same_repr_def xs nil;
       match xs with
       | Nil ->
         let u = () in
         refine_ u
       | Cons (_, tail) ->
-        let refine_ nonnegative = size_nonnegative tail in
+        size_nonnegative tail;
         let u = () in
         refine_ u
 
@@ -463,41 +461,37 @@ module List_proofs = struct
       fun left right premise ->
       let u = () in
       if valid left && valid right then
-        let refine_ left_valid = valid_def left in
-        let refine_ right_valid = valid_def right in
+        (valid_def left;
+        valid_def right;
         match left with
         | Nil ->
           (match right with
            | Nil -> refine_ u
            | Cons (right_head, _) ->
              let refine_ same_lookup = premise right_head in
-             let refine_ left_lookup = lookup_repr_def right_head left in
-             let refine_ right_lookup = lookup_repr_def right_head right in
+             lookup_repr_def right_head left;
+             lookup_repr_def right_head right;
              refine_ u)
         | Cons (left_head, left_tail) ->
           match right with
           | Nil ->
             let refine_ same_lookup = premise left_head in
-            let refine_ left_lookup = lookup_repr_def left_head left in
-            let refine_ right_lookup = lookup_repr_def left_head right in
+            lookup_repr_def left_head left;
+            lookup_repr_def left_head right;
             refine_ u
           | Cons (right_head, right_tail) ->
             let refine_ left_lookup = premise left_head in
             let refine_ right_lookup = premise right_head in
-            let refine_ left_at_left = lookup_repr_def left_head left in
-            let refine_ right_at_left = lookup_repr_def left_head right in
-            let refine_ left_at_right = lookup_repr_def right_head left in
-            let refine_ right_at_right = lookup_repr_def right_head right in
+            lookup_repr_def left_head left;
+            lookup_repr_def left_head right;
+            lookup_repr_def right_head left;
+            lookup_repr_def right_head right;
             if left_head < right_head then
-              let refine_ absent =
-                lookup_below left_head right_head right_tail
-              in
-              refine_ u
+              (lookup_below left_head right_head right_tail;
+              refine_ u)
             else if right_head < left_head then
-              let refine_ absent =
-                lookup_below right_head left_head left_tail
-              in
-              refine_ u
+              (lookup_below right_head left_head left_tail;
+              refine_ u)
             else
               let (tail_premise @ total) :
                   (element : int) ->
@@ -506,22 +500,16 @@ module List_proofs = struct
                     === lookup_repr element right_tail} =
                 fun element ->
                 let refine_ same_lookup = premise element in
-                let refine_ left_equation = lookup_repr_def element left in
-                let refine_ right_equation = lookup_repr_def element right in
+                lookup_repr_def element left;
+                lookup_repr_def element right;
                 if element = left_head then
-                  let refine_ left_absent =
-                    lookup_below element left_head left_tail
-                  in
-                  let refine_ right_absent =
-                    lookup_below element right_head right_tail
-                  in
-                  refine_ u
+                  (lookup_below element left_head left_tail;
+                  lookup_below element right_head right_tail;
+                  refine_ u)
                 else refine_ u
               in
-              let refine_ tails_equal =
-                extensional_repr left_tail right_tail tail_premise
-              in
-              refine_ u
+              extensional_repr left_tail right_tail tail_premise;
+              refine_ u)
       else refine_ u
 end
 
@@ -712,10 +700,10 @@ module Validity_proofs : sig
            && Bigint.compare left_right (Bigint.add left_left 1Z) <= 0
            && Bigint.compare left_left left_right >= 0
         then
-          let refine_ left_maximum = maximum_def left_left left_right in
-          let refine_ right_maximum = maximum_def left_right right in
-          let refine_ result_maximum = maximum_def left_left new_right in
-          refine_ u
+          (maximum_def left_left left_right;
+          maximum_def left_right right;
+          maximum_def left_left new_right;
+          refine_ u)
         else refine_ u
 
       let (right_rotation_heights @ total) :
@@ -748,10 +736,10 @@ module Validity_proofs : sig
            && Bigint.compare right_right (Bigint.add right_left 1Z) <= 0
            && Bigint.compare right_right right_left >= 0
         then
-          let refine_ right_maximum = maximum_def right_left right_right in
-          let refine_ left_maximum = maximum_def left right_left in
-          let refine_ result_maximum = maximum_def new_left right_right in
-          refine_ u
+          (maximum_def right_left right_right;
+          maximum_def left right_left;
+          maximum_def new_left right_right;
+          refine_ u)
         else refine_ u
 
       let (left_right_heights @ total) :
@@ -801,14 +789,12 @@ module Validity_proofs : sig
            && Bigint.compare middle_left (Bigint.add middle_right 1Z) <= 0
            && Bigint.compare middle_right (Bigint.add middle_left 1Z) <= 0
         then
-          let refine_ left_maximum = maximum_def left_left middle in
-          let refine_ middle_maximum =
-            maximum_def middle_left middle_right
-          in
-          let refine_ new_left_maximum = maximum_def left_left middle_left in
-          let refine_ new_right_maximum = maximum_def middle_right right in
-          let refine_ result_maximum = maximum_def new_left new_right in
-          refine_ u
+          (maximum_def left_left middle;
+          maximum_def middle_left middle_right;
+          maximum_def left_left middle_left;
+          maximum_def middle_right right;
+          maximum_def new_left new_right;
+          refine_ u)
         else refine_ u
 
       let (right_left_heights @ total) :
@@ -862,16 +848,12 @@ module Validity_proofs : sig
            && Bigint.compare middle_left (Bigint.add middle_right 1Z) <= 0
            && Bigint.compare middle_right (Bigint.add middle_left 1Z) <= 0
         then
-          let refine_ right_maximum = maximum_def middle right_right in
-          let refine_ middle_maximum =
-            maximum_def middle_left middle_right
-          in
-          let refine_ new_left_maximum = maximum_def left middle_left in
-          let refine_ new_right_maximum =
-            maximum_def middle_right right_right
-          in
-          let refine_ result_maximum = maximum_def new_left new_right in
-          refine_ u
+          (maximum_def middle right_right;
+          maximum_def middle_left middle_right;
+          maximum_def left middle_left;
+          maximum_def middle_right right_right;
+          maximum_def new_left new_right;
+          refine_ u)
         else refine_ u
 
       let rec (all_less_weaken @ total) :
@@ -885,14 +867,14 @@ module Validity_proofs : sig
         fun lower upper tree ->
         let u = () in
         if lower < upper && all_less lower tree then
-          let refine_ lower_bound = all_less_def lower tree in
-          let refine_ upper_bound = all_less_def upper tree in
+          (all_less_def lower tree;
+          all_less_def upper tree;
           match tree with
           | Empty -> refine_ u
           | Node (left, _, right, _) ->
-            let refine_ left_induction = all_less_weaken lower upper left in
-            let refine_ right_induction = all_less_weaken lower upper right in
-            refine_ u
+            all_less_weaken lower upper left;
+            all_less_weaken lower upper right;
+            refine_ u)
         else refine_ u
 
       let rec (all_greater_weaken @ total) :
@@ -906,14 +888,14 @@ module Validity_proofs : sig
         fun lower upper tree ->
         let u = () in
         if lower < upper && all_greater upper tree then
-          let refine_ upper_bound = all_greater_def upper tree in
-          let refine_ lower_bound = all_greater_def lower tree in
+          (all_greater_def upper tree;
+          all_greater_def lower tree;
           match tree with
           | Empty -> refine_ u
           | Node (left, _, right, _) ->
-            let refine_ left_induction = all_greater_weaken lower upper left in
-            let refine_ right_induction = all_greater_weaken lower upper right in
-            refine_ u
+            all_greater_weaken lower upper left;
+            all_greater_weaken lower upper right;
+            refine_ u)
         else refine_ u
 
       let (make_node_all_less @ total) :
@@ -931,9 +913,9 @@ module Validity_proofs : sig
         let result = make_node left value right in
         let u = () in
         if value < upper && all_less upper left && all_less upper right then
-          let refine_ construction = make_node_def left value right in
-          let refine_ result_bound = all_less_def upper result in
-          refine_ u
+          (make_node_def left value right;
+          all_less_def upper result;
+          refine_ u)
         else refine_ u
 
       let (make_node_all_greater @ total) :
@@ -954,9 +936,9 @@ module Validity_proofs : sig
            && all_greater lower left
            && all_greater lower right
         then
-          let refine_ construction = make_node_def left value right in
-          let refine_ result_bound = all_greater_def lower result in
-          refine_ u
+          (make_node_def left value right;
+          all_greater_def lower result;
+          refine_ u)
         else refine_ u
 
       let (make_node_height @ total) :
@@ -969,8 +951,8 @@ module Validity_proofs : sig
           @ immutable contended =
       fun left value right ->
       let result = make_node left value right in
-      let refine_ construction = make_node_def left value right in
-      let refine_ result_height = height_def result in
+      make_node_def left value right;
+      height_def result;
       let u = () in
       refine_ u
 
@@ -983,17 +965,17 @@ module Validity_proofs : sig
         fun tree ->
         let u = () in
         if valid tree then
-          let refine_ invariant = valid_def tree in
-          let refine_ tree_height = height_def tree in
+          (valid_def tree;
+          height_def tree;
           match tree with
           | Empty -> refine_ u
           | Node (left, _, right, _) ->
             let left_height = height left in
             let right_height = height right in
-            let refine_ left_induction = height_nonnegative left in
-            let refine_ right_induction = height_nonnegative right in
-            let refine_ height_maximum = maximum_def left_height right_height in
-            refine_ u
+            height_nonnegative left;
+            height_nonnegative right;
+            maximum_def left_height right_height;
+            refine_ u)
         else refine_ u
 
     let (make_node_valid @ total) :
@@ -1023,10 +1005,10 @@ module Validity_proofs : sig
          && valid left
          && valid right
       then
-        let refine_ construction = make_node_def left value right in
-        let refine_ result_height = make_node_height left value right in
-        let refine_ invariant = valid_def result in
-        refine_ u
+        (make_node_def left value right;
+        make_node_height left value right;
+        valid_def result;
+        refine_ u)
       else refine_ u
 
       let (make_left_child @ total) :
@@ -1066,10 +1048,10 @@ module Validity_proofs : sig
            && Bigint.compare (height left) (Bigint.add (height right) 1Z) <= 0
            && Bigint.compare (height right) (Bigint.add (height left) 1Z) <= 0
         then
-          let refine_ result_bound = make_node_all_less upper left value right in
-          let refine_ result_invariant = make_node_valid left value right in
-          let refine_ result_height = make_node_height left value right in
-          refine_ u
+          (make_node_all_less upper left value right;
+          make_node_valid left value right;
+          make_node_height left value right;
+          refine_ u)
         else refine_ u
 
     let (make_right_child @ total) :
@@ -1107,13 +1089,11 @@ module Validity_proofs : sig
          && Bigint.compare (height left) (Bigint.add (height right) 1Z) <= 0
          && Bigint.compare (height right) (Bigint.add (height left) 1Z) <= 0
       then
-        let refine_ weakened_right = all_greater_weaken lower value right in
-        let refine_ result_bound =
-          make_node_all_greater lower left value right
-        in
-        let refine_ result_invariant = make_node_valid left value right in
-        let refine_ result_height = make_node_height left value right in
-        refine_ u
+        (all_greater_weaken lower value right;
+        make_node_all_greater lower left value right;
+        make_node_valid left value right;
+        make_node_height left value right;
+        refine_ u)
       else refine_ u
 
     let (rotate_right_valid @ total) :
@@ -1155,20 +1135,14 @@ module Validity_proofs : sig
          && height left = Bigint.add (height right) 2Z
          && Bigint.compare (height left_left) (height left_right) >= 0
       then
-        let refine_ left_invariant = valid_def left in
-        let refine_ left_bound = all_less_def value left in
-        let refine_ left_height_equation = height_def left in
-        let refine_ height_facts =
-          left_rotation_heights left_left_height left_right_height
-            right_height left_height
-        in
-        let refine_ new_right_properties =
-          make_right_child left_value left_right value right
-        in
-        let refine_ result_invariant =
-          make_node_valid left_left left_value new_right
-        in
-        refine_ u
+        (valid_def left;
+        all_less_def value left;
+        height_def left;
+        left_rotation_heights left_left_height left_right_height
+            right_height left_height;
+        make_right_child left_value left_right value right;
+        make_node_valid left_left left_value new_right;
+        refine_ u)
       else refine_ u
 
     let (rotate_left_valid @ total) :
@@ -1210,23 +1184,15 @@ module Validity_proofs : sig
          && height right = Bigint.add (height left) 2Z
          && Bigint.compare (height right_right) (height right_left) >= 0
       then
-        let refine_ right_invariant = valid_def right in
-        let refine_ right_bound = all_greater_def value right in
-        let refine_ right_height_equation = height_def right in
-        let refine_ height_facts =
-          right_rotation_heights right_left_height right_right_height
-            left_height right_height
-        in
-        let refine_ weakened_left =
-          all_less_weaken value right_value left
-        in
-        let refine_ new_left_properties =
-          make_left_child right_value left value right_left
-        in
-        let refine_ result_invariant =
-          make_node_valid new_left right_value right_right
-        in
-        refine_ u
+        (valid_def right;
+        all_greater_def value right;
+        height_def right;
+        right_rotation_heights right_left_height right_right_height
+            left_height right_height;
+        all_less_weaken value right_value left;
+        make_left_child right_value left value right_left;
+        make_node_valid new_left right_value right_right;
+        refine_ u)
       else refine_ u
 
     let (rotate_left_right_valid @ total) :
@@ -1281,34 +1247,24 @@ module Validity_proofs : sig
          && height left = Bigint.add (height right) 2Z
          && Bigint.compare (height left_left) (height middle) < 0
       then
-        let refine_ left_invariant = valid_def left in
-        let refine_ middle_invariant = valid_def middle in
-        let refine_ left_bound = all_less_def value left in
-        let refine_ middle_bound = all_less_def value middle in
-        let refine_ middle_lower_bound = all_greater_def left_value middle in
-        let refine_ left_height_equation = height_def left in
-        let refine_ middle_height_equation = height_def middle in
-        let refine_ left_left_nonnegative = height_nonnegative left_left in
-        let refine_ middle_left_nonnegative = height_nonnegative middle_left in
-        let refine_ middle_right_nonnegative = height_nonnegative middle_right in
-        let refine_ right_nonnegative = height_nonnegative right in
-        let refine_ height_facts =
-          left_right_heights left_left_height middle_left_height
-            middle_right_height right_height middle_height left_height
-        in
-        let refine_ weakened_left =
-          all_less_weaken left_value middle_value left_left
-        in
-        let refine_ new_left_properties =
-          make_left_child middle_value left_left left_value middle_left
-        in
-        let refine_ new_right_properties =
-          make_right_child middle_value middle_right value right
-        in
-        let refine_ result_invariant =
-          make_node_valid new_left middle_value new_right
-        in
-        refine_ u
+        (valid_def left;
+        valid_def middle;
+        all_less_def value left;
+        all_less_def value middle;
+        all_greater_def left_value middle;
+        height_def left;
+        height_def middle;
+        height_nonnegative left_left;
+        height_nonnegative middle_left;
+        height_nonnegative middle_right;
+        height_nonnegative right;
+        left_right_heights left_left_height middle_left_height
+            middle_right_height right_height middle_height left_height;
+        all_less_weaken left_value middle_value left_left;
+        make_left_child middle_value left_left left_value middle_left;
+        make_right_child middle_value middle_right value right;
+        make_node_valid new_left middle_value new_right;
+        refine_ u)
       else refine_ u
 
     let (rotate_right_left_valid @ total) :
@@ -1364,37 +1320,25 @@ module Validity_proofs : sig
          && height right = Bigint.add (height left) 2Z
          && Bigint.compare (height right_right) (height middle) < 0
       then
-        let refine_ right_invariant = valid_def right in
-        let refine_ middle_invariant = valid_def middle in
-        let refine_ right_bound = all_greater_def value right in
-        let refine_ middle_bound = all_greater_def value middle in
-        let refine_ middle_upper_bound = all_less_def right_value middle in
-        let refine_ right_height_equation = height_def right in
-        let refine_ middle_height_equation = height_def middle in
-        let refine_ left_nonnegative = height_nonnegative left in
-        let refine_ middle_left_nonnegative = height_nonnegative middle_left in
-        let refine_ middle_right_nonnegative = height_nonnegative middle_right in
-        let refine_ right_right_nonnegative = height_nonnegative right_right in
-        let refine_ height_facts =
-          right_left_heights left_height middle_left_height
-            middle_right_height right_right_height middle_height right_height
-        in
-        let refine_ weakened_left =
-          all_less_weaken value middle_value left
-        in
-        let refine_ weakened_right =
-          all_greater_weaken middle_value right_value right_right
-        in
-        let refine_ new_left_properties =
-          make_left_child middle_value left value middle_left
-        in
-        let refine_ new_right_properties =
-          make_right_child middle_value middle_right right_value right_right
-        in
-        let refine_ result_invariant =
-          make_node_valid new_left middle_value new_right
-        in
-        refine_ u
+        (valid_def right;
+        valid_def middle;
+        all_greater_def value right;
+        all_greater_def value middle;
+        all_less_def right_value middle;
+        height_def right;
+        height_def middle;
+        height_nonnegative left;
+        height_nonnegative middle_left;
+        height_nonnegative middle_right;
+        height_nonnegative right_right;
+        right_left_heights left_height middle_left_height
+            middle_right_height right_right_height middle_height right_height;
+        all_less_weaken value middle_value left;
+        all_greater_weaken middle_value right_value right_right;
+        make_left_child middle_value left value middle_left;
+        make_right_child middle_value middle_right right_value right_right;
+        make_node_valid new_left middle_value new_right;
+        refine_ u)
       else refine_ u
 
     let (balance_valid @ total) :
@@ -1425,79 +1369,67 @@ module Validity_proofs : sig
          && Bigint.compare left_height (Bigint.add right_height 2Z) <= 0
          && Bigint.compare right_height (Bigint.add left_height 2Z) <= 0
       then
-        let refine_ balance_equation = balance_def left value right in
-        let refine_ left_nonnegative = height_nonnegative left in
-        let refine_ right_nonnegative = height_nonnegative right in
+        (balance_def left value right;
+        height_nonnegative left;
+        height_nonnegative right;
         if Bigint.compare left_height (Bigint.add right_height 1Z) > 0 then
           match left with
           | Empty ->
-            let refine_ empty_height = height_def left in
+            height_def left;
             refine_ u
           | Node (left_left, left_value, left_right, cached_height) ->
             if Bigint.compare (height left_left) (height left_right) >= 0
             then
-              let refine_ rotation =
-                rotate_right_valid left_left left_value left_right
-                  cached_height value right
-              in
-              refine_ u
+              (rotate_right_valid left_left left_value left_right
+                  cached_height value right;
+              refine_ u)
             else
               match left_right with
               | Empty ->
-                let refine_ left_invariant = valid_def left in
-                let refine_ left_left_nonnegative =
-                  height_nonnegative left_left
-                in
-                let refine_ empty_height = height_def left_right in
+                valid_def left;
+                height_nonnegative left_left;
+                height_def left_right;
                 refine_ u
               | Node
                   ( middle_left,
                     middle_value,
                     middle_right,
                     middle_cached_height ) ->
-                let refine_ rotation =
-                  rotate_left_right_valid left_left left_value middle_left
+                rotate_left_right_valid left_left left_value middle_left
                     middle_value middle_right middle_cached_height
-                    cached_height value right
-                in
+                    cached_height value right;
                 refine_ u
         else if Bigint.compare right_height (Bigint.add left_height 1Z) > 0
         then
           match right with
           | Empty ->
-            let refine_ empty_height = height_def right in
+            height_def right;
             refine_ u
           | Node (right_left, right_value, right_right, cached_height) ->
             if Bigint.compare (height right_right) (height right_left) >= 0
             then
-              let refine_ rotation =
-                rotate_left_valid left value right_left right_value right_right
-                  cached_height
-              in
-              refine_ u
+              (rotate_left_valid left value right_left right_value right_right
+                  cached_height;
+              refine_ u)
             else
               match right_left with
               | Empty ->
-                let refine_ right_invariant = valid_def right in
-                let refine_ right_right_nonnegative =
-                  height_nonnegative right_right
-                in
-                let refine_ empty_height = height_def right_left in
+                valid_def right;
+                height_nonnegative right_right;
+                height_def right_left;
                 refine_ u
               | Node
                   ( middle_left,
                     middle_value,
                     middle_right,
                     middle_cached_height ) ->
-                let refine_ rotation =
-                  rotate_right_left_valid left value middle_left middle_value
+                rotate_right_left_valid left value middle_left middle_value
                     middle_right middle_cached_height right_value right_right
-                    cached_height
-                in
+                    cached_height;
                 refine_ u
         else
-          let refine_ construction = make_node_valid left value right in
-          refine_ u
+          (make_node_valid left value right;
+          refine_ u))
       else refine_ u
 
     let (balance_left_height @ total) :
@@ -1535,69 +1467,53 @@ module Validity_proofs : sig
          && Bigint.compare old_left_height (Bigint.add right_height 1Z) <= 0
          && Bigint.compare right_height (Bigint.add old_left_height 1Z) <= 0
       then
-        let refine_ balance_equation = balance_def left value right in
-        let refine_ old_maximum = maximum_def old_left_height right_height in
-        let refine_ left_nonnegative = height_nonnegative left in
-        let refine_ right_nonnegative = height_nonnegative right in
+        (balance_def left value right;
+        maximum_def old_left_height right_height;
+        height_nonnegative left;
+        height_nonnegative right;
         if Bigint.compare left_height (Bigint.add right_height 1Z) > 0 then
           match left with
           | Empty ->
-            let refine_ empty_height = height_def left in
+            height_def left;
             refine_ u
           | Node (left_left, left_value, left_right, _) ->
             let left_left_height = height left_left in
             let left_right_height = height left_right in
-            let refine_ left_invariant = valid_def left in
-            let refine_ left_height_equation = height_def left in
+            valid_def left;
+            height_def left;
             if Bigint.compare left_left_height left_right_height >= 0 then
               let new_right = make_node left_right value right in
-              let refine_ height_facts =
-                left_rotation_heights left_left_height left_right_height
-                  right_height left_height
-              in
-              let refine_ new_right_height =
-                make_node_height left_right value right
-              in
-              let refine_ result_height =
-                make_node_height left_left left_value new_right
-              in
+              left_rotation_heights left_left_height left_right_height
+                  right_height left_height;
+              make_node_height left_right value right;
+              make_node_height left_left left_value new_right;
               refine_ u
             else
               match left_right with
               | Empty ->
-                let refine_ empty_height = height_def left_right in
-                let refine_ left_left_nonnegative =
-                  height_nonnegative left_left
-                in
+                height_def left_right;
+                height_nonnegative left_left;
                 refine_ u
               | Node (middle_left, middle_value, middle_right, _) ->
                 let middle_height = height left_right in
                 let middle_left_height = height middle_left in
                 let middle_right_height = height middle_right in
-                let refine_ middle_invariant = valid_def left_right in
-                let refine_ middle_height_equation = height_def left_right in
+                valid_def left_right;
+                height_def left_right;
                 let new_left = make_node left_left left_value middle_left in
                 let new_right = make_node middle_right value right in
-                let refine_ height_facts =
-                  left_right_heights left_left_height middle_left_height
-                    middle_right_height right_height middle_height left_height
-                in
-                let refine_ new_left_height =
-                  make_node_height left_left left_value middle_left
-                in
-                let refine_ new_right_height =
-                  make_node_height middle_right value right
-                in
-                let refine_ result_height =
-                  make_node_height new_left middle_value new_right
-                in
+                left_right_heights left_left_height middle_left_height
+                    middle_right_height right_height middle_height left_height;
+                make_node_height left_left left_value middle_left;
+                make_node_height middle_right value right;
+                make_node_height new_left middle_value new_right;
                 refine_ u
         else if Bigint.compare right_height (Bigint.add left_height 1Z) > 0
         then refine_ u
         else
-          let refine_ result_height = make_node_height left value right in
-          let refine_ new_maximum = maximum_def left_height right_height in
-          refine_ u
+          (make_node_height left value right;
+          maximum_def left_height right_height;
+          refine_ u))
       else refine_ u
 
     let (balance_right_height @ total) :
@@ -1635,71 +1551,55 @@ module Validity_proofs : sig
          && Bigint.compare left_height (Bigint.add old_right_height 1Z) <= 0
          && Bigint.compare old_right_height (Bigint.add left_height 1Z) <= 0
       then
-        let refine_ balance_equation = balance_def left value right in
-        let refine_ old_maximum = maximum_def left_height old_right_height in
-        let refine_ left_nonnegative = height_nonnegative left in
-        let refine_ right_nonnegative = height_nonnegative right in
+        (balance_def left value right;
+        maximum_def left_height old_right_height;
+        height_nonnegative left;
+        height_nonnegative right;
         if Bigint.compare left_height (Bigint.add right_height 1Z) > 0 then
           refine_ u
         else if Bigint.compare right_height (Bigint.add left_height 1Z) > 0
         then
           match right with
           | Empty ->
-            let refine_ empty_height = height_def right in
+            height_def right;
             refine_ u
           | Node (right_left, right_value, right_right, _) ->
             let right_left_height = height right_left in
             let right_right_height = height right_right in
-            let refine_ right_invariant = valid_def right in
-            let refine_ right_height_equation = height_def right in
+            valid_def right;
+            height_def right;
             if Bigint.compare right_right_height right_left_height >= 0 then
               let new_left = make_node left value right_left in
-              let refine_ height_facts =
-                right_rotation_heights right_left_height right_right_height
-                  left_height right_height
-              in
-              let refine_ new_left_height =
-                make_node_height left value right_left
-              in
-              let refine_ result_height =
-                make_node_height new_left right_value right_right
-              in
+              right_rotation_heights right_left_height right_right_height
+                  left_height right_height;
+              make_node_height left value right_left;
+              make_node_height new_left right_value right_right;
               refine_ u
             else
               match right_left with
               | Empty ->
-                let refine_ empty_height = height_def right_left in
-                let refine_ right_right_nonnegative =
-                  height_nonnegative right_right
-                in
+                height_def right_left;
+                height_nonnegative right_right;
                 refine_ u
               | Node (middle_left, middle_value, middle_right, _) ->
                 let middle_height = height right_left in
                 let middle_left_height = height middle_left in
                 let middle_right_height = height middle_right in
-                let refine_ middle_invariant = valid_def right_left in
-                let refine_ middle_height_equation = height_def right_left in
+                valid_def right_left;
+                height_def right_left;
                 let new_left = make_node left value middle_left in
                 let new_right = make_node middle_right right_value right_right in
-                let refine_ height_facts =
-                  right_left_heights left_height middle_left_height
+                right_left_heights left_height middle_left_height
                     middle_right_height right_right_height middle_height
-                    right_height
-                in
-                let refine_ new_left_height =
-                  make_node_height left value middle_left
-                in
-                let refine_ new_right_height =
-                  make_node_height middle_right right_value right_right
-                in
-                let refine_ result_height =
-                  make_node_height new_left middle_value new_right
-                in
+                    right_height;
+                make_node_height left value middle_left;
+                make_node_height middle_right right_value right_right;
+                make_node_height new_left middle_value new_right;
                 refine_ u
         else
-          let refine_ result_height = make_node_height left value right in
-          let refine_ new_maximum = maximum_def left_height right_height in
-          refine_ u
+          (make_node_height left value right;
+          maximum_def left_height right_height;
+          refine_ u))
       else refine_ u
 
     let (balance_all_less @ total) :
@@ -1716,95 +1616,65 @@ module Validity_proofs : sig
       fun upper left value right ->
       let u = () in
       if value < upper && all_less upper left && all_less upper right then
-        let refine_ balance_equation = balance_def left value right in
+        (balance_def left value right;
         if Bigint.compare (height left) (Bigint.add (height right) 1Z) > 0
         then
           match left with
           | Empty ->
-            let refine_ result_bound =
-              make_node_all_less upper left value right
-            in
+            make_node_all_less upper left value right;
             refine_ u
           | Node (left_left, left_value, left_right, _) ->
-            let refine_ left_bound = all_less_def upper left in
+            all_less_def upper left;
             if Bigint.compare (height left_left) (height left_right) >= 0
             then
               let new_right = make_node left_right value right in
-              let refine_ new_right_bound =
-                make_node_all_less upper left_right value right
-              in
-              let refine_ result_bound =
-                make_node_all_less upper left_left left_value new_right
-              in
+              make_node_all_less upper left_right value right;
+              make_node_all_less upper left_left left_value new_right;
               refine_ u
             else
               match left_right with
               | Empty ->
-                let refine_ result_bound =
-                  make_node_all_less upper left value right
-                in
+                make_node_all_less upper left value right;
                 refine_ u
               | Node (middle_left, middle_value, middle_right, _) ->
-                let refine_ middle_bound = all_less_def upper left_right in
+                all_less_def upper left_right;
                 let new_left = make_node left_left left_value middle_left in
                 let new_right = make_node middle_right value right in
-                let refine_ new_left_bound =
-                  make_node_all_less upper left_left left_value middle_left
-                in
-                let refine_ new_right_bound =
-                  make_node_all_less upper middle_right value right
-                in
-                let refine_ result_bound =
-                  make_node_all_less upper new_left middle_value new_right
-                in
+                make_node_all_less upper left_left left_value middle_left;
+                make_node_all_less upper middle_right value right;
+                make_node_all_less upper new_left middle_value new_right;
                 refine_ u
         else if
           Bigint.compare (height right) (Bigint.add (height left) 1Z) > 0
         then
           match right with
           | Empty ->
-            let refine_ result_bound =
-              make_node_all_less upper left value right
-            in
+            make_node_all_less upper left value right;
             refine_ u
           | Node (right_left, right_value, right_right, _) ->
-            let refine_ right_bound = all_less_def upper right in
+            all_less_def upper right;
             if Bigint.compare (height right_right) (height right_left) >= 0
             then
               let new_left = make_node left value right_left in
-              let refine_ new_left_bound =
-                make_node_all_less upper left value right_left
-              in
-              let refine_ result_bound =
-                make_node_all_less upper new_left right_value right_right
-              in
+              make_node_all_less upper left value right_left;
+              make_node_all_less upper new_left right_value right_right;
               refine_ u
             else
               match right_left with
               | Empty ->
-                let refine_ result_bound =
-                  make_node_all_less upper left value right
-                in
+                make_node_all_less upper left value right;
                 refine_ u
               | Node (middle_left, middle_value, middle_right, _) ->
-                let refine_ middle_bound = all_less_def upper right_left in
+                all_less_def upper right_left;
                 let new_left = make_node left value middle_left in
                 let new_right = make_node middle_right right_value right_right in
-                let refine_ new_left_bound =
-                  make_node_all_less upper left value middle_left
-                in
-                let refine_ new_right_bound =
-                  make_node_all_less upper middle_right right_value right_right
-                in
-                let refine_ result_bound =
-                  make_node_all_less upper new_left middle_value new_right
-                in
+                make_node_all_less upper left value middle_left;
+                make_node_all_less upper middle_right right_value right_right;
+                make_node_all_less upper new_left middle_value new_right;
                 refine_ u
         else
-          let refine_ result_bound =
-            make_node_all_less upper left value right
-          in
-          refine_ u
+          (make_node_all_less upper left value right;
+          refine_ u))
       else refine_ u
 
     let (balance_all_greater @ total) :
@@ -1821,95 +1691,65 @@ module Validity_proofs : sig
       fun lower left value right ->
       let u = () in
       if lower < value && all_greater lower left && all_greater lower right then
-        let refine_ balance_equation = balance_def left value right in
+        (balance_def left value right;
         if Bigint.compare (height left) (Bigint.add (height right) 1Z) > 0
         then
           match left with
           | Empty ->
-            let refine_ result_bound =
-              make_node_all_greater lower left value right
-            in
+            make_node_all_greater lower left value right;
             refine_ u
           | Node (left_left, left_value, left_right, _) ->
-            let refine_ left_bound = all_greater_def lower left in
+            all_greater_def lower left;
             if Bigint.compare (height left_left) (height left_right) >= 0
             then
               let new_right = make_node left_right value right in
-              let refine_ new_right_bound =
-                make_node_all_greater lower left_right value right
-              in
-              let refine_ result_bound =
-                make_node_all_greater lower left_left left_value new_right
-              in
+              make_node_all_greater lower left_right value right;
+              make_node_all_greater lower left_left left_value new_right;
               refine_ u
             else
               match left_right with
               | Empty ->
-                let refine_ result_bound =
-                  make_node_all_greater lower left value right
-                in
+                make_node_all_greater lower left value right;
                 refine_ u
               | Node (middle_left, middle_value, middle_right, _) ->
-                let refine_ middle_bound = all_greater_def lower left_right in
+                all_greater_def lower left_right;
                 let new_left = make_node left_left left_value middle_left in
                 let new_right = make_node middle_right value right in
-                let refine_ new_left_bound =
-                  make_node_all_greater lower left_left left_value middle_left
-                in
-                let refine_ new_right_bound =
-                  make_node_all_greater lower middle_right value right
-                in
-                let refine_ result_bound =
-                  make_node_all_greater lower new_left middle_value new_right
-                in
+                make_node_all_greater lower left_left left_value middle_left;
+                make_node_all_greater lower middle_right value right;
+                make_node_all_greater lower new_left middle_value new_right;
                 refine_ u
         else if
           Bigint.compare (height right) (Bigint.add (height left) 1Z) > 0
         then
           match right with
           | Empty ->
-            let refine_ result_bound =
-              make_node_all_greater lower left value right
-            in
+            make_node_all_greater lower left value right;
             refine_ u
           | Node (right_left, right_value, right_right, _) ->
-            let refine_ right_bound = all_greater_def lower right in
+            all_greater_def lower right;
             if Bigint.compare (height right_right) (height right_left) >= 0
             then
               let new_left = make_node left value right_left in
-              let refine_ new_left_bound =
-                make_node_all_greater lower left value right_left
-              in
-              let refine_ result_bound =
-                make_node_all_greater lower new_left right_value right_right
-              in
+              make_node_all_greater lower left value right_left;
+              make_node_all_greater lower new_left right_value right_right;
               refine_ u
             else
               match right_left with
               | Empty ->
-                let refine_ result_bound =
-                  make_node_all_greater lower left value right
-                in
+                make_node_all_greater lower left value right;
                 refine_ u
               | Node (middle_left, middle_value, middle_right, _) ->
-                let refine_ middle_bound = all_greater_def lower right_left in
+                all_greater_def lower right_left;
                 let new_left = make_node left value middle_left in
                 let new_right = make_node middle_right right_value right_right in
-                let refine_ new_left_bound =
-                  make_node_all_greater lower left value middle_left
-                in
-                let refine_ new_right_bound =
-                  make_node_all_greater lower middle_right right_value right_right
-                in
-                let refine_ result_bound =
-                  make_node_all_greater lower new_left middle_value new_right
-                in
+                make_node_all_greater lower left value middle_left;
+                make_node_all_greater lower middle_right right_value right_right;
+                make_node_all_greater lower new_left middle_value new_right;
                 refine_ u
         else
-          let refine_ result_bound =
-            make_node_all_greater lower left value right
-          in
-          refine_ u
+          (make_node_all_greater lower left value right;
+          refine_ u))
       else refine_ u
 
     let rec (add_all_less @ total) :
@@ -1924,28 +1764,24 @@ module Validity_proofs : sig
       let result = add_tree element tree in
       let u = () in
       if element < upper && all_less upper tree then
-        let refine_ insertion = add_tree_def element tree in
-        let refine_ tree_bound = all_less_def upper tree in
+        (add_tree_def element tree;
+        all_less_def upper tree;
         match tree with
         | Empty ->
-          let refine_ result_bound = all_less_def upper result in
+          all_less_def upper result;
           refine_ u
         | Node (left, value, right, _) ->
           if element = value then refine_ u
           else if element < value then
             let new_left = add_tree element left in
-            let refine_ induction = add_all_less element upper left in
-            let refine_ result_bound =
-              balance_all_less upper new_left value right
-            in
+            add_all_less element upper left;
+            balance_all_less upper new_left value right;
             refine_ u
           else
             let new_right = add_tree element right in
-            let refine_ induction = add_all_less element upper right in
-            let refine_ result_bound =
-              balance_all_less upper left value new_right
-            in
-            refine_ u
+            add_all_less element upper right;
+            balance_all_less upper left value new_right;
+            refine_ u)
       else refine_ u
 
     let rec (add_all_greater @ total) :
@@ -1960,28 +1796,24 @@ module Validity_proofs : sig
       let result = add_tree element tree in
       let u = () in
       if lower < element && all_greater lower tree then
-        let refine_ insertion = add_tree_def element tree in
-        let refine_ tree_bound = all_greater_def lower tree in
+        (add_tree_def element tree;
+        all_greater_def lower tree;
         match tree with
         | Empty ->
-          let refine_ result_bound = all_greater_def lower result in
+          all_greater_def lower result;
           refine_ u
         | Node (left, value, right, _) ->
           if element = value then refine_ u
           else if element < value then
             let new_left = add_tree element left in
-            let refine_ induction = add_all_greater element lower left in
-            let refine_ result_bound =
-              balance_all_greater lower new_left value right
-            in
+            add_all_greater element lower left;
+            balance_all_greater lower new_left value right;
             refine_ u
           else
             let new_right = add_tree element right in
-            let refine_ induction = add_all_greater element lower right in
-            let refine_ result_bound =
-              balance_all_greater lower left value new_right
-            in
-            refine_ u
+            add_all_greater element lower right;
+            balance_all_greater lower left value new_right;
+            refine_ u)
       else refine_ u
 
     let rec (add_valid_height @ total) :
@@ -1994,55 +1826,43 @@ module Validity_proofs : sig
               || height (add_tree element tree)
                  = Bigint.add (height tree) 1Z)} @ immutable contended =
       fun element tree validity ->
-      let refine_ valid_unit = validity in
+      validity;
       let result = add_tree element tree in
       let u = () in
-      let refine_ invariant = valid_def tree in
-      let refine_ insertion_equation = add_tree_def element tree in
+      valid_def tree;
+      add_tree_def element tree;
       match tree with
       | Empty ->
         let zero = 0Z in
-        let refine_ empty_height = height_def tree in
-        let refine_ result_height = height_def result in
-        let refine_ result_invariant = valid_def result in
-        let refine_ left_bound = all_less_def element tree in
-        let refine_ right_bound = all_greater_def element tree in
-        let refine_ height_maximum = maximum_def zero zero in
+        height_def tree;
+        height_def result;
+        valid_def result;
+        all_less_def element tree;
+        all_greater_def element tree;
+        maximum_def zero zero;
         refine_ u
       | Node (left, value, right, _) ->
         let left_height = height left in
         let right_height = height right in
-        let refine_ tree_height_equation = height_def tree in
+        height_def tree;
         if element = value then refine_ u
         else if element < value then
           let proof = () in
           let left_validity : {u : unit | valid left} = refine_ proof in
           let new_left = add_tree element left in
-          let refine_ induction =
-            add_valid_height element left left_validity
-          in
-          let refine_ new_left_bound = add_all_less element value left in
-          let refine_ result_invariant =
-            balance_valid new_left value right
-          in
-          let refine_ result_height =
-            balance_left_height left_height new_left value right
-          in
+          add_valid_height element left left_validity;
+          add_all_less element value left;
+          balance_valid new_left value right;
+          balance_left_height left_height new_left value right;
           refine_ u
         else
           let proof = () in
           let right_validity : {u : unit | valid right} = refine_ proof in
           let new_right = add_tree element right in
-          let refine_ induction =
-            add_valid_height element right right_validity
-          in
-          let refine_ new_right_bound = add_all_greater element value right in
-          let refine_ result_invariant =
-            balance_valid left value new_right
-          in
-          let refine_ result_height =
-            balance_right_height left value new_right right_height
-          in
+          add_valid_height element right right_validity;
+          add_all_greater element value right;
+          balance_valid left value new_right;
+          balance_right_height left value new_right right_height;
           refine_ u
     end
 
@@ -2091,22 +1911,20 @@ module Validity_proofs : sig
       let u = () in
       if all_less upper tree then
         let tree_elements = elements tree in
-        let refine_ tree_bound = all_less_def upper tree in
-        let refine_ tree_elements_equation = elements_def tree in
+        all_less_def upper tree;
+        elements_def tree;
         match tree with
         | Empty ->
-          let refine_ list_bound = List_set.all_less_def upper tree_elements in
+          List_set.all_less_def upper tree_elements;
           refine_ u
         | Node (left, value, right, _) ->
           let left_elements = elements left in
           let right_elements = elements right in
           let suffix = List_set.Cons (value, right_elements) in
-          let refine_ left_induction = elements_all_less upper left in
-          let refine_ right_induction = elements_all_less upper right in
-          let refine_ suffix_bound = List_set.all_less_def upper suffix in
-          let refine_ append_bound =
-            List_proofs.all_less_append upper left_elements suffix
-          in
+          elements_all_less upper left;
+          elements_all_less upper right;
+          List_set.all_less_def upper suffix;
+          List_proofs.all_less_append upper left_elements suffix;
           refine_ u
       else refine_ u
 
@@ -2139,26 +1957,20 @@ module Validity_proofs : sig
         let u = () in
         if all_greater lower tree then
           let tree_elements = elements tree in
-          let refine_ tree_bound = all_greater_def lower tree in
-          let refine_ tree_elements_equation = elements_def tree in
+          all_greater_def lower tree;
+          elements_def tree;
           match tree with
           | Empty ->
-            let refine_ list_bound =
-              List_set.all_greater_def lower tree_elements
-            in
+            List_set.all_greater_def lower tree_elements;
             refine_ u
           | Node (left, value, right, _) ->
             let left_elements = elements left in
             let right_elements = elements right in
             let suffix = List_set.Cons (value, right_elements) in
-            let refine_ left_induction = elements_all_greater lower left in
-            let refine_ right_induction = elements_all_greater lower right in
-            let refine_ suffix_bound =
-              List_set.all_greater_def lower suffix
-            in
-            let refine_ append_bound =
-              List_proofs.all_greater_append lower left_elements suffix
-            in
+            elements_all_greater lower left;
+            elements_all_greater lower right;
+            List_set.all_greater_def lower suffix;
+            List_proofs.all_greater_append lower left_elements suffix;
             refine_ u
         else refine_ u
 
@@ -2171,48 +1983,36 @@ module Validity_proofs : sig
             === List_set.lookup_repr element (elements tree)}
             @ immutable contended =
         fun element tree validity ->
-        let refine_ valid_unit = validity in
+        validity;
         let u = () in
-        let refine_ invariant = valid_def tree in
-        let refine_ tree_lookup = lookup_tree_def element tree in
-        let refine_ tree_elements = elements_def tree in
+        valid_def tree;
+        lookup_tree_def element tree;
+        elements_def tree;
         match tree with
         | Empty ->
           let model = elements tree in
-          let refine_ model_lookup = List_set.lookup_repr_def element model in
+          List_set.lookup_repr_def element model;
           refine_ u
         | Node (left, value, right, _) ->
           let left_elements = elements left in
           let right_elements = elements right in
           let suffix = List_set.Cons (value, right_elements) in
-          let refine_ append_lookup =
-            List_proofs.lookup_append element left_elements suffix
-          in
-          let refine_ suffix_lookup =
-            List_set.lookup_repr_def element suffix
-          in
+          List_proofs.lookup_append element left_elements suffix;
+          List_set.lookup_repr_def element suffix;
           if element = value then refine_ u
           else if element < value then
             let proof = () in
             let left_valid : {u : unit | valid left} = refine_ proof in
-            let refine_ induction =
-              lookup_tree_elements element left left_valid
-            in
-            let refine_ right_bound = elements_all_greater value right in
-            let refine_ right_absent =
-              List_proofs.lookup_below element value right_elements
-            in
+            lookup_tree_elements element left left_valid;
+            elements_all_greater value right;
+            List_proofs.lookup_below element value right_elements;
             refine_ u
           else
             let proof = () in
             let right_valid : {u : unit | valid right} = refine_ proof in
-            let refine_ induction =
-              lookup_tree_elements element right right_valid
-            in
-            let refine_ left_bound = elements_all_less value left in
-            let refine_ left_absent =
-              List_proofs.lookup_above element value left_elements
-            in
+            lookup_tree_elements element right right_valid;
+            elements_all_less value left;
+            List_proofs.lookup_above element value left_elements;
             refine_ u
 
     end
@@ -2226,9 +2026,7 @@ module Validity_proofs : sig
           @ immutable contended =
       fun element tree validity ->
       let found = lookup_tree element tree in
-      let refine_ correctness =
-        Lookup_proofs.lookup_tree_elements element tree validity
-      in
+      Lookup_proofs.lookup_tree_elements element tree validity;
       refine_ found
 
     let (lookup_tree_elements @ total) :
@@ -2247,28 +2045,26 @@ module Validity_proofs : sig
         (validity : {u : unit | valid tree}) ->
         {u : unit | List_set.valid (elements tree)} @ immutable contended =
       fun tree validity ->
-      let refine_ valid_unit = validity in
+      validity;
       let tree_elements = elements tree in
-      let refine_ tree_equation = elements_def tree in
+      elements_def tree;
       match tree with
       | Empty ->
-        let refine_ result = List_set.valid_def tree_elements in
+        List_set.valid_def tree_elements;
         let u = () in
         refine_ u
       | Node (left, value, right, _) ->
-        let refine_ invariant = valid_def tree in
+        valid_def tree;
         let left_elements = elements left in
         let right_elements = elements right in
         let proof = () in
         let left_validity : {u : unit | valid left} = refine_ proof in
         let right_validity : {u : unit | valid right} = refine_ proof in
-        let refine_ left_induction = elements_valid left left_validity in
-        let refine_ right_induction = elements_valid right right_validity in
-        let refine_ left_bound = elements_all_less value left in
-        let refine_ right_bound = Lookup_proofs.elements_all_greater value right in
-        let refine_ result =
-          List_proofs.valid_append_pivot left_elements value right_elements
-        in
+        elements_valid left left_validity;
+        elements_valid right right_validity;
+        elements_all_less value left;
+        Lookup_proofs.elements_all_greater value right;
+        List_proofs.valid_append_pivot left_elements value right_elements;
         refine_ proof
 
     end
@@ -2295,8 +2091,8 @@ module Validity_proofs : sig
           @ immutable contended =
       fun left value right ->
       let result = make_node left value right in
-      let refine_ construction = make_node_def left value right in
-      let refine_ result_elements = elements_def result in
+      make_node_def left value right;
+      elements_def result;
       let u = () in
       refine_ u
 
@@ -2310,8 +2106,8 @@ module Validity_proofs : sig
           === elements (make_node left value right)} @ immutable contended =
       fun left value right cached_height ->
       let tree = Node (left, value, right, cached_height) in
-      let refine_ tree_elements = elements_def tree in
-      let refine_ rebuilt_elements = make_node_elements left value right in
+      elements_def tree;
+      make_node_elements left value right;
       let u = () in
       refine_ u
 
@@ -2334,20 +2130,12 @@ module Validity_proofs : sig
       let left_elements = elements left_left in
       let left_tail = List_set.Cons (left_value, elements left_right) in
       let right_tail = List_set.Cons (value, elements right) in
-      let refine_ old_left_elements =
-        make_node_elements left_left left_value left_right
-      in
-      let refine_ new_right_elements =
-        make_node_elements left_right value right
-      in
-      let refine_ result_elements =
-        make_node_elements left_left left_value new_right
-      in
-      let refine_ original_elements = make_node_elements old_left value right in
-      let refine_ association =
-        List_proofs.append_associative left_elements left_tail right_tail
-      in
-      let refine_ left_tail_equation = List_set.append_def left_tail right_tail in
+      make_node_elements left_left left_value left_right;
+      make_node_elements left_right value right;
+      make_node_elements left_left left_value new_right;
+      make_node_elements old_left value right;
+      List_proofs.append_associative left_elements left_tail right_tail;
+      List_set.append_def left_tail right_tail;
       let u = () in
       refine_ u
 
@@ -2371,18 +2159,12 @@ module Validity_proofs : sig
       let left_elements = elements left in
       let left_tail = List_set.Cons (value, elements right_left) in
       let right_tail = List_set.Cons (right_value, elements right_right) in
-      let refine_ old_right_elements =
-        make_node_elements right_left right_value right_right
-      in
-      let refine_ new_left_elements = make_node_elements left value right_left in
-      let refine_ result_elements =
-        make_node_elements new_left right_value right_right
-      in
-      let refine_ original_elements = make_node_elements left value old_right in
-      let refine_ association =
-        List_proofs.append_associative left_elements left_tail right_tail
-      in
-      let refine_ left_tail_equation = List_set.append_def left_tail right_tail in
+      make_node_elements right_left right_value right_right;
+      make_node_elements left value right_left;
+      make_node_elements new_left right_value right_right;
+      make_node_elements left value old_right;
+      List_proofs.append_associative left_elements left_tail right_tail;
+      List_set.append_def left_tail right_tail;
       let u = () in
       refine_ u
 
@@ -2411,15 +2193,11 @@ module Validity_proofs : sig
       let original_left = make_node left_left left_value original_middle in
       let new_left = make_node left_left left_value middle_left in
       let rotated_left = make_node new_left middle_value middle_right in
-      let refine_ inner_rotation =
-        rotate_left_elements left_left left_value middle_left middle_value
-          middle_right
-      in
-      let refine_ outer_rotation =
-        rotate_right_elements new_left middle_value middle_right value right
-      in
-      let refine_ rotated_outer = make_node_elements rotated_left value right in
-      let refine_ original_outer = make_node_elements original_left value right in
+      rotate_left_elements left_left left_value middle_left middle_value
+          middle_right;
+      rotate_right_elements new_left middle_value middle_right value right;
+      make_node_elements rotated_left value right;
+      make_node_elements original_left value right;
       let u = () in
       refine_ u
 
@@ -2449,15 +2227,11 @@ module Validity_proofs : sig
       let original_right = make_node original_middle right_value right_right in
       let new_right = make_node middle_right right_value right_right in
       let rotated_right = make_node middle_left middle_value new_right in
-      let refine_ inner_rotation =
-        rotate_right_elements middle_left middle_value middle_right right_value
-          right_right
-      in
-      let refine_ outer_rotation =
-        rotate_left_elements left value middle_left middle_value new_right
-      in
-      let refine_ rotated_outer = make_node_elements left value rotated_right in
-      let refine_ original_outer = make_node_elements left value original_right in
+      rotate_right_elements middle_left middle_value middle_right right_value
+          right_right;
+      rotate_left_elements left value middle_left middle_value new_right;
+      make_node_elements left value rotated_right;
+      make_node_elements left value original_right;
       let u = () in
       refine_ u
 
@@ -2469,7 +2243,7 @@ module Validity_proofs : sig
           elements (balance left value right)
           === elements (make_node left value right)} @ immutable contended =
       fun left value right ->
-      let refine_ balance_equation = balance_def left value right in
+      balance_def left value right;
       if Bigint.compare (height left) (Bigint.add (height right) 1Z) > 0 then
         match left with
         | Empty ->
@@ -2477,20 +2251,14 @@ module Validity_proofs : sig
           refine_ u
         | Node (left_left, left_value, left_right, cached_height) ->
           let rebuilt_left = make_node left_left left_value left_right in
-          let refine_ left_elements =
-            cached_height_irrelevant left_left left_value left_right
-              cached_height
-          in
-          let refine_ original_elements = make_node_elements left value right in
-          let refine_ rebuilt_elements =
-            make_node_elements rebuilt_left value right
-          in
+          cached_height_irrelevant left_left left_value left_right
+              cached_height;
+          make_node_elements left value right;
+          make_node_elements rebuilt_left value right;
           if Bigint.compare (height left_left) (height left_right) >= 0 then
-            let refine_ rotation =
-              rotate_right_elements left_left left_value left_right value right
-            in
+            (rotate_right_elements left_left left_value left_right value right;
             let u = () in
-            refine_ u
+            refine_ u)
           else
             match left_right with
             | Empty ->
@@ -2503,23 +2271,13 @@ module Validity_proofs : sig
               let canonical_left =
                 make_node left_left left_value rebuilt_middle
               in
-              let refine_ middle_elements =
-                cached_height_irrelevant middle_left middle_value middle_right
-                  middle_height
-              in
-              let refine_ rebuilt_left_elements =
-                make_node_elements left_left left_value left_right
-              in
-              let refine_ canonical_left_elements =
-                make_node_elements left_left left_value rebuilt_middle
-              in
-              let refine_ canonical_outer_elements =
-                make_node_elements canonical_left value right
-              in
-              let refine_ rotation =
-                rotate_left_right_elements left_left left_value middle_left
-                  middle_value middle_right value right
-              in
+              cached_height_irrelevant middle_left middle_value middle_right
+                  middle_height;
+              make_node_elements left_left left_value left_right;
+              make_node_elements left_left left_value rebuilt_middle;
+              make_node_elements canonical_left value right;
+              rotate_left_right_elements left_left left_value middle_left
+                  middle_value middle_right value right;
               let u = () in
               refine_ u
       else if Bigint.compare (height right) (Bigint.add (height left) 1Z) > 0
@@ -2530,20 +2288,14 @@ module Validity_proofs : sig
           refine_ u
         | Node (right_left, right_value, right_right, cached_height) ->
           let rebuilt_right = make_node right_left right_value right_right in
-          let refine_ right_elements =
-            cached_height_irrelevant right_left right_value right_right
-              cached_height
-          in
-          let refine_ original_elements = make_node_elements left value right in
-          let refine_ rebuilt_elements =
-            make_node_elements left value rebuilt_right
-          in
+          cached_height_irrelevant right_left right_value right_right
+              cached_height;
+          make_node_elements left value right;
+          make_node_elements left value rebuilt_right;
           if Bigint.compare (height right_right) (height right_left) >= 0 then
-            let refine_ rotation =
-              rotate_left_elements left value right_left right_value right_right
-            in
+            (rotate_left_elements left value right_left right_value right_right;
             let u = () in
-            refine_ u
+            refine_ u)
           else
             match right_left with
             | Empty ->
@@ -2556,23 +2308,13 @@ module Validity_proofs : sig
               let canonical_right =
                 make_node rebuilt_middle right_value right_right
               in
-              let refine_ middle_elements =
-                cached_height_irrelevant middle_left middle_value middle_right
-                  middle_height
-              in
-              let refine_ rebuilt_right_elements =
-                make_node_elements right_left right_value right_right
-              in
-              let refine_ canonical_right_elements =
-                make_node_elements rebuilt_middle right_value right_right
-              in
-              let refine_ canonical_outer_elements =
-                make_node_elements left value canonical_right
-              in
-              let refine_ rotation =
-                rotate_right_left_elements left value middle_left middle_value
-                  middle_right right_value right_right
-              in
+              cached_height_irrelevant middle_left middle_value middle_right
+                  middle_height;
+              make_node_elements right_left right_value right_right;
+              make_node_elements rebuilt_middle right_value right_right;
+              make_node_elements left value canonical_right;
+              rotate_right_left_elements left value middle_left middle_value
+                  middle_right right_value right_right;
               let u = () in
               refine_ u
       else
@@ -2588,10 +2330,10 @@ module Validity_proofs : sig
       let tree = Node (empty_left, element, empty_right, 1Z) in
       let nil = List_set.Nil in
       let suffix = List_set.Cons (element, nil) in
-      let refine_ left_elements = elements_def empty_left in
-      let refine_ right_elements = elements_def empty_right in
-      let refine_ tree_elements = elements_def tree in
-      let refine_ append_equation = List_set.append_def nil suffix in
+      elements_def empty_left;
+      elements_def empty_right;
+      elements_def tree;
+      List_set.append_def nil suffix;
       let u = () in
       refine_ u
 
@@ -2601,9 +2343,9 @@ module Validity_proofs : sig
           === List_set.add_repr element (elements Empty)} =
       let empty = Empty in
       let empty_elements = elements empty in
-      let refine_ leaf_model = leaf_elements element in
-      let refine_ empty_model = elements_def empty in
-      let refine_ add_model = List_set.add_repr_def element empty_elements in
+      leaf_elements element;
+      elements_def empty;
+      List_set.add_repr_def element empty_elements;
       let u = () in
       refine_ u
 
@@ -2625,13 +2367,11 @@ module Validity_proofs : sig
       let right_elements = elements right in
       let u = () in
       if valid tree then
-        let refine_ invariant = valid_def tree in
-        let refine_ tree_model = elements_def tree in
-          let refine_ left_bound = Element_proofs.elements_all_less value left in
-        let refine_ model_add =
-          List_proofs.add_at_pivot left_elements value right_elements
-        in
-        refine_ u
+        (valid_def tree;
+        elements_def tree;
+          Element_proofs.elements_all_less value left;
+        List_proofs.add_at_pivot left_elements value right_elements;
+        refine_ u)
       else refine_ u
 
     let (add_left_step @ total) :
@@ -2656,19 +2396,17 @@ module Validity_proofs : sig
           else true} @ immutable contended =
       fun element left value right cached_height correctness ->
       let new_left = add_tree element left in
-      let refine_ new_left_elements = correctness in
+      correctness;
       let tree = Node (left, value, right, cached_height) in
       let left_elements = elements left in
       let right_elements = elements right in
       let u = () in
       if element < value && valid left then
-        let refine_ tree_model = elements_def tree in
-        let refine_ balance_model = balance_elements new_left value right in
-        let refine_ node_model = make_node_elements new_left value right in
-        let refine_ model_add =
-          List_proofs.add_left element left_elements value right_elements
-        in
-        refine_ u
+        (elements_def tree;
+        balance_elements new_left value right;
+        make_node_elements new_left value right;
+        List_proofs.add_left element left_elements value right_elements;
+        refine_ u)
       else refine_ u
 
     let (add_right_step @ total) :
@@ -2693,20 +2431,18 @@ module Validity_proofs : sig
           else true} @ immutable contended =
       fun element left value right cached_height correctness ->
       let new_right = add_tree element right in
-      let refine_ new_right_elements = correctness in
+      correctness;
       let tree = Node (left, value, right, cached_height) in
       let left_elements = elements left in
       let right_elements = elements right in
       let u = () in
       if value < element && all_less value left && valid right then
-        let refine_ left_bound = Element_proofs.elements_all_less value left in
-        let refine_ tree_model = elements_def tree in
-        let refine_ balance_model = balance_elements left value new_right in
-        let refine_ node_model = make_node_elements left value new_right in
-        let refine_ model_add =
-          List_proofs.add_right element left_elements value right_elements
-        in
-        refine_ u
+        (Element_proofs.elements_all_less value left;
+        elements_def tree;
+        balance_elements left value new_right;
+        make_node_elements left value new_right;
+        List_proofs.add_right element left_elements value right_elements;
+        refine_ u)
       else refine_ u
 
     let rec (add_tree_elements @ total) :
@@ -2721,33 +2457,27 @@ module Validity_proofs : sig
       fun element tree ->
       let u = () in
       if valid tree then
-        let refine_ invariant = valid_def tree in
-        let refine_ insertion_equation = add_tree_def element tree in
+        (valid_def tree;
+        add_tree_def element tree;
         match tree with
         | Empty ->
-          let refine_ step = add_leaf_step element in
+          add_leaf_step element;
           refine_ u
         | Node (left, value, right, cached_height) ->
           if element = value then
-            let refine_ step =
-              add_equal_step left value right cached_height
-            in
-            refine_ u
+            (add_equal_step left value right cached_height;
+            refine_ u)
           else if element < value then
             let induction = add_tree_elements element left in
-            let refine_ step =
-              add_left_step element left value right cached_height
-                induction
-            in
+            add_left_step element left value right cached_height
+                induction;
             refine_ u
           else
-            let refine_ left_bound = Element_proofs.elements_all_less value left in
+            (Element_proofs.elements_all_less value left;
             let induction = add_tree_elements element right in
-            let refine_ step =
-              add_right_step element left value right cached_height
-                induction
-            in
-            refine_ u
+            add_right_step element left value right cached_height
+                induction;
+            refine_ u))
       else refine_ u
 
     end
@@ -2764,13 +2494,9 @@ module Validity_proofs : sig
           @ immutable contended =
       fun element tree validity ->
       let result = add_tree element tree in
-      let refine_ valid_unit = validity in
-      let refine_ result_validity =
-        Validity_proofs.add_valid_height element tree validity
-      in
-      let refine_ result_elements =
-        Insertion_model_proofs.add_tree_elements element tree
-      in
+      validity;
+      Validity_proofs.add_valid_height element tree validity;
+      Insertion_model_proofs.add_tree_elements element tree;
       refine_ result
 
     let[@def] rec (add_elements @ total) xs tree =
@@ -2789,11 +2515,11 @@ module Validity_proofs : sig
              === List_set.union_repr xs (elements tree)}
           @ immutable contended =
       fun xs tree validity ->
-      let refine_ valid_unit = validity in
+      validity;
       let u = () in
-      let refine_ result_equation = add_elements_def xs tree in
+      add_elements_def xs tree;
       let tree_elements = elements tree in
-      let refine_ model_equation = List_set.union_repr_def xs tree_elements in
+      List_set.union_repr_def xs tree_elements;
       match xs with
       | List_set.Nil -> refine_ u
       | List_set.Cons (head, tail) ->
@@ -2801,14 +2527,10 @@ module Validity_proofs : sig
         let refine_ added_validity =
           Validity_proofs.add_valid_height head tree validity
         in
-        let refine_ added_elements =
-          Insertion_model_proofs.add_tree_elements head tree
-        in
+        Insertion_model_proofs.add_tree_elements head tree;
         let proof = () in
         let added_validity : {u : unit | valid added} = refine_ proof in
-        let refine_ induction =
-          add_elements_spec tail added added_validity
-        in
+        add_elements_spec tail added added_validity;
         refine_ u
 
     let (union @ total) :
@@ -2823,9 +2545,7 @@ module Validity_proofs : sig
       fun left right right_validity ->
       let left_elements = elements left in
       let result = add_elements left_elements right in
-      let refine_ result_spec =
-        add_elements_spec left_elements right right_validity
-      in
+      add_elements_spec left_elements right right_validity;
       refine_ result
 
     let (size @ total) tree =
@@ -2839,7 +2559,7 @@ module Validity_proofs : sig
 
       let (empty @ total) : t =
         let tree = Empty in
-        let refine_ invariant = valid_def tree in
+        valid_def tree;
         refine_ tree
 
       let[@def] (lookup @ total) element (set : t) =
@@ -2880,8 +2600,8 @@ module Validity_proofs : sig
           {u : unit | lookup element empty === false} =
         let empty_set = empty in
         let refine_ tree = empty_set in
-        let refine_ public_lookup = lookup_def element empty_set in
-        let refine_ tree_lookup = lookup_tree_def element tree in
+        lookup_def element empty_set;
+        lookup_tree_def element tree;
         let u = () in
         refine_ u
 
@@ -2901,27 +2621,19 @@ module Validity_proofs : sig
           Operations.add added_element tree validity
         in
         let result = add added_element set in
-        let refine_ add_equation = add_def added_element set in
+        add_def added_element set;
         let refine_ result_tree = result in
         let expected = List_set.add_repr added_element (elements tree) in
         let result_elements = elements result_tree in
-        let refine_ same_result =
-          List_proofs.same_repr_equal result_elements expected
-        in
+        List_proofs.same_repr_equal result_elements expected;
         let result_validity : {u : unit | valid result_tree} = refine_ proof in
-        let refine_ input_lookup =
-          Element_proofs.lookup_tree_elements element tree validity
-        in
-        let refine_ result_lookup =
-          Element_proofs.lookup_tree_elements element result_tree
-            result_validity
-        in
-        let refine_ public_input = lookup_def element set in
-        let refine_ public_result = lookup_def element result in
+        Element_proofs.lookup_tree_elements element tree validity;
+        Element_proofs.lookup_tree_elements element result_tree
+            result_validity;
+        lookup_def element set;
+        lookup_def element result;
         let tree_elements = elements tree in
-        let refine_ model_law =
-          List_proofs.lookup_add_repr element added_element tree_elements
-        in
+        List_proofs.lookup_add_repr element added_element tree_elements;
         refine_ proof
 
       let (lookup_union @ total) :
@@ -2941,33 +2653,23 @@ module Validity_proofs : sig
           Operations.union left_tree right_tree right_validity
         in
         let result = union left right in
-        let refine_ union_equation = union_def left right in
+        union_def left right;
         let refine_ result_tree = result in
         let left_elements = elements left_tree in
         let right_elements = elements right_tree in
         let expected = List_set.union_repr left_elements right_elements in
         let result_elements = elements result_tree in
-        let refine_ same_result =
-          List_proofs.same_repr_equal result_elements expected
-        in
+        List_proofs.same_repr_equal result_elements expected;
         let left_validity : {u : unit | valid left_tree} = refine_ proof in
         let result_validity : {u : unit | valid result_tree} = refine_ proof in
-        let refine_ left_lookup =
-          Element_proofs.lookup_tree_elements element left_tree left_validity
-        in
-        let refine_ right_lookup =
-          Element_proofs.lookup_tree_elements element right_tree right_validity
-        in
-        let refine_ result_lookup =
-          Element_proofs.lookup_tree_elements element result_tree
-            result_validity
-        in
-        let refine_ public_left = lookup_def element left in
-        let refine_ public_right = lookup_def element right in
-        let refine_ public_result = lookup_def element result in
-        let refine_ model_law =
-          List_proofs.lookup_union_repr element left_elements right_elements
-        in
+        Element_proofs.lookup_tree_elements element left_tree left_validity;
+        Element_proofs.lookup_tree_elements element right_tree right_validity;
+        Element_proofs.lookup_tree_elements element result_tree
+            result_validity;
+        lookup_def element left;
+        lookup_def element right;
+        lookup_def element result;
+        List_proofs.lookup_union_repr element left_elements right_elements;
         refine_ proof
 
       let (equal_lookup @ total) :
@@ -2985,21 +2687,15 @@ module Validity_proofs : sig
           let refine_ right_tree = right in
           let left_elements = elements left_tree in
           let right_elements = elements right_tree in
-          let refine_ equal_equation = equal_def left right in
-          let refine_ same_model =
-            List_proofs.same_repr_equal left_elements right_elements
-          in
+          equal_def left right;
+          List_proofs.same_repr_equal left_elements right_elements;
           let left_validity : {u : unit | valid left_tree} = refine_ proof in
           let right_validity : {u : unit | valid right_tree} = refine_ proof in
-          let refine_ left_lookup =
-            Element_proofs.lookup_tree_elements element left_tree left_validity
-          in
-          let refine_ right_lookup =
-            Element_proofs.lookup_tree_elements element right_tree
-              right_validity
-          in
-          let refine_ public_left = lookup_def element left in
-          let refine_ public_right = lookup_def element right in
+          Element_proofs.lookup_tree_elements element left_tree left_validity;
+          Element_proofs.lookup_tree_elements element right_tree
+              right_validity;
+          lookup_def element left;
+          lookup_def element right;
           refine_ proof
         else refine_ proof
 
@@ -3018,12 +2714,8 @@ module Validity_proofs : sig
         let proof = () in
         let left_validity : {u : unit | valid left_tree} = refine_ proof in
         let right_validity : {u : unit | valid right_tree} = refine_ proof in
-        let refine_ left_model_valid =
-          Element_proofs.elements_valid left_tree left_validity
-        in
-        let refine_ right_model_valid =
-          Element_proofs.elements_valid right_tree right_validity
-        in
+        Element_proofs.elements_valid left_tree left_validity;
+        Element_proofs.elements_valid right_tree right_validity;
         let (model_premise @ total) :
             (element : int) ->
             {u : unit |
@@ -3031,25 +2723,17 @@ module Validity_proofs : sig
               === List_set.lookup_repr element right_elements} =
           fun element ->
           let refine_ same_lookup = premise element in
-          let refine_ left_lookup =
-            Element_proofs.lookup_tree_elements element left_tree left_validity
-          in
-          let refine_ right_lookup =
-            Element_proofs.lookup_tree_elements element right_tree
-              right_validity
-          in
-          let refine_ public_left = lookup_def element left in
-          let refine_ public_right = lookup_def element right in
+          Element_proofs.lookup_tree_elements element left_tree left_validity;
+          Element_proofs.lookup_tree_elements element right_tree
+              right_validity;
+          lookup_def element left;
+          lookup_def element right;
           refine_ proof
         in
-        let refine_ same_model =
-          List_proofs.extensional_repr left_elements right_elements
-            model_premise
-        in
-        let refine_ reflexive =
-          List_proofs.same_repr_reflexive left_elements
-        in
-        let refine_ equal_equation = equal_def left right in
+        List_proofs.extensional_repr left_elements right_elements
+            model_premise;
+        List_proofs.same_repr_reflexive left_elements;
+        equal_def left right;
         refine_ proof
 
       let (size_zero @ total) (set : t) :
@@ -3058,10 +2742,10 @@ module Validity_proofs : sig
         let refine_ tree = set in
         let refine_ empty_tree = empty_set in
         let tree_elements = elements tree in
-        let refine_ size_equation = size_def set in
-        let refine_ equal_equation = equal_def set empty_set in
-        let refine_ empty_elements = elements_def empty_tree in
-        let refine_ model_law = List_proofs.size_zero_repr tree_elements in
+        size_def set;
+        equal_def set empty_set;
+        elements_def empty_tree;
+        List_proofs.size_zero_repr tree_elements;
         let u = () in
         refine_ u
     end

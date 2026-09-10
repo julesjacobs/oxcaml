@@ -30,7 +30,7 @@ let () =
     let (append_nil_left @ total) ys :
         {u : unit | append Nil ys === ys} =
       let nil = Nil in
-      let refine_ equation = append_def nil ys in
+      append_def nil ys;
       let u = () in
       refine_ u
 
@@ -39,7 +39,7 @@ let () =
         {u : unit | append xs Nil === xs} @ immutable contended =
       fun xs ->
       let nil = Nil in
-      let refine_ equation = append_def xs nil in
+      append_def xs nil;
       match xs with
       | Nil ->
         let u = () in
@@ -48,7 +48,7 @@ let () =
         let induction : {u : unit | append tail Nil === tail} =
           append_nil_right tail
         in
-        let refine_ induction = induction in
+        induction;
         let u = () in
         refine_ u
 
@@ -62,10 +62,10 @@ let () =
       fun xs ys zs ->
       let xy = append xs ys in
       let yz = append ys zs in
-      let refine_ equation = append_def xs ys in
-      let refine_ equation = append_def xy zs in
-      let refine_ equation = append_def ys zs in
-      let refine_ equation = append_def xs yz in
+      append_def xs ys;
+      append_def xy zs;
+      append_def ys zs;
+      append_def xs yz;
       match xs with
       | Nil ->
         let u = () in
@@ -76,7 +76,7 @@ let () =
               append (append tail ys) zs === append tail (append ys zs)} =
           append_associative tail ys zs
         in
-        let refine_ induction = induction in
+        induction;
         let u = () in
         refine_ u
 
@@ -87,9 +87,9 @@ let () =
           @ immutable contended =
       fun xs ys ->
       let xy = append xs ys in
-      let refine_ equation = append_def xs ys in
-      let refine_ equation = length_def xy in
-      let refine_ equation = length_def xs in
+      append_def xs ys;
+      length_def xy;
+      length_def xs;
       match xs with
       | Nil ->
         let u = () in
@@ -100,7 +100,7 @@ let () =
               length (append tail ys) === length tail + length ys} =
           length_append tail ys
         in
-        let refine_ induction = induction in
+        induction;
         let u = () in
         refine_ u
 
@@ -111,9 +111,9 @@ let () =
           @ immutable contended =
       fun xs ys ->
       let xy = append xs ys in
-      let refine_ equation = append_def xs ys in
-      let refine_ equation = sum_def xy in
-      let refine_ equation = sum_def xs in
+      append_def xs ys;
+      sum_def xy;
+      sum_def xs;
       match xs with
       | Nil ->
         let u = () in
@@ -123,7 +123,7 @@ let () =
             {u : unit | sum (append tail ys) === sum tail + sum ys} =
           sum_append tail ys
         in
-        let refine_ induction = induction in
+        induction;
         let u = () in
         refine_ u
   end
@@ -131,11 +131,11 @@ let () =
   let xs = Cons (1, Cons (2, Nil)) in
   let ys = Cons (3, Cons (4, Cons (5, Nil))) in
   let zs = Cons (6, Nil) in
-  let refine_ left_identity = Laws.append_nil_left xs in
-  let refine_ right_identity = Laws.append_nil_right xs in
-  let refine_ associative = Laws.append_associative xs ys zs in
-  let refine_ length_append = Laws.length_append xs ys in
-  let refine_ sum_append = Laws.sum_append xs ys in
+  Laws.append_nil_left xs;
+  Laws.append_nil_right xs;
+  Laws.append_associative xs ys zs;
+  Laws.length_append xs ys;
+  Laws.sum_append xs ys;
   let result = append xs ys in
   Format.printf "length = %d, sum = %d@." (length result) (sum result);;
 [%%expect{|

@@ -307,6 +307,12 @@ let label_declaration sub ld =
   let attrs = sub.attributes sub ld.ld_attributes in
   let mut = mutable_ ld.ld_mutable in
   let modalities = Typemode.untransl_modalities ld.ld_modalities in
+  let modalities =
+    if ld.ld_ghost then
+      { Location.txt = Parsetree.Modality "ghost"; loc = Location.none }
+      :: modalities
+    else modalities
+  in
   Type.field ~loc ~attrs ~mut ~modalities
     (map_loc sub ld.ld_name)
     (sub.typ sub ld.ld_type)
@@ -457,6 +463,7 @@ let exp_extra sub (extra, loc, attrs) sexp =
     | Texp_newtype (_, label_loc, jkind, _) ->
         Pexp_newtype (label_loc, jkind, sexp)
     | Texp_stack -> Pexp_stack sexp
+    | Texp_ghost -> Pexp_ghost sexp
     | Texp_mode modes ->
         Pexp_constraint (sexp, None, Typemode.untransl_mode modes)
     | Texp_inspected_type _ ->
@@ -593,6 +600,7 @@ let expression sub exp =
                         let modes = Typemode.untransl_mode modes in
                         [], modes
                       | Texp_poly _ | Texp_newtype _ | Texp_stack
+                      | Texp_ghost
                       | Texp_inspected_type _ -> [], []
                       | Texp_ghost_region | Texp_borrowed | Texp_refine
                       | Texp_let_refine _ -> [], []

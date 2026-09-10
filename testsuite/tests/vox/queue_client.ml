@@ -17,10 +17,10 @@ let () =
   let nil = [] in
   let one = [first] in
   let two = [second] in
-  let refine_ equation = append_def nil one in
+  append_def nil one;
   let refine_ q2 = enqueue q1 second in
-  let refine_ equation = append_def one two in
-  let refine_ equation = append_def nil two in
+  append_def one two;
+  append_def nil two;
   let nonempty : {q : t | (contents q === []) === false} = refine_ q2 in
   let refine_ first_result = dequeue nonempty in
   let (a : int), q3 = first_result in
@@ -31,5 +31,5 @@ let () =
     let u = () in
     refine_ u
   in
-  let refine_ proof = proof in
+  proof;
   Format.printf "FIFO: %d %d; empty=%b@." a b (contents q4 = [])

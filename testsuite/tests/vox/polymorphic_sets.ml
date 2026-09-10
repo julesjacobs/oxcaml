@@ -17,7 +17,7 @@ module Key = struct
 
   let (compare_reflexive @ total) (x : t) :
       {u : unit | compare x x = 0} =
-    let refine_ equation = compare_def x x in
+    compare_def x x;
     let u = () in
     refine_ u
 
@@ -26,8 +26,8 @@ module Key = struct
       (y : t) ->
       {u : unit | (compare x y <= 0) === (compare y x >= 0)} =
     fun x y ->
-    let refine_ forward = compare_def x y in
-    let refine_ backward = compare_def y x in
+    compare_def x y;
+    compare_def y x;
     let u = () in
     refine_ u
 
@@ -40,9 +40,9 @@ module Key = struct
         then compare x z <= 0
         else true} @ immutable contended =
     fun x y z ->
-    let refine_ left = compare_def x y in
-    let refine_ right = compare_def y z in
-    let refine_ result = compare_def x z in
+    compare_def x y;
+    compare_def y z;
+    compare_def x z;
     let u = () in
     refine_ u
 end
@@ -58,15 +58,11 @@ let () =
   let right = Set.add equivalent empty in
   let larger = Set.add second left in
   let combined = Set.union left larger in
-  let refine_ empty_law = Set.lookup_empty first in
-  let refine_ add_law =
-    Set.lookup_add equivalent first empty
-  in
-  let refine_ union_law =
-    Set.lookup_union second left larger
-  in
-  let refine_ size_law = Set.size_zero empty in
-  let refine_ equal_lookup_law = Set.equal_lookup left right first in
+  Set.lookup_empty first;
+  Set.lookup_add equivalent first empty;
+  Set.lookup_union second left larger;
+  Set.size_zero empty;
+  Set.equal_lookup left right first;
   let (same_lookup @ total) :
       (element : Key.t) ->
       {u : unit |
@@ -75,7 +71,7 @@ let () =
     let u = () in
     refine_ u
   in
-  let refine_ extensional_law = Set.extensional larger larger same_lookup in
+  Set.extensional larger larger same_lookup;
   Format.printf
     "equivalent member = %b; semantic equal = %b; representation equal = %b; size = %s@."
     (Set.lookup equivalent combined)

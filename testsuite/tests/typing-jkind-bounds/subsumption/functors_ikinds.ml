@@ -81,6 +81,7 @@ Error: The kind of type "'a F(Ref).t" is
        The first mode-crosses less than the second along:
          portability: mod portable with 'a ≰ mod portable
          statefulness: mod stateless with 'a ≰ mod stateless
+         totality: mod total with 'a ≰ mod total
 |}]
 
 module F (M : sig

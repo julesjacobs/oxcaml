@@ -81,7 +81,7 @@ module Demo : sig end = struct
     let bounded : {i : int | 0 <= i && i < Iarray.length updated.base} =
       refine_ raw_index in
     let result = get updated bounded in
-    let refine_ equation = get_def updated bounded in
+    get_def updated bounded;
     refine_ result
 
   let (last_write_wins @ total) :
@@ -101,7 +101,7 @@ module Demo : sig end = struct
     let bounded : {i : int | 0 <= i && i < Iarray.length updated.base} =
       refine_ raw_index in
     let result = get updated bounded in
-    let refine_ equation = get_def updated bounded in
+    get_def updated bounded;
     refine_ result
 
   module Laws (Element : sig type t : immutable_data end) = struct
@@ -116,8 +116,8 @@ module Demo : sig end = struct
       let cleared = {overlay with
         updates = Updates.Refined.remove index overlay.updates} in
       let original = {overlay with updates = Updates.Refined.empty ()} in
-      let refine_ cleared_observation = lookup_def index cleared in
-      let refine_ base_observation = lookup_def index original in
+      lookup_def index cleared;
+      lookup_def index original;
       let u = () in
       if 0 <= index && index < Iarray.length overlay.base then
         let cleared_index :
@@ -126,8 +126,8 @@ module Demo : sig end = struct
         let base_index :
             {i : int | 0 <= i && i < Iarray.length original.base} =
           refine_ index in
-        let refine_ cleared_equation = get_def cleared cleared_index in
-        let refine_ base_equation = get_def original base_index in
+        get_def cleared cleared_index;
+        get_def original base_index;
         refine_ u
       else refine_ u
 
@@ -158,8 +158,8 @@ module Demo : sig end = struct
         Updates.Refined.add right right_value overlay.updates in
       let right_first = {overlay with
         updates = Updates.Refined.add left left_value right_updates} in
-      let refine_ left_observation = lookup_def index left_first in
-      let refine_ right_observation = lookup_def index right_first in
+      lookup_def index left_first;
+      lookup_def index right_first;
       let u = () in
       if 0 <= index && index < Iarray.length overlay.base then
         let left_index :
@@ -168,8 +168,8 @@ module Demo : sig end = struct
         let right_index :
             {i : int | 0 <= i && i < Iarray.length right_first.base} =
           refine_ index in
-        let refine_ left_equation = get_def left_first left_index in
-        let refine_ right_equation = get_def right_first right_index in
+        get_def left_first left_index;
+        get_def right_first right_index;
         refine_ u
       else refine_ u
   end
@@ -185,7 +185,7 @@ module Demo : sig end = struct
     let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
       refine_ index in
     let result = get overlay bounded in
-    let refine_ equation = get_def overlay bounded in
+    get_def overlay bounded;
     refine_ result
 
   type mutable_value = {mutable payload : int}
@@ -228,7 +228,7 @@ module Demo : sig end = struct
     | Some before, Some after ->
       let u = () in
       let proof : {u : unit | before = after} = refine_ u in
-      let refine_ proof = proof in
+      proof;
       Format.printf "independent updates at index 1 = %d,%d@." before after
     | _ -> assert false
 
@@ -250,11 +250,9 @@ module Demo : sig end = struct
     let right_first = {overlay with
       updates = Updates.Refined.add left left_value right_updates} in
     List.iter (fun (index : int) ->
-      let refine_ commutation = 
-        Item_laws.independent_updates overlay left distinct
-          left_value right_value index in
-      let refine_ removal = 
-        Item_laws.clear_reads_base left_first index in
+      Item_laws.independent_updates overlay left distinct
+          left_value right_value index;
+      Item_laws.clear_reads_base left_first index;
       let cleared = {left_first with
         updates = Updates.Refined.remove index left_first.updates} in
       let original = {left_first with updates = Updates.Refined.empty ()} in
@@ -264,7 +262,7 @@ module Demo : sig end = struct
         let u = () in
         let proof : {u : unit |
           before === after && restored === base_value} = refine_ u in
-        let refine_ proof = proof in
+        proof;
         Format.printf "record reads at %d = %d,%d; cleared=%d@."
           index before.label after.label restored.label
       | _ -> assert false)

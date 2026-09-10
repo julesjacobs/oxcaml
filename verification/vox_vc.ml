@@ -1212,6 +1212,7 @@ let rec predicate ctx env s e =
           in
           name ctx s (scalar_value (required e.rexp_loc result))
       end
+    | Rexp_ghost body -> eval s body
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
       let s, left = eval s left in
@@ -1629,8 +1630,15 @@ and expression_desc ctx s e =
       name ctx s (scalar_value (both Eq left right))
     | _ -> s, opaque ())
   | Texp_sequence (a, _, b) ->
-    let s, _ = eval s a in
-    eval s b
+    let s, value = eval s a in
+    let rec expose_statement s ty =
+      match get_desc (Ctype.expand_head a.exp_env ty) with
+      | Trefine { ref_payload; _ } ->
+        let s, _ = expose_fact ctx a.exp_env s ty value a.exp_loc in
+        expose_statement s ref_payload
+      | _ -> s
+    in
+    eval (expose_statement s a.exp_type) b
   | Texp_ifthenelse (c, t, f) ->
     let s, c = eval s c in
     let c =

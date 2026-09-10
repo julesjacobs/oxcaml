@@ -20,13 +20,13 @@ module Clamp = struct
     fun lo hi x ->
     let refine_ hi = hi in
     let result = clamp lo hi x in
-    let refine_ equation = clamp_def lo hi x in
+    clamp_def lo hi x;
     refine_ result
 
   let (identity @ total) (lo : int) (hi : int) (x : int) :
       {u : unit |
         if lo <= x && x <= hi then clamp (lo : int) (hi : int) (x : int) === x else true} =
-    let refine_ equation = clamp_def lo hi x in
+    clamp_def lo hi x;
     let u = () in
     refine_ u
 
@@ -36,8 +36,8 @@ module Clamp = struct
           clamp lo hi (clamp lo hi x) === clamp lo hi x
         else true} =
     let first = clamp lo hi x in
-    let refine_ first_equation = clamp_def lo hi x in
-    let refine_ second_equation = clamp_def lo hi first in
+    clamp_def lo hi x;
+    clamp_def lo hi first;
     let u = () in
     refine_ u
 end
@@ -81,8 +81,8 @@ let () =
   let lo = 0 in
   let hi = 10 in
   List.iter (fun x ->
-    let refine_ identity = Clamp.identity lo hi x in
-    let refine_ idempotent = Clamp.idempotent lo hi x in
+    Clamp.identity lo hi x;
+    Clamp.idempotent lo hi x;
     Format.printf "%d -> %d@." x (Clamp.clamp 0 10 x)) [-3; 4; 12]
 ;;
 [%%expect{|
@@ -104,7 +104,7 @@ Error: Refinement could not be proved (counterexample)
 
 let unordered (lo : int) (hi : int) (x : int) : {r : int | lo <= r && r <= hi} =
   let result = Clamp.clamp lo hi x in
-  let refine_ equation = Clamp.clamp_def lo hi x in
+  Clamp.clamp_def lo hi x;
   refine_ result
 ;;
 [%%expect{|

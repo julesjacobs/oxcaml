@@ -145,7 +145,7 @@ Line 1, characters 0-39:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data,
-       because 'a is not mod forkable unyielding many stateless immutable.
+       because 'a is not mod forkable unyielding many total immutable.
 |}]
 
 type 'a t : immutable_data = { mutable x : 'a }
@@ -156,7 +156,7 @@ Line 1, characters 0-47:
 Error: This type definition does not satisfy its kind annotation
          immutable_data,
        because
-       - 'a is not mod stateless immutable
+       - 'a is not mod total immutable
        - mutable fields are not mod immutable
 |}]
 
@@ -177,7 +177,7 @@ Line 1, characters 0-46:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data,
-       because functions are not mod forkable unyielding many stateless.
+       because functions are not mod forkable unyielding many total.
 |}]
 
 type 'a t : immutable_data = { x : 'a option }
@@ -187,7 +187,7 @@ Line 1, characters 0-46:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data,
-       because 'a is not mod forkable unyielding many stateless immutable.
+       because 'a is not mod forkable unyielding many total immutable.
 |}]
 
 type t : immutable_data = { x : int; y : int; mutable z : int }
@@ -207,7 +207,7 @@ Line 1, characters 0-44:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          mutable_data,
-       because functions are not mod forkable unyielding many stateless.
+       because functions are not mod forkable unyielding many total.
 |}]
 
 type ('a : value mod portable) t : value mod many = { x : 'a }
@@ -313,7 +313,7 @@ Line 1, characters 0-53:
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: This type definition does not satisfy its kind annotation
          immutable_data with 'a,
-       because functions are not mod forkable unyielding many stateless.
+       because functions are not mod forkable unyielding many total.
 |}]
 
 type 'a t : value mod global with 'a = { x : 'a }

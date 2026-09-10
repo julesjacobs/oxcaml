@@ -15,7 +15,7 @@
   >   ()
   > EOF
   Verbosity 0: @ portable stateless total
-  Verbosity 1: @ global portable uncontended read_write stateless aliased many forkable unyielding total dynamic
+  Verbosity 1: @ global portable uncontended read_write stateless aliased many forkable unyielding total real dynamic
 
   $ run 2:4 <<EOF
   > let foo = ref 0
@@ -24,4 +24,4 @@
   >   ()
   > EOF
   Verbosity 0: @ portable stateless unique total static
-  Verbosity 1: @ global portable uncontended read_write stateless unique many forkable unyielding total static
+  Verbosity 1: @ global portable uncontended read_write stateless unique many forkable unyielding total real static
