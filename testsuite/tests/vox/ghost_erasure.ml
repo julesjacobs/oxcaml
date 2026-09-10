@@ -59,9 +59,7 @@ module Client : sig val run : int list -> int end
 
 module Statement_client = struct
   let (run @ total) (xs : int list) =
-    ghost_ begin
-      let refine_ proof = Proof.visit xs in ()
-    end;
+    ghost_ (Proof.visit xs);
     7
 end;;
 [%%expect{|

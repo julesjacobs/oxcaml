@@ -123,7 +123,7 @@ module Definitions :
 
 let unfolded (x : number) : {r : number | r > x} =
   let r = Definitions.next x in
-  let refine_ proof = Definitions.next_def x in
+  Definitions.next_def x;
   refine_ r;;
 [%%expect{|
 val unfolded : (x : number) -> {r : number | r > x} = <fun>

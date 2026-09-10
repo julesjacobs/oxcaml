@@ -31,10 +31,10 @@ module Expr = struct
       {u : unit |
         eval (add left right) input === eval left input + eval right input} =
     let result = add left right in
-    let refine_ equation = add_def left right in
-    let refine_ equation = eval_def left input in
-    let refine_ equation = eval_def right input in
-    let refine_ equation = eval_def result input in
+    add_def left right;
+    eval_def left input;
+    eval_def right input;
+    eval_def result input;
     let u = () in
     match left, right with
     | Lit _, Lit _ -> refine_ u
@@ -52,17 +52,17 @@ module Expr = struct
       {u : unit | eval (fold expression) input === eval expression input}
         @ immutable contended =
     fun expression input ->
-    let refine_ equation = fold_def expression in
-    let refine_ equation = eval_def expression input in
+    fold_def expression;
+    eval_def expression input;
     let u = () in
     match expression with
     | Lit _ | Input -> refine_ u
     | Add (left, right) ->
-      let refine_ left_proof = fold_correct left input in
-      let refine_ right_proof = fold_correct right input in
+      fold_correct left input;
+      fold_correct right input;
       let left = fold left in
       let right = fold right in
-      let refine_ local_proof = add_correct left right input in
+      add_correct left right input;
       refine_ u
 end
 ;;
@@ -122,11 +122,11 @@ let () =
   Format.printf "input=4 result=%d; input=10 result=%d@."
     (eval expression 4) (eval expression 10);
   let input = 4 in
-  let refine_ proof = fold_correct expression input in
+  fold_correct expression input;
   Format.printf "folded=%d@." (eval (fold expression) 4);
   let overflow = Add (Lit max_int, Lit 1) in
   let input = 0 in
-  let refine_ proof = fold_correct overflow input in
+  fold_correct overflow input;
   Format.printf "wrapping addition preserved=%b@."
     (eval (fold overflow) 0 = min_int)
 ;;
@@ -144,10 +144,10 @@ let bad_fold (a : int) (b : int) input :
   let right = Expr.Lit b in
   let original = Expr.Add (left, right) in
   let result = Expr.Lit (a - b) in
-  let refine_ equation = Expr.eval_def left input in
-  let refine_ equation = Expr.eval_def right input in
-  let refine_ equation = Expr.eval_def original input in
-  let refine_ equation = Expr.eval_def result input in
+  Expr.eval_def left input;
+  Expr.eval_def right input;
+  Expr.eval_def original input;
+  Expr.eval_def result input;
   let u = () in
   refine_ u
 ;;

@@ -34,7 +34,7 @@ let () =
           match r with before, after -> before === after} =
       fun outer key value query ->
       let refine_ query = query in
-      let refine_ separation = distinct_def query key in
+      distinct_def query key;
       let inner = M.Refined.add key value outer in
       let before =
         if M.mem query outer then

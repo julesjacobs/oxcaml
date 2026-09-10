@@ -5,12 +5,12 @@ let rec (append_nil @ total) : (xs : int list) ->
     {u : unit | append xs [] === xs} @ immutable contended =
   fun xs ->
   let nil = [] in
-  let refine_ equation = append_def xs nil in
+  append_def xs nil;
   let u = () in
   match xs with
   | [] -> refine_ u
   | _ :: tail ->
-    let refine_ induction = append_nil tail in
+    append_nil tail;
     refine_ u
 
 let rec (append_associative @ total) :
@@ -20,14 +20,14 @@ let rec (append_associative @ total) :
   fun xs ys zs ->
   let xy = append xs ys in
   let yz = append ys zs in
-  let refine_ equation = append_def xs ys in
-  let refine_ equation = append_def xy zs in
-  let refine_ equation = append_def xs yz in
+  append_def xs ys;
+  append_def xy zs;
+  append_def xs yz;
   let u = () in
   match xs with
   | [] -> refine_ u
   | _ :: tail ->
-    let refine_ induction = append_associative tail ys zs in
+    append_associative tail ys zs;
     refine_ u
 
 let[@def] rec reverse (xs : int list) =
@@ -45,10 +45,10 @@ let rec (reverse_append_correct @ total) :
     {u : unit | reverse_append xs acc === append (reverse xs) acc}
       @ immutable contended =
   fun xs acc ->
-  let refine_ equation = reverse_append_def xs acc in
-  let refine_ equation = reverse_def xs in
+  reverse_append_def xs acc;
+  reverse_def xs;
   let reversed = reverse xs in
-  let refine_ equation = append_def reversed acc in
+  append_def reversed acc;
   let u = () in
   match xs with
   | [] -> refine_ u
@@ -57,10 +57,10 @@ let rec (reverse_append_correct @ total) :
     let singleton = [head] in
     let rest = reverse tail in
     let nil = [] in
-    let refine_ induction = reverse_append_correct tail next in
-    let refine_ association = append_associative rest singleton acc in
-    let refine_ equation = append_def singleton acc in
-    let refine_ equation = append_def nil acc in
+    reverse_append_correct tail next;
+    append_associative rest singleton acc;
+    append_def singleton acc;
+    append_def nil acc;
     refine_ u
 
 type representation = {front : int list; rear : int list}
@@ -75,44 +75,44 @@ let (normalize @ total) : (front : int list) -> (rear : int list) ->
     {r : t | contents r === append front (reverse rear)} =
   fun front rear ->
   let nil = [] in
-  let refine_ reverse_nil = ghost_ (reverse_def nil) in
+  ghost_ (reverse_def nil);
   match front with
   | [] ->
     let reversed = reverse_append rear nil in
     let model = ghost_ (reverse rear) in
-    let refine_ reverse_law = ghost_ (reverse_append_correct rear nil) in
-    let refine_ append_law = ghost_ (append_nil model) in
-    let refine_ left_nil = ghost_ (append_def nil model) in
+    ghost_ (reverse_append_correct rear nil);
+    ghost_ (append_nil model);
+    ghost_ (append_def nil model);
     let raw = {front = reversed; rear = []} in
     let q : t = refine_ raw in
-    let refine_ equation = ghost_ (contents_def q) in
-    let refine_ right_nil = ghost_ (append_nil reversed) in
+    ghost_ (contents_def q);
+    ghost_ (append_nil reversed);
     refine_ q
   | _ :: _ ->
     let raw = {front; rear} in
     let q : t = refine_ raw in
-    let refine_ equation = ghost_ (contents_def q) in
+    ghost_ (contents_def q);
     refine_ q
 
 let (empty @ total) : {q : t | contents q === []} =
   let nil = [] in
   let refine_ result = normalize nil nil in
-  let refine_ equation = ghost_ (reverse_def nil) in
-  let refine_ equation = ghost_ (append_def nil nil) in
+  ghost_ (reverse_def nil);
+  ghost_ (append_def nil nil);
   refine_ result
 
 let (enqueue @ total) : (q : t) -> (value : int) ->
     {r : t | contents r === append (contents q) [value]} =
   fun q value ->
-  let refine_ model = ghost_ (contents_def q) in
+  ghost_ (contents_def q);
   let refine_ raw = q in
   let front = raw.front in
   let rear = raw.rear in
   let next_rear = value :: rear in
   let singleton = [value] in
   let reversed = ghost_ (reverse rear) in
-  let refine_ reverse_law = ghost_ (reverse_def next_rear) in
-  let refine_ association = ghost_ (append_associative front reversed singleton) in
+  ghost_ (reverse_def next_rear);
+  ghost_ (append_associative front reversed singleton);
   let refine_ result = normalize front next_rear in
   refine_ result
 
@@ -123,15 +123,15 @@ let (dequeue @ total) :
       match r with head, tail -> contents original === head :: contents tail} =
   fun q ->
   let refine_ original = q in
-  let refine_ model = ghost_ (contents_def original) in
+  ghost_ (contents_def original);
   let refine_ raw = original in
   let front = raw.front in
   let rear = raw.rear in
   let reversed = ghost_ (reverse rear) in
-  let refine_ equation = ghost_ (append_def front reversed) in
+  ghost_ (append_def front reversed);
   match front with
   | [] ->
-    let refine_ equation = ghost_ (reverse_def rear) in
+    ghost_ (reverse_def rear);
     let nonempty : {xs : int list | (xs === []) === false} = refine_ front in
     let head = List.Refined.hd nonempty in
     let refine_ rest = empty in

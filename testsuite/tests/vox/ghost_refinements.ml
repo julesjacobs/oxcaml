@@ -207,9 +207,7 @@ type ghost_elimination =
 
 let (statement_proof @ total) x : {y : int | y >= 0} =
   let y = Nonnegative.value x in
-  ghost_ begin
-    let refine_ proof = Nonnegative.lemma x in ()
-  end;
+  ghost_ (Nonnegative.lemma x);
   refine_ y;;
 [%%expect{|
 val statement_proof : int @ total -> {y : int | y >= 0} = <fun>

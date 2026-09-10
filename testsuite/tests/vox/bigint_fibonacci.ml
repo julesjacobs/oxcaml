@@ -32,7 +32,7 @@ end = struct
       let j = i + 1Z in
       let k = j + 1Z in
       let c = a + b in
-      let refine_ proof = fib_def k in
+      fib_def k;
       let next : {i : t | 0Z <= i && i <= n} = refine_ j in
       (tail_loop[@tailcall]) n next (refine_ b) (refine_ c)
   [@@decreases let refine_ i = index in n - i]
@@ -40,12 +40,12 @@ end = struct
   let (tail @ total) (n : t) : {r : t | r = fib n} =
     let zero = 0Z in
     if n <= zero then
-      let refine_ proof = fib_def n in
-      refine_ zero
+      (fib_def n;
+      refine_ zero)
     else
       let one = 1Z in
-      let refine_ proof = fib_def zero in
-      let refine_ proof = fib_def one in
+      fib_def zero;
+      fib_def one;
       let index : {i : t | 0Z <= i && i <= n} = refine_ zero in
       tail_loop n index (refine_ zero) (refine_ one)
 
@@ -60,18 +60,18 @@ end = struct
     else if n = 0Z then
       let zero = 0Z in
       let one = 1Z in
-      let refine_ proof = fib_def zero in
-      let refine_ proof = fib_def one in
+      fib_def zero;
+      fib_def one;
       refine_ u
     else
       let prev = n - 1Z in
-      let refine_ proof = doubling_identity prev in
+      doubling_identity prev;
       let next = n + 1Z in
       let twice = 2Z * n in
       let twice_next = twice + 1Z in
-      let refine_ proof = fib_def next in
-      let refine_ proof = fib_def twice in
-      let refine_ proof = fib_def twice_next in
+      fib_def next;
+      fib_def twice;
+      fib_def twice_next;
       refine_ u
   [@@decreases n]
 
@@ -82,8 +82,8 @@ end = struct
     if n = 0Z then
       let zero = 0Z in
       let one = 1Z in
-      let refine_ proof = fib_def zero in
-      let refine_ proof = fib_def one in
+      fib_def zero;
+      fib_def one;
       (refine_ zero, refine_ one)
     else
       let k = n / 2Z in
@@ -91,21 +91,21 @@ end = struct
       let a, b = doubling_pair smaller in
       let refine_ a = a in
       let refine_ b = b in
-      let refine_ proof = doubling_identity k in
+      doubling_identity k;
       let c = a * (2Z * b - a) in
       let d = a * a + b * b in
       if n mod 2Z = 0Z then (refine_ c, refine_ d)
       else
         let next = n + 1Z in
-        let refine_ proof = fib_def next in
+        fib_def next;
         let e = c + d in
         (refine_ d, refine_ e)
   [@@decreases let refine_ n = index in n]
 
   let (doubling @ total) (n : t) : {r : t | r = fib n} =
     if n <= 0Z then
-      let refine_ proof = fib_def n in
-      let zero = 0Z in refine_ zero
+      (fib_def n;
+      let zero = 0Z in refine_ zero)
     else
       let index : {n : t | 0Z <= n} = refine_ n in
       let a, _ = doubling_pair index in

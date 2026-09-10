@@ -12012,6 +12012,14 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
   with_local_level_generalize
     (fun () -> type_exp env (mode_statement_with_position position) sexp, sort)
   ~before_generalize: begin fun (exp, _sort) ->
+    let rec statement_type ty =
+      let ty = expand_head env ty in
+      match get_desc ty with
+      | Trefine { ref_payload; _ } -> statement_type ref_payload
+      | _ -> ty
+    in
+    (* Only the statement checks discard the refinement wrappers. *)
+    let exp = { exp with exp_type = statement_type exp.exp_type } in
     let subexp = final_subexpression exp in
     let ty = expand_head env exp.exp_type in
     if is_Tvar ty

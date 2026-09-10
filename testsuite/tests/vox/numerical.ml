@@ -64,7 +64,7 @@ Line 2, characters 45-46:
 let unfolded () : {r : int | r = 1} =
   let n = 1 in
   let r = Fib.fib n in
-  let refine_ proof = Fib.fib_def n in
+  Fib.fib_def n;
   refine_ r;;
 [%%expect{|
 val unfolded : unit -> {r : int | r = 1} = <fun>

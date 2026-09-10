@@ -23,7 +23,9 @@ runtime_code ()
 
 The continuation after `;` remains real. Use `(ghost_ f) x` to apply an
 erased function value, and `ghost_ (f x)` to erase the entire call.
-Statement position accepts ghost values. The call still has to establish its
+Statement position accepts ghost values, including refined-unit lemma results.
+Use `ghost_ (lemma x);` directly when only the lemma's guarantee is needed; keep
+a binding when its value is used later. The call still has to establish its
 preconditions and be total.
 
 The division of labour is deliberate and is the heart of the design:

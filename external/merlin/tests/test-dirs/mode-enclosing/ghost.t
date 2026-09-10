@@ -32,3 +32,12 @@
 
   $ $MERLIN single errors -filename test.ml < test.ml | jq '.value'
   []
+
+  $ cat > test.ml <<'ML'
+  > let (lemma @ total) () : {u : unit | true} =
+  >   let u = () in refine_ u
+  > let () = ghost_ (lemma ()); ()
+  > ML
+
+  $ $MERLIN single errors -extension refinement_types -strict-sequence -filename test.ml < test.ml | jq '.value'
+  []
