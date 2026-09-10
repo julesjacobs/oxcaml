@@ -20,17 +20,28 @@ module Search = struct
       Iarray.Refined.get array bounded
     else 0
 
+  let[@def] rec absent (array : int iarray) (target : int) (lo : int) (hi : int) =
+    if 0 <= lo && lo < hi then
+      at array lo <> target && absent array target (lo + 1) hi
+    else true
+  [@@decreases
+    let lo : int = lo in
+    let hi : int = hi in
+    if 0 <= lo && lo < hi then hi - lo else 0]
+
   let rec (find @ total) :
       (array : int iarray) -> (target : int) ->
       (hi : {hi : int | 0 <= hi && hi <= Iarray.length array}) ->
       (lo : {lo : int | 0 <= lo && lo <= (let refine_ h = hi in h)}) ->
       {r : int option |
         match r with
-        | None -> true
+        | None -> absent array target
+            (let refine_ l = lo in l) (let refine_ h = hi in h)
         | Some index ->
           (let refine_ l = lo in l <= index)
           && (let refine_ h = hi in index < h)
-          && at array index = target} =
+          && at array index = target
+          && absent array target (let refine_ l = lo in l) index} =
     fun array target hi lo ->
     let refine_ upper = hi in
     let upper : int = upper in
@@ -38,6 +49,7 @@ module Search = struct
     let lower : int = lower in
     if lower = upper then
       let result = None in
+      ghost_ (absent_def array target lower upper);
       refine_ result
     else
       let index : {i : int | 0 <= i && i < Iarray.length array} =
@@ -47,6 +59,7 @@ module Search = struct
       ghost_ (at_def array lower);
       if value = target then
         let result = Some lower in
+        ghost_ (absent_def array target lower lower);
         refine_ result
       else
         let next = lower + 1 in
@@ -54,6 +67,14 @@ module Search = struct
           refine_ next
         in
         let refine_ result = find array target hi next in
+        ghost_ (
+          let stop = match result with None -> upper | Some index -> index in
+          absent_def array target lower stop;
+          let u = () in
+          (refine_ u : {u : unit |
+            match result with
+            | None -> absent array target lower upper
+            | Some index -> absent array target lower index}));
         refine_ result
   [@@decreases
     let refine_ upper = hi in
@@ -61,6 +82,29 @@ module Search = struct
     let refine_ lower = lo in
     let lower : int = lower in
     upper - lower]
+
+  let rec (absent_at @ total) :
+      (array : int iarray) -> (target : int) ->
+      (lo : int) -> (hi : int) -> (index : int) ->
+      {u : unit | 0 <= lo && lo <= index && index < hi
+        && absent array target lo hi} ->
+      {u : unit | at array index <> target} =
+    fun array target lo hi index premise ->
+    let refine_ premise = premise in
+    absent_def array target lo hi;
+    let u = () in
+    if index = lo then refine_ u
+    else
+      let next = lo + 1 in
+      let premise : {u : unit | 0 <= next && next <= index && index < hi
+        && absent array target next hi} = refine_ u in
+      absent_at array target next hi index premise;
+      refine_ u
+  [@@decreases
+    let lo : int = lo in
+    let hi : int = hi in
+    if 0 <= lo && lo < hi then hi - lo else 0]
+
 end
 ;;
 [%%expect{|
@@ -77,6 +121,18 @@ module Search :
                let (bounded : int) = (index : int) in
                Iarray.Refined.get array bounded
              else 0)}
+    val absent : int iarray -> int -> int -> int -> bool
+    val absent_def :
+      (array : int iarray) ->
+      (target : int) ->
+      (lo : int) ->
+      (hi : int) ->
+      {u : unit
+        | (absent array target lo hi) ===
+            (if (0 <= lo) && (lo < hi)
+             then
+               ((at array lo) <> target) && (absent array target (lo + 1) hi)
+             else true)}
     val find :
       (array : int iarray) ->
       ((target : int) ->
@@ -84,17 +140,31 @@ module Search :
        (lo : {lo : int | (0 <= lo) && (lo <= (let refine_ h = hi in h))}) ->
        {r : int option
          | match r with
-           | None -> true
+           | None ->
+               absent array target (let refine_ l' = lo in l')
+                 (let refine_ h' = hi in h')
            | Some index ->
-               (let refine_ l = lo in l <= index) &&
+               (let refine_ l'' = lo in l'' <= index) &&
                  ((let refine_ h = hi in index < h) &&
-                    ((at array index) = target))}) @ total
+                    (((at array index) = target) &&
+                       (absent array target (let refine_ l = lo in l) index)))}) @ total
+      stateful
+    val absent_at :
+      (array : int iarray) ->
+      ((target : int) ->
+       (lo : int) ->
+       (hi : int) ->
+       (index : int) ->
+       {u : unit
+         | (0 <= lo) &&
+             ((lo <= index) && ((index < hi) && (absent array target lo hi)))} ->
+       {u : unit | (at array index) <> target}) @ total
       stateful
   end
 |}]
 
 let () =
-  let array = [: 4; 8; 15; 16 :] in
+  let array = [: 4; 8; 4; 16 :] in
   let upper = 4 in
   let lower = 0 in
   let upper : {i : int | 0 <= i && i <= Iarray.length array} = refine_ upper in
@@ -108,6 +178,14 @@ let () =
     | Some index -> Format.printf "%d: index %d@." target index)
     [4; 16; 9];
   let target = 4 in
+  let start = 1 in
+  let start : {i : int | 0 <= i && i <= (let refine_ h = upper in h)} =
+    refine_ start
+  in
+  let refine_ result = Search.find array target upper start in
+  (match result with
+   | None -> Format.printf "unexpected absence@."
+   | Some index -> Format.printf "subinterval: index %d@." index);
   let refine_ limit = upper in
   let end_index : {i : int | 0 <= i && i <= (let refine_ h = upper in h)} =
     refine_ limit
@@ -121,6 +199,7 @@ let () =
 4: index 0
 16: index 3
 9: absent
+subinterval: index 2
 empty interval
 |}]
 
@@ -133,5 +212,25 @@ let invalid () =
 Line 4, characters 27-42:
 4 |   Iarray.Refined.get array (refine_ index)
                                ^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let invalid_first () =
+  let array = [: 4; 4 :] in
+  let target = 4 in
+  let lo = 0 in
+  let later = 1 in
+  Search.at_def array lo;
+  Search.at_def array later;
+  Search.absent_def array target lo later;
+  let result : {i : int | Search.at array i = target
+    && Search.absent array target lo i} = refine_ later in
+  let refine_ result = result in
+  result
+;;
+[%%expect{|
+Line 10, characters 42-55:
+10 |     && Search.absent array target lo i} = refine_ later in
+                                               ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

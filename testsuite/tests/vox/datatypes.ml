@@ -154,14 +154,14 @@ type wrapped = Wrap of token
 let opaque_payload_injective (left @ immutable) (right @ immutable)
     (premise : {u : unit | Wrap left === Wrap right}) :
     {u : unit | left === right} =
-  let refine_ _proof = premise in
+  premise;
   let u = () in
   refine_ u
 
 let injective (left @ immutable) (right @ immutable)
     (premise : {u : unit | First left === First right}) :
     {u : unit | left === right} =
-  let refine_ _proof = premise in
+  premise;
   let u = () in
   refine_ u
 
