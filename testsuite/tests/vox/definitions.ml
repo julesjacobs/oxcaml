@@ -295,3 +295,105 @@ module Polymorphic :
     val boolean : (x : bool) -> {y : bool | y === x}
   end
 |}]
+
+module Let_patterns = struct
+  let[@def] sum (pair : int * int) =
+    let x, pair = pair in x + pair
+
+  let[@def] nested (pair : int * (int * int)) =
+    let x, (y, z) = pair in x + y + z
+
+  type fields = { left : int; right : int }
+
+  let[@def] fields_sum (fields : fields) =
+    let { left; right } = fields in left + right
+end;;
+[%%expect{|
+module Let_patterns :
+  sig
+    val sum : int * int -> int
+    val sum_def :
+      (pair' : (int * int)) ->
+      {u : unit | (sum pair') === (match pair' with | (x, pair) -> x + pair)}
+    val nested : int * (int * int) -> int
+    val nested_def :
+      (pair : (int * (int * int))) ->
+      {u : unit
+        | (nested pair) === (match pair with | (x, (y, z)) -> (x + y) + z)}
+    type fields = { left : int; right : int; }
+    val fields_sum : fields -> int
+    val fields_sum_def :
+      (fields : fields) ->
+      {u : unit
+        | (fields_sum fields) ===
+            (match fields with | { left; right } -> left + right)}
+  end
+|}]
+
+let tuple_let_unfold () : {n : int | n = 7} =
+  let pair = 3, 4 in
+  let result = Let_patterns.sum pair in
+  let refine_ proof = Let_patterns.sum_def pair in
+  refine_ result;;
+[%%expect{|
+val tuple_let_unfold : unit -> {n : int | n = 7} = <fun>
+|}]
+
+let tuple_let_wrong () : {n : int | n = 8} =
+  let pair = 3, 4 in
+  let result = Let_patterns.sum pair in
+  let refine_ proof = Let_patterns.sum_def pair in
+  refine_ result;;
+[%%expect{|
+Line 5, characters 2-16:
+5 |   refine_ result;;
+      ^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let[@def] partial_let (values : int list) =
+  let head :: _ = values in head;;
+[%%expect{|
+Line 2, characters 2-32:
+2 |   let head :: _ = values in head;;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 8 [partial-match]: this pattern-matching is not exhaustive.
+  Here is an example of a case that is not matched: "[]"
+
+Line 2, characters 2-32:
+2 |   let head :: _ = values in head;;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: The expression is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 1-2, characters 22-32
+         which is expected to be "total".
+|}]
+
+let tuple_let_predicate (pair : int * int) :
+    {n : int | let x, y = pair in n = x + y} =
+  let x, y = pair in
+  let result = x + y in
+  refine_ result;;
+[%%expect{|
+val tuple_let_predicate :
+  (pair : (int * int)) -> {n : int | match pair with | (x, y) -> n = (x + y)} =
+  <fun>
+|}]
+
+let nested_let_unfold () : {n : int | n = 12} =
+  let pair = 3, (4, 5) in
+  let result = Let_patterns.nested pair in
+  let refine_ proof = Let_patterns.nested_def pair in
+  refine_ result;;
+[%%expect{|
+val nested_let_unfold : unit -> {n : int | n = 12} = <fun>
+|}]
+
+let record_let_unfold () : {n : int | n = 7} =
+  let fields = { Let_patterns.left = 3; right = 4 } in
+  let result = Let_patterns.fields_sum fields in
+  let refine_ proof = Let_patterns.fields_sum_def fields in
+  refine_ result;;
+[%%expect{|
+val record_let_unfold : unit -> {n : int | n = 7} = <fun>
+|}]

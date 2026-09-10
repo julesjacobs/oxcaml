@@ -15200,8 +15200,12 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
                        rb_expr },
                      expression locals body ))
           | _ ->
-              unsupported_refinement_syntax binding.vb_pat.pat_loc
-                "This binding pattern"
+              let scrutinee = expression locals binding.vb_expr in
+              let locals, rc_lhs =
+                refinement_pattern_of_typed locals binding.vb_pat
+              in
+              let rc_rhs = expression locals body in
+              mk (Rexp_match (scrutinee, [{ rc_lhs; rc_guard = None; rc_rhs }]))
         end
       | Texp_function { params; body = Tfunction_body body; _ } ->
           let locals, params =
