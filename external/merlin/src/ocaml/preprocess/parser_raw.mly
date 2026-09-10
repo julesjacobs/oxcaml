@@ -3037,8 +3037,6 @@ fun_:
      { mkexp_constraint ~loc:$sloc ~exp ~cty:None ~modes:[mode] }
   | EXCLAVE seq_expr
      { mkexp_exclave ~loc:$sloc ~kwd_loc:($loc($1)) $2 }
-  | GHOST seq_expr
-     { mkexp ~loc:$sloc (Pexp_ghost $2) }
 ;
 %public %inline expr :
   | or_function(fun_expr) { $1 }
@@ -3093,6 +3091,8 @@ fun_:
   | simple_expr nonempty_llist(labeled_simple_expr)
       { mkexp ~loc:$sloc (Pexp_apply($1, $2)) }
   | stack(simple_expr) %prec below_HASH { $1 }
+  | GHOST simple_expr %prec below_HASH
+      { mkexp ~loc:$sloc (Pexp_ghost $2) }
   | BORROW simple_expr %prec below_HASH
       { Exp.borrow ~loc:(make_loc $sloc) $2 }
   | REFINE simple_expr %prec below_HASH

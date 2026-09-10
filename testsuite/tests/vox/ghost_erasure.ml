@@ -56,3 +56,26 @@ end;;
   (makeblock 0 Client/0))
 module Client : sig val run : int list -> int end
 |}]
+
+module Statement_client = struct
+  let (run @ total) (xs : int list) =
+    ghost_ begin
+      let refine_ proof = Proof.visit xs in ()
+    end;
+    7
+end;;
+[%%expect{|
+(let
+  (Statement_client/0 =
+     (let
+       (run/1 =
+          (function {nlocal = 0}
+            xs/2[value<
+                  (consts (0))
+                   (non_consts ([0: ?,
+                                 value<(consts (0)) (non_consts ([0: ?, *]))>]))>]
+            : int (seq 24029 7)))
+       (makeblock 0 run/1)))
+  (makeblock 0 Statement_client/0))
+module Statement_client : sig val run : int list -> int end
+|}]

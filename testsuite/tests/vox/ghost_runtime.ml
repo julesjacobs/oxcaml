@@ -75,3 +75,11 @@ let () =
   assert (!defaults = 1);
   assert (defaulted ~a:7 () = 7);
   assert (!defaults = 1)
+
+let () =
+  let calls = ref 0 in
+  let return_ghost (x : unit @ ghost) = incr calls; x in
+  ghost_ (());
+  ghost_ begin (); () end;
+  return_ghost (ghost_ ());
+  assert (!calls = 1)

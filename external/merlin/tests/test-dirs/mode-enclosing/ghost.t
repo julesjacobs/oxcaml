@@ -22,3 +22,13 @@
   [
     "This value is ghost but is expected to be real."
   ]
+
+  $ cat > test.ml <<'ML'
+  > let () =
+  >   ghost_ (());
+  >   ghost_ begin (); () end;
+  >   print_endline "real continuation"
+  > ML
+
+  $ $MERLIN single errors -filename test.ml < test.ml | jq '.value'
+  []

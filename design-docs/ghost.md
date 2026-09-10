@@ -7,6 +7,25 @@ field modality that erases data from representations.
     @ ghost             -- the value may only flow to ghost positions
     { x : t @@ ghost }  -- a ghost record field: occupies no slot
 
+`ghost_` takes one simple expression, like `refine_` and `assume_`.
+Parenthesize a call or use `begin ... end` for a proof block:
+
+```ocaml
+ghost_ (lemma x);
+runtime_code ()
+
+ghost_ begin
+  lemma1 x;
+  lemma2 x
+end;
+runtime_code ()
+```
+
+The continuation after `;` remains real. Use `(ghost_ f) x` to apply an
+erased function value, and `ghost_ (f x)` to erase the entire call.
+Statement position accepts ghost values. The call still has to establish its
+preconditions and be total.
+
 The division of labour is deliberate and is the heart of the design:
 
 - The **mode** `@ ghost` is an information-flow property and nothing else.
