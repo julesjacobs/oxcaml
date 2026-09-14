@@ -371,6 +371,8 @@ let classify_expression : Typedtree.expression -> sd =
 
 (** {1 Usage of recursive variables} *)
 
+module Value_mode = Mode
+
 module Mode = struct
   (** For an expression in a program, its "usage mode" represents
       static information about how the value produced by the expression
@@ -414,12 +416,16 @@ module Mode = struct
         in arbitrary ways. Such a value must be fully defined at the point
         of usage, it cannot be defined mutually-recursively with its context. *)
 
+    | Require_initialized
+    (** A total closure or payload must not depend on its unfinished recursive
+        group, even through delayed or guarded aliases. *)
+
   let equal = ((=) : t -> t -> bool)
 
   (* Lower-ranked modes demand/use less of the variable/expression they qualify
      -- so they allow more recursive definitions.
 
-     Ignore < Delay < Guard < Return < Dereference
+     Ignore < Delay < Guard < Return < Dereference < Require_initialized
   *)
   let rank = function
     | Ignore -> 0
@@ -427,6 +433,7 @@ module Mode = struct
     | Guard -> 2
     | Return -> 3
     | Dereference -> 4
+    | Require_initialized -> 5
 
   (* Returns the more conservative (highest-ranking) mode of the two
      arguments.
@@ -446,6 +453,7 @@ module Mode = struct
      it: (compose Ignore m) and (compose m Ignore) are both Ignore. *)
   let compose m' m = match m', m with
     | Ignore, _ | _, Ignore -> Ignore
+    | Require_initialized, _ | _, Require_initialized -> Require_initialized
     | Dereference, _ -> Dereference
     | Delay, _ -> Delay
     | Guard, Return -> Guard
@@ -454,7 +462,8 @@ module Mode = struct
     | Return, ((Dereference | Guard | Delay) as m) -> m
 end
 
-type mode = Mode.t = Ignore | Delay | Guard | Return | Dereference
+type mode = Mode.t =
+  Ignore | Delay | Guard | Return | Dereference | Require_initialized
 
 module Env :
 sig
@@ -646,6 +655,28 @@ let array_mode exp =
   | Lambda.Punspecializedarray ->
     Misc.fatal_error "Value_rec_check.array_mode: Punspecializedarray"
 
+let has_total_modality modalities =
+  let open Value_mode in
+  let mode = Value.min_with_comonadic Totality Totality.partial in
+  let mode = Modality.Const.apply_left modalities mode in
+  Totality.is_total (Value.proj_comonadic Totality mode)
+
+let has_total_kind env ty =
+  let open Value_mode in
+  let kind = Ctype.type_jkind env ty in
+  let crossing = Ctype.crossing_of_jkind env kind in
+  let mode = Value.min_with_comonadic Totality Totality.partial in
+  let mode = Crossing.apply_left crossing mode in
+  Totality.is_total (Value.proj_comonadic Totality mode)
+
+let closure_demand alloc_mode =
+  let open Value_mode in
+  (* Commit the choice so later constraints cannot certify a delayed
+     recursive dependency as total after this check. *)
+  match Totality.zap_to_ceil (Alloc.proj_comonadic Totality alloc_mode) with
+  | Totality.Const.Total -> Require_initialized
+  | Totality.Const.Partial -> Delay
+
 (* Expression judgment:
      G |- e : m
    where (m) is an input of the code and (G) is an output;
@@ -755,9 +786,20 @@ let rec expression : Typedtree.expression -> term_judg =
           | [] -> Guard
           | _ :: _ -> Dereference
         in
-        join [expression e << function_mode;
-              list expression applied << Dereference;
-              list expression delayed << Guard]
+        let closure_demands =
+          List.filter_map (function
+            | _, Arg _ -> None
+            | _, Omitted omitted -> Some (closure_demand omitted.mode_closure))
+            args
+        in
+        let application =
+          join [expression e << function_mode;
+                list expression applied << Dereference;
+                list expression delayed << Guard]
+        in
+        if List.exists (Mode.equal Require_initialized) closure_demands
+        then application << Require_initialized
+        else application
     | Texp_tuple (exprs, _) ->
       list expression (List.map snd exprs) << Guard
     | Texp_unboxed_tuple exprs ->
@@ -790,7 +832,11 @@ let rec expression : Typedtree.expression -> term_judg =
         | _ -> empty
       in
       let arg_mode i =
-        if Ctype.is_inductive exp.exp_env desc.cstr_res then Dereference
+        let arg = List.nth desc.cstr_args i in
+        if has_total_modality arg.ca_modalities
+           || (desc.cstr_generalized && has_total_kind exp.exp_env arg.ca_type)
+        then Require_initialized
+        else if Ctype.is_inductive exp.exp_env desc.cstr_res then Dereference
         else match desc.cstr_repr with
         | Variant_unboxed | Variant_with_null ->
           Return
@@ -829,7 +875,8 @@ let rec expression : Typedtree.expression -> term_judg =
     | Texp_record { fields = es; extended_expression = eo;
                     representation = rep } ->
         let field_mode (label : Data_types.label_description) =
-          match rep with
+          if has_total_modality label.lbl_modalities then Require_initialized
+          else match rep with
           | Record_float | Record_ufloat -> Dereference
           | Record_unboxed | Record_inlined (_, _, Variant_unboxed) -> Return
           | Record_boxed | Record_inlined (_, Constructor_uniform_value, _) ->
@@ -873,13 +920,15 @@ let rec expression : Typedtree.expression -> term_judg =
       | Record_unboxed_product
       | Record_unboxed_product_undetermined
       | Record_unboxed_product_variable _ ->
-        let field (_, _, field_def) =
+        let field
+            ((label : Data_types.unboxed_label_description), _, field_def) =
           let env =
             match field_def with
             | Kept _ -> empty
             | Overridden (_, e) -> expression e
           in
-          env << Return
+          env << (if has_total_modality label.lbl_modalities
+                  then Require_initialized else Return)
         in
         join [
           array field es;
@@ -1037,7 +1086,7 @@ let rec expression : Typedtree.expression -> term_judg =
         path pth << Dereference;
         list field fields << Dereference;
       ]
-    | Texp_function { params; body } ->
+    | Texp_function { params; body; alloc_mode } ->
       (*
          G      |-{body} b  : m[Delay]
          (Hj    |-{def}  Pj : m[Delay])^j
@@ -1081,7 +1130,7 @@ let rec expression : Typedtree.expression -> term_judg =
         let patterns = List.map param_pat params in
         let defaults = List.map param_default params in
         let body = function_body body in
-        let f = join (body :: defaults) << Delay in
+        let f = join (body :: defaults) << closure_demand alloc_mode in
         (fun m ->
           let env = f m in
           remove_patlist patterns env)
@@ -1589,7 +1638,8 @@ and is_destructuring_pattern : type k . k general_pattern -> bool =
 let is_valid_recursive_expression idlist expr : sd option =
   match expr.exp_desc with
   | Texp_function _ ->
-     (* Fast path: functions can never have invalid recursive references *)
+     (* Typecore separately checks totality of recursive functions. This
+        fast path only checks safe runtime initialization. *)
      Some Static
   | _ ->
      let rkind = classify_expression expr in

@@ -224,3 +224,27 @@ let () =
   assert (solve 20 = Valid);
   assert (match solve 10 with Invalid _ -> true | _ -> false);
   print_endline "Iarray equality transports nested observations"
+
+let () =
+  let source wanted =
+    "external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n\
+     external unknown : (int -> int) @ immutable total -> bool\n\
+       @@ total = \"unknown_callback_fact\"\n\
+     external choose : (f : (int -> int)) @ immutable total ->\n\
+       {n : int | n === 7 && unknown f} = \"choose_with_callback\"\n\
+     let test (f : (int -> int) @ immutable total) =\n\
+       let refine_ n = choose f in\n\
+       let (_ : {n : int | n === " ^ string_of_int wanted
+    ^ "}) = refine_ n in ()\n"
+  in
+  let solve wanted =
+    match queries (source wanted) with
+    | [q] ->
+        (Vox_smt_solver.check
+           ~config:{ Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+           ~int_width:63 q).validity
+    | _ -> failwith "Expected one callback-conjunction query"
+  in
+  assert (solve 7 = Valid);
+  assert (match solve 8 with Invalid _ -> true | _ -> false)
+

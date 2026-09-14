@@ -1062,6 +1062,7 @@ module Merge = struct
               type_attributes = [];
               type_unboxed_default = false;
               type_inductive = false;
+              type_phantom_parameters = false;
               type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
               type_unboxed_version = None;
             }
@@ -3063,6 +3064,10 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
              env dependent_ids)
           signature
   and find_forbidden_recursive_signature_item env dependent_ids = function
+    | Sig_type (_, decl, _, _) when decl.type_phantom_parameters ->
+        Location.raise_errorf ~loc:decl.type_loc
+          "Recursive module signatures cannot assert phantom parameter \
+           guarantees."
     | Sig_type (id, decl, _, _) when decl.type_inductive ->
         Some (`Inductive (Ident.name id))
     | Sig_module (_, _, decl, _, _) ->

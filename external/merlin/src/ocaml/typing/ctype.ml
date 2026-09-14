@@ -1808,6 +1808,7 @@ let new_local_type ?(loc = Location.none) ?manifest_and_scope origin jkind =
     type_attributes = [];
     type_unboxed_default = false;
     type_inductive = false;
+    type_phantom_parameters = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -2855,6 +2856,28 @@ let declaration_can_pattern_match_total env root root_args decl =
   let completed_declarations = ref Path.Map.empty in
   let exception Not_definitely_nonrecursive in
   let allow_direct_recursion = decl.type_inductive in
+  let strictly_contains outer inner =
+    if eq_type outer inner then false
+    else
+      let seen = ref TypeSet.empty in
+      let found = ref false in
+      let rec visit ty =
+        if not (TypeSet.mem ty !seen) then begin
+          seen := TypeSet.add ty !seen;
+          if eq_type ty inner then found := true
+          else Btype.iter_type_expr visit ty
+        end
+      in
+      Btype.iter_type_expr visit outer;
+      !found
+  in
+  let arguments_decrease args previous =
+    List.length args = List.length previous
+    && List.for_all2
+         (fun arg previous ->
+           eq_type arg previous || strictly_contains previous arg)
+         args previous
+  in
   let rec visit_type direct ty =
     let visited =
       if direct then visited_direct_types else visited_indirect_types
@@ -2884,22 +2907,37 @@ let declaration_can_pattern_match_total env root root_args decl =
         (Path.Map.find_opt path !completed_declarations)
         ~default:[]
     in
-    if List.exists (List.equal eq_type args) completed then ()
-    else match Path.Map.find_opt path !active_declarations with
-    | Some active_args ->
-      (* An exact revisit closes a nominal cycle. Changed arguments may keep
-         transforming forever, so reject instead of expanding the sequence. *)
-      if not (List.equal eq_type args active_args) then
-        raise_notrace Not_definitely_nonrecursive
-    | None ->
-      active_declarations := Path.Map.add path args !active_declarations;
+    let active =
+      Option.value (Path.Map.find_opt path !active_declarations) ~default:[]
+    in
+    if List.exists (List.equal eq_type args) (completed @ active) then ()
+    else match active with
+    | previous :: _ when not (arguments_decrease args previous) ->
+      (* Permit finite nesting, but do not expand growing instantiations. *)
+      raise_notrace Not_definitely_nonrecursive
+    | _ ->
+      active_declarations := Path.Map.add path (args :: active)
+        !active_declarations;
       Fun.protect
         ~finally:(fun () ->
-          active_declarations := Path.Map.remove path !active_declarations)
+          active_declarations :=
+            if active = [] then Path.Map.remove path !active_declarations
+            else Path.Map.add path active !active_declarations)
         (fun () ->
           match Env.find_type path env with
-          | decl -> visit_representation false decl args
-          | exception Not_found -> ());
+          | decl ->
+              begin match decl.type_kind with
+              | Type_abstract _ | Type_open
+                when not decl.type_phantom_parameters ->
+                  List.iter (visit_type false) args
+              | Type_variant (constructors, _, _)
+                when List.exists (fun constructor ->
+                  Option.is_some constructor.cd_res) constructors ->
+                  List.iter (visit_type false) args
+              | _ -> ()
+              end;
+              visit_representation false decl args
+          | exception Not_found -> List.iter (visit_type false) args);
       completed_declarations :=
         Path.Map.add path (args :: completed) !completed_declarations
   and visit_representation direct decl args =
@@ -9085,6 +9123,7 @@ let rec nondep_type_decl env mid is_covariant decl =
       type_attributes = decl.type_attributes;
       type_unboxed_default = decl.type_unboxed_default;
       type_inductive = decl.type_inductive;
+      type_phantom_parameters = decl.type_phantom_parameters;
       type_uid = decl.type_uid;
       type_unboxed_version;
     }

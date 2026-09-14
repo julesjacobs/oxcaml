@@ -283,3 +283,30 @@ range, and permutation mathematics used by quicksort and `collection_theory.ml`.
 The latter verifies rotation and observes preserved multiplicities through an
 abstract multiset interface. `collection_rejected.ml` checks representation
 abstraction and the premises required by the count laws.
+
+## Permission refs
+
+`pref.mli` exposes an erased unique `'a Pref.token` and its finite-map
+observation `Pref.own : 'a Pref.token -> 'a Pref.heap`. Reads borrow the token; writes consume it and return its successor.
+The current map determines both permission and value. Saved ghost maps remain
+historical observations after writes. Native code omits token fields and
+arguments. Bytecode retains the existing `void` unit placeholders; neither
+backend stores an ownership map. `pref_layout.ml` checks the wrapper layouts.
+
+Payload types are preserved by heap observations and ownership operations.
+Different payload types use separate tokens. Executable reads and writes are
+partial. Total projection and pattern matching check recursive dependencies
+through heap payloads; passive handle parameters carry a checked guarantee
+that their identity does not contain their payload.
+
+`prefs.ml` checks updates, frames, old snapshots, and stable runtime identity.
+`pref_swap.ml` verifies a swap against a whole-map postcondition;
+`pref_payloads.ml` exercises the GC write barrier with a list payload.
+`pref_staging.ml` checks that partial application does not execute an erased-token
+write early. `pref_rejected.ml` rejects missing permission, stale ownership,
+ghost writes, and false map claims. `pref_modes.ml` exercises zero-layout
+uniqueness and the payload-kind boundary.
+
+The solver supplies ground empty/update/lookup laws over a common location sort.
+Different payload sorts do not imply distinct locations. The encoding is
+conservative across typed views; it does not supply general heap extensionality.

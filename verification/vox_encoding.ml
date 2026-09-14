@@ -456,7 +456,9 @@ and build_data ctx env stack key ty =
     | Some (arguments, declaration) ->
       begin match declaration.type_kind with
       | Type_record (labels, (Record_boxed | Record_mixed _), _)
-        when List.for_all (fun label -> label.ld_mutable = Immutable) labels ->
+        when Ctype.can_pattern_match_total env ty
+             && List.for_all (fun label -> label.ld_mutable = Immutable) labels
+        ->
         let stack = (key, (datatype, false)) :: stack in
         begin match
           Misc.Stdlib.List.map_option
@@ -476,7 +478,8 @@ and build_data ctx env stack key ty =
           finish (Record_data constructor) [constructor]
         end
       | Type_variant (constructors, Variant_boxed _, _)
-        when constructors <> []
+        when Ctype.can_pattern_match_total env ty
+             && constructors <> []
              && List.for_all
                   (fun constructor ->
                     constructor.cd_res = None
