@@ -283,3 +283,30 @@ range, and permutation mathematics used by quicksort and `collection_theory.ml`.
 The latter verifies rotation and observes preserved multiplicities through an
 abstract multiset interface. `collection_rejected.ml` checks representation
 abstraction and the premises required by the count laws.
+
+## Permission refs
+
+`pref.mli` exposes one erased unique token and its finite-map observation
+`Pref.own`. Reads borrow the token; writes consume it and return its successor.
+The current map determines both permission and value. Saved ghost maps remain
+historical observations after writes. Native code omits token fields and
+arguments. Bytecode retains the existing `void` unit placeholders; neither
+backend stores an ownership map. `pref_layout.ml` checks the wrapper layouts.
+
+Allocation takes erased `Pref.Data.t` evidence restricting payloads to scalars,
+pairs, options, lists, and passive pref handles. This closes the higher-order
+store route to recursion: `immutable_data` alone admits suitably annotated
+function fields. User-defined recursive record payloads and split/join are not
+part of this initial interface.
+
+`prefs.ml` checks updates, frames, old snapshots, and stable runtime identity.
+`pref_swap.ml` verifies a total swap against a whole-map postcondition;
+`pref_payloads.ml` exercises the GC write barrier with a list payload.
+`pref_staging.ml` checks that partial application does not execute an erased-token
+write early. `pref_rejected.ml` rejects missing permission, stale ownership,
+ghost writes, and false map claims. `pref_modes.ml` exercises zero-layout
+uniqueness and the payload-kind boundary.
+
+The solver supplies ground empty/update/lookup laws over a common location sort.
+Different payload sorts do not imply distinct locations. The encoding is
+conservative across typed views; it does not supply general heap extensionality.
