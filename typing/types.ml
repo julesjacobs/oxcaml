@@ -210,6 +210,7 @@ and refinement_expression_desc =
       * refinement_expression option
   | Rexp_array of Asttypes.mutable_flag * refinement_expression list
   | Rexp_field of refinement_expression * Path.t * string
+  | Rexp_unboxed_field of refinement_expression * Path.t * string
   | Rexp_ifthenelse of
       refinement_expression * refinement_expression
       * refinement_expression option

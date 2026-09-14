@@ -135,7 +135,8 @@ type context =
     iarray_reads : (sort * term * term, term) Hashtbl.t;
     map_class_sorts : (sort, sort) Hashtbl.t;
     pref_heaps : (sort, unit) Hashtbl.t;
-    pref_constructors : (Function.t, [`Empty | `Put]) Hashtbl.t;
+    pref_constructors :
+      (Function.t, [`Empty | `Put | `Union | `Restrict | `Exclude]) Hashtbl.t;
     pref_observers :
       (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
@@ -1164,6 +1165,34 @@ let rec pref_observe ctx budget fn heap key =
           | None -> call
         in
         App (Ite, [both Eq key changed; changed_value; old])
+      | Call (op, [left; right])
+        when List.mem
+               (Hashtbl.find_opt ctx.pref_constructors op)
+               [Some `Union; Some `Restrict; Some `Exclude] ->
+        let mem heap =
+          let mem =
+            intern_function ctx "Pref.mem" [term_sort heap; term_sort key] Bool
+          in
+          Hashtbl.replace ctx.pref_observers mem None;
+          pref_observe ctx (budget - 1) mem heap key
+        in
+        let empty =
+          match Hashtbl.find_opt ctx.pref_observers fn with
+          | Some None -> Boolean false
+          | Some (Some (_, none)) -> Construct (none, [])
+          | None -> call
+        in
+        let left_value = pref_observe ctx (budget - 1) fn left key in
+        begin match Hashtbl.find_opt ctx.pref_constructors op with
+        | Some `Union ->
+          App
+            ( Ite,
+              [mem left; left_value; pref_observe ctx (budget - 1) fn right key]
+            )
+        | Some `Restrict -> App (Ite, [mem right; left_value; empty])
+        | Some `Exclude -> App (Ite, [mem right; empty; left_value])
+        | _ -> call
+        end
       | Call (empty, [])
         when Hashtbl.find_opt ctx.pref_constructors empty = Some `Empty ->
         begin match Hashtbl.find_opt ctx.pref_observers fn with
@@ -1175,8 +1204,62 @@ let rec pref_observe ctx budget fn heap key =
     in
     observe_iarray ctx call value
 
+let rec pref_disjoint ctx budget left right =
+  let fn =
+    intern_function ctx "Pref.disjoint" [term_sort left; term_sort right] Bool
+  in
+  let call = Call (fn, [left; right]) in
+  let expand heap other =
+    match expose_head ctx heap with
+    | Call (fn, []) when Hashtbl.find_opt ctx.pref_constructors fn = Some `Empty
+      ->
+      Some (Boolean true)
+    | Call (fn, [source; key; _])
+      when Hashtbl.find_opt ctx.pref_constructors fn = Some `Put ->
+      let mem =
+        intern_function ctx "Pref.mem" [term_sort other; term_sort key] Bool
+      in
+      Hashtbl.replace ctx.pref_observers mem None;
+      Some
+        (both And
+           (App (Not, [pref_observe ctx budget mem other key]))
+           (pref_disjoint ctx (budget - 1) source other))
+    | Call (fn, [a; b])
+      when Hashtbl.find_opt ctx.pref_constructors fn = Some `Union ->
+      Some
+        (both And
+           (pref_disjoint ctx (budget - 1) a other)
+           (pref_disjoint ctx (budget - 1) b other))
+    | _ -> None
+  in
+  if budget = 0
+  then call
+  else
+    let value =
+      match expand left right with
+      | Some value -> value
+      | None -> Option.value (expand right left) ~default:call
+    in
+    observe_iarray ctx call value
+
 let operation ctx env function_type result_type name args =
   match name, args with
+  | "caml_pref_heap_disjoint", [left; right] ->
+    begin match scalar left, scalar right with
+    | Some left, Some right -> scalar_value (pref_disjoint ctx 64 left right)
+    | _ -> None
+    end
+  | "caml_pref_heap_same_domain", [left; right] ->
+    begin match scalar left, scalar right with
+    | Some left, Some right ->
+      scalar_value
+        (Call
+           ( intern_function ctx "Pref.same_domain"
+               [term_sort left; term_sort right]
+               Bool,
+             [left; right] ))
+    | _ -> None
+    end
   | "caml_pref_own_bytecode", [token] ->
     begin match scalar token, sort ctx.encoding env result_type with
     | Some token, Some heap_sort ->
@@ -1191,6 +1274,27 @@ let operation ctx env function_type result_type name args =
         let fn = intern_function ctx "Pref.empty" [] heap_sort in
         Hashtbl.replace ctx.pref_constructors fn `Empty;
         scalar_value (Call (fn, [])))
+  | ( (( "caml_pref_heap_union" | "caml_pref_heap_restrict"
+       | "caml_pref_heap_exclude" ) as name),
+      [left; right] ) ->
+    begin match scalar left, scalar right with
+    | Some left, Some right ->
+      let kind, label =
+        match name with
+        | "caml_pref_heap_union" -> `Union, "Pref.union"
+        | "caml_pref_heap_restrict" -> `Restrict, "Pref.restrict"
+        | _ -> `Exclude, "Pref.exclude"
+      in
+      let fn =
+        intern_function ctx label
+          [term_sort left; term_sort right]
+          (term_sort left)
+      in
+      Hashtbl.replace ctx.pref_heaps (term_sort left) ();
+      Hashtbl.replace ctx.pref_constructors fn kind;
+      scalar_value (Call (fn, [left; right]))
+    | _ -> None
+    end
   | "caml_pref_heap_put", [heap; pointer; value] ->
     begin match scalar heap, scalar pointer, scalar value with
     | Some heap, Some pointer, Some value ->
@@ -1699,7 +1803,8 @@ let rec predicate ctx env s e =
           | None -> None)
       in
       name ctx s (scalar_value (required e.rexp_loc value))
-    | Rexp_record (fields, extended) ->
+    | Rexp_record (fields, extended)
+    | Rexp_record_unboxed_product (fields, extended) ->
       let s, base =
         match extended with
         | None -> s, None
@@ -1716,7 +1821,8 @@ let rec predicate ctx env s e =
       name ctx s
         (scalar_value
            (required e.rexp_loc (record_value ctx env e.rexp_type base fields)))
-    | Rexp_field (record_exp, _, field_name) ->
+    | Rexp_field (record_exp, _, field_name)
+    | Rexp_unboxed_field (record_exp, _, field_name) ->
       let s, record = eval s record_exp in
       name ctx s
         (scalar_value
@@ -1953,6 +2059,17 @@ let rec pattern : type k.
       pattern_selected_fields ctx s value constructor patterns
     | _ -> pattern_fallback ctx s p
     end
+  | Tpat_record_unboxed_product (fields, _, _) ->
+    begin match data_of_type ctx p.pat_env p.pat_type, scalar value with
+    | Some { kind = Record_data constructor; _ }, Some value ->
+      let patterns =
+        List.map
+          (fun (_, label, pattern) -> label.Data_types.lbl_pos, pattern)
+          fields
+      in
+      pattern_selected_fields ctx s value constructor patterns
+    | _ -> pattern_fallback ctx s p
+    end
   | Tpat_or (left, right, _) ->
     let left = pattern ctx s value left in
     let left_condition = disjunction (List.map snd left) in
@@ -2169,11 +2286,44 @@ and expression_desc ctx s e =
     name ctx s
       (opaque_if_unsupported
          (record_value ctx e.exp_env e.exp_type base fields))
+  | Texp_record_unboxed_product { fields; extended_expression; _ } ->
+    let s, base =
+      match extended_expression with
+      | None -> s, None
+      | Some (e, _) ->
+        let s, value = eval s e in
+        s, Some (e.exp_type, value)
+    in
+    let fields = Array.to_list fields in
+    let s, values =
+      arguments_right_to_left
+        (fun s (_, _, field) ->
+          match field with Kept _ -> s, None | Overridden (_, e) -> eval s e)
+        s fields
+    in
+    let fields =
+      List.filter_map Fun.id
+        (List.map2
+           (fun (label, _, field) value ->
+             match field with
+             | Kept _ -> None
+             | Overridden _ -> Some (label.Data_types.lbl_name, value))
+           fields values)
+    in
+    name ctx s
+      (opaque_if_unsupported
+         (record_value ctx e.exp_env e.exp_type base fields))
   | Texp_array (Immutable, _, elements, _) ->
     let s, values = arguments_right_to_left eval s elements in
     let s, value = iarray_value ctx e.exp_env e.exp_type s values in
     s, opaque_if_unsupported value
   | Texp_field { record; label; _ } ->
+    let s, value = eval s record in
+    name ctx s
+      (opaque_if_unsupported
+         (select_field ctx e.exp_env record.exp_type label.Data_types.lbl_name
+            value))
+  | Texp_unboxed_field { record; label; _ } ->
     let s, value = eval s record in
     name ctx s
       (opaque_if_unsupported
@@ -2587,21 +2737,24 @@ let query ctx code =
         relate right left
       | _ -> ()
       end;
-      let observation =
+      let observations =
         match term with
         | Call (fn, [heap; key]) when Hashtbl.mem ctx.pref_observers fn ->
-          Some (heap, fun alias -> pref_observe ctx 128 fn alias key)
+          [(heap, fun alias -> pref_observe ctx 128 fn alias key)]
+        | Call (fn, [left; right]) when observation_function "Pref.disjoint" fn
+          ->
+          [ (left, fun alias -> pref_disjoint ctx 64 alias right);
+            (right, fun alias -> pref_disjoint ctx 64 left alias) ]
         | Call (fn, [array; index]) when observation_function "Iarray.get" fn ->
-          Some
-            ( array,
+          [ ( array,
               fun alias ->
                 iarray_get ctx (term_sort alias) (Function.result fn) alias
-                  index )
+                  index ) ]
         | Call (fn, [array]) when observation_function "Iarray.length" fn ->
-          Some (array, fun alias -> iarray_length ctx (term_sort alias) alias)
-        | _ -> None
+          [(array, fun alias -> iarray_length ctx (term_sort alias) alias)]
+        | _ -> []
       in
-      Option.iter
+      List.iter
         (fun (array, read) ->
           let observe alias =
             let value = read alias in
@@ -2615,7 +2768,7 @@ let query ctx code =
           Hashtbl.replace array_observations array
             (observe :: entries array_observations array);
           List.iter (propagate observe) (entries array_equalities array))
-        observation;
+        observations;
       Option.iter
         (define "iarray observation" term)
         (Hashtbl.find_opt ctx.observation_equations term);
