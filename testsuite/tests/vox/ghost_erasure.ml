@@ -51,7 +51,7 @@ end;;
                   (consts (0))
                    (non_consts ([0: ?,
                                  value<(consts (0)) (non_consts ([0: ?, *]))>]))>]
-            : int (let (proof/1 =[value<int>] 24029) 7)))
+            : int (let (proof/1 =[value<int>] (opaque 24029)) 7)))
        (makeblock 0 run/0)))
   (makeblock 0 Client/0))
 module Client : sig val run : int list -> int end
@@ -72,7 +72,7 @@ end;;
                   (consts (0))
                    (non_consts ([0: ?,
                                  value<(consts (0)) (non_consts ([0: ?, *]))>]))>]
-            : int (seq 24029 7)))
+            : int (seq (opaque 24029) 7)))
        (makeblock 0 run/1)))
   (makeblock 0 Statement_client/0))
 module Statement_client : sig val run : int list -> int end

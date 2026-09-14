@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_staging.ml";
+ all_modules = "pref.mli pref.ml pref_split.ml";
  { bytecode; }
  { native; }
 *)
@@ -19,18 +19,15 @@ let () =
   let t = second.state in
   let hash = Hashtbl.hash p in
   let distinct = p <> q in
-  let replacement = 8 in
-  let write_later = Pref.write p replacement in
   let before = ghost_ (Pref.own (borrow_ t)) in
-  let x : {x : int | Some x === Pref.Heap.at before p} =
-    let b = borrow_ t in
-    let b : {b : Pref.token | Pref.Heap.mem (Pref.own b) p} = refine_ b in
-    let refine_ x = Pref.read p b in
-    refine_ x in
-  let refine_ x = x in
-  let t : {t : Pref.token | Pref.Heap.mem (Pref.own t) p} = refine_ t in
-  assert (x = 7);
-  let refine_ next = write_later t in
+  let selection = ghost_ (Pref.Heap.put (Pref.Heap.empty ()) p seven) in
+  let refine_ parts = Pref.split selection t in
+  let left = parts.#left in
+  let right = parts.#right in
+  let left : {t : Pref.token | Pref.Heap.mem (Pref.own t) p} = refine_ left in
+  let value = 8 in
+  let refine_ left = Pref.write p value left in
+  let refine_ next = Pref.join left right in
   let after = ghost_ (Pref.own (borrow_ next)) in
   let y : {y : int | Some y === Pref.Heap.at after q} =
     let b = borrow_ next in
@@ -45,7 +42,8 @@ let () =
     refine_ z in
   let refine_ z = z in
   let u = () in
-  let claim : {u : unit | y = 42 && z = 8 && Pref.Heap.at before p === Some 7} = refine_ u in
+  let claim : {u : unit |
+    y = 42 && z = 8 && Pref.Heap.at before p === Some 7} = refine_ u in
   Gc.full_major ();
   Gc.compact ();
   assert (y = 42 && z = 8 && distinct && p <> q);

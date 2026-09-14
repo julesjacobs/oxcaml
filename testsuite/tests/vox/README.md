@@ -293,20 +293,35 @@ historical observations after writes. Native code omits token fields and
 arguments. Bytecode retains the existing `void` unit placeholders; neither
 backend stores an ownership map. `pref_layout.ml` checks the wrapper layouts.
 
-Allocation takes erased `Pref.Data.t` evidence restricting payloads to scalars,
-pairs, options, lists, and passive pref handles. This closes the higher-order
-store route to recursion: `immutable_data` alone admits suitably annotated
-function fields. User-defined recursive record payloads and split/join are not
-part of this initial interface.
+Pref identities have kind `immutable_data`; they carry no ownership themselves.
+Payloads can include recursive records and immutable function fields. Executable
+reads and writes are partial, so a higher-order store cannot introduce recursion
+into total code. Ghost map observations and split/join remain total.
+
+`Pref.split selection token` returns two erased token fields, dividing ownership
+by the domain of `selection`. `Pref.join left right` consumes both tokens and
+returns their disjoint union. Each live token occurrence owns a disjoint fragment;
+uniqueness prevents joining a token with itself. Maps are observations and cannot
+be converted into tokens.
 
 `prefs.ml` checks updates, frames, old snapshots, and stable runtime identity.
-`pref_swap.ml` verifies a total swap against a whole-map postcondition;
+`pref_swap.ml` verifies a swap against a whole-map postcondition;
 `pref_payloads.ml` exercises the GC write barrier with a list payload.
 `pref_staging.ml` checks that partial application does not execute an erased-token
 write early. `pref_rejected.ml` rejects missing permission, stale ownership,
 ghost writes, and false map claims. `pref_modes.ml` exercises zero-layout
 uniqueness and the payload-kind boundary.
 
-The solver supplies ground empty/update/lookup laws over a common location sort.
+`pref_records.ml` checks recursive and higher-order payloads. `pref_split.ml`
+checks split/write/join and historical observations. `pref_tree.ml` verifies a
+partial binary-tree mirror against a total inductive model, including validity,
+exact heap contents, and preservation of an unrelated frame. Its runtime client
+mirrors an asymmetric tree and checks every link and an unrelated integer cell.
+The recursive payload examples currently require ordinary inference;
+`-principal` cannot establish their recursive `immutable_data` bounds.
+
+The solver supplies ground empty/update/lookup, union, restriction, exclusion,
+and disjointness laws over a common location sort. Generic finite-map laws in
+`Pref.Heap` are trusted specifications; the tree functions and proofs are checked.
 Different payload sorts do not imply distinct locations. The encoding is
 conservative across typed views; it does not supply general heap extensionality.

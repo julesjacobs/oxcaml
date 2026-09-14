@@ -456,6 +456,7 @@ and build_data ctx env stack key ty =
     | Some (arguments, declaration) ->
       begin match declaration.type_kind with
       | Type_record (labels, (Record_boxed | Record_mixed _), _)
+      | Type_record_unboxed_product (labels, _, _)
         when List.for_all (fun label -> label.ld_mutable = Immutable) labels ->
         let stack = (key, (datatype, false)) :: stack in
         begin match

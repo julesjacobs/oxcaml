@@ -16,5 +16,5 @@
 let () =
   let value = 7 in
   let refine_ t = Pref.empty () in
-  let refine_ r = Pref.alloc (ghost_ (Pref.Data.int ())) value t in
+  let refine_ r = Pref.alloc value t in
   Printf.printf "%d\n" (Obj.size (Obj.repr r))
