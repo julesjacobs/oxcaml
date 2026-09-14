@@ -321,6 +321,14 @@ checks split/write/join and historical observations. `pref_tree.ml` verifies a
 partial binary-tree mirror against a total inductive model, including validity,
 exact heap contents, and preservation of an unrelated frame. Its runtime client
 mirrors an asymmetric tree and checks every link and an unrelated empty node cell.
+`pref_list.ml` verifies in-place linked-list reversal with separate ownership
+for the remaining list and reversed prefix. Its contract gives the exact reversed
+node model and preserves an unrelated frame. A checked traversal compares node
+identities before and after reversal, including empty, singleton, repeated-value,
+and 1,000-node lists; reversing twice restores the original order.
+`pref_list_rejected.ml` rejects a no-op claimed to reverse a list and an attempt
+to drop a node from the owned map. These examples use the existing Pref laws.
+
 The recursive payload examples currently require ordinary inference;
 `-principal` cannot establish their recursive `immutable_data` bounds.
 
