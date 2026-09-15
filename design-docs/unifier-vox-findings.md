@@ -95,3 +95,23 @@ at the end of an unparenthesized arrow chain can instead constrain its final
 result, causing higher-order mode mismatches. The MGU continuation and factor
 callback use parenthesized function types. This remains an annotation and
 diagnostic usability issue; no new Vox soundness defect was identified.
+
+## STLC inference
+
+The runtime result combines a unique ownership token with shared graph handles
+and an immutable equation tree. The shared result fields need explicit
+`@@ aliased` modalities so returning the unique token does not demand unique
+ownership of the shared handles or equations.
+
+A larger branching generator again exposed incomplete heap-observation
+propagation: direct allocation did not establish membership of the new handle
+at the later proof site. The checked `allocation_mem` lemma supplies exactly
+that consequence of `H.put`. This reinforces the earlier heap-saturation
+observation; no membership fact is assumed and no compiler change is made here.
+
+A proof block that introduces local names must return a refinement over names
+visible to the caller. Returning plain unit discards needed evidence, while
+returning a refinement mentioning a block-local name produces an escaping-scope
+diagnostic. The generator returns explicit scope refinements across these
+blocks. Non-variable dependent arguments such as `S Z` must still be named;
+the existing literal/projection elaboration does not cover constructor calls.
