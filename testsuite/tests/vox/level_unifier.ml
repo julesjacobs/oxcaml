@@ -145,7 +145,8 @@ let bind :
       let t : {t : Pref.token | H.mem (Pref.own t) p} = refine_ t in
       let refine_ t = Pref.write p link t in
       let after = ghost_ (Pref.own (borrow_ t)) in
-      let step = ghost_ (Bind_left search) in let d = ghost_ (Lowering (bound, levels, step)) in
+      let step = ghost_ (Bind_left search) in let tree = ghost_ lowered.#tree in
+      let d = ghost_ (Lowering (bound, levels, tree, step)) in
       let ok = true in
       ghost_ (unified_def middle p q ok after step; unified_def h p q ok after d);
       let r = #{ok; state = t; derivation = d} in refine_ r
