@@ -124,3 +124,28 @@ No new compiler capability was required. The current heap-fact propagation issue
 also affected preservation of an argument's membership across the result and
 self-arrow allocations. A checked `allocation_keeps_mem` lemma exposes that
 consequence of `H.put`; the implementation does not assume membership.
+
+## Scheme copying
+
+A node containing an optional memo payload caused heap-observation premises to
+be omitted as unsupported in the template-uniqueness proof. Replacing the memo's
+`option` with the explicit `Empty_memo | Memo` datatype allowed the proofs to
+check. Factoring the descriptor into a polymorphic shape alone did not fix it.
+The suspected interaction is between the outer `Heap.at` option and a nested
+option in the node; this needs a minimized encoding regression before assigning
+an exact cause. Vox should explain which premise it cannot encode and why.
+
+Matching a pair of inductive template witnesses lost the structural descent
+needed for a recursive total proof call. Nested matches exposed that descent.
+Supporting equivalent tuple matches would simplify these proofs.
+
+Heap updates again required a checked `put_frame` lemma to expose membership
+and unchanged observations at a selected handle. Adapting dependent callbacks
+between a local heap name and its equal history interpretation required explicit
+`refine_` annotations. The refinement operator itself requires a plain local
+variable, including when refining a literal or a projected result field.
+
+The copier uses fresh node handles as session identities. This avoids an
+unproved machine-integer epoch bound, at the cost of one Boolean cell per call.
+In-node memo entries retain previous targets until overwritten; a later cleanup
+stage should address retention. Neither choice requires a compiler change.
