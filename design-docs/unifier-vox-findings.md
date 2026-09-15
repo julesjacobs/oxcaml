@@ -199,3 +199,14 @@ closure in the logical definition. A total pointwise proof then relates that
 evaluator to a prefixed valuation. Supporting closure expressions in logical
 definitions would remove this duplicated evaluator; no new logical assumption
 is needed for the current encoding.
+
+
+## Unboxed exceptional returns
+
+The ordinary OxCaml `raise` and `failwith` declarations return
+`'a : value_or_null`, so they cannot inhabit the unboxed inference-result
+record. The level-overflow branch currently uses the compiler's special
+`assert false` expression, which can return at this layout and always raises.
+Supporting layout-polymorphic exceptional returns would permit a descriptive
+exception without this workaround. This is an OxCaml library/layout restriction,
+not a refinement-logic defect.

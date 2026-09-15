@@ -59,3 +59,29 @@ Line 4, characters 32-41:
                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+module Unchecked_level_increment = struct
+  let bad : (depth : {n : int | n >= 0}) -> {n : int | n >= 0} = fun depth ->
+    let refine_ depth = depth in let next = depth + 1 in refine_ next
+end;;
+[%%expect{|
+Line 3, characters 57-69:
+3 |     let refine_ depth = depth in let next = depth + 1 in refine_ next
+                                                             ^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Discard_parent_pool = struct
+  let bad : (p : node Pref.t) @ immutable ->
+      {u : unit | Generalize_spec.covered (H.put (H.empty ()) p (cell Var 0)) (-1) Generalize_spec.Empty p} @ ghost = fun p -> ghost_ (
+    let h = H.empty () in let desc : desc = Var in let v = cell desc 0 in cell_def desc 0;
+    let after = H.put h p v in let empty : Generalize_spec.pool = Generalize_spec.Empty in
+    Generalize_spec.covered_def after (-1) empty p; Generalize_spec.listed_def empty p;
+    Level_spec.at_level_def after p; let u = () in refine_ u)
+end;;
+[%%expect{|
+Line 7, characters 51-60:
+7 |     Level_spec.at_level_def after p; let u = () in refine_ u)
+                                                       ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
