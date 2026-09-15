@@ -3,6 +3,16 @@ open Typedtree
 open Vox_smt
 open Vox_encoding
 
+module Term_table = Hashtbl.Make (struct
+  type t = term
+
+  let equal left right = compare left right = 0
+
+  (* The default hash only inspects ten meaningful nodes. Large obligations
+     share that prefix, causing expensive comparisons in the visited table. *)
+  let hash term = Hashtbl.hash_param 100 1000 term
+end)
+
 type logical_lambda =
   { parameters : Symbol.t list;
     body : term;
@@ -126,6 +136,7 @@ type context =
     set_class_sorts : (sort, sort) Hashtbl.t;
     set_membership : (sort * term * term, term) Hashtbl.t;
     observation_definitions : (Symbol.t, term) Hashtbl.t;
+    shared_observations : term Term_table.t;
     map_origins : (Function.t, map_origin) Hashtbl.t;
     iarray_origins : (Symbol.t, iarray_origin) Hashtbl.t;
     iarray_constructors :
@@ -429,11 +440,16 @@ let intern_function ctx label arguments result =
 let share_observation ctx term =
   match term with
   | Boolean _ | Integer _ | Var _ -> term
-  | _ ->
-    let symbol = Symbol.create ~label:"observation" (term_sort term) in
-    Hashtbl.add ctx.observation_definitions symbol term;
-    Hashtbl.add ctx.named_terms symbol term;
-    Var symbol
+  | _ -> (
+    match Term_table.find_opt ctx.shared_observations term with
+    | Some value -> value
+    | None ->
+      let symbol = Symbol.create ~label:"observation" (term_sort term) in
+      Hashtbl.add ctx.observation_definitions symbol term;
+      Hashtbl.add ctx.named_terms symbol term;
+      let value = Var symbol in
+      Term_table.add ctx.shared_observations term value;
+      value)
 
 let map_term_children f = function
   | App (op, args) -> App (op, List.map f args)
@@ -2709,24 +2725,22 @@ let query ctx code =
       (label, Function.arguments fn, Function.result fn)
     = Some fn
   in
-  let locations = Hashtbl.create 16 in
-  let seen = Hashtbl.create 16 and symbols = ref [] in
+  let seen = Term_table.create 16 and symbols = ref [] in
   let rec visit term =
-    if not (Hashtbl.mem seen term)
+    if not (Term_table.mem seen term)
     then begin
-      Hashtbl.add seen term ();
+      Term_table.add seen term ();
       begin match term with
       | Call (fn, [pointer]) when observation_function "Pref.location" fn ->
-        List.iter
-          (fun (other, location) ->
-            let axiom =
-              App (Implies, [both Eq term location; both Eq pointer other])
-            in
-            definitions
-              := { label = "pref identity"; term = axiom } :: !definitions;
-            Queue.add axiom pending)
-          (entries locations fn);
-        Hashtbl.replace locations fn ((pointer, term) :: entries locations fn)
+        (* A left inverse enforces injectivity with one equation per pointer. *)
+        let inverse =
+          intern_function ctx "Pref.pointer"
+            [Function.result fn]
+            (term_sort pointer)
+        in
+        let axiom = both Eq (Call (inverse, [term])) pointer in
+        definitions := { label = "pref identity"; term = axiom } :: !definitions;
+        Queue.add axiom pending
       | _ -> ()
       end;
       begin match term with
@@ -2831,6 +2845,7 @@ let context ~prove ~verify_introductions =
     set_class_sorts = Hashtbl.create 8;
     set_membership = Hashtbl.create 32;
     observation_definitions = Hashtbl.create 32;
+    shared_observations = Term_table.create 32;
     map_origins = Hashtbl.create 16;
     iarray_origins = Hashtbl.create 16;
     iarray_constructors = Hashtbl.create 16;
