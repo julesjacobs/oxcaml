@@ -37,26 +37,6 @@ let (bind_scope @ total) :
     scoped_def changed x;
     let u = () in refine_ u)
 
-let (bind_model_forward @ total) :
-    (h : node Pref.heap) @ immutable ->
-    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
-    (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
-    (model : ((x : node Pref.t) @ immutable ->
-      {u : unit | equation (H.put h p (Link q)) rho x})) @ total ->
-    (x : node Pref.t) @ immutable ->
-    {u : unit | H.at h p === Some Var} ->
-    {u : unit | equation h rho x && rho p === rho q} @ ghost =
-  fun h rho p q model x premise ->
-  ghost_ (
-    let refine_ premise = premise in
-    let changed = H.put h p (Link q) in
-    model p;
-    model x;
-    equation_def changed rho p;
-    equation_def changed rho x;
-    equation_def h rho x;
-    let u = () in refine_ u)
-
 let (bind_model_backward @ total) :
     (h : node Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -146,96 +126,7 @@ let rec (unified_edits @ total) :
         unified_edits middle b e ok after right (refine_ u); refine_ u)
       else refine_ u)
 
-let rec (edits_forward_at @ total) :
-    (h : node Pref.heap) @ immutable ->
-    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
-    (edits : edits) @ immutable -> (x : node Pref.t) @ immutable ->
-    {u : unit | valid_edits h edits && equation (apply_edits h edits) rho x} ->
-    {u : unit | equation h rho x} @ ghost =
-  fun h rho edits x premise -> ghost_ (
-    let refine_ premise = premise in
-    apply_edits_def h edits;
-    valid_edits_def h edits;
-    let u = () in
-    match edits with
-    | Unchanged -> refine_ u
-    | Set (p, q) ->
-      let changed = H.put h p (Link q) in
-      equation_def changed rho x;
-      equation_def h rho x;
-      refine_ u
-    | Then (left, right) ->
-      let middle = apply_edits h left in
-      edits_forward_at middle rho right x (refine_ u);
-      edits_forward_at h rho left x (refine_ u);
-      refine_ u)
-
-let rec (edits_backward_at @ total) :
-    (h : node Pref.heap) @ immutable ->
-    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
-    (edits : edits) @ immutable -> (x : node Pref.t) @ immutable ->
-    {u : unit | equal_edits rho edits && equation h rho x} ->
-    {u : unit | equation (apply_edits h edits) rho x} @ ghost =
-  fun h rho edits x premise -> ghost_ (
-    let refine_ premise = premise in
-    apply_edits_def h edits;
-    equal_edits_def rho edits;
-    let u = () in
-    match edits with
-    | Unchanged -> refine_ u
-    | Set (p, q) ->
-      let changed = H.put h p (Link q) in
-      equation_def changed rho x;
-      equation_def h rho x;
-      refine_ u
-    | Then (left, right) ->
-      let middle = apply_edits h left in
-      edits_backward_at h rho left x (refine_ u);
-      edits_backward_at middle rho right x (refine_ u);
-      refine_ u)
-
-let rec (success_equal_edits @ total) :
-    (h : node Pref.heap) @ immutable ->
-    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
-    (model : ((x : node Pref.t) @ immutable ->
-      {u : unit | equation h rho x})) @ total ->
-    (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
-    (after : node Pref.heap) @ immutable -> (d : derivation) @ immutable ->
-    {u : unit | unified h p q true after d && rho p === rho q} ->
-    {u : unit | equal_edits rho (writes p q d)} @ ghost =
-  fun h rho model p q after d premise -> ghost_ (
-    let refine_ premise = premise in
-    let ok = true in
-    unified_def h p q ok after d;
-    writes_def p q d;
-    let edits = writes p q d in
-    equal_edits_def rho edits;
-    let u = () in
-    match d with
-    | Same | Constants | Bind_left _ | Bind_right _
-    | Occurs_left _ | Occurs_right _ | Clash -> refine_ u
-    | Swap rest ->
-      success_equal_edits h rho model q p after rest (refine_ u); refine_ u
-    | Resolve (r, s, rp, sq, rest) ->
-      resolution_model h rho model p r rp (refine_ u);
-      resolution_model h rho model q s sq (refine_ u);
-      success_equal_edits h rho model r s after rest (refine_ u); refine_ u
-    | Children (a, b, c, e, middle, left_ok, left, right) ->
-      model p; model q;
-      equation_def h rho p; equation_def h rho q;
-      success_equal_edits h rho model a c middle left (refine_ u);
-      unified_edits h a c left_ok middle left (refine_ u);
-      let le = writes a c left in
-      let middle_model : (x : node Pref.t) @ immutable ->
-          {u : unit | equation middle rho x} @ total = fun x ->
-        model x;
-        let u = () in
-        let refine_ proof = edits_backward_at h rho le x (refine_ u) in
-        refine_ u in
-      success_equal_edits middle rho middle_model b e after right (refine_ u);
-      refine_ u)
-
-let (success_backward_at @ total) :
+let rec (success_backward_at @ total) :
     (h : node Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (model : ((x : node Pref.t) @ immutable ->
@@ -248,75 +139,34 @@ let (success_backward_at @ total) :
   fun h rho model p q after d x premise -> ghost_ (
     let refine_ premise = premise in
     let ok = true in
-    let u = () in
-    success_equal_edits h rho model p q after d (refine_ u);
-    unified_edits h p q ok after d (refine_ u);
-    model x;
-    let edits = writes p q d in
-    edits_backward_at h rho edits x (refine_ u);
-    refine_ u)
-
-let rec (success_equality @ total) :
-    (h : node Pref.heap) @ immutable ->
-    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
-    (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
-    (after : node Pref.heap) @ immutable -> (d : derivation) @ immutable ->
-    (model : ((x : node Pref.t) @ immutable ->
-      {u : unit | equation after rho x})) @ total ->
-    {u : unit | unified h p q true after d} ->
-    {u : unit | rho p === rho q} @ ghost =
-  fun h rho p q after d model premise -> ghost_ (
-    let refine_ premise = premise in
-    let ok = true in
     unified_def h p q ok after d;
     let u = () in
-    unified_edits h p q ok after d (refine_ u);
-    let edits = writes p q d in
-    let before_model : (x : node Pref.t) @ immutable ->
-        {u : unit | equation h rho x} @ total = fun x ->
-      model x;
-      let u = () in
-      let refine_ proof = edits_forward_at h rho edits x (refine_ u) in
-      refine_ u in
     match d with
-    | Same | Occurs_left _ | Occurs_right _ | Clash -> refine_ u
-    | Constants ->
-      before_model p; before_model q;
-      equation_def h rho p; equation_def h rho q;
-      refine_ u
+    | Same | Constants | Occurs_left _ | Occurs_right _ | Clash ->
+      model x; refine_ u
     | Bind_left _ ->
-      model p; equation_def after rho p;
-      let changed = H.put h p (Link q) in
-      equation_def changed rho p;
-      refine_ u
+      bind_model_backward h rho p q model x (refine_ u); refine_ u
     | Bind_right _ ->
-      model q; equation_def after rho q;
-      let changed = H.put h q (Link p) in
-      equation_def changed rho q;
-      refine_ u
+      bind_model_backward h rho q p model x (refine_ u); refine_ u
     | Swap rest ->
-      success_equality h rho q p after rest model (refine_ u); refine_ u
+      success_backward_at h rho model q p after rest x (refine_ u); refine_ u
     | Resolve (r, s, rp, sq, rest) ->
-      success_equality h rho r s after rest model (refine_ u);
-      resolution_model h rho before_model p r rp (refine_ u);
-      resolution_model h rho before_model q s sq (refine_ u);
-      refine_ u
+      resolution_model h rho model p r rp (refine_ u);
+      resolution_model h rho model q s sq (refine_ u);
+      success_backward_at h rho model r s after rest x (refine_ u); refine_ u
     | Children (a, b, c, e, middle, left_ok, left, right) ->
-      unified_edits middle b e ok after right (refine_ u);
-      let re = writes b e right in
+      model p; model q;
+      equation_def h rho p; equation_def h rho q;
       let middle_model : (x : node Pref.t) @ immutable ->
           {u : unit | equation middle rho x} @ total = fun x ->
-        model x;
         let u = () in
-        let refine_ proof = edits_forward_at middle rho re x (refine_ u) in
+        let refine_ proof =
+          success_backward_at h rho model a c middle left x (refine_ u) in
         refine_ u in
-      success_equality h rho a c middle left middle_model (refine_ u);
-      success_equality middle rho b e after right model (refine_ u);
-      before_model p; before_model q;
-      equation_def h rho p; equation_def h rho q;
+      success_backward_at middle rho middle_model b e after right x (refine_ u);
       refine_ u)
 
-let (success_forward_at @ total) :
+let rec (success_forward_at @ total) :
     (h : node Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
@@ -329,13 +179,50 @@ let (success_forward_at @ total) :
   fun h rho p q after d model x premise -> ghost_ (
     let refine_ premise = premise in
     let ok = true in
+    unified_def h p q ok after d;
     let u = () in
-    success_equality h rho p q after d model (refine_ u);
-    unified_edits h p q ok after d (refine_ u);
-    model x;
-    let edits = writes p q d in
-    edits_forward_at h rho edits x (refine_ u);
-    refine_ u)
+    match d with
+    | Same | Occurs_left _ | Occurs_right _ | Clash -> model x; refine_ u
+    | Constants ->
+      model x; model p; model q;
+      equation_def h rho p; equation_def h rho q;
+      refine_ u
+    | Bind_left _ ->
+      model x; model p;
+      equation_def after rho x; equation_def after rho p;
+      equation_def h rho x;
+      refine_ u
+    | Bind_right _ ->
+      model x; model q;
+      equation_def after rho x; equation_def after rho q;
+      equation_def h rho x;
+      refine_ u
+    | Swap rest ->
+      success_forward_at h rho q p after rest model x (refine_ u); refine_ u
+    | Resolve (r, s, rp, sq, rest) ->
+      let before_model : (x : node Pref.t) @ immutable ->
+          {u : unit | equation h rho x} @ total = fun x ->
+        let u = () in
+        let refine_ proof =
+          success_forward_at h rho r s after rest model x (refine_ u) in
+        refine_ u in
+      resolution_model h rho before_model p r rp (refine_ u);
+      resolution_model h rho before_model q s sq (refine_ u);
+      success_forward_at h rho r s after rest model x (refine_ u);
+      refine_ u
+    | Children (a, b, c, e, middle, left_ok, left, right) ->
+      let middle_model : (x : node Pref.t) @ immutable ->
+          {u : unit | equation middle rho x} @ total = fun x ->
+        let u = () in
+        let refine_ proof =
+          success_forward_at middle rho b e after right model x (refine_ u) in
+        refine_ u in
+      success_forward_at h rho a c middle left middle_model p (refine_ u);
+      success_forward_at h rho a c middle left middle_model q (refine_ u);
+      equation_def h rho p; equation_def h rho q;
+      success_forward_at middle rho b e after right model x (refine_ u);
+      success_forward_at h rho a c middle left middle_model x (refine_ u);
+      refine_ u)
 
 let rec (weight_positive @ total) : (t : ty) @ immutable ->
     {u : unit | weight t > Bigint.zero} @ ghost = fun t -> ghost_ (
@@ -420,14 +307,12 @@ let rec (failure_refutes @ total) :
       model p; model q;
       equation_def h rho p; equation_def h rho q;
       if left_ok then (
-        success_equal_edits h rho model a c middle left (refine_ u);
-        unified_edits h a c left_ok middle left (refine_ u);
-        let le = writes a c left in
         let middle_model : (x : node Pref.t) @ immutable ->
             {u : unit | equation middle rho x} @ total = fun x ->
           model x;
           let u = () in
-          let refine_ proof = edits_backward_at h rho le x (refine_ u) in
+          let refine_ proof =
+            success_backward_at h rho model a c middle left x (refine_ u) in
           refine_ u in
         failure_refutes middle rho middle_model b e after right (refine_ u);
         refine_ u)

@@ -49,6 +49,10 @@ are:
 - `success_backward_at`: given a model witness for `h`, the requested operand
   equality and a node `x`, prove its equation in `after`.
 
+The recursive proofs construct intermediate model callbacks directly. Their
+recursive calls descend on child execution witnesses, using the closure support
+in #139.
+
 They preserve the supplied valuation. Thus the successor models are exactly the
 old models satisfying the requested equality. These are total, checked proof
 functions, not assumed predicates or axiomatized invariant constructors.

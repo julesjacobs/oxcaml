@@ -4,7 +4,7 @@
  expect;
 *)
 
-module Delayed = struct
+module Recursive_callback = struct
   type chain = Stop | Next of chain [@@inductive]
   let rec (proof @ total) : (xs : chain) @ immutable -> (q : int) ->
       {u : unit | true} @ ghost = fun xs q -> ghost_ (
@@ -16,10 +16,12 @@ module Delayed = struct
       callback q)
 end;;
 [%%expect{|
-Line 9, characters 17-22:
-9 |         fun x -> proof rest x in
-                     ^^^^^
-Error: This recursive function cannot be total: the recursive function occurs in a delayed body.
+module Recursive_callback :
+  sig
+    type chain = Stop | Next of chain
+    [@@inductive]
+    val proof : chain @ immutable -> int -> {u : unit | true} @ ghost
+  end
 |}]
 
 module Pointwise = struct

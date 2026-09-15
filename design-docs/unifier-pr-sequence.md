@@ -6,6 +6,8 @@ algorithm and theorem as a reference throughout this separate Vox development.
 
 - [x] [Pref handle identity](https://github.com/julesjacobs/oxcaml/pull/137):
   runtime physical equality with a logical identity contract.
+- [x] [Total recursion through closures](https://github.com/julesjacobs/oxcaml/pull/139):
+  direct recursive proof calls inside total model callbacks.
 - [x] Mutable first-order unifier (this PR): shared cells, representative lookup,
   occurs checking, returned ownership, exact model transformation and correct
   rejection. See `mutable-unifier.md` for the precise guarantee.
