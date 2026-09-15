@@ -175,4 +175,17 @@ failure constructors preserve the executed prefix and return no result handle.
 `hm_execution_proofs.ml` proves heap extension and ownership of successful
 results. The fixture executes allocation, close/transfer and clean copying,
 and checks that concrete run against the witness. The recursive inference
-driver and semantic typing bridge remain unfinished.
+driver is now implemented for let-free terms; the semantic typing bridge
+remains unfinished.
+
+
+`hm_infer.ml` runs clean instantiation, pooled allocation and level unification
+in syntax order, including monomorphic recursive lambdas and early failures.
+Its closed entry constructs the initial evidence from an empty heap.
+`hm_runtime_proofs.ml` preserves ownership, level bounds, pool coverage and
+cleared visited marks through every let-free execution. These are structural
+guarantees; independent declarative soundness and completeness are still open.
+The positive fixture runs constants, identity, application and recursion, and
+rejects self-application, recursive self-return and Boolean application.
+The negative fixture checks scoping, the let-free restriction and missing heap
+safety evidence.
