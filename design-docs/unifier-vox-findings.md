@@ -166,3 +166,19 @@ construction through total local callbacks. Equal heap aliases required checked
 callback adaptation, and one higher-order scheme alias required an explicit
 forwarding callback rather than direct `refine_` adaptation. Diagnostics and
 alias adaptation remain useful ergonomics targets.
+
+## Registered allocation and forest transport
+
+An unannotated runtime `let desc1 = Var` followed by pooled allocation and a
+ghost descriptor match caused an uncaught `Vox_smt.Sort_error`: `reachable:
+Expected datatype(Copy_spec.shape), got datatype(Copy_spec.shape)`. Explicitly
+annotating `let desc1 : desc = Var` makes the fixture check. The failure was
+reproduced with one allocation and the subsequent descriptor predicates/match;
+removing either portion stopped reproducing it. The encoding cause is not yet
+diagnosed and no compiler fix is included. Vox should report the distinct sort
+identities and source location rather than escaping with this exception.
+
+Forest and pool-coverage transport work with explicit total callbacks. Heap
+aliases still require repeated dependent callback annotations at composition
+sites. Reducing that adaptation overhead would simplify clients without
+changing their invariants or adding SMT quantifiers.
