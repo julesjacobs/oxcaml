@@ -181,15 +181,14 @@ let (readback_model_at @ total) :
     (h : Pref.heap) @ immutable ->
     (trees : ((x : node Pref.t) @ immutable ->
       {t : tree | root t === x && (if H.mem h x then finite h t else H.at h x === None)} @ immutable)) @ total ->
-    (labels : (node Pref.t @ immutable total -> int)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (agrees : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in rho x === readback labels t})) @ total ->
+      {u : unit | let refine_ t = trees x in not (H.mem h x) || rho x === readback t})) @ total ->
     (x : node Pref.t) @ immutable ->
-    {u : unit | equation h rho x} @ ghost = fun h trees labels rho agrees x -> ghost_ (
+    {u : unit | equation h rho x} @ ghost = fun h trees rho agrees x -> ghost_ (
   equation_def h rho x;
   let refine_ t = trees x in finite_def h t; root_def t;
-  agrees x; readback_def labels t;
+  agrees x; readback_def t;
   let u = () in
   if H.mem h x then (
     match t with
@@ -269,19 +268,18 @@ let (with_finite_model @ total) :
     (trees : ((x : node Pref.t) @ immutable ->
       {t : tree | root t === x &&
         (if H.mem h x then finite h t else H.at h x === None)} @ immutable)) @ total ->
-    (labels : (node Pref.t @ immutable total -> int)) @ total ->
     (claim : bool) ->
     (use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (model : ((x : node Pref.t) @ immutable ->
         {u : unit | equation h rho x})) @ total ->
       {u : unit | claim})) @ total ->
-    {u : unit | claim} @ ghost = fun h trees labels claim use -> ghost_ (
+    {u : unit | claim} @ ghost = fun h trees claim use -> ghost_ (
   let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
-    let refine_ t = trees x in readback labels t in
+    let refine_ t = trees x in readback t in
   let agrees : (x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in rho x === readback labels t}
+      {u : unit | let refine_ t = trees x in not (H.mem h x) || rho x === readback t}
       @ total = fun x -> rho_def x; let u = () in refine_ u in
   let model : (x : node Pref.t) @ immutable -> {u : unit | equation h rho x}
       @ total = fun x ->
-    let refine_ u = readback_model_at h trees labels rho agrees x in refine_ u in
+    let refine_ u = readback_model_at h trees rho agrees x in refine_ u in
   let refine_ u = use rho model in refine_ u)

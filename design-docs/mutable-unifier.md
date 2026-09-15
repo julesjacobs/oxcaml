@@ -80,8 +80,9 @@ are partial; all specification functions and proof functions are total.
 The base unifier proves safe access, exact equations and correct rejection.
 The additional layer in `unifier-finite-readback.md` constructs finite unfoldings
 from allocation and preserves them through unification, proving acyclicity and
-finite-model existence for inputs carrying that invariant. Most-general
-substitutions and principal STLC still require factorization proofs.
+finite-model existence for inputs carrying that invariant. The layer in
+`unifier-mgu.md` adds most-general substitution factorization. Principal STLC
+inference remains a subsequent stage.
 
 The initial API accepts a scoped graph. It can diverge on a cyclic input;
 termination and native resource failures have no recovery contract here.

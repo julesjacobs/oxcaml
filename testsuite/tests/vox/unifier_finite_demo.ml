@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml unifier_spec.ml unifier_proofs.ml unifier.ml unifier_finite_spec.ml unifier_finite_proofs.ml unifier_finite_demo.ml";
+ all_modules = "pref.mli pref.ml unifier_spec.ml unifier_proofs.ml unifier.ml unifier_finite_spec.ml unifier_finite_proofs.ml unifier_mgu_spec.ml unifier_mgu_proofs.ml unifier_finite_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -11,6 +11,8 @@ open Unifier_spec
 open Unifier_proofs
 open Unifier_finite_spec
 open Unifier_finite_proofs
+open Unifier_mgu_spec
+open Unifier_mgu_proofs
 
 let run mode =
   let refine_ t = Pref.empty () in
@@ -153,7 +155,6 @@ let run mode =
       let u = () in
       let refine_ t = unified_finite_at h trees p q ok after d x (refine_ u) in
       refine_ t in
-    let labels : node Pref.t @ immutable total -> int = fun _ -> 0 in
     let claim = true in
     let use : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         (model : ((x : node Pref.t) @ immutable -> {u : unit | equation after rho x}))
@@ -163,7 +164,42 @@ let run mode =
       if ok then (
         success_forward_at h rho p q after d model r (refine_ u); refine_ u)
       else refine_ u in
-    let refine_ u = with_finite_model after after_trees labels claim use in u) in
+    let refine_ u = with_finite_model after after_trees claim use in u) in
+  let _mgu_proof = ghost_ (
+    if ok then (
+      let claim = true in
+      let use : ((sigma : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+          (solution : ((x : node Pref.t) @ immutable ->
+            {u : unit | equation h sigma x && sigma p === sigma q
+              && sigma x === substitute sigma (sigma x)
+              && (H.mem h x || sigma x === TVar x)})) @ total ->
+          (factor : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+            (model : ((x : node Pref.t) @ immutable -> {u : unit | equation h rho x})) @ total ->
+            (x : node Pref.t) @ immutable -> {u : unit | rho p === rho q} ->
+            {u : unit | rho x === substitute rho (sigma x)})) @ total ->
+          {u : unit | claim}) @ total = fun sigma solution factor ->
+        solution a; solution r; solution alias2;
+        let model : (x : node Pref.t) @ immutable -> {u : unit | equation h sigma x}
+            @ total = fun x -> solution x; let u = () in refine_ u in
+        let[@def] delta : node Pref.t @ immutable total -> ty @ immutable total =
+          fun x -> TArrow (TVar x, TBool) in
+        let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total =
+          fun x -> substitute delta (sigma x) in
+        let instance : (x : node Pref.t) @ immutable ->
+            {u : unit | rho x === substitute delta (sigma x)} @ total = fun x ->
+          rho_def x; let u = () in refine_ u in
+        let old_model : (x : node Pref.t) @ immutable -> {u : unit | equation h rho x}
+            @ total = fun x ->
+          solution x; let u = () in
+          instance_solution_at h sigma model delta rho instance p q x (refine_ u);
+          refine_ u in
+        let u = () in
+        instance_solution_at h sigma model delta rho instance p q a (refine_ u);
+        factor rho old_model a (refine_ u);
+        factor rho old_model r (refine_ u);
+        refine_ u in
+      let u = () in let refine_ u = with_mgu h trees p q after d (refine_ u) claim use in u)
+    else ()) in
   let proof = ghost_ (
     let u = () in
     unified_frame h p q ok after d a (refine_ u);

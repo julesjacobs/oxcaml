@@ -39,13 +39,11 @@ let[@def] rec (walks @ total) (h : Pref.heap @ immutable)
   | Stop -> p === q
   | Step (next, rest) -> edge h p next && walks h next q rest)
 
-let[@def] rec (readback @ total)
-    (labels : (node Pref.t @ immutable total -> int) @ total)
-    (tree : tree @ immutable) = match tree with
-  | Free p -> TVar (labels p)
+let[@def] rec (readback @ total) (tree : tree @ immutable) = match tree with
+  | Free p -> TVar p
   | Boolean _ -> TBool
-  | Alias (_, child) -> readback labels child
-  | Branch (_, a, b) -> TArrow (readback labels a, readback labels b)
+  | Alias (_, child) -> readback child
+  | Branch (_, a, b) -> TArrow (readback a, readback b)
 
 let[@def] (allocatable @ total) (h : Pref.heap @ immutable)
     (v : node @ immutable) = ghost_ (match v with
