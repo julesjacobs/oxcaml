@@ -7,11 +7,12 @@ type node : immutable_data = {
   desc : node Pref.t shape;
   level : level;
   memo : node Pref.t memo;
+  visited : bool;
 }
 type desc = node Pref.t shape
 
 type ty = Variable of node Pref.t | Boolean | Function of ty * ty [@@inductive]
-let[@def] (cell @ total) (desc : desc @ immutable) (depth : int) = {desc; level = Finite depth; memo = Empty_memo}
+let[@def] (cell @ total) (desc : desc @ immutable) (depth : int) = {desc; level = Finite depth; memo = Empty_memo; visited = false}
 let[@def] (mark @ total) (v : node @ immutable) (epoch : node Pref.t @ immutable)
     (target : node Pref.t @ immutable) = {v with memo = Memo (epoch, target)}
 let[@def] (equation @ total) (h : node Pref.heap @ immutable)

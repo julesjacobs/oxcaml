@@ -29,7 +29,7 @@ module Forget_cleanup = struct
   let bad : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
       (epoch : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
       {u : unit | H.mem h p && H.at h p === Some
-        {desc = Var; level = Generic; memo = Memo (epoch, q)}} ->
+        {desc = Var; level = Generic; memo = Memo (epoch, q); visited = false}} ->
       {u : unit | swept_at h h (Entry (p, Empty)) p} @ ghost =
     fun h p epoch q premise -> ghost_ (
       let refine_ premise = premise in let trail = Entry (p, Empty) in

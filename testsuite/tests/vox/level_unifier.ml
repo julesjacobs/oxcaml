@@ -1,3 +1,4 @@
+open Marked_occurs_proofs
 open Copy_spec
 open Level_unifier_spec
 open Level_unifier_proofs
@@ -39,80 +40,19 @@ let rec representative :
       ghost_ (resolves_def h p p path);
       let result = #{value = p; path = path} in refine_ result
 
-let rec occurs :
-    (h : node Pref.heap) @ immutable ghost ->
-    (scope : ((q : node Pref.t) @ immutable ->
-      {u : unit | not (H.mem h q) || finite_scope h q})) @ total ghost ->
-    (needle : node Pref.t) @ immutable ->
-    (p : node Pref.t) @ immutable ->
-    (t : {t : node Pref.token | Pref.own t === h && H.mem h p && active h p}) @ local read ->
-    {r : searched_result | searched h needle p r.#found r.#search} @ immutable =
-  fun h scope needle p t ->
-  let refine_ t = t in
-  let equal = Pref.equal p needle in
-  let refine_ equal = equal in
-  let result : {r : searched_result | searched h needle p r.#found r.#search} = if equal then
-    let trace = ghost_ Hit in
-    let flag = true in
-    ghost_ (searched_def h needle p flag trace);
-    let r = #{found = true; search = trace} in refine_ r
-  else begin
-    ghost_ (scope p);
-    ghost_ (finite_scope_def h p; source_ok_def h p; observe_def h p);
-    let n : {n : desc | Some n === observe h p} =
-      let b : {b : node Pref.token | H.mem (Pref.own b) p} = refine_ t in
-      let refine_ old = Pref.read p b in ghost_ (observe_def h p);
-        let n = old.desc in refine_ n in
-    let refine_ n = n in
-    match n with
-    | Var | Bool ->
-      let trace = ghost_ Leaf in
-      let flag = false in
-      ghost_ (searched_def h needle p flag trace);
-      let r = #{found = false; search = trace} in refine_ r
-    | Link q ->
-      let t : {t : node Pref.token | Pref.own t === h && H.mem h q && active h q} = refine_ t in
-      let refine_ r = occurs h scope needle q t in
-      let trace = ghost_ (Follow (q, r.#search)) in
-      let found = r.#found in
-      ghost_ (searched_def h needle p found trace);
-      let r = #{found = r.#found; search = trace} in refine_ r
-    | Arrow (a, b) ->
-      let t : {t : node Pref.token | Pref.own t === h && H.mem h a && active h a} = refine_ t in
-      let refine_ left = occurs h scope needle a t in
-      let refine_ t = t in
-      if left.#found then
-        let trace = ghost_ (Left (a, b, left.#search)) in
-        let flag = true in
-        ghost_ (searched_def h needle p flag trace);
-        let r = #{found = true; search = trace} in refine_ r
-      else
-        let t : {t : node Pref.token | Pref.own t === h && H.mem h b && active h b} = refine_ t in
-        let refine_ right = occurs h scope needle b t in
-        let trace = ghost_ (Both (a, b, left.#search, right.#search)) in
-        let found = right.#found in
-        ghost_ (searched_def h needle p found trace);
-        let r = #{found = right.#found; search = trace} in refine_ r
-  end in
-  result
-
-let bind :
+let bind_searched :
     (h : node Pref.heap) @ immutable ghost ->
     (scope : ((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h q) || finite_scope h q})) @ total ghost ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
+    (found : bool) -> (search : search) @ immutable ghost ->
     (t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q && active h p && active h q
-      && observe h p === Some Var && terminal h q && not (p === q)}) @ unique ->
+      && observe h p === Some Var && terminal h q && not (p === q)
+      && searched h p q found search}) @ unique ->
     {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation} @ unique =
-  fun h scope p q t ->
+  fun h scope p q found search t ->
   let refine_ t = t in
-  let checked : {r : searched_result | searched h p q r.#found r.#search} =
-    let b = borrow_ t in
-    let b : {b : node Pref.token | Pref.own b === h && H.mem h q && active h q} = refine_ b in
-    let refine_ checked = occurs h scope p q b in refine_ checked in
-  let refine_ checked = checked in
-  let search = ghost_ checked.#search in
-  if checked.#found then
+  if found then
     let d = ghost_ (Occurs_left search) in
     let ok = false in
     ghost_ (unified_def h p q ok h d);
@@ -151,14 +91,50 @@ let bind :
       ghost_ (unified_def middle p q ok after step; unified_def h p q ok after d);
       let r = #{ok; state = t; derivation = d} in refine_ r
 
+let bind :
+    (h : node Pref.heap) @ immutable ghost ->
+    (scope : ((x : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h x) || finite_scope h x})) @ total ghost ->
+    (unmarked : ((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at h x with None -> true | Some v -> not v.visited})) @ total ghost ->
+    (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
+    (t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q
+      && active h p && active h q && observe h p === Some Var
+      && terminal h q && not (p === q)}) @ unique ->
+    {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation} @ unique =
+  fun h scope unmarked p q t ->
+    let refine_ t = t in
+    let t : {t : node Pref.token | Pref.own t === h && H.mem h q && active h q} = refine_ t in
+    let refine_ checked = Marked_occurs.occurs h scope unmarked p q t in
+    let marks = ghost_ checked.#marks in let search = ghost_ checked.#search in
+    let found = checked.#found in let mid = ghost_ (scan_heap h marks) in
+    let scope_mid : ((x : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem mid x) || finite_scope mid x}) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ u = scan_scope h scope p marks x (refine_ u) in refine_ u) in
+    ghost_ (let u = () in scan_heap_def h marks;
+      scan_observe h p marks p (refine_ u); scan_observe h p marks q (refine_ u);
+      terminal_def h q; terminal_def mid q;
+      scan_searched h p marks p q found search (refine_ u));
+    let t = checked.#state in
+    let t : {t : node Pref.token | Pref.own t === mid && H.mem mid p && H.mem mid q
+      && active mid p && active mid q && observe mid p === Some Var
+      && terminal mid q && not (p === q) && searched mid p q found search} = refine_ t in
+    let refine_ out = bind_searched mid scope_mid p q found search t in
+    let derivation = ghost_ (Scanned (p, marks, out.#derivation)) in
+    let state = out.#state in let after = ghost_ (Pref.own (borrow_ state)) in
+    let ok = out.#ok in ghost_ (unified_def h p q ok after derivation);
+    let r = #{ok; state; derivation} in refine_ r
+
 let rec unify :
     (h : node Pref.heap) @ immutable ghost ->
     (scope : ((q : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h q) || finite_scope h q})) @ total ghost ->
+    (unmarked : ((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at h x with None -> true | Some v -> not v.visited})) @ total ghost ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q && active h p && active h q}) @ unique ->
     {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation} @ unique =
-  fun h scope p q t ->
+  fun h scope unmarked p q t ->
   let refine_ t = t in
   let rp : {r : resolved | H.mem h r.#value && active h r.#value && terminal h r.#value
     && resolves h p r.#value r.#path} =
@@ -203,11 +179,11 @@ let rec unify :
       | Var, _ ->
         let t : {t : node Pref.token | Pref.own t === h && H.mem h r && H.mem h s && active h r && active h s
           && observe h r === Some Var && terminal h s && not (r === s)} = refine_ t in
-        let refine_ answer = bind h scope r s t in answer
+        let refine_ answer = bind h scope unmarked r s t in answer
       | _, Var ->
         let t : {t : node Pref.token | Pref.own t === h && H.mem h s && H.mem h r && active h s && active h r
           && observe h s === Some Var && terminal h r && not (s === r)} = refine_ t in
-        let refine_ answer = bind h scope s r t in
+        let refine_ answer = bind h scope unmarked s r t in
         let ok = answer.#ok in
         let t = answer.#state in
         let after = ghost_ (Pref.own (borrow_ t)) in
@@ -225,7 +201,7 @@ let rec unify :
         ghost_ (finite_scope_def h r; source_ok_def h r; observe_def h r);
         ghost_ (finite_scope_def h s; source_ok_def h s; observe_def h s);
         let t : {t : node Pref.token | Pref.own t === h && H.mem h a && H.mem h c && active h a && active h c} = refine_ t in
-        let refine_ left = unify h scope a c t in
+        let refine_ left = unify h scope unmarked a c t in
         let left_ok = left.#ok in
         let ld = ghost_ left.#derivation in
         let t = left.#state in
@@ -247,7 +223,11 @@ let rec unify :
             let proof : {u : unit | H.mem middle b && H.mem middle e && active middle b && active middle e} = refine_ u in proof) in
           let refine_ proof = proof in
           let t : {t : node Pref.token | Pref.own t === middle && H.mem middle b && H.mem middle e && active middle b && active middle e} = refine_ t in
-          let refine_ right = unify middle scope_middle b e t in
+          let unmarked_middle : ((x : node Pref.t) @ immutable ->
+            {u : unit | match H.at middle x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
+            unmarked x; let u = () in unified_scratch h a c left_ok middle ld x (refine_ u);
+            scratch_frame_def h middle x; refine_ u) in
+          let refine_ right = unify middle scope_middle unmarked_middle b e t in
           let ok = right.#ok in
           let t = right.#state in
           let after = ghost_ (Pref.own (borrow_ t)) in

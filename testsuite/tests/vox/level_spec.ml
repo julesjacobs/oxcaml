@@ -17,7 +17,7 @@ let[@def] (decreases @ total) (before : level) (after : level) = match before, a
 let[@def] (lower_frame @ total) (h : node Pref.heap @ immutable) (after : node Pref.heap @ immutable)
     (x : node Pref.t @ immutable) = ghost_ (H.mem after x === H.mem h x &&
     match H.at h x, H.at after x with
-    | None, None -> true | Some a, Some b -> a.desc === b.desc && a.memo === b.memo && decreases a.level b.level
+    | None, None -> true | Some a, Some b -> a.desc === b.desc && a.memo === b.memo && a.visited === b.visited && decreases a.level b.level
     | _ -> false)
 
 let[@def] (children_below @ total) (h : node Pref.heap @ immutable) (desc : desc @ immutable) (bound : int) = ghost_ (

@@ -1,3 +1,4 @@
+open Marked_occurs_proofs
 open Copy_spec
 open Copy_heap_proofs
 open Level_spec
@@ -190,6 +191,20 @@ let (lower_bind_origin @ total) : (saved : node Pref.heap) @ immutable ->
         let out = Origin (root, append path next) in
         originates_def saved after cut x out; refine_ out))
 
+let rec (scan_path @ total) : (h : node Pref.heap) @ immutable ->
+    (needle : node Pref.t) @ immutable -> (d : Level_unifier_spec.marks) @ immutable ->
+    (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
+    (path : path) @ immutable ->
+    {u : unit | Level_unifier_spec.marks_valid h needle d && reaches h p q path} ->
+    {u : unit | reaches (Level_unifier_spec.scan_heap h d) p q path} @ ghost =
+  fun h needle d p q path premise -> ghost_ (
+    let refine_ premise = premise in let after = Level_unifier_spec.scan_heap h d in
+    reaches_def h p q path; reaches_def after p q path;
+    let u = () in match path with Stop -> refine_ u
+    | Step (next, rest) -> scan_at h needle d p (refine_ u);
+      edge_def h p next; edge_def after p next;
+      scan_path h needle d next q rest (refine_ u); refine_ u)
+
 let rec (unified_origin @ total) : (saved : node Pref.heap) @ immutable ->
     (h : node Pref.heap) @ immutable -> (cut : int) ->
     (prior : ((x : node Pref.t) @ immutable ->
@@ -219,6 +234,16 @@ let rec (unified_origin @ total) : (saved : node Pref.heap) @ immutable ->
       let refine_ o = unified_origin saved h cut prior q p ok after rest x (refine_ u) in refine_ o
     | Resolve (r, s, _, _, rest) ->
       let refine_ o = unified_origin saved h cut prior r s ok after rest x (refine_ u) in refine_ o
+    | Scanned (needle, marks, rest) ->
+      let mid = Level_unifier_spec.scan_heap h marks in
+      let middle_prior : ((y : node Pref.t) @ immutable ->
+        {o : origin | not (below mid y cut) || originates saved mid cut y o} @ immutable) @ total = fun y ->
+        let u = () in scan_below h needle marks y cut (refine_ u);
+        let refine_ o = prior y in originates_def saved h cut y o;
+        originates_def saved mid cut y o;
+        if below mid y cut then (match o with Origin (root, path) ->
+          scan_path h needle marks root y path (refine_ u); refine_ o) else refine_ o in
+      let refine_ o = unified_origin saved mid cut middle_prior p q ok after rest x (refine_ u) in refine_ o
     | Lowering (bound, edits, tree, rest) ->
       let mid = lower_heap h bound edits in
       Level_unifier_spec.unified_def mid p q ok after rest;

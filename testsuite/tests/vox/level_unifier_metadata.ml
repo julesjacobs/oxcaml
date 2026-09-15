@@ -1,3 +1,4 @@
+open Marked_occurs_proofs
 open Copy_spec
 open Level_spec
 open Level_proofs
@@ -37,6 +38,9 @@ let rec (unified_active @ total) : (h : node Pref.heap) @ immutable -> (p : node
   | Bind_right _ -> redirect_active h q p x (refine_ u); refine_ u
   | Swap rest -> unified_active h q p ok after rest x (refine_ u); refine_ u
   | Resolve (a, b, _, _, rest) -> unified_active h a b ok after rest x (refine_ u); refine_ u
+  | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
+    scan_observe h needle marks x (refine_ u);
+    unified_active mid p q ok after rest x (refine_ u); refine_ u
   | Lowering (bound, edits, _, rest) -> let mid = lower_heap h bound edits in
     lowering_at h bound edits x (refine_ u); frame_active h mid x (refine_ u);
     unified_active mid p q ok after rest x (refine_ u); refine_ u
@@ -54,6 +58,10 @@ let rec (unified_scope @ total) : (h : node Pref.heap) @ immutable ->
   | Bind_right _ -> redirect_scope h q p x (refine_ u); refine_ u
   | Swap rest -> unified_scope h scope q p ok after rest x (refine_ u); refine_ u
   | Resolve (a, b, _, _, rest) -> unified_scope h scope a b ok after rest x (refine_ u); refine_ u
+  | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
+    let mid_scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem mid x) || finite_scope mid x}) @ total =
+      fun x -> let u = () in let refine_ u = scan_scope h scope needle marks x (refine_ u) in refine_ u in
+    unified_scope mid mid_scope p q ok after rest x (refine_ u); refine_ u
   | Lowering (bound, edits, _, rest) -> let mid = lower_heap h bound edits in
     let mid_scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem mid x) || finite_scope mid x}) @ total =
       fun x -> let u = () in let refine_ u = lower_scope h scope bound edits x (refine_ u) in refine_ u in
@@ -124,6 +132,9 @@ let rec (unified_ordered @ total) : (h : node Pref.heap) @ immutable -> (p : nod
   | Bind_right _ -> redirect_ordered h q p x (refine_ u); refine_ u
   | Swap rest -> unified_ordered h q p ok after rest x (refine_ u); refine_ u
   | Resolve (a, b, _, _, rest) -> unified_ordered h a b ok after rest x (refine_ u); refine_ u
+  | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
+    scan_ordered h needle marks x (refine_ u);
+    unified_ordered mid p q ok after rest x (refine_ u); refine_ u
   | Lowering (bound, edits, _, rest) -> let mid = lower_heap h bound edits in
     lowering_ordered h bound edits x (refine_ u); unified_ordered mid p q ok after rest x (refine_ u); refine_ u
   | Children (a, b, c, e, mid, left_ok, left, right) ->
@@ -137,7 +148,7 @@ let (copy_equation @ total) : (h : node Pref.heap) @ immutable ->
 
 let[@def] (scratch_frame @ total) (h : node Pref.heap @ immutable) (after : node Pref.heap @ immutable)
     (x : node Pref.t @ immutable) = ghost_ (match H.at h x, H.at after x with
-  | None, None -> true | Some a, Some b -> a.memo === b.memo && decreases a.level b.level
+  | None, None -> true | Some a, Some b -> a.memo === b.memo && a.visited === b.visited && decreases a.level b.level
     && (not (a.level === Generic) || a === b) | _ -> false)
 let (scratch_trans @ total) : (h : node Pref.heap) @ immutable -> (mid : node Pref.heap) @ immutable ->
     (after : node Pref.heap) @ immutable -> (x : node Pref.t) @ immutable ->
@@ -171,6 +182,10 @@ let rec (unified_scratch @ total) : (h : node Pref.heap) @ immutable -> (p : nod
   | Bind_right _ -> redirect_scratch h q p x (refine_ u); refine_ u
   | Swap rest -> unified_scratch h q p ok after rest x (refine_ u); refine_ u
   | Resolve (a, b, _, _, rest) -> unified_scratch h a b ok after rest x (refine_ u); refine_ u
+  | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
+    unified_scratch mid p q ok after rest x (refine_ u);
+    scan_at h needle marks x (refine_ u);
+    scratch_frame_def mid after x; scratch_frame_def h after x; refine_ u
   | Lowering (bound, edits, _, rest) -> let mid = lower_heap h bound edits in
     lower_scratch h bound edits x (refine_ u); unified_scratch mid p q ok after rest x (refine_ u);
     scratch_trans h mid after x (refine_ u); refine_ u
