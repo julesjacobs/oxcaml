@@ -36,9 +36,12 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] Pool generalization primitive: explicit coverage and finite forests,
   environmental path exclusion and two-sided exact instantiation; see
   `level-generalization.md`.
-- [ ] Automatic pool registration and nested pool transfer, saved-heap
-  provenance, and finite-unfolding/MGU transport for the richer-node unifier.
-  Complete these before claiming principal generalization in HM.
+- [x] Automatic pool registration for allocation and copying, including session
+  cells; finite-unfolding transport through richer-node unification,
+  generalization and copying. See `level-generalization.md`.
+- [ ] Nested pool transfer and draining, saved-heap provenance, and MGU
+  factorization for the richer-node unifier. Complete these before claiming
+  principal generalization in HM.
 - [ ] Let-polymorphic HM: level-based generalization, context framing and
   principal typing.
 - [ ] In-node traversal marks with all-exit cleanup.
