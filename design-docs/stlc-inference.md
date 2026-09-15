@@ -239,3 +239,16 @@ the initial paths when entering a let RHS. `rhs_interpret` then derives relative
 interpretation for two models of that RHS heap that agree on the saved low
 boundary. These lemmas do not yet construct the two models from declarative
 polymorphic typings.
+
+`hm_freshness_proofs` constructs generalized names from high free leaves of a
+finite RHS readback. Level order keeps low-boundary readbacks below the cutoff,
+and RHS activity separates the selected names from existing generic template
+parameters. Reifying templates and abstracting their generic parameters therefore
+produces a canonical declarative environment avoiding the selected names.
+`generalize_readback_typing` supplies this freshness premise to `generalize_typing`.
+A rejection fixture demonstrates why arbitrary free-name substitution must come
+after this abstraction: a low boundary assignment can contain a selected name.
+The name lists may repeat shared leaves; abstraction uses their first position,
+leaving unused binders. This ghost representation does not change copying.
+The full inference soundness induction and template-instance correspondence are
+still separate obligations.
