@@ -66,3 +66,20 @@ links, repeated sessions, constants and finite-root reuse, and calls both
 semantic interfaces. The negative fixture rejects fabricated mappings, copied
 finite boundaries, reused old allocation targets, dropped arrow children,
 inconsistent duplicate-parameter instances and stale-session equality.
+
+## Copy-memo cleanup
+
+`Pooled_copy` records touched source cells in a temporary cleanup list while
+keeping memo lookup in each source cell. Hits add no cleanup entry. The checked
+copy history determines the list exactly; `touched_distinct` excludes duplicate
+entries. The list stores no copied targets.
+
+`Clean_copy.instantiate` clears this list before returning and drops the list.
+`memo_released` states that every mapped source cell has an empty memo.
+`swept_at` preserves heap membership, descriptors and levels, and preserves the
+memos of cells outside the list. `model_equivalence` consequently preserves
+both directions of the existing instance semantics. Scope and level-order
+transport are explicit total proof functions.
+
+The lower-level copier still exposes its pre-cleanup heap for composing proofs.
+Runtime recursion remains partial; this cleanup adds no termination assumption.
