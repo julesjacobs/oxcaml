@@ -155,3 +155,13 @@ that typing, scheme opening and context weakening commute with that operation.
 Indexed scheme parameters remain unchanged. This is the specialization step
 needed after syntactic abstraction in the HM soundness proof; abstraction is
 still a separate obligation.
+
+
+`hm_abstraction.ml` replaces selected free names by indexed parameters, preserving
+repeated occurrences and shifting existing parameters beneath every nested
+scheme binder. `abstraction_typed` transforms the complete typing judgment.
+`generalize_typing` additionally requires the selected names to be absent from
+the context, then identifies the transformed context with ordinary weakening.
+The fixture composes abstraction with arbitrary free-name substitution, including
+a substitution that reuses the original handle name. The heap/path argument that
+establishes this absence for graph-selected parameters remains in the HM bridge.
