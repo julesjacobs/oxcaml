@@ -78,8 +78,9 @@ Runtime termination remains outside scope.
   positive `id id` and recursive-call derivations plus rejection probes.
 - [ ] Total type proofs: evaluation, opening, weakening, embedding, abstraction
   and free-variable substitution.
-- [ ] Environment templates with constructed instance translators and protected
-  boundary transport.
+- [x] Environment templates with protected boundary transport and constructed
+  empty, monomorphic, weakened and model-transported instance translators.
+  The let translator remains in the one-let bridge below.
 - [ ] Interleaved execution witnesses for actual richer-node operations.
 - [ ] Richer-node let-free inference, including monomorphic recursive lambdas:
   model extension, model restriction, soundness and rejection.
