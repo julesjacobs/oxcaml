@@ -97,7 +97,7 @@ let rec (unified_finite_at @ total) :
         let refine_ target = search_finite h q p p trace (refine_ u) in
         let refine_ t = replace_free h q p target old (refine_ u) in refine_ t)
       else refine_ old
-    | Lowering (bound, edits, rest) ->
+    | Lowering (bound, edits, _, rest) ->
       let mid = lower_heap h bound edits in
       let middle_trees : (x : node Pref.t) @ immutable ->
           {t : tree | tree_root t === x && (if H.mem mid x then finite mid t else observe mid x === None)} @ immutable total =
