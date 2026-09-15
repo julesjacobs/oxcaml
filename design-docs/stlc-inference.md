@@ -263,3 +263,18 @@ The application allocations extend that model, so unification cannot fail.
 `id_id_completes` excludes failure and `id_id_factor` constructs a substitution
 from final readback to `B -> B`. The runtime fixture calls `closed_hm` directly.
 This is the concrete one-let bridge, not the general HM completeness theorem.
+
+`hm_polymorphic_proofs.with_run_model` extends the model construction to every
+execution constructor, including nested lets and failure prefixes. At a let,
+it first constructs a baseline model of the RHS. For each requested instance
+it recursively constructs an alternative model of that same RHS execution at
+the requested semantic arguments. Both preserve all incoming assignments;
+`rhs_interpret` supplies the copy choices. The body then uses the constructed
+instance translator. No principal-generalization oracle is assumed.
+
+`closed_completes` and `closed_reject` relate returned executions to independent
+closed declarative typings. `closed_factor` constructs a substitution from the
+returned finite readback to any such typing. These theorems have no let-free
+premise. Nested aliases and mixed monomorphic/polymorphic boundaries exercise
+the actual driver. Full HM soundness remains open, so this factorization result
+alone does not establish principality.

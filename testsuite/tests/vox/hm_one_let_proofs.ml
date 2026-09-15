@@ -262,6 +262,7 @@ let (with_application_model @ total) : (h : node Pref.heap) @ immutable -> (dept
     (claim : bool) ->
     (use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
+      (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
       {u : unit | ok && tau p === target} -> {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun h depth pool facts rho model f a p arrow ok after d target premise claim use -> ghost_ (
     let refine_ premise = premise in let var : desc = Var in let v = cell var depth in
@@ -282,7 +283,9 @@ let (with_application_model @ total) : (h : node Pref.heap) @ immutable -> (dept
           let next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after rho2 x}) @ total = fun x ->
             let u = () in let refine_ u = C.unify_complete h2 rho2 model2 f arrow ok after d x (refine_ u) in refine_ u in
           let u = () in C.unify_complete h2 rho2 model2 f arrow ok after d p (refine_ u);
-          let refine_ u = use rho2 next (refine_ u) in refine_ u in
+          let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho2 x === rho x}) @ total = fun x ->
+            equal1 x; equal2 x; let u = () in refine_ u in
+          let refine_ u = use rho2 next equal (refine_ u) in refine_ u in
       let u = () in let refine_ u = C.with_alloc h1 depth pool1 (refine_ facts1) rho1 model1 arrow desc value h2 (refine_ u) claim consume2 in refine_ u in
     Copy_model_proofs.describes_def rho var target;
     let u = () in let refine_ u = C.with_alloc h depth pool facts rho model p var target h1 (refine_ u) claim consume1 in refine_ u)
@@ -373,7 +376,8 @@ let (with_id_id_model @ total) : (e : execution) @ immutable -> (after : node Pr
               let target = Function (b, b) in
               let consume_application : ((final : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
                 (final_model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after final x})) @ total ->
-                {u : unit | ok && final p === target} -> {u : unit | claim}) @ total = fun final final_model assigned ->
+                (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h2 x) || final x === tau x})) @ total ->
+                {u : unit | ok && final p === target} -> {u : unit | claim}) @ total = fun final final_model _equal assigned ->
                   let refine_ assigned = assigned in C.matches_def final e target;
                   let u = () in let refine_ u = use final final_model (refine_ u) in refine_ u in
               let u = () in let refine_ u = with_application_model h2 0 pool2 facts2 tau model2 q1 q2 p arrow ok after derivation target (refine_ u) claim consume_application in refine_ u in
