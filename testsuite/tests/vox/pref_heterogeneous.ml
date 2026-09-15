@@ -10,12 +10,11 @@
 let () =
   let seven = 7 in
   let refine_ t = Pref.empty () in
-  let refine_ first = Pref.alloc (ghost_ (Pref.Data.int ())) seven t in
+  let refine_ first = Pref.alloc seven t in
   let p = first.value in
   let t = first.state in
   let payload = ("frame", p) in
-  let shape = ghost_ (Pref.Data.pair (Pref.Data.string ()) (Pref.Data.pref ())) in
-  let refine_ second = Pref.alloc shape payload t in
+  let refine_ second = Pref.alloc payload t in
   let q = second.value in
   let t = second.state in
   let hash = Hashtbl.hash p in

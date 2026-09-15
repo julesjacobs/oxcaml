@@ -1,0 +1,340 @@
+(* TEST
+ has-z3;
+ flags = "-extension refinement_types";
+ source_directories = "${test_source_directory}/../../../verification/library";
+ all_modules = "pref.mli pref.ml pref_list.ml";
+ { bytecode; }
+ { native; }
+*)
+
+module H = Pref.Heap
+
+type node : immutable_data = {
+  value : int;
+  next : node option Pref.t;
+}
+
+type model = Nil | Cons of node * model [@@inductive]
+
+let[@def] (root @ total) (xs : model @ immutable) =
+  match xs with Nil -> None | Cons (n, _) -> Some n
+
+let[@def] (tail @ total) (xs : model @ immutable) =
+  match xs with Nil -> Nil | Cons (_, xs) -> xs
+
+let[@def] (link @ total) (n : node @ immutable)
+    (next : node option @ immutable) =
+  ghost_ (H.put (H.empty ()) n.next next)
+
+let[@def] rec (heap @ total) (xs : model @ immutable) =
+  ghost_ (match xs with
+  | Nil -> H.empty ()
+  | Cons (n, xs) -> H.union (link n (root xs)) (heap xs))
+
+let[@def] rec (valid @ total) (xs : model @ immutable) =
+  ghost_ (match xs with
+  | Nil -> true
+  | Cons (n, xs) -> valid xs && H.disjoint (link n (root xs)) (heap xs))
+
+let[@def] rec (rev_append @ total) (xs : model @ immutable)
+    (ys : model @ immutable) =
+  match xs with
+  | Nil -> ys
+  | Cons (n, xs) -> rev_append xs (Cons (n, ys))
+
+type result = { pointer : node option @@ aliased; state : Pref.token }
+
+type built = {
+  pointer : node option @@ aliased;
+  model : model @@ aliased ghost;
+  state : Pref.token;
+}
+
+let (unfold @ total) (xs : model @ immutable)
+    : {u : unit | match xs with
+      | Nil -> root xs === None && heap xs === H.empty () && valid xs
+      | Cons (n, rest) -> root xs === Some n && tail xs === rest
+        && heap xs === H.union (link n (root rest)) (heap rest)
+        && valid xs = (valid rest
+          && H.disjoint (link n (root rest)) (heap rest))} @ ghost =
+  ghost_ (
+    let refine_ a = root_def xs in
+    let refine_ b = tail_def xs in
+    let refine_ c = heap_def xs in
+    let refine_ d = valid_def xs in
+    let u = () in refine_ u)
+
+let rec reverse_into :
+    (pointer : node option) @ immutable ->
+    (acc : node option) @ immutable ->
+    (xs : model) @ immutable ghost -> (ys : model) @ immutable ghost ->
+    (t : {t : Pref.token | valid xs && root xs === pointer
+      && Pref.own t === heap xs}) @ unique ->
+    (a : {a : Pref.token | valid ys && root ys === acc
+      && Pref.own a === heap ys}) @ unique ->
+    {r : result | r.pointer === root (rev_append xs ys)
+      && Pref.own r.state === heap (rev_append xs ys)
+      && valid (rev_append xs ys)} @ unique =
+  fun pointer acc xs ys t a ->
+  let refine_ t = t in
+  let refine_ a = a in
+  let refine_ facts = ghost_ (unfold xs) in
+  let refine_ equation = ghost_ (rev_append_def xs ys) in
+  match pointer with
+  | None ->
+    let r = {pointer = acc; state = a} in
+    refine_ r
+  | Some n ->
+    let rest = ghost_ (tail xs) in
+    let next_model = ghost_ (root rest) in
+    let selection = ghost_ (link n next_model) in
+    let rest_heap = ghost_ (heap rest) in
+    let proof = ghost_ (
+      let refine_ a = H.partition_law selection rest_heap in
+      let refine_ b = link_def n next_model in
+      let u = () in
+      let proof : {u : unit |
+        H.restrict (heap xs) selection === selection
+        && H.exclude (heap xs) selection === rest_heap
+        && H.mem selection n.next
+        && H.at selection n.next === Some next_model} = refine_ u in proof) in
+    let refine_ proof = proof in
+    let refine_ parts = Pref.split selection t in
+    let cell = parts.#left in
+    let rest_token = parts.#right in
+    let p = n.next in
+    let next : {v : node option | v === root rest} =
+      let b = borrow_ cell in
+      let b : {b : Pref.token | H.mem (Pref.own b) p} = refine_ b in
+      let refine_ next = Pref.read p b in
+      refine_ next in
+    let refine_ next = next in
+    let cell : {t : Pref.token | H.mem (Pref.own t) p} = refine_ cell in
+    let refine_ cell = Pref.write p acc cell in
+    let new_link = ghost_ (Pref.own (borrow_ cell)) in
+    let refine_ a = Pref.join cell a in
+    let extended = ghost_ (Cons (n, ys)) in
+    let proof = ghost_ (
+      let refine_ a = unfold extended in
+      let refine_ b = link_def n next_model in
+      let refine_ c = link_def n acc in
+      let e = H.empty () in
+      let refine_ d = H.put_law e p next_model acc in
+      let u = () in
+      let proof : {u : unit | new_link === link n acc
+        && heap extended === H.union new_link (heap ys)
+        && valid extended && root extended === Some n
+        && rev_append xs ys === rev_append rest extended} = refine_ u in proof) in
+    let refine_ proof = proof in
+    let rest_token : {t : Pref.token | valid rest && root rest === next
+      && Pref.own t === heap rest} = refine_ rest_token in
+    let pointer = Some n in
+    let a : {a : Pref.token | valid extended && root extended === pointer
+      && Pref.own a === heap extended} = refine_ a in
+    let refine_ r = reverse_into next pointer rest extended rest_token a in
+    refine_ r
+
+let reverse : (pointer : node option) @ immutable ->
+    (xs : model) @ immutable ghost ->
+    (frame : Pref.heap) @ immutable ghost ->
+    (t : {t : Pref.token | valid xs && root xs === pointer
+      && H.disjoint (heap xs) frame
+      && Pref.own t === H.union (heap xs) frame}) @ unique ->
+    {r : result | r.pointer === root (rev_append xs Nil)
+      && Pref.own r.state === H.union (heap (rev_append xs Nil)) frame
+      && H.disjoint (heap (rev_append xs Nil)) frame
+      && valid (rev_append xs Nil)} @ unique =
+  fun pointer xs frame t ->
+  let refine_ t = t in
+  let selection = ghost_ (heap xs) in
+  let refine_ proof = ghost_ (H.partition_law selection frame) in
+  let refine_ parts = Pref.split selection t in
+  let list = parts.#left in
+  let frame_token = parts.#right in
+  let nil = ghost_ Nil in
+  let refine_ proof = ghost_ (unfold nil) in
+  let refine_ a = Pref.empty () in
+  let acc : node option = None in
+  let a : {a : Pref.token | valid nil && root nil === acc
+    && Pref.own a === heap nil} = refine_ a in
+  let list : {t : Pref.token | valid xs && root xs === pointer
+    && Pref.own t === heap xs} = refine_ list in
+  let refine_ r = reverse_into pointer acc xs nil list a in
+  let pointer = r.pointer in
+  let state = r.state in
+  let refine_ state = Pref.join state frame_token in
+  let result = {pointer; state} in
+  refine_ result
+
+let empty () : {b : built | b.pointer === root b.model && valid b.model
+    && Pref.own b.state === heap b.model && b.model === Nil} @ unique =
+  let model = ghost_ Nil in
+  let refine_ facts = ghost_ (unfold model) in
+  let refine_ state = Pref.empty () in
+  let b = {pointer = None; model; state} in
+  refine_ b
+
+let cons (value : int)
+    (b : {b : built | b.pointer === root b.model && valid b.model
+      && Pref.own b.state === heap b.model} @ unique)
+    : {r : built | let refine_ b = b in
+      r.pointer === root r.model && valid r.model
+      && Pref.own r.state === heap r.model
+      && (match r.model with Nil -> false | Cons (n, xs) ->
+        n.value = value && xs === b.model)} @ unique =
+  let refine_ b = b in
+  let pointer = b.pointer in
+  let xs = b.model in
+  let t = b.state in
+  let before = ghost_ (Pref.own (borrow_ t)) in
+  let refine_ cell = Pref.alloc pointer t in
+  let next = cell.value in
+  let state = cell.state in
+  let n = {value; next} in
+  let model = ghost_ (Cons (n, xs)) in
+  let proof = ghost_ (
+    let refine_ a = unfold model in
+    let refine_ b = link_def n pointer in
+    let e = H.empty () in
+    let refine_ c = H.union_law before e e in
+    let refine_ d = H.put_union_law e before next pointer in
+    let u = () in
+    let _contents : {u : unit |
+      H.put before next pointer === heap model} = refine_ u in
+    let _separate : {u : unit | H.disjoint (link n pointer) before} =
+      refine_ u in
+    let proof : {u : unit | root model === Some n && valid model
+      && H.put before next pointer === heap model} = refine_ u in proof) in
+  let refine_ proof = proof in
+  let result = {pointer = Some n; model; state} in
+  refine_ result
+
+let[@def] rec (nodes @ total) (xs : model @ immutable) =
+  match xs with Nil -> [] | Cons (n, xs) -> n :: nodes xs
+
+type observation = { nodes : node list @@ aliased; state : Pref.token }
+
+let rec observe : (pointer : node option) @ immutable ->
+    (xs : model) @ immutable ghost ->
+    (t : {t : Pref.token | valid xs && root xs === pointer
+      && Pref.own t === heap xs}) @ unique ->
+    {r : observation | r.nodes === nodes xs
+      && Pref.own r.state === heap xs} @ unique = fun pointer xs t ->
+  let refine_ t = t in
+  let refine_ facts = ghost_ (unfold xs) in
+  let refine_ equation = ghost_ (nodes_def xs) in
+  match pointer with
+  | None -> let r = {nodes = []; state = t} in refine_ r
+  | Some n ->
+    let rest = ghost_ (tail xs) in
+    let next_model = ghost_ (root rest) in
+    let selection = ghost_ (link n next_model) in
+    let rest_heap = ghost_ (heap rest) in
+    let proof = ghost_ (
+      let refine_ a = H.partition_law selection rest_heap in
+      let refine_ b = link_def n next_model in
+      let u = () in
+      let proof : {u : unit |
+        H.restrict (heap xs) selection === selection
+        && H.exclude (heap xs) selection === rest_heap
+        && H.mem selection n.next
+        && H.at selection n.next === Some next_model} = refine_ u in proof) in
+    let refine_ proof = proof in
+    let refine_ parts = Pref.split selection t in
+    let cell = parts.#left in
+    let rest_token = parts.#right in
+    let p = n.next in
+    let next : {v : node option | v === root rest} =
+      let b = borrow_ cell in
+      let b : {b : Pref.token | H.mem (Pref.own b) p} = refine_ b in
+      let refine_ next = Pref.read p b in
+      refine_ next in
+    let refine_ next = next in
+    let rest_token : {t : Pref.token | valid rest && root rest === next
+      && Pref.own t === heap rest} = refine_ rest_token in
+    let refine_ r = observe next rest rest_token in
+    let ns = r.nodes in
+    let state = r.state in
+    let refine_ state = Pref.join cell state in
+    let r = {nodes = n :: ns; state} in
+    refine_ r
+
+let rec of_list : int list ->
+    {b : built | b.pointer === root b.model && valid b.model
+      && Pref.own b.state === heap b.model} @ unique = fun values ->
+  match values with
+  | [] -> let refine_ b = empty () in refine_ b
+  | value :: rest ->
+    let refine_ b = of_list rest in
+    let b : {b : built | b.pointer === root b.model && valid b.model
+      && Pref.own b.state === heap b.model} = refine_ b in
+    let refine_ b = cons value b in
+    refine_ b
+
+let check values =
+  let refine_ b = of_list values in
+  let pointer = b.pointer in
+  let xs = b.model in
+  let t = b.state in
+  let t : {t : Pref.token | valid xs && root xs === pointer
+    && Pref.own t === heap xs} = refine_ t in
+  let refine_ original = observe pointer xs t in
+  let original_nodes = original.nodes in
+  let t = original.state in
+  let refine_ frame_token = Pref.empty () in
+  let forty_two = 42 in
+  let refine_ extra = Pref.alloc forty_two frame_token in
+  let unrelated = extra.value in
+  let frame_token = extra.state in
+  let frame = ghost_ (Pref.own (borrow_ frame_token)) in
+  let u = () in
+  let frame_value : {u : unit | H.mem frame unrelated
+    && H.at frame unrelated === Some 42} = refine_ u in
+  let refine_ frame_value = frame_value in
+  let refine_ t = Pref.join t frame_token in
+  let t : {t : Pref.token | valid xs && root xs === pointer
+    && H.disjoint (heap xs) frame
+    && Pref.own t === H.union (heap xs) frame} = refine_ t in
+  let refine_ reversed = reverse pointer xs frame t in
+  let pointer = reversed.pointer in
+  let t = reversed.state in
+  let ys = ghost_ (rev_append xs Nil) in
+  let selection = ghost_ (heap ys) in
+  let refine_ proof = ghost_ (H.partition_law selection frame) in
+  let refine_ parts = Pref.split selection t in
+  let list = parts.#left in
+  let frame_token = parts.#right in
+  let untouched : {v : int | v = 42} =
+    let b = borrow_ frame_token in
+    let b : {b : Pref.token | H.mem (Pref.own b) unrelated} = refine_ b in
+    let refine_ v = Pref.read unrelated b in
+    refine_ v in
+  let refine_ untouched = untouched in
+  assert (untouched = 42);
+  let list : {t : Pref.token | valid ys && root ys === pointer
+    && Pref.own t === heap ys} = refine_ list in
+  let refine_ observed = observe pointer ys list in
+  let reversed_nodes = observed.nodes in
+  let state = observed.state in
+  assert (List.map (fun n -> n.value) reversed_nodes = List.rev values);
+  assert (List.for_all2 ( == ) reversed_nodes (List.rev original_nodes));
+  let refine_ t = Pref.join state frame_token in
+  let t : {t : Pref.token | valid ys && root ys === pointer
+    && H.disjoint (heap ys) frame
+    && Pref.own t === H.union (heap ys) frame} = refine_ t in
+  let refine_ restored = reverse pointer ys frame t in
+  let pointer = restored.pointer in
+  let t = restored.state in
+  let zs = ghost_ (rev_append ys Nil) in
+  let selection = ghost_ (heap zs) in
+  let refine_ proof = ghost_ (H.partition_law selection frame) in
+  let refine_ parts = Pref.split selection t in
+  let list = parts.#left in
+  let list : {t : Pref.token | valid zs && root zs === pointer
+    && Pref.own t === heap zs} = refine_ list in
+  let refine_ observed = observe pointer zs list in
+  assert (List.for_all2 ( == ) observed.nodes original_nodes)
+
+let () =
+  List.iter check [[]; [7]; [1; 2]; [1; 2; 3; 4]; [7; 7; 7]];
+  check (List.init 1000 Fun.id)

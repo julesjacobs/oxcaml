@@ -7,7 +7,7 @@
  { native; }
 *)
 
-let (swap @ total) (p : int Pref.t @ immutable) (q : int Pref.t @ immutable)
+let swap (p : int Pref.t @ immutable) (q : int Pref.t @ immutable)
     (t : {t : Pref.token |
       Pref.Heap.mem (Pref.own t) p && Pref.Heap.mem (Pref.own t) q} @ unique)
     : {u : Pref.token | let refine_ t = t in
@@ -39,10 +39,10 @@ let () =
   let seven = 7 in
   let forty_two = 42 in
   let refine_ t = Pref.empty () in
-  let refine_ first = Pref.alloc (ghost_ (Pref.Data.int ())) seven t in
+  let refine_ first = Pref.alloc seven t in
   let p = first.value in
   let t = first.state in
-  let refine_ second = Pref.alloc (ghost_ (Pref.Data.int ())) forty_two t in
+  let refine_ second = Pref.alloc forty_two t in
   let q = second.value in
   let t = second.state in
   let hash = Hashtbl.hash p in
