@@ -49,9 +49,29 @@ Lambda inspection checks that executable operations contain no proof calls or
 resolution, search, derivation, or edit-witness allocations. This is an erasure
 check, not a native cost proof.
 
-The unifier proves partial correctness and exact model transformation. Finite
-readback, acyclicity preservation and most-general substitutions remain separate
-stages. No invariant constructor or correctness theorem is assumed.
+The unifier proves partial correctness and exact model transformation. The finite
+readback layer additionally constructs and preserves finite unfoldings and
+excludes cycles. Most-general substitutions remain a separate stage. No
+invariant constructor or correctness theorem is assumed.
+
+## Findings from finite readback
+
+A proof over a tuple match did not expose structural descent to the totality
+checker; nested matches do. This is a checking limitation, not evidence of a
+soundness defect. `finite_unique` uses nested matches.
+
+Directly constructing all unfolding evidence after eight allocations failed to
+recover an early cell's contents through the entire update chain. The emitted
+SMT obligations did not propagate that lookup through every intermediate heap.
+The checked `allocation_frame` and `allocation_finite_at` lemmas establish the
+invariant incrementally. Heap-observation saturation is worth investigating;
+this development does not change the compiler's automation or assume lookup
+facts to bypass it.
+
+Local total closures do not automatically expose their bodies to later proofs.
+A local `[@def]` valuation supplies an explicit defining lemma for the model
+witness. Equal saved-heap names are transported using checked `refine_` function
+adaptation from #140.
 
 ## Build tooling
 
