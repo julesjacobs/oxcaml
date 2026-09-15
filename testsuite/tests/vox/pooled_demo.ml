@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml level_proofs.ml level_lower.ml level_unifier_spec.ml level_unifier_proofs.ml level_unifier_metadata.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml pooled_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml level_proofs.ml level_lower.ml level_unifier_spec.ml level_unifier_proofs.ml level_unifier_metadata.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml pooled_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -16,6 +16,8 @@ open Level_unifier_proofs
 open Level_unifier_metadata
 open Level_finite_spec
 open Level_finite_proofs
+open Level_mgu_spec
+open Level_mgu_proofs
 open Forest_transport
 open Pooled_spec
 open Pooled_proofs
@@ -37,12 +39,12 @@ let run reject =
     ghost_ (fun x -> covered_def h0 0 pool0 x; let u = () in refine_ u) in
   ghost_ (pool_scoped_def h0 pool0);
   let desc1 : desc = Var in
-  ghost_ (children_below_def h0 desc1 2);
-  let state : {t : Pref.token | Pref.own t === h0 && pool_scoped h0 pool0 && 2 >= 0 && children_below h0 desc1 2} = refine_ state in
-  let refine_ step = Pooled_allocator.allocate h0 2 desc1 pool0 state in
+  ghost_ (children_below_def h0 desc1 1);
+  let state : {t : Pref.token | Pref.own t === h0 && pool_scoped h0 pool0 && 1 >= 0 && children_below h0 desc1 1} = refine_ state in
+  let refine_ step = Pooled_allocator.allocate h0 1 desc1 pool0 state in
   let a = step.#value in let pool1 = step.#pool in let state = step.#state in
-  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = cell desc1 2 in
-  ghost_ (cell_def desc1 2; payload_scoped_def h0 v1; allocatable_def h0 v1;
+  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = cell desc1 1 in
+  ghost_ (cell_def desc1 1; payload_scoped_def h0 v1; allocatable_def h0 v1;
     (match desc1 with Var | Bool -> () | Link q -> below_def h0 q 2; ()
     | Arrow (a, b) -> below_def h0 a 2; below_def h0 b 2; ()));
   let trees1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
@@ -51,7 +53,7 @@ let run reject =
   let scope1 : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h1 x then source_ok h1 x else H.at h1 x === None}) @ total ghost = ghost_ (fun x ->
     let u = () in let refine_ u = allocation_scope_at h0 scope0 a v1 x (refine_ u) in refine_ u) in
   let order1 : ((x : node Pref.t) @ immutable -> {u : unit | ordered h1 x}) @ total ghost = ghost_ (fun x ->
-    order0 x; let u = () in let refine_ u = allocation_ordered h0 a desc1 2 x (refine_ u) in refine_ u) in
+    order0 x; let u = () in let refine_ u = allocation_ordered h0 a desc1 1 x (refine_ u) in refine_ u) in
   let coverage1 : ((x : node Pref.t) @ immutable -> {u : unit | covered h1 0 pool1 x}) @ total ghost = ghost_ (fun x ->
     coverage0 x; let u = () in let refine_ u = allocation_coverage h0 a v1 pool0 0 x (refine_ u) in refine_ u) in
   let desc2 : desc = if reject then Bool else Var in
@@ -73,7 +75,8 @@ let run reject =
   let coverage2 : ((x : node Pref.t) @ immutable -> {u : unit | covered h2 0 pool2 x}) @ total ghost = ghost_ (fun x ->
     coverage1 x; let u = () in let refine_ u = allocation_coverage h1 b v2 pool1 0 x (refine_ u) in refine_ u) in
   let desc3 : desc = Arrow (a, b) in
-  ghost_ (let u = () in allocation_below h1 b v2 a 2 (refine_ u); children_below_def h2 desc3 2);
+  ghost_ (below_def h1 a 1; below_def h1 a 2; at_level_def h1 a;
+    let u = () in allocation_below h1 b v2 a 2 (refine_ u); children_below_def h2 desc3 2);
   let state : {t : Pref.token | Pref.own t === h2 && pool_scoped h2 pool2 && 2 >= 0 && children_below h2 desc3 2} = refine_ state in
   let refine_ step = Pooled_allocator.allocate h2 2 desc3 pool2 state in
   let root = step.#value in let pool3 = step.#pool in let state = step.#state in
@@ -100,6 +103,41 @@ let run reject =
   let refine_ solved = Level_unifier.unify h3 finite_scope3 a target state in
   assert (solved.#ok = not reject);
   let ok = solved.#ok in let ud = ghost_ solved.#derivation in let h4 = ghost_ (Pref.own (borrow_ solved.#state)) in
+  let _mgu_proof = ghost_ (
+    if ok then (
+      let claim = true in
+      let use : ((sigma : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+          (solution : ((x : node Pref.t) @ immutable ->
+            {u : unit | node_equation h3 sigma x && sigma a === sigma target
+              && sigma x === substitute sigma (sigma x)
+              && (H.mem h3 x || sigma x === Variable x)})) @ total ->
+          (factor : ((rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+            (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x})) @ total ->
+            (x : node Pref.t) @ immutable -> {u : unit | rho a === rho target} ->
+            {u : unit | rho x === substitute rho (sigma x)})) @ total ->
+          {u : unit | claim}) @ total = fun sigma solution factor ->
+        solution a; solution root; solution b;
+        let model : (x : node Pref.t) @ immutable -> {u : unit | node_equation h3 sigma x}
+            @ total = fun x -> solution x; let u = () in refine_ u in
+        let[@def] delta : node Pref.t @ immutable total -> ty @ immutable total =
+          fun x -> Function (Variable x, Boolean) in
+        let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total =
+          fun x -> substitute delta (sigma x) in
+        let instance : (x : node Pref.t) @ immutable ->
+            {u : unit | rho x === substitute delta (sigma x)} @ total = fun x ->
+          rho_def x; let u = () in refine_ u in
+        let old_model : (x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x}
+            @ total = fun x ->
+          solution x; let u = () in
+          instance_solution_at h3 sigma model delta rho instance a target x (refine_ u);
+          refine_ u in
+        let u = () in
+        instance_solution_at h3 sigma model delta rho instance a target a (refine_ u);
+        factor rho old_model a (refine_ u);
+        factor rho old_model root (refine_ u);
+        refine_ u in
+      let u = () in let refine_ u = with_mgu h3 trees3 a target h4 ud (refine_ u) claim use in u)
+    else ()) in
   let trees4 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h4 x then finite h4 t else observe h4 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
     let u = () in let refine_ t = unified_finite_at h3 trees3 a target ok h4 ud x (refine_ u) in refine_ t) in

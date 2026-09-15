@@ -83,3 +83,19 @@ failures, constructor clashes, sharing, alias chains and retained mutations.
 All specification and proof functions are checked total; their calls in the
 runtime fixture erase. No SMT quantifiers, compiler changes or new trusted
 primitives are introduced. Principal STLC inference is the next stage.
+
+## Mutable levels and generic templates
+
+`level_mgu_spec.ml` and `level_mgu_proofs.ml` expose the same contract for
+`Copy_spec.node`, using `Variable`, `Boolean` and `Function` and the richer
+unifier's `node_equation`. The finite forest transport handles level lowering;
+the MGU proof then factors canonical descriptor readback as above. Levels and
+memo fields remain runtime metadata, without a graph conversion or runtime
+substitution table.
+
+`pooled_demo.ml` consumes this API after actual unification at different levels,
+then continues through generalization and repeated copying. The callback
+instantiates the MGU with self-containing finite types and checks factorization
+at variables and a shared arrow root. `level_mgu_rejected.ml` checks the same
+four invalid claims on the richer representation. Principal HM still requires
+the generalization provenance and term-inference layers.
