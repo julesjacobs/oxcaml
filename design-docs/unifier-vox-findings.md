@@ -142,8 +142,11 @@ Supporting equivalent tuple matches would simplify these proofs.
 Heap updates again required a checked `put_frame` lemma to expose membership
 and unchanged observations at a selected handle. Adapting dependent callbacks
 between a local heap name and its equal history interpretation required explicit
-`refine_` annotations. The refinement operator itself requires a plain local
-variable, including when refining a literal or a projected result field.
+`refine_` annotations. The expression-refinement extension removes the separate local-binding step:
+`refine_ evidence.proof` adapts a projected callback directly. Other expressions
+are bound once before ordinary refinement checking or function adaptation.
+Dependent heap-alias transport still uses the checked expected function contract;
+this extension does not infer a missing invariant or add an assumption.
 
 The copier uses fresh node handles as session identities. This avoids an
 unproved machine-integer epoch bound, at the cost of one Boolean cell per call.

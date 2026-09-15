@@ -6,6 +6,8 @@
  { bytecode; }{ native; }
 *)
 
+type 'a evidence = { proof : 'a }
+
 let (transport @ total) :
     (before : int Pref.heap) @ immutable -> (after : int Pref.heap) @ immutable ->
     (model : ((p : int Pref.t) @ immutable ->
@@ -14,7 +16,8 @@ let (transport @ total) :
     ((p : int Pref.t) @ immutable -> {u : unit | Pref.Heap.mem after p}) @ total ghost =
   fun before after model equality -> ghost_ (
     let refine_ equality = equality in
-    refine_ model)
+    let evidence = {proof = model} in
+    refine_ evidence.proof)
 
 let calls = ref 0
 let source x : {r : int | r > 0} =
@@ -54,3 +57,30 @@ let () =
   assert (!stages = 1);
   let refine_ result = partial 2 in
   assert (result = 1 && !stages = 2)
+
+type callbacks = { callback : int -> {r : int | r > 0} }
+let constructed = ref 0
+let callback_calls = ref 0
+let make_callbacks () =
+  incr constructed;
+  { callback = fun _ -> incr callback_calls; let r = 1 in refine_ r }
+let projected : int -> {r : int | r >= 0} =
+  refine_ (make_callbacks ()).callback
+let () =
+  assert (!constructed = 1 && !callback_calls = 0);
+  let refine_ a = projected 3 in
+  let refine_ b = projected 4 in
+  assert (a = 1 && b = 1 && !constructed = 1 && !callback_calls = 2)
+
+let expression_calls = ref 0
+let value : {n : int | n >= 0} = refine_ (incr expression_calls; 42)
+let () = let refine_ value = value in assert (value = 42 && !expression_calls = 1)
+
+let adapted_stages_expr : int -> int -> {r : int | r >= 0} =
+  refine_ (incr constructed; staged)
+let () =
+  assert (!constructed = 2 && !stages = 2);
+  let partial = adapted_stages_expr 1 in
+  assert (!constructed = 2 && !stages = 3);
+  let refine_ result = partial 2 in
+  assert (result = 1 && !constructed = 2 && !stages = 4)
