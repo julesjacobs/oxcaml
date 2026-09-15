@@ -1,0 +1,73 @@
+(* TEST
+ has-z3;
+ flags = "-extension refinement_types";
+ expect;
+*)
+
+module Delayed = struct
+  type chain = Stop | Next of chain [@@inductive]
+  let rec (proof @ total) : (xs : chain) @ immutable -> (q : int) ->
+      {u : unit | true} @ ghost = fun xs q -> ghost_ (
+    match xs with
+    | Stop -> let u = () in refine_ u
+    | Next rest ->
+      let callback : (x : int) -> {u : unit | true} @ total =
+        fun x -> proof rest x in
+      callback q)
+end;;
+[%%expect{|
+Line 9, characters 17-22:
+9 |         fun x -> proof rest x in
+                     ^^^^^
+Error: This recursive function cannot be total: the recursive function occurs in a delayed body.
+|}]
+
+module Pointwise = struct
+  type chain = Stop | Next of chain [@@inductive]
+  let rec (proof @ total) : (xs : chain) @ immutable -> (q : int) ->
+      {u : unit | true} @ ghost = fun xs q -> ghost_ (
+    match xs with
+    | Stop -> let u = () in refine_ u
+    | Next rest -> proof rest q)
+end;;
+[%%expect{|
+module Pointwise :
+  sig
+    type chain = Stop | Next of chain
+    [@@inductive]
+    val proof : chain @ immutable -> int -> {u : unit | true} @ ghost
+  end
+|}]
+
+type bad = #{ value : int; evidence : unit @@ ghost };;
+[%%expect{|
+Line 1, characters 46-51:
+1 | type bad = #{ value : int; evidence : unit @@ ghost };;
+                                                  ^^^^^
+Error: Unrecognized modality ghost.
+|}]
+
+type good = #{ value : int; evidence : unit Ghost.t };;
+[%%expect{|
+type good = #{ value : int; evidence : unit Ghost.t; }
+|}]
+
+type top_chain = Stop | Next of top_chain [@@inductive];;
+[%%expect{|
+type top_chain = Stop | Next of top_chain [@@inductive]
+|}]
+
+let rec (top_pointwise @ total) : (xs : top_chain) @ immutable -> (q : int) ->
+    {u : unit | true} @ ghost = fun xs q -> ghost_ (
+  match xs with
+  | Stop -> let u = () in refine_ u
+  | Next rest -> top_pointwise rest q);;
+[%%expect{|
+Line 5, characters 17-30:
+5 |   | Next rest -> top_pointwise rest q);;
+                     ^^^^^^^^^^^^^
+Error: The value "top_pointwise" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 2-5, characters 32-38
+         which is expected to be "total".
+|}]
