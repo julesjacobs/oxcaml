@@ -14,9 +14,11 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] Mutable first-order unifier (this PR): shared cells, representative lookup,
   occurs checking, returned ownership, exact model transformation and correct
   rejection. See `mutable-unifier.md` for the precise guarantee.
-- [ ] Finite readback and MGU: explicit acyclicity/readback witnesses and
-  factorization functions. Establish finite-model existence and connect the
-  graph contract to most-general substitutions.
+- [x] Finite readback and acyclicity: construct finite unfolding witnesses from
+  allocation and preserve them through unification, including failure. Prove
+  cycle exclusion and finite-model construction; see `unifier-finite-readback.md`.
+- [ ] MGU factorization: connect the graph contract to most-general substitutions
+  using explicit factorization functions.
 - [ ] Principal STLC inference: allocation, shared environments, explicit typing
   derivations, soundness, completeness and rejection.
 - [ ] Monomorphic recursive functions.
