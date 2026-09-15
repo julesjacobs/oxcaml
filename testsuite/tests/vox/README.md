@@ -329,6 +329,21 @@ and 1,000-node lists; reversing twice restores the original order.
 `pref_list_rejected.ml` rejects a no-op claimed to reverse a list and an attempt
 to drop a node from the owned map. These examples use the existing Pref laws.
 
+The `pref_ring_*_demo.ml` tests exercise circular doubly linked lists with a
+sentinel. Both link cells appear in the same ownership map. The examples check
+empty and singleton cycles, insertion, removal with split/join of the detached
+node's ownership, a cross-ring range splice, reversal, and traversal in both
+directions. An unrelated empty node cell remains in the frame and is checked afterwards.
+
+Local mutation contracts specify exact map updates; the concrete examples
+establish the resulting whole-cycle predicates. The splice contract checks
+boundary links, so callers remain responsible for range validity and destination
+placement. Reversal collects an auxiliary list of node handles, includes the
+sentinel, and swaps each node's links. The supporting proof modules use the
+existing Pref laws without additional trusted declarations.
+`pref_ring_rejected.ml` rejects sentinel removal, a missing backward-link update,
+and a no-op claimed to reverse a list.
+
 The recursive payload examples currently require ordinary inference;
 `-principal` cannot establish their recursive `immutable_data` bounds.
 

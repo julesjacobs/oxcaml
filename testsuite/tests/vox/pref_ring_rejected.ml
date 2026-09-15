@@ -1,0 +1,119 @@
+(* TEST
+ has-z3;
+ flags = "-extension refinement_types";
+ source_directories = "${test_source_directory}/../../../verification/library";
+ all_modules = "pref.mli pref.ml pref_ring.ml";
+ readonly_files = "pref_ring_rejected.ml";
+ compile_only = "true";
+ {
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   run-expect;
+   check-program-output;
+ }
+ {
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   run-expectnat;
+   check-program-output;
+ }
+*)
+
+open Pref_ring
+
+module Remove_sentinel = struct
+  let bad : (s : node) @ immutable -> (left : node) @ immutable ->
+      (right : node) @ immutable ->
+      (t : {t : node option Pref.token | present (Pref.own t) left
+        && present (Pref.own t) s && present (Pref.own t) right
+        && H.at (Pref.own t) left.next === Some (Some s)
+        && H.at (Pref.own t) s.prev === Some (Some left)
+        && H.at (Pref.own t) s.next === Some (Some right)
+        && H.at (Pref.own t) right.prev === Some (Some s)}) @ unique ->
+      node option Pref.token @ unique = fun s left right t ->
+    let refine_ t = t in
+    let t : {t : node option Pref.token | present (Pref.own t) left
+      && present (Pref.own t) s && present (Pref.own t) right
+      && not (s === s)
+      && H.at (Pref.own t) left.next === Some (Some s)
+      && H.at (Pref.own t) s.prev === Some (Some left)
+      && H.at (Pref.own t) s.next === Some (Some right)
+      && H.at (Pref.own t) right.prev === Some (Some s)} = refine_ t in
+    let refine_ t = remove s left s right t in t
+end;;
+[%%expect{|
+Line 20, characters 59-68:
+20 |       && H.at (Pref.own t) right.prev === Some (Some s)} = refine_ t in
+                                                                ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}, Principal{|
+Line 6, characters 59-60:
+6 |       (t : {t : node option Pref.token | present (Pref.own t) left
+                                                               ^
+Error: The value "t" has type "Pref_ring.node option Pref.token"
+       but an expression was expected of type "'a Pref.token"
+       The kind of Pref_ring.node option is
+           immutable_data with Pref_ring.node
+         because it's a boxed variant type.
+       But the kind of Pref_ring.node option must be a subkind of
+           immutable_data.
+|}]
+
+module Missing_backward_update = struct
+  let bad (left : node @ immutable) (right : node @ immutable)
+      (t : {t : node option Pref.token | H.mem (Pref.own t) left.next
+        && H.mem (Pref.own t) right.prev} @ unique) :
+      {r : node option Pref.token | let refine_ t = t in
+        Pref.own r === connected (Pref.own t) left right} @ unique =
+    let refine_ t = t in
+    let before = ghost_ (Pref.own (borrow_ t)) in
+    let refine_ definition = ghost_ (connected_def before left right) in
+    let p = left.next in
+    let v = Some right in
+    let t : {t : node option Pref.token | H.mem (Pref.own t) p} = refine_ t in
+    let refine_ t = Pref.write p v t in
+    refine_ t
+end;;
+[%%expect{|
+Line 14, characters 4-13:
+14 |     refine_ t
+         ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}, Principal{|
+Line 3, characters 57-58:
+3 |       (t : {t : node option Pref.token | H.mem (Pref.own t) left.next
+                                                             ^
+Error: The value "t" has type "Pref_ring.node option Pref.token"
+       but an expression was expected of type "'a Pref.token"
+       The kind of Pref_ring.node option is
+           immutable_data with Pref_ring.node
+         because it's a boxed variant type.
+       But the kind of Pref_ring.node option must be a subkind of
+           immutable_data.
+|}]
+
+module No_reversal = struct
+  let bad (ns : node list @ immutable)
+      (t : {t : node option Pref.token | owns (Pref.own t) ns} @ unique) :
+      {r : node option Pref.token | let refine_ t = t in
+        Pref.own r === flipped_all (Pref.own t) ns} @ unique =
+    let refine_ t = t in
+    refine_ t
+end;;
+[%%expect{|
+Line 7, characters 4-13:
+7 |     refine_ t
+        ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}, Principal{|
+Line 3, characters 56-57:
+3 |       (t : {t : node option Pref.token | owns (Pref.own t) ns} @ unique) :
+                                                            ^
+Error: The value "t" has type "Pref_ring.node option Pref.token"
+       but an expression was expected of type "'a Pref.token"
+       The kind of Pref_ring.node option is
+           immutable_data with Pref_ring.node
+         because it's a boxed variant type.
+       But the kind of Pref_ring.node option must be a subkind of
+           immutable_data.
+|}]
