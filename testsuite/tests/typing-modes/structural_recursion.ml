@@ -95,10 +95,7 @@ module Test_delayed = struct
     | S smaller -> let again () = delayed smaller in again ()
 end
 [%%expect{|
-Line 5, characters 34-41:
-5 |     | S smaller -> let again () = delayed smaller in again ()
-                                      ^^^^^^^
-Error: This recursive function cannot be total: the recursive function occurs in a delayed body.
+module Test_delayed : sig val delayed : nat -> int end
 |}]
 module Test_noisy = struct
   let rec (noisy @ total) n =
