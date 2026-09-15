@@ -27,9 +27,10 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] Monomorphic recursive lambdas: shared argument/result/self allocation,
   explicit body/result equality, and extended soundness, model-extension,
   principality and rejection proofs. See `stlc-inference.md`.
-- [ ] Generic templates and copy instantiation: exact scheme-instance witnesses
-  with fresh copies, a shared nongeneric boundary and in-node epoch memoization
-  from the first copier. Begin with finite/generic levels and checked templates.
+- [x] Generic templates and copy instantiation: exact scheme-instance witnesses
+  with fresh copies, a shared nongeneric boundary and in-node memoization using
+  fresh session handles. Separate richer-node subsystem with finite/generic
+  levels; see `scheme-instantiation.md`. Unifier integration remains below.
 - [ ] Levels and scope: lowering, pool membership witnesses and saved-heap
   provenance, preserving the unifier's semantic contract. Represent pending
   binding and pool work explicitly before restoring the boundary invariant.
