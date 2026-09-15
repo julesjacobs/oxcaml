@@ -65,3 +65,17 @@ Line 7, characters 85-94:
                                                                                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+module Generalize_outer_binding = struct
+  let bad : (p : Copy_spec.node Pref.t) @ immutable ->
+      {u : unit | open_scheme (Forall (Z, Free p)) No_arguments === Boolean} @ ghost = fun p -> ghost_ (
+    let z = Z in let t = Free p in let s = Forall (z, t) in
+    let args = No_arguments in open_scheme_def s args; open_type_def args t;
+    let u = () in refine_ u)
+end;;
+[%%expect{|
+Line 6, characters 18-27:
+6 |     let u = () in refine_ u)
+                      ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
