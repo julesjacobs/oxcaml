@@ -77,11 +77,11 @@ boxed result wrappers.
 Bytecode still uses the backend's erased placeholders. The executable operations
 are partial; all specification functions and proof functions are total.
 
-This stage proves safe access, exact equations and correct rejection. It does
-not yet prove acyclicity preservation or produce a most-general substitution.
-The next stage must provide finite readback and factorization witnesses before
-claiming an MGU or principal STLC result. In particular, exact equations alone
-must not be presented as a proof that the output graph has a finite model.
+The base unifier proves safe access, exact equations and correct rejection.
+The additional layer in `unifier-finite-readback.md` constructs finite unfoldings
+from allocation and preserves them through unification, proving acyclicity and
+finite-model existence for inputs carrying that invariant. Most-general
+substitutions and principal STLC still require factorization proofs.
 
 The initial API accepts a scoped graph. It can diverge on a cyclic input;
 termination and native resource failures have no recovery contract here.
