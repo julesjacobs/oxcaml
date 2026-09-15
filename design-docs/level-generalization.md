@@ -63,27 +63,42 @@ All universal facts are total proof functions. Finite unfoldings, pool membershi
 and paths are explicit witnesses. Ghost recursion is checked total; no new
 axioms or SMT quantifiers were added.
 
+## Registered allocation and finite forests
+
+`pooled_allocator.ml` registers each allocation immediately in the returned
+pool. `pooled_copy.ml` threads that pool through the copier, registering the
+session cell and every fresh copy exactly once. Memo hits, finite boundaries
+and generic links add no entry. Its checked history equation specifies the
+exact returned pool; total proof functions preserve coverage and ownership.
+The earlier `copy_algorithm.ml` remains the standalone reference interface.
+
+`level_finite_spec.ml` and `level_finite_proofs.ml` port finite readback to the
+richer nodes. They construct finite forests from allocation and transport them
+through lowering and unification, including retained writes on failure.
+`forest_transport.ml` preserves forests through generalization and actual copy
+histories and derives the finite unfoldings needed by generalization. Finite
+model construction and cycle exclusion are checked on this representation.
+
+`pooled_demo.ml` starts with an empty heap, allocates and registers a shared
+arrow graph, unifies, generalizes and copies it, then generalizes and copies
+again. It constructs the forests and coverage callbacks through the checked
+transport functions. Both successful unification and occurs rejection are
+exercised; exact pool counts check session allocation and sharing. Rejection
+fixtures rule out missing registrations, invented copy allocations, stale
+finite witnesses, cycles and stale coverage after allocation.
+
 ## Remaining integration
 
 These are verified primitives, not a principal let-polymorphic inferencer.
-Callers currently construct the pool, coverage function and finite-unfolding
-forest explicitly; the positive fixtures do this from allocations. Allocation
-and copying do not yet register every newly allocated node in a runtime pool.
-The copier's session cell must also be accounted for when adding that allocator
-interface. Automatic pool registration, nested pool transfer and saved-heap
-provenance sufficient for principal generalization remain next. The current
-path bound proves environmental exclusion, not that every nongeneric variable
-is reachable from the environment.
+Callers still compose explicit total forest, coverage and level-order callbacks.
+The pool accumulator retains earlier entries, including generic entries;
+nested pool transfer and draining remain to be implemented. No separate runtime
+memo table was added. Runtime termination is not proved.
 
-The richer unifier has exact model and level-order guarantees. The earlier
-minimal unifier's finite-readback/MGU API has not yet been ported to this node
-representation. Generalization accepts a supplied finite forest; it does not
-construct that forest from the richer unifier's derivation. The next HM layer
-must supply that transport, solve each RHS before generalizing it, and prove
-principal typing against the independent declarative rules.
-
-The runtime pipeline fixture generalizes a source, instantiates it, unifies a
-copied variable with a Boolean boundary and checks that the original generic
-variable remains unchanged. It covers shared parameters and partial
-instantiation. Other fixtures check level lowering, occurs rejection, retained
-writes on failure, and rejected invalid level, memo and pool witnesses.
+Saved-heap provenance sufficient for principal generalization also remains.
+The current path bound proves environmental exclusion, not that every
+nongeneric variable is reachable from the environment. The richer unifier has
+exact model and finite-readback guarantees, but the earlier minimal unifier's
+MGU factorization API still needs porting. The HM layer must solve each RHS
+before generalizing it and prove principal typing against independent
+declarative rules. The minimal STLC entry point remains unchanged.
