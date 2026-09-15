@@ -100,8 +100,10 @@ Runtime termination remains outside scope.
 - [x] Canonical environment freshness for graph-selected generalization names:
   low boundary readbacks and existing generic templates avoid the selected names;
   abstraction establishes the premise of `generalize_typing` before substitution.
-- [ ] One-let bridge: construct baseline and alternative RHS models, apply
+- [x] One-let bridge: construct baseline and alternative RHS models, apply
   relative generalization, and consume the resulting factorization for `id id`.
+  The baseline comes from finite readback; each alternative comes from the same
+  RHS execution’s checked completeness proof. Both copies use their current heap.
 - [x] Nested execution transport for forests, levels, pools and active RHS origins.
   `run_origin` constructs saved-root paths across every execution constructor;
   `rhs_interpret` derives relative interpretation from two RHS models agreeing

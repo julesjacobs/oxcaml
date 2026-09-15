@@ -252,3 +252,14 @@ The name lists may repeat shared leaves; abstraction uses their first position,
 leaving unused binders. This ghost representation does not change copying.
 The full inference soundness induction and template-instance correspondence are
 still separate obligations.
+
+`hm_one_let_proofs.with_id_id_model` constructs a model of the final heap of
+any actual `let id = fun x -> x in id id` execution with result `B -> B`, for
+arbitrary finite semantic `B`. The baseline model comes from the finite forest.
+For each copy, the let-free completeness theorem constructs an alternative model
+of the same RHS execution; `rhs_interpret` supplies its instance choices. The
+second copy starts from the first copy's heap and preserves its assigned type.
+The application allocations extend that model, so unification cannot fail.
+`id_id_completes` excludes failure and `id_id_factor` constructs a substitution
+from final readback to `B -> B`. The runtime fixture calls `closed_hm` directly.
+This is the concrete one-let bridge, not the general HM completeness theorem.
