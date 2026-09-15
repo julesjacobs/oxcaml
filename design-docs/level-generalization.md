@@ -87,6 +87,34 @@ exercised; exact pool counts check session allocation and sharing. Rejection
 fixtures rule out missing registrations, invented copy allocations, stale
 finite witnesses, cycles and stale coverage after allocation.
 
+## Causal provenance
+
+`lower_locality_spec.ml` states that every level-write target occurs in the
+returned bounded traversal. `Level_lower.lower` now proves that confinement.
+The unifier's `Lowering` evidence also identifies the target traversal and the
+source variable's original level, and requires the ensuing variable binding.
+Previously, its weaker evidence allowed unrelated level decreases; those are
+model-preserving but unsuitable for principal generalization.
+
+`provenance_spec.ml` defines an origin as a saved finite root at or below the
+cutoff plus an explicit path in the current graph. `provenance_proofs.ml`
+constructs origins initially and transports them through fresh allocation above
+the cutoff, causal unification, copying and generalization. A newly lowered
+node obtains a path through the binding source and the target traversal.
+Successful and failed unification both preserve provenance.
+
+With the saved roots still below the cutoff and current level order,
+`generic_excludes_origin` rules out an origin for every newly generic node.
+`nongeneric_origin` constructs an origin for each active node that remains
+nongeneric after generalization. Pool coverage supplies complete classification.
+These statements are relative to saved heap roots; the correspondence to the
+declarative typing environment is still part of the HM proof.
+
+`provenance_demo.ml` allocates an outer variable and two fresh variables, unifies
+one fresh variable with the outer variable, and generalizes. The shared variable
+stays finite and the independent variable becomes generic. The fixture constructs
+its origin callbacks from allocations and the actual unification evidence.
+
 ## Remaining integration
 
 These are verified primitives, not a principal let-polymorphic inferencer.
@@ -99,9 +127,9 @@ list-based scope interface; callers retain the parent pool while filling the
 child pool. The original accumulating interface remains available. No separate runtime
 memo table was added. Runtime termination is not proved.
 
-Saved-heap provenance sufficient for principal generalization also remains.
-The current path bound proves environmental exclusion, not that every
-nongeneric variable is reachable from the environment. The richer unifier has
+The saved-heap provenance theorem still needs connecting to the declarative
+typing environment. It does not itself establish that every nongeneric variable
+is reachable from an environment scheme. The richer unifier has
 exact model, finite-readback and MGU factorization guarantees; see
 `unifier-mgu.md`. The HM layer must solve each RHS
 before generalizing it and prove principal typing against independent
