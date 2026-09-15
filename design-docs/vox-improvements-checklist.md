@@ -13,7 +13,7 @@ unifier (#138). Keep all changes covered by accepted and rejected regressions.
   order, single evaluation, ghost erasure and ownership.
 - [x] Support direct ghost fields in unboxed records and improve total-function
   versus total-result diagnostics.
-- [ ] Import frontend changes into Merlin, run focused and broader checks,
+- [x] Import frontend changes into Merlin, run focused and broader checks,
   exercise the new APIs in the unifier, and publish/restack the PRs.
 
 The supported boundaries and elaboration rules are recorded in
