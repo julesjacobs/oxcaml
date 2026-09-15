@@ -31,9 +31,14 @@ algorithm and theorem as a reference throughout this separate Vox development.
   with fresh copies, a shared nongeneric boundary and in-node memoization using
   fresh session handles. Separate richer-node subsystem with finite/generic
   levels; see `scheme-instantiation.md`. Unifier integration remains below.
-- [ ] Levels and scope: lowering, pool membership witnesses and saved-heap
-  provenance, preserving the unifier's semantic contract. Represent pending
-  binding and pool work explicitly before restoring the boundary invariant.
+- [x] Richer-node unification and lowering: exact success/rejection, finite
+  scope, level order, generic-node and memo preservation.
+- [x] Pool generalization primitive: explicit coverage and finite forests,
+  environmental path exclusion and two-sided exact instantiation; see
+  `level-generalization.md`.
+- [ ] Automatic pool registration and nested pool transfer, saved-heap
+  provenance, and finite-unfolding/MGU transport for the richer-node unifier.
+  Complete these before claiming principal generalization in HM.
 - [ ] Let-polymorphic HM: level-based generalization, context framing and
   principal typing.
 - [ ] In-node traversal marks with all-exit cleanup.
