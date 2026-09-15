@@ -73,7 +73,9 @@ Runtime termination remains outside scope.
 
 ## Remaining HM proof ladder
 
-- [ ] Independent indexed declarative typing, scheme opening and context weakening.
+- [x] Independent indexed declarative typing, scheme opening and context weakening.
+  Checked opening/evaluation, weakening/meaning, well-formedness and scoping;
+  positive `id id` and recursive-call derivations plus rejection probes.
 - [ ] Total type proofs: evaluation, opening, weakening, embedding, abstraction
   and free-variable substitution.
 - [ ] Environment templates with constructed instance translators and protected

@@ -187,3 +187,15 @@ Forest and pool-coverage transport work with explicit total callbacks. Heap
 aliases still require repeated dependent callback annotations at composition
 sites. Reducing that adaptation overhead would simplify clients without
 changing their invariants or adding SMT quantifiers.
+
+
+## Declarative HM semantics
+
+A `[@def]` function that passes an anonymous closure to another logical
+function can produce a definition premise that VC generation cannot translate.
+The diagnostic reports that the premise was omitted. For scheme meaning, an
+explicit finite parameter vector passed to the recursive evaluator avoids the
+closure in the logical definition. A total pointwise proof then relates that
+evaluator to a prefixed valuation. Supporting closure expressions in logical
+definitions would remove this duplicated evaluator; no new logical assumption
+is needed for the current encoding.
