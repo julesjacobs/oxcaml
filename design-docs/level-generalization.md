@@ -138,6 +138,21 @@ model equalities. The rejection fixture checks that a fixed boundary cannot be
 varied, a low variable cannot become a parameter, and unconstrained variable
 models do not automatically agree.
 
+## Copy depth discipline
+
+`ordered_copy.ml` wraps the pooled copier with explicit bounds for the source
+heap's finite nodes. Every shared finite boundary must be at most the requested
+instance depth. `copy_order_proofs.ml` proves the result bound, level order at
+every heap handle, and the same finite-node bound for subsequent copies. The
+wrapper retains the original history, registration and semantic contracts.
+The callbacks erase; allocation, sharing and in-node memoization are unchanged.
+
+`copy_order_demo.ml` copies a shared generic graph with a finite boundary and
+a generic alias at depths zero and three. Rejection probes exclude a boundary
+at depth two from copying at depth one, and exclude the resulting unordered
+arrow. The lower-level copier still permits arbitrary depths for clients that
+do not require level order; HM uses the bounded interface.
+
 ## Remaining integration
 
 These are verified primitives, not a principal let-polymorphic inferencer.
