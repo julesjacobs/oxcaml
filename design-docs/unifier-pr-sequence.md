@@ -94,6 +94,9 @@ Runtime termination remains outside scope.
   witnesses for finite readback, including monomorphic recursive lambdas.
 - [x] Richer-node let-free model extension, completeness, principality and
   rejection against independent declarative typing.
+- [x] Actual let-polymorphic driver: nested RHS levels, child-pool closing and
+  transfer, preserved parent coverage, protected saved nodes, and safety on
+  failure. Let-free theorem contracts remain available.
 - [ ] One-let bridge: construct baseline and alternative RHS models, apply
   relative generalization, and consume the resulting factorization for `id id`.
 - [ ] Nested execution transport for forests, levels, pools and active RHS origins.
