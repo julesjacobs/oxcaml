@@ -214,3 +214,19 @@ finite readback to any proposed declarative type. Together with `closed_sound`,
 this establishes closed let-free principality, including recursive lambdas.
 The identity fixture exercises arbitrary argument types. Let-polymorphic
 environments remain the next semantic extension.
+
+
+`Hm_infer.closed_hm` accepts all scoped terms and executes lets at a deeper
+level, closes their child pools and transfers retained finite nodes before
+inferring the body. The original `closed` entry retains its let-free contract
+and semantic theorems. `hm_protected_proofs.ml` preserves saved low bounds and
+generic descriptors, while `hm_registration_proofs.ml` traces unlisted finite
+nodes back to the input heap. `hm_let_runtime_proofs.ml` combines these facts
+into nested-level and pool preservation. Failure preserves heap safety; a
+failed RHS can retain its deeper level because no continuation uses it.
+
+Level increment uses a runtime overflow guard that raises `Assert_failure`;
+it never reports overflow as a typing rejection. Theorems concern returned
+executions, so runtime termination and resource exceptions remain outside
+scope. The nested-let, shared-boundary and recursive-let fixtures check the
+actual driver; full let-polymorphic semantic theorems remain open.
