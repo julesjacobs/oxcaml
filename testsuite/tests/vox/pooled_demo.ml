@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml level_unifier_proofs.ml level_unifier_metadata.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml pooled_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml pooled_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -100,7 +100,11 @@ let run reject =
   let target = if reject then root else b in
   ghost_ (below_def h3 root 2; active_def h3 root);
   let state : {t : Pref.token | Pref.own t === h3 && H.mem h3 a && H.mem h3 target && active h3 a && active h3 target} = refine_ state in
-  let refine_ solved = Level_unifier.unify h3 finite_scope3 a target state in
+  let unmarked : ((x : node Pref.t) @ immutable ->
+    {u : unit | match H.at h3 x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
+    cell_def desc1 1; cell_def desc2 2; cell_def desc3 2;
+    let u = () in refine_ u) in
+  let refine_ solved = Level_unifier.unify h3 finite_scope3 unmarked a target state in
   assert (solved.#ok = not reject);
   let ok = solved.#ok in let ud = ghost_ solved.#derivation in let h4 = ghost_ (Pref.own (borrow_ solved.#state)) in
   let _mgu_proof = ghost_ (

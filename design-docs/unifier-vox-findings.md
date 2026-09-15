@@ -150,8 +150,9 @@ this extension does not infer a missing invariant or add an assumption.
 
 The copier uses fresh node handles as session identities. This avoids an
 unproved machine-integer epoch bound, at the cost of one Boolean cell per call.
-In-node memo entries retain previous targets until overwritten; a later cleanup
-stage should address retention. Neither choice requires a compiler change.
+The public clean-copy wrapper clears written in-node memos through a temporary
+list of touched source handles before returning. The raw copier remains available
+for proof composition. Neither choice requires a compiler change.
 
 ## Levels and generalization
 

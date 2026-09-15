@@ -11,7 +11,7 @@ let rec (history_at @ total) : (saved : Pref.heap) @ immutable ->
     (x : node Pref.t) @ immutable -> {u : unit | valid saved epoch depth d} ->
     {u : unit | not (H.mem saved x) || (H.mem (heap saved epoch depth d) x &&
       match H.at saved x, H.at (heap saved epoch depth d) x with
-      | Some old, Some now -> old.desc === now.desc && old.level === now.level &&
+      | Some old, Some now -> old.desc === now.desc && old.level === now.level && old.visited === now.visited &&
         (match mapping d x with None -> now.memo === old.memo
         | Some q -> now.memo === Memo (epoch, q))
       | None, None -> true | _ -> false)} @ ghost = fun saved epoch depth d x premise -> ghost_ (
@@ -174,3 +174,28 @@ let rec (copied_fresh @ total) : (saved : Pref.heap) @ immutable ->
       if p === x then (history_at saved epoch depth rest p (refine_ u); refine_ u)
       else (extends_def rest d; extends_def rest rest; extension_trans rest d final (refine_ u);
         let refine_ u = copied_fresh saved epoch depth rest final p q (refine_ u) in refine_ u))
+
+let rec (history_unmarked @ total) : (saved : Pref.heap) @ immutable ->
+    (unmarked : ((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at saved x with None -> true | Some v -> not v.visited})) @ total ->
+    (epoch : node Pref.t) @ immutable -> (depth : int) -> (d : history) @ immutable ->
+    (x : node Pref.t) @ immutable -> {u : unit | valid saved epoch depth d} ->
+    {u : unit | match H.at (heap saved epoch depth d) x with
+      None -> true | Some v -> not v.visited} @ ghost =
+  fun saved unmarked epoch depth d x premise -> ghost_ (
+    let refine_ premise = premise in valid_def saved epoch depth d;
+    heap_def saved epoch depth d; let u = () in
+    match d with
+    | Start -> unmarked x; let desc : desc = Bool in cell_def desc depth;
+      let v = cell desc depth in put_frame saved epoch v x; refine_ u
+    | Fresh (rest, p, q, old, desc) ->
+      history_unmarked saved unmarked epoch depth rest x (refine_ u);
+      history_unmarked saved unmarked epoch depth rest p (refine_ u);
+      let h = heap saved epoch depth rest in let v = cell desc depth in
+      put_frame h q v x; let h1 = H.put h q v in let w = mark old epoch q in
+      put_frame h1 p w x; cell_def desc depth; mark_def old epoch q; refine_ u
+    | Alias (rest, p, q, old) ->
+      history_unmarked saved unmarked epoch depth rest x (refine_ u);
+      history_unmarked saved unmarked epoch depth rest p (refine_ u);
+      let h = heap saved epoch depth rest in let w = mark old epoch q in
+      put_frame h p w x; mark_def old epoch q; refine_ u)
