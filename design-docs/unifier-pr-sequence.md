@@ -56,8 +56,9 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [ ] In-node traversal marks with cleanup on every return path.
 - [ ] Structure linking without a unification pair cache.
 - [ ] Path compression with explicit representative and generic-cell framing.
-- [ ] Copy-memo cleanup: release retained prior instances and prove descriptor,
-  level and model preservation.
+- [x] Copy-memo cleanup: a temporary duplicate-free list of touched source
+  cells clears all written memos before return. Descriptor, level and exact
+  model preservation are checked; lookup remains in-node.
 - [x] Vox sort-encoding crash: minimize, fix and add a compiler regression.
 - [x] Vox dependent-callback adaptation: refine expressions and projected proof
   callbacks through one evaluated local binding, preserving checked contracts,
