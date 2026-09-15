@@ -210,3 +210,12 @@ record. The level-overflow branch currently uses the compiler's special
 Supporting layout-polymorphic exceptional returns would permit a descriptive
 exception without this workaround. This is an OxCaml library/layout restriction,
 not a refinement-logic defect.
+
+
+The full HM completeness proof exposed an ergonomics issue with total curried
+proof factories. Returning a translator annotated `@total ghost` made the
+factory check, but its partially applied result had ghost modes incompatible
+with the ordinary-total callback accepted by the next proof. The working
+encoding constructs the translator inline and calls the existing transport
+lemma from its body. This is a candidate for a minimized mode-inference test;
+no soundness defect has been established.

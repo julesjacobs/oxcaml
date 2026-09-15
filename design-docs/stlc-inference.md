@@ -278,3 +278,22 @@ returned finite readback to any such typing. These theorems have no let-free
 premise. Nested aliases and mixed monomorphic/polymorphic boundaries exercise
 the actual driver. Full HM soundness remains open, so this factorization result
 alone does not establish principality.
+
+`hm_template_instance_proofs` constructs declarative instance arguments from
+copy choices. Its direct scheme representation replaces generic parameters with
+indices while embedding each finite boundary's assigned type unchanged. Shared
+parameters use their first index consistently, including when the names list
+contains duplicates. `direct_instance` works for arbitrary boundary assignments;
+`scheme_wf` and `context_wf` establish well-formedness.
+
+For canonical readback assignments, `selected_generic` and
+`canonical_boundaries` derive the freshness needed by abstraction from graph
+levels and finite trees. `scheme_reification` equates the direct scheme with the
+previous canonical abstraction. The fixtures include a boundary assignment
+containing the same free name as a generic parameter, and a repeated parameter.
+The full execution soundness induction remains open.
+
+`hm_scheme_transport_proofs` checks substitution through direct schemes and
+contexts from explicit equalities at their finite boundaries. It preserves
+generic parameter indices, so arbitrary free-name substitution follows
+generalization without capturing a boundary assignment.
