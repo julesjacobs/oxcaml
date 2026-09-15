@@ -62,10 +62,14 @@ module Delayed = struct
   [@@decreases n]
 end;;
 [%%expect{|
-Line 3, characters 26-30:
+Line 3, characters 26-38:
 3 |     let later = fun () -> loop (n - 1) in
-                              ^^^^
-Error: the recursive function occurs in a delayed body
+                              ^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 5, characters 15-16:
+5 |   [@@decreases n]
+                   ^
+  Required by this decreases attribute
 |}]
 
 module Blocking = struct

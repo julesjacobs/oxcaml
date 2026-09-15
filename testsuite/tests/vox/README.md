@@ -27,6 +27,7 @@ legacy-mode defaults.
 | Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
 | Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
 | Clamp laws | `clamp.ml` | Explicit equations prove interval bounds, identity, and idempotence. |
+| Recursive closures | `closure_termination.ml`, `scoped_termination.ml` | Named and returned callbacks retain structural or numerical descent obligations. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 | Expression evaluation | `expressions.ml` | Structural recursion establishes termination; induction proves constant folding preserves wrapping-integer evaluation. |
 | Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |

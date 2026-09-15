@@ -252,10 +252,14 @@ let rec delayed n =
   let f () = delayed (n - 1) in if n > 0 then f () else 0
 [@@decreases n];;
 [%%expect{|
-Line 2, characters 13-20:
+Line 2, characters 13-28:
 2 |   let f () = delayed (n - 1) in if n > 0 then f () else 0
-                 ^^^^^^^
-Error: the recursive function occurs in a delayed body
+                 ^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 3, characters 13-14:
+3 | [@@decreases n];;
+                 ^
+  Required by this decreases attribute
 |}]
 
 let rec functor_body n =
