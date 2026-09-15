@@ -101,9 +101,10 @@ identities use `assume_`; ghost expressions require total computations.
 negative inputs to zero, and computes Fibonacci 100 without overflow guards.
 Its inductive proof erases at the fast-doubling operation boundary.
 
-Structural recursion does not fix the existing totality loophole through
-ordinary negative datatypes. A successful demo is not a claim of global
-soundness; never execute known-divergent examples.
+Total elimination requires the checked datatype guarantee.
+`negative_totality.ml` checks that negative variants, recursive records, and
+alias-hidden negative types cannot bypass it; the partial versions remain legal.
+These regressions are not a mechanized soundness proof of Vox.
 
 ## Additional demos
 

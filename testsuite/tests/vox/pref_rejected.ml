@@ -295,6 +295,37 @@ Line 5, characters 54-63:
 Error: Refinement could not be proved (counterexample)
 |}]
 
+module Unboxed_ghost_authority = struct
+  type box = #{ n : int; state : int Pref.token @@ ghost }
+  let bad : int Pref.token @ unique -> int Pref.token @ unique real = fun t ->
+    let box = #{ n = 0; state = t } in
+    box.#state
+end;;
+[%%expect{|
+Line 5, characters 4-14:
+5 |     box.#state
+        ^^^^^^^^^^
+Error: This value is "ghost" but is expected to be "real".
+|}]
+
+module Unboxed_ghost_join = struct
+  type box = #{ n : int; state : int Pref.token @@ ghost }
+  let bad (box : box) = ghost_ (
+    let left = box.#state in
+    let right = box.#state in
+    let refine_ joined = Pref.join left right in ())
+end;;
+[%%expect{|
+Line 6, characters 40-45:
+6 |     let refine_ joined = Pref.join left right in ())
+                                            ^^^^^
+Error: This value is used here, but it is also being used as unique at:
+Line 6, characters 35-39:
+6 |     let refine_ joined = Pref.join left right in ())
+                                       ^^^^
+
+|}]
+
 module Typed_heap_diagonal = struct
   type callback = {
     run : callback Pref.heap @ immutable -> bool @ ghost
