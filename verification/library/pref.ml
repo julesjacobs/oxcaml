@@ -123,6 +123,12 @@ external write : ('a : immutable_data).
     own u === Heap.put (own t) p v} @ unique
   @@ portable = "caml_pref_write_bytecode" "caml_pref_write"
 
+(** Runtime identity comparison for handles. *)
+external equal : ('a : immutable_data).
+  (p : 'a t) @ immutable -> (q : 'a t) @ immutable ->
+  {b : bool | b = (p === q)} @ total
+  @@ portable total = "%eq"
+
 type partition = #{ left : token; right : token }
 
 external split : (selection : heap) @ immutable ghost -> (t : token) @ unique ->
