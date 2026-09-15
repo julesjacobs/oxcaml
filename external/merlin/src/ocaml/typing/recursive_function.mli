@@ -6,6 +6,8 @@ val parameters :
 
 val check_predicates : Ident.t -> Typedtree.expression -> unit
 
-(** Reject escaped, delayed, partially applied, and predicate occurrences of
-    the recursive identifier. Call before checking any descent obligations. *)
+(** Reject escaped, partially applied, and predicate occurrences of the
+    recursive identifier, and calls in unsupported delayed bodies. Ordinary
+    closures are traversed: their recursive calls must satisfy the same descent
+    obligations as calls in the enclosing body. Call before checking descent. *)
 val check_uses : Ident.t -> Typedtree.expression -> unit
