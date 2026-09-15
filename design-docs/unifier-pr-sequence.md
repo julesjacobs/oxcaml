@@ -43,10 +43,13 @@ algorithm and theorem as a reference throughout this separate Vox development.
   parent pool, discard completed generic entries, and prove coverage transport.
 - [ ] Generalization provenance: track allocations and environment reachability
   sufficiently to prove principal generalization, with explicit witnesses.
-  Causal lowering, saved-root origins and two-sided classification are checked;
+  Causal lowering, saved-root origins, two-sided classification and relative
+  principal generalization with actual copy realization are checked;
   the bridge to the declarative environment remains.
 - [x] Richer-node MGU: substitution factorization, idempotence and identity
   outside the original heap; see `unifier-mgu.md`.
+- [ ] Copy depth discipline: require shared finite boundaries to be no deeper
+  than the instance depth, and prove copied heap level order.
 - [ ] Let-polymorphic HM: connect environments, let bindings, generalization and
   copying; prove soundness, completeness, principality and rejection against
   independent declarative typing rules.
