@@ -136,13 +136,6 @@ let[@def] rec (valid_edits @ total) (h : Pref.heap @ immutable)
   | Then (left, right) -> valid_edits h left
     && valid_edits (apply_edits h left) right)
 
-let[@def] rec (equal_edits @ total)
-    (rho : (node Pref.t @ immutable total -> ty @ immutable total) @ total)
-    (edits : edits @ immutable) = ghost_ (match edits with
-  | Unchanged -> true
-  | Set (p, q) -> rho p === rho q
-  | Then (left, right) -> equal_edits rho left && equal_edits rho right)
-
 let[@def] rec (writes @ total) (p : node Pref.t @ immutable)
     (q : node Pref.t @ immutable) (d : derivation @ immutable) =
   match d with

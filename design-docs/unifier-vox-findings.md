@@ -22,22 +22,23 @@ types.
 
 ## Total recursive proofs and closures
 
-A total recursive proof that calls itself in a returned closure is rejected:
-"the recursive function occurs in a delayed body". The initial unifier frame
-proof encountered this when constructing the intermediate heap's scope callback.
-Do not disable termination checks to accommodate it.
+The first implementation encountered "the recursive function occurs in a
+delayed body" when constructing intermediate model callbacks. This restriction
+was syntactic: Vox already checked equivalent inline callbacks, and both descent
+checkers already traversed ordinary function bodies.
 
-The working approach proves a pointwise frame theorem by direct structural
-recursion on erased execution evidence. A nonrecursive callback invokes that
-completed theorem for a requested node. Semantic composition similarly uses
-an erased edit tree and independent pointwise edit lemmas. This is proof data,
-not an executable write log or memo table.
+[PR #139](https://github.com/julesjacobs/oxcaml/pull/139) permits direct recursive
+calls inside named and returned closures while retaining every structural or
+numerical descent obligation. The unifier now uses recursive model callbacks
+directly. This removes the separate semantic edit traversal; the erased edit
+witness remains only to describe the exact physical writes.
 
-`unifier_vox_limits.ml` reproduces the delayed-body rejection and accepts the
-pointwise version inside a module. The same pointwise definition at the
-interactive top level is rejected as partial. This top-level/module discrepancy
-is a suspected compiler defect, isolated separately from the deliberate
-delayed-body restriction.
+`closure_termination.ml` covers accepted and rejected recursive closures.
+`unifier_vox_limits.ml` retains the original proof callback as a positive
+regression. The same pointwise recursive definition at the interactive top level
+is still rejected as partial. `pat_modes` uses legacy modes for that context;
+fixing the discrepancy requires a separate mode-policy change. Module-scoped
+proofs remain the workaround.
 
 ## Unboxed records and ghost fields
 
