@@ -24,19 +24,22 @@ algorithm and theorem as a reference throughout this separate Vox development.
   declarative typing derivations, model-extension completeness, principality and
   rejection. See `stlc-inference.md`; the first runtime layer generates then
   solves an equation tree. Open-term principal pairs remain a separate API.
-- [ ] Monomorphic recursive functions.
-- [ ] Levels and scope: lowering, pool membership witnesses and saved-heap
-  provenance, preserving the unifier's semantic contract.
+- [x] Monomorphic recursive lambdas: shared argument/result/self allocation,
+  explicit body/result equality, and extended soundness, model-extension,
+  principality and rejection proofs. See `stlc-inference.md`.
 - [ ] Generic templates and copy instantiation: exact scheme-instance witnesses
-  with fresh copies and a shared nongeneric boundary.
+  with fresh copies, a shared nongeneric boundary and in-node epoch memoization
+  from the first copier. Begin with finite/generic levels and checked templates.
+- [ ] Levels and scope: lowering, pool membership witnesses and saved-heap
+  provenance, preserving the unifier's semantic contract. Represent pending
+  binding and pool work explicitly before restoring the boundary invariant.
 - [ ] Let-polymorphic HM: level-based generalization, context framing and
   principal typing.
 - [ ] In-node traversal marks with all-exit cleanup.
-- [ ] In-node copy memoization with epoch-scoped correspondence witnesses.
 - [ ] Structure linking without a unification pair cache.
 - [ ] Path compression with explicit representative and generic-cell framing.
 
-Later boundaries remain subject to the ongoing Pro design consultation. For each
+The Pro design consultation supports the remaining order above. For each
 stage, require checked semantic proof functions, positive runtime cases,
 rejected incorrect implementations, and inspection that ghost evidence erases.
 Do not promote a soundness-only milestone to principality. OCaml runtime

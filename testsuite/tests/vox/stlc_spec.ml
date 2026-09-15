@@ -1,7 +1,8 @@
 open Unifier_spec
 
 type index = Z | S of index [@@inductive]
-type term = Bound of index | Boolean | Lambda of term | Apply of term * term [@@inductive]
+type term = Bound of index | Boolean | Lambda of term | Recursive of term
+  | Apply of term * term [@@inductive]
 type env = Empty | Bind of node Pref.t * env [@@inductive]
 type context = No_types | Type of ty * context [@@inductive]
 
@@ -14,6 +15,7 @@ let[@def] rec (scoped_term @ total) (n : index @ immutable) (e : term @ immutabl
   | Bound i -> present n i
   | Boolean -> true
   | Lambda body -> scoped_term (S n) body
+  | Recursive body -> scoped_term (S (S n)) body
   | Apply (f, a) -> scoped_term n f && scoped_term n a
 let[@def] rec (lookup @ total) (env : env @ immutable) (i : index @ immutable) =
   match env with Empty -> None | Bind (p, rest) -> match i with
@@ -28,7 +30,8 @@ let[@def] rec (context_of @ total)
 let[@def] rec (env_allocated @ total) (h : Pref.heap @ immutable) (env : env @ immutable) =
   ghost_ (match env with Empty -> true | Bind (p, rest) -> H.mem h p && env_allocated h rest)
 
-type typing = Variable | Constant | Abstraction of ty * typing | Application of ty * typing * typing
+type typing = Variable | Constant | Abstraction of ty * typing
+  | Application of ty * typing * typing | Recursion of ty * ty * typing
   [@@inductive]
 let[@def] rec (typed @ total) (ctx : context @ immutable) (e : term @ immutable)
     (t : ty @ immutable) (d : typing @ immutable) = ghost_ (match d with
@@ -36,6 +39,9 @@ let[@def] rec (typed @ total) (ctx : context @ immutable) (e : term @ immutable)
   | Constant -> e === Boolean && t === TBool
   | Abstraction (a, body) -> (match e, t with
     | Lambda e, TArrow (x, b) -> a === x && typed (Type (a, ctx)) e b body
+    | _ -> false)
+  | Recursion (a, b, body) -> (match e with
+    | Recursive e -> t === TArrow (a, b) && typed (Type (a, Type (t, ctx))) e b body
     | _ -> false)
   | Application (a, left, right) -> (match e with
     | Apply (f, x) -> typed ctx f (TArrow (a, t)) left && typed ctx x a right
@@ -57,17 +63,21 @@ type graph =
   | GVar of index * node Pref.t
   | GBool of node Pref.t
   | GLam of node Pref.t * graph * node Pref.t * Pref.heap
+  | GRec of node Pref.t * node Pref.t * node Pref.t * graph
   | GApp of graph * graph * node Pref.t * node Pref.t * Pref.heap * Pref.heap
   [@@inductive]
 let[@def] (root @ total) (g : graph @ immutable) = match g with
-  | GVar (_, p) | GBool p | GLam (_, _, p, _) | GApp (_, _, p, _, _, _) -> p
+  | GVar (_, p) | GBool p | GLam (_, _, p, _)
+  | GApp (_, _, p, _, _, _) | GRec (_, _, p, _) -> p
 let[@def] rec (source @ total) (g : graph @ immutable) = match g with
   | GVar (i, _) -> Bound i | GBool _ -> Boolean
   | GLam (_, body, _, _) -> Lambda (source body)
+  | GRec (_, _, _, body) -> Recursive (source body)
   | GApp (f, a, _, _, _, _) -> Apply (source f, source a)
 let[@def] rec (constraints @ total) (g : graph @ immutable) = match g with
   | GVar _ | GBool _ -> Nothing
   | GLam (_, body, _, _) -> constraints body
+  | GRec (_, result, _, body) -> And (constraints body, Equal (root body, result))
   | GApp (f, a, _, arrow, _, _) -> And (And (constraints f, constraints a), Equal (root f, arrow))
 let[@def] rec (built @ total) (h : Pref.heap @ immutable) (env : env @ immutable)
     (g : graph @ immutable) (after : Pref.heap @ immutable) = ghost_ (match g with
@@ -76,6 +86,11 @@ let[@def] rec (built @ total) (h : Pref.heap @ immutable) (env : env @ immutable
   | GLam (arg, body, p, middle) -> not (H.mem h arg)
     && built (H.put h arg Var) (Bind (arg, env)) body middle
     && not (H.mem middle p) && after === H.put middle p (Arrow (arg, root body))
+  | GRec (arg, result, p, body) -> not (H.mem h arg)
+    && not (H.mem (H.put h arg Var) result)
+    && not (H.mem (H.put (H.put h arg Var) result Var) p)
+    && built (H.put (H.put (H.put h arg Var) result Var) p (Arrow (arg, result)))
+      (Bind (arg, Bind (p, env))) body after
   | GApp (f, a, p, arrow, h1, h2) -> built h env f h1 && built h1 env a h2
     && not (H.mem h2 p) && not (H.mem (H.put h2 p Var) arrow)
     && after === H.put (H.put h2 p Var) arrow (Arrow (root a, p)))
@@ -103,6 +118,7 @@ let[@def] rec (derive @ total)
     (g : graph @ immutable) = match g with
   | GVar _ -> Variable | GBool _ -> Constant
   | GLam (arg, body, _, _) -> Abstraction (rho arg, derive rho body)
+  | GRec (arg, result, _, body) -> Recursion (rho arg, rho result, derive rho body)
   | GApp (f, a, _, _, _, _) -> Application (rho (root a), derive rho f, derive rho a)
 
 let[@def] (inferred @ total) (e : term @ immutable) (middle : Pref.heap @ immutable)

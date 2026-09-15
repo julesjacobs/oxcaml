@@ -115,3 +115,12 @@ returning a refinement mentioning a block-local name produces an escaping-scope
 diagnostic. The generator returns explicit scope refinements across these
 blocks. Non-variable dependent arguments such as `S Z` must still be named;
 the existing literal/projection elaboration does not cover constructor calls.
+
+## Recursive lambdas
+
+The STLC extension checked direct recursive calls through three allocation-model
+continuations and a body-model continuation using the existing totality support.
+No new compiler capability was required. The current heap-fact propagation issue
+also affected preservation of an argument's membership across the result and
+self-arrow allocations. A checked `allocation_keeps_mem` lemma exposes that
+consequence of `H.put`; the implementation does not assume membership.
