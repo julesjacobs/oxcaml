@@ -17,8 +17,9 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] Finite readback and acyclicity: construct finite unfolding witnesses from
   allocation and preserve them through unification, including failure. Prove
   cycle exclusion and finite-model construction; see `unifier-finite-readback.md`.
-- [ ] MGU factorization: connect the graph contract to most-general substitutions
-  using explicit factorization functions.
+- [x] MGU factorization: canonical handle-indexed readback, solution and
+  factorization functions, idempotence and identity outside the original heap.
+  See `unifier-mgu.md`.
 - [ ] Principal STLC inference: allocation, shared environments, explicit typing
   derivations, soundness, completeness and rejection.
 - [ ] Monomorphic recursive functions.
