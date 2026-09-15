@@ -85,8 +85,11 @@ Runtime termination remains outside scope.
 - [x] Interleaved execution witnesses for actual richer-node operations, with
   heap extension and successful-result ownership. A concrete let trace checks
   allocation, close/transfer and clean copying; the driver remains below.
-- [ ] Richer-node let-free inference, including monomorphic recursive lambdas:
-  model extension, model restriction, soundness and rejection.
+- [x] Actual richer-node let-free driver, including monomorphic recursive
+  lambdas: checked execution witnesses, pool/level/ownership preservation,
+  cleanup invariants and explicit failure prefixes.
+- [ ] Richer-node let-free semantics: model extension, model restriction,
+  soundness and rejection against independent declarative typing.
 - [ ] One-let bridge: construct baseline and alternative RHS models, apply
   relative generalization, and consume the resulting factorization for `id id`.
 - [ ] Nested execution transport for forests, levels, pools and active RHS origins.
