@@ -230,3 +230,12 @@ it never reports overflow as a typing rejection. Theorems concern returned
 executions, so runtime termination and resource exceptions remain outside
 scope. The nested-let, shared-boundary and recursive-let fixtures check the
 actual driver; full let-polymorphic semantic theorems remain open.
+
+`hm_origin_proofs.run_origin` preserves explicit saved-root paths through every
+execution constructor, including nested lets, copy cleanup and failure prefixes.
+Its saved cutoff must be strictly below the active inference depth: allocations
+at the active depth need not originate in the saved heap. `rhs_origin` constructs
+the initial paths when entering a let RHS. `rhs_interpret` then derives relative
+interpretation for two models of that RHS heap that agree on the saved low
+boundary. These lemmas do not yet construct the two models from declarative
+polymorphic typings.
