@@ -218,6 +218,7 @@ val name_cases :
 
 (* Why are we calling [submode]? This tells us why. *)
 type submode_reason =
+  | Function_value
   | Application of type_expr
       (* Check that the result of an application is a submode of the expected mode
          from the context *)
