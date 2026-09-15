@@ -102,7 +102,7 @@ memo table was added. Runtime termination is not proved.
 Saved-heap provenance sufficient for principal generalization also remains.
 The current path bound proves environmental exclusion, not that every
 nongeneric variable is reachable from the environment. The richer unifier has
-exact model and finite-readback guarantees, but the earlier minimal unifier's
-MGU factorization API still needs porting. The HM layer must solve each RHS
+exact model, finite-readback and MGU factorization guarantees; see
+`unifier-mgu.md`. The HM layer must solve each RHS
 before generalizing it and prove principal typing against independent
 declarative rules. The minimal STLC entry point remains unchanged.
