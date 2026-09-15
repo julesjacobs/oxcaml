@@ -184,8 +184,20 @@ in syntax order, including monomorphic recursive lambdas and early failures.
 Its closed entry constructs the initial evidence from an empty heap.
 `hm_runtime_proofs.ml` preserves ownership, level bounds, pool coverage and
 cleared visited marks through every let-free execution. These are structural
-guarantees; independent declarative soundness and completeness are still open.
+guarantees; the separate semantic proofs below establish soundness.
+Completeness remains open.
 The positive fixture runs constants, identity, application and recursion, and
 rejects self-application, recursive self-return and Boolean application.
 The negative fixture checks scoping, the let-free restriction and missing heap
 safety evidence.
+
+
+`hm_forest_proofs.ml` constructs finite unfolding forests through every
+execution constructor, including nested lets and failures.
+`hm_model_proofs.ml` restricts any model of the final heap to the initial heap;
+this also covers failed unification after partial writes.
+`hm_sound_proofs.ml` constructs independent declarative typing witnesses for
+successful let-free executions under monomorphic environments. `closed_sound`
+specializes this to a finite readback of a closed result. These proofs do not
+yet establish model extension, principality, rejection or let-polymorphic
+soundness.
