@@ -201,3 +201,16 @@ successful let-free executions under monomorphic environments. `closed_sound`
 specializes this to a finite readback of a closed result. These proofs do not
 yet establish model extension, principality, rejection or let-polymorphic
 soundness.
+
+
+`hm_complete_proofs.ml` constructs model extensions for every let-free
+execution constructor from an independent declarative typing witness.
+Allocation assigns fresh roots their required types, copying preserves the
+incoming assignment, and a compatible unification cannot fail.
+`with_closed_model` supplies the final model for any declarative closed-term
+type, `closed_completes` rules out failure, `closed_reject` refutes a proposed
+typing after actual failure, and `closed_factor` supplies a substitution from
+finite readback to any proposed declarative type. Together with `closed_sound`,
+this establishes closed let-free principality, including recursive lambdas.
+The identity fixture exercises arbitrary argument types. Let-polymorphic
+environments remain the next semantic extension.
