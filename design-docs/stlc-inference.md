@@ -147,3 +147,11 @@ unification, memo cleanup and closing at a sufficient cutoff. It constructs
 instance translators for empty and monomorphic environments, lifts them under
 fresh type binders, and transports them across models that agree on the template
 boundaries. The let translator remains part of the RHS model-extension bridge.
+
+
+`hm_substitution.ml` substitutes free handle names with embedded semantic types
+and transforms complete typing derivations. `hm_substitution_proofs.ml` proves
+that typing, scheme opening and context weakening commute with that operation.
+Indexed scheme parameters remain unchanged. This is the specialization step
+needed after syntactic abstraction in the HM soundness proof; abstraction is
+still a separate obligation.

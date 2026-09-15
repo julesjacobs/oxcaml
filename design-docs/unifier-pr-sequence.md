@@ -77,7 +77,8 @@ Runtime termination remains outside scope.
   Checked opening/evaluation, weakening/meaning, well-formedness and scoping;
   positive `id id` and recursive-call derivations plus rejection probes.
 - [ ] Total type proofs: evaluation, opening, weakening, embedding, abstraction
-  and free-variable substitution.
+  and free-variable substitution. Opening, weakening, embedding and closed
+  free-variable substitution are checked; abstraction remains.
 - [x] Environment templates with protected boundary transport and constructed
   empty, monomorphic, weakened and model-transported instance translators.
   The let translator remains in the one-let bridge below.
