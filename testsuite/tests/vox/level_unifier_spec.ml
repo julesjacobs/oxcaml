@@ -76,7 +76,70 @@ let[@def] rec (searched @ total) (h : Pref.heap @ immutable)
 
 type searched_result = #{ found : bool; search : search @@ ghost }
 
+type trail = End | Trail of node Pref.t * trail [@@inductive]
+type marks = No_marks | Marked of marks * node Pref.t * node * search [@@inductive]
+let[@def] (set_visited @ total) (v : node @ immutable) (visited : bool) =
+  {v with visited}
+let[@def] rec (marked_heap @ total) (h : Pref.heap @ immutable)
+    (d : marks @ immutable) = ghost_ (match d with
+  | No_marks -> h
+  | Marked (rest, p, old, _) ->
+    H.put (marked_heap h rest) p (set_visited old true))
+let[@def] rec (mark_trail @ total) (d : marks @ immutable) = ghost_ (
+  match d with No_marks -> End
+  | Marked (rest, p, _, _) -> Trail (p, mark_trail rest))
+let[@def] rec (marked @ total) (d : marks @ immutable)
+    (x : node Pref.t @ immutable) = ghost_ (match d with
+  | No_marks -> false
+  | Marked (rest, p, _, _) -> p === x || marked rest x)
+let[@def] rec (marks_valid @ total) (h : Pref.heap @ immutable)
+    (needle : node Pref.t @ immutable) (d : marks @ immutable) = ghost_ (
+  match d with No_marks -> true
+  | Marked (rest, p, old, proof) -> marks_valid h needle rest
+    && H.mem (marked_heap h rest) p
+    && H.at (marked_heap h rest) p === Some old && not old.visited
+    && searched h needle p false proof)
+let[@def] (marked_at @ total) (h : Pref.heap @ immutable)
+    (after : Pref.heap @ immutable) (d : marks @ immutable)
+    (x : node Pref.t @ immutable) = ghost_ (
+  H.mem h x === H.mem after x && match H.at h x, H.at after x with
+  | None, None -> true
+  | Some a, Some b -> a.desc === b.desc && a.level === b.level
+    && a.memo === b.memo && b.visited === (a.visited || marked d x)
+  | _ -> false)
+let[@def] rec (cached @ total) (d : marks @ immutable)
+    (x : node Pref.t @ immutable) = ghost_ (match d with
+  | No_marks -> Leaf
+  | Marked (rest, p, _, proof) -> if x === p then proof else cached rest x)
+let[@def] rec (on_trail @ total) (trail : trail @ immutable)
+    (x : node Pref.t @ immutable) = ghost_ (match trail with
+  | End -> false | Trail (p, rest) -> x === p || on_trail rest x)
+let[@def] rec (reset_heap @ total) (h : Pref.heap @ immutable)
+    (trail : trail @ immutable) = ghost_ (match trail with
+  | End -> h
+  | Trail (p, rest) -> match H.at h p with
+    | None -> reset_heap h rest
+    | Some v -> reset_heap (H.put h p (set_visited v false)) rest)
+let[@def] (reset_at @ total) (h : Pref.heap @ immutable)
+    (after : Pref.heap @ immutable) (trail : trail @ immutable)
+    (x : node Pref.t @ immutable) = ghost_ (
+  H.mem h x === H.mem after x && match H.at h x, H.at after x with
+  | None, None -> true
+  | Some a, Some b -> a.desc === b.desc && a.level === b.level
+    && a.memo === b.memo
+    && b.visited === (if on_trail trail x then false else a.visited)
+  | _ -> false)
+
+type scanning = #{state : Pref.token; found : bool; trail : trail @@ aliased;
+  marks : marks @@ ghost; search : search @@ ghost}
+type checked = #{state : Pref.token; found : bool;
+  marks : marks @@ ghost; search : search @@ ghost}
+
+let[@def] (scan_heap @ total) (h : Pref.heap @ immutable) (d : marks @ immutable) =
+  ghost_ (reset_heap (marked_heap h d) (mark_trail d))
+
 type derivation =
+  | Scanned of node Pref.t * marks * derivation
   | Lowering of int * lowering * bounded * derivation
   | Same
   | Swap of derivation
@@ -95,6 +158,8 @@ let[@def] rec (unified @ total) (h : Pref.heap @ immutable)
     (p : node Pref.t @ immutable) (q : node Pref.t @ immutable)
     (ok : bool) (after : Pref.heap @ immutable) (d : derivation @ immutable) =
   ghost_ (H.mem h p && H.mem h q && active h p && active h q && match d with
+  | Scanned (needle, marks, rest) -> marks_valid h needle marks
+    && unified (scan_heap h marks) p q ok after rest
   | Lowering (bound, edits, tree, rest) -> lower_valid h bound edits
     && observe h p === Some Var && at_level h p === Finite bound
     && confined edits tree && bound_root tree === q
@@ -133,11 +198,12 @@ type result = #{
   derivation : derivation @@ ghost;
 }
 
-type edits = Lowered of int * lowering | Unchanged | Set of node Pref.t * node Pref.t | Then of edits * edits
+type edits = Scanned_edit of node Pref.t * marks | Lowered of int * lowering | Unchanged | Set of node Pref.t * node Pref.t | Then of edits * edits
   [@@inductive]
 
 let[@def] rec (apply_edits @ total) (h : Pref.heap @ immutable)
     (edits : edits @ immutable) = ghost_ (match edits with
+  | Scanned_edit (_, d) -> scan_heap h d
   | Lowered (bound, d) -> lower_heap h bound d
   | Unchanged -> h
   | Set (p, q) -> H.put h p (redirect h p q)
@@ -145,6 +211,7 @@ let[@def] rec (apply_edits @ total) (h : Pref.heap @ immutable)
 
 let[@def] rec (valid_edits @ total) (h : Pref.heap @ immutable)
     (edits : edits @ immutable) = ghost_ (match edits with
+  | Scanned_edit (needle, d) -> marks_valid h needle d
   | Lowered (bound, d) -> lower_valid h bound d
   | Unchanged -> true
   | Set (p, _) -> observe h p === Some Var
@@ -154,6 +221,7 @@ let[@def] rec (valid_edits @ total) (h : Pref.heap @ immutable)
 let[@def] rec (writes @ total) (p : node Pref.t @ immutable)
     (q : node Pref.t @ immutable) (d : derivation @ immutable) =
   match d with
+  | Scanned (needle, marks, rest) -> Then (Scanned_edit (needle, marks), writes p q rest)
   | Lowering (bound, edits, _, rest) -> Then (Lowered (bound, edits), writes p q rest)
   | Bind_left _ -> Set (p, q)
   | Bind_right _ -> Set (q, p)

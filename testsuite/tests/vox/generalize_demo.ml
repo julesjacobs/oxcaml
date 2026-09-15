@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml level_unifier_proofs.ml level_unifier_metadata.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml generalize_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml generalize_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -63,6 +63,14 @@ let run shared =
   let d = ghost_ copied.#history in let epoch = ghost_ copied.#epoch in
   let copy_scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after_copy x) || finite_scope after_copy x}) @ total ghost = ghost_ (fun x ->
     let u = () in let refine_ u = Level_copy_proofs.copy_finite_scope saved scope_saved order_saved epoch depth d x (refine_ u) in refine_ u) in
+  let unmarked_saved : ((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at saved x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
+    let d = Bool in cell_def d 0; let d = Var in cell_def d 2; cell_def desc 2;
+    let u = () in closed_observe h 0 pool x (refine_ u);
+    closed_at_def h saved 0 pool x; refine_ u) in
+  let unmarked : ((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at after_copy x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
+    let u = () in let refine_ u = Copy_heap_proofs.history_unmarked saved unmarked_saved epoch depth d x (refine_ u) in refine_ u) in
   let result = copied.#value in
   let _models = ghost_ (
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
@@ -100,7 +108,7 @@ let run shared =
     let refine_ equal = Pref.equal x y in assert (equal = shared);
     let state : {t : Pref.token | Pref.own t === after_copy && H.mem after_copy x && H.mem after_copy boundary
       && active after_copy x && active after_copy boundary} = refine_ state in
-    let refine_ unified = Level_unifier.unify after_copy copy_scope x boundary state in
+    let refine_ unified = Level_unifier.unify after_copy copy_scope unmarked x boundary state in
     assert unified.#ok;
     let final = ghost_ (Pref.own (borrow_ unified.#state)) in
     ghost_ (let u = () in let ok = unified.#ok in

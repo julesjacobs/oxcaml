@@ -1,3 +1,4 @@
+open Marked_occurs_proofs
 open Copy_spec
 open Level_unifier_spec
 open Level_spec
@@ -120,6 +121,10 @@ let rec (unified_frame @ total) :
       if H.mem h x && scoped h x then (
         let u = () in bind_scope h q p x (refine_ u); refine_ u)
       else let u = () in refine_ u
+    | Scanned (needle, marks, rest) ->
+      let u = () in let mid = scan_heap h marks in
+      scan_observe h needle marks x (refine_ u); scan_scoped h needle marks x (refine_ u);
+      unified_frame mid p q ok after rest x (refine_ u); refine_ u
     | Lowering (bound, edits, _, rest) ->
       let u = () in let mid = lower_heap h bound edits in
       lower_observe h bound edits x (refine_ u); lower_scoped h bound edits x (refine_ u);
@@ -158,6 +163,11 @@ let rec (unified_edits @ total) :
     match d with
     | Same | Constants | Bind_left _ | Bind_right _
     | Occurs_left _ | Occurs_right _ | Clash -> refine_ u
+    | Scanned (needle, marks, rest) ->
+      let mid = scan_heap h marks in
+      unified_edits mid p q ok after rest (refine_ u);
+      let first = Scanned_edit (needle, marks) in
+      apply_edits_def h first; valid_edits_def h first; refine_ u
     | Lowering (bound, levels, _, rest) ->
       let mid = lower_heap h bound levels in
       unified_edits mid p q ok after rest (refine_ u);
@@ -194,6 +204,11 @@ let rec (success_backward_at @ total) :
       bind_model_backward h rho p q model x (refine_ u); refine_ u
     | Bind_right _ ->
       bind_model_backward h rho q p model x (refine_ u); refine_ u
+    | Scanned (needle, marks, rest) ->
+      let mid = scan_heap h marks in
+      let model_mid : ((x : node Pref.t) @ immutable -> {u : unit | node_equation mid rho x}) @ total =
+        fun x -> model x; let u = () in scan_equation h needle marks rho x (refine_ u); refine_ u in
+      success_backward_at mid rho model_mid p q after rest x (refine_ u); refine_ u
     | Lowering (bound, edits, _, rest) ->
       let mid = lower_heap h bound edits in
       let model_mid : ((x : node Pref.t) @ immutable -> {u : unit | node_equation mid rho x}) @ total =
@@ -250,6 +265,10 @@ let rec (success_forward_at @ total) :
       node_equation_def after rho x; node_equation_def after rho q;
       node_equation_def h rho x;
       refine_ u
+    | Scanned (needle, marks, rest) ->
+      let mid = scan_heap h marks in
+      success_forward_at mid rho p q after rest model x (refine_ u);
+      scan_equation h needle marks rho x (refine_ u); refine_ u
     | Lowering (bound, edits, _, rest) ->
       let mid = lower_heap h bound edits in
       success_forward_at mid rho p q after rest model x (refine_ u);
@@ -354,6 +373,11 @@ let rec (failure_refutes @ total) :
       model p; model q;
       node_equation_def h rho p; node_equation_def h rho q;
       refine_ u
+    | Scanned (needle, marks, rest) ->
+      let mid = scan_heap h marks in
+      let model_mid : ((x : node Pref.t) @ immutable -> {u : unit | node_equation mid rho x}) @ total =
+        fun x -> model x; let u = () in scan_equation h needle marks rho x (refine_ u); refine_ u in
+      failure_refutes mid rho model_mid p q after rest (refine_ u); refine_ u
     | Lowering (bound, edits, _, rest) ->
       let mid = lower_heap h bound edits in
       let model_mid : ((x : node Pref.t) @ immutable -> {u : unit | node_equation mid rho x}) @ total =
