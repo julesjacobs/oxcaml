@@ -43,7 +43,8 @@ algorithm and theorem as a reference throughout this separate Vox development.
   parent pool, discard completed generic entries, and prove coverage transport.
 - [ ] Generalization provenance: track allocations and environment reachability
   sufficiently to prove principal generalization, with explicit witnesses.
-- [ ] Richer-node MGU: port substitution factorization and principality.
+- [x] Richer-node MGU: substitution factorization, idempotence and identity
+  outside the original heap; see `unifier-mgu.md`.
 - [ ] Let-polymorphic HM: connect environments, let bindings, generalization and
   copying; prove soundness, completeness, principality and rejection against
   independent declarative typing rules.
