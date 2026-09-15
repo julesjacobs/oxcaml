@@ -29,19 +29,19 @@ module Missing_write = struct
       (t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q
         && H.at h p === Some Var && H.at h q === Some Bool
         && not (p === q)}) @ unique ->
-      {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation.ghost && r.#ok}
+      {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation && r.#ok}
       @ unique = fun h p q t ->
     let refine_ t = t in
     let search = ghost_ Leaf in
     let d = ghost_ (Bind_left search) in
     let ok = true in
     ghost_ (unified_def h p q ok h d);
-    let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
+    let r = #{ok; state = t; derivation = d} in refine_ r
 end;;
 [%%expect{|
-Line 14, characters 64-73:
-14 |     let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
-                                                                     ^^^^^^^^^
+Line 14, characters 48-57:
+14 |     let r = #{ok; state = t; derivation = d} in refine_ r
+                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -51,7 +51,7 @@ module Missing_occurs = struct
       (t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q
         && H.at h p === Some Var && H.at h q === Some (Arrow (p, p))
         && not (p === q)}) @ unique ->
-      {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation.ghost && r.#ok}
+      {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation && r.#ok}
       @ unique = fun h p q t ->
     let refine_ t = t in
     let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
@@ -64,12 +64,12 @@ module Missing_occurs = struct
     let d = ghost_ (Bind_left search) in
     let ok = true in
     ghost_ (unified_def h p q ok after d);
-    let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
+    let r = #{ok; state = t; derivation = d} in refine_ r
 end;;
 [%%expect{|
-Line 20, characters 64-73:
-20 |     let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
-                                                                     ^^^^^^^^^
+Line 20, characters 48-57:
+20 |     let r = #{ok; state = t; derivation = d} in refine_ r
+                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -78,18 +78,18 @@ module False_rejection = struct
       (p : node Pref.t) @ immutable ->
       (t : {t : node Pref.token | Pref.own t === h && H.mem h p
         && H.at h p === Some Bool}) @ unique ->
-      {r : result | unified h p p r.#ok (Pref.own r.#state) r.#derivation.ghost && not r.#ok}
+      {r : result | unified h p p r.#ok (Pref.own r.#state) r.#derivation && not r.#ok}
       @ unique = fun h p t ->
     let refine_ t = t in
     let d = ghost_ Clash in
     let ok = false in
     ghost_ (unified_def h p p ok h d);
-    let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
+    let r = #{ok; state = t; derivation = d} in refine_ r
 end;;
 [%%expect{|
-Line 12, characters 64-73:
-12 |     let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
-                                                                     ^^^^^^^^^
+Line 12, characters 48-57:
+12 |     let r = #{ok; state = t; derivation = d} in refine_ r
+                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -112,7 +112,7 @@ module Missing_second_child = struct
         && H.mem h p && H.mem h q && H.mem h a && H.mem h b
         && H.at h p === Some (Arrow (a, a))
         && H.at h q === Some (Arrow (a, b)) && not (a === b)}) @ unique ->
-      {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation.ghost && r.#ok}
+      {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation && r.#ok}
       @ unique = fun h p q a b t ->
     let refine_ t = t in
     let ok = true in
@@ -120,11 +120,11 @@ module Missing_second_child = struct
     ghost_ (unified_def h p q ok h d);
     let same = ghost_ Same in
     ghost_ (unified_def h a b ok h same);
-    let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
+    let r = #{ok; state = t; derivation = d} in refine_ r
 end;;
 [%%expect{|
-Line 17, characters 64-73:
-17 |     let r = #{ok; state = t; derivation = {Ghost.ghost = d}} in refine_ r
-                                                                     ^^^^^^^^^
+Line 17, characters 48-57:
+17 |     let r = #{ok; state = t; derivation = d} in refine_ r
+                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

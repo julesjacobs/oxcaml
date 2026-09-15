@@ -17,10 +17,10 @@ mutations if the second child fails.
 - `testsuite/tests/vox/unifier_demo.ml`: runtime cases with constructed ownership
   and scope witnesses.
 - `testsuite/tests/vox/unifier_rejected.ml`: rejected incorrect implementations.
-- `testsuite/tests/vox/unifier_vox_limits.ml`: isolated Vox limitations.
+- `testsuite/tests/vox/unifier_vox_limits.ml`: regressions for Vox proof ergonomics.
 
 No SMT quantifiers are used. An existential execution witness is returned in a
-`Ghost.t` field. Universal facts are explicit total functions; for example the
+direct `@@ ghost` field. Universal facts are explicit total functions; for example the
 scope argument has the shape:
 
 ```ocaml
@@ -72,7 +72,8 @@ when their own cells are untouched.
 
 The runtime has no substitution table, pair cache, or proof heap. Resolution,
 search and execution evidence erase. Result packages use unboxed records with
-`Ghost.t` fields so proof packaging does not introduce boxed result wrappers.
+direct `@@ ghost` fields, enabled by #140, so proof packaging does not introduce
+boxed result wrappers.
 Bytecode still uses the backend's erased placeholders. The executable operations
 are partial; all specification functions and proof functions are total.
 

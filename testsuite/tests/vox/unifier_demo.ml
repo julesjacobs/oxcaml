@@ -56,7 +56,7 @@ let run mode =
   let t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q} = refine_ t in
   let refine_ result = Unifier.unify h scope p q t in
   let ok = result.#ok in
-  let d = ghost_ result.#derivation.ghost in
+  let d = ghost_ result.#derivation in
   let t = result.#state in
   let after = ghost_ (Pref.own (borrow_ t)) in
   let proof = ghost_ (
