@@ -91,8 +91,12 @@ finite witnesses, cycles and stale coverage after allocation.
 
 These are verified primitives, not a principal let-polymorphic inferencer.
 Callers still compose explicit total forest, coverage and level-order callbacks.
-The pool accumulator retains earlier entries, including generic entries;
-nested pool transfer and draining remain to be implemented. No separate runtime
+`nested_pool.ml` closes a child pool and transfers its remaining finite entries
+to the parent pool. Generic child entries are discarded; existing parent entries
+are preserved. `transfer_listed` specifies exact membership and
+`close_transfer_coverage` preserves coverage for any outer cutoff. This is a
+list-based scope interface; callers retain the parent pool while filling the
+child pool. The original accumulating interface remains available. No separate runtime
 memo table was added. Runtime termination is not proved.
 
 Saved-heap provenance sufficient for principal generalization also remains.

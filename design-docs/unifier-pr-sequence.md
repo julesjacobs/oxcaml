@@ -39,14 +39,27 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] Automatic pool registration for allocation and copying, including session
   cells; finite-unfolding transport through richer-node unification,
   generalization and copying. See `level-generalization.md`.
-- [ ] Nested pool transfer and draining, saved-heap provenance, and MGU
-  factorization for the richer-node unifier. Complete these before claiming
-  principal generalization in HM.
-- [ ] Let-polymorphic HM: level-based generalization, context framing and
-  principal typing.
-- [ ] In-node traversal marks with all-exit cleanup.
+- [x] Nested pool transfer and draining: retain lowered finite nodes in the
+  parent pool, discard completed generic entries, and prove coverage transport.
+- [ ] Generalization provenance: track allocations and environment reachability
+  sufficiently to prove principal generalization, with explicit witnesses.
+- [ ] Richer-node MGU: port substitution factorization and principality.
+- [ ] Let-polymorphic HM: connect environments, let bindings, generalization and
+  copying; prove soundness, completeness, principality and rejection against
+  independent declarative typing rules.
+- [ ] In-node traversal marks with cleanup on every return path.
 - [ ] Structure linking without a unification pair cache.
 - [ ] Path compression with explicit representative and generic-cell framing.
+- [ ] Copy-memo cleanup: release retained prior instances and prove descriptor,
+  level and model preservation.
+- [ ] Vox sort-encoding crash: minimize, fix and add a compiler regression.
+- [ ] Vox dependent-callback adaptation: reduce explicit forwarding annotations
+  while preserving checked function contracts and totality.
+
+For every item: implement the runtime change, check the semantic proofs, run
+positive and rejection tests, inspect ghost erasure, and review before publishing
+its stacked PR. Mark an item complete only when its stated guarantee is checked.
+Runtime termination remains outside scope.
 
 The Pro design consultation supports the remaining order above. For each
 stage, require checked semantic proof functions, positive runtime cases,
