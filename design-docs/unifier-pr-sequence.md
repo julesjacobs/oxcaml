@@ -48,7 +48,7 @@ algorithm and theorem as a reference throughout this separate Vox development.
   the bridge to the declarative environment remains.
 - [x] Richer-node MGU: substitution factorization, idempotence and identity
   outside the original heap; see `unifier-mgu.md`.
-- [ ] Copy depth discipline: require shared finite boundaries to be no deeper
+- [x] Copy depth discipline: require shared finite boundaries to be no deeper
   than the instance depth, and prove copied heap level order.
 - [ ] Let-polymorphic HM: connect environments, let bindings, generalization and
   copying; prove soundness, completeness, principality and rejection against
