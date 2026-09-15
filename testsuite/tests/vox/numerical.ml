@@ -231,12 +231,10 @@ Error: The value "abs" is "partial"
 let rec self_measure n = if n > 0 then self_measure (n - 1) else 0
 [@@decreases self_measure n];;
 [%%expect{|
-Line 2, characters 13-25:
+Line 2, characters 26-27:
 2 | [@@decreases self_measure n];;
-                 ^^^^^^^^^^^^
-Error: The value "self_measure" is "partial"
-       but is expected to be "total"
-         because it is used in an expression (at line 2, characters 13-27).
+                              ^
+Error: This value is "immutable" but is expected to be "read_write".
 |}]
 
 let rec alias n = let f = alias in if n > 0 then f (n - 1) else 0

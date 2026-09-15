@@ -31,7 +31,7 @@ let nonvariable = add (x + 1) y;;
 Line 1, characters 22-29:
 1 | let nonvariable = add (x + 1) y;;
                           ^^^^^^^
-Error: A dependent function argument must be a plain local variable
+Error: A dependent argument must be a stable variable, literal, or immutable field projection
 |}]
 
 module type Recursion = sig
@@ -95,7 +95,7 @@ let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
 Line 1, characters 31-48:
 1 | let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
                                    ^^^^^^^^^^^^^^^^^
-Error: A dependent function argument must be a plain local variable
+Error: A dependent argument must be a stable variable, literal, or immutable field projection
 |}]
 
 let borrowed_mutable () =

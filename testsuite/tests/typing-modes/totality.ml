@@ -63,6 +63,8 @@ Line 3, characters 2-6:
 3 |   loop
       ^^^^
 Error: This value is "partial" but is expected to be "total".
+Annotate the callback itself with "(f : (int -> int) @ total)".
+A "total" annotation after the arrow constrains the result value.
 |}]
 
 let (looping @ total) () = while true do () done
