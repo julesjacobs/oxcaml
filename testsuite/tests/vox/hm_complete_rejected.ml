@@ -50,3 +50,18 @@ Line 8, characters 18-27:
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+module Reuse_identity_copy = struct
+  let bad : (p : Copy_spec.node Pref.t) @ immutable ->
+      (rho : (Copy_spec.node Pref.t @ immutable total -> Copy_spec.ty @ immutable total)) @ total ->
+      {u : unit | rho p === Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean)} ->
+      {u : unit | rho p === Copy_spec.Function
+        (Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean), Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean))} @ ghost =
+    fun _p _rho assigned -> ghost_ (let refine_ assigned = assigned in let u = () in refine_ u)
+end;;
+[%%expect{|
+Line 7, characters 85-94:
+7 |     fun _p _rho assigned -> ghost_ (let refine_ assigned = assigned in let u = () in refine_ u)
+                                                                                         ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
