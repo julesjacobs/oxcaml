@@ -41,16 +41,16 @@ algorithm and theorem as a reference throughout this separate Vox development.
   generalization and copying. See `level-generalization.md`.
 - [x] Nested pool transfer and draining: retain lowered finite nodes in the
   parent pool, discard completed generic entries, and prove coverage transport.
-- [ ] Generalization provenance: track allocations and environment reachability
+- [x] Generalization provenance: track allocations and environment reachability
   sufficiently to prove principal generalization, with explicit witnesses.
   Causal lowering, saved-root origins, two-sided classification and relative
-  principal generalization with actual copy realization are checked;
-  the bridge to the declarative environment remains.
+  principal generalization with actual copy realization and the full
+  declarative bridge are checked.
 - [x] Richer-node MGU: substitution factorization, idempotence and identity
   outside the original heap; see `unifier-mgu.md`.
 - [x] Copy depth discipline: require shared finite boundaries to be no deeper
   than the instance depth, and prove copied heap level order.
-- [ ] Let-polymorphic HM: connect environments, let bindings, generalization and
+- [x] Let-polymorphic HM: connect environments, let bindings, generalization and
   copying; prove soundness, completeness, principality and rejection against
   independent declarative typing rules.
 - [x] In-node occurs-check marks with cleanup on every return path: Boolean
@@ -115,12 +115,13 @@ Runtime termination remains outside scope.
 - [x] Declarative template instances: construct scheme arguments from copy
   choices, preserve shared parameters, and protect low-boundary names from
   capture. Connect direct scheme reification to canonical abstraction.
-- [ ] Public closed-term HM soundness, combined with factorization for principality.
-- [ ] Nested-let, mixed-boundary and saved-garbage regression cases.
+- [x] Public closed-term HM soundness, combined with factorization for principality:
+  full nested-let induction and actual runtime proof consumers pass.
+- [x] Nested-let, mixed-boundary and saved-garbage regression cases.
 
-These are proposed steps from the completed Pro consultation, not checked
-results. Each step must construct its witnesses rather than accept the desired
-semantic theorem as an input callback.
+Completed steps construct their witnesses rather than accept the desired
+semantic theorem as an input callback. Structure linking and path compression
+remain unchecked optimization steps.
 
 The Pro design consultation supports the remaining order above. For each
 stage, require checked semantic proof functions, positive runtime cases,

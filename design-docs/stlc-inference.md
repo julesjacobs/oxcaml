@@ -229,7 +229,7 @@ Level increment uses a runtime overflow guard that raises `Assert_failure`;
 it never reports overflow as a typing rejection. Theorems concern returned
 executions, so runtime termination and resource exceptions remain outside
 scope. The nested-let, shared-boundary and recursive-let fixtures check the
-actual driver; full let-polymorphic semantic theorems remain open.
+actual driver; the full semantic theorems are described below.
 
 `hm_origin_proofs.run_origin` preserves explicit saved-root paths through every
 execution constructor, including nested lets, copy cleanup and failure prefixes.
@@ -250,8 +250,8 @@ A rejection fixture demonstrates why arbitrary free-name substitution must come
 after this abstraction: a low boundary assignment can contain a selected name.
 The name lists may repeat shared leaves; abstraction uses their first position,
 leaving unused binders. This ghost representation does not change copying.
-The full inference soundness induction and template-instance correspondence are
-still separate obligations.
+The template-instance correspondence and full soundness induction are described
+below.
 
 `hm_one_let_proofs.with_id_id_model` constructs a model of the final heap of
 any actual `let id = fun x -> x in id id` execution with result `B -> B`, for
@@ -276,8 +276,8 @@ instance translator. No principal-generalization oracle is assumed.
 closed declarative typings. `closed_factor` constructs a substitution from the
 returned finite readback to any such typing. These theorems have no let-free
 premise. Nested aliases and mixed monomorphic/polymorphic boundaries exercise
-the actual driver. Full HM soundness remains open, so this factorization result
-alone does not establish principality.
+the actual driver. This factorization result alone does not establish principality; the soundness
+proof described below supplies the remaining direction.
 
 `hm_template_instance_proofs` constructs declarative instance arguments from
 copy choices. Its direct scheme representation replaces generic parameters with
@@ -291,9 +291,27 @@ For canonical readback assignments, `selected_generic` and
 levels and finite trees. `scheme_reification` equates the direct scheme with the
 previous canonical abstraction. The fixtures include a boundary assignment
 containing the same free name as a generic parameter, and a repeated parameter.
-The full execution soundness induction remains open.
+The full execution soundness induction is described below.
 
 `hm_scheme_transport_proofs` checks substitution through direct schemes and
 contexts from explicit equalities at their finite boundaries. It preserves
 generic parameter indices, so arbitrary free-name substitution follows
 generalization without capturing a boundary assignment.
+
+`hm_polymorphic_sound_proofs.run_sound` covers every successful execution,
+including nested lets, under an explicit final heap model. Variable typing
+uses the actual copy history and its cleanup-preserved model to construct the
+instance arguments. At a let, soundness first types the RHS in its canonical
+readback model. `hm_generalized_scheme_proofs` equates its level-selected names
+and abstracted type with the generated graph template's direct scheme. Only
+then does substitution transport that typing to the final heap model. The body
+uses the same scheme, so the independent declarative let rule applies.
+
+`closed_sound` constructs a declarative typing of the returned finite readback.
+`closed_principal` combines this witness with completeness's factorization for
+an arbitrary competing declarative typing. Together with `closed_completes`
+and `closed_reject`, these establish closed-term HM soundness, completeness,
+principality and correct rejection for returned executions. Runtime termination
+and resource exceptions remain outside scope. The runtime uses mutable levels,
+pool generalization, in-node copy memos and occurs marks; structure linking and
+path compression remain separate optimization steps.
