@@ -61,6 +61,41 @@ let rec generate : (h : Pref.heap) @ immutable ghost ->
         let u = () in built_frame h env graph after value (refine_ u);
         built_equations h env graph after (refine_ u));
       let r = #{value; equations; state = t; graph} in refine_ r
+    | Recursive body ->
+      let v = Var in let refine_ step = Pref.alloc v t in
+      let arg = step.value in let t = step.state in
+      let h1 = ghost_ (Pref.own (borrow_ t)) in
+      ghost_ (allocation_mem h arg v);
+      let refine_ step = Pref.alloc v t in
+      let result = step.value in let t = step.state in
+      let h2 = ghost_ (Pref.own (borrow_ t)) in
+      ghost_ (allocation_mem h1 result v);
+      let arrow = Arrow (arg, result) in let refine_ step = Pref.alloc arrow t in
+      let value = step.value in let t = step.state in
+      let h3 = ghost_ (Pref.own (borrow_ t)) in
+      ghost_ (allocation_mem h2 value arrow;
+        allocation_keeps_mem h1 result v arg; allocation_keeps_mem h2 value arrow arg);
+      let rest = Bind (value, env) in let env1 = Bind (arg, rest) in
+      ghost_ (
+        let keep : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || H.mem h3 x}
+            @ total = fun x -> let u = () in refine_ u in
+        let u = () in env_frame h h3 keep env (refine_ u);
+        env_allocated_def h3 rest; env_allocated_def h3 env1;
+        depth_def rest; depth_def env1;
+
+        let proof : {u : unit | env_allocated h3 env1 && scoped_term (depth env1) body} = refine_ u in proof);
+      let env1 : {v : env | env_allocated h3 v} = refine_ env1 in
+      let body : {b : term | let refine_ env1 = env1 in scoped_term (depth env1) b} = refine_ body in
+      let t : {t : Pref.token | Pref.own t === h3} = refine_ t in
+      let refine_ child = generate h3 env1 body t in
+      let refine_ env1 = env1 in let refine_ body = body in
+      let after = ghost_ (Pref.own (borrow_ child.#state)) in
+      let graph = ghost_ (GRec (arg, result, value, child.#graph)) in
+      let equations = And (child.#equations, Equal (child.#value, result)) in
+      ghost_ (built_def h env graph after; source_def graph; root_def graph; constraints_def graph;
+        let u = () in built_frame h env graph after value (refine_ u);
+        built_equations h env graph after (refine_ u));
+      let r = #{value; equations; state = child.#state; graph} in refine_ r
     | Apply (f, a) ->
       let env : {v : env | env_allocated h v} = refine_ env in
       let f : {f : term | let refine_ env = env in scoped_term (depth env) f} = refine_ f in

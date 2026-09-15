@@ -54,6 +54,31 @@ let identity_instance () =
         result.#tree target d (refine_ u) claim use in ()) else ()) in
   ()
 
+let recursive_instance () =
+  let e = Recursive (Bound Z) in
+  if scoped_term Z e then (
+    let e : {e : term | scoped_term Z e} = refine_ e in
+    let refine_ result = Stlc_infer.infer e in let refine_ e = e in
+    assert result.#ok;
+    let _proof = ghost_ (
+      let after = Pref.own (borrow_ result.#state) in
+      if result.#ok then (
+        let boolean = TBool in let target = TArrow (boolean, boolean) in
+        let variable = Variable in let d = Recursion (boolean, boolean, variable) in
+        let ctx = Type (boolean, Type (target, No_types)) in
+        let body = Bound Z in let zero = Z in let empty = No_types in
+        lookup_type_def ctx zero; typed_def ctx body boolean variable;
+        typed_def empty e target d;
+        let claim = true in
+        let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+            {u : unit | target === Unifier_mgu_spec.substitute delta (readback result.#tree)} ->
+            {u : unit | claim}) @ total = fun _delta factor ->
+          let refine_ factor = factor in let u = () in refine_ u in
+        let u = () in
+        let refine_ u = with_typing_factor e result.#generated_heap result.#graph after result.#solving
+          result.#tree target d (refine_ u) claim use in ()) else ()) in
+    ()) else assert false
+
 let () =
   run Boolean true;
   run (Lambda (Bound Z)) true;
@@ -64,4 +89,13 @@ let () =
   run (Lambda (Apply (Bound Z, Bound Z))) false;
   run (Apply (Boolean, Boolean)) false;
   run (Apply (Lambda (Apply (Bound Z, Boolean)), Boolean)) false;
-  identity_instance ()
+  run (Recursive (Bound Z)) true;
+  run (Recursive (Apply (Bound (S Z), Bound Z))) true;
+  run (Apply (Recursive (Bound Z), Boolean)) true;
+  run (Lambda (Recursive (Bound (S (S Z))))) true;
+  run (Recursive (Bound (S Z))) false;
+  run (Recursive (Apply (Bound Z, Bound Z))) false;
+  run (Recursive (Apply (Lambda (Apply (Bound (S (S Z)), Lambda (Bound Z))),
+    Apply (Bound (S Z), Boolean)))) false;
+  identity_instance ();
+  recursive_instance ()

@@ -93,6 +93,66 @@ let rec (with_generation_model @ total) : (h : Pref.heap) @ immutable ->
           (refine_ u) claim consume1 in refine_ u
       | _ -> refine_ u)
     | _ -> refine_ u)
+  | GRec (arg, result, p, body) -> (match d with
+    | Recursion (a, b, db) ->
+      let h1 = H.put h arg Var in let h2 = H.put h1 result Var in
+      let arrow = Arrow (arg, result) in let h3 = H.put h2 p arrow in
+      let rest = Bind (p, env) in let env1 = Bind (arg, rest) in
+      let v = Var in allocatable_def h v; allocatable_def h1 v; allocatable_def h2 arrow;
+      describes_def rho v a;
+      let trees1 : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
+          (if H.mem h1 x then finite h1 t else H.at h1 x === None)} @ immutable total = fun x ->
+        let u = () in let refine_ t = allocation_finite_at h trees arg v x (refine_ u) in refine_ t in
+      let trees2 : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
+          (if H.mem h2 x then finite h2 t else H.at h2 x === None)} @ immutable total = fun x ->
+        let u = () in let refine_ t = allocation_finite_at h1 trees1 result v x (refine_ u) in refine_ t in
+      let trees3 : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
+          (if H.mem h3 x then finite h3 t else H.at h3 x === None)} @ immutable total = fun x ->
+        let u = () in let refine_ t = allocation_finite_at h2 trees2 p arrow x (refine_ u) in refine_ t in
+      let consume1 : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+          (model1 : ((x : node Pref.t) @ immutable -> {u : unit | equation h1 rho1 x})) @ total ->
+          (equal1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho1 x === rho x})) @ total ->
+          {u : unit | rho1 arg === a} -> {u : unit | claim}) @ total = fun rho1 model1 equal1 fit1 ->
+        let refine_ fit1 = fit1 in let u = () in describes_def rho1 v b;
+        let consume2 : ((rho2 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+            (model2 : ((x : node Pref.t) @ immutable -> {u : unit | equation h2 rho2 x})) @ total ->
+            (equal2 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1 x) || rho2 x === rho1 x})) @ total ->
+            {u : unit | rho2 result === b} -> {u : unit | claim}) @ total = fun rho2 model2 equal2 fit2 ->
+          let refine_ fit2 = fit2 in let u = () in equal2 arg;
+          describes_def rho2 arrow target;
+          let consume3 : ((rho3 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+              (model3 : ((x : node Pref.t) @ immutable -> {u : unit | equation h3 rho3 x})) @ total ->
+              (equal3 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h2 x) || rho3 x === rho2 x})) @ total ->
+              {u : unit | rho3 p === target} -> {u : unit | claim}) @ total = fun rho3 model3 equal3 fit3 ->
+            let refine_ fit3 = fit3 in let u = () in equal3 arg; equal3 result;
+            let from0 : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho3 x === rho x}
+                @ total = fun x -> equal1 x; equal2 x; equal3 x; let u = () in refine_ u in
+            context_equal h rho rho3 from0 env (refine_ u);
+            context_of_def rho3 rest; context_of_def rho3 env1;
+            let keep : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || H.mem h3 x}
+                @ total = fun x -> let u = () in refine_ u in
+            env_frame h h3 keep env (refine_ u);
+            env_allocated_def h3 rest; env_allocated_def h3 env1;
+            let consume4 : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+                (next : ((x : node Pref.t) @ immutable -> {u : unit | equation after tau x})) @ total ->
+                (equal4 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h3 x) || tau x === rho3 x})) @ total ->
+                {u : unit | satisfies tau (constraints body) && tau (root body) === b} ->
+                {u : unit | claim}) @ total = fun tau next equal4 fit4 ->
+              let refine_ fit4 = fit4 in let u = () in equal4 result; equal4 p;
+              let equal : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x}
+                  @ total = fun x -> keep x; from0 x; equal4 x; let u = () in refine_ u in
+              let last = Equal (root body, result) in satisfies_def tau last;
+              let cs = constraints g in satisfies_def tau cs;
+              let refine_ u = use tau next equal (refine_ u) in refine_ u in
+            let refine_ u = with_generation_model h3 trees3 env1 body after rho3 model3 b db
+              (refine_ u) claim consume4 in refine_ u in
+          let refine_ u = with_allocation_model h2 trees2 rho2 model2 p arrow target h3
+            (refine_ u) claim consume3 in refine_ u in
+        let refine_ u = with_allocation_model h1 trees1 rho1 model1 result v b h2
+          (refine_ u) claim consume2 in refine_ u in
+      let refine_ u = with_allocation_model h trees rho model arg v a h1
+        (refine_ u) claim consume1 in refine_ u
+    | _ -> refine_ u)
   | GApp (f, a, p, arrow, h1, h2) -> (match d with
     | Application (argty, df, da) ->
       let ft = TArrow (argty, target) in
