@@ -6,7 +6,7 @@ type node : immutable_data =
   | Arrow of node Pref.t * node Pref.t
   | Link of node Pref.t
 
-type ty = TVar of int | TBool | TArrow of ty * ty [@@inductive]
+type ty = TVar of node Pref.t | TBool | TArrow of ty * ty [@@inductive]
 
 let[@def] (scoped @ total) (h : node Pref.heap @ immutable)
     (p : node Pref.t @ immutable) =

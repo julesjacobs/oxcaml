@@ -63,19 +63,18 @@ link edges. `walk_bound` extends this to explicit walks. `no_cycle` derives fals
 from any nonempty walk from an allocated handle back to itself. Thus even pure
 link cycles, which the old model equations permit, are excluded.
 
-`readback` interprets variable leaves using a supplied handle-to-integer label
-function, reads Boolean and arrow nodes, and follows aliases. The result is the
-existing finite inductive `ty`. `readback_model_at` establishes the existing heap
-equation for any requested handle, given the pointwise definition of the
-valuation. `with_finite_model` constructs that valuation with a local `[@def]`
-function and supplies its defining lemma. It passes the valuation and its total
-model witness to a total continuation. This is explicit existential elimination;
-the model witness is constructed, not assumed. The demo consumes this API.
+`readback` interprets variable leaves as `TVar` of their physical handle, reads
+Boolean and arrow nodes, and follows aliases. The result is the finite inductive
+`ty`. `readback_model_at` establishes the existing heap equation for any
+requested handle, given the pointwise definition of the valuation.
+`with_finite_model` constructs that valuation with a local `[@def]` function and
+supplies its defining lemma. It passes the valuation and its total model
+witness to a total continuation. This is explicit existential elimination; the
+model witness is constructed, not assumed.
 
-Labels need not be injective for finite-model existence. The fixture uses zero
-for every free variable. This does not establish a most-general substitution.
-The unfolding retains physical variable identities for the subsequent
-factorization stage.
+The MGU layer makes this readback canonical by preserving physical variable
+identities; the earlier label-function parameter is removed. Its factorization
+contract is described in `unifier-mgu.md`.
 
 ## Boundary and checks
 
@@ -87,5 +86,4 @@ Run `vox/unifier_finite_demo.ml` and `vox/unifier_finite_rejected.ml` through th
 test runner; both exercise bytecode and native compilation. The demo covers
 shared arrows, alias chains, variable binding, identity, occurs failures,
 constructor clashes and partial mutations. Lambda inspection checks that the
-new proof computations erase. MGU factorization and principal STLC remain later
-PRs.
+new proof computations erase. The MGU layer adds factorization; principal STLC remains a later PR.
