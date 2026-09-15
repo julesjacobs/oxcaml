@@ -161,10 +161,7 @@ Error: Refinement could not be proved (counterexample)
 
 let nonvariable : zero = refine_ 0;;
 [%%expect{|
-Line 1, characters 33-34:
-1 | let nonvariable : zero = refine_ 0;;
-                                     ^
-Error: "refine_" requires a plain local variable
+val nonvariable : zero = 0
 |}]
 
 let rec diverge () : zero = diverge ();;

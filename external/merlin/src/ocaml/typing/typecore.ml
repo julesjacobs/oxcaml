@@ -7838,6 +7838,20 @@ and type_expect_
           "%a requires a known refinement type from its context"
           Style.inline_code "assume_"))
     end
+  | Pexp_refine operand
+    when (match operand.pexp_desc with
+          | Pexp_ident {txt = Longident.Lident _; _} -> false
+          | _ -> true) ->
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let name = Location.mkloc "*refine_value*" loc in
+      let value = Ast_helper.Exp.ident ~loc
+          (Location.mkloc (Longident.Lident name.txt) loc) in
+      let body = Ast_helper.Exp.mk ~loc (Pexp_refine value) in
+      let normalized = Ast_helper.Exp.let_ ~loc Immutable Nonrecursive
+          [Ast_helper.Vb.mk ~loc (Ast_helper.Pat.var ~loc name) operand] body in
+      let normalized =
+        {normalized with pexp_attributes = sexp.pexp_attributes} in
+      type_expect env expected_mode normalized ty_expected_explained
   | Pexp_refine operand -> begin
       Language_extension.assert_enabled ~loc Refinement_types ();
       match get_desc (expand_head env ty_expected) with
