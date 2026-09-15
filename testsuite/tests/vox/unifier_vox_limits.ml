@@ -41,17 +41,14 @@ module Pointwise :
   end
 |}]
 
-type bad = #{ value : int; evidence : unit @@ ghost };;
+type direct = #{ value : int; evidence : unit @@ ghost };;
 [%%expect{|
-Line 1, characters 46-51:
-1 | type bad = #{ value : int; evidence : unit @@ ghost };;
-                                                  ^^^^^
-Error: Unrecognized modality ghost.
+type direct = #{ value : int; evidence : unit @@ ghost; }
 |}]
 
-type good = #{ value : int; evidence : unit Ghost.t };;
+type wrapped = #{ value : int; evidence : unit Ghost.t };;
 [%%expect{|
-type good = #{ value : int; evidence : unit Ghost.t; }
+type wrapped = #{ value : int; evidence : unit Ghost.t; }
 |}]
 
 type top_chain = Stop | Next of top_chain [@@inductive];;
@@ -65,11 +62,6 @@ let rec (top_pointwise @ total) : (xs : top_chain) @ immutable -> (q : int) ->
   | Stop -> let u = () in refine_ u
   | Next rest -> top_pointwise rest q);;
 [%%expect{|
-Line 5, characters 17-30:
-5 |   | Next rest -> top_pointwise rest q);;
-                     ^^^^^^^^^^^^^
-Error: The value "top_pointwise" is "partial"
-       but is expected to be "total"
-         because it is used inside the function at lines 2-5, characters 32-38
-         which is expected to be "total".
+val top_pointwise : top_chain @ immutable -> int -> {u : unit | true} @ ghost =
+  <fun>
 |}]

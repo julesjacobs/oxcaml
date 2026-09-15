@@ -8,6 +8,9 @@ algorithm and theorem as a reference throughout this separate Vox development.
   runtime physical equality with a logical identity contract.
 - [x] [Total recursion through closures](https://github.com/julesjacobs/oxcaml/pull/139):
   direct recursive proof calls inside total model callbacks.
+- [x] [Proof ergonomics](https://github.com/julesjacobs/oxcaml/pull/140):
+  dependent arguments, checked function adaptation, recursive annotations and
+  direct unboxed ghost fields.
 - [x] Mutable first-order unifier (this PR): shared cells, representative lookup,
   occurs checking, returned ownership, exact model transformation and correct
   rejection. See `mutable-unifier.md` for the precise guarantee.

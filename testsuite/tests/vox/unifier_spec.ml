@@ -43,7 +43,7 @@ let[@def] rec (resolves @ total) (h : Pref.heap @ immutable)
 
 type resolved = #{
   value : node Pref.t;
-  path : resolution Ghost.t;
+  path : resolution @@ ghost;
 }
 
 type search =
@@ -70,7 +70,7 @@ let[@def] rec (searched @ total) (h : Pref.heap @ immutable)
     && H.at h p === Some (Arrow (a, b))
     && searched h needle a false left && searched h needle b found right)
 
-type searched_result = #{ found : bool; search : search Ghost.t }
+type searched_result = #{ found : bool; search : search @@ ghost }
 
 type derivation =
   | Same
@@ -117,7 +117,7 @@ let[@def] rec (unified @ total) (h : Pref.heap @ immutable)
 type result = #{
   ok : bool;
   state : Pref.token;
-  derivation : derivation Ghost.t;
+  derivation : derivation @@ ghost;
 }
 
 type edits = Unchanged | Set of node Pref.t * node Pref.t | Then of edits * edits

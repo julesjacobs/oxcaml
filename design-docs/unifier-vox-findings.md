@@ -1,91 +1,63 @@
 # Vox findings from the mutable unifier
 
-Tested on the Pref stack at `edc50aeab356`, with the unifier branch's changes.
-These findings distinguish limitations from defects; a rejected proof is not by
-itself evidence of a compiler bug.
+The unifier now builds on #137, #139 and #140. Rejected examples distinguish
+language boundaries from compiler defects; rejection alone is not a defect.
 
-## Handle identity: missing primitive contract
+## Improvements applied
 
-Neither generic `=` nor `==` lets the verifier infer logical equality of two
-`Pref.t` handles. `vox_encoding.ml` only translates these comparisons for its
-supported numeric/Boolean payload classes. This blocks representative identity
-and the occurs check's base case. Use physical equality for handles: structural
-comparison of the contents would be the wrong algorithm.
+- #137 adds `Pref.equal`: physical handle equality with the contract
+  `{b : bool | b = (p === q)}`. This is a trusted primitive contract backed by
+  `%eq`; structural comparison of cell contents would be the wrong operation.
+- #139 permits direct, fully applied recursive calls inside named and returned
+  closures. The existing structural and numerical descent obligations still
+  apply. Intermediate model callbacks now call recursive proofs directly.
+- #140 preserves recursive totality at the interactive top level and supports
+  dependent result annotations on explicitly typed, unlabelled variable
+  parameters. Full function signatures remain useful for reviewing contracts.
+- #140 adds checked `refine_` adaptation of function results. Equal saved heap
+  observations can transport a model callback through pointwise obligations.
+  Wrappers preserve effects at each curried application; ghost wrappers erase.
+- #140 accepts stable literals and immutable projections in dependent calls.
+  Mutable reads and effectful arguments still require an explicit `let`.
+- #140 supports direct `@@ ghost` fields in unboxed records. The unifier now
+  uses these fields for resolution, search and execution witnesses. Real reads,
+  real pattern inspection and block indices into ghost fields remain forbidden.
+  Ownership checks prevent erased fields from recovering real tokens or
+  duplicating unique ownership.
 
-Add `Pref.equal`, implemented by `%eq`, with the contract
-`{b : bool | b = (p === q)}`. This is a small addition to the trusted Pref primitive
-interface, not a lemma proved from generic equality. Test aliases, independent
-allocations holding identical payloads, and preservation of identity after writes.
-A future compiler improvement could recognize physical equality for Pref types
-without requiring the wrapper, while retaining conservative behavior for other
-types.
+The earlier negative-datatype warning was stale: total elimination already
+requires the checked datatype guarantee. Compile-only regressions cover that
+boundary. This is an audit of concrete cases, not a soundness proof of Vox.
 
-## Total recursive proofs and closures
+## Remaining language boundaries
 
-The first implementation encountered "the recursive function occurs in a
-delayed body" when constructing intermediate model callbacks. This restriction
-was syntactic: Vox already checked equivalent inline callbacks, and both descent
-checkers already traversed ordinary function bodies.
+Function adaptation currently requires a stable local function and unlabelled
+parameters. Labelled or optional arguments need an explicit wrapper. Scalar
+refinements still use `let refine_` to open evidence and `refine_` to repackage it.
+The callback's `@ total` annotation applies to the function value; placing it
+after an arrow constrains the returned value. #140 adds a targeted diagnostic.
 
-[PR #139](https://github.com/julesjacobs/oxcaml/pull/139) permits direct recursive
-calls inside named and returned closures while retaining every structural or
-numerical descent obligation. The unifier now uses recursive model callbacks
-directly. This removes the separate semantic edit traversal; the erased edit
-witness remains only to describe the exact physical writes.
+Do not infer heap membership merely from `Heap.at h p === Some value` in the
+current encoding. Operation certificates retain `Heap.mem h p` explicitly.
+Connecting these observations is a possible specification/automation improvement;
+it must not become an assumed allocation invariant.
 
-`closure_termination.ml` covers accepted and rejected recursive closures.
-`unifier_vox_limits.ml` retains the original proof callback as a positive
-regression. The same pointwise recursive definition at the interactive top level
-is still rejected as partial. `pat_modes` uses legacy modes for that context;
-fixing the discrepancy requires a separate mode-policy change. Module-scoped
-proofs remain the workaround.
+## Representation and proof boundary
 
-## Unboxed records and ghost fields
+Native code removes void witness slots. Bytecode can retain void placeholders.
+Lambda inspection checks that executable operations contain no proof calls or
+resolution, search, derivation, or edit-witness allocations. This is an erasure
+check, not a native cost proof.
 
-An unboxed record with `@@ ghost` on a field is rejected with "Unrecognized
-modality ghost". Boxed records accept it, but then a result with one runtime
-field can retain a wrapper allocation after proof erasure. Use a field of type
-`witness Ghost.t` inside the unboxed record instead: its void representation
-removes the field and the unboxed result avoids the wrapper. The unifier uses
-this accepted form. The limits test records both forms; accepting the direct
-syntax or giving a targeted diagnostic would improve the language.
+The unifier proves partial correctness and exact model transformation. Finite
+readback, acyclicity preservation and most-general substitutions remain separate
+stages. No invariant constructor or correctness theorem is assumed.
 
-The `-dlambda` output for the final implementation contains no calls into the
-proof/specification modules and no constructors for resolution, search,
-derivation, or edit witnesses. The remaining block constructions are the actual
-`Link` payload, the unreachable assertion's exception payload, and the module's
-function exports. This checks erasure at Lambda; it is not a native cost proof.
+## Build tooling
 
-## Dependent arguments and refinement evidence
-
-Dependent calls require plain local variables: literals and projections such as
-`r.value` must first be named. A refined argument must be explicitly opened with
-`let refine_`, then repackaged for a different refinement. Local callback result
-dependencies require explicit function signatures. These are current language
-rules, not identified soundness defects, but they cause substantial annotation
-noise in this example.
-
-Some callbacks need totality annotations on the function, not its returned
-value; misplaced annotations produce superficially similar printed types.
-Examples should show the distinction consistently.
-
-## Heap membership and contents
-
-Do not assume a standalone `Heap.at h p = Some value` automatically supplies a
-membership fact in the current encoding. Operation certificates explicitly
-retain `Heap.mem h p` for safe access. This is a specification/automation issue to
-investigate, rather than an excuse to assume an allocation invariant.
-
-## Recursive result annotations
-
-The initial `weight_positive` lemma used a result annotation after its arguments.
-Recursive calls did not expose that dependent result refinement. Writing the
-whole dependent function signature before `= fun ...` resolved this. The existing
-proof files use that explicit style. A smaller dedicated reproducer is still
-needed before classifying this as a compiler defect.
-
-## Scope of this report
-
-No soundness defect was identified. The only added primitive is `Pref.equal`,
-with a concrete `%eq` implementation. No invariant or correctness theorem was
-added as an assumed external.
+Running Merlin's bootstrap Dune workspace can remove the main workspace's
+compiler-library installation links. `dev test` then refuses to run before
+rebuilding those links and requests full initialization. This is an incremental
+workflow issue: the installed compiler can still be used by `ocamltest` directly.
+The test helper could distinguish missing workspace links from stale runtime or
+standard-library artifacts and rebuild the required links automatically.
