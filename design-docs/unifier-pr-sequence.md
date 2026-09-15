@@ -112,6 +112,9 @@ Runtime termination remains outside scope.
 - [x] Public closed-term HM completeness, rejection and factorization: constructed
   baseline and alternative models for arbitrary nested lets; actual nested-alias
   and mixed-boundary runtime fixtures pass in bytecode and native builds.
+- [x] Declarative template instances: construct scheme arguments from copy
+  choices, preserve shared parameters, and protect low-boundary names from
+  capture. Connect direct scheme reification to canonical abstraction.
 - [ ] Public closed-term HM soundness, combined with factorization for principality.
 - [ ] Nested-let, mixed-boundary and saved-garbage regression cases.
 
