@@ -9031,6 +9031,29 @@ let substitute_refinement_ident id replacement ty =
     (Subst.add_bound_value id replacement Subst.identity)
     ty
 
+let substitute_refinement_expression binder replacement ty =
+  let ty = Subst.type_expr Subst.identity ty in
+  let seen = ref TypeSet.empty in
+  let rec visit ty =
+    if not (TypeSet.mem ty !seen) then begin
+      seen := TypeSet.add ty !seen;
+      match get_desc ty with
+      | Trefine refinement ->
+          let predicate = Refinement_predicate.map
+              ~expression:(fun e -> match e.rexp_desc with
+                | Rexp_var id | Rexp_ident (Path.Pident id)
+                    when Ident.same id binder -> replacement
+                | _ -> e) refinement.ref_pred in
+          set_type_desc ty (Trefine {refinement with ref_pred = predicate});
+          visit refinement.ref_payload;
+          ignore (Refinement_predicate.fold_types (fun () ty -> visit ty)
+            () predicate : unit)
+      | _ -> Btype.iter_type_expr visit ty
+    end
+  in
+  visit ty;
+  ty
+
 let apply_dependent_type binder argument ty =
   Subst.type_expr
     (Subst.add_value binder (Path.Pident argument) Subst.identity)
