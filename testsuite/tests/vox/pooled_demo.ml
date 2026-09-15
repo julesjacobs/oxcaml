@@ -38,7 +38,7 @@ let run reject =
   let coverage0 : ((x : node Pref.t) @ immutable -> {u : unit | covered h0 0 pool0 x}) @ total ghost =
     ghost_ (fun x -> covered_def h0 0 pool0 x; let u = () in refine_ u) in
   ghost_ (pool_scoped_def h0 pool0);
-  let desc1 : desc = Var in
+  let desc1 = Var in
   ghost_ (children_below_def h0 desc1 1);
   let state : {t : Pref.token | Pref.own t === h0 && pool_scoped h0 pool0 && 1 >= 0 && children_below h0 desc1 1} = refine_ state in
   let refine_ step = Pooled_allocator.allocate h0 1 desc1 pool0 state in

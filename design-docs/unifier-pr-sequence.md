@@ -58,7 +58,7 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [ ] Path compression with explicit representative and generic-cell framing.
 - [ ] Copy-memo cleanup: release retained prior instances and prove descriptor,
   level and model preservation.
-- [ ] Vox sort-encoding crash: minimize, fix and add a compiler regression.
+- [x] Vox sort-encoding crash: minimize, fix and add a compiler regression.
 - [ ] Vox dependent-callback adaptation: reduce explicit forwarding annotations
   while preserving checked function contracts and totality.
 
