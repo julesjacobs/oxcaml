@@ -40,11 +40,11 @@ let (allocation_unlisted @ total) : (h : Pref.heap) @ immutable -> (pool : pool)
       Copy_heap_proofs.put_frame h p v x; finite_node_def h x; finite_node_def after x; let u = () in refine_ u)
 let (unify_finite_before @ total) : (h : Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (q : node Pref.t) @ immutable -> (ok : bool) -> (after : Pref.heap) @ immutable ->
-    (d : Level_unifier_spec.derivation) @ immutable -> (x : node Pref.t) @ immutable ->
-    {u : unit | Level_unifier_spec.unified h p q ok after d && H.mem after x && finite_node after x} ->
+    (d : Optimized_unifier_spec.derivation) @ immutable -> (x : node Pref.t) @ immutable ->
+    {u : unit | Optimized_unifier_spec.unified h p q ok after d && H.mem after x && finite_node after x} ->
     {u : unit | H.mem h x && finite_node h x} @ ghost = fun h p q ok after d x premise -> ghost_ (
-      let refine_ premise = premise in let u = () in Level_unifier_proofs.unified_frame h p q ok after d x (refine_ u);
-      Level_unifier_metadata.unified_scratch h p q ok after d x (refine_ u);
+      let refine_ premise = premise in let u = () in Optimized_metadata.unified_frame h p q ok after d x (refine_ u);
+      Optimized_metadata.unified_scratch h p q ok after d x (refine_ u);
       Level_unifier_metadata.scratch_frame_def h after x;
       finite_node_def h x; finite_node_def after x;
       (match H.at h x, H.at after x with Some a, Some b -> decreases_def a.level b.level; () | _ -> ()); refine_ u)

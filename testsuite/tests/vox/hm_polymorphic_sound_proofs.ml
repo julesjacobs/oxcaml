@@ -230,7 +230,7 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
       (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total = fun x ->
         let u = () in let refine_ t = Level_finite_proofs.allocation_finite_at h2 ts2 p v x (refine_ u) in refine_ t in
       let model4 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h4 rho x}) @ total = fun x ->
-        let u = () in Level_unifier_proofs.success_forward_at h4 rho f arrow after derivation model x (refine_ u); refine_ u in
+        let u = () in Optimized_model_proofs.success_forward_at h4 rho f arrow after derivation model x (refine_ u); refine_ u in
       let model3 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x}) @ total = fun x ->
         let u = () in let refine_ _t = ts3 x in model4 x; Hm_model_proofs.allocation_restrict h3 arrow w rho x (refine_ u); refine_ u in
       let model2 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h2 rho x}) @ total = fun x ->
@@ -242,7 +242,7 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
       let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 depth pool1 x}) @ total = fun x ->
         let u = () in Hm_let_runtime_proofs.run_runtime h depth pool facts env left h1 pool1 x (refine_ u); refine_ u in
       let refine_ right_typing = run_sound h1 ts1 depth pool1 facts1 env schemas right h2 pool2 rho model2 a (refine_ u) in
-      Level_unifier_proofs.success_forward_at h4 rho f arrow after derivation model arrow (refine_ u);
+      Optimized_model_proofs.success_forward_at h4 rho f arrow after derivation model arrow (refine_ u);
       node_equation_def h4 rho arrow; observe_def h4 arrow; cell_def desc depth;
       let ft = rho f in T.embed_def ft;
       let at = T.embed (rho a) in let d = D.Application (at, left_typing, right_typing) in
@@ -282,11 +282,11 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
       (match result body with None -> let d = D.Constant in refine_ d | Some b -> match finish with
       | Aborted -> let d = D.Constant in refine_ d | Unified (_, derivation) ->
       let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
-        let u = () in Level_unifier_proofs.success_forward_at middle rho b res after derivation model x (refine_ u); refine_ u in
+        let u = () in Optimized_model_proofs.success_forward_at middle rho b res after derivation model x (refine_ u); refine_ u in
       let model3 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x}) @ total = fun x ->
         let u = () in Hm_model_proofs.run_restrict h3 ts3 depth pool3 env3 body middle body_pool rho mid_model x (refine_ u); refine_ u in
       let refine_ body_typing = run_sound h3 ts3 depth pool3 (refine_ facts3) env3 schemas3 body middle body_pool rho mid_model b (refine_ u) in
-      Level_unifier_proofs.success_forward_at middle rho b res after derivation model p (refine_ u);
+      Optimized_model_proofs.success_forward_at middle rho b res after derivation model p (refine_ u);
       model3 self; node_equation_def h3 rho self; observe_def h3 self; T.embed_def ty;
       let at = T.embed (rho arg) in let bt = T.embed (rho res) in
       let d = D.Recursion (at, bt, body_typing) in D.typed_def z g term t d; refine_ d))

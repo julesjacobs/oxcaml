@@ -254,11 +254,11 @@ let (with_application_model @ total) : (h : Pref.heap) @ immutable -> (depth : i
     (model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation h rho x})) @ total ->
     (f : node Pref.t) @ immutable -> (a : node Pref.t) @ immutable ->
     (p : node Pref.t) @ immutable -> (arrow : node Pref.t) @ immutable ->
-    (ok : bool) -> (after : Pref.heap) @ immutable -> (d : Level_unifier_spec.derivation) @ immutable ->
+    (ok : bool) -> (after : Pref.heap) @ immutable -> (d : Optimized_unifier_spec.derivation) @ immutable ->
     (target : ty) @ immutable ->
     {u : unit | H.mem h f && H.mem h a && rho f === Function (rho a, target)
       && allocated h depth p Var && allocated (H.put h p (cell Var depth)) depth arrow (Arrow (a, p))
-      && Level_unifier_spec.unified (H.put (H.put h p (cell Var depth)) arrow (cell (Arrow (a, p)) depth)) f arrow ok after d} ->
+      && Optimized_unifier_spec.unified (H.put (H.put h p (cell Var depth)) arrow (cell (Arrow (a, p)) depth)) f arrow ok after d} ->
     (claim : bool) ->
     (use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
