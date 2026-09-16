@@ -8,10 +8,12 @@ let[@def] rec (pool_scoped @ total) (h : node Pref.heap @ immutable) (pool : poo
   match pool with Empty -> true | Entry (p, rest) -> H.mem h p && source_ok h p && pool_scoped h rest)
 let[@def] (close_level @ total) (cut : int) (level : level) = match level with
   | Generic -> Generic | Finite n -> if n > cut then Generic else Finite n
+let[@def] (needs_close @ total) (cut : int) (level : level) = match level with
+  | Generic -> false | Finite n -> n > cut
 let[@def] (close_cell @ total) (cut : int) (v : node @ immutable) = {v with level = close_level cut v.level}
 let[@def] rec (closed_heap @ total) (h : node Pref.heap @ immutable) (cut : int) (pool : pool @ immutable) = ghost_ (
   match pool with Empty -> h | Entry (p, rest) -> match H.at h p with None -> closed_heap h cut rest
-    | Some v -> closed_heap (H.put h p (close_cell cut v)) cut rest)
+    | Some v -> closed_heap (if needs_close cut v.level then H.put h p (close_cell cut v) else h) cut rest)
 let[@def] (closed_at @ total) (h : node Pref.heap @ immutable) (after : node Pref.heap @ immutable)
     (cut : int) (pool : pool @ immutable) (x : node Pref.t @ immutable) = ghost_ (
   H.mem h x === H.mem after x && match H.at h x, H.at after x with

@@ -41,7 +41,9 @@ let run reject =
   let desc1 = Var in
   ghost_ (children_below_def h0 desc1 1);
   let state : {t : node Pref.token | Pref.own t === h0 && pool_scoped h0 pool0 && 1 >= 0 && children_below h0 desc1 1} = refine_ state in
-  let refine_ step = Pooled_allocator.allocate h0 1 desc1 pool0 state in
+  let allocation_heap0 : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h0)} in
+  let refine_ state = state in
+  let refine_ step = Pooled_allocator.allocate allocation_heap0 1 desc1 pool0 (refine_ state) in
   let a = step.#value in let pool1 = step.#pool in let state = step.#state in
   let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = cell desc1 1 in
   ghost_ (cell_def desc1 1; payload_scoped_def h0 v1; allocatable_def h0 v1;
@@ -59,7 +61,9 @@ let run reject =
   let desc2 : desc = if reject then Bool else Var in
   ghost_ (children_below_def h1 desc2 2);
   let state : {t : node Pref.token | Pref.own t === h1 && pool_scoped h1 pool1 && 2 >= 0 && children_below h1 desc2 2} = refine_ state in
-  let refine_ step = Pooled_allocator.allocate h1 2 desc2 pool1 state in
+  let allocation_heap1 : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h1)} in
+  let refine_ state = state in
+  let refine_ step = Pooled_allocator.allocate allocation_heap1 2 desc2 pool1 (refine_ state) in
   let b = step.#value in let pool2 = step.#pool in let state = step.#state in
   let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = cell desc2 2 in
   ghost_ (cell_def desc2 2; payload_scoped_def h1 v2; allocatable_def h1 v2;
@@ -78,7 +82,9 @@ let run reject =
   ghost_ (below_def h1 a 1; below_def h1 a 2; at_level_def h1 a;
     let u = () in allocation_below h1 b v2 a 2 (refine_ u); children_below_def h2 desc3 2);
   let state : {t : node Pref.token | Pref.own t === h2 && pool_scoped h2 pool2 && 2 >= 0 && children_below h2 desc3 2} = refine_ state in
-  let refine_ step = Pooled_allocator.allocate h2 2 desc3 pool2 state in
+  let allocation_heap2 : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h2)} in
+  let refine_ state = state in
+  let refine_ step = Pooled_allocator.allocate allocation_heap2 2 desc3 pool2 (refine_ state) in
   let root = step.#value in let pool3 = step.#pool in let state = step.#state in
   let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = cell desc3 2 in
   ghost_ (cell_def desc3 2; payload_scoped_def h2 v3; allocatable_def h2 v3;
@@ -103,6 +109,7 @@ let run reject =
   let unmarked : ((x : node Pref.t) @ immutable ->
     {u : unit | match H.at h3 x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
     cell_def desc1 1; cell_def desc2 2; cell_def desc3 2;
+    put_frame h0 a v1 x; put_frame h1 b v2 x; put_frame h2 root v3 x;
     let u = () in refine_ u) in
   let refine_ solved = Level_unifier.unify h3 finite_scope3 unmarked a target state in
   assert (solved.#ok = not reject);

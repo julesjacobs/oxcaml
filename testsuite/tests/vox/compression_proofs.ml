@@ -134,3 +134,20 @@ let (determined @ total) : (saved : node Pref.heap) @ immutable -> (h : node Pre
       let u = () in backward h after d eta eta_model y (refine_ u);
       node_equation_def h eta y; observe_def h y; equation_def h eta y; refine_ u in
     let refine_ u = prior rho old_rho eta old_eta equal x (refine_ u) in refine_ u)
+
+let rec (resolution @ total) : (h : node Pref.heap) @ immutable ->
+    (after : node Pref.heap) @ immutable -> (edits : edits) @ immutable ->
+    (p : node Pref.t) @ immutable -> (root : node Pref.t) @ immutable ->
+    (path : resolution) @ immutable ->
+    {u : unit | rewritten h after edits && resolves h p root path} ->
+    {d : resolution | resolves after p root d} @ immutable ghost =
+  fun h after edits p root path premise -> ghost_ (
+    let refine_ premise = premise in rewritten_def h after edits;
+    let u = () in match edits with
+    | Done -> refine_ path
+    | Write (x, _, r, original, rest) ->
+      active_def h x;
+      Compression_path_proofs.resolution_terminal h x r original (refine_ u); terminal_def h r;
+      let middle = H.put h x (redirect h x r) in
+      let refine_ next = Compression_path_proofs.shortcut_resolution h x r original p root path (refine_ u) in
+      let refine_ out = resolution middle after rest p root next (refine_ u) in refine_ out)

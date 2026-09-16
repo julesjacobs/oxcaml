@@ -219,3 +219,31 @@ with the ordinary-total callback accepted by the next proof. The working
 encoding constructs the translator inline and calls the existing transport
 lemma from its body. This is a candidate for a minimized mode-inference test;
 no soundness defect has been established.
+
+## No-op heap writes
+
+The exposed `Pref.Heap` laws do not currently establish
+`H.put h p v === h` from `H.mem h p && H.at h p === Some v`.
+A direct refinement probe is rejected. Pointwise read preservation is available,
+but exact heap equality needs either an additional checked heap-library law or
+an operational specification that explicitly skips unchanged writes. Runtime
+optimizations in this development should use the latter until the library
+provides the former; do not assume heap extensionality implicitly.
+
+## Ghost parameter layout
+
+A direct `@ ghost` parameter can retain a dummy argument slot after its
+computation is erased. Existing `Ghost.t` wrappers have void layout and avoid
+that slot without a language change. Dependent refinements can refer to the
+wrapper's immutable `Ghost.ghost` projection. This is an API ergonomics issue:
+record fields already support the desired erasure.
+
+### Ghost statements and tail calls
+
+Ghost statements currently lower to opaque dummy expressions. A ghost proof
+following a recursive call can therefore prevent tail-call optimization even
+when its mathematical work erases. Native Cmm for fused pool closing showed a
+recursive call followed by opaque expressions. Moving its proof before the call,
+using the specified final heap, restored a compiler-generated loop. Copy cleanup
+also compiles to a loop. Vox should erase ghost statements without leaving an
+optimization barrier; void-layout argument packaging alone does not address this.

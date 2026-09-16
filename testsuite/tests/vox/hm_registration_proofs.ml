@@ -58,6 +58,7 @@ let rec (run_unlisted @ total) : (h : node Pref.heap) @ immutable -> (depth : in
   fun h depth pool env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool; result_def e;
     let u = () in match e with
+    | RShared _ -> refine_ u
     | RVar (i, _, epoch, d) -> (match lookup env i with None -> refine_ u | Some _ ->
       copy_unlisted h pool epoch depth d x (refine_ u); refine_ u)
     | RBool p -> let desc : desc = Bool in let v = cell desc depth in

@@ -158,3 +158,42 @@ fixtures and the let, recursion, polymorphic, shared-graph and compression
 regressions pass in bytecode and native code. Structure, execution, runtime and
 model rejection probes pass. Ghost erasure was inspected, and the final
 `codex review --uncommitted` reported no actionable defects.
+
+## Runtime efficiency follow-up
+
+Keep `Pref` as the semantic model of mutable fields. No Vox language change is
+required for this sequence. Preserve full HM proofs at every runtime change.
+
+- [x] Prune level lowering using level order; check a deeply shared DAG.
+- [x] Avoid copy-session allocation for nongeneric instances.
+- [x] Reuse compressed representatives and avoid already-direct link writes.
+- [x] Fuse pool closing/draining and skip unchanged writes.
+- [ ] Discard obsolete pool links and route retained nodes to the appropriate
+  enclosing pool.
+- [x] Prove all memos empty at inference boundaries and restore this invariant
+  after copying, including untouched and newly allocated nodes.
+- [ ] Remove copy epochs using the clean entry/exit memo invariant.
+- [ ] Package runtime proof arguments in all-ghost records with void layout;
+  inspect native calling conventions.
+- [ ] Replace unary-index linear environment lookup with an efficient verified
+  representation.
+- [ ] Replace depth-sensitive runtime recursion with explicit worklists.
+- [x] Reduce update allocation by skipping unchanged writes. Retain the accepted
+  `Pref` representation; splitting every node field is not required for the
+  algorithmic model and has not been justified by a measured benefit.
+- [ ] Run integrated positive/rejection tests, inspect erasure, review and
+  publish the stacked improvements.
+
+The inference driver, lookup, pooled allocation, pool closing, copy cleanup and
+pruned lowering now use void-layout ghost wrappers. Native Cmm confirms their
+runtime argument lists. Other runtime helpers still need conversion. Pool
+closing and copy cleanup compile to loops. Pool closing's ghost proof runs
+before the recursive call to preserve tail-call optimization. Representative-only
+pool tracking and level-directed transfer remain.
+
+The first efficiency batch passes nine focused positive/rejection suites in
+bytecode and native code, including full HM principality and the shared-DAG
+regression. The remaining allocation and HM callers also pass direct proof
+checking. Native Cmm was inspected for the converted helpers, and
+`codex review --uncommitted` reported no actionable defects. The unchecked
+items above remain work for subsequent batches.

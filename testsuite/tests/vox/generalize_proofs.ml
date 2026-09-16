@@ -33,10 +33,15 @@ let rec (closed_observe @ total) : (h : node Pref.heap) @ immutable -> (cut : in
   | Empty -> refine_ u
   | Entry (p, rest) -> source_ok_def h p;
     match H.at h p with None -> refine_ u | Some old ->
+      needs_close_def cut old.level;
+      if not (needs_close cut old.level) then (
+        closed_observe h cut rest x (refine_ u); closed_at_def h after cut rest x;
+        close_level_def cut old.level; refine_ u)
+      else (
       let v = close_cell cut old in close_cell_def cut old;
       let mid = H.put h p v in put_frame h p v x; close_source h p old cut x (refine_ u);
       pool_write h p old cut rest (refine_ u); closed_observe mid cut rest x (refine_ u);
-      closed_at_def mid after cut rest x; close_idempotent cut old.level; refine_ u)
+      closed_at_def mid after cut rest x; close_idempotent cut old.level; refine_ u))
 
 let (closed_level @ total) : (h : node Pref.heap) @ immutable -> (cut : int) -> (pool : pool) @ immutable ->
     (x : node Pref.t) @ immutable -> {u : unit | pool_scoped h pool && H.mem h x && covered h cut pool x} ->

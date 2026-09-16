@@ -6,6 +6,7 @@ module D = Hm_declarative
 
 type finish = Aborted | Unified of bool * Optimized_unifier_spec.derivation [@@inductive]
 type execution =
+  | RShared of D.index * node Pref.t
   | RVar of D.index * node Pref.t * node Pref.t * history
   | RBool of node Pref.t
   | RLam of node Pref.t * execution * node Pref.heap * pool * node Pref.t option
@@ -19,7 +20,7 @@ type execution =
   [@@inductive]
 
 let[@def] rec (result @ total) (e : execution @ immutable) = match e with
-  | RVar (_, p, _, _) | RBool p -> Some p
+  | RShared (_, p) | RVar (_, p, _, _) | RBool p -> Some p
   | RLam (_, _, _, _, p) -> p
   | RApp_left _ | RApp_right _ | RLet_left _ -> None
   | RApp (_, _, _, _, _, _, p, _, ok, _) -> if ok then Some p else None
@@ -27,7 +28,7 @@ let[@def] rec (result @ total) (e : execution @ immutable) = match e with
     | Aborted -> None | Unified (ok, _) -> if ok then Some p else None)
   | RLet (_, body, _, _) -> result body
 let[@def] rec (source @ total) (e : execution @ immutable) = match e with
-  | RVar (i, _, _, _) -> D.Bound i | RBool _ -> D.Truth
+  | RShared (i, _) | RVar (i, _, _, _) -> D.Bound i | RBool _ -> D.Truth
   | RLam (_, body, _, _, _) -> D.Lambda (source body)
   | RApp_left (left, right) -> D.Apply (source left, right)
   | RApp_right (left, right, _, _) | RApp (left, right, _, _, _, _, _, _, _, _) ->
@@ -46,6 +47,8 @@ let[@def] rec (ran @ total) (h : node Pref.heap @ immutable) (depth : int)
     (pool : pool @ immutable) (env : env @ immutable) (e : execution @ immutable)
     (after : node Pref.heap @ immutable) (final_pool : pool @ immutable) = ghost_ (
   depth >= 0 && pool_scoped h pool && match e with
+  | RShared (i, p) -> lookup env i === Some p && active h p
+    && after === h && final_pool === pool
   | RVar (i, p, epoch, d) -> (match lookup env i with None -> false | Some original ->
       valid h epoch depth d && target_for h d original p
       && after === copy_heap h epoch depth d

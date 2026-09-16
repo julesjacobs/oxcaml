@@ -11,27 +11,19 @@ let rec raw :
       {u : unit | not (H.mem h q) || finite_scope h q})) @ total ghost ->
     (unmarked : ((x : node Pref.t) @ immutable ->
       {u : unit | match H.at h x with None -> true | Some v -> not v.visited})) @ total ghost ->
+    (order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x})) @ total ghost ->
     (trees : ((x : node Pref.t) @ immutable ->
       {t : tree | tree_root t === x && (if H.mem h x then finite h t else observe h x === None)} @ immutable)) @ total ghost ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
+    (rp : {r : resolved | H.mem h r.#value && active h r.#value && terminal h r.#value
+      && resolves h p r.#value r.#path}) ->
+    (sq : {r : resolved | H.mem h r.#value && active h r.#value && terminal h r.#value
+      && resolves h q r.#value r.#path}) ->
     (t : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q && active h p && active h q}) @ unique ->
     {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation} @ unique =
-  fun h scope unmarked trees p q t ->
+  fun h scope unmarked order trees p q rp sq t ->
+  let refine_ rp = rp in let refine_ sq = sq in
   let refine_ t = t in
-  let rp : {r : resolved | H.mem h r.#value && active h r.#value && terminal h r.#value
-    && resolves h p r.#value r.#path} =
-    let p : {p : node Pref.t | H.mem h p && active h p} = refine_ p in
-    let b = borrow_ t in
-    let b : {b : node Pref.token | Pref.own b === h} = refine_ b in
-    let refine_ r = Level_unifier.representative h scope p b in refine_ r in
-  let refine_ rp = rp in
-  let sq : {r : resolved | H.mem h r.#value && active h r.#value && terminal h r.#value
-    && resolves h q r.#value r.#path} =
-    let q : {q : node Pref.t | H.mem h q && active h q} = refine_ q in
-    let b = borrow_ t in
-    let b : {b : node Pref.token | Pref.own b === h} = refine_ b in
-    let refine_ r = Level_unifier.representative h scope q b in refine_ r in
-  let refine_ sq = sq in
   let r = rp.#value in
   let s = sq.#value in
   let result : {answer : result |
@@ -63,7 +55,7 @@ let rec raw :
       | Var, _ ->
         let t : {t : node Pref.token | Pref.own t === h && H.mem h r && H.mem h s && active h r && active h s
           && observe h r === Some Var && terminal h s && not (r === s)} = refine_ t in
-        let refine_ answer = Level_unifier.bind h scope unmarked r s t in
+        let refine_ answer = Pruned_bind.bind h scope unmarked order trees r s t in
         let after = ghost_ (Pref.own (borrow_ answer.#state)) in
         let d = ghost_ (Base answer.#derivation) in let ok = answer.#ok in
         ghost_ (unified_def h r s ok after d);
@@ -71,7 +63,7 @@ let rec raw :
       | _, Var ->
         let t : {t : node Pref.token | Pref.own t === h && H.mem h s && H.mem h r && active h s && active h r
           && observe h s === Some Var && terminal h r && not (s === r)} = refine_ t in
-        let refine_ answer = Level_unifier.bind h scope unmarked s r t in
+        let refine_ answer = Pruned_bind.bind h scope unmarked order trees s r t in
         let ok = answer.#ok in
         let t = answer.#state in
         let after = ghost_ (Pref.own (borrow_ t)) in
@@ -93,7 +85,7 @@ let rec raw :
         ghost_ (finite_scope_def h r; source_ok_def h r; observe_def h r);
         ghost_ (finite_scope_def h s; source_ok_def h s; observe_def h s);
         let t : {t : node Pref.token | Pref.own t === h && H.mem h a && H.mem h c && active h a && active h c} = refine_ t in
-        let refine_ left = unify h scope unmarked trees a c t in
+        let refine_ left = unify h scope unmarked order trees a c t in
         let left_ok = left.#ok in
         let ld = ghost_ left.#derivation in
         let t = left.#state in
@@ -122,7 +114,9 @@ let rec raw :
           let trees_middle : ((x : node Pref.t) @ immutable ->
             {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
               let u = () in let refine_ tree = Optimized_finite_proofs.unified_finite_at h trees a c left_ok middle ld x (refine_ u) in refine_ tree) in
-          let refine_ right = unify middle scope_middle unmarked_middle trees_middle b e t in
+          let order_middle : ((x : node Pref.t) @ immutable -> {u : unit | ordered middle x}) @ total ghost = ghost_ (fun x ->
+            let u = () in let refine_ u = unified_ordered h order a c left_ok middle ld x (refine_ u) in refine_ u) in
+          let refine_ right = unify middle scope_middle unmarked_middle order_middle trees_middle b e t in
           let ok = right.#ok in
           let t = right.#state in
           let after = ghost_ (Pref.own (borrow_ t)) in
@@ -167,12 +161,13 @@ let rec raw :
 and unify : (h : node Pref.heap) @ immutable ghost ->
     (scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || finite_scope h x})) @ total ghost ->
     (unmarked : ((x : node Pref.t) @ immutable -> {u : unit | match H.at h x with None -> true | Some v -> not v.visited})) @ total ghost ->
+    (order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x})) @ total ghost ->
     (trees : ((x : node Pref.t) @ immutable ->
       {t : tree | tree_root t === x && (if H.mem h x then finite h t else observe h x === None)} @ immutable)) @ total ghost ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (state : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q && active h p && active h q}) @ unique ->
     {out : result | unified h p q out.#ok (Pref.own out.#state) out.#derivation} @ unique =
-  fun h scope unmarked trees p q state ->
+  fun h scope unmarked order trees p q state ->
     let refine_ state = state in
     let state : {t : node Pref.token | Pref.own t === h && H.mem h p && active h p} = refine_ state in
     let refine_ first = Compressed_representative.representative h scope p state in
@@ -204,7 +199,29 @@ and unify : (h : node Pref.heap) @ immutable ghost ->
       at_level_def h p; at_level_def h1 p; at_level_def h2 p;
       at_level_def h1 q; at_level_def h2 q; ());
     let state : {t : node Pref.token | Pref.own t === h2 && H.mem h2 p && H.mem h2 q && active h2 p && active h2 q} = refine_ second.#state in
-    let refine_ out = raw h2 scope2 unmarked2 trees2 p q state in
+    let order1 : ((x : node Pref.t) @ immutable -> {u : unit | ordered h1 x}) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ u = Compression_proofs.ordered h h1 edits1 order x (refine_ u) in refine_ u) in
+    let order2 : ((x : node Pref.t) @ immutable -> {u : unit | ordered h2 x}) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ u = Compression_proofs.ordered h1 h2 edits2 order1 x (refine_ u) in refine_ u) in
+    let r = first.#value in let s = second.#value in
+    let rp : {out : resolved | H.mem h2 out.#value && active h2 out.#value && terminal h2 out.#value
+      && resolves h2 p out.#value out.#path} =
+      let path : {d : resolution | resolves h2 p r d} @ immutable ghost = ghost_ (let u = () in
+        let refine_ path1 = Compression_proofs.resolution h h1 edits1 p r first.#path (refine_ u) in
+        let refine_ path2 = Compression_proofs.resolution h1 h2 edits2 p r path1 (refine_ u) in refine_ path2) in
+      let refine_ path = path in
+      ghost_ (let u = () in Compression_proofs.frame h h1 edits1 r (refine_ u);
+        Compression_proofs.frame h1 h2 edits2 r (refine_ u);
+        active_def h r; active_def h1 r; active_def h2 r;
+        Compression_path_proofs.resolution_terminal h2 p r path (refine_ u); ());
+      let out = #{value = r; path} in refine_ out in
+    let sq : {out : resolved | H.mem h2 out.#value && active h2 out.#value && terminal h2 out.#value
+      && resolves h2 q out.#value out.#path} =
+      let path : {d : resolution | resolves h2 q s d} @ immutable ghost = ghost_ (let u = () in
+        let refine_ path = Compression_proofs.resolution h1 h2 edits2 q s second.#path (refine_ u) in refine_ path) in
+      let refine_ path = path in let out = #{value = s; path} in refine_ out in
+    let refine_ rp = rp in let refine_ sq = sq in
+    let refine_ out = raw h2 scope2 unmarked2 order2 trees2 p q (refine_ rp) (refine_ sq) state in
     let after = ghost_ (Pref.own (borrow_ out.#state)) in let ok = out.#ok in
     let d2 = ghost_ (Pre_compress (h2, edits2, out.#derivation)) in
     let d1 = ghost_ (Pre_compress (h1, edits1, d2)) in

@@ -30,6 +30,7 @@ let rec (run_member @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
     {u : unit | protected_at h after bound x} @ ghost = fun h depth pool env e after final_pool bound x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     let u = () in match e with
+    | RShared _ -> protected_at_def h h bound x; refine_ u
     | RVar (i, _, epoch, d) -> (match lookup env i with None -> refine_ u | Some _ ->
       copy_member h epoch depth d bound x (refine_ u); refine_ u)
     | RBool p -> let desc : desc = Bool in let v = cell desc depth in allocated_def h depth p desc;
