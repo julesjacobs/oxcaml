@@ -178,7 +178,7 @@ let rec (run_result_active @ total) : (h : node Pref.heap) @ immutable -> (depth
         fresh_active h2 depth q var (refine_ u);
         let desc = Arrow (a, q) in let w = cell desc depth in let h4 = H.put h3 arrow w in
         allocated_def h3 depth arrow desc; allocation_active h3 arrow w q (refine_ u);
-        Level_unifier_metadata.unified_active h4 f arrow ok after d q (refine_ u); refine_ u)
+        Optimized_metadata.unified_active h4 f arrow ok after d q (refine_ u); refine_ u)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in let h2 = H.put h1 res v in
       let desc = Arrow (arg, res) in let h3 = H.put h2 self (cell desc depth) in
@@ -191,7 +191,7 @@ let rec (run_result_active @ total) : (h : node Pref.heap) @ immutable -> (depth
       protected_at_def h3 middle depth self; below_def middle self depth;
       active_def middle self; at_level_def middle self;
       (match result body with None -> refine_ u | Some b -> match finish with Aborted -> refine_ u
-        | Unified (ok, d) -> Level_unifier_metadata.unified_active middle b res ok after d self (refine_ u); refine_ u)
+        | Unified (ok, d) -> Optimized_metadata.unified_active middle b res ok after d self (refine_ u); refine_ u)
     | RLet (rhs, body, middle, child_pool) ->
       let child_depth = depth + 1 in let empty : pool = Generalize_spec.Empty in
       ran_def h child_depth empty env rhs middle child_pool;

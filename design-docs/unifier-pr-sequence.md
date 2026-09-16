@@ -11,7 +11,7 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] [Proof ergonomics](https://github.com/julesjacobs/oxcaml/pull/140):
   dependent arguments, checked function adaptation, recursive annotations and
   direct unboxed ghost fields.
-- [x] Mutable first-order unifier (this PR): shared cells, representative lookup,
+- [x] Mutable first-order unifier: shared cells, representative lookup,
   occurs checking, returned ownership, exact model transformation and correct
   rejection. See `mutable-unifier.md` for the precise guarantee.
 - [x] Finite readback and acyclicity: construct finite unfolding witnesses from
@@ -30,7 +30,7 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] Generic templates and copy instantiation: exact scheme-instance witnesses
   with fresh copies, a shared nongeneric boundary and in-node memoization using
   fresh session handles. Separate richer-node subsystem with finite/generic
-  levels; see `scheme-instantiation.md`. Unifier integration remains below.
+  levels; see `scheme-instantiation.md`. Unifier integration is checked below.
 - [x] Richer-node unification and lowering: exact success/rejection, finite
   scope, level order, generic-node and memo preservation.
 - [x] Pool generalization primitive: explicit coverage and finite forests,
@@ -56,8 +56,8 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] In-node occurs-check marks with cleanup on every return path: Boolean
   fields cache completed negative searches, and a temporary trail restores full
   node contents pointwise. Success, failure, MGU and provenance proofs compose.
-- [ ] Structure linking without a unification pair cache.
-- [ ] Path compression with explicit representative and generic-cell framing.
+- [x] Structure linking without a unification pair cache.
+- [x] Path compression with explicit representative and generic-cell framing.
 - [x] Copy-memo cleanup: a temporary duplicate-free list of touched source
   cells clears all written memos before return. Descriptor, level and exact
   model preservation are checked; lookup remains in-node.
@@ -71,7 +71,7 @@ positive and rejection tests, inspect ghost erasure, and review before publishin
 its stacked PR. Mark an item complete only when its stated guarantee is checked.
 Runtime termination remains outside scope.
 
-## Remaining HM proof ladder
+## HM proof ladder
 
 - [x] Independent indexed declarative typing, scheme opening and context weakening.
   Checked opening/evaluation, weakening/meaning, well-formedness and scoping;
@@ -81,10 +81,10 @@ Runtime termination remains outside scope.
   context-freshness predicate; its graph bridge is recorded below.
 - [x] Environment templates with protected boundary transport and constructed
   empty, monomorphic, weakened and model-transported instance translators.
-  The let translator remains in the one-let bridge below.
+  The let translator is constructed in the one-let bridge below.
 - [x] Interleaved execution witnesses for actual richer-node operations, with
   heap extension and successful-result ownership. A concrete let trace checks
-  allocation, close/transfer and clean copying; the driver remains below.
+  allocation, close/transfer and clean copying; the driver is checked below.
 - [x] Actual richer-node let-free driver, including monomorphic recursive
   lambdas: checked execution witnesses, pool/level/ownership preservation,
   cleanup invariants and explicit failure prefixes.
@@ -105,10 +105,10 @@ Runtime termination remains outside scope.
   The baseline comes from finite readback; each alternative comes from the same
   RHS execution’s checked completeness proof. Both copies use their current heap.
 - [x] Nested execution transport for forests, levels, pools and active RHS origins.
-  `run_origin` constructs saved-root paths across every execution constructor;
-  `rhs_interpret` derives relative interpretation from two RHS models agreeing
-  on the saved low boundary. Constructing these models from declarative RHS
-  typings remains in the one-let bridge.
+  `run_origin` constructs saved-root paths for low residual variables across
+  every execution constructor. `rhs_interpret` derives relative interpretation
+  from two RHS models agreeing on the saved low boundary. The full completeness
+  proof constructs these models from declarative RHS typings.
 - [x] Public closed-term HM completeness, rejection and factorization: constructed
   baseline and alternative models for arbitrary nested lets; actual nested-alias
   and mixed-boundary runtime fixtures pass in bytecode and native builds.
@@ -121,15 +121,15 @@ Runtime termination remains outside scope.
 
 Completed steps construct their witnesses rather than accept the desired
 semantic theorem as an input callback. Structure linking and path compression
-remain unchecked optimization steps.
+are integrated into recursive unification with the proofs listed below.
 
-The Pro design consultation supports the remaining order above. For each
+The Pro design consultation informed the order above. For each
 stage, require checked semantic proof functions, positive runtime cases,
 rejected incorrect implementations, and inspection that ghost evidence erases.
 Do not promote a soundness-only milestone to principality. OCaml runtime
 termination is outside this sequence; ghost mathematics must remain total.
 
-## Remaining heap rewrites
+## Heap rewrites
 
 - [x] Separate relative interpretation from directed saved-root paths: accept
   explicit agreement of the two models on current low-level nodes.
@@ -143,14 +143,18 @@ termination is outside this sequence; ghost mathematics must remain total.
 - [x] Restrict saved-root provenance to low residual variables; derive compound
   model agreement by finite unfolding, then recheck execution provenance. Full
   HM principal fixtures pass with the weaker provenance interface.
-- [ ] Prove post-success structure linking preserves models, finite forests,
+- [x] Prove post-success structure linking preserves models, finite forests,
   level order, scratch metadata and semantic determination.
-- [ ] Link structure roots inside recursive unification, re-resolving roots
+- [x] Link structure roots inside recursive unification, re-resolving roots
   after child calls. Keep the unification pair cache absent.
-- [ ] Integrate compressing representative calls into recursive unification.
-- [ ] Recheck full HM soundness, completeness, principality and rejection for
+- [x] Integrate compressing representative calls into recursive unification.
+- [x] Recheck full HM soundness, completeness, principality and rejection for
   the integrated runtime, including failure prefixes and saved garbage.
-- [ ] Review and publish the remaining stacked changes.
+- [x] Review and publish the remaining stacked changes.
 
-The standalone compression kernel is preparatory: the inference driver still
-calls the existing unifier. Neither optimization is marked complete above.
+The inference driver now calls the optimized recursive unifier. Its ghost
+forest comes from allocation, execution and pool-closing proofs. Full principal
+fixtures and the let, recursion, polymorphic, shared-graph and compression
+regressions pass in bytecode and native code. Structure, execution, runtime and
+model rejection probes pass. Ghost erasure was inspected, and the final
+`codex review --uncommitted` reported no actionable defects.

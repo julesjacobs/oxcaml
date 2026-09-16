@@ -64,7 +64,7 @@ let rec (run_extends @ total) : (h : node Pref.heap) @ immutable -> (depth : int
         Copy_heap_proofs.put_frame h2 p v x;
         let desc = Arrow (a, p) in let w = cell desc depth in let h4 = H.put h3 arrow w in
         Copy_heap_proofs.put_frame h3 arrow w x;
-        Level_unifier_proofs.unified_frame h4 f arrow ok after d x (refine_ u); refine_ u)
+        Optimized_metadata.unified_frame h4 f arrow ok after d x (refine_ u); refine_ u)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
       let h2 = H.put h1 res v in let desc = Arrow (arg, res) in let w = cell desc depth in
@@ -75,7 +75,7 @@ let rec (run_extends @ total) : (h : node Pref.heap) @ immutable -> (depth : int
       let next_env = Bind (arg, Bind (self, env)) in
       run_extends h3 depth next_pool next_env body middle body_pool x (refine_ u);
       (match result body with None -> refine_ u | Some b -> match finish with Aborted -> refine_ u
-        | Unified (ok, d) -> Level_unifier_proofs.unified_frame middle b res ok after d x (refine_ u); refine_ u)
+        | Unified (ok, d) -> Optimized_metadata.unified_frame middle b res ok after d x (refine_ u); refine_ u)
     | RLet_left (rhs, _) -> let next = depth + 1 in let empty : pool = Generalize_spec.Empty in
       run_extends h next empty env rhs after final_pool x (refine_ u); refine_ u
     | RLet (rhs, body, middle, child_pool) -> let next = depth + 1 in let empty : pool = Generalize_spec.Empty in
@@ -110,7 +110,7 @@ let rec (run_result @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
         Copy_heap_proofs.put_frame h2 q v q;
         let desc = Arrow (a, q) in let w = cell desc depth in let h4 = H.put h3 arrow w in
         Copy_heap_proofs.put_frame h3 arrow w q;
-        Level_unifier_proofs.unified_frame h4 f arrow ok after d q (refine_ u); refine_ u)
+        Optimized_metadata.unified_frame h4 f arrow ok after d q (refine_ u); refine_ u)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
       let h2 = H.put h1 res v in let desc = Arrow (arg, res) in let w = cell desc depth in
@@ -119,7 +119,7 @@ let rec (run_result @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
       let next_env = Bind (arg, Bind (self, env)) in
       run_extends h3 depth next_pool next_env body middle body_pool self (refine_ u);
       (match result body with None -> refine_ u | Some b -> match finish with Aborted -> refine_ u
-        | Unified (ok, d) -> Level_unifier_proofs.unified_frame middle b res ok after d self (refine_ u); refine_ u)
+        | Unified (ok, d) -> Optimized_metadata.unified_frame middle b res ok after d self (refine_ u); refine_ u)
     | RLet (rhs, body, middle, child_pool) -> (match result rhs with None -> refine_ u | Some q ->
       let closed = closed_heap middle depth child_pool in
       let parent = Nested_pool_spec.transfer closed child_pool pool in let next_env = Bind (q, env) in
@@ -163,14 +163,14 @@ let rec (run_pool_member @ total) : (h : node Pref.heap) @ immutable -> (depth :
         Copy_heap_proofs.put_frame h2 p v x; Copy_heap_proofs.put_frame h3 arrow w x;
         if x === p || x === arrow then () else
           (run_pool_member h1 depth pool1 env right h2 pool2 x (refine_ u); ());
-        Level_unifier_proofs.unified_frame h4 f arrow ok after d x (refine_ u); refine_ u)
+        Optimized_metadata.unified_frame h4 f arrow ok after d x (refine_ u); refine_ u)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in let h2 = H.put h1 res v in
       let desc = Arrow (arg, res) in let h3 = H.put h2 self (cell desc depth) in
       let next_pool = Entry (self, Entry (res, Entry (arg, pool))) in let next_env = Bind (arg, Bind (self, env)) in
       run_pool_member h3 depth next_pool next_env body middle body_pool x (refine_ u);
       (match result body with None -> refine_ u | Some b -> match finish with Aborted -> refine_ u
-      | Unified (ok, d) -> Level_unifier_proofs.unified_frame middle b res ok after d x (refine_ u); refine_ u)
+      | Unified (ok, d) -> Optimized_metadata.unified_frame middle b res ok after d x (refine_ u); refine_ u)
     | RLet_left (rhs, _) -> let next = depth + 1 in let empty : pool = Generalize_spec.Empty in
       run_pool_member h next empty env rhs after final_pool x (refine_ u); refine_ u
     | RLet (rhs, body, middle, child_pool) -> (match result rhs with None -> refine_ u | Some p ->

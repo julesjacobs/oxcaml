@@ -186,6 +186,15 @@ existing operations. `Leaf_agreement_proofs.low_unfolded_agreement` derives
 agreement for every low compound boundary from level order, finite unfolding,
 two heap models and agreement at the original saved low roots. Thus unreachable
 low constants and compound nodes need no current saved-root path. The external
-`rhs_interpret` and full HM theorem contracts are unchanged. This prepares the
-proof for structure linking and compression; those runtime integrations remain
-on the checklist.
+`rhs_interpret` and full HM theorem contracts are unchanged. The integrated structure-linking and compression proofs use this interface.
+
+The optimized execution relation records compression before comparison and
+structure linking after successful child comparisons. Structure linking uses
+current finite unfoldings with equal readback; a total size argument excludes
+cycles. `Structure_origin_proofs` reconstructs paths to residual variables
+through equal readbacks. `Compression_origin_proofs` removes skipped link
+prefixes using explicit resolution witnesses. Both preserve saved-root choices.
+The HM driver supplies erased forests and reuses the same declarative theorem
+ladder; source/target levels, descriptors and representatives are reread before
+a structure write. The old unifier remains the checked binding implementation
+and an earlier stage of the development.
