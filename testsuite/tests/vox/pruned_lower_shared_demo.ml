@@ -85,4 +85,4 @@ let () =
       tree_root_def t; finite_def h t; observe_def h x; refine_ t) in
   ghost_ (cell_def desc 4; active_def h p; at_level_def h p; below_def h p 4);
   let state : {t : Pref.token | Pref.own t === h && active h p && below h p 4} = refine_ state in
-  run 60 h scope order trees p state
+  run 200000 h scope order trees p state

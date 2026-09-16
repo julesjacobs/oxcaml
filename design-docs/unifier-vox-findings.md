@@ -247,3 +247,21 @@ recursive call followed by opaque expressions. Moving its proof before the call,
 using the specified final heap, restored a compiler-generated loop. Copy cleanup
 also compiles to a loop. Vox should erase ghost statements without leaving an
 optimization barrier; void-layout argument packaging alone does not address this.
+
+### Continuation contracts and erased goals
+
+Concrete continuation result types plus all-ghost goal records support
+stack-safe ownership-passing traversals without changing Vox. The goal records
+and witness callbacks erase; pending runtime work remains in continuation
+closures. Representative lookup and compression need only erased witness
+callbacks and compile to loops without runtime continuation allocation.
+
+The environment integration exposed a callback-adaptation limitation:
+`refine_ callback` does not adapt the callback's refined input type, even when
+the two predicates are provably equivalent. This occurs with both unique and
+aliased arguments. A minimized case takes `expected : {n : int | n = 0}`
+and a callback accepting `{n : int | n = expected}`; adapting it to accept
+`{n : int | n = 0}` is rejected during typing. An explicit adapter that unpacks
+its argument and calls `callback (refine_ value)` checks. Giving continuations
+the exact incoming contract also works. Extending checked callback adaptation
+to refined input types would remove these annotations; no new axiom is needed.

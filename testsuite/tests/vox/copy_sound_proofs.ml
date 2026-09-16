@@ -24,14 +24,14 @@ let rec (mapped_instance @ total) : (saved : Pref.heap) @ immutable ->
   fun saved epoch depth d final rho model p q want images premise -> ghost_ (
     let refine_ premise = premise in valid_def saved epoch depth d; mapping_def d p;
     let u = () in match d with
-    | Start -> refine_ u
+    | Start | Clean -> refine_ u
     | Fresh (rest, x, y, old, desc) ->
       if p === x then (
         history_at saved epoch depth rest p (refine_ u);
         history_grows saved epoch depth rest p (refine_ u);
         history_grows saved epoch depth rest q (refine_ u);
         heap_def saved epoch depth d; let h = heap saved epoch depth rest in
-        let v = cell desc depth in let w = mark old epoch q in cell_def desc depth;
+        let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; cell_def desc depth;
         put_frame h q v q; let h1 = H.put h q v in put_frame h1 p w q;
         fresh_frame saved epoch depth d final q (refine_ u);
         mapping_preserved saved epoch depth d final p q (refine_ u);

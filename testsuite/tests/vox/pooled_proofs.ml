@@ -9,7 +9,7 @@ let rec (registered_keeps @ total) : (base : pool) @ immutable -> (epoch : node 
     (d : history) @ immutable -> (x : node Pref.t) @ immutable ->
     {u : unit | not (listed base x) || listed (registered base epoch d) x} @ ghost = fun base epoch d x -> ghost_ (
   registered_def base epoch d; let pool = registered base epoch d in listed_def pool x;
-  let u = () in match d with Start -> refine_ u
+  let u = () in match d with Start | Clean -> refine_ u
   | Fresh (rest, _, _, _, _) | Alias (rest, _, _, _) -> registered_keeps base epoch rest x; refine_ u)
 let rec (registered_covers @ total) : (saved : Pref.heap) @ immutable -> (base : pool) @ immutable ->
     (epoch : node Pref.t) @ immutable -> (depth : int) -> (d : history) @ immutable -> (cut : int) ->
@@ -23,18 +23,19 @@ let rec (registered_covers @ total) : (saved : Pref.heap) @ immutable -> (base :
     if H.mem saved x then (
       history_at saved epoch depth d x (refine_ u); registered_keeps base epoch d x; refine_ u)
     else match d with
-    | Start -> let v = cell Bool depth in put_frame saved epoch v x; refine_ u
+    | Clean -> refine_ u
+  | Start -> let v = cell Bool depth in put_frame saved epoch v x; refine_ u
     | Fresh (rest, p, q, old, desc) ->
       registered_covers saved base epoch depth rest cut x (refine_ u);
       let mid = heap saved epoch depth rest in let prior = registered base epoch rest in
       covered_def mid cut prior x; at_level_def mid x;
-      let v = cell desc depth in let w = mark old epoch q in
+      let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
       put_frame mid q v x; let h1 = H.put mid q v in put_frame h1 p w x;
       refine_ u
     | Alias (rest, p, q, old) ->
       registered_covers saved base epoch depth rest cut x (refine_ u);
       let mid = heap saved epoch depth rest in let prior = registered base epoch rest in
-      covered_def mid cut prior x; at_level_def mid x; let v = mark old epoch q in put_frame mid p v x;
+      covered_def mid cut prior x; at_level_def mid x; let v = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame mid p v x;
       refine_ u)
 let rec (registered_member @ total) : (saved : Pref.heap) @ immutable -> (base : pool) @ immutable ->
     (epoch : node Pref.t) @ immutable -> (depth : int) -> (d : history) @ immutable ->
@@ -42,12 +43,13 @@ let rec (registered_member @ total) : (saved : Pref.heap) @ immutable -> (base :
     {u : unit | listed base x || H.mem (heap saved epoch depth d) x} @ ghost = fun saved base epoch depth d x premise -> ghost_ (
   let refine_ premise = premise in registered_def base epoch d; valid_def saved epoch depth d; heap_def saved epoch depth d;
   let pool = registered base epoch d in listed_def pool x; let u = () in match d with
+  | Clean -> refine_ u
   | Start -> let v = cell Bool depth in put_frame saved epoch v x; refine_ u
   | Fresh (rest, p, q, old, desc) ->
-    let mid = heap saved epoch depth rest in let v = cell desc depth in let w = mark old epoch q in
+    let mid = heap saved epoch depth rest in let v = cell desc depth in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
     put_frame mid q v x; let h1 = H.put mid q v in put_frame h1 p w x;
     if x === q then refine_ u else (registered_member saved base epoch depth rest x (refine_ u); refine_ u)
-  | Alias (rest, p, q, old) -> let mid = heap saved epoch depth rest in let v = mark old epoch q in
+  | Alias (rest, p, q, old) -> let mid = heap saved epoch depth rest in let v = session_mark rest old epoch q in session_mark_def rest old epoch q;
     put_frame mid p v x; registered_member saved base epoch depth rest x (refine_ u); refine_ u)
 let rec (pool_member @ total) : (h : Pref.heap) @ immutable -> (pool : pool) @ immutable ->
     (x : node Pref.t) @ immutable -> {u : unit | pool_scoped h pool && listed pool x} ->

@@ -17,7 +17,7 @@ let rec (target_below_at @ total) : (saved : Pref.heap) @ immutable ->
   at_level_def saved p; below_def after q depth; at_level_def after q;
   match H.at saved p with None -> refine_ u | Some v ->
   match v.level with Finite _ -> refine_ u | Generic ->
-    match d with Start -> refine_ u
+    match d with Start | Clean -> refine_ u
     | Fresh (rest, x, _, old, desc) ->
       if p === x then (
         history_at saved epoch depth rest p (refine_ u); ready_def saved rest old.desc desc;
@@ -33,35 +33,35 @@ let rec (target_below_at @ total) : (saved : Pref.heap) @ immutable ->
       else (target_for_def saved rest p q;
         target_below_at saved depth bounds epoch rest final p q (refine_ u); refine_ u))
 
-let (mark_below @ total) : (h : Pref.heap) @ immutable ->
+let (mark_below @ total) : (session : history) @ immutable -> (h : Pref.heap) @ immutable ->
     (p : node Pref.t) @ immutable -> (old : node) @ immutable ->
     (epoch : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (x : node Pref.t) @ immutable -> (bound : int) ->
     {u : unit | H.mem h p && H.at h p === Some old} ->
-    {u : unit | below (H.put h p (mark old epoch q)) x bound === below h x bound} @ ghost =
-  fun h p old epoch q x bound premise -> ghost_ (
-    let refine_ premise = premise in let v = mark old epoch q in mark_def old epoch q;
+    {u : unit | below (H.put h p (session_mark session old epoch q)) x bound === below h x bound} @ ghost =
+  fun session h p old epoch q x bound premise -> ghost_ (
+    let refine_ premise = premise in let v = session_mark session old epoch q in session_mark_def session old epoch q; mark_def old epoch q;
     let after = H.put h p v in put_frame h p v x;
     below_def h x bound; below_def after x bound; at_level_def h x; at_level_def after x;
     let u = () in refine_ u)
 
-let (mark_ordered @ total) : (h : Pref.heap) @ immutable ->
+let (mark_ordered @ total) : (session : history) @ immutable -> (h : Pref.heap) @ immutable ->
     (p : node Pref.t) @ immutable -> (old : node) @ immutable ->
     (epoch : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (x : node Pref.t) @ immutable ->
     {u : unit | H.mem h p && H.at h p === Some old && ordered h x} ->
-    {u : unit | ordered (H.put h p (mark old epoch q)) x} @ ghost =
-  fun h p old epoch q x premise -> ghost_ (
-    let refine_ premise = premise in let v = mark old epoch q in mark_def old epoch q;
+    {u : unit | ordered (H.put h p (session_mark session old epoch q)) x} @ ghost =
+  fun session h p old epoch q x premise -> ghost_ (
+    let refine_ premise = premise in let v = session_mark session old epoch q in session_mark_def session old epoch q; mark_def old epoch q;
     let after = H.put h p v in put_frame h p v x;
     ordered_def h x; ordered_def after x; let u = () in
     match H.at h x with None -> refine_ u | Some v ->
     match v.level with Generic -> refine_ u | Finite n ->
     children_below_def h v.desc n; children_below_def after v.desc n;
     match v.desc with Var | Bool -> refine_ u
-    | Link y -> mark_below h p old epoch q y n (refine_ u); refine_ u
-    | Arrow (a, b) -> mark_below h p old epoch q a n (refine_ u);
-      mark_below h p old epoch q b n (refine_ u); refine_ u)
+    | Link y -> mark_below session h p old epoch q y n (refine_ u); refine_ u
+    | Arrow (a, b) -> mark_below session h p old epoch q a n (refine_ u);
+      mark_below session h p old epoch q b n (refine_ u); refine_ u)
 
 let rec (copy_ordered @ total) : (saved : Pref.heap) @ immutable ->
     (depth : int) ->
@@ -75,6 +75,7 @@ let rec (copy_ordered @ total) : (saved : Pref.heap) @ immutable ->
     let refine_ premise = premise in valid_def saved epoch depth d; heap_def saved epoch depth d;
     let u = () in
     match d with
+    | Clean -> order x; refine_ u
     | Start ->
       let desc : desc = Bool in children_below_def saved desc depth; order x;
       allocation_ordered saved epoch desc depth x (refine_ u); refine_ u
@@ -90,12 +91,12 @@ let rec (copy_ordered @ total) : (saved : Pref.heap) @ immutable ->
       allocation_ordered mid q desc depth x (refine_ u);
       let v = cell desc depth in let h1 = H.put mid q v in
       history_grows saved epoch depth rest p (refine_ u); put_frame mid q v p;
-      mark_ordered h1 p old epoch q x (refine_ u); refine_ u
+      mark_ordered rest h1 p old epoch q x (refine_ u); refine_ u
     | Alias (rest, p, q, old) ->
       let mid = heap saved epoch depth rest in
       copy_ordered saved depth bounds order epoch rest x (refine_ u);
       history_grows saved epoch depth rest p (refine_ u);
-      mark_ordered mid p old epoch q x (refine_ u); refine_ u)
+      mark_ordered rest mid p old epoch q x (refine_ u); refine_ u)
 
 let rec (copy_bounds @ total) : (saved : Pref.heap) @ immutable ->
     (depth : int) ->
@@ -111,6 +112,7 @@ let rec (copy_bounds @ total) : (saved : Pref.heap) @ immutable ->
     let after = heap saved epoch depth d in
     finite_node_def after x; below_def after x depth; at_level_def after x;
     let u = () in match d with
+    | Clean -> bounds x; refine_ u
     | Start -> bounds x; finite_node_def saved x; below_def saved x depth; at_level_def saved x;
       let desc : desc = Bool in let v = cell desc depth in cell_def desc depth;
       put_frame saved epoch v x; refine_ u
@@ -119,9 +121,9 @@ let rec (copy_bounds @ total) : (saved : Pref.heap) @ immutable ->
       copy_depth saved epoch depth rest (refine_ u);
       finite_node_def mid x; below_def mid x depth; at_level_def mid x;
       let v = cell desc depth in cell_def desc depth; let h1 = H.put mid q v in
-      let w = mark old epoch q in mark_def old epoch q;
+      let w = session_mark rest old epoch q in session_mark_def rest old epoch q; mark_def old epoch q;
       put_frame mid q v x; put_frame h1 p w x; refine_ u
     | Alias (rest, p, q, old) ->
       let mid = heap saved epoch depth rest in copy_bounds saved depth bounds epoch rest x (refine_ u);
       finite_node_def mid x; below_def mid x depth; at_level_def mid x;
-      let w = mark old epoch q in mark_def old epoch q; put_frame mid p w x; refine_ u)
+      let w = session_mark rest old epoch q in session_mark_def rest old epoch q; mark_def old epoch q; put_frame mid p w x; refine_ u)

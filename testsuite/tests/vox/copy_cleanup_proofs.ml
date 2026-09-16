@@ -43,7 +43,7 @@ let rec (touched_mapping @ total) : (d : history) @ immutable ->
       (match mapping d x with None -> false | Some _ -> true)} @ ghost =
   fun d x -> ghost_ (
     touched_def d; mapping_def d x; let trail = touched d in listed_def trail x;
-    let u = () in match d with Start -> refine_ u
+    let u = () in match d with Start | Clean -> refine_ u
     | Fresh (rest, _, _, _, _) | Alias (rest, _, _, _) ->
       touched_mapping rest x; refine_ u)
 
@@ -56,7 +56,7 @@ let rec (touched_saved @ total) : (saved : Pref.heap) @ immutable ->
   fun saved epoch depth d x premise -> ghost_ (
     let refine_ premise = premise in valid_def saved epoch depth d;
     touched_def d; let trail = touched d in listed_def trail x;
-    let u = () in match d with Start -> refine_ u
+    let u = () in match d with Start | Clean -> refine_ u
     | Fresh (rest, _, _, _, _) | Alias (rest, _, _, _) ->
       touched_saved saved epoch depth rest x (refine_ u);
       history_at saved epoch depth rest x (refine_ u); refine_ u)
@@ -83,7 +83,7 @@ let (sweep_scope @ total) : (h : Pref.heap) @ immutable ->
     let refine_ premise = premise in frame x; swept_at_def h after trail x;
     source_ok_def h x; source_ok_def after x;
     (match H.at h x with None -> () | Some v ->
-      (match v.memo with Empty_memo -> () | Memo (stamp, _) ->
+      (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) ->
         frame stamp; swept_at_def h after trail stamp; ());
       match v.desc with Var | Bool -> ()
       | Link p -> frame p; swept_at_def h after trail p; ()
@@ -133,7 +133,7 @@ let rec (touched_distinct @ total) : (saved : Pref.heap) @ immutable ->
   fun saved epoch depth d premise -> ghost_ (
     let refine_ premise = premise in valid_def saved epoch depth d;
     touched_def d; let trail = touched d in distinct_def trail;
-    let u = () in match d with Start -> refine_ u
+    let u = () in match d with Start | Clean -> refine_ u
     | Fresh (rest, p, _, _, _) | Alias (rest, p, _, _) ->
       touched_mapping rest p;
       touched_distinct saved epoch depth rest (refine_ u); refine_ u)
@@ -150,6 +150,7 @@ let rec (history_clean @ total) : (saved : Pref.heap) @ immutable ->
     heap_def saved epoch depth d; touched_def d;
     let trail = touched d in listed_def trail x;
     let u = () in match d with
+    | Clean -> refine_ u
     | Start ->
       let desc : desc = Bool in let v = cell desc depth in cell_def desc depth;
       put_frame saved epoch v x; refine_ u
@@ -157,9 +158,9 @@ let rec (history_clean @ total) : (saved : Pref.heap) @ immutable ->
       history_clean saved epoch depth rest x (refine_ u);
       let h = heap saved epoch depth rest in let v = cell desc depth in
       cell_def desc depth; put_frame h q v x;
-      let mid = H.put h q v in let w = mark old epoch q in
+      let mid = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
       put_frame mid p w x; refine_ u
     | Alias (rest, p, q, old) ->
       history_clean saved epoch depth rest x (refine_ u);
-      let h = heap saved epoch depth rest in let w = mark old epoch q in
+      let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
       put_frame h p w x; refine_ u)
