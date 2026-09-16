@@ -178,3 +178,14 @@ exact model, finite-readback and MGU factorization guarantees; see
 `unifier-mgu.md`. The HM layer must solve each RHS
 before generalizing it and prove principal typing against independent
 declarative rules. The minimal STLC entry point remains unchanged.
+
+The full HM bridge now carries physical origins only for low residual variables:
+`low_var h x cut` means `below h x cut` and the current descriptor is `Var`.
+`Leaf_provenance_proofs` constructs and transports these origins through the
+existing operations. `Leaf_agreement_proofs.low_unfolded_agreement` derives
+agreement for every low compound boundary from level order, finite unfolding,
+two heap models and agreement at the original saved low roots. Thus unreachable
+low constants and compound nodes need no current saved-root path. The external
+`rhs_interpret` and full HM theorem contracts are unchanged. This prepares the
+proof for structure linking and compression; those runtime integrations remain
+on the checklist.
