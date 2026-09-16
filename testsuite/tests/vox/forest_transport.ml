@@ -6,12 +6,12 @@ open Level_unifier_proofs
 open Level_finite_spec
 open Level_finite_proofs
 
-let (mark_observe @ total) : (h : Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
+let (mark_observe @ total) : (d : history) @ immutable -> (h : Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (old : node) @ immutable -> (epoch : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (x : node Pref.t) @ immutable -> {u : unit | H.mem h p && H.at h p === Some old} ->
-    {u : unit | H.mem (H.put h p (mark old epoch q)) x === H.mem h x
-      && observe (H.put h p (mark old epoch q)) x === observe h x} @ ghost = fun h p old epoch q x premise -> ghost_ (
-  let refine_ premise = premise in let v = mark old epoch q in mark_def old epoch q;
+    {u : unit | H.mem (H.put h p (session_mark d old epoch q)) x === H.mem h x
+      && observe (H.put h p (session_mark d old epoch q)) x === observe h x} @ ghost = fun d h p old epoch q x premise -> ghost_ (
+  let refine_ premise = premise in let v = session_mark d old epoch q in session_mark_def d old epoch q; mark_def old epoch q;
   put_frame h p v x; observe_write h p v x; observe_def h x; let u = () in refine_ u)
 let rec (finite_frame @ total) : (h : Pref.heap) @ immutable -> (after : Pref.heap) @ immutable ->
     (frame : ((x : node Pref.t) @ immutable -> {u : unit | H.mem h x === H.mem after x && observe h x === observe after x})) @ total ->
@@ -20,16 +20,16 @@ let rec (finite_frame @ total) : (h : Pref.heap) @ immutable -> (after : Pref.he
   let x = tree_root t in frame x; let u = () in match t with Free _ | Constant_tree _ -> refine_ u
   | Alias_tree (_, c) -> finite_frame h after frame c (refine_ u); refine_ u
   | Branch (_, a, b) -> finite_frame h after frame a (refine_ u); finite_frame h after frame b (refine_ u); refine_ u)
-let (mark_forest @ total) : (h : Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
+let (mark_forest @ total) : (d : history) @ immutable -> (h : Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (old : node) @ immutable -> (epoch : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (t : tree) @ immutable -> (x : node Pref.t) @ immutable ->
     {u : unit | H.mem h p && H.at h p === Some old && tree_root t === x
       && (if H.mem h x then finite h t else observe h x === None)} ->
-    {t : tree | tree_root t === x && (if H.mem (H.put h p (mark old epoch q)) x then finite (H.put h p (mark old epoch q)) t
-      else observe (H.put h p (mark old epoch q)) x === None)} @ immutable ghost = fun h p old epoch q t x premise -> ghost_ (
-  let refine_ premise = premise in let after = H.put h p (mark old epoch q) in
+    {t : tree | tree_root t === x && (if H.mem (H.put h p (session_mark d old epoch q)) x then finite (H.put h p (session_mark d old epoch q)) t
+      else observe (H.put h p (session_mark d old epoch q)) x === None)} @ immutable ghost = fun d h p old epoch q t x premise -> ghost_ (
+  let refine_ premise = premise in let after = H.put h p (session_mark d old epoch q) in
   let frame : ((x : node Pref.t) @ immutable -> {u : unit | H.mem h x === H.mem after x && observe h x === observe after x}) @ total =
-    fun x -> let u = () in let refine_ u = mark_observe h p old epoch q x (refine_ u) in refine_ u in
+    fun x -> let u = () in let refine_ u = mark_observe d h p old epoch q x (refine_ u) in refine_ u in
   frame x; if H.mem h x then (let u = () in finite_frame h after frame t (refine_ u); refine_ t) else refine_ t)
 let rec (copy_forest_at @ total) : (saved : Pref.heap) @ immutable ->
     (trees : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
@@ -40,6 +40,7 @@ let rec (copy_forest_at @ total) : (saved : Pref.heap) @ immutable ->
       else observe (heap saved epoch depth d) x === None)} @ immutable ghost = fun saved trees epoch depth d x premise -> ghost_ (
   let refine_ premise = premise in valid_def saved epoch depth d; heap_def saved epoch depth d; let u = () in
   match d with
+  | Clean -> let refine_ t = trees x in refine_ t
   | Start -> let desc = Bool in let v = cell desc depth in cell_def desc depth; allocatable_def saved v;
     let refine_ t = allocation_finite_at saved trees epoch v x (refine_ u) in refine_ t
   | Fresh (rest, p, q, old, desc) ->
@@ -52,11 +53,11 @@ let rec (copy_forest_at @ total) : (saved : Pref.heap) @ immutable ->
     payload_scoped_def mid v;
     let refine_ t = allocation_finite_at mid prior q v x (refine_ u) in
     let h1 = H.put mid q v in history_grows saved epoch depth rest p (refine_ u); put_frame mid q v p;
-    let refine_ t = mark_forest h1 p old epoch q t x (refine_ u) in refine_ t
+    let refine_ t = mark_forest rest h1 p old epoch q t x (refine_ u) in refine_ t
   | Alias (rest, p, q, old) -> let mid = heap saved epoch depth rest in
     let refine_ t = copy_forest_at saved trees epoch depth rest x (refine_ u) in
     history_grows saved epoch depth rest p (refine_ u);
-    let refine_ t = mark_forest mid p old epoch q t x (refine_ u) in refine_ t)
+    let refine_ t = mark_forest rest mid p old epoch q t x (refine_ u) in refine_ t)
 
 let (closed_forest_at @ total) : (h : Pref.heap) @ immutable ->
     (trees : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&

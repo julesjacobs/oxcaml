@@ -23,7 +23,7 @@ let (redirect_scope @ total) : (h : Pref.heap) @ immutable -> (p : node Pref.t) 
     finite_scope_def h x; finite_scope_def after x; source_ok_def h x; source_ok_def after x;
     let u = () in redirect_active h p q x (refine_ u); redirect_active h p q q (refine_ u);
     (match H.at h x with None -> () | Some old ->
-      (match old.memo with Empty_memo -> () | Memo (stamp, _) -> Copy_heap_proofs.put_frame h p v stamp; ());
+      (match old.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> Copy_heap_proofs.put_frame h p v stamp; ());
       (match old.desc with Var | Bool -> () | Link a -> redirect_active h p q a (refine_ u); Copy_heap_proofs.put_frame h p v a; ()
       | Arrow (a, b) -> redirect_active h p q a (refine_ u); redirect_active h p q b (refine_ u);
         Copy_heap_proofs.put_frame h p v a; Copy_heap_proofs.put_frame h p v b; ())); refine_ u)

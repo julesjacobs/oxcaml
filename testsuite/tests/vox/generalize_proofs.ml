@@ -14,7 +14,7 @@ let (close_source @ total) : (h : Pref.heap) @ immutable -> (p : node Pref.t) @ 
   let refine_ premise = premise in close_cell_def cut old; let v = close_cell cut old in
   let after = H.put h p v in put_frame h p v x; source_ok_def h x; source_ok_def after x;
   (match H.at h x with None -> () | Some a ->
-    (match a.memo with Empty_memo -> () | Memo (stamp, _) -> put_frame h p v stamp; ());
+    (match a.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> put_frame h p v stamp; ());
     (match a.desc with Var | Bool -> () | Link q -> put_frame h p v q; ()
     | Arrow (a, b) -> put_frame h p v a; put_frame h p v b; ())); let u = () in refine_ u)
 let rec (pool_write @ total) : (h : Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
@@ -74,7 +74,7 @@ let (closed_source @ total) : (h : Pref.heap) @ immutable -> (cut : int) -> (poo
   closed_observe h cut pool x (refine_ u); closed_at_def h after cut pool x;
   source_ok_def h x; source_ok_def after x;
   (match H.at h x with None -> () | Some v ->
-    (match v.memo with Empty_memo -> () | Memo (stamp, _) ->
+    (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) ->
       closed_observe h cut pool stamp (refine_ u); closed_at_def h after cut pool stamp; ());
     (match v.desc with Var | Bool -> () | Link q ->
       closed_observe h cut pool q (refine_ u); closed_at_def h after cut pool q; ()

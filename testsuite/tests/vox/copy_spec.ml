@@ -2,7 +2,7 @@ module H = Pref.Heap
 
 type level = Generic | Finite of int
 type ('a : immutable_data) shape = Var | Bool | Arrow of 'a * 'a | Link of 'a
-type ('a : immutable_data) memo = Empty_memo | Memo of 'a * 'a
+type ('a : immutable_data) memo = Empty_memo | Memo of 'a * 'a | Forward of 'a
 type node : immutable_data = {
   desc : node Pref.t shape;
   level : level;
@@ -22,26 +22,33 @@ let[@def] (equation @ total) (h : Pref.heap @ immutable)
   | Var -> true | Bool -> rho p === Boolean
   | Arrow (a, b) -> rho p === Function (rho a, rho b) | Link q -> rho p === rho q)
 let[@def] (payload_scoped @ total) (h : Pref.heap @ immutable) (v : node @ immutable) = ghost_ (
-  (match v.memo with Empty_memo -> true | Memo (stamp, _) -> H.mem h stamp)
+  (match v.memo with Empty_memo | Forward _ -> true | Memo (stamp, _) -> H.mem h stamp)
   && (match v.desc with Var | Bool -> true | Link q -> H.mem h q
     | Arrow (a, b) -> H.mem h a && H.mem h b))
 let[@def] (source_ok @ total) (h : Pref.heap @ immutable) (p : node Pref.t @ immutable) = ghost_ (
   match H.at h p with None -> false | Some v -> H.mem h p
-  && (match v.memo with Empty_memo -> true | Memo (stamp, _) -> H.mem h stamp)
+  && (match v.memo with Empty_memo | Forward _ -> true | Memo (stamp, _) -> H.mem h stamp)
   && (match v.desc with Var | Bool -> true | Link q -> H.mem h q
     | Arrow (a, b) -> H.mem h a && H.mem h b))
 
-type history = Start | Fresh of history * node Pref.t * node Pref.t * node * desc
+type history = Start | Clean | Fresh of history * node Pref.t * node Pref.t * node * desc
   | Alias of history * node Pref.t * node Pref.t * node [@@inductive]
+let[@def] rec (clean_session @ total) (d : history @ immutable) = ghost_ (match d with
+  | Start -> false | Clean -> true
+  | Fresh (rest, _, _, _, _) | Alias (rest, _, _, _) -> clean_session rest)
+let[@def] (session_mark @ total) (d : history @ immutable) (v : node @ immutable)
+    (epoch : node Pref.t @ immutable) (target : node Pref.t @ immutable) = ghost_ (
+  if clean_session d then {v with memo = Forward target} else mark v epoch target)
 let[@def] rec (mapping @ total) (d : history @ immutable) (p : node Pref.t @ immutable) = ghost_ (match d with
-  | Start -> None | Fresh (rest, x, q, _, _) | Alias (rest, x, q, _) ->
+  | Start | Clean -> None | Fresh (rest, x, q, _, _) | Alias (rest, x, q, _) ->
     if p === x then Some q else mapping rest p)
 let[@def] rec (heap @ total) (saved : Pref.heap @ immutable)
     (epoch : node Pref.t @ immutable) (depth : int) (d : history @ immutable) = ghost_ (match d with
   | Start -> H.put saved epoch (cell Bool depth)
+  | Clean -> saved
   | Fresh (rest, p, q, old, desc) ->
-    H.put (H.put (heap saved epoch depth rest) q (cell desc depth)) p (mark old epoch q)
-  | Alias (rest, p, q, old) -> H.put (heap saved epoch depth rest) p (mark old epoch q))
+    H.put (H.put (heap saved epoch depth rest) q (cell desc depth)) p (session_mark rest old epoch q)
+  | Alias (rest, p, q, old) -> H.put (heap saved epoch depth rest) p (session_mark rest old epoch q))
 let[@def] (target_for @ total) (saved : Pref.heap @ immutable) (d : history @ immutable)
     (p : node Pref.t @ immutable) (q : node Pref.t @ immutable) = ghost_ (
   H.mem saved p && match H.at saved p with
@@ -56,6 +63,7 @@ let[@def] rec (valid @ total) (saved : Pref.heap @ immutable)
     (epoch : node Pref.t @ immutable) (depth : int) (d : history @ immutable) = ghost_ (
   match d with
   | Start -> not (H.mem saved epoch) && depth >= 0
+  | Clean -> H.mem saved epoch && depth >= 0
   | Fresh (rest, p, q, old, desc) -> valid saved epoch depth rest
     && H.mem saved p && H.at (heap saved epoch depth rest) p === Some old
     && old.level === Generic && mapping rest p === None

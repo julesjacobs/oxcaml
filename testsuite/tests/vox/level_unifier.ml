@@ -6,39 +6,68 @@ open Level_spec
 open Level_proofs
 open Level_unifier_metadata
 
-let rec representative :
-    (h : Pref.heap) @ immutable ghost ->
-    (scope : ((q : node Pref.t) @ immutable ->
-      {u : unit | not (H.mem h q) || finite_scope h q})) @ total ghost ->
-    (p : {p : node Pref.t | H.mem h p && active h p}) @ immutable ->
-    (t : {t : Pref.token | Pref.own t === h}) @ local read ->
-    {r : resolved | let refine_ p = p in H.mem h r.#value && active h r.#value && terminal h r.#value
-      && resolves h p r.#value r.#path} @ immutable =
-  fun h scope p t ->
-    let refine_ p = p in
+let rec representative_loop :
+    (start : (node Pref.t) Ghost.t) @ immutable ->
+    (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((q : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h.Ghost.ghost q) || finite_scope h.Ghost.ghost q})) Ghost.t) @ total  ->
+    (p : node Pref.t) @ immutable  ->
+    (t : {t : Pref.token | Pref.own t === h.Ghost.ghost && H.mem h.Ghost.ghost p && active h.Ghost.ghost p}) @ local read  ->
+    (lift : (((value : node Pref.t) @ immutable ->
+      (path : {d : resolution | resolves h.Ghost.ghost p value d}) @ immutable ->
+      {d : resolution | resolves h.Ghost.ghost start.Ghost.ghost value d} @ immutable)) Ghost.t) @ total ->
+    {r : resolved | H.mem h.Ghost.ghost r.#value && active h.Ghost.ghost r.#value && terminal h.Ghost.ghost r.#value
+      && resolves h.Ghost.ghost start.Ghost.ghost r.#value r.#path} @ immutable = fun start h scope p t lift ->
     let refine_ t = t in
-    ghost_ (scope p);
-    ghost_ (finite_scope_def h p; source_ok_def h p; observe_def h p);
+    ghost_ (scope.Ghost.ghost p);
+    ghost_ (finite_scope_def h.Ghost.ghost p; source_ok_def h.Ghost.ghost p; observe_def h.Ghost.ghost p);
     let t : {t : Pref.token | H.mem (Pref.own t) p} = refine_ t in
     let refine_ old = Pref.read p t in
-    ghost_ (observe_def h p);
+    ghost_ (observe_def h.Ghost.ghost p);
     let n = old.desc in
     match n with
     | Link q ->
-      let q : {q : node Pref.t | H.mem h q && active h q} = refine_ q in
       let refine_ t = t in
-      let t : {t : Pref.token | Pref.own t === h} = refine_ t in
-      let refine_ r = representative h scope q t in
-      let refine_ q = q in
-      let path = ghost_ (Via (q, r.#path)) in
-      let value = r.#value in
-      ghost_ (resolves_def h p value path);
-      let result = #{value = r.#value; path = path} in refine_ result
+      let t : {t : Pref.token | Pref.own t === h.Ghost.ghost && H.mem h.Ghost.ghost q && active h.Ghost.ghost q} = refine_ t in
+      let h_witness5 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
+      let scope_witness6 : (((q : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h_witness5.Ghost.ghost q) || finite_scope h_witness5.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
+      let refine_ state_argument8 = t in
+      let next_lift : (((value : node Pref.t) @ immutable ->
+        (path : {d : resolution | resolves h_witness5.Ghost.ghost q value d}) @ immutable ->
+        {d : resolution | resolves h_witness5.Ghost.ghost start.Ghost.ghost value d} @ immutable)) Ghost.t =
+        {Ghost.ghost = ghost_ (fun value path ->
+          let refine_ path = path in
+          let joined = Via (q, path) in
+          resolves_def h.Ghost.ghost p value joined;
+          let joined : {d : resolution | resolves h.Ghost.ghost p value d} = refine_ joined in
+          let refine_ result = lift.Ghost.ghost value joined in refine_ result)} in
+      let refine_ out = representative_loop start h_witness5 scope_witness6 q (refine_ state_argument8) next_lift in refine_ out
+
     | Var | Bool | Arrow _ ->
       let path = ghost_ Here in
-      ghost_ (terminal_def h p);
-      ghost_ (resolves_def h p p path);
+      ghost_ (terminal_def h.Ghost.ghost p);
+      ghost_ (resolves_def h.Ghost.ghost p p path);
+      let path : {d : resolution | resolves h.Ghost.ghost start.Ghost.ghost p d} @ immutable ghost = ghost_ (
+        let path : {d : resolution | resolves h.Ghost.ghost p p d} = refine_ path in
+        let refine_ out = lift.Ghost.ghost p path in refine_ out) in
+      let refine_ path = path in
       let result = #{value = p; path = path} in refine_ result
+
+let representative :
+    (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((q : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h.Ghost.ghost q) || finite_scope h.Ghost.ghost q})) Ghost.t) @ total  ->
+    (p : {p : node Pref.t | H.mem h.Ghost.ghost p && active h.Ghost.ghost p}) @ immutable  ->
+    (t : {t : Pref.token | Pref.own t === h.Ghost.ghost}) @ local read  ->
+    {r : resolved | let refine_ p = p in H.mem h.Ghost.ghost r.#value && active h.Ghost.ghost r.#value && terminal h.Ghost.ghost r.#value
+      && resolves h.Ghost.ghost p r.#value r.#path} @ immutable = fun h scope p t ->
+    let refine_ p = p in let refine_ t = t in
+    let start = {Ghost.ghost = ghost_ p} in
+    let lift : (((value : node Pref.t) @ immutable ->
+      (path : {d : resolution | resolves h.Ghost.ghost p value d}) @ immutable ->
+      {d : resolution | resolves h.Ghost.ghost start.Ghost.ghost value d} @ immutable)) Ghost.t =
+      {Ghost.ghost = ghost_ (fun value path -> let refine_ path = path in refine_ path)} in
+    let t : {t : Pref.token | Pref.own t === h.Ghost.ghost && H.mem h.Ghost.ghost p && active h.Ghost.ghost p} = refine_ t in
+    let refine_ result = representative_loop start h scope p t lift in refine_ result
 
 let bind_searched :
     (h : Pref.heap) @ immutable ghost ->
@@ -105,7 +134,14 @@ let bind :
   fun h scope unmarked p q t ->
     let refine_ t = t in
     let t : {t : Pref.token | Pref.own t === h && H.mem h q && active h q} = refine_ t in
-    let refine_ checked = Marked_occurs.occurs h scope unmarked p q t in
+    let h_witness1 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
+    let scope_witness2 : (((x : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
+    let unmarked_witness3 : (((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at h_witness1.Ghost.ghost x with
+        None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked)} in
+    let refine_ state_argument4 = t in
+    let refine_ checked = Marked_occurs.occurs h_witness1 scope_witness2 unmarked_witness3 p q (refine_ state_argument4) in
     let marks = ghost_ checked.#marks in let search = ghost_ checked.#search in
     let found = checked.#found in let mid = ghost_ (scan_heap h marks) in
     let scope_mid : ((x : node Pref.t) @ immutable ->
@@ -141,14 +177,24 @@ let rec unify :
     let p : {p : node Pref.t | H.mem h p && active h p} = refine_ p in
     let b = borrow_ t in
     let b : {b : Pref.token | Pref.own b === h} = refine_ b in
-    let refine_ r = representative h scope p b in refine_ r in
+    let h_witness9 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
+    let scope_witness10 : (((q : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h_witness9.Ghost.ghost q) || finite_scope h_witness9.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
+    let p_argument11 : {p : node Pref.t | H.mem h_witness9.Ghost.ghost p && active h_witness9.Ghost.ghost p} = let refine_ argument = p in refine_ argument in
+    let refine_ state_argument12 = b in
+    let refine_ r = representative h_witness9 scope_witness10 p_argument11 (refine_ state_argument12) in refine_ r in
   let refine_ rp = rp in
   let sq : {r : resolved | H.mem h r.#value && active h r.#value && terminal h r.#value
     && resolves h q r.#value r.#path} =
     let q : {q : node Pref.t | H.mem h q && active h q} = refine_ q in
     let b = borrow_ t in
     let b : {b : Pref.token | Pref.own b === h} = refine_ b in
-    let refine_ r = representative h scope q b in refine_ r in
+    let h_witness13 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
+    let scope_witness14 : (((q : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h_witness13.Ghost.ghost q) || finite_scope h_witness13.Ghost.ghost q})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
+    let p_argument15 : {p : node Pref.t | H.mem h_witness13.Ghost.ghost p && active h_witness13.Ghost.ghost p} = let refine_ argument = q in refine_ argument in
+    let refine_ state_argument16 = b in
+    let refine_ r = representative h_witness13 scope_witness14 p_argument15 (refine_ state_argument16) in refine_ r in
   let refine_ sq = sq in
   let r = rp.#value in
   let s = sq.#value in

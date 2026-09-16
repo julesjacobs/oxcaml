@@ -18,6 +18,17 @@ let rec (with_copy_model @ total) : (saved : Pref.heap) @ immutable ->
     {u : unit | claim} @ ghost = fun saved scope rho model want wanted epoch depth d premise claim use -> ghost_ (
   let refine_ premise = premise in valid_def saved epoch depth d; heap_def saved epoch depth d;
   let u = () in match d with
+  | Clean ->
+    let equal : ((x : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem saved x) || rho x === rho x}) @ total =
+      fun x -> let u = () in refine_ u in
+    let assigned : ((p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
+      {u : unit | not (target_for saved d p q) || rho q === want p}) @ total = fun p q ->
+      target_for_def saved d p q; mapping_def d p;
+      wanted p; instance_at_def saved rho want p; let u = () in refine_ u in
+    let next : ((x : node Pref.t) @ immutable ->
+      {u : unit | equation (heap saved epoch depth d) rho x}) @ total = refine_ model in
+    let refine_ u = use rho next equal assigned in refine_ u
   | Start ->
     let desc = Bool in let v = cell desc depth in let value = Boolean in
     cell_def desc depth; payload_scoped_def saved v; describes_def rho desc value;
@@ -57,7 +68,7 @@ let rec (with_copy_model @ total) : (saved : Pref.heap) @ immutable ->
         let model1 : ((x : node Pref.t) @ immutable -> {u : unit | equation h1 tau x}) @ total = refine_ model1 in
         let next : (x : node Pref.t) @ immutable -> {u : unit | equation (heap saved epoch depth d) tau x}
             @ total = fun x -> let u = () in
-          mark_model h1 tau model1 p old epoch q x (refine_ u); let u = () in refine_ u in
+          mark_model rest h1 tau model1 p old epoch q x (refine_ u); let u = () in refine_ u in
         let equal : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem saved x) || tau x === rho x}
             @ total = fun x -> let u = () in history_grows saved epoch depth rest x (refine_ u);
           equal0 x; equal1 x; refine_ u in
@@ -84,7 +95,7 @@ let rec (with_copy_model @ total) : (saved : Pref.heap) @ immutable ->
       wanted p; instance_at_def saved rho want p;
       (match old.desc with Link child -> assigned0 child q; () | _ -> ());
       let next : (x : node Pref.t) @ immutable -> {u : unit | equation (heap saved epoch depth d) tau x}
-          @ total = fun x -> let u = () in let refine_ u = mark_model h tau model0 p old epoch q x (refine_ u) in refine_ u in
+          @ total = fun x -> let u = () in let refine_ u = mark_model rest h tau model0 p old epoch q x (refine_ u) in refine_ u in
       let assigned : ((a : node Pref.t) @ immutable -> (b : node Pref.t) @ immutable ->
           {u : unit | not (target_for saved d a b) || tau b === want a}) @ total = fun a b ->
         target_for_def saved d a b; mapping_def d a; target_for_def saved rest a b; assigned0 a b;
