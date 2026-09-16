@@ -341,6 +341,23 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
         let refine_ u = with_run_model closed depth transferred closed_facts closed_forest next_env next_ts next_g rho1 closed_model xi body_realize n body after final_pool target db (refine_ u) claim consume_body in refine_ u in
       let refine_ u = with_run_model h child_depth empty child_facts forest env ts shifted rho model zeta rhs_realize rhs_n rhs middle child_pool a dr (refine_ u) claim consume_rhs in refine_ u)
       | _ -> refine_ u)
+    | RShared (i, q) -> (match d with
+      | D.Variable args -> (match D.lookup g i with None -> refine_ u | Some sigma ->
+        Hm_environment_proofs.aligned_lookup g ts i (refine_ u);
+        match template_lookup ts i with None -> refine_ u | Some schema ->
+        Hm_environment_proofs.env_lookup h depth env ts i schema (refine_ u);
+        Hm_environment_proofs.active_template h schema q (refine_ u);
+        T.eval_arguments_length xi args; T.eval_open_scheme xi sigma args;
+        let values = T.eval_arguments xi args in
+        let consume : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+          {u : unit | interpret rho choices schema === T.meaning xi sigma values} ->
+          {u : unit | claim}) @ total = fun choices fit ->
+          let refine_ fit = fit in interpret_def rho choices schema;
+          let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho x === rho x}) @ total = fun x -> let u = () in refine_ u in
+          Hm_complete_proofs.matches_def rho e value;
+          let u = () in let refine_ u = use rho (refine_ model) equal (refine_ u) in refine_ u in
+        let refine_ u = realize i sigma schema values (refine_ u) claim consume in refine_ u)
+      | _ -> refine_ u)
     | RVar (i, q, epoch, history) -> (match d with
       | D.Variable args -> (match D.lookup g i with None -> refine_ u | Some sigma ->
         let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->

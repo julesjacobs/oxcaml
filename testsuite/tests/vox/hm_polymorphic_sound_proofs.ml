@@ -182,6 +182,13 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
       let sigma = P.scheme rho schema in P.scheme_def rho schema; P.context_def rho next_schemas;
       P.scheme_wf rho schema; Hm_abstraction_proofs.add_zero k;
       let d = D.Let_binding (sigma, changed_rhs, body_d) in D.typed_def z g term t d; refine_ d)
+    | RShared (i, _) ->
+      let refine_ schema = lookup_schema h depth env schemas i p (refine_ u) in
+      Hm_environment_proofs.active_template h schema p (refine_ u);
+      P.lookup_context rho schemas i schema (refine_ u); boundary_scheme rho p;
+      let args = D.No_arguments in let d = D.Variable args in let sigma = D.Forall (z, t) in
+      D.typed_def z g term t d; D.length_def args; D.arity_def sigma;
+      D.arguments_wf_def z args; D.open_scheme_def sigma args; T.open_empty t; refine_ d
     | RVar (i, _, epoch, history) -> (match lookup env i with None -> let d = D.Constant in refine_ d
       | Some original -> let refine_ d = variable_typing h depth env schemas i original p epoch history rho
           (refine_ model) (refine_ u) in refine_ d)

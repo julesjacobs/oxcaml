@@ -79,6 +79,11 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
     let z = D.Z in T.embed_wf z ty; let u = () in match e with
     | RApp_left _ | RApp_right _ | RLet_left _ | RLet _ ->
       let d = D.Constant in refine_ d
+    | RShared (i, _) ->
+      lookup_context rho env i p (refine_ u);
+      let args = D.No_arguments in let d = D.Variable args in let scheme = D.Forall (z, t) in
+      D.typed_def z g term t d; D.length_def args; D.arity_def scheme;
+      D.arguments_wf_def z args; D.open_scheme_def scheme args; T.open_empty t; refine_ d
     | RVar (i, _, _, history) -> (match lookup env i with None -> let d = D.Constant in refine_ d
       | Some original -> mono_lookup h env i original (refine_ u);
         active_def h original; at_level_def h original; target_for_def h history original p;

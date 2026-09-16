@@ -142,6 +142,16 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
     let z = D.Z in let g = context rho env in let source_term = source e in let typ = T.embed target in
     D.typed_def z g source_term typ d; T.embed_def target; let u = () in match e with
     | RLet_left _ | RLet _ -> refine_ u
+    | RShared (i, p) -> (match d with
+      | D.Variable args ->
+        lookup_context rho env i p (refine_ u);
+        let scheme = D.Forall (z, T.embed (rho p)) in D.arity_def scheme; D.length_def args;
+        (match args with D.Argument _ -> refine_ u | D.No_arguments ->
+          D.open_scheme_def scheme args; let ot = T.embed (rho p) in T.open_empty ot;
+          let original_type = rho p in embed_injective target original_type (refine_ u);
+          let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho x === rho x}) @ total = fun x -> let u = () in refine_ u in
+          matches_def rho e target; let refine_ u = use rho (refine_ model) equal (refine_ u) in refine_ u)
+      | _ -> refine_ u)
     | RVar (i, p, epoch, history) -> (match d with
       | D.Variable args -> (match lookup env i with None -> refine_ u | Some original ->
         lookup_context rho env i original (refine_ u);

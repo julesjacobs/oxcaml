@@ -54,6 +54,7 @@ let rec (run_forest @ total) : (h : Pref.heap) @ immutable ->
   fun h trees depth pool env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     let u = () in match e with
+    | RShared _ -> let refine_ t = trees x in refine_ t
     | RVar (i, _, epoch, d) -> (match lookup env i with
       | None -> let _impossible : {u : unit | false} = refine_ u in let refine_ t = trees x in refine_ t
       | Some _ -> let refine_ t = clean_copy_forest h trees epoch depth d x (refine_ u) in refine_ t)

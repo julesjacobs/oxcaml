@@ -25,6 +25,11 @@ let rec walk : (h : Pref.heap) @ immutable ghost ->
       ghost_ (observe_def h p);
       match old.desc with
       | Link q ->
+        let refine_ direct = Pref.equal q root in
+        if direct then (
+          let edits = ghost_ Done in ghost_ (rewritten_def h h edits);
+          let r = #{value = root; state; edits; path} in refine_ r
+        ) else (
         let rest = ghost_ (Compression_path_proofs.tail path) in
         ghost_ (let u = () in Compression_path_proofs.tail_resolves h p q root path (refine_ u);
           scope p; finite_scope_def h p; source_ok_def h p; ());
@@ -45,6 +50,7 @@ let rec walk : (h : Pref.heap) @ immutable ghost ->
         let edits = ghost_ (Write (p, q, root, path, out.#edits)) in
         ghost_ (rewritten_def h after edits);
         let r = #{value = root; state = out.#state; edits; path} in refine_ r
+      )
       | Var | Bool | Arrow _ ->
         ghost_ (let impossible : {u : unit | false} = refine_ () in let refine_ impossible = impossible in ()); assert false)
 

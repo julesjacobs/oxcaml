@@ -39,6 +39,7 @@ let rec (run_extends @ total) : (h : Pref.heap) @ immutable -> (depth : int) ->
   fun h depth pool env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     let u = () in match e with
+    | RShared _ -> refine_ u
     | RVar (i, _, epoch, d) -> (match lookup env i with
       None -> refine_ u | Some _ -> copy_extends h epoch depth d x (refine_ u); refine_ u)
     | RBool p -> let desc : desc = Bool in let v = cell desc depth in
@@ -94,6 +95,7 @@ let rec (run_result @ total) : (h : Pref.heap) @ immutable -> (depth : int) ->
     {u : unit | H.mem after p} @ ghost = fun h depth pool env e after final_pool p premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     result_def e; let u = () in match e with
+    | RShared _ -> active_def h p; refine_ u
     | RVar (i, q, epoch, d) -> (match lookup env i with None -> refine_ u
       | Some original -> copy_result h epoch depth d original q (refine_ u); refine_ u)
     | RBool q -> let desc : desc = Bool in let v = cell desc depth in
@@ -132,6 +134,7 @@ let rec (run_pool_member @ total) : (h : Pref.heap) @ immutable -> (depth : int)
     {u : unit | H.mem after x} @ ghost = fun h depth pool env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     let u = () in match e with
+    | RShared _ -> Pooled_proofs.pool_member h pool x (refine_ u); refine_ u
     | RVar (i, _, epoch, d) -> (match lookup env i with None -> refine_ u | Some _ ->
       Pooled_proofs.registered_member h pool epoch depth d x (refine_ u);
       if listed pool x then (
