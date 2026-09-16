@@ -128,3 +128,28 @@ stage, require checked semantic proof functions, positive runtime cases,
 rejected incorrect implementations, and inspection that ghost evidence erases.
 Do not promote a soundness-only milestone to principality. OCaml runtime
 termination is outside this sequence; ghost mathematics must remain total.
+
+## Remaining heap rewrites
+
+- [x] Separate relative interpretation from directed saved-root paths: accept
+  explicit agreement of the two models on current low-level nodes.
+- [x] Check the compression counterexample for directed saved-root paths.
+- [x] Prove compression preserves exactly the models, finite readback, levels,
+  generic cells, marks, memos, pool coverage and semantic low-node agreement.
+- [x] Implement and run the standalone compressing representative with a ghost
+  edit trace; positive bytecode/native fixtures check rewritten links and generic
+  framing.
+- [x] Complete compression rejection probes and ghost-erasure inspection.
+- [ ] Restrict saved-root provenance to low residual variables; derive compound
+  model agreement by finite unfolding, then recheck execution provenance.
+- [ ] Prove post-success structure linking preserves models, finite forests,
+  level order, scratch metadata and semantic determination.
+- [ ] Link structure roots inside recursive unification, re-resolving roots
+  after child calls. Keep the unification pair cache absent.
+- [ ] Integrate compressing representative calls into recursive unification.
+- [ ] Recheck full HM soundness, completeness, principality and rejection for
+  the integrated runtime, including failure prefixes and saved garbage.
+- [ ] Review and publish the remaining stacked changes.
+
+The standalone compression kernel is preparatory: the inference driver still
+calls the existing unifier. Neither optimization is marked complete above.

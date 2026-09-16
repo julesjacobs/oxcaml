@@ -37,7 +37,35 @@ let (origin_agreement @ total) : (saved : Pref.heap) @ immutable ->
     let u = () in match origin with Origin (root, path) -> equal root;
       path_agreement h rho rho_model eta eta_model root x path (refine_ u))
 
-let rec (relative_interpret @ total) : (saved : Pref.heap) @ immutable ->
+let rec (interpret_agreement @ total) : (h : Pref.heap) @ immutable -> (cut : int) ->
+    (order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x})) @ total ->
+    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+    (eta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+    (eta_model : ((x : node Pref.t) @ immutable -> {u : unit | equation h eta x})) @ total ->
+    (equal : ((x : node Pref.t) @ immutable ->
+      {u : unit | not (below h x cut) || rho x === eta x})) @ total ->
+    (tree : bounded) @ immutable -> {u : unit | unfolded h tree} ->
+    {u : unit | interpret rho eta (scheme h cut tree) === eta (bound_root tree)}
+      @ ghost = fun h cut order rho eta eta_model equal tree premise -> ghost_ (
+    let refine_ premise = premise in unfolded_def h tree; bound_root_def tree;
+    let p = bound_root tree in let schema = scheme h cut tree in
+    scheme_def h cut tree; interpret_def rho eta schema; at_level_def h p;
+    let level = at_level h p in close_level_def cut level;
+    let u = () in
+    if not (close_level cut level === Generic) then (
+      order p; ordered_def h p; below_def h p cut;
+      equal p; refine_ u)
+    else (
+      eta_model p; equation_def h eta p;
+      match tree with Tip _ -> refine_ u
+      | Through (_, child) ->
+        interpret_agreement h cut order rho eta eta_model equal child (refine_ u); refine_ u
+      | Fork (_, a, b) ->
+        interpret_agreement h cut order rho eta eta_model equal a (refine_ u);
+        interpret_agreement h cut order rho eta eta_model equal b (refine_ u); refine_ u))
+
+
+let (relative_interpret @ total) : (saved : Pref.heap) @ immutable ->
     (h : Pref.heap) @ immutable -> (cut : int) ->
     (prior : ((x : node Pref.t) @ immutable ->
       {o : origin | not (below h x cut) || originates saved h cut x o}
@@ -52,23 +80,14 @@ let rec (relative_interpret @ total) : (saved : Pref.heap) @ immutable ->
     (tree : bounded) @ immutable -> {u : unit | unfolded h tree} ->
     {u : unit | interpret rho eta (scheme h cut tree) === eta (bound_root tree)}
       @ ghost = fun saved h cut prior order rho rho_model eta eta_model equal tree premise -> ghost_ (
-    let refine_ premise = premise in unfolded_def h tree; bound_root_def tree;
-    let p = bound_root tree in let schema = scheme h cut tree in
-    scheme_def h cut tree; interpret_def rho eta schema; at_level_def h p;
-    let level = at_level h p in close_level_def cut level;
-    let u = () in
-    if not (close_level cut level === Generic) then (
-      order p; ordered_def h p; below_def h p cut;
-      let refine_ origin = prior p in
-      origin_agreement saved h cut rho rho_model eta eta_model equal p origin (refine_ u); refine_ u)
-    else (
-      eta_model p; equation_def h eta p;
-      match tree with Tip _ -> refine_ u
-      | Through (_, child) ->
-        relative_interpret saved h cut prior order rho rho_model eta eta_model equal child (refine_ u); refine_ u
-      | Fork (_, a, b) ->
-        relative_interpret saved h cut prior order rho rho_model eta eta_model equal a (refine_ u);
-        relative_interpret saved h cut prior order rho rho_model eta eta_model equal b (refine_ u); refine_ u))
+    let refine_ premise = premise in
+    let determined : ((x : node Pref.t) @ immutable ->
+      {u : unit | not (below h x cut) || rho x === eta x}) @ total = fun x ->
+      let u = () in if below h x cut then (
+        let refine_ origin = prior x in
+        origin_agreement saved h cut rho rho_model eta eta_model equal x origin (refine_ u); refine_ u)
+      else refine_ u in
+    let u = () in let refine_ u = interpret_agreement h cut order rho eta eta_model determined tree (refine_ u) in refine_ u)
 
 let (finite_assignment @ total) : (h : Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
