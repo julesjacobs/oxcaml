@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml compression_origin_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml leaf_provenance_spec.ml leaf_agreement_proofs.ml compression_origin_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -60,3 +60,24 @@ let (finite_readback @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.
     Level_unifier_spec.resolves_def h r r here; Level_unifier_spec.terminal_def h r;
     let u = () in Compression_finite_proofs.finite_compress h p q r path tree (refine_ u);
     Compression_finite_proofs.compress_readback p tree; refine_ u)
+
+let (stranded_low_constant @ total) : (p : node Pref.t) @ immutable ->
+    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+    (eta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+    (rho_model : ((x : node Pref.t) @ immutable ->
+      {u : unit | equation (H.put (H.empty ()) p (cell Bool 0)) rho x})) @ total ->
+    (eta_model : ((x : node Pref.t) @ immutable ->
+      {u : unit | equation (H.put (H.empty ()) p (cell Bool 0)) eta x})) @ total ->
+    {u : unit | rho p === eta p} @ ghost = fun p rho eta rho_model eta_model -> ghost_ (
+    let saved = H.empty () in let boolean : desc = Bool in cell_def boolean 0;
+    let h = H.put saved p (cell boolean 0) in
+    let prior : ((x : node Pref.t) @ immutable ->
+      {o : origin | not (Leaf_provenance_spec.low_var h x 0) || originates saved h 0 x o} @ immutable) @ total = fun x ->
+      Leaf_provenance_spec.low_var_def h x 0; Level_unifier_spec.observe_def h x;
+      let o = Origin (x, Stop) in refine_ o in
+    let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total = fun x ->
+      ordered_def h x; children_below_def h boolean 0; let u = () in refine_ u in
+    let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (below saved x 0) || rho x === eta x}) @ total = fun x ->
+      below_def saved x 0; let u = () in refine_ u in
+    let tree = Tip p in unfolded_def h tree; bound_root_def tree; below_def h p 0; at_level_def h p;
+    let u = () in Leaf_agreement_proofs.low_unfolded_agreement saved h 0 prior order rho (refine_ rho_model) eta (refine_ eta_model) equal tree (refine_ u); refine_ u)

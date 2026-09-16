@@ -140,8 +140,9 @@ termination is outside this sequence; ghost mathematics must remain total.
   edit trace; positive bytecode/native fixtures check rewritten links and generic
   framing.
 - [x] Complete compression rejection probes and ghost-erasure inspection.
-- [ ] Restrict saved-root provenance to low residual variables; derive compound
-  model agreement by finite unfolding, then recheck execution provenance.
+- [x] Restrict saved-root provenance to low residual variables; derive compound
+  model agreement by finite unfolding, then recheck execution provenance. Full
+  HM principal fixtures pass with the weaker provenance interface.
 - [ ] Prove post-success structure linking preserves models, finite forests,
   level order, scratch metadata and semantic determination.
 - [ ] Link structure roots inside recursive unification, re-resolving roots
