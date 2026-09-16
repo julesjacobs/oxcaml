@@ -35,7 +35,12 @@ let instantiate : (saved : Pref.heap) @ immutable ghost ->
       history_grows saved epoch depth history x (refine_ u); refine_ u) in
     let state = out.#state in
     let state : {t : Pref.token | Pref.own t === raw} = refine_ state in
-    let refine_ state = Copy_cleanup.clear raw trail members state in
+    let heap_witness : Pref.heap Ghost.t = {Ghost.ghost = ghost_ (raw)} in
+    let members_witness : (((x : node Pref.t) @ immutable ->
+      {u : unit | not (listed trail x) || H.mem heap_witness.Ghost.ghost x})) Ghost.t =
+      {Ghost.ghost = ghost_ (refine_ members)} in
+    let refine_ state = state in
+    let refine_ state = Copy_cleanup.clear heap_witness trail members_witness (refine_ state) in
     let result = #{value = out.#value; state; pool = out.#pool; epoch; history} in
     refine_ result
 
@@ -84,4 +89,19 @@ let (model_equivalence @ total) : (saved : Pref.heap) @ immutable ->
     let h = heap saved epoch depth d in let trail = touched d in
     let after = swept h trail in
     let refine_ u = sweep_model h after trail rho x (refine_ u) in
+    refine_ u)
+
+let (clean_result @ total) : (saved : Pref.heap) @ immutable ->
+    (epoch : node Pref.t) @ immutable -> (depth : int) ->
+    (d : history) @ immutable -> (x : node Pref.t) @ immutable ->
+    {u : unit | valid saved epoch depth d &&
+      match H.at saved x with None -> true | Some v -> v.memo === Empty_memo} ->
+    {u : unit | match H.at (swept (heap saved epoch depth d) (touched d)) x with
+      None -> true | Some v -> v.memo === Empty_memo} @ ghost =
+  fun saved epoch depth d x premise -> ghost_ (
+    let refine_ premise = premise in let u = () in
+    history_clean saved epoch depth d x (refine_ u);
+    result_at saved epoch depth d x (refine_ u);
+    let h = heap saved epoch depth d in let trail = touched d in
+    let after = swept h trail in swept_at_def h after trail x;
     refine_ u)

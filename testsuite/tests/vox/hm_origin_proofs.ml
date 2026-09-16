@@ -78,6 +78,7 @@ let rec (run_origin @ total) : (saved : Pref.heap) @ immutable -> (cut : int) ->
   fun saved cut h depth pool facts prior env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool; result_def e;
     let u = () in match e with
+    | RShared _ -> let refine_ o = prior x in refine_ o
     | RVar (i, _, epoch, d) -> (match Hm_environment_spec.lookup env i with
       None -> let refine_ o = prior x in refine_ o | Some _ ->
       let scope : ((y : node Pref.t) @ immutable ->

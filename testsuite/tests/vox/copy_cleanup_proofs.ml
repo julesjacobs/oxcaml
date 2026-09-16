@@ -137,3 +137,29 @@ let rec (touched_distinct @ total) : (saved : Pref.heap) @ immutable ->
     | Fresh (rest, p, _, _, _) | Alias (rest, p, _, _) ->
       touched_mapping rest p;
       touched_distinct saved epoch depth rest (refine_ u); refine_ u)
+
+let rec (history_clean @ total) : (saved : Pref.heap) @ immutable ->
+    (epoch : node Pref.t) @ immutable -> (depth : int) ->
+    (d : history) @ immutable -> (x : node Pref.t) @ immutable ->
+    {u : unit | valid saved epoch depth d &&
+      match H.at saved x with None -> true | Some v -> v.memo === Empty_memo} ->
+    {u : unit | match H.at (heap saved epoch depth d) x with
+      | None -> true | Some v -> v.memo === Empty_memo || listed (touched d) x} @ ghost =
+  fun saved epoch depth d x premise -> ghost_ (
+    let refine_ premise = premise in valid_def saved epoch depth d;
+    heap_def saved epoch depth d; touched_def d;
+    let trail = touched d in listed_def trail x;
+    let u = () in match d with
+    | Start ->
+      let desc : desc = Bool in let v = cell desc depth in cell_def desc depth;
+      put_frame saved epoch v x; refine_ u
+    | Fresh (rest, p, q, old, desc) ->
+      history_clean saved epoch depth rest x (refine_ u);
+      let h = heap saved epoch depth rest in let v = cell desc depth in
+      cell_def desc depth; put_frame h q v x;
+      let mid = H.put h q v in let w = mark old epoch q in
+      put_frame mid p w x; refine_ u
+    | Alias (rest, p, q, old) ->
+      history_clean saved epoch depth rest x (refine_ u);
+      let h = heap saved epoch depth rest in let w = mark old epoch q in
+      put_frame h p w x; refine_ u)

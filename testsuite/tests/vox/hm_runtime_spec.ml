@@ -4,7 +4,7 @@ open Generalize_spec
 
 let[@def] (safe @ total) (h : Pref.heap @ immutable) (x : node Pref.t @ immutable) = ghost_ (
   (if H.mem h x then source_ok h x else H.at h x === None)
-  && ordered h x && match H.at h x with None -> true | Some v -> not v.visited)
+  && ordered h x && match H.at h x with None -> true | Some v -> not v.visited && v.memo === Empty_memo)
 let[@def] (depth_bound @ total) (h : Pref.heap @ immutable) (depth : int) (x : node Pref.t @ immutable) = ghost_ (
   not (H.mem h x) || not (finite_node h x) || below h x depth)
 let[@def] (runtime_at @ total) (h : Pref.heap @ immutable) (depth : int)
@@ -13,7 +13,7 @@ let[@def] (runtime_at @ total) (h : Pref.heap @ immutable) (depth : int)
 
 let[@def] rec (let_free @ total) (e : Hm_execution_spec.execution @ immutable) =
   match e with
-  | Hm_execution_spec.RVar _ | Hm_execution_spec.RBool _ -> true
+  | Hm_execution_spec.RShared _ | Hm_execution_spec.RVar _ | Hm_execution_spec.RBool _ -> true
   | Hm_execution_spec.RLam (_, body, _, _, _) | Hm_execution_spec.RRec (_, _, _, body, _, _, _) -> let_free body
   | Hm_execution_spec.RApp_left (left, _) -> let_free left
   | Hm_execution_spec.RApp_right (left, right, _, _)

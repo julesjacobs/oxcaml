@@ -47,6 +47,7 @@ let rec (run_restrict @ total) : (h : Pref.heap) @ immutable ->
   fun h trees depth pool env e after final_pool rho model x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     let refine_ old = trees x in let u = () in match e with
+    | RShared _ -> model x; refine_ u
     | RVar (i, _, epoch, d) -> (match lookup env i with None -> refine_ u | Some _ ->
       model x; copy_restrict h epoch depth d rho x (refine_ u); refine_ u)
     | RBool p -> let desc : desc = Bool in let v = cell desc depth in

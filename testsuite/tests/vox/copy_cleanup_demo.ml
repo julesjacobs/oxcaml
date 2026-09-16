@@ -63,7 +63,12 @@ let run (depth : {n : int | n >= 0}) =
     let u = () in touched_saved saved epoch depth history x (refine_ u);
     history_grows saved epoch depth history x (refine_ u); refine_ u) in
   let state : {t : Pref.token | Pref.own t === h} = refine_ state in
-  let refine_ state = Copy_cleanup.clear h trail members state in
+  let heap_witness : Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h)} in
+  let members_witness : (((x : node Pref.t) @ immutable ->
+    {u : unit | not (listed trail x) || H.mem heap_witness.Ghost.ghost x})) Ghost.t =
+    {Ghost.ghost = ghost_ (refine_ members)} in
+  let refine_ state = state in
+  let refine_ state = Copy_cleanup.clear heap_witness trail members_witness (refine_ state) in
   let after = ghost_ (Pref.own (borrow_ state)) in
   let framing : ((x : node Pref.t) @ immutable ->
     {u : unit | swept_at h after trail x}) @ total ghost = ghost_ (fun x ->

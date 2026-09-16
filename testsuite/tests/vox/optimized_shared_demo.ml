@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml hm_declarative.ml hm_environment_spec.ml compression_spec.ml compression_path_proofs.ml compressed_representative.ml compression_proofs.ml leaf_provenance_spec.ml leaf_provenance_proofs.ml structure_finite_proofs.ml structure_model_proofs.ml structure_spec.ml structure_link.ml structure_origin_proofs.ml compression_origin_proofs.ml optimized_unifier_spec.ml optimized_metadata.ml optimized_finite_proofs.ml optimized_model_proofs.ml optimized_mgu_proofs.ml optimized_origin_proofs.ml optimized_link_proofs.ml optimized_link.ml optimized_unifier.ml optimized_shared_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml hm_declarative.ml hm_environment_spec.ml compression_spec.ml compression_path_proofs.ml compressed_representative.ml compression_proofs.ml leaf_provenance_spec.ml leaf_provenance_proofs.ml structure_finite_proofs.ml structure_model_proofs.ml structure_spec.ml structure_link.ml structure_origin_proofs.ml compression_origin_proofs.ml optimized_unifier_spec.ml optimized_metadata.ml optimized_finite_proofs.ml optimized_model_proofs.ml optimized_mgu_proofs.ml optimized_origin_proofs.ml optimized_link_proofs.ml optimized_link.ml pruned_lower_proofs.ml pruned_lower.ml pruned_bind.ml optimized_unifier.ml optimized_shared_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -55,6 +55,14 @@ let run fail =
       tree_root_def tr; finite_def h tr;
       let t = if x === a then ta else if x === b then tb else if x === left then tl else if x === right then tr else Free x in
       tree_root_def t; refine_ t) in
+  let order0 : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total ghost = ghost_ (fun x ->
+let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
+    cell_def left_desc 4; cell_def right_desc 4;
+    below_def h a 4; below_def h b 4; below_def h child 4;
+    at_level_def h a; at_level_def h b; at_level_def h child;
+    children_below_def h left_desc 4; children_below_def h right_desc 4;
+    let v = Var in children_below_def h v 0; let v = Bool in children_below_def h v 4; children_below_def h v 0;
+    ordered_def h x; at_level_def h x; let u = () in refine_ u) in
   let ld = Arrow (left, left) in let lv = cell ld 4 in
   let refine_ step = Pref.alloc lv state in let p = step.value in let state = step.state in
   let h1 = ghost_ (Pref.own (borrow_ state)) in
@@ -85,7 +93,16 @@ let run fail =
     unmarked x; cell_def ld 4; cell_def rd 4; let u = () in refine_ u) in
   ghost_ (active2 p; active2 q);
   let state : {t : Pref.token | Pref.own t === h2 && H.mem h2 p && H.mem h2 q && active h2 p && active h2 q} = refine_ state in
-  let refine_ out = Optimized_unifier.unify h2 scope2 unmarked2 trees2 p q state in
+  let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h2 x}) @ total ghost = ghost_ (fun x ->
+    order0 x; let u = () in
+    cell_def left_desc 4; cell_def right_desc 4; let boolean = Bool in cell_def boolean 4;
+    cell_def ld 4; cell_def rd 4;
+    below_def h left 4; at_level_def h left; children_below_def h ld 4;
+    Pooled_allocation_proofs.allocation_ordered h p ld 4 x (refine_ u);
+    below_def h1 right 4; below_def h1 child 4; at_level_def h1 right; at_level_def h1 child;
+    children_below_def h1 rd 4;
+    Pooled_allocation_proofs.allocation_ordered h1 q rd 4 x (refine_ u); refine_ u) in
+  let refine_ out = Optimized_unifier.unify h2 scope2 unmarked2 order trees2 p q state in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in let d = ghost_ out.#derivation in let ok = out.#ok in
   let _mgu_proof = ghost_ (
     if ok then (

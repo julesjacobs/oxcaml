@@ -248,6 +248,22 @@ let (identity_execution @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
     let u = () in match e with RLam (_, body, _, _, _) -> source_def body; result_def body; let_free_def body; refine_ u
     | _ -> refine_ u)
 
+let (lambda_result_level @ total) : (h : Pref.heap) @ immutable -> (depth : int) ->
+    (pool : pool) @ immutable -> (env : Hm_environment_spec.env) @ immutable ->
+    (e : execution) @ immutable -> (after : Pref.heap) @ immutable -> (final_pool : pool) @ immutable ->
+    (p : node Pref.t) @ immutable ->
+    {u : unit | ran h depth pool env e after final_pool && result e === Some p
+      && source e === D.Lambda (D.Bound D.Z)} ->
+    {u : unit | at_level after p === Finite depth && listed final_pool p} @ ghost =
+  fun h depth pool env e after final_pool p premise -> ghost_ (
+    let refine_ premise = premise in ran_def h depth pool env e after final_pool;
+    source_def e; result_def e; let u = () in match e with
+    | RLam (a, body, middle, body_pool, out) ->
+      (match result body with None -> refine_ u | Some b -> match out with None -> refine_ u | Some q ->
+        let desc = Arrow (a, b) in
+        cell_def desc depth; at_level_def after p; listed_def final_pool p; refine_ u)
+    | _ -> refine_ u)
+
 let (with_application_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) -> (pool : pool) @ immutable ->
     (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h depth pool x})) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -341,12 +357,19 @@ let (with_id_id_model @ total) : (e : execution) @ immutable -> (after : Pref.he
       Generalize_scheme_proofs.scheme_valid rhs_heap 0 rhs_pool coverage tree (refine_ u);
       Generalize_scheme_proofs.scheme_root rhs_heap 0 tree;
       scheme_boundary_bound rhs_heap 0 rhs_pool order tree (refine_ u);
+      lambda_result_level initial 1 empty env rhs rhs_heap rhs_pool original (refine_ u);
+      Generalize_proofs.closed_observe rhs_heap 0 rhs_pool original (refine_ u);
+      closed_at_def rhs_heap h 0 rhs_pool original; at_level_def rhs_heap original;
+      at_level_def h original; let lvl = Finite 1 in close_level_def 0 lvl;
       source_def body; result_def body; ran_def h 0 pool env1 body after final_pool;
       match body with
       | RApp_left (left, _) -> source_def left; result_def left; refine_ u
       | RApp_right (_, right, _, _) -> source_def right; result_def right; refine_ u
       | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, derivation) ->
         source_def left; source_def right; result_def left; result_def right;
+        ran_def h 0 pool env1 left h1 pool1;
+        Hm_protected_proofs.run_member h 0 pool env1 left h1 pool1 0 original (refine_ u);
+        Hm_environment_spec.protected_at_def h h1 0 original; at_level_def h1 original;
         (match left with RVar (i1, q1, epoch1, d1) ->
           (match right with RVar (i2, q2, epoch2, d2) ->
           ran_def h 0 pool env1 left h1 pool1; ran_def h1 0 pool1 env1 right h2 pool2;
@@ -383,7 +406,10 @@ let (with_id_id_model @ total) : (e : execution) @ immutable -> (after : Pref.he
               let u = () in let refine_ u = with_application_model h2 0 pool2 facts2 tau model2 q1 q2 p arrow ok after derivation target (refine_ u) claim consume_application in refine_ u in
             let u = () in let refine_ u = with_identity_pair rhs rhs_heap rhs_pool tree h pool facts forest rho converted epoch1 d1 q1 epoch2 d2 q2 b (refine_ u) claim consume_pair in refine_ u in
           let refine_ u = Level_finite_proofs.with_finite_model h forest claim consume_model in refine_ u
+          | RShared (i, p) -> ran_def h1 0 pool1 env1 right h2 pool2;
+            Hm_environment_spec.lookup_def env1 i; active_def h1 p; at_level_def h1 p; refine_ u
           | _ -> refine_ u)
+        | RShared (i, p) -> Hm_environment_spec.lookup_def env1 i; active_def h p; at_level_def h p; refine_ u
         | _ -> refine_ u)
       | _ -> refine_ u)
     | _ -> refine_ u)
