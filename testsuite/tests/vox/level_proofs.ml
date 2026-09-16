@@ -60,7 +60,7 @@ let (frame_scope @ total) : (h : node Pref.heap) @ immutable -> (after : node Pr
   active_def h x; active_def after x; at_level_def h x; at_level_def after x;
   let u = () in match H.at h x, H.at after x with
   | Some a, Some b -> decreases_def a.level b.level;
-    (match a.memo with Empty_memo -> () | Memo (stamp, _) -> frame stamp; lower_frame_def h after stamp; ());
+    (match a.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> frame stamp; lower_frame_def h after stamp; ());
     (match a.desc with Var | Bool -> () | Link q -> frame q; lower_frame_def h after q; frame_active h after q (refine_ u); ()
     | Arrow (a, b) -> frame a; frame b; lower_frame_def h after a; lower_frame_def h after b;
       frame_active h after a (refine_ u); frame_active h after b (refine_ u); ()); refine_ u

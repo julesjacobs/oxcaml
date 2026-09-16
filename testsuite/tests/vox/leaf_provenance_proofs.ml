@@ -153,18 +153,18 @@ let (allocation_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
     else refine_ o)
 
 
-let (mark_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
+let (mark_leaf_origin @ total) : (session : history) @ immutable -> (saved : node Pref.heap) @ immutable ->
     (h : node Pref.heap) @ immutable -> (cut : int) ->
     (p : node Pref.t) @ immutable -> (old : node) @ immutable ->
     (epoch : node Pref.t) @ immutable -> (target : node Pref.t) @ immutable ->
     (x : node Pref.t) @ immutable -> (origin : origin) @ immutable ->
     {u : unit | H.mem h p && H.at h p === Some old &&
       (not (low_var h x cut) || originates saved h cut x origin)} ->
-    {u : unit | not (low_var (H.put h p (mark old epoch target)) x cut) ||
-      originates saved (H.put h p (mark old epoch target)) cut x origin}
-      @ ghost = fun saved h cut p old epoch target x origin premise -> ghost_ (
-    let refine_ premise = premise in let v = mark old epoch target in
-    let after = H.put h p v in mark_def old epoch target; put_frame h p v x;
+    {u : unit | not (low_var (H.put h p (session_mark session old epoch target)) x cut) ||
+      originates saved (H.put h p (session_mark session old epoch target)) cut x origin}
+      @ ghost = fun session saved h cut p old epoch target x origin premise -> ghost_ (
+    let refine_ premise = premise in let v = session_mark session old epoch target in
+    let after = H.put h p v in session_mark_def session old epoch target; mark_def old epoch target; put_frame h p v x;
     below_def h x cut; below_def after x cut;
     at_level_def h x; at_level_def after x;
     low_var_def h x cut; low_var_def after x cut;
@@ -173,7 +173,7 @@ let (mark_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
       originates_def saved h cut x origin;
       originates_def saved after cut x origin;
       match origin with Origin (root, path) ->
-        mark_path h p old epoch target root x path (refine_ u); refine_ u)
+        mark_path session h p old epoch target root x path (refine_ u); refine_ u)
     else refine_ u)
 
 
@@ -192,6 +192,7 @@ let rec (copy_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
   fun saved h cut scope prior epoch depth d x premise -> ghost_ (
     let refine_ premise = premise in valid_def h epoch depth d;
     heap_def h epoch depth d; let u = () in match d with
+    | Clean -> let refine_ o = prior x in refine_ o
     | Start -> scope epoch; let desc : desc = Bool in
       let v = cell desc depth in cell_def desc depth;
       let refine_ o = allocation_leaf_origin saved h cut prior epoch v x (refine_ u) in refine_ o
@@ -205,11 +206,11 @@ let rec (copy_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
       let refine_ o = allocation_leaf_origin saved mid cut prior1 q v x (refine_ u) in
       let h1 = H.put mid q v in
       history_grows h epoch depth rest p (refine_ u); put_frame mid q v p;
-      mark_leaf_origin saved h1 cut p old epoch q x o (refine_ u); refine_ o
+      mark_leaf_origin rest saved h1 cut p old epoch q x o (refine_ u); refine_ o
     | Alias (rest, p, q, old) -> let mid = heap h epoch depth rest in
       let refine_ o = copy_leaf_origin saved h cut scope prior epoch depth rest x (refine_ u) in
       history_grows h epoch depth rest p (refine_ u);
-      mark_leaf_origin saved mid cut p old epoch q x o (refine_ u); refine_ o)
+      mark_leaf_origin rest saved mid cut p old epoch q x o (refine_ u); refine_ o)
 
 
 let (closed_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->

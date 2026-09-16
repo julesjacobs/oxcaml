@@ -9,30 +9,38 @@ type instance = #{value : node Pref.t @@ aliased; state : node Pref.token;
   pool : pool @@ aliased; epoch : node Pref.t @@ ghost;
   history : history @@ ghost}
 
-let instantiate : (saved : node Pref.heap) @ immutable ghost ->
-    (scope : ((p : node Pref.t) @ immutable ->
-      {u : unit | if H.mem saved p then source_ok saved p
-        else H.at saved p === None})) @ total ghost ->
+let instantiate : (saved : (node Pref.heap) Ghost.t) @ immutable ->
+    (clean : (((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at saved.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t) @ total ->
+    (scope : (((p : node Pref.t) @ immutable ->
+      {u : unit | if H.mem saved.Ghost.ghost p then source_ok saved.Ghost.ghost p
+        else H.at saved.Ghost.ghost p === None})) Ghost.t) @ total ->
     (base : pool) @ immutable -> (depth : {n : int | n >= 0}) ->
-    (p : {p : node Pref.t | H.mem saved p}) @ immutable ->
-    (state : {t : node Pref.token | Pref.own t === saved
-      && pool_scoped saved base}) @ unique ->
+    (p : {p : node Pref.t | H.mem saved.Ghost.ghost p}) @ immutable ->
+    (state : {t : node Pref.token | Pref.own t === saved.Ghost.ghost
+      && pool_scoped saved.Ghost.ghost base}) @ unique ->
     {r : instance | let refine_ p = p in let refine_ depth = depth in
-      valid saved r.#epoch depth r.#history
+      valid saved.Ghost.ghost r.#epoch depth r.#history
       && Pref.own r.#state ===
-        swept (heap saved r.#epoch depth r.#history) (touched r.#history)
+        swept (heap saved.Ghost.ghost r.#epoch depth r.#history) (touched r.#history)
       && r.#pool === registered base r.#epoch r.#history
-      && target_for saved r.#history p r.#value} @ unique =
-  fun saved scope base depth p state ->
-    let refine_ out = Pooled_copy.instantiate saved scope base depth p state in
+      && target_for saved.Ghost.ghost r.#history p r.#value} @ unique = fun saved clean scope base depth p state ->
+    let saved_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (saved.Ghost.ghost)} in
+    let clean_witness2 : (((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at saved_witness1.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t = {Ghost.ghost = ghost_ (refine_ clean.Ghost.ghost)} in
+    let scope_witness3 : (((p : node Pref.t) @ immutable -> {u : unit | if H.mem saved_witness1.Ghost.ghost p then source_ok saved_witness1.Ghost.ghost p else H.at saved_witness1.Ghost.ghost p === None})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
+    let refine_ state = state in
+    let copy_source1 : {p : node Pref.t | H.mem saved_witness1.Ghost.ghost p} =
+      let refine_ p = p in refine_ p in
+    let refine_ out = Clean_pooled_copy.instantiate saved_witness1 clean_witness2 scope_witness3 base depth copy_source1 (refine_ state) in
     let refine_ depth = depth in let refine_ p = p in
     let epoch = ghost_ out.#epoch in let history = ghost_ out.#history in
-    let raw = ghost_ (heap saved epoch depth history) in
+    let raw = ghost_ (heap saved.Ghost.ghost epoch depth history) in
     let trail = out.#trail in
     let members : ((x : node Pref.t) @ immutable ->
       {u : unit | not (listed trail x) || H.mem raw x}) @ total ghost = ghost_ (fun x ->
-      let u = () in touched_saved saved epoch depth history x (refine_ u);
-      history_grows saved epoch depth history x (refine_ u); refine_ u) in
+      let u = () in touched_saved saved.Ghost.ghost epoch depth history x (refine_ u);
+      history_grows saved.Ghost.ghost epoch depth history x (refine_ u); refine_ u) in
     let state = out.#state in
     let state : {t : node Pref.token | Pref.own t === raw} = refine_ state in
     let heap_witness : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (raw)} in

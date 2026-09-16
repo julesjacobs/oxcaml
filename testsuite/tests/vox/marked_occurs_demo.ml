@@ -38,7 +38,14 @@ let run hit =
     active_def h x; at_level_def h x; let u = () in refine_ u) in
   ghost_ (active_def h root; at_level_def h root; cell_def root_desc 0);
   let state : {t : node Pref.token | Pref.own t === h && H.mem h root && active h root} = refine_ state in
-  let refine_ out = Marked_occurs.occurs h scope unmarked needle root state in
+  let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
+  let scope_witness2 : (((x : node Pref.t) @ immutable ->
+      {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
+  let unmarked_witness3 : (((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at h_witness1.Ghost.ghost x with
+        None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked)} in
+  let refine_ state_argument4 = state in
+  let refine_ out = Marked_occurs.occurs h_witness1 scope_witness2 unmarked_witness3 needle root (refine_ state_argument4) in
   assert (out.#found = hit);
   let state = out.#state in let d = ghost_ out.#marks in
   let after = ghost_ (Pref.own (borrow_ state)) in

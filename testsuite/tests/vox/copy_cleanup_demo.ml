@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml copy_order_proofs.ml ordered_copy.ml copy_cleanup_spec.ml copy_cleanup_proofs.ml copy_cleanup.ml clean_copy.ml copy_cleanup_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml copy_order_proofs.ml ordered_copy.ml copy_cleanup_spec.ml copy_cleanup_proofs.ml copy_cleanup.ml clean_pooled_copy.ml clean_copy.ml copy_cleanup_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -103,8 +103,24 @@ let run (depth : {n : int | n >= 0}) =
   let state : {t : node Pref.token | Pref.own t === after && pool_scoped after base} = refine_ state in
   let link : {p : node Pref.t | H.mem after p} = refine_ link in
   let depth : {n : int | n >= 0} = refine_ depth in
-  let refine_ second = Clean_copy.instantiate after next_scope base depth link state in
+  let clean : ((x : node Pref.t) @ immutable ->
+    {u : unit | match H.at after x with None -> true | Some v -> v.memo === Empty_memo}) @ total ghost = ghost_ (fun x ->
+    let desc = Var in cell_def desc 0;
+    let refine_ depth = depth in
+    let u = () in Clean_copy.clean_result saved epoch depth history x (refine_ u);
+    refine_ u) in
+  let saved_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (after)} in
+  let clean_witness2 : (((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at saved_witness1.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t = {Ghost.ghost = ghost_ (refine_ clean)} in
+  let scope_witness3 : (((p : node Pref.t) @ immutable ->
+      {u : unit | if H.mem saved_witness1.Ghost.ghost p then source_ok saved_witness1.Ghost.ghost p
+        else H.at saved_witness1.Ghost.ghost p === None})) Ghost.t = {Ghost.ghost = ghost_ (refine_ next_scope)} in
+  let refine_ state = state in
+  let copy_source1 : {p : node Pref.t | H.mem saved_witness1.Ghost.ghost p} =
+    let refine_ p = link in refine_ p in
+  let refine_ second = Clean_copy.instantiate saved_witness1 clean_witness2 scope_witness3 base depth copy_source1 (refine_ state) in
   let refine_ depth = depth in let refine_ link = link in
+  (match second.#pool with Entry (_, Entry (_, Entry (_, Empty))) -> () | _ -> assert false);
   let refine_ same = Pref.equal result second.#value in assert (not same);
   let state = second.#state in
   let d2 = ghost_ second.#history in let e2 = ghost_ second.#epoch in

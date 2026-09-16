@@ -31,7 +31,10 @@ let run () =
     finite_scope_def h x; source_ok_def h x; let u = () in refine_ u) in
   ghost_ (active_all p);
   let state : {t : node Pref.token | Pref.own t === h && H.mem h p && active h p} = refine_ state in
-  let refine_ out = Compressed_representative.representative h scope p state in
+  let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
+  let scope_witness2 : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope)} in
+  let refine_ state_argument3 = state in
+  let refine_ out = Compressed_representative.representative h_witness1 scope_witness2 p (refine_ state_argument3) in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in
   let edits = ghost_ out.#edits in
   ghost_ (let u = () in
