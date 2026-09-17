@@ -301,3 +301,12 @@ check generated definition lemmas. The VC translator still does not support
 local lambdas inside these lemmas: using one reports an omitted premise and
 rejects the resulting unproved claim. HM copy certificates therefore use
 first-order predicates; this fix only removes the compiler crash.
+
+### Structural descent through tuple matches
+
+For `type nat = Z | S of nat [@@inductive]`, a total recursive function with
+`match a, b with S rest, S tail -> f rest tail | _ -> 0` is rejected because
+neither recursive argument is recognized as a proper descendant. The equivalent
+nested matches are accepted. This arose in effective environment transport;
+that proof uses nested matches. Preserving descent through tuple scrutinees
+would remove this source-level restriction without weakening totality.
