@@ -94,3 +94,19 @@ let (enter_runtime @ total) : (h : node Pref.heap) @ immutable ->
       E.terminal_level h heads x (refine_ u); at_level_def h x; ())
     else ();
     refine_ u)
+
+let (rebase @ total) : (h : node Pref.heap) @ immutable ->
+    (a : E.heads) @ total -> (b : E.heads) @ total ->
+    (va : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h a x})) @ total ->
+    (vb : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h b x})) @ total ->
+    (depth : int) -> (pool : pool) @ immutable -> (x : node Pref.t) @ immutable ->
+    {u : unit | runtime_at h a depth pool x} ->
+    {u : unit | runtime_at h b depth pool x} @ ghost =
+  fun h a b va vb depth pool x premise -> ghost_ (
+    let refine_ premise = premise in runtime_at_def h a depth pool x;
+    safe_def h a x; depth_bound_def h a depth x; va x; vb x;
+    let u = () in Effective_unifier_order.rebase h a b va vb x (refine_ u);
+    Effective_unifier_order.same_level h a b x (refine_ u);
+    E.effective_below_def h a x depth; E.effective_below_def h b x depth;
+    runtime_at_def h b depth pool x; safe_def h b x;
+    depth_bound_def h b depth x; refine_ u)
