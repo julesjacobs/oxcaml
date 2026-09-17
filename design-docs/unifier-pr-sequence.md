@@ -293,3 +293,33 @@ instantiation arguments; representative callbacks and heap witnesses erase.
 The depth-200,000 shared-graph stress case passes in bytecode and native code.
 `codex review --uncommitted` completed without actionable findings. The active HM driver still uses the previous copier until lowering and
 the remaining semantic interfaces migrate.
+
+The effective-level copier is published as PR #179, stacked on #178:
+https://github.com/julesjacobs/oxcaml/pull/179.
+
+Descriptor-first lowering migration:
+
+- [x] Follow links before testing stored levels; never write link records.
+- [x] Preserve representative witnesses, effective scope and ordering.
+- [x] Preserve physical heap frames, models, finite forests and graph paths.
+- [x] Retain confined write traces and construct effective bounded trees.
+- [x] Check the CPS runtime with erased heap and representative witnesses.
+- [x] Test stale finite and generic link levels against finite targets in
+  bytecode and native code.
+- [x] Pass depth-200,000 shared-graph regression in bytecode/native code;
+  inspect erased native calling conventions.
+- [x] Complete review and publish the lowering batch.
+- [ ] Connect this lowering operation to the effective unifier and HM driver.
+
+The semantic lowering certificate is independent of representative functions.
+It contains the terminal-write trace and a concrete bounded tree: links carry
+only graph edges, while terminal nodes carry the level bound. The runtime
+constructs this certificate from its effective-level proof. The certificate
+alone proves heap framing, exact level updates, preservation of link records
+and low boundaries, and completed-traversal effective ordering. This allows
+the next unifier trace to remain ordinary inductive data.
+
+The complete lowering batch passes bytecode/native tests, including the
+terminal-certificate proofs and depth-200,000 shared graph. Native lowering
+takes only bound and pointer arguments. `codex review --uncommitted` exited
+zero with no actionable findings.
