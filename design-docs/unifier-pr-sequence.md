@@ -368,6 +368,11 @@ HM effective-level integration:
 - [x] Return the certificate from the effective copier in an erased field.
 - [x] Prove effective environment lookup, monomorphic binding and transport.
 - [x] Derive the declarative HM variable-typing judgment from certified copying.
+- [x] Define the representative-level driver invariant and prove allocation,
+  copying with cleanup, unification, and child-pool entry preserve it.
+- [x] Prove finite representative registration and bound preservation through
+  every execution case; derive parent-pool coverage and closing preservation.
+- [x] Add an allocator whose contract permits stale child-link levels.
 - [ ] Migrate the remaining execution cases, metadata and public HM proofs.
 - [ ] Connect the complete driver and representative pools, including routing.
 
