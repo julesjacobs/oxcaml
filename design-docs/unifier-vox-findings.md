@@ -310,3 +310,11 @@ neither recursive argument is recognized as a proper descendant. The equivalent
 nested matches are accepted. This arose in effective environment transport;
 that proof uses nested matches. Preserving descent through tuple scrutinees
 would remove this source-level restriction without weakening totality.
+
+The effective HM integration now checks soundness, completeness, rejection and
+principality for the CPS runtime trace. Higher-order model callbacks sometimes
+need their heap expression written identically on both sides of a dependent
+function type: unfolding equal heap expressions and wrapping the outer callback
+in `refine_` did not adapt a nested callback argument. An explicit adapter with
+the callee's heap expression and a refined inner callback works. This is a
+remaining elaboration usability issue; no assumption was added to bypass it.
