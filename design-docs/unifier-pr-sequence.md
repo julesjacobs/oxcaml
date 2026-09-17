@@ -382,3 +382,15 @@ proves that a link cannot certify itself as a terminal representative. Native
 Cmm retains only depth, pool and root arguments, with no certificate traversal.
 `codex review --uncommitted` exited zero with no actionable findings. The
 complete HM driver still uses its existing execution trace and runtime.
+
+The replacement HM execution trace now uses the effective unifier,
+representative-only closing/transfer and certified copying. Its allocation
+predicate requires fresh, scoped descriptors; level bounds belong to the
+runtime invariant. The finite-graph preservation and model-restriction proofs
+cover every execution constructor, including failure prefixes and nested lets.
+These are semantic prerequisites; the active driver has not switched yet.
+
+The combined copier/unifier/HM proof suite passes in bytecode and native mode
+with the replacement execution spec, finite-graph proof and model-restriction
+proof included. The existing stale-alias and depth-200,000 runtime cases still
+pass. No new runtime driver is claimed by this semantic batch.
