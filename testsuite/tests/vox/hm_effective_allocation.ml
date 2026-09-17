@@ -100,3 +100,19 @@ let (allocate_runtime @ total) : (h : Pref.heap) @ immutable ->
     listed_def next x; at_level_def h x; at_level_def after x;
     runtime_at_def after b depth next x; safe_def after b x;
     depth_bound_def after b depth x; refine_ u)
+
+let (allocated_below @ total) : (h : Pref.heap) @ immutable ->
+    (depth : int) -> (p : node Pref.t) @ immutable -> (desc : desc) @ immutable ->
+    (heads : E.heads) @ total ->
+    {u : unit | Hm_effective_execution_spec.allocated h depth p desc
+      && (match desc with Link _ -> false | _ -> true)
+      && E.valid_head (H.put h p (cell desc depth)) heads p} ->
+    {u : unit | E.effective_below (H.put h p (cell desc depth)) heads p depth} @ ghost =
+  fun h depth p desc heads premise -> ghost_ (
+    let refine_ premise = premise in
+    Hm_effective_execution_spec.allocated_def h depth p desc;
+    let v = cell desc depth in let after = H.put h p v in
+    cell_def desc depth; Copy_heap_proofs.put_frame h p v p;
+    terminal_def after p; observe_def after p;
+    let u = () in E.terminal_level after heads p (refine_ u);
+    at_level_def after p; E.effective_below_def after heads p depth; refine_ u)
