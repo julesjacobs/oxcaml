@@ -280,3 +280,12 @@ Minimized probes are in `/tmp/vox-representative-pool-check/`:
 copying helper checks when the function is passed directly as a ghost argument.
 The existing inferencer does not use these new predicates and remains unchanged.
 This is an expressiveness/erasure obstacle, not evidence of unsound acceptance.
+
+The prerequisite fix retains immutable records containing functions as symbolic
+field collections outside SMT. Predicate projection preserves the existing
+function witness, and record construction, updates and conditional selection
+preserve field identities. Partial program calls stay opaque; function equality
+remains unsupported. This covers the representative callback wrappers used by
+effective copying. Passing an entire function-containing record as an argument
+to an opaque predicate and recursively unfolding nested record parameters remain
+outside this change.
