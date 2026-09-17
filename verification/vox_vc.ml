@@ -37,6 +37,7 @@ type function_value =
 and value =
   | Scalar of term
   | Function of function_value
+  | Record of (string * value option) list
 
 type set_origin =
   | Set_empty
@@ -65,15 +66,18 @@ let scalar_value t = Some (Scalar t)
 
 let scalar_option = Option.map (fun t -> Scalar t)
 
-let equal_value a b =
+let rec equal_value a b =
   match a, b with
   | None, None -> true
   | Some (Scalar a), Some (Scalar b) -> a = b
   | Some (Function a), Some (Function b) ->
     a.instances == b.instances && a.total = b.total
+  | Some (Record a), Some (Record b) ->
+    List.length a = List.length b
+    && List.for_all2 (fun (x, a) (y, b) -> x = y && equal_value a b) a b
   | _ -> false
 
-let join_value condition a b =
+let rec join_value condition a b =
   if equal_value a b
   then a
   else
@@ -93,6 +97,12 @@ let join_value condition a b =
              lambda = None;
              application = None
            })
+    | Some (Record a), Some (Record b) when List.map fst a = List.map fst b ->
+      Some
+        (Record
+           (List.map2
+              (fun (label, a) (_, b) -> label, join_value condition a b)
+              a b))
     | _ -> None
 
 type obligation =
@@ -385,17 +395,20 @@ let construct ctx env ty name values =
     end
 
 let select_field ctx env ty name value =
-  match data_of_type ctx env ty, scalar value with
-  | Some { kind = Record_data constructor; _ }, Some value ->
-    begin match
-      List.find_mapi
-        (fun index (label, _) -> if label = name then Some index else None)
-        (Constructor.fields constructor)
-    with
-    | Some index -> scalar_value (select ctx constructor index value)
-    | None -> None
-    end
-  | _ -> None
+  match value with
+  | Some (Record fields) -> Option.join (List.assoc_opt name fields)
+  | _ -> (
+    match data_of_type ctx env ty, scalar value with
+    | Some { kind = Record_data constructor; _ }, Some value ->
+      begin match
+        List.find_mapi
+          (fun index (label, _) -> if label = name then Some index else None)
+          (Constructor.fields constructor)
+      with
+      | Some index -> scalar_value (select ctx constructor index value)
+      | None -> None
+      end
+    | _ -> None)
 
 let record_value ctx env ty base fields =
   match data_of_type ctx env ty with
@@ -414,7 +427,22 @@ let record_value ctx env ty base fields =
     | Some values -> scalar_value (Construct (constructor, values))
     | None -> None
     end
-  | _ -> None
+  | _ ->
+    Option.map
+      (fun labels ->
+        Record
+          (List.map
+             (fun (name, _) ->
+               let value =
+                 match List.assoc_opt name fields with
+                 | Some value -> value
+                 | None ->
+                   Option.bind base (fun (ty, value) ->
+                       select_field ctx env ty name value)
+               in
+               name, value)
+             labels))
+      (immutable_record_fields env ty)
 
 let rec erase_assertions code =
   List.filter_map
@@ -904,26 +932,48 @@ let iarray_value ctx env ty s values =
     s, iarray_copy ctx iarray_sort (Iarray_literal (List.map scalar values))
   | None -> s, None
 
+let fresh_function ?primitive label =
+  Function
+    { label;
+      instances = ref [];
+      specializations = ref [];
+      choice = None;
+      primitive;
+      total = false;
+      lambda = None;
+      application = None
+    }
+
 let fresh ?primitive ctx env ty label =
-  match sort ctx.encoding env ty with
-  | Some sort ->
-    register_sort ctx sort;
-    scalar_value (fresh_symbol sort label)
-  | None -> (
+  let is_function ty =
     match get_desc (Ctype.expand_head env ty) with
-    | Tarrow _ ->
-      Some
-        (Function
-           { label;
-             instances = ref [];
-             specializations = ref [];
-             choice = None;
-             primitive;
-             total = false;
-             lambda = None;
-             application = None
-           })
-    | _ -> None)
+    | Tarrow _ -> true
+    | _ -> false
+  in
+  let field (name, ty) =
+    let label = label ^ "." ^ name in
+    let value =
+      if is_function ty
+      then Some (fresh_function label)
+      else
+        Option.map
+          (fun sort ->
+            register_sort ctx sort;
+            Scalar (fresh_symbol sort label))
+          (sort ctx.encoding env ty)
+    in
+    name, value
+  in
+  match immutable_record_fields env ty with
+  | Some fields when List.exists (fun (_, ty) -> is_function ty) fields ->
+    Some (Record (List.map field fields))
+  | _ -> (
+    match sort ctx.encoding env ty with
+    | Some sort ->
+      register_sort ctx sort;
+      scalar_value (fresh_symbol sort label)
+    | None when is_function ty -> Some (fresh_function ?primitive label)
+    | None -> None)
 
 let symbolic_path ctx env ty path =
   let path = Env.normalize_value_path None env path in
@@ -1615,7 +1665,7 @@ let rec function_call ctx env ty fn args =
         Option.map
           (function
             | Function fn -> Function { fn with lambda = None }
-            | Scalar _ as value -> value)
+            | (Scalar _ | Record _) as value -> value)
           fn
       in
       function_call ctx env ty fn args
@@ -1820,7 +1870,7 @@ let rec predicate ctx env s e =
       in
       name ctx s (scalar_value (required e.rexp_loc value))
     | Rexp_record (fields, extended)
-    | Rexp_record_unboxed_product (fields, extended) ->
+    | Rexp_record_unboxed_product (fields, extended) -> (
       let s, base =
         match extended with
         | None -> s, None
@@ -1834,16 +1884,17 @@ let rec predicate ctx env s e =
       let fields =
         List.map2 (fun (_, name, _) value -> name, value) fields values
       in
-      name ctx s
-        (scalar_value
-           (required e.rexp_loc (record_value ctx env e.rexp_type base fields)))
+      let value = record_value ctx env e.rexp_type base fields in
+      match value with
+      | Some (Record _) -> name ctx s value
+      | _ -> name ctx s (scalar_value (required e.rexp_loc value)))
     | Rexp_field (record_exp, _, field_name)
-    | Rexp_unboxed_field (record_exp, _, field_name) ->
+    | Rexp_unboxed_field (record_exp, _, field_name) -> (
       let s, record = eval s record_exp in
-      name ctx s
-        (scalar_value
-           (required e.rexp_loc
-              (select_field ctx env record_exp.rexp_type field_name record)))
+      let value = select_field ctx env record_exp.rexp_type field_name record in
+      match value with
+      | Some (Function _ | Record _) -> name ctx s value
+      | _ -> name ctx s (scalar_value (required e.rexp_loc value)))
     | Rexp_apply (fn, args) ->
       let prim =
         match fn.rexp_desc with
