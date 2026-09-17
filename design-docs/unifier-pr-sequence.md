@@ -323,3 +323,38 @@ The complete lowering batch passes bytecode/native tests, including the
 terminal-certificate proofs and depth-200,000 shared graph. Native lowering
 takes only bound and pointer arguments. `codex review --uncommitted` exited
 zero with no actionable findings.
+
+Effective unifier migration (in progress):
+
+- [x] Remove raw alias-level requirements from representative lookup and the
+  in-node marked occurs check.
+- [x] Check path compression against finite representative levels, preserving
+  effective levels, ordering, finite graphs, models and generic nodes.
+- [x] Add a semantic trace with terminal-only lowering and graph-only traversal.
+- [x] Reprove soundness, completeness, rejection, finite-graph preservation and
+  the most-general-unifier property for that trace.
+- [x] Connect occurs checking and descriptor-first lowering in variable binding;
+  check successful binding and occurs rejection through stale aliases in
+  bytecode/native code, including mark cleanup and unchanged link levels.
+- [x] Transport representative paths, effective level decreases and ordering
+  through every trace constructor, including failure prefixes.
+- [x] Connect the recursive runtime, compression and structure linking to the
+  effective trace and metadata proofs.
+- [x] Prove physical protection of effectively generic nodes and preservation of
+  representative-only pool coverage.
+- [ ] Integrate the effective unifier into the full HM driver and reclose its
+  public conclusions.
+- [ ] Switch the HM driver to representative-only pools and direct enclosing
+  pool routing; complete integrated regression, erasure checks and review.
+
+The active HM driver still uses the previous unifier and pool implementation.
+The new trace theorems certify the separate effective unifier runtime. Its
+stale-alias, occurs-rejection and recursive-arrow fixtures pass in bytecode
+and native code. Native Cmm shows only the two node pointers as public unifier
+arguments, and only those pointers plus a continuation in the recursive worker.
+
+The shared-graph fixture also passes in bytecode/native code. It applies the MGU
+theorem on success and checks retained child linking when a later comparison
+rejects. `codex review --uncommitted` exited zero with no actionable findings;
+its nested test attempt could not identify its process, so the successful
+parent-run suites are the test evidence.
