@@ -289,3 +289,15 @@ remains unsupported. This covers the representative callback wrappers used by
 effective copying. Passing an entire function-containing record as an argument
 to an opaque predicate and recursively unfolding nested record parameters remain
 outside this change.
+
+### Reflected local functions with named function types
+
+A reflected definition containing `let f : callback @ total = fun x -> x`,
+where `type callback = int -> int`, crashed while reconstructing the function's
+refinement expression. The reconstruction inspected an unexpanded type alias
+as an arrow. Expanding each function type head before extracting its result
+fixes ordinary aliases and aliases in curried result types. Regression cases
+check generated definition lemmas. The VC translator still does not support
+local lambdas inside these lemmas: using one reports an omitted premise and
+rejects the resulting unproved claim. HM copy certificates therefore use
+first-order predicates; this fix only removes the compiler crash.
