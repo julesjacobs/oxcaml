@@ -128,3 +128,86 @@ let (close_protected @ total) : (h : Pref.heap) @ immutable ->
       E.closed_level h heads cut pool p (refine_ u);
       let g = Generic in Generalize_spec.close_level_def cut g; ());
     refine_ u)
+
+let[@def] rec (scheme @ total) (h : Pref.heap @ immutable)
+    (heads : E.heads @ total) (cut : int) (tree : Level_finite_spec.tree @ immutable) = ghost_ (
+  let p = Level_finite_spec.tree_root tree in
+  if not (Generalize_spec.close_level cut (E.level h heads p) === Generic) then Boundary p else
+  match tree with
+  | Level_finite_spec.Free p -> Parameter p
+  | Level_finite_spec.Constant_tree p -> Constant p
+  | Level_finite_spec.Branch (p, a, b) -> Product (p, scheme h heads cut a, scheme h heads cut b)
+  | Level_finite_spec.Alias_tree (p, child) -> Indirect (p, scheme h heads cut child))
+
+let rec (scheme_root @ total) : (h : Pref.heap) @ immutable ->
+    (heads : E.heads) @ total -> (cut : int) -> (tree : Level_finite_spec.tree) @ immutable ->
+    {u : unit | root (scheme h heads cut tree) === Level_finite_spec.tree_root tree} @ ghost =
+  fun h heads cut tree -> ghost_ (
+    scheme_def h heads cut tree; Level_finite_spec.tree_root_def tree;
+    let result = scheme h heads cut tree in root_def result;
+    let u = () in refine_ u)
+
+let rec (scheme_valid @ total) : (h : Pref.heap) @ immutable ->
+    (heads : E.heads) @ total ->
+    (witness : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h heads x})) @ total ->
+    (cut : int) -> (pool : Generalize_spec.pool) @ immutable ->
+    (coverage : ((x : node Pref.t) @ immutable ->
+      {u : unit | Representative_level.representative_covered h cut pool x})) @ total ->
+    (tree : Level_finite_spec.tree) @ immutable ->
+    {u : unit | Generalize_spec.pool_scoped h pool && Level_finite_spec.finite h tree} ->
+    {u : unit | valid_template (Representative_pool_spec.close_heap h cut pool) heads
+      (scheme h heads cut tree)} @ ghost =
+  fun h heads witness cut pool coverage tree premise -> ghost_ (
+    let refine_ premise = premise in let u = () in
+    Level_finite_spec.finite_def h tree; Level_finite_spec.tree_root_def tree;
+    let p = Level_finite_spec.tree_root tree in
+    let after = Representative_pool_spec.close_heap h cut pool in
+    witness p; let r = heads p in coverage r.root;
+    E.closed_level h heads cut pool p (refine_ u);
+    Representative_pool_spec.close_heap_def h cut pool;
+    let filtered = Representative_level.representatives h pool in
+    Representative_level.representatives_scoped h pool (refine_ u);
+    Generalize_proofs.closed_observe h cut filtered p (refine_ u);
+    Generalize_spec.closed_at_def h after cut filtered p;
+    U.observe_def h p; U.observe_def after p;
+    scheme_def h heads cut tree; scheme_root h heads cut tree;
+    let output = scheme h heads cut tree in valid_template_def after heads output;
+    finite_def after heads p; generic_def after heads p;
+    if not (Generalize_spec.close_level cut (E.level h heads p) === Generic) then refine_ u
+    else (match tree with
+    | Level_finite_spec.Free _ | Level_finite_spec.Constant_tree _ -> refine_ u
+    | Level_finite_spec.Alias_tree (_, child) ->
+      scheme_root h heads cut child;
+      scheme_valid h heads witness cut pool coverage child (refine_ u); refine_ u
+    | Level_finite_spec.Branch (_, a, b) ->
+      scheme_root h heads cut a; scheme_root h heads cut b;
+      scheme_valid h heads witness cut pool coverage a (refine_ u);
+      scheme_valid h heads witness cut pool coverage b (refine_ u); refine_ u))
+
+let rec (scheme_boundary @ total) : (h : Pref.heap) @ immutable ->
+    (heads : E.heads) @ total -> (cut : int) ->
+    (pool : Generalize_spec.pool) @ immutable ->
+    (witness : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h heads x})) @ total ->
+    (levels : ((x : node Pref.t) @ immutable ->
+      {u : unit | match E.level h heads x with Generic -> true | Finite n -> n >= 0})) @ total ->
+    (tree : Level_finite_spec.tree) @ immutable ->
+    {u : unit | Generalize_spec.pool_scoped h pool && Level_finite_spec.finite h tree} ->
+    {u : unit | boundary_bound (Representative_pool_spec.close_heap h cut pool) heads cut
+      (scheme h heads cut tree)} @ ghost =
+  fun h heads cut pool witness levels tree premise -> ghost_ (
+    let refine_ premise = premise in let u = () in
+    let p = Level_finite_spec.tree_root tree in let output = scheme h heads cut tree in
+    let after = Representative_pool_spec.close_heap h cut pool in
+    Level_finite_spec.finite_def h tree; Level_finite_spec.tree_root_def tree;
+    scheme_def h heads cut tree; boundary_bound_def after heads cut output;
+    let old = E.level h heads p in Generalize_spec.close_level_def cut old;
+    if not (Generalize_spec.close_level cut old === Generic) then (
+      levels p; witness p; E.effective_below_def h heads p cut;
+      E.closed_boundary h heads cut pool p cut (refine_ u); refine_ u)
+    else (match tree with
+    | Level_finite_spec.Free _ | Level_finite_spec.Constant_tree _ -> refine_ u
+    | Level_finite_spec.Alias_tree (_, child) ->
+      scheme_boundary h heads cut pool witness levels child (refine_ u); refine_ u
+    | Level_finite_spec.Branch (_, a, b) ->
+      scheme_boundary h heads cut pool witness levels a (refine_ u);
+      scheme_boundary h heads cut pool witness levels b (refine_ u); refine_ u))
