@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml hm_declarative.ml hm_environment_spec.ml compression_spec.ml compression_path_proofs.ml compressed_representative.ml compression_proofs.ml leaf_provenance_spec.ml leaf_provenance_proofs.ml structure_finite_proofs.ml structure_model_proofs.ml structure_spec.ml structure_link.ml structure_origin_proofs.ml compression_origin_proofs.ml optimized_unifier_spec.ml optimized_metadata.ml optimized_finite_proofs.ml optimized_model_proofs.ml optimized_origin_proofs.ml optimized_link_proofs.ml optimized_link.ml pruned_lower_proofs.ml pruned_lower.ml pruned_bind.ml optimized_unifier.ml copy_order_proofs.ml ordered_copy.ml copy_cleanup_spec.ml copy_cleanup_proofs.ml copy_cleanup.ml clean_pooled_copy.ml clean_copy.ml nested_pool_spec.ml nested_pool_proofs.ml nested_pool.ml representative_level.ml representative_pool_spec.ml representative_pool_proofs.ml representative_pool.ml effective_level.ml effective_template.ml representative_mutation.ml effective_copy_spec.ml effective_copy_heap_proofs.ml effective_copy_metadata.ml effective_copy_complete.ml effective_copy_sound.ml effective_copy_template.ml effective_copy_finite.ml effective_copy_order.ml effective_copy_origin.ml effective_copy_pool.ml effective_copy_runtime.ml effective_copy_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml hm_declarative.ml hm_environment_spec.ml compression_spec.ml compression_path_proofs.ml compressed_representative.ml compression_proofs.ml leaf_provenance_spec.ml leaf_provenance_proofs.ml structure_finite_proofs.ml structure_model_proofs.ml structure_spec.ml structure_link.ml structure_origin_proofs.ml compression_origin_proofs.ml optimized_unifier_spec.ml optimized_metadata.ml optimized_finite_proofs.ml optimized_model_proofs.ml optimized_origin_proofs.ml optimized_link_proofs.ml optimized_link.ml pruned_lower_proofs.ml pruned_lower.ml pruned_bind.ml optimized_unifier.ml copy_order_proofs.ml ordered_copy.ml copy_cleanup_spec.ml copy_cleanup_proofs.ml copy_cleanup.ml clean_pooled_copy.ml clean_copy.ml nested_pool_spec.ml nested_pool_proofs.ml nested_pool.ml representative_level.ml representative_pool_spec.ml representative_pool_proofs.ml representative_pool.ml effective_level.ml effective_template.ml representative_mutation.ml effective_copy_spec.ml effective_copy_heap_proofs.ml effective_copy_metadata.ml effective_copy_complete.ml effective_copy_sound.ml effective_copy_template.ml effective_copy_finite.ml effective_copy_order.ml effective_copy_origin.ml effective_copy_pool.ml effective_copy_runtime.ml representative_certificate.ml copy_certificate_spec.ml copy_certificate_capture.ml copy_certificate_proofs.ml certified_copy.ml hm_type_proofs.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_freshness_proofs.ml hm_template_instance_proofs.ml hm_execution_spec.ml hm_effective_environment.ml hm_effective_variable.ml effective_copy_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -53,7 +53,18 @@ let run generic =
   let state : {t : Pref.token | Pref.own t === c.C.saved && H.mem c.C.saved root} = refine_ state in
   let refine_ state = state in
 
-  let refine_ out = C.instantiate c heads scope clean witness (refine_ depth) base root (refine_ state) in
+  ghost_ (
+    let wrong = {R.root = p; path = U.Here} in
+    let fake = Representative_certificate.Entry
+      (p, wrong, Representative_certificate.Empty) in
+    Representative_certificate.certificate_valid_def c.C.saved fake;
+    let path = U.Here in U.resolves_def c.C.saved p p path;
+    U.terminal_def c.C.saved p; U.observe_def c.C.saved p;
+    let u = () in
+    let _ : {u : unit | not (Representative_certificate.certificate_valid c.C.saved fake)} = refine_ u in ());
+  let refine_ out = Certified_copy.instantiate c heads scope clean witness (refine_ depth) base root (refine_ state) in
+  ghost_ (let u = () in Copy_certificate_proofs.replay c.C.saved out.#certificate
+    heads.Ghost.ghost witness.Ghost.ghost c.C.epoch c.C.depth out.#history root out.#value (refine_ u));
   let result = out.#value in let state = out.#state in let d = ghost_ out.#history in
   let after = ghost_ (Pref.own (borrow_ state)) in
   ghost_ (let u = () in target_allocated c.C.saved heads.Ghost.ghost root depth d root result (refine_ u);
@@ -126,7 +137,7 @@ let run generic =
   let state : {t : Pref.token | Pref.own t === c2.C.saved && H.mem c2.C.saved root} = refine_ state in
   let refine_ state = state in
 
-  let refine_ second = C.instantiate c2 next_heads next_scope next_clean next_witness (refine_ depth) base root (refine_ state) in
+  let refine_ second = Certified_copy.instantiate c2 next_heads next_scope next_clean next_witness (refine_ depth) base root (refine_ state) in
   let refine_ same = Pref.equal result second.#value in assert (not same);
   ()
 
@@ -162,7 +173,7 @@ let rec deep : int -> int -> (h : Pref.heap Ghost.t) @ immutable ->
         E.valid_head c.C.saved heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
       terminal.Ghost.ghost x; E.valid_head_def c.C.saved heads.Ghost.ghost x; here_def x;
       let path = U.Here in U.resolves_def c.C.saved x x path; let u = () in refine_ u)} in
-    let refine_ out = C.instantiate c heads scope clean witness (refine_ depth) base p (refine_ state) in
+    let refine_ out = Certified_copy.instantiate c heads scope clean witness (refine_ depth) base p (refine_ state) in
     assert (pool_size 0 out.#pool = expected))
   else (
     let desc = Arrow (p, p) in

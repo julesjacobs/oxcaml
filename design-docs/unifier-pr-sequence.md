@@ -358,3 +358,27 @@ theorem on success and checks retained child linking when a later comparison
 rejects. `codex review --uncommitted` exited zero with no actionable findings;
 its nested test attempt could not identify its process, so the successful
 parent-run suites are the test evidence.
+
+HM effective-level integration:
+
+- [x] Represent copy evidence as ordinary finite data suitable for an inductive
+  execution trace, with checked representative paths and coverage.
+- [x] Prove equivalence with effective copy validity and target predicates;
+  construct the certificate entirely in ghost code.
+- [x] Return the certificate from the effective copier in an erased field.
+- [x] Prove effective environment lookup, monomorphic binding and transport.
+- [x] Derive the declarative HM variable-typing judgment from certified copying.
+- [ ] Migrate the remaining execution cases, metadata and public HM proofs.
+- [ ] Connect the complete driver and representative pools, including routing.
+
+The reflected-function-alias crash found during this work is fixed in PR #182.
+The compiler regressions, Merlin tests and review pass. Local lambdas inside
+reflected predicates still cannot be translated by the VC generator; the copy
+certificate predicates use ordinary first-order data.
+
+The certified copier passes bytecode/native regressions for stale links,
+sharing, repeated instantiation and depth-200,000 graphs. The fixture also
+proves that a link cannot certify itself as a terminal representative. Native
+Cmm retains only depth, pool and root arguments, with no certificate traversal.
+`codex review --uncommitted` exited zero with no actionable findings. The
+complete HM driver still uses its existing execution trace and runtime.
