@@ -308,6 +308,27 @@ let applied env declaration arguments ty =
   try Some (Ctype.apply env declaration.type_params ty arguments)
   with Ctype.Cannot_apply -> None
 
+let immutable_record_fields env ty =
+  match source_type env ty with
+  | Some (arguments, declaration) ->
+    begin match declaration.type_kind with
+    | Type_record (labels, (Record_boxed | Record_mixed _), _)
+    | Type_record_unboxed_product (labels, _, _)
+      when List.for_all (fun label -> label.ld_mutable = Immutable) labels ->
+      Misc.Stdlib.List.map_option
+        (fun label ->
+          Option.map
+            (fun ty ->
+              let ty =
+                match get_desc ty with Tpoly (body, []) -> body | _ -> ty
+              in
+              Ident.name label.ld_id, ty)
+            (applied env declaration arguments label.ld_type))
+        labels
+    | _ -> None
+    end
+  | None -> None
+
 let rec nested_type_key key = function
   | Variable _ -> false
   | Constructor (_, arguments) ->
