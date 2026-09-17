@@ -237,3 +237,40 @@ physical preservation of saved low boundaries, and whole-scan level ordering.
 These predicates use explicit total representative witnesses, with no SMT
 quantifiers or new assumptions. The active HM implementation has not switched
 to these predicates yet.
+
+The epoch-free copying, void-layout arguments, stack-safe traversals and efficient
+environment batch is published as PR #176, stacked on #175:
+https://github.com/julesjacobs/oxcaml/pull/176.
+
+Representative-pool migration:
+
+- [x] Construct unique representative witnesses from finite forests.
+- [x] Check effective closing, physical low-boundary preservation and whole-scan
+  effective ordering; derive effective finite scope from effective ordering.
+- [x] Prove links never become representatives again under the current optimized
+  unifier, including failure prefixes, compression and structure linking.
+- [x] Prove terminal redirection transports representative paths and low bounds.
+- [x] Implement representative-only fused closing/transfer as a separate checked
+  primitive; prove coverage and bounds for its retained entries.
+- [ ] Migrate copy classification, templates, protected boundaries and the
+  inference sharing shortcut to effective levels.
+- [ ] Migrate lowering and the full HM runtime/semantic ladder, then switch the
+  inference driver to representative-only pools.
+- [ ] Route retained representatives directly to their enclosing level pools.
+- [ ] Complete regression, erasure, review and publication of the pool migration.
+
+The new primitive remains separate from the active inferencer until copying and
+saved-boundary transport support stale Link levels. These local proofs do not
+claim the full HM theorem for the new pool implementation.
+
+The representative-pool fixture passes in bytecode/native code, including the
+two-stage alias/generalized-target case. Native Cmm shows fused closing as a loop
+with only cut, child pool and parent pool arguments. The effective-template
+uniqueness, transport and closing-protection lemmas also check. The final
+`codex review --uncommitted` found no actionable defects.
+
+Effective copy-history framing, allocation, mapping freshness (including aliases)
+and pointer-equality classification check in the isolated experiment. Wiring them
+into an erased runtime interface exposed the ghost function-field limitation
+recorded in `unifier-vox-findings.md`; those experimental copy modules are not
+part of the active inferencer.

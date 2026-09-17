@@ -265,3 +265,18 @@ and a callback accepting `{n : int | n = expected}`; adapting it to accept
 its argument and calls `callback (refine_ value)` checks. Giving continuations
 the exact incoming contract also works. Extending checked callback adaptation
 to refined input types would remove these annotations; no new axiom is needed.
+
+### Function witnesses inside ghost records
+
+A total function can be passed directly to a refinement predicate. The same
+function projected from `Ghost.t` fails with `Unsupported refinement predicate
+in VC generation`. Binding the projection to a local variable first also fails:
+the premise mentioning the projection is omitted from SMT translation. This
+prevents packaging a representative-selection function in a void-layout wrapper
+when its identity occurs in copy-history predicates.
+
+Minimized probes are in `/tmp/vox-representative-pool-check/`:
+`callback_wrapper_probe.ml` and `callback_wrapper_adapter.ml`. The effective
+copying helper checks when the function is passed directly as a ghost argument.
+The existing inferencer does not use these new predicates and remains unchanged.
+This is an expressiveness/erasure obstacle, not evidence of unsound acceptance.
