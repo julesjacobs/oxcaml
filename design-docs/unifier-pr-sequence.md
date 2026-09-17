@@ -1,5 +1,10 @@
 # Mutable inference PR sequence
 
+Current entry point: `Hm_routed_infer.closed_hm`. It uses representative-level
+unification, in-node copy forwarding with cleanup, and mutable enclosing-level
+pools. Earlier drivers and progress notes below record stages of the proof
+ladder; the final section describes the current implementation.
+
 Each stage supplies explicit existential witnesses and total proof functions for
 universal facts. Keep SMT refinements quantifier-free. Preserve the existing Lean
 algorithm and theorem as a reference throughout this separate Vox development.
@@ -168,7 +173,7 @@ required for this sequence. Preserve full HM proofs at every runtime change.
 - [x] Avoid copy-session allocation for nongeneric instances.
 - [x] Reuse compressed representatives and avoid already-direct link writes.
 - [x] Fuse pool closing/draining and skip unchanged writes.
-- [ ] Discard obsolete pool links and route retained nodes to the appropriate
+- [x] Discard obsolete pool links and route retained nodes to the appropriate
   enclosing pool.
 - [x] Prove all memos empty at inference boundaries and restore this invariant
   after copying, including untouched and newly allocated nodes.
@@ -181,7 +186,7 @@ required for this sequence. Preserve full HM proofs at every runtime change.
 - [x] Reduce update allocation by skipping unchanged writes. Retain the accepted
   `Pref` representation; splitting every node field is not required for the
   algorithmic model and has not been justified by a measured benefit.
-- [ ] Run integrated positive/rejection tests, inspect erasure, review and
+- [x] Run integrated positive/rejection tests, inspect erasure, review and
   publish the stacked improvements.
 
 All helpers on the HM execution path now use void-layout ghost wrappers.
@@ -256,8 +261,8 @@ Representative-pool migration:
   effective levels; use the certified copier for every variable occurrence.
 - [x] Migrate lowering and the full HM runtime/semantic ladder, then switch the
   inference driver to representative-only pools.
-- [ ] Route retained representatives directly to their enclosing level pools.
-- [ ] Complete regression, erasure, review and publication of the pool migration.
+- [x] Route retained representatives directly to their enclosing level pools.
+- [x] Complete regression, erasure, review and publication of the pool migration.
 
 The new primitive remains separate from the active inferencer until copying and
 saved-boundary transport support stale Link levels. These local proofs do not
@@ -344,7 +349,7 @@ Effective unifier migration (in progress):
   representative-only pool coverage.
 - [x] Integrate the effective unifier into the full HM driver and reclose its
   public conclusions.
-- [ ] Switch the HM driver to representative-only pools and direct enclosing
+- [x] Switch the HM driver to representative-only pools and direct enclosing
   pool routing; complete integrated regression, erasure checks and review.
 
 The active HM driver still uses the previous unifier and pool implementation.
@@ -377,7 +382,7 @@ HM effective-level integration:
   effective trace; prove soundness, completeness, rejection and principality.
 - [x] Connect the complete CPS driver to the effective allocator, certified
   copier, effective unifier and representative-only closing/transfer.
-- [ ] Route retained representatives directly to their enclosing level pools.
+- [x] Route retained representatives directly to their enclosing level pools.
 
 The reflected-function-alias crash found during this work is fixed in PR #182.
 The compiler regressions, Merlin tests and review pass. Local lambdas inside
@@ -415,13 +420,44 @@ now apply to this driver's actual execution trace. The new provenance proof
 uses finite-graph witnesses rather than carrying the runtime invariant.
 The earlier `hm_infer` and its theorem modules remain as a regression baseline.
 
-Direct enclosing-pool routing remains unfinished: `close_and_transfer` still
-moves retained representatives into the immediate parent pool. Consequently a
-low-level representative can be rescanned at several enclosing let boundaries.
-The current driver does not claim to remove that cost.
+The effective driver retained immediate-parent transfer as an intermediate
+stage. The routed driver below replaces this transfer with direct routing.
 
 The effective driver suite passes in bytecode and native code, including
 polymorphic completeness and principality applied to actual runtime results.
 Native Cmm retains only depth, pool, environment, term and continuation in the
 worker; heap witnesses, traces and proof callbacks are erased.
 `codex review --uncommitted` found no actionable defects.
+
+## Direct enclosing-level pool routing
+
+`Hm_routed_infer.closed_hm` uses an owned mutable array of enclosing-level
+pools. Entering a let saves the current pool. Closing its RHS discards links,
+generalizes high representatives and routes retained representatives directly
+to their finite-level bucket. Taking and clearing the parent bucket resumes
+inference without repeatedly transferring lower-level entries through it.
+
+The storage invariant supplies an explicit location witness for every finite
+representative. Allocation, copying, unification, entry and closing preserve
+this invariant. Closing equivalence proves that the physical pools produce
+exactly the heap of the existing logical closing operation. The actual routed
+execution therefore satisfies the existing soundness, completeness, rejection
+and principality contracts in `Hm_effective_sound` and `Hm_effective_complete`.
+
+Closing uses two linear passes and a temporary retained list. A CPS traversal
+measures nested-let depth to size the pool array before inference. These costs
+remain; no benchmark or overall complexity theorem is claimed.
+
+The public `closed_hm` result drops scratch pools and the mutable bucket array;
+only the type root, ownership token and erased logical pool/execution remain.
+`closed_compiled` retains the storage result for internal diagnostics.
+
+The integrated suite passes in bytecode and native code, including soundness
+and principality applied to actual results, rejection, shared graphs and
+depth-200,000 fixtures. Routing regressions retain 2,000 lambda types through
+2,000 enclosing lets, and 64 through 200,000 enclosing lets, checking the exact
+final physical pool size. Native Cmm shows only depth, environment, term,
+physical pool, mutable pools and continuation in the worker's runtime arguments.
+
+Review identified and resolved scratch-pool retention in the public result.
+The subsequent `codex review --uncommitted` reported no actionable defects.
