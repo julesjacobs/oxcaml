@@ -89,6 +89,23 @@ module Heap : sig
       || put (put h p x) q y === put (put h q y) p x} @ ghost
     @@ total = "caml_pref_heap_law5"
 
+  external split_law : (h : heap) @ immutable ->
+    (selection : heap) @ immutable ->
+    {u : unit | union (restrict h selection) (exclude h selection) === h
+      && disjoint (restrict h selection) (exclude h selection)} @ ghost
+    @@ total = "caml_pref_heap_law2"
+  external exclude_put_law : ('a : immutable_data).
+    (h : heap) @ immutable -> (selection : heap) @ immutable ->
+    (p : 'a t) @ immutable -> (v : 'a) @ immutable ->
+    {u : unit | not (mem selection p) ||
+      exclude (put h p v) selection === exclude h selection} @ ghost
+    @@ total = "caml_pref_heap_law4"
+  external exclude_union_law : (a : heap) @ immutable ->
+    (b : heap) @ immutable -> (selection : heap) @ immutable ->
+    {u : unit | exclude (union a b) selection ===
+      union (exclude a selection) (exclude b selection)} @ ghost
+    @@ total = "caml_pref_heap_law3"
+
 end
 
 val empty : unit -> {t : token | own t === Heap.empty ()} @ unique

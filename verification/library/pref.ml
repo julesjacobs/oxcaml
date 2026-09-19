@@ -82,33 +82,33 @@ module Heap = struct
       || put (put h p x) q y === put (put h q y) p x} @ ghost
     @@ total = "caml_pref_heap_law5"
 
-end
-
-module Raw = struct
-  external empty : unit ->
-    {t : token | own t === Heap.empty ()} @ unique
-    @@ total = "caml_pref_empty_bytecode" "caml_pref_empty"
-  external alloc : ('a : immutable_data).
-    'a @ immutable -> 'a t @@ portable = "caml_pref_alloc"
-  external attach : ('a : immutable_data).
+  external split_law : (h : heap) @ immutable ->
+    (selection : heap) @ immutable ->
+    {u : unit | union (restrict h selection) (exclude h selection) === h
+      && disjoint (restrict h selection) (exclude h selection)} @ ghost
+    @@ total = "caml_pref_heap_law2"
+  external exclude_put_law : ('a : immutable_data).
+    (h : heap) @ immutable -> (selection : heap) @ immutable ->
     (p : 'a t) @ immutable -> (v : 'a) @ immutable ->
-    (t : token) @ unique ->
-    {u : token | not (Heap.mem (own t) p)
-      && own u === Heap.put (own t) p v} @ unique
-    @@ total = "caml_pref_attach_bytecode" "caml_pref_attach"
+    {u : unit | not (mem selection p) ||
+      exclude (put h p v) selection === exclude h selection} @ ghost
+    @@ total = "caml_pref_heap_law4"
+  external exclude_union_law : (a : heap) @ immutable ->
+    (b : heap) @ immutable -> (selection : heap) @ immutable ->
+    {u : unit | exclude (union a b) selection ===
+      union (exclude a selection) (exclude b selection)} @ ghost
+    @@ total = "caml_pref_heap_law3"
+
 end
 
-let empty = Raw.empty
+external empty : unit -> {t : token | own t === Heap.empty ()} @ unique
+  @@ total = "caml_pref_empty_bytecode" "caml_pref_empty"
 
-let alloc : ('a : immutable_data).
+external alloc : ('a : immutable_data).
   (value : 'a) @ immutable -> (t : token) @ unique ->
   {r : 'a t step | not (Heap.mem (own t) r.value)
-    && own r.state === Heap.put (own t) r.value value} @ unique =
-  fun value t ->
-    let p = Raw.alloc value in
-    let refine_ state = Raw.attach p value t in
-    let r = { value = p; state } in
-    refine_ r
+    && own r.state === Heap.put (own t) r.value value} @ unique
+  @@ portable = "caml_pref_alloc_step_bytecode" "caml_pref_alloc_step"
 
 external read : ('a : immutable_data).
   (p : 'a t) @ immutable ->
