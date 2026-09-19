@@ -18,7 +18,7 @@ let () =
     flush stderr);
   let rec commands () =
     match read_line () with
-    | "(check-sat)" ->
+    | "(check-sat)" | "(check-sat-using (then simplify solve-eqs smt))" ->
       (match mode with
       | "hang" -> hang ()
       | "crash" ->

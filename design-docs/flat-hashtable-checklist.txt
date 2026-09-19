@@ -1,0 +1,104 @@
+Flat hash table work plan (2026-09-19)
+
+Scope: runtime table, ownership API, full normal-return correctness proof,
+SIMD foundation, and installed-compiler benchmarks in one PR.
+
+Design
+- Unique keys, power-of-two capacity, triangular probing in 16-byte groups.
+- Scanned interleaved key/value backing array and byte controls, with 15
+  wraparound clones. Empty=128, Deleted=254, fingerprints=0..127.
+- Check matching candidates before terminating on Empty. Occupancy includes
+  live entries and tombstones and stays at or below 7/8 capacity.
+- Rebuild at the same capacity with >=capacity/8 tombstones; otherwise double.
+- Aliased handles, erased views, and one unique ghost token owning one or
+  more heterogeneous tables. A table's private region includes its header
+  and both backing blocks. Rebuilding preserves handle identity.
+- Both keys and payloads currently require immutable_data. Hash/equality are
+  pure total functions, with explicit equality/hash laws. Stateful callbacks
+  and disjoint-frame lending await proper borrowing.
+
+Checklist
+[x] Exact machine-integer bitwise reasoning and rejection tests.
+[x] Typed storage contracts connecting actual payload/control writes to models.
+[x] Finite map, representation, clone, counter and probe-route invariants.
+[x] Triangular inverse coverage and guaranteed vacancy/non-exhaustion.
+[x] Concrete lookup, insertion, replacement, removal and clear proofs.
+[x] Concrete migration, rebuild/publication and public replace proofs.
+[x] Public .mli with functional correctness and ownership/frame contracts.
+[x] Public client proving a stored value is returned, and removal is observed.
+[x] Aliased handle and heterogeneous tables under one token, including resize.
+[x] Randomized differential operations and pointer/GC-compaction tests.
+[x] Rejected clients: stale view, missing ownership, token reuse, false value.
+[x] Compiler proof suite, including false-goal rejection after query slicing.
+[x] Borrowing design consultation; implementation deferred.
+[x] Final NEON/scalar boundary/differential tests and full runtime build.
+[x] Complete library installation, retaining -principal where supported.
+[x] Installed-compiler benchmarks against Hashtbl.Make and scalar ablation.
+[x] Final review; the bytecode stack-growth finding is fixed.
+[ ] New stacked PR.
+
+Proof boundary
+The actual imperative algorithm is checked against typed C storage contracts.
+The public operations establish normal-return functional correctness and exact
+ownership/frame preservation. Probe coverage and vacancy non-exhaustion are
+proved. General termination, allocation success and absence of capacity-limit
+exceptions are not claimed. Migration retries with a larger destination on an
+incomplete copy; no theorem says the first selected destination always suffices.
+
+The trusted boundary includes C storage, exact SIMD/scalar matching, the Vox
+checker/SMT solver and the existing finite-map heap laws. Heap.put_law adds
+standard write-back identity when the value already occupies the location.
+No assume_ or whole-table correctness axiom is introduced. SIMD differential
+tests are not a machine-code proof. SSE2 is implemented but not run on this
+arm64 machine.
+
+Vox findings
+- Mixed Int/BitVec reasoning made bounded bitclear decrease time out. Bitwise
+  queries now use machine-width bitvectors consistently, including comparisons
+  and datatype fields. Integer-only queries retain the existing encoding.
+- Irrelevant SSA definitions inflated individual proof retries. Dependency
+  slicing removes unused definitions without strengthening premises.
+- Heap observation expansion had a shared budget across obligations. Suppress
+  duplicate propagation and regenerate observations for individual retries.
+  A 48-write regression checks valid reads and rejection of a false read.
+- Slicing initially pruned lengths needed by latent array observations. Follow
+  observation definitions during dependency collection. Expand explicit heap
+  observations before slicing the initial batch; early slicing is restricted
+  to individual retries. Existing raw_memory_demo covers explicit hints.
+  The existing complete
+  iarray_borrow test checks the affected array slicing lemmas.
+- Result-only polymorphic definition lemmas can lose phantom type connections.
+  Use explicit polymorphic signatures and a type-carrying model/entry argument.
+  A locally abstract alternative encountered Ctype.Unify and is not used.
+- Inferred functor result aliases lose predicate identity. Proof functors use
+  explicit invariant-module parameters and their paths.
+- Refined structural-recursion parameters are not recognized as inductive;
+  use explicit inductive datatypes and guarded implication contracts.
+- A boxed all-void result is rejected. Mutations use unboxed records carrying
+  erased views and ghost tokens; creation also carries the runtime handle.
+- Standard exception helpers have value_or_null results. Erased unboxed resize
+  results use the existing layout-polymorphic %raise primitive explicitly.
+- Local string literals in refinements and implicit loop-variable bounds are
+  unsupported. Exact roundtrip proofs use integers; runtime GC tests include
+  pointer payloads, and mask tests explicitly establish argument bounds.
+
+Proof-design consultation:
+https://chatgpt.com/c/6aaedb5c-0f48-83ea-b5cb-36e89a402e3a
+
+- OxCaml -principal rejects passing int option (and tuple options) to a
+  polymorphic immutable_data parameter, even without refinement_types enabled.
+  Explicit kind annotations do not fix this. Build the new table modules with
+  normal type inference while retaining every refinement/termination check;
+  existing library modules retain -principal. No test or warning is disabled.
+
+Benchmark: verification/benchmarks/flat_hashtbl_results.csv records three runs
+per workload using the installed optimized arm64 compiler. At 1,048,576 integer
+entries, median stdlib/flat ratios are 1.23x build, 0.96x hit, 3.11x miss, and
+1.53x churn. Small tables are slower. The measured find/mem loops allocate zero bytes for all three
+implementations. Allocation during build/churn depends on growth and occupancy;
+SIMD is not a uniform improvement across workloads.
+
+- Review found linear bytecode stack consumption during migration. Carry the
+  original heap as a ghost loop parameter and discharge frame composition
+  before recursion, making the call structurally tail-recursive even with -g.
+  The client fills and reads 65,536 entries with a bounded bytecode stack.

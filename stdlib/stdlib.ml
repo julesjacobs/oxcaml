@@ -116,13 +116,16 @@ let abs x = if x >= 0 then x else -x
 
 external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int
   @@ portable total = "%andint"
-external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%orint"
-external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%xorint"
+external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%orint"
+external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%xorint"
 
 let lnot x = x lxor (-1)
 
 external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%lslint"
-external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%lsrint"
+external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%lsrint"
 external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%asrint"
 
 let max_int = (-1) lsr 1

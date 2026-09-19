@@ -67,6 +67,7 @@ module Heap = struct
     (h : heap) @ immutable -> (p : 'a t) @ immutable ->
     (x : 'a) @ immutable -> (y : 'a) @ immutable ->
     {u : unit | put (put h p x) p y === put h p y
+      && (not (at h p === Some x) || put h p x === h)
       && same_domain (put h p x) (put h p y)
       && (not (mem h p) || same_domain (put h p x) h)} @ ghost
     @@ total = "caml_pref_heap_law4"
