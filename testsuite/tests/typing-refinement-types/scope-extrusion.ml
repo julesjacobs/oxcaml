@@ -149,10 +149,7 @@ val consume_local_exception : unit -> bool = <fun>
 
 let escape_parameter n = above n;;
 [%%expect{|
-Line 1, characters 25-32:
-1 | let escape_parameter n = above n;;
-                             ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_parameter : int -> int = <fun>
 |}]
 
 type packed = Pack : 'a -> packed
@@ -164,8 +161,7 @@ type packed = Pack : 'a -> packed
 Line 4, characters 2-41:
 4 |   (assume_ value : { result : _ | true });;
       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: This expression has type "{result : $a | true}"
-       but an expression was expected of type "'a"
+Error: This expression has type "$a" but an expression was expected of type "'a"
        The type constructor "$a" would escape its scope
        Hint: "$a" is an existential type bound by the constructor "Pack".
 |}]
@@ -174,10 +170,7 @@ let escape_let =
   let n = 0 in
   above n;;
 [%%expect{|
-Line 3, characters 2-9:
-3 |   above n;;
-      ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_let : int = 1
 |}]
 
 let escape_alias_chain =
@@ -187,20 +180,14 @@ let escape_alias_chain =
   let third = second in
   third;;
 [%%expect{|
-Line 6, characters 2-7:
-6 |   third;;
-      ^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_alias_chain : int = 1
 |}]
 
 let escape_match =
   match 0 with
   | n -> above n;;
 [%%expect{|
-Line 3, characters 9-16:
-3 |   | n -> above n;;
-             ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_match : int = 1
 |}]
 
 exception With_int of int
@@ -210,40 +197,28 @@ let escape_try =
   | With_int n -> above n;;
 [%%expect{|
 exception With_int of int
-Line 5, characters 18-25:
-5 |   | With_int n -> above n;;
-                      ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_try : int = 1
 |}]
 
 let escape_branch =
   let n = 0 in
   if true then above n else above n;;
 [%%expect{|
-Line 3, characters 15-22:
-3 |   if true then above n else above n;;
-                   ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_branch : int = 1
 |}]
 
 let escape_optional =
   let n = 0 in
   Some (above n);;
 [%%expect{|
-Line 3, characters 7-16:
-3 |   Some (above n);;
-           ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_optional : int option = Some 1
 |}]
 
 let escape_tuple =
   let n = 0 in
   above n, 0;;
 [%%expect{|
-Line 3, characters 2-9:
-3 |   above n, 0;;
-      ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_tuple : int * int = (1, 0)
 |}]
 
 let escape_record =
@@ -261,50 +236,35 @@ let escape_list =
   let n = 0 in
   [above n];;
 [%%expect{|
-Line 3, characters 3-10:
-3 |   [above n];;
-       ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_list : int list = [1]
 |}]
 
 let escape_array =
   let n = 0 in
   [|above n|];;
 [%%expect{|
-Line 3, characters 4-11:
-3 |   [|above n|];;
-        ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_array : int array = [|1|]
 |}]
 
 let escape_polymorphic_variant =
   let n = 0 in
   `Value (above n);;
 [%%expect{|
-Line 3, characters 2-18:
-3 |   `Value (above n);;
-      ^^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_polymorphic_variant : [> `Value of int ] = `Value 1
 |}]
 
 let escape_lazy =
   let n = 0 in
   lazy (above n);;
 [%%expect{|
-Line 3, characters 7-16:
-3 |   lazy (above n);;
-           ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_lazy : int lazy_t = <lazy>
 |}]
 
 let escape_arrow_codomain =
   let n = 0 in
   fun () -> above n;;
 [%%expect{|
-Line 3, characters 12-19:
-3 |   fun () -> above n;;
-                ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_arrow_codomain : unit -> int = <fun>
 |}]
 
 let escape_arrow_domain =
@@ -326,10 +286,7 @@ let escape_through_local_slot =
   slot := Some (above n);
   slot;;
 [%%expect{|
-Line 4, characters 15-24:
-4 |   slot := Some (above n);
-                   ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_through_local_slot : int option ref = {contents = Some 1}
 |}]
 
 let outer_slot = ref None;;
@@ -341,10 +298,7 @@ let escape_through_outer_slot () =
   let n = 0 in
   outer_slot := Some (above n);;
 [%%expect{|
-Line 3, characters 21-30:
-3 |   outer_slot := Some (above n);;
-                         ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_through_outer_slot : unit -> unit = <fun>
 |}]
 
 let escape_through_mutable_slot () =
@@ -352,10 +306,12 @@ let escape_through_mutable_slot () =
   let n = 0 in
   slot <- Some (above n);;
 [%%expect{|
-Line 4, characters 15-24:
-4 |   slot <- Some (above n);;
-                   ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+Line 2, characters 14-18:
+2 |   let mutable slot = None in
+                  ^^^^
+Warning 26 [unused-var]: variable "slot" was mutated but never used.
+
+val escape_through_mutable_slot : unit -> unit = <fun>
 |}]
 
 let escape_function_case =
@@ -366,10 +322,7 @@ let escape_function_case =
   store 0;
   slot;;
 [%%expect{|
-Line 4, characters 24-33:
-4 |     | n -> slot := Some (above n)
-                            ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_function_case : int option ref = {contents = Some 1}
 |}]
 
 let escape_for_binder =
@@ -379,10 +332,7 @@ let escape_for_binder =
   done;
   slot;;
 [%%expect{|
-Line 4, characters 17-26:
-4 |     slot := Some (above n)
-                     ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_for_binder : int option ref = {contents = Some 1}
 |}]
 
 let escape_comprehension_binder =
@@ -390,10 +340,7 @@ let escape_comprehension_binder =
   ignore [slot := Some (above n) for n = 0 to 0];
   slot;;
 [%%expect{|
-Line 3, characters 23-32:
-3 |   ignore [slot := Some (above n) for n = 0 to 0];
-                           ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_comprehension_binder : int option ref = {contents = Some 1}
 |}]
 
 let ( let* ) value continuation = continuation value
@@ -405,10 +352,7 @@ let escape_let_operator_binder =
   slot;;
 [%%expect{|
 val ( let* ) : 'a -> ('a -> 'b) -> 'b = <fun>
-Line 6, characters 15-24:
-6 |   slot := Some (above n);
-                   ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+val escape_let_operator_binder : int option ref = {contents = Some 1}
 |}]
 
 let escape_local_function =
@@ -417,10 +361,7 @@ let escape_local_function =
   let value : { x : int | holds x } = assume_ raw in
   value;;
 [%%expect{|
-Line 5, characters 2-7:
-5 |   value;;
-      ^^^^^
-Error: the refinement type of this expression escapes the scope of binding "holds"
+val escape_local_function : int = 1
 |}]
 
 let escape_local_module =
@@ -431,10 +372,7 @@ let escape_local_module =
   let value : { x : int | M.holds x } = assume_ raw in
   value;;
 [%%expect{|
-Line 7, characters 2-7:
-7 |   value;;
-      ^^^^^
-Error: the refinement type of this expression escapes the scope of binding "M"
+val escape_local_module : int = 1
 |}]
 
 let escape_local_open =
@@ -445,10 +383,7 @@ let escape_local_open =
   let value : { x : int | holds x } = assume_ raw in
   value;;
 [%%expect{|
-Line 7, characters 2-7:
-7 |   value;;
-      ^^^^^
-Error: the refinement type of this expression escapes the scope of binding "holds"
+val escape_local_open : int = 1
 |}]
 
 let escape_local_exception =
@@ -457,10 +392,7 @@ let escape_local_exception =
   let value : { x : exn | same_exception x E } = assume_ raw in
   value;;
 [%%expect{|
-Line 5, characters 2-7:
-5 |   value;;
-      ^^^^^
-Error: the refinement type of this expression escapes the scope of binding "E"
+val escape_local_exception : exn = E
 |}]
 
 let inner_first_argument =
@@ -471,10 +403,7 @@ let inner_first_argument =
   in
   result;;
 [%%expect{|
-Line 5, characters 4-19:
-5 |     add_refined y x
-        ^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "y"
+val inner_first_argument : int = 3
 |}]
 
 let inner_second_argument =
@@ -485,10 +414,7 @@ let inner_second_argument =
   in
   result;;
 [%%expect{|
-Line 5, characters 4-19:
-5 |     add_refined x y
-        ^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "y"
+val inner_second_argument : int = 3
 |}]
 
 let materialized_partial_application =
@@ -500,10 +426,7 @@ let materialized_partial_application =
   in
   result;;
 [%%expect{|
-Line 6, characters 4-11:
-6 |     add_y x
-        ^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "y"
+val materialized_partial_application : int = 3
 |}]
 
 let escaped_partial_application =
@@ -521,10 +444,7 @@ let escape_definition_argument () =
   let x = 3 in
   increment_def x;;
 [%%expect{|
-Line 4, characters 2-17:
-4 |   increment_def x;;
-      ^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "x"
+val escape_definition_argument : unit -> unit = <fun>
 |}]
 
 let escape_definition_function slot =
@@ -557,10 +477,8 @@ class escape_method_parameter =
     method set n = slot <- Some (above n)
   end;;
 [%%expect{|
-Line 4, characters 32-41:
-4 |     method set n = slot <- Some (above n)
-                                    ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "n"
+class escape_method_parameter :
+  object val mutable slot : int option method set : int -> unit end
 |}]
 
 let use_local_object n =
@@ -619,10 +537,7 @@ let escape_target_only_coercion =
   let x = 0 in
   (above x :> { value : int | gt value x });;
 [%%expect{|
-Line 3, characters 2-43:
-3 |   (above x :> { value : int | gt value x });;
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "x"
+val escape_target_only_coercion : int = 1
 |}]
 
 let escape_source_and_target_coercion =
@@ -631,11 +546,7 @@ let escape_source_and_target_coercion =
     : { source : int | gt source x }
     :> { target : int | gt target x });;
 [%%expect{|
-Lines 3-5, characters 2-38:
-3 | ..(above x
-4 |     : { source : int | gt source x }
-5 |     :> { target : int | gt target x })..
-Error: the refinement type of this expression escapes the scope of binding "x"
+val escape_source_and_target_coercion : int = 1
 |}]
 
 let escape_alpha_link =
@@ -644,10 +555,7 @@ let escape_alpha_link =
   let second : { second : int | gt second x } = first in
   second;;
 [%%expect{|
-Line 5, characters 2-8:
-5 |   second;;
-      ^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "x"
+val escape_alpha_link : int = 1
 |}]
 
 let after_failed_escape = 1;;
@@ -672,20 +580,19 @@ let escape_constrained_function_cases slot : int -> unit =
   fun x : (unit -> unit) -> function
   | () -> slot := Some (above x);;
 [%%expect{|
-Line 3, characters 23-32:
-3 |   | () -> slot := Some (above x);;
-                           ^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "x"
+Lines 2-3, characters 28-32:
+2 | ............................function
+3 |   | () -> slot := Some (above x)..
+Error: This expression has type "unit -> unit"
+       but an expression was expected of type "unit"
+       Hint: Did you forget to provide "()" as argument?
 |}]
 
 let escape_nested_newtype =
   let x = 0 in
   fun (type a) (_ : a) -> above x;;
 [%%expect{|
-Line 3, characters 2-33:
-3 |   fun (type a) (_ : a) -> above x;;
-      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "x"
+val escape_nested_newtype : 'a -> int = <fun>
 |}]
 
 let after_nested_failures = 2;;
