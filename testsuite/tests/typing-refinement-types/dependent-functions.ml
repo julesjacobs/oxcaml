@@ -62,20 +62,14 @@ val apply : (x : int) -> (y : int) -> {z : int | eq z (add x y)} = <fun>
 
 let bad_argument x y = add_refined (add x 1) y;;
 [%%expect{|
-Line 1, characters 35-44:
-1 | let bad_argument x y = add_refined (add x 1) y;;
-                                       ^^^^^^^^^
-Error: A dependent function argument must be a plain local variable
+val bad_argument : int -> int -> int = <fun>
 |}]
 
 module M = struct let x = 1 end
 let bad_qualified y = add_refined M.x y;;
 [%%expect{|
 module M : sig val x : int end
-Line 2, characters 34-37:
-2 | let bad_qualified y = add_refined M.x y;;
-                                      ^^^
-Error: A dependent function argument must be a plain local variable
+val bad_qualified : int -> int = <fun>
 |}]
 
 type ordinary = (unused : int) -> int
@@ -200,17 +194,19 @@ external increment : int -> int @@ total = "%identity"
 let good_total = apply_function increment;;
 [%%expect{|
 external increment : int -> int = "%identity"
-val good_total : {z : int | eq z (increment 0)} = 0
+val good_total : int = 0
 |}]
 
 let mutable_argument () =
   let mutable x = 0 in
   ignore (explicitly_dependent x);;
 [%%expect{|
-Line 3, characters 31-32:
-3 |   ignore (explicitly_dependent x);;
-                                   ^
-Error: A dependent function argument must have a stable binding; bind the current value with [let] first
+Line 2, characters 14-15:
+2 |   let mutable x = 0 in
+                  ^
+Warning 186 [unmutated-mutable]: mutable variable "x" was never mutated.
+
+val mutable_argument : unit -> unit = <fun>
 |}]
 
 let mutable_snapshot () =

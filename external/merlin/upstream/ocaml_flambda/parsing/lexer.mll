@@ -103,6 +103,7 @@ let all_keywords =
     "repr_", REPR, oxcaml;
     "refine_", REFINE, oxcaml;
     "assume_", ASSUME, oxcaml;
+    "unreachable_", UNREACHABLE, oxcaml;
     "sig", SIG, always;
     "stack_", STACK, oxcaml;
     "struct", STRUCT, always;

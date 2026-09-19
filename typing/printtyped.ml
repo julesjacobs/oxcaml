@@ -581,6 +581,7 @@ and pattern_extra i ppf (extra_pat, loc, attrs) =
   line i ppf "extra %a\n" fmt_location loc;
   let i = i + 1 in
   match extra_pat with
+  | Tpat_refinement _ -> line i ppf "Tpat_refinement\n"
   | Tpat_unpack ->
      line i ppf "Tpat_extra_unpack\n";
      attributes i ppf attrs;
@@ -646,6 +647,8 @@ and expression_extra i ppf (extra, loc, attrs) =
       line i ppf "Texp_ghost_region\n"
   | Texp_refine ->
       line i ppf "Texp_refine\n"
+  | Texp_refinement _ -> line i ppf "Texp_refinement\n"
+  | Texp_value_name id -> line i ppf "Texp_value_name %a\n" Ident.print id
   | Texp_let_refine (id, name) ->
       line i ppf "Texp_let_refine %a %a %s\n" Ident.print id
         fmt_location name.loc name.txt

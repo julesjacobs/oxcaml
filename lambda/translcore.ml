@@ -1290,6 +1290,8 @@ and transl_exp0_desc ~in_new_scope ~scopes (layout : Lambda.layout) e =
                   event_before ~scopes ifso (transl_exp ~scopes layout ifso),
                   lambda_unit,
                   Lambda.layout_unit)
+  | Texp_sequence (expr1, _, expr2) when is_ghost_exp expr1 ->
+      event_before ~scopes expr2 (transl_exp ~scopes layout expr2)
   | Texp_sequence(expr1, sort', expr2) ->
       let sort' = Jkind.Sort.default_for_transl_and_get sort' in
       let layout' = layout_exp sort' expr1 in

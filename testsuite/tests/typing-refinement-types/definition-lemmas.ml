@@ -66,13 +66,10 @@ Error: The value "print_endline" is "partial"
 
 let[@def] rec recursive x = recursive x;;
 [%%expect{|
-Line 1, characters 28-37:
+Line 1, characters 3-39:
 1 | let[@def] rec recursive x = recursive x;;
-                                ^^^^^^^^^
-Error: The value "recursive" is "partial"
-       but is expected to be "total"
-         because it is used inside the function at line 1, characters 24-39
-         which is expected to be "total".
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: This recursive function cannot be total: no parameter has a checked inductive datatype.
 |}]
 
 let[@def] polymorphic x = x;;
