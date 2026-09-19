@@ -35,7 +35,7 @@ Checklist
 [x] Complete library installation, retaining -principal where supported.
 [x] Installed-compiler benchmarks against Hashtbl.Make and scalar ablation.
 [x] Final review; the bytecode stack-growth finding is fixed.
-[ ] New stacked PR.
+[x] New stacked PR: https://github.com/julesjacobs/oxcaml/pull/191
 
 Proof boundary
 The actual imperative algorithm is checked against typed C storage contracts.
