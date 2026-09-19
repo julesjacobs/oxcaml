@@ -1,5 +1,9 @@
 # Vox findings from the mutable unifier
 
+For the current prioritized cleanup and language-improvement inventory, see
+[HM simplification inventory](hm-simplification-inventory.md). The findings
+below record the branch state when encountered; some are fixed on newer work.
+
 The unifier now builds on #137, #139 and #140. Rejected examples distinguish
 language boundaries from compiler defects; rejection alone is not a defect.
 
