@@ -6,7 +6,8 @@ prefix=${1:?Usage: build.sh COMPILER_PREFIX}
 prefix=$(cd "$prefix" && pwd)
 output="$root/_build/vox-library"
 destination="$prefix/lib/ocaml/vox"
-modules=(vox_sequence vox_int_sequence vox_iarray borrow borrow_iarray)
+modules=(vox_sequence vox_int_sequence vox_iarray borrow borrow_iarray
+         pref ghost_pref raw_memory verified_atomic unique_cell one_shot)
 mkdir -p "$output"
 for module in "${modules[@]}"; do
   cp "$root/verification/library/$module.mli" "$root/verification/library/$module.ml" "$output/"

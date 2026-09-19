@@ -348,23 +348,22 @@ module Slice = struct
         {u : unit | let refine_ s = s in rp (final s)}) @ portable once ->
       {u : unit | lp (final left) && rp (final right)} =
       fun spawn left right lp rp lf rf ->
+    let left_final = ghost_ (final (borrow_ left)) in
+    let right_final = ghost_ (final (borrow_ right)) in
     let left1 = Raw.transfer left in
-    let left1 : {s : 'a t | current s === current left
-        && final s === final left} = refine_ left1 in
-    let right1 : {s : 'a t | current s === current right
-        && final s === final right} = refine_ right in
-    let l, r =
+    let left_job () : {u : unit | lp left_final} = lf left1 in
+    let right_job () : {u : unit | rp right_final} = rf right in
+    let (_ : {u : unit | lp left_final}),
+        (_ : {u : unit | rp right_final}) =
       if spawn then
-        let domain = (Domain.Safe.spawn [@alert "-do_not_spawn_domains"]) (fun
-          () -> lf left1) in
-        await_both domain (fun () -> rf right1)
+        let domain = (Domain.Safe.spawn [@alert "-do_not_spawn_domains"])
+          left_job in
+        await_both domain right_job
       else
-        let l = lf left1 in
-        let r = rf right1 in
+        let l : {u : unit | lp left_final} = left_job () in
+        let r : {u : unit | rp right_final} = right_job () in
         l, r in
-    let refine_ l = l in
-    let refine_ r = r in
-    let u = () in refine_ u
+    ()
 
 end
 
