@@ -34,19 +34,17 @@ let (head_terminal @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | H.mem h p && valid_head h heads p} ->
     {u : unit | H.mem h (heads p).root && terminal h (heads p).root} @ ghost =
   fun h heads p premise -> ghost_ (
-    let refine_ premise = premise in valid_head_def h heads p;
-    let r = heads p in let u = () in
-    Compression_path_proofs.resolution_terminal h p r.root r.path (refine_ u);
-    refine_ u)
+    valid_head_def h heads p;
+    let r = heads p in Compression_path_proofs.resolution_terminal h p r.root r.path ();
+    ())
 
 let (terminal_level @ total) : (h : Pref.heap) @ immutable ->
     (heads : heads) @ total -> (p : node Pref.t) @ immutable ->
     {u : unit | H.mem h p && terminal h p && valid_head h heads p} ->
     {u : unit | level h heads p === at_level h p} @ ghost =
   fun h heads p premise -> ghost_ (
-    let refine_ premise = premise in valid_head_def h heads p;
-    level_def h heads p; let r = heads p in let u = () in
-    terminal_here h p r.root r.path (refine_ u); refine_ u)
+    valid_head_def h heads p;
+    level_def h heads p; let r = heads p in terminal_here h p r.root r.path (); ())
 
 let (closed_head @ total) : (h : Pref.heap) @ immutable ->
     (heads : heads) @ total -> (cut : int) -> (pool : G.pool) @ immutable ->
@@ -54,18 +52,17 @@ let (closed_head @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | G.pool_scoped h pool && valid_head h heads p} ->
     {u : unit | valid_head (Representative_pool_spec.close_heap h cut pool) heads p} @ ghost =
   fun h heads cut pool p premise -> ghost_ (
-    let refine_ premise = premise in let after = Representative_pool_spec.close_heap h cut pool in
+    let after = Representative_pool_spec.close_heap h cut pool in
     Representative_pool_spec.close_heap_def h cut pool;
-    let filtered = representatives h pool in let u = () in
-    representatives_scoped h pool (refine_ u);
+    let filtered = representatives h pool in representatives_scoped h pool ();
     let frame : ((x : node Pref.t) @ immutable ->
       {u : unit | H.mem h x === H.mem after x && observe h x === observe after x}) @ total = fun x ->
-        let u = () in G.closed_at_def h after cut filtered x;
-        Generalize_proofs.closed_observe h cut filtered x (refine_ u);
-        observe_def h x; observe_def after x; refine_ u in
+        G.closed_at_def h after cut filtered x;
+        Generalize_proofs.closed_observe h cut filtered x ();
+        observe_def h x; observe_def after x; () in
     frame p; valid_head_def h heads p; valid_head_def after heads p;
     let r = heads p in resolution_frame h after frame p r.root r.path;
-    refine_ u)
+    ())
 
 let (closed_level @ total) : (h : Pref.heap) @ immutable ->
     (heads : heads) @ total -> (cut : int) -> (pool : G.pool) @ immutable ->
@@ -75,18 +72,17 @@ let (closed_level @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | level (Representative_pool_spec.close_heap h cut pool) heads p
       === G.close_level cut (level h heads p)} @ ghost =
   fun h heads cut pool p premise -> ghost_ (
-    let refine_ premise = premise in let after = Representative_pool_spec.close_heap h cut pool in
+    let after = Representative_pool_spec.close_heap h cut pool in
     Representative_pool_spec.close_heap_def h cut pool;
-    let filtered = representatives h pool in let u = () in
-    representatives_scoped h pool (refine_ u);
-    Generalize_proofs.closed_observe h cut filtered p (refine_ u);
+    let filtered = representatives h pool in representatives_scoped h pool ();
+    Generalize_proofs.closed_observe h cut filtered p ();
     G.closed_at_def h after cut filtered p;
     level_def h heads p; level_def after heads p;
     if H.mem h p then (
-      head_terminal h heads p (refine_ u);
+      head_terminal h heads p ();
       valid_head_def h heads p; let r = heads p in
-      close_resolution h cut pool p r.root r.path (refine_ u); refine_ u)
-    else (let generic = Generic in G.close_level_def cut generic; refine_ u))
+      close_resolution h cut pool p r.root r.path (); ())
+    else (let generic = Generic in G.close_level_def cut generic; ()))
 
 let (closed_boundary @ total) : (h : Pref.heap) @ immutable ->
     (heads : heads) @ total -> (cut : int) -> (pool : G.pool) @ immutable ->
@@ -96,25 +92,24 @@ let (closed_boundary @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | let after = Representative_pool_spec.close_heap h cut pool in
       H.at after p === H.at h p && effective_below after heads p bound} @ ghost =
   fun h heads cut pool p bound premise -> ghost_ (
-    let refine_ premise = premise in let after = Representative_pool_spec.close_heap h cut pool in
+    let after = Representative_pool_spec.close_heap h cut pool in
     Representative_pool_spec.close_heap_def h cut pool;
-    let filtered = representatives h pool in let u = () in
-    representatives_scoped h pool (refine_ u);
-    Generalize_proofs.closed_observe h cut filtered p (refine_ u);
+    let filtered = representatives h pool in representatives_scoped h pool ();
+    Generalize_proofs.closed_observe h cut filtered p ();
     G.closed_at_def h after cut filtered p;
     effective_below_def h heads p bound; level_def h heads p;
     let r = heads p in
-    head_terminal h heads p (refine_ u);
+    head_terminal h heads p ();
     Level_spec.below_def h r.root bound;
-    Generalize_proofs.closed_below h cut filtered r.root bound (refine_ u);
+    Generalize_proofs.closed_below h cut filtered r.root bound ();
     Level_spec.below_def after r.root bound;
     effective_below_def after heads p bound; level_def after heads p;
     representatives_member h pool p;
     if terminal h p then (
-      terminal_level h heads p (refine_ u); at_level_def h p;
+      terminal_level h heads p (); at_level_def h p;
       match H.at h p with None -> () | Some v -> G.close_level_def cut v.level; ())
     else ();
-    refine_ u)
+    ())
 
 let (closed_ordered @ total) : (h : Pref.heap) @ immutable ->
     (heads : heads) @ total ->
@@ -124,31 +119,30 @@ let (closed_ordered @ total) : (h : Pref.heap) @ immutable ->
       && effective_ordered h heads p} ->
     {u : unit | effective_ordered (Representative_pool_spec.close_heap h cut pool) heads p} @ ghost =
   fun h heads valid cut pool p premise -> ghost_ (
-    let refine_ premise = premise in let after = Representative_pool_spec.close_heap h cut pool in
+    let after = Representative_pool_spec.close_heap h cut pool in
     Representative_pool_spec.close_heap_def h cut pool;
-    let filtered = representatives h pool in let u = () in
-    representatives_scoped h pool (refine_ u);
-    Generalize_proofs.closed_observe h cut filtered p (refine_ u);
+    let filtered = representatives h pool in representatives_scoped h pool ();
+    Generalize_proofs.closed_observe h cut filtered p ();
     G.closed_at_def h after cut filtered p;
     effective_ordered_def h heads p; effective_ordered_def after heads p;
     representative_covered_def h cut pool p;
     representatives_member h pool p;
     terminal_def h p; observe_def h p; G.covered_def h cut pool p;
     at_level_def h p;
-    match H.at h p with None -> refine_ u | Some v ->
-      match v.desc with Link _ -> refine_ u | Var | Bool | Arrow _ ->
+    match H.at h p with None -> () | Some v ->
+      match v.desc with Link _ -> () | Var | Bool | Arrow _ ->
         representatives_covered h cut pool p;
         representative_covered_def h cut filtered p;
-        Generalize_proofs.closed_level h cut filtered p (refine_ u);
+        Generalize_proofs.closed_level h cut filtered p ();
         at_level_def after p;
         G.close_level_def cut v.level;
-        match v.level with Generic -> refine_ u | Finite n ->
-          if n > cut then refine_ u else (
+        match v.level with Generic -> () | Finite n ->
+          if n > cut then () else (
             (match v.desc with Var | Bool | Link _ -> () | Arrow (a, b) ->
               valid a; valid b;
-              closed_boundary h heads cut pool a n (refine_ u);
-              closed_boundary h heads cut pool b n (refine_ u); ());
-            refine_ u))
+              closed_boundary h heads cut pool a n ();
+              closed_boundary h heads cut pool b n (); ());
+            ()))
 
 let (link_level @ total) : (h : Pref.heap) @ immutable ->
     (heads : heads) @ total -> (p : node Pref.t) @ immutable ->
@@ -157,12 +151,12 @@ let (link_level @ total) : (h : Pref.heap) @ immutable ->
       && valid_head h heads q && observe h p === Some (Link q)} ->
     {u : unit | level h heads p === level h heads q} @ ghost =
   fun h heads p q premise -> ghost_ (
-    let refine_ premise = premise in valid_head_def h heads p;
+    valid_head_def h heads p;
     valid_head_def h heads q; level_def h heads p; level_def h heads q;
     let left = heads p in let right = heads q in
     resolves_def h p left.root left.path; terminal_def h p;
-    let u = () in match left.path with Here -> refine_ u | Via (_, rest) ->
-      unique h q left.root rest right.root right.path (refine_ u); refine_ u)
+    match left.path with Here -> () | Via (_, rest) ->
+      unique h q left.root rest right.root right.path (); ())
 
 let[@def] (effective_active @ total) (h : Pref.heap @ immutable)
     (heads : heads @ total) (p : node Pref.t @ immutable) = ghost_ (
@@ -182,21 +176,21 @@ let (ordered_scope @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | source_ok h p && effective_ordered h heads p} ->
     {u : unit | effective_scope h heads p} @ ghost =
   fun h heads valid p premise -> ghost_ (
-    let refine_ premise = premise in effective_scope_def h heads p;
+    effective_scope_def h heads p;
     source_ok_def h p; observe_def h p; effective_ordered_def h heads p;
-    effective_active_def h heads p; let u = () in valid p;
-    match H.at h p with None -> refine_ u | Some v ->
+    effective_active_def h heads p; valid p;
+    match H.at h p with None -> () | Some v ->
       match v.desc with
-      | Link q -> valid q; link_level h heads p q (refine_ u);
-        effective_active_def h heads q; refine_ u
-      | Var | Bool -> refine_ u
+      | Link q -> valid q; link_level h heads p q ();
+        effective_active_def h heads q; ()
+      | Var | Bool -> ()
       | Arrow (a, b) ->
-        terminal_def h p; terminal_level h heads p (refine_ u);
+        terminal_def h p; terminal_level h heads p ();
         at_level_def h p;
         effective_active_def h heads a; effective_active_def h heads b;
         (match v.level with Generic -> () | Finite n ->
           effective_below_def h heads a n; effective_below_def h heads b n; ());
-        refine_ u)
+        ())
 
 let (generic_child_rejected @ total) : (h : Pref.heap) @ immutable ->
     (heads : heads) @ total -> (p : node Pref.t) @ immutable ->
@@ -205,6 +199,20 @@ let (generic_child_rejected @ total) : (h : Pref.heap) @ immutable ->
       && level h heads a === Generic} ->
     {u : unit | not (effective_ordered h heads p)} @ ghost =
   fun h heads p a b n premise -> ghost_ (
-    let refine_ premise = premise in observe_def h p; at_level_def h p;
+    observe_def h p; at_level_def h p;
     effective_ordered_def h heads p; effective_below_def h heads a n;
-    let u = () in refine_ u)
+    ())
+
+let (terminal_children @ total) : (h : Pref.heap) @ immutable ->
+    (heads : heads) @ total -> (p : node Pref.t) @ immutable ->
+    (a : node Pref.t) @ immutable -> (b : node Pref.t) @ immutable ->
+    {u : unit | active h p && terminal h p && valid_head h heads p
+      && effective_scope h heads p && observe h p === Some (Arrow (a, b))} ->
+    {u : unit | effective_active h heads p
+      && effective_active h heads a && effective_active h heads b}
+      @ ghost = fun h heads p a b premise -> ghost_ (
+    active_def h p;
+    terminal_level h heads p ();
+    effective_active_def h heads p;
+    effective_scope_def h heads p;
+    ())

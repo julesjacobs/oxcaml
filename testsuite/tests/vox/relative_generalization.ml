@@ -15,11 +15,11 @@ let rec (path_agreement @ total) : (h : Pref.heap) @ immutable ->
     (path : path) @ immutable ->
     {u : unit | reaches h p q path && rho p === eta p} ->
     {u : unit | rho q === eta q} @ ghost = fun h rho rho_model eta eta_model p q path premise -> ghost_ (
-    let refine_ premise = premise in reaches_def h p q path;
-    let u = () in match path with Stop -> refine_ u
+    reaches_def h p q path;
+    match path with Stop -> ()
     | Step (next, rest) -> rho_model p; eta_model p;
       equation_def h rho p; equation_def h eta p; edge_def h p next;
-      path_agreement h rho rho_model eta eta_model next q rest (refine_ u))
+      path_agreement h rho rho_model eta eta_model next q rest ())
 
 let (origin_agreement @ total) : (saved : Pref.heap) @ immutable ->
     (h : Pref.heap) @ immutable -> (cut : int) ->
@@ -33,9 +33,9 @@ let (origin_agreement @ total) : (saved : Pref.heap) @ immutable ->
     {u : unit | originates saved h cut x origin} ->
     {u : unit | rho x === eta x} @ ghost =
   fun saved h cut rho rho_model eta eta_model equal x origin premise -> ghost_ (
-    let refine_ premise = premise in originates_def saved h cut x origin;
-    let u = () in match origin with Origin (root, path) -> equal root;
-      path_agreement h rho rho_model eta eta_model root x path (refine_ u))
+    originates_def saved h cut x origin;
+    match origin with Origin (root, path) -> equal root;
+      path_agreement h rho rho_model eta eta_model root x path ())
 
 let rec (interpret_agreement @ total) : (h : Pref.heap) @ immutable -> (cut : int) ->
     (order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x})) @ total ->
@@ -47,22 +47,21 @@ let rec (interpret_agreement @ total) : (h : Pref.heap) @ immutable -> (cut : in
     (tree : bounded) @ immutable -> {u : unit | unfolded h tree} ->
     {u : unit | interpret rho eta (scheme h cut tree) === eta (bound_root tree)}
       @ ghost = fun h cut order rho eta eta_model equal tree premise -> ghost_ (
-    let refine_ premise = premise in unfolded_def h tree; bound_root_def tree;
+    unfolded_def h tree; bound_root_def tree;
     let p = bound_root tree in let schema = scheme h cut tree in
     scheme_def h cut tree; interpret_def rho eta schema; at_level_def h p;
     let level = at_level h p in close_level_def cut level;
-    let u = () in
     if not (close_level cut level === Generic) then (
       order p; ordered_def h p; below_def h p cut;
-      equal p; refine_ u)
+      equal p; ())
     else (
       eta_model p; equation_def h eta p;
-      match tree with Tip _ -> refine_ u
+      match tree with Tip _ -> ()
       | Through (_, child) ->
-        interpret_agreement h cut order rho eta eta_model equal child (refine_ u); refine_ u
+        interpret_agreement h cut order rho eta eta_model equal child (); ()
       | Fork (_, a, b) ->
-        interpret_agreement h cut order rho eta eta_model equal a (refine_ u);
-        interpret_agreement h cut order rho eta eta_model equal b (refine_ u); refine_ u))
+        interpret_agreement h cut order rho eta eta_model equal a ();
+        interpret_agreement h cut order rho eta eta_model equal b (); ()))
 
 
 let (relative_interpret @ total) : (saved : Pref.heap) @ immutable ->
@@ -80,14 +79,13 @@ let (relative_interpret @ total) : (saved : Pref.heap) @ immutable ->
     (tree : bounded) @ immutable -> {u : unit | unfolded h tree} ->
     {u : unit | interpret rho eta (scheme h cut tree) === eta (bound_root tree)}
       @ ghost = fun saved h cut prior order rho rho_model eta eta_model equal tree premise -> ghost_ (
-    let refine_ premise = premise in
     let determined : ((x : node Pref.t) @ immutable ->
       {u : unit | not (below h x cut) || rho x === eta x}) @ total = fun x ->
-      let u = () in if below h x cut then (
-        let refine_ origin = prior x in
-        origin_agreement saved h cut rho rho_model eta eta_model equal x origin (refine_ u); refine_ u)
-      else refine_ u in
-    let u = () in let refine_ u = interpret_agreement h cut order rho eta eta_model determined tree (refine_ u) in refine_ u)
+      if below h x cut then (
+        let origin = prior x in
+        origin_agreement saved h cut rho rho_model eta eta_model equal x origin (); ())
+      else () in
+    let () = interpret_agreement h cut order rho eta eta_model determined tree () in ())
 
 let (finite_assignment @ total) : (h : Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -95,8 +93,8 @@ let (finite_assignment @ total) : (h : Pref.heap) @ immutable ->
     (x : node Pref.t) @ immutable -> (bound : int) ->
     {u : unit | instance_at h rho want x && below h x bound} ->
     {u : unit | want x === rho x} @ ghost = fun h rho want x bound premise -> ghost_ (
-    let refine_ premise = premise in instance_at_def h rho want x;
-    below_def h x bound; at_level_def h x; let u = () in refine_ u)
+    instance_at_def h rho want x;
+    below_def h x bound; at_level_def h x; ())
 
 let (instance_model @ total) : (h : Pref.heap) @ immutable ->
     (order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x})) @ total ->
@@ -108,14 +106,14 @@ let (instance_model @ total) : (h : Pref.heap) @ immutable ->
   fun h order rho model want wanted x -> ghost_ (
     order x; model x; wanted x; ordered_def h x;
     equation_def h rho x; equation_def h want x; instance_at_def h rho want x;
-    let u = () in match H.at h x with None -> refine_ u | Some v ->
-      match v.level with Generic -> refine_ u | Finite n ->
+    match H.at h x with None -> () | Some v ->
+      match v.level with Generic -> () | Finite n ->
       children_below_def h v.desc n;
-      match v.desc with Var | Bool -> refine_ u
-      | Link q -> wanted q; finite_assignment h rho want q n (refine_ u); refine_ u
+      match v.desc with Var | Bool -> ()
+      | Link q -> wanted q; finite_assignment h rho want q n (); ()
       | Arrow (a, b) -> wanted a; wanted b;
-        finite_assignment h rho want a n (refine_ u);
-        finite_assignment h rho want b n (refine_ u); refine_ u)
+        finite_assignment h rho want a n ();
+        finite_assignment h rho want b n (); ())
 
 let (with_relative_model @ total) : (saved : Pref.heap) @ immutable ->
     (h : Pref.heap) @ immutable -> (cut : int) -> (pool : pool) @ immutable ->
@@ -139,42 +137,39 @@ let (with_relative_model @ total) : (saved : Pref.heap) @ immutable ->
       {u : unit | eta (bound_root tree) === interpret rho choices (scheme h cut tree)} ->
       {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun saved h cut pool scope forest coverage order roots rho model choices tree premise claim use -> ghost_ (
-    let refine_ premise = premise in let after = closed_heap h cut pool in
+    let after = closed_heap h cut pool in
     let scope_after : ((x : node Pref.t) @ immutable ->
       {u : unit | if H.mem after x then source_ok after x else H.at after x === None}) @ total =
-      fun x -> let u = () in let refine_ u = closed_scope h scope cut pool x (refine_ u) in refine_ u in
+      fun x -> let () = closed_scope h scope cut pool x () in () in
     let trees : ((x : node Pref.t) @ immutable ->
       {s : template | not (H.mem after x) || (root s === x && template after s)} @ immutable) @ total =
-      fun x -> let refine_ t = forest x in let u = () in
-        closed_observe h cut pool x (refine_ u); closed_at_def h after cut pool x;
+      fun x -> let t = forest x in closed_observe h cut pool x (); closed_at_def h after cut pool x;
         let s = scheme h cut t in scheme_root h cut t;
-        if H.mem h x then (scheme_valid h cut pool coverage t (refine_ u); refine_ s) else refine_ s in
+        if H.mem h x then (scheme_valid h cut pool coverage t (); s) else s in
     let order_after : ((x : node Pref.t) @ immutable -> {u : unit | ordered after x}) @ total =
-      fun x -> order x; coverage x; scope x; let u = () in
-        closed_observe h cut pool x (refine_ u); closed_at_def h after cut pool x;
-        if H.mem h x then (closed_ordered h cut pool x (refine_ u); refine_ u)
-        else (ordered_def after x; refine_ u) in
+      fun x -> order x; coverage x; scope x; closed_observe h cut pool x (); closed_at_def h after cut pool x;
+        if H.mem h x then (closed_ordered h cut pool x (); ())
+        else (ordered_def after x; ()) in
     let model_after : ((x : node Pref.t) @ immutable -> {u : unit | equation after rho x}) @ total =
-      fun x -> model x; let u = () in closed_model h cut pool rho x (refine_ u); refine_ u in
+      fun x -> model x; closed_model h cut pool rho x (); () in
     let[@def] eta : node Pref.t @ immutable total -> ty @ immutable total =
-      fun x -> let refine_ t = trees x in interpret rho choices t in
+      fun x -> let t = trees x in interpret rho choices t in
     let values : ((x : node Pref.t) @ immutable ->
       {u : unit | let refine_ t = trees x in eta x === interpret rho choices t}) @ total =
-      fun x -> eta_def x; let u = () in refine_ u in
+      fun x -> eta_def x; () in
     let wanted : ((x : node Pref.t) @ immutable -> {u : unit | instance_at after rho eta x}) @ total =
-      fun x -> let refine_ u = Copy_template_proofs.forest_instance after scope_after trees rho choices eta values x in refine_ u in
+      fun x -> let () = Copy_template_proofs.forest_instance after scope_after trees rho choices eta values x in () in
     let eta_model : ((x : node Pref.t) @ immutable -> {u : unit | equation h eta x}) @ total =
       fun x -> instance_model after order_after rho model_after eta wanted x;
-        let u = () in closed_model h cut pool eta x (refine_ u); refine_ u in
+        closed_model h cut pool eta x (); () in
     let equal : ((x : node Pref.t) @ immutable ->
       {u : unit | not (below saved x cut) || eta x === rho x}) @ total = fun x ->
-      roots x; let u = () in if below saved x cut then (
-        closed_boundary h cut pool x (refine_ u); wanted x;
-        finite_assignment after rho eta x cut (refine_ u); refine_ u) else refine_ u in
-    let s = scheme h cut tree in let u = () in
-    scheme_valid h cut pool coverage tree (refine_ u); scheme_root h cut tree;
-    Copy_template_proofs.forest_eval after trees rho choices eta values s (refine_ u);
-    let refine_ u = use eta eta_model equal (refine_ u) in refine_ u)
+      roots x; if below saved x cut then (
+        closed_boundary h cut pool x (); wanted x;
+        finite_assignment after rho eta x cut (); ()) else () in
+    let s = scheme h cut tree in scheme_valid h cut pool coverage tree (); scheme_root h cut tree;
+    Copy_template_proofs.forest_eval after trees rho choices eta values s ();
+    let () = use eta eta_model equal () in ())
 
 let (with_relative_copy @ total) : (saved : Pref.heap) @ immutable ->
     (h : Pref.heap) @ immutable -> (cut : int) -> (pool : pool) @ immutable ->
@@ -204,8 +199,7 @@ let (with_relative_copy @ total) : (saved : Pref.heap) @ immutable ->
       {u : unit | tau q === eta (bound_root tree)} -> {u : unit | claim})) @ total ->
     {u : unit | claim} @ ghost =
   fun saved h cut pool scope forest coverage order prior rho rho_model eta eta_model equal epoch depth d tree q premise claim use -> ghost_ (
-    let refine_ premise = premise in let u = () in
-    relative_interpret saved h cut prior order rho rho_model eta eta_model equal tree (refine_ u);
+    relative_interpret saved h cut prior order rho rho_model eta eta_model equal tree ();
     let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (next : ((x : node Pref.t) @ immutable ->
         {u : unit | equation (heap (closed_heap h cut pool) epoch depth d) tau x})) @ total ->
@@ -213,6 +207,6 @@ let (with_relative_copy @ total) : (saved : Pref.heap) @ immutable ->
         {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
       {u : unit | tau q === interpret rho eta (scheme h cut tree)} ->
       {u : unit | claim}) @ total = fun tau next preserved fit ->
-        let refine_ fit = fit in let refine_ u = use tau next preserved (refine_ u) in refine_ u in
-    let refine_ u = with_generalized_instance h scope forest cut pool coverage rho rho_model eta epoch depth d tree q
-      (refine_ u) claim consume in refine_ u)
+        let () = use tau next preserved () in () in
+    let () = with_generalized_instance h scope forest cut pool coverage rho rho_model eta epoch depth d tree q
+      () claim consume in ())

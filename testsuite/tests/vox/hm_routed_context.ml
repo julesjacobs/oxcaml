@@ -18,39 +18,37 @@ let (advance @ total) : (h : Pref.heap) @ immutable ->
     {r : context | recorded after r && r.origin === c.origin && r.store === next}
       @ ghost =
   fun h c step after next premise -> ghost_ (
-    let refine_ premise = premise in recorded_def h c;
+    recorded_def h c;
     let execution = P.Sequence (c.execution, h, c.store, step) in
     let r = {origin = c.origin; store = next; execution} in
     let empty = H.empty () in
     P.ran_def empty c.origin execution after next;
-    recorded_def after r; refine_ r)
+    recorded_def after r; r)
 
 let (position @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable -> (p : node Pref.t) @ immutable ->
     {u : unit | recorded h c} ->
     {i : int | S.located_at h c.store p i} @ ghost =
   fun h c p premise -> ghost_ (
-    let refine_ premise = premise in recorded_def h c;
+    recorded_def h c;
     let empty = H.empty () in let zero = 0 in
     S.located_at_def empty c.origin p zero;
-    let u = () in
-    P.preserves_location empty c.origin c.execution h c.store p zero (refine_ u);
-    let i = P.position empty c.origin c.execution p zero in refine_ i)
+    P.preserves_location empty c.origin c.execution h c.store p zero ();
+    let i = P.position empty c.origin c.execution p zero in i)
 
 let (members @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable -> (i : int) -> (p : node Pref.t) @ immutable ->
     {u : unit | recorded h c} ->
     {u : unit | P.member h c.store i p} @ ghost =
   fun h c i p premise -> ghost_ (
-    let refine_ premise = premise in recorded_def h c;
+    recorded_def h c;
     let empty = H.empty () in
     let facts : ((j : int) -> (x : node Pref.t) @ immutable ->
       {u : unit | P.member empty c.origin j x}) @ total = fun j x ->
       P.member_def empty c.origin j x; S.at_def c.origin j;
-      let none = Empty in listed_def none x; let u = () in refine_ u in
-    let u = () in
-    P.preserves_members empty c.origin c.execution h c.store facts i p (refine_ u);
-    refine_ u)
+      let none = Empty in listed_def none x; () in
+    P.preserves_members empty c.origin c.execution h c.store facts i p ();
+    ())
 
 let (scoped @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable ->
@@ -59,12 +57,11 @@ let (scoped @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | recorded h c && 0 <= c.store.S.depth} ->
     {u : unit | pool_scoped h c.store.S.pending} @ ghost =
   fun h c scope premise -> ghost_ (
-    let refine_ premise = premise in
     let facts : ((i : int) -> (p : node Pref.t) @ immutable ->
       {u : unit | P.member h c.store i p}) @ total = fun i p ->
-      let u = () in members h c i p (refine_ u); refine_ u in
-    let u = () in P.scoped h c.store facts scope c.store.S.depth (refine_ u);
-    S.at_def c.store c.store.S.depth; refine_ u)
+      members h c i p (); () in
+    P.scoped h c.store facts scope c.store.S.depth ();
+    S.at_def c.store c.store.S.depth; ())
 
 let (allocated @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable -> (p : node Pref.t) @ immutable ->
@@ -74,11 +71,10 @@ let (allocated @ total) : (h : Pref.heap) @ immutable ->
       && r.store === {c.store with pending = Entry (p, c.store.S.pending)}
       && recorded (H.put h p (cell desc c.store.S.depth)) r} @ ghost =
   fun h c p desc premise -> ghost_ (
-    let refine_ premise = premise in
     let after = H.put h p (cell desc c.store.S.depth) in
     let next = {c.store with pending = Entry (p, c.store.S.pending)} in
     let step = P.Allocate (p, desc) in P.ran_def h c.store step after next;
-    let u = () in let refine_ r = advance h c step after next (refine_ u) in refine_ r)
+    let r = advance h c step after next () in r)
 
 let (copied @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable -> (epoch : node Pref.t) @ immutable ->
@@ -91,11 +87,10 @@ let (copied @ total) : (h : Pref.heap) @ immutable ->
       && recorded (Hm_effective_execution_spec.copy_heap h epoch c.store.S.depth d) r}
       @ ghost =
   fun h c epoch d certificate premise -> ghost_ (
-    let refine_ premise = premise in
     let after = Hm_effective_execution_spec.copy_heap h epoch c.store.S.depth d in
     let next = {c.store with pending = Pooled_spec.registered c.store.S.pending epoch d} in
     let step = P.Copy (epoch, d, certificate) in P.ran_def h c.store step after next;
-    let u = () in let refine_ r = advance h c step after next (refine_ u) in refine_ r)
+    let r = advance h c step after next () in r)
 
 let (unified @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable -> (p : node Pref.t) @ immutable ->
@@ -106,9 +101,9 @@ let (unified @ total) : (h : Pref.heap) @ immutable ->
     {r : context | r.origin === c.origin && r.store === c.store && recorded after r}
       @ ghost =
   fun h c p q ok after d premise -> ghost_ (
-    let refine_ premise = premise in let step = P.Unify (p, q, ok, d) in
+    let step = P.Unify (p, q, ok, d) in
     P.ran_def h c.store step after c.store;
-    let u = () in let refine_ r = advance h c step after c.store (refine_ u) in refine_ r)
+    let r = advance h c step after c.store () in r)
 
 let (entered @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable ->
@@ -119,11 +114,11 @@ let (entered @ total) : (h : Pref.heap) @ immutable ->
         buckets = Vox_iarray.updated c.store.S.buckets c.store.S.depth c.store.S.pending}}
       @ ghost =
   fun h c premise -> ghost_ (
-    let refine_ premise = premise in let step = P.Enter in
+    let step = P.Enter in
     let next = {S.depth = c.store.S.depth + 1; pending = Empty;
       buckets = Vox_iarray.updated c.store.S.buckets c.store.S.depth c.store.S.pending} in
     P.ran_def h c.store step h next;
-    let u = () in let refine_ r = advance h c step h next (refine_ u) in refine_ r)
+    let r = advance h c step h next () in r)
 
 let (left @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable ->
@@ -134,18 +129,18 @@ let (left @ total) : (h : Pref.heap) @ immutable ->
       && recorded (Representative_pool_spec.close_heap h (c.store.S.depth - 1) c.store.S.pending) r}
       @ ghost =
   fun h c premise -> ghost_ (
-    let refine_ premise = premise in let step = P.Leave in
+    let step = P.Leave in
     let next = S.closed_store h c.store in
     let after = Representative_pool_spec.close_heap h (c.store.S.depth - 1) c.store.S.pending in
     P.ran_def h c.store step after next;
-    let u = () in let refine_ r = advance h c step after next (refine_ u) in refine_ r)
+    let r = advance h c step after next () in r)
 
 let (capacity @ total) : (h : Pref.heap) @ immutable -> (c : context) @ immutable ->
     {u : unit | recorded h c} ->
     {u : unit | Iarray.length c.store.S.buckets = Iarray.length c.origin.S.buckets}
       @ ghost = fun h c premise -> ghost_ (
-    let refine_ premise = premise in recorded_def h c; let empty = H.empty () in
-    let u = () in P.capacity empty c.origin c.execution h c.store (refine_ u); refine_ u)
+    recorded_def h c; let empty = H.empty () in
+    P.capacity empty c.origin c.execution h c.store (); ())
 
 let (scoped_runtime @ total) : (h : Pref.heap) @ immutable ->
     (c : context) @ immutable -> (heads : Effective_level.heads) @ total ->
@@ -155,12 +150,11 @@ let (scoped_runtime @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | recorded h c && c.store.S.depth >= 0} ->
     {u : unit | pool_scoped h c.store.S.pending} @ ghost =
   fun h c heads depth pool facts premise -> ghost_ (
-    let refine_ premise = premise in
     let scope : ((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h x) || source_ok h x}) @ total = fun x ->
         facts x; Hm_effective_runtime.runtime_at_def h heads depth pool x;
-        Hm_effective_runtime.safe_def h heads x; let u = () in refine_ u in
-    let u = () in scoped h c scope (refine_ u); refine_ u)
+        Hm_effective_runtime.safe_def h heads x; () in
+    scoped h c scope (); ())
 
 let (allocation_pool @ total) : (h : Pref.heap) @ immutable ->
     (depth : int) -> (p : node Pref.t) @ immutable -> (desc : desc) @ immutable ->
@@ -169,9 +163,7 @@ let (allocation_pool @ total) : (h : Pref.heap) @ immutable ->
       && pool_scoped h pool} ->
     {u : unit | pool_scoped (H.put h p (cell desc depth)) (Entry (p, pool))}
       @ ghost = fun h depth p desc pool premise -> ghost_ (
-    let refine_ premise = premise in let v = cell desc depth in let u = () in
-    Pooled_allocation_proofs.allocation_pool h p v pool (refine_ u);
-    Pooled_allocation_proofs.allocation_source h p v p (refine_ u);
-    Copy_heap_proofs.put_frame h p v p;
+    let v = cell desc depth in Pooled_allocation_proofs.allocation_pool h p v pool ();
+    Pooled_allocation_proofs.allocation_source h p v p ();
     let after = H.put h p v in let next = Entry (p, pool) in
-    pool_scoped_def after next; refine_ u)
+    pool_scoped_def after next; ())

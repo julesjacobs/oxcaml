@@ -19,37 +19,36 @@ let (close_runtime @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | runtime_at (P.close_heap h depth child) heads depth
       (P.transfer_rep (P.close_heap h depth child) child parent) x} @ ghost =
   fun h heads depth child parent facts x premise -> ghost_ (
-    let refine_ premise = premise in let child_depth = depth + 1 in
+    let child_depth = depth + 1 in
     let valid : ((y : node Pref.t) @ immutable ->
       {u : unit | E.valid_head h heads y}) @ total = fun y ->
       facts y; runtime_at_def h heads child_depth child y;
-      safe_def h heads y; let u = () in refine_ u in
+      safe_def h heads y; () in
     let after = P.close_heap h depth child in
     let next = P.transfer_rep after child parent in
     P.close_heap_def h depth child;
-    let filtered = R.representatives h child in let u = () in
-    R.representatives_scoped h child (refine_ u);
+    let filtered = R.representatives h child in R.representatives_scoped h child ();
     facts x; runtime_at_def h heads child_depth child x;
     safe_def h heads x; depth_bound_def h heads child_depth x;
-    E.closed_head h heads depth child x (refine_ u);
-    Generalize_proofs.closed_observe h depth filtered x (refine_ u);
+    E.closed_head h heads depth child x ();
+    Generalize_proofs.closed_observe h depth filtered x ();
     closed_at_def h after depth filtered x;
     if H.mem h x then (
-      Generalize_proofs.closed_source h depth filtered x (refine_ u);
-      E.closed_ordered h heads valid depth child x (refine_ u);
-      E.head_terminal h heads x (refine_ u);
+      Generalize_proofs.closed_source h depth filtered x ();
+      E.closed_ordered h heads valid depth child x ();
+      E.head_terminal h heads x ();
       let r = heads x in facts r.root;
       runtime_at_def h heads child_depth child r.root;
-      E.closed_level h heads depth child x (refine_ u); ())
+      E.closed_level h heads depth child x (); ())
     else (E.effective_ordered_def after heads x; ());
     let old = E.level h heads x in close_level_def depth old;
     E.effective_below_def h heads x child_depth;
     E.effective_below_def after heads x depth;
     let outer = depth - 1 in
     Representative_pool_proofs.closed_coverage h depth child parent outer x
-      (refine_ u);
+      ();
     runtime_at_def after heads depth next x; safe_def after heads x;
-    depth_bound_def after heads depth x; refine_ u)
+    depth_bound_def after heads depth x; ())
 
 let (run_coverage @ total) : (h : Pref.heap) @ immutable ->
     (heads : E.heads) @ total -> (depth : int) -> (parent : pool) @ immutable ->
@@ -64,27 +63,26 @@ let (run_coverage @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | R.representative_covered middle (depth - 1) parent x
       || listed child x} @ ghost =
   fun h heads depth parent facts env rhs middle child x premise -> ghost_ (
-    let refine_ premise = premise in let child_depth = depth + 1 in
+    let child_depth = depth + 1 in
     let empty : pool = Empty in let outer = depth - 1 in
     Hm_effective_execution_spec.ran_def h child_depth empty env rhs middle child;
     R.representative_covered_def middle outer parent x;
     covered_def middle outer parent x; at_level_def middle x;
-    finite_node_def middle x; let u = () in
-    if terminal middle x && H.mem middle x && finite_node middle x
+    finite_node_def middle x; if terminal middle x && H.mem middle x && finite_node middle x
         && not (listed child x) then (
-      Hm_effective_registration.run_unlisted h child_depth empty env rhs middle child x (refine_ u);
+      Hm_effective_registration.run_unlisted h child_depth empty env rhs middle child x ();
       facts x; runtime_at_def h heads depth parent x;
       safe_def h heads x; depth_bound_def h heads depth x;
       R.representative_covered_def h outer parent x;
       covered_def h outer parent x;
-      E.terminal_level h heads x (refine_ u);
+      E.terminal_level h heads x ();
       E.effective_below_def h heads x depth;
       finite_node_def h x; at_level_def h x;
       below_def h x outer;
-      Hm_effective_bound.run_member h child_depth empty env rhs middle child outer x (refine_ u);
+      Hm_effective_bound.run_member h child_depth empty env rhs middle child outer x ();
       Hm_effective_bound.preserved_bound_def h middle outer x;
       below_def middle x outer; ()) else ();
-    refine_ u)
+    ())
 
 let (close_after_run @ total) : (h : Pref.heap) @ immutable ->
     (heads : E.heads) @ total -> (next_heads : E.heads) @ total ->
@@ -103,7 +101,6 @@ let (close_after_run @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | runtime_at (P.close_heap middle depth child) next_heads depth
       (P.transfer_rep (P.close_heap middle depth child) child parent) x} @ ghost =
   fun h heads next_heads depth parent facts env rhs middle child next_facts x premise -> ghost_ (
-    let refine_ premise = premise in let u = () in
-    run_coverage h heads depth parent facts env rhs middle child x (refine_ u);
-    close_runtime middle next_heads depth child parent next_facts x (refine_ u);
-    refine_ u)
+    run_coverage h heads depth parent facts env rhs middle child x ();
+    close_runtime middle next_heads depth child parent next_facts x ();
+    ())

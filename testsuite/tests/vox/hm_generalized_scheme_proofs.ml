@@ -120,7 +120,7 @@ let (generalized_scheme @ total) : (h : Pref.heap) @ immutable -> (cut : int) ->
     (tree : tree) @ immutable -> {u : unit | finite h tree && below h (tree_root tree) depth} ->
     {u : unit | P.scheme rho (G.scheme h cut (U.unfolding tree)) ===
       D.Forall (A.count (F.generalized_names h cut tree),
-        A.abstract_type (F.generalized_names h cut tree) D.Z (T.embed (readback tree)))} @ ghost =
+        A.abstract_type (F.generalized_names h cut tree) D.Z (D.embed (readback tree)))} @ ghost =
   fun h cut depth order trees rho values tree premise -> ghost_ (
     let refine_ premise = premise in let names = F.generalized_names h cut tree in
     let high : ((p : node Pref.t) @ immutable ->
@@ -167,7 +167,7 @@ let (generalize_typing @ total) : (h : Pref.heap) @ immutable -> (cut : int) -> 
     (tree : tree) @ immutable -> (e : D.term) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | finite h tree && below h (tree_root tree) depth
       && Hm_environment_spec.env_at h cut env schemas
-      && D.typed D.Z (P.context rho schemas) e (T.embed (readback tree)) d} ->
+      && D.typed D.Z (P.context rho schemas) e (D.embed (readback tree)) d} ->
     {d : D.typing | let names = F.template_names (G.scheme h cut (U.unfolding tree)) in
       D.typed (A.count names) (D.weaken_context (A.count names) (P.context rho schemas)) e
         (P.body names rho (G.scheme h cut (U.unfolding tree))) d} @ immutable ghost =

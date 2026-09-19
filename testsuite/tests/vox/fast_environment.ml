@@ -37,7 +37,7 @@ let rec (append_assoc @ total) : (a : E.env) @ immutable ->
     append_def a b; let ab = append a b in append_def ab c;
     let bc = append b c in append_def a bc;
     (match a with E.Empty -> () | E.Bind (_, rest) -> append_assoc rest b c; ());
-    let u = () in refine_ u)
+    ())
 
 let rec (append_sized @ total) : (a : E.env) @ immutable ->
     (b : E.env) @ immutable -> (n : int) -> (m : int) ->
@@ -48,7 +48,7 @@ let rec (append_sized @ total) : (a : E.env) @ immutable ->
     let ab = append a b in let count = n + m in sized_def ab count;
     (match a with E.Empty -> () | E.Bind (_, rest) ->
       if n > 0 then (let next = n - 1 in append_sized rest b next m; ()) else ());
-    let u = () in refine_ u)
+    ())
 
 let rec (tree_sized @ total) : (t : tree) @ immutable ->
     {u : unit | not (valid_tree t) || (weight t > 0 && sized (flatten_tree t) (weight t))} @ ghost =
@@ -60,7 +60,7 @@ let rec (tree_sized @ total) : (t : tree) @ immutable ->
       tree_sized a; tree_sized b;
       let left = flatten_tree a in let right = flatten_tree b in
       let n = weight a in let m = weight b in append_sized left right n m; ());
-    let u = () in refine_ u)
+    ())
 
 let rec (append_at @ total) : (a : E.env) @ immutable ->
     (b : E.env) @ immutable -> (n : int) -> (i : int) ->
@@ -72,7 +72,7 @@ let rec (append_at @ total) : (a : E.env) @ immutable ->
     let ab = append a b in at_def ab i; at_def a i;
     (match a with E.Empty -> () | E.Bind (_, rest) ->
       if i > 0 then (let j = i - 1 in let count = n - 1 in append_at rest b count j; ()) else ());
-    let u = () in refine_ u)
+    ())
 
 let rec (lookup_encoded @ total) : (env : E.env) @ immutable ->
     (index : D.index) @ immutable -> (n : int) ->
@@ -81,13 +81,12 @@ let rec (lookup_encoded @ total) : (env : E.env) @ immutable ->
     encoded_def index n; at_def env n; E.lookup_def env index;
     (match env with E.Empty -> () | E.Bind (_, rest) -> match index with
       | D.Z -> () | D.S tail -> let next = n - 1 in lookup_encoded rest tail next; ());
-    let u = () in refine_ u)
+    ())
 
 let cons : (p : node Pref.t) @ immutable ->
     (f : {f : forest | valid_forest f}) @ immutable ->
     {out : forest | let refine_ f = f in valid_forest out
       && flatten out === E.Bind (p, flatten f)} @ immutable = fun p f ->
-  let refine_ f = f in
   ghost_ (valid_forest_def f; flatten_def f);
   match f with
   | Cons (a, Cons (b, rest)) ->
@@ -105,55 +104,55 @@ let cons : (p : node Pref.t) @ immutable ->
           let suffix = flatten rest in append_assoc left right suffix;
           let both = append left right in let prefix = E.Bind (p, both) in
           append_def prefix suffix; ());
-        refine_ out))
+        out))
     else (
       let tree = Leaf p in let out = Cons (tree, f) in
       ghost_ (valid_tree_def tree; valid_forest_def out; flatten_tree_def tree;
         flatten_def out; let prefix = E.Bind (p, E.Empty) in let suffix = flatten f in
         append_def prefix suffix; let empty = E.Empty in append_def empty suffix; ());
-      refine_ out)
+      out)
   | Nil | Cons (_, Nil) ->
     let tree = Leaf p in let out = Cons (tree, f) in
     ghost_ (valid_tree_def tree; valid_forest_def out; flatten_tree_def tree;
       flatten_def out; let prefix = E.Bind (p, E.Empty) in let suffix = flatten f in
       append_def prefix suffix; let empty = E.Empty in append_def empty suffix; ());
-    refine_ out
+    out
 
 let rec lookup_tree : (tree : tree) @ immutable -> (index : int) ->
     (premise : ({u : unit | valid_tree tree && index >= 0}) Ghost.t) ->
     {p : node Pref.t option | p === at (flatten_tree tree) index} @ immutable =
   fun tree index premise ->
-    ghost_ (let refine_ premise = premise.Ghost.ghost in
+    ghost_ (let _ = premise.Ghost.ghost in
       valid_tree_def tree; flatten_tree_def tree;
       let env = flatten_tree tree in at_def env index; ());
     match tree with
     | Leaf p ->
-      if index = 0 then (let out = Some p in refine_ out)
+      if index = 0 then (let out = Some p in out)
       else (ghost_ (let empty = E.Empty in let next = index - 1 in at_def empty next; ());
-        let out = None in refine_ out)
+        let out = None in out)
     | Branch (_, p, left, right) ->
-      if index = 0 then (let out = Some p in refine_ out) else (
+      if index = 0 then (let out = Some p in out) else (
         let next = index - 1 in let count = weight left in
         ghost_ (tree_sized left; tree_sized right;
           let a = flatten_tree left in let b = flatten_tree right in
           append_at a b count next; ());
         if next < count then (
           let premise : ({u : unit | valid_tree left && next >= 0}) Ghost.t =
-            {Ghost.ghost = ghost_ (refine_ ())} in
-          let refine_ out = lookup_tree left next premise in refine_ out)
+            {Ghost.ghost = ghost_ ()} in
+          let out = lookup_tree left next premise in out)
         else (
           let next = next - count in
           let premise : ({u : unit | valid_tree right && next >= 0}) Ghost.t =
-            {Ghost.ghost = ghost_ (refine_ ())} in
-          let refine_ out = lookup_tree right next premise in refine_ out))
+            {Ghost.ghost = ghost_ ()} in
+          let out = lookup_tree right next premise in out))
 
 let rec lookup : (f : forest) @ immutable -> (index : int) ->
     (premise : ({u : unit | valid_forest f && index >= 0}) Ghost.t) ->
     {p : node Pref.t option | p === at (flatten f) index} @ immutable =
   fun f index premise ->
-    ghost_ (let refine_ premise = premise.Ghost.ghost in valid_forest_def f; flatten_def f);
+    ghost_ (let _ = premise.Ghost.ghost in valid_forest_def f; flatten_def f);
     match f with
-    | Nil -> ghost_ (let env = E.Empty in at_def env index; ()); let out = None in refine_ out
+    | Nil -> ghost_ (let env = E.Empty in at_def env index; ()); let out = None in out
     | Cons (tree, rest) ->
       let count = weight tree in
       ghost_ (tree_sized tree;
@@ -161,13 +160,13 @@ let rec lookup : (f : forest) @ immutable -> (index : int) ->
         append_at prefix suffix count index; ());
       if index < count then (
         let premise : ({u : unit | valid_tree tree && index >= 0}) Ghost.t =
-          {Ghost.ghost = ghost_ (refine_ ())} in
-        let refine_ out = lookup_tree tree index premise in refine_ out)
+          {Ghost.ghost = ghost_ ()} in
+        let out = lookup_tree tree index premise in out)
       else (
         let next = index - count in
         let premise : ({u : unit | valid_forest rest && next >= 0}) Ghost.t =
-          {Ghost.ghost = ghost_ (refine_ ())} in
-        let refine_ out = lookup rest next premise in refine_ out)
+          {Ghost.ghost = ghost_ ()} in
+        let out = lookup rest next premise in out)
 
 let rec compile_work : (goal : E.env Ghost.t) @ immutable ->
     (env : E.env) @ immutable ->
@@ -176,14 +175,12 @@ let rec compile_work : (goal : E.env Ghost.t) @ immutable ->
     {f : forest | valid_forest f && flatten f === goal.Ghost.ghost} @ immutable =
   fun goal env use -> match env with
   | E.Empty -> let out = Nil in
-    ghost_ (valid_forest_def out; flatten_def out); use (refine_ out)
+    ghost_ (valid_forest_def out; flatten_def out); use (out)
   | E.Bind (p, rest) ->
     let resume : (f : {f : forest | valid_forest f && flatten f === rest}) @ immutable ->
         {f : forest | valid_forest f && flatten f === goal.Ghost.ghost} @ immutable = fun f ->
-      let refine_ f = f in
-      let input : {f : forest | valid_forest f} = refine_ f in
-      let refine_ out = cons p input in let refine_ input = input in
-      use (refine_ out) in
+      let input : {f : forest | valid_forest f} = f in
+      let out = cons p input in use (out) in
     compile_work goal rest resume
 
 let compile : (env : E.env) @ immutable ->
@@ -191,5 +188,5 @@ let compile : (env : E.env) @ immutable ->
   let goal = {Ghost.ghost = ghost_ env} in
   let use : (f : {f : forest | valid_forest f && flatten f === env}) @ immutable ->
       {f : forest | valid_forest f && flatten f === goal.Ghost.ghost} @ immutable = fun f ->
-    let refine_ f = f in refine_ f in
-  let refine_ out = compile_work goal env use in refine_ out
+    f in
+  let out = compile_work goal env use in out
