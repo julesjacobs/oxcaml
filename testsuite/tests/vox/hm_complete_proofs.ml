@@ -13,15 +13,15 @@ let[@def] (default_value @ total) (_i : D.index @ immutable) = Boolean
 open Optimized_unifier_spec
 
 let rec (embed_eval @ total) : (t : D.mono) @ immutable ->
-    {u : unit | D.mono_wf D.Z t} -> {u : unit | T.embed (T.eval default_value t) === t} @ ghost =
+    {u : unit | D.mono_wf D.Z t} -> {u : unit | D.embed (T.eval default_value t) === t} @ ghost =
   fun t premise -> ghost_ (
     let refine_ premise = premise in let z = D.Z in D.mono_wf_def z t;
-    T.eval_def default_value t; let value = T.eval default_value t in T.embed_def value;
+    T.eval_def default_value t; let value = T.eval default_value t in D.embed_def value;
     let u = () in match t with D.Free _ | D.Boolean -> refine_ u
     | D.Parameter i -> D.present_def z i; refine_ u
     | D.Function (a, b) -> embed_eval a (refine_ u); embed_eval b (refine_ u); refine_ u)
 let (embed_injective @ total) : (a : ty) @ immutable -> (b : ty) @ immutable ->
-    {u : unit | T.embed a === T.embed b} -> {u : unit | a === b} @ ghost = fun a b premise -> ghost_ (
+    {u : unit | D.embed a === D.embed b} -> {u : unit | a === b} @ ghost = fun a b premise -> ghost_ (
     let refine_ premise = premise in T.eval_embed default_value a; T.eval_embed default_value b;
     let u = () in refine_ u)
 let rec (context_equal @ total) : (h : Pref.heap) @ immutable ->
@@ -133,21 +133,21 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h rho x})) @ total ->
     (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran h depth pool env e after final_pool && let_free e && mono_env h env
-      && D.typed D.Z (context rho env) (source e) (T.embed target) d} -> (claim : bool) ->
+      && D.typed D.Z (context rho env) (source e) (D.embed target) d} -> (claim : bool) ->
     (use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (next : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after tau x})) @ total ->
       (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total -> {u : unit | matches tau e target} -> {u : unit | claim})) @ total ->
     {u : unit | claim} @ ghost = fun h depth pool facts env e after final_pool rho model target d premise claim use -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     let_free_def e; source_def e; result_def e;
-    let z = D.Z in let g = context rho env in let source_term = source e in let typ = T.embed target in
-    D.typed_def z g source_term typ d; T.embed_def target; let u = () in match e with
+    let z = D.Z in let g = context rho env in let source_term = source e in let typ = D.embed target in
+    D.typed_def z g source_term typ d; D.embed_def target; let u = () in match e with
     | RLet_left _ | RLet _ -> refine_ u
     | RShared (i, p) -> (match d with
       | D.Variable args ->
         lookup_context rho env i p (refine_ u);
-        let scheme = D.Forall (z, T.embed (rho p)) in D.arity_def scheme; D.length_def args;
+        let scheme = D.Forall (z, D.embed (rho p)) in D.arity_def scheme; D.length_def args;
         (match args with D.Argument _ -> refine_ u | D.No_arguments ->
-          D.open_scheme_def scheme args; let ot = T.embed (rho p) in T.open_empty ot;
+          D.open_scheme_def scheme args; let ot = D.embed (rho p) in T.open_empty ot;
           let original_type = rho p in embed_injective target original_type (refine_ u);
           let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho x === rho x}) @ total = fun x -> let u = () in refine_ u in
           matches_def rho e target; let refine_ u = use rho (refine_ model) equal (refine_ u) in refine_ u)
@@ -155,9 +155,9 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
     | RVar (i, p, epoch, history) -> (match d with
       | D.Variable args -> (match lookup env i with None -> refine_ u | Some original ->
         lookup_context rho env i original (refine_ u);
-        let scheme = D.Forall (z, T.embed (rho original)) in D.arity_def scheme;
+        let scheme = D.Forall (z, D.embed (rho original)) in D.arity_def scheme;
         D.length_def args; (match args with D.Argument _ -> refine_ u | D.No_arguments ->
-        D.open_scheme_def scheme args; let ot = T.embed (rho original) in T.open_empty ot;
+        D.open_scheme_def scheme args; let ot = D.embed (rho original) in T.open_empty ot;
         let original_type = rho original in embed_injective target original_type (refine_ u);
         let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (next : ((x : node Pref.t) @ immutable -> {u : unit | node_equation (copy_heap h epoch depth history) tau x})) @ total ->
           (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
@@ -210,7 +210,7 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
     | RApp_left (left, _) -> (match d with D.Application (at, df, da) ->
       let a = T.eval default_value at in
       (match source_term with D.Apply (_, argument) -> D.typed_def z g argument at da; () | _ -> ());
-      embed_eval at (refine_ u); let function_type = Function (a, target) in T.embed_def function_type;
+      embed_eval at (refine_ u); let function_type = Function (a, target) in D.embed_def function_type;
       let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (next : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after tau x})) @ total ->
         (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total -> {u : unit | matches tau left function_type} -> {u : unit | claim}) @ total = fun tau next equal fit ->
         let refine_ fit = fit in let u = () in
@@ -220,7 +220,7 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
     | RApp_right (left, right, h1, pool1) -> (match d with D.Application (at, df, da) ->
       let a = T.eval default_value at in
       (match source_term with D.Apply (_, argument) -> D.typed_def z g argument at da; () | _ -> ());
-      embed_eval at (refine_ u); let function_type = Function (a, target) in T.embed_def function_type;
+      embed_eval at (refine_ u); let function_type = Function (a, target) in D.embed_def function_type;
       let facts1 = execution_facts h depth pool facts env left h1 pool1 (refine_ u) in
       run_env h depth pool env left h1 pool1 env (refine_ u);
       let consume1 : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (model1 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h1 rho1 x})) @ total ->
@@ -237,7 +237,7 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, derivation) -> (match d with D.Application (at, df, da) ->
       let a = T.eval default_value at in
       (match source_term with D.Apply (_, argument) -> D.typed_def z g argument at da; () | _ -> ());
-      embed_eval at (refine_ u); let function_type = Function (a, target) in T.embed_def function_type;
+      embed_eval at (refine_ u); let function_type = Function (a, target) in D.embed_def function_type;
       let facts1 = execution_facts h depth pool facts env left h1 pool1 (refine_ u) in
       run_env h depth pool env left h1 pool1 env (refine_ u);
       let consume1 : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (model1 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h1 rho1 x})) @ total ->
@@ -338,7 +338,7 @@ let rec (with_run_model @ total) : (h : Pref.heap) @ immutable -> (depth : int) 
 let (with_closed_model @ total) : (e : execution) @ immutable -> (after : Pref.heap) @ immutable ->
     (pool : pool) @ immutable -> (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
-      && let_free e && D.typed D.Z D.Empty_context (source e) (T.embed target) d} -> (claim : bool) ->
+      && let_free e && D.typed D.Z D.Empty_context (source e) (D.embed target) d} -> (claim : bool) ->
     (use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after tau x})) @ total ->
       {u : unit | matches tau e target} -> {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
@@ -363,7 +363,7 @@ let (closed_reject @ total) : (e : execution) @ immutable -> (after : Pref.heap)
     (pool : pool) @ immutable -> (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
       && let_free e && result e === None
-      && D.typed D.Z D.Empty_context (source e) (T.embed target) d} -> {u : unit | false} @ ghost =
+      && D.typed D.Z D.Empty_context (source e) (D.embed target) d} -> {u : unit | false} @ ghost =
   fun e after pool target d premise -> ghost_ (
     let refine_ premise = premise in
     let use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -377,7 +377,7 @@ let (closed_factor @ total) : (e : execution) @ immutable -> (after : Pref.heap)
     (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
       && let_free e && result e === Some p && Level_finite_spec.finite after t && Level_finite_spec.tree_root t === p
-      && D.typed D.Z D.Empty_context (source e) (T.embed target) d} -> (claim : bool) ->
+      && D.typed D.Z D.Empty_context (source e) (D.embed target) d} -> (claim : bool) ->
     (use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       {u : unit | target === Level_mgu_spec.substitute delta (Level_finite_spec.readback t)} -> {u : unit | claim})) @ total ->
     {u : unit | claim} @ ghost = fun e after pool p t target d premise claim use -> ghost_ (
@@ -393,7 +393,7 @@ let (closed_factor @ total) : (e : execution) @ immutable -> (after : Pref.heap)
 let (closed_completes @ total) : (e : execution) @ immutable -> (after : Pref.heap) @ immutable ->
     (pool : pool) @ immutable -> (target : ty) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
-      && let_free e && D.typed D.Z D.Empty_context (source e) (T.embed target) d} ->
+      && let_free e && D.typed D.Z D.Empty_context (source e) (D.embed target) d} ->
     {u : unit | not (result e === None)} @ ghost = fun e after pool target d premise -> ghost_ (
       let refine_ premise = premise in let u = () in match result e with Some _ -> refine_ u
       | None -> closed_reject e after pool target d (refine_ u); refine_ u)

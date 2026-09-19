@@ -30,7 +30,7 @@ let (variable_typing @ total) : (h : Pref.heap) @ immutable -> (depth : int) ->
     (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation (copy_heap h epoch depth history) rho x})) @ total ->
     {u : unit | env_at h depth env schemas && lookup env i === Some original
       && valid h epoch depth history && target_for h history original p} ->
-    {d : D.typing | D.typed D.Z (P.context rho schemas) (D.Bound i) (T.embed (rho p)) d} @ immutable ghost =
+    {d : D.typing | D.typed D.Z (P.context rho schemas) (D.Bound i) (D.embed (rho p)) d} @ immutable ghost =
   fun h depth env schemas i original p epoch history rho model premise -> ghost_ (
     let refine_ premise = premise in let u = () in
     let refine_ schema = lookup_schema h depth env schemas i original (refine_ u) in
@@ -47,7 +47,7 @@ let (variable_typing @ total) : (h : Pref.heap) @ immutable -> (depth : int) ->
     let refine_ args = P.direct_instance rho choices schema in
     P.lookup_context rho schemas i schema (refine_ u); P.context_wf rho schemas;
     let ty = rho p in let z = D.Z in T.embed_wf z ty;
-    let g = P.context rho schemas in let term = D.Bound i in let target = T.embed ty in
+    let g = P.context rho schemas in let term = D.Bound i in let target = D.embed ty in
     let d = D.Variable args in D.typed_def z g term target d; refine_ d)
 
 let (bind_schema @ total) : (h : Pref.heap) @ immutable -> (depth : int) ->
@@ -62,7 +62,7 @@ let (bind_schema @ total) : (h : Pref.heap) @ immutable -> (depth : int) ->
 
 let (boundary_scheme @ total) :
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total -> (p : node Pref.t) @ immutable ->
-    {u : unit | P.scheme rho (Boundary p) === D.Forall (D.Z, T.embed (rho p))} @ ghost = fun rho p -> ghost_ (
+    {u : unit | P.scheme rho (Boundary p) === D.Forall (D.Z, D.embed (rho p))} @ ghost = fun rho p -> ghost_ (
     let schema = Boundary p in P.scheme_def rho schema; Hm_freshness_proofs.template_names_def schema;
     let names = Hm_abstraction.No_names in Hm_abstraction.count_def names; P.body_def names rho schema;
     let u = () in refine_ u)
@@ -78,11 +78,11 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after rho x})) @ total -> (p : node Pref.t) @ immutable ->
     {u : unit | ran h depth pool env e after final_pool && env_at h depth env schemas && result e === Some p} ->
-    {d : D.typing | D.typed D.Z (P.context rho schemas) (source e) (T.embed (rho p)) d} @ immutable ghost =
+    {d : D.typing | D.typed D.Z (P.context rho schemas) (source e) (D.embed (rho p)) d} @ immutable ghost =
   fun h trees depth pool facts env schemas e after final_pool rho model p premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;
     let_free_def e; result_def e; source_def e; P.context_wf rho schemas;
-    let g = P.context rho schemas in let term = source e in let ty = rho p in let t = T.embed ty in
+    let g = P.context rho schemas in let term = source e in let ty = rho p in let t = D.embed ty in
     let z = D.Z in T.embed_wf z ty; let u = () in match e with
     | RApp_left _ | RApp_right _ | RLet_left _ ->
       let d = D.Constant in refine_ d
@@ -193,7 +193,7 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
       | Some original -> let refine_ d = variable_typing h depth env schemas i original p epoch history rho
           (refine_ model) (refine_ u) in refine_ d)
     | RBool _ -> model p; node_equation_def after rho p; observe_def after p;
-      let desc : desc = Bool in cell_def desc depth; T.embed_def ty;
+      let desc : desc = Bool in cell_def desc depth; D.embed_def ty;
       let d = D.Constant in D.typed_def z g term t d; refine_ d
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
@@ -218,7 +218,7 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
         let u = () in let refine_ _t = ts2 x in model x; Hm_model_proofs.allocation_restrict middle p w rho x (refine_ u); refine_ u in
       let refine_ body_typing = run_sound h1 ts1 depth pool1 (refine_ facts1) env1 schemas1 body middle body_pool rho mid_model b (refine_ u) in
       model p; node_equation_def after rho p; observe_def after p; cell_def desc depth;
-      T.embed_def ty; let a = T.embed (rho arg) in let d = D.Abstraction (a, body_typing) in
+      D.embed_def ty; let a = D.embed (rho arg) in let d = D.Abstraction (a, body_typing) in
       D.typed_def z g term t d; refine_ d)
     | RApp (left, right, h1, pool1, h2, pool2, _, arrow, ok, derivation) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
@@ -251,8 +251,8 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
       let refine_ right_typing = run_sound h1 ts1 depth pool1 facts1 env schemas right h2 pool2 rho model2 a (refine_ u) in
       Optimized_model_proofs.success_forward_at h4 rho f arrow after derivation model arrow (refine_ u);
       node_equation_def h4 rho arrow; observe_def h4 arrow; cell_def desc depth;
-      let ft = rho f in T.embed_def ft;
-      let at = T.embed (rho a) in let d = D.Application (at, left_typing, right_typing) in
+      let ft = rho f in D.embed_def ft;
+      let at = D.embed (rho a) in let d = D.Application (at, left_typing, right_typing) in
       D.typed_def z g term t d; refine_ d)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
@@ -294,15 +294,15 @@ let rec (run_sound @ total) : (h : Pref.heap) @ immutable ->
         let u = () in Hm_model_proofs.run_restrict h3 ts3 depth pool3 env3 body middle body_pool rho mid_model x (refine_ u); refine_ u in
       let refine_ body_typing = run_sound h3 ts3 depth pool3 (refine_ facts3) env3 schemas3 body middle body_pool rho mid_model b (refine_ u) in
       Optimized_model_proofs.success_forward_at middle rho b res after derivation model p (refine_ u);
-      model3 self; node_equation_def h3 rho self; observe_def h3 self; T.embed_def ty;
-      let at = T.embed (rho arg) in let bt = T.embed (rho res) in
+      model3 self; node_equation_def h3 rho self; observe_def h3 self; D.embed_def ty;
+      let at = D.embed (rho arg) in let bt = D.embed (rho res) in
       let d = D.Recursion (at, bt, body_typing) in D.typed_def z g term t d; refine_ d))
 
 let (closed_sound @ total) : (e : execution) @ immutable -> (after : Pref.heap) @ immutable ->
     (pool : pool) @ immutable -> (p : node Pref.t) @ immutable -> (t : tree) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
       && result e === Some p && finite after t && tree_root t === p} ->
-    {d : D.typing | D.typed D.Z D.Empty_context (source e) (T.embed (readback t)) d} @ immutable ghost =
+    {d : D.typing | D.typed D.Z D.Empty_context (source e) (D.embed (readback t)) d} @ immutable ghost =
   fun e after pool p t premise -> ghost_ (
     let refine_ premise = premise in let h = H.empty () in
     let trees : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
@@ -333,10 +333,10 @@ let (closed_principal @ total) : (e : execution) @ immutable -> (after : Pref.he
     (target : ty) @ immutable -> (typing : D.typing) @ immutable ->
     {u : unit | ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty e after pool
       && result e === Some p && finite after tree && tree_root tree === p
-      && D.typed D.Z D.Empty_context (source e) (T.embed target) typing} -> (claim : bool) ->
+      && D.typed D.Z D.Empty_context (source e) (D.embed target) typing} -> (claim : bool) ->
     (use : ((inferred : D.typing) @ immutable ->
       (delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
-      {u : unit | D.typed D.Z D.Empty_context (source e) (T.embed (readback tree)) inferred
+      {u : unit | D.typed D.Z D.Empty_context (source e) (D.embed (readback tree)) inferred
         && target === Level_mgu_spec.substitute delta (readback tree)} -> {u : unit | claim})) @ total ->
     {u : unit | claim} @ ghost = fun e after pool p tree target typing premise claim use -> ghost_ (
     let refine_ premise = premise in let u = () in

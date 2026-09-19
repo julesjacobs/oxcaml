@@ -92,7 +92,7 @@ let run shared =
         let u = () in let refine_ u = with_generalized_choices h 0 pool coverage epoch depth d tau next tree result (refine_ u) claim accept in refine_ u in
     let u = () in let refine_ u = with_generalized_instance h scope forest 0 pool coverage rho model choices epoch depth d tree result (refine_ u) claim use in ()) in
   ghost_ (let u = () in Copy_heap_proofs.target_allocated saved epoch depth d p result (refine_ u);
-    Copy_heap_proofs.extends_def d d;
+    Copy_spec.extends_def d d;
     Level_copy_proofs.target_active_at saved order_saved epoch depth d d p result (refine_ u);
     copy_scope result; finite_scope_def after_copy result;
     Copy_heap_proofs.history_at saved epoch depth d boundary (refine_ u);
