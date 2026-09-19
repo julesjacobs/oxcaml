@@ -25,12 +25,12 @@ let (current_coverage @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | Representative_level.representative_covered
       h (s.depth - 1) s.pending p} @ ghost =
   fun h s where p premise -> ghost_ (
-    let refine_ premise = premise in located_def h s where p;
+    located_def h s where p;
     let i = where p in at_def s i;
     let cut = s.depth - 1 in
     Representative_level.representative_covered_def h cut s.pending p;
     covered_def h cut s.pending p; Level_spec.at_level_def h p;
-    let u = () in refine_ u)
+    ())
 
 let (same_closing @ total) : (h : node Pref.heap) @ immutable ->
     (s : store) @ immutable -> (where : locations) @ total ->
@@ -46,34 +46,31 @@ let (same_closing @ total) : (h : node Pref.heap) @ immutable ->
       === Representative_pool_spec.close_heap h (s.depth - 1) virtual_pool}
       @ ghost =
   fun h s where virtual_pool physical logical premise -> ghost_ (
-    let refine_ premise = premise in let cut = s.depth - 1 in
+    let cut = s.depth - 1 in
     let coverage : ((p : node Pref.t) @ immutable ->
       {u : unit | not (L.terminal h p) ||
         (match H.at h p with None -> true | Some v ->
           not (needs_close cut v.level) ||
             (listed s.pending p === listed virtual_pool p))}) @ total =
       fun p ->
-        physical p; logical p; let u = () in
-        current_coverage h s where p (refine_ u);
+        physical p; logical p; current_coverage h s where p ();
         Representative_level.representative_covered_def h cut s.pending p;
         Representative_level.representative_covered_def h cut virtual_pool p;
         covered_def h cut s.pending p; covered_def h cut virtual_pool p;
         Level_spec.at_level_def h p;
         if L.terminal h p then (
           L.terminal_def h p; L.observe_def h p;
-          let ownership : {u : unit | not (listed virtual_pool p) || H.mem h p} =
+          let _ : {u : unit | not (listed virtual_pool p) || H.mem h p} =
             (if listed virtual_pool p then
-              (Pooled_proofs.pool_member h virtual_pool p (refine_ u); refine_ u)
-             else refine_ u) in
-          let refine_ ownership = ownership in
+              (Pooled_proofs.pool_member h virtual_pool p (); ())
+             else ()) in
           if listed s.pending p then
-            (Pooled_proofs.pool_member h s.pending p (refine_ u); ()) else ());
+            (Pooled_proofs.pool_member h s.pending p (); ()) else ());
         (match H.at h p with None -> () | Some v ->
           needs_close_def cut v.level; ());
-        refine_ u in
-    let u = () in
+        () in
     Pool_closing_equivalence.same_representative_closing
-      h cut s.pending virtual_pool coverage (refine_ u); refine_ u)
+      h cut s.pending virtual_pool coverage (); ())
 
 let (allocated @ total) : (h : node Pref.heap) @ immutable ->
     (s : store) @ immutable -> (where : locations) @ total ->
@@ -84,19 +81,17 @@ let (allocated @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | located (H.put h p (cell desc s.depth))
       {s with pending = Entry (p, s.pending)} next_where x} @ ghost =
   fun h s where p desc next_where x premise -> ghost_ (
-    let refine_ premise = premise in
     let v = cell desc s.depth in cell_def desc s.depth;
     let after = H.put h p v in
     let next = {s with pending = Entry (p, s.pending)} in
     located_def h s where x; located_def after next next_where x;
-    Copy_heap_proofs.put_frame h p v x;
     L.terminal_def h x; L.terminal_def after x;
     L.observe_def h x; L.observe_def after x;
     Level_spec.at_level_def h x; Level_spec.at_level_def after x;
     let old_i = where x in let new_i = next_where x in
     at_def s old_i; at_def next new_i;
     let pending = Entry (p, s.pending) in listed_def pending x;
-    let u = () in refine_ u)
+    ())
 
 let (unified @ total) : (h : node Pref.heap) @ immutable ->
     (s : store) @ immutable -> (where : locations) @ total ->
@@ -108,18 +103,16 @@ let (unified @ total) : (h : node Pref.heap) @ immutable ->
       && located h s where x} ->
     {u : unit | located after s where x} @ ghost =
   fun h s where p q ok after d x premise -> ghost_ (
-    let refine_ premise = premise in
     located_def h s where x; located_def after s where x;
-    let u = () in
     if L.terminal after x then (
-      Effective_unifier_pool.unified_terminal h p q ok after d x (refine_ u);
-      Effective_unifier_metadata.cells h p q ok after d x (refine_ u);
+      Effective_unifier_pool.unified_terminal h p q ok after d x ();
+      Effective_unifier_metadata.cells h p q ok after d x ();
       Effective_unifier_metadata.cell_frame_def h after x;
       Level_spec.at_level_def h x; Level_spec.at_level_def after x;
       (match H.at h x, H.at after x with
       | Some a, Some b -> Level_spec.decreases_def a.level b.level; ()
       | _ -> ()); ()) else ();
-    refine_ u)
+    ())
 
 let (copied @ total) : (h : node Pref.heap) @ immutable ->
     (s : store) @ immutable -> (where : locations) @ total ->
@@ -136,15 +129,13 @@ let (copied @ total) : (h : node Pref.heap) @ immutable ->
       {s with pending = Pooled_spec.registered s.pending epoch d} next_where x}
       @ ghost =
   fun h s where certificate epoch d next_where x premise -> ghost_ (
-    let refine_ premise = premise in
     let raw = heap h epoch s.depth d in
     let after = Hm_effective_execution_spec.copy_heap h epoch s.depth d in
     let trail = Pooled_spec.touched d in
     let next = {s with pending = Pooled_spec.registered s.pending epoch d} in
-    let u = () in
-    Hm_effective_registration.history_at h certificate epoch s.depth d x (refine_ u);
-    Hm_effective_registration.result_at h certificate epoch s.depth d x (refine_ u);
-    Hm_effective_registration.copy_new_member h s.pending certificate epoch s.depth d x (refine_ u);
+    Hm_effective_registration.history_at h certificate epoch s.depth d x ();
+    Hm_effective_registration.result_at h certificate epoch s.depth d x ();
+    Hm_effective_registration.copy_new_member h s.pending certificate epoch s.depth d x ();
     Copy_cleanup_spec.swept_at_def raw after trail x;
     Pooled_proofs.registered_keeps s.pending epoch d x;
     located_def h s where x; located_def after next next_where x;
@@ -152,7 +143,7 @@ let (copied @ total) : (h : node Pref.heap) @ immutable ->
     L.terminal_def h x; L.terminal_def after x;
     L.observe_def h x; L.observe_def after x;
     Level_spec.at_level_def h x; Level_spec.at_level_def after x;
-    refine_ u)
+    ())
 
 let (entered @ total) : (h : node Pref.heap) @ immutable ->
     (s : store) @ immutable -> (where : locations) @ total ->
@@ -164,14 +155,13 @@ let (entered @ total) : (h : node Pref.heap) @ immutable ->
         buckets = Vox_iarray.updated s.buckets s.depth s.pending} where x}
         @ ghost =
   fun h s where x premise -> ghost_ (
-    let refine_ premise = premise in
     let buckets = Vox_iarray.updated s.buckets s.depth s.pending in
     let next = {depth = s.depth + 1; pending = Empty; buckets} in
     let i = where x in
     located_def h s where x; located_def h next where x;
     at_def s i; at_def next i; bucket_def buckets i;
     Vox_iarray.updated_read s.buckets s.depth s.pending i;
-    bucket_def s.buckets i; let u = () in refine_ u)
+    bucket_def s.buckets i; ())
 
 let[@def] (closed_store @ total) (h : node Pref.heap @ immutable)
     (s : store @ immutable) = ghost_ (
@@ -195,17 +185,16 @@ let (left @ total) : (h : node Pref.heap) @ immutable ->
       (Representative_pool_spec.close_heap h (s.depth - 1) s.pending)
       (closed_store h s) next_where x} @ ghost =
   fun h s where next_where x premise -> ghost_ (
-    let refine_ premise = premise in let cut = s.depth - 1 in
+    let cut = s.depth - 1 in
     let after = Representative_pool_spec.close_heap h cut s.pending in
     let empty = Empty in
     let retained = Representative_pool_spec.transfer_rep after s.pending empty in
     let routed = route after retained s.buckets in
     let next = closed_store h s in closed_store_def h s;
-    let u = () in
     Representative_pool_spec.close_heap_def h cut s.pending;
-    Representative_level.representatives_scoped h s.pending (refine_ u);
+    Representative_level.representatives_scoped h s.pending ();
     let filtered = Representative_level.representatives h s.pending in
-    Generalize_proofs.closed_observe h cut filtered x (refine_ u);
+    Generalize_proofs.closed_observe h cut filtered x ();
     closed_at_def h after cut filtered x;
     Representative_level.representatives_member h s.pending x;
     located_def h s where x; located_def after next next_where x;
@@ -220,12 +209,12 @@ let (left @ total) : (h : node Pref.heap) @ immutable ->
     bucket_def cleared j; Vox_iarray.updated_read routed cut empty j;
     bucket_def routed j;
     let size = Iarray.length s.buckets in
-    closed_routable h cut s.pending size (refine_ u);
-    route_member after retained s.buckets j x (refine_ u);
+    closed_routable h cut s.pending size ();
+    route_member after retained s.buckets j x ();
     Representative_pool_proofs.transfer_member after s.pending empty x;
     listed_def empty x; Representative_pool_spec.retained_rep_def after x;
     Nested_pool_spec.retained_def after x;
-    refine_ u)
+    ())
 
 let[@def] (located_at @ total) (h : node Pref.heap @ immutable)
     (s : store @ immutable) (p : node Pref.t @ immutable) (i : int) = ghost_ (
@@ -240,4 +229,4 @@ let (location_at @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | located h s where p === located_at h s p (where p)} @ ghost =
   fun h s where p -> ghost_ (
     located_def h s where p; let i = where p in located_at_def h s p i;
-    let u = () in refine_ u)
+    ())

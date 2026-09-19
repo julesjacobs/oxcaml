@@ -31,7 +31,7 @@ let (one_commutes @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
       let ap = close_cell cut a in let bq = close_cell cut b in
       H.commute_law h p ap q bq; ()
     | _ -> ());
-    let u = () in refine_ u)
+    ())
 
 let rec (one_pool_commutes @ total) : (h : node Pref.heap) @ immutable ->
     (cut : int) -> (p : node Pref.t) @ immutable -> (pool : pool) @ immutable ->
@@ -40,13 +40,13 @@ let rec (one_pool_commutes @ total) : (h : node Pref.heap) @ immutable ->
   fun h cut p pool -> ghost_ (
     let hp = close_one h cut p in
     closed_heap_def h cut pool; closed_heap_def hp cut pool;
-    let u = () in match pool with
-    | Empty -> refine_ u
+    match pool with
+    | Empty -> ()
     | Entry (q, rest) ->
       close_one_def h cut q; close_one_def hp cut q;
       one_commutes h cut p q;
       let hq = close_one h cut q in
-      one_pool_commutes hq cut p rest; refine_ u)
+      one_pool_commutes hq cut p rest; ())
 
 let rec (pools_commute @ total) : (h : node Pref.heap) @ immutable ->
     (cut : int) -> (a : pool) @ immutable -> (b : pool) @ immutable ->
@@ -55,12 +55,12 @@ let rec (pools_commute @ total) : (h : node Pref.heap) @ immutable ->
   fun h cut a b -> ghost_ (
     let hb = closed_heap h cut b in
     closed_heap_def h cut a; closed_heap_def hb cut a;
-    let u = () in match a with Empty -> refine_ u
+    match a with Empty -> ()
     | Entry (p, rest) ->
       close_one_def h cut p; close_one_def hb cut p;
       one_pool_commutes h cut p b;
       let hp = close_one h cut p in
-      pools_commute hp cut rest b; refine_ u)
+      pools_commute hp cut rest b; ())
 
 let rec (unchanged @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     (pool : pool) @ immutable ->
@@ -69,13 +69,13 @@ let rec (unchanged @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     {u : unit | closed_heap h cut pool === h} @ ghost =
   fun h cut pool facts -> ghost_ (
     closed_heap_def h cut pool;
-    let u = () in match pool with Empty -> refine_ u
+    match pool with Empty -> ()
     | Entry (p, rest) ->
       facts p; listed_def pool p; close_one_def h cut p;
       let next : ((x : node Pref.t) @ immutable ->
         {u : unit | not (listed rest x) || close_one h cut x === h}) @ total =
-        fun x -> facts x; listed_def pool x; let u = () in refine_ u in
-      unchanged h cut rest next; refine_ u)
+        fun x -> facts x; listed_def pool x; () in
+      unchanged h cut rest next; ())
 
 let (absorb @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     (a : pool) @ immutable -> (b : pool) @ immutable ->
@@ -87,19 +87,18 @@ let (absorb @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     {u : unit | closed_heap (closed_heap h cut a) cut b ===
       closed_heap h cut a} @ ghost =
   fun h cut a b coverage premise -> ghost_ (
-    let refine_ premise = premise in let after = closed_heap h cut a in
+    let after = closed_heap h cut a in
     let facts : ((p : node Pref.t) @ immutable ->
       {u : unit | not (listed b p) || close_one after cut p === after}) @ total =
       fun p ->
-        coverage p; let u = () in
-        Generalize_proofs.closed_observe h cut a p (refine_ u);
+        coverage p; Generalize_proofs.closed_observe h cut a p ();
         closed_at_def h after cut a p; close_one_def after cut p;
         (match H.at h p with None -> () | Some v ->
           needs_close_def cut v.level; close_level_def cut v.level; ());
         (match H.at after p with None -> () | Some v ->
           needs_close_def cut v.level; ());
-        refine_ u in
-    unchanged after cut b facts; let u = () in refine_ u)
+        () in
+    unchanged after cut b facts; ())
 
 let (same_closing @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     (a : pool) @ immutable -> (b : pool) @ immutable ->
@@ -109,20 +108,19 @@ let (same_closing @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     {u : unit | pool_scoped h a && pool_scoped h b} ->
     {u : unit | closed_heap h cut a === closed_heap h cut b} @ ghost =
   fun h cut a b coverage premise -> ghost_ (
-    let refine_ premise = premise in
     let ab : ((p : node Pref.t) @ immutable ->
       {u : unit | not (listed b p) ||
         (match H.at h p with None -> true | Some v ->
           not (needs_close cut v.level) || listed a p)}) @ total =
-        fun p -> coverage p; let u = () in refine_ u in
+        fun p -> coverage p; () in
     let ba : ((p : node Pref.t) @ immutable ->
       {u : unit | not (listed a p) ||
         (match H.at h p with None -> true | Some v ->
           not (needs_close cut v.level) || listed b p)}) @ total =
-        fun p -> coverage p; let u = () in refine_ u in
-    let u = () in absorb h cut a b ab (refine_ u);
-    absorb h cut b a ba (refine_ u);
-    pools_commute h cut a b; refine_ u)
+        fun p -> coverage p; () in
+    absorb h cut a b ab ();
+    absorb h cut b a ba ();
+    pools_commute h cut a b; ())
 
 let (same_representative_closing @ total) :
     (h : node Pref.heap) @ immutable -> (cut : int) ->
@@ -135,7 +133,6 @@ let (same_representative_closing @ total) :
     {u : unit | Representative_pool_spec.close_heap h cut a ===
       Representative_pool_spec.close_heap h cut b} @ ghost =
   fun h cut a b coverage premise -> ghost_ (
-    let refine_ premise = premise in
     let pa = Representative_level.representatives h a in
     let pb = Representative_level.representatives h b in
     let filtered : ((p : node Pref.t) @ immutable ->
@@ -145,13 +142,12 @@ let (same_representative_closing @ total) :
       coverage p;
       Representative_level.representatives_member h a p;
       Representative_level.representatives_member h b p;
-      let u = () in refine_ u in
-    let u = () in
-    Representative_level.representatives_scoped h a (refine_ u);
-    Representative_level.representatives_scoped h b (refine_ u);
+      () in
+    Representative_level.representatives_scoped h a ();
+    Representative_level.representatives_scoped h b ();
     Representative_pool_spec.close_heap_def h cut a;
     Representative_pool_spec.close_heap_def h cut b;
-    same_closing h cut pa pb filtered (refine_ u); refine_ u)
+    same_closing h cut pa pb filtered (); ())
 
 let rec (transfer_scoped @ total) : (h : node Pref.heap) @ immutable ->
     (child : pool) @ immutable -> (parent : pool) @ immutable ->
@@ -159,14 +155,13 @@ let rec (transfer_scoped @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | pool_scoped h
       (Representative_pool_spec.transfer_rep h child parent)} @ ghost =
   fun h child parent premise -> ghost_ (
-    let refine_ premise = premise in
     Representative_pool_spec.transfer_rep_def h child parent;
-    pool_scoped_def h child; let u = () in match child with
-    | Empty -> refine_ u
+    pool_scoped_def h child; match child with
+    | Empty -> ()
     | Entry (p, rest) -> if Representative_pool_spec.retained_rep h p then (
       let next = Entry (p, parent) in pool_scoped_def h next;
-      transfer_scoped h rest next (refine_ u); refine_ u)
-      else (transfer_scoped h rest parent (refine_ u); refine_ u))
+      transfer_scoped h rest next (); ())
+      else (transfer_scoped h rest parent (); ()))
 
 let (closed_transfer_scoped @ total) : (h : node Pref.heap) @ immutable ->
     (cut : int) -> (child : pool) @ immutable -> (parent : pool) @ immutable ->
@@ -174,11 +169,10 @@ let (closed_transfer_scoped @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | let after = Representative_pool_spec.close_heap h cut child in
       pool_scoped after (Representative_pool_spec.transfer_rep after child parent)}
       @ ghost = fun h cut child parent premise -> ghost_ (
-    let refine_ premise = premise in let u = () in
     Representative_pool_spec.close_heap_def h cut child;
-    Representative_level.representatives_scoped h child (refine_ u);
+    Representative_level.representatives_scoped h child ();
     let filtered = Representative_level.representatives h child in
-    Nested_pool_proofs.closed_other_pool h cut filtered child (refine_ u);
-    Nested_pool_proofs.closed_other_pool h cut filtered parent (refine_ u);
+    Nested_pool_proofs.closed_other_pool h cut filtered child ();
+    Nested_pool_proofs.closed_other_pool h cut filtered parent ();
     let after = Representative_pool_spec.close_heap h cut child in
-    transfer_scoped after child parent (refine_ u); refine_ u)
+    transfer_scoped after child parent (); ())

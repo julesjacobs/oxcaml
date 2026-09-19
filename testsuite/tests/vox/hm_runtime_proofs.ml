@@ -241,7 +241,7 @@ let (copy_target_active @ total) : (h : node Pref.heap) @ immutable -> (depth : 
     let refine_ premise = premise in
     let order : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || ordered h x}) @ total = fun x ->
       facts x; runtime_at_def h depth pool x; safe_def h x; let u = () in refine_ u in
-    let u = () in Copy_heap_proofs.extends_def d d;
+    let u = () in Copy_spec.extends_def d d;
     Level_copy_proofs.target_active_at h order epoch depth d d p q (refine_ u);
     Clean_copy.result_at h epoch depth d q (refine_ u);
     let raw = heap h epoch depth d in let trail = Pooled_spec.touched d in
