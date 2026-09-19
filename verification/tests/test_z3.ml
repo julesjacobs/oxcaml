@@ -12,8 +12,13 @@ let app op args = App (op, args)
 
 let eq a b = app Eq [a; b]
 
+let force_bits = ref false
+
 let check ?(datatypes = []) ?(symbols = []) ?(functions = []) ?(facts = []) term
     =
+  let facts =
+    if !force_bits then eq (app Bit_and [i 0L; i 0L]) (i 0L) :: facts else facts
+  in
   Vox_smt_solver.check ~config ~int_width:63
     { datatypes;
       symbols;
@@ -34,7 +39,7 @@ let invalid ?datatypes ?symbols ?functions ?facts term =
   | Failure message -> failwith message
   | _ -> failwith "Expected invalid"
 
-let () =
+let arithmetic () =
   let f = Function.create ~label:"same" ~arguments:[Int63] ~result:Int63 in
   let g = Function.create ~label:"same" ~arguments:[Int63] ~result:Int63 in
   valid ~symbols:[x] ~functions:[f]
@@ -153,6 +158,12 @@ let () =
   print_endline "Z3 integration tests passed"
 
 let () =
+  arithmetic ();
+  force_bits := true;
+  arithmetic ();
+  force_bits := false
+
+let () =
   Vox_smt_solver.with_session ~config ~int_width:63 (fun check ->
       let query symbols facts term =
         { datatypes = [];
@@ -176,3 +187,39 @@ let () =
         | _ -> failwith "A previous query's assumptions escaped its scope"
       done);
   print_endline "Z3 session tests passed"
+
+let () =
+  let signed n = Int64.shift_right (Int64.shift_left n 1) 1 in
+  let cases =
+    [0L; 1L; -1L; 65535L; -4611686018427387904L; 4611686018427387903L]
+  in
+  List.iter
+    (fun (op, compute) ->
+      List.iter
+        (fun a ->
+          List.iter
+            (fun b -> valid (eq (app op [i a; i b]) (i (signed (compute a b)))))
+            cases)
+        cases)
+    [Bit_and, Int64.logand; Bit_or, Int64.logor; Bit_xor, Int64.logxor];
+  valid ~symbols:[x]
+    (eq (app Bit_and [Var x; app Bit_xor [Var x; i (-1L)]]) (i 0L));
+  ignore (invalid ~symbols:[x] (eq (app Bit_or [Var x; i 1L]) (i 0L)))
+
+let () =
+  let values = [0L; 1L; -1L; -4611686018427387904L; 4611686018427387903L] in
+  List.iter
+    (fun value ->
+      List.iter
+        (fun count ->
+          let bits = Int64.logand value Int64.max_int in
+          let result =
+            if count = 0 then value else Int64.shift_right_logical bits count
+          in
+          valid
+            (eq
+               (app Shift_right_logical [i value; i (Int64.of_int count)])
+               (i result)))
+        [0; 1; 7; 16; 62; 63])
+    values;
+  ignore (invalid (eq (app Shift_right_logical [i (-1L); i 64L]) (i 0L)))
