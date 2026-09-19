@@ -30,7 +30,8 @@ type function_value =
     primitive : (string * int) option;
     choice : (term * function_value * function_value) option;
     total : bool;
-    lambda : logical_lambda option;
+    (* Shared by aliases and choices until deferred body checking completes. *)
+    lambda : logical_lambda option ref;
     application : (type_expr * function_value * value option list) option
   }
 
@@ -94,7 +95,7 @@ let rec join_value condition a b =
              primitive =
                (if a.primitive = b.primitive then a.primitive else None);
              total = a.total && b.total;
-             lambda = None;
+             lambda = ref None;
              application = None
            })
     | Some (Record a), Some (Record b) when List.map fst a = List.map fst b ->
@@ -126,6 +127,11 @@ type state =
     code : command list;
     dead : bool;
     omitted_premises : (Location.t * Location.error) list
+  }
+
+type deferred_check =
+  { scope : state;
+    check : state -> state
   }
 
 module Symbolic_keys = Hashtbl.Make (struct
@@ -161,6 +167,7 @@ type context =
     pref_observers :
       (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
+    mutable argument_values : value option Path.Map.t;
     mutable batches : command list list;
     named_terms : (Symbol.t, term) Hashtbl.t;
     symbolic : value option Symbolic_keys.t;
@@ -313,9 +320,28 @@ let merge_patterns base outcomes =
           s.values values)
       outcomes Path.Map.empty
   in
-  { base with values }, disjunction (List.map snd outcomes)
+  let code, omitted_premises =
+    List.fold_left
+      (fun (code, omitted) (s, condition) ->
+        let facts = added_prefix ~base:base.code s.code in
+        let code =
+          match facts with
+          | [] -> code
+          | _ when condition = Boolean true -> facts @ code
+          | _ ->
+            Choice (facts @ [Assume condition], [Assume (not_ condition)])
+            :: code
+        in
+        ( code,
+          added_prefix ~base:base.omitted_premises s.omitted_premises @ omitted
+        ))
+      (base.code, base.omitted_premises)
+      outcomes
+  in
+  ( { base with values; code; omitted_premises },
+    disjunction (List.map snd outcomes) )
 
-let guarded_case ctx eval loc s matched guard body rest =
+let guarded_case ctx eval_guard eval_body loc s matched guard body rest =
   let matched, condition = merge_patterns s matched in
   let values = s.values in
   let s, accepted =
@@ -324,13 +350,13 @@ let guarded_case ctx eval loc s matched guard body rest =
     | Some g ->
       let state, value =
         choose ctx matched condition
-          (fun s -> eval s g)
+          (fun s -> eval_guard s g)
           (fun s -> s, scalar_value (Boolean false))
       in
       state, if state.dead then Boolean false else required loc value
   in
   choose ctx s accepted
-    (fun s -> eval s body)
+    (fun s -> eval_body s body)
     (fun state -> rest { state with values })
 
 let register_declarations ctx declarations =
@@ -489,7 +515,7 @@ let map_term_children f = function
 
 (* Unresolved body results are not captures: keeping them free would identify
    different applications of a function whose body we cannot model. *)
-let logical_lambda ctx captured parameters body =
+let logical_lambda ctx captured argument_values parameters body =
   let retained = Hashtbl.create 16 in
   let rec retain term =
     match term with
@@ -506,6 +532,7 @@ let logical_lambda ctx captured parameters body =
   in
   let retain_value _ value = Option.iter retain (scalar value) in
   Path.Map.iter retain_value captured.values;
+  Path.Map.iter retain_value argument_values;
   Path.Map.iter retain_value ctx.free;
   Symbolic_keys.iter retain_value ctx.symbolic;
   List.iter (fun symbol -> Hashtbl.replace retained symbol ()) parameters;
@@ -940,7 +967,7 @@ let fresh_function ?primitive label =
       choice = None;
       primitive;
       total = false;
-      lambda = None;
+      lambda = ref None;
       application = None
     }
 
@@ -1029,14 +1056,17 @@ let lookup ctx s env ty path =
       match Path.Map.find_opt path s.values with
       | Some value -> instantiate_path ctx env ty path value
       | None -> (
-        match Path.Map.find_opt path ctx.free with
+        match Path.Map.find_opt path ctx.argument_values with
         | Some value -> instantiate_path ctx env ty path value
-        | None ->
-          let value =
-            fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
-          in
-          ctx.free <- Path.Map.add path value ctx.free;
-          value)))
+        | None -> (
+          match Path.Map.find_opt path ctx.free with
+          | Some value -> instantiate_path ctx env ty path value
+          | None ->
+            let value =
+              fresh ?primitive:(primitive env path) ctx env ty (Path.name path)
+            in
+            ctx.free <- Path.Map.add path value ctx.free;
+            value))))
 
 let iarray_call ctx value =
   match scalar value with
@@ -1650,7 +1680,7 @@ let rec function_call ctx env ty fn args =
     join_value condition
       (function_call ctx env ty (Some (Function a)) args)
       (function_call ctx env ty (Some (Function b)) args)
-  | Some (Function { lambda = Some lambda; _ })
+  | Some (Function { lambda = { contents = Some lambda }; _ })
     when List.length lambda.parameters = List.length args ->
     begin match
       ( Misc.Stdlib.List.map_option scalar args,
@@ -1664,7 +1694,7 @@ let rec function_call ctx env ty fn args =
       let fn =
         Option.map
           (function
-            | Function fn -> Function { fn with lambda = None }
+            | Function fn -> Function { fn with lambda = ref None }
             | (Scalar _ | Record _) as value -> value)
           fn
       in
@@ -1684,7 +1714,7 @@ let rec function_call ctx env ty fn args =
            instances = ref [];
            specializations = ref [];
            choice = None;
-           lambda = None;
+           lambda = ref None;
            application = Some (ty, fn, args)
          })
   | _ -> (
@@ -1830,12 +1860,6 @@ let expression_constructor ctx env ty (c : Data_types.constructor_description) =
       symbolic_path ctx env ty path
     end
 
-let refinement env ty loc =
-  match get_desc (Ctype.expand_head env ty) with
-  | Trefine r -> r
-  | _ ->
-    Misc.fatal_errorf "VC: refinement expected at %a" Location.print_loc loc
-
 let rec predicate ctx env s e =
   if impossible s
   then s, None
@@ -1935,6 +1959,9 @@ let rec predicate ctx env s e =
           | _ -> name ctx s (scalar_value (required e.rexp_loc result))
           end
       end
+    | Rexp_refinement (source, body) ->
+      let s, value = eval s body in
+      expose_outer ctx env s source value e.rexp_loc
     | Rexp_ghost body -> eval s body
     | Rexp_logical_equal (left, right) ->
       let s, right = eval s right in
@@ -1969,19 +1996,62 @@ let rec predicate ctx env s e =
     | Rexp_match (scrutinee, cases) ->
       let s, value = eval s scrutinee in
       predicate_cases ctx env s value cases
+    | Rexp_fun _ -> (
+      let rec parameters acc body =
+        match body.rexp_desc with
+        | Rexp_fun (id, ty, _, body) -> parameters ((id, ty) :: acc) body
+        | _ -> List.rev acc, body
+      in
+      let params, body = parameters [] e in
+      let captured_arguments = ctx.argument_values in
+      let scoped, symbols =
+        List.fold_left
+          (fun (scoped, symbols) (id, ty) ->
+            let value = fresh ctx env ty (Ident.name id) in
+            match scalar value with
+            | Some (Var symbol) ->
+              let scoped, _ =
+                expose_outer ctx env (bind scoped id value) ty value e.rexp_loc
+              in
+              scoped, symbol :: symbols
+            | _ -> unsupported e.rexp_loc)
+          (s, []) params
+      in
+      let scoped, result = eval scoped body in
+      let lambda =
+        if impossible scoped
+        then None
+        else
+          Option.bind (scalar result)
+            (logical_lambda ctx s captured_arguments (List.rev symbols))
+      in
+      match lambda, fresh_function "refinement_function" with
+      | Some lambda, Function fn ->
+        fn.lambda := Some lambda;
+        s, Some (Function fn)
+      | _ ->
+        Location.raise_errorf ~loc:e.rexp_loc
+          "This local function cannot be represented in a refinement \
+           predicate. Use an explicit total function witness and a pointwise \
+           lemma.")
     | _ -> unsupported e.rexp_loc
 
 and expose ctx env s ty value loc =
-  if impossible s
-  then s, value
-  else
-    let r = refinement env ty loc in
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine r when not (impossible s) ->
     let s, predicate =
       predicate ctx env (bind s r.ref_binder value) r.ref_pred
     in
     (if s.dead then s else branch s (required loc predicate)), value
+  | _ -> s, value
 
 and predicate_pattern ctx env s value p =
+  let s, value =
+    List.fold_left
+      (fun (s, value) ty -> expose_outer ctx env s ty value p.rpat_loc)
+      (s, value)
+      (p.rpat_type :: p.rpat_refinements)
+  in
   match p.rpat_desc with
   | Rpat_any -> [s, Boolean true]
   | Rpat_var id -> [bind s id value, Boolean true]
@@ -2073,13 +2143,35 @@ and predicate_cases ctx env s value cases =
     | case :: cases ->
       let matched = predicate_pattern ctx env s value case.rc_lhs in
       let rest s = predicate_cases ctx env s value cases in
-      guarded_case ctx (predicate ctx env) case.rc_rhs.rexp_loc s matched
-        case.rc_guard case.rc_rhs rest
+      guarded_case ctx (predicate ctx env) (predicate ctx env)
+        case.rc_rhs.rexp_loc s matched case.rc_guard case.rc_rhs rest
+
+and expose_fact ctx env s ty value loc =
+  (* Dropping an unsupported premise is conservative; goals remain strict. *)
+  try expose ctx env s ty value loc
+  with Location.Error error ->
+    { s with omitted_premises = (loc, error) :: s.omitted_premises }, value
+
+and expose_outer ctx env s ty value loc =
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine r ->
+    let s, value = expose_fact ctx env s ty value loc in
+    expose_outer ctx env s r.ref_payload value loc
+  | _ -> s, value
 
 let rec pattern : type k.
     context -> state -> value option -> k general_pattern -> (state * term) list
     =
  fun ctx s value p ->
+  let s, value = expose_outer ctx p.pat_env s p.pat_type value p.pat_loc in
+  let s, value =
+    List.fold_left
+      (fun (s, value) -> function
+        | Tpat_refinement source, loc, _ ->
+          expose_outer ctx p.pat_env s source value loc
+        | _ -> s, value)
+      (s, value) p.pat_extra
+  in
   match p.pat_desc with
   | Tpat_any -> [s, Boolean true]
   | Tpat_var { id; mode; _ } -> [bind s id (at_mode mode value), Boolean true]
@@ -2179,14 +2271,14 @@ and pattern_fallback : type k.
 
 let intro_loc e =
   List.find_map
-    (function Texp_refine, loc, _ -> Some loc | _ -> None)
+    (function
+      | Texp_refine, loc, _ -> Some loc
+      | Texp_refinement { target; _ }, loc, _ -> (
+        match get_desc (Ctype.expand_head e.exp_env target) with
+        | Trefine _ -> Some loc
+        | _ -> None)
+      | _ -> None)
     e.exp_extra
-
-let expose_fact ctx env s ty value loc =
-  (* Dropping an unsupported premise is conservative; goals remain strict. *)
-  try expose ctx env s ty value loc
-  with Location.Error error ->
-    { s with omitted_premises = (loc, error) :: s.omitted_premises }, value
 
 let omitted_premise_messages s =
   List.concat_map
@@ -2196,11 +2288,6 @@ let omitted_premise_messages s =
          translated to SMT"
       :: error.main :: error.sub)
     (List.rev s.omitted_premises)
-
-let has_elim e =
-  List.exists
-    (function Texp_let_refine _, _, _ -> true | _ -> false)
-    e.exp_extra
 
 let rec module_structure m =
   match m.mod_desc with
@@ -2237,42 +2324,126 @@ let export_module ctx id str s =
   in
   { s with values }
 
-let rec expression ctx s e =
+let forwards_result e =
+  match e.exp_desc with
+  | Texp_let _ | Texp_sequence _ | Texp_ifthenelse _ | Texp_match _
+  | Texp_open _ | Texp_letmodule _ | Texp_exclave _ ->
+    true
+  | _ -> false
+
+let defer checks scope check = checks := { scope; check } :: !checks
+
+(* Re-enter the saved branch only for its proof. Its assumptions must not leak
+   into checks for another branch or into evaluation of the enclosing call. *)
+let complete_checks entry s checks =
+  List.fold_left
+    (fun s { scope; check } ->
+      if s.dead
+      then s
+      else
+        let prefix =
+          erase_assertions (added_prefix ~base:entry.code scope.code)
+        in
+        let scoped =
+          { s with
+            values =
+              Path.Map.union
+                (fun _ current _ -> Some current)
+                s.values scope.values;
+            code = prefix @ s.code
+          }
+        in
+        let checked = check scoped in
+        { s with
+          code = Check (added_prefix ~base:s.code checked.code) :: s.code
+        })
+    s (List.rev checks)
+
+let rec expression ?deferred ctx s e =
   if impossible s
   then s, None
   else
-    let s, value = expression_desc ctx s e in
-    match if ctx.verify_introductions then intro_loc e else None with
-    | Some loc when not s.dead ->
-      let r = refinement e.exp_env e.exp_type e.exp_loc in
-      let goals, goal =
-        try predicate ctx e.exp_env (bind s r.ref_binder value) r.ref_pred
-        with Location.Error error ->
-          raise
-            (Location.Error
-               { error with
-                 sub =
-                   error.sub
-                   @ [ Location.msg ~loc
-                         "Required by this refinement introduction" ]
-               })
-      in
-      let assertion =
-        Assert
-          { loc;
-            goal =
-              (if goals.dead
-               then Boolean true
-               else required r.ref_pred.rexp_loc goal);
-            omitted_premises = goals.omitted_premises
-          }
-      in
-      let check = assertion :: added_prefix ~base:s.code goals.code in
-      { s with code = Check check :: s.code }, value
-    | _ -> s, value
+    let deferred =
+      if
+        List.exists
+          (function Texp_refine, _, _ -> true | _ -> false)
+          e.exp_extra
+      then None
+      else deferred
+    in
+    expression_extras ?deferred ctx s e e.exp_type e.exp_extra
 
-and expression_desc ctx s e =
+and expression_extras ?deferred ctx s e ty = function
+  | [] ->
+    let s, value = expression_desc ?deferred ctx s { e with exp_type = ty } in
+    (* The returned child's facts are already present when checked eagerly, and
+       its target must remain unavailable when checking is deferred. *)
+    if forwards_result e
+    then s, value
+    else expose_outer ctx e.exp_env s ty value e.exp_loc
+  | (extra, loc, _) :: rest -> (
+    let source =
+      match extra with Texp_refinement { source; _ } -> source | _ -> ty
+    in
+    let s, value = expression_extras ?deferred ctx s e source rest in
+    match extra with
+    | Texp_refinement { target; _ } ->
+      begin match deferred with
+      | Some checks
+        when match get_desc (Ctype.expand_head e.exp_env target) with
+             | Trefine _ -> true
+             | _ -> false ->
+        defer checks s (fun s ->
+            fst (introduce_outer ctx e.exp_env s target value loc));
+        s, value
+      | None | Some _ -> introduce ctx e.exp_env s target value loc
+      end
+    | Texp_value_name id ->
+      let path = Path.Pident id in
+      ctx.argument_values <- Path.Map.add path value ctx.argument_values;
+      ctx.free <- Path.Map.remove path ctx.free;
+      bind s id value, value
+    | _ -> s, value)
+
+and introduce ctx env s ty value loc =
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine r when ctx.verify_introductions && not s.dead ->
+    let goals, goal =
+      try predicate ctx env (bind s r.ref_binder value) r.ref_pred
+      with Location.Error error ->
+        raise
+          (Location.Error
+             { error with
+               sub =
+                 error.sub
+                 @ [Location.msg ~loc "Required by this refinement introduction"]
+             })
+    in
+    let assertion =
+      Assert
+        { loc;
+          goal =
+            (if goals.dead
+             then Boolean true
+             else required r.ref_pred.rexp_loc goal);
+          omitted_premises = goals.omitted_premises
+        }
+    in
+    let check = assertion :: added_prefix ~base:s.code goals.code in
+    let s = { s with code = Check check :: s.code } in
+    expose_outer ctx env s ty value loc
+  | _ -> s, value
+
+and introduce_outer ctx env s ty value loc =
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine r ->
+    let s, value = introduce_outer ctx env s r.ref_payload value loc in
+    introduce ctx env s ty value loc
+  | _ -> s, value
+
+and expression_desc ?deferred ctx s e =
   let eval = expression ctx in
+  let result = expression ?deferred ctx in
   let opaque () = fresh ctx e.exp_env e.exp_type "result" in
   let opaque_if_unsupported = function
     | Some _ as value -> value
@@ -2290,12 +2461,14 @@ and expression_desc ctx s e =
   | Texp_constant c -> s, constant c
   | Texp_tuple (components, _) ->
     let s, values =
-      arguments_right_to_left (fun s (_, e) -> eval s e) s components
+      arguments_right_to_left (fun s (_, e) -> result s e) s components
     in
     name ctx s
       (opaque_if_unsupported (construct ctx e.exp_env e.exp_type "" values))
   | Texp_construct (_, c, _, args, _) ->
-    let s, values = arguments_right_to_left (fun s (_, e) -> eval s e) s args in
+    let s, values =
+      arguments_right_to_left (fun s (_, e) -> result s e) s args
+    in
     let value =
       match values with
       | [] -> expression_constructor ctx e.exp_env e.exp_type c
@@ -2314,7 +2487,7 @@ and expression_desc ctx s e =
     let s, values =
       arguments_right_to_left
         (fun s (_, _, field) ->
-          match field with Kept _ -> s, None | Overridden (_, e) -> eval s e)
+          match field with Kept _ -> s, None | Overridden (_, e) -> result s e)
         s fields
     in
     let fields =
@@ -2357,7 +2530,7 @@ and expression_desc ctx s e =
       (opaque_if_unsupported
          (record_value ctx e.exp_env e.exp_type base fields))
   | Texp_array (Immutable, _, elements, _) ->
-    let s, values = arguments_right_to_left eval s elements in
+    let s, values = arguments_right_to_left result s elements in
     let s, value = iarray_value ctx e.exp_env e.exp_type s values in
     s, opaque_if_unsupported value
   | Texp_field { record; label; _ } ->
@@ -2373,18 +2546,16 @@ and expression_desc ctx s e =
          (select_field ctx e.exp_env record.exp_type label.Data_types.lbl_name
             value))
   | Texp_open ({ open_expr = { mod_desc = Tmod_ident _; _ }; _ }, body) ->
-    eval s body
+    result s body
   | Texp_letmodule (Some id, _, _, m, body)
     when Option.is_some (module_structure m) ->
     let str = Option.get (module_structure m) in
     let s, _ = structure ctx s str in
-    eval (export_module ctx id str s) body
+    result (export_module ctx id str s) body
   | Texp_let (rec_flag, bindings, body) ->
-    let s, _ = value_bindings ctx s rec_flag bindings (has_elim e) in
-    eval s body
-  | Texp_assume (binding, _, _) ->
-    let s, value = eval s binding.vb_expr in
-    expose_fact ctx e.exp_env s e.exp_type value e.exp_loc
+    let s, _ = value_bindings ctx s rec_flag bindings in
+    result s body
+  | Texp_assume (binding, _, _) -> eval s binding.vb_expr
   | Texp_logical_equal (left, right) -> (
     let s, right = eval s right in
     let s, left = eval s left in
@@ -2397,15 +2568,8 @@ and expression_desc ctx s e =
       name ctx s (scalar_value (both Eq left right))
     | _ -> s, opaque ())
   | Texp_sequence (a, _, b) ->
-    let s, value = eval s a in
-    let rec expose_statement s ty =
-      match get_desc (Ctype.expand_head a.exp_env ty) with
-      | Trefine { ref_payload; _ } ->
-        let s, _ = expose_fact ctx a.exp_env s ty value a.exp_loc in
-        expose_statement s ref_payload
-      | _ -> s
-    in
-    eval (expose_statement s a.exp_type) b
+    let s, _ = eval s a in
+    result s b
   | Texp_ifthenelse (c, t, f) ->
     let s, c = eval s c in
     let c =
@@ -2415,8 +2579,8 @@ and expression_desc ctx s e =
         required e.exp_loc (fresh ctx e.exp_env Predef.type_bool "condition")
     in
     choose ctx s c
-      (fun s -> eval s t)
-      (fun s -> match f with None -> s, None | Some f -> eval s f)
+      (fun s -> result s t)
+      (fun s -> match f with None -> s, None | Some f -> result s f)
   | Texp_apply (fn, args, _, _, _, _) ->
     let prim =
       match fn.exp_desc with
@@ -2428,12 +2592,42 @@ and expression_desc ctx s e =
         [(_, Arg (a, _)); (_, Arg (b, _))] ) ->
       short_circuit ctx eval e.exp_loc ~is_and:(op = "%sequand") s a b
     | _ -> (
-      let argument s (_, arg) =
-        match arg with Omitted _ -> s, None | Arg (e, _) -> eval s e
-      in
-      let s, args = arguments_right_to_left argument s args in
+      let args = Array.of_list args in
+      let values = Array.make (Array.length args) None in
+      let checks = Array.init (Array.length args) (fun _ -> ref []) in
+      let entries = Array.make (Array.length args) s in
+      let s = ref s in
+      for index = Array.length args - 1 downto 0 do
+        match snd args.(index) with
+        | Omitted _ -> ()
+        | Arg (e, _) ->
+          entries.(index) <- !s;
+          let evaluated, value = expression ~deferred:checks.(index) ctx !s e in
+          values.(index) <- value;
+          s := evaluated
+      done;
+      let evaluated, fn_value = eval !s fn in
+      s := evaluated;
+      (* Only proofs of returned values are deferred. Argument computations have
+         already been checked in runtime order; contracts follow dependency
+         order. *)
+      Array.iteri
+        (fun index (_, arg) ->
+          match arg with
+          | Omitted _ -> ()
+          | Arg (e, _) when !(checks.(index)) <> [] ->
+            let checked =
+              complete_checks entries.(index) !s !(checks.(index))
+            in
+            let checked, _ =
+              expose_outer ctx e.exp_env checked e.exp_type values.(index)
+                e.exp_loc
+            in
+            s := checked
+          | Arg _ -> ())
+        args;
+      let s, args = !s, Array.to_list values in
       if not s.dead then ctx.check_call ctx s e args;
-      let s, fn_value = eval s fn in
       let prim = stored_primitive prim fn_value in
       let total =
         match fn_value with Some (Function { total; _ }) -> total | _ -> false
@@ -2470,6 +2664,18 @@ and expression_desc ctx s e =
           value
       | Some (("%raise" | "%reraise" | "%raise_notrace"), 1) ->
         branch s (Boolean false), None
+      | Some ("%iarray_init", 2) ->
+        let value = match value with Some _ -> value | None -> opaque () in
+        let s =
+          match args, iarray_call ctx value with
+          | [length; _], Some (sort, array) -> (
+            match scalar length with
+            | Some length when term_sort length = Int63 ->
+              branch s (both Eq (iarray_length ctx sort array) length)
+            | _ -> s)
+          | _ -> s
+        in
+        name ctx s value
       | Some ("caml_array_append", 2) | Some ("%iarray_sub", 3) ->
         name ctx
           (normal_iarray_copy ctx value s)
@@ -2493,78 +2699,21 @@ and expression_desc ctx s e =
       | _ -> name ctx s (match value with Some _ -> value | None -> opaque ()))
     end
   | Texp_function { params; body; _ } ->
-    let captured = s in
-    let s = { s with code = erase_assertions s.code } in
-    let s =
-      List.fold_left
-        (fun s p ->
-          let s, pat =
-            match p.fp_kind with
-            | Tparam_pat pat -> s, pat
-            | Tparam_optional_default (pat, default, _) ->
-              let checked, _ = eval s default in
-              ( { s with
-                  code =
-                    Check (added_prefix ~base:s.code checked.code) :: s.code
-                },
-                pat )
-          in
-          let value =
-            fresh ctx pat.pat_env pat.pat_type (Ident.name p.fp_param)
-          in
-          let s, condition =
-            merge_patterns s (pattern ctx (bind s p.fp_param value) value pat)
-          in
-          branch s condition)
-        s params
-    in
-    let arguments =
-      Misc.Stdlib.List.map_option
-        (fun p ->
-          match
-            ( p.fp_arg_label,
-              p.fp_kind,
-              Path.Map.find_opt (Path.Pident p.fp_param) s.values )
-          with
-          | Nolabel, Tparam_pat _, Some (Some (Scalar (Var symbol))) ->
-            Some symbol
-          | _ -> None)
-        params
-    in
-    let s, result =
-      match body with
-      | Tfunction_body body -> eval s body
-      | Tfunction_cases cases ->
-        begin match cases.fc_cases with
-        | [] -> s, None
-        | c :: _ ->
-          let value = fresh ctx c.c_lhs.pat_env c.c_lhs.pat_type "argument" in
-          value_cases ctx (bind s cases.fc_param value) value cases.fc_cases
-        end
-    in
-    ctx.batches <- s.code :: ctx.batches;
     let value = opaque () in
-    let value =
-      if
-        s.dead
-        || not
-             (List.exists
-                (function Texp_ghost, _, _ -> true | _ -> false)
-                e.exp_extra)
-      then value
-      else
-        match value, arguments, scalar result with
-        | Some (Function fn), Some parameters, Some body ->
-          Some
-            (Function
-               { fn with lambda = logical_lambda ctx captured parameters body })
-        | _ -> value
+    let check s =
+      check_function ctx s e params body value;
+      s
     in
-    captured, value
+    begin match deferred with
+    | None -> ignore (check s)
+    | Some checks -> defer checks s check
+    end;
+    s, value
   | Texp_match (scrutinee, _, cases, [], _)
     when List.for_all (fun c -> snd (split_pattern c.c_lhs) = None) cases ->
     let s, value = eval s scrutinee in
-    computation_cases ctx s scrutinee.exp_type value cases
+    computation_cases ?deferred ctx s scrutinee.exp_type value cases
+  | Texp_exclave body -> result s body
   | _ ->
     (* Unknown evaluation/control-flow forms lose outgoing facts, but cannot
        hide obligations in their children or delayed bodies. *)
@@ -2573,7 +2722,70 @@ and expression_desc ctx s e =
     Tast_iterator.default_iterator.expr iterator e;
     !state, opaque ()
 
-and value_bindings ctx s rec_flag bindings eliminate =
+and check_function ctx s e params body value =
+  let captured = s in
+  let captured_arguments = ctx.argument_values in
+  let s = { s with code = erase_assertions s.code } in
+  let s =
+    List.fold_left
+      (fun s p ->
+        let s, pat =
+          match p.fp_kind with
+          | Tparam_pat pat -> s, pat
+          | Tparam_optional_default (pat, default, _) ->
+            let checked, _ = expression ctx s default in
+            ( { s with
+                code = Check (added_prefix ~base:s.code checked.code) :: s.code
+              },
+              pat )
+        in
+        let value =
+          fresh ctx pat.pat_env pat.pat_type (Ident.name p.fp_param)
+        in
+        let s, condition =
+          merge_patterns s (pattern ctx (bind s p.fp_param value) value pat)
+        in
+        branch s condition)
+      s params
+  in
+  let arguments =
+    Misc.Stdlib.List.map_option
+      (fun p ->
+        match
+          ( p.fp_arg_label,
+            p.fp_kind,
+            Path.Map.find_opt (Path.Pident p.fp_param) s.values )
+        with
+        | Nolabel, Tparam_pat _, Some (Some (Scalar (Var symbol))) ->
+          Some symbol
+        | _ -> None)
+      params
+  in
+  let s, result =
+    match body with
+    | Tfunction_body body -> expression ctx s body
+    | Tfunction_cases cases ->
+      begin match cases.fc_cases with
+      | [] -> s, None
+      | c :: _ ->
+        let value = fresh ctx c.c_lhs.pat_env c.c_lhs.pat_type "argument" in
+        value_cases ctx (bind s cases.fc_param value) value cases.fc_cases
+      end
+  in
+  ctx.batches <- s.code :: ctx.batches;
+  if
+    (not s.dead)
+    && List.exists
+         (function Texp_ghost, _, _ -> true | _ -> false)
+         e.exp_extra
+  then
+    match value, arguments, scalar result with
+    | Some (Function fn), Some parameters, Some body ->
+      fn.lambda
+        := logical_lambda ctx captured captured_arguments parameters body
+    | _ -> ()
+
+and value_bindings ctx s rec_flag bindings =
   let s =
     match rec_flag with
     | Asttypes.Nonrecursive -> s
@@ -2604,15 +2816,8 @@ and value_bindings ctx s rec_flag bindings eliminate =
       let value =
         match rec_flag, value with
         | Asttypes.Recursive, Some (Function fn) ->
-          Some (Function { fn with lambda = None })
+          Some (Function { fn with lambda = ref None })
         | _ -> value
-      in
-      let s, value =
-        if eliminate
-        then
-          expose_fact ctx vb.vb_expr.exp_env s vb.vb_expr.exp_type value
-            vb.vb_expr.exp_loc
-        else s, value
       in
       let s, condition = merge_patterns s (pattern ctx s value vb.vb_pat) in
       loop (branch s condition) rest
@@ -2621,17 +2826,18 @@ and value_bindings ctx s rec_flag bindings eliminate =
 
 and value_cases ctx s value cases = cases_with_pattern ctx s value cases
 
-and computation_cases ctx s scrutinee_type value cases =
-  cases_with_pattern ~scrutinee_type ctx s value cases
+and computation_cases ?deferred ctx s scrutinee_type value cases =
+  cases_with_pattern ?deferred ~scrutinee_type ctx s value cases
 
 and cases_with_pattern : type k.
     ?scrutinee_type:Types.type_expr ->
+    ?deferred:deferred_check list ref ->
     context ->
     state ->
     value option ->
     k case list ->
     state * value option =
- fun ?scrutinee_type ctx s value cases ->
+ fun ?scrutinee_type ?deferred ctx s value cases ->
   if impossible s
   then s, None
   else
@@ -2657,9 +2863,11 @@ and cases_with_pattern : type k.
         | _ -> value
       in
       let matched = pattern ctx s matched_value c.c_lhs in
-      let rest s = cases_with_pattern ?scrutinee_type ctx s value cases in
-      guarded_case ctx (expression ctx) c.c_rhs.exp_loc s matched c.c_guard
-        c.c_rhs rest
+      let rest s =
+        cases_with_pattern ?scrutinee_type ?deferred ctx s value cases
+      in
+      guarded_case ctx (expression ctx) (expression ?deferred ctx)
+        c.c_rhs.exp_loc s matched c.c_guard c.c_rhs rest
 
 and structure ctx s str =
   List.fold_left
@@ -2669,7 +2877,7 @@ and structure ctx s str =
       else
         match item.str_desc with
         | Tstr_value (rec_flag, bindings) ->
-          value_bindings ctx s rec_flag bindings false
+          value_bindings ctx s rec_flag bindings
         | Tstr_eval (e, _, _) -> expression ctx s e
         | Tstr_module { mb_id = Some id; mb_expr; _ }
           when Option.is_some (module_structure mb_expr) ->
@@ -2696,7 +2904,7 @@ and iterator ctx state =
     expr = (fun _ e -> checked (fun s -> expression ctx s e));
     value_bindings =
       (fun _ (rec_flag, bindings) ->
-        checked (fun s -> value_bindings ctx s rec_flag bindings false));
+        checked (fun s -> value_bindings ctx s rec_flag bindings));
     structure = (fun _ str -> checked (fun s -> structure ctx s str))
   }
 
@@ -2908,6 +3116,7 @@ let context ~prove ~verify_introductions =
     pref_constructors = Hashtbl.create 8;
     pref_observers = Hashtbl.create 8;
     free = Path.Map.empty;
+    argument_values = Path.Map.empty;
     batches = [];
     named_terms = Hashtbl.create 32;
     symbolic = Symbolic_keys.create 16;
@@ -3003,7 +3212,11 @@ let check_termination ~prove ~self ~fn ~measure =
   let entry =
     List.fold_left
       (fun s (id, pat) ->
-        bind s id (fresh ctx pat.pat_env pat.pat_type (Ident.name id)))
+        let value = fresh ctx pat.pat_env pat.pat_type (Ident.name id) in
+        let s, condition =
+          merge_patterns s (pattern ctx (bind s id value) value pat)
+        in
+        branch s condition)
       empty params
   in
   let entry, entry_measure = expression ctx entry measure in

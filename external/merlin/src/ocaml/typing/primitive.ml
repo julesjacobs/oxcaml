@@ -767,6 +767,11 @@ let prim_has_valid_reprs ~loc prim =
       Lazy.force Primitive_reprs.vector_array_indexing_primitives
     in
     match prim.prim_name with
+    | "%raise" | "%reraise" | "%raise_notrace" ->
+      check [is (Same_as_ocaml_repr C.scannable); any]
+    | "%raise_with_backtrace" ->
+      check [is (Same_as_ocaml_repr C.scannable);
+             is (Same_as_ocaml_repr C.scannable); any]
     | "%identity"
     | "%opaque"
     | "%obj_magic" ->

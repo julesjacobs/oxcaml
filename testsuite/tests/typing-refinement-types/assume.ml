@@ -108,7 +108,7 @@ let () =
 
 let (checked_total @ total) = check zero;;
 [%%expect{|
-val checked_total : zero = 0
+val checked_total : int = 0
 |}]
 
 let (check_total @ total) = check;;

@@ -693,6 +693,8 @@ let primitive env path =
           else if
             same_value env description (iarray_value_path ["Refined"; "get"])
           then Some ("%array_safe_get", 2)
+          else if same_value env description (iarray_value_path ["init"])
+          then Some ("%iarray_init", 2)
           else if same_value env description (iarray_value_path ["append"])
           then Some ("caml_array_append", 2)
           else if same_value env description (iarray_value_path ["sub"])
