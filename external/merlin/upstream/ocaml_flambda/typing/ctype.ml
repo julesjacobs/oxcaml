@@ -2816,8 +2816,9 @@ let expand_head env ty =
   try try_expand_head try_expand_safe env ty
   with Cannot_expand -> ty
 
-let is_inductive env ty =
+let rec is_inductive env ty =
   match get_desc (expand_head env ty) with
+  | Trefine r -> is_inductive env r.ref_payload
   | Tconstr (path, _, _) ->
       (try (Env.find_type path env).type_inductive with Not_found -> false)
   | _ -> false
