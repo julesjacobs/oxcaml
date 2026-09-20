@@ -23,7 +23,19 @@ module P = Ghost_pref
 module H = P.Heap
 module Standard = Hashtbl.Make (Key)
 
+let work_factor = if Array.length Sys.argv > 3 then int_of_string Sys.argv.(3) else 1
+
 let key i = i * 104729
+let queries n =
+  let indices = Array.init n Fun.id in
+  let rng = Random.State.make [|1729|] in
+  for i = n - 1 downto 1 do
+    let j = Random.State.int rng (i + 1) in
+    let x = indices.(i) in indices.(i) <- indices.(j); indices.(j) <- x
+  done;
+  Iarray.init n (fun i -> key indices.(i)),
+  Iarray.init n (fun i -> key (n + indices.(i)))
+
 let stamp () = Gc.full_major (); (Gc.allocated_bytes (), Sys.time ())
 let report name payload n operation count (bytes, time) =
   let elapsed = Sys.time () -. time in
@@ -50,6 +62,41 @@ let rec fill : ('a : immutable_data).
 
 let rec churn : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
+      : int) -> (offset : int) ->
+    (view : {v : 'a I.view | I.valid v}) @ immutable ->
+    (token : {t : P.token | H.at (P.own t) (T.location table) === Some
+      view.model})
+      @ unique read_write ghost ->
+    {r : 'a V.result | I.valid r.#view &&
+      H.at (P.own r.#state) (T.location table) === Some r.#view.model} @
+        unique =
+  fun table values index offset view token ->
+    if index >= Iarray.length values then #{V.view; state = token} else begin
+      let removed = V.remove table view (key (index + offset)) token in
+      let changed = V.replace table removed.#view
+        (key (index + Iarray.length values - offset))
+        (Iarray.get values index) removed.#state in
+      churn table values (index + 1) offset changed.#view changed.#state
+    end
+
+let rec churn_rounds : ('a : immutable_data).
+    (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
+      : int) -> (offset : int) ->
+    (view : {v : 'a I.view | I.valid v}) @ immutable ->
+    (token : {t : P.token | H.at (P.own t) (T.location table) === Some
+      view.model})
+      @ unique read_write ghost ->
+    {r : 'a V.result | I.valid r.#view &&
+      H.at (P.own r.#state) (T.location table) === Some r.#view.model} @
+        unique =
+  fun table values index offset view token ->
+    if index = 0 then #{V.view; state = token} else
+    let changed = churn table values 0 offset view token in
+    churn_rounds table values (index - 1) (Iarray.length values - offset)
+      changed.#view changed.#state
+
+let rec replace_rounds : ('a : immutable_data).
+    (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) ->
     (view : {v : 'a I.view | I.valid v}) @ immutable ->
     (token : {t : P.token | H.at (P.own t) (T.location table) === Some
@@ -59,81 +106,120 @@ let rec churn : ('a : immutable_data).
       H.at (P.own r.#state) (T.location table) === Some r.#view.model} @
         unique =
   fun table values index view token ->
-    if index >= Iarray.length values then #{V.view; state = token} else begin
-      let removed = V.remove table view (key index) token in
-      let changed = V.replace table removed.#view (key (index + Iarray.length
-        values))
-        (Iarray.get values index) removed.#state in
-      churn table values (index + 1) changed.#view changed.#state
-    end
+    if index = 0 then #{V.view; state = token} else
+    let changed = fill table values 0 view token in
+    replace_rounds table values (index - 1)
+      changed.#view changed.#state
 
 let verified : ('a : immutable_data).
     string -> string -> ('a iarray) @ immutable -> unit = fun name payload
       values ->
   let n = Iarray.length values in
+  let batches = max 1 (100000 * work_factor / n) in
   let timing = stamp () in
+  for _batch = 1 to batches do
+    let r : 'a V.created = V.create (P.empty ()) in
+    let _ = fill r.table values 0 r.view r.state in
+    ignore (Sys.opaque_identity r.table)
+  done;
+  report name payload n "build" (batches * n) timing;
   let r : 'a V.created = V.create (P.empty ()) in
   let built = fill r.table values 0 r.view r.state in
-  report name payload n "build" n timing;
   for i = 0 to n - 1 do
     assert (V.find r.table built.#view (key i) (borrow_ built.#state) =
       (Iarray.get values i))
   done;
-  let iterations = max n 1000000 in
+  let hits, misses = queries n in
+  let rounds = max 1 (1000000 * work_factor / n) in
+  let iterations = rounds * n in
   let timing = stamp () in
-  for i = 0 to iterations - 1 do
-    ignore (Sys.opaque_identity
-      (V.find r.table built.#view (key (i mod n)) (borrow_ built.#state)))
+  for _round = 1 to rounds do
+    for i = 0 to n - 1 do
+      ignore (Sys.opaque_identity
+        (V.find r.table built.#view (Iarray.get hits i) (borrow_ built.#state)))
+    done
   done;
   report name payload n "hit" iterations timing;
   let timing = stamp () in
   let found = ref 0 in
-  for i = 0 to iterations - 1 do
-    if V.mem r.table built.#view (key (n + i mod n)) (borrow_ built.#state) then
-      incr found
+  for _round = 1 to rounds do
+    for i = 0 to n - 1 do
+      if V.mem r.table built.#view (Iarray.get misses i) (borrow_ built.#state) then
+        incr found
+    done
   done;
   report name payload n "miss" iterations timing;
   assert (!found = 0);
   let timing = stamp () in
-  let changed = churn r.table values 0 built.#view built.#state in
-  report name payload n "churn" (2 * n) timing;
+  let built = replace_rounds r.table values batches built.#view built.#state in
+  report name payload n "replace" (batches * n) timing;
+  let timing = stamp () in
+  let changed = churn_rounds r.table values batches 0
+    built.#view built.#state in
+  report name payload n "churn" (2 * n * batches) timing;
+  let offset = if batches mod 2 = 0 then 0 else n in
   for i = 0 to n - 1 do
-    assert (not (V.mem r.table changed.#view (key i) (borrow_ changed.#state)));
-    assert (V.find r.table changed.#view (key (i + n)) (borrow_
+    assert (not (V.mem r.table changed.#view (key (i + n - offset))
+      (borrow_ changed.#state)));
+    assert (V.find r.table changed.#view (key (i + offset)) (borrow_
       changed.#state) = (Iarray.get values i))
   done
 
 let standard payload values =
   let n = Iarray.length values in
+  let batches = max 1 (100000 * work_factor / n) in
   let timing = stamp () in
+  for _batch = 1 to batches do
+    let table = Standard.create 16 in
+    for i = 0 to n - 1 do Standard.replace table (key i) (Iarray.get values i)
+      done;
+    ignore (Sys.opaque_identity table)
+  done;
+  report "stdlib" payload n "build" (batches * n) timing;
   let table = Standard.create 16 in
   for i = 0 to n - 1 do Standard.replace table (key i) (Iarray.get values i)
     done;
-  report "stdlib" payload n "build" n timing;
   for i = 0 to n - 1 do assert (Standard.find table (key i) = (Iarray.get
     values i)) done;
-  let iterations = max n 1000000 in
+  let hits, misses = queries n in
+  let rounds = max 1 (1000000 * work_factor / n) in
+  let iterations = rounds * n in
   let timing = stamp () in
-  for i = 0 to iterations - 1 do
-    ignore (Sys.opaque_identity (Standard.find table (key (i mod n))))
+  for _round = 1 to rounds do
+    for i = 0 to n - 1 do
+      ignore (Sys.opaque_identity (Standard.find table (Iarray.get hits i)))
+    done
   done;
   report "stdlib" payload n "hit" iterations timing;
   let timing = stamp () in
   let found = ref 0 in
-  for i = 0 to iterations - 1 do
-    if Standard.mem table (key (n + i mod n)) then incr found
+  for _round = 1 to rounds do
+    for i = 0 to n - 1 do
+      if Standard.mem table (Iarray.get misses i) then incr found
+    done
   done;
   report "stdlib" payload n "miss" iterations timing;
   assert (!found = 0);
   let timing = stamp () in
-  for i = 0 to n - 1 do
-    Standard.remove table (key i);
-    Standard.replace table (key (i + n)) (Iarray.get values i)
+  for _batch = 1 to batches do
+    for i = 0 to n - 1 do
+      Standard.replace table (key i) (Iarray.get values i)
+    done
   done;
-  report "stdlib" payload n "churn" (2 * n) timing;
+  report "stdlib" payload n "replace" (batches * n) timing;
+  let timing = stamp () in
+  for batch = 0 to batches - 1 do
+    let offset = if batch mod 2 = 0 then 0 else n in
+    for i = 0 to n - 1 do
+      Standard.remove table (key (i + offset));
+      Standard.replace table (key (i + n - offset)) (Iarray.get values i)
+    done
+  done;
+  report "stdlib" payload n "churn" (2 * n * batches) timing;
+  let offset = if batches mod 2 = 0 then 0 else n in
   for i = 0 to n - 1 do
-    assert (not (Standard.mem table (key i)));
-    assert (Standard.find table (key (i + n)) = (Iarray.get values i))
+    assert (not (Standard.mem table (key (i + n - offset))));
+    assert (Standard.find table (key (i + offset)) = (Iarray.get values i))
   done
 
 let () =
