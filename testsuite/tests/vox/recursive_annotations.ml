@@ -91,3 +91,18 @@ Line 3, characters 13-27:
                  ^^^^^^^^^^^^^^
   Required by this decreases attribute
 |}]
+
+let rec (refined_chain @ total) (xs : {xs : chain | true}) =
+  match xs with Stop -> () | Next rest -> refined_chain rest;;
+[%%expect{|
+val refined_chain : {xs : chain | true} -> unit = <fun>
+|}]
+
+let rec (refined_cycle @ total) (xs : {xs : chain | true}) =
+  refined_cycle xs;;
+[%%expect{|
+Line 2, characters 2-18:
+2 |   refined_cycle xs;;
+      ^^^^^^^^^^^^^^^^
+Error: This recursive function cannot be total: the recursive argument is not a known proper descendant.
+|}]

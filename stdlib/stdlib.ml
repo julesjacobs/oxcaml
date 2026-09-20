@@ -29,11 +29,11 @@ let () =
   register_named_value "Pervasives.array_align_error"
     (Invalid_argument "address was misaligned")
 
-external raise :
-  ('a : value_or_null). exn -> 'a @ portable unique @@ portable
+external[@layout_poly] raise :
+  ('a : any). exn -> 'a @ portable unique @@ portable
   = "%reraise"
-external raise_notrace :
-  ('a : value_or_null). exn -> 'a @ portable unique @@ portable
+external[@layout_poly] raise_notrace :
+  ('a : any). exn -> 'a @ portable unique @@ portable
   = "%raise_notrace"
 
 let failwith s = raise(Failure s)

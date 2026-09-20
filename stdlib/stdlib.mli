@@ -32,10 +32,11 @@
 
 (** {1 Exceptions} *)
 
-external raise : ('a : value_or_null). exn -> 'a @ portable unique = "%reraise"
+external[@layout_poly] raise :
+  ('a : any). exn -> 'a @ portable unique = "%reraise"
 (** Raise the given exception value *)
 
-external raise_notrace : ('a : value_or_null). exn -> 'a @ portable unique
+external[@layout_poly] raise_notrace : ('a : any). exn -> 'a @ portable unique
   = "%raise_notrace"
 (** A faster version [raise] which does not record the backtrace.
     @since 4.02
