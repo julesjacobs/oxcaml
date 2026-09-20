@@ -53,7 +53,7 @@ legacy-mode defaults.
 | Parallel slices | `borrow_parallel.ml` | Disjoint callbacks, sequential fallback, and joining before exception propagation. |
 | Quicksort | `quicksort.mli`, `quicksort_client.ml` | Sequential and parallel in-place sorting establish sortedness and multiplicity-preserving permutation on normal return. |
 | Ghost code | `ghost*.ml` | Total proof computations erase; ghost values remain usable in static predicates and cannot be read by runtime checks. |
-| Time credits | `time_credits.ml`, `time_credits_rejected.ml`, `merge_sort.ml` | Unique ghost credits split and merge; generic merge sort preserves full-element multiplicities and uses at most `n * ceil(log2 n)` comparison calls. |
+| Time credits | `time_credits.ml`, `time_credits_rejected.ml`, `merge_sort.ml`, `merge_sort_rejected.ml` | Unique ghost credits split and merge; generic merge sort preserves full-element multiplicities and uses at most `n * ceil(log2 n)` comparison calls. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
