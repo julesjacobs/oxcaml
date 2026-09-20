@@ -1,7 +1,7 @@
 type mask = {m : int | 0 <= m && m <= 65535}
 
 external match16_valid : bytes -> int -> int -> mask
-  = "caml_vox_control_match16" [@@noalloc]
+  = "caml_vox_control_match16" [@@noalloc] [@@builtin] [@@no_effects]
 
 let[@inline always] match16 bytes offset byte : mask =
   let length = Bytes.length bytes in

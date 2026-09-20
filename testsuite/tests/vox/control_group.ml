@@ -14,6 +14,16 @@ let scalar bytes offset target =
   done;
   !mask
 
+external match16_empty : bytes -> int -> int -> int
+  = "caml_vox_control_match16_empty" [@@noalloc] [@@builtin] [@@no_effects]
+
+let check bytes offset target expected =
+  assert (Vox_control.match16 bytes offset target = expected);
+  let scanned = match16_empty bytes offset target in
+  assert (scanned land 65535 = expected);
+  assert ((scanned land 65536 <> 0) = (scalar bytes offset 128 <> 0));
+  assert (0 <= scanned && scanned <= 131071)
+
 let () =
   let bytes = Bytes.make 47 '\000' in
   for offset = 0 to 31 do
@@ -21,7 +31,7 @@ let () =
       for lane = 0 to 15 do
         Bytes.fill bytes 0 47 (Char.chr ((target + 1) mod 256));
         Bytes.set bytes (offset + lane) (Char.chr target);
-        assert (Vox_control.match16 bytes offset target = 1 lsl lane)
+        check bytes offset target (1 lsl lane)
       done
     done
   done;
@@ -30,7 +40,7 @@ let () =
       Bytes.set bytes lane
         (if mask land (1 lsl lane) <> 0 then '\128' else '\254')
     done;
-    assert (Vox_control.match16 bytes 0 128 = mask)
+    check bytes 0 128 mask
   done;
   let random = Random.State.make [|104729|] in
   for _ = 1 to 1000 do
@@ -38,8 +48,7 @@ let () =
       (Char.chr (Random.State.int random 256))) bytes;
     let offset = Random.State.int random 32 in
     for target = 0 to 255 do
-      assert (Vox_control.match16 bytes offset target =
-              scalar bytes offset target)
+      check bytes offset target (scalar bytes offset target)
     done
   done;
   List.iter (fun (length, offset, target) ->

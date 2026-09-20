@@ -15,6 +15,7 @@ external own : ('a : immutable_data). 'a token @ local immutable ghost -> 'a
 external empty : ('a : immutable_data). unit -> {t : 'a token | own t ===
   Heap.empty ()} @ unique ghost
   @@ total = "caml_pref_empty_bytecode" "caml_pref_empty"
+  [@@noalloc] [@@builtin] [@@no_effects] [@@no_coeffects]
 
 external read : ('a : immutable_data).
   (p : 'a t) @ immutable ->

@@ -5,9 +5,6 @@ module M = Vox_table_model
 module Probe = Vox_table_probe
 module W = Vox_table_wrap
 
-external[@layout_poly] raise_any : ('a : any).
-  exn -> 'a @ portable unique = "%raise"
-
 module Make (Key : Vox_table_map.Key) = struct
   module Migrate = Vox_table_migrate.Make (Key)
   module Insert = Migrate.Insert
@@ -62,7 +59,7 @@ module Make (Key : Vox_table_map.Key) = struct
       let state = T.replace_storage table {T.model = before.model} fresh.table
         {T.model = copied.#view.model} copied.#state token in
       (#{Mutation.view = copied.#view; state} : 'a Mutation.result)
-    end else if capacity > 536870912 then raise_any (Invalid_argument
+    end else if capacity > 536870912 then raise (Invalid_argument
       "Vox_flat_hashtbl: capacity exhausted")
     else begin
       ghost_ (double_capacity capacity; double_plan capacity plan);
@@ -88,7 +85,7 @@ module Make (Key : Vox_table_map.Key) = struct
       capacity);
     if deleted >= capacity lsr 3 then
       rebuild_into table before (refine_ capacity) before.plan token
-    else if capacity > 536870912 then raise_any (Invalid_argument
+    else if capacity > 536870912 then raise (Invalid_argument
       "Vox_flat_hashtbl: capacity exhausted")
     else begin
       ghost_ (double_capacity (refine_ capacity); double_plan capacity

@@ -46,3 +46,32 @@ CAMLprim value caml_vox_control_match16(value bytes, value offset, value byte)
   return Val_long(match16((const unsigned char *)String_val(bytes)
                           + Long_val(offset), (unsigned char)Long_val(byte)));
 }
+
+CAMLprim value caml_vox_control_match16_empty(value bytes, value offset,
+                                            value byte)
+{
+  const unsigned char *p = (const unsigned char *)String_val(bytes)
+                            + Long_val(offset);
+  unsigned found = match16(p, (unsigned char)Long_val(byte));
+#if defined(__aarch64__) && !defined(VOX_CONTROL_SCALAR)
+  unsigned empty = vmaxvq_u8(vceqq_u8(vld1q_u8(p), vdupq_n_u8(128)));
+#else
+  unsigned empty = match16(p, 128);
+#endif
+  return Val_long(found | ((unsigned)(empty != 0) << 16));
+}
+
+CAMLprim intnat caml_vox_int_ctz_untagged(intnat input)
+{
+  uintnat bits = (uintnat)input
+                  | ((uintnat)1 << (8 * sizeof(value) - 1));
+  unsigned count = 0;
+  while ((bits & 1) == 0) {
+    bits >>= 1;
+    count++;
+  }
+  return count;
+}
+
+CAMLprim value caml_vox_int_ctz(value input)
+{ return Val_long(caml_vox_int_ctz_untagged(Long_val(input))); }

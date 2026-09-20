@@ -57,6 +57,8 @@ let () =
   assert (byte = 7);
   let mask = T.match16 table view 0 7 (borrow_ state) in
   assert (mask = 8);
+  let scanned = T.match16_empty table view 0 7 (borrow_ state) in
+  assert (scanned = 65544);
   let state = T.clear table view state in
   let view = {T.model = before} in
   let size : {n : int | n = 0} = T.size table view (borrow_ state) in
@@ -64,13 +66,26 @@ let () =
   let mask = T.match16 table view 0 128 (borrow_ state) in
   assert (mask = 65535)
 
+let (ctz_zero @ total) () :
+    {n : int | n = 63} = Vox_table_bits.count_trailing_zeros 0
+
+let (ctz_negative @ total) () :
+    {n : int | n = 0} = Vox_table_bits.count_trailing_zeros (-1)
+
+let () =
+  assert (ctz_zero () = 63);
+  assert (ctz_negative () = 0);
+  for bit = 0 to 62 do
+    let mask = 1 lsl bit in
+    assert (Vox_table_bits.count_trailing_zeros mask = bit);
+    assert (Vox_table_bits.count_trailing_zeros (-mask) = bit)
+  done
+
 let () =
   for mask = 1 to 65535 do
-    if 0 < mask && mask <= 65535 then begin
-    let first = Vox_table_bits.first (refine_ mask) in
+    let first = Vox_table_bits.first mask in
     assert (mask land M.lane_bit first <> 0);
     assert (mask land (M.lane_bit first - 1) = 0)
-    end
   done
 
 module Int_key = struct
@@ -304,3 +319,48 @@ let () =
     assert (Verified.find created.table filled.#view (index * 104729)
       (borrow_ filled.#state) = index)
   done
+
+let () =
+  let r : string Verified.created = Verified.create (P.empty ()) in
+  let changed = Verified.replace r.table r.view 7 "hello" r.state in
+  ghost_ (
+    VI.Map.same_get changed.#view.model.slots
+      (VI.Map.put r.view.model.slots 7 "hello") 7;
+    VI.Map.put_get r.view.model.slots 7 "hello" 7;
+    Int_key.reflexive 7);
+  Gc.full_major (); Gc.compact ();
+  let value : {s : string | s === "hello"} =
+    Verified.find r.table changed.#view 7 (borrow_ changed.#state) in
+  assert (value = "hello")
+
+let () =
+  let calls = ref 0 in
+  let token = P.empty (incr calls) in
+  assert (!calls = 1);
+  let r : int Verified.created = Verified.create token in
+  assert (Verified.length r.table r.view (borrow_ r.state) = 0)
+
+let () =
+  let r : (int * string) Verified.created = Verified.create (P.empty ()) in
+  let first_pass = pointer_fill r.table 0 r.view r.state in
+  Gc.full_major ();
+  let replaced = pointer_fill r.table 0 first_pass.#view first_pass.#state in
+  Gc.compact ();
+  for key = 0 to 299 do
+    assert (Verified.find r.table replaced.#view key (borrow_ replaced.#state)
+      = (key, string_of_int key))
+  done
+
+let () =
+  let r : int VM.created = Verified.create (P.empty ()) in
+  let populated = fill r.table r.view 0 r.state in
+  let removed = Verified.remove r.table populated.#view 5 populated.#state in
+  let replaced = Verified.replace r.table removed.#view 35 900 removed.#state in
+  assert (Verified.length r.table replaced.#view (borrow_ replaced.#state) = 40);
+  assert (Verified.find r.table replaced.#view 35 (borrow_ replaced.#state) = 900);
+  assert (not (Verified.mem r.table replaced.#view 5 (borrow_ replaced.#state)));
+  let inserted = Verified.replace r.table replaced.#view 97 901 replaced.#state in
+  assert (Verified.length r.table inserted.#view (borrow_ inserted.#state) = 41);
+  assert (Verified.find r.table inserted.#view 97 (borrow_ inserted.#state) = 901);
+  assert (T.deleted r.table {T.model = inserted.#view.model}
+    (borrow_ inserted.#state) = 0)

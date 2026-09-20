@@ -103,11 +103,35 @@ module Make (Key : Vox_table_map.Key)
         end
       end
 
+  let find_hashed : ('a : immutable_data).
+      (table : (Key.t, 'a) T.t) @ immutable ->
+      (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
+      (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
+      (hash : {h : int | h = Key.hash query}) ->
+      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
+        table) === Some
+        view.model})
+        @ local read ghost ->
+      {r : found | 0 <= r.#index && r.#index < view.model.capacity &&
+         (r.#byte = 128 || r.#byte = 254) &&
+         M.control view.model r.#index === Some r.#byte &&
+         M.slot view.model r.#index === Some None &&
+         Read.I.route view.model (Bigint.of_int r.#index)
+           (Some (query, value)) r.#path} = fun table view query value hash
+             token ->
+    let capacity = T.capacity table {T.model = view.model} token in
+    let group = (hash lsr 7) land (capacity - 1) in
+    ghost_ (
+      Read.I.valid_def view; Read.capacity_bounds view.model;
+      Read.I.empty_free_def view.model hash 0;
+      Read.I.probe_def capacity hash 0; Read.I.wrap_def capacity (hash lsr 7));
+    scan table view query value capacity hash 0 group 16 token
   let find : ('a : immutable_data).
       (table : (Key.t, 'a) T.t) @ immutable ->
       (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
       (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location table) === Some
+      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
+        table) === Some
         view.model})
         @ local read ghost ->
       {r : found | 0 <= r.#index && r.#index < view.model.capacity &&
@@ -116,12 +140,6 @@ module Make (Key : Vox_table_map.Key)
          M.slot view.model r.#index === Some None &&
          Read.I.route view.model (Bigint.of_int r.#index)
            (Some (query, value)) r.#path} = fun table view query value token ->
-    let capacity = T.capacity table {T.model = view.model} token in
-    let hash = Key.hash query in
-    let group = (hash lsr 7) land (capacity - 1) in
-    ghost_ (
-      Read.I.valid_def view; Read.capacity_bounds view.model;
-      Read.I.empty_free_def view.model hash 0;
-      Read.I.probe_def capacity hash 0; Read.I.wrap_def capacity (hash lsr 7));
-    scan table view query value capacity hash 0 group 16 token
+    find_hashed table view query value (Key.hash query) token
+
 end
