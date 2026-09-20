@@ -52,7 +52,8 @@ module Make (Key : Vox_table_map.Key) = struct
         let rest = B.clear mask in
         candidates table view query capacity group needle (refine_ rest) token
       end
-  let rec groups : ('a : immutable_data).
+  (* Keep this specialization boundary so small comparators inline in the loop. *)
+  let[@inline never] rec groups : ('a : immutable_data).
       (table : (Key.t, 'a) T.t) @ immutable ->
       (view : {v : 'a I.view | I.valid v}) @ immutable ->
       (query : Key.t) @ immutable ->
@@ -82,11 +83,12 @@ module Make (Key : Vox_table_map.Key) = struct
         R.group_in_shape view.model hash rank);
       let snapshot = {T.model = view.model} in
       let needle = hash land 127 in
-      let mask = T.match16 table snapshot group needle token in
+      let scanned = T.match16_empty table snapshot group needle token in
+      let mask = scanned land 65535 in
       let found = candidates table view query capacity group needle
         (refine_ mask) token in
       if found >= 0 then found else begin
-        let empty = T.match16 table snapshot group 128 token in
+        let empty = scanned land 65536 in
         ghost_ (Spec.prefix_absent_def view.model query (rank + 1));
         if empty <> 0 then begin
           ghost_ (Proof.empty_stop view query rank);
@@ -101,6 +103,43 @@ module Make (Key : Vox_table_map.Key) = struct
       end
     end
 
+  let find_index_hashed : ('a : immutable_data).
+      (table : (Key.t, 'a) T.t) @ immutable ->
+      (view : {v : 'a I.view | I.valid v}) @ immutable ->
+      (query : Key.t) @ immutable ->
+      (hash : {h : int | h = Key.hash query}) ->
+      (token : {t : P.token | H.at (P.own t) (T.location table) ===
+        Some view.model}) @ local read ghost ->
+      {index : int | if index = -1 then
+        I.Map.absent view.model.slots query &&
+        I.Map.lookup view.model.slots query === None
+        else 0 <= index && index < view.model.capacity &&
+          (match M.slot view.model index with
+           | Some (Some (stored, _)) -> Key.equal stored query
+           | _ -> false)} = fun table view query hash token ->
+    let snapshot = {T.model = view.model} in
+    let capacity = T.capacity table snapshot token in
+    let group = (hash lsr 7) land (capacity - 1) in
+    ghost_ (
+      I.valid_def view; R.capacity_bounds view.model;
+      Spec.prefix_absent_def view.model query 0;
+      I.probe_def capacity hash 0; I.wrap_def capacity (hash lsr 7));
+    if capacity = 16 then begin
+      ghost_ (I.group_def capacity hash 0; R.group_in_shape view.model hash 0);
+      let needle = hash land 127 in
+      let mask = T.match16 table snapshot group needle token in
+      let found = candidates table view query capacity group needle
+        (refine_ mask) token in
+      if found >= 0 then found else begin
+        ghost_ (
+          Spec.prefix_absent_def view.model query 1;
+          Proof.exhausted view query);
+        -1
+      end
+    end else
+      groups table view query capacity hash 0 group 16 token
+
+
   let find_index : ('a : immutable_data).
       (table : (Key.t, 'a) T.t) @ immutable ->
       (view : {v : 'a I.view | I.valid v}) @ immutable ->
@@ -114,15 +153,7 @@ module Make (Key : Vox_table_map.Key) = struct
           (match M.slot view.model index with
            | Some (Some (stored, _)) -> Key.equal stored query
            | _ -> false)} = fun table view query token ->
-    let snapshot = {T.model = view.model} in
-    let capacity = T.capacity table snapshot token in
-    let hash = Key.hash query in
-    let group = (hash lsr 7) land (capacity - 1) in
-    ghost_ (
-      I.valid_def view; R.capacity_bounds view.model;
-      Spec.prefix_absent_def view.model query 0;
-      I.probe_def capacity hash 0; I.wrap_def capacity (hash lsr 7));
-    groups table view query capacity hash 0 group 16 token
+    find_index_hashed table view query (Key.hash query) token
 
   let find_opt : ('a : immutable_data).
       (table : (Key.t, 'a) T.t) @ immutable ->

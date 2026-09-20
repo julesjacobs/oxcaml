@@ -6,6 +6,8 @@ type ('k : immutable_data, 'v : immutable_data) t : immutable_data
 type ('k : immutable_data, 'v : immutable_data) view =
   { model : ('k, 'v) M.state @@ ghost }
 
+type ('k : immutable_data) stored_key = { key : 'k @@ ghost }
+
 (** One logical region owns the header and both backing blocks. Only the
     handle escapes; callers cannot separately access its arrays. *)
 external location : ('k, 'v) t @ immutable ->
@@ -26,14 +28,15 @@ external capacity : (table : ('k, 'v) t) @ immutable ->
     H.at (P.own t) (location table) === Some state.model}) @ local read ghost ->
   {n : int | n = state.model.capacity}
   @@ portable = "caml_vox_table_capacity_bytecode" "caml_vox_table_capacity"
-    [@@noalloc]
+    [@@noalloc] [@@builtin] [@@no_effects]
 
 external size : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
   (token : {t : P.token |
     H.at (P.own t) (location table) === Some state.model}) @ local read ghost ->
   {n : int | n = state.model.size}
-  @@ portable = "caml_vox_table_size_bytecode" "caml_vox_table_size" [@@noalloc]
+  @@ portable = "caml_vox_table_size_bytecode" "caml_vox_table_size"
+    [@@noalloc] [@@builtin] [@@no_effects]
 
 external deleted : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
@@ -41,7 +44,7 @@ external deleted : (table : ('k, 'v) t) @ immutable ->
     H.at (P.own t) (location table) === Some state.model}) @ local read ghost ->
   {n : int | n = state.model.deleted}
   @@ portable = "caml_vox_table_deleted_bytecode" "caml_vox_table_deleted"
-    [@@noalloc]
+    [@@noalloc] [@@builtin] [@@no_effects]
 
 external read_control : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
@@ -50,7 +53,7 @@ external read_control : (table : ('k, 'v) t) @ immutable ->
     H.at (P.own t) (location table) === Some state.model}) @ local read ghost ->
   {byte : int | M.control state.model index === Some byte}
   @@ portable = "caml_vox_table_read_control_bytecode"
-    "caml_vox_table_read_control" [@@noalloc]
+    "caml_vox_table_read_control" [@@noalloc] [@@builtin] [@@no_effects]
 
 external write_control : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
@@ -62,7 +65,7 @@ external write_control : (table : ('k, 'v) t) @ immutable ->
   {t : P.token | P.own t === H.put (P.own token) (location table)
     (M.set_control state.model index byte)} @ unique ghost
   @@ portable = "caml_vox_table_write_control_bytecode"
-    "caml_vox_table_write_control" [@@noalloc]
+    "caml_vox_table_write_control" [@@noalloc] [@@builtin]
 
 external write_slot : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
@@ -75,6 +78,20 @@ external write_slot : (table : ('k, 'v) t) @ immutable ->
     (M.set_slot state.model index (Some (key, value)))} @ unique ghost
   @@ portable = "caml_vox_table_write_slot_bytecode"
     "caml_vox_table_write_slot" [@@noalloc]
+
+external write_value : (table : ('k, 'v) t) @ immutable ->
+  (state : ('k, 'v) view) @ immutable ->
+  (index : {i : int | 0 <= i && i < state.model.capacity}) ->
+  (stored : {s : 'k stored_key | match M.slot state.model index with
+    | Some (Some (key, _)) -> key === s.key | _ -> false}) @ immutable ->
+  (value : 'v) @ immutable ->
+  (token : {t : P.token |
+    H.at (P.own t) (location table) === Some state.model})
+    @ unique read_write ghost ->
+  {t : P.token | P.own t === H.put (P.own token) (location table)
+    (M.set_slot state.model index (Some (stored.key, value)))} @ unique ghost
+  @@ portable = "caml_vox_table_write_value_bytecode"
+    "caml_vox_table_write_value" [@@noalloc]
 
 external clear_slot : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
@@ -96,7 +113,7 @@ external set_counts : (table : ('k, 'v) t) @ immutable ->
   {t : P.token | P.own t === H.put (P.own token) (location table)
     (M.set_counts state.model size deleted)} @ unique ghost
   @@ portable = "caml_vox_table_set_counts_bytecode"
-    "caml_vox_table_set_counts" [@@noalloc]
+    "caml_vox_table_set_counts" [@@noalloc] [@@builtin]
 
 external read_key : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
@@ -108,7 +125,7 @@ external read_key : (table : ('k, 'v) t) @ immutable ->
   {key : 'k | match M.slot state.model index with
     | Some (Some (k, _)) -> key === k | _ -> false} @ immutable
   @@ portable = "caml_vox_table_read_key_bytecode" "caml_vox_table_read_key"
-    [@@noalloc]
+    [@@noalloc] [@@builtin] [@@no_effects]
 
 external read_value : (table : ('k, 'v) t) @ immutable ->
   (state : ('k, 'v) view) @ immutable ->
@@ -120,7 +137,8 @@ external read_value : (table : ('k, 'v) t) @ immutable ->
   {value : 'v | match M.slot state.model index with
     | Some (Some (_, v)) -> value === v | _ -> false} @ immutable
   @@ portable = "caml_vox_table_read_value_bytecode"
-    "caml_vox_table_read_value" [@@noalloc]
+    "caml_vox_table_read_value"
+    [@@noalloc] [@@builtin] [@@no_effects]
 
 (** Exact observation of the 16 physical control bytes, including clones. *)
 external match16 : (table : ('k, 'v) t) @ immutable ->
@@ -132,7 +150,20 @@ external match16 : (table : ('k, 'v) t) @ immutable ->
   {bits : int | 0 <= bits && bits <= 65535 &&
     bits = M.matching state.model offset byte 16}
   @@ portable = "caml_vox_table_match16_bytecode" "caml_vox_table_match16"
-    [@@noalloc]
+    [@@noalloc] [@@builtin]
+
+(** Low 16 bits match [byte]; bit 16 records an empty lane. *)
+external match16_empty : (table : ('k, 'v) t) @ immutable ->
+  (state : ('k, 'v) view) @ immutable ->
+  (offset : {i : int | 0 <= i && i < state.model.capacity}) ->
+  (byte : {b : int | 0 <= b && b <= 255}) ->
+  (token : {t : P.token |
+    H.at (P.own t) (location table) === Some state.model}) @ local read ghost ->
+  {bits : int | 0 <= bits && bits <= 131071 &&
+    bits land 65535 = M.matching state.model offset byte 16 &&
+    (bits land 65536 <> 0) = (M.matching state.model offset 128 16 <> 0)}
+  @@ portable = "caml_vox_table_match16_empty_bytecode" "caml_vox_table_match16_empty"
+    [@@noalloc] [@@builtin] [@@no_effects]
 
 external exchange : (left : ('k, 'v) t) @ immutable ->
   (before_left : ('k, 'v) view) @ immutable ->

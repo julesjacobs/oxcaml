@@ -55,7 +55,7 @@ module Make (Key : Vox_table_map.Key) = struct
     let allocated = T.create 16 token in
     let entry = empty_entry allocated.value in
     let view = {I.model = ghost_ (M.initial 16 entry);
-      routes = M.repeat 16 (0, 0); plan = Vox_table_probe.One} in
+      routes = ghost_ (M.repeat 16 (0, 0)); plan = Vox_table_probe.One} in
     ghost_ (
       Vox_table_probe.valid_def Vox_table_probe.One;
       Vox_table_probe.groups_def Vox_table_probe.One;
@@ -188,7 +188,8 @@ module Make (Key : Vox_table_map.Key) = struct
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i < before.model.capacity}) ->
       (key : {k : Key.t | match M.slot before.model index with
-        | Some (Some (stored, _)) -> stored === k | _ -> false}) @ immutable ->
+        | Some (Some (stored, _)) -> stored === k | _ -> false})
+        @ immutable ghost ->
       (value : 'a) @ immutable ->
       (token : {t : P.token | H.at (P.own t) (T.location table) ===
         Some before.model}) @ unique read_write ghost ->
@@ -197,7 +198,7 @@ module Make (Key : Vox_table_map.Key) = struct
           value) &&
         P.own r.#state === H.put (P.own token) (T.location table) r.#view.model}
       @ unique = fun table before index key value token ->
-    let state = T.write_slot table {T.model = before.model} index key value
+    let state = T.write_value table {T.model = before.model} index {T.key} value
       token in
     let view = {I.model = ghost_ (M.set_slot before.model index (Some (key,
       value)));
