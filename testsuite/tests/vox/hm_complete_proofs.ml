@@ -10,6 +10,8 @@ module D = Hm_declarative
 module T = Hm_type_proofs
 
 let[@def] (default_value @ total) (_i : D.index @ immutable) = Boolean
+open Optimized_unifier_spec
+
 let rec (embed_eval @ total) : (t : D.mono) @ immutable ->
     {u : unit | D.mono_wf D.Z t} -> {u : unit | T.embed (T.eval default_value t) === t} @ ghost =
   fun t premise -> ghost_ (
@@ -100,8 +102,8 @@ let (unify_complete @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | unified h p q ok after d && rho p === rho q} ->
     {u : unit | ok && node_equation after rho x} @ ghost = fun h rho model p q ok after d x premise -> ghost_ (
       let refine_ premise = premise in let u = () in
-      if ok then (Level_unifier_proofs.success_backward_at h rho model p q after d x (refine_ u); refine_ u)
-      else (Level_unifier_proofs.failure_refutes h rho model p q after d (refine_ u); refine_ u))
+      if ok then (Optimized_model_proofs.success_backward_at h rho model p q after d x (refine_ u); refine_ u)
+      else (Optimized_model_proofs.failure_refutes h rho model p q after d (refine_ u); refine_ u))
 
 let (allocation_facts @ total) : (h : node Pref.heap) @ immutable -> (depth : int) -> (pool : pool) @ immutable ->
     (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h depth pool x})) @ total ->

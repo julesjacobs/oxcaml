@@ -34,8 +34,8 @@ let (unify_runtime @ total) : (h : node Pref.heap) @ immutable -> (depth : int) 
     (pool : pool) @ immutable ->
     (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h depth pool x})) @ total ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable -> (ok : bool) ->
-    (after : node Pref.heap) @ immutable -> (d : Level_unifier_spec.derivation) @ immutable ->
-    (x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.unified h p q ok after d} ->
+    (after : node Pref.heap) @ immutable -> (d : Optimized_unifier_spec.derivation) @ immutable ->
+    (x : node Pref.t) @ immutable -> {u : unit | Optimized_unifier_spec.unified h p q ok after d} ->
     {u : unit | runtime_at after depth pool x} @ ghost =
   fun h depth pool facts p q ok after d x premise -> ghost_ (
     let refine_ premise = premise in facts x; runtime_at_def h depth pool x;
@@ -44,12 +44,15 @@ let (unify_runtime @ total) : (h : node Pref.heap) @ immutable -> (depth : int) 
         {u : unit | not (H.mem h y) || finite_scope h y}) @ total = fun y ->
       facts y; runtime_at_def h depth pool y;
       let u = () in let refine_ u = safe_finite_scope h y (refine_ u) in refine_ u in
-    let u = () in Level_unifier_metadata.unified_scope h scope p q ok after d x (refine_ u);
-    Level_unifier_proofs.unified_frame h p q ok after d x (refine_ u);
-    Level_unifier_metadata.unified_ordered h p q ok after d x (refine_ u);
-    Level_unifier_metadata.unified_scratch h p q ok after d x (refine_ u);
+    let u = () in Optimized_metadata.unified_scope h scope p q ok after d x (refine_ u);
+    Optimized_metadata.unified_frame h p q ok after d x (refine_ u);
+    let order : ((y : node Pref.t) @ immutable -> {u : unit | ordered h y}) @ total = fun y ->
+      facts y; runtime_at_def h depth pool y; safe_def h y; let u = () in refine_ u in
+    Optimized_metadata.unified_ordered h order p q ok after d x (refine_ u);
+    Optimized_metadata.unified_scratch h p q ok after d x (refine_ u);
     Level_unifier_metadata.scratch_frame_def h after x;
-    let cut = depth - 1 in Generalize_proofs.coverage_after_unify h p q ok after d cut pool x (refine_ u);
+    let cut = depth - 1 in covered_def h cut pool x; covered_def after cut pool x;
+    (match H.at h x, H.at after x with Some a, Some b -> decreases_def a.level b.level; () | _ -> ());
     runtime_at_def after depth pool x; safe_def after x; finite_scope_def after x;
     depth_bound_def after depth x; finite_node_def h x; finite_node_def after x;
     below_def h x depth; below_def after x depth; at_level_def h x; at_level_def after x;
@@ -211,7 +214,7 @@ let rec (run_active @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
         let desc = Arrow (a, p) in let w = cell desc depth in let h4 = H.put h3 arrow w in
         allocated_def h2 depth p var; allocated_def h3 depth arrow desc;
         allocation_active h2 p v x (refine_ u); allocation_active h3 arrow w x (refine_ u);
-        Level_unifier_metadata.unified_active h4 f arrow ok after d x (refine_ u); refine_ u)
+        Optimized_metadata.unified_active h4 f arrow ok after d x (refine_ u); refine_ u)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
       let h2 = H.put h1 res v in let desc = Arrow (arg, res) in let w = cell desc depth in let h3 = H.put h2 self w in
@@ -221,7 +224,7 @@ let rec (run_active @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
       let next_env = Hm_environment_spec.Bind (arg, Hm_environment_spec.Bind (self, env)) in
       run_active h3 depth next_pool next_env body middle body_pool x (refine_ u);
       (match result body with None -> refine_ u | Some b -> match finish with Aborted -> refine_ u
-        | Unified (ok, d) -> Level_unifier_metadata.unified_active middle b res ok after d x (refine_ u); refine_ u)
+        | Unified (ok, d) -> Optimized_metadata.unified_active middle b res ok after d x (refine_ u); refine_ u)
     | RLet_left _ | RLet _ -> refine_ u)
 
 let (copy_target_active @ total) : (h : node Pref.heap) @ immutable -> (depth : int) ->
@@ -271,7 +274,7 @@ let (run_result_active @ total) : (h : node Pref.heap) @ immutable -> (depth : i
         fresh_active h2 depth q var (refine_ u);
         let desc = Arrow (a, q) in let w = cell desc depth in let h4 = H.put h3 arrow w in
         allocated_def h3 depth arrow desc; allocation_active h3 arrow w q (refine_ u);
-        Level_unifier_metadata.unified_active h4 f arrow ok after d q (refine_ u); refine_ u)
+        Optimized_metadata.unified_active h4 f arrow ok after d q (refine_ u); refine_ u)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in let h2 = H.put h1 res v in
       let desc = Arrow (arg, res) in let h3 = H.put h2 self (cell desc depth) in
@@ -280,7 +283,7 @@ let (run_result_active @ total) : (h : node Pref.heap) @ immutable -> (depth : i
       let next_env = Hm_environment_spec.Bind (arg, Hm_environment_spec.Bind (self, env)) in
       run_active h3 depth next_pool next_env body middle body_pool self (refine_ u);
       (match result body with None -> refine_ u | Some b -> match finish with Aborted -> refine_ u
-        | Unified (ok, d) -> Level_unifier_metadata.unified_active middle b res ok after d self (refine_ u); refine_ u))
+        | Unified (ok, d) -> Optimized_metadata.unified_active middle b res ok after d self (refine_ u); refine_ u))
 
 let (run_result_below @ total) : (h : node Pref.heap) @ immutable -> (depth : int) ->
     (pool : pool) @ immutable ->

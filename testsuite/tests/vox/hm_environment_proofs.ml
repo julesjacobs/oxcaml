@@ -150,14 +150,14 @@ let (close_protected @ total) : (h : node Pref.heap) @ immutable ->
 let (unify_protected @ total) : (h : node Pref.heap) @ immutable ->
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (ok : bool) -> (after : node Pref.heap) @ immutable ->
-    (d : Level_unifier_spec.derivation) @ immutable -> (depth : int) ->
+    (d : Optimized_unifier_spec.derivation) @ immutable -> (depth : int) ->
     (x : node Pref.t) @ immutable ->
-    {u : unit | Level_unifier_spec.unified h p q ok after d} ->
+    {u : unit | Optimized_unifier_spec.unified h p q ok after d} ->
     {u : unit | protected_at h after depth x} @ ghost =
   fun h p q ok after d depth x premise -> ghost_ (
     let refine_ premise = premise in let u = () in
-    Level_unifier_proofs.unified_frame h p q ok after d x (refine_ u);
-    Level_unifier_metadata.unified_scratch h p q ok after d x (refine_ u);
+    Optimized_metadata.unified_frame h p q ok after d x (refine_ u);
+    Optimized_metadata.unified_scratch h p q ok after d x (refine_ u);
     Level_unifier_metadata.scratch_frame_def h after x;
     protected_at_def h after depth x;
     below_def h x depth; below_def after x depth;

@@ -7,34 +7,7 @@ open Hm_environment_spec
 open Hm_execution_spec
 open Level_finite_spec
 
-let rec (unify_restrict @ total) : (h : node Pref.heap) @ immutable ->
-    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
-    (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable -> (ok : bool) ->
-    (after : node Pref.heap) @ immutable -> (d : derivation) @ immutable ->
-    (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation after rho x})) @ total ->
-    (x : node Pref.t) @ immutable -> {u : unit | unified h p q ok after d} ->
-    {u : unit | node_equation h rho x} @ ghost = fun h rho p q ok after d model x premise -> ghost_ (
-    let refine_ premise = premise in unified_def h p q ok after d;
-    let u = () in match d with
-    | Same | Constants | Occurs_left _ | Occurs_right _ | Clash -> model x; refine_ u
-    | Bind_left _ -> let v = redirect h p q in observe_write h p v x;
-      model x; node_equation_def after rho x; node_equation_def h rho x; refine_ u
-    | Bind_right _ -> let v = redirect h q p in observe_write h q v x;
-      model x; node_equation_def after rho x; node_equation_def h rho x; refine_ u
-    | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
-      unify_restrict mid rho p q ok after rest model x (refine_ u);
-      Marked_occurs_proofs.scan_equation h needle marks rho x (refine_ u); refine_ u
-    | Lowering (bound, edits, _, rest) -> let mid = lower_heap h bound edits in
-      unify_restrict mid rho p q ok after rest model x (refine_ u);
-      lower_equation h bound edits rho x (refine_ u); refine_ u
-    | Swap rest -> unify_restrict h rho q p ok after rest model x (refine_ u); refine_ u
-    | Resolve (r, s, _, _, rest) -> unify_restrict h rho r s ok after rest model x (refine_ u); refine_ u
-    | Children (a, b, c, e, middle, left_ok, left, right) ->
-      if left_ok then (
-        let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
-          let u = () in let refine_ u = unify_restrict middle rho b e ok after right model x (refine_ u) in refine_ u in
-        unify_restrict h rho a c left_ok middle left mid_model x (refine_ u); refine_ u)
-      else (unify_restrict h rho a c left_ok middle left (refine_ model) x (refine_ u); refine_ u))
+let unify_restrict = Optimized_model_proofs.unify_restrict
 
 let (allocation_restrict @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (v : node) @ immutable -> (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->

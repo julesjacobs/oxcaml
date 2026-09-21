@@ -99,3 +99,9 @@ instantiates the MGU with self-containing finite types and checks factorization
 at variables and a shared arrow root. `level_mgu_rejected.ml` checks the same
 four invalid claims on the richer representation. Principal HM still requires
 the generalization provenance and term-inference layers.
+
+`Optimized_mgu_proofs.with_mgu` provides the same solution, substitution
+factorization, idempotence and outside-heap identity contract for
+`Optimized_unifier.unify`. Its proof composes the original binding cases with
+exact-model graph rewrites and finite-forest transport. The shared-graph fixture
+consumes the factorization with an independently constructed substitution.

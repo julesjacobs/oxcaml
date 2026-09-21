@@ -1,3 +1,5 @@
+open Level_unifier_spec
+open Level_finite_spec
 open Copy_spec
 open Level_spec
 open Generalize_spec
@@ -23,12 +25,14 @@ let rec lookup_node : (h : node Pref.heap) @ immutable ghost ->
 
 let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool : pool) @ immutable ->
     (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h depth pool x})) @ total ghost ->
+    (trees : ((x : node Pref.t) @ immutable ->
+      {t : tree | tree_root t === x && (if H.mem h x then finite h t else observe h x === None)} @ immutable)) @ total ghost ->
     (env : env) @ immutable -> (e : D.term) @ immutable ->
     (state : {t : node Pref.token | Pref.own t === h && depth >= 0 && pool_scoped h pool
       && env_owned h env && D.scoped_term (env_depth env) e}) @ unique ->
     {r : inference | ran h depth pool env r.#execution (Pref.own r.#state) r.#pool
       && (not (term_let_free e) || let_free r.#execution) && source r.#execution === e && r.#value === result r.#execution} @ unique =
-  fun h depth pool facts env e state ->
+  fun h depth pool facts trees env e state ->
     let refine_ state = state in
     ghost_ (term_let_free_def e; let n = env_depth env in D.scoped_term_def n e; ());
     match e with
@@ -70,7 +74,12 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
         below_def h1 arg depth; env_owned_def h1 next_env; env_depth_def next_env);
       let state : {t : node Pref.token | Pref.own t === h1 && depth >= 0 && pool_scoped h1 pool1
         && env_owned h1 next_env && D.scoped_term (env_depth next_env) body} = refine_ state in
-      let refine_ inferred = infer h1 depth pool1 facts1 next_env body state in
+      let trees1 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      allocated_def h depth arg var; let u = () in
+      let next = Hm_forest_proofs.allocated_forest h trees depth arg var (refine_ u) in
+      let refine_ t = next x in refine_ t) in
+      let refine_ inferred = infer h1 depth pool1 facts1 trees1 next_env body state in
       let middle = ghost_ (Pref.own (borrow_ inferred.#state)) in let body_pool = inferred.#pool in
       let body_run = ghost_ inferred.#execution in
       let state = inferred.#state in
@@ -101,7 +110,7 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
     | D.Apply (left, right) ->
       let state : {t : node Pref.token | Pref.own t === h && depth >= 0 && pool_scoped h pool
         && env_owned h env && D.scoped_term (env_depth env) left} = refine_ state in
-      let refine_ first = infer h depth pool facts env left state in
+      let refine_ first = infer h depth pool facts trees env left state in
       let h1 = ghost_ (Pref.own (borrow_ first.#state)) in let pool1 = first.#pool in
       let left_run = ghost_ first.#execution in let state = first.#state in
       (match first.#value with
@@ -117,7 +126,10 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
           run_env_owned h depth pool env left_run h1 pool1 (refine_ u));
         let state : {t : node Pref.token | Pref.own t === h1 && depth >= 0 && pool_scoped h1 pool1
           && env_owned h1 env && D.scoped_term (env_depth env) right} = refine_ state in
-        let refine_ second = infer h1 depth pool1 facts1 env right state in
+        let trees1 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ t = Hm_forest_proofs.run_forest h trees depth pool env left_run h1 pool1 x (refine_ u) in refine_ t) in
+      let refine_ second = infer h1 depth pool1 facts1 trees1 env right state in
         let h2 = ghost_ (Pref.own (borrow_ second.#state)) in let pool2 = second.#pool in
         let right_run = ghost_ second.#execution in let state = second.#state in
         match second.#value with
@@ -159,7 +171,20 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
           ghost_ (let v = cell desc depth in let u = () in allocation_active h3 arrow v f (refine_ u);
             below_def h4 arrow depth; active_def h4 arrow; active_def h4 f);
           let state : {t : node Pref.token | Pref.own t === h4 && H.mem h4 f && H.mem h4 arrow && active h4 f && active h4 arrow} = refine_ state in
-          let refine_ solved = Level_unifier.unify h4 scope unmarked f arrow state in
+          let trees2 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ t = Hm_forest_proofs.run_forest h1 trees1 depth pool1 env right_run h2 pool2 x (refine_ u) in refine_ t) in
+      let trees3 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      allocated_def h2 depth p var; let u = () in
+      let next = Hm_forest_proofs.allocated_forest h2 trees2 depth p var (refine_ u) in
+      let refine_ t = next x in refine_ t) in
+      let trees4 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h4 x then finite h4 t else observe h4 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      allocated_def h3 depth arrow desc; let u = () in
+      let next = Hm_forest_proofs.allocated_forest h3 trees3 depth arrow desc (refine_ u) in
+      let refine_ t = next x in refine_ t) in
+      let refine_ solved = Optimized_unifier.unify h4 scope unmarked trees4 f arrow state in
           let after = ghost_ (Pref.own (borrow_ solved.#state)) in
           let execution = ghost_ (RApp (left_run, right_run, h1, pool1, h2, pool2, p, arrow, solved.#ok, solved.#derivation)) in
           ghost_ (allocated_def h2 depth p var; allocated_def h3 depth arrow desc;
@@ -199,7 +224,22 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
         env_depth_def self_env; env_depth_def next_env);
       let state : {t : node Pref.token | Pref.own t === h3 && depth >= 0 && pool_scoped h3 pool3
         && env_owned h3 next_env && D.scoped_term (env_depth next_env) body} = refine_ state in
-      let refine_ inferred = infer h3 depth pool3 facts3 next_env body state in
+      let trees1 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      allocated_def h depth arg var; let u = () in
+      let next = Hm_forest_proofs.allocated_forest h trees depth arg var (refine_ u) in
+      let refine_ t = next x in refine_ t) in
+      let trees2 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      allocated_def h1 depth res var; let u = () in
+      let next = Hm_forest_proofs.allocated_forest h1 trees1 depth res var (refine_ u) in
+      let refine_ t = next x in refine_ t) in
+      let trees3 : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      allocated_def h2 depth self desc; let u = () in
+      let next = Hm_forest_proofs.allocated_forest h2 trees2 depth self desc (refine_ u) in
+      let refine_ t = next x in refine_ t) in
+      let refine_ inferred = infer h3 depth pool3 facts3 trees3 next_env body state in
       let middle = ghost_ (Pref.own (borrow_ inferred.#state)) in let body_pool = inferred.#pool in
       let body_run = ghost_ inferred.#execution in let state = inferred.#state in
       (match inferred.#value with
@@ -224,7 +264,10 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
           run_active h3 depth pool3 facts3 next_env body_run middle body_pool res (refine_ u);
           active_def middle b; active_def middle res);
         let state : {t : node Pref.token | Pref.own t === middle && H.mem middle b && H.mem middle res && active middle b && active middle res} = refine_ state in
-        let refine_ solved = Level_unifier.unify middle scope unmarked b res state in
+        let middle_trees : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ t = Hm_forest_proofs.run_forest h3 trees3 depth pool3 next_env body_run middle body_pool x (refine_ u) in refine_ t) in
+      let refine_ solved = Optimized_unifier.unify middle scope unmarked middle_trees b res state in
         let after = ghost_ (Pref.own (borrow_ solved.#state)) in
         let execution = ghost_ (RRec (arg, res, self, body_run, middle, body_pool, Unified (solved.#ok, solved.#derivation))) in
         ghost_ (allocated_def h depth arg var; allocated_def h1 depth res var; allocated_def h2 depth self desc;
@@ -242,7 +285,7 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
       ghost_ (pool_scoped_def h child_pool);
       let state : {t : node Pref.token | Pref.own t === h && child_depth >= 0 && pool_scoped h child_pool
         && env_owned h env && D.scoped_term (env_depth env) rhs} = refine_ state in
-      let refine_ first = infer h child_depth child_pool child_facts env rhs state in
+      let refine_ first = infer h child_depth child_pool child_facts trees env rhs state in
       let middle = ghost_ (Pref.own (borrow_ first.#state)) in let rhs_pool = first.#pool in
       let rhs_run = ghost_ first.#execution in let state = first.#state in
       (match first.#value with
@@ -271,7 +314,13 @@ let rec infer : (h : node Pref.heap) @ immutable ghost -> (depth : int) -> (pool
           env_owned_def start next_env; env_depth_def next_env);
         let state : {t : node Pref.token | Pref.own t === start && depth >= 0 && pool_scoped start parent_pool
           && env_owned start next_env && D.scoped_term (env_depth next_env) body} = refine_ state in
-        let refine_ out = infer start depth parent_pool parent_facts next_env body state in
+        let middle_trees : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ t = Hm_forest_proofs.run_forest h trees child_depth child_pool env rhs_run middle rhs_pool x (refine_ u) in refine_ t) in
+      let closed_trees : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem start x then finite start t else observe start x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      let u = () in let refine_ t = Forest_transport.closed_forest_at middle middle_trees depth rhs_pool x (refine_ u) in refine_ t) in
+      let refine_ out = infer start depth parent_pool parent_facts closed_trees next_env body state in
         let after = ghost_ (Pref.own (borrow_ out.#state)) in
         let execution = ghost_ (RLet (rhs_run, out.#execution, middle, rhs_pool)) in
         ghost_ (ran_def h depth pool env execution after out.#pool;
@@ -292,7 +341,10 @@ let closed_hm : (e : {e : D.term | D.scoped_term D.Z e}) @ immutable ->
   ghost_ (pool_scoped_def h pool; env_owned_def h env; env_depth_def env);
   let state : {t : node Pref.token | Pref.own t === h && 0 >= 0 && pool_scoped h pool && env_owned h env
     && D.scoped_term (env_depth env) e} = refine_ state in
-  let refine_ out = infer h 0 pool facts env e state in refine_ out
+  let trees : ((x : node Pref.t) @ immutable ->
+    {t : tree | tree_root t === x && (if H.mem h x then finite h t else observe h x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+      let t = Free x in tree_root_def t; observe_def h x; refine_ t) in
+      let refine_ out = infer h 0 pool facts trees env e state in refine_ out
 
 let closed : (e : {e : D.term | D.scoped_term D.Z e && term_let_free e}) @ immutable ->
     {r : inference | let refine_ e = e in

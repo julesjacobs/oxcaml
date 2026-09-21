@@ -135,7 +135,7 @@ let rec (run_origin @ total) : (saved : node Pref.heap) @ immutable -> (cut : in
       let prior3 = allocated_origin saved h2 cut (refine_ prior2) depth p var (refine_ u) in
       facts3 arrow; runtime_at_def h3 depth pool3 arrow; safe_def h3 arrow;
       let prior4 = allocated_origin saved h3 cut (refine_ prior3) depth arrow desc (refine_ u) in
-        let refine_ o = Leaf_provenance_proofs.unified_leaf_origin saved h4 cut (refine_ prior4) f arrow ok after d x (refine_ u) in refine_ o)
+        let refine_ o = Optimized_origin_proofs.unified_leaf_origin saved h4 cut (refine_ prior4) f arrow ok after d x (refine_ u) in refine_ o)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in let pool1 = Entry (arg, pool) in
       let h2 = H.put h1 res v in let pool2 = Entry (res, pool1) in
@@ -160,7 +160,7 @@ let rec (run_origin @ total) : (saved : node Pref.heap) @ immutable -> (cut : in
       let middle_prior : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
         let u = () in let refine_ o = run_origin saved cut h3 depth pool3 facts3 (refine_ prior3) next_env body middle body_pool y (refine_ u) in refine_ o in
-      let refine_ o = Leaf_provenance_proofs.unified_leaf_origin saved middle cut middle_prior b res ok after d x (refine_ u) in refine_ o)
+      let refine_ o = Optimized_origin_proofs.unified_leaf_origin saved middle cut middle_prior b res ok after d x (refine_ u) in refine_ o)
     | RLet_left (rhs, _) ->
       let child_depth = depth + 1 in let empty : pool = Generalize_spec.Empty in
       ran_def h child_depth empty env rhs after final_pool;

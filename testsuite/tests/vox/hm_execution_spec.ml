@@ -4,7 +4,7 @@ open Generalize_spec
 open Hm_environment_spec
 module D = Hm_declarative
 
-type finish = Aborted | Unified of bool * Level_unifier_spec.derivation [@@inductive]
+type finish = Aborted | Unified of bool * Optimized_unifier_spec.derivation [@@inductive]
 type execution =
   | RVar of D.index * node Pref.t * node Pref.t * history
   | RBool of node Pref.t
@@ -12,7 +12,7 @@ type execution =
   | RApp_left of execution * D.term
   | RApp_right of execution * execution * node Pref.heap * pool
   | RApp of execution * execution * node Pref.heap * pool * node Pref.heap * pool
-      * node Pref.t * node Pref.t * bool * Level_unifier_spec.derivation
+      * node Pref.t * node Pref.t * bool * Optimized_unifier_spec.derivation
   | RRec of node Pref.t * node Pref.t * node Pref.t * execution * node Pref.heap * pool * finish
   | RLet_left of execution * D.term
   | RLet of execution * execution * node Pref.heap * pool
@@ -72,7 +72,7 @@ let[@def] rec (ran @ total) (h : node Pref.heap @ immutable) (depth : int)
       match result right with None -> false | Some a ->
       allocated h2 depth p Var
       && allocated (H.put h2 p (cell Var depth)) depth arrow (Arrow (a, p))
-      && Level_unifier_spec.unified
+      && Optimized_unifier_spec.unified
         (H.put (H.put h2 p (cell Var depth)) arrow (cell (Arrow (a, p)) depth))
         f arrow ok after d)
     && final_pool === Entry (arrow, Entry (p, pool2))
@@ -88,7 +88,7 @@ let[@def] rec (ran @ total) (h : node Pref.heap @ immutable) (depth : int)
     && (match result body with
       | None -> finish === Aborted && after === middle
       | Some b -> match finish with Aborted -> false | Unified (ok, d) ->
-        Level_unifier_spec.unified middle b res ok after d)
+        Optimized_unifier_spec.unified middle b res ok after d)
   | RLet_left (rhs, _) -> ran h (depth + 1) Empty env rhs after final_pool
     && result rhs === None
   | RLet (rhs, body, middle, child_pool) ->

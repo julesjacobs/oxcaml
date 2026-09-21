@@ -91,7 +91,7 @@ let rec (run_forest @ total) : (h : node Pref.heap) @ immutable ->
         let ts3 = allocated_forest h2 (refine_ ts2) depth p var (refine_ u) in
         let desc = Arrow (a, p) in let h4 = H.put h3 arrow (cell desc depth) in
         let ts4 = allocated_forest h3 (refine_ ts3) depth arrow desc (refine_ u) in
-        let refine_ t = Level_finite_proofs.unified_finite_at h4 (refine_ ts4) f arrow ok after d x (refine_ u) in refine_ t)
+        let refine_ t = Optimized_finite_proofs.unified_finite_at h4 (refine_ ts4) f arrow ok after d x (refine_ u) in refine_ t)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let h1 = H.put h arg (cell var depth) in
       let ts1 = allocated_forest h trees depth arg var (refine_ u) in
@@ -106,7 +106,7 @@ let rec (run_forest @ total) : (h : node Pref.heap) @ immutable ->
       let u = () in let refine_ t = run_forest h3 (refine_ ts3) depth pool3 env3 body middle body_pool x (refine_ u) in refine_ t in
       (match result body with None -> let refine_ t = ts4 x in refine_ t | Some b -> match finish with
       | Aborted -> let _impossible : {u : unit | false} = refine_ u in let refine_ t = trees x in refine_ t
-      | Unified (ok, d) -> let refine_ t = Level_finite_proofs.unified_finite_at middle (refine_ ts4) b res ok after d x (refine_ u) in refine_ t)
+      | Unified (ok, d) -> let refine_ t = Optimized_finite_proofs.unified_finite_at middle (refine_ ts4) b res ok after d x (refine_ u) in refine_ t)
     | RLet (rhs, body, middle, child_pool) ->
       let empty : pool = Empty in let child_depth = depth + 1 in
     let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
