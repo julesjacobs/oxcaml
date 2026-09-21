@@ -59,6 +59,14 @@ module Make (C : Vox_big_credits.S) : sig
         1Z <= state.#capacity && state.#capacity <= Bigint.of_int max_int
         else true} @ ghost @@ total
 
+  val model_valid :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      {u : unit | if valid state then
+        F.valid (heap state) (contents state) &&
+        F.complete (contents state) (contents state) &&
+        R.all_ordered (capacity state) (heap state) (contents state) &&
+        capacity state <= Bigint.of_int max_int else true} @ ghost @@ total
+
   val find_semantics : (x : M.elem) @ immutable ->
       (q : M.elem) @ immutable ->
       (state : t) @ local immutable total ghost forkable unyielding ->

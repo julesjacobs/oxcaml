@@ -75,6 +75,18 @@ module Make (C : Vox_big_credits.S) = struct
     valid_def (borrow_ state); D.population_bounds state.#capacity (heap state) state.#paths;
     let u = () in refine_ u)
 
+  let (model_valid @ total) :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      {u : unit | if valid state then
+        F.valid (heap state) (contents state) &&
+        F.complete (contents state) (contents state) &&
+        R.all_ordered (capacity state) (heap state) (contents state) &&
+        capacity state <= Bigint.of_int max_int else true} @ ghost =
+      fun state -> ghost_ (
+    valid_def (borrow_ state); contents_def (borrow_ state);
+    capacity_def (borrow_ state);
+    let u = () in refine_ u)
+
   let (find_semantics @ total) : (x : M.elem) @ immutable ->
       (q : M.elem) @ immutable ->
       (state : t) @ local immutable total ghost forkable unyielding ->
