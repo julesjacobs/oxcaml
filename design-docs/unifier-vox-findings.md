@@ -51,8 +51,9 @@ check, not a native cost proof.
 
 The unifier proves partial correctness and exact model transformation. The finite
 readback layer additionally constructs and preserves finite unfoldings and
-excludes cycles. Most-general substitutions remain a separate stage. No
-invariant constructor or correctness theorem is assumed.
+excludes cycles. The MGU layer adds canonical substitutions and explicit
+factorization functions. No invariant constructor or correctness theorem is
+assumed.
 
 ## Findings from finite readback
 
@@ -81,3 +82,16 @@ rebuilding those links and requests full initialization. This is an incremental
 workflow issue: the installed compiler can still be used by `ocamltest` directly.
 The test helper could distinguish missing workspace links from stale runtime or
 standard-library artifacts and rebuild the required links automatically.
+
+## MGU factorization
+
+Physical handles can serve directly as symbolic variable identities in `ty`.
+This removes the finite-readback label function and avoids an additional
+numbering table and injectivity invariant. The same existing model theorems
+then support MGU factorization without polymorphizing or duplicating them.
+
+Totality on a curried callback must constrain the callback itself. An annotation
+at the end of an unparenthesized arrow chain can instead constrain its final
+result, causing higher-order mode mismatches. The MGU continuation and factor
+callback use parenthesized function types. This remains an annotation and
+diagnostic usability issue; no new Vox soundness defect was identified.
