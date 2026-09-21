@@ -138,3 +138,12 @@ recursive self.
 This layer does not yet connect declarative let typing to a mutable execution.
 The remaining bridge must construct environment instance translators from RHS
 model-extension proofs; the checklist records that obligation separately.
+
+
+`hm_environment_spec.ml` relates runtime handle lists to erased template lists.
+It protects generic descriptors and finite boundaries below a binding's depth.
+`hm_environment_proofs.ml` transports those facts through allocation, copying,
+unification, memo cleanup and closing at a sufficient cutoff. It constructs
+instance translators for empty and monomorphic environments, lifts them under
+fresh type binders, and transports them across models that agree on the template
+boundaries. The let translator remains part of the RHS model-extension bridge.
