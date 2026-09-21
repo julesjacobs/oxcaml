@@ -34,7 +34,7 @@ let (scoped_fixture @ total) : (s : sample) ->
   term_let_free_def id; term_let_free_def applied; term_let_free_def bad;
   term_let_free_def call; term_let_free_def loop; term_let_free_def self_return;
   term_let_free_def omega_body; term_let_free_def omega;
-  let u = () in refine_ u)
+  let u = () in u)
 
 
 let rec pool_size = function Generalize_spec.Empty -> 0
@@ -42,9 +42,8 @@ let rec pool_size = function Generalize_spec.Empty -> 0
 
 let run sample expected =
   let e = expression sample in ghost_ (scoped_fixture sample);
-  let e : {e : term | scoped_term Z e && term_let_free e} = refine_ e in
-  let refine_ out = Hm_infer.closed e in
-  let refine_ e = e in
+  let e : {e : term | scoped_term Z e && term_let_free e} = e in
+  let out = Hm_infer.closed e in
   assert (Option.is_some out.#value = expected);
   (match sample with Identity -> assert (pool_size out.#pool = 2) | _ -> ());
   match out.#value with
@@ -53,11 +52,11 @@ let run sample expected =
     let after = ghost_ (Pref.own (borrow_ out.#state)) in
     ghost_ (let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      let u = () in Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u);
-      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
-      let refine_ _typing = Hm_sound_proofs.closed_sound out.#execution after out.#pool p tree (refine_ u) in ());
-    let state = out.#state in let state : {t : Pref.token | H.mem (Pref.own t) p} = refine_ state in
-    let refine_ v = Pref.read p (borrow_ state) in
+      let u = () in Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (u);
+      let tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (u) in
+      let _typing = Hm_sound_proofs.closed_sound out.#execution after out.#pool p tree (u) in ());
+    let state = out.#state in let state : {t : Pref.token | H.mem (Pref.own t) p} = state in
+    let v = Pref.read p (borrow_ state) in
     assert (v.level = Finite 0 && not v.visited)
 
 let () =

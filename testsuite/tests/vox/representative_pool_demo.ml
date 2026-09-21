@@ -16,18 +16,18 @@ let (close_frame @ total) : (h : Pref.heap) @ immutable ->
     {u : unit | pool_scoped h pool} ->
     {u : unit | H.mem h p === H.mem (S.close_heap h cut pool) p} @ ghost =
   fun h cut pool p premise -> ghost_ (
-    let refine_ premise = premise in let u = () in
-    S.close_heap_def h cut pool; R.representatives_scoped h pool (refine_ u);
+    let u = () in
+    S.close_heap_def h cut pool; R.representatives_scoped h pool (u);
     let filtered = R.representatives h pool in
     let after = S.close_heap h cut pool in
-    Generalize_proofs.closed_observe h cut filtered p (refine_ u);
-    closed_at_def h after cut filtered p; refine_ u)
+    Generalize_proofs.closed_observe h cut filtered p (u);
+    closed_at_def h after cut filtered p; u)
 
 let run () =
-  let refine_ state = Pref.empty () in
-  let leaf = cell Var 1 in let refine_ step = Pref.alloc leaf state in
+  let state = Pref.empty () in
+  let leaf = cell Var 1 in let step = Pref.alloc leaf state in
   let q = step.value in let state = step.state in
-  let alias = cell (Link q) 2 in let refine_ step = Pref.alloc alias state in
+  let alias = cell (Link q) 2 in let step = Pref.alloc alias state in
   let p = step.value in let state = step.state in
   let h = ghost_ (Pref.own (borrow_ state)) in
   let empty = Empty in let tail = Entry (q, empty) in let pool = Entry (p, tail) in
@@ -36,27 +36,24 @@ let run () =
     pool_scoped_def h empty; pool_scoped_def h tail; pool_scoped_def h pool);
   let witness = {Ghost.ghost = ghost_ h} in
   let state : {t : Pref.token | Pref.own t === h && pool_scoped h pool
-    && pool_scoped h empty} = refine_ state in
-  let refine_ state = state in
-  let refine_ out = Representative_pool.close_and_transfer witness 1 pool empty (refine_ state) in
+    && pool_scoped h empty} = state in
+  let out = Representative_pool.close_and_transfer witness 1 pool empty (state) in
   let retained = out.#parent in let state = out.#state in
   let middle = ghost_ (Pref.own (borrow_ state)) in
-  ghost_ (let u = () in close_frame h 1 pool p (refine_ u);
-    close_frame h 1 pool q (refine_ u); pool_scoped_def middle empty);
+  ghost_ (let u = () in close_frame h 1 pool p (u);
+    close_frame h 1 pool q (u); pool_scoped_def middle empty);
   let witness = {Ghost.ghost = ghost_ middle} in
   assert (retained = Entry (q, Empty));
   let state : {t : Pref.token | Pref.own t === middle && pool_scoped middle retained
-    && pool_scoped middle empty} = refine_ state in
-  let refine_ state = state in
-  let refine_ out = Representative_pool.close_and_transfer witness 0 retained empty (refine_ state) in
+    && pool_scoped middle empty} = state in
+  let out = Representative_pool.close_and_transfer witness 0 retained empty (state) in
   assert (out.#parent = Empty);
   let state = out.#state in
-  ghost_ (let u = () in close_frame middle 0 retained p (refine_ u);
-    close_frame middle 0 retained q (refine_ u));
-  let state : {t : Pref.token | H.mem (Pref.own t) p} = refine_ state in
-  let refine_ pv = Pref.read p (borrow_ state) in let refine_ state = state in
-  let state : {t : Pref.token | H.mem (Pref.own t) q} = refine_ state in
-  let refine_ qv = Pref.read q (borrow_ state) in
+  ghost_ (let u = () in close_frame middle 0 retained p (u);
+    close_frame middle 0 retained q (u));
+  let state : {t : Pref.token | H.mem (Pref.own t) p} = state in
+  let pv = Pref.read p (borrow_ state) in let state : {t : Pref.token | H.mem (Pref.own t) q} = state in
+  let qv = Pref.read q (borrow_ state) in
   assert (pv.desc = Link q); assert (pv.level = Finite 2);
   assert (qv.level = Generic);
   assert (pv.memo = Empty_memo); assert (qv.memo = Empty_memo)

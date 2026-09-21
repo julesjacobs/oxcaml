@@ -102,7 +102,7 @@ let rec (decode_encoded @ total) : (n : int) ->
 [@@decreases n]
 
 let bound : (n : {n : int | n >= 0}) ->
-    {t : term | let refine_ n = n in valid t && source t === D.Bound (decode n)} @ immutable =
+    {t : term | valid t && source t === D.Bound (decode n)} @ immutable =
   fun n -> let index = {number = n; original = decode n} in let out = Bound index in
     ghost_ (decode_encoded n; valid_def out; source_def out);
     out

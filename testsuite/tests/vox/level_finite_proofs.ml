@@ -174,7 +174,7 @@ let rec (walk_bound @ total) :
     (p : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
     (w : walk) @ immutable ->
     {u : unit | H.mem h p && walks h p q w} ->
-    {u : unit | let refine_ tq = trees q in let refine_ tp = trees p in
+    {u : unit | let tq = trees q in let tp = trees p in
       H.mem h q && size tq <= size tp
       && (w === Stop || size tq < size tp)} @ ghost =
   fun h trees p q w premise -> ghost_ (
@@ -208,7 +208,7 @@ let (readback_model_at @ total) :
       {t : tree | tree_root t === x && (if H.mem h x then finite h t else observe h x === None)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (agrees : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in not (H.mem h x) || rho x === readback t})) @ total ->
+      {u : unit | let t = trees x in not (H.mem h x) || rho x === readback t})) @ total ->
     (x : node Pref.t) @ immutable ->
     {u : unit | node_equation h rho x} @ ghost = fun h trees rho agrees x -> ghost_ (
   node_equation_def h rho x;
@@ -298,7 +298,7 @@ let (with_finite_model @ total) :
   let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
     let t = trees x in readback t in
   let agrees : (x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in not (H.mem h x) || rho x === readback t}
+      {u : unit | let t = trees x in not (H.mem h x) || rho x === readback t}
       @ total = fun x -> rho_def x; () in
   let model : (x : node Pref.t) @ immutable -> {u : unit | node_equation h rho x}
       @ total = fun x ->

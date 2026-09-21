@@ -1,0 +1,29 @@
+{
+  "name": "vox-browser-tutorial",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "npm run build:workers && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test tests/*.test.mjs",
+    "build:compiler": "python3 scripts/build.py",
+    "build:workers": "esbuild src/compiler-worker.js --bundle --format=iife --platform=browser --outfile=public/assets/compiler-worker.js && esbuild scripts/solver-worker.js --define:global=globalThis --bundle --format=iife --platform=browser --outfile=public/assets/solver-worker.js",
+    "predev": "npm run build:workers"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/legacy-modes": "6.5.4",
+    "@codemirror/lint": "6.9.7",
+    "@codemirror/state": "6.7.5",
+    "@codemirror/view": "6.43.12",
+    "codemirror": "6.0.2",
+    "vite": "8.3.0",
+    "z3-solver": "5.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

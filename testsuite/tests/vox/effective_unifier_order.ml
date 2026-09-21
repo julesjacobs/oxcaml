@@ -47,7 +47,7 @@ let (redirect_below @ total) : (h : Pref.heap) @ immutable ->
     E.level_def h before_heads x; E.level_def after after_heads x;
     let old = before_heads x in let next = after_heads x in Compression_path_proofs.resolution_terminal h x old.root old.path ();
     Level_spec.below_def h old.root bound;
-    let refine_ path = Representative_mutation.redirect_low h source target x old.root old.path bound () in
+    let path = Representative_mutation.redirect_low h source target x old.root old.path bound () in
     let root = if old.root === source then target else old.root in
     R.unique after x root path next.root next.path ();
     Level_spec.below_def after root bound;
@@ -93,44 +93,44 @@ let rec (ordered @ total) : (h : Pref.heap) @ immutable ->
     | Swap rest -> ordered h q p ok after rest a b va vb order x (); ()
     | Resolve (r, s, _, _, rest) -> ordered h r s ok after rest a b va vb order x (); ()
     | Children (left, right, other_left, other_right, middle, left_ok, first, second) ->
-      let raw_heads : ((y : node Pref.t) @ immutable total -> {r : R.representative | not (H.mem middle y) || resolves middle y r.root r.path} @ immutable total) @ total = fun y -> va y; let refine_ out = M.head h left other_left left_ok middle first a y () in refine_ out in
-      let[@def] mid_heads : E.heads = fun y -> let refine_ r = raw_heads y in r in
+      let raw_heads : ((y : node Pref.t) @ immutable total -> {r : R.representative | not (H.mem middle y) || resolves middle y r.root r.path} @ immutable total) @ total = fun y -> va y; let out = M.head h left other_left left_ok middle first a y () in out in
+      let[@def] mid_heads : E.heads = fun y -> let r = raw_heads y in r in
       let mid_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head middle mid_heads y}) @ total = fun y ->
-        mid_heads_def y; let refine_ r = raw_heads y in E.valid_head_def middle mid_heads y; () in
+        mid_heads_def y; let _r = raw_heads y in E.valid_head_def middle mid_heads y; () in
       let mid_order : ((y : node Pref.t) @ immutable -> {u : unit | E.effective_ordered middle mid_heads y}) @ total = fun y ->
-        let refine_ out = ordered h left other_left left_ok middle first a mid_heads va mid_valid order y () in refine_ out in
+        let out = ordered h left other_left left_ok middle first a mid_heads va mid_valid order y () in out in
       if left_ok then (ordered middle right other_right ok after second mid_heads b mid_valid vb mid_order x (); ())
       else (mid_order x; rebase middle mid_heads b mid_valid (refine_ vb) x (); ())
     | Post_link (middle, rest, source, target) ->
-      let raw_heads : ((y : node Pref.t) @ immutable total -> {r : R.representative | not (H.mem middle y) || resolves middle y r.root r.path} @ immutable total) @ total = fun y -> va y; let refine_ out = M.head h p q true middle rest a y () in refine_ out in
-      let[@def] mid_heads : E.heads = fun y -> let refine_ r = raw_heads y in r in
+      let raw_heads : ((y : node Pref.t) @ immutable total -> {r : R.representative | not (H.mem middle y) || resolves middle y r.root r.path} @ immutable total) @ total = fun y -> va y; let out = M.head h p q true middle rest a y () in out in
+      let[@def] mid_heads : E.heads = fun y -> let r = raw_heads y in r in
       let mid_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head middle mid_heads y}) @ total = fun y ->
-        mid_heads_def y; let refine_ r = raw_heads y in E.valid_head_def middle mid_heads y; () in
+        mid_heads_def y; let _r = raw_heads y in E.valid_head_def middle mid_heads y; () in
       ordered h p q true middle rest a mid_heads va mid_valid order x ();
       Structure_spec.linkable_def middle source target; finite_def middle source; finite_def middle target;
       let s = tree_root source in let t = tree_root target in active_def middle s;
       redirect_order middle s t mid_heads b mid_valid (refine_ vb) x (); ()
     | Pre_compress (middle, edits, rest) ->
-      let raw_heads : ((y : node Pref.t) @ immutable total -> {r : R.representative | not (H.mem middle y) || resolves middle y r.root r.path} @ immutable total) @ total = fun y -> va y; let refine_ out = Effective_compression_metadata.head h middle edits a y () in refine_ out in
-      let[@def] mid_heads : E.heads = fun y -> let refine_ r = raw_heads y in r in
+      let raw_heads : ((y : node Pref.t) @ immutable total -> {r : R.representative | not (H.mem middle y) || resolves middle y r.root r.path} @ immutable total) @ total = fun y -> va y; let out = Effective_compression_metadata.head h middle edits a y () in out in
+      let[@def] mid_heads : E.heads = fun y -> let r = raw_heads y in r in
       let mid_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head middle mid_heads y}) @ total = fun y ->
-        mid_heads_def y; let refine_ r = raw_heads y in E.valid_head_def middle mid_heads y; () in
+        mid_heads_def y; let _r = raw_heads y in E.valid_head_def middle mid_heads y; () in
       let mid_order : ((y : node Pref.t) @ immutable -> {u : unit | E.effective_ordered middle mid_heads y}) @ total = fun y ->
-        order y; let refine_ out = Effective_compression_metadata.ordered h middle edits a mid_heads va mid_valid y () in refine_ out in
+        order y; let out = Effective_compression_metadata.ordered h middle edits a mid_heads va mid_valid y () in out in
       ordered middle p q ok after rest mid_heads b mid_valid vb mid_order x (); ()
     | Scanned (needle, marks, rest) ->
       let middle = scan_heap h marks in
       let mid_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head middle a y}) @ total = fun y ->
-        va y; let refine_ out = Effective_scan_proofs.head h a needle marks y () in refine_ out in
+        va y; let out = Effective_scan_proofs.head h a needle marks y () in out in
       let mid_order : ((y : node Pref.t) @ immutable -> {u : unit | E.effective_ordered middle a y}) @ total = fun y ->
-        order y; let refine_ out = Effective_scan_proofs.order h a needle marks y () in refine_ out in
+        order y; let out = Effective_scan_proofs.order h a needle marks y () in out in
       ordered middle p q ok after rest a b mid_valid vb mid_order x (); ()
     | Terminal_lower (bound, edits, tree, rest) ->
       let middle = lower_heap h bound edits in Terminal_lower_spec.completed_def h bound q middle edits tree;
       let frame : ((y : node Pref.t) @ immutable -> {u : unit | lower_frame h middle y}) @ total = fun y ->
-        let refine_ out = Terminal_lower_proofs.lowering_at h bound edits y () in refine_ out in
+        let out = Terminal_lower_proofs.lowering_at h bound edits y () in out in
       let mid_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head middle a y}) @ total = fun y ->
-        va y; let refine_ out = Effective_lower_proofs.frame_head h middle a frame y () in refine_ out in
+        va y; let out = Effective_lower_proofs.frame_head h middle a frame y () in out in
       let mid_order : ((y : node Pref.t) @ immutable -> {u : unit | E.effective_ordered middle a y}) @ total = fun y ->
-        order y; let refine_ out = Terminal_lower_proofs.completed_ordered h a va bound q middle edits tree y () in refine_ out in
+        order y; let out = Terminal_lower_proofs.completed_ordered h a va bound q middle edits tree y () in out in
       ordered middle p q ok after rest a b mid_valid vb mid_order x (); ())

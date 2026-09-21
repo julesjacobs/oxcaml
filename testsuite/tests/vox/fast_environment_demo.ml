@@ -12,39 +12,37 @@ module T = Fast_term
 module D = Hm_declarative
 
 let rec inspect count p q (f : {f : F.forest | F.valid_forest f} @ immutable) i =
-  let refine_ f = f in
   if i < 0 then () else (
     let proof : ({u : unit | F.valid_forest f && i >= 0}) Ghost.t =
-      {Ghost.ghost = ghost_ (refine_ ())} in
-    let refine_ found = F.lookup f i proof in
+      {Ghost.ghost = ghost_ (())} in
+    let found = F.lookup f i proof in
     (if i = count then assert (found = None) else
       match found with None -> assert false | Some value ->
         let expected = if i mod 2 = 0 then q else p in
-        let refine_ equal = Pref.equal value expected in assert equal);
-    inspect count p q (refine_ f) (i - 1))
+        let equal = Pref.equal value expected in assert equal);
+    inspect count p q (f) (i - 1))
 
 let rec build remaining count p q
     (f : {f : F.forest | F.valid_forest f} @ immutable) =
   if remaining <= 0 then inspect count p q f count else (
-    let refine_ next = F.cons p f in
-    build (remaining - 1) count q p (refine_ next))
+    let next = F.cons p f in
+    build (remaining - 1) count q p (next))
 
 let () =
-  let refine_ state = Pref.empty () in
+  let state = Pref.empty () in
   let a = cell Var 0 in let b = cell Bool 0 in
-  let refine_ first = Pref.alloc a state in
-  let refine_ second = Pref.alloc b first.state in
+  let first = Pref.alloc a state in
+  let second = Pref.alloc b first.state in
   let empty = F.Nil in ghost_ (F.valid_forest_def empty);
-  build 200000 200000 first.value second.value (refine_ empty);
-  let zero : {n : int | n >= 0} = refine_ 0 in
-  let refine_ variable = T.bound zero in let refine_ zero = zero in
-  let term = T.Lambda variable in
+  build 200000 200000 first.value second.value (empty);
+  let zero : {n : int | n >= 0} = 0 in
+  let variable = T.bound zero in let term = T.Lambda variable in
   ghost_ (T.valid_def term; T.source_def term;
     T.decode_def zero;
     let z = D.Z in let one = D.S z in
     let body = D.Bound z in let source = D.Lambda body in
     D.scoped_term_def z source; D.scoped_term_def one body;
     D.present_def one z; ());
-  let input : {e : T.term | T.valid e && D.scoped_term D.Z (T.source e)} = refine_ term in
-  let refine_ out = Hm_infer.closed_compiled input in
+  let input : {e : T.term | T.valid e && D.scoped_term D.Z (T.source e)} = term in
+  let out = Hm_infer.closed_compiled input in
   assert (out.#value <> None)

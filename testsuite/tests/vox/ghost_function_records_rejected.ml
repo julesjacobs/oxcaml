@@ -100,3 +100,45 @@ Line 4, characters 28-46:
                                 ^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+let supported_conjunct : (r : callbacks) @ total -> (x : int) ->
+    {u : unit | r.first === r.second && x = 0} ->
+    {n : int | n = 0} = fun r x _ -> x;;
+[%%expect{|
+val supported_conjunct :
+  (r : callbacks) ->
+  (x : int) ->
+  {u : unit | (r.first === r.second) && (x = 0)} -> {n : int | n = 0} = <fun>
+|}]
+
+let unsupported_disjunction : (r : callbacks) @ total -> (x : int) ->
+    {u : unit | r.first === r.second || x = 0} ->
+    {n : int | n = 0} = fun r x _ -> x;;
+[%%expect{|
+Line 3, characters 37-38:
+3 |     {n : int | n = 0} = fun r x _ -> x;;
+                                         ^
+Error: Refinement could not be proved (counterexample)
+Line 3, characters 32-33:
+3 |     {n : int | n = 0} = fun r x _ -> x;;
+                                    ^
+  This refinement premise was omitted because it could not be translated to SMT
+Line 2, characters 16-36:
+2 |     {u : unit | r.first === r.second || x = 0} ->
+                    ^^^^^^^^^^^^^^^^^^^^
+  Unsupported refinement predicate in VC generation
+|}]
+
+let unsupported_goal : (r : callbacks) @ total ->
+    {u : unit | r.first === r.second && true} ->
+    {u : unit | r.first === r.second} = fun r _ -> ();;
+[%%expect{|
+Line 3, characters 16-36:
+3 |     {u : unit | r.first === r.second} = fun r _ -> ();;
+                    ^^^^^^^^^^^^^^^^^^^^
+Error: Unsupported refinement predicate in VC generation
+Line 3, characters 51-53:
+3 |     {u : unit | r.first === r.second} = fun r _ -> ();;
+                                                       ^^
+  Required by this refinement introduction
+|}]

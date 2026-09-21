@@ -8,6 +8,6 @@ val representative :
         total  ->
     (p : {p : node Pref.t | H.mem h.Ghost.ghost p}) @ immutable  ->
     (t : {t : Pref.token | Pref.own t === h.Ghost.ghost}) @ local read  ->
-    {r : resolved | let refine_ p = p in H.mem h.Ghost.ghost r.#value && terminal
+    {r : resolved | H.mem h.Ghost.ghost r.#value && terminal
       h.Ghost.ghost r.#value
       && resolves h.Ghost.ghost p r.#value r.#path} @ immutable

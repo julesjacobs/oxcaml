@@ -155,7 +155,7 @@ let (with_relative_model @ total) : (saved : Pref.heap) @ immutable ->
     let[@def] eta : node Pref.t @ immutable total -> ty @ immutable total =
       fun x -> let t = trees x in interpret rho choices t in
     let values : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in eta x === interpret rho choices t}) @ total =
+      {u : unit | let t = trees x in eta x === interpret rho choices t}) @ total =
       fun x -> eta_def x; () in
     let wanted : ((x : node Pref.t) @ immutable -> {u : unit | instance_at after rho eta x}) @ total =
       fun x -> let () = Copy_template_proofs.forest_instance after scope_after trees rho choices eta values x in () in

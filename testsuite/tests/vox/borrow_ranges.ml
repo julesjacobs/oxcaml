@@ -25,36 +25,36 @@ let (replace_two @ total) : (values : int list) ->
   Model.set_def values zero first;
   Model.set_def intermediate one second;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | _ :: tail ->
     Model.length_def tail;
     Model.set_def tail zero second;
     match tail with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | _ :: rest ->
       Model.length_def rest;
-      let u = () in refine_ u
+      let u = () in u
 
 let write_pair : (loan : {s : int Slice.t | Model.length (Slice.current s) === 2Z})
     @ local unique ->
-    {u : unit | let refine_ s = loan in Slice.final s === [99; 88]} = fun loan ->
-  let refine_ s = loan in
+    {u : unit | let s = loan in Slice.final s === [99; 88]} = fun loan ->
+  let s = loan in
   let before = ghost_ (Slice.current (borrow_ s)) in
   let zero = 0 in
   let one = 1 in
   let first = 99 in
   let second = 88 in
   let index : {i : int | 0 <= i
-    && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} = refine_ zero in
-  let refine_ s1 = Slice.set s index first in
+    && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} = zero in
+  let s1 = Slice.set s index first in
   let bzero = ghost_ 0Z in
   ghost_ (Model.set_length before bzero first);
   let index : {i : int | 0 <= i
-    && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} = refine_ one in
-  let refine_ s2 = Slice.set s1 index second in
+    && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s1)) < 0} = one in
+  let s2 = Slice.set s1 index second in
   ghost_ (replace_two before);
   Slice.finish s2;
-  let u = () in refine_ u
+  let u = () in u
 
 let[@def] rewritten (before : int list) =
   if Bigint.compare (Model.length before) 4Z >= 0 then
@@ -70,10 +70,10 @@ let edit : (a : int Owned_array.t) @ unique ->
   let post = ghost_ (fun (copy : snapshot @ immutable total)
       (after : int Model.t @ immutable) ->
         Model.of_iarray copy === before && after === rewritten before) in
-  let refine_ result = Owned_array.with_mut a post (fun loan ->
-    let refine_ s = loan in
-    let refine_ copy = Slice.snapshot (borrow_ s) in
-    let refine_ n = Slice.length (borrow_ s) in
+  let result = Owned_array.with_mut a post (fun loan ->
+    let s = loan in
+    let copy = Slice.snapshot (borrow_ s) in
+    let n = Slice.length (borrow_ s) in
     let state =
       if n >= 4 then (
         let first = 1 in
@@ -82,40 +82,39 @@ let edit : (a : int Owned_array.t) @ unique ->
         let bpast = ghost_ 3Z in
         ghost_ (Model.sub_length before bfirst bpast);
         let first : {i : int | 0 <= i
-          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) <= 0} = refine_ first in
-        let past : {j : int | let refine_ i = first in i <= j
-          && Bigint.compare (Bigint.of_int j) (Model.length (Slice.current s)) <= 0} = refine_ past in
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) <= 0} = first in
+        let past : {j : int | let i = first in i <= j
+          && Bigint.compare (Bigint.of_int j) (Model.length (Slice.current s)) <= 0} = past in
         let pair_post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
         after === [99; 88]) in
-        let refine_ range = Slice.with_range s first past pair_post (fun middle ->
-          let refine_ middle = middle in
-          let sized : {s : int Slice.t | Model.length (Slice.current s) === 2Z} = refine_ middle in
-          let refine_ u = write_pair sized in
-          refine_ u) in
+        let range = Slice.with_range s first past pair_post (fun middle ->
+          let sized : {s : int Slice.t | Model.length (Slice.current s) === 2Z} = middle in
+          let u = write_pair sized in
+          u) in
         let {value = u; state} = range in
 
 
         let zero = 0 in
         let index : {i : int | 0 <= i
-          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} = refine_ zero in
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} = zero in
         let value = 7 in
-        let refine_ state = Slice.set state index value in
+        let state = Slice.set state index value in
         state)
       else s in
     Slice.finish state;
     ghost_ (rewritten_def before);
-    refine_ copy) in
+    copy) in
   let {value = copy; state} = result in
 
   let result = {value = copy; state} in
-  refine_ result
+  result
 
 let check (values : int list) (expected : int list) =
   let input = Iarray.of_list values in
-  let refine_ a = Owned_array.of_iarray input in
-  let refine_ result = edit a in
+  let a = Owned_array.of_iarray input in
+  let result = edit a in
   let {value = snapshot; state} = result in
-  let refine_ output = Owned_array.into_iarray state in
+  let output = Owned_array.into_iarray state in
   assert (Iarray.to_list snapshot = values);
   assert (Iarray.to_list output = expected);
   assert (Iarray.to_list input = values)

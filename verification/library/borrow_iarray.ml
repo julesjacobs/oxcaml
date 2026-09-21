@@ -36,7 +36,7 @@ module Raw = struct
   external split : ('a : immutable_data).
     (s : 'a loan) @ local unique ->
     (index : {k : int | 0 <= k && k <= Iarray.length (current s)}) ->
-    {r : 'a split_frame * 'a loan * 'a loan | let refine_ k = index in
+    {r : 'a split_frame * 'a loan * 'a loan | let k = index in
       match r with _, left, right ->
         current left === Vox_iarray.slice (current s) 0 k
         && current right === Vox_iarray.slice (current s) k
@@ -88,14 +88,14 @@ module Slice = struct
   external get : ('a : immutable_data).
     (s : 'a t) @ local immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length (current s)}) ->
-    {value : 'a | let refine_ i = index in
+    {value : 'a | let i = index in
       Some value === Vox_iarray.at (current s) i}
     @@ portable total = "caml_borrow_get"
   external set : ('a : immutable_data).
     (s : 'a t) @ local unique ->
     (index : {i : int | 0 <= i && i < Iarray.length (current s)}) ->
     (value : 'a) @ immutable ->
-    {r : 'a t | let refine_ i = index in
+    {r : 'a t | let i = index in
       current r === Vox_iarray.updated (current s) i value
       && final r === final s}
     @ local unique @@ portable total = "caml_borrow_set"
@@ -107,35 +107,35 @@ module Slice = struct
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i && i < Iarray.length (current s)}) ->
       (second : {i : int | 0 <= i && i < Iarray.length (current s)}) ->
-      {r : 'a t | let refine_ i = first in let refine_ j = second in
+      {r : 'a t | let i = first in let j = second in
         current r === Vox_iarray.swap (current s) i j && final r === final s}
       @ local unique = fun s first second ->
     exclave_ (
       let before = ghost_ (current (borrow_ s)) in
-      let refine_ i = first in
-      let refine_ j = second in
-      let refine_ x = get (borrow_ s) first in
-      let refine_ y = get (borrow_ s) second in
-      let refine_ middle = set s first y in
+      let i = first in
+      let j = second in
+      let x = get (borrow_ s) first in
+      let y = get (borrow_ s) second in
+      let middle = set s first y in
       ghost_ (Vox_iarray.updated_length before i y);
       let second : {k : int | 0 <= k && k < Iarray.length (current middle)} =
-        refine_ j in
-      let refine_ result = set middle second x in
+        j in
+      let result = set middle second x in
       ghost_ (Vox_iarray.swap_def before i j);
-      refine_ result)
+      result)
   let (split_at @ total) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (index : {k : int | 0 <= k && k <= Iarray.length (current s)}) ->
       (post : ('r @ immutable total -> 'a iarray @ total immutable ->
         'a iarray @ total immutable -> bool @ ghost)) @ ghost ->
-      ((left : {left : 'a t | let refine_ k = index in
+      ((left : {left : 'a t | let k = index in
           current left === Vox_iarray.slice (current s) 0 k}) @ local unique ->
-        (right : {right : 'a t | let refine_ k = index in
+        (right : {right : 'a t | let k = index in
           current right === Vox_iarray.slice (current s) k
             (Iarray.length (current s))}) @ local unique ->
-        {r : 'r | let refine_ l = left in let refine_ r_ = right in
+        {r : 'r | let l = left in let r_ = right in
           post r (final l) (final r_)}) @ local once ->
-      {r : ('r, 'a t) step | let refine_ k = index in
+      {r : ('r, 'a t) step | let k = index in
         post r.value (Vox_iarray.slice (current r.state) 0 k)
           (Vox_iarray.slice (current r.state) k (Iarray.length (current
             r.state)))
@@ -143,48 +143,48 @@ module Slice = struct
         && Iarray.length (current r.state) = Iarray.length (current s)}
       @ local unique = fun s index post body ->
     exclave_ (
-      let refine_ k = index in
+      let k = index in
       let raw_index : {k : int | 0 <= k && k <= Iarray.length (Raw.current s)} =
-        refine_ k in
-      let refine_ pieces = Raw.split s raw_index in
+        k in
+      let pieces = Raw.split s raw_index in
       let frame, left, right = pieces in
       let _left_end = ghost_ (Raw.final (borrow_ left)) in
       let _right_end = ghost_ (Raw.final (borrow_ right)) in
-      let left : {left : 'a t | let refine_ k = index in
-        current left === Vox_iarray.slice (current s) 0 k} = refine_ left in
-      let right : {right : 'a t | let refine_ k = index in
+      let left : {left : 'a t | let k = index in
+        current left === Vox_iarray.slice (current s) 0 k} = left in
+      let right : {right : 'a t | let k = index in
         current right === Vox_iarray.slice (current s) k
-          (Iarray.length (current s))} = refine_ right in
-      let refine_ value = body left right in
-      let refine_ state = Raw.recombine frame in
+          (Iarray.length (current s))} = right in
+      let value = body left right in
+      let state = Raw.recombine frame in
       let result = {value; state} in
-      refine_ result)
+      result)
   let (finish @ total) : ('a : immutable_data).
       (s : 'a t) @ local unique -> {u : unit | final s === current s} =
     fun s ->
       let u = Raw.finish s in
-      refine_ u
+      u
   let (split3 @ total) : ('a : immutable_data) ('r : immutable_data).
       (s : 'a t) @ local unique ->
       (first : {i : int | 0 <= i && i <= Iarray.length (current s)}) ->
-      (past : {j : int | let refine_ i = first in
+      (past : {j : int | let i = first in
         i <= j && j <= Iarray.length (current s)}) ->
       (post : ('r @ immutable total -> 'a iarray @ total immutable ->
         'a iarray @ total immutable -> 'a iarray @ total immutable -> bool @
           ghost)) @ ghost ->
-      ((left : {left : 'a t | let refine_ i = first in
+      ((left : {left : 'a t | let i = first in
           current left === Vox_iarray.slice (current s) 0 i}) @ local unique ->
-        (middle : {middle : 'a t | let refine_ i =
-          first in let refine_ j = past in
+        (middle : {middle : 'a t | let i =
+          first in let j = past in
           current middle === Vox_iarray.slice (current s) i j}) @ local unique
             ->
-        (right : {right : 'a t | let refine_ j = past in
+        (right : {right : 'a t | let j = past in
           current right === Vox_iarray.slice (current s) j
             (Iarray.length (current s))}) @ local unique ->
-        {r : 'r | let refine_ l = left in let refine_ m = middle in
-          let refine_ r_ = right in post r (final l) (final m) (final r_)})
+        {r : 'r | let l = left in let m = middle in
+          let r_ = right in post r (final l) (final m) (final r_)})
         @ local once ->
-      {r : ('r, 'a t) step | let refine_ i = first in let refine_ j = past in
+      {r : ('r, 'a t) step | let i = first in let j = past in
         post r.value (Vox_iarray.slice (current r.state) 0 i)
           (Vox_iarray.slice (current r.state) i j)
           (Vox_iarray.slice (current r.state) j (Iarray.length (current
@@ -194,9 +194,9 @@ module Slice = struct
       @ local unique = fun s first past post body ->
     exclave_ (
       let before = ghost_ (current (borrow_ s)) in
-      let refine_ size = length (borrow_ s) in
-      let refine_ i = first in
-      let refine_ j = past in
+      let size = length (borrow_ s) in
+      let i = first in
+      let j = past in
       let width = j - i in
       let rest_size = size - i in
       let zero = 0 in
@@ -205,44 +205,44 @@ module Slice = struct
             immutable) ->
         post value left (Vox_iarray.slice rest zero width)
           (Vox_iarray.slice rest width (Iarray.length rest))) in
-      let refine_ result = split_at s first outer_post (fun left_arg rest_arg ->
-        let refine_ left = left_arg in
-        let refine_ rest = rest_arg in
+      let result = split_at s first outer_post (fun left_arg rest_arg ->
+        let left = left_arg in
+        let rest = rest_arg in
         let left_end = ghost_ (final (borrow_ left)) in
         ghost_ (Vox_iarray.slice_length before i size);
         let bounded : {k : int | 0 <= k && k <= Iarray.length (current rest)} =
-          refine_ width in
+          width in
         let inner_post = ghost_ (fun (value : 'r @ immutable)
             (middle : 'a iarray @ total immutable) (right : 'a iarray @ total
               immutable) ->
           post value left_end middle right) in
-        let refine_ inner =
+        let inner =
           split_at rest bounded inner_post (fun mid_arg right_arg ->
-          let refine_ middle = mid_arg in
-          let refine_ right = right_arg in
+          let middle = mid_arg in
+          let right = right_arg in
           ghost_ (Vox_iarray.slice_slice before i size zero width);
           ghost_ (Vox_iarray.slice_slice before i size width rest_size);
-          let left : {left : 'a t | let refine_ i = first in
-            current left === Vox_iarray.slice (current s) 0 i} = refine_ left in
-          let middle : {middle : 'a t | let refine_ i =
-            first in let refine_ j = past in
-            current middle === Vox_iarray.slice (current s) i j} = refine_
+          let left : {left : 'a t | let i = first in
+            current left === Vox_iarray.slice (current s) 0 i} = left in
+          let middle : {middle : 'a t | let i =
+            first in let j = past in
+            current middle === Vox_iarray.slice (current s) i j} =
               middle in
-          let right : {right : 'a t | let refine_ j = past in
+          let right : {right : 'a t | let j = past in
             current right === Vox_iarray.slice (current s) j
-              (Iarray.length (current s))} = refine_ right in
-          let refine_ value = body left middle right in
-          refine_ value) in
+              (Iarray.length (current s))} = right in
+          let value = body left middle right in
+          value) in
         let {value; state = rest} = inner in
         finish rest;
-        refine_ value) in
+        value) in
       let {value; state} = result in
       let after = ghost_ (current (borrow_ state)) in
       ghost_ (Vox_iarray.slice_length after i size);
       ghost_ (Vox_iarray.slice_slice after i size zero width);
       ghost_ (Vox_iarray.slice_slice after i size width rest_size);
       let result = {value; state} in
-      refine_ result)
+      result)
   let parallel : ('a : immutable_data).
       (spawn : bool) ->
       (left : 'a t) @ local unique -> (right : 'a t) @ local unique ->
@@ -250,10 +250,10 @@ module Slice = struct
       (rp : ('a iarray @ total immutable -> bool @ ghost)) @ ghost ->
       ((s : {s : 'a t | current s === current left
           && final s === final left}) @ local unique ->
-        {u : unit | let refine_ s = s in lp (final s)}) @ portable once ->
+        {u : unit | lp (final s)}) @ portable once ->
       ((s : {s : 'a t | current s === current right
           && final s === final right}) @ local unique ->
-        {u : unit | let refine_ s = s in rp (final s)}) @ portable once ->
+        {u : unit | rp (final s)}) @ portable once ->
       {u : unit | lp (final left) && rp (final right)} =
       fun spawn left right lp rp lf rf ->
     let left_final = ghost_ (final (borrow_ left)) in
@@ -294,15 +294,15 @@ module Owned_array = struct
         @ ghost ->
       ((s : {s : 'a Slice.t | Slice.current s === contents a})
           @ local unique ->
-        {r : 'r | let refine_ s = s in post r (Slice.final s)}) @ local once ->
+        {r : 'r | post r (Slice.final s)}) @ local once ->
       {r : ('r, 'a t) step | post r.value (contents r.state)
         && Iarray.length (contents r.state) = Iarray.length (contents a)}
       @ unique = fun a post body ->
     let frame, loan = Raw.open_ a in
     let loan : {s : 'a Slice.t | Slice.current s === contents a} =
-      refine_ loan in
-    let refine_ value = body loan in
+      loan in
+    let value = body loan in
     let state = Raw.restore frame in
     let result = {value; state} in
-    refine_ result
+    result
 end

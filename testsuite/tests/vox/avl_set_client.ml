@@ -26,7 +26,7 @@ let () =
           lookup element ascending === lookup element ascending} =
       fun _element ->
       let u = () in
-      refine_ u
+      u
     in
     extensional ascending ascending same_lookup;
     ())

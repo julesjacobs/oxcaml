@@ -17,7 +17,7 @@ let (mixed_boundary @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t
     {u : unit | not (p === q) && not (p === r) && not (p === g)
       && not (q === r) && not (q === g) && not (r === g)} -> {u : unit | true} @ ghost =
   fun p q r g premise -> ghost_ (
-    let refine_ premise = premise in let var : desc = Var in let arrow = Arrow (p, q) in
+    let var : desc = Var in let arrow = Arrow (p, q) in
     let low = cell var 0 in let high = cell var 1 in let product = cell arrow 1 in
     let generic = {low with level = Generic} in cell_def var 0; cell_def var 1; cell_def arrow 1;
     let h0 = H.empty () in let h1 = H.put h0 p low in let h2 = H.put h1 q high in
@@ -30,18 +30,18 @@ let (mixed_boundary @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t
     let order : ((x : node Pref.t) @ immutable -> {u : unit | ordered h x}) @ total = fun x ->
       ordered_def h x; children_below_def h var 0; children_below_def h var 1; children_below_def h arrow 1;
       below_def h p 1; below_def h q 1; at_level_def h p; at_level_def h q;
-      let u = () in refine_ u in
+      let u = () in u in
     let trees : ((x : node Pref.t) @ immutable ->
       {t : tree | tree_root t === x && (not (H.mem h x) || finite h t)} @ immutable) @ total = fun x ->
-      if x === r then refine_ rhs else (
-        let t = Free x in tree_root_def t; finite_def h t; Level_unifier_spec.observe_def h x; refine_ t) in
+      if x === r then rhs else (
+        let t = Free x in tree_root_def t; finite_def h t; Level_unifier_spec.observe_def h x; t) in
     let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
-      let refine_ t = trees x in readback t in
+      let t = trees x in readback t in
     let values : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in rho x === readback t}) @ total = fun x ->
-      rho_def x; let refine_ t = trees x in
+      {u : unit | let t = trees x in rho x === readback t}) @ total = fun x ->
+      rho_def x; let t = trees x in
       readback_def t; readback_def a; readback_def b;
-      let u = () in refine_ u in
+      let u = () in u in
     let no = E.No_templates in let parameter = Parameter g in let boundary = Boundary p in
     let ts1 = E.Template_binding (parameter, no) in let ts = E.Template_binding (boundary, ts1) in
     let empty : E.env = E.Empty in let env1 = E.Bind (g, empty) in let env = E.Bind (p, env1) in
@@ -49,11 +49,11 @@ let (mixed_boundary @ total) : (p : node Pref.t) @ immutable -> (q : node Pref.t
     root_def parameter; root_def boundary; template_def h parameter; template_def h boundary;
     generic_desc_def h g var; finite_node_def h p; at_level_def h p; below_def h p 0;
     E.boundary_bound_def h 0 parameter; E.boundary_bound_def h 0 boundary;
-    let u = () in Hm_generalized_scheme_proofs.generalized_scheme h 0 1 order trees rho values rhs (refine_ u);
-    Hm_generalized_scheme_proofs.canonical_context h 0 order trees rho values env ts (refine_ u);
-    environment_avoids h 0 1 order trees rho values rhs env ts (refine_ u);
+    let u = () in Hm_generalized_scheme_proofs.generalized_scheme h 0 1 order trees rho values rhs (u);
+    Hm_generalized_scheme_proofs.canonical_context h 0 order trees rho values env ts (u);
+    environment_avoids h 0 1 order trees rho values rhs env ts (u);
     generalized_names_def h 0 rhs; generalized_names_def h 0 a; generalized_names_def h 0 b;
     below_def h q 0; at_level_def h q;
     let names = generalized_names h 0 rhs in
     let no_names = A.No_names in let one_name = A.Name (q, no_names) in join_def no_names one_name;
-    let _selected : {u : unit | names === one_name} = refine_ u in refine_ u)
+    let _selected : {u : unit | names === one_name} = u in u)

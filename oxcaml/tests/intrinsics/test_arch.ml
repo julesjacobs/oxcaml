@@ -11,3 +11,4 @@ let () =
   match Sys.arch with
   | Amd64 -> assert amd64
   | Arm64 -> assert arm64
+  | Wasm -> assert (not amd64 && not arm64)

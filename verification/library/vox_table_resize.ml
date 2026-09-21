@@ -64,7 +64,7 @@ module Make (Key : Vox_table_map.Key) = struct
       ghost_ (double_capacity capacity; double_plan capacity plan);
       let next_capacity = capacity + capacity in
       let next_plan = ghost_ (Probe.Twice plan) in
-      rebuild_into table before (refine_ next_capacity) next_plan token
+      rebuild_into table before (next_capacity) next_plan token
     end
 
   let rebuild : ('a : immutable_data).
@@ -82,14 +82,14 @@ module Make (Key : Vox_table_map.Key) = struct
     ghost_ (I.valid_def before; I.shape_def before.model; I.power_of_two_def
       capacity);
     if deleted >= capacity lsr 3 then
-      rebuild_into table before (refine_ capacity) before.plan token
+      rebuild_into table before (capacity) before.plan token
     else if capacity > 536870912 then raise (Invalid_argument
       "Vox_flat_hashtbl: capacity exhausted")
     else begin
-      ghost_ (double_capacity (refine_ capacity); double_plan capacity
+      ghost_ (double_capacity (capacity); double_plan capacity
         before.plan);
       let next_capacity = capacity + capacity in
       let next_plan = ghost_ (Probe.Twice before.plan) in
-      rebuild_into table before (refine_ next_capacity) next_plan token
+      rebuild_into table before (next_capacity) next_plan token
     end
 end

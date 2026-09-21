@@ -607,12 +607,18 @@ got_mapping:
 #ifndef WITH_ADDRESS_SANITIZER
 static void* map_fixed(void* mem, uintnat size, int prot, const char* name)
 {
+#ifdef __EMSCRIPTEN__
+  /* Linear memory is committed already; Emscripten cannot remap MAP_FIXED. */
+  if (prot != PROT_NONE) memset(mem, 0, size);
+  return mem;
+#else
   if (mmap_named(mem, size, prot, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
                  -1, 0, name) == MAP_FAILED) {
     return 0;
   } else {
     return mem;
   }
+#endif
 }
 #endif
 

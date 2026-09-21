@@ -12,12 +12,12 @@ let (forest_eval @ total) : (saved : Pref.heap) @ immutable ->
     (choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (want : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((x : node Pref.t) @ immutable -> {u : unit |
-      let refine_ t = trees x in want x === interpret rho choices t})) @ total ->
+      let t = trees x in want x === interpret rho choices t})) @ total ->
     (t : template) @ immutable -> {u : unit | Effective_template.valid_template saved heads t} ->
     {u : unit | want (root t) === interpret rho choices t} @ ghost =
   fun saved heads trees rho choices want values t premise -> ghost_ (
     Effective_template.valid_template_def saved heads t; let p = root t in
-    let refine_ actual = trees p in values p; Effective_template.unique saved heads rho choices actual t (); ())
+    let actual = trees p in values p; Effective_template.unique saved heads rho choices actual t (); ())
 
 let (forest_instance @ total) : (saved : Pref.heap) @ immutable ->
     (heads : Effective_level.heads) @ total ->
@@ -28,12 +28,12 @@ let (forest_instance @ total) : (saved : Pref.heap) @ immutable ->
     (choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (want : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((x : node Pref.t) @ immutable -> {u : unit |
-      let refine_ t = trees x in want x === interpret rho choices t})) @ total ->
+      let t = trees x in want x === interpret rho choices t})) @ total ->
     (x : node Pref.t) @ immutable -> {u : unit | effective_instance_at saved heads rho want x} @ ghost =
   fun saved heads scope trees rho choices want values x -> ghost_ (
     scope x; effective_instance_at_def saved heads rho want x;
     if H.mem saved x then (
-      let refine_ t = trees x in values x; Effective_template.valid_template_def saved heads t; root_def t; interpret_def rho choices t;
+      let t = trees x in values x; Effective_template.valid_template_def saved heads t; root_def t; interpret_def rho choices t;
       Effective_template.head saved heads t ();
       Effective_template.finite_def saved heads x; Effective_template.generic_def saved heads x;
       Level_unifier_spec.observe_def saved x; head_desc_def t; head_generic_def t;
@@ -61,8 +61,8 @@ let (with_scheme_instance @ total) : (saved : Pref.heap) @ immutable ->
       {u : unit | tau q === interpret rho choices t} -> {u : unit | claim})) @ total -> {u : unit | claim} @ ghost =
   fun saved heads scope trees rho model choices epoch depth d t q premise claim use -> ghost_ (
     let[@def] want : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
-      let refine_ t = trees x in interpret rho choices t in
-    let values : (x : node Pref.t) @ immutable -> {u : unit | let refine_ t = trees x in want x === interpret rho choices t}
+      let t = trees x in interpret rho choices t in
+    let values : (x : node Pref.t) @ immutable -> {u : unit | let t = trees x in want x === interpret rho choices t}
         @ total = fun x -> want_def x; () in
     let wanted : (x : node Pref.t) @ immutable -> {u : unit | effective_instance_at saved heads rho want x}
         @ total = fun x -> let () = forest_instance saved heads scope trees rho choices want values x in () in
@@ -118,7 +118,7 @@ let (with_clean_scheme_instance @ total) : (saved : Pref.heap) @ immutable ->
       let next : ((x : node Pref.t) @ immutable -> {u : unit | equation after tau x}) @ total = fun x ->
         model_raw x; Effective_copy_metadata.model_equivalence saved heads epoch depth d tau x (); () in
       let () = use tau (refine_ next) equal () in () in
-    let () = with_scheme_instance saved heads scope trees rho model choices epoch depth d t q () claim (refine_ consume) in ())
+    let () = with_scheme_instance saved heads scope trees rho model choices epoch depth d t q () claim (consume) in ())
 
 let (with_clean_instance_choices @ total) : (saved : Pref.heap) @ immutable ->
     (heads : Effective_level.heads) @ total ->

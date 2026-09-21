@@ -94,36 +94,35 @@ let (scoped_fixture @ total) : (s : sample) ->
   D.scoped_term_def n0 e18;
   D.scoped_term_def n0 e17;
   D.scoped_term_def n0 e19;
-  let u = () in refine_ u)
+  let u = () in u)
 
 let run sample expected =
   let e = expression sample in ghost_ (scoped_fixture sample);
-  let e : {e : D.term | D.scoped_term D.Z e} = refine_ e in
-  let refine_ out = Hm_infer.closed_hm e in let refine_ e = e in
-  assert (Option.is_some out.#value = expected);
+  let e : {e : D.term | D.scoped_term D.Z e} = e in
+  let out = Hm_infer.closed_hm e in assert (Option.is_some out.#value = expected);
   ghost_ (let h = H.empty () in let depth = 0 in
     let pool : Generalize_spec.pool = Generalize_spec.Empty in let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
     let after = Pref.own (borrow_ out.#state) in
     let facts : ((x : node Pref.t) @ immutable -> {u : unit | Hm_runtime_spec.runtime_at h depth pool x}) @ total = fun x ->
       Hm_runtime_spec.runtime_at_def h depth pool x; Hm_runtime_spec.safe_def h x;
       Hm_runtime_spec.depth_bound_def h depth x; let cut = depth - 1 in
-      Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; let u = () in refine_ u in
+      Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; let u = () in u in
     let cut = -1 in
     let prior : ((x : node Pref.t) @ immutable ->
       {o : Provenance_spec.origin | not (Leaf_provenance_spec.low_var h x cut) || Provenance_spec.originates h h cut x o} @ immutable) @ total = fun x ->
-      let refine_ o = Provenance_proofs.initial_origin h cut x in Leaf_provenance_spec.low_var_def h x cut; refine_ o in
+      let o = Provenance_proofs.initial_origin h cut x in Leaf_provenance_spec.low_var_def h x cut; o in
     let _origins : ((p : node Pref.t) @ immutable ->
       {o : Provenance_spec.origin | not (Leaf_provenance_spec.low_var after p cut) || Provenance_spec.originates h after cut p o} @ immutable) @ total = fun p ->
-      let u = () in let refine_ o = Hm_origin_proofs.run_origin h cut h depth pool facts prior env out.#execution after out.#pool p (refine_ u) in refine_ o in ());
+      let u = () in let o = Hm_origin_proofs.run_origin h cut h depth pool facts prior env out.#execution after out.#pool p (u) in o in ());
   match out.#value with None -> () | Some p ->
     let after = ghost_ (Pref.own (borrow_ out.#state)) in
     ghost_ (let u = () in
-      let refine_ _tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
+      let _tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (u) in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u));
-    let state = out.#state in let state : {t : Pref.token | H.mem (Pref.own t) p} = refine_ state in
-    let refine_ v = Pref.read p (borrow_ state) in
+      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (u));
+    let state = out.#state in let state : {t : Pref.token | H.mem (Pref.own t) p} = state in
+    let v = Pref.read p (borrow_ state) in
     assert (v.level = Finite 0 && not v.visited)
 
 let () =
@@ -131,7 +130,7 @@ let () =
   run Bad_body false; run Bad_rhs false; run Monomorphic false
 
 let overflow : unit -> inference @ unique = fun () ->
-  let refine_ state = Pref.empty () in let h = ghost_ (Pref.own (borrow_ state)) in
+  let state = Pref.empty () in let h = ghost_ (Pref.own (borrow_ state)) in
   let depth = 4611686018427387903 in
   let pool : Generalize_spec.pool = Generalize_spec.Empty in
   let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
@@ -139,24 +138,23 @@ let overflow : unit -> inference @ unique = fun () ->
   let facts : ((x : node Pref.t) @ immutable -> {u : unit | Hm_runtime_spec.runtime_at h depth pool x}) @ total ghost = ghost_ (fun x ->
     Hm_runtime_spec.runtime_at_def h depth pool x; Hm_runtime_spec.safe_def h x;
     Hm_runtime_spec.depth_bound_def h depth x; let cut = depth - 1 in
-    Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; let u = () in refine_ u) in
+    Generalize_spec.covered_def h cut pool x; Level_spec.ordered_def h x; let u = () in u) in
   ghost_ (let z = D.Z in let one = D.S z in D.scoped_term_def z e;
     D.scoped_term_def z rhs; D.scoped_term_def one rhs;
     Generalize_spec.pool_scoped_def h pool; Hm_runtime_spec.env_owned_def h env;
     Hm_runtime_spec.env_depth_def env);
   let state : {t : Pref.token | Pref.own t === h && depth >= 0 && Generalize_spec.pool_scoped h pool
-    && Hm_runtime_spec.env_owned h env && D.scoped_term (Hm_runtime_spec.env_depth env) e} = refine_ state in
+    && Hm_runtime_spec.env_owned h env && D.scoped_term (Hm_runtime_spec.env_depth env) e} = state in
   let trees : ((x : node Pref.t) @ immutable ->
     {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
       (if H.mem h x then Level_finite_spec.finite h t else Level_unifier_spec.observe h x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
       let t = Level_finite_spec.Free x in Level_finite_spec.tree_root_def t;
-      Level_unifier_spec.observe_def h x; refine_ t) in
+      Level_unifier_spec.observe_def h x; t) in
   let heap_witness : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
-  let facts_witness : (((x : node Pref.t) @ immutable -> {u : unit | Hm_runtime_spec.runtime_at heap_witness.Ghost.ghost depth pool x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ facts)} in
+  let facts_witness : (((x : node Pref.t) @ immutable -> {u : unit | Hm_runtime_spec.runtime_at heap_witness.Ghost.ghost depth pool x})) Ghost.t = {Ghost.ghost = ghost_ (facts)} in
   let trees_witness : (((x : node Pref.t) @ immutable ->
-      {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x && (if H.mem heap_witness.Ghost.ghost x then Level_finite_spec.finite heap_witness.Ghost.ghost t else Level_unifier_spec.observe heap_witness.Ghost.ghost x === None)} @ immutable)) Ghost.t = {Ghost.ghost = ghost_ (refine_ trees)} in
-  let refine_ state = state in
-  let refine_ out = Hm_infer.infer heap_witness depth pool facts_witness trees_witness env e (refine_ state) in
+      {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x && (if H.mem heap_witness.Ghost.ghost x then Level_finite_spec.finite heap_witness.Ghost.ghost t else Level_unifier_spec.observe heap_witness.Ghost.ghost x === None)} @ immutable)) Ghost.t = {Ghost.ghost = ghost_ (trees)} in
+  let out = Hm_infer.infer heap_witness depth pool facts_witness trees_witness env e (state) in
   #{value = out.#value; state = out.#state; pool = out.#pool; execution = out.#execution}
 
-let () = match overflow () with _ -> assert false | exception Assert_failure _ -> ()
+let () = match overflow () with _ -> assert false | exception Failure message -> assert (message = "type inference level capacity")

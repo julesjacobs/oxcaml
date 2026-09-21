@@ -29,7 +29,7 @@ let rec (depth_nonnegative @ total) (p : path @ immutable) :
     {u : unit | depth p >= 0Z} @ ghost = ghost_ (
   depth_def p;
   (match p with Stop _ -> () | Step (_, rest) -> depth_nonnegative rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let (observe @ total) : (h : P.heap) @ immutable ->
     (p : path) @ immutable -> (x : elem) @ immutable -> (v : node) @ immutable ->
@@ -45,7 +45,7 @@ let (observe @ total) : (h : P.heap) @ immutable ->
   valid_def h p; head_def p; depth_def p; root_def p;
   compressed_def h p; tail_def p;
   (match p with Stop _ -> () | Step (_, rest) -> depth_nonnegative rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (compressed_mem @ total) : (h : P.heap) @ immutable ->
     (p : path) @ immutable -> (x : elem) @ immutable ->
@@ -58,7 +58,7 @@ let rec (compressed_mem @ total) : (h : P.heap) @ immutable ->
       compressed_mem h rest x;
       let _ = H.mem (H.put (compressed h rest) y
         (Link (rank h y, root rest))) x in ());
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (compressed_rank @ total) : (h : P.heap) @ immutable ->
     (p : path) @ immutable -> (x : elem) @ immutable ->
@@ -66,12 +66,12 @@ let rec (compressed_rank @ total) : (h : P.heap) @ immutable ->
     fun h p x -> ghost_ (
   compressed_def h p;
   match p with
-  | Stop _ -> let u = () in refine_ u
+  | Stop _ -> let u = () in u
   | Step (y, rest) ->
       compressed_rank h rest x;
       rank_def (H.put (compressed h rest) y (Link (rank h y, root rest))) x;
       rank_def (compressed h rest) x; rank_def h x;
-      let u = () in refine_ u)
+      let u = () in u)
 
 let[@def] is_root (h : P.heap @ immutable) (x : elem @ immutable) = ghost_ (
   H.mem h x && match H.at h x with Some (Root r) -> r >= 0 | _ -> false)
@@ -91,8 +91,8 @@ let rec (terminal @ total) : (h : P.heap) @ immutable ->
     fun h p -> ghost_ (
   valid_def h p; root_def p; head_def p;
   match p with
-  | Stop x -> is_root_def h x; let u = () in refine_ u
-  | Step (_, rest) -> terminal h rest; let u = () in refine_ u)
+  | Stop x -> is_root_def h x; let u = () in u
+  | Step (_, rest) -> terminal h rest; let u = () in u)
 
 let rec (unique_root @ total) : (h : P.heap) @ immutable ->
     (p : path) @ immutable -> (q : path) @ immutable ->
@@ -103,7 +103,7 @@ let rec (unique_root @ total) : (h : P.heap) @ immutable ->
   (match p, q with
   | Step (_, ps), Step (_, qs) -> unique_root h ps qs
   | _ -> ());
-  let u = () in refine_ u)
+  let u = () in u)
 
 let[@def] rec redirect (x : elem @ immutable) (r : elem @ immutable)
     (p : path @ immutable) = ghost_ (
@@ -127,20 +127,20 @@ let rec (redirect_valid @ total) : (h : P.heap) @ immutable ->
   | Stop y ->
       unique_root h selected p;
       valid_def after (Stop y); head_def (Stop y); root_def (Stop y);
-      let u = () in refine_ u
+      let u = () in u
   | Step (y, rest) ->
       if y === x then (
         unique_root h selected p;
         valid_def after (Step (y, Stop r)); head_def (Step (y, Stop r));
         root_def (Step (y, Stop r));
         valid_def after (Stop r); head_def (Stop r); root_def (Stop r);
-        let u = () in refine_ u)
+        let u = () in u)
       else (
         redirect_valid h selected x r rest;
         let next = redirect x r rest in
         valid_def after (Step (y, next)); head_def (Step (y, next));
         root_def (Step (y, next));
-        let u = () in refine_ u))
+        let u = () in u))
 
 let[@def] rec refresh (selected : path @ immutable) (query : path @ immutable) =
   ghost_ (match selected with
@@ -157,7 +157,7 @@ let rec (refresh_valid @ total) : (h : P.heap) @ immutable ->
   valid_def h selected; head_def selected; root_def selected;
   compressed_def h selected; refresh_def selected query;
   match selected with
-  | Stop _ -> let u = () in refine_ u
+  | Stop _ -> let u = () in u
   | Step (x, rest) ->
       terminal h selected; is_root_def h (root selected);
       refresh_valid h rest query;
@@ -167,7 +167,7 @@ let rec (refresh_valid @ total) : (h : P.heap) @ immutable ->
       let witness = refresh rest selected in
       let next = refresh rest query in
       redirect_valid middle witness x (root rest) next;
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (fresh_valid @ total) : (h : P.heap) @ immutable ->
     (p : path) @ immutable -> (x : elem) @ immutable ->
@@ -177,7 +177,7 @@ let rec (fresh_valid @ total) : (h : P.heap) @ immutable ->
   let after = H.put h x (Root 0) in
   valid_def after p;
   (match p with Stop _ -> () | Step (_, rest) -> fresh_valid h rest x);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let[@def] rec extend (loser : elem @ immutable) (winner : elem @ immutable)
     (p : path @ immutable) = ghost_ (
@@ -206,14 +206,14 @@ let rec (extend_valid @ total) : (h : P.heap) @ immutable ->
         head_def (Step (x, Stop winner)); root_def (Step (x, Stop winner));
         valid_def after (Stop winner); head_def (Stop winner);
         root_def (Stop winner);
-        let u = () in refine_ u)
-      else (valid_def after p; let u = () in refine_ u)
+        let u = () in u)
+      else (valid_def after p; let u = () in u)
   | Step (x, rest) ->
       extend_valid h loser winner rest;
       let next = extend loser winner rest in
       valid_def after (Step (x, next)); head_def (Step (x, next));
       root_def (Step (x, next));
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (root_rank_valid @ total) : (h : P.heap) @ immutable ->
     (x : elem) @ immutable -> (rank : int) -> (p : path) @ immutable ->
@@ -224,7 +224,7 @@ let rec (root_rank_valid @ total) : (h : P.heap) @ immutable ->
   let after = H.put h x (Root rank) in
   valid_def after p;
   (match p with Stop _ -> () | Step (_, rest) -> root_rank_valid h x rank rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let[@def] joined_path (h : P.heap @ immutable)
     (x : elem @ immutable) (y : elem @ immutable) (p : path @ immutable) =
@@ -242,17 +242,17 @@ let (joined_valid @ total) : (h : P.heap) @ immutable ->
         (if root p === x || root p === y then winner h x y else root p)
       else true} @ ghost = fun h x y p -> ghost_ (
   joined_path_def h x y p; linked_def h x y; winner_def h x y;
-  if x === y then let u = () in refine_ u
+  if x === y then let u = () in u
   else if rank h x < rank h y then (
-    extend_valid h x y p; let u = () in refine_ u)
+    extend_valid h x y p; let u = () in u)
   else (
     extend_valid h y x p;
-    if rank h y < rank h x then let u = () in refine_ u
+    if rank h y < rank h x then let u = () in u
     else (
       let middle = H.put h y (Link (rank h y, x)) in
       is_root_def h x; is_root_def middle x;
       root_rank_valid middle x (rank h x + 1) (extend y x p);
-      let u = () in refine_ u)))
+      let u = () in u)))
 
 let[@def] rec contains (x : elem @ immutable) (p : path @ immutable) =
   ghost_ (match p with
@@ -270,4 +270,4 @@ let rec (compressed_frame @ total) : (h : P.heap) @ immutable ->
   | Step (y, rest) ->
       compressed_frame h rest x;
       let _ = H.at (H.put (compressed h rest) y (Link (rank h y, root rest))) x in ());
-  let u = () in refine_ u)
+  let u = () in u)

@@ -78,9 +78,10 @@ module Uses :
   sig
     val polymorphic_empty : 'a list
     val empty_int : unit -> {r : int list | r === []}
-    val refined : {l : 'a list | (l === List.[]) === false} -> 'a * 'a list
+    val refined :
+      {l : 'a list | (l === List.[]) === false} @ total -> 'a * 'a list
     val labeled_refined :
-      {l : 'a list | (l === ListLabels.[]) === false} -> 'a * 'a list
+      {l : 'a list | (l === ListLabels.[]) === false} @ total -> 'a * 'a list
     val alias_nonempty :
       int list_alias -> {r : int list_alias | (r === []) === false}
     val literal_refined : unit -> int * int list
@@ -96,8 +97,7 @@ let (bad_refined_domain @ total) (xs : int list) = List.Refined.hd xs;;
 Line 1, characters 67-69:
 1 | let (bad_refined_domain @ total) (xs : int list) = List.Refined.hd xs;;
                                                                        ^^
-Error: The value "xs" has type "int list" but an expression was expected of type
-         "{l : 'a list | (l === List.[]) === false}"
+Error: Refinement could not be proved (counterexample)
 |}]
 
 let (bad_refined_literal @ total) () = List.Refined.tl [];;
@@ -105,8 +105,7 @@ let (bad_refined_literal @ total) () = List.Refined.tl [];;
 Line 1, characters 55-57:
 1 | let (bad_refined_literal @ total) () = List.Refined.tl [];;
                                                            ^^
-Error: This expression should not be a list literal, the expected type is
-       "{l : 'a list | (l === List.[]) === false}"
+Error: Refinement could not be proved (counterexample)
 |}]
 
 type mutable_element = { mutable payload : int }

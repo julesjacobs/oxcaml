@@ -14,8 +14,7 @@ let instantiate : (saved : Pref.heap) @ immutable ghost ->
     (order : ((x : node Pref.t) @ immutable -> {u : unit | ordered saved x})) @ total ghost ->
     (p : {p : node Pref.t | H.mem saved p}) @ immutable ->
     (t : {t : Pref.token | Pref.own t === saved && pool_scoped saved base && depth >= 0}) @ unique ->
-    {r : instance | let refine_ p = p in
-      valid saved r.#epoch depth r.#history
+    {r : instance | valid saved r.#epoch depth r.#history
       && Pref.own r.#state === heap saved r.#epoch depth r.#history
       && r.#pool === registered base r.#epoch r.#history
       && r.#trail === touched r.#history
@@ -24,14 +23,12 @@ let instantiate : (saved : Pref.heap) @ immutable ghost ->
       && below (Pref.own r.#state) r.#value depth
       && ordered (Pref.own r.#state) r.#value} @ unique =
   fun saved scope base depth bounds order p t ->
-    let refine_ t = t in
-    let t : {t : Pref.token | Pref.own t === saved && pool_scoped saved base} = refine_ t in
-    let checked_depth : {n : int | n >= 0} = refine_ depth in
-    let refine_ out = Pooled_copy.instantiate saved scope base checked_depth p t in
-    let refine_ p = p in let refine_ checked_depth = checked_depth in
+    let t : {t : Pref.token | Pref.own t === saved && pool_scoped saved base} = t in
+    let checked_depth : {n : int | n >= 0} = depth in
+    let out = Pooled_copy.instantiate saved scope base checked_depth p t in
     let value = out.#value in let state = out.#state in let pool = out.#pool in let trail = out.#trail in
     let epoch = ghost_ out.#epoch in let history = ghost_ out.#history in
     ghost_ (let u = () in extends_def history history;
-      target_below_at saved depth bounds epoch history history p value (refine_ u);
-      copy_ordered saved depth bounds order epoch history value (refine_ u));
-    let out = #{value; state; pool; trail; epoch; history} in refine_ out
+      target_below_at saved depth bounds epoch history history p value (u);
+      copy_ordered saved depth bounds order epoch history value (u));
+    let out = #{value; state; pool; trail; epoch; history} in out

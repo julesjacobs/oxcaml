@@ -37,18 +37,18 @@ let (normalize @ total) : (values : int list) ->
     Lists.intro result (fun index ->
       Mapped.map_at values index;
       match Vox_sequence.at values index with
-      | None -> let u = () in refine_ u
+      | None -> let u = () in u
       | Some value ->
         let mapped = Clamp.apply value in
         Clamp.apply_def value;
         Nonnegative.test_def mapped;
-        let u = () in refine_ u);
+        let u = () in u);
     Lists.filter_identity result;
     let u = () in
-    (refine_ u : {u : unit | Lists.holds result &&
+    (u : {u : unit | Lists.holds result &&
       Vox_sequence.length result === Vox_sequence.length values &&
       Lists.filter result === result}));
-  refine_ result
+  result
 
 let (select @ total) : (values : int list) ->
     {result : int list | Lists.holds result &&
@@ -60,10 +60,10 @@ let (select @ total) : (values : int list) ->
     Lists.filter_length values;
     Lists.filter_idempotent values;
     let u = () in
-    (refine_ u : {u : unit | Lists.holds result &&
+    (u : {u : unit | Lists.holds result &&
       Vox_sequence.length result <= Vox_sequence.length values &&
       Lists.filter result === result}));
-  refine_ result
+  result
 
 module A = Vox_iarray
 external same_list : ('a : immutable_data).
@@ -71,9 +71,9 @@ external same_list : ('a : immutable_data).
 
 let () =
   let input = [-3; 4; -1; 2] in
-  let refine_ normalized = normalize input in
+  let normalized = normalize input in
   assert (same_list normalized [0; 4; 0; 2]);
-  let refine_ selected = select input in
+  let selected = select input in
   assert (same_list selected [4; 2]);
   assert (Bigint.equal (Sum.fold [1; 2; 3] 0Z) 6Z)
 
@@ -94,9 +94,9 @@ let (slice_and_update @ total) : (values : int iarray) -> (first : int) ->
     A.slice_length values first past;
     A.updated_length part index value;
     let u = () in
-    (refine_ u : {u : unit | Arrays.holds result &&
+    (u : {u : unit | Arrays.holds result &&
       Iarray.length result = past - first}));
-  refine_ result
+  result
 
 let (compositional @ total) : (left : int list) -> (right : int list) ->
     (initial : Bigint.t) ->
@@ -109,17 +109,17 @@ let (compositional @ total) : (left : int list) -> (right : int list) ->
   Mapped.map_append left right;
   Lists.filter_append left right;
   Sum.fold_append left right initial;
-  let u = () in refine_ u
+  let u = () in u
 
 let () =
   let values = [: 0; 1; 2; 3 :] in
   let u = () in
-  let refine_ checked = (assume_ u : {u : unit | Arrays.holds values}) in
+  let _checked = (assume_ u : {u : unit | Arrays.holds values}) in
   let first = 1 in
   let past = 3 in
   let index = 1 in
   let value = 9 in
   let u = () in
-  let refine_ result = slice_and_update values first past index value
-    (refine_ u) in
+  let result = slice_and_update values first past index value
+    (u) in
   assert (same_list (A.to_list result) [1; 9])

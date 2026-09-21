@@ -27,20 +27,15 @@ module Mutable_field = struct
   let get b = Values.identity b.value
 end;;
 [%%expect{|
-Line 3, characters 30-37:
-3 |   let get b = Values.identity b.value
-                                  ^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+module Mutable_field :
+  sig type box = { mutable value : int; } val get : box -> int end
 |}]
 
 module Effectful = struct
   let get () = Values.identity (print_endline "bad"; 42)
 end;;
 [%%expect{|
-Line 2, characters 31-56:
-2 |   let get () = Values.identity (print_endline "bad"; 42)
-                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+module Effectful : sig val get : unit -> int end
 |}]
 
 module More = struct

@@ -139,10 +139,9 @@ val lookup_encoded :
 
 val cons :
   (p : Copy_spec.node Pref.t) @ immutable ->
-  (f' : {f : forest | valid_forest f}) @ immutable ->
+  (f : {f : forest | valid_forest f}) @ immutable ->
   {out : forest
-    | let refine_ f = f' in
-      (valid_forest out) && ((flatten out) === (E.Bind (p, (flatten f))))} @ immutable
+    | (valid_forest out) && ((flatten out) === (E.Bind (p, (flatten f))))} @ immutable
 
 val lookup :
   (f : forest) @ immutable ->

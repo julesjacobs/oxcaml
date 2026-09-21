@@ -27,9 +27,7 @@ module Make (I : Invariant) = struct
        @ unique ghost ->
      (outside : {c : Ghost_pref.token |
        Ghost_pref.own c === Ghost_pref.own caller}) @ unique ghost ->
-     {r : transfer | let refine_ inside = inside in
-       let refine_ outside = outside in
-       I.holds (key a) before (Ghost_pref.own r.restored) &&
+     {r : transfer | I.holds (key a) before (Ghost_pref.own r.restored) &&
        post before (Ghost_pref.own r.outgoing)} @ unique)
       @ immutable total ghost ->
     {r : int Ghost_pref.step | post r.value (Ghost_pref.own r.state)} @ unique
@@ -46,9 +44,7 @@ module Make (I : Invariant) = struct
        @ unique ghost ->
      (outside : {c : Ghost_pref.token |
        Ghost_pref.own c === Ghost_pref.own caller}) @ unique ghost ->
-     {r : transfer | let refine_ inside = inside in
-       let refine_ outside = outside in
-       I.holds (key a) (if before = expected then desired else before)
+     {r : transfer | I.holds (key a) (if before = expected then desired else before)
          (Ghost_pref.own r.restored) &&
        post (before = expected) (Ghost_pref.own r.outgoing)} @ unique)
       @ immutable total ghost ->

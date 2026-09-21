@@ -31,14 +31,14 @@ let (swap_partition @ total) : (values : int list) -> (pivot : int) ->
   range_grow swapped pivot low_side zero lower;
   if lower = scan then
     (range_empty swapped pivot high_side next_lower next_scan;
-    let u = () in refine_ u)
+    let u = () in u)
   else
     (range_get values pivot high_side lower scan lower;
     range_shrink values pivot high_side lower scan next_lower scan;
     range_set values pivot high_side next_lower scan lower y;
     range_set intermediate pivot high_side next_lower scan scan x;
     range_grow swapped pivot high_side next_lower scan;
-    let u = () in refine_ u)
+    let u = () in u)
 
 let (partition_bounds @ total) : (values : int list) -> (pivot : int) -> (index : Bigint.t) ->
     {u : unit | if 0Z <= index && index < length values
@@ -55,7 +55,7 @@ let (partition_bounds @ total) : (values : int list) -> (pivot : int) -> (index 
   sub_prefix values index;
   range_sub values pivot high_side next size;
   sub_suffix values next;
-  let u = () in refine_ u
+  let u = () in u
 
 let (glue_partition @ total) : (before : int list) -> (pivot : int) -> (index : Bigint.t) ->
     (left : int list) -> (middle : int list) -> (right : int list) ->
@@ -92,4 +92,4 @@ let (glue_partition @ total) : (before : int list) -> (pivot : int) -> (index : 
   append_def middle right;
   append_def nil right;
   sorted_glue left pivot right;
-  let u = () in refine_ u
+  let u = () in u

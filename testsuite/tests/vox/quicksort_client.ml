@@ -16,20 +16,18 @@ let verified_sort : (parallel : bool) -> (values : int iarray) ->
     {result : int iarray | Spec.sorted (Model.of_iarray result)
       && Spec.permutation (Model.of_iarray values) (Model.of_iarray result)} =
     fun parallel values ->
-  let refine_ owned = Owned_array.of_iarray values in
-  let refine_ sorted =
+  let owned = Owned_array.of_iarray values in
+  let sorted =
     if parallel then Quicksort.parallel_sort_array ~max_domains:4 ~cutoff:32 owned
     else Quicksort.sort_array owned in
-  let refine_ result = Owned_array.into_iarray sorted in
-  refine_ result
+  let result = Owned_array.into_iarray sorted in
+  result
 
 let check (values : int list) =
   let input = Iarray.of_list values in
   let expected = List.sort compare values in
   let sequential = verified_sort false input in
   let parallel = verified_sort true input in
-  let refine_ sequential = sequential in
-  let refine_ parallel = parallel in
   assert (Iarray.to_list sequential = expected);
   assert (Iarray.to_list parallel = expected);
   assert (Iarray.to_list input = values)

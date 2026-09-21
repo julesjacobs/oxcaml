@@ -57,7 +57,7 @@ let rec (success_backward_at @ total) :
       node_equation_def h rho p; node_equation_def h rho q;
       let middle_model : (x : node Pref.t) @ immutable ->
           {u : unit | node_equation middle rho x} @ total = fun x ->
-        let refine_ proof =
+        let _proof =
           success_backward_at h rho model a c middle left x () in
         () in
       success_backward_at middle rho middle_model b e after right x ();
@@ -90,7 +90,7 @@ let rec (success_forward_at @ total) :
     | Resolve (r, s, rp, sq, rest) ->
       let before_model : (x : node Pref.t) @ immutable ->
           {u : unit | node_equation h rho x} @ total = fun x ->
-        let refine_ proof =
+        let _proof =
           success_forward_at h rho r s after rest model x () in
         () in
       resolution_model h rho before_model p r rp ();
@@ -100,7 +100,7 @@ let rec (success_forward_at @ total) :
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let middle_model : (x : node Pref.t) @ immutable ->
           {u : unit | node_equation middle rho x} @ total = fun x ->
-        let refine_ proof =
+        let _proof =
           success_forward_at middle rho b e after right model x () in
         () in
       success_forward_at h rho a c middle left middle_model p ();
@@ -145,7 +145,7 @@ let rec (failure_refutes @ total) :
         let middle_model : (x : node Pref.t) @ immutable ->
             {u : unit | node_equation middle rho x} @ total = fun x ->
           model x;
-          let refine_ proof =
+          let _proof =
             success_backward_at h rho model a c middle left x () in
           () in
         failure_refutes middle rho middle_model b e after right ();

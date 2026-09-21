@@ -55,23 +55,23 @@ let rec (copy_leaf_origin @ total) : (saved : Pref.heap) @ immutable ->
   fun saved h certificate cut scope prior epoch depth d x premise -> ghost_ (
     C.certified_valid_def h certificate epoch depth d;
     heap_def h epoch depth d; match d with
-    | Clean -> let refine_ o = prior x in refine_ o
+    | Clean -> let o = prior x in o
     | Start -> scope epoch; let desc : desc = Bool in
       let v = cell desc depth in cell_def desc depth;
-      let refine_ o = Leaf_provenance_proofs.allocation_leaf_origin saved h cut prior epoch v x () in refine_ o
+      let o = Leaf_provenance_proofs.allocation_leaf_origin saved h cut prior epoch v x () in o
     | Fresh (rest, p, q, old, desc) -> let mid = heap h epoch depth rest in
       let prior1 : ((x : node Pref.t) @ immutable ->
         {o : origin | not (low_var mid x cut) || originates saved mid cut x o}
-        @ immutable) @ total = fun x -> let refine_ o = copy_leaf_origin saved h certificate cut scope prior epoch depth rest x () in refine_ o in
+        @ immutable) @ total = fun x -> let o = copy_leaf_origin saved h certificate cut scope prior epoch depth rest x () in o in
       scope q; history_absent h epoch depth rest q ();
       let v = cell desc depth in cell_def desc depth;
-      let refine_ o = Leaf_provenance_proofs.allocation_leaf_origin saved mid cut prior1 q v x () in
+      let o = Leaf_provenance_proofs.allocation_leaf_origin saved mid cut prior1 q v x () in
       let h1 = H.put mid q v in
-      Hm_effective_registration.history_at h certificate epoch depth rest p (); Leaf_provenance_proofs.mark_leaf_origin rest saved h1 cut p old epoch q x o (); refine_ o
+      Hm_effective_registration.history_at h certificate epoch depth rest p (); Leaf_provenance_proofs.mark_leaf_origin rest saved h1 cut p old epoch q x o (); o
     | Alias (rest, p, q, old) -> let mid = heap h epoch depth rest in
-      let refine_ o = copy_leaf_origin saved h certificate cut scope prior epoch depth rest x () in
+      let o = copy_leaf_origin saved h certificate cut scope prior epoch depth rest x () in
       Hm_effective_registration.history_at h certificate epoch depth rest p ();
-      Leaf_provenance_proofs.mark_leaf_origin rest saved mid cut p old epoch q x o (); refine_ o)
+      Leaf_provenance_proofs.mark_leaf_origin rest saved mid cut p old epoch q x o (); o)
 
 
 let (clean_copy_origin @ total) : (saved : Pref.heap) @ immutable ->
@@ -91,15 +91,15 @@ let (clean_copy_origin @ total) : (saved : Pref.heap) @ immutable ->
     let frame : ((y : node Pref.t) @ immutable ->
       {u : unit | Copy_cleanup_spec.swept_at raw after trail y}) @ total = fun y ->
       let () = Hm_effective_registration.result_at h certificate epoch depth d y () in () in
-    let refine_ o = copy_leaf_origin saved h certificate cut scope prior epoch depth d x () in
+    let o = copy_leaf_origin saved h certificate cut scope prior epoch depth d x () in
     frame x; Copy_cleanup_spec.swept_at_def raw after trail x;
     below_def raw x cut; below_def after x cut;
     low_var_def raw x cut; low_var_def after x cut;
     Level_unifier_spec.observe_def raw x; Level_unifier_spec.observe_def after x; at_level_def raw x; at_level_def after x;
     if low_var after x cut then (
       originates_def saved raw cut x o; originates_def saved after cut x o;
-      match o with Origin (p, path) -> cleanup_path raw after trail frame p x path (); refine_ o)
-    else refine_ o)
+      match o with Origin (p, path) -> cleanup_path raw after trail frame p x path (); o)
+    else o)
 
 let (allocated_origin @ total) : (saved : Pref.heap) @ immutable ->
     (h : Pref.heap) @ immutable -> (cut : int) ->
@@ -115,7 +115,7 @@ let (allocated_origin @ total) : (saved : Pref.heap) @ immutable ->
     let v = cell desc depth in
     let out : ((x : node Pref.t) @ immutable ->
       {o : origin | not (low_var (H.put h p (cell desc depth)) x cut) || originates saved (H.put h p (cell desc depth)) cut x o} @ immutable) @ total = fun x ->
-      let refine_ o = Leaf_provenance_proofs.allocation_leaf_origin saved h cut prior p v x () in refine_ o in out)
+      let o = Leaf_provenance_proofs.allocation_leaf_origin saved h cut prior p v x () in o in out)
 
 let rec (run_origin @ total) : (saved : Pref.heap) @ immutable -> (cut : int) -> (h : Pref.heap) @ immutable -> (depth : int) ->
     (pool : pool) @ immutable ->
@@ -131,71 +131,71 @@ let rec (run_origin @ total) : (saved : Pref.heap) @ immutable -> (cut : int) ->
   fun saved cut h depth pool trees prior env e after final_pool x premise -> ghost_ (
     ran_def h depth pool env e after final_pool; result_def e;
     match e with
-    | RShared _ -> let refine_ o = prior x in refine_ o
+    | RShared _ -> let o = prior x in o
     | RVar (i, target, epoch, d, certificate) -> (match Hm_environment_spec.lookup env i with
-      None -> let refine_ o = prior x in refine_ o | Some original ->
+      None -> let o = prior x in o | Some original ->
       C.certifies_def h certificate epoch depth d original target;
       let scope : ((y : node Pref.t) @ immutable ->
         {u : unit | H.mem h y || H.at h y === None}) @ total = fun y ->
-        let refine_ _tree = trees y in Level_unifier_spec.observe_def h y; () in
-      let refine_ o = clean_copy_origin saved h certificate cut scope prior epoch depth d x () in refine_ o)
+        let _tree = trees y in Level_unifier_spec.observe_def h y; () in
+      let o = clean_copy_origin saved h certificate cut scope prior epoch depth d x () in o)
     | RBool p -> let desc : desc = Bool in allocated_def h depth p desc;
-      let refine_ _tree = trees p in Level_unifier_spec.observe_def h p;
+      let _tree = trees p in Level_unifier_spec.observe_def h p;
       let next = allocated_origin saved h cut prior depth p desc () in
-      let refine_ o = next x in refine_ o
+      let o = next x in o
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let start = H.put h arg (cell var depth) in
       let next_pool = Entry (arg, pool) in let next_env = Hm_environment_spec.Bind (arg, env) in
       allocated_def h depth arg var;
       let start_trees : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem start y then finite start t else Level_unifier_spec.observe start y === None)} @ immutable) @ total = fun y ->
-        let out = F.allocated_forest h trees depth arg var () in let refine_ t = out y in refine_ t in
-      let refine_ _tree = trees arg in Level_unifier_spec.observe_def h arg;
+        let out = F.allocated_forest h trees depth arg var () in let t = out y in t in
+      let _tree = trees arg in Level_unifier_spec.observe_def h arg;
       let start_prior = allocated_origin saved h cut prior depth arg var () in
       let middle_prior : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = run_origin saved cut start depth next_pool start_trees (refine_ start_prior) next_env body middle body_pool y () in refine_ o in
-      (match result body with None -> let refine_ o = middle_prior x in refine_ o
-      | Some b -> match out with None -> let refine_ o = prior x in refine_ o
+        let o = run_origin saved cut start depth next_pool start_trees (refine_ start_prior) next_env body middle body_pool y () in o in
+      (match result body with None -> let o = middle_prior x in o
+      | Some b -> match out with None -> let o = prior x in o
         | Some p -> let desc = Arrow (arg, b) in allocated_def middle depth p desc;
-          let refine_ _tree = F.run_forest start start_trees depth next_pool next_env body middle body_pool p () in
+          let _tree = F.run_forest start start_trees depth next_pool next_env body middle body_pool p () in
           Level_unifier_spec.observe_def middle p;
           let next = allocated_origin saved middle cut middle_prior depth p desc () in
-          let refine_ o = next x in refine_ o)
-    | RApp_left (left, _) -> let refine_ o = run_origin saved cut h depth pool trees prior env left after final_pool x () in refine_ o
+          let o = next x in o)
+    | RApp_left (left, _) -> let o = run_origin saved cut h depth pool trees prior env left after final_pool x () in o
     | RApp_right (left, right, middle, left_pool) ->
       let middle_trees : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem middle y then finite middle t else Level_unifier_spec.observe middle y === None)} @ immutable) @ total = fun y ->
-        let refine_ t = F.run_forest h trees depth pool env left middle left_pool y () in refine_ t in
+        let t = F.run_forest h trees depth pool env left middle left_pool y () in t in
       let middle_prior : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = run_origin saved cut h depth pool trees prior env left middle left_pool y () in refine_ o in
-      let refine_ o = run_origin saved cut middle depth left_pool middle_trees middle_prior env right after final_pool x () in refine_ o
+        let o = run_origin saved cut h depth pool trees prior env left middle left_pool y () in o in
+      let o = run_origin saved cut middle depth left_pool middle_trees middle_prior env right after final_pool x () in o
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       let trees1 : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h1 y then finite h1 t else Level_unifier_spec.observe h1 y === None)} @ immutable) @ total = fun y ->
-        let refine_ t = F.run_forest h trees depth pool env left h1 pool1 y () in refine_ t in
+        let t = F.run_forest h trees depth pool env left h1 pool1 y () in t in
       let prior1 : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var h1 y cut) || originates saved h1 cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = run_origin saved cut h depth pool trees prior env left h1 pool1 y () in refine_ o in
+        let o = run_origin saved cut h depth pool trees prior env left h1 pool1 y () in o in
       let trees2 : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h2 y then finite h2 t else Level_unifier_spec.observe h2 y === None)} @ immutable) @ total = fun y ->
-        let refine_ t = F.run_forest h1 trees1 depth pool1 env right h2 pool2 y () in refine_ t in
+        let t = F.run_forest h1 trees1 depth pool1 env right h2 pool2 y () in t in
       let prior2 : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var h2 y cut) || originates saved h2 cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = run_origin saved cut h1 depth pool1 trees1 (refine_ prior1) env right h2 pool2 y () in refine_ o in
-      (match result left with None -> let refine_ o = prior x in refine_ o | Some f -> match result right with None -> let refine_ o = prior x in refine_ o | Some a ->
+        let o = run_origin saved cut h1 depth pool1 trees1 (prior1) env right h2 pool2 y () in o in
+      (match result left with None -> let o = prior x in o | Some f -> match result right with None -> let o = prior x in o | Some a ->
         let var : desc = Var in let h3 = H.put h2 p (cell var depth) in
         let desc = Arrow (a, p) in let h4 = H.put h3 arrow (cell desc depth) in
         allocated_def h2 depth p var; allocated_def h3 depth arrow desc;
         let trees3 : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h3 y then finite h3 t else Level_unifier_spec.observe h3 y === None)} @ immutable) @ total = fun y ->
-        let out = F.allocated_forest h2 trees2 depth p var () in let refine_ t = out y in refine_ t in
-      let refine_ _tree = trees2 p in Level_unifier_spec.observe_def h2 p;
-      let prior3 = allocated_origin saved h2 cut (refine_ prior2) depth p var () in
-      let refine_ _tree = trees3 arrow in Level_unifier_spec.observe_def h3 arrow;
+        let out = F.allocated_forest h2 trees2 depth p var () in let t = out y in t in
+      let _tree = trees2 p in Level_unifier_spec.observe_def h2 p;
+      let prior3 = allocated_origin saved h2 cut (prior2) depth p var () in
+      let _tree = trees3 arrow in Level_unifier_spec.observe_def h3 arrow;
       let prior4 = allocated_origin saved h3 cut (refine_ prior3) depth arrow desc () in
-        let refine_ o = Effective_unifier_origin.unified_leaf_origin saved h4 cut (refine_ prior4) f arrow ok after d x () in refine_ o)
+        let o = Effective_unifier_origin.unified_leaf_origin saved h4 cut (refine_ prior4) f arrow ok after d x () in o)
     | RRec (arg, res, self, body, middle, body_pool, finish) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in let pool1 = Entry (arg, pool) in
       let h2 = H.put h1 res v in let pool2 = Entry (res, pool1) in
@@ -203,40 +203,40 @@ let rec (run_origin @ total) : (saved : Pref.heap) @ immutable -> (cut : int) ->
       allocated_def h depth arg var; allocated_def h1 depth res var; allocated_def h2 depth self desc;
       let trees1 : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h1 y then finite h1 t else Level_unifier_spec.observe h1 y === None)} @ immutable) @ total = fun y ->
-        let out = F.allocated_forest h trees depth arg var () in let refine_ t = out y in refine_ t in
-      let refine_ _tree = trees arg in Level_unifier_spec.observe_def h arg;
+        let out = F.allocated_forest h trees depth arg var () in let t = out y in t in
+      let _tree = trees arg in Level_unifier_spec.observe_def h arg;
       let prior1 = allocated_origin saved h cut prior depth arg var () in
       let trees2 : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h2 y then finite h2 t else Level_unifier_spec.observe h2 y === None)} @ immutable) @ total = fun y ->
-        let out = F.allocated_forest h1 trees1 depth res var () in let refine_ t = out y in refine_ t in
-      let refine_ _tree = trees1 res in Level_unifier_spec.observe_def h1 res;
+        let out = F.allocated_forest h1 trees1 depth res var () in let t = out y in t in
+      let _tree = trees1 res in Level_unifier_spec.observe_def h1 res;
       let prior2 = allocated_origin saved h1 cut (refine_ prior1) depth res var () in
       let trees3 : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h3 y then finite h3 t else Level_unifier_spec.observe h3 y === None)} @ immutable) @ total = fun y ->
-        let out = F.allocated_forest h2 trees2 depth self desc () in let refine_ t = out y in refine_ t in
-      let refine_ _tree = trees2 self in Level_unifier_spec.observe_def h2 self;
+        let out = F.allocated_forest h2 trees2 depth self desc () in let t = out y in t in
+      let _tree = trees2 self in Level_unifier_spec.observe_def h2 self;
       let prior3 = allocated_origin saved h2 cut (refine_ prior2) depth self desc () in
       let next_env = Hm_environment_spec.Bind (arg, Hm_environment_spec.Bind (self, env)) in
       (match result body with None ->
-        let refine_ o = run_origin saved cut h3 depth pool3 trees3 (refine_ prior3) next_env body middle body_pool x () in refine_ o
-      | Some b -> match finish with Aborted -> let refine_ o = prior x in refine_ o | Unified (ok, d) ->
+        let o = run_origin saved cut h3 depth pool3 trees3 (refine_ prior3) next_env body middle body_pool x () in o
+      | Some b -> match finish with Aborted -> let o = prior x in o | Unified (ok, d) ->
       let middle_prior : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = run_origin saved cut h3 depth pool3 trees3 (refine_ prior3) next_env body middle body_pool y () in refine_ o in
-      let refine_ o = Effective_unifier_origin.unified_leaf_origin saved middle cut middle_prior b res ok after d x () in refine_ o)
+        let o = run_origin saved cut h3 depth pool3 trees3 (refine_ prior3) next_env body middle body_pool y () in o in
+      let o = Effective_unifier_origin.unified_leaf_origin saved middle cut middle_prior b res ok after d x () in o)
     | RLet_left (rhs, _) ->
       let child_depth = depth + 1 in let empty : pool = Generalize_spec.Empty in
       ran_def h child_depth empty env rhs after final_pool;
-            let refine_ o = run_origin saved cut h child_depth empty trees prior env rhs after final_pool x () in refine_ o
+            let o = run_origin saved cut h child_depth empty trees prior env rhs after final_pool x () in o
     | RLet (rhs, body, middle, child_pool) ->
       let child_depth = depth + 1 in let empty : pool = Generalize_spec.Empty in
       ran_def h child_depth empty env rhs middle child_pool;
             let middle_trees : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem middle y then finite middle t else Level_unifier_spec.observe middle y === None)} @ immutable) @ total = fun y ->
-        let refine_ t = F.run_forest h trees child_depth empty env rhs middle child_pool y () in refine_ t in
+        let t = F.run_forest h trees child_depth empty env rhs middle child_pool y () in t in
       let middle_prior : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = run_origin saved cut h child_depth empty trees prior env rhs middle child_pool y () in refine_ o in
+        let o = run_origin saved cut h child_depth empty trees prior env rhs middle child_pool y () in o in
       let closed = Representative_pool_spec.close_heap middle depth child_pool in
       let transferred = Representative_pool_spec.transfer_rep closed child_pool pool in
       Representative_pool_spec.close_heap_def middle depth child_pool;
@@ -244,12 +244,12 @@ let rec (run_origin @ total) : (saved : Pref.heap) @ immutable -> (cut : int) ->
       Representative_level.representatives_scoped middle child_pool ();
       let closed_trees : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem closed y then finite closed t else Level_unifier_spec.observe closed y === None)} @ immutable) @ total = fun y ->
-        let refine_ t = Forest_transport.closed_forest_at middle middle_trees depth filtered y () in refine_ t in
+        let t = Forest_transport.closed_forest_at middle middle_trees depth filtered y () in t in
       let closed_prior : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var closed y cut) || originates saved closed cut y o} @ immutable) @ total = fun y ->
-        let refine_ o = middle_prior y in Leaf_provenance_proofs.closed_leaf_origin saved middle depth cut filtered y o (); refine_ o in
-      (match result rhs with None -> let refine_ o = prior x in refine_ o | Some p -> let next_env = Hm_environment_spec.Bind (p, env) in
-        let refine_ o = run_origin saved cut closed depth transferred closed_trees closed_prior next_env body after final_pool x () in refine_ o))
+        let o = middle_prior y in Leaf_provenance_proofs.closed_leaf_origin saved middle depth cut filtered y o (); o in
+      (match result rhs with None -> let o = prior x in o | Some p -> let next_env = Hm_environment_spec.Bind (p, env) in
+        let o = run_origin saved cut closed depth transferred closed_trees closed_prior next_env body after final_pool x () in o))
 
 let (rhs_interpret @ total) : (h : Pref.heap) @ immutable ->
     (trees : ((x : node Pref.t) @ immutable ->
@@ -275,9 +275,9 @@ let (rhs_interpret @ total) : (h : Pref.heap) @ immutable ->
     ran_def h child_depth empty env rhs after child_pool;
     let initial : ((x : node Pref.t) @ immutable ->
       {o : origin | not (low_var h x depth) || originates h h depth x o} @ immutable) @ total = fun x ->
-      let refine_ o = Provenance_proofs.initial_origin h depth x in low_var_def h x depth; refine_ o in
+      let o = Provenance_proofs.initial_origin h depth x in low_var_def h x depth; o in
     let prior : ((x : node Pref.t) @ immutable ->
       {o : origin | not (low_var after x depth) || originates h after depth x o} @ immutable) @ total = fun x ->
-      let refine_ o = run_origin h depth h child_depth empty trees initial env rhs after child_pool x () in refine_ o in
+      let o = run_origin h depth h child_depth empty trees initial env rhs after child_pool x () in o in
     Hm_effective_agreement.relative_interpret h after heads depth prior order rho rho_model eta eta_model equal tree ();
     ())

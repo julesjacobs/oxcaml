@@ -44,7 +44,7 @@ module Make (O : Order) = struct
       @ ghost = fun values target -> ghost_ (
     count_def values target;
     (match values with [] -> () | _ :: tail -> count_nonnegative tail target);
-    let u = () in refine_ u)
+    let u = () in u)
 
   let rec (count_append @ total) : (left : O.elt list) @ immutable ->
       (right : O.elt list) @ immutable -> (target : O.elt) @ immutable ->
@@ -55,7 +55,7 @@ module Make (O : Order) = struct
     count_def left target;
     count_def (S.append left right) target;
     (match left with [] -> () | _ :: tail -> count_append tail right target);
-    let u = () in refine_ u)
+    let u = () in u)
 
   let rec (same_elim @ total) : (keys : O.elt list) @ immutable ->
       (left : O.elt list) @ immutable -> (right : O.elt list) @ immutable ->
@@ -66,7 +66,7 @@ module Make (O : Order) = struct
     same_counts_def keys left right;
     count_def keys target;
     (match keys with [] -> () | _ :: tail -> same_elim tail left right target);
-    let u = () in refine_ u)
+    let u = () in u)
 
   let (permutation_count @ total) : (left : O.elt list) @ immutable ->
       (right : O.elt list) @ immutable -> (target : O.elt) @ immutable ->
@@ -78,7 +78,7 @@ module Make (O : Order) = struct
     count_nonnegative right target;
     same_elim left left right target;
     same_elim right left right target;
-    let u = () in refine_ u)
+    let u = () in u)
 
   let rec (same_intro @ total) : (keys : O.elt list) @ immutable ->
       (left : O.elt list) @ immutable -> (right : O.elt list) @ immutable ->
@@ -89,7 +89,7 @@ module Make (O : Order) = struct
     same_counts_def keys left right;
     (match keys with [] -> () | head :: tail ->
       proof head; same_intro tail left right proof);
-    let u = () in refine_ u)
+    let u = () in u)
 
   let (count_extensional @ total) : (left : O.elt list) @ immutable ->
       (right : O.elt list) @ immutable ->
@@ -100,11 +100,11 @@ module Make (O : Order) = struct
     same_intro left left right proof;
     same_intro right left right proof;
     permutation_def left right;
-    let u = () in refine_ u)
+    let u = () in u)
 
   let (permutation_refl @ total) (values : O.elt list @ immutable) :
       {u : unit | permutation values values} @ ghost = ghost_ (
-    count_extensional values values (fun _target -> let u = () in refine_ u))
+    count_extensional values values (fun _target -> let u = () in u))
 
   let (permutation_trans @ total) : (first : O.elt list) @ immutable ->
       (second : O.elt list) @ immutable -> (third : O.elt list) @ immutable ->
@@ -115,8 +115,8 @@ module Make (O : Order) = struct
       count_extensional first third (fun target ->
         permutation_count first second target;
         permutation_count second third target;
-        let u = () in refine_ u);
-    let u = () in refine_ u)
+        let u = () in u);
+    let u = () in u)
 
   let (permutation_append @ total) : (left : O.elt list) @ immutable ->
       (right : O.elt list) @ immutable -> (new_left : O.elt list) @ immutable ->
@@ -131,8 +131,8 @@ module Make (O : Order) = struct
           count_append new_left new_right target;
           permutation_count left new_left target;
           permutation_count right new_right target;
-          let u = () in refine_ u);
-    let u = () in refine_ u)
+          let u = () in u);
+    let u = () in u)
 
   let (permutation_rotate @ total) (left : O.elt list @ immutable)
       (right : O.elt list @ immutable) :
@@ -141,7 +141,7 @@ module Make (O : Order) = struct
     count_extensional (S.append left right) (S.append right left) (fun target ->
       count_append left right target;
       count_append right left target;
-      let u = () in refine_ u))
+      let u = () in u))
 
   let rec (all_member @ total) : (values : O.elt list) @ immutable ->
       (bound : O.elt) @ immutable -> (target : O.elt) @ immutable ->
@@ -151,7 +151,7 @@ module Make (O : Order) = struct
       all_def values bound;
       count_def values target;
       (match values with [] -> () | _ :: tail -> all_member tail bound target);
-      let u = () in refine_ u)
+      let u = () in u)
 
   let rec (all_if_counts @ total) : (before : O.elt list) @ immutable ->
       (after : O.elt list) @ immutable -> (bound : O.elt) @ immutable ->
@@ -169,8 +169,8 @@ module Make (O : Order) = struct
       all_if_counts before tail bound (fun target ->
         proof target;
         count_def after target;
-        let u = () in refine_ u));
-    let u = () in refine_ u)
+        let u = () in u));
+    let u = () in u)
 
   let (all_permutation @ total) : (before : O.elt list) @ immutable ->
       (after : O.elt list) @ immutable -> (bound : O.elt) @ immutable ->
@@ -179,8 +179,8 @@ module Make (O : Order) = struct
     if permutation before after then
       all_if_counts before after bound (fun target ->
         permutation_count before after target;
-        let u = () in refine_ u);
-    let u = () in refine_ u)
+        let u = () in u);
+    let u = () in u)
 
   let rec (all_append @ total) : (left : O.elt list) @ immutable ->
       (right : O.elt list) @ immutable -> (bound : O.elt) @ immutable ->
@@ -191,7 +191,7 @@ module Make (O : Order) = struct
       all_def (S.append left right) bound;
       all_def left bound;
       (match left with [] -> () | _ :: tail -> all_append tail right bound);
-      let u = () in refine_ u)
+      let u = () in u)
 
   let rec (all_weaken @ total) : (values : O.elt list) @ immutable ->
       (old_bound : O.elt) @ immutable -> (new_bound : O.elt) @ immutable ->
@@ -204,7 +204,7 @@ module Make (O : Order) = struct
       (match values with [] -> () | head :: tail ->
         O.transitive new_bound old_bound head;
         all_weaken tail old_bound new_bound);
-      let u = () in refine_ u)
+      let u = () in u)
 
   let (sorted_short @ total) (values : O.elt list @ immutable) :
       {u : unit | if S.length values <= 1Z then sorted values else true}
@@ -216,5 +216,5 @@ module Make (O : Order) = struct
       sorted_def tail;
       match tail with [] -> all_def tail head
       | _ :: _ -> ());
-    let u = () in refine_ u)
+    let u = () in u)
 end

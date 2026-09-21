@@ -29,11 +29,11 @@ let (normal_model_at @ total) :
         (if H.mem h x then finite h t else observe h x === None)} @ immutable)) @ total ->
     (sigma : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (normal : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in normalizes h sigma x t})) @ total ->
+      {u : unit | let t = trees x in normalizes h sigma x t})) @ total ->
     (x : node Pref.t) @ immutable -> {u : unit | node_equation h sigma x} @ ghost =
   fun h trees sigma normal x -> ghost_ (
     let agrees : (x : node Pref.t) @ immutable ->
-        {u : unit | let refine_ t = trees x in not (H.mem h x) || sigma x === readback t}
+        {u : unit | let t = trees x in not (H.mem h x) || sigma x === readback t}
         @ total = fun x ->
       normal x; let t = trees x in normalizes_def h sigma x t;
       () in
@@ -48,7 +48,7 @@ let (mgu_solution_at @ total) :
         (if H.mem after x then finite after t else observe after x === None)} @ immutable)) @ total ->
     (sigma : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (normal : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in normalizes after sigma x t})) @ total ->
+      {u : unit | let t = trees x in normalizes after sigma x t})) @ total ->
     (x : node Pref.t) @ immutable ->
     {u : unit | unified h p q true after d} ->
     {u : unit | node_equation h sigma x && sigma p === sigma q} @ ghost =
@@ -67,7 +67,7 @@ let (mgu_factor_at @ total) :
         (if H.mem after x then finite after t else observe after x === None)} @ immutable)) @ total ->
     (sigma : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (normal : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in normalizes after sigma x t})) @ total ->
+      {u : unit | let t = trees x in normalizes after sigma x t})) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h rho x})) @ total ->
     (x : node Pref.t) @ immutable ->
@@ -148,7 +148,7 @@ let (with_mgu @ total) :
     let t = trees x in
     if H.mem after x then readback t else Variable x in
   let normal : (x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in normalizes after sigma x t}
+      {u : unit | let t = trees x in normalizes after sigma x t}
       @ total = fun x ->
     sigma_def x; let t = trees x in normalizes_def after sigma x t;
     () in

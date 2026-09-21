@@ -86,7 +86,7 @@ module Model :
         'a t @ local immutable -> 'a list @ total stateful ghost
     val contents_def :
       ('a : immutable_data).
-        (value : 'a t) @ immutable ->
+        (value : 'a t) @ local forkable unyielding immutable ->
         {u : unit | (contents value) === value.contents}
     val observe : ('a : immutable_data). 'a t @ unique total -> 'a t
   end

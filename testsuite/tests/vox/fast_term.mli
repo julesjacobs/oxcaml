@@ -65,7 +65,6 @@ val decode_def :
   @@ total
 
 val bound :
-  (n' : {n : int | n >= 0}) ->
+  (n : {n : int | n >= 0}) ->
   {t : term
-    | let refine_ n = n' in
-      (valid t) && ((source t) === (D.Bound (decode n)))} @ immutable
+    | (valid t) && ((source t) === (D.Bound (decode n)))} @ immutable

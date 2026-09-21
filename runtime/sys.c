@@ -765,6 +765,15 @@ CAMLprim value caml_sys_const_arch_arm64(value unit)
 #endif
 }
 
+CAMLprim value caml_sys_const_arch_wasm(value unit)
+{
+#if defined(__wasm__)
+  return Val_true;
+#else
+  return Val_false;
+#endif
+}
+
 CAMLprim value caml_sys_get_config(value unit)
 {
   CAMLparam0 ();   /* unit is unused */

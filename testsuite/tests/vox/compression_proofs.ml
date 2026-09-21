@@ -33,12 +33,12 @@ let rec (finite @ total) : (h : Pref.heap) @ immutable -> (after : Pref.heap) @ 
     {t : tree | Level_finite_spec.finite after t && tree_root t === tree_root tree && readback t === readback tree} @ immutable ghost =
   fun h after d tree premise -> ghost_ (
     rewritten_def h after d; match d with
-    | Done -> refine_ tree
+    | Done -> tree
     | Write (p, q, r, path, rest) -> let middle = H.put h p (redirect h p r) in
       Compression_finite_proofs.finite_compress h p q r path tree ();
       Compression_finite_proofs.compress_root p tree; Compression_finite_proofs.compress_readback p tree;
       let changed = Compression_finite_proofs.compress p tree in
-      let refine_ out = finite middle after rest changed () in refine_ out)
+      let out = finite middle after rest changed () in out)
 
 let rec (frame @ total) : (h : Pref.heap) @ immutable -> (after : Pref.heap) @ immutable -> (d : edits) @ immutable ->
     (x : node Pref.t) @ immutable -> {u : unit | rewritten h after d} ->
@@ -144,10 +144,10 @@ let rec (resolution @ total) : (h : Pref.heap) @ immutable ->
   fun h after edits p root path premise -> ghost_ (
     rewritten_def h after edits;
     match edits with
-    | Done -> refine_ path
+    | Done -> path
     | Write (x, _, r, original, rest) ->
       active_def h x;
       Compression_path_proofs.resolution_terminal h x r original (); terminal_def h r;
       let middle = H.put h x (redirect h x r) in
-      let refine_ next = Compression_path_proofs.shortcut_resolution h x r original p root path () in
-      let refine_ out = resolution middle after rest p root next () in refine_ out)
+      let next = Compression_path_proofs.shortcut_resolution h x r original p root path () in
+      let out = resolution middle after rest p root next () in out)

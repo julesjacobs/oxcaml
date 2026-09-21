@@ -16,37 +16,35 @@ let run : (e : D.term) @ immutable -> (target : ty) @ immutable ghost ->
     (d : D.typing) @ immutable ghost ->
     {u : unit | D.typed D.Z D.Empty_context e (D.embed target) d} @ ghost -> unit =
   fun e target d premise ->
-  ghost_ (let refine_ premise = premise in let z = D.Z in let g = D.Empty_context in
+  ghost_ (let z = D.Z in let g = D.Empty_context in
     let t = D.embed target in let u = () in D.depth_def g;
-    T.typing_scoped z g e t d (refine_ u); ());
-  let input : {e : D.term | D.scoped_term D.Z e} = refine_ e in
-  let refine_ out = Hm_infer.closed_hm input in let refine_ input = input in
-  let after = ghost_ (Pref.own (borrow_ out.#state)) in
-  ghost_ (let refine_ premise = premise in let u = () in
-    P.closed_completes out.#execution after out.#pool target d (refine_ u));
+    T.typing_scoped z g e t d (u); ());
+  let input : {e : D.term | D.scoped_term D.Z e} = e in
+  let out = Hm_infer.closed_hm input in let after = ghost_ (Pref.own (borrow_ out.#state)) in
+  ghost_ (let u = () in
+    P.closed_completes out.#execution after out.#pool target d (u));
   match out.#value with None ->
-    ghost_ (let _impossible : {u : unit | false} = refine_ () in ()); assert false
+    ghost_ (let _impossible : {u : unit | false} = () in ()); assert false
   | Some p ->
-    ghost_ (let refine_ premise = premise in let u = () in
-      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
+    ghost_ (let u = () in
+      let tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (u) in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u);
+      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (u);
       let use : ((inferred : D.typing) @ immutable ->
         (delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | D.typed D.Z D.Empty_context (source out.#execution) (D.embed (Level_finite_spec.readback tree)) inferred
           && target === Level_mgu_spec.substitute delta (Level_finite_spec.readback tree)} ->
-        {u : unit | true}) @ total = fun _inferred _delta _factor -> let u = () in refine_ u in
-      Hm_polymorphic_sound_proofs.closed_principal out.#execution after out.#pool p tree target d (refine_ u) true use; ()); ()
+        {u : unit | true}) @ total = fun _inferred _delta _factor -> let u = () in u in
+      Hm_polymorphic_sound_proofs.closed_principal out.#execution after out.#pool p tree target d (u) true use; ()); ()
 
 let nested (b : ty @ immutable ghost) =
   let z = D.Z in let v = D.Bound z in let rhs = D.Lambda v in
   let app = D.Apply (v, v) in let inner = D.Let (v, app) in let e = D.Let (rhs, inner) in
   let target = ghost_ (Function (b, b)) in
   let d : {d : D.typing | D.typed D.Z D.Empty_context e (D.embed target) d} @ immutable ghost = ghost_ (let a = D.embed b in T.embed_wf z b; D.embed_def target;
-    let u = () in let refine_ d = Hm_polymorphic_fixtures.nested_alias_typing a (refine_ u) in refine_ d) in
-  let refine_ d = d in
-  run e target d (ghost_ (refine_ ()))
+    let u = () in let d = Hm_polymorphic_fixtures.nested_alias_typing a (u) in d) in
+  run e target d (ghost_ (()))
 
 let mixed (b : ty @ immutable ghost) =
   let z = D.Z in let one = D.S z in let v = D.Bound z in
@@ -54,9 +52,8 @@ let mixed (b : ty @ immutable ghost) =
   let truth = D.Truth in let app = D.Apply (v, truth) in
   let body = D.Let (rhs, app) in let e = D.Lambda body in
   let target = ghost_ (Function (b, b)) in
-  let d : {d : D.typing | D.typed D.Z D.Empty_context e (D.embed target) d} @ immutable ghost = ghost_ (let refine_ d = Hm_polymorphic_fixtures.mixed_typing b in refine_ d) in
-  let refine_ d = d in
-  run e target d (ghost_ (refine_ ()))
+  let d : {d : D.typing | D.typed D.Z D.Empty_context e (D.embed target) d} @ immutable ghost = ghost_ (let d = Hm_polymorphic_fixtures.mixed_typing b in d) in
+  run e target d (ghost_ (()))
 
 let () =
   nested (ghost_ Boolean);
@@ -75,21 +72,21 @@ let saved_garbage () =
     D.scoped_term_def z identity; D.scoped_term_def one v; D.present_def one z;
     D.scoped_term_def one inner; D.scoped_term_def one identity;
     D.scoped_term_def two v; D.present_def two z; D.scoped_term_def two self_app; ());
-  let input : {e : D.term | D.scoped_term D.Z e} = refine_ e in
-  let refine_ out = Hm_infer.closed_hm input in
+  let input : {e : D.term | D.scoped_term D.Z e} = e in
+  let out = Hm_infer.closed_hm input in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in
   match out.#value with None -> assert false | Some p ->
     ghost_ (let u = () in
-      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
+      let tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (u) in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u);
-      let _typing = Hm_polymorphic_sound_proofs.closed_sound out.#execution after out.#pool p tree (refine_ u) in ()); ()
+      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (u);
+      let _typing = Hm_polymorphic_sound_proofs.closed_sound out.#execution after out.#pool p tree (u) in ()); ()
 
 let () = saved_garbage ()
 
 let deep_infer : (e : {e : D.term | D.scoped_term D.Z e}) @ immutable -> unit =
-  fun e -> let refine_ out = Hm_infer.closed_hm e in
+  fun e -> let out = Hm_infer.closed_hm e in
     match out.#value with None -> assert false | Some _ -> ()
 
 let rec deep_lambdas : int -> (body : D.term) @ immutable ->
@@ -98,19 +95,19 @@ let rec deep_lambdas : int -> (body : D.term) @ immutable ->
   fun count body scope ->
     if count <= 0 then (
       ghost_ (let z = D.Z in scope.Ghost.ghost z; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ body in
+      let input : {e : D.term | D.scoped_term D.Z e} = body in
       deep_infer input;
       let z = D.Z in let one = D.S z in let two = D.S one in
       let variable = D.Bound z in
       let copied = D.Let (body, variable) in
       ghost_ (D.scoped_term_def z copied; D.scoped_term_def one variable;
         D.present_def one z; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ copied in
+      let input : {e : D.term | D.scoped_term D.Z e} = copied in
       deep_infer input;
       let identity = D.Lambda variable in
       let applied = D.Apply (identity, body) in
       ghost_ (D.scoped_term_def z applied; D.scoped_term_def z identity; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ applied in
+      let input : {e : D.term | D.scoped_term D.Z e} = applied in
       deep_infer input;
       let call = D.Apply (variable, body) in
       let outer = D.Bound one in
@@ -124,7 +121,7 @@ let rec deep_lambdas : int -> (body : D.term) @ immutable ->
         D.scoped_term_def two variable; D.present_def two z;
         D.scoped_term_def one drop; D.scoped_term_def one calls;
         D.scoped_term_def z unified; ());
-      let input : {e : D.term | D.scoped_term D.Z e} = refine_ unified in
+      let input : {e : D.term | D.scoped_term D.Z e} = unified in
       deep_infer input)
     else (
       let next = D.Lambda body in
@@ -132,7 +129,7 @@ let rec deep_lambdas : int -> (body : D.term) @ immutable ->
         {u : unit | D.scoped_term n next})) Ghost.t =
         {Ghost.ghost = ghost_ (fun n ->
           let more = D.S n in scope.Ghost.ghost more;
-          D.scoped_term_def n next; let u = () in refine_ u)} in
+          D.scoped_term_def n next; let u = () in u)} in
       deep_lambdas (count - 1) next scope)
 
 let () =
@@ -140,5 +137,5 @@ let () =
   let scope : (((n : D.index) @ immutable ->
     {u : unit | D.scoped_term n body})) Ghost.t =
     {Ghost.ghost = ghost_ (fun n ->
-      D.scoped_term_def n body; let u = () in refine_ u)} in
+      D.scoped_term_def n body; let u = () in u)} in
   deep_lambdas 200000 body scope

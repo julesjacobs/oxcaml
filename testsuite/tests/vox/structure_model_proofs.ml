@@ -37,8 +37,8 @@ let (backward @ total) : (h : Pref.heap) @ immutable -> (source : tree) @ immuta
       let ty = readback source in Level_mgu_spec.substitute_def rho ty;
       match source with Free _ | Constant_tree _ | Alias_tree _ -> ()
       | Branch (_, a, b) -> let ta = readback a in let tb = readback b in let ty = Function (ta, tb) in
-        weight_def ty; let refine_ pa = Level_unifier_proofs.weight_positive ta in
-        let refine_ pb = Level_unifier_proofs.weight_positive tb in
+        weight_def ty; let _pa = Level_unifier_proofs.weight_positive ta in
+        let _pb = Level_unifier_proofs.weight_positive tb in
         smaller_avoids h source a (); smaller_avoids h source b ();
         frame_avoids h p q a (); frame_avoids h p q b ();
         Level_mgu_proofs.readback_factor after rho (refine_ model) a ();

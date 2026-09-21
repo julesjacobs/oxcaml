@@ -6,7 +6,6 @@ let (nested_alias_typing @ total) : (a : mono) @ immutable ->
     {d : typing | typed Z Empty_context
       (Let (Lambda (Bound Z), Let (Bound Z, Apply (Bound Z, Bound Z)))) (Function (a, a)) d}
     @ immutable ghost = fun a premise -> ghost_ (
-  let refine_ premise = premise in
   let z = Z in let one = S z in let parameter = Parameter z in
   let identity_type = Function (parameter, parameter) in
   let identity = Forall (one, identity_type) in
@@ -61,7 +60,7 @@ let (nested_alias_typing @ total) : (a : mono) @ immutable ->
   open_type_def alias_args identity_type; open_type_def alias_args parameter; open_index_def alias_args z;
   typed_def one outer_env bound identity_type alias;
   typed_def z outer_env inner aa inner_d;
-  typed_def z empty source aa d; refine_ d)
+  typed_def z empty source aa d; d)
 
 
 let (mixed_typing @ total) : (b : Copy_spec.ty) @ immutable ->
@@ -104,4 +103,4 @@ let (mixed_typing @ total) : (b : Copy_spec.ty) @ immutable ->
     typed_def z body_env truth boolean constant;
     typed_def z body_env body a body_d;
     typed_def z outer_env inside a let_d;
-    typed_def z empty e target d; refine_ d)
+    typed_def z empty e target d; d)

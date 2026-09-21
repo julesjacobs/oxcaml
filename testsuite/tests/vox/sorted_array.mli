@@ -78,6 +78,6 @@ val contents_length : (array : t) ->
     Bigint.of_int (length array)} @@ total
 val contents_at : (array : t) ->
   (index : {i : int | 0 <= i && i < length array}) ->
-  {u : unit | let refine_ i = index in
+  {u : unit | let i = index in
     Vox_sequence.at (contents array) (Bigint.of_int i) === Some (at array i)}
   @@ total

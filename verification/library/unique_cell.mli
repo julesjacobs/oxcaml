@@ -22,20 +22,17 @@ module Make (V : Payload) : sig @@ portable
   val take : (cell : t) ->
     (token : {t : Ghost_pref.token | match Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) with
       | Some (Some _) -> true | _ -> false}) @ unique ghost ->
-    {r : V.t step | let refine_ token = token in
-      Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
+    {r : V.t step | Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
       && Ghost_pref.own r.state === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) None} @ unique
 
   val put : (cell : t) -> (value : V.t) @ unique ->
     (token : {t : Ghost_pref.token | Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) === Some None}) @ unique ghost ->
-    {t : Ghost_pref.token | let refine_ token = token in
-      Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) (Some (V.snapshot value))} @ unique ghost
+    {t : Ghost_pref.token | Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) (Some (V.snapshot value))} @ unique ghost
 
   val replace : (cell : t) -> (value : V.t) @ unique ->
     (token : {t : Ghost_pref.token | match Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) with
       | Some (Some _) -> true | _ -> false}) @ unique ghost ->
-    {r : V.t step | let refine_ token = token in
-      Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
+    {r : V.t step | Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
       && Ghost_pref.own r.state === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) (Some (V.snapshot value))} @ unique
 end
 

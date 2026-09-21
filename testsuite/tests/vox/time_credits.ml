@@ -12,59 +12,55 @@
 module C = Vox_credits.Make ()
 
 let (twice @ total) (token : {t : C.token | C.credits t >= 2} @ unique total ghost) :
-    {t : C.token | let refine_ token = token in
-      C.credits t = C.credits token - 2} @ unique total ghost =
-  let refine_ token = token in
-  let refine_ first = C.tick (refine_ token) in
-  C.tick (refine_ first)
+    {t : C.token | C.credits t = C.credits token - 2} @ unique total ghost =
+  let first = C.tick (token) in
+  C.tick (first)
 
 let () =
   let ten = 10 in
   let four = 4 in
-  let initial : {n : int | n >= 0} = refine_ ten in
-  let refine_ token = C.Budget.create initial in
+  let initial : {n : int | n >= 0} = ten in
+  let token = C.Budget.create initial in
   ghost_ (let u = () in
-    (refine_ u : {u : unit | C.credits token = 10}));
-  let input : {t : C.token | C.credits t >= four} = refine_ token in
-  let refine_ parts = C.split four input in
+    (u : {u : unit | C.credits token = 10}));
+  let input : {t : C.token | C.credits t >= four} = token in
+  let parts = C.split four input in
   let { C.left; right } = parts in
-  let start : {t : C.token | C.credits t >= 2} = refine_ left in
-  let refine_ left = twice start in
+  let start : {t : C.token | C.credits t >= 2} = left in
+  let left = twice start in
   ghost_ (let u = () in
-    (refine_ u : {u : unit | C.credits left = 2 && C.credits right = 6}));
-  let refine_ result = C.merge left (refine_ right) in
+    (u : {u : unit | C.credits left = 2 && C.credits right = 6}));
+  let result = C.merge left (right) in
   ghost_ (
     let u = () in
-    (refine_ u : {u : unit | C.credits result = 8}));
+    (u : {u : unit | C.credits result = 8}));
   ()
 
 let (observe @ total) :
     (token : {t : C.token | C.credits t > 0}) @ unique total ghost ->
-    {t : C.token | let refine_ token = token in
-      C.credits t = C.credits token - 1} @ unique total ghost = fun token ->
-  let refine_ token = token in
+    {t : C.token | C.credits t = C.credits token - 1} @ unique total ghost = fun token ->
   let first = ghost_ (C.credits (borrow_ token)) in
   let second = ghost_ (C.credits (borrow_ token)) in
   ghost_ (C.nonnegative (borrow_ token));
-  let available : {t : C.token | C.credits t > 0} = refine_ token in
-  let refine_ result = C.tick available in
+  let available : {t : C.token | C.credits t > 0} = token in
+  let result = C.tick available in
   ghost_ (let u = () in
-    (refine_ u : {u : unit | first = second && C.credits result = first - 1}));
-  refine_ result
+    (u : {u : unit | first = second && C.credits result = first - 1}));
+  result
 
 let (roundtrip @ total) : (amount : {n : int | n >= 0}) ->
     {u : unit | true} = fun amount ->
-  let refine_ token = C.Budget.create amount in
-  let refine_ zero = C.empty () in
+  let token = C.Budget.create amount in
+  let zero = C.empty () in
   let admissible : {t : C.token | 0 <= C.credits token &&
-    0 <= C.credits t && 0 <= C.credits token + C.credits t} = refine_ zero in
-  let refine_ result = C.merge token admissible in
-  ghost_ (let refine_ expected = amount in
+    0 <= C.credits t && 0 <= C.credits token + C.credits t} = zero in
+  let result = C.merge token admissible in
+  ghost_ (let expected = amount in
     let expected : int = expected in let u = () in
-    (refine_ u : {u : unit | C.credits result = expected}));
-  let u = () in refine_ u
+    (u : {u : unit | C.credits result = expected}));
+  let u = () in u
 
 let () =
   let limit = max_int in
   let bound : {n : int | n >= 0} = assume_ limit in
-  let refine_ checked = roundtrip bound in ()
+  let _checked = roundtrip bound in ()

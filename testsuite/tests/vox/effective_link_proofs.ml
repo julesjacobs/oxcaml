@@ -19,7 +19,7 @@ let (equal_roots @ total) : (before : Pref.heap) @ immutable ->
     let[@def] sigma : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
       let t = trees x in if H.mem h x then readback t else Variable x in
     let normal : ((x : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees x in Level_mgu_spec.normalizes h sigma x t}) @ total = fun x ->
+      {u : unit | let t = trees x in Level_mgu_spec.normalizes h sigma x t}) @ total = fun x ->
       sigma_def x; let t = trees x in Level_mgu_spec.normalizes_def h sigma x t; () in
     let model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h sigma x}) @ total = fun x ->
       let () = Level_mgu_proofs.normal_model_at h trees sigma normal x in () in

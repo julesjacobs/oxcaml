@@ -23,7 +23,7 @@ module Make (Key : Vox_table_map.Key) = struct
     R.matching_control model group needle lane;
     Mask.bounded model group needle 16;
     Spec.candidate_at model query group
-      (refine_ (M.matching model group needle 16)) lane;
+      ((M.matching model group needle 16)) lane;
     ())
 
   let (visited_misses @ total) : ('a : immutable_data).
@@ -80,12 +80,12 @@ module Make (Key : Vox_table_map.Key) = struct
           Key.equal key query then begin
         R.route_at model model.slots view.routes 0Z index (Some (key, value));
         Key.hash_equal key query;
-        let (_ : {u : unit | Key.hash key = Key.hash query}) = refine_ () in
+        let (_ : {u : unit | Key.hash key = Key.hash query}) = () in
         match S.at view.routes index with
         | None -> ()
         | Some (rank, lane) ->
           let (_ : {u : unit | I.route model index (Some (key, value))
-            (rank, lane)}) = refine_ () in
+            (rank, lane)}) = () in
           R.route_info model index key value rank lane;
           R.route_equal_key model index key query value rank lane;
           if rank <= stop then begin

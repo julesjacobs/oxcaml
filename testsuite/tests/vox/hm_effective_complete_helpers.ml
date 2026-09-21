@@ -113,14 +113,14 @@ let rec (snapshot @ total) : (h : Pref.heap) @ immutable ->
         | Level_finite_spec.Free _ -> Parameter p
         | Level_finite_spec.Constant_tree _ -> Constant p
         | Level_finite_spec.Alias_tree (_, child) ->
-          let refine_ t = snapshot h heads child () in Indirect (p, t)
+          let t = snapshot h heads child () in Indirect (p, t)
         | Level_finite_spec.Branch (_, a, b) ->
-          let refine_ s = snapshot h heads a () in
-          let refine_ t = snapshot h heads b () in Product (p, s, t) in
-      root_def s; Effective_template.valid_template_def h heads s; refine_ s)
+          let s = snapshot h heads a () in
+          let t = snapshot h heads b () in Product (p, s, t) in
+      root_def s; Effective_template.valid_template_def h heads s; s)
     else (let s = Boundary p in root_def s;
       Effective_template.finite_def h heads p;
-      Effective_template.valid_template_def h heads s; refine_ s))
+      Effective_template.valid_template_def h heads s; s))
 
 let (with_variable_model @ total) : (h : Pref.heap) @ immutable -> (heads : E.heads) @ total -> (certificate : Representative_certificate.certificate) @ immutable -> (depth : int) -> (pool : pool) @ immutable ->
     (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h heads depth pool x})) @ total ->
@@ -154,14 +154,14 @@ let (with_variable_model @ total) : (h : Pref.heap) @ immutable -> (heads : E.he
     let valid : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h heads x}) @ total = fun x ->
       facts x; runtime_at_def h heads depth pool x; safe_def h heads x; () in
     let actual = match lookup env i with None -> root schema | Some p -> p in
-    let refine_ selected = Hm_effective_environment.lookup_schema h heads depth env ts i actual () in
+    let _selected = Hm_effective_environment.lookup_schema h heads depth env ts i actual () in
     Copy_certificate_proofs.replay h certificate heads valid epoch depth d original q ();
     let scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h x then source_ok h x else H.at h x === None}) @ total = fun x ->
       facts x; runtime_at_def h heads depth pool x; safe_def h heads x; () in
     let trees : ((x : node Pref.t) @ immutable ->
       {s : template | not (H.mem h x) || (root s === x && Effective_template.valid_template h heads s)} @ immutable) @ total = fun x ->
-      let refine_ tree = forest x in if H.mem h x then (let refine_ s = snapshot h heads tree () in refine_ s)
-      else (let s = Boundary x in refine_ s) in
+      let tree = forest x in if H.mem h x then (let s = snapshot h heads tree () in s)
+      else (let s = Boundary x in s) in
     T.eval_arguments_length xi args; T.eval_open_scheme xi sigma args;
     let values = T.eval_arguments xi args in
     let consume_choices : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -172,7 +172,7 @@ let (with_variable_model @ total) : (h : Pref.heap) @ immutable -> (heads : E.he
         (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
         {u : unit | tau q === interpret rho choices schema} -> {u : unit | claim}) @ total = fun tau next equal assigned ->
           let () = use tau (refine_ next) equal () in () in
-      let () = Effective_copy_template.with_clean_scheme_instance h heads scope trees rho model choices epoch depth d schema q () claim (refine_ consume) in () in
+      let () = Effective_copy_template.with_clean_scheme_instance h heads scope trees rho model choices epoch depth d schema q () claim (consume) in () in
     let () = realize i sigma schema values () claim consume_choices in ())
 
 
@@ -204,9 +204,9 @@ let (with_application_model @ total) : (h : Pref.heap) @ immutable -> (heads : E
     let trees1 : ((x : node Pref.t) @ immutable ->
       {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
         (if H.mem h1 x then Level_finite_spec.finite h1 t else observe h1 x === None)} @ immutable) @ total = refine_ trees1 in
-    let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 trees1 x in r in
+    let[@def] heads1 : E.heads = fun x -> let r = Forest_heads.select h1 trees1 x in r in
     let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
-      heads1_def x; let refine_ r = Forest_heads.select h1 trees1 x in E.valid_head_def h1 heads1 x; () in
+      heads1_def x; let _r = Forest_heads.select h1 trees1 x in E.valid_head_def h1 heads1 x; () in
     let valid : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h heads x}) @ total = fun x ->
       facts x; runtime_at_def h heads depth pool x; safe_def h heads x; () in
     let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 heads1 depth pool1 x}) @ total = fun x ->
@@ -228,7 +228,7 @@ let (with_application_model @ total) : (h : Pref.heap) @ immutable -> (heads : E
           let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho2 x === rho x}) @ total = fun x ->
             equal1 x; equal2 x; () in
           let () = use rho2 next equal () in () in
-      let () = with_alloc h1 heads1 depth pool1 (refine_ facts1) rho1 model1 arrow desc value h2 () claim consume2 in () in
+      let () = with_alloc h1 heads1 depth pool1 (facts1) rho1 model1 arrow desc value h2 () claim consume2 in () in
     Copy_model_proofs.describes_def rho var target;
     let () = with_alloc h heads depth pool facts rho model p var target h1 () claim consume1 in ())
 

@@ -17,22 +17,21 @@ let run (b : ty @ immutable ghost) =
     let v = D.Bound z in let rhs = D.Lambda v in let body = D.Apply (v, v) in
     D.scoped_term_def z e; D.scoped_term_def z rhs; D.scoped_term_def one v;
     D.scoped_term_def one body; D.present_def one z; ());
-  let e : {e : D.term | D.scoped_term D.Z e} = refine_ e in
-  let refine_ out = Hm_infer.closed_hm e in let refine_ e = e in
-  let after = ghost_ (Pref.own (borrow_ out.#state)) in
-  ghost_ (let u = () in P.id_id_completes out.#execution after out.#pool (refine_ u));
+  let e : {e : D.term | D.scoped_term D.Z e} = e in
+  let out = Hm_infer.closed_hm e in let after = ghost_ (Pref.own (borrow_ out.#state)) in
+  ghost_ (let u = () in P.id_id_completes out.#execution after out.#pool (u));
   match out.#value with None ->
-    ghost_ (let _impossible : {u : unit | false} = refine_ () in ()); assert false
+    ghost_ (let _impossible : {u : unit | false} = () in ()); assert false
   | Some p ->
     ghost_ (let u = () in
-      let refine_ tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (refine_ u) in
+      let tree = Hm_forest_proofs.closed_forest out.#execution after out.#pool p (u) in
       let h = H.empty () in let pool : Generalize_spec.pool = Generalize_spec.Empty in
       let env : Hm_environment_spec.env = Hm_environment_spec.Empty in
-      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (refine_ u);
+      Hm_execution_proofs.run_result h 0 pool env out.#execution after out.#pool p (u);
       let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
         {u : unit | Function (b, b) === Level_mgu_spec.substitute delta (Level_finite_spec.readback tree)} ->
-        {u : unit | true}) @ total = fun _delta _factor -> let u = () in refine_ u in
-      P.id_id_factor out.#execution after out.#pool p tree b (refine_ u) true use; ()); ()
+        {u : unit | true}) @ total = fun _delta _factor -> let u = () in u in
+      P.id_id_factor out.#execution after out.#pool p tree b (u) true use; ()); ()
 
 let () =
   run (ghost_ Boolean);

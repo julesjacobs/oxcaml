@@ -22,7 +22,7 @@ let (empty_refines @ total) query :
       model
     }
   in
-  refine_ result
+  result
 
 let (add_refines_at @ total) :
     (query : int) ->
@@ -37,8 +37,6 @@ let (add_refines_at @ total) :
       Avl_sets.lookup query result.implementation
       === Model.mem query result.model} =
   fun query added input class_compatibility ->
-  let refine_ input = input in
-  let refine_ class_compatibility = class_compatibility in
   let implementation = input.implementation in
   let model = input.model in
   ghost_ (Avl_sets.lookup_add query added implementation);
@@ -47,7 +45,7 @@ let (add_refines_at @ total) :
       model = Model.Refined.add added model
     }
   in
-  refine_ result
+  result
 
 let (union_refines_at @ total) :
     (query : int) ->
@@ -61,8 +59,6 @@ let (union_refines_at @ total) :
       Avl_sets.lookup query result.implementation
       === Model.mem query result.model} =
   fun query left right ->
-  let refine_ left = left in
-  let refine_ right = right in
   let left_implementation = left.implementation in
   let right_implementation = right.implementation in
   let left_model = left.model in
@@ -74,7 +70,7 @@ let (union_refines_at @ total) :
       model = Model.Refined.union left_model right_model
     }
   in
-  refine_ result
+  result
 
 let (inserted_key_refines @ total) added input :
     {result : paired |
@@ -88,7 +84,7 @@ let (inserted_key_refines @ total) added input :
       model = Model.Refined.add added model
     }
   in
-  refine_ result
+  result
 
 let () =
   let one_value = 1 in
@@ -99,9 +95,9 @@ let () =
       model = Model.empty
     }
   in
-  let refine_ one = inserted_key_refines one_value empty in
-  let refine_ two = inserted_key_refines two_value one in
-  let refine_ three = inserted_key_refines three_value two in
+  let one = inserted_key_refines one_value empty in
+  let two = inserted_key_refines two_value one in
+  let three = inserted_key_refines three_value two in
   Format.printf "AVL/model members = %b,%b,%b@."
     (Avl_sets.lookup 1 three.implementation && Model.mem 1 three.model)
     (Avl_sets.lookup 2 three.implementation && Model.mem 2 three.model)

@@ -16,16 +16,16 @@ let remember : (h : (Pref.heap) Ghost.t) @ immutable  ->(needle : (node Pref.t) 
     ghost_ (marks_at h.Ghost.ghost needle.Ghost.ghost d.Ghost.ghost p ();
       let current = marked_heap h.Ghost.ghost d.Ghost.ghost in marked_at_def h.Ghost.ghost current d.Ghost.ghost p;
       searched_def h.Ghost.ghost needle.Ghost.ghost p false search.Ghost.ghost);
-    let refine_ old = Pref.read p (borrow_ state) in if old.visited then
-      let r = #{state; found = false; trail; marks = d.Ghost.ghost; search = search.Ghost.ghost} in refine_ r
+    let old = Pref.read p (borrow_ state) in if old.visited then
+      let r = #{state; found = false; trail; marks = d.Ghost.ghost; search = search.Ghost.ghost} in r
     else
       let v = set_visited old true in
-      let refine_ state = Pref.write p v state in
+      let state = Pref.write p v state in
       let marks = ghost_ (Marked (d.Ghost.ghost, p, old, search.Ghost.ghost)) in
       let trail = Trail (p, trail) in
       ghost_ (marks_valid_def h.Ghost.ghost needle.Ghost.ghost marks; marked_heap_def h.Ghost.ghost marks;
         mark_trail_def marks);
-      let r = #{state; found = false; trail; marks; search = search.Ghost.ghost} in refine_ r
+      let r = #{state; found = false; trail; marks; search = search.Ghost.ghost} in r
 
 type scan_goal = { heap : Pref.heap @@ ghost; needle : node Pref.t @@ ghost;
   root : node Pref.t @@ ghost }
@@ -49,19 +49,19 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
       && r.#trail === mark_trail r.#marks
       && Pref.own r.#state === marked_heap goal.heap r.#marks
       && searched goal.heap goal.needle goal.root r.#found r.#search} @ unique = fun goal h scope unmarked needle p d trail state use ->
-    let refine_ same = Pref.equal needle p in
+    let same = Pref.equal needle p in
     if same then
       let search = ghost_ Hit in
       ghost_ (searched_def h.Ghost.ghost needle p true search);
-      let r = #{state; found = true; trail; marks = d.Ghost.ghost; search} in use (refine_ r)
+      let r = #{state; found = true; trail; marks = d.Ghost.ghost; search} in use (r)
     else begin
       ghost_ (marks_at h.Ghost.ghost needle d.Ghost.ghost p ();
         let current = marked_heap h.Ghost.ghost d.Ghost.ghost in marked_at_def h.Ghost.ghost current d.Ghost.ghost p;
         scope.Ghost.ghost p; unmarked.Ghost.ghost p; source_ok_def h.Ghost.ghost p;
         observe_def h.Ghost.ghost p);
-      let refine_ old = Pref.read p (borrow_ state) in if old.visited then
-        let refine_ search = ghost_ (cached_search h.Ghost.ghost needle d.Ghost.ghost p ()) in
-        let r = #{state; found = false; trail; marks = d.Ghost.ghost; search} in use (refine_ r)
+      let old = Pref.read p (borrow_ state) in if old.visited then
+        let search = ghost_ (cached_search h.Ghost.ghost needle d.Ghost.ghost p ()) in
+        let r = #{state; found = false; trail; marks = d.Ghost.ghost; search} in use (r)
       else
         match old.desc with
         | Var | Bool ->
@@ -69,17 +69,17 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
           ghost_ (searched_def h.Ghost.ghost needle p false search);
           let state : {t : Pref.token | marks_valid h.Ghost.ghost needle d.Ghost.ghost
             && trail === mark_trail d.Ghost.ghost && Pref.own t === marked_heap h.Ghost.ghost d.Ghost.ghost
-            && searched h.Ghost.ghost needle p false search} = refine_ state in
+            && searched h.Ghost.ghost needle p false search} = state in
           let h_witness27 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
           let needle_witness28 : (node Pref.t) Ghost.t = {Ghost.ghost = ghost_ (needle)} in
           let d_witness29 : (marks) Ghost.t = {Ghost.ghost = ghost_ (d.Ghost.ghost)} in
           let search_witness30 : (search) Ghost.t = {Ghost.ghost = ghost_ (search)} in
-          let refine_ state_argument31 = state in
-          let refine_ r = remember h_witness27 needle_witness28 d_witness29 trail p search_witness30 (refine_ state_argument31) in use (refine_ r)
+          let state_argument31 = state in
+          let r = remember h_witness27 needle_witness28 d_witness29 trail p search_witness30 (state_argument31) in use (r)
         | Link q ->
           let state : {t : Pref.token | marks_valid h.Ghost.ghost needle d.Ghost.ghost
             && trail === mark_trail d.Ghost.ghost && Pref.own t === marked_heap h.Ghost.ghost d.Ghost.ghost
-            && H.mem h.Ghost.ghost q} = refine_ state in
+            && H.mem h.Ghost.ghost q} = state in
           let h_witness7 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
           let scope_witness8 : (((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness7.Ghost.ghost x) || source_ok h_witness7.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
@@ -87,7 +87,7 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
       {u : unit | match H.at h_witness7.Ghost.ghost x with
         None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked.Ghost.ghost)} in
           let d_witness10 : (marks) Ghost.t = {Ghost.ghost = ghost_ (d.Ghost.ghost)} in
-          let refine_ state_argument11 = state in
+          let state_argument11 = state in
           let resume_child : (child : {r : scanning | marks_valid h_witness7.Ghost.ghost needle r.#marks
       && r.#trail === mark_trail r.#marks
       && Pref.own r.#state === marked_heap h_witness7.Ghost.ghost r.#marks
@@ -102,22 +102,22 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
           let state = child.#state in let trail = child.#trail in
           let marks = ghost_ child.#marks in
           if found then
-            let r = #{state; found; trail; marks; search} in use (refine_ r)
+            let r = #{state; found; trail; marks; search} in use (r)
           else
             let state : {t : Pref.token | marks_valid h.Ghost.ghost needle marks
               && trail === mark_trail marks && Pref.own t === marked_heap h.Ghost.ghost marks
-              && searched h.Ghost.ghost needle p false search} = refine_ state in
+              && searched h.Ghost.ghost needle p false search} = state in
             let h_witness32 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
             let needle_witness33 : (node Pref.t) Ghost.t = {Ghost.ghost = ghost_ (needle)} in
             let d_witness34 : (marks) Ghost.t = {Ghost.ghost = ghost_ (marks)} in
             let search_witness35 : (search) Ghost.t = {Ghost.ghost = ghost_ (search)} in
-            let refine_ state_argument36 = state in
-            let refine_ r = remember h_witness32 needle_witness33 d_witness34 trail p search_witness35 (refine_ state_argument36) in use (refine_ r) in
-          scan_work goal h_witness7 scope_witness8 unmarked_witness9 needle q d_witness10 trail (refine_ state_argument11) resume_child
+            let state_argument36 = state in
+            let r = remember h_witness32 needle_witness33 d_witness34 trail p search_witness35 (state_argument36) in use (r) in
+          scan_work goal h_witness7 scope_witness8 unmarked_witness9 needle q d_witness10 trail (state_argument11) resume_child
         | Arrow (a, b) ->
           let state : {t : Pref.token | marks_valid h.Ghost.ghost needle d.Ghost.ghost
             && trail === mark_trail d.Ghost.ghost && Pref.own t === marked_heap h.Ghost.ghost d.Ghost.ghost
-            && H.mem h.Ghost.ghost a} = refine_ state in
+            && H.mem h.Ghost.ghost a} = state in
           let h_witness12 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
           let scope_witness13 : (((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness12.Ghost.ghost x) || source_ok h_witness12.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
@@ -125,7 +125,7 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
       {u : unit | match H.at h_witness12.Ghost.ghost x with
         None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked.Ghost.ghost)} in
           let d_witness15 : (marks) Ghost.t = {Ghost.ghost = ghost_ (d.Ghost.ghost)} in
-          let refine_ state_argument16 = state in
+          let state_argument16 = state in
           let resume_left : (left : {r : scanning | marks_valid h_witness12.Ghost.ghost needle r.#marks
       && r.#trail === mark_trail r.#marks
       && Pref.own r.#state === marked_heap h_witness12.Ghost.ghost r.#marks
@@ -139,11 +139,11 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
           if left.#found then
             let search = ghost_ (Left (a, b, left.#search)) in
             ghost_ (searched_def h.Ghost.ghost needle p true search);
-            let r = #{state; found = true; trail; marks; search} in use (refine_ r)
+            let r = #{state; found = true; trail; marks; search} in use (r)
           else
             let state : {t : Pref.token | marks_valid h.Ghost.ghost needle marks
               && trail === mark_trail marks && Pref.own t === marked_heap h.Ghost.ghost marks
-              && H.mem h.Ghost.ghost b} = refine_ state in
+              && H.mem h.Ghost.ghost b} = state in
             let h_witness17 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
             let scope_witness18 : (((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness17.Ghost.ghost x) || source_ok h_witness17.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
@@ -151,7 +151,7 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
       {u : unit | match H.at h_witness17.Ghost.ghost x with
         None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked.Ghost.ghost)} in
             let d_witness20 : (marks) Ghost.t = {Ghost.ghost = ghost_ (marks)} in
-            let refine_ state_argument21 = state in
+            let state_argument21 = state in
             let resume_right : (right : {r : scanning | marks_valid h_witness17.Ghost.ghost needle r.#marks
       && r.#trail === mark_trail r.#marks
       && Pref.own r.#state === marked_heap h_witness17.Ghost.ghost r.#marks
@@ -166,20 +166,20 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (Pref.heap) Ghost.t) 
             let state = right.#state in let trail = right.#trail in
             let marks = ghost_ right.#marks in
             if found then
-              let r = #{state; found; trail; marks; search} in use (refine_ r)
+              let r = #{state; found; trail; marks; search} in use (r)
             else
               let state : {t : Pref.token | marks_valid h.Ghost.ghost needle marks
                 && trail === mark_trail marks && Pref.own t === marked_heap h.Ghost.ghost marks
-                && searched h.Ghost.ghost needle p false search} = refine_ state in
+                && searched h.Ghost.ghost needle p false search} = state in
               let h_witness37 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
               let needle_witness38 : (node Pref.t) Ghost.t = {Ghost.ghost = ghost_ (needle)} in
               let d_witness39 : (marks) Ghost.t = {Ghost.ghost = ghost_ (marks)} in
               let search_witness40 : (search) Ghost.t = {Ghost.ghost = ghost_ (search)} in
-              let refine_ state_argument41 = state in
-              let refine_ r = remember h_witness37 needle_witness38 d_witness39 trail p search_witness40 (refine_ state_argument41) in use (refine_ r)
+              let state_argument41 = state in
+              let r = remember h_witness37 needle_witness38 d_witness39 trail p search_witness40 (state_argument41) in use (r)
  in
-            scan_work goal h_witness17 scope_witness18 unmarked_witness19 needle b d_witness20 trail (refine_ state_argument21) resume_right in
-          scan_work goal h_witness12 scope_witness13 unmarked_witness14 needle a d_witness15 trail (refine_ state_argument16) resume_left
+            scan_work goal h_witness17 scope_witness18 unmarked_witness19 needle b d_witness20 trail (state_argument21) resume_right in
+          scan_work goal h_witness12 scope_witness13 unmarked_witness14 needle a d_witness15 trail (state_argument16) resume_left
     end
 
 let scan : (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.t) @ immutable ->
@@ -202,8 +202,8 @@ let scan : (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.t)
       && r.#trail === mark_trail r.#marks
       && Pref.own r.#state === marked_heap goal.heap r.#marks
       && searched goal.heap goal.needle goal.root r.#found r.#search} @ unique = fun r ->
-      refine_ r in
-    let refine_ out = scan_work goal h scope unmarked needle p d trail state use in refine_ out
+      r in
+    let out = scan_work goal h scope unmarked needle p d trail state use in out
 
 let rec reset : (h : (Pref.heap) Ghost.t) @ immutable  ->
     (trail : trail) @ immutable  ->(members : (((x : node Pref.t) @ immutable ->
@@ -212,22 +212,22 @@ let rec reset : (h : (Pref.heap) Ghost.t) @ immutable  ->
     {t : Pref.token | Pref.own t === reset_heap h.Ghost.ghost trail} @ unique = fun h trail members state  ->
     ghost_ (reset_heap_def h.Ghost.ghost trail);
     match trail with
-    | End -> refine_ state
+    | End -> state
     | Trail (p, rest) ->
       ghost_ (on_trail_def trail p; members.Ghost.ghost p);
-      let refine_ old = Pref.read p (borrow_ state) in
+      let old = Pref.read p (borrow_ state) in
       let v = set_visited old false in
-      let refine_ state = Pref.write p v state in
+      let state = Pref.write p v state in
       let mid = ghost_ (H.put h.Ghost.ghost p v) in
       let tail : ((x : node Pref.t) @ immutable ->
         {u : unit | not (on_trail rest x) || H.mem mid x}) @ total ghost = ghost_ (fun x ->
         on_trail_def trail x; members.Ghost.ghost x; ()) in
-      let state : {t : Pref.token | Pref.own t === mid} = refine_ state in
+      let state : {t : Pref.token | Pref.own t === mid} = state in
       let h_witness1 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (mid)} in
       let members_witness2 : (((x : node Pref.t) @ immutable ->
-      {u : unit | not (on_trail rest x) || H.mem h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ tail)} in
-      let refine_ state_argument3 = state in
-      let refine_ state = reset h_witness1 rest members_witness2 (refine_ state_argument3) in refine_ state
+      {u : unit | not (on_trail rest x) || H.mem h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (tail)} in
+      let state_argument3 = state in
+      let state = reset h_witness1 rest members_witness2 (state_argument3) in state
 
 let occurs : (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h.Ghost.ghost x) || source_ok h.Ghost.ghost x})) Ghost.t) @ total  ->(unmarked : (((x : node Pref.t) @ immutable ->
@@ -243,7 +243,7 @@ let occurs : (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.
     ghost_ (marks_valid_def h.Ghost.ghost needle d; marked_heap_def h.Ghost.ghost d; mark_trail_def d);
     let state : {t : Pref.token | marks_valid h.Ghost.ghost needle d
       && trail === mark_trail d && Pref.own t === marked_heap h.Ghost.ghost d
-      && H.mem h.Ghost.ghost p} = refine_ state in
+      && H.mem h.Ghost.ghost p} = state in
     let h_witness22 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
     let scope_witness23 : (((x : node Pref.t) @ immutable ->
       {u : unit | not (H.mem h_witness22.Ghost.ghost x) || source_ok h_witness22.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
@@ -251,8 +251,8 @@ let occurs : (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.
       {u : unit | match H.at h_witness22.Ghost.ghost x with
         None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked.Ghost.ghost)} in
     let d_witness25 : (marks) Ghost.t = {Ghost.ghost = ghost_ (d)} in
-    let refine_ state_argument26 = state in
-    let refine_ found = scan h_witness22 scope_witness23 unmarked_witness24 needle p d_witness25 trail (refine_ state_argument26) in
+    let state_argument26 = state in
+    let found = scan h_witness22 scope_witness23 unmarked_witness24 needle p d_witness25 trail (state_argument26) in
     let d = ghost_ found.#marks in let trail = found.#trail in
     let mid = ghost_ (marked_heap h.Ghost.ghost d) in
     let members : ((x : node Pref.t) @ immutable ->
@@ -260,10 +260,10 @@ let occurs : (h : (Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.
       trail_members d x; initially_unmarked h.Ghost.ghost needle d x ();
       marks_at h.Ghost.ghost needle d x (); marked_at_def h.Ghost.ghost mid d x; ()) in
     let state = found.#state in
-    let state : {t : Pref.token | Pref.own t === mid} = refine_ state in
+    let state : {t : Pref.token | Pref.own t === mid} = state in
     let h_witness4 : (Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (mid)} in
     let members_witness5 : (((x : node Pref.t) @ immutable ->
-      {u : unit | not (on_trail trail x) || H.mem h_witness4.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ members)} in
-    let refine_ state_argument6 = state in
-    let refine_ state = reset h_witness4 trail members_witness5 (refine_ state_argument6) in
-    let r = #{state; found = found.#found; marks = d; search = found.#search} in refine_ r
+      {u : unit | not (on_trail trail x) || H.mem h_witness4.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (members)} in
+    let state_argument6 = state in
+    let state = reset h_witness4 trail members_witness5 (state_argument6) in
+    let r = #{state; found = found.#found; marks = d; search = found.#search} in r

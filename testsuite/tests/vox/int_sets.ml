@@ -27,7 +27,7 @@ let () =
         {u : unit | lookup element result === lookup element result} =
       fun _element ->
       let u = () in
-      refine_ u
+      u
     in
     extensional result result same_lookup;
     ())

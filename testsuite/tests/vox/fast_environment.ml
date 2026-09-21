@@ -85,7 +85,7 @@ let rec (lookup_encoded @ total) : (env : E.env) @ immutable ->
 
 let cons : (p : node Pref.t) @ immutable ->
     (f : {f : forest | valid_forest f}) @ immutable ->
-    {out : forest | let refine_ f = f in valid_forest out
+    {out : forest | valid_forest out
       && flatten out === E.Bind (p, flatten f)} @ immutable = fun p f ->
   ghost_ (valid_forest_def f; flatten_def f);
   match f with

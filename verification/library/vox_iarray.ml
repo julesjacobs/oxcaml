@@ -9,25 +9,25 @@ let[@def] at (values : ('a : immutable_data) iarray @ immutable total)
     (index : int) : 'a option @ immutable total =
   if 0 <= index && index < Iarray.length values then
     let bounded : {i : int | 0 <= i && i < Iarray.length values} =
-      refine_ index in
+      index in
     Some (get values bounded)
   else None
 
 let (at_get @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-    {u : unit | let refine_ i = index in
+    {u : unit | let i = index in
       at values i === Some (get values index)} = fun values index ->
-  let refine_ i = index in
+  let i = index in
   at_def values i;
-  let u = () in refine_ u
+  let u = () in u
 
 let (at_outside @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (index : int) ->
     {u : unit | if index < 0 || Iarray.length values <= index then
       at values index === None else true} = fun values index ->
   at_def values index;
-  let u = () in refine_ u
+  let u = () in u
 
 external extensional : ('a : immutable_data).
   (left : 'a iarray) @ immutable total ->
@@ -47,17 +47,17 @@ external set : ('a : immutable_data).
 external sub : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
   (position : {i : int | 0 <= i && i <= Iarray.length values}) ->
-  (size : {n : int | let refine_ p = position in
+  (size : {n : int | let p = position in
     0 <= n && n <= Iarray.length values - p}) ->
-  {result : 'a iarray | let refine_ n = size in Iarray.length result = n}
+  {result : 'a iarray | let n = size in Iarray.length result = n}
     @ immutable total @@ total = "caml_vox_iarray_sub"
 
 let[@def] updated (values : ('a : immutable_data) iarray @ immutable total)
     (index : int) (value : 'a @ immutable total) : 'a iarray @ immutable total =
   if 0 <= index && index < Iarray.length values then
     let bounded : {i : int | 0 <= i && i < Iarray.length values} =
-      refine_ index in
-    let refine_ result = set values bounded value in
+      index in
+    let result = set values bounded value in
     result
   else values
 
@@ -65,14 +65,14 @@ let (set_read @ total) : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
   (index : {i : int | 0 <= i && i < Iarray.length values}) ->
   (value : 'a) @ immutable -> (query : int) ->
-  {u : unit | let refine_ i = index in
-    let refine_ changed = set values index value in
+  {u : unit | let i = index in
+    let changed = set values index value in
     at changed query === (if i = query then Some value else at values query)} =
   fun values index value query ->
-    let refine_ changed = set values index value in
+    let changed = set values index value in
     at_def changed query;
     at_def values query;
-    let u = () in refine_ u
+    let u = () in u
 
 let (updated_length @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (index : int) ->
@@ -80,7 +80,7 @@ let (updated_length @ total) : ('a : immutable_data).
     {u : unit | Iarray.length (updated values index value) =
       Iarray.length values} = fun values index value ->
   updated_def values index value;
-  let u = () in refine_ u
+  let u = () in u
 
 let (updated_read @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (index : int) ->
@@ -92,7 +92,7 @@ let (updated_read @ total) : ('a : immutable_data).
   let changed = updated values index value in
   at_def changed query;
   at_def values query;
-  let u = () in refine_ u
+  let u = () in u
 
 let[@def] slice (values : ('a : immutable_data) iarray @ immutable total)
     (first : int) (past : int) : 'a iarray @ immutable total =
@@ -101,11 +101,11 @@ let[@def] slice (values : ('a : immutable_data) iarray @ immutable total)
   let past = if past < first then first else if past > size then size else past
     in
   let position : {i : int | 0 <= i && i <= Iarray.length values} =
-    refine_ first in
+    first in
   let length = past - first in
-  let length : {n : int | let refine_ p = position in
-    0 <= n && n <= Iarray.length values - p} = refine_ length in
-  let refine_ result = sub values position length in
+  let length : {n : int | let p = position in
+    0 <= n && n <= Iarray.length values - p} = length in
+  let result = sub values position length in
   result
 
 let (slice_length @ total) : ('a : immutable_data).
@@ -114,7 +114,7 @@ let (slice_length @ total) : ('a : immutable_data).
       then Iarray.length (slice values first past) = past - first else true} =
   fun values first past ->
     slice_def values first past;
-    let u = () in refine_ u
+    let u = () in u
 
 let (slice_read @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (first : int) -> (past : int) ->
@@ -129,7 +129,7 @@ let (slice_read @ total) : ('a : immutable_data).
     let position = first + index in
     at_def result index;
     at_def values position;
-    let u = () in refine_ u
+    let u = () in u
 
 let (slice_all @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
@@ -143,8 +143,8 @@ let (slice_all @ total) : ('a : immutable_data).
     (ghost_ (fun index ->
       slice_read values zero size index;
       at_def values index;
-      let u = () in refine_ u));
-  let u = () in refine_ u
+      let u = () in u));
+  let u = () in u
 
 let (slice_slice @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (first : int) -> (past : int) ->
@@ -170,9 +170,9 @@ let (slice_slice @ total) : ('a : immutable_data).
           slice_read middle lower upper index;
           slice_read values first past shifted;
           slice_read values start stop index;
-          let u = () in refine_ u));
-      let u = () in refine_ u
-    else let u = () in refine_ u
+          let u = () in u));
+      let u = () in u
+    else let u = () in u
 
 let[@def] swap (values : ('a : immutable_data) iarray @ immutable total)
     (first : int) (second : int) : 'a iarray @ immutable total =
@@ -191,8 +191,8 @@ let (swap_length @ total) : ('a : immutable_data).
       let middle = updated values first y in
       updated_length values first y;
       updated_length middle second x;
-      let u = () in refine_ u
-    | _ -> let u = () in refine_ u
+      let u = () in u
+    | _ -> let u = () in u
 
 let (swap_read @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (first : int) -> (second : int) ->
@@ -212,8 +212,8 @@ let (swap_read @ total) : ('a : immutable_data).
       updated_length values first y;
       updated_read values first y query;
       updated_read middle second x query;
-      let u = () in refine_ u
-    | _ -> let u = () in refine_ u
+      let u = () in u
+    | _ -> let u = () in u
 
 let[@def] to_list (values : ('a : immutable_data) iarray @ immutable total) :
     'a list @ immutable total =
@@ -225,18 +225,18 @@ let (to_list_length @ total) : ('a : immutable_data).
       Bigint.of_int (Iarray.length values)} = fun values ->
   to_list_def values;
   Vox_sequence.of_iarray_length values;
-  let u = () in refine_ u
+  let u = () in u
 
 let (to_list_get @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-    {u : unit | let refine_ i = index in
+    {u : unit | let i = index in
       Vox_sequence.at (to_list values) (Bigint.of_int i) === at values i} =
     fun values index ->
   to_list_def values;
   Vox_sequence.of_iarray_at values index;
   at_get values index;
-  let u = () in refine_ u
+  let u = () in u
 
 let (to_list_at @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (index : int) ->
@@ -244,16 +244,16 @@ let (to_list_at @ total) : ('a : immutable_data).
       === at values index} = fun values index ->
   if 0 <= index && index < Iarray.length values then
     let bounded : {i : int | 0 <= i && i < Iarray.length values} =
-      refine_ index in
+      index in
     to_list_get values bounded;
-    let u = () in refine_ u
+    let u = () in u
   else
     let converted = to_list values in
     let query = Bigint.of_int index in
     to_list_length values;
     Vox_sequence.at_outside converted query;
     at_outside values index;
-    let u = () in refine_ u
+    let u = () in u
 
 let (to_list_updated_at @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (index : int) ->
@@ -267,7 +267,7 @@ let (to_list_updated_at @ total) : ('a : immutable_data).
   to_list_at changed query;
   to_list_at values query;
   updated_read values index value query;
-  let u = () in refine_ u
+  let u = () in u
 
 let (to_list_slice_at @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (first : int) -> (past : int) ->
@@ -283,7 +283,7 @@ let (to_list_slice_at @ total) : ('a : immutable_data).
   to_list_at part query;
   to_list_at values shifted;
   slice_read values first past query;
-  let u = () in refine_ u
+  let u = () in u
 
 module For_all (P : Vox_sequence.Predicate) = struct
   let[@def] rec range (values : P.element iarray @ immutable total)
@@ -308,11 +308,11 @@ module For_all (P : Vox_sequence.Predicate) = struct
     range_def values first past;
     if past > 0 then
       let previous = past - 1 in
-      if index = previous then let u = () in refine_ u
+      if index = previous then let u = () in u
       else
         (range_get values first previous index;
-        let u = () in refine_ u)
-    else let u = () in refine_ u
+        let u = () in u)
+    else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let rec (range_intro @ total) :
@@ -326,12 +326,12 @@ module For_all (P : Vox_sequence.Predicate) = struct
     range_def values first past;
     if past > 0 then
       let previous = past - 1 in
-      let refine_ last = proof previous in
+      let _last = proof previous in
       range_intro values first previous (fun index ->
-        let refine_ known = proof index in
-        let u = () in refine_ u);
-      let u = () in refine_ u
-    else let u = () in refine_ u
+        let _known = proof index in
+        let u = () in u);
+      let u = () in u
+    else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let (get @ total) : (values : P.element iarray) @ immutable ->
@@ -344,7 +344,7 @@ module For_all (P : Vox_sequence.Predicate) = struct
     holds_def values;
     range_get values zero size index;
     at_outside values index;
-    let u = () in refine_ u
+    let u = () in u
 
   let (intro @ total) : (values : P.element iarray) @ immutable ->
       ((index : int) -> {u : unit | if 0 <= index
@@ -355,9 +355,9 @@ module For_all (P : Vox_sequence.Predicate) = struct
     let size = Iarray.length values in
     holds_def values;
     range_intro values zero size (fun index ->
-      let refine_ point = proof index in
-      let u = () in refine_ u);
-    let u = () in refine_ u
+      let _point = proof index in
+      let u = () in u);
+    let u = () in u
 
   let (updated_holds @ total) : (values : P.element iarray) @ immutable ->
       (index : int) -> (value : P.element) @ immutable ->
@@ -367,11 +367,11 @@ module For_all (P : Vox_sequence.Predicate) = struct
     if holds values && P.test value then
       let changed = updated values index value in
       intro changed (fun query ->
-        let refine_ old = get values query in
+        let _old = get values query in
         updated_read values index value query;
-        let u = () in refine_ u);
-      let u = () in refine_ u
-    else let u = () in refine_ u
+        let u = () in u);
+      let u = () in u
+    else let u = () in u
 
   let (slice_holds @ total) : (values : P.element iarray) @ immutable ->
       (first : int) -> (past : int) ->
@@ -385,10 +385,10 @@ module For_all (P : Vox_sequence.Predicate) = struct
       intro part (fun index ->
         let shifted = first + index in
         slice_read values first past index;
-        let refine_ known = get values shifted in
-        let u = () in refine_ u);
-      let u = () in refine_ u
-    else let u = () in refine_ u
+        let _known = get values shifted in
+        let u = () in u);
+      let u = () in u
+    else let u = () in u
 
   let (split_holds @ total) : (values : P.element iarray) @ immutable ->
       (middle : int) ->
@@ -405,13 +405,13 @@ module For_all (P : Vox_sequence.Predicate) = struct
     if 0 <= middle && middle <= size && holds left && holds right then
       (intro values (fun index ->
         let relative = index - middle in
-        let refine_ first = get left index in
-        let refine_ second = get right relative in
+        let _first = get left index in
+        let _second = get right relative in
         slice_read values zero middle index;
         slice_read values middle size relative;
-        let u = () in refine_ u);
-      let u = () in refine_ u)
-    else let u = () in refine_ u
+        let u = () in u);
+      let u = () in u)
+    else let u = () in u
 end
 
 module Int = struct
@@ -447,11 +447,11 @@ module Int = struct
       range_def values bound lower first past;
       if past > 0 then
         let previous = past - 1 in
-        if index = previous then let u = () in refine_ u
+        if index = previous then let u = () in u
         else
           (range_get values bound lower first previous index;
-          let u = () in refine_ u)
-      else let u = () in refine_ u
+          let u = () in u)
+      else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let rec (range_intro @ total) :
@@ -466,13 +466,13 @@ module Int = struct
       range_def values bound lower first past;
       if past > 0 then
         let previous = past - 1 in
-        let refine_ last = proof previous in
+        let _last = proof previous in
         range_intro values bound lower first previous
           (fun index ->
-            let refine_ known = proof index in
-            let u = () in refine_ u);
-        let u = () in refine_ u
-      else let u = () in refine_ u
+            let _known = proof index in
+            let u = () in u);
+        let u = () in u
+      else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
   let (element_updated @ total) : (values : int iarray) -> (index : int) ->
       (value : int) -> (query : int) ->
@@ -484,7 +484,7 @@ module Int = struct
     updated_read values index value query;
     element_def values query;
     element_def changed query;
-    let u = () in refine_ u
+    let u = () in u
 
   let (element_slice @ total) : (values : int iarray) ->
       (first : int) -> (past : int) -> (index : int) ->
@@ -497,7 +497,7 @@ module Int = struct
     slice_read values first past index;
     element_def values shifted;
     element_def result index;
-    let u = () in refine_ u
+    let u = () in u
 
   let (element_swap @ total) : (values : int iarray) ->
       (first : int) -> (second : int) -> (index : int) ->
@@ -514,7 +514,7 @@ module Int = struct
     element_def values first;
     element_def values second;
     element_def result index;
-    let u = () in refine_ u
+    let u = () in u
 
   let (range_empty @ total) : (values : int iarray) -> (bound : int) ->
       (lower : bool) -> (first : int) -> (past : int) ->
@@ -522,9 +522,9 @@ module Int = struct
         else true} = fun values bound lower first past ->
     if past <= first then
       (range_intro values bound lower first past
-        (fun index -> let u = () in refine_ u);
-      let u = () in refine_ u)
-    else let u = () in refine_ u
+        (fun index -> let u = () in u);
+      let u = () in u)
+    else let u = () in u
 
   let (range_shrink @ total) : (values : int iarray) -> (bound : int) ->
       (lower : bool) -> (first : int) -> (past : int) ->
@@ -538,9 +538,9 @@ module Int = struct
         (range_intro values bound lower new_first new_past
           (fun index ->
             range_get values bound lower first past index;
-            let u = () in refine_ u);
-        let u = () in refine_ u)
-      else let u = () in refine_ u
+            let u = () in u);
+        let u = () in u)
+      else let u = () in u
 
   let (range_grow @ total) : (values : int iarray) -> (bound : int) ->
       (lower : bool) -> (first : int) -> (past : int) ->
@@ -551,7 +551,7 @@ module Int = struct
     fun values bound lower first past ->
       let next = past + 1 in
       range_def values bound lower first next;
-      let u = () in refine_ u
+      let u = () in u
 
   let (range_set @ total) : (values : int iarray) -> (bound : int) ->
       (lower : bool) -> (first : int) -> (past : int) ->
@@ -568,9 +568,9 @@ module Int = struct
           (fun query ->
             range_get values bound lower first past query;
             element_updated values index value query;
-            let u = () in refine_ u);
-        let u = () in refine_ u
-      else let u = () in refine_ u
+            let u = () in u);
+        let u = () in u
+      else let u = () in u
 
   let[@def] rec sorted_prefix (values : int iarray) (past : int) =
     if past <= 1 then true
@@ -593,10 +593,10 @@ module Int = struct
     if past > 1 then
       let previous = past - 1 in
       let index = past - 2 in
-      let refine_ pair = proof index in
+      let _pair = proof index in
       sorted_prefix_intro values previous proof;
-      let u = () in refine_ u
-    else let u = () in refine_ u
+      let u = () in u
+    else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let (sorted_intro @ total) : (values : int iarray) ->
@@ -608,7 +608,7 @@ module Int = struct
     let size = Iarray.length values in
     sorted_def values;
     sorted_prefix_intro values size proof;
-    let u = () in refine_ u
+    let u = () in u
 
   let rec (sorted_prefix_get @ total) : (values : int iarray) -> (past : int) ->
       (index : int) ->
@@ -620,11 +620,11 @@ module Int = struct
       if past > 1 then
         let last = past - 2 in
         let previous = past - 1 in
-        if index = last then let u = () in refine_ u
+        if index = last then let u = () in u
         else
           (sorted_prefix_get values previous index;
-          let u = () in refine_ u)
-      else let u = () in refine_ u
+          let u = () in u)
+      else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let (sorted_get @ total) : (values : int iarray) -> (index : int) ->
@@ -635,7 +635,7 @@ module Int = struct
       let size = Iarray.length values in
       sorted_def values;
       sorted_prefix_get values size index;
-      let u = () in refine_ u
+      let u = () in u
 
   let rec (ordered @ total) : (values : int iarray) ->
       (first : int) -> (last : int) ->
@@ -648,8 +648,8 @@ module Int = struct
       let previous = last - 1 in
       ordered values first previous;
       sorted_get values previous;
-      let u = () in refine_ u
-    else let u = () in refine_ u
+      let u = () in u
+    else let u = () in u
   [@@decreases
     let first : int = first in let last : int = last in
     if 0 <= first && first <= last then last - first else 0]
@@ -669,9 +669,9 @@ module Int = struct
         element_slice values first past index;
         element_slice values first past following;
         sorted_get values shifted;
-        let u = () in refine_ u);
-      let u = () in refine_ u
-    else let u = () in refine_ u
+        let u = () in u);
+      let u = () in u
+    else let u = () in u
 
   let (sorted_updated @ total) : (values : int iarray) -> (index : int) ->
       (value : int) ->
@@ -692,9 +692,9 @@ module Int = struct
         element_updated values index value query;
         element_updated values index value next;
         sorted_get values query;
-        let u = () in refine_ u);
-      let u = () in refine_ u
-    else let u = () in refine_ u
+        let u = () in u);
+      let u = () in u
+    else let u = () in u
 
   let (sorted_glue @ total) : (values : int iarray) -> (pivot : int) ->
       (index : int) ->
@@ -725,14 +725,14 @@ module Int = struct
             element_slice values zero index query;
             element_slice values zero index following;
             sorted_get left query;
-            let u = () in refine_ u)
+            let u = () in u)
           else if query < index then (
             element_slice values zero index query;
             all_def left pivot low;
             range_get left pivot low zero index query;
             let value = element left query in
             accepts_def value pivot low;
-            let u = () in refine_ u)
+            let u = () in u)
           else if query = index then (
             element_slice values next size zero;
             let length = size - next in
@@ -740,17 +740,17 @@ module Int = struct
             range_get right pivot high zero length zero;
             let value = element right zero in
             accepts_def value pivot high;
-            let u = () in refine_ u)
+            let u = () in u)
           else (
             let relative = query - next in
             let following = relative + 1 in
             element_slice values next size relative;
             element_slice values next size following;
             sorted_get right relative;
-            let u = () in refine_ u))
-        else let u = () in refine_ u);
-      let u = () in refine_ u)
-    else let u = () in refine_ u
+            let u = () in u))
+        else let u = () in u);
+      let u = () in u)
+    else let u = () in u
 
   let[@def] rec count_prefix (values : int iarray) (target : int) (past : int) =
     if past <= 0 then 0Z
@@ -781,7 +781,7 @@ module Int = struct
       if 0 < past && past <= Iarray.length values then
         let index = past - 1 in
         let bounded : {i : int | 0 <= i && i < Iarray.length values} =
-          refine_ index in
+          index in
         let head = get values bounded in
         Vox_sequence.iarray_at_get values bounded;
         let next = head :: suffix in
@@ -789,8 +789,8 @@ module Int = struct
         at_def values index;
         element_def values index;
         to_list_prefix_count values index next target;
-        let u = () in refine_ u
-      else let u = () in refine_ u
+        let u = () in u
+      else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let (to_list_count @ total) : (values : int iarray) -> (target : int) ->
@@ -803,7 +803,7 @@ module Int = struct
     count_def values target;
     Vox_int_sequence.count_def nil target;
     to_list_prefix_count values size nil target;
-    let u = () in refine_ u
+    let u = () in u
 
   let (permutation_count @ total) : (before : int iarray) ->
       (after : int iarray) -> (target : int) ->
@@ -819,7 +819,7 @@ module Int = struct
       Vox_int_sequence.permutation_count left right target;
       to_list_count before target;
       to_list_count after target;
-      let u = () in refine_ u
+      let u = () in u
 
   let (count_extensional @ total) : (left : int iarray) -> (right : int iarray)
     ->
@@ -830,15 +830,15 @@ module Int = struct
     let after = to_list right in
     Vox_int_sequence.count_extensional before after
       (fun target ->
-        let refine_ known = proof target in
+        let _known = proof target in
         to_list_count left target;
         to_list_count right target;
-        let u = () in refine_ u);
+        let u = () in u);
     Vox_int_sequence.permutation_def before after;
     bag_def left;
     bag_def right;
     permutation_def left right;
-    let u = () in refine_ u
+    let u = () in u
 
   let rec (count_prefix_updated @ total) : (values : int iarray) ->
       (index : int) -> (value : int) -> (target : int) -> (past : int) ->
@@ -856,8 +856,8 @@ module Int = struct
       let previous = past - 1 in
       element_updated values index value previous;
       count_prefix_updated values index value target previous;
-      let u = () in refine_ u
-    else let u = () in refine_ u
+      let u = () in u
+    else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let (count_updated @ total) : (values : int iarray) -> (index : int) ->
@@ -874,7 +874,7 @@ module Int = struct
     count_def values target;
     count_def changed target;
     count_prefix_updated values index value target size;
-    let u = () in refine_ u
+    let u = () in u
 
   let (count_swap @ total) : (values : int iarray) -> (first : int) ->
       (second : int) -> (target : int) ->
@@ -884,8 +884,8 @@ module Int = struct
       swap_def values first second;
       at_def values first;
       at_def values second;
-      let refine_ x = element_def values first in
-      let refine_ y = element_def values second in
+      let _x = element_def values first in
+      let _y = element_def values second in
       match at values first, at values second with
       | Some x, Some y ->
         let middle = updated values first y in
@@ -893,8 +893,8 @@ module Int = struct
         element_updated values first y second;
         count_updated values first y target;
         count_updated middle second x target;
-        let u = () in refine_ u
-      | _ -> let u = () in refine_ u
+        let u = () in u
+      | _ -> let u = () in u
 
   let (permutation_swap @ total) : (values : int iarray) ->
       (first : int) -> (second : int) ->
@@ -903,13 +903,13 @@ module Int = struct
       let after = swap values first second in
       count_extensional values after (fun target ->
         count_swap values first second target;
-        let u = () in refine_ u);
-      let u = () in refine_ u
+        let u = () in u);
+      let u = () in u
 
   let (permutation_refl @ total) : (values : int iarray) ->
       {u : unit | permutation values values} = fun values ->
     permutation_def values values;
-    let u = () in refine_ u
+    let u = () in u
 
   let (permutation_trans @ total) : (first : int iarray) ->
       (second : int iarray) -> (third : int iarray) ->
@@ -918,7 +918,7 @@ module Int = struct
     permutation_def first second;
     permutation_def second third;
     permutation_def first third;
-    let u = () in refine_ u
+    let u = () in u
 
   let rec (count_prefix_slice @ total) : (values : int iarray) ->
       (first : int) -> (past : int) -> (target : int) -> (size : int) ->
@@ -936,8 +936,8 @@ module Int = struct
         count_prefix_def values target finish;
         element_slice values first past previous;
         count_prefix_slice values first past target previous;
-        let u = () in refine_ u
-      else let u = () in refine_ u
+        let u = () in u
+      else let u = () in u
   [@@decreases let size : int = size in if size > 0 then size else 0]
 
   let (count_slice @ total) : (values : int iarray) ->
@@ -952,7 +952,7 @@ module Int = struct
       slice_length values first past;
       count_def part target;
       count_prefix_slice values first past target size;
-      let u = () in refine_ u
+      let u = () in u
 
   let (count_decompose3 @ total) : (values : int iarray) ->
       (first : int) -> (past : int) -> (target : int) ->
@@ -969,7 +969,7 @@ module Int = struct
     count_slice values past size target;
     count_def values target;
     count_prefix_def values target zero;
-    let u = () in refine_ u
+    let u = () in u
 
   let rec (count_prefix_nonnegative @ total) : (values : int iarray) ->
       (target : int) -> (past : int) ->
@@ -979,8 +979,8 @@ module Int = struct
     if past > 0 then
       let previous = past - 1 in
       count_prefix_nonnegative values target previous;
-      let u = () in refine_ u
-    else let u = () in refine_ u
+      let u = () in u
+    else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let rec (count_prefix_present @ total) : (values : int iarray) ->
@@ -992,11 +992,11 @@ module Int = struct
       if past > 0 then
         let previous = past - 1 in
         count_prefix_nonnegative values target previous;
-        if index = previous then let u = () in refine_ u
+        if index = previous then let u = () in u
         else
           (count_prefix_present values target previous index;
-          let u = () in refine_ u)
-      else let u = () in refine_ u
+          let u = () in u)
+      else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let rec (count_prefix_bound @ total) : (values : int iarray) ->
@@ -1013,8 +1013,8 @@ module Int = struct
         let previous = past - 1 in
         range_get values bound lower zero size previous;
         count_prefix_bound values target bound lower previous;
-        let u = () in refine_ u
-      else let u = () in refine_ u
+        let u = () in u
+      else let u = () in u
   [@@decreases let past : int = past in if past > 0 then past else 0]
 
   let (all_permutation @ total) : (before : int iarray) -> (after : int iarray)
@@ -1034,9 +1034,9 @@ module Int = struct
       permutation_count before after target;
       count_prefix_present after target size index;
       count_prefix_bound before target bound lower old_size;
-      let u = () in refine_ u);
+      let u = () in u);
     all_def after bound lower;
-    let u = () in refine_ u
+    let u = () in u
 
   let (range_slice @ total) : (values : int iarray) -> (bound : int) ->
       (lower : bool) -> (first : int) -> (past : int) ->
@@ -1055,10 +1055,10 @@ module Int = struct
           let shifted = first + index in
           element_slice values first past index;
           range_get values bound lower first past shifted;
-          let u = () in refine_ u);
+          let u = () in u);
         all_def part bound lower;
-        let u = () in refine_ u
-      else let u = () in refine_ u
+        let u = () in u
+      else let u = () in u
 
   let (sorted_short @ total) : (values : int iarray) ->
       {u : unit | if Iarray.length values <= 1 then sorted values else true} =
@@ -1066,6 +1066,6 @@ module Int = struct
       let size = Iarray.length values in
       sorted_def values;
       sorted_prefix_def values size;
-      let u = () in refine_ u
+      let u = () in u
 
 end

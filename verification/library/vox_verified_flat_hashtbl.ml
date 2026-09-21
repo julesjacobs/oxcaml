@@ -109,7 +109,7 @@ module Make (Key : Vox_table_map.Key) = struct
         Mutation.result)
     end else begin
       let old_heap = ghost_ (P.own (borrow_ token)) in
-      let attempted = Insert.try_insert_hashed table before (refine_ key) value hash token
+      let attempted = Insert.try_insert_hashed table before (key) value hash token
         in
       if attempted.#inserted then
         (#{Mutation.view = attempted.#view; state = attempted.#state} : 'a

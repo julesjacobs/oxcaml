@@ -20,20 +20,17 @@ module Make (V : Payload) = struct
   external take : (cell : t) ->
     (token : {t : Ghost_pref.token | match Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) with
       | Some (Some _) -> true | _ -> false}) @ unique ghost ->
-    {r : V.t step | let refine_ token = token in
-      Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
+    {r : V.t step | Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
       && Ghost_pref.own r.state === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) None} @ unique @@ portable = "caml_unique_cell_take_bytecode" "caml_unique_cell_take"
 
   external put : (cell : t) -> (value : V.t) @ unique ->
     (token : {t : Ghost_pref.token | Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) === Some None}) @ unique ghost ->
-    {t : Ghost_pref.token | let refine_ token = token in
-      Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) (Some (V.snapshot value))} @ unique ghost @@ portable = "caml_unique_cell_put_bytecode" "caml_unique_cell_put"
+    {t : Ghost_pref.token | Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) (Some (V.snapshot value))} @ unique ghost @@ portable = "caml_unique_cell_put_bytecode" "caml_unique_cell_put"
 
   external replace : (cell : t) -> (value : V.t) @ unique ->
     (token : {t : Ghost_pref.token | match Ghost_pref.Heap.at (Ghost_pref.own t) (location cell) with
       | Some (Some _) -> true | _ -> false}) @ unique ghost ->
-    {r : V.t step | let refine_ token = token in
-      Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
+    {r : V.t step | Ghost_pref.Heap.at (Ghost_pref.own token) (location cell) === Some (Some (V.snapshot r.value))
       && Ghost_pref.own r.state === Ghost_pref.Heap.put (Ghost_pref.own token) (location cell) (Some (V.snapshot value))} @ unique @@ portable = "caml_unique_cell_replace_bytecode" "caml_unique_cell_replace"
 end
 

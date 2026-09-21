@@ -593,6 +593,7 @@ end
 type arch =
   | Amd64
   | Arm64
+  | Wasm
 
 val arch : arch
 

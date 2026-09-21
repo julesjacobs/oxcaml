@@ -14,7 +14,6 @@ let (id_id @ total) : (a : mono) @ immutable ->
     {d : typing | typed Z Empty_context
       (Let (Lambda (Bound Z), Apply (Bound Z, Bound Z))) (Function (a, a)) d}
     @ immutable ghost = fun a premise -> ghost_ (
-  let refine_ premise = premise in
   let z = Z in let one = S z in let parameter = Parameter z in
   let identity_type = Function (parameter, parameter) in
   let identity = Forall (one, identity_type) in
@@ -55,12 +54,12 @@ let (id_id @ total) : (a : mono) @ immutable ->
   typed_def z body_env bound left_type left;
   typed_def z body_env bound aa right;
   typed_def z body_env application aa app;
-  typed_def z empty source aa d; refine_ d)
+  typed_def z empty source aa d; d)
 
 let () =
   ghost_ (
     let a = Boolean in let z = Z in mono_wf_def z a;
-    let u = () in let _ = id_id a (refine_ u) in ());
+    let u = () in let _ = id_id a (u) in ());
   let zero = Z in let one = S zero in let two = S one in
   let s = Forall (one, Function (Parameter zero, Parameter one)) in
   assert (weaken_scheme one s = Forall (one, Function (Parameter zero, Parameter two)));
@@ -72,7 +71,6 @@ let (recursive_call @ total) : (a : mono) @ immutable -> (b : mono) @ immutable 
     {d : typing | typed Z Empty_context
       (Recursive (Apply (Bound (S Z), Bound Z))) (Function (a, b)) d}
     @ immutable ghost = fun a b premise -> ghost_ (
-  let refine_ premise = premise in
   let z = Z in let one = S z in let t = Function (a, b) in
   let arg_scheme = Forall (z, a) in let self_scheme = Forall (z, t) in
   let empty = Empty_context in let self = Binding (self_scheme, empty) in
@@ -90,4 +88,4 @@ let (recursive_call @ total) : (a : mono) @ immutable -> (b : mono) @ immutable 
   open_scheme_def self_scheme args; open_scheme_def arg_scheme args;
   open_empty t; open_empty a;
   typed_def z env f t variable; typed_def z env x a variable;
-  typed_def z env app b body; typed_def z empty source t d; refine_ d)
+  typed_def z env app b body; typed_def z empty source t d; d)

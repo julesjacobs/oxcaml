@@ -117,6 +117,7 @@ val empty : unit -> {t : token | own t === Heap.empty ()} @ unique
 val alloc : ('a : immutable_data).
   (value : 'a) @ immutable -> (t : token) @ unique ->
   {r : 'a t step | not (Heap.mem (own t) r.value)
+    && Heap.mem (own r.state) r.value
     && own r.state === Heap.put (own t) r.value value} @ unique
 
 (** Read under a temporary borrow. Payloads are shared immutable values.
@@ -124,15 +125,14 @@ val alloc : ('a : immutable_data).
 external read : ('a : immutable_data).
   (p : 'a t) @ immutable ->
   (t : {t : token | Heap.mem (own t) p}) @ local read ->
-  {v : 'a | let refine_ t = t in Some v === Heap.at (own t) p} @ immutable
+  {v : 'a | Some v === Heap.at (own t) p} @ immutable
   = "caml_pref_read_bytecode" "caml_pref_read"
 
 (** Consume writable ownership and return the updated finite map. *)
 external write : ('a : immutable_data).
   (p : 'a t) @ immutable -> (v : 'a) @ immutable ->
   (t : {t : token | Heap.mem (own t) p}) @ unique read_write ->
-  {u : token | let refine_ t = t in
-    own u === Heap.put (own t) p v} @ unique
+  {u : token | own u === Heap.put (own t) p v} @ unique
   = "caml_pref_write_bytecode" "caml_pref_write"
 
 (** Runtime identity comparison for handles. *)

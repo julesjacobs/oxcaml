@@ -28,7 +28,7 @@ let rec (lookup_valid @ total) : (h : P.heap) @ immutable ->
   (match paths with
   | [] -> ()
   | p :: rest -> M.valid_def h p; lookup_valid h x rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let[@def] rec refresh (selected : M.path @ immutable)
     (paths : M.path list @ immutable) = ghost_ (match paths with
@@ -43,11 +43,11 @@ let rec (refresh_member @ total) : (h : P.heap) @ immutable ->
     fun h selected paths x -> ghost_ (
   valid_def h paths; refresh_def selected paths; member_def x paths;
   match paths with
-  | [] -> member_def x []; let u = () in refine_ u
+  | [] -> member_def x []; let u = () in u
   | p :: rest ->
       M.refresh_valid h selected p; refresh_member h selected rest x;
       member_def x (M.refresh selected p :: refresh selected rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (refresh_valid @ total) : (h : P.heap) @ immutable ->
     (selected : M.path) @ immutable -> (paths : M.path list) @ immutable ->
@@ -58,13 +58,13 @@ let rec (refresh_valid @ total) : (h : P.heap) @ immutable ->
   valid_def h paths; refresh_def selected paths; size_def paths;
   let after = M.compressed h selected in
   match paths with
-  | [] -> valid_def after []; size_def []; let u = () in refine_ u
+  | [] -> valid_def after []; size_def []; let u = () in u
   | p :: rest ->
       M.refresh_valid h selected p; refresh_valid h selected rest;
       refresh_member h selected rest (M.head p);
       valid_def after (M.refresh selected p :: refresh selected rest);
       size_def (M.refresh selected p :: refresh selected rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (refresh_representative @ total) : (h : P.heap) @ immutable ->
     (selected : M.path) @ immutable -> (paths : M.path list) @ immutable ->
@@ -76,14 +76,14 @@ let rec (refresh_representative @ total) : (h : P.heap) @ immutable ->
   representative_def x paths; representative_def x (refresh selected paths);
   lookup_def x paths;
   match paths with
-  | [] -> lookup_def x []; let u = () in refine_ u
+  | [] -> lookup_def x []; let u = () in u
   | p :: rest ->
       M.refresh_valid h selected p;
       refresh_representative h selected rest x;
       representative_def x rest;
       representative_def x (refresh selected rest);
       lookup_def x (M.refresh selected p :: refresh selected rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (fresh_valid @ total) : (h : P.heap) @ immutable ->
     (paths : M.path list) @ immutable -> (x : M.elem) @ immutable ->
@@ -96,7 +96,7 @@ let rec (fresh_valid @ total) : (h : P.heap) @ immutable ->
   (match paths with
   | [] -> ()
   | p :: rest -> M.valid_def h p; M.fresh_valid h p x; fresh_valid h rest x);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let (allocate_valid @ total) : (h : P.heap) @ immutable ->
     (paths : M.path list) @ immutable -> (x : M.elem) @ immutable ->
@@ -112,7 +112,7 @@ let (allocate_valid @ total) : (h : P.heap) @ immutable ->
   M.head_def (M.Stop x); M.root_def (M.Stop x);
   size_def (M.Stop x :: paths); member_def x (M.Stop x :: paths);
   representative_def x (M.Stop x :: paths); lookup_def x (M.Stop x :: paths);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let[@def] rec join (h : P.heap @ immutable)
     (x : M.elem @ immutable) (y : M.elem @ immutable)
@@ -129,11 +129,11 @@ let rec (join_member @ total) : (h : P.heap) @ immutable ->
     fun h x y paths q -> ghost_ (
   valid_def h paths; join_def h x y paths; member_def q paths;
   match paths with
-  | [] -> member_def q []; let u = () in refine_ u
+  | [] -> member_def q []; let u = () in u
   | p :: rest ->
       M.joined_valid h x y p; join_member h x y rest q;
       member_def q (M.joined_path h x y p :: join h x y rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (join_valid @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -146,13 +146,13 @@ let rec (join_valid @ total) : (h : P.heap) @ immutable ->
   valid_def h paths; join_def h x y paths; size_def paths;
   let after = M.linked h x y in
   match paths with
-  | [] -> valid_def after []; size_def []; let u = () in refine_ u
+  | [] -> valid_def after []; size_def []; let u = () in u
   | p :: rest ->
       M.joined_valid h x y p; join_valid h x y rest;
       join_member h x y rest (M.head p);
       valid_def after (M.joined_path h x y p :: join h x y rest);
       size_def (M.joined_path h x y p :: join h x y rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (join_representative @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -167,12 +167,12 @@ let rec (join_representative @ total) : (h : P.heap) @ immutable ->
   representative_def q paths; representative_def q (join h x y paths);
   lookup_def q paths;
   match paths with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | p :: rest ->
       M.joined_valid h x y p; join_representative h x y rest q;
       representative_def q rest; representative_def q (join h x y rest);
       lookup_def q (M.joined_path h x y p :: join h x y rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let[@def] rec closed (paths : M.path list @ immutable)
     (p : M.path @ immutable) = ghost_ (
@@ -188,7 +188,7 @@ let rec (closed_root @ total) : (paths : M.path list) @ immutable ->
       @ ghost = fun paths p -> ghost_ (
   closed_def paths p; M.head_def p; M.root_def p;
   (match p with M.Stop _ -> () | M.Step (_, rest) -> closed_root paths rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (lookup_closed @ total) : (paths : M.path list) @ immutable ->
     (queries : M.path list) @ immutable -> (x : M.elem) @ immutable ->
@@ -197,7 +197,7 @@ let rec (lookup_closed @ total) : (paths : M.path list) @ immutable ->
     fun paths queries x -> ghost_ (
   complete_def paths queries; member_def x queries; lookup_def x queries;
   (match queries with [] -> () | _ :: rest -> lookup_closed paths rest x);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (redirect_closed @ total) : (paths : M.path list) @ immutable ->
     (x : M.elem) @ immutable -> (r : M.elem) @ immutable ->
@@ -207,18 +207,18 @@ let rec (redirect_closed @ total) : (paths : M.path list) @ immutable ->
     fun paths x r p -> ghost_ (
   closed_def paths p; M.redirect_def x r p; M.head_def p;
   match p with
-  | M.Stop _ -> let u = () in refine_ u
+  | M.Stop _ -> let u = () in u
   | M.Step (y, rest) ->
       if y === x then (
         closed_def paths (M.Step (y, M.Stop r));
         M.head_def (M.Step (y, M.Stop r));
         closed_def paths (M.Stop r); M.head_def (M.Stop r);
-        let u = () in refine_ u)
+        let u = () in u)
       else (
         redirect_closed paths x r rest;
         closed_def paths (M.Step (y, M.redirect x r rest));
         M.head_def (M.Step (y, M.redirect x r rest));
-        let u = () in refine_ u))
+        let u = () in u))
 
 let rec (refresh_closed @ total) : (paths : M.path list) @ immutable ->
     (selected : M.path) @ immutable -> (query : M.path) @ immutable ->
@@ -231,7 +231,7 @@ let rec (refresh_closed @ total) : (paths : M.path list) @ immutable ->
   | M.Step (x, rest) ->
       refresh_closed paths rest query; closed_root paths rest;
       redirect_closed paths x (M.root rest) (M.refresh rest query));
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (refresh_closed_domain @ total) : (h : P.heap) @ immutable ->
     (selected : M.path) @ immutable -> (paths : M.path list) @ immutable ->
@@ -244,7 +244,7 @@ let rec (refresh_closed_domain @ total) : (h : P.heap) @ immutable ->
   (match p with
   | M.Stop _ -> ()
   | M.Step (_, rest) -> refresh_closed_domain h selected paths rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (refresh_complete @ total) : (h : P.heap) @ immutable ->
     (selected : M.path) @ immutable -> (paths : M.path list) @ immutable ->
@@ -255,14 +255,14 @@ let rec (refresh_complete @ total) : (h : P.heap) @ immutable ->
       else true} @ ghost = fun h selected paths queries -> ghost_ (
   complete_def paths queries; refresh_def selected queries;
   match queries with
-  | [] -> complete_def (refresh selected paths) []; let u = () in refine_ u
+  | [] -> complete_def (refresh selected paths) []; let u = () in u
   | p :: rest ->
       refresh_closed paths selected p;
       refresh_closed_domain h selected paths (M.refresh selected p);
       refresh_complete h selected paths rest;
       complete_def (refresh selected paths)
         (M.refresh selected p :: refresh selected rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (extend_closed @ total) : (paths : M.path list) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -277,13 +277,13 @@ let rec (extend_closed @ total) : (paths : M.path list) @ immutable ->
         closed_def paths (M.Step (q, M.Stop y));
         M.head_def (M.Step (q, M.Stop y));
         closed_def paths (M.Stop y); M.head_def (M.Stop y);
-        let u = () in refine_ u)
-      else let u = () in refine_ u
+        let u = () in u)
+      else let u = () in u
   | M.Step (q, rest) ->
       extend_closed paths x y rest;
       closed_def paths (M.Step (q, M.extend x y rest));
       M.head_def (M.Step (q, M.extend x y rest));
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (join_closed_domain @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -297,7 +297,7 @@ let rec (join_closed_domain @ total) : (h : P.heap) @ immutable ->
   (match p with
   | M.Stop _ -> ()
   | M.Step (_, rest) -> join_closed_domain h x y paths rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (join_complete @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -309,7 +309,7 @@ let rec (join_complete @ total) : (h : P.heap) @ immutable ->
     fun h x y paths queries -> ghost_ (
   complete_def paths queries; join_def h x y queries;
   match queries with
-  | [] -> complete_def (join h x y paths) []; let u = () in refine_ u
+  | [] -> complete_def (join h x y paths) []; let u = () in u
   | p :: rest ->
       M.joined_path_def h x y p;
       extend_closed paths x y p; extend_closed paths y x p;
@@ -317,7 +317,7 @@ let rec (join_complete @ total) : (h : P.heap) @ immutable ->
       join_complete h x y paths rest;
       complete_def (join h x y paths)
         (M.joined_path h x y p :: join h x y rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (cons_closed @ total) : (paths : M.path list) @ immutable ->
     (added : M.path) @ immutable -> (p : M.path) @ immutable ->
@@ -326,7 +326,7 @@ let rec (cons_closed @ total) : (paths : M.path list) @ immutable ->
   closed_def paths p; closed_def (added :: paths) p;
   member_def (M.head p) (added :: paths);
   (match p with M.Stop _ -> () | M.Step (_, rest) -> cons_closed paths added rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (cons_complete @ total) : (paths : M.path list) @ immutable ->
     (added : M.path) @ immutable -> (queries : M.path list) @ immutable ->
@@ -337,7 +337,7 @@ let rec (cons_complete @ total) : (paths : M.path list) @ immutable ->
   (match queries with
   | [] -> ()
   | p :: rest -> cons_closed paths added p; cons_complete paths added rest);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let (allocate_complete @ total) : (paths : M.path list) @ immutable ->
     (x : M.elem) @ immutable ->
@@ -348,7 +348,7 @@ let (allocate_complete @ total) : (paths : M.path list) @ immutable ->
   complete_def (M.Stop x :: paths) (M.Stop x :: paths);
   closed_def (M.Stop x :: paths) (M.Stop x);
   M.head_def (M.Stop x); member_def x (M.Stop x :: paths);
-  let u = () in refine_ u)
+  let u = () in u)
 
 let[@def] rec addresses (paths : M.path list @ immutable) = ghost_ (
   match paths with [] -> [] | p :: rest -> M.head p :: addresses rest)
@@ -361,7 +361,7 @@ let rec (member_same @ total) : (left : M.path list) @ immutable ->
   (match left, right with
   | _ :: ps, _ :: qs -> member_same ps qs x
   | _ -> ());
-  let u = () in refine_ u)
+  let u = () in u)
 
 let rec (refresh_addresses @ total) : (h : P.heap) @ immutable ->
     (selected : M.path) @ immutable -> (paths : M.path list) @ immutable ->
@@ -370,11 +370,11 @@ let rec (refresh_addresses @ total) : (h : P.heap) @ immutable ->
     fun h selected paths -> ghost_ (
   valid_def h paths; refresh_def selected paths; addresses_def paths;
   match paths with
-  | [] -> addresses_def []; let u = () in refine_ u
+  | [] -> addresses_def []; let u = () in u
   | p :: rest ->
       M.refresh_valid h selected p; refresh_addresses h selected rest;
       addresses_def (M.refresh selected p :: refresh selected rest);
-      let u = () in refine_ u)
+      let u = () in u)
 
 let rec (join_addresses @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -384,8 +384,8 @@ let rec (join_addresses @ total) : (h : P.heap) @ immutable ->
       else true} @ ghost = fun h x y paths -> ghost_ (
   valid_def h paths; join_def h x y paths; addresses_def paths;
   match paths with
-  | [] -> addresses_def []; let u = () in refine_ u
+  | [] -> addresses_def []; let u = () in u
   | p :: rest ->
       M.joined_valid h x y p; join_addresses h x y rest;
       addresses_def (M.joined_path h x y p :: join h x y rest);
-      let u = () in refine_ u)
+      let u = () in u)

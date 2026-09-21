@@ -130,7 +130,7 @@ let (scheme_instance @ total) :
       fun _p -> () in
     parameters_subset schema names included; open_template names rho choices schema ();
     F.template_scheme_def rho schema; let sigma = F.template_scheme rho schema in let args = arguments names choices in
-    D.arity_def sigma; D.open_scheme_def sigma args; arguments_length names choices; arguments_wf names choices; refine_ args)
+    D.arity_def sigma; D.open_scheme_def sigma args; arguments_length names choices; arguments_wf names choices; args)
 
 let rec (selected_generic @ total) : (h : Pref.heap) @ immutable -> (schema : template) @ immutable ->
     (p : node Pref.t) @ immutable -> {u : unit | template h schema} ->
@@ -153,7 +153,7 @@ let rec (canonical_boundaries @ total) : (h : Pref.heap) @ immutable -> (cut : i
         && (not (H.mem h p) || Level_finite_spec.finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === Level_finite_spec.readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === Level_finite_spec.readback t})) @ total ->
     (names : A.names) @ immutable ->
     (generic : ((p : node Pref.t) @ immutable ->
       {u : unit | A.position names p === None || at_level h p === Generic})) @ total ->
@@ -164,7 +164,7 @@ let rec (canonical_boundaries @ total) : (h : Pref.heap) @ immutable -> (cut : i
     template_def h schema; Hm_environment_spec.boundary_bound_def h cut schema;
     boundaries_avoid_def names rho schema; match schema with
     | Parameter _ | Constant _ -> ()
-    | Boundary p -> root_def schema; below_def h p cut; let refine_ tree = trees p in values p;
+    | Boundary p -> root_def schema; below_def h p cut; let tree = trees p in values p;
       let high : ((q : node Pref.t) @ immutable ->
         {u : unit | A.position names q === None || not (Level_spec.below h q cut)}) @ total = fun q ->
         generic q; Level_spec.below_def h q cut; () in
@@ -180,7 +180,7 @@ let (canonical_instance @ total) : (h : Pref.heap) @ immutable -> (cut : int) ->
         && (not (H.mem h p) || Level_finite_spec.finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === Level_finite_spec.readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === Level_finite_spec.readback t})) @ total ->
     (choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (schema : template) @ immutable ->
     {u : unit | template h schema && Hm_environment_spec.boundary_bound h cut schema} ->
@@ -193,7 +193,7 @@ let (canonical_instance @ total) : (h : Pref.heap) @ immutable -> (cut : int) ->
       {u : unit | A.position names p === None || at_level h p === Generic}) @ total = fun p ->
         let () = selected_generic h schema p () in () in
     canonical_boundaries h cut order trees rho values names generic schema ();
-    let refine_ args = scheme_instance rho choices schema () in refine_ args)
+    let args = scheme_instance rho choices schema () in args)
 
 let[@def] rec (body @ total) (names : A.names @ immutable)
     (rho : (node Pref.t @ immutable total -> ty @ immutable total) @ total)
@@ -273,7 +273,7 @@ let (direct_instance @ total) :
       fun _p -> () in
     parameters_subset schema names included; body_instance names rho choices schema ();
     scheme_def rho schema; let sigma = scheme rho schema in let args = arguments names choices in
-    D.arity_def sigma; D.open_scheme_def sigma args; arguments_length names choices; arguments_wf names choices; refine_ args)
+    D.arity_def sigma; D.open_scheme_def sigma args; arguments_length names choices; arguments_wf names choices; args)
 
 let rec (body_wf @ total) : (names : A.names) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->

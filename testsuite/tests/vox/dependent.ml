@@ -28,10 +28,7 @@ val result : int = 42
 
 let nonvariable = add (x + 1) y;;
 [%%expect{|
-Line 1, characters 22-29:
-1 | let nonvariable = add (x + 1) y;;
-                          ^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+val nonvariable : int = 43
 |}]
 
 module type Recursion = sig
@@ -92,10 +89,7 @@ val borrowed_sum :
 
 let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
 [%%expect{|
-Line 1, characters 31-48:
-1 | let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
-                                   ^^^^^^^^^^^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+val borrowed_nonvariable : int = 43
 |}]
 
 let borrowed_mutable () =
@@ -103,8 +97,10 @@ let borrowed_mutable () =
   let refine_ result = add (borrow_ current) y in
   result;;
 [%%expect{|
-Line 3, characters 27-44:
-3 |   let refine_ result = add (borrow_ current) y in
-                               ^^^^^^^^^^^^^^^^^
-Error: A dependent function argument must have a stable binding; bind the current value with [let] first
+Line 2, characters 14-21:
+2 |   let mutable current = 1 in
+                  ^^^^^^^
+Warning 186 [unmutated-mutable]: mutable variable "current" was never mutated.
+
+val borrowed_mutable : unit -> int = <fun>
 |}]

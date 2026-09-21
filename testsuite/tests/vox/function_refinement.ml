@@ -46,8 +46,7 @@ end;;
 Line 3, characters 34-43:
 3 |       int -> {r : int | r >= 0} = refine_ f
                                       ^^^^^^^^^
-Error: The value "( *refine_arg_0* )" has type "int"
-       but an expression was expected of type "{x : int | x > 0}"
+Error: Refinement could not be proved (counterexample)
 |}]
 
 module Once_capture = struct

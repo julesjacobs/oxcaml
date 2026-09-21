@@ -670,13 +670,11 @@ module Refined = struct
   let hd : ('a : value_or_null).
       { l : 'a list | (l === []) === false } -> 'a @ total =
     fun l ->
-      let refine_ l = l in
       trust_total (hd l)
   let hd = trust_total hd
   let tl : ('a : value_or_null).
       { l : 'a list | (l === []) === false } -> 'a list @ total =
     fun l ->
-      let refine_ l = l in
       trust_total (tl l)
   let tl = trust_total tl
 end

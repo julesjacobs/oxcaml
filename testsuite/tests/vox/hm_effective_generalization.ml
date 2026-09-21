@@ -49,7 +49,7 @@ let (canonical_value @ total) : (h : Pref.heap) @ immutable ->
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (tree : tree) @ immutable -> {u : unit | finite h tree} ->
     {u : unit | rho (tree_root tree) === readback tree} @ ghost = fun h trees rho values tree premise -> ghost_ (
     finite_def h tree;
@@ -61,7 +61,7 @@ let rec (scheme_readback @ total) : (h : Pref.heap) @ immutable -> (heads : E.he
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (tree : tree) @ immutable -> {u : unit | finite h tree} ->
     {u : unit | interpret rho F.variable_choice (Effective_template.scheme h heads cut tree) === readback tree} @ ghost =
   fun h heads cut trees rho values tree premise -> ghost_ (
@@ -84,7 +84,7 @@ let rec (scheme_boundaries @ total) : (h : Pref.heap) @ immutable -> (heads : E.
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (names : A.names) @ immutable ->
     (high : ((p : node Pref.t) @ immutable ->
       {u : unit | A.position names p === None || not (E.effective_below h heads p cut)})) @ total ->
@@ -115,7 +115,7 @@ let (generalized_scheme @ total) : (h : Pref.heap) @ immutable -> (heads : E.hea
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (tree : tree) @ immutable -> {u : unit | finite h tree && E.effective_below h heads (tree_root tree) depth} ->
     {u : unit | P.scheme rho (Effective_template.scheme h heads cut tree) ===
       D.Forall (A.count (EF.generalized_names h heads cut tree),
@@ -152,7 +152,7 @@ let rec (canonical_boundaries @ total) : (h : Pref.heap) @ immutable -> (heads :
         && (not (H.mem h p) || Level_finite_spec.finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === Level_finite_spec.readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === Level_finite_spec.readback t})) @ total ->
     (names : A.names) @ immutable ->
     (generic : ((p : node Pref.t) @ immutable ->
       {u : unit | A.position names p === None || E.level h heads p === Generic})) @ total ->
@@ -178,7 +178,7 @@ let rec (canonical_context @ total) : (h : Pref.heap) @ immutable -> (heads : E.
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (env : Hm_environment_spec.env) @ immutable -> (schemas : Hm_environment_spec.templates) @ immutable ->
     {u : unit | Hm_effective_environment.effective_env h heads cut env schemas} ->
     {u : unit | P.context rho schemas === F.template_context rho schemas} @ ghost =
@@ -202,7 +202,7 @@ let (generalize_typing @ total) : (h : Pref.heap) @ immutable -> (heads : E.head
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (env : Hm_environment_spec.env) @ immutable -> (schemas : Hm_environment_spec.templates) @ immutable ->
     (tree : tree) @ immutable -> (e : D.term) @ immutable -> (d : D.typing) @ immutable ->
     {u : unit | finite h tree && E.effective_below h heads (tree_root tree) depth

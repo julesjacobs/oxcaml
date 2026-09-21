@@ -12,15 +12,14 @@ let rec fold_right_ih :
     {u : unit | r [] initial} @ ghost ->
     {result : 'b | r xs result} @ immutable total =
     fun r f xs initial base ->
-  let refine_ base = base in
   match xs with
-  | [] -> refine_ initial
+  | [] -> initial
   | x :: tail ->
     let u = () in
-    let refine_ acc = fold_right_ih r f tail initial (refine_ u) in
+    let acc = fold_right_ih r f tail initial (u) in
     let model = ghost_ tail in
-    let refine_ result = f x model acc (refine_ u) in
-    refine_ result
+    let result = f x model acc (u) in
+    result
 
 let rec map_ih :
     (r : (('a : immutable_data) list @ immutable total ->
@@ -33,17 +32,16 @@ let rec map_ih :
     (xs : 'a list) @ immutable ->
     {u : unit | r [] []} @ ghost ->
     {ys : 'b list | r xs ys} @ immutable total = fun r f xs base ->
-  let refine_ base = base in
   match xs with
-  | [] -> let ys = [] in refine_ ys
+  | [] -> let ys = [] in ys
   | x :: tail ->
     let u = () in
-    let refine_ ys = map_ih r f tail (refine_ u) in
+    let ys = map_ih r f tail (u) in
     let tail_model = ghost_ tail in
     let output_model = ghost_ ys in
-    let refine_ y = f x tail_model output_model (refine_ u) in
+    let y = f x tail_model output_model (u) in
     let result = y :: ys in
-    refine_ result
+    result
 
 let[@def] rec map_rel
     (r : (('a : immutable_data) @ immutable total ->
@@ -66,13 +64,13 @@ let rec map :
   | [] ->
     let ys = [] in
     ghost_ (map_rel_def r xs ys);
-    refine_ ys
+    ys
   | x :: tail ->
-    let refine_ y = f x in
-    let refine_ ys = map r f tail in
+    let y = f x in
+    let ys = map r f tail in
     let result = y :: ys in
     ghost_ (map_rel_def r xs result);
-    refine_ result
+    result
 
 let rec (map_length @ total) :
     (r : (('a : immutable_data) @ immutable total ->
@@ -84,13 +82,13 @@ let rec (map_length @ total) :
   length_def xs;
   length_def ys;
   match xs with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | _ :: tail ->
     match ys with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | _ :: outputs ->
       map_length r tail outputs;
-      let u = () in refine_ u
+      let u = () in u
 
 let rec fold_right :
     (r : (('a : immutable_data) @ immutable total ->
@@ -108,12 +106,11 @@ let rec fold_right :
     {u : unit | inv [] initial} @ ghost ->
     {result : 'b | inv xs result} @ immutable total =
     fun r inv f preserve xs initial base ->
-  let refine_ base = base in
   match xs with
-  | [] -> refine_ initial
+  | [] -> initial
   | x :: tail ->
     let u = () in
-    let refine_ acc = fold_right r inv f preserve tail initial (refine_ u) in
-    let refine_ result = f x acc in
-    ghost_ (preserve x tail acc result (refine_ u));
-    refine_ result
+    let acc = fold_right r inv f preserve tail initial (u) in
+    let result = f x acc in
+    ghost_ (preserve x tail acc result (u));
+    result

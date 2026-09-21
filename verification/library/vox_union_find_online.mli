@@ -105,7 +105,7 @@ module Make (C : Vox_big_credits.S) : sig
   val make_set :
       (state : {s : t | valid s && size s < Bigint.of_int max_int}) @ unique read_write total ->
       (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         added (snapshot state) (snapshot r.#state) r.#value &&
         contents r.#state === M.Stop r.#value :: contents state &&
         size r.#state = Bigint.add (size state) 1Z && member r.#value r.#state &&
@@ -115,9 +115,9 @@ module Make (C : Vox_big_credits.S) : sig
 
   val find : (x : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s}) @ unique read_write total ->
-      (fee : {b : C.token | let refine_ state = state in C.credits b = find_fee state})
+      (fee : {b : C.token | C.credits b = find_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         found (snapshot state) (snapshot r.#state) x &&
         contents r.#state === F.refresh (F.lookup x (contents state)) (contents state) &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
@@ -126,9 +126,9 @@ module Make (C : Vox_big_credits.S) : sig
 
   val union : (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s && member y s}) @ unique read_write total ->
-      (fee : {b : C.token | let refine_ state = state in C.credits b = union_fee state})
+      (fee : {b : C.token | C.credits b = union_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         joined (snapshot state) (snapshot r.#state) x y r.#value &&
         contents r.#state === S.union_paths (heap state) (contents state) x y &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
@@ -160,7 +160,7 @@ module Make (C : Vox_big_credits.S) : sig
       (state : {s : t | valid s && size s < Bigint.of_int max_int}) @ unique
         read_write total ->
       (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         added (snapshot state) (snapshot r.#state) r.#value &&
         size r.#state = Bigint.add (size state) 1Z &&
         member r.#value r.#state &&
@@ -168,10 +168,9 @@ module Make (C : Vox_big_credits.S) : sig
 
   val find_connectivity : (x : elem) @ immutable ->
       (state : {s : t | valid s && member x s}) @ unique read_write total ->
-      (fee : {b : C.token | let refine_ state = state in
-        C.credits b = find_fee state})
+      (fee : {b : C.token | C.credits b = find_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         found (snapshot state) (snapshot r.#state) x &&
         size r.#state = size state && r.#value === representative x state &&
         account r.#state = Bigint.add (account state) (find_fee state)} @ unique
@@ -179,10 +178,9 @@ module Make (C : Vox_big_credits.S) : sig
   val union_connectivity : (x : elem) @ immutable -> (y : elem) @ immutable ->
       (state : {s : t | valid s && member x s && member y s}) @ unique
         read_write total ->
-      (fee : {b : C.token | let refine_ state = state in
-        C.credits b = union_fee state})
+      (fee : {b : C.token | C.credits b = union_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
+      {r : result | valid r.#state &&
         joined (snapshot state) (snapshot r.#state) x y r.#value &&
         size r.#state = size state &&
         account r.#state = Bigint.add (account state) (union_fee state)}

@@ -9,7 +9,7 @@ let rec into_slice : (h : Pref.heap Ghost.t) @ immutable ->
     (pools : {s : pool Slice.t |
       routable h.Ghost.ghost (Iarray.length (Slice.current s)) pending})
       @ local unique ->
-    {u : unit | let refine_ s = pools in
+    {u : unit | let s = pools in
       Slice.final s === route h.Ghost.ghost pending (Slice.current s)} =
   fun h pending state pools ->
     let s = pools in
@@ -52,8 +52,7 @@ let route_pools : (h : Pref.heap Ghost.t) @ immutable ->
       routable h.Ghost.ghost (Iarray.length (Owned_array.contents a)) pending})
       @ unique ->
     (state : {t : Pref.token | Pref.own t === h.Ghost.ghost}) @ local read ->
-    {a : pool Owned_array.t | let refine_ pools = pools in
-      Owned_array.contents a ===
+    {a : pool Owned_array.t | Owned_array.contents a ===
         route h.Ghost.ghost pending (Owned_array.contents pools)} @ unique =
   fun h pending pools state ->
     let before = ghost_ (Owned_array.contents (borrow_ pools)) in
@@ -75,8 +74,7 @@ let close_and_route : (h : Pref.heap Ghost.t) @ immutable ->
       && pool_scoped h.Ghost.ghost child}) @ unique ->
     (pools : {a : pool Owned_array.t |
       0 <= cut && cut < Iarray.length (Owned_array.contents a)}) @ unique ->
-    {r : closed | let refine_ pools = pools in
-      Pref.own r.#state === Representative_pool_spec.close_heap h.Ghost.ghost cut child
+    {r : closed | Pref.own r.#state === Representative_pool_spec.close_heap h.Ghost.ghost cut child
       && Owned_array.contents r.#pools ===
         route (Representative_pool_spec.close_heap h.Ghost.ghost cut child)
           (Representative_pool_spec.transfer_rep
@@ -102,8 +100,7 @@ let close_and_route : (h : Pref.heap Ghost.t) @ immutable ->
 let save : (i : int) -> (pending : pool) @ immutable ->
     (pools : {a : pool Owned_array.t |
       0 <= i && i < Iarray.length (Owned_array.contents a)}) @ unique ->
-    {a : pool Owned_array.t | let refine_ pools = pools in
-      Owned_array.contents a ===
+    {a : pool Owned_array.t | Owned_array.contents a ===
         Vox_iarray.updated (Owned_array.contents pools) i pending} @ unique =
   fun i pending pools ->
     let before = ghost_ (Owned_array.contents (borrow_ pools)) in
@@ -122,8 +119,7 @@ type taken = #{pending : pool @@ aliased; pools : pool Owned_array.t}
 let take : (i : int) ->
     (pools : {a : pool Owned_array.t |
       0 <= i && i < Iarray.length (Owned_array.contents a)}) @ unique ->
-    {r : taken | let refine_ pools = pools in
-      r.#pending === bucket (Owned_array.contents pools) i
+    {r : taken | r.#pending === bucket (Owned_array.contents pools) i
       && Owned_array.contents r.#pools ===
         Vox_iarray.updated (Owned_array.contents pools) i Empty} @ unique =
   fun i pools ->

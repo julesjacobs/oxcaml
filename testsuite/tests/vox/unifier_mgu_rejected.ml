@@ -85,7 +85,7 @@ module Missing_operand_equality = struct
           (if H.mem after x then finite after t else H.at after x === None)} @ immutable)) @ total ->
       (sigma : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (normal : ((x : node Pref.t) @ immutable ->
-        {u : unit | let refine_ t = trees x in normalizes after sigma x t})) @ total ->
+        {u : unit | let t = trees x in normalizes after sigma x t})) @ total ->
       (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       (model : ((x : node Pref.t) @ immutable -> {u : unit | equation h rho x})) @ total ->
       (x : node Pref.t) @ immutable ->

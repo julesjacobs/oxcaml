@@ -21,7 +21,7 @@ let (variable_typing @ total) : (h : Pref.heap) @ immutable -> (heads : E.heads)
     {d : D.typing | D.typed D.Z (P.context rho schemas) (D.Bound i) (D.embed (rho p)) d} @ immutable ghost =
   fun h heads witness certificate depth env schemas i original p epoch history rho model premise -> ghost_ (
     Copy_certificate_proofs.replay h certificate heads witness epoch depth history original p ();
-    let refine_ schema = lookup_schema h heads depth env schemas i original () in
+    let schema = lookup_schema h heads depth env schemas i original () in
     copy_heap_def h epoch depth history; let after = copy_heap h epoch depth history in let raw = heap h epoch depth history in
     let trail = Pooled_spec.touched history in let clean_model : ((x : node Pref.t) @ immutable -> {u : unit | equation after rho x}) @ total = fun x -> model x; node_equation_def after rho x; observe_def after x; equation_def after rho x; () in
     let raw_model : ((x : node Pref.t) @ immutable -> {u : unit | equation raw rho x}) @ total = fun x ->
@@ -32,8 +32,8 @@ let (variable_typing @ total) : (h : Pref.heap) @ immutable -> (heads : E.heads)
       fun x -> choices_def x; () in
     Effective_copy_sound.target_image h heads history rho original p (); choices_def original;
     Effective_copy_sound.template_sound h heads epoch depth history rho (refine_ raw_model) choices images schema ();
-    let refine_ args = P.direct_instance rho choices schema in
+    let args = P.direct_instance rho choices schema in
     P.lookup_context rho schemas i schema (); P.context_wf rho schemas;
     let ty = rho p in let z = D.Z in T.embed_wf z ty;
     let g = P.context rho schemas in let term = D.Bound i in let target = D.embed ty in
-    let d = D.Variable args in D.typed_def z g term target d; refine_ d)
+    let d = D.Variable args in D.typed_def z g term target d; d)

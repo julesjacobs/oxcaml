@@ -2167,10 +2167,24 @@ and predicate_cases ctx env s value cases =
         case.rc_rhs.rexp_loc s matched case.rc_guard case.rc_rhs rest
 
 and expose_fact ctx env s ty value loc =
-  (* Dropping an unsupported premise is conservative; goals remain strict. *)
-  try expose ctx env s ty value loc
-  with Location.Error error ->
-    { s with omitted_premises = (loc, error) :: s.omitted_premises }, value
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine r when not (impossible s) ->
+    expose_premise ctx env (bind s r.ref_binder value) r.ref_pred loc, value
+  | _ -> s, value
+
+and expose_premise ctx env s pred loc =
+  match pred.rexp_desc with
+  | Rexp_apply ({ rexp_desc = Rexp_ident path; _ }, [(_, a); (_, b)])
+    when primitive env path = Some ("%sequand", 2) ->
+    let s = expose_premise ctx env s a loc in
+    expose_premise ctx env s b loc
+  | _ -> (
+    (* Only premises may be weakened; unsupported goals remain errors. *)
+    try
+      let s, value = predicate ctx env s pred in
+      if s.dead then s else branch s (required loc value)
+    with Location.Error error ->
+      { s with omitted_premises = (loc, error) :: s.omitted_premises })
 
 and expose_outer ctx env s ty value loc =
   match get_desc (Ctype.expand_head env ty) with

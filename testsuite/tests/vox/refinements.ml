@@ -25,11 +25,7 @@ val payload : int = 42
 
 let implicit_payload = wrapped + 1;;
 [%%expect{|
-Line 1, characters 23-30:
-1 | let implicit_payload = wrapped + 1;;
-                           ^^^^^^^
-Error: The value "wrapped" has type "nonnegative" = "{n : int | n >= 0}"
-       but an expression was expected of type "int"
+val implicit_payload : int = 43
 |}]
 
 let unknown x = refine_ x;;
@@ -45,8 +41,5 @@ let escapes =
   let result : {n : int | n = bound} = refine_ bound in
   result;;
 [%%expect{|
-Line 4, characters 2-8:
-4 |   result;;
-      ^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "bound"
+val escapes : int = 42
 |}]

@@ -30,7 +30,7 @@ let (forest_eval @ total) : (saved : Pref.heap) @ immutable ->
     (choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (want : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((x : node Pref.t) @ immutable -> {u : unit |
-      let refine_ t = trees x in want x === interpret rho choices t})) @ total ->
+      let t = trees x in want x === interpret rho choices t})) @ total ->
     (t : template) @ immutable -> {u : unit | template saved t} ->
     {u : unit | want (root t) === interpret rho choices t} @ ghost =
   fun saved trees rho choices want values t premise -> ghost_ (
@@ -45,7 +45,7 @@ let (forest_instance @ total) : (saved : Pref.heap) @ immutable ->
     (choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (want : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((x : node Pref.t) @ immutable -> {u : unit |
-      let refine_ t = trees x in want x === interpret rho choices t})) @ total ->
+      let t = trees x in want x === interpret rho choices t})) @ total ->
     (x : node Pref.t) @ immutable -> {u : unit | instance_at saved rho want x} @ ghost =
   fun saved scope trees rho choices want values x -> ghost_ (
     scope x; instance_at_def saved rho want x;
@@ -76,7 +76,7 @@ let (with_scheme_instance @ total) : (saved : Pref.heap) @ immutable ->
   fun saved scope trees rho model choices epoch depth d t q premise claim use -> ghost_ (
     let[@def] want : node Pref.t @ immutable total -> ty @ immutable total = fun x ->
       let t = trees x in interpret rho choices t in
-    let values : (x : node Pref.t) @ immutable -> {u : unit | let refine_ t = trees x in want x === interpret rho choices t}
+    let values : (x : node Pref.t) @ immutable -> {u : unit | let t = trees x in want x === interpret rho choices t}
         @ total = fun x -> want_def x; () in
     let wanted : (x : node Pref.t) @ immutable -> {u : unit | instance_at saved rho want x}
         @ total = fun x -> let () = forest_instance saved scope trees rho choices want values x in () in

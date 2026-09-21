@@ -32,7 +32,7 @@ module Make (C : Vox_big_credits.S) = struct
       {u : unit | ticks state <= account state} @ ghost = fun state -> ghost_ (
     ticks_def (borrow_ state); account_def (borrow_ state);
     U.account_bounds (borrow_ state.#core); C.nonnegative (borrow_ state.#savings);
-    let u = () in refine_ u)
+    let u = () in u)
 
   let (observations @ total) :
       (state : t) @ local immutable total ghost forkable unyielding ->
@@ -44,49 +44,46 @@ module Make (C : Vox_big_credits.S) = struct
     U.alpha_bounds (borrow_ state.#core); U.alpha_def (borrow_ state.#core);
     find_fee_def (borrow_ state); union_fee_def (borrow_ state);
     A.find_fee_def (U.alpha state.#core); A.union_fee_def (U.alpha state.#core);
-    let u = () in refine_ u)
+    let u = () in u)
   let create : (limit : {n : Bigint.t | 1Z <= n && n <= Bigint.of_int max_int}) @ ghost ->
       (fee : {b : C.token | C.credits b = 1Z}) @ unique total ghost ->
       {s : t | valid s && size s = 0Z && contents s === [] && account s = 1Z && capacity s = limit} @ unique =
       fun limit fee ->
-    let refine_ fee = fee in
-    let refine_ limit = limit in
     let cap = limit in
-    let payment : {b : C.token | C.credits b >= 1Z} = refine_ fee in
-    let refine_ r = U.create cap payment in
+    let payment : {b : C.token | C.credits b >= 1Z} = fee in
+    let r = U.create cap payment in
     let #{U.state = core; refund = savings} = r in
     let state = #{core; savings} in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
       F.size_def []);
-    refine_ state
+    state
 
   let make_set :
       (state : {s : t | valid s && size s < capacity s}) @ unique read_write total ->
       (fee : {b : C.token | C.credits b = 3Z}) @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state && capacity r.#state = capacity state &&
+      {r : result | valid r.#state && capacity r.#state = capacity state &&
         contents r.#state === M.Stop r.#value :: contents state &&
         size r.#state = Bigint.add (size state) 1Z && member r.#value r.#state &&
         not (H.mem (heap state) r.#value) &&
         heap r.#state === H.put (heap state) r.#value (M.Root 0) &&
         account r.#state = Bigint.add (account state) 3Z} @ unique =
       fun state fee ->
-    let refine_ state = state in let refine_ fee = fee in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
       U.alpha_def (borrow_ state.#core));
     let savings = state.#savings in
     let core = state.#core in
-    let input : {s : U.t | U.valid s && F.size s.#U.paths < s.#U.capacity} = refine_ core in
-    let payment : {b : C.token | C.credits b >= 3Z} = refine_ fee in
-    let refine_ r = U.make_set input payment in
+    let input : {s : U.t | U.valid s && F.size s.#U.paths < s.#U.capacity} = core in
+    let payment : {b : C.token | C.credits b >= 3Z} = fee in
+    let r = U.make_set input payment in
     let #{U.value; state = core; refund} = r in
     ghost_ (C.nonnegative (borrow_ savings); C.nonnegative (borrow_ refund));
     let right : {t : C.token | 0Z <= C.credits savings && 0Z <= C.credits t} =
-      refine_ refund in
-    let refine_ savings = C.merge savings right in
+      refund in
+    let savings = C.merge savings right in
     let state = #{core; savings} in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
@@ -94,19 +91,18 @@ module Make (C : Vox_big_credits.S) = struct
     ghost_ (size_def (borrow_ state); contents_def (borrow_ state);
       F.size_def (contents (borrow_ state));
       member_def value (borrow_ state); F.member_def value (contents (borrow_ state)); M.head_def (M.Stop value));
-    let result = #{value; state} in refine_ result
+    let result = #{value; state} in result
 
   let find : (x : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s}) @ unique read_write total ->
-      (fee : {b : C.token | let refine_ state = state in C.credits b = find_fee state})
+      (fee : {b : C.token | C.credits b = find_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state && capacity r.#state = capacity state &&
+      {r : result | valid r.#state && capacity r.#state = capacity state &&
         contents r.#state === F.refresh (F.lookup x (contents state)) (contents state) &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
         size r.#state = size state && r.#value === representative x state &&
         account r.#state = Bigint.add (account state) (find_fee state)} @ unique =
       fun x state fee ->
-    let refine_ state = state in let refine_ fee = fee in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
@@ -116,32 +112,30 @@ module Make (C : Vox_big_credits.S) = struct
       U.representative_def x (borrow_ state.#core));
     let savings = state.#savings in
     let core = state.#core in
-    let input : {s : U.t | U.valid s && U.member x s} = refine_ core in
-    let payment : {b : C.token | let refine_ input = input in
-      C.credits b >= A.find_fee input.#U.alpha} = refine_ fee in
-    let refine_ r = U.find x input payment in
+    let input : {s : U.t | U.valid s && U.member x s} = core in
+    let payment : {b : C.token | C.credits b >= A.find_fee input.#U.alpha} = fee in
+    let r = U.find x input payment in
     let #{U.value; state = core; refund} = r in
     ghost_ (C.nonnegative (borrow_ savings); C.nonnegative (borrow_ refund));
     let right : {t : C.token | 0Z <= C.credits savings && 0Z <= C.credits t} =
-      refine_ refund in
-    let refine_ savings = C.merge savings right in
+      refund in
+    let savings = C.merge savings right in
     let state = #{core; savings} in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
-    let result = #{value; state} in refine_ result
+    let result = #{value; state} in result
 
   let union : (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s && member y s}) @ unique read_write total ->
-      (fee : {b : C.token | let refine_ state = state in C.credits b = union_fee state})
+      (fee : {b : C.token | C.credits b = union_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state && capacity r.#state = capacity state &&
+      {r : result | valid r.#state && capacity r.#state = capacity state &&
         contents r.#state === S.union_paths (heap state) (contents state) x y &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
         size r.#state = size state && r.#value === S.union_root (heap state) (contents state) x y &&
         account r.#state = Bigint.add (account state) (union_fee state)} @ unique =
       fun x y state fee ->
-    let refine_ state = state in let refine_ fee = fee in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
@@ -152,20 +146,19 @@ module Make (C : Vox_big_credits.S) = struct
       member_def y (borrow_ state); U.member_def y (borrow_ state.#core));
     let savings = state.#savings in
     let core = state.#core in
-    let input : {s : U.t | U.valid s && U.member x s && U.member y s} = refine_ core in
-    let payment : {b : C.token | let refine_ input = input in
-      C.credits b >= A.union_fee input.#U.alpha} = refine_ fee in
-    let refine_ r = U.union x y input payment in
+    let input : {s : U.t | U.valid s && U.member x s && U.member y s} = core in
+    let payment : {b : C.token | C.credits b >= A.union_fee input.#U.alpha} = fee in
+    let r = U.union x y input payment in
     let #{U.value; state = core; refund} = r in
     ghost_ (C.nonnegative (borrow_ savings); C.nonnegative (borrow_ refund));
     let right : {t : C.token | 0Z <= C.credits savings && 0Z <= C.credits t} =
-      refine_ refund in
-    let refine_ savings = C.merge savings right in
+      refund in
+    let savings = C.merge savings right in
     let state = #{core; savings} in
     ghost_ (capacity_def (borrow_ state); valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
-    let result = #{value; state} in refine_ result
+    let result = #{value; state} in result
 
   let (find_semantics @ total) : (x : M.elem) @ immutable ->
       (q : M.elem) @ immutable ->
@@ -178,7 +171,7 @@ module Make (C : Vox_big_credits.S) = struct
     U.contents_def (borrow_ state.#core); U.member_def x (borrow_ state.#core);
     U.representative_def q (borrow_ state.#core);
     U.find_semantics x q (borrow_ state.#core);
-    let u = () in refine_ u)
+    let u = () in u)
 
   let (union_semantics @ total) : (x : M.elem) @ immutable ->
       (y : M.elem) @ immutable -> (q : M.elem) @ immutable ->
@@ -198,7 +191,7 @@ module Make (C : Vox_big_credits.S) = struct
     U.representative_def x (borrow_ state.#core); U.representative_def y (borrow_ state.#core);
     U.representative_def q (borrow_ state.#core);
     U.union_semantics x y q (borrow_ state.#core);
-    let u = () in refine_ u)
+    let u = () in u)
 
   let (fee_bounds @ total) :
       (state : t) @ local immutable total ghost forkable unyielding -> (a : Bigint.t) ->
@@ -211,9 +204,9 @@ module Make (C : Vox_big_credits.S) = struct
     U.capacity_def (borrow_ state.#core);
     let cap = capacity (borrow_ state) in let b = U.alpha (borrow_ state.#core) in
     if valid state && 1Z <= a && K.iter cap a 1Z 1Z >= cap && K.below cap a then (
-      let u = () in K.inverse_order cap cap a b (refine_ u);
-      let u = () in K.inverse_order cap cap b a (refine_ u);
+      let u = () in K.inverse_order cap cap a b (u);
+      let u = () in K.inverse_order cap cap b a (u);
       find_fee_def (borrow_ state); union_fee_def (borrow_ state);
-      let u = () in refine_ u)
-    else let u = () in refine_ u)
+      let u = () in u)
+    else let u = () in u)
 end

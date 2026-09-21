@@ -10,12 +10,11 @@ let[@def] (is_var @ total) (x : int shape @ immutable) =
 let run () =
   let desc = Var in
   ghost_ (is_var_def desc);
-  let u = () in let proof : {u : unit | is_var desc} = refine_ u in
-  let refine_ proof = proof in
+  let u = () in let _proof : {u : unit | is_var desc} = u in
   ghost_ (
     let result = match desc with Var -> true | Link q -> q = 0 in
-    let result : {b : bool | b} = refine_ result in
-    let refine_ result = result in ());
+    let _result : {b : bool | b} = result in
+    ());
   ()
 
 let () = run ()

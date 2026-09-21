@@ -32,22 +32,21 @@ let rec (release @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     {u : unit | Bigint.add (P.node_phi cap alpha rank root) 1Z <=
       P.node_phi cap alpha rank parent} =
     fun cap alpha rank parent lower root edges premise ->
-  let refine_ premise = premise in
   chain_def lower root edges; levels_def cap alpha edges;
   let lev = P.node_level cap alpha rank parent in
   match edges with
-  | [] -> L.mem_def lev []; let u = () in refine_ u
+  | [] -> L.mem_def lev []; let u = () in u
   | e :: tail ->
     let current = P.node_level cap alpha e.rank e.parent in
     L.insert_mem current (levels cap alpha tail) lev;
     if Bigint.equal current lev then (
       let u = () in
-      P.repeated_level cap alpha rank parent e.rank e.parent root (refine_ u);
-      let u = () in refine_ u)
+      P.repeated_level cap alpha rank parent e.rank e.parent root (u);
+      let u = () in u)
     else (
       let u = () in
-      release cap alpha rank parent e.parent root tail (refine_ u);
-      let u = () in refine_ u)
+      release cap alpha rank parent e.parent root tail (u);
+      let u = () in u)
 
 let rec (counting @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (lower : Bigint.t) -> (root : Bigint.t) -> (edges : edge list) ->
@@ -58,24 +57,23 @@ let rec (counting @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
       length edges <= Bigint.add (loss cap alpha root edges)
         (L.size (levels cap alpha edges))} =
     fun cap alpha lower root edges premise ->
-  let refine_ premise = premise in
   chain_def lower root edges; levels_def cap alpha edges;
   loss_def cap alpha root edges; length_def edges;
   match edges with
-  | [] -> L.range_def 0Z alpha []; L.size_def []; let u = () in refine_ u
+  | [] -> L.range_def 0Z alpha []; L.size_def []; let u = () in u
   | e :: tail ->
-    let u = () in counting cap alpha e.parent root tail (refine_ u);
-    let u = () in P.analyze cap alpha e.rank e.parent (refine_ u);
-    let u = () in P.compression cap alpha e.rank e.parent root (refine_ u);
+    let u = () in counting cap alpha e.parent root tail (u);
+    let u = () in P.analyze cap alpha e.rank e.parent (u);
+    let u = () in P.compression cap alpha e.rank e.parent root (u);
     let lev = P.node_level cap alpha e.rank e.parent in
     let suffix = levels cap alpha tail in
     L.insert_range 0Z alpha suffix lev;
     L.insert_size 0Z alpha lev suffix;
     if L.mem lev suffix then (
       let u = () in
-      release cap alpha e.rank e.parent e.parent root tail (refine_ u);
-      let u = () in refine_ u)
-    else let u = () in refine_ u
+      release cap alpha e.rank e.parent e.parent root tail (u);
+      let u = () in u)
+    else let u = () in u
 
 let (bound @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (lower : Bigint.t) -> (root : Bigint.t) -> (edges : edge list) ->
@@ -84,6 +82,5 @@ let (bound @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     {u : unit | length edges <= Bigint.add (loss cap alpha root edges) alpha}
     = fun cap alpha lower root edges premise ->
   counting cap alpha lower root edges premise;
-  let refine_ premise = premise in
   L.range_size 0Z alpha (levels cap alpha edges);
-  let u = () in refine_ u
+  let u = () in u

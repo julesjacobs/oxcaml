@@ -49,7 +49,7 @@ module Make (Key : Vox_table_map.Key)
            Count.occupied_def entry byte;
            (match entry with
             | Some (key, _) ->
-              let (_ : {u : unit | (Key.hash key land 127) <> 254}) = refine_
+              let (_ : {u : unit | (Key.hash key land 127) <> 254}) =
                 () in ()
             | None -> ())
          | None -> ())

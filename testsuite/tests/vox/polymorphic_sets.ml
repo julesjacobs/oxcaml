@@ -19,7 +19,7 @@ module Key = struct
       {u : unit | compare x x = 0} =
     compare_def x x;
     let u = () in
-    refine_ u
+    u
 
   let (compare_reverse @ total) :
       (x : t) ->
@@ -29,7 +29,7 @@ module Key = struct
     compare_def x y;
     compare_def y x;
     let u = () in
-    refine_ u
+    u
 
   let (compare_transitive @ total) :
       (x : t) ->
@@ -44,7 +44,7 @@ module Key = struct
     compare_def y z;
     compare_def x z;
     let u = () in
-    refine_ u
+    u
 end
 
 module Set = Polymorphic_list_set.Make (Key)
@@ -70,7 +70,7 @@ let () =
           Set.lookup element larger === Set.lookup element larger} =
       fun _element ->
       let u = () in
-      refine_ u
+      u
     in
     Set.extensional larger larger same_lookup;
     ())

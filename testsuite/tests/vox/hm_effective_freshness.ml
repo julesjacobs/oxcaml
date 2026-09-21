@@ -110,7 +110,7 @@ let rec (template_avoids @ total) : (h : Pref.heap) @ immutable -> (heads : E.he
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (rhs : tree) @ immutable -> (schema : template) @ immutable ->
     {u : unit | finite h rhs && E.effective_below h heads (tree_root rhs) depth && Effective_template.valid_template h heads schema
       && Effective_template.boundary_bound h heads cut schema} ->
@@ -141,7 +141,7 @@ let rec (environment_avoids @ total) : (h : Pref.heap) @ immutable -> (heads : E
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (rhs : tree) @ immutable -> (env : Hm_environment_spec.env) @ immutable ->
     (schemas : Hm_environment_spec.templates) @ immutable ->
     {u : unit | finite h rhs && E.effective_below h heads (tree_root rhs) depth && Hm_effective_environment.effective_env h heads cut env schemas} ->
@@ -165,7 +165,7 @@ let (generalize_readback_typing @ total) : (h : Pref.heap) @ immutable -> (heads
       {t : tree | tree_root t === p && (not (H.mem h p) || finite h t)} @ immutable)) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (values : ((p : node Pref.t) @ immutable ->
-      {u : unit | let refine_ t = trees p in rho p === readback t})) @ total ->
+      {u : unit | let t = trees p in rho p === readback t})) @ total ->
     (rhs : tree) @ immutable -> (env : Hm_environment_spec.env) @ immutable ->
     (schemas : Hm_environment_spec.templates) @ immutable ->
     (n : D.index) @ immutable -> (e : D.term) @ immutable -> (d : D.typing) @ immutable ->

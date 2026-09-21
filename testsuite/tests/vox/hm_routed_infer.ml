@@ -78,10 +78,10 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
     let i = ghost_ index.T.original in
     ghost_ (Dp.env_lookup_owned h.Ghost.ghost env i ();
       F.lookup_encoded env i index.T.number; ());
-    let premise : ({u : unit | F.valid_forest runtime_env && index.T.number >= 0}) Ghost.t = {Ghost.ghost = ghost_ (refine_ ())} in
-    let refine_ found = F.lookup runtime_env index.T.number premise in
+    let premise : ({u : unit | F.valid_forest runtime_env && index.T.number >= 0}) Ghost.t = {Ghost.ghost = ghost_ (())} in
+    let found = F.lookup runtime_env index.T.number premise in
     let p : {p : node Pref.t | lookup env i === Some p && H.mem h.Ghost.ghost p} = match found with
-      | Some p -> refine_ p | None -> ghost_ (let _ : {u : unit | false} = refine_ () in ()); assert false in
+      | Some p -> p | None -> ghost_ (let _ : {u : unit | false} = () in ()); assert false in
     let c = {Effective_copy_spec.saved = ghost_ h.Ghost.ghost; epoch = ghost_ p;
       depth = ghost_ depth; base = ghost_ physical} in
     let scope : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem c.Effective_copy_spec.saved x) || source_ok c.Effective_copy_spec.saved x})) Ghost.t =
@@ -91,41 +91,41 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
       {Ghost.ghost = ghost_ (fun x -> facts.Ghost.ghost x; runtime_at_def h.Ghost.ghost heads.Ghost.ghost depth pool x;
         safe_def h.Ghost.ghost heads.Ghost.ghost x; ())} in
     let valid_copy : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head c.Effective_copy_spec.saved heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ valid.Ghost.ghost)} in
-    let refine_ copied = Certified_copy.instantiate c heads scope clean valid_copy (refine_ depth) physical p (refine_ state) in
+    let copied = Certified_copy.instantiate c heads scope clean valid_copy (depth) physical p (state) in
     let copied_virtual = ghost_ (Pooled_spec.registered pool copied.#epoch copied.#history) in
     ghost_ (Copy_certificate_spec.certifies_def h.Ghost.ghost copied.#certificate copied.#epoch depth copied.#history p copied.#value);
-    let refine_ routing = ghost_ (C.copied h.Ghost.ghost routing copied.#epoch copied.#history copied.#certificate ()) in
+    let routing = ghost_ (C.copied h.Ghost.ghost routing copied.#epoch copied.#history copied.#certificate ()) in
     let physical = copied.#pool in
   let execution = ghost_ (RVar (i, copied.#value, copied.#epoch, copied.#history, copied.#certificate)) in
   let after = ghost_ (Pref.own (borrow_ copied.#state)) in
   ghost_ (copy_heap_def h.Ghost.ghost copied.#epoch depth copied.#history; ran_def h.Ghost.ghost depth pool env execution after copied_virtual;
     source_def execution; result_def execution);
-  let out = #{value = Some copied.#value; state = copied.#state; pool = copied_virtual; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = Some copied.#value; state = copied.#state; pool = copied_virtual; execution; physical; pools; routing} in use (out)
   | T.Truth ->
     let desc = Bool in
     ghost_ (cell_def desc depth; let v = cell desc depth in payload_scoped_def h.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime h.Ghost.ghost routing heads.Ghost.ghost depth pool facts.Ghost.ghost (); ());
-  let refine_ allocated = Effective_allocator.allocate h depth desc physical (refine_ state) in
+  let allocated = Effective_allocator.allocate h depth desc physical (state) in
   let allocated_virtual = ghost_ (Entry (allocated.#value, pool)) in
   ghost_ (allocated_def h.Ghost.ghost depth allocated.#value desc);
   ghost_ (C.allocation_pool h.Ghost.ghost depth allocated.#value desc pool ());
-  let refine_ routing = ghost_ (C.allocated h.Ghost.ghost routing allocated.#value desc ()) in
+  let routing = ghost_ (C.allocated h.Ghost.ghost routing allocated.#value desc ()) in
   let physical = allocated.#pool in
   ghost_ (allocated_def h.Ghost.ghost depth allocated.#value desc);
   let execution = ghost_ (RBool allocated.#value) in
   let after = ghost_ (Pref.own (borrow_ allocated.#state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after allocated_virtual;
     source_def execution; result_def execution);
-  let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated_virtual; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated_virtual; execution; physical; pools; routing} in use (out)
   | T.Lambda runtime_body ->
     let var = Var in
   ghost_ (cell_def var depth; let v = cell var depth in payload_scoped_def h.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime h.Ghost.ghost routing heads.Ghost.ghost depth pool facts.Ghost.ghost (); ());
-  let refine_ arg_allocation = Effective_allocator.allocate h depth var physical (refine_ state) in
+  let arg_allocation = Effective_allocator.allocate h depth var physical (state) in
   let arg_allocation_virtual = ghost_ (Entry (arg_allocation.#value, pool)) in
   ghost_ (allocated_def h.Ghost.ghost depth arg_allocation.#value var);
   ghost_ (C.allocation_pool h.Ghost.ghost depth arg_allocation.#value var pool ());
-  let refine_ routing = ghost_ (C.allocated h.Ghost.ghost routing arg_allocation.#value var ()) in
+  let routing = ghost_ (C.allocated h.Ghost.ghost routing arg_allocation.#value var ()) in
   let physical = arg_allocation.#pool in
   ghost_ (allocated_def h.Ghost.ghost depth arg_allocation.#value var);
   let argument = arg_allocation.#value in let arg_pool = arg_allocation_virtual in
@@ -134,20 +134,20 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let arg_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem arg_heap.Ghost.ghost x then finite arg_heap.Ghost.ghost t else observe arg_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest h.Ghost.ghost trees.Ghost.ghost depth argument var () in
-      let refine_ t = next x in refine_ t)} in
+      let t = next x in t)} in
   let[@def] arg_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in r) in
   let arg_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ arg_heads_selected} in
   let arg_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head arg_heap.Ghost.ghost arg_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> arg_heads_selected_def x;
-      let refine_ r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in
+      let _r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in
       E.valid_head_def arg_heap.Ghost.ghost arg_heads.Ghost.ghost x; ())} in
   let arg_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at arg_heap.Ghost.ghost arg_heads.Ghost.ghost depth arg_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> facts.Ghost.ghost x;
       allocated_def h.Ghost.ghost depth argument var;
       A.allocate_runtime h.Ghost.ghost heads.Ghost.ghost arg_heads.Ghost.ghost depth pool argument var valid.Ghost.ghost (refine_ arg_valid.Ghost.ghost) x (); ())} in
-  let env_input : {f : F.forest | F.valid_forest f} = refine_ runtime_env in
-  let refine_ next_runtime_env = F.cons argument env_input in
+  let env_input : {f : F.forest | F.valid_forest f} = runtime_env in
+  let next_runtime_env = F.cons argument env_input in
   let next_env = ghost_ (Bind (argument, env)) in
   ghost_ (let v = cell var depth in Dp.allocation_env h.Ghost.ghost argument v env ();
     Copy_heap_proofs.put_frame h.Ghost.ghost argument v argument;
@@ -164,17 +164,17 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let after = ghost_ (Pref.own (borrow_ state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after body_pool;
     source_def execution; result_def execution);
-  let out = #{value = None; state = state; pool = body_pool; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = None; state = state; pool = body_pool; execution; physical; pools; routing} in use (out)
   | Some target ->
   let body_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle.Ghost.ghost x then finite middle.Ghost.ghost t else observe middle.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest arg_heap.Ghost.ghost arg_trees.Ghost.ghost depth arg_pool next_env body_run middle.Ghost.ghost body_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> let t = G.run_forest arg_heap.Ghost.ghost arg_trees.Ghost.ghost depth arg_pool next_env body_run middle.Ghost.ghost body_pool x () in t)} in
   let[@def] body_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in r) in
   let body_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ body_heads_selected} in
   let body_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle.Ghost.ghost body_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> body_heads_selected_def x;
-      let refine_ r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in
+      let _r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in
       E.valid_head_def middle.Ghost.ghost body_heads.Ghost.ghost x; ())} in
   let body_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at middle.Ghost.ghost body_heads.Ghost.ghost depth body_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> Hm_effective_invariant.run_invariant arg_heap.Ghost.ghost arg_heads.Ghost.ghost arg_trees.Ghost.ghost depth arg_pool arg_facts.Ghost.ghost next_env body_run middle.Ghost.ghost body_heads.Ghost.ghost body_valid.Ghost.ghost body_pool x (); ())} in
@@ -189,22 +189,22 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let desc = Arrow (argument, target) in
   ghost_ (cell_def desc depth; let v = cell desc depth in payload_scoped_def middle.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime middle.Ghost.ghost routing body_heads.Ghost.ghost depth body_pool body_facts.Ghost.ghost (); ());
-  let refine_ allocated = Effective_allocator.allocate middle depth desc physical (refine_ state) in
+  let allocated = Effective_allocator.allocate middle depth desc physical (state) in
   let allocated_virtual = ghost_ (Entry (allocated.#value, body_pool)) in
   ghost_ (allocated_def middle.Ghost.ghost depth allocated.#value desc);
   ghost_ (C.allocation_pool middle.Ghost.ghost depth allocated.#value desc body_pool ());
-  let refine_ routing = ghost_ (C.allocated middle.Ghost.ghost routing allocated.#value desc ()) in
+  let routing = ghost_ (C.allocated middle.Ghost.ghost routing allocated.#value desc ()) in
   let physical = allocated.#pool in
   ghost_ (allocated_def middle.Ghost.ghost depth allocated.#value desc);
   let execution = ghost_ (RLam (argument, body_run, middle.Ghost.ghost, body_pool, Some allocated.#value)) in
   let after = ghost_ (Pref.own (borrow_ allocated.#state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after allocated_virtual;
     source_def execution; result_def execution);
-  let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated_virtual; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated_virtual; execution; physical; pools; routing} in use (out)
   in
   let call_facts_0 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at arg_heap.Ghost.ghost arg_heads.Ghost.ghost depth call_pool_0.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> arg_facts.Ghost.ghost x; ())} in
-  work goal arg_heap arg_heads arg_trees depth call_pool_0 call_facts_0 next_runtime_env runtime_body physical pools routing (refine_ state) resume
+  work goal arg_heap arg_heads arg_trees depth call_pool_0 call_facts_0 next_runtime_env runtime_body physical pools routing (state) resume
   | T.Apply (runtime_left, runtime_right) ->
   let call_pool_2 : pool Ghost.t = {Ghost.ghost = ghost_ pool} in
   let resume_left : (answer : {r : inference | ran h.Ghost.ghost depth call_pool_2.Ghost.ghost (F.flatten runtime_env) r.#execution (Pref.own r.#state) r.#pool && source r.#execution === T.source runtime_left && r.#value === result r.#execution && C.recorded (Pref.own r.#state) r.#routing && r.#routing.origin === goal.origin && r.#routing.store.S.pending === r.#physical && r.#routing.store.S.buckets === B.contents r.#pools && (r.#value === None || r.#routing.store.S.depth = depth)}) @ unique -> {r : inference | completed goal (Pref.own r.#state) r.#pool r.#execution r.#value r.#routing r.#physical (B.contents r.#pools)} @ unique = fun answer ->
@@ -218,17 +218,17 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let after = ghost_ (Pref.own (borrow_ state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after pool1;
     source_def execution; result_def execution);
-  let out = #{value = None; state = state; pool = pool1; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = None; state = state; pool = pool1; execution; physical; pools; routing} in use (out)
   | Some fn ->
   let first_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h1.Ghost.ghost x then finite h1.Ghost.ghost t else observe h1.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env left_run h1.Ghost.ghost pool1 x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> let t = G.run_forest h.Ghost.ghost trees.Ghost.ghost depth pool env left_run h1.Ghost.ghost pool1 x () in t)} in
   let[@def] first_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select h1.Ghost.ghost first_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select h1.Ghost.ghost first_trees.Ghost.ghost x in r) in
   let first_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ first_heads_selected} in
   let first_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1.Ghost.ghost first_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> first_heads_selected_def x;
-      let refine_ r = Forest_heads.select h1.Ghost.ghost first_trees.Ghost.ghost x in
+      let _r = Forest_heads.select h1.Ghost.ghost first_trees.Ghost.ghost x in
       E.valid_head_def h1.Ghost.ghost first_heads.Ghost.ghost x; ())} in
   let first_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1.Ghost.ghost first_heads.Ghost.ghost depth pool1 x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> Hm_effective_invariant.run_invariant h.Ghost.ghost heads.Ghost.ghost trees.Ghost.ghost depth pool facts.Ghost.ghost env left_run h1.Ghost.ghost first_heads.Ghost.ghost first_valid.Ghost.ghost pool1 x (); ())} in
@@ -249,17 +249,17 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let after = ghost_ (Pref.own (borrow_ state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after pool2;
     source_def execution; result_def execution);
-  let out = #{value = None; state = state; pool = pool2; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = None; state = state; pool = pool2; execution; physical; pools; routing} in use (out)
   | Some actual ->
   let second_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem h2.Ghost.ghost x then finite h2.Ghost.ghost t else observe h2.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h1.Ghost.ghost first_trees.Ghost.ghost depth pool1 env right_run h2.Ghost.ghost pool2 x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> let t = G.run_forest h1.Ghost.ghost first_trees.Ghost.ghost depth pool1 env right_run h2.Ghost.ghost pool2 x () in t)} in
   let[@def] second_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select h2.Ghost.ghost second_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select h2.Ghost.ghost second_trees.Ghost.ghost x in r) in
   let second_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ second_heads_selected} in
   let second_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h2.Ghost.ghost second_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> second_heads_selected_def x;
-      let refine_ r = Forest_heads.select h2.Ghost.ghost second_trees.Ghost.ghost x in
+      let _r = Forest_heads.select h2.Ghost.ghost second_trees.Ghost.ghost x in
       E.valid_head_def h2.Ghost.ghost second_heads.Ghost.ghost x; ())} in
   let second_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h2.Ghost.ghost second_heads.Ghost.ghost depth pool2 x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> Hm_effective_invariant.run_invariant h1.Ghost.ghost first_heads.Ghost.ghost first_trees.Ghost.ghost depth pool1 first_facts.Ghost.ghost env right_run h2.Ghost.ghost second_heads.Ghost.ghost second_valid.Ghost.ghost pool2 x (); ())} in
@@ -273,11 +273,11 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let var = Var in
   ghost_ (cell_def var depth; let v = cell var depth in payload_scoped_def h2.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime h2.Ghost.ghost routing second_heads.Ghost.ghost depth pool2 second_facts.Ghost.ghost (); ());
-  let refine_ result_allocation = Effective_allocator.allocate h2 depth var physical (refine_ state) in
+  let result_allocation = Effective_allocator.allocate h2 depth var physical (state) in
   let result_allocation_virtual = ghost_ (Entry (result_allocation.#value, pool2)) in
   ghost_ (allocated_def h2.Ghost.ghost depth result_allocation.#value var);
   ghost_ (C.allocation_pool h2.Ghost.ghost depth result_allocation.#value var pool2 ());
-  let refine_ routing = ghost_ (C.allocated h2.Ghost.ghost routing result_allocation.#value var ()) in
+  let routing = ghost_ (C.allocated h2.Ghost.ghost routing result_allocation.#value var ()) in
   let physical = result_allocation.#pool in
   ghost_ (allocated_def h2.Ghost.ghost depth result_allocation.#value var);
   let result_node = result_allocation.#value in let result_pool = result_allocation_virtual in
@@ -286,13 +286,13 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let result_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem result_heap.Ghost.ghost x then finite result_heap.Ghost.ghost t else observe result_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest h2.Ghost.ghost second_trees.Ghost.ghost depth result_node var () in
-      let refine_ t = next x in refine_ t)} in
+      let t = next x in t)} in
   let[@def] result_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in r) in
   let result_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ result_heads_selected} in
   let result_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head result_heap.Ghost.ghost result_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> result_heads_selected_def x;
-      let refine_ r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in
+      let _r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in
       E.valid_head_def result_heap.Ghost.ghost result_heads.Ghost.ghost x; ())} in
   let result_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at result_heap.Ghost.ghost result_heads.Ghost.ghost depth result_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> second_facts.Ghost.ghost x;
@@ -306,11 +306,11 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let desc = Arrow (actual, result_node) in
   ghost_ (cell_def desc depth; let v = cell desc depth in payload_scoped_def result_heap.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime result_heap.Ghost.ghost routing result_heads.Ghost.ghost depth result_pool result_facts.Ghost.ghost (); ());
-  let refine_ arrow_allocation = Effective_allocator.allocate result_heap depth desc physical (refine_ state) in
+  let arrow_allocation = Effective_allocator.allocate result_heap depth desc physical (state) in
   let arrow_allocation_virtual = ghost_ (Entry (arrow_allocation.#value, result_pool)) in
   ghost_ (allocated_def result_heap.Ghost.ghost depth arrow_allocation.#value desc);
   ghost_ (C.allocation_pool result_heap.Ghost.ghost depth arrow_allocation.#value desc result_pool ());
-  let refine_ routing = ghost_ (C.allocated result_heap.Ghost.ghost routing arrow_allocation.#value desc ()) in
+  let routing = ghost_ (C.allocated result_heap.Ghost.ghost routing arrow_allocation.#value desc ()) in
   let physical = arrow_allocation.#pool in
   ghost_ (allocated_def result_heap.Ghost.ghost depth arrow_allocation.#value desc);
   let arrow_node = arrow_allocation.#value in let arrow_pool = arrow_allocation_virtual in
@@ -319,13 +319,13 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let arrow_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem arrow_heap.Ghost.ghost x then finite arrow_heap.Ghost.ghost t else observe arrow_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest result_heap.Ghost.ghost result_trees.Ghost.ghost depth arrow_node desc () in
-      let refine_ t = next x in refine_ t)} in
+      let t = next x in t)} in
   let[@def] arrow_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select arrow_heap.Ghost.ghost arrow_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select arrow_heap.Ghost.ghost arrow_trees.Ghost.ghost x in r) in
   let arrow_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ arrow_heads_selected} in
   let arrow_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head arrow_heap.Ghost.ghost arrow_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> arrow_heads_selected_def x;
-      let refine_ r = Forest_heads.select arrow_heap.Ghost.ghost arrow_trees.Ghost.ghost x in
+      let _r = Forest_heads.select arrow_heap.Ghost.ghost arrow_trees.Ghost.ghost x in
       E.valid_head_def arrow_heap.Ghost.ghost arrow_heads.Ghost.ghost x; ())} in
   let arrow_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at arrow_heap.Ghost.ghost arrow_heads.Ghost.ghost depth arrow_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> result_facts.Ghost.ghost x;
@@ -343,32 +343,32 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let d : int Ghost.t = {Ghost.ghost = ghost_ depth} in let pool_proof : pool Ghost.t = {Ghost.ghost = ghost_ arrow_pool} in
   let unify_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at arrow_heap.Ghost.ghost arrow_heads.Ghost.ghost d.Ghost.ghost pool_proof.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (refine_ arrow_facts.Ghost.ghost)} in
-  let refine_ solved = Effective_hm_unify.unify arrow_heap arrow_heads d pool_proof unify_facts arrow_trees fn arrow_node (refine_ state) in
+  let solved = Effective_hm_unify.unify arrow_heap arrow_heads d pool_proof unify_facts arrow_trees fn arrow_node (state) in
   let after_unify = ghost_ (Pref.own (borrow_ solved.#state)) in
-  let refine_ routing = ghost_ (C.unified arrow_heap.Ghost.ghost routing fn arrow_node solved.#ok after_unify solved.#derivation ()) in
+  let routing = ghost_ (C.unified arrow_heap.Ghost.ghost routing fn arrow_node solved.#ok after_unify solved.#derivation ()) in
   let value = if solved.#ok then Some result_node else None in
   let execution = ghost_ (RApp (left_run, right_run, h1.Ghost.ghost, pool1, h2.Ghost.ghost, pool2, result_node, arrow_node, solved.#ok, solved.#derivation)) in
   let after = ghost_ (Pref.own (borrow_ solved.#state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after arrow_pool;
     source_def execution; result_def execution);
-  let out = #{value = value; state = solved.#state; pool = arrow_pool; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = value; state = solved.#state; pool = arrow_pool; execution; physical; pools; routing} in use (out)
   in
   let call_facts_1 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1.Ghost.ghost first_heads.Ghost.ghost depth call_pool_1.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> first_facts.Ghost.ghost x; ())} in
-  work goal h1 first_heads first_trees depth call_pool_1 call_facts_1 runtime_env runtime_right physical pools routing (refine_ state) resume_right
+  work goal h1 first_heads first_trees depth call_pool_1 call_facts_1 runtime_env runtime_right physical pools routing (state) resume_right
   in
   let call_facts_2 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h.Ghost.ghost heads.Ghost.ghost depth call_pool_2.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> facts.Ghost.ghost x; ())} in
-  work goal h heads trees depth call_pool_2 call_facts_2 runtime_env runtime_left physical pools routing (refine_ state) resume_left
+  work goal h heads trees depth call_pool_2 call_facts_2 runtime_env runtime_left physical pools routing (state) resume_left
   | T.Recursive runtime_body ->
     let var = Var in
   ghost_ (cell_def var depth; let v = cell var depth in payload_scoped_def h.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime h.Ghost.ghost routing heads.Ghost.ghost depth pool facts.Ghost.ghost (); ());
-  let refine_ arg_allocation = Effective_allocator.allocate h depth var physical (refine_ state) in
+  let arg_allocation = Effective_allocator.allocate h depth var physical (state) in
   let arg_allocation_virtual = ghost_ (Entry (arg_allocation.#value, pool)) in
   ghost_ (allocated_def h.Ghost.ghost depth arg_allocation.#value var);
   ghost_ (C.allocation_pool h.Ghost.ghost depth arg_allocation.#value var pool ());
-  let refine_ routing = ghost_ (C.allocated h.Ghost.ghost routing arg_allocation.#value var ()) in
+  let routing = ghost_ (C.allocated h.Ghost.ghost routing arg_allocation.#value var ()) in
   let physical = arg_allocation.#pool in
   ghost_ (allocated_def h.Ghost.ghost depth arg_allocation.#value var);
   let argument = arg_allocation.#value in let arg_pool = arg_allocation_virtual in
@@ -377,13 +377,13 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let arg_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem arg_heap.Ghost.ghost x then finite arg_heap.Ghost.ghost t else observe arg_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest h.Ghost.ghost trees.Ghost.ghost depth argument var () in
-      let refine_ t = next x in refine_ t)} in
+      let t = next x in t)} in
   let[@def] arg_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in r) in
   let arg_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ arg_heads_selected} in
   let arg_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head arg_heap.Ghost.ghost arg_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> arg_heads_selected_def x;
-      let refine_ r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in
+      let _r = Forest_heads.select arg_heap.Ghost.ghost arg_trees.Ghost.ghost x in
       E.valid_head_def arg_heap.Ghost.ghost arg_heads.Ghost.ghost x; ())} in
   let arg_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at arg_heap.Ghost.ghost arg_heads.Ghost.ghost depth arg_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> facts.Ghost.ghost x;
@@ -391,11 +391,11 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
       A.allocate_runtime h.Ghost.ghost heads.Ghost.ghost arg_heads.Ghost.ghost depth pool argument var valid.Ghost.ghost (refine_ arg_valid.Ghost.ghost) x (); ())} in
   ghost_ (cell_def var depth; let v = cell var depth in payload_scoped_def arg_heap.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime arg_heap.Ghost.ghost routing arg_heads.Ghost.ghost depth arg_pool arg_facts.Ghost.ghost (); ());
-  let refine_ result_allocation = Effective_allocator.allocate arg_heap depth var physical (refine_ state) in
+  let result_allocation = Effective_allocator.allocate arg_heap depth var physical (state) in
   let result_allocation_virtual = ghost_ (Entry (result_allocation.#value, arg_pool)) in
   ghost_ (allocated_def arg_heap.Ghost.ghost depth result_allocation.#value var);
   ghost_ (C.allocation_pool arg_heap.Ghost.ghost depth result_allocation.#value var arg_pool ());
-  let refine_ routing = ghost_ (C.allocated arg_heap.Ghost.ghost routing result_allocation.#value var ()) in
+  let routing = ghost_ (C.allocated arg_heap.Ghost.ghost routing result_allocation.#value var ()) in
   let physical = result_allocation.#pool in
   ghost_ (allocated_def arg_heap.Ghost.ghost depth result_allocation.#value var);
   let result_node = result_allocation.#value in let result_pool = result_allocation_virtual in
@@ -404,13 +404,13 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let result_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem result_heap.Ghost.ghost x then finite result_heap.Ghost.ghost t else observe result_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest arg_heap.Ghost.ghost arg_trees.Ghost.ghost depth result_node var () in
-      let refine_ t = next x in refine_ t)} in
+      let t = next x in t)} in
   let[@def] result_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in r) in
   let result_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ result_heads_selected} in
   let result_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head result_heap.Ghost.ghost result_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> result_heads_selected_def x;
-      let refine_ r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in
+      let _r = Forest_heads.select result_heap.Ghost.ghost result_trees.Ghost.ghost x in
       E.valid_head_def result_heap.Ghost.ghost result_heads.Ghost.ghost x; ())} in
   let result_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at result_heap.Ghost.ghost result_heads.Ghost.ghost depth result_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> arg_facts.Ghost.ghost x;
@@ -425,11 +425,11 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let desc = Arrow (argument, result_node) in
   ghost_ (cell_def desc depth; let v = cell desc depth in payload_scoped_def result_heap.Ghost.ghost v; ());
   ghost_ (C.scoped_runtime result_heap.Ghost.ghost routing result_heads.Ghost.ghost depth result_pool result_facts.Ghost.ghost (); ());
-  let refine_ self_allocation = Effective_allocator.allocate result_heap depth desc physical (refine_ state) in
+  let self_allocation = Effective_allocator.allocate result_heap depth desc physical (state) in
   let self_allocation_virtual = ghost_ (Entry (self_allocation.#value, result_pool)) in
   ghost_ (allocated_def result_heap.Ghost.ghost depth self_allocation.#value desc);
   ghost_ (C.allocation_pool result_heap.Ghost.ghost depth self_allocation.#value desc result_pool ());
-  let refine_ routing = ghost_ (C.allocated result_heap.Ghost.ghost routing self_allocation.#value desc ()) in
+  let routing = ghost_ (C.allocated result_heap.Ghost.ghost routing self_allocation.#value desc ()) in
   let physical = self_allocation.#pool in
   ghost_ (allocated_def result_heap.Ghost.ghost depth self_allocation.#value desc);
   let self_node = self_allocation.#value in let self_pool = self_allocation_virtual in
@@ -438,22 +438,22 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let self_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem self_heap.Ghost.ghost x then finite self_heap.Ghost.ghost t else observe self_heap.Ghost.ghost x === None)} @ immutable)) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> let next = G.allocated_forest result_heap.Ghost.ghost result_trees.Ghost.ghost depth self_node desc () in
-      let refine_ t = next x in refine_ t)} in
+      let t = next x in t)} in
   let[@def] self_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select self_heap.Ghost.ghost self_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select self_heap.Ghost.ghost self_trees.Ghost.ghost x in r) in
   let self_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ self_heads_selected} in
   let self_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head self_heap.Ghost.ghost self_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> self_heads_selected_def x;
-      let refine_ r = Forest_heads.select self_heap.Ghost.ghost self_trees.Ghost.ghost x in
+      let _r = Forest_heads.select self_heap.Ghost.ghost self_trees.Ghost.ghost x in
       E.valid_head_def self_heap.Ghost.ghost self_heads.Ghost.ghost x; ())} in
   let self_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at self_heap.Ghost.ghost self_heads.Ghost.ghost depth self_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> result_facts.Ghost.ghost x;
       allocated_def result_heap.Ghost.ghost depth self_node desc;
       A.allocate_runtime result_heap.Ghost.ghost result_heads.Ghost.ghost self_heads.Ghost.ghost depth result_pool self_node desc result_valid.Ghost.ghost (refine_ self_valid.Ghost.ghost) x (); ())} in
-  let env_input : {f : F.forest | F.valid_forest f} = refine_ runtime_env in
-  let refine_ with_self = F.cons self_node env_input in
-  let env_input : {f : F.forest | F.valid_forest f} = refine_ with_self in
-  let refine_ next_runtime_env = F.cons argument env_input in
+  let env_input : {f : F.forest | F.valid_forest f} = runtime_env in
+  let with_self = F.cons self_node env_input in
+  let env_input : {f : F.forest | F.valid_forest f} = with_self in
+  let next_runtime_env = F.cons argument env_input in
   let next_env = ghost_ (Bind (argument, Bind (self_node, env))) in
   ghost_ (let v = cell var depth in
     Dp.allocation_env h.Ghost.ghost argument v env ();
@@ -477,17 +477,17 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let after = ghost_ (Pref.own (borrow_ state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after body_pool;
     source_def execution; result_def execution);
-  let out = #{value = None; state = state; pool = body_pool; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = None; state = state; pool = body_pool; execution; physical; pools; routing} in use (out)
   | Some target ->
   let body_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle.Ghost.ghost x then finite middle.Ghost.ghost t else observe middle.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest self_heap.Ghost.ghost self_trees.Ghost.ghost depth self_pool next_env body_run middle.Ghost.ghost body_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> let t = G.run_forest self_heap.Ghost.ghost self_trees.Ghost.ghost depth self_pool next_env body_run middle.Ghost.ghost body_pool x () in t)} in
   let[@def] body_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in r) in
   let body_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ body_heads_selected} in
   let body_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle.Ghost.ghost body_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> body_heads_selected_def x;
-      let refine_ r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in
+      let _r = Forest_heads.select middle.Ghost.ghost body_trees.Ghost.ghost x in
       E.valid_head_def middle.Ghost.ghost body_heads.Ghost.ghost x; ())} in
   let body_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at middle.Ghost.ghost body_heads.Ghost.ghost depth body_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> Hm_effective_invariant.run_invariant self_heap.Ghost.ghost self_heads.Ghost.ghost self_trees.Ghost.ghost depth self_pool self_facts.Ghost.ghost next_env body_run middle.Ghost.ghost body_heads.Ghost.ghost body_valid.Ghost.ghost body_pool x (); ())} in
@@ -507,19 +507,19 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let d : int Ghost.t = {Ghost.ghost = ghost_ depth} in let pool_proof : pool Ghost.t = {Ghost.ghost = ghost_ body_pool} in
   let unify_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at middle.Ghost.ghost body_heads.Ghost.ghost d.Ghost.ghost pool_proof.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (refine_ body_facts.Ghost.ghost)} in
-  let refine_ solved = Effective_hm_unify.unify middle body_heads d pool_proof unify_facts body_trees target result_node (refine_ state) in
+  let solved = Effective_hm_unify.unify middle body_heads d pool_proof unify_facts body_trees target result_node (state) in
   let after_unify = ghost_ (Pref.own (borrow_ solved.#state)) in
-  let refine_ routing = ghost_ (C.unified middle.Ghost.ghost routing target result_node solved.#ok after_unify solved.#derivation ()) in
+  let routing = ghost_ (C.unified middle.Ghost.ghost routing target result_node solved.#ok after_unify solved.#derivation ()) in
   let value = if solved.#ok then Some self_node else None in
   let execution = ghost_ (RRec (argument, result_node, self_node, body_run, middle.Ghost.ghost, body_pool, Unified (solved.#ok, solved.#derivation))) in
   let after = ghost_ (Pref.own (borrow_ solved.#state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after body_pool;
     source_def execution; result_def execution);
-  let out = #{value = value; state = solved.#state; pool = body_pool; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = value; state = solved.#state; pool = body_pool; execution; physical; pools; routing} in use (out)
   in
   let call_facts_3 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at self_heap.Ghost.ghost self_heads.Ghost.ghost depth call_pool_3.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> self_facts.Ghost.ghost x; ())} in
-  work goal self_heap self_heads self_trees depth call_pool_3 call_facts_3 next_runtime_env runtime_body physical pools routing (refine_ state) resume
+  work goal self_heap self_heads self_trees depth call_pool_3 call_facts_3 next_runtime_env runtime_body physical pools routing (state) resume
   | T.Let (runtime_rhs, runtime_body) ->
     let child_depth = depth + 1 in
     if child_depth < 0 then
@@ -527,9 +527,9 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
     ghost_ (let limit = Iarray.length goal.origin.S.buckets in
       K.fits_def runtime_rhs child_depth limit;
       C.capacity h.Ghost.ghost routing ());
-    let saved_pools : {a : pool B.t | 0 <= depth && depth < Iarray.length (B.contents a)} = refine_ pools in
-    let refine_ pools = Rp.save depth physical saved_pools in
-    let refine_ routing = ghost_ (C.entered h.Ghost.ghost routing ()) in
+    let saved_pools : {a : pool B.t | 0 <= depth && depth < Iarray.length (B.contents a)} = pools in
+    let pools = Rp.save depth physical saved_pools in
+    let routing = ghost_ (C.entered h.Ghost.ghost routing ()) in
     let physical : pool = Empty in
     let child_pool : pool = Empty in
     ghost_ (pool_scoped_def h.Ghost.ghost child_pool);
@@ -547,17 +547,17 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let after = ghost_ (Pref.own (borrow_ state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after rhs_pool;
     source_def execution; result_def execution);
-  let out = #{value = None; state = state; pool = rhs_pool; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = None; state = state; pool = rhs_pool; execution; physical; pools; routing} in use (out)
   | Some bound_node ->
   let rhs_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem middle.Ghost.ghost x then finite middle.Ghost.ghost t else observe middle.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.run_forest h.Ghost.ghost trees.Ghost.ghost child_depth child_pool env rhs_run middle.Ghost.ghost rhs_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> let t = G.run_forest h.Ghost.ghost trees.Ghost.ghost child_depth child_pool env rhs_run middle.Ghost.ghost rhs_pool x () in t)} in
   let[@def] rhs_heads_selected : E.heads @ ghost = ghost_ (fun x ->
-    let refine_ r = Forest_heads.select middle.Ghost.ghost rhs_trees.Ghost.ghost x in r) in
+    let r = Forest_heads.select middle.Ghost.ghost rhs_trees.Ghost.ghost x in r) in
   let rhs_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ rhs_heads_selected} in
   let rhs_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle.Ghost.ghost rhs_heads.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> rhs_heads_selected_def x;
-      let refine_ r = Forest_heads.select middle.Ghost.ghost rhs_trees.Ghost.ghost x in
+      let _r = Forest_heads.select middle.Ghost.ghost rhs_trees.Ghost.ghost x in
       E.valid_head_def middle.Ghost.ghost rhs_heads.Ghost.ghost x; ())} in
   let rhs_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at middle.Ghost.ghost rhs_heads.Ghost.ghost child_depth rhs_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> Hm_effective_invariant.run_invariant h.Ghost.ghost heads.Ghost.ghost trees.Ghost.ghost child_depth child_pool child_facts.Ghost.ghost env rhs_run middle.Ghost.ghost rhs_heads.Ghost.ghost rhs_valid.Ghost.ghost rhs_pool x (); ())} in
@@ -575,35 +575,35 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
     C.scoped_runtime middle.Ghost.ghost routing rhs_heads.Ghost.ghost child_depth rhs_pool rhs_facts.Ghost.ghost (); ());
   ghost_ (
     let[@def] positions : S.locations = fun x ->
-      let refine_ i = C.position middle.Ghost.ghost routing x () in i in
+      let i = C.position middle.Ghost.ghost routing x () in i in
     let located : ((x : node Pref.t) @ immutable -> {u : unit | S.located middle.Ghost.ghost routing.store positions x}) @ total = fun x ->
-      positions_def x; let refine_ i = C.position middle.Ghost.ghost routing x () in
+      positions_def x; let _i = C.position middle.Ghost.ghost routing x () in
       S.location_at middle.Ghost.ghost routing.store positions x; () in
     let logical : ((x : node Pref.t) @ immutable -> {u : unit | R.representative_covered middle.Ghost.ghost (routing.store.S.depth - 1) rhs_pool x}) @ total = fun x ->
       rhs_facts.Ghost.ghost x; runtime_at_def middle.Ghost.ghost rhs_heads.Ghost.ghost child_depth rhs_pool x; () in
     S.same_closing middle.Ghost.ghost routing.store positions rhs_pool located logical (); ());
-  let input_pools : {a : pool B.t | 0 <= depth && depth < Iarray.length (B.contents a)} = refine_ pools in
-  let refine_ closed = Rp.close_and_route middle depth physical (refine_ state) input_pools in
+  let input_pools : {a : pool B.t | 0 <= depth && depth < Iarray.length (B.contents a)} = pools in
+  let closed = Rp.close_and_route middle depth physical (state) input_pools in
   let state = closed.#state in
   ghost_ (let after = Pref.own (borrow_ state) in let empty : pool = Empty in
     let retained = Representative_pool_spec.transfer_rep after physical empty in
     Level_pool_routing_spec.route_length after retained routing.store.S.buckets; ());
-  let input_pools : {a : pool B.t | 0 <= depth && depth < Iarray.length (B.contents a)} = refine_ closed.#pools in
-  let refine_ taken = Rp.take depth input_pools in
+  let input_pools : {a : pool B.t | 0 <= depth && depth < Iarray.length (B.contents a)} = closed.#pools in
+  let taken = Rp.take depth input_pools in
   let physical = taken.#pending in let pools = taken.#pools in
   let before_close = ghost_ routing in
-  let refine_ routing = ghost_ (C.left middle.Ghost.ghost before_close ()) in
+  let routing = ghost_ (C.left middle.Ghost.ghost before_close ()) in
   ghost_ (S.closed_store_def middle.Ghost.ghost before_close.store);
   ghost_ (Pool_closing_equivalence.closed_transfer_scoped middle.Ghost.ghost depth rhs_pool pool ());
   let parent_pool = ghost_ (Representative_pool_spec.transfer_rep (Representative_pool_spec.close_heap middle.Ghost.ghost depth rhs_pool) rhs_pool pool) in
   let start : Pref.heap Ghost.t = {Ghost.ghost = ghost_ (Pref.own (borrow_ state))} in
   let parent_trees : (((x : node Pref.t) @ immutable ->
     {t : tree | tree_root t === x && (if H.mem start.Ghost.ghost x then finite start.Ghost.ghost t else observe start.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-    {Ghost.ghost = ghost_ (fun x -> let refine_ t = G.representative_closed_forest middle.Ghost.ghost rhs_trees.Ghost.ghost depth rhs_pool x () in refine_ t)} in
+    {Ghost.ghost = ghost_ (fun x -> let t = G.representative_closed_forest middle.Ghost.ghost rhs_trees.Ghost.ghost depth rhs_pool x () in t)} in
   let parent_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at start.Ghost.ghost rhs_heads.Ghost.ghost depth parent_pool x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> Hm_effective_closing.close_after_run h.Ghost.ghost heads.Ghost.ghost rhs_heads.Ghost.ghost depth pool facts.Ghost.ghost env rhs_run middle.Ghost.ghost rhs_pool (refine_ rhs_facts.Ghost.ghost) x (); ())} in
-  let env_input : {f : F.forest | F.valid_forest f} = refine_ runtime_env in
-  let refine_ next_runtime_env = F.cons bound_node env_input in
+  let env_input : {f : F.forest | F.valid_forest f} = runtime_env in
+  let next_runtime_env = F.cons bound_node env_input in
   let next_env = ghost_ (Bind (bound_node, env)) in
   ghost_ (
     let frame : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem middle.Ghost.ghost x) || H.mem start.Ghost.ghost x}) @ total = fun x ->
@@ -622,15 +622,15 @@ let rec work : (goal : goal) @ immutable -> (h : Pref.heap Ghost.t) @ immutable 
   let after = ghost_ (Pref.own (borrow_ answer.#state)) in
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after answer.#pool;
     source_def execution; result_def execution);
-  let out = #{value = answer.#value; state = answer.#state; pool = answer.#pool; execution; physical; pools; routing} in use (refine_ out)
+  let out = #{value = answer.#value; state = answer.#state; pool = answer.#pool; execution; physical; pools; routing} in use (out)
   in
   let call_facts_4 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at start.Ghost.ghost rhs_heads.Ghost.ghost depth call_pool_4.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> parent_facts.Ghost.ghost x; ())} in
-  work goal start rhs_heads parent_trees depth call_pool_4 call_facts_4 next_runtime_env runtime_body physical pools routing (refine_ state) resume_body
+  work goal start rhs_heads parent_trees depth call_pool_4 call_facts_4 next_runtime_env runtime_body physical pools routing (state) resume_body
   in
   let call_facts_5 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h.Ghost.ghost heads.Ghost.ghost child_depth call_pool_5.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> child_facts.Ghost.ghost x; ())} in
-  work goal h heads trees child_depth call_pool_5 call_facts_5 runtime_env runtime_rhs physical pools routing (refine_ state) resume_rhs
+  work goal h heads trees child_depth call_pool_5 call_facts_5 runtime_env runtime_rhs physical pools routing (state) resume_rhs
   )
 
 let closed_compiled :
@@ -640,17 +640,17 @@ let closed_compiled :
         r.#execution (Pref.own r.#state) r.#pool
       && source r.#execution === T.source input && r.#value === result r.#execution} @ unique =
   fun input ->
-    let refine_ pools = K.create input in
+    let pools = K.create input in
     let values = ghost_ (B.contents (borrow_ pools)) in
     let physical : pool = Empty in
     let origin = ghost_ {S.depth = 0; pending = physical; buckets = values} in
     let routing = {C.origin = ghost_ origin; store = ghost_ origin; execution = ghost_ Level_pool_execution.Idle} in
-    let refine_ state = Pref.empty () in
+    let state = Pref.empty () in
     let h : Pref.heap Ghost.t = {Ghost.ghost = ghost_ (Pref.own (borrow_ state))} in
     let heads : E.heads Ghost.t = {Ghost.ghost = ghost_ (fun x -> {R.root = x; path = Here})} in
     let trees : (((x : node Pref.t) @ immutable ->
       {t : tree | tree_root t === x && (if H.mem h.Ghost.ghost x then finite h.Ghost.ghost t else observe h.Ghost.ghost x === None)} @ immutable)) Ghost.t =
-      {Ghost.ghost = ghost_ (fun x -> let t = Free x in tree_root_def t; observe_def h.Ghost.ghost x; refine_ t)} in
+      {Ghost.ghost = ghost_ (fun x -> let t = Free x in tree_root_def t; observe_def h.Ghost.ghost x; t)} in
     let pool : pool = Empty in
     let facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h.Ghost.ghost heads.Ghost.ghost 0 pool x})) Ghost.t =
       {Ghost.ghost = ghost_ (fun x -> runtime_at_def h.Ghost.ghost heads.Ghost.ghost 0 pool x;
@@ -678,7 +678,7 @@ let closed_compiled :
       C.recorded_def h.Ghost.ghost routing);
     let call_facts_6 : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h.Ghost.ghost heads.Ghost.ghost 0 call_pool_6.Ghost.ghost x})) Ghost.t =
     {Ghost.ghost = ghost_ (fun x -> facts.Ghost.ghost x; ())} in
-  let refine_ out = work goal h heads trees 0 call_pool_6 call_facts_6 runtime_env input physical pools routing (refine_ state) use in
+  let out = work goal h heads trees 0 call_pool_6 call_facts_6 runtime_env input physical pools routing (state) use in
   let value = out.#value in let physical = out.#physical in
   ghost_ (completed_def goal (Pref.own (borrow_ out.#state)) out.#pool
     out.#execution value out.#routing physical (B.contents (borrow_ out.#pools)));
@@ -694,8 +694,8 @@ let closed_hm : (e : {e : D.term | D.scoped_term D.Z e}) @ immutable ->
         r.#execution (Pref.own r.#state) r.#pool
       && source r.#execution === e && r.#value === result r.#execution} @ unique =
   fun e ->
-    let refine_ input = T.compile e in
-    let input : {e : T.term | T.valid e && D.scoped_term D.Z (T.source e)} = refine_ input in
-    let refine_ out = closed_compiled input in let answer = #{value = out.#value; state = out.#state;
+    let input = T.compile e in
+    let input : {e : T.term | T.valid e && D.scoped_term D.Z (T.source e)} = input in
+    let out = closed_compiled input in let answer = #{value = out.#value; state = out.#state;
       pool = ghost_ out.#pool; execution = ghost_ out.#execution} in
-    refine_ answer
+    answer

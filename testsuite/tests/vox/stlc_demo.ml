@@ -13,28 +13,26 @@ open Stlc_inference_proofs
 
 let run e expected =
   if scoped_term Z e then (
-    let e : {e : term | scoped_term Z e} = refine_ e in
-    let refine_ result = Stlc_infer.infer e in let refine_ e = e in
-    let ok = result.#ok in assert (ok = expected);
+    let e : {e : term | scoped_term Z e} = e in
+    let result = Stlc_infer.infer e in let ok = result.#ok in assert (ok = expected);
     let h = ghost_ (Pref.own (borrow_ result.#state)) in
     let _proof = ghost_ (
       if ok then (
         let u = () in
-        let refine_ typing = inference_sound e result.#generated_heap result.#graph h result.#solving result.#tree (refine_ u) in
+        let _typing = inference_sound e result.#generated_heap result.#graph h result.#solving result.#tree (u) in
         ()) else ()) in
     let p = result.#value in let t = result.#state in
-    let t : {t : Pref.token | H.mem (Pref.own t) p} = refine_ t in
-    let refine_ _payload = Pref.read p (borrow_ t) in ())
+    let t : {t : Pref.token | H.mem (Pref.own t) p} = t in
+    let _payload = Pref.read p (borrow_ t) in ())
   else assert false
 
 let identity_instance () =
   let e = Lambda (Bound Z) in
   ghost_ (let b = Bound Z in let zero = Z in let one = S zero in
     scoped_term_def one b; present_def one zero; scoped_term_def zero e;
-    let u = () in let proof : {u : unit | scoped_term Z e} = refine_ u in proof);
-  let e : {e : term | scoped_term Z e} = refine_ e in
-  let refine_ result = Stlc_infer.infer e in let refine_ e = e in
-  assert result.#ok;
+    let u = () in let proof : {u : unit | scoped_term Z e} = u in proof);
+  let e : {e : term | scoped_term Z e} = e in
+  let result = Stlc_infer.infer e in assert result.#ok;
   let _proof = ghost_ (
     let after = Pref.own (borrow_ result.#state) in
     if result.#ok then (
@@ -48,18 +46,17 @@ let identity_instance () =
       let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
           {u : unit | target === Unifier_mgu_spec.substitute delta (readback result.#tree)} ->
           {u : unit | claim}) @ total = fun _delta factor ->
-        let refine_ factor = factor in let u = () in refine_ u in
+        let u = () in u in
       let u = () in
-      let refine_ u = with_typing_factor e result.#generated_heap result.#graph after result.#solving
-        result.#tree target d (refine_ u) claim use in ()) else ()) in
+      let _u = with_typing_factor e result.#generated_heap result.#graph after result.#solving
+        result.#tree target d (u) claim use in ()) else ()) in
   ()
 
 let recursive_instance () =
   let e = Recursive (Bound Z) in
   if scoped_term Z e then (
-    let e : {e : term | scoped_term Z e} = refine_ e in
-    let refine_ result = Stlc_infer.infer e in let refine_ e = e in
-    assert result.#ok;
+    let e : {e : term | scoped_term Z e} = e in
+    let result = Stlc_infer.infer e in assert result.#ok;
     let _proof = ghost_ (
       let after = Pref.own (borrow_ result.#state) in
       if result.#ok then (
@@ -73,10 +70,10 @@ let recursive_instance () =
         let use : ((delta : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
             {u : unit | target === Unifier_mgu_spec.substitute delta (readback result.#tree)} ->
             {u : unit | claim}) @ total = fun _delta factor ->
-          let refine_ factor = factor in let u = () in refine_ u in
+          let u = () in u in
         let u = () in
-        let refine_ u = with_typing_factor e result.#generated_heap result.#graph after result.#solving
-          result.#tree target d (refine_ u) claim use in ()) else ()) in
+        let _u = with_typing_factor e result.#generated_heap result.#graph after result.#solving
+          result.#tree target d (u) claim use in ()) else ()) in
     ()) else assert false
 
 let () =

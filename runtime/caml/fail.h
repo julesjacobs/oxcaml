@@ -58,8 +58,12 @@ struct longjmp_buffer {
 struct longjmp_buffer {
   jmp_buf buf;
 };
+#ifndef sigsetjmp
 #define sigsetjmp(buf,save) setjmp(buf)
+#endif
+#ifndef siglongjmp
 #define siglongjmp(buf,val) longjmp(buf,val)
+#endif
 #endif
 
 struct caml_exception_context {

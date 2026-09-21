@@ -8,7 +8,7 @@ external length : ('a : immutable_data).
 let (length_def @ total) (values : ('a : immutable_data) t @ immutable) :
     {u : unit | length values ===
       (match values with [] -> 0Z | _ :: tail -> Bigint.add 1Z (length tail))} =
-  let u = () in refine_ u
+  let u = () in u
 
 let[@def] rec append (left : ('a : immutable_data) t @ immutable total)
     (right : 'a t @ immutable total) : 'a t @ immutable total =
@@ -63,7 +63,7 @@ let[@def] rec from_iarray
   if 0 < count && count <= Iarray.length values then
     let index = count - 1 in
     let bounded : {i : int | 0 <= i && i < Iarray.length values} =
-      refine_ index in
+      index in
     let head = iarray_get values bounded in
     from_iarray values index (head :: suffix)
   else suffix
@@ -79,10 +79,10 @@ let rec (append_nil @ total) : (xs : ('a : immutable_data) list) @ immutable ->
   append_def xs nil;
   let u = () in
   match xs with
-  | [] -> refine_ u
+  | [] -> u
   | _ :: tail ->
     append_nil tail;
-    refine_ u
+    u
 
 let rec (append_associative @ total) :
     (xs : ('a : immutable_data) list) @ immutable ->
@@ -96,10 +96,10 @@ let rec (append_associative @ total) :
   append_def xs yz;
   let u = () in
   match xs with
-  | [] -> refine_ u
+  | [] -> u
   | _ :: tail ->
     append_associative tail ys zs;
-    refine_ u
+    u
 
 let rec (append_length @ total) : ('a : immutable_data).
     (left : 'a t) @ immutable -> (right : 'a t) @ immutable ->
@@ -110,10 +110,10 @@ let rec (append_length @ total) : ('a : immutable_data).
   let joined = append left right in
   length_def joined;
   match left with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | _ :: tail ->
     append_length tail right;
-    let u = () in refine_ u
+    let u = () in u
 
 let rec (append_split @ total) : ('a : immutable_data).
     (left : 'a t) @ immutable -> (right : 'a t) @ immutable ->
@@ -130,10 +130,10 @@ let rec (append_split @ total) : ('a : immutable_data).
     let zero = 0Z in
     take_def zero right;
     drop_def zero right;
-    let u = () in refine_ u
+    let u = () in u
   | _ :: tail ->
     append_split tail right;
-    let u = () in refine_ u
+    let u = () in u
 
 let rec (set_length @ total) : ('a : immutable_data).
     (values : 'a t) @ immutable -> (index : Bigint.t) ->
@@ -145,11 +145,11 @@ let rec (set_length @ total) : ('a : immutable_data).
   let updated = set values index value in
   length_def updated;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | _ :: tail ->
     let next = Bigint.sub index 1Z in
     set_length tail next value;
-    let u = () in refine_ u
+    let u = () in u
 
 let[@def] swap (values : ('a : immutable_data) t @ immutable total)
     (first : Bigint.t) (second : Bigint.t) : 'a t @ immutable total =
@@ -175,15 +175,15 @@ let rec (cut @ total) : ('a : immutable_data).
   append_def prefix suffix;
   if Bigint.compare count 0Z < 0
      || Bigint.compare count (length values) > 0 then
-    let u = () in refine_ u
+    let u = () in u
   else match values with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | _ :: tail ->
-    if Bigint.equal count 0Z then let u = () in refine_ u
+    if Bigint.equal count 0Z then let u = () in u
     else
       let next = Bigint.sub count 1Z in
       cut tail next;
-      let u = () in refine_ u
+      let u = () in u
 
 let rec (drop_add @ total) : ('a : immutable_data).
     (values : 'a t) @ immutable -> (first : Bigint.t) -> (second : Bigint.t) ->
@@ -197,15 +197,15 @@ let rec (drop_add @ total) : ('a : immutable_data).
   drop_def second rest;
   drop_def sum values;
   if Bigint.compare first 0Z < 0 || Bigint.compare second 0Z < 0 then
-    let u = () in refine_ u
+    let u = () in u
   else match values with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | _ :: tail ->
-    if Bigint.equal first 0Z then let u = () in refine_ u
+    if Bigint.equal first 0Z then let u = () in u
     else
       let next = Bigint.sub first 1Z in
       drop_add tail next second;
-      let u = () in refine_ u
+      let u = () in u
 
 let (sub_length @ total) : ('a : immutable_data).
     (values : 'a t) @ immutable -> (first : Bigint.t) -> (past : Bigint.t) ->
@@ -219,7 +219,7 @@ let (sub_length @ total) : ('a : immutable_data).
   cut values first;
   cut rest width;
   sub_def values first past;
-  let u = () in refine_ u
+  let u = () in u
 
 let rec (from_iarray_length @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (count : int) -> (suffix : 'a t) @
@@ -231,14 +231,14 @@ let rec (from_iarray_length @ total) : ('a : immutable_data).
   from_iarray_def values count suffix;
   if 0 < count && count <= Iarray.length values then
     let index = count - 1 in
-    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index
+    let bounded : {i : int | 0 <= i && i < Iarray.length values} = index
       in
     let head = iarray_get values bounded in
     let suffix1 = head :: suffix in
     length_def suffix1;
     from_iarray_length values index suffix1;
-    let u = () in refine_ u
-  else let u = () in refine_ u
+    let u = () in u
+  else let u = () in u
 [@@decreases let count : int = count in if count > 0 then count else 0]
 
 let (of_iarray_length @ total) : ('a : immutable_data).
@@ -250,12 +250,12 @@ let (of_iarray_length @ total) : ('a : immutable_data).
   of_iarray_def values;
   length_def nil;
   from_iarray_length values count nil;
-  let u = () in refine_ u
+  let u = () in u
 
 let[@def] iarray_at (values : ('a : immutable_data) iarray @ immutable total)
     (index : int) : 'a option @ immutable total =
   if 0 <= index && index < Iarray.length values then
-    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index
+    let bounded : {i : int | 0 <= i && i < Iarray.length values} = index
       in
     Some (iarray_get values bounded)
   else None
@@ -263,12 +263,12 @@ let[@def] iarray_at (values : ('a : immutable_data) iarray @ immutable total)
 let (iarray_at_get @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-    {u : unit | let refine_ i = index in
+    {u : unit | let i = index in
       iarray_at values i === Some (iarray_get values index)} = fun values index
         ->
-  let refine_ i = index in
+  let i = index in
   iarray_at_def values i;
-  let u = () in refine_ u
+  let u = () in u
 
 let (from_iarray_unfold @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (count : int) ->
@@ -282,7 +282,7 @@ let (from_iarray_unfold @ total) : ('a : immutable_data).
   let index = count - 1 in
   from_iarray_def values count suffix;
   iarray_at_def values index;
-  let u = () in refine_ u
+  let u = () in u
 
 let rec (from_iarray_at @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable -> (count : int) -> (suffix : 'a t) @
@@ -298,31 +298,31 @@ let rec (from_iarray_at @ total) : ('a : immutable_data).
   iarray_at_def values query;
   if 0 < count && count <= Iarray.length values then
     let index = count - 1 in
-    let bounded : {i : int | 0 <= i && i < Iarray.length values} = refine_ index
+    let bounded : {i : int | 0 <= i && i < Iarray.length values} = index
       in
     let head = iarray_get values bounded in
     let suffix1 = head :: suffix in
     let shifted = Bigint.sub (Bigint.of_int query) (Bigint.of_int index) in
     at_def suffix1 shifted;
     from_iarray_at values index suffix1 query;
-    let u = () in refine_ u
-  else let u = () in refine_ u
+    let u = () in u
+  else let u = () in u
 [@@decreases let count : int = count in if count > 0 then count else 0]
 
 let (of_iarray_at @ total) : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-    {u : unit | let refine_ i = index in
+    {u : unit | let i = index in
       at (of_iarray values) (Bigint.of_int i) === Some (iarray_get values
         index)} =
     fun values index ->
-  let refine_ query = index in
+  let query = index in
   let count = Iarray.length values in
   let nil = [] in
   of_iarray_def values;
   from_iarray_at values count nil query;
   iarray_at_def values query;
-  let u = () in refine_ u
+  let u = () in u
 
 module Iarray = struct
   let (length @ total) : ('a : immutable_data).
@@ -331,18 +331,18 @@ module Iarray = struct
         && Bigint.of_int n === length (of_iarray values)} = fun values ->
     let n = Iarray.length values in
     ghost_ (of_iarray_length values);
-    refine_ n
+    n
 
   let (get @ total) : ('a : immutable_data).
       (values : 'a iarray) @ immutable ->
       (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-      {value : 'a | let refine_ i = index in
+      {value : 'a | let i = index in
         at (of_iarray values) (Bigint.of_int i) === Some value
         && value === iarray_get values index}
       @ immutable total = fun values index ->
     let value = iarray_get values index in
     ghost_ (of_iarray_at values index);
-    refine_ value
+    value
 end
 
 let rec (take_all @ total) : ('a : immutable_data).
@@ -352,10 +352,10 @@ let rec (take_all @ total) : ('a : immutable_data).
   length_def values;
   take_def size values;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | _ :: tail ->
     take_all tail;
-    let u = () in refine_ u
+    let u = () in u
 
 
 let (sub_prefix @ total) : ('a : immutable_data).
@@ -364,7 +364,7 @@ let (sub_prefix @ total) : ('a : immutable_data).
   let zero = 0Z in
   sub_def values zero past;
   drop_def zero values;
-  let u = () in refine_ u
+  let u = () in u
 
 
 let (sub_suffix @ total) : ('a : immutable_data).
@@ -378,7 +378,7 @@ let (sub_suffix @ total) : ('a : immutable_data).
   sub_def values first size;
   cut values first;
   take_all rest;
-  let u = () in refine_ u
+  let u = () in u
 
 
 let (decompose3 @ total) : ('a : immutable_data).
@@ -394,7 +394,7 @@ let (decompose3 @ total) : ('a : immutable_data).
   cut rest width;
   sub_def values first past;
   drop_add values first width;
-  let u = () in refine_ u
+  let u = () in u
 
 module type Predicate = sig
   type element : immutable_data
@@ -413,11 +413,11 @@ module For_all (P : Predicate) = struct
     holds_def values;
     at_def values index;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       let previous = Bigint.sub index 1Z in
-      let refine_ induction = get tail previous in
-      let u = () in refine_ u
+      let _induction = get tail previous in
+      let u = () in u
 
   let rec (intro @ total) : (values : P.element list) @ immutable ->
       ((index : Bigint.t) -> {u : unit | if 0Z <= index then
@@ -426,17 +426,17 @@ module For_all (P : Predicate) = struct
       {u : unit | holds values} = fun values proof ->
     holds_def values;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       let zero = 0Z in
-      let refine_ first = proof zero in
+      let _first = proof zero in
       at_def values zero;
       intro tail (fun index ->
         let next = Bigint.add index 1Z in
-        let refine_ known = proof next in
+        let _known = proof next in
         at_def values next;
-        let u = () in refine_ u);
-      let u = () in refine_ u
+        let u = () in u);
+      let u = () in u
 
   let rec (append_holds @ total) : (left : P.element list) @ immutable ->
       (right : P.element list) @ immutable ->
@@ -447,10 +447,10 @@ module For_all (P : Predicate) = struct
     holds_def left;
     holds_def joined;
     match left with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       append_holds tail right;
-      let u = () in refine_ u
+      let u = () in u
 
   let[@def] rec filter (values : P.element list @ immutable total) :
       P.element list @ immutable total =
@@ -465,10 +465,10 @@ module For_all (P : Predicate) = struct
     filter_def values;
     holds_def result;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       filter_holds tail;
-      let u = () in refine_ u
+      let u = () in u
   let rec (set_holds @ total) : (values : P.element list) @ immutable ->
       (index : Bigint.t) -> (value : P.element) @ immutable ->
       {u : unit | if holds values && P.test value then
@@ -478,11 +478,11 @@ module For_all (P : Predicate) = struct
     holds_def values;
     holds_def result;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       let previous = Bigint.sub index 1Z in
       set_holds tail previous value;
-      let u = () in refine_ u
+      let u = () in u
 
   let (split_holds @ total) : (values : P.element list) @ immutable ->
       (index : Bigint.t) ->
@@ -493,7 +493,7 @@ module For_all (P : Predicate) = struct
     let right = drop index values in
     cut values index;
     append_holds left right;
-    let u = () in refine_ u
+    let u = () in u
 
   let rec (filter_length @ total) : (values : P.element list) @ immutable ->
       {u : unit | 0Z <= length (filter values)
@@ -503,10 +503,10 @@ module For_all (P : Predicate) = struct
     length_def values;
     length_def result;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       filter_length tail;
-      let u = () in refine_ u
+      let u = () in u
 
   let rec (filter_append @ total) : (left : P.element list) @ immutable ->
       (right : P.element list) @ immutable ->
@@ -520,10 +520,10 @@ module For_all (P : Predicate) = struct
     filter_def joined;
     append_def first second;
     match left with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       filter_append tail right;
-      let u = () in refine_ u
+      let u = () in u
 
   let rec (filter_identity @ total) : (values : P.element list) @ immutable ->
       {u : unit | if holds values then filter values === values else true} =
@@ -531,17 +531,17 @@ module For_all (P : Predicate) = struct
     filter_def values;
     holds_def values;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       filter_identity tail;
-      let u = () in refine_ u
+      let u = () in u
 
   let (filter_idempotent @ total) : (values : P.element list) @ immutable ->
       {u : unit | filter (filter values) === filter values} = fun values ->
     let result = filter values in
     filter_holds values;
     filter_identity result;
-    let u = () in refine_ u
+    let u = () in u
 
 end
 
@@ -563,10 +563,10 @@ module Map (F : Mapping) = struct
     length_def values;
     length_def result;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       map_length tail;
-      let u = () in refine_ u
+      let u = () in u
 
   let rec (map_at @ total) : (values : F.input list) @ immutable ->
       (index : Bigint.t) ->
@@ -578,11 +578,11 @@ module Map (F : Mapping) = struct
     at_def values index;
     at_def result index;
     match values with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       let previous = Bigint.sub index 1Z in
       map_at tail previous;
-      let u = () in refine_ u
+      let u = () in u
   let rec (map_append @ total) : (left : F.input list) @ immutable ->
       (right : F.input list) @ immutable ->
       {u : unit | map (append left right) ===
@@ -595,10 +595,10 @@ module Map (F : Mapping) = struct
     map_def left;
     append_def first second;
     match left with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | _ :: tail ->
       map_append tail right;
-      let u = () in refine_ u
+      let u = () in u
 
 end
 
@@ -628,10 +628,10 @@ module Fold (F : Folding) = struct
     fold_def joined initial;
     fold_def left suffix;
     match left with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | head :: tail ->
       fold_append tail right initial;
-      let u = () in refine_ u
+      let u = () in u
 end
 
 let rec (extensional @ total) : ('a : immutable_data).
@@ -641,7 +641,7 @@ let rec (extensional @ total) : ('a : immutable_data).
       @ total ->
     {u : unit | left === right} = fun left right proof ->
   let zero = 0Z in
-  let refine_ known = proof zero in
+  let _known = proof zero in
   length_def left;
   length_def right;
   at_def left zero;
@@ -649,19 +649,19 @@ let rec (extensional @ total) : ('a : immutable_data).
   match left with
   | [] ->
     (match right with
-     | [] -> let u = () in refine_ u
-     | _ :: _ -> let u = () in refine_ u)
+     | [] -> let u = () in u
+     | _ :: _ -> let u = () in u)
   | x :: xs ->
     match right with
-    | [] -> let u = () in refine_ u
+    | [] -> let u = () in u
     | y :: ys ->
       extensional xs ys (fun index ->
         let next = Bigint.add index 1Z in
-        let refine_ known = proof next in
+        let _known = proof next in
         at_def left next;
         at_def right next;
-        let u = () in refine_ u);
-      let u = () in refine_ u
+        let u = () in u);
+      let u = () in u
 
 let rec (at_outside @ total) : ('a : immutable_data).
     (values : 'a list) @ immutable -> (index : Bigint.t) ->
@@ -670,9 +670,9 @@ let rec (at_outside @ total) : ('a : immutable_data).
   length_def values;
   at_def values index;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> let u = () in u
   | head :: tail ->
     let previous = Bigint.sub index 1Z in
     length_def tail;
     at_outside tail previous;
-    let u = () in refine_ u
+    let u = () in u

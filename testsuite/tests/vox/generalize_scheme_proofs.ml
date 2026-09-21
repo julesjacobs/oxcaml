@@ -54,9 +54,9 @@ let (with_generalized_instance @ total) : (h : Pref.heap) @ immutable ->
     let scope_saved : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem saved x then source_ok saved x else H.at saved x === None}) @ total =
       fun x -> let () = closed_scope h scope cut pool x () in () in
     let trees : ((x : node Pref.t) @ immutable -> {s : template | not (H.mem saved x) || (root s === x && template saved s)} @ immutable) @ total =
-      fun x -> let refine_ tree = forest x in closed_observe h cut pool x (); closed_at_def h saved cut pool x;
+      fun x -> let tree = forest x in closed_observe h cut pool x (); closed_at_def h saved cut pool x;
         let s = scheme h cut tree in scheme_root h cut tree;
-        if H.mem h x then (scheme_valid h cut pool coverage tree (); refine_ s) else refine_ s in
+        if H.mem h x then (scheme_valid h cut pool coverage tree (); s) else s in
     let model_saved : ((x : node Pref.t) @ immutable -> {u : unit | equation saved rho x}) @ total =
       fun x -> model x; closed_model h cut pool rho x (); () in
     let s = scheme h cut t in
@@ -67,7 +67,7 @@ let (with_generalized_instance @ total) : (h : Pref.heap) @ immutable ->
         let equal_old : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x}) @ total =
           fun x -> equal x; closed_observe h cut pool x (); closed_at_def h saved cut pool x; () in
         let next : ((x : node Pref.t) @ immutable -> {u : unit | equation (heap (closed_heap h cut pool) epoch depth d) tau x}) @ total = refine_ next in
-        let () = use tau next equal_old (refine_ fit) in () in
+        let () = use tau next equal_old (fit) in () in
     scheme_valid h cut pool coverage t (); scheme_root h cut t;
     let () = Copy_template_proofs.with_scheme_instance saved scope_saved trees rho model_saved choices epoch depth d s q
       () claim consume in ())
@@ -87,5 +87,5 @@ let (with_generalized_choices @ total) : (h : Pref.heap) @ immutable -> (cut : i
     let model : ((x : node Pref.t) @ immutable -> {u : unit | equation (heap saved epoch depth d) rho x}) @ total = refine_ model in
     let consume : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
       {u : unit | rho q === interpret rho choices s} -> {u : unit | claim}) @ total = fun choices fit ->
-        let () = use choices (refine_ fit) in () in
+        let () = use choices (fit) in () in
     let () = Copy_template_proofs.with_instance_choices saved epoch depth d rho model s q () claim consume in ())
