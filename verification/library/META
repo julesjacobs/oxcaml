@@ -1,3 +1,3 @@
-description = "Vox verified owned arrays and scoped slices"
+description = "Vox verified collections, ownership, and time credits"
 archive(byte) = "vox_borrow.cma"
 archive(native) = "vox_borrow.cmxa"

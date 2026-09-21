@@ -1,4 +1,4 @@
-# Verified borrow library
+# Vox verified library
 
 From a configured Vox checkout with Z3 on `PATH`:
 
@@ -6,10 +6,12 @@ From a configured Vox checkout with Z3 on `PATH`:
 make vox-library
 ```
 
-This builds and installs the final compiler, verifies the library with
-`-principal` in bytecode and native modes, and installs `Vox_sequence`,
-`Vox_int_sequence`, `Vox_iarray`, `Borrow`, `Borrow_iarray`, and `vox_borrow`
-under the configured prefix's `lib/ocaml/vox`.
+This builds and installs the final compiler, verifies the library in bytecode
+and native modes, and installs the `vox_borrow` archive and public interfaces
+under the configured prefix's `lib/ocaml/vox`. It includes sequences, owned
+arrays and slices, sorting, time credits, union-find, connectivity, atomic
+ownership transfer, and hash tables. Verification uses `-principal` except
+for the table modules, whose immutable-data inference currently rejects it.
 
 With the worktree-local prefix from the agent guide, compile a client with:
 
@@ -148,3 +150,161 @@ The implementation adds no trusted credit or sorting primitive. See
 `merge_sort_rejected.ml` in the Vox fixtures for borrowed observations,
 splitting and merging, overflow and reuse
 rejections, and integer and ranked-record clients.
+
+## Union-find time credits
+
+`Vox_union_find_online.Make (Credits)` provides the growing interface.
+`create` takes one credit and no capacity argument. `make_set` takes eleven
+credits; `find` and `union` take exactly `find_fee state` and `union_fee state`.
+Operations consume the unique state and payment, returning only the result
+and updated state. All surplus stays private. The fee observations are ghost
+functions; the public interface exposes neither capacity nor credit tokens
+owned by the state. Insertions require `size state < Bigint.of_int max_int`.
+
+`Vox_union_find_simple.Make (Credits)` provides the same interface for a fixed
+capacity supplied to `create`, with a three-credit insertion fee. Both wrappers
+require exact payments, so callers split their external budget before a call.
+They export membership, representative semantics, and accounting observations
+for verification. Their abstract state hides the underlying resource and saved
+credits. `account_bounds` bounds ticks by the account, and each operation
+increases the account by exactly its advertised fee.
+
+The online implementation doubles a ghost epoch `E` when full and uses analysis
+capacity `min(E,max_int)`. No runtime nodes move. Its saved credits cover the
+reserve `8n - 4(E-1)`, plus retained surplus. Each insertion deposits eight
+credits. At growth it unlocks `4E`, transfers the required amount into the
+potential bank, and retains the remainder. Cap coherence preserves the old
+nodes' levels and indices. The checked reparameterization equation is
+`Phi(new) - Phi(old) = (new_alpha - old_alpha) * sum_ranks`.
+The checked doubling lemma bounds the alpha increase by one; `sum_ranks <= n`
+therefore bounds the transfer by `4E`. This establishes funding before growth
+at every prefix, independently of intervening finds and unions.
+
+`Vox_union_find_online_cost.sequence` telescopes accounts with constructor-derived
+operation counts. `fee_bounds` bounds each state's fees using any final population
+at least its current size and the canonical inverse for that population. Together
+they give, for every finite prefix with `n` insertions, `f` top-level finds and
+`u` unions, with `a = alpha(max(1,n))`:
+
+```
+ticks <= 1 + 11n + (4a+12)f + (12a+36)u
+```
+
+Thus the online API supports `O(n + (f+u) alpha(n))` without an upfront population
+bound, within the implementation's machine-size limit. `union_find_online.ml`
+checks both sealed APIs, interleaves insertion and union across alpha-changing
+and same-alpha capacity growth, and derives the final bounds from actual returned
+accounts. The rejection fixture checks exact fees, state reuse, hidden savings,
+nonmember queries, and the machine-size limit.
+
+The lower-level refund API remains available:
+
+`Vox_union_find.Make (Credits)` implements union by rank and full path
+compression. Supply `Vox_big_credits.S`; issuance is available only to the
+caller through `Vox_big_credits.Make ().Budget`. Bigint balances avoid an
+artificial machine-integer limit on accumulated credit. `tick`, `split`, and
+`merge` are checked implementations with the same uniqueness discipline as
+`Vox_credits`.
+
+`create` fixes a positive ghost capacity `N <= max_int`. `make_set` requires
+room within that capacity. `find` and `union` require membership in the
+owned forest. Operations consume the unique state and a unique fee token,
+then return the state and surplus credit. The private state representation
+and abstract heap resource prevent callers from constructing a forest or
+extracting its bank. Model observations borrow the state.
+
+Write `J_b(k,t,x) = Vox_ackermann.iter b k t x`. Its admissible domain is
+`b >= 1`, `k >= 0`, and `0 <= t,x <= b`; outside this domain it returns zero.
+The checked coherence lemma proves `J_b(k,t,x) = min(b,J_c(k,t,x))`
+for `b <= c` on the smaller cap's domain. `alpha_bounds` exposes that the
+implemented inverse is the least `a >= 1` with `J_N(a,1,1) = N`.
+
+For comparison, define the conventional uncapped hierarchy by
+`A_0(x) = x+1`, `I(k,0,x) = x`,
+`I(k,t+1,x) = A_k(I(k,t,x))`, and `A_(k+1)(x) = I(k,x+1,x)`.
+Induction on level and iteration count identifies `J_b(k,t,x)` with
+`min(b,I(k,t,x))` on the admissible domain. This identification is an external
+mathematical argument, not a separate Vox theorem against an independently
+defined uncapped iterator. It identifies the implemented inverse with the
+least `a >= 1` such that `A_a(1) >= N`; thresholds are 3, 7, and 2047 for
+levels 1, 2, and 3.
+
+All hierarchy, potential, and registry computations in the operations are
+ghost computations. Native inspection confirms these computations disappear
+from the public operations and recursive worker. Abstract token calls remain;
+with the concrete `Vox_big_credits.Make` implementation, they have constant
+overhead per event.
+
+The caller supplies these fees:
+
+| Operation | Credits |
+| --- | ---: |
+| `create` | 1 |
+| `make_set` | 3 |
+| `find` | `4a + 8` |
+| `union` | `12a + 24` |
+
+The cost model charges one tick per worker entry, owned-cell read or write,
+constant-size node construction, and cell-allocation request. Entry covers
+the bounded scalar work in that body. A find with `d` parent edges spends
+exactly `4d + 2` ticks. Root linking
+precharges seven ticks, including a link of a root to itself. Union also
+charges one entry tick. The bank holds
+exactly four times the forest potential. A positive-rank nonroot of rank `r`
+uses level `l = max { k < a | A_k(r) <= parent_rank }` and index
+`i = max { t >= 1 | I(l,t,r) <= parent_rank }`, with potential
+`(a-l)r-i`. Rank-zero nonroots have zero potential; roots have potential
+`ar`. The bank consists of actual credit tokens, never newly issued credit.
+The returned surplus can exceed the incoming fee when compression releases
+stored credit.
+
+The proof connects this potential to the mutable heap. It proves strict rank
+increase along paths, preservation of ranks and representatives under
+compression, the representative change caused by union, and the exact
+forest-potential decrease during compression. Counting last occurrences of
+Ackermann levels bounds a path by its potential release plus `a+1`. Linking
+increases potential by at most `a`. The rank-sum invariant
+`sum ranks <= elements - components` bounds all ranks below capacity and
+rules out rank overflow. Nonroot nodes retain their historical integer rank.
+
+Every operation preserves an exact accounting equation: cumulative ticks
+plus the current bank and the returned credit equal the previous account
+plus the supplied credit. `account_bounds` establishes that cumulative ticks
+are at most this account. `Vox_union_find_complexity.sequence` telescopes
+a finite trace of these account increments. The executable client builds
+such a trace from actual operation results through the sealed interface.
+For `n` calls to `make_set`, `f` top-level finds, and `u` unions, the checked
+bound is
+`1 + 3n + (4a+8)f + (12a+24)u`, at most
+`1 + 3n + 36a(f+u)`. Internal finds are included in the union fee.
+Choosing capacity `N=n` for `n >= 1` gives
+`O(n + (f+u) alpha(n))`; an empty history can use `N=1`. Increasing capacity requires a new accounting
+argument; this API keeps capacity fixed.
+
+Tick placement and coverage are part of the trusted cost model. The claim
+counts instrumented unit-cost events, not CPU instructions or wall time.
+Reference operations and rank arithmetic are assumed constant-time.
+Heap ownership primitives, compiler refinement checking, SMT, and ghost
+erasure retain their existing trust boundaries. The development adds no
+axioms, `external` declarations, or `assume_` to the algorithm or proofs.
+Effectful `find` uses checked recursive decreases on its finite ghost path;
+termination also assumes the audited primitive bodies terminate. It does
+not claim that effectful operations inhabit Vox's pure `total` mode.
+
+### Connectivity clients
+
+`Vox_connectivity.Make (Credits)` seals the online implementation behind
+abstract elements and persistent ghost snapshots. `snapshot` observes the
+partition; `contains`, `root`, and `connected` describe it. After an operation,
+`added_law`, `found_law`, and `joined_law` instantiate its membership and
+representative guarantees for any chosen element. New elements form fresh
+singleton components; a union chooses one of the two previous representatives
+and preserves every other component. Saved snapshots remain
+usable after the live unique state has been consumed; they grant no mutation
+permission.
+
+The operations retain exact payments and return no refunds. The
+`connectivity.ml` client keeps unspent caller credits in its own wallet and
+proves conservation using `account` and `account_bounds`. The implementation's
+surplus and growth reserve remain private. The signature exposes no path,
+heap, rank, or reserve model.

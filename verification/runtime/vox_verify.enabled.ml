@@ -38,8 +38,14 @@ let prove check loc query =
   let result : Vox_smt_solver.result = check query in
   match result.validity with
   | Vox_smt.Valid -> ()
-  | Invalid _ ->
-    Location.raise_errorf ~loc "Refinement could not be proved (counterexample)"
+  | Invalid model ->
+    if !dump_vc
+    then
+      Location.raise_errorf ~loc "Refinement could not be proved.\n%s"
+        (Vox_smt.explain_invalid query model)
+    else
+      Location.raise_errorf ~loc
+        "Refinement could not be proved (counterexample)"
   | Unknown reason ->
     Location.raise_errorf ~loc "Refinement solver returned unknown%s"
       (match reason with None -> "" | Some r -> ": " ^ r)
