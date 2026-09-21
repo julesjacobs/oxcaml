@@ -2,7 +2,7 @@ module P = Ghost_pref
 module Slot = Unique_cell.Slot
 
 module Invariant = struct
-  type key = { anchor : unit; location : bool P.t @@ ghost }
+  type key = { location : bool P.t @@ ghost }
   let[@def] (full @ total) (k : key @ immutable) (h : P.heap @ immutable) =
     ghost_ (h === P.Heap.put (P.Heap.empty ()) k.location true)
   (* Zero leaves the slot with an endpoint; one owns the published payload. *)
@@ -32,7 +32,7 @@ let create (type a : value mod portable contended) () :
     (a send * a recv) @ unique =
   let r = Slot.empty () (P.empty ()) in
   let cell = r.Slot.value in
-  let k = { Invariant.anchor = (); location = ghost_ (Slot.location cell) } in
+  let k = ghost_ { Invariant.location = Slot.location cell } in
   let empty = P.empty () in
   ghost_ (Invariant.holds_def k 0 (P.own (borrow_ empty)));
   let atomic = A.create k 0 empty in
@@ -79,8 +79,8 @@ let rec await : ('a : value mod portable contended).
       ghost_ (Invariant.holds_def k (if before = 1 then 0 else before) ho);
       ghost_ (post_def (before = 1) hi);
       { A.restored = outside; outgoing = inside })) in
-  let success = result.P.value in
-  let permission = result.P.state in
+  let success = result.#value in
+  let permission = result.#state in
   let h = ghost_ (P.own (borrow_ permission)) in
   ghost_ (post_def success h);
   if success then begin

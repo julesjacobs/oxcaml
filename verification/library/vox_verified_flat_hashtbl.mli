@@ -3,7 +3,10 @@ module H = P.Heap
 module T = Vox_table_storage
 module M = Vox_table_model
 
-(** Hash and equality are pure, total, and stable on immutable keys. *)
+(** Hash and equality are pure, total, and stable on immutable keys.
+    Mutation contracts describe normal return. An exception consumes the passed
+    authority; the old token cannot be restored after partial mutation. Split
+    unrelated ownership before fallible operations to retain that frame. *)
 module Make (Key : Vox_table_map.Key) : sig
   module Spec : module type of Vox_table_invariant.Make (Key)
 

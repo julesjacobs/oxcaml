@@ -59,6 +59,12 @@ legacy-mode defaults.
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
 skip when it is absent; the default Linux CI job installs pinned Z3.
 
+`comparator_laws.ml` rejects Set/Map comparators without checked ordering
+witnesses, and rejects false reflexivity, sign antisymmetry and transitivity.
+`atomic_layout.ml` checks load/CAS, partial application and native allocation
+counts with void invariant keys and unboxed results. `raw_memory_demo.ml`
+exercises explicit allocation and freeing.
+
 `principal.ml` checks mode crossing for ordinary polymorphic comparisons in
 refinement predicates under `-principal`.
 

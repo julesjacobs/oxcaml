@@ -163,3 +163,17 @@ idiom according to what each example teaches:
 Adding ghost wrappers to a lemma's internal steps is unnecessary when the
 entire invocation is already erased. Likewise, unwrapping a refined executable
 result is not a reason to erase the operation producing it.
+
+## Verification budgets and arithmetic
+
+`-smt-timeout MS` bounds each query, including serialization and solver I/O.
+`-smt-budget MS` adds a shared, cooperative budget for each verification pass,
+including VC construction and individual-obligation retries; zero leaves this
+budget unlimited. Solver startup/protocol failures propagate without retrying
+all obligations. Invalid or inconclusive logical batches can be retried to
+identify the failing obligation; retries share the overall budget.
+
+Machine-int constant multiplication uses exact wrapping arithmetic. Queries
+using bitvectors also encode variable multiplication exactly. Other variable
+multiplication is conservative and uninterpreted; a failed proof involving it
+reports an abstract countermodel rather than a concrete program counterexample.

@@ -57,7 +57,15 @@ let arithmetic () =
   valid
     (eq (app Sub [i (-4611686018427387904L); i 1L]) (i 4611686018427387903L));
   let product = app Mul [i 4611686018427387903L; i 2L] in
-  ignore (invalid (eq product (i (-2L))));
+  valid (eq product (i (-2L)));
+  valid ~symbols:[x] (eq (app Mul [Var x; i 0L]) (i 0L));
+  valid ~symbols:[x] (eq (app Mul [i 1L; Var x]) (Var x));
+  valid ~symbols:[x] (eq (app Mul [Var x; i (-1L)]) (app Neg [Var x]));
+  valid ~symbols:[x] (eq (app Mul [Var x; i 2L]) (app Add [Var x; Var x]));
+  let y = Symbol.create ~label:"y" Int63 in
+  valid ~symbols:[x; y]
+    ~facts:[eq (Var y) (i 2L)]
+    (eq (app Mul [Var x; Var y]) (app Mul [Var x; i 2L]));
   valid (eq product product);
   valid (app Ge [product; i (-4611686018427387904L)]);
   valid (app Le [product; i 4611686018427387903L]);

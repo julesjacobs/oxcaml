@@ -199,14 +199,7 @@ let dispose connection =
 
 let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
     ?(cancelled = fun () -> false) ~int_width q =
-  let input = to_smtlib ~int_width ~timeout_ms:config.timeout_ms q in
-  let input =
-    "(push 1)\n"
-    ^ String.concat "\n"
-        (List.filter
-           (fun line -> not (String.starts_with ~prefix:"(set-logic " line))
-           (String.split_on_char '\n' input))
-  in
+  if config.timeout_ms <= 0 then invalid_arg "Vox_smt_solver: timeout_ms";
   let keep = ref false in
   let deadline = monotonic_time () +. (float config.timeout_ms /. 1000.) in
   let stderr = Buffer.create 128 in
@@ -264,6 +257,19 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
     if String.length s > remaining then protocol "Solver output exceeds 4 MiB"
   in
   let run () =
+    ignore (poll ());
+    let input =
+      to_smtlib
+        ~poll:(fun () -> ignore (poll ()))
+        ~int_width ~timeout_ms:config.timeout_ms q
+    in
+    let input =
+      "(push 1)\n"
+      ^ String.concat "\n"
+          (List.filter
+             (fun line -> not (String.starts_with ~prefix:"(set-logic " line))
+             (String.split_on_char '\n' input))
+    in
     ignore (poll ());
     let connection, started =
       match session.connection with
