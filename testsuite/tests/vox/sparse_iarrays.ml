@@ -15,6 +15,15 @@ module Demo : sig end = struct
   module Index = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
+    let (reflexive @ total) (x : t) :
+        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+    let (antisymmetric @ total) (x : t) (y : t) :
+        {u : unit | (compare x y < 0) = (compare y x > 0)
+          && (compare x y = 0) = (compare y x = 0)} @ ghost =
+      ghost_ (refine_ ())
+    let (transitive @ total) (x : t) (y : t) (z : t) :
+        {u : unit | not (compare x y <= 0 && compare y z <= 0)
+          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
   end
 
   module Updates = Map.MakeTotal (Index)
@@ -289,6 +298,15 @@ module Invalid_index : sig end = struct
   module Index = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
+    let (reflexive @ total) (x : t) :
+        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+    let (antisymmetric @ total) (x : t) (y : t) :
+        {u : unit | (compare x y < 0) = (compare y x > 0)
+          && (compare x y = 0) = (compare y x = 0)} @ ghost =
+      ghost_ (refine_ ())
+    let (transitive @ total) (x : t) (y : t) (z : t) :
+        {u : unit | not (compare x y <= 0 && compare y z <= 0)
+          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
   end
 
   module Updates = Map.MakeTotal (Index)
@@ -303,8 +321,8 @@ module Invalid_index : sig end = struct
     Iarray.Refined.get base bounded
 end;;
 [%%expect{|
-Line 14, characters 6-19:
-14 |       refine_ index
+Line 23, characters 6-19:
+23 |       refine_ index
            ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

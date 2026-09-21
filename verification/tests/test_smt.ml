@@ -201,6 +201,8 @@ let () =
        4611686018427387903)))\n\
        (assert (and (<= (- 4611686018427387904) (int63_mul v0 2)) (<= \
        (int63_mul v0 2) 4611686018427387903)))\n\
+       (assert (= (int63_mul v0 2) (- (mod (+ (* 2 v0) 4611686018427387904) \
+       9223372036854775808) 4611686018427387904)))\n\
        (assert (= (int63_mul v0 2) (int63_mul v0 2)))\n\
        (assert (not (= (int63_mul v0 2) (int63_mul v0 2))))\n\
        (check-sat)\n")
@@ -491,3 +493,31 @@ let () =
       | _ -> failwith "Sort checking must precede process startup"
       | exception Sort_error _ -> ());
       print_endline "SMT interface tests passed")
+
+let () =
+  let calls = ref 0 in
+  let q = query (app And [Boolean true; Boolean true]) in
+  let poll () =
+    incr calls;
+    if !calls = 3 then raise Exit
+  in
+  match to_smtlib ~poll ~int_width:63 ~timeout_ms:5000 q with
+  | _ -> failwith "Expected construction cancellation"
+  | exception Exit -> assert (!calls = 3)
+
+let () =
+  let calls = ref 0 in
+  let cancelled () =
+    incr calls;
+    if !calls = 3 then raise Exit;
+    false
+  in
+  let config =
+    { Vox_smt_solver.executable = "/no-such-vox-solver"; timeout_ms = 5000 }
+  in
+  match
+    Vox_smt_solver.check ~config ~cancelled ~int_width:63
+      (query (app And [Boolean true; Boolean true]))
+  with
+  | _ -> failwith "Expected cancellation before solver startup"
+  | exception Exit -> assert (!calls = 3)

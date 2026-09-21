@@ -821,8 +821,14 @@ let operation ctx env ~function_type ~result_type name args =
     | "%leint" -> binary Int63 Le
     | "%gtint" -> binary Int63 Gt
     | "%geint" -> binary Int63 Ge
-    | "%compare" when argument_type = Some Vox_type.Bigint ->
-      begin match binary Int Int_lt, equality Eq with
+    | "%compare" ->
+      let lt =
+        match argument_type, args with
+        | Some Vox_type.Bool, [Some x; Some y] ->
+          Some (App (And, [App (Not, [x]); y]))
+        | _ -> comparison Lt Int_lt
+      in
+      begin match lt, equality Eq with
       | Some lt, Some eq ->
         Some
           (App

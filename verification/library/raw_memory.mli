@@ -4,7 +4,10 @@
     identity laws are trusted; coverage and range lemmas are verified.
     Allocation failure returns the original token on normal return. Managed
     allocation and identity exhaustion may raise Out_of_memory.
-    Dropping a token does not free storage. *)
+    Exceptions consume the passed authority; handlers must not restore it.
+    Split unrelated ownership before a fallible call to retain that frame.
+    Storage is released only by [free]. Dropping a token or descriptor does
+    not free storage, including after exceptional exits. *)
 module P = Ghost_pref
 module H = P.Heap
 

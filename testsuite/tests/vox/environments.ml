@@ -16,6 +16,15 @@ let () =
     module Identifier = struct
       type t = int
       external compare : int -> int -> int @@ total = "%compare"
+      let (reflexive @ total) (x : t) :
+          {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+      let (antisymmetric @ total) (x : t) (y : t) :
+          {u : unit | (compare x y < 0) = (compare y x > 0)
+            && (compare x y = 0) = (compare y x = 0)} @ ghost =
+        ghost_ (refine_ ())
+      let (transitive @ total) (x : t) (y : t) (z : t) :
+          {u : unit | not (compare x y <= 0 && compare y z <= 0)
+            || compare x z <= 0} @ ghost = ghost_ (refine_ ())
     end
     module M = Map.MakeTotal (Identifier)
 
@@ -82,6 +91,15 @@ let remove_does_not_restore key =
   let module Identifier = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
+    let (reflexive @ total) (x : t) :
+        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+    let (antisymmetric @ total) (x : t) (y : t) :
+        {u : unit | (compare x y < 0) = (compare y x > 0)
+          && (compare x y = 0) = (compare y x = 0)} @ ghost =
+      ghost_ (refine_ ())
+    let (transitive @ total) (x : t) (y : t) (z : t) :
+        {u : unit | not (compare x y <= 0 && compare y z <= 0)
+          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
   end in
   let module M = Map.MakeTotal (Identifier) in
   let outer = M.Refined.singleton key 10 in
@@ -93,8 +111,8 @@ let remove_does_not_restore key =
   ()
 ;;
 [%%expect{|
-Line 11, characters 31-46:
-11 |   let proof : {b : bool | b} = refine_ present in
+Line 20, characters 31-46:
+20 |   let proof : {b : bool | b} = refine_ present in
                                     ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

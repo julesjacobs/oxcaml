@@ -70,13 +70,22 @@ module type OrderedType =
 module type TotalOrderedType =
   sig
     type t
-    val compare : t -> t -> int @@ total
+    val compare : t @ immutable -> t @ immutable -> int @@ total
+    val reflexive : (x : t) -> {u : unit | compare x x = 0}
+      @ ghost @@ total
+    val antisymmetric : (x : t) -> (y : t) ->
+      {u : unit | (compare x y < 0) = (compare y x > 0)
+        && (compare x y = 0) = (compare y x = 0)} @ ghost @@ total
+    val transitive : (x : t) -> (y : t) -> (z : t) ->
+      {u : unit | not (compare x y <= 0 && compare y z <= 0)
+        || compare x z <= 0} @ ghost @@ total
   end
 (** Input signature of {!MakeTotal}. [compare] must implement the total
     ordering specified by {!OrderedType} and have [total] mode. Throughout
     verified use, the sign of [compare x y] must remain stable for every pair:
-    [compare] may depend only on state that remains immutable. {!MakeTotal}
-    trusts this contract. *)
+    [compare] may depend only on state that remains immutable. The erased
+    laws establish reflexivity, sign antisymmetry and transitivity of the
+    non-strict ordering. The functor requires these checked witnesses. *)
 
 module type S =
   sig

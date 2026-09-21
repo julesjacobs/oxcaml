@@ -138,60 +138,51 @@ CAMLprim value caml_pref_ghost_split_bytecode(value selection, value token)
   return Val_unit;
 }
 
-/* Verified atomics retain an immutable identity and key. Proof arguments and
-   permission results have no runtime authority representation. */
-CAMLprim value caml_vox_atomic_create(value key, value initial)
+/* Invariant indices and authority are erased. Native results are scalars. */
+CAMLprim value caml_vox_atomic_create(value initial)
 {
-  CAMLparam2(key, initial);
+  CAMLparam1(initial);
   CAMLlocal1(cell);
   uintnat id = pref_fresh_id();
-  cell = caml_alloc_small(3, Object_tag);
-  Field(cell, 0) = key;
+  cell = caml_alloc_small(2, Object_tag);
+  Field(cell, 0) = initial;
   Field(cell, 1) = Val_long(id);
-  Field(cell, 2) = initial;
   CAMLreturn(cell);
 }
 
 CAMLprim value caml_vox_atomic_create_bytecode(value key, value initial,
-                                              value token)
+                                             value token)
 {
-  return caml_vox_atomic_create(key, initial);
+  return caml_vox_atomic_create(initial);
 }
 
-CAMLprim value caml_vox_atomic_key(value cell)
+CAMLprim void caml_vox_atomic_key(value cell) {}
+
+CAMLprim value caml_vox_atomic_key_bytecode(value cell)
 {
-  return Field(cell, 0);
+  return Val_unit;
 }
 
 CAMLprim value caml_vox_atomic_load(value cell, value post, value transition)
 {
-  CAMLparam1(cell);
-  CAMLlocal1(result);
-  result = caml_alloc_small(1, 0);
-  Field(result, 0) = caml_atomic_load_field(cell, Val_long(2));
-  CAMLreturn(result);
+  return caml_atomic_load_field(cell, Val_long(0));
 }
 
 CAMLprim value caml_vox_atomic_load_bytecode(value cell, value post,
-                                            value token, value transition)
+                                           value token, value transition)
 {
   CAMLparam1(cell);
   CAMLlocal1(result);
   result = caml_alloc_small(2, 0);
-  Field(result, 1) = Atom(0);
-  Field(result, 0) = caml_atomic_load_field(cell, Val_long(2));
+  Field(result, 1) = Val_unit;
+  Field(result, 0) = caml_vox_atomic_load(cell, post, transition);
   CAMLreturn(result);
 }
 
 CAMLprim value caml_vox_atomic_cas(value cell, value expected, value desired,
-                                  value post, value transition)
+                                 value post, value transition)
 {
-  CAMLparam3(cell, expected, desired);
-  CAMLlocal1(result);
-  result = caml_alloc_small(1, 0);
-  Field(result, 0) =
-    caml_atomic_cas_field(cell, Val_long(2), expected, desired);
-  CAMLreturn(result);
+  return caml_atomic_cas_field(cell, Val_long(0), expected, desired);
 }
 
 CAMLprim value caml_vox_atomic_cas_bytecode(value *argv, int argn)
@@ -202,9 +193,9 @@ CAMLprim value caml_vox_atomic_cas_bytecode(value *argv, int argn)
   expected = argv[1];
   desired = argv[2];
   result = caml_alloc_small(2, 0);
-  Field(result, 1) = Atom(0);
-  Field(result, 0) =
-    caml_atomic_cas_field(cell, Val_long(2), expected, desired);
+  Field(result, 1) = Val_unit;
+  Field(result, 0) = caml_vox_atomic_cas(cell, expected, desired,
+                                       argv[3], argv[5]);
   CAMLreturn(result);
 }
 

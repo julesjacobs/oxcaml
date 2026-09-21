@@ -1,5 +1,5 @@
 (** [timeout_ms] must be positive. It configures Z3's timeout and the runner's
-    best-effort deadline for startup and protocol handling. *)
+    best-effort deadline for serialization, startup and protocol handling. *)
 type config =
   { executable : string;
     timeout_ms : int
@@ -47,3 +47,6 @@ val with_session :
   int_width:int ->
   ((Vox_smt.query -> result) -> 'a) ->
   'a
+
+(** Monotonic clock used for verification budgets. *)
+val monotonic_time : unit -> float
