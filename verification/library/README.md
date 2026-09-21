@@ -148,3 +148,83 @@ The implementation adds no trusted credit or sorting primitive. See
 `merge_sort_rejected.ml` in the Vox fixtures for borrowed observations,
 splitting and merging, overflow and reuse
 rejections, and integer and ranked-record clients.
+
+## Union-find time credits
+
+`Vox_union_find.Make (Credits)` implements union by rank and full path
+compression. Supply `Vox_big_credits.S`; issuance is available only to the
+caller through `Vox_big_credits.Make ().Budget`. Bigint balances avoid an
+artificial machine-integer limit on accumulated credit. `tick`, `split`, and
+`merge` are checked implementations with the same uniqueness discipline as
+`Vox_credits`.
+
+`create` fixes a positive ghost capacity `N <= max_int`. `make_set` requires
+room within that capacity. `find` and `union` require membership in the
+owned forest. Operations consume the unique state and a unique fee token,
+then return the state and surplus credit. The private state representation
+and abstract heap resource prevent callers from constructing a forest or
+extracting its bank. Model observations borrow the state.
+
+The capped hierarchy in `Vox_ackermann` defines
+`I(k, 0, x) = x`, `I(k, t+1, x) = A_k(I(k, t, x))`,
+`A_0(x) = x+1`, and `A_(k+1)(x) = I(k, x+1, x)`, saturating at `N`.
+The checked coherence lemma relates every pair of caps. `alpha_bounds` exposes that the inverse is the
+least `a >= 1` with `A_a(1) >= N`: thresholds are 3, 7, and 2047 for levels
+1, 2, and 3. All hierarchy, potential, and registry computations in the
+operations are ghost computations. Native inspection confirms these
+computations disappear from the public operations and recursive worker;
+abstract token calls remain with constant overhead per event.
+
+The caller supplies these fees:
+
+| Operation | Credits |
+| --- | ---: |
+| `create` | 1 |
+| `make_set` | 3 |
+| `find` | `4a + 8` |
+| `union` | `12a + 24` |
+
+The cost model charges one tick per worker entry, owned-cell read or write,
+constant-size node construction, and cell-allocation request. Entry covers
+the bounded scalar work in that body. A find with `d` parent edges spends
+exactly `4d + 2` ticks. Root linking
+precharges seven ticks, including a link of a root to itself. Union also
+charges one entry tick. The bank holds
+exactly four times the forest potential. A positive-rank nonroot of rank `r`
+uses level `l = max { k < a | A_k(r) <= parent_rank }` and index
+`i = max { t >= 1 | I(l,t,r) <= parent_rank }`, with potential
+`(a-l)r-i`. Rank-zero nonroots have zero potential; roots have potential
+`ar`. The bank consists of actual credit tokens, never newly issued credit.
+The returned surplus can exceed the incoming fee when compression releases
+stored credit.
+
+The proof connects this potential to the mutable heap. It proves strict rank
+increase along paths, preservation of ranks and representatives under
+compression, the representative change caused by union, and the exact
+forest-potential decrease during compression. Counting last occurrences of
+Ackermann levels bounds a path by its potential release plus `a+1`. Linking
+increases potential by at most `a`. The rank-sum invariant
+`sum ranks <= elements - components` bounds all ranks below capacity and
+rules out rank overflow. Nonroot nodes retain their historical integer rank.
+
+Every operation preserves an exact accounting equation: cumulative ticks
+plus the current bank and the returned credit equal the previous account
+plus the supplied credit. `account_bounds` establishes that cumulative ticks
+are at most this account. `Vox_union_find_complexity.sequence` telescopes
+a finite trace of these account increments. The executable client builds
+such a trace from actual operation results through the sealed interface.
+For `n` allocations, `f` finds, and `u` unions, the checked bound is
+`1 + 3n + (4a+8)f + (12a+24)u`, at most
+`1 + 3n + 36a(f+u)`. Choosing capacity `N=n` gives
+`O(n + (f+u) alpha(n))`. Increasing capacity requires a new accounting
+argument; this API keeps capacity fixed.
+
+Tick placement and coverage are part of the trusted cost model. The claim
+counts instrumented unit-cost events, not CPU instructions or wall time.
+Reference operations and rank arithmetic are assumed constant-time.
+Heap ownership primitives, compiler refinement checking, SMT, and ghost
+erasure retain their existing trust boundaries. The development adds no
+axioms, `external` declarations, or `assume_` to the algorithm or proofs.
+Effectful `find` uses checked recursive decreases on its finite ghost path;
+termination also assumes the audited primitive bodies terminate. It does
+not claim that effectful operations inhabit Vox's pure `total` mode.

@@ -9,7 +9,13 @@ destination="$prefix/lib/ocaml/vox"
 modules=(vox_sequence vox_int_sequence vox_iarray
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
          vox_merge_sort borrow borrow_iarray
-         pref ghost_pref raw_memory verified_atomic unique_cell one_shot
+         pref ghost_pref vox_big_credits vox_ackermann
+         vox_union_find_potential vox_union_find_levels vox_union_find_path_cost
+         vox_union_find_model vox_union_find_forest vox_union_find_rank
+         vox_union_find_mass vox_union_find_link vox_union_find_worker
+         vox_union_find_amortized vox_union_find_bank vox_union_find_spec
+         vox_union_find vox_union_find_complexity
+         raw_memory verified_atomic unique_cell one_shot
          vox_control vox_table_model vox_table_model_proofs vox_table_bits
          vox_table_probe vox_table_wrap vox_table_mask vox_table_map
          vox_table_invariant vox_table_initial vox_table_update_proofs
