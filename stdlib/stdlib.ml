@@ -29,11 +29,11 @@ let () =
   register_named_value "Pervasives.array_align_error"
     (Invalid_argument "address was misaligned")
 
-external raise :
-  ('a : value_or_null). exn -> 'a @ portable unique @@ portable
+external[@layout_poly] raise :
+  ('a : any). exn -> 'a @ portable unique @@ portable
   = "%reraise"
-external raise_notrace :
-  ('a : value_or_null). exn -> 'a @ portable unique @@ portable
+external[@layout_poly] raise_notrace :
+  ('a : any). exn -> 'a @ portable unique @@ portable
   = "%raise_notrace"
 
 let failwith s = raise(Failure s)
@@ -116,13 +116,16 @@ let abs x = if x >= 0 then x else -x
 
 external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int
   @@ portable total = "%andint"
-external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%orint"
-external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%xorint"
+external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%orint"
+external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%xorint"
 
 let lnot x = x lxor (-1)
 
 external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%lslint"
-external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%lsrint"
+external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%lsrint"
 external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%asrint"
 
 let max_int = (-1) lsr 1

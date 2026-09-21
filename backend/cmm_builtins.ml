@@ -838,8 +838,186 @@ let transl_vec_builtin name args dbg _typ_res =
     For situations such as where the Cmm code below returns e.g. an untagged
     integer, we exploit the generic mechanism on "external" to deal with the
     tagging before the result is returned to the user. *)
+let vox_control_match ~table ~with_empty name args dbg =
+  let storage, offset, byte = three_args name args in
+  let neon = String.equal Config.architecture "arm64" in
+  if not (neon || String.equal Config.architecture "amd64")
+  then None
+  else
+    let simd ty func args =
+      Cop
+        ( Cextcall
+            { func;
+              ty;
+              ty_args = List.map (fun _ -> XVec128) args;
+              alloc = false;
+              builtin = true;
+              returns = true;
+              effects = No_effects;
+              coeffects = No_coeffects
+            },
+          args,
+          dbg )
+    in
+    let broadcast byte =
+      if neon
+      then
+        simd typ_vec128 "caml_neon_int8x16_dup"
+          [Cop (Cstatic_cast (V128_of_scalar Int8x16), [byte], dbg)]
+      else
+        let repeated =
+          Cop (Cmuli, [byte; Cconst_natint (0x0101010101010101n, dbg)], dbg)
+        in
+        bind "low"
+          (Cop (Cstatic_cast (V128_of_scalar Int64x2), [repeated], dbg))
+          (fun low ->
+            simd typ_vec128 "caml_simd_vec128_interleave_low_64" [low; low])
+    in
+    let matching group needle =
+      let equal =
+        simd typ_vec128
+          (if neon then "caml_neon_int8x16_cmpeq" else "caml_sse2_int8x16_cmpeq")
+          [group; needle]
+      in
+      if not neon
+      then simd typ_int "caml_sse2_vec128_movemask_8" [equal]
+      else
+        let weights =
+          vec128 ~dbg
+            { word0 = 0x8040201008040201L; word1 = 0x8040201008040201L }
+        in
+        let weighted =
+          simd typ_vec128 "caml_neon_int8x16_bitwise_and" [equal; weights]
+        in
+        let rec reduce n vector =
+          if n = 0
+          then
+            and_int
+              (Cop (Cstatic_cast (Scalar_of_v128 Int64x2), [vector], dbg))
+              (Cconst_int (65535, dbg))
+              dbg
+          else
+            bind "pairs" vector (fun vector ->
+                reduce (n - 1)
+                  (simd typ_vec128 "caml_neon_int8x16_hadd" [vector; vector]))
+        in
+        (* Three pairwise sums put the two 8-lane masks in bytes 0 and 1. *)
+        reduce 3 weighted
+    in
+    Some
+      (bind "byte" byte (fun byte ->
+           bind "offset" offset (fun offset ->
+               bind "storage" storage (fun storage ->
+                   let controls =
+                     if table
+                     then
+                       load ~dbg Word_val Asttypes.Mutable
+                         ~addr:(field_address storage 3 dbg)
+                     else storage
+                   in
+                   let addr =
+                     Cop (Cadda, [controls; untag_int offset dbg], dbg)
+                   in
+                   bind "group"
+                     (load ~dbg Onetwentyeight_unaligned Asttypes.Mutable ~addr)
+                     (fun group ->
+                       let found =
+                         matching group (broadcast (untag_int byte dbg))
+                       in
+                       let result =
+                         if not with_empty
+                         then found
+                         else
+                           let empty =
+                             matching group
+                               (vec128 ~dbg
+                                  { word0 = 0x8080808080808080L;
+                                    word1 = 0x8080808080808080L
+                                  })
+                           in
+                           let has_empty =
+                             Cop (Ccmpi Cne, [empty; Cconst_int (0, dbg)], dbg)
+                           in
+                           or_int found
+                             (lsl_int has_empty (Cconst_int (16, dbg)) dbg)
+                             dbg
+                       in
+                       tag_int result dbg)))))
+
 let transl_builtin name args dbg typ_res =
   match name with
+  | "caml_vox_control_match16" ->
+    vox_control_match ~table:false ~with_empty:false name args dbg
+  | "caml_vox_control_match16_empty" ->
+    vox_control_match ~table:false ~with_empty:true name args dbg
+  | "caml_pref_empty" -> Some (Csequence (one_arg name args, Ctuple []))
+  | "caml_vox_table_match16" ->
+    vox_control_match ~table:true ~with_empty:false name args dbg
+  | "caml_vox_table_match16_empty" ->
+    vox_control_match ~table:true ~with_empty:true name args dbg
+  (* Keep this layout in sync with vox_table_create in runtime/pref.c. Backing
+     blocks can be exchanged, so even their pointers are mutable. *)
+  | "caml_vox_table_read_control" ->
+    let table, index = two_args name args in
+    let controls =
+      load ~dbg Word_val Asttypes.Mutable ~addr:(field_address table 3 dbg)
+    in
+    let addr = Cop (Cadda, [controls; untag_int index dbg], dbg) in
+    Some (tag_int (load ~dbg Byte_unsigned Asttypes.Mutable ~addr) dbg)
+  | "caml_vox_table_write_control" ->
+    let table, index, byte = three_args name args in
+    let controls =
+      load ~dbg Word_val Asttypes.Mutable ~addr:(field_address table 3 dbg)
+    in
+    let addr = Cop (Cadda, [controls; untag_int index dbg], dbg) in
+    Some
+      (store ~dbg Byte_unsigned Assignment ~addr ~new_value:(untag_int byte dbg))
+  | "caml_vox_table_set_counts" ->
+    let table, size, deleted = three_args name args in
+    Some
+      (bind "deleted" deleted (fun deleted ->
+           bind "size" size (fun size ->
+               bind "table" table (fun table ->
+                   Csequence
+                     ( store ~dbg Word_int Assignment
+                         ~addr:(field_address table 4 dbg)
+                         ~new_value:size,
+                       store ~dbg Word_int Assignment
+                         ~addr:(field_address table 5 dbg)
+                         ~new_value:deleted )))))
+  | "caml_vox_table_size" | "caml_vox_table_deleted" ->
+    let table = one_arg name args in
+    let field = if String.equal name "caml_vox_table_size" then 4 else 5 in
+    Some
+      (load ~dbg Word_int Asttypes.Mutable
+         ~addr:(field_address table field dbg))
+  | "caml_vox_table_capacity" ->
+    let table = one_arg name args in
+    let entries =
+      load ~dbg Word_val Asttypes.Mutable ~addr:(field_address table 2 dbg)
+    in
+    Some
+      (tag_int
+         (lsr_int
+            (untag_int (addr_array_length entries dbg) dbg)
+            (Cconst_int (1, dbg))
+            dbg)
+         dbg)
+  | "caml_vox_table_read_key" | "caml_vox_table_read_value" ->
+    let table, index = two_args name args in
+    let entries =
+      load ~dbg Word_val Asttypes.Mutable ~addr:(field_address table 2 dbg)
+    in
+    let offset = if String.equal name "caml_vox_table_read_key" then 0 else 1 in
+    let index =
+      tag_int
+        (add_int
+           (lsl_int (untag_int index dbg) (Cconst_int (1, dbg)) dbg)
+           (Cconst_int (offset, dbg))
+           dbg)
+        dbg
+    in
+    Some (addr_array_ref entries index dbg)
   | "caml_int128_add" ->
     let op = Caddi128 in
     if_operation_supported op ~f:(fun () -> Cop (op, args, dbg))
@@ -905,7 +1083,7 @@ let transl_builtin name args dbg typ_res =
     popcnt Untagged_int8 (one_arg name args) dbg
   | "caml_nativeint_popcnt_unboxed_to_untagged" ->
     popcnt Unboxed_nativeint (one_arg name args) dbg
-  | "caml_int_ctz_untagged_to_untagged" ->
+  | "caml_int_ctz_untagged_to_untagged" | "caml_vox_int_ctz_untagged" ->
     (* Assuming a 64-bit x86-64 target:
 
        Setting the top bit of the input for the BSF instruction ensures the

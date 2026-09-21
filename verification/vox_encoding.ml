@@ -771,6 +771,31 @@ let operation ctx env ~function_type ~result_type name args =
   in
   let result =
     match name with
+    | "caml_vox_int_ctz" ->
+      begin match args with
+      | [Some x] when term_sort x = Int63 ->
+        let rec count bit =
+          if bit = 63
+          then Integer 63L
+          else
+            App
+              ( Ite,
+                [ App
+                    ( Ne,
+                      [ App
+                          ( Bit_and,
+                            [ x;
+                              Integer
+                                (if bit = 62
+                                 then -4611686018427387904L
+                                 else Int64.shift_left 1L bit) ] );
+                        Integer 0L ] );
+                  Integer (Int64.of_int bit);
+                  count (bit + 1) ] )
+        in
+        Some (count 0)
+      | _ -> None
+      end
     | "%addint" -> binary Int63 Add
     | "%subint" -> binary Int63 Sub
     | "%mulint" -> binary Int63 Mul
@@ -780,6 +805,10 @@ let operation ctx env ~function_type ~result_type name args =
       | _ -> binary Int63 (if name = "%divint" then Div else Rem)
       end
     | "%negint" -> unary Int63 Neg
+    | "%andint" -> binary Int63 Bit_and
+    | "%orint" -> binary Int63 Bit_or
+    | "%xorint" -> binary Int63 Bit_xor
+    | "%lsrint" -> binary Int63 Shift_right_logical
     | "%equal" -> structural_equality Eq
     | "%notequal" -> structural_equality Ne
     | "%eq" -> physical_equality Eq

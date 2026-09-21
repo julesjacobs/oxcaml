@@ -148,6 +148,7 @@ type context =
     mutable datatypes : datatype_declaration list;
     mutable functions : Function.t list;
     function_cache : (string * sort list * sort, Function.t) Hashtbl.t;
+    string_literals : (Function.t, int) Hashtbl.t;
     set_origins : (Function.t, set_origin) Hashtbl.t;
     set_class_sorts : (sort, sort) Hashtbl.t;
     set_membership : (sort * term * term, term) Hashtbl.t;
@@ -1823,9 +1824,24 @@ let stored_primitive syntax = function
   | Some (Function { primitive = Some _ as primitive; _ }) -> primitive
   | _ -> syntax
 
-let constant c = scalar_option (Vox_encoding.constant c)
+let string_literal ctx env text =
+  match sort ctx.encoding env Predef.type_string with
+  | None -> None
+  | Some sort ->
+    let fn = intern_function ctx ("string literal:" ^ text) [] sort in
+    if not (Hashtbl.mem ctx.string_literals fn)
+    then Hashtbl.add ctx.string_literals fn (Hashtbl.length ctx.string_literals);
+    scalar_value (Call (fn, []))
 
-let rconstant c = scalar_option (Vox_encoding.rconstant c)
+let constant ctx env c =
+  match c with
+  | Const_string (text, _, _) -> string_literal ctx env text
+  | _ -> scalar_option (Vox_encoding.constant c)
+
+let rconstant ctx env c =
+  match c.Parsetree.pconst_desc with
+  | Parsetree.Pconst_string (text, _, _) -> string_literal ctx env text
+  | _ -> scalar_option (Vox_encoding.rconstant c)
 
 let constructor ctx env ty name =
   scalar_option (Vox_encoding.constructor ctx.encoding env ty name)
@@ -1874,7 +1890,8 @@ let rec predicate ctx env s e =
       | Some (_, 0) -> unsupported e.rexp_loc
       | _ -> s, lookup ctx s env e.rexp_type path
       end
-    | Rexp_constant c -> s, scalar_value (required e.rexp_loc (rconstant c))
+    | Rexp_constant c ->
+      s, scalar_value (required e.rexp_loc (rconstant ctx env c))
     | Rexp_tuple components ->
       let s, values =
         arguments_right_to_left (fun s (_, e) -> eval s e) s components
@@ -2057,7 +2074,10 @@ and predicate_pattern ctx env s value p =
   | Rpat_var id -> [bind s id value, Boolean true]
   | Rpat_alias (p, id) -> predicate_pattern ctx env (bind s id value) value p
   | Rpat_constant c ->
-    [s, both Eq (required p.rpat_loc value) (required p.rpat_loc (rconstant c))]
+    [ ( s,
+        both Eq
+          (required p.rpat_loc value)
+          (required p.rpat_loc (rconstant ctx env c)) ) ]
   | Rpat_tuple components ->
     begin match data_of_type ctx env p.rpat_type, scalar value with
     | Some { kind = Tuple_data constructor; _ }, Some value ->
@@ -2202,7 +2222,7 @@ let rec pattern : type k.
   | Tpat_alias { pattern = p; id; _ } -> pattern ctx (bind s id value) value p
   | Tpat_value p -> pattern ctx s value (p :> Typedtree.pattern)
   | Tpat_constant c ->
-    begin match scalar value, scalar (constant c) with
+    begin match scalar value, scalar (constant ctx p.pat_env c) with
     | Some x, Some c -> [s, both Eq x c]
     | _ ->
       [s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")]
@@ -2482,7 +2502,7 @@ and expression_desc ?deferred ctx s e =
       | _ -> at_mode mode (lookup ctx s e.exp_env e.exp_type path)
     in
     s, value
-  | Texp_constant c -> s, constant c
+  | Texp_constant c -> s, constant ctx e.exp_env c
   | Texp_tuple (components, _) ->
     let s, values =
       arguments_right_to_left (fun s (_, e) -> result s e) s components
@@ -2737,6 +2757,27 @@ and expression_desc ?deferred ctx s e =
     when List.for_all (fun c -> snd (split_pattern c.c_lhs) = None) cases ->
     let s, value = eval s scrutinee in
     computation_cases ?deferred ctx s scrutinee.exp_type value cases
+  | Texp_for { for_id; for_from; for_to; for_dir; for_body; _ } ->
+    let s, first = eval s for_from in
+    let s, last = eval s for_to in
+    let index = scalar_value (Var (Symbol.create ~label:"loop index" Int63)) in
+    let body_state = bind s for_id index in
+    let body_state =
+      match scalar first, scalar last, scalar index with
+      | Some first, Some last, Some index ->
+        let low, high =
+          match for_dir with
+          | Asttypes.Upto -> first, last
+          | Asttypes.Downto -> last, first
+        in
+        branch body_state (both And (both Le low index) (both Le index high))
+      | _ -> body_state
+    in
+    let checked, _ = eval body_state for_body in
+    let s =
+      { s with code = Check (added_prefix ~base:s.code checked.code) :: s.code }
+    in
+    s, opaque ()
   | Texp_exclave body -> result s body
   | _ ->
     (* Unknown evaluation/control-flow forms lose outgoing facts, but cannot
@@ -2932,6 +2973,61 @@ and iterator ctx state =
     structure = (fun _ str -> checked (fun s -> structure ctx s str))
   }
 
+(* Keep the SSA definitions needed by the selected obligations. Definitions from
+   later branches or postconditions can otherwise dominate a query. Dropping
+   facts only weakens the premises; no new equality is introduced. *)
+let slice_goal ctx query term =
+  let used = Hashtbl.create 32 in
+  let pending = Queue.create () in
+  let definitions = Hashtbl.create 32 in
+  let rec visit = function
+    | Var symbol ->
+      if not (Hashtbl.mem used symbol)
+      then begin
+        Hashtbl.add used symbol ();
+        Queue.add symbol pending;
+        (* Observation expansion can expose additional SSA dependencies. *)
+        Option.iter visit (Hashtbl.find_opt ctx.observation_definitions symbol)
+      end
+    | App (_, args) | Call (_, args) | Construct (_, args) ->
+      List.iter visit args
+    | Is (_, arg) | Select (_, _, arg) -> visit arg
+    | Boolean _ | Integer _ | Big_integer _ -> ()
+  in
+  let defined_symbol (fact : labelled_term) =
+    match fact.label, fact.term with
+    | ("value" | "reachable" | "observation"), App (Eq, [Var symbol; _]) ->
+      Some symbol
+    | _ -> None
+  in
+  List.iter
+    (fun fact ->
+      match defined_symbol fact with
+      | None -> visit fact.term
+      | Some symbol ->
+        let previous =
+          Option.value (Hashtbl.find_opt definitions symbol) ~default:[]
+        in
+        Hashtbl.replace definitions symbol (fact.term :: previous))
+    query.facts;
+  visit term;
+  while not (Queue.is_empty pending) do
+    let symbol = Queue.take pending in
+    List.iter visit
+      (Option.value (Hashtbl.find_opt definitions symbol) ~default:[])
+  done;
+  { query with
+    symbols = List.filter (Hashtbl.mem used) query.symbols;
+    facts =
+      List.filter
+        (fun fact ->
+          match defined_symbol fact with
+          | None -> true
+          | Some symbol -> Hashtbl.mem used symbol)
+        query.facts;
+    goal = { label = "refine_"; term }
+  }
+
 let query ctx code =
   let definitions = ref [] in
   let share = function
@@ -2971,135 +3067,166 @@ let query ctx code =
     }
   in
   let facts = List.rev !definitions in
-  (* These edges request observations; they do not assert array equality.
-     Equality still follows from the original, possibly guarded facts. *)
-  let array_equalities = Hashtbl.create 16 in
-  let array_observations = Hashtbl.create 16 in
-  let pending = Queue.create () in
-  (* Equalities through subarrays can revisit an array at shifted indices. Stop
-     expanding at a fixed budget and retain uninterpreted observations. *)
-  let observation_budget = ref 1024 in
-  let propagate observe alias =
-    if !observation_budget > 0
-    then begin
-      decr observation_budget;
-      Queue.add (observe alias) pending
-    end
-  in
-  let entries table key =
-    Option.value (Hashtbl.find_opt table key) ~default:[]
-  in
-  let relate left right =
-    let previous = entries array_equalities left in
-    let same_origin =
-      expose_head ctx left = expose_head ctx right
-      && Option.is_some (iarray_origin ctx left)
+  let expand ~slice goal =
+    let raw = { datatypes = []; symbols = []; functions = []; facts; goal } in
+    let facts = if slice then (slice_goal ctx raw goal.term).facts else facts in
+    let definitions = ref (List.rev facts) in
+    (* These edges request observations; they do not assert array equality.
+       Equality still follows from the original, possibly guarded facts. *)
+    let array_equalities = Hashtbl.create 16 in
+    let array_observations = Hashtbl.create 16 in
+    let pending = Queue.create () in
+    (* Equalities through subarrays can revisit an array at shifted indices.
+       Stop expanding at a fixed budget and retain uninterpreted
+       observations. *)
+    let observation_budget = ref 1024 in
+    let propagated = Term_table.create 64 in
+    let propagate observe alias =
+      if !observation_budget > 0
+      then begin
+        let term = observe alias in
+        if not (Term_table.mem propagated term)
+        then begin
+          Term_table.add propagated term ();
+          decr observation_budget;
+          Queue.add term pending
+        end
+      end
     in
-    if left <> right && (not same_origin) && not (List.mem right previous)
-    then begin
-      Hashtbl.replace array_equalities left (right :: previous);
-      List.iter
-        (fun observe -> propagate observe right)
-        (entries array_observations left)
-    end
-  in
-  let observation_function label fn =
-    Hashtbl.find_opt ctx.function_cache
-      (label, Function.arguments fn, Function.result fn)
-    = Some fn
-  in
-  let seen = Term_table.create 16 and symbols = ref [] in
-  let rec visit term =
-    if not (Term_table.mem seen term)
-    then begin
-      Term_table.add seen term ();
-      begin match term with
-      | Call (fn, [pointer]) when observation_function "Pref.location" fn ->
-        (* A left inverse enforces injectivity with one equation per pointer. *)
-        let inverse =
-          intern_function ctx "Pref.pointer"
-            [Function.result fn]
-            (term_sort pointer)
-        in
-        let axiom = both Eq (Call (inverse, [term])) pointer in
-        definitions := { label = "pref identity"; term = axiom } :: !definitions;
-        Queue.add axiom pending
-      | _ -> ()
-      end;
-      begin match term with
-      | App (Eq, [left; right])
-        when is_iarray_sort ctx.encoding (term_sort left)
-             || Hashtbl.mem ctx.pref_heaps (term_sort left) ->
-        relate left right;
-        relate right left
-      | _ -> ()
-      end;
-      let observations =
-        match term with
-        | Call (fn, [heap; key]) when Hashtbl.mem ctx.pref_observers fn ->
-          [(heap, fun alias -> pref_observe ctx 128 fn alias key)]
-        | Call (fn, [left; right]) when observation_function "Pref.disjoint" fn
-          ->
-          [ (left, fun alias -> pref_disjoint ctx 64 alias right);
-            (right, fun alias -> pref_disjoint ctx 64 left alias) ]
-        | Call (fn, [array; index]) when observation_function "Iarray.get" fn ->
-          [ ( array,
-              fun alias ->
-                iarray_get ctx (term_sort alias) (Function.result fn) alias
-                  index ) ]
-        | Call (fn, [array]) when observation_function "Iarray.length" fn ->
-          [(array, fun alias -> iarray_length ctx (term_sort alias) alias)]
-        | _ -> []
+    let entries table key =
+      Option.value (Hashtbl.find_opt table key) ~default:[]
+    in
+    let relate left right =
+      let previous = entries array_equalities left in
+      let same_origin =
+        expose_head ctx left = expose_head ctx right
+        && Option.is_some (iarray_origin ctx left)
       in
-      List.iter
-        (fun (array, read) ->
-          let observe alias =
-            let value = read alias in
-            if is_iarray_sort ctx.encoding (term_sort term)
-            then begin
-              relate term value;
-              relate value term
-            end;
-            value
+      if left <> right && (not same_origin) && not (List.mem right previous)
+      then begin
+        Hashtbl.replace array_equalities left (right :: previous);
+        List.iter
+          (fun observe -> propagate observe right)
+          (entries array_observations left)
+      end
+    in
+    let observation_function label fn =
+      Hashtbl.find_opt ctx.function_cache
+        (label, Function.arguments fn, Function.result fn)
+      = Some fn
+    in
+    let seen = Term_table.create 16 and symbols = ref [] in
+    let rec visit term =
+      if not (Term_table.mem seen term)
+      then begin
+        Term_table.add seen term ();
+        begin match term with
+        | Call (fn, []) when Hashtbl.mem ctx.string_literals fn ->
+          let tag =
+            intern_function ctx "string literal identity" [term_sort term] Int
           in
-          Hashtbl.replace array_observations array
-            (observe :: entries array_observations array);
-          List.iter (propagate observe) (entries array_equalities array))
-        observations;
-      Option.iter
-        (define "iarray observation" term)
-        (Hashtbl.find_opt ctx.observation_equations term);
-      match term with
-      | Var symbol ->
-        symbols := symbol :: !symbols;
+          let id = Hashtbl.find ctx.string_literals fn in
+          let axiom =
+            both Eq (Call (tag, [term])) (Big_integer (string_of_int id))
+          in
+          definitions
+            := { label = "string literal"; term = axiom } :: !definitions;
+          Queue.add axiom pending
+        | Call (fn, [pointer]) when observation_function "Pref.location" fn ->
+          (* A left inverse enforces injectivity with one equation per
+             pointer. *)
+          let inverse =
+            intern_function ctx "Pref.pointer"
+              [Function.result fn]
+              (term_sort pointer)
+          in
+          let axiom = both Eq (Call (inverse, [term])) pointer in
+          definitions
+            := { label = "pref identity"; term = axiom } :: !definitions;
+          Queue.add axiom pending
+        | _ -> ()
+        end;
+        begin match term with
+        | App (Eq, [left; right])
+          when is_iarray_sort ctx.encoding (term_sort left)
+               || Hashtbl.mem ctx.pref_heaps (term_sort left) ->
+          relate left right;
+          relate right left
+        | _ -> ()
+        end;
+        let observations =
+          match term with
+          | Call (fn, [heap; key]) when Hashtbl.mem ctx.pref_observers fn ->
+            [(heap, fun alias -> pref_observe ctx 128 fn alias key)]
+          | Call (fn, [left; right])
+            when observation_function "Pref.disjoint" fn ->
+            [ (left, fun alias -> pref_disjoint ctx 64 alias right);
+              (right, fun alias -> pref_disjoint ctx 64 left alias) ]
+          | Call (fn, [array; index]) when observation_function "Iarray.get" fn
+            ->
+            [ ( array,
+                fun alias ->
+                  iarray_get ctx (term_sort alias) (Function.result fn) alias
+                    index ) ]
+          | Call (fn, [array]) when observation_function "Iarray.length" fn ->
+            [(array, fun alias -> iarray_length ctx (term_sort alias) alias)]
+          | _ -> []
+        in
+        List.iter
+          (fun (array, read) ->
+            let observe alias =
+              let value = read alias in
+              if is_iarray_sort ctx.encoding (term_sort term)
+              then begin
+                relate term value;
+                relate value term
+              end;
+              value
+            in
+            Hashtbl.replace array_observations array
+              (observe :: entries array_observations array);
+            List.iter (propagate observe) (entries array_equalities array))
+          observations;
         Option.iter
-          (define "observation" term)
-          (Hashtbl.find_opt ctx.observation_definitions symbol)
-      | App (_, args) | Call (_, args) | Construct (_, args) ->
-        List.iter visit args
-      | Is (_, arg) | Select (_, _, arg) -> visit arg
-      | _ -> ()
-    end
-  and define label term value =
-    let equation = both Eq term value in
-    definitions := { label; term = equation } :: !definitions;
-    visit equation
-  in
-  List.iter (fun f -> visit f.term) facts;
-  visit goal.term;
-  while not (Queue.is_empty pending) do
-    visit (Queue.take pending)
-  done;
-  ( { datatypes = List.rev ctx.datatypes;
+          (define "iarray observation" term)
+          (Hashtbl.find_opt ctx.observation_equations term);
+        match term with
+        | Var symbol ->
+          symbols := symbol :: !symbols;
+          Option.iter
+            (define "observation" term)
+            (Hashtbl.find_opt ctx.observation_definitions symbol)
+        | App (_, args) | Call (_, args) | Construct (_, args) ->
+          List.iter visit args
+        | Is (_, arg) | Select (_, _, arg) -> visit arg
+        | _ -> ()
+      end
+    and define label term value =
+      let equation = both Eq term value in
+      definitions := { label; term = equation } :: !definitions;
+      visit equation
+    in
+    List.iter (fun f -> visit f.term) facts;
+    visit goal.term;
+    while not (Queue.is_empty pending) do
+      visit (Queue.take pending)
+    done;
+    { datatypes = List.rev ctx.datatypes;
       symbols = List.rev !symbols;
       functions = List.rev ctx.functions;
       facts = List.rev !definitions;
       goal
-    },
-    goals )
+    }
+  in
+  (* Preserve explicit observation hints in the initial batch. Early slicing is
+     only needed when regenerating smaller individual retry queries. *)
+  ( expand ~slice:false goal,
+    goals,
+    fun term -> expand ~slice:true { label = "refine_"; term } )
 
 let verify_batch ctx prove code =
-  let query, goals = query ctx code in
+  let query, goals, expand = query ctx code in
+  let query = slice_goal ctx query query.goal.term in
   let prove_one (o : obligation) q =
     try prove o.loc q
     with Location.Error error ->
@@ -3116,7 +3243,8 @@ let verify_batch ctx prove code =
     with Location.Error _ ->
       List.iter
         (fun (o, term) ->
-          prove_one o { query with goal = { label = "refine_"; term } })
+          let query = expand term in
+          prove_one o (slice_goal ctx query term))
         goals)
 
 let context ~prove ~verify_introductions =
@@ -3124,6 +3252,7 @@ let context ~prove ~verify_introductions =
     datatypes = [];
     functions = [];
     function_cache = Hashtbl.create 32;
+    string_literals = Hashtbl.create 16;
     set_origins = Hashtbl.create 16;
     set_class_sorts = Hashtbl.create 8;
     set_membership = Hashtbl.create 32;

@@ -1,6 +1,6 @@
 open Vox_smt
 
-let queries source =
+let queries ?(retry = false) source =
   Language_extension.enable Refinement_types ();
   Typecore.reset_delayed_checks ();
   let parsed = Parse.implementation (Lexing.from_string source) in
@@ -9,8 +9,14 @@ let queries source =
   in
   Typecore.force_delayed_checks ();
   let result = ref [] in
-  Vox_vc.generate tree ~prove:(fun _ query ->
+  let first = ref true in
+  Vox_vc.generate tree ~prove:(fun loc query ->
       check ~int_width:63 query;
+      if retry && !first
+      then begin
+        first := false;
+        Location.raise_errorf ~loc "Exercise individual-obligation retry"
+      end;
       result := query :: !result);
   List.rev !result
 
@@ -18,6 +24,53 @@ let prelude =
   "external ge : int -> int -> bool @@ total = \"%greaterequal\"\n\
    external add : int -> int -> int @@ total = \"%addint\"\n\
    type nonnegative = {n : int | ge n 0}\n"
+
+let () =
+  let source wanted =
+    "external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n\
+     external unknown : (int -> int) @ immutable total -> bool\n\
+     @@ total = \"unknown_callback_fact\"\n\
+     external choose : (f : (int -> int)) @ immutable total ->\n\
+     {n : int | n === 7 && unknown f} = \"choose_with_callback\"\n\
+     let test (f : (int -> int) @ immutable total) =\n\
+     let refine_ n = choose f in\n\
+     let (_ : {n : int | n === " ^ string_of_int wanted
+    ^ "}) = refine_ n in ()\n"
+  in
+  let solve wanted =
+    match queries (source wanted) with
+    | [q] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    | _ -> failwith "Expected one callback-conjunction query"
+  in
+  assert (solve 7 = Valid);
+  assert (match solve 8 with Invalid _ -> true | _ -> false)
+
+let () =
+  let source =
+    prelude ^ "let f (x : int) =\n" ^ "let (_ : nonnegative) = refine_ x in\n"
+    ^ String.concat "" (List.init 40 (fun _ -> "let x = add x x in\n"))
+    ^ "let (_ : {n : int | n === x}) = refine_ x in ()"
+  in
+  let batch = queries source in
+  let separate = queries ~retry:true source in
+  match batch, separate with
+  | [batch], [first; second] ->
+    assert (List.length first.facts < List.length batch.facts / 2);
+    let solve q =
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    in
+    assert (match solve first with Invalid _ -> true | _ -> false);
+    assert (solve second = Valid)
+  | _ -> failwith "Expected a batch and two individual obligations"
 
 let size count body =
   let steps = String.concat "" (List.init count (fun _ -> body)) in
@@ -308,25 +361,43 @@ let () =
   print_endline "Pref identity equations scale linearly"
 
 let () =
-  let source wanted =
-    "external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n\
-     external unknown : (int -> int) @ immutable total -> bool\n\
-       @@ total = \"unknown_callback_fact\"\n\
-     external choose : (f : (int -> int)) @ immutable total ->\n\
-       {n : int | n === 7 && unknown f} = \"choose_with_callback\"\n\
-     let test (f : (int -> int) @ immutable total) =\n\
-       let refine_ n = choose f in\n\
-       let (_ : {n : int | n === " ^ string_of_int wanted
-    ^ "}) = refine_ n in ()\n"
+  let source =
+    "type pointer : immutable_data\n\
+     type heap : immutable_data\n\
+     type 'a option = None | Some of 'a\n\
+     external put : heap -> pointer -> int -> heap @@ total = \
+     \"caml_pref_heap_put\"\n\
+     external at : heap -> pointer -> int option @@ total = \
+     \"caml_pref_heap_at\"\n\
+     external write : (h : heap) -> (p : pointer) -> (v : int) ->\n\
+     {r : heap | r === put h p v} = \"test_heap_write\"\n\
+     let f (h : heap) "
+    ^ String.concat " "
+        (List.init 48 (fun i -> Printf.sprintf "(p%d : pointer)" i))
+    ^ " =\n"
+    ^ String.concat ""
+        (List.init 48 (fun i ->
+             Printf.sprintf
+               "let h = write h p%d %d in\n\
+                let u = () in\n\
+                let (_ : {u : unit | at h p%d === Some %d}) = refine_ u in\n"
+               i i i i))
+    ^ "let u = () in\n\
+       let (_ : {u : unit | at h p47 === Some 999}) = refine_ u in ()"
   in
-  let solve wanted =
-    match queries (source wanted) with
-    | [q] ->
+  let qs = queries ~retry:true source in
+  assert (List.length qs = 49);
+  List.iteri
+    (fun index query ->
+      let validity =
         (Vox_smt_solver.check
-           ~config:{ Vox_smt_solver.default_config with executable = Sys.argv.(1) }
-           ~int_width:63 q).validity
-    | _ -> failwith "Expected one callback-conjunction query"
-  in
-  assert (solve 7 = Valid);
-  assert (match solve 8 with Invalid _ -> true | _ -> false)
-
+           ~config:
+             { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+           ~int_width:63 query)
+          .validity
+      in
+      if index < 48
+      then assert (validity = Valid)
+      else assert (match validity with Invalid _ -> true | _ -> false))
+    qs;
+  print_endline "Heap observations are regenerated for individual obligations"

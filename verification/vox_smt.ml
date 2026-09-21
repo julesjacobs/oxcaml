@@ -142,6 +142,10 @@ type op =
   | Div
   | Rem
   | Neg
+  | Bit_and
+  | Bit_or
+  | Bit_xor
+  | Shift_right_logical
   | Eq
   | Ne
   | Lt
@@ -200,6 +204,10 @@ let operator = function
   | Div -> "int63_div"
   | Rem -> "int63_rem"
   | Neg -> "int63_neg"
+  | Bit_and -> "int63_and"
+  | Bit_or -> "int63_or"
+  | Bit_xor -> "int63_xor"
+  | Shift_right_logical -> "int63_lsr"
   | Eq -> "="
   | Ne -> "distinct"
   | Lt -> "<"
@@ -247,6 +255,8 @@ type operator_signature =
 
 let operator_signature = function
   | Add | Sub | Mul | Div | Rem -> Fixed ([Int63; Int63], Int63)
+  | Bit_and | Bit_or | Bit_xor | Shift_right_logical ->
+    Fixed ([Int63; Int63], Int63)
   | Neg -> Fixed ([Int63], Int63)
   | Lt | Le | Gt | Ge -> Fixed ([Int63; Int63], Bool)
   | Not -> Fixed ([Bool], Bool)
@@ -560,23 +570,34 @@ let to_smtlib ~int_width ~timeout_ms q =
   List.iteri
     (fun index id -> Hashtbl.add opaque_names id ("s" ^ string_of_int index))
     opaque_ids;
+  let has_bitwise =
+    List.exists uses [Bit_and; Bit_or; Bit_xor; Shift_right_logical]
+  in
   let smt_sort = function
     | Bool -> "Bool"
-    | Int63 -> "Int"
+    | Int63 -> if has_bitwise then "(_ BitVec 63)" else "Int"
     | Int -> "Int"
     | Opaque id -> Hashtbl.find opaque_names id
     | Datatype datatype -> Hashtbl.find datatype_names datatype.datatype_id
   in
   let rec term = function
     | Boolean v -> add (string_of_bool v)
-    | Integer value -> integer value
+    | Integer value ->
+      if has_bitwise
+      then
+        add (Printf.sprintf "(_ bv%Ld 63)" (Int64.logand value Int64.max_int))
+      else integer value
     | Big_integer text ->
       if text.[0] = '-'
       then add ("(- " ^ String.sub text 1 (String.length text - 1) ^ ")")
       else add text
     | Var s -> add (Hashtbl.find names s.Symbol.id)
-    | App (Int_of_int63, [argument]) -> term argument
-    | App (Div, [dividend; Integer divisor]) when divisor <> 0L ->
+    | App (Int_of_int63, [argument]) ->
+      if has_bitwise then add "(int63_of_bits ";
+      term argument;
+      if has_bitwise then add ")"
+    | App (Div, [dividend; Integer divisor])
+      when divisor <> 0L && not has_bitwise ->
       add "(let ((x ";
       term dividend;
       add ")) (let ((q ";
@@ -592,7 +613,8 @@ let to_smtlib ~int_width ~timeout_ms q =
       add ") (- q ";
       add modulus;
       add ") q)))"
-    | App (Rem, [dividend; Integer divisor]) when divisor <> 0L ->
+    | App (Rem, [dividend; Integer divisor])
+      when divisor <> 0L && not has_bitwise ->
       add "(let ((x ";
       term dividend;
       add ")) (let ((r (mod (ite (< x 0) (- x) x) ";
@@ -638,9 +660,38 @@ let to_smtlib ~int_width ~timeout_ms q =
       add " ";
       term value;
       add ")"
+    | App (Shift_right_logical, [value; count]) ->
+      add "(ite (and (bvsge ";
+      term count;
+      add " (_ bv0 63)) (bvsle ";
+      term count;
+      add " (_ bv63 63))) (bvlshr ";
+      term value;
+      add " ";
+      term count;
+      add ") (int63_lsr_unspecified ";
+      term value;
+      add " ";
+      term count;
+      add "))"
     | App (op, args) ->
       add "(";
-      add (operator op);
+      add
+        (if has_bitwise
+         then
+           match op with
+           | Add -> "bvadd"
+           | Sub -> "bvsub"
+           | Neg -> "bvneg"
+           | Lt -> "bvslt"
+           | Le -> "bvsle"
+           | Gt -> "bvsgt"
+           | Ge -> "bvsge"
+           | Bit_and -> "bvand"
+           | Bit_or -> "bvor"
+           | Bit_xor -> "bvxor"
+           | _ -> operator op
+         else operator op);
       List.iter
         (fun arg ->
           add " ";
@@ -671,12 +722,24 @@ let to_smtlib ~int_width ~timeout_ms q =
   add
     (if
        has_int || opaque_ids <> [] || q.datatypes <> [] || uses_general Div
-       || uses_general Rem
+       || uses_general Rem || has_bitwise
      then "(set-logic ALL)\n"
      else if multiplications = [] && q.functions = []
      then "(set-logic QF_LIA)\n"
      else "(set-logic QF_UFLIA)\n");
-  if uses Add
+  if has_bitwise
+  then begin
+    add
+      "(define-fun int63_of_bits ((x (_ BitVec 63))) Int\n\
+      \  (ite (= ((_ extract 62 62) x) #b0) (bv2int x)\n\
+      \    (- (bv2int x) 9223372036854775808)))\n"
+  end;
+  if uses Shift_right_logical
+  then
+    add
+      "(declare-fun int63_lsr_unspecified ((_ BitVec 63) (_ BitVec 63)) (_ \
+       BitVec 63))\n";
+  if uses Add && not has_bitwise
   then
     add
       (Printf.sprintf
@@ -684,7 +747,7 @@ let to_smtlib ~int_width ~timeout_ms q =
          \  (ite (> (+ x y) %s) (- (+ x y) %s)\n\
          \    (ite (< (+ x y) %s) (+ (+ x y) %s) (+ x y))))\n"
          maximum modulus minimum modulus);
-  if uses Sub
+  if uses Sub && not has_bitwise
   then
     add
       (Printf.sprintf
@@ -692,15 +755,20 @@ let to_smtlib ~int_width ~timeout_ms q =
          \  (ite (> (- x y) %s) (- (- x y) %s)\n\
          \    (ite (< (- x y) %s) (+ (- x y) %s) (- x y))))\n"
          maximum modulus minimum modulus);
-  if uses Neg
+  if uses Neg && not has_bitwise
   then
     add
       (Printf.sprintf
          "(define-fun int63_neg ((x Int)) Int\n  (ite (= x %s) %s (- x)))\n"
          minimum minimum);
-  if uses_general Div || uses_general Rem
+  if (not has_bitwise) && (uses_general Div || uses_general Rem)
   then add "(define-fun int63_abs ((x Int)) Int (ite (< x 0) (- x) x))\n";
-  if uses_general Div
+  if has_bitwise && uses Div
+  then
+    add
+      "(define-fun int63_div ((x (_ BitVec 63)) (y (_ BitVec 63))) (_ BitVec \
+       63) (ite (= y (_ bv0 63)) (_ bv0 63) (bvsdiv x y)))\n";
+  if uses_general Div && not has_bitwise
   then
     add
       (Printf.sprintf
@@ -711,14 +779,25 @@ let to_smtlib ~int_width ~timeout_ms q =
          \                   (- (div (int63_abs x) (int63_abs y))))))\n\
          \ (ite (> q %s) (- q %s) q))))\n"
          maximum modulus);
-  if uses_general Rem
+  if has_bitwise && uses Rem
+  then
+    add
+      "(define-fun int63_rem ((x (_ BitVec 63)) (y (_ BitVec 63))) (_ BitVec \
+       63) (ite (= y (_ bv0 63)) (_ bv0 63) (bvsrem x y)))\n";
+  if uses_general Rem && not has_bitwise
   then
     add
       "(define-fun int63_rem ((x Int) (y Int)) Int\n\
       \  (ite (= y 0) 0\n\
       \    (let ((r (mod (int63_abs x) (int63_abs y))))\n\
       \      (ite (< x 0) (- r) r))))\n";
-  if multiplications <> [] then add "(declare-fun int63_mul (Int Int) Int)\n";
+  if multiplications <> []
+  then
+    add
+      (if has_bitwise
+       then
+         "(declare-fun int63_mul ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))\n"
+       else "(declare-fun int63_mul (Int Int) Int)\n");
   List.iter
     (fun id ->
       add
@@ -776,15 +855,18 @@ let to_smtlib ~int_width ~timeout_ms q =
            (smt_sort (Function.result f))))
     q.functions;
   let bounded value =
-    add "(assert (and (<= ";
-    add minimum;
-    add " ";
-    term value;
-    add ") (<= ";
-    term value;
-    add " ";
-    add maximum;
-    add ")))\n"
+    if not has_bitwise
+    then begin
+      add "(assert (and (<= ";
+      add minimum;
+      add " ";
+      term value;
+      add ") (<= ";
+      term value;
+      add " ";
+      add maximum;
+      add ")))\n"
+    end
   in
   List.iter
     (fun symbol ->
@@ -802,7 +884,11 @@ let to_smtlib ~int_width ~timeout_ms q =
     q.facts;
   add "(assert (not ";
   term q.goal.term;
-  add "))\n(check-sat)\n";
+  add "))\n";
+  add
+    (if has_bitwise
+     then "(check-sat-using (then simplify solve-eqs smt))\n"
+     else "(check-sat)\n");
   Buffer.contents b
 
 type value =

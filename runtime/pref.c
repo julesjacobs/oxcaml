@@ -18,6 +18,7 @@
 #include "caml/fail.h"
 #include "caml/custom.h"
 #include <stdlib.h>
+#include <string.h>
 
 /* Object identity keeps polymorphic comparison and hashing independent of
    the payload, while the GC scans the payload and collects pref cycles. */
@@ -367,5 +368,166 @@ CAMLprim value caml_raw_memory_free_bytecode(value handle, value token)
 
 CAMLprim value caml_raw_memory_location(value handle, value index)
 {
+  return Val_unit;
+}
+
+/* A table handle owns two dense backing blocks. Object identity, like Pref,
+   stays stable when slots and controls change. Fields 2..5 are private. */
+static value vox_table_create(value capacity, mlsize_t fields)
+{
+  CAMLparam1(capacity);
+  CAMLlocal4(entries, controls, table, result);
+  uintnat id = pref_fresh_id();
+  mlsize_t n = Long_val(capacity);
+  entries = caml_alloc(2 * n, 0);
+  for (mlsize_t i = 0; i < 2 * n; i++) Field(entries, i) = Val_unit;
+  controls = caml_alloc_string(n + 15);
+  memset(Bytes_val(controls), 128, n + 15);
+  table = caml_alloc_small(6, Object_tag);
+  Field(table, 0) = Val_unit;
+  Field(table, 1) = Val_long(id);
+  Field(table, 2) = entries;
+  Field(table, 3) = controls;
+  Field(table, 4) = Val_long(0);
+  Field(table, 5) = Val_long(0);
+  result = caml_alloc_small(fields, 0);
+  Field(result, 0) = table;
+  if (fields == 2) Field(result, 1) = Val_unit;
+  CAMLreturn(result);
+}
+
+CAMLprim value caml_vox_table_location(value table) { return table; }
+
+CAMLprim value caml_vox_table_create(value capacity)
+{ return vox_table_create(capacity, 1); }
+CAMLprim value caml_vox_table_create_bytecode(value capacity, value token)
+{ return vox_table_create(capacity, 2); }
+
+CAMLprim value caml_vox_table_capacity(value table)
+{ return Val_long(Wosize_val(Field(table, 2)) / 2); }
+CAMLprim value caml_vox_table_capacity_bytecode(value table, value state,
+                                              value token)
+{ return caml_vox_table_capacity(table); }
+CAMLprim value caml_vox_table_size(value table)
+{ return Field(table, 4); }
+CAMLprim value caml_vox_table_size_bytecode(value table, value state, value token)
+{ return caml_vox_table_size(table); }
+CAMLprim value caml_vox_table_deleted(value table)
+{ return Field(table, 5); }
+CAMLprim value caml_vox_table_deleted_bytecode(value table, value state,
+                                             value token)
+{ return caml_vox_table_deleted(table); }
+
+CAMLprim value caml_vox_table_read_control(value table, value index)
+{ return Val_long(Byte_u(Field(table, 3), Long_val(index))); }
+CAMLprim value caml_vox_table_read_control_bytecode(value table, value state,
+                                                  value index, value token)
+{ return caml_vox_table_read_control(table, index); }
+CAMLprim void caml_vox_table_write_control(value table, value index, value byte)
+{ Byte_u(Field(table, 3), Long_val(index)) = Long_val(byte); }
+CAMLprim value caml_vox_table_write_control_bytecode(value table, value state,
+                                      value index, value byte, value token)
+{
+  caml_vox_table_write_control(table, index, byte);
+  return Val_unit;
+}
+
+CAMLprim value caml_vox_table_read_key(value table, value index)
+{ return Field(Field(table, 2), 2 * Long_val(index)); }
+CAMLprim value caml_vox_table_read_key_bytecode(value table, value state,
+                                              value index, value token)
+{ return caml_vox_table_read_key(table, index); }
+CAMLprim value caml_vox_table_read_value(value table, value index)
+{ return Field(Field(table, 2), 2 * Long_val(index) + 1); }
+CAMLprim value caml_vox_table_read_value_bytecode(value table, value state,
+                                                value index, value token)
+{ return caml_vox_table_read_value(table, index); }
+CAMLprim void caml_vox_table_write_slot(value table, value index, value key,
+                                     value element)
+{
+  caml_modify(&Field(Field(table, 2), 2 * Long_val(index)), key);
+  caml_modify(&Field(Field(table, 2), 2 * Long_val(index) + 1), element);
+}
+CAMLprim value caml_vox_table_write_slot_bytecode(value *argv, int argn)
+{
+  caml_vox_table_write_slot(argv[0], argv[2], argv[3], argv[4]);
+  return Val_unit;
+}
+CAMLprim void caml_vox_table_write_value(value table, value index, value element)
+{
+  caml_modify(&Field(Field(table, 2), 2 * Long_val(index) + 1), element);
+}
+CAMLprim value caml_vox_table_write_value_bytecode(value *argv, int argn)
+{
+  caml_vox_table_write_value(argv[0], argv[2], argv[4]);
+  return Val_unit;
+}
+CAMLprim void caml_vox_table_clear_slot(value table, value index)
+{ caml_vox_table_write_slot(table, index, Val_unit, Val_unit); }
+CAMLprim value caml_vox_table_clear_slot_bytecode(value table, value state,
+                                                value index, value token)
+{
+  caml_vox_table_clear_slot(table, index);
+  return Val_unit;
+}
+CAMLprim void caml_vox_table_set_counts(value table, value size, value deleted)
+{
+  Field(table, 4) = size;
+  Field(table, 5) = deleted;
+}
+CAMLprim value caml_vox_table_set_counts_bytecode(value table, value state,
+                                    value size, value deleted, value token)
+{
+  caml_vox_table_set_counts(table, size, deleted);
+  return Val_unit;
+}
+
+CAMLextern value caml_vox_control_match16(value bytes, value offset, value byte);
+CAMLprim value caml_vox_table_match16(value table, value offset, value byte)
+{ return caml_vox_control_match16(Field(table, 3), offset, byte); }
+CAMLprim value caml_vox_table_match16_bytecode(value table, value state,
+                                    value offset, value byte, value token)
+{ return caml_vox_table_match16(table, offset, byte); }
+
+CAMLextern value caml_vox_control_match16_empty(value, value, value);
+CAMLprim value caml_vox_table_match16_empty(value table, value offset, value byte)
+{ return caml_vox_control_match16_empty(Field(table, 3), offset, byte); }
+CAMLprim value caml_vox_table_match16_empty_bytecode(value table, value state,
+                                    value offset, value byte, value token)
+{ return caml_vox_table_match16_empty(table, offset, byte); }
+
+CAMLprim void caml_vox_table_exchange(value left, value right)
+{
+  for (int field = 2; field < 6; field++) {
+    value saved = Field(left, field);
+    caml_modify(&Field(left, field), Field(right, field));
+    caml_modify(&Field(right, field), saved);
+  }
+}
+CAMLprim value caml_vox_table_exchange_bytecode(value left, value left_state,
+                                value right, value right_state, value token)
+{
+  caml_vox_table_exchange(left, right);
+  return Val_unit;
+}
+CAMLprim value caml_vox_table_replace_storage_bytecode(value *argv, int argn)
+{
+  caml_vox_table_exchange(argv[0], argv[2]);
+  return Val_unit;
+}
+CAMLprim void caml_vox_table_clear(value table)
+{
+  value entries = Field(table, 2);
+  value controls = Field(table, 3);
+  for (mlsize_t i = 0; i < Wosize_val(entries); i++)
+    caml_modify(&Field(entries, i), Val_unit);
+  memset(Bytes_val(controls), 128, caml_string_length(controls));
+  Field(table, 4) = Val_long(0);
+  Field(table, 5) = Val_long(0);
+}
+CAMLprim value caml_vox_table_clear_bytecode(value table, value state,
+                                          value token)
+{
+  caml_vox_table_clear(table);
   return Val_unit;
 }

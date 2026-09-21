@@ -44,6 +44,10 @@ let () =
       app Div [n; n], Int63;
       app Rem [n; n], Int63;
       app Neg [n], Int63;
+      app Bit_and [n; n], Int63;
+      app Bit_or [n; n], Int63;
+      app Bit_xor [n; n], Int63;
+      app Shift_right_logical [n; n], Int63;
       app Eq [n; n], Bool;
       app Ne [p; p], Bool;
       app Lt [n; n], Bool;
@@ -108,6 +112,10 @@ let () =
       Mul;
       Div;
       Rem;
+      Bit_and;
+      Bit_or;
+      Bit_xor;
+      Shift_right_logical;
       Neg;
       Eq;
       Ne;

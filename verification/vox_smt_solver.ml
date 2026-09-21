@@ -116,6 +116,24 @@ let model symbols response =
       Option.map Int64.neg (Int64.of_string_opt digits)
     | _ -> None
   in
+  let machine_integer = function
+    | Atom bits when String.starts_with ~prefix:"#b" bits ->
+      if String.length bits <> 65
+      then None
+      else
+        Option.map
+          (fun n -> Int64.shift_right (Int64.shift_left n 1) 1)
+          (Int64.of_string_opt ("0b" ^ String.sub bits 2 63))
+    | List [Atom "_"; Atom bits; Atom "63"]
+      when String.starts_with ~prefix:"bv" bits ->
+      Option.bind
+        (Int64.of_string_opt (String.sub bits 2 (String.length bits - 2)))
+        (fun n ->
+          if n < 0L
+          then None
+          else Some (Int64.shift_right (Int64.shift_left n 1) 1))
+    | value -> integer value
+  in
   let value symbol sexp =
     match Symbol.sort symbol, sexp with
     | Bool, Atom "true" -> Some (Bool_value true)
@@ -126,7 +144,7 @@ let model symbols response =
       when decimal_integer digits && digits.[0] <> '-' ->
       Some (Bigint_value (if digits = "0" then "0" else "-" ^ digits))
     | Int63, sexp ->
-      Option.bind (integer sexp) (fun n ->
+      Option.bind (machine_integer sexp) (fun n ->
           if n < -4611686018427387904L || n > 4611686018427387903L
           then None
           else Some (Int_value n))
