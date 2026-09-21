@@ -109,8 +109,11 @@ Runtime termination remains outside scope.
   `rhs_interpret` derives relative interpretation from two RHS models agreeing
   on the saved low boundary. Constructing these models from declarative RHS
   typings remains in the one-let bridge.
-- [ ] Public closed-term HM soundness, completeness, principality and rejection;
-  nested-let, mixed-boundary and saved-garbage regression cases.
+- [x] Public closed-term HM completeness, rejection and factorization: constructed
+  baseline and alternative models for arbitrary nested lets; actual nested-alias
+  and mixed-boundary runtime fixtures pass in bytecode and native builds.
+- [ ] Public closed-term HM soundness, combined with factorization for principality.
+- [ ] Nested-let, mixed-boundary and saved-garbage regression cases.
 
 These are proposed steps from the completed Pro consultation, not checked
 results. Each step must construct its witnesses rather than accept the desired
