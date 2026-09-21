@@ -20,8 +20,10 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [x] MGU factorization: canonical handle-indexed readback, solution and
   factorization functions, idempotence and identity outside the original heap.
   See `unifier-mgu.md`.
-- [ ] Principal STLC inference: allocation, shared environments, explicit typing
-  derivations, soundness, completeness and rejection.
+- [x] Principal closed-term STLC inference: allocation, shared environments,
+  declarative typing derivations, model-extension completeness, principality and
+  rejection. See `stlc-inference.md`; the first runtime layer generates then
+  solves an equation tree. Open-term principal pairs remain a separate API.
 - [ ] Monomorphic recursive functions.
 - [ ] Levels and scope: lowering, pool membership witnesses and saved-heap
   provenance, preserving the unifier's semantic contract.

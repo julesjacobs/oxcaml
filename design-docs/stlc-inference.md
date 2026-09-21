@@ -1,0 +1,96 @@
+# Principal inference for closed STLC terms
+
+This stage adds variables, a Boolean constant, lambda abstraction and application.
+The public `Stlc_infer.infer` API accepts a closed term with an explicit
+`scoped_term Z e` refinement. Variables use de Bruijn indices. A caller handling
+raw syntax can test this executable predicate before calling inference.
+
+## Runtime algorithm
+
+`stlc_generate.ml` traverses syntax with an environment of shared Pref handles.
+A variable returns its environment handle. A Boolean allocates a Boolean node.
+A lambda allocates a fresh parameter variable, generates its body, and allocates
+an arrow from the parameter to the body's result. An application generates both
+children, allocates a fresh result variable and the required argument/result
+arrow, and records equality of that arrow with the function's type.
+
+`stlc_solve.ml` processes the generated equalities with the existing mutable
+unifier. A binary equation tree gives constant-time concatenation during
+generation. Solving visits the left subtree before the right and stops on
+failure. It returns ownership of the resulting heap, including earlier writes.
+`stlc_infer.ml` starts with an empty token and returns a graph root, success flag
+and successor token, together with erased execution and finite-readback witnesses.
+
+This is a two-phase STLC inferencer. The equation tree is real runtime data;
+the annotated syntax graph, heap snapshots and proof functions are ghost data.
+No substitution table or additional unification cache is introduced. The later
+HM stage must solve at let-generalization boundaries rather than defer all
+constraints to the end of the term.
+
+## Specification and exported guarantees
+
+`stlc_spec.ml` defines the syntax, contexts and the independent declarative
+`typed` predicate. Its witnesses have the ordinary variable, constant,
+abstraction and application rules. The remaining predicates specify generation
+(`built`), solving (`solved`) and their composition (`inferred`). The returned
+root is tied to the actual execution witness and finite unfolding tree.
+
+For a returned execution, with `P = readback result.tree`:
+
+- `inference_sound` constructs a derivation of `No_types |- e : P` on success.
+- `with_typing_factor` takes any derivation of `No_types |- e : T` and constructs
+  a total substitution `delta` with `T = substitute delta P`. The substitution
+  and equation witness are passed to an explicit total continuation.
+- `inference_rejects` derives false from any putative typing derivation when the
+  execution returned failure.
+
+Together the first two establish that the returned readback is a principal
+type. The third proves correct rejection. These apply to returned executions;
+runtime termination and resource failures remain outside the contract. The
+public principality theorem is for closed terms. Generation, model extension
+and solving have environment-parametric contracts, but an open-term principal
+pair API is not exported by this stage.
+
+## Proof ladder
+
+`stlc_graph_proofs.ml` proves allocation-domain and contents framing, constraint
+allocation, finite-unfolding preservation, and generation soundness. Soundness
+uses a model of the generated heap satisfying its equalities to construct the
+declarative typing derivation.
+
+`stlc_model_proofs.ml` proves that a fresh allocation extends an arbitrary model
+without changing assignments on old handles. It also transports contexts and
+constraint satisfaction through pointwise agreement. `stlc_complete_proofs.ml`
+uses these facts recursively: every declarative typing extends an old model to
+a model of the generated graph satisfying its constraints. Fresh node values
+are constructed from the supplied typing; no model or invariant constructor is
+assumed.
+
+`stlc_solve_proofs.ml` composes the unifier's exact model and rejection theorems
+through the equation tree. It also preserves finite unfoldings on failure.
+`stlc_inference_proofs.ml` combines these with canonical readback. Factorization
+uses `readback_factor` from the MGU layer on the model constructed from an
+arbitrary typing derivation. Thus both the executable constraint generation and
+the mutable solving stage participate in the principality proof.
+
+All universal facts are explicit total functions and all existential facts are
+explicit witnesses or continuations. The SMT fragment remains quantifier-free.
+No compiler change, new trusted primitive or assumed correctness theorem is
+introduced.
+
+## Checks and next stages
+
+`stlc_demo.ml` covers identity, nested binders, shared environments, higher-order
+application, Boolean application, self-application rejection and constructor
+clashes. It invokes soundness on successful executions and constructs a
+factorization witness for the Boolean instance of identity. The returned token
+is used to read the actual result root on success and failure.
+
+`stlc_rejected.ml` rejects a wrong de Bruijn lookup, an omitted application
+equality, a Boolean used as a function, an invalid identity typing, a skipped
+solver and an unbound variable passed to the closed-term API. Both test files
+run with bytecode and native compilation. Lambda inspection checks that proof
+calls and witness construction erase while the runtime equation tree remains.
+
+Monomorphic recursive functions, mutable levels, generic templates and
+let-polymorphism remain subsequent stages.
