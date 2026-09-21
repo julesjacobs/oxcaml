@@ -336,3 +336,12 @@ let (cleanup_protected @ total) : (h : node Pref.heap) @ immutable ->
     let refine_ premise = premise in Copy_cleanup_spec.swept_at_def h after trail x;
     protected_at_def h after depth x; below_def h x depth; below_def after x depth;
     at_level_def h x; at_level_def after x; let u = () in refine_ u)
+
+let (active_template @ total) : (h : node Pref.heap) @ immutable ->
+    (schema : template) @ immutable -> (p : node Pref.t) @ immutable ->
+    {u : unit | template h schema && root schema === p && active h p} ->
+    {u : unit | schema === Boundary p} @ ghost = fun h schema p premise -> ghost_ (
+      let refine_ premise = premise in let u = () in
+      Copy_heap_proofs.template_head h schema p (refine_ u);
+      head_generic_def schema; root_def schema; active_def h p; at_level_def h p;
+      refine_ u)

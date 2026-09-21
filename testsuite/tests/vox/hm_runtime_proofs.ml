@@ -88,6 +88,7 @@ let (copy_runtime @ total) : (h : node Pref.heap) @ immutable -> (depth : int) -
     Copy_order_proofs.copy_ordered h depth bounds order epoch d x (refine_ u);
     Copy_order_proofs.copy_bounds h depth bounds epoch d x (refine_ u);
     Copy_heap_proofs.history_unmarked h unmarked epoch depth d x (refine_ u);
+    Clean_copy.clean_result h epoch depth d x (refine_ u);
     let cut = depth - 1 in Pooled_proofs.registered_covers h pool epoch depth d cut x (refine_ u);
     Copy_cleanup_proofs.sweep_scope raw after trail frame x (refine_ u);
     Copy_cleanup_proofs.sweep_order raw after trail frame x (refine_ u);
@@ -112,6 +113,7 @@ let rec (run_runtime @ total) : (h : node Pref.heap) @ immutable -> (depth : int
   fun h depth pool facts env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool; let_free_def e;
     let u = () in match e with
+    | RShared _ -> facts x; refine_ u
     | RVar (i, _, epoch, d) -> (match Hm_environment_spec.lookup env i with
       None -> refine_ u | Some _ -> copy_runtime h depth pool facts epoch d x (refine_ u); refine_ u)
     | RBool p -> facts x; let desc : desc = Bool in allocated_def h depth p desc;
@@ -190,6 +192,7 @@ let rec (run_active @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
     {u : unit | active after x} @ ghost = fun h depth pool env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool; let_free_def e;
     let u = () in match e with
+    | RShared _ -> refine_ u
     | RVar (i, _, epoch, d) -> (match Hm_environment_spec.lookup env i with None -> refine_ u
       | Some _ -> copy_active h epoch depth d x (refine_ u); refine_ u)
     | RBool p -> let desc : desc = Bool in allocated_def h depth p desc;
@@ -262,6 +265,7 @@ let (run_result_active @ total) : (h : node Pref.heap) @ immutable -> (depth : i
     {u : unit | active after p} @ ghost = fun h depth pool facts env e after final_pool p premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool; let_free_def e; result_def e;
     let u = () in match e with
+    | RShared _ -> refine_ u
     | RVar (i, q, epoch, d) -> (match Hm_environment_spec.lookup env i with None -> refine_ u
       | Some original -> copy_target_active h depth pool facts epoch d original q (refine_ u); refine_ u)
     | RBool q -> let desc : desc = Bool in fresh_active h depth q desc (refine_ u); refine_ u

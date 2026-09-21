@@ -78,3 +78,14 @@ let (transferred_bound @ total) : (h : node Pref.heap) @ immutable ->
     at_level_def after x;
     (match H.at h x with None -> () | Some v ->
       close_level_def cut v.level; ()); refine_ u)
+
+let (closed_retained @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
+    (pool : pool) @ immutable -> (p : node Pref.t) @ immutable ->
+    {u : unit | pool_scoped h pool && close_level cut (at_level h p) === at_level h p} ->
+    {u : unit | retained (closed_heap h cut pool) p === retained h p} @ ghost =
+  fun h cut pool p premise -> ghost_ (
+    let refine_ premise = premise in let u = () in
+    Generalize_proofs.closed_observe h cut pool p (refine_ u);
+    let after = closed_heap h cut pool in closed_at_def h after cut pool p;
+    at_level_def h p; at_level_def after p; retained_def h p; retained_def after p;
+    refine_ u)

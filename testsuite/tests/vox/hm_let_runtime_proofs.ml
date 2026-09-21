@@ -69,6 +69,7 @@ let rec (run_invariant @ total) : (h : node Pref.heap) @ immutable -> (depth : i
   fun h depth pool facts env e after final_pool x premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool; result_def e; runtime_at_def after depth final_pool x;
     let u = () in match e with
+    | RShared _ -> facts x; refine_ u
     | RVar (i, _, epoch, d) -> (match Hm_environment_spec.lookup env i with
       None -> refine_ u | Some _ -> copy_runtime h depth pool facts epoch d x (refine_ u); refine_ u)
     | RBool p -> facts x; let desc : desc = Bool in allocated_def h depth p desc;
@@ -166,6 +167,7 @@ let rec (run_result_active @ total) : (h : node Pref.heap) @ immutable -> (depth
     {u : unit | active after p} @ ghost = fun h depth pool facts env e after final_pool p premise -> ghost_ (
     let refine_ premise = premise in ran_def h depth pool env e after final_pool;  result_def e;
     let u = () in match e with
+    | RShared _ -> refine_ u
     | RVar (i, q, epoch, d) -> (match Hm_environment_spec.lookup env i with None -> refine_ u
       | Some original -> copy_target_active h depth pool facts epoch d original q (refine_ u); refine_ u)
     | RBool q -> let desc : desc = Bool in fresh_active h depth q desc (refine_ u); refine_ u
