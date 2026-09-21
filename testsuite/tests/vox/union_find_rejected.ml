@@ -84,20 +84,23 @@ module Reuse_state = struct
   module U = Vox_union_find.Make (C)
   let bad : (x : Vox_union_find_model.elem) @ immutable ->
       (state : {s : U.t | U.valid s && U.member x s}) @ unique read_write total ->
-      (fee : {b : C.token | let refine_ state = state in
+      (fee1 : {b : C.token | let refine_ state = state in
         C.credits b >= Vox_union_find_amortized.find_fee state.#U.alpha})
-        @ unique total ghost -> U.result @ unique = fun x state fee ->
-    let _ = U.find x state fee in
-    let refine_ result = U.find x state fee in result
+        @ unique total ghost ->
+      (fee2 : {b : C.token | let refine_ state = state in
+        C.credits b >= Vox_union_find_amortized.find_fee state.#U.alpha})
+        @ unique total ghost -> U.result @ unique = fun x state fee1 fee2 ->
+    let _ = U.find x state fee1 in
+    let refine_ result = U.find x state fee2 in result
 end;;
 [%%expect{|
-Line 10, characters 40-43:
-10 |     let refine_ result = U.find x state fee in result
-                                             ^^^
+Line 13, characters 34-39:
+13 |     let refine_ result = U.find x state fee2 in result
+                                       ^^^^^
 Error: This value is used here, but it has already been used as unique at:
-Line 9, characters 27-30:
-9 |     let _ = U.find x state fee in
-                               ^^^
+Line 12, characters 21-26:
+12 |     let _ = U.find x state fee1 in
+                          ^^^^^
 
 |}]
 

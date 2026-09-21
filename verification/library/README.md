@@ -165,15 +165,27 @@ then return the state and surplus credit. The private state representation
 and abstract heap resource prevent callers from constructing a forest or
 extracting its bank. Model observations borrow the state.
 
-The capped hierarchy in `Vox_ackermann` defines
-`I(k, 0, x) = x`, `I(k, t+1, x) = A_k(I(k, t, x))`,
-`A_0(x) = x+1`, and `A_(k+1)(x) = I(k, x+1, x)`, saturating at `N`.
-The checked coherence lemma relates every pair of caps. `alpha_bounds` exposes that the inverse is the
-least `a >= 1` with `A_a(1) >= N`: thresholds are 3, 7, and 2047 for levels
-1, 2, and 3. All hierarchy, potential, and registry computations in the
-operations are ghost computations. Native inspection confirms these
-computations disappear from the public operations and recursive worker;
-abstract token calls remain with constant overhead per event.
+Write `J_b(k,t,x) = Vox_ackermann.iter b k t x`. Its admissible domain is
+`b >= 1`, `k >= 0`, and `0 <= t,x <= b`; outside this domain it returns zero.
+The checked coherence lemma proves `J_b(k,t,x) = min(b,J_c(k,t,x))`
+for `b <= c` on the smaller cap's domain. `alpha_bounds` exposes that the
+implemented inverse is the least `a >= 1` with `J_N(a,1,1) = N`.
+
+For comparison, define the conventional uncapped hierarchy by
+`A_0(x) = x+1`, `I(k,0,x) = x`,
+`I(k,t+1,x) = A_k(I(k,t,x))`, and `A_(k+1)(x) = I(k,x+1,x)`.
+Induction on level and iteration count identifies `J_b(k,t,x)` with
+`min(b,I(k,t,x))` on the admissible domain. This identification is an external
+mathematical argument, not a separate Vox theorem against an independently
+defined uncapped iterator. It identifies the implemented inverse with the
+least `a >= 1` such that `A_a(1) >= N`; thresholds are 3, 7, and 2047 for
+levels 1, 2, and 3.
+
+All hierarchy, potential, and registry computations in the operations are
+ghost computations. Native inspection confirms these computations disappear
+from the public operations and recursive worker. Abstract token calls remain;
+with the concrete `Vox_big_credits.Make` implementation, they have constant
+overhead per event.
 
 The caller supplies these fees:
 
@@ -213,10 +225,12 @@ plus the supplied credit. `account_bounds` establishes that cumulative ticks
 are at most this account. `Vox_union_find_complexity.sequence` telescopes
 a finite trace of these account increments. The executable client builds
 such a trace from actual operation results through the sealed interface.
-For `n` allocations, `f` finds, and `u` unions, the checked bound is
+For `n` calls to `make_set`, `f` top-level finds, and `u` unions, the checked
+bound is
 `1 + 3n + (4a+8)f + (12a+24)u`, at most
-`1 + 3n + 36a(f+u)`. Choosing capacity `N=n` gives
-`O(n + (f+u) alpha(n))`. Increasing capacity requires a new accounting
+`1 + 3n + 36a(f+u)`. Internal finds are included in the union fee.
+Choosing capacity `N=n` for `n >= 1` gives
+`O(n + (f+u) alpha(n))`; an empty history can use `N=1`. Increasing capacity requires a new accounting
 argument; this API keeps capacity fixed.
 
 Tick placement and coverage are part of the trusted cost model. The claim
