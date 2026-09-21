@@ -303,3 +303,42 @@ let rec (link_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
       M.joined_valid h x y p;
       potential_def cap alpha after (M.joined_path h x y p :: F.join h x y rest);
       let u = () in refine_ u)
+
+
+let (reparameterize_value @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (a : Bigint.t) -> (b : Bigint.t) -> (h : P.heap) @ immutable ->
+    (p : M.path) @ immutable ->
+    {u : unit | if M.valid h p && R.ordered small h p && small <= large &&
+      1Z <= a && a <= b && b <= Bigint.add a 1Z && A.iter small a 1Z 1Z >= small
+      then value large b h (M.head p) = Bigint.add (value small a h (M.head p))
+        (Bigint.mul (Bigint.sub b a) (R.weight h (M.head p))) else true} @ ghost =
+    fun small large a b h p -> ghost_ (
+  M.valid_def h p; R.ordered_def small h p; M.head_def p;
+  value_def small a h (M.head p); value_def large b h (M.head p);
+  R.weight_def h (M.head p); M.rank_def h (M.head p);
+  match p with
+  | M.Stop _ -> let u = () in refine_ u
+  | M.Step (x, rest) ->
+    R.bounds small h rest;
+    if M.valid h p && R.ordered small h p && small <= large &&
+      1Z <= a && a <= b && b <= Bigint.add a 1Z && A.iter small a 1Z 1Z >= small
+    then (
+      let rank = R.weight h x in let parent = R.weight h (M.head rest) in
+      let u = () in V.reparameterize small large a b rank parent (refine_ u);
+      let u = () in refine_ u)
+    else let u = () in refine_ u)
+
+let rec (reparameterize @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (a : Bigint.t) -> (b : Bigint.t) -> (h : P.heap) @ immutable ->
+    (paths : M.path list) @ immutable ->
+    {u : unit | if F.valid h paths && R.all_ordered small h paths && small <= large &&
+      1Z <= a && a <= b && b <= Bigint.add a 1Z && A.iter small a 1Z 1Z >= small
+      then potential large b h paths = Bigint.add (potential small a h paths)
+        (Bigint.mul (Bigint.sub b a) (D.mass h paths)) else true} @ ghost =
+    fun small large a b h paths -> ghost_ (
+  F.valid_def h paths; R.all_ordered_def small h paths;
+  potential_def small a h paths; potential_def large b h paths; D.mass_def h paths;
+  (match paths with [] -> () | p :: rest ->
+    reparameterize_value small large a b h p;
+    reparameterize small large a b h rest);
+  let u = () in refine_ u)

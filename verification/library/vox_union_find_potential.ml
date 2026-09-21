@@ -263,3 +263,69 @@ let (repeated_level @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   A.compose cap lev idx one rank composition;
   let u = () in compression cap alpha rank parent root (refine_ u);
   let u = () in refine_ u
+
+let rec (level_cap @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (rank : Bigint.t) -> (parent : Bigint.t) -> (bound : Bigint.t) ->
+    {u : unit | 1Z <= rank && rank < parent && parent < small &&
+      small <= large && 0Z <= bound} ->
+    {u : unit | level small rank parent bound = level large rank parent bound} =
+    fun small large rank parent bound premise ->
+  let refine_ premise = premise in
+  level_def small rank parent bound; level_def large rank parent bound;
+  if bound > 0Z then (
+    let one = 1Z in
+    let u = () in A.coherent small large bound one rank (refine_ u);
+    A.minimum_def small (A.iter large bound 1Z rank);
+    if A.iter small bound 1Z rank > parent then (
+      let next = Bigint.sub bound 1Z in
+      let u = () in level_cap small large rank parent next (refine_ u));
+    let u = () in refine_ u)
+  else let u = () in refine_ u
+[@@decreases let bound : Bigint.t = bound in bound]
+
+let rec (index_cap @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (lev : Bigint.t) -> (rank : Bigint.t) -> (parent : Bigint.t) ->
+    (bound : Bigint.t) ->
+    {u : unit | 1Z <= rank && rank < parent && parent < small &&
+      small <= large && lev >= 0Z && 1Z <= bound && bound <= rank} ->
+    {u : unit | index small lev rank parent bound =
+      index large lev rank parent bound} = fun small large lev rank parent bound premise ->
+  let refine_ premise = premise in
+  index_def small lev rank parent bound; index_def large lev rank parent bound;
+  if bound > 1Z then (
+    let u = () in A.coherent small large lev bound rank (refine_ u);
+    A.minimum_def small (A.iter large lev bound rank);
+    if A.iter small lev bound rank > parent then (
+      let next = Bigint.sub bound 1Z in
+      let u = () in index_cap small large lev rank parent next (refine_ u));
+    let u = () in refine_ u)
+  else let u = () in refine_ u
+[@@decreases let bound : Bigint.t = bound in bound]
+
+let (reparameterize @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (a : Bigint.t) -> (b : Bigint.t) -> (rank : Bigint.t) -> (parent : Bigint.t) ->
+    {u : unit | 0Z <= rank && rank < parent && parent < small &&
+      small <= large && 1Z <= a && a <= b && b <= Bigint.add a 1Z &&
+      A.iter small a 1Z 1Z >= small} ->
+    {u : unit | node_phi large b rank parent = Bigint.add
+      (node_phi small a rank parent) (Bigint.mul (Bigint.sub b a) rank)} =
+    fun small large a b rank parent premise ->
+  let refine_ premise = premise in
+  node_phi_def small a rank parent; node_phi_def large b rank parent;
+  if rank > 0Z then (
+    let one = 1Z in
+    let u = () in analyze small a rank parent (refine_ u);
+    let u = () in A.monotone small a one one one rank (refine_ u);
+    let u = () in A.coherent small large a one rank (refine_ u);
+    A.minimum_def small (A.iter large a 1Z rank);
+    let old_bound = Bigint.sub a 1Z in
+    let u = () in level_cap small large rank parent old_bound (refine_ u);
+    node_level_def small a rank parent; node_level_def large b rank parent;
+    if b > a then level_def large rank parent a;
+    let lev = node_level small a rank parent in
+    let u = () in index_cap small large lev rank parent rank (refine_ u);
+    node_index_def small a rank parent; node_index_def large b rank parent;
+    phi_def a rank lev (node_index small a rank parent);
+    phi_def b rank lev (node_index large b rank parent);
+    let u = () in refine_ u)
+  else let u = () in refine_ u

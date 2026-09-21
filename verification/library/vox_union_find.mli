@@ -52,6 +52,13 @@ module Make (C : Vox_big_credits.S) : sig
       K.below (capacity state) (alpha state) else true} @ ghost @@ total
   val account_bounds : (state : t) @ local immutable total ghost forkable unyielding ->
     {u : unit | ticks state <= account state} @ ghost @@ total
+  val size_bounds :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      {u : unit | if valid state then 0Z <= F.size state.#paths &&
+        F.size state.#paths <= state.#capacity &&
+        1Z <= state.#capacity && state.#capacity <= Bigint.of_int max_int
+        else true} @ ghost @@ total
+
   val find_semantics : (x : M.elem) @ immutable ->
       (q : M.elem) @ immutable ->
       (state : t) @ local immutable total ghost forkable unyielding ->
@@ -81,6 +88,28 @@ module Make (C : Vox_big_credits.S) : sig
         (let refine_ fee = fee in C.credits r.#refund = Bigint.sub (C.credits fee) 1Z &&
           Bigint.add (account r.#state) (C.credits r.#refund) = C.credits fee)}
       @ unique
+
+  val reparameterize :
+      (capacity : Bigint.t) @ ghost ->
+      (state : {s : t | valid s && s.#capacity <= capacity &&
+        capacity <= Bigint.mul 2Z s.#capacity && capacity <= Bigint.of_int max_int})
+        @ unique read_write total ->
+      (fee : {b : C.token | let refine_ state = state in
+        C.credits b >= (if capacity = state.#capacity then 0Z
+          else Bigint.mul 4Z (F.size state.#paths))}) @ unique total ghost ->
+      {r : initialized | let refine_ state = state in
+        valid r.#state && r.#state.#capacity = capacity &&
+        state.#alpha <= r.#state.#alpha && r.#state.#alpha <= Bigint.add state.#alpha 1Z &&
+        r.#state.#paths === state.#paths && heap r.#state === heap state &&
+        r.#state.#spent = state.#spent &&
+        (let refine_ fee = fee in
+          C.credits r.#refund = Bigint.sub (C.credits fee)
+            (Bigint.mul 4Z (Bigint.mul (Bigint.sub r.#state.#alpha state.#alpha)
+              (D.mass (heap state) state.#paths))) &&
+          C.credits r.#refund >= Bigint.sub (C.credits fee)
+            (if capacity = state.#capacity then 0Z else Bigint.mul 4Z (F.size state.#paths)) &&
+          Bigint.add (account r.#state) (C.credits r.#refund) =
+            Bigint.add (account state) (C.credits fee))} @ unique
 
   val make_set :
       (state : {s : t | valid s && F.size s.#paths < s.#capacity})

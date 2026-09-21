@@ -151,6 +151,52 @@ rejections, and integer and ranked-record clients.
 
 ## Union-find time credits
 
+`Vox_union_find_online.Make (Credits)` provides the growing interface.
+`create` takes one credit and no capacity argument. `make_set` takes eleven
+credits; `find` and `union` take exactly `find_fee state` and `union_fee state`.
+Operations consume the unique state and payment, returning only the result
+and updated state. All surplus stays private. The fee observations are ghost
+functions; the public interface exposes neither capacity nor credit tokens
+owned by the state. Insertions require `size state < Bigint.of_int max_int`.
+
+`Vox_union_find_simple.Make (Credits)` provides the same interface for a fixed
+capacity supplied to `create`, with a three-credit insertion fee. Both wrappers
+require exact payments, so callers split their external budget before a call.
+They export membership, representative semantics, and accounting observations
+for verification. Their abstract state hides the underlying resource and saved
+credits. `account_bounds` bounds ticks by the account, and each operation
+increases the account by exactly its advertised fee.
+
+The online implementation doubles a ghost epoch `E` when full and uses analysis
+capacity `min(E,max_int)`. No runtime nodes move. Its saved credits cover the
+reserve `8n - 4(E-1)`, plus retained surplus. Each insertion deposits eight
+credits. At growth it unlocks `4E`, transfers the required amount into the
+potential bank, and retains the remainder. Cap coherence preserves the old
+nodes' levels and indices. The checked reparameterization equation is
+`Phi(new) - Phi(old) = (new_alpha - old_alpha) * sum_ranks`.
+The checked doubling lemma bounds the alpha increase by one; `sum_ranks <= n`
+therefore bounds the transfer by `4E`. This establishes funding before growth
+at every prefix, independently of intervening finds and unions.
+
+`Vox_union_find_online_cost.sequence` telescopes accounts with constructor-derived
+operation counts. `fee_bounds` bounds each state's fees using any final population
+at least its current size and the canonical inverse for that population. Together
+they give, for every finite prefix with `n` insertions, `f` top-level finds and
+`u` unions, with `a = alpha(max(1,n))`:
+
+```
+ticks <= 1 + 11n + (4a+12)f + (12a+36)u
+```
+
+Thus the online API supports `O(n + (f+u) alpha(n))` without an upfront population
+bound, within the implementation's machine-size limit. `union_find_online.ml`
+checks both sealed APIs, interleaves insertion and union across alpha-changing
+and same-alpha capacity growth, and derives the final bounds from actual returned
+accounts. The rejection fixture checks exact fees, state reuse, hidden savings,
+nonmember queries, and the machine-size limit.
+
+The lower-level refund API remains available:
+
 `Vox_union_find.Make (Credits)` implements union by rank and full path
 compression. Supply `Vox_big_credits.S`; issuance is available only to the
 caller through `Vox_big_credits.Make ().Budget`. Bigint balances avoid an
