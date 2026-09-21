@@ -244,3 +244,65 @@ let rec (coherent @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
 [@@decreases let small : Bigint.t = small in
   let level : Bigint.t = level in let count : Bigint.t = count in
   Bigint.add (Bigint.mul level (Bigint.add small 1Z)) count]
+
+let rec (below_elim @ total) : (cap : Bigint.t) -> (a : Bigint.t) ->
+    (k : Bigint.t) ->
+    {u : unit | if below cap a && 1Z <= k && k < a then
+      iter cap k 1Z 1Z < cap else true} = fun cap a k ->
+  below_def cap a;
+  if below cap a && 1Z <= k && k < a then (
+    if k < Bigint.sub a 1Z then below_elim cap (Bigint.sub a 1Z) k;
+    let u = () in refine_ u)
+  else let u = () in refine_ u
+[@@decreases let a : Bigint.t = a in if a > 0Z then a else 0Z]
+
+let (inverse_order @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (a : Bigint.t) -> (b : Bigint.t) ->
+    {u : unit | 1Z <= small && small <= large && a >= 1Z && b >= 1Z &&
+      below small a && iter large b 1Z 1Z >= large} ->
+    {u : unit | a <= b} = fun small large a b premise ->
+  let refine_ premise = premise in
+  let one = 1Z in
+  let u = () in coherent small large b one one (refine_ u);
+  minimum_def small (iter large b 1Z 1Z);
+  below_elim small a b;
+  let u = () in refine_ u
+
+let (double_growth @ total) : (cap : Bigint.t) -> (k : Bigint.t) ->
+    (x : Bigint.t) ->
+    {u : unit | cap >= 1Z && k >= 1Z && 0Z <= x && x <= cap} ->
+    {u : unit | minimum cap (Bigint.add (Bigint.mul 2Z x) 1Z) <=
+      iter cap k 1Z x} = fun cap k x premise ->
+  let refine_ premise = premise in
+  iter_def cap k 1Z x;
+  minimum_def cap (Bigint.add (Bigint.mul 2Z x) 1Z);
+  if x < cap then (
+    let lower = Bigint.sub k 1Z in let count = Bigint.add x 1Z in
+    growth cap lower count x; bounds cap lower count x;
+    minimum_def cap (Bigint.add x count);
+    iter_def cap k 0Z (iter cap lower count x);
+    let u = () in refine_ u)
+  else let u = () in refine_ u
+
+let (inverse_doubling @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (a : Bigint.t) -> (b : Bigint.t) ->
+    {u : unit | 1Z <= small && small <= large && large <= Bigint.mul 2Z small &&
+      1Z <= a && 1Z <= b && b <= large && below large b &&
+      iter small a 1Z 1Z >= small} ->
+    {u : unit | b <= Bigint.add a 1Z} = fun small large a b premise ->
+  let refine_ premise = premise in
+  let one = 1Z in
+  if large > 1Z then (
+    let u = () in coherent small large a one one (refine_ u);
+    let z = iter large a 1Z 1Z in
+    minimum_def small z; bounds large a 1Z 1Z;
+    let u = () in double_growth large a z (refine_ u);
+    minimum_def large (Bigint.add (Bigint.mul 2Z z) 1Z);
+    let u = () in compose large a one one one (refine_ u);
+    let next = Bigint.add a 1Z in
+    iter_def large next 1Z 1Z;
+    bounds large a 2Z 1Z;
+    iter_def large next 0Z (iter large a 2Z 1Z);
+    below_elim large b next;
+    let u = () in refine_ u)
+  else let u = () in refine_ u

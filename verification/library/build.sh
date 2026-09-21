@@ -15,6 +15,7 @@ modules=(vox_sequence vox_int_sequence vox_iarray
          vox_union_find_mass vox_union_find_link vox_union_find_worker
          vox_union_find_amortized vox_union_find_bank vox_union_find_spec
          vox_union_find vox_union_find_complexity
+         vox_union_find_simple vox_union_find_online vox_union_find_online_cost
          raw_memory verified_atomic unique_cell one_shot
          vox_control vox_table_model vox_table_model_proofs vox_table_bits
          vox_table_probe vox_table_wrap vox_table_mask vox_table_map

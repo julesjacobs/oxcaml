@@ -231,3 +231,15 @@ let (linked_capacity @ total) : (cap : Bigint.t) ->
   linked_root h x y winner;
   component_bounds (M.linked h x y) (F.join h x y paths) winner;
   let u = () in refine_ u)
+
+let rec (population_bounds @ total) : (cap : Bigint.t) ->
+    (h : Vox_union_find_model.node P.heap) @ immutable -> (paths : M.path list) @ immutable ->
+    {u : unit | 0Z <= F.size paths && 0Z <= components h paths &&
+      components h paths <= F.size paths &&
+      (if R.all_ordered cap h paths then 0Z <= mass h paths else true)} @ ghost =
+    fun cap h paths -> ghost_ (
+  F.size_def paths; components_def h paths; mass_def h paths;
+  R.all_ordered_def cap h paths;
+  (match paths with [] -> () | p :: rest ->
+    R.bounds cap h p; population_bounds cap h rest);
+  let u = () in refine_ u)

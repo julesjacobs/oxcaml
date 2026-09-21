@@ -66,6 +66,15 @@ module Make (C : Vox_big_credits.S) = struct
     W.balance_def (borrow_ state.#raw); C.nonnegative (borrow_ state.#raw.W.bank);
     let u = () in refine_ u)
 
+  let (size_bounds @ total) :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      {u : unit | if valid state then 0Z <= F.size state.#paths &&
+        F.size state.#paths <= state.#capacity &&
+        1Z <= state.#capacity && state.#capacity <= Bigint.of_int max_int
+        else true} @ ghost = fun state -> ghost_ (
+    valid_def (borrow_ state); D.population_bounds state.#capacity (heap state) state.#paths;
+    let u = () in refine_ u)
+
   let (find_semantics @ total) : (x : M.elem) @ immutable ->
       (q : M.elem) @ immutable ->
       (state : t) @ local immutable total ghost forkable unyielding ->
@@ -143,6 +152,63 @@ module Make (C : Vox_big_credits.S) = struct
       R.all_ordered_def capacity h []; B.potential_def capacity alpha h [];
       D.mass_def h []; D.components_def h []);
     let result = #{state; refund} in refine_ result
+
+  let reparameterize :
+      (capacity : Bigint.t) @ ghost ->
+      (state : {s : t | valid s && s.#capacity <= capacity &&
+        capacity <= Bigint.mul 2Z s.#capacity && capacity <= Bigint.of_int max_int})
+        @ unique read_write total ->
+      (fee : {b : C.token | let refine_ state = state in
+        C.credits b >= (if capacity = state.#capacity then 0Z
+          else Bigint.mul 4Z (F.size state.#paths))}) @ unique total ghost ->
+      {r : initialized | let refine_ state = state in
+        valid r.#state && r.#state.#capacity = capacity &&
+        state.#alpha <= r.#state.#alpha && r.#state.#alpha <= Bigint.add state.#alpha 1Z &&
+        r.#state.#paths === state.#paths && heap r.#state === heap state &&
+        r.#state.#spent = state.#spent &&
+        (let refine_ fee = fee in
+          C.credits r.#refund = Bigint.sub (C.credits fee)
+            (Bigint.mul 4Z (Bigint.mul (Bigint.sub r.#state.#alpha state.#alpha)
+              (D.mass (heap state) state.#paths))) &&
+          C.credits r.#refund >= Bigint.sub (C.credits fee)
+            (if capacity = state.#capacity then 0Z else Bigint.mul 4Z (F.size state.#paths)) &&
+          Bigint.add (account r.#state) (C.credits r.#refund) =
+            Bigint.add (account state) (C.credits fee))} @ unique = fun capacity state fee ->
+    let refine_ state = state in let refine_ fee = fee in
+    let old_cap = ghost_ state.#capacity in let old_a = ghost_ state.#alpha in
+    let paths = ghost_ state.#paths in let spent = ghost_ state.#spent in
+    let before = ghost_ (heap (borrow_ state)) in
+    ghost_ (valid_def (borrow_ state));
+    let input : {n : Bigint.t | n >= 1Z} = refine_ capacity in
+    let refine_ alpha = ghost_ (K.inverse input) in
+    ghost_ (
+      let u = () in K.inverse_order old_cap capacity old_a alpha (refine_ u);
+      let u = () in K.inverse_doubling old_cap capacity old_a alpha (refine_ u);
+      if capacity = old_cap then (
+        let u = () in K.inverse_order capacity old_cap alpha old_a (refine_ u));
+      D.population_bounds old_cap before paths);
+    let needed = ghost_ (Bigint.mul 4Z (Bigint.mul (Bigint.sub alpha old_a)
+      (D.mass before paths))) in
+    ghost_ (
+      B.reparameterize old_cap capacity old_a alpha before paths;
+      R.weaken_all old_cap capacity before paths;
+      account_def (borrow_ state); heap_def (borrow_ state);
+      W.heap_def (borrow_ state.#raw);
+      W.balance_def (borrow_ state.#raw); C.nonnegative (borrow_ state.#raw.W.bank));
+    let available : {t : C.token | 0Z <= needed && needed <= C.credits t} = refine_ fee in
+    let refine_ divided = C.split needed available in
+    let raw = state.#raw in let memory = raw.W.memory in let bank = raw.W.bank in
+    let right : {t : C.token | 0Z <= C.credits bank && 0Z <= C.credits t} =
+      refine_ divided.C.left in
+    let refine_ bank = C.merge bank right in
+    let raw = {W.memory; bank} in
+    ghost_ (W.heap_def (borrow_ raw); W.balance_def (borrow_ raw));
+    let state = #{raw; paths; capacity; alpha; spent} in
+    ghost_ (heap_def (borrow_ state); valid_def (borrow_ state);
+      account_def (borrow_ state));
+    ghost_ (let u = () in
+      let _ : {u : unit | valid state} = refine_ u in ());
+    let result = #{state; refund = divided.C.right} in refine_ result
 
   let make_set :
       (state : {s : t | valid s && F.size s.#paths < s.#capacity})

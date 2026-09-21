@@ -172,3 +172,20 @@ let rec (fresh_all_ordered @ total) : (cap : Bigint.t) ->
   | [] -> ()
   | p :: rest -> fresh_ordered cap h x p; fresh_all_ordered cap h x rest);
   let u = () in refine_ u)
+
+let rec (weaken @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (h : Vox_union_find_model.node P.heap) @ immutable -> (p : M.path) @ immutable ->
+    {u : unit | if small <= large && ordered small h p then ordered large h p
+      else true} @ ghost = fun small large h p -> ghost_ (
+  ordered_def small h p; ordered_def large h p;
+  (match p with M.Stop _ -> () | M.Step (_, rest) -> weaken small large h rest);
+  let u = () in refine_ u)
+
+let rec (weaken_all @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
+    (h : Vox_union_find_model.node P.heap) @ immutable -> (paths : M.path list) @ immutable ->
+    {u : unit | if small <= large && all_ordered small h paths then
+      all_ordered large h paths else true} @ ghost = fun small large h paths -> ghost_ (
+  all_ordered_def small h paths; all_ordered_def large h paths;
+  (match paths with [] -> () | p :: rest ->
+    weaken small large h p; weaken_all small large h rest);
+  let u = () in refine_ u)
