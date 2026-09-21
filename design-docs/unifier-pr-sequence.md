@@ -274,3 +274,22 @@ and pointer-equality classification check in the isolated experiment. Wiring the
 into an erased runtime interface exposed the ghost function-field limitation
 recorded in `unifier-vox-findings.md`; those experimental copy modules are not
 part of the active inferencer.
+
+Effective-level copying now has a separate checked runtime and proof ladder:
+
+- [x] Classify links through their representative and share finite sources.
+- [x] Use in-node forwarding for generic sources and clear all touched memos.
+- [x] Preserve saved representatives and construct representatives for fresh nodes.
+- [x] Prove soundness and model-extension completeness for effective templates,
+  including the final heap after cleanup.
+- [x] Preserve finite forests, effective ordering, bounds, leaf provenance,
+  pool scope and representative-only pool coverage.
+- [ ] Switch the active HM driver and its sharing shortcut to this copier.
+
+The stale-link fixture exercises finite sharing, generic copying, repeated
+instantiation, shared arrows, stale stored levels and memo cleanup. Its initial
+bytecode/native runs pass. Native Cmm shows only depth, pool and root as
+instantiation arguments; representative callbacks and heap witnesses erase.
+The depth-200,000 shared-graph stress case passes in bytecode and native code.
+`codex review --uncommitted` completed without actionable findings. The active HM driver still uses the previous copier until lowering and
+the remaining semantic interfaces migrate.
