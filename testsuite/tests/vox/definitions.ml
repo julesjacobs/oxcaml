@@ -397,3 +397,36 @@ let record_let_unfold () : {n : int | n = 7} =
 [%%expect{|
 val record_let_unfold : unit -> {n : int | n = 7} = <fun>
 |}]
+
+module Function_alias = struct
+  type callback = int -> int
+  type curried = int -> callback
+
+  let[@def] (identity @ total) (x : int) =
+    let f : callback @ total = fun y -> y in
+    f x
+
+  let[@def] (first @ total) (x : int) (y : int) =
+    let f : curried @ total = fun a b -> a in
+    f x y
+end;;
+[%%expect{|
+module Function_alias :
+  sig
+    type callback = int -> int
+    type curried = int -> callback
+    val identity : int -> int
+    val identity_def :
+      (x : int) ->
+      {u : unit
+        | (identity x) ===
+            (let (f : callback) = (fun y -> y : callback) in f x)}
+    val first : int -> int -> int
+    val first_def :
+      (x : int) ->
+      (y : int) ->
+      {u : unit
+        | (first x y) ===
+            (let (f : curried) = (fun a -> fun b -> a : curried) in f x y)}
+  end
+|}]

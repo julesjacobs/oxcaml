@@ -15381,7 +15381,7 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
             | [] -> body
             | (id, param_type, constrained) :: params ->
                 let result_type =
-                  match get_desc fn_type with
+                  match get_desc (expand_head exp.exp_env fn_type) with
                   | Tarrow (_, _, result_type, _) -> result_type
                   | _ -> assert false
                 in
