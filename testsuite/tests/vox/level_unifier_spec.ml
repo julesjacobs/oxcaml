@@ -2,6 +2,7 @@ module H = Pref.Heap
 
 open Copy_spec
 open Level_spec
+open Lower_locality_spec
 
 let[@def] (observe @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @ immutable) =
   ghost_ (match H.at h p with None -> None | Some v -> Some v.desc)
@@ -76,7 +77,7 @@ let[@def] rec (searched @ total) (h : node Pref.heap @ immutable)
 type searched_result = #{ found : bool; search : search @@ ghost }
 
 type derivation =
-  | Lowering of int * lowering * derivation
+  | Lowering of int * lowering * bounded * derivation
   | Same
   | Swap of derivation
   | Constants
@@ -94,7 +95,11 @@ let[@def] rec (unified @ total) (h : node Pref.heap @ immutable)
     (p : node Pref.t @ immutable) (q : node Pref.t @ immutable)
     (ok : bool) (after : node Pref.heap @ immutable) (d : derivation @ immutable) =
   ghost_ (H.mem h p && H.mem h q && active h p && active h q && match d with
-  | Lowering (bound, edits, rest) -> lower_valid h bound edits
+  | Lowering (bound, edits, tree, rest) -> lower_valid h bound edits
+    && observe h p === Some Var && at_level h p === Finite bound
+    && confined edits tree && bound_root tree === q
+    && bounded (lower_heap h bound edits) bound tree
+    && (match rest with Bind_left _ -> true | _ -> false)
     && unified (lower_heap h bound edits) p q ok after rest
   | Swap rest -> unified h q p ok after rest
   | Same -> p === q && ok && after === h
@@ -149,7 +154,7 @@ let[@def] rec (valid_edits @ total) (h : node Pref.heap @ immutable)
 let[@def] rec (writes @ total) (p : node Pref.t @ immutable)
     (q : node Pref.t @ immutable) (d : derivation @ immutable) =
   match d with
-  | Lowering (bound, edits, rest) -> Then (Lowered (bound, edits), writes p q rest)
+  | Lowering (bound, edits, _, rest) -> Then (Lowered (bound, edits), writes p q rest)
   | Bind_left _ -> Set (p, q)
   | Bind_right _ -> Set (q, p)
   | Swap rest -> writes q p rest

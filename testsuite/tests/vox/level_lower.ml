@@ -1,6 +1,8 @@
 open Copy_spec
 open Level_spec
 open Level_proofs
+open Lower_locality_spec
+open Lower_locality_proofs
 
 type written = #{state : node Pref.token; edits : lowering @@ ghost}
 
@@ -10,7 +12,7 @@ let write_level : (h : node Pref.heap) @ immutable ghost -> (bound : int) ->
       && match H.at h p with None -> false | Some v -> children_below h v.desc bound}) @ unique ->
     {r : written | lower_valid h bound r.#edits
       && Pref.own r.#state === lower_heap h bound r.#edits
-      && below (Pref.own r.#state) p bound} @ unique = fun h bound p t ->
+      && below (Pref.own r.#state) p bound && confined r.#edits (Tip p)} @ unique = fun h bound p t ->
   let refine_ t = t in
   ghost_ (active_def h p; at_level_def h p);
   let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
@@ -22,7 +24,9 @@ let write_level : (h : node Pref.heap) @ immutable ghost -> (bound : int) ->
   let after = ghost_ (lower_heap h bound edits) in
   ghost_ (let empty = Keep in lower_heap_def h bound empty; lower_valid_def h bound empty;
     lower_heap_def h bound edits; lower_valid_def h bound edits; lower_cell_def old bound;
-    below_def after p bound; at_level_def after p);
+    below_def after p bound; at_level_def after p;
+    let tree = Tip p in contains_def tree p; confined_def edits tree;
+    let empty = Keep in confined_def empty tree; ());
   let r = #{state = t; edits} in refine_ r
 
 let rec lower : (h : node Pref.heap) @ immutable ghost ->
@@ -31,7 +35,8 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
     (t : {t : node Pref.token | Pref.own t === h && bound >= 0 && active h p}) @ unique ->
     {r : lowered | lower_valid h bound r.#edits
       && Pref.own r.#state === lower_heap h bound r.#edits
-      && bound_root r.#tree === p && bounded (Pref.own r.#state) bound r.#tree} @ unique =
+      && bound_root r.#tree === p && bounded (Pref.own r.#state) bound r.#tree
+      && confined r.#edits r.#tree} @ unique =
   fun h scope bound p t ->
     let refine_ t = t in
     ghost_ (active_def h p; scope p; finite_scope_def h p; source_ok_def h p);
@@ -68,7 +73,9 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
       ghost_ (let u = () in bounded_frame mid after frame bound tree_child (refine_ u);
         lowering_at h bound d p (refine_ u); frame p; lower_frame_def h mid p; lower_frame_def mid after p;
         lower_valid_def h bound edits; lower_heap_def h bound edits;
-        bound_root_def tree; bounded_def after bound tree);
+        bound_root_def tree; bounded_def after bound tree;
+        confined_through d p tree_child (refine_ u);
+        confined_root w tree p (refine_ u); confined_def edits tree);
       let r = #{state = result.#state; edits; tree} in refine_ r
     | Arrow (a, b) ->
       let t : {t : node Pref.token | Pref.own t === h && bound >= 0 && active h a} = refine_ t in
@@ -103,5 +110,8 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
         lowering_at h bound d1 p (refine_ u); frame1 p; lower_frame_def h h1 p; lower_frame_def h1 after p;
         lower_heap_def h1 bound suffix; lower_valid_def h1 bound suffix;
         lower_heap_def h bound edits; lower_valid_def h bound edits;
-        bound_root_def tree; bounded_def after bound tree);
+        bound_root_def tree; bounded_def after bound tree;
+        confined_fork d1 d2 p ta tb (refine_ u);
+        confined_root w tree p (refine_ u);
+        confined_def suffix tree; confined_def edits tree);
       let r = #{state = result.#state; edits; tree} in refine_ r

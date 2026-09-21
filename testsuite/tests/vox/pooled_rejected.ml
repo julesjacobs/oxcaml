@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml generalize_spec.ml level_unifier_spec.ml level_finite_spec.ml pooled_spec.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml generalize_spec.ml level_unifier_spec.ml level_finite_spec.ml pooled_spec.ml";
  readonly_files = "pooled_rejected.ml";
  compile_only = "true";
  {
