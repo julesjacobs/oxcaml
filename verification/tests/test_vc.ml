@@ -196,6 +196,38 @@ let () =
   let small = lambda_size 20 in
   let large = lambda_size 80 in
   assert (large < 5 * small);
+  let repeated_size count =
+    let predicate =
+      String.concat " && " (List.init count (fun _ -> "ge (p x) 0"))
+    in
+    let source =
+      prelude
+      ^ "external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n"
+      ^ "let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init 20 (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n" ^ "let (_ : {u : unit | " ^ predicate
+      ^ "}) = refine_ u in ()"
+    in
+    match queries source with
+    | [q] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+    | _ -> failwith "Expected one repeated ghost-lambda query"
+  in
+  assert (repeated_size 20 < 3 * repeated_size 1);
+  assert (
+    solve
+      ("let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init 20 (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n"
+      ^ "let (_ : {u : unit | ge (p x) (p x)}) = refine_ u in ()")
+    = Valid);
+  assert (
+    match
+      solve
+        "let f () = let p = ghost_ (fun (x : int) -> add x 1) in\n\
+         let u = () in let (_ : {u : unit | p 1 === p 2}) = refine_ u in ()"
+    with
+    | Invalid _ -> true
+    | _ -> false);
   print_endline "Ghost lambdas preserve obligations and share substitutions"
 
 let () =
@@ -224,6 +256,56 @@ let () =
   assert (solve 20 = Valid);
   assert (match solve 10 with Invalid _ -> true | _ -> false);
   print_endline "Iarray equality transports nested observations"
+
+let () =
+  let prelude =
+    "type pointer : immutable_data\n\
+     type heap : immutable_data\n\
+     external empty : unit -> heap @@ total = \"caml_pref_heap_empty\"\n\
+     external mem : heap -> pointer -> bool @@ total = \"caml_pref_heap_mem\"\n\
+     external put : heap -> pointer -> int -> heap @@ total = \
+     \"caml_pref_heap_put\"\n\
+     external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n"
+  in
+  let query source =
+    match queries (prelude ^ source) with
+    | [q] -> q
+    | _ -> failwith "Expected one Pref identity query"
+  in
+  let identity_size count =
+    let parameters =
+      String.concat " "
+        (List.init count (fun i -> Printf.sprintf "(p%d : pointer)" i))
+    in
+    let observations =
+      String.concat " && "
+        (List.init count (fun i -> Printf.sprintf "mem h p%d === mem h p%d" i i))
+    in
+    let q =
+      query
+        ("let f (h : heap) " ^ parameters
+       ^ " = let u = () in let (_ : {u : unit | " ^ observations
+       ^ "}) = refine_ u in ()")
+    in
+    String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+  in
+  assert (identity_size 80 < 5 * identity_size 20);
+  let solve predicate =
+    let q =
+      query
+        ("let f (p : pointer) (q : pointer) = let u = () in\n"
+       ^ "let (_ : {u : unit | " ^ predicate ^ "}) = refine_ u in ()")
+    in
+    (Vox_smt_solver.check
+       ~config:{ Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+       ~int_width:63 q)
+      .validity
+  in
+  assert (solve "mem (put (empty ()) p 0) q === (p === q)" = Valid);
+  assert (match solve "p === q" with Invalid _ -> true | _ -> false);
+  assert (
+    match solve "(p === q) === false" with Invalid _ -> true | _ -> false);
+  print_endline "Pref identity equations scale linearly"
 
 let () =
   let source wanted =
