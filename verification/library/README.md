@@ -91,3 +91,60 @@ The [HOF idiom study](../../design-docs/hof-idioms.md) compares relational,
 IH, total-model, preservation-proof, and ghost-evidence APIs.
 `vox_traversal.ml` and its interface are experimental checked implementations;
 they are not yet included in the installed library.
+
+## Comparison credits and merge sort
+
+`Vox_credits.Make ()` creates a fresh abstract token type. Its private balance
+is a nonnegative machine integer in a ghost record. `credits (borrow_ token)`
+observes that balance without consuming the token. `tick` consumes a positive
+balance and returns one fewer credit. `split` partitions a balance; `merge`
+consumes two tokens and returns their sum. The merge precondition requires
+both operands and their machine sum to be nonnegative: with nonnegative
+operands, a wrapping addition would be negative. `split` and `merge` preserve
+the sum of live credit; `empty` adds zero and `tick` consumes one credit.
+Discarding a token discards its credit. Balances remain nonnegative.
+
+The driver can issue positive credit with `Budget.create`. Algorithms receive
+only `Vox_credits.S`, which omits that constructor and permits only zero-credit
+creation. Each application of `Make` has a distinct token type, so an algorithm
+cannot replenish its input from a new instance. Uniqueness prevents reuse;
+discarding credit is allowed. The accounting boundary must exclude any other
+source of unaccounted tokens of the same type.
+
+`Vox_merge_sort.Make (Order) (Credits) (Compare)` sorts immutable lists. `Order`
+supplies a ghost total preorder and checked reflexivity, totality and
+transitivity laws. Every call to `Compare.compare` requires positive credit
+and returns exactly one fewer credit. The sort establishes termination,
+sortedness, preservation of length and the multiplicity of every complete
+element, and a comparison bound of `n * height n`, independently of surplus
+initial credit. No positive credit is issued inside the functor.
+
+`Vox_sort_cost.height` is zero for sizes zero and one. Its checked bounds
+establish `2^(height n - 1) < n <= 2^(height n)` for `n > 1`, so the bound is
+`n * ceil(log2 n)` for positive sizes; the empty-list budget is zero.
+Arithmetic for this theorem uses `Bigint`; funding and
+splitting require the relevant amounts to fit the supplied machine-int
+balance. Inside the sorting implementation, budget calculations, scalar
+termination measures and functional proofs are erased with `ghost_`.
+Executable fixtures separately validate initial budgets with `assume_`;
+those computations remain at runtime.
+
+`Vox_ordered_sequence.Make` defines permutation by equal counts over the
+finite union of both lists' supports. Its checked elimination lemma gives
+equal counts at any element. Equality here is full logical equality, not
+comparison equivalence. The ranked-record fixture preserves payloads and
+repeated records even when their ranks compare equal. Alternating splitting
+does not promise stable sorting.
+
+This counts invocations of `Compare.compare` made by the sorting implementation,
+with unit cost. Work or further comparisons inside the comparator and other
+sorting operations are not charged by this cost model;
+a bound on total work would require instrumentation for those operations.
+Ghost representation erasure alone does not promise elimination of every
+out-of-line token call. The comparison and sort results use unboxed records.
+
+The implementation adds no trusted credit or sorting primitive. See
+`time_credits.ml`, `time_credits_rejected.ml`, `merge_sort.ml`, and
+`merge_sort_rejected.ml` in the Vox fixtures for borrowed observations,
+splitting and merging, overflow and reuse
+rejections, and integer and ranked-record clients.
