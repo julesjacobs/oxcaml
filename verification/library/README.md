@@ -1,4 +1,4 @@
-# Verified borrow library
+# Vox verified library
 
 From a configured Vox checkout with Z3 on `PATH`:
 
@@ -6,10 +6,12 @@ From a configured Vox checkout with Z3 on `PATH`:
 make vox-library
 ```
 
-This builds and installs the final compiler, verifies the library with
-`-principal` in bytecode and native modes, and installs `Vox_sequence`,
-`Vox_int_sequence`, `Vox_iarray`, `Borrow`, `Borrow_iarray`, and `vox_borrow`
-under the configured prefix's `lib/ocaml/vox`.
+This builds and installs the final compiler, verifies the library in bytecode
+and native modes, and installs the `vox_borrow` archive and public interfaces
+under the configured prefix's `lib/ocaml/vox`. It includes sequences, owned
+arrays and slices, sorting, time credits, union-find, connectivity, atomic
+ownership transfer, and hash tables. Verification uses `-principal` except
+for the table modules, whose immutable-data inference currently rejects it.
 
 With the worktree-local prefix from the agent guide, compile a client with:
 
@@ -288,3 +290,21 @@ axioms, `external` declarations, or `assume_` to the algorithm or proofs.
 Effectful `find` uses checked recursive decreases on its finite ghost path;
 termination also assumes the audited primitive bodies terminate. It does
 not claim that effectful operations inhabit Vox's pure `total` mode.
+
+### Connectivity clients
+
+`Vox_connectivity.Make (Credits)` seals the online implementation behind
+abstract elements and persistent ghost snapshots. `snapshot` observes the
+partition; `contains`, `root`, and `connected` describe it. After an operation,
+`added_law`, `found_law`, and `joined_law` instantiate its membership and
+representative guarantees for any chosen element. New elements form fresh
+singleton components; a union chooses one of the two previous representatives
+and preserves every other component. Saved snapshots remain
+usable after the live unique state has been consumed; they grant no mutation
+permission.
+
+The operations retain exact payments and return no refunds. The
+`connectivity.ml` client keeps unspent caller credits in its own wallet and
+proves conservation using `account` and `account_bounds`. The implementation's
+surplus and growth reserve remain private. The signature exposes no path,
+heap, rank, or reserve model.

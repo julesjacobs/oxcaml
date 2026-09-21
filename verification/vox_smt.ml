@@ -902,3 +902,109 @@ type validity =
   | Unknown of string option
   | Timeout
   | Failure of string
+
+let explain_invalid query model =
+  let names label prefix items =
+    let counts = Hashtbl.create (List.length items) in
+    List.iter
+      (fun item ->
+        let name = label item in
+        let count = Option.value (Hashtbl.find_opt counts name) ~default:0 in
+        Hashtbl.replace counts name (count + 1))
+      items;
+    let table = Hashtbl.create (List.length items) in
+    List.iteri
+      (fun index item ->
+        let name = label item in
+        let name =
+          if Hashtbl.find counts name = 1
+          then name
+          else name ^ "[" ^ prefix ^ string_of_int index ^ "]"
+        in
+        Hashtbl.add table item name)
+      items;
+    fun item -> Option.value (Hashtbl.find_opt table item) ~default:(label item)
+  in
+  let symbol_name = names Symbol.label "v" query.symbols in
+  let function_name = names Function.label "f" query.functions in
+  let rec term depth = function
+    | _ when depth = 0 -> "..."
+    | Boolean b -> string_of_bool b
+    | Integer n -> Int64.to_string n
+    | Big_integer n -> n ^ "Z"
+    | Var s -> symbol_name s
+    | Call (f, args) -> application depth (function_name f) args
+    | Construct (c, args) -> application depth (Constructor.label c) args
+    | Is (c, t) -> application depth ("is " ^ Constructor.label c) [t]
+    | Select (c, index, t) ->
+      application depth (Constructor.label c ^ "." ^ string_of_int index) [t]
+    | App (op, args) -> (
+      let name =
+        match op with
+        | Add | Int_add -> "+"
+        | Sub | Int_sub -> "-"
+        | Mul | Int_mul -> "*"
+        | Div | Int_div -> "/"
+        | Rem | Int_mod -> "mod"
+        | Neg | Int_neg -> "negate"
+        | Eq -> "="
+        | Ne -> "<>"
+        | Lt | Int_lt -> "<"
+        | Le | Int_le -> "<="
+        | Gt | Int_gt -> ">"
+        | Ge | Int_ge -> ">="
+        | Not -> "not"
+        | And -> "&&"
+        | Or -> "||"
+        | Implies -> "implies"
+        | Ite -> "if"
+        | Bit_and -> "land"
+        | Bit_or -> "lor"
+        | Bit_xor -> "lxor"
+        | Shift_right_logical -> "lsr"
+        | Int_of_int63 -> "Bigint.of_int"
+      in
+      match args with
+      | [left; right] ->
+        "("
+        ^ term (depth - 1) left
+        ^ " " ^ name ^ " "
+        ^ term (depth - 1) right
+        ^ ")"
+      | _ -> application depth name args)
+  and application depth name args =
+    name ^ "(" ^ String.concat ", " (List.map (term (depth - 1)) args) ^ ")"
+  in
+  let lines =
+    ref ["Goal (" ^ query.goal.label ^ "): " ^ term 8 query.goal.term]
+  in
+  let add s = lines := s :: !lines in
+  List.iter
+    (fun fact -> add ("Assumption (" ^ fact.label ^ "): " ^ term 8 fact.term))
+    query.facts;
+  (match model with
+  | None -> add "The solver did not return printable model values."
+  | Some values ->
+    List.iter
+      (fun (symbol, value) ->
+        let value =
+          match value with
+          | Bool_value b -> string_of_bool b
+          | Int_value n -> Int64.to_string n
+          | Bigint_value n -> n ^ "Z"
+        in
+        add ("Model: " ^ symbol_name symbol ^ " = " ^ value))
+      values);
+  if query.functions <> []
+  then begin
+    add
+      ("Opaque functions: "
+      ^ String.concat ", " (List.map function_name query.functions));
+    add
+      "A model of opaque calls may indicate missing facts, not a runtime \
+       counterexample."
+  end;
+  add
+    "The solver found a model satisfying the assumptions and falsifying the \
+     goal.";
+  String.concat "\n" (List.rev !lines)
