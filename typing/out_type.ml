@@ -2292,6 +2292,11 @@ let tree_of_type_decl id decl =
       { oattr_name = "inductive" } :: otype_attributes
     else otype_attributes
   in
+  let otype_attributes =
+    if decl.type_phantom_parameters then
+      { oattr_name = "phantom_parameters" } :: otype_attributes
+    else otype_attributes
+  in
   { otype_name = name;
     otype_params = args;
     otype_type = ty;
@@ -2755,6 +2760,7 @@ let dummy =
     type_attributes = [];
     type_unboxed_default = false;
     type_inductive = false;
+    type_phantom_parameters = false;
     type_uid = Uid.internal_not_actually_unique;
     type_unboxed_version = None;
   }

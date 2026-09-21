@@ -2,6 +2,27 @@ let value_jkind =
   Jkind.Builtin.value ~why:(Jkind.History.Unknown "Vox encoding test")
 
 let () =
+  let source =
+    "type 'a heap\n\
+     type hidden = { contents : hidden heap }\n\
+     type 'a handle [@@phantom_parameters]\n\
+     type node = { next : node handle }\n"
+  in
+  let parsed = Parse.implementation (Lexing.from_string source) in
+  let _, _, _, _, _, env =
+    Typemod.type_structure (Lazy.force Env.initial) parsed
+  in
+  let ty name =
+    let path, _ =
+      Env.lookup_type ~loc:Location.none (Longident.Lident name) env
+    in
+    Ctype.newconstr path []
+  in
+  let context = Vox_encoding.create_context () in
+  assert (Vox_encoding.data context env (ty "hidden") = None);
+  assert (Option.is_some (Vox_encoding.data context env (ty "node")))
+
+let () =
   let context = Vox_encoding.create_context () in
   let weak = Ctype.newvar2 Btype.lowest_level value_jkind in
   assert (Vox_encoding.sort context Env.empty weak = None);

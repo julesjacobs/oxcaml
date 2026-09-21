@@ -134,6 +134,10 @@ type context =
     iarray_lengths : (term, term) Hashtbl.t;
     iarray_reads : (sort * term * term, term) Hashtbl.t;
     map_class_sorts : (sort, sort) Hashtbl.t;
+    pref_heaps : (sort, unit) Hashtbl.t;
+    pref_constructors : (Function.t, [`Empty | `Put]) Hashtbl.t;
+    pref_observers :
+      (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
     mutable batches : command list list;
     named_terms : (Symbol.t, term) Hashtbl.t;
@@ -1134,8 +1138,102 @@ let normal_vox_sequence_length ctx env function_type args s =
     end
   | _ -> s
 
+let pref_location ctx heap pointer =
+  comparison_class ctx ctx.map_class_sorts "Pref.location" (term_sort heap)
+    pointer
+
+let rec pref_observe ctx budget fn heap key =
+  let call = Call (fn, [heap; key]) in
+  if budget = 0
+  then call
+  else
+    let value =
+      match expose_head ctx heap with
+      | Call (update, [source; changed; value])
+        when Hashtbl.find_opt ctx.pref_constructors update = Some `Put ->
+        let old = pref_observe ctx (budget - 1) fn source key in
+        let changed_value =
+          match Hashtbl.find_opt ctx.pref_observers fn with
+          | Some None -> Boolean true
+          | Some (Some (some, _)) ->
+            begin match Constructor.fields some with
+            | [(_, sort)] when sort = term_sort value ->
+              Construct (some, [value])
+            | _ -> call
+            end
+          | None -> call
+        in
+        App (Ite, [both Eq key changed; changed_value; old])
+      | Call (empty, [])
+        when Hashtbl.find_opt ctx.pref_constructors empty = Some `Empty ->
+        begin match Hashtbl.find_opt ctx.pref_observers fn with
+        | Some None -> Boolean false
+        | Some (Some (_, none)) -> Construct (none, [])
+        | None -> call
+        end
+      | _ -> call
+    in
+    observe_iarray ctx call value
+
 let operation ctx env function_type result_type name args =
   match name, args with
+  | "caml_pref_own_bytecode", [token] ->
+    begin match scalar token, sort ctx.encoding env result_type with
+    | Some token, Some heap_sort ->
+      Hashtbl.replace ctx.pref_heaps heap_sort ();
+      scalar_value
+        (borrow_projection ctx "Pref.own" heap_sort (expose_head ctx token))
+    | _ -> None
+    end
+  | "caml_pref_heap_empty", [_] ->
+    Option.bind (sort ctx.encoding env result_type) (fun heap_sort ->
+        Hashtbl.replace ctx.pref_heaps heap_sort ();
+        let fn = intern_function ctx "Pref.empty" [] heap_sort in
+        Hashtbl.replace ctx.pref_constructors fn `Empty;
+        scalar_value (Call (fn, [])))
+  | "caml_pref_heap_put", [heap; pointer; value] ->
+    begin match scalar heap, scalar pointer, scalar value with
+    | Some heap, Some pointer, Some value ->
+      let key = pref_location ctx heap pointer in
+      let fn =
+        intern_function ctx "Pref.put"
+          [term_sort heap; term_sort key; term_sort value]
+          (term_sort heap)
+      in
+      Hashtbl.replace ctx.pref_heaps (term_sort heap) ();
+      Hashtbl.replace ctx.pref_constructors fn `Put;
+      scalar_value (Call (fn, [heap; key; value]))
+    | _ -> None
+    end
+  | (("caml_pref_heap_mem" | "caml_pref_heap_at") as name), [heap; pointer] ->
+    begin match
+      scalar heap, scalar pointer, sort ctx.encoding env result_type
+    with
+    | Some heap, Some pointer, Some result ->
+      Hashtbl.replace ctx.pref_heaps (term_sort heap) ();
+      let key = pref_location ctx heap pointer in
+      let label =
+        if name = "caml_pref_heap_mem" then "Pref.mem" else "Pref.at"
+      in
+      let fn =
+        intern_function ctx label [term_sort heap; term_sort key] result
+      in
+      let constructors =
+        if name = "caml_pref_heap_mem"
+        then Some None
+        else
+          Option.bind (data_of_type ctx env result_type) (fun data ->
+              match
+                data_constructor data "Some", data_constructor data "None"
+              with
+              | Some some, Some none -> Some (Some (some, none))
+              | _ -> None)
+      in
+      Option.bind constructors (fun constructors ->
+          Hashtbl.replace ctx.pref_observers fn constructors;
+          scalar_value (pref_observe ctx 128 fn heap key))
+    | _ -> None
+    end
   | "caml_vox_sequence_length", [values] ->
     Option.bind (scalar values) (fun values ->
         scalar_value (vox_sequence_length ctx values))
@@ -1900,11 +1998,35 @@ let intro_loc e =
     (function Texp_refine, loc, _ -> Some loc | _ -> None)
     e.exp_extra
 
-let expose_fact ctx env s ty value loc =
+let rec expose_fact ctx env s ty value loc =
   (* Dropping an unsupported premise is conservative; goals remain strict. *)
-  try expose ctx env s ty value loc
-  with Location.Error error ->
-    { s with omitted_premises = (loc, error) :: s.omitted_premises }, value
+  let rec assume s p =
+    try match p.rexp_desc with
+    | Rexp_ghost p -> assume s p
+    | Rexp_let (binding, body) ->
+        let s, value = predicate ctx env s binding.rb_expr in
+        let s, value =
+          match binding.rb_kind with
+          | Rbind_value -> s, value
+          | Rbind_refine ->
+              expose_fact ctx env s binding.rb_expr.rexp_type value
+                binding.rb_expr.rexp_loc
+        in
+        assume (bind s binding.rb_ident value) body
+    | Rexp_apply ({ rexp_desc = Rexp_ident path; _ }, [(_, a); (_, b)])
+      when primitive env path = Some ("%sequand", 2) ->
+        assume (assume s a) b
+    | _ ->
+        let s, predicate = predicate ctx env s p in
+        if s.dead then s else branch s (required loc predicate)
+    with Location.Error error ->
+      { s with omitted_premises = (loc, error) :: s.omitted_premises }
+  in
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine r when not (impossible s) ->
+      assume (bind s r.ref_binder value) r.ref_pred, value
+  | _ -> s, value
+
 
 let omitted_premise_messages s =
   List.concat_map
@@ -2437,20 +2559,38 @@ let query ctx code =
       (label, Function.arguments fn, Function.result fn)
     = Some fn
   in
+  let locations = Hashtbl.create 16 in
   let seen = Hashtbl.create 16 and symbols = ref [] in
   let rec visit term =
     if not (Hashtbl.mem seen term)
     then begin
       Hashtbl.add seen term ();
       begin match term with
+      | Call (fn, [pointer]) when observation_function "Pref.location" fn ->
+        List.iter
+          (fun (other, location) ->
+            let axiom =
+              App (Implies, [both Eq term location; both Eq pointer other])
+            in
+            definitions
+              := { label = "pref identity"; term = axiom } :: !definitions;
+            Queue.add axiom pending)
+          (entries locations fn);
+        Hashtbl.replace locations fn ((pointer, term) :: entries locations fn)
+      | _ -> ()
+      end;
+      begin match term with
       | App (Eq, [left; right])
-        when is_iarray_sort ctx.encoding (term_sort left) ->
+        when is_iarray_sort ctx.encoding (term_sort left)
+             || Hashtbl.mem ctx.pref_heaps (term_sort left) ->
         relate left right;
         relate right left
       | _ -> ()
       end;
       let observation =
         match term with
+        | Call (fn, [heap; key]) when Hashtbl.mem ctx.pref_observers fn ->
+          Some (heap, fun alias -> pref_observe ctx 128 fn alias key)
         | Call (fn, [array; index]) when observation_function "Iarray.get" fn ->
           Some
             ( array,
@@ -2545,6 +2685,9 @@ let context ~prove ~verify_introductions =
     iarray_lengths = Hashtbl.create 16;
     iarray_reads = Hashtbl.create 16;
     map_class_sorts = Hashtbl.create 8;
+    pref_heaps = Hashtbl.create 8;
+    pref_constructors = Hashtbl.create 8;
+    pref_observers = Hashtbl.create 8;
     free = Path.Map.empty;
     batches = [];
     named_terms = Hashtbl.create 32;

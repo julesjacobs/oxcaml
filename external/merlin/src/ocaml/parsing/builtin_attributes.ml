@@ -125,6 +125,7 @@ let builtin_attrs =
   ; "immediate"
   ; "immediate64"
   ; "inductive"
+  ; "phantom_parameters"
   ; "boxed"
   ; "unboxed"
   ; "principal"

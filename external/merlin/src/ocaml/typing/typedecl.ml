@@ -401,6 +401,7 @@ in
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default = false;
       type_inductive = false;
+      type_phantom_parameters = false;
       type_uid = Uid.unboxed_version uid;
       type_unboxed_version = None;
     }
@@ -421,6 +422,7 @@ in
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default = false;
       type_inductive = false;
+      type_phantom_parameters = false;
       type_uid = uid;
       type_unboxed_version;
     }
@@ -1315,6 +1317,9 @@ let transl_declaration env sdecl (id, uid) =
         type_inductive =
           Attr_helper.has_no_payload_attribute
             "inductive" sdecl.ptype_attributes;
+        type_phantom_parameters =
+          Attr_helper.has_no_payload_attribute
+            "phantom_parameters" sdecl.ptype_attributes;
         type_uid = uid;
         type_unboxed_version = None;
         (* Unboxed versions are computed after all declarations have been
@@ -1520,6 +1525,7 @@ let derive_unboxed_version env path_in_group_has_unboxed_version decl =
         type_attributes = decl.type_attributes;
         type_unboxed_default = false;
         type_inductive = false;
+        type_phantom_parameters = false;
         type_uid = Uid.unboxed_version decl.type_uid;
         type_unboxed_version = None;
       }
@@ -3849,6 +3855,51 @@ let add_types_to_env ~shapes decls env =
       add_type ~long_path:false ~check:true ~shape id decl env)
     decls shapes env
 
+let check_phantom_parameters_decl env decl =
+  if decl.type_phantom_parameters then begin
+    List.iter (fun parameter ->
+      match get_desc (Ctype.expand_head env parameter) with
+      | Tvar _ | Tunivar _ -> ()
+      | _ ->
+          Location.raise_errorf ~loc:decl.type_loc
+            "Phantom parameters must be type variables.")
+      decl.type_params;
+    let visited = ref TypeSet.empty in
+    let rec visit ty =
+      if List.exists (eq_type ty) decl.type_params then
+        Location.raise_errorf ~loc:decl.type_loc
+          "A phantom parameter cannot occur in the type's representation.";
+      if not (TypeSet.mem ty !visited) then begin
+        visited := TypeSet.add ty !visited;
+        let expanded = Ctype.expand_head env ty in
+        if not (eq_type ty expanded) then visit expanded
+        else match get_desc ty with
+        | Tconstr (path, args, _) ->
+            begin match Env.find_type path env with
+            | { type_phantom_parameters = true; _ } -> ()
+            | _ | exception Not_found -> List.iter visit args
+            end
+        | _ -> Btype.iter_type_expr visit ty
+      end
+    in
+    Option.iter visit decl.type_manifest;
+    match decl.type_kind with
+    | Type_variant (constructors, _, _) ->
+        List.iter (fun (constructor : Types.constructor_declaration) ->
+          if Option.is_some constructor.cd_res then
+            Location.raise_errorf ~loc:decl.type_loc
+              "GADTs cannot guarantee phantom parameters.";
+          Btype.iter_type_expr_cstr_args visit constructor.cd_args) constructors
+    | Type_record (fields, _, _) | Type_record_unboxed_product (fields, _, _) ->
+        List.iter
+          (fun (field : Types.label_declaration) -> visit field.ld_type)
+          fields
+    | Type_abstract _ -> ()
+    | Type_open ->
+        Location.raise_errorf ~loc:decl.type_loc
+          "Extensible types cannot guarantee phantom parameters."
+  end
+
 let check_inductive_decl env ~single id decl =
   if decl.type_inductive then begin
     let reject reason =
@@ -4037,6 +4088,7 @@ let transl_type_decl env rec_flag sdecl_list =
   List.iter
     (check_abbrev_regularity ~abs_env new_env id_loc_list to_check) tdecls;
   List.iter (fun (id, decl) ->
+    check_phantom_parameters_decl new_env decl;
     check_inductive_decl new_env ~single:(List.length decls = 1) id decl)
     decls;
   List.iter (fun (id, decl) ->
@@ -4137,6 +4189,7 @@ let transl_type_decl env rec_flag sdecl_list =
   (* Compute the final environment with variance and immediacy *)
   let final_env = add_types_to_env ~shapes:(Some shapes) decls env in
   List.iter (fun (id, decl) ->
+    check_phantom_parameters_decl final_env decl;
     check_inductive_decl final_env ~single:(List.length decls = 1) id decl)
     decls;
   (* Keep original declaration *)
@@ -5208,6 +5261,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
           type_attributes = decl.type_attributes;
           type_unboxed_default = false;
           type_inductive = false;
+          type_phantom_parameters = false;
           type_uid = Uid.unboxed_version type_uid;
           type_unboxed_version = None;
         }
@@ -5248,6 +5302,10 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_attributes = sdecl.ptype_attributes;
       type_unboxed_default;
       type_inductive = sig_decl.type_inductive;
+      type_phantom_parameters =
+        sig_decl.type_phantom_parameters
+        || Attr_helper.has_no_payload_attribute
+             "phantom_parameters" sdecl.ptype_attributes;
       type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
       type_unboxed_version;
     }
@@ -5258,6 +5316,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
   | Some ty -> raise(Error(loc, Unbound_type_var(ty, new_sig_decl)))
   end;
   let new_sig_decl = name_recursion sdecl id new_sig_decl in
+  check_phantom_parameters_decl env new_sig_decl;
   let new_type_variance =
     let required = Typedecl_variance.variance_of_params sdecl.ptype_params in
     try
@@ -5284,6 +5343,7 @@ let transl_with_constraint id ?fixed_row_path ~sig_env ~sig_decl ~outer_env
       type_manifest = new_sig_decl.type_manifest;
       type_unboxed_default = new_sig_decl.type_unboxed_default;
       type_inductive = new_sig_decl.type_inductive;
+      type_phantom_parameters = new_sig_decl.type_phantom_parameters;
       type_is_newtype = new_sig_decl.type_is_newtype;
       type_expansion_scope = new_sig_decl.type_expansion_scope;
       type_loc = new_sig_decl.type_loc;
@@ -5356,6 +5416,7 @@ let transl_package_constraint ~loc ty =
     type_attributes = [];
     type_unboxed_default = false;
     type_inductive = false;
+    type_phantom_parameters = false;
     type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
     type_unboxed_version = None;
   }
@@ -5382,6 +5443,7 @@ let abstract_type_decl ~injective ~jkind ~params =
       type_attributes = [];
       type_unboxed_default = false;
       type_inductive = false;
+      type_phantom_parameters = false;
       type_uid = Uid.internal_not_actually_unique;
       type_unboxed_version =
         Some {
@@ -5400,6 +5462,7 @@ let abstract_type_decl ~injective ~jkind ~params =
           type_attributes = [];
           type_unboxed_default = false;
           type_inductive = false;
+          type_phantom_parameters = false;
           type_uid = Uid.internal_not_actually_unique;
           type_unboxed_version = None;
         };
