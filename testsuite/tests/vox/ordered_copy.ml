@@ -18,6 +18,7 @@ let instantiate : (saved : node Pref.heap) @ immutable ghost ->
       valid saved r.#epoch depth r.#history
       && Pref.own r.#state === heap saved r.#epoch depth r.#history
       && r.#pool === registered base r.#epoch r.#history
+      && r.#trail === touched r.#history
       && target_for saved r.#history p r.#value
       && pool_scoped (Pref.own r.#state) r.#pool
       && below (Pref.own r.#state) r.#value depth
@@ -28,9 +29,9 @@ let instantiate : (saved : node Pref.heap) @ immutable ghost ->
     let checked_depth : {n : int | n >= 0} = refine_ depth in
     let refine_ out = Pooled_copy.instantiate saved scope base checked_depth p t in
     let refine_ p = p in let refine_ checked_depth = checked_depth in
-    let value = out.#value in let state = out.#state in let pool = out.#pool in
+    let value = out.#value in let state = out.#state in let pool = out.#pool in let trail = out.#trail in
     let epoch = ghost_ out.#epoch in let history = ghost_ out.#history in
     ghost_ (let u = () in extends_def history history;
       target_below_at saved depth bounds epoch history history p value (refine_ u);
       copy_ordered saved depth bounds order epoch history value (refine_ u));
-    let out = #{value; state; pool; epoch; history} in refine_ out
+    let out = #{value; state; pool; trail; epoch; history} in refine_ out
