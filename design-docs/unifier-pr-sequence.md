@@ -78,7 +78,7 @@ Runtime termination remains outside scope.
   positive `id id` and recursive-call derivations plus rejection probes.
 - [x] Total type proofs: evaluation, opening, weakening, embedding, abstraction
   and free-variable substitution. The generalization lemma uses an explicit
-  context-freshness predicate; proving it for graph-selected names remains below.
+  context-freshness predicate; its graph bridge is recorded below.
 - [x] Environment templates with protected boundary transport and constructed
   empty, monomorphic, weakened and model-transported instance translators.
   The let translator remains in the one-let bridge below.
@@ -97,6 +97,9 @@ Runtime termination remains outside scope.
 - [x] Actual let-polymorphic driver: nested RHS levels, child-pool closing and
   transfer, preserved parent coverage, protected saved nodes, and safety on
   failure. Let-free theorem contracts remain available.
+- [x] Canonical environment freshness for graph-selected generalization names:
+  low boundary readbacks and existing generic templates avoid the selected names;
+  abstraction establishes the premise of `generalize_typing` before substitution.
 - [ ] One-let bridge: construct baseline and alternative RHS models, apply
   relative generalization, and consume the resulting factorization for `id id`.
 - [x] Nested execution transport for forests, levels, pools and active RHS origins.
