@@ -149,3 +149,20 @@ The copier uses fresh node handles as session identities. This avoids an
 unproved machine-integer epoch bound, at the cost of one Boolean cell per call.
 In-node memo entries retain previous targets until overwritten; a later cleanup
 stage should address retention. Neither choice requires a compiler change.
+
+## Levels and generalization
+
+The same richer-node model supports the original unifier's exact success and
+rejection proofs through an explicit descriptor observation. Metadata framing
+then handles levels and memos separately. Larger allocation fixtures made heap
+membership/observation propagation harder to expose; small fixtures and selected
+heap-update lemmas remained reliable. A minimized compiler regression is still
+needed before classifying the larger-fixture failure as an encoding defect.
+
+The environment exclusion proof uses explicit paths and a total pointwise level
+order function. Pool completeness is another total function; no quantifier was
+added to the SMT fragment. Exact generalization composes existing CPS model
+construction through total local callbacks. Equal heap aliases required checked
+callback adaptation, and one higher-order scheme alias required an explicit
+forwarding callback rather than direct `refine_` adaptation. Diagnostics and
+alias adaptation remain useful ergonomics targets.
