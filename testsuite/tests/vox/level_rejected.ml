@@ -38,7 +38,7 @@ Error: Refinement could not be proved (counterexample)
 
 module Generic_is_active = struct
   let bad : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
-      {u : unit | H.at h p === Some {desc = Var; level = Generic; memo = Empty_memo}} ->
+      {u : unit | H.at h p === Some {desc = Var; level = Generic; memo = Empty_memo; visited = false}} ->
       {u : unit | active h p} @ ghost = fun h p premise -> ghost_ (
     let refine_ premise = premise in active_def h p; at_level_def h p; let u = () in refine_ u)
 end;;
@@ -98,9 +98,9 @@ module Memo_is_not_a_level = struct
   let bad : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
       (epoch : node Pref.t) @ immutable ->
       {u : unit | H.at h p === Some (cell Var 1)} ->
-      {u : unit | lower_frame h (H.put h p {desc = Var; level = Finite 0; memo = Memo (epoch, p)}) p} @ ghost = fun h p epoch premise -> ghost_ (
+      {u : unit | lower_frame h (H.put h p {desc = Var; level = Finite 0; memo = Memo (epoch, p); visited = false}) p} @ ghost = fun h p epoch premise -> ghost_ (
     let refine_ premise = premise in let desc = Var in cell_def desc 1;
-    let after = H.put h p {desc = Var; level = Finite 0; memo = Memo (epoch, p)} in
+    let after = H.put h p {desc = Var; level = Finite 0; memo = Memo (epoch, p); visited = false} in
     lower_frame_def h after p; let u = () in refine_ u)
 end;;
 [%%expect{|

@@ -23,15 +23,15 @@ let read : (h : node Pref.heap) @ immutable ghost ->
 
 let () =
   let refine_ state = Pref.empty () in
-  let generic = {desc = Var; level = Generic; memo = Empty_memo} in
+  let generic = {desc = Var; level = Generic; memo = Empty_memo; visited = false} in
   let refine_ step = Pref.alloc generic state in let a = step.value in let state = step.state in
   let finite = cell Var 0 in let refine_ step = Pref.alloc finite state in
   let boundary = step.value in let state = step.state in
-  let inner = {desc = Arrow (a, a); level = Generic; memo = Empty_memo} in
+  let inner = {desc = Arrow (a, a); level = Generic; memo = Empty_memo; visited = false} in
   let refine_ step = Pref.alloc inner state in let pair = step.value in let state = step.state in
-  let outer = {desc = Arrow (pair, boundary); level = Generic; memo = Empty_memo} in
+  let outer = {desc = Arrow (pair, boundary); level = Generic; memo = Empty_memo; visited = false} in
   let refine_ step = Pref.alloc outer state in let root = step.value in let state = step.state in
-  let alias = {desc = Link root; level = Generic; memo = Empty_memo} in
+  let alias = {desc = Link root; level = Generic; memo = Empty_memo; visited = false} in
   let refine_ step = Pref.alloc alias state in let link = step.value in let state = step.state in
   let saved = ghost_ (Pref.own (borrow_ state)) in
   let scope : ((x : node Pref.t) @ immutable -> {u : unit |
@@ -125,7 +125,7 @@ let () =
 
 let constant level =
   let refine_ state = Pref.empty () in
-  let original = {desc = Bool; level; memo = Empty_memo} in
+  let original = {desc = Bool; level; memo = Empty_memo; visited = false} in
   let refine_ step = Pref.alloc original state in
   let p = step.value in let state = step.state in
   let saved = ghost_ (Pref.own (borrow_ state)) in

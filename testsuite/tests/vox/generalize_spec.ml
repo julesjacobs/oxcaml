@@ -15,7 +15,7 @@ let[@def] rec (closed_heap @ total) (h : node Pref.heap @ immutable) (cut : int)
 let[@def] (closed_at @ total) (h : node Pref.heap @ immutable) (after : node Pref.heap @ immutable)
     (cut : int) (pool : pool @ immutable) (x : node Pref.t @ immutable) = ghost_ (
   H.mem h x === H.mem after x && match H.at h x, H.at after x with
-  | None, None -> true | Some a, Some b -> a.desc === b.desc && a.memo === b.memo
+  | None, None -> true | Some a, Some b -> a.desc === b.desc && a.memo === b.memo && a.visited === b.visited
     && b.level === (if listed pool x then close_level cut a.level else a.level)
   | _ -> false)
 let[@def] (covered @ total) (h : node Pref.heap @ immutable) (cut : int) (pool : pool @ immutable)

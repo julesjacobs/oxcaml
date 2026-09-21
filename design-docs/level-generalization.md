@@ -16,9 +16,15 @@ child fails. There is no rollback, pair cache or path compression.
 `level_lower.ml` traverses links and both arrow children, then updates a node's
 level to the minimum of its current level and the requested bound. It preserves
 descriptors and memos. It deliberately does not prune at equal or smaller levels:
-there is no assumed descendant invariant hidden in that traversal. A shared DAG
-may be traversed repeatedly. Visited marks and occurs-check pruning remain later
-optimizations. Cycles can diverge; runtime termination is not proved.
+there is no assumed descendant invariant hidden in that traversal. Lowering may still traverse a shared DAG repeatedly and has no level shortcut.
+Cycles can diverge; runtime termination is not proved.
+
+`marked_occurs.ml` records completed negative searches in each node’s Boolean
+`visited` field. Repeated visits reuse that result. A temporary list of marked
+handles resets the field before either a positive or negative return. Checked
+proofs establish the search result and restore membership and the complete node
+value at every handle. The list carries no search results; search evidence
+erases. Unification requires initially clear marks and preserves that invariant.
 
 `generalize.ml` consumes a supplied pool traversal and marks finite nodes
 strictly above the cutoff generic. It preserves descriptors and memos, accepts

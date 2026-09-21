@@ -1,3 +1,4 @@
+open Marked_occurs_proofs
 open Copy_spec
 open Level_spec
 open Level_unifier_spec
@@ -69,6 +70,18 @@ let rec (lower_finite @ total) : (h : node Pref.heap) @ immutable -> (bound : in
   | Alias_tree (_, c) -> lower_finite h bound edits c (refine_ u); refine_ u
   | Branch (_, a, b) -> lower_finite h bound edits a (refine_ u); lower_finite h bound edits b (refine_ u); refine_ u)
 
+let rec (scan_finite @ total) : (h : node Pref.heap) @ immutable ->
+    (needle : node Pref.t) @ immutable -> (d : marks) @ immutable ->
+    (t : tree) @ immutable -> {u : unit | marks_valid h needle d && finite h t} ->
+    {u : unit | finite (scan_heap h d) t} @ ghost = fun h needle d t premise -> ghost_ (
+  let refine_ premise = premise in finite_def h t; tree_root_def t;
+  let after = scan_heap h d in finite_def after t; let x = tree_root t in
+  let u = () in scan_observe h needle d x (refine_ u); match t with
+  | Free _ | Constant_tree _ -> refine_ u
+  | Alias_tree (_, c) -> scan_finite h needle d c (refine_ u); refine_ u
+  | Branch (_, a, b) -> scan_finite h needle d a (refine_ u);
+    scan_finite h needle d b (refine_ u); refine_ u)
+
 let rec (unified_finite_at @ total) :
     (h : node Pref.heap) @ immutable ->
     (trees : ((x : node Pref.t) @ immutable ->
@@ -97,6 +110,13 @@ let rec (unified_finite_at @ total) :
         let refine_ target = search_finite h q p p trace (refine_ u) in
         let refine_ t = replace_free h q p target old (refine_ u) in refine_ t)
       else refine_ old
+    | Scanned (needle, marks, rest) ->
+      let mid = scan_heap h marks in
+      let middle_trees : (x : node Pref.t) @ immutable ->
+          {t : tree | tree_root t === x && (if H.mem mid x then finite mid t else observe mid x === None)} @ immutable total =
+        fun x -> let refine_ t = trees x in let u = () in scan_observe h needle marks x (refine_ u);
+          if H.mem h x then (scan_finite h needle marks t (refine_ u); refine_ t) else refine_ t in
+      unified_finite_at mid middle_trees p q ok after rest x (refine_ u)
     | Lowering (bound, edits, _, rest) ->
       let mid = lower_heap h bound edits in
       let middle_trees : (x : node Pref.t) @ immutable ->

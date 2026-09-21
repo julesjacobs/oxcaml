@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml level_unifier_proofs.ml level_unifier_metadata.ml level_unifier.ml level_unifier_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_unifier_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -36,7 +36,12 @@ let run mode =
   let p, q = match mode with 1 -> a, left | 3 -> b, left | 4 -> a, right | 5 -> a, a | _ -> left, right in
   ghost_ (active_all p; active_all q);
   let state : {t : node Pref.token | Pref.own t === h && H.mem h p && H.mem h q && active h p && active h q} = refine_ state in
-  let refine_ result = Level_unifier.unify h scope p q state in
+  let unmarked : ((x : node Pref.t) @ immutable ->
+    {u : unit | match H.at h x with None -> true | Some v -> not v.visited}) @ total ghost = ghost_ (fun x ->
+    let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
+    cell_def left_desc 4; cell_def right_desc 4;
+    let u = () in refine_ u) in
+  let refine_ result = Level_unifier.unify h scope unmarked p q state in
   let ok = result.#ok in let d = ghost_ result.#derivation in
   let after = ghost_ (Pref.own (borrow_ result.#state)) in
   ghost_ (let u = () in unified_frame h p q ok after d a (refine_ u));

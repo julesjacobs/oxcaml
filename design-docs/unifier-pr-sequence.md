@@ -53,7 +53,9 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [ ] Let-polymorphic HM: connect environments, let bindings, generalization and
   copying; prove soundness, completeness, principality and rejection against
   independent declarative typing rules.
-- [ ] In-node traversal marks with cleanup on every return path.
+- [x] In-node occurs-check marks with cleanup on every return path: Boolean
+  fields cache completed negative searches, and a temporary trail restores full
+  node contents pointwise. Success, failure, MGU and provenance proofs compose.
 - [ ] Structure linking without a unification pair cache.
 - [ ] Path compression with explicit representative and generic-cell framing.
 - [x] Copy-memo cleanup: a temporary duplicate-free list of touched source
@@ -68,6 +70,26 @@ For every item: implement the runtime change, check the semantic proofs, run
 positive and rejection tests, inspect ghost erasure, and review before publishing
 its stacked PR. Mark an item complete only when its stated guarantee is checked.
 Runtime termination remains outside scope.
+
+## Remaining HM proof ladder
+
+- [ ] Independent indexed declarative typing, scheme opening and context weakening.
+- [ ] Total type proofs: evaluation, opening, weakening, embedding, abstraction
+  and free-variable substitution.
+- [ ] Environment templates with constructed instance translators and protected
+  boundary transport.
+- [ ] Interleaved execution witnesses for actual richer-node operations.
+- [ ] Richer-node let-free inference, including monomorphic recursive lambdas:
+  model extension, model restriction, soundness and rejection.
+- [ ] One-let bridge: construct baseline and alternative RHS models, apply
+  relative generalization, and consume the resulting factorization for `id id`.
+- [ ] Nested execution transport for forests, levels, pools and active RHS origins.
+- [ ] Public closed-term HM soundness, completeness, principality and rejection;
+  nested-let, mixed-boundary and saved-garbage regression cases.
+
+These are proposed steps from the completed Pro consultation, not checked
+results. Each step must construct its witnesses rather than accept the desired
+semantic theorem as an input callback.
 
 The Pro design consultation supports the remaining order above. For each
 stage, require checked semantic proof functions, positive runtime cases,
