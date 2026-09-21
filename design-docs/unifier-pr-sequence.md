@@ -172,24 +172,32 @@ required for this sequence. Preserve full HM proofs at every runtime change.
   enclosing pool.
 - [x] Prove all memos empty at inference boundaries and restore this invariant
   after copying, including untouched and newly allocated nodes.
-- [ ] Remove copy epochs using the clean entry/exit memo invariant.
-- [ ] Package runtime proof arguments in all-ghost records with void layout;
+- [x] Remove copy epochs using the clean entry/exit memo invariant.
+- [x] Package runtime proof arguments in all-ghost records with void layout;
   inspect native calling conventions.
-- [ ] Replace unary-index linear environment lookup with an efficient verified
+- [x] Replace unary-index linear environment lookup with an efficient verified
   representation.
-- [ ] Replace depth-sensitive runtime recursion with explicit worklists.
+- [x] Replace depth-sensitive runtime recursion with explicit worklists.
 - [x] Reduce update allocation by skipping unchanged writes. Retain the accepted
   `Pref` representation; splitting every node field is not required for the
   algorithmic model and has not been justified by a measured benefit.
 - [ ] Run integrated positive/rejection tests, inspect erasure, review and
   publish the stacked improvements.
 
-The inference driver, lookup, pooled allocation, pool closing, copy cleanup and
-pruned lowering now use void-layout ghost wrappers. Native Cmm confirms their
-runtime argument lists. Other runtime helpers still need conversion. Pool
-closing and copy cleanup compile to loops. Pool closing's ghost proof runs
-before the recursive call to preserve tail-call optimization. Representative-only
-pool tracking and level-directed transfer remain.
+All helpers on the HM execution path now use void-layout ghost wrappers.
+Native Cmm confirms their runtime argument lists. Clean instantiation uses
+in-node forwarding pointers, restores empty memos, and allocates no epoch cell.
+The earlier stamped copier remains a separate proof-ladder implementation.
+
+Representative lookup and compression compile to loops with erased path
+reconstruction. The occurs check, pruned lowering, optimized unification,
+clean copying and HM driver use explicit continuation closures for pending
+work. Their full proof chain checks; native stress cases at depth 200,000 pass.
+All nine deep HM, shared lowering, compression, copy cleanup, shared
+unification, marked occurs and rejection suites pass in bytecode and native
+code. Pool closing and
+copy cleanup already compile to loops. Representative-only pool tracking and
+level-directed transfer remain.
 
 The first efficiency batch passes nine focused positive/rejection suites in
 bytecode and native code, including full HM principality and the shared-DAG
@@ -197,3 +205,35 @@ regression. The remaining allocation and HM callers also pass direct proof
 checking. Native Cmm was inspected for the converted helpers, and
 `codex review --uncommitted` reported no actionable defects. The unchecked
 items above remain work for subsequent batches.
+
+Pool consultation (2026-09-16): https://chatgpt.com/c/6aab0a94-5f58-83eb-8540-4ad3abdef13c
+
+Objective: derive representative-only pool coverage without weakening full HM
+principality. Full current development attached. Proposed results must be
+checked against the existing low-boundary and finite-scope invariants.
+
+The environment implementation uses skew binary random-access lists and machine
+integer variable indices. `Fast_environment.lookup_encoded` connects the
+executable lookup to the existing declarative environment. `Hm_infer.closed_hm`
+converts the original syntax once; `closed_compiled` accepts `Fast_term.term`
+directly. `Fast_term.bound` constructs a variable from an integer while its
+unary source index is ghost. The native worker receives only depth, pool,
+runtime environment, runtime term and continuation. The full HM proof chain,
+200,000 lookups and direct compiled inference pass in bytecode/native code.
+The full principality regression also passes in bytecode/native code with
+the new environment, including the deep cases. The open-environment
+compatibility fixture also passes in bytecode/native code.
+
+Pool migration experiments are isolated in `/tmp/vox-representative-pool-check`.
+Checked steps: finite forests construct unique representative witnesses;
+representative-level observations are independent of the witness; pool closing
+preserves resolution paths and closes covered representative levels; an alias
+can keep a finite stored level while its representative becomes generic; and a
+level-independent representative loop checks. A closing loop that skips links also checks. These are local migration
+lemmas and an isolated primitive, not yet the full HM integration.
+
+The effective-level experiment now also proves representative-level closing,
+physical preservation of saved low boundaries, and whole-scan level ordering.
+These predicates use explicit total representative witnesses, with no SMT
+quantifiers or new assumptions. The active HM implementation has not switched
+to these predicates yet.

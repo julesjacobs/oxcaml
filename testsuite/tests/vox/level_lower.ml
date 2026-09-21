@@ -6,24 +6,25 @@ open Lower_locality_proofs
 
 type written = #{state : node Pref.token; edits : lowering @@ ghost}
 
-let write_level : (h : node Pref.heap) @ immutable ghost -> (bound : int) ->
+let write_level : (h : (node Pref.heap) Ghost.t) @ immutable -> (bound : int) ->
     (p : node Pref.t) @ immutable ->
-    (t : {t : node Pref.token | Pref.own t === h && bound >= 0 && active h p
-      && match H.at h p with None -> false | Some v -> children_below h v.desc bound}) @ unique ->
-    {r : written | lower_valid h bound r.#edits
-      && Pref.own r.#state === lower_heap h bound r.#edits
+    (t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && active h.Ghost.ghost p
+      && match H.at h.Ghost.ghost p with None -> false | Some v -> children_below h.Ghost.ghost v.desc bound}) @ unique ->
+    {r : written | lower_valid h.Ghost.ghost bound r.#edits
+      && Pref.own r.#state === lower_heap h.Ghost.ghost bound r.#edits
       && below (Pref.own r.#state) p bound && confined r.#edits (Tip p)} @ unique = fun h bound p t ->
   let refine_ t = t in
-  ghost_ (active_def h p; at_level_def h p);
+  ghost_ (active_def h.Ghost.ghost p; at_level_def h.Ghost.ghost p);
   let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
   let refine_ old = Pref.read p (borrow_ t) in let refine_ t = t in
   let v = lower_cell old bound in
   let t : {t : node Pref.token | H.mem (Pref.own t) p} = refine_ t in
   let refine_ t = Pref.write p v t in
   let edits = ghost_ (Lower (p, old, Keep)) in
-  let after = ghost_ (lower_heap h bound edits) in
-  ghost_ (let empty = Keep in lower_heap_def h bound empty; lower_valid_def h bound empty;
-    lower_heap_def h bound edits; lower_valid_def h bound edits; lower_cell_def old bound;
+  let after = ghost_ (lower_heap h.Ghost.ghost bound edits) in
+  ghost_ (let empty = Keep in lower_heap_def h.Ghost.ghost bound empty; lower_valid_def h.Ghost.ghost bound empty;
+    lower_heap_def h.Ghost.ghost bound edits; lower_valid_def h.Ghost.ghost bound edits; lower_cell_def old bound;
+    Copy_heap_proofs.put_frame h.Ghost.ghost p v p;
     below_def after p bound; at_level_def after p;
     let tree = Tip p in contains_def tree p; confined_def edits tree;
     let empty = Keep in confined_def empty tree; ());
@@ -49,7 +50,9 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
       ghost_ (children_below_def h old.desc bound);
       let t : {t : node Pref.token | Pref.own t === h && bound >= 0 && active h p
         && match H.at h p with None -> false | Some v -> children_below h v.desc bound} = refine_ t in
-      let refine_ r = write_level h bound p t in
+      let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h)} in
+      let refine_ state_argument2 = t in
+      let refine_ r = write_level h_witness1 bound p (refine_ state_argument2) in
       let tree = ghost_ (Tip p) in let edits = ghost_ r.#edits in
       let after = ghost_ (Pref.own (borrow_ r.#state)) in
       ghost_ (let u = () in lowering_at h bound edits p (refine_ u);
@@ -65,7 +68,9 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
         lower_frame_def h mid p; children_below_def mid old.desc bound);
       let t = child.#state in let t : {t : node Pref.token | Pref.own t === mid && bound >= 0 && active mid p
         && match H.at mid p with None -> false | Some v -> children_below mid v.desc bound} = refine_ t in
-      let refine_ result = write_level mid bound p t in
+      let h_witness3 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (mid)} in
+      let refine_ state_argument4 = t in
+      let refine_ result = write_level h_witness3 bound p (refine_ state_argument4) in
       let w = ghost_ result.#edits in let after = ghost_ (Pref.own (borrow_ result.#state)) in
       let frame : ((x : node Pref.t) @ immutable -> {u : unit | lower_frame mid after x}) @ total ghost = ghost_ (fun x ->
         let u = () in let refine_ u = lowering_at mid bound w x (refine_ u) in refine_ u) in
@@ -97,7 +102,9 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
         lower_frame_def h h1 p; lower_frame_def h1 h2 p; children_below_def h2 old.desc bound);
       let t = right.#state in let t : {t : node Pref.token | Pref.own t === h2 && bound >= 0 && active h2 p
         && match H.at h2 p with None -> false | Some v -> children_below h2 v.desc bound} = refine_ t in
-      let refine_ result = write_level h2 bound p t in
+      let h_witness5 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h2)} in
+      let refine_ state_argument6 = t in
+      let refine_ result = write_level h_witness5 bound p (refine_ state_argument6) in
       let w = ghost_ result.#edits in let after = ghost_ (Pref.own (borrow_ result.#state)) in
       let suffix = ghost_ (Sequence (d2, w)) in let edits = ghost_ (Sequence (d1, suffix)) in
       let frame2 : ((x : node Pref.t) @ immutable -> {u : unit | lower_frame h2 after x}) @ total ghost = ghost_ (fun x ->

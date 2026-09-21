@@ -14,24 +14,25 @@ let (put_scope @ total) : (h : node Pref.heap) @ immutable ->
   if x === p then (
     (match v.desc with Var | Bool -> () | Link q -> put_frame h p v q; ()
       | Arrow (a, b) -> put_frame h p v a; put_frame h p v b; ());
-    (match v.memo with Empty_memo -> () | Memo (stamp, _) -> put_frame h p v stamp; ()); refine_ u)
+    (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> put_frame h p v stamp; ()); refine_ u)
   else (match H.at h x with None -> refine_ u | Some old ->
     (match old.desc with Var | Bool -> () | Link q -> put_frame h p v q; ()
       | Arrow (a, b) -> put_frame h p v a; put_frame h p v b; ());
-    (match old.memo with Empty_memo -> () | Memo (stamp, _) -> put_frame h p v stamp; ()); refine_ u))
+    (match old.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> put_frame h p v stamp; ()); refine_ u))
 
 let rec (epoch_allocated @ total) : (saved : node Pref.heap) @ immutable -> (epoch : node Pref.t) @ immutable ->
     (depth : int) -> (d : history) @ immutable -> {u : unit | valid saved epoch depth d} ->
     {u : unit | H.mem (heap saved epoch depth d) epoch} @ ghost = fun saved epoch depth d premise -> ghost_ (
   let refine_ premise = premise in valid_def saved epoch depth d; heap_def saved epoch depth d;
   let u = () in match d with
+  | Clean -> refine_ u
   | Start -> let v = cell Bool depth in put_frame saved epoch v epoch; refine_ u
   | Fresh (rest, p, q, old, desc) ->
     epoch_allocated saved epoch depth rest (refine_ u);
     let h = heap saved epoch depth rest in let v = cell desc depth in put_frame h q v epoch;
-    let h1 = H.put h q v in let w = mark old epoch q in put_frame h1 p w epoch; refine_ u
+    let h1 = H.put h q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h1 p w epoch; refine_ u
   | Alias (rest, p, q, old) -> epoch_allocated saved epoch depth rest (refine_ u);
-    let h = heap saved epoch depth rest in let w = mark old epoch q in put_frame h p w epoch; refine_ u)
+    let h = heap saved epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; put_frame h p w epoch; refine_ u)
 
 let (ready_scoped @ total) : (saved : node Pref.heap) @ immutable -> (epoch : node Pref.t) @ immutable ->
     (depth : int) -> (d : history) @ immutable -> (source : desc) @ immutable -> (dest : desc) @ immutable ->
@@ -54,6 +55,7 @@ let rec (history_scope @ total) : (saved : node Pref.heap) @ immutable ->
       else H.at (heap saved epoch depth d) x === None} @ ghost = fun saved scope epoch depth d x premise -> ghost_ (
   let refine_ premise = premise in valid_def saved epoch depth d; heap_def saved epoch depth d;
   let u = () in match d with
+  | Clean -> scope x; refine_ u
   | Start -> let desc = Bool in let v = cell desc depth in cell_def desc depth; payload_scoped_def saved v;
     let refine_ u = put_scope saved scope epoch v x (refine_ u) in refine_ u
   | Fresh (rest, p, q, old, desc) ->
@@ -66,7 +68,7 @@ let rec (history_scope @ total) : (saved : node Pref.heap) @ immutable ->
         @ total = fun x -> let u = () in let refine_ u = put_scope h prior q v x (refine_ u) in refine_ u in
     history_grows saved epoch depth rest p (refine_ u); prior p; source_ok_def h p;
     epoch_allocated saved epoch depth rest (refine_ u);
-    let w = mark old epoch q in mark_def old epoch q; payload_scoped_def h1 w;
+    let w = session_mark rest old epoch q in session_mark_def rest old epoch q; mark_def old epoch q; payload_scoped_def h1 w;
     let refine_ u = put_scope h1 next p w x (refine_ u) in refine_ u
   | Alias (rest, p, q, old) ->
     let h = heap saved epoch depth rest in
@@ -74,7 +76,7 @@ let rec (history_scope @ total) : (saved : node Pref.heap) @ immutable ->
         @ total = fun x -> let u = () in let refine_ u = history_scope saved scope epoch depth rest x (refine_ u) in refine_ u in
     history_grows saved epoch depth rest p (refine_ u); prior p; source_ok_def h p;
     epoch_allocated saved epoch depth rest (refine_ u);
-    let w = mark old epoch q in mark_def old epoch q; payload_scoped_def h w;
+    let w = session_mark rest old epoch q in session_mark_def rest old epoch q; mark_def old epoch q; payload_scoped_def h w;
     let refine_ u = put_scope h prior p w x (refine_ u) in refine_ u)
 
 let[@def] (describes @ total)
@@ -120,15 +122,15 @@ let (with_allocation_model @ total) : (h : node Pref.heap) @ immutable ->
     let equal : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x}
         @ total = fun x -> tau_def x; let u = () in refine_ u in
     tau_def p; let u = () in let refine_ u = use tau next equal (refine_ u) in refine_ u)
-let (mark_model @ total) : (h : node Pref.heap) @ immutable ->
+let (mark_model @ total) : (d : history) @ immutable -> (h : node Pref.heap) @ immutable ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
     (model : ((x : node Pref.t) @ immutable -> {u : unit | equation h rho x})) @ total ->
     (p : node Pref.t) @ immutable -> (old : node) @ immutable -> (epoch : node Pref.t) @ immutable ->
     (q : node Pref.t) @ immutable -> (x : node Pref.t) @ immutable ->
-    {u : unit | H.at h p === Some old} -> {u : unit | equation (H.put h p (mark old epoch q)) rho x}
-    @ ghost = fun h rho model p old epoch q x premise -> ghost_ (
-  let refine_ premise = premise in let after = H.put h p (mark old epoch q) in
-  mark_def old epoch q; model x; equation_def h rho x; equation_def after rho x; let u = () in refine_ u)
+    {u : unit | H.at h p === Some old} -> {u : unit | equation (H.put h p (session_mark d old epoch q)) rho x}
+    @ ghost = fun d h rho model p old epoch q x premise -> ghost_ (
+  let refine_ premise = premise in let after = H.put h p (session_mark d old epoch q) in
+  session_mark_def d old epoch q; mark_def old epoch q; model x; equation_def h rho x; equation_def after rho x; let u = () in refine_ u)
 
 let (restrict_model @ total) : (saved : node Pref.heap) @ immutable ->
     (scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem saved x then source_ok saved x else H.at saved x === None})) @ total ->

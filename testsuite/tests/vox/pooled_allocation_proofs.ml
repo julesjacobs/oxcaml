@@ -11,10 +11,10 @@ let (allocation_source @ total) : (h : node Pref.heap) @ immutable -> (p : node 
   let refine_ premise = premise in let after = H.put h p v in
   payload_scoped_def h v; source_ok_def h x; source_ok_def after x; put_frame h p v x;
   let u = () in
-  (match v.memo with Empty_memo -> () | Memo (stamp, _) -> put_frame h p v stamp; ());
+  (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> put_frame h p v stamp; ());
   (match v.desc with Var | Bool -> () | Link q -> put_frame h p v q; () | Arrow (a, b) -> put_frame h p v a; put_frame h p v b; ());
   (match H.at h x with None -> () | Some old ->
-    (match old.memo with Empty_memo -> () | Memo (stamp, _) -> put_frame h p v stamp; ());
+    (match old.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> put_frame h p v stamp; ());
     (match old.desc with Var | Bool -> () | Link q -> put_frame h p v q; () | Arrow (a, b) -> put_frame h p v a; put_frame h p v b; ())); refine_ u)
 let rec (allocation_pool @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (v : node) @ immutable -> (pool : pool) @ immutable ->

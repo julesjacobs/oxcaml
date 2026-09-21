@@ -12,14 +12,15 @@ let rec (copy_new_member @ total) : (h : node Pref.heap) @ immutable -> (pool : 
     let refine_ premise = premise in valid_def h epoch depth d; heap_def h epoch depth d;
     Pooled_spec.registered_def pool epoch d; let out = Pooled_spec.registered pool epoch d in listed_def out x;
     let u = () in match d with
+    | Clean -> refine_ u
     | Start -> let desc : desc = Bool in let v = cell desc depth in Copy_heap_proofs.put_frame h epoch v x; refine_ u
     | Fresh (rest, p, q, old, desc) ->
       copy_new_member h pool epoch depth rest x (refine_ u);
-      let mid = heap h epoch depth rest in let v = cell desc depth in let h1 = H.put mid q v in let w = mark old epoch q in
+      let mid = heap h epoch depth rest in let v = cell desc depth in let h1 = H.put mid q v in let w = session_mark rest old epoch q in session_mark_def rest old epoch q;
       Copy_heap_proofs.put_frame mid q v x; Copy_heap_proofs.put_frame h1 p w x; refine_ u
     | Alias (rest, p, q, old) ->
       copy_new_member h pool epoch depth rest x (refine_ u);
-      let mid = heap h epoch depth rest in let w = mark old epoch q in Copy_heap_proofs.put_frame mid p w x; refine_ u)
+      let mid = heap h epoch depth rest in let w = session_mark rest old epoch q in session_mark_def rest old epoch q; Copy_heap_proofs.put_frame mid p w x; refine_ u)
 
 let (copy_unlisted @ total) : (h : node Pref.heap) @ immutable -> (pool : pool) @ immutable ->
     (epoch : node Pref.t) @ immutable -> (depth : int) -> (d : history) @ immutable -> (x : node Pref.t) @ immutable ->

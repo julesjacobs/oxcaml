@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml hm_declarative.ml hm_environment_spec.ml compression_spec.ml compression_path_proofs.ml compressed_representative.ml compression_proofs.ml leaf_provenance_spec.ml leaf_provenance_proofs.ml structure_finite_proofs.ml structure_model_proofs.ml structure_spec.ml structure_link.ml structure_origin_proofs.ml compression_origin_proofs.ml optimized_unifier_spec.ml optimized_metadata.ml optimized_finite_proofs.ml optimized_model_proofs.ml optimized_origin_proofs.ml optimized_link_proofs.ml optimized_link.ml pruned_lower_proofs.ml pruned_lower.ml pruned_bind.ml optimized_unifier.ml copy_order_proofs.ml ordered_copy.ml copy_cleanup_spec.ml copy_cleanup_proofs.ml copy_cleanup.ml clean_copy.ml nested_pool_spec.ml nested_pool_proofs.ml nested_pool.ml hm_type_proofs.ml hm_execution_spec.ml hm_execution_proofs.ml hm_forest_proofs.ml hm_model_proofs.ml hm_runtime_spec.ml hm_runtime_proofs.ml hm_sound_proofs.ml hm_environment_proofs.ml hm_protected_proofs.ml hm_registration_proofs.ml hm_let_runtime_proofs.ml hm_infer.ml leaf_agreement_proofs.ml hm_origin_proofs.ml hm_complete_proofs.ml hm_one_let_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_polymorphic_proofs.ml hm_polymorphic_fixtures.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_freshness_proofs.ml hm_template_instance_proofs.ml hm_scheme_transport_proofs.ml hm_generalized_scheme_proofs.ml hm_polymorphic_sound_proofs.ml hm_principal_demo.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml hm_declarative.ml hm_environment_spec.ml compression_spec.ml compression_path_proofs.ml compressed_representative.ml compression_proofs.ml leaf_provenance_spec.ml leaf_provenance_proofs.ml structure_finite_proofs.ml structure_model_proofs.ml structure_spec.ml structure_link.ml structure_origin_proofs.ml compression_origin_proofs.ml optimized_unifier_spec.ml optimized_metadata.ml optimized_finite_proofs.ml optimized_model_proofs.ml optimized_origin_proofs.ml optimized_link_proofs.ml optimized_link.ml pruned_lower_proofs.ml pruned_lower.ml pruned_bind.ml optimized_unifier.ml copy_order_proofs.ml ordered_copy.ml copy_cleanup_spec.ml copy_cleanup_proofs.ml copy_cleanup.ml clean_pooled_copy.ml clean_copy.ml nested_pool_spec.ml nested_pool_proofs.ml nested_pool.ml hm_type_proofs.ml hm_execution_spec.ml hm_execution_proofs.ml hm_forest_proofs.ml hm_model_proofs.ml hm_runtime_spec.ml hm_runtime_proofs.ml hm_sound_proofs.ml hm_environment_proofs.ml hm_protected_proofs.ml hm_registration_proofs.ml hm_let_runtime_proofs.ml fast_environment.ml fast_term.ml hm_infer.ml leaf_agreement_proofs.ml hm_origin_proofs.ml hm_complete_proofs.ml hm_one_let_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_polymorphic_proofs.ml hm_polymorphic_fixtures.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_freshness_proofs.ml hm_template_instance_proofs.ml hm_scheme_transport_proofs.ml hm_generalized_scheme_proofs.ml hm_polymorphic_sound_proofs.ml hm_principal_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -87,3 +87,58 @@ let saved_garbage () =
       let _typing = Hm_polymorphic_sound_proofs.closed_sound out.#execution after out.#pool p tree (refine_ u) in ()); ()
 
 let () = saved_garbage ()
+
+let deep_infer : (e : {e : D.term | D.scoped_term D.Z e}) @ immutable -> unit =
+  fun e -> let refine_ out = Hm_infer.closed_hm e in
+    match out.#value with None -> assert false | Some _ -> ()
+
+let rec deep_lambdas : int -> (body : D.term) @ immutable ->
+    (scope : (((n : D.index) @ immutable ->
+      {u : unit | D.scoped_term n body})) Ghost.t) @ total -> unit =
+  fun count body scope ->
+    if count <= 0 then (
+      ghost_ (let z = D.Z in scope.Ghost.ghost z; ());
+      let input : {e : D.term | D.scoped_term D.Z e} = refine_ body in
+      deep_infer input;
+      let z = D.Z in let one = D.S z in let two = D.S one in
+      let variable = D.Bound z in
+      let copied = D.Let (body, variable) in
+      ghost_ (D.scoped_term_def z copied; D.scoped_term_def one variable;
+        D.present_def one z; ());
+      let input : {e : D.term | D.scoped_term D.Z e} = refine_ copied in
+      deep_infer input;
+      let identity = D.Lambda variable in
+      let applied = D.Apply (identity, body) in
+      ghost_ (D.scoped_term_def z applied; D.scoped_term_def z identity; ());
+      let input : {e : D.term | D.scoped_term D.Z e} = refine_ applied in
+      deep_infer input;
+      let call = D.Apply (variable, body) in
+      let outer = D.Bound one in
+      let inner_call = D.Apply (outer, body) in
+      let drop = D.Lambda inner_call in
+      let calls = D.Apply (drop, call) in
+      let unified = D.Lambda calls in
+      ghost_ (scope.Ghost.ghost one; scope.Ghost.ghost two;
+        D.scoped_term_def one call; D.scoped_term_def two inner_call;
+        D.scoped_term_def two outer; D.present_def two one;
+        D.scoped_term_def two variable; D.present_def two z;
+        D.scoped_term_def one drop; D.scoped_term_def one calls;
+        D.scoped_term_def z unified; ());
+      let input : {e : D.term | D.scoped_term D.Z e} = refine_ unified in
+      deep_infer input)
+    else (
+      let next = D.Lambda body in
+      let scope : (((n : D.index) @ immutable ->
+        {u : unit | D.scoped_term n next})) Ghost.t =
+        {Ghost.ghost = ghost_ (fun n ->
+          let more = D.S n in scope.Ghost.ghost more;
+          D.scoped_term_def n next; let u = () in refine_ u)} in
+      deep_lambdas (count - 1) next scope)
+
+let () =
+  let body = D.Truth in
+  let scope : (((n : D.index) @ immutable ->
+    {u : unit | D.scoped_term n body})) Ghost.t =
+    {Ghost.ghost = ghost_ (fun n ->
+      D.scoped_term_def n body; let u = () in refine_ u)} in
+  deep_lambdas 200000 body scope

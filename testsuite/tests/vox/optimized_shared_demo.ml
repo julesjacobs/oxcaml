@@ -102,7 +102,14 @@ let desc = Var in cell_def desc 0; let desc = Bool in cell_def desc 4;
     below_def h1 right 4; below_def h1 child 4; at_level_def h1 right; at_level_def h1 child;
     children_below_def h1 rd 4;
     Pooled_allocation_proofs.allocation_ordered h1 q rd 4 x (refine_ u); refine_ u) in
-  let refine_ out = Optimized_unifier.unify h2 scope2 unmarked2 order trees2 p q state in
+  let h_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h2)} in
+  let scope_witness2 : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h_witness1.Ghost.ghost x) || finite_scope h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope2)} in
+  let unmarked_witness3 : (((x : node Pref.t) @ immutable -> {u : unit | match H.at h_witness1.Ghost.ghost x with None -> true | Some v -> not v.visited})) Ghost.t = {Ghost.ghost = ghost_ (refine_ unmarked2)} in
+  let order_witness4 : (((x : node Pref.t) @ immutable -> {u : unit | ordered h_witness1.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ order)} in
+  let trees_witness5 : (((x : node Pref.t) @ immutable ->
+      {t : tree | tree_root t === x && (if H.mem h_witness1.Ghost.ghost x then finite h_witness1.Ghost.ghost t else observe h_witness1.Ghost.ghost x === None)} @ immutable)) Ghost.t = {Ghost.ghost = ghost_ (refine_ trees2)} in
+  let refine_ state_argument6 = state in
+  let refine_ out = Optimized_unifier.unify h_witness1 scope_witness2 unmarked_witness3 order_witness4 trees_witness5 p q (refine_ state_argument6) in
   let after = ghost_ (Pref.own (borrow_ out.#state)) in let d = ghost_ out.#derivation in let ok = out.#ok in
   let _mgu_proof = ghost_ (
     if ok then (
