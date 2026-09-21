@@ -118,3 +118,23 @@ a non-arrow recursive type and an out-of-scope recursive-body index.
 Mutable levels, generic templates and let-polymorphism remain subsequent stages.
 A completed recursive lambda can later be generalized by an enclosing let;
 recursive uses inside its own body remain monomorphic.
+
+
+## Independent declarative HM layer
+
+`hm_declarative.ml` gives let-polymorphic typing its own specification. Bound
+scheme parameters use de Bruijn indices; free type names use handles without
+reading their cells. A scheme binds its first `k` indices. Generalizing a RHS
+adds `k` ambient parameters and weakens the outer context, preserving every
+scheme's own binders. Recursive self and argument bindings have arity zero.
+
+`hm_type_proofs.ml` proves opening/evaluation, weakening/meaning, well-formedness
+preservation, embedding and term scoping. Universal facts are total functions;
+finite type arguments supply explicit instance witnesses. The positive fixture
+constructs an independent `id id` derivation and a monomorphic recursive call.
+Rejection probes check argument count, bound-parameter capture and polymorphic
+recursive self.
+
+This layer does not yet connect declarative let typing to a mutable execution.
+The remaining bridge must construct environment instance translators from RHS
+model-extension proofs; the checklist records that obligation separately.
