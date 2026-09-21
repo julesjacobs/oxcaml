@@ -336,6 +336,7 @@ let pat_extra sub = function
   | Tpat_type (path,lid) -> Tpat_type (path, map_loc_lid sub lid)
   | Tpat_open (path,lid,env) ->
       Tpat_open (path, map_loc_lid sub lid, sub.env sub env)
+  | Tpat_refinement _ as d -> d
   | Tpat_constraint (ct, ma) ->
     Tpat_constraint (Option.map (sub.typ sub) ct, sub.modes sub ma)
   | Tpat_inspected_type (Label_disambiguation _) as d -> d
@@ -451,7 +452,7 @@ let extra sub = function
   | Texp_poly cto -> Texp_poly (Option.map (sub.typ sub) cto)
   | Texp_borrowed as d -> d
   | Texp_ghost_region as d -> d
-    | Texp_refine as d -> d
+  | (Texp_refine | Texp_refinement _ | Texp_value_name _) as d -> d
   | Texp_let_refine (id, name) ->
       Texp_let_refine (id, map_loc sub name)
   | Texp_stack as d -> d

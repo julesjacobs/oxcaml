@@ -6,6 +6,13 @@ let unavailable structure =
           | Typedtree.Texp_refine, loc, _ ->
             Location.raise_errorf ~loc
               "Refinement verification is unavailable in this compiler"
+          | Typedtree.Texp_refinement { target; _ }, loc, _ ->
+            (match Types.get_desc
+                (Ctype.expand_head expression.Typedtree.exp_env target) with
+             | Types.Trefine _ ->
+                 Location.raise_errorf ~loc
+                   "Refinement verification is unavailable in this compiler"
+             | _ -> ())
           | _ -> ()) expression.Typedtree.exp_extra;
         Tast_iterator.default_iterator.expr self expression)
     }

@@ -1575,7 +1575,11 @@ let with_refinement_names binders ty f =
           if String.Set.mem candidate used then fresh (candidate ^ "'")
           else candidate
         in
-        Ident.Map.add binder (fresh (Ident.name binder)) names)
+        let seed = match Ident.name binder with
+          | "*argument*" -> "argument"
+          | name -> name
+        in
+        Ident.Map.add binder (fresh seed) names)
       binders !refinement_names
   in
   Misc.protect_refs [Misc.R (refinement_names, names)] f
