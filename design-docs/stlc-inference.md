@@ -165,3 +165,14 @@ the context, then identifies the transformed context with ordinary weakening.
 The fixture composes abstraction with arbitrary free-name substitution, including
 a substitution that reuses the original handle name. The heap/path argument that
 establishes this absence for graph-selected parameters remains in the HM bridge.
+
+
+`hm_execution_spec.ml` records interleaved richer-node inference operations.
+Variable steps use the cleaned copy heap; applications record both child runs
+and the actual unifier derivation. Let steps run the RHS one level deeper,
+close its pool, transfer retained finite nodes, then run the body. Separate
+failure constructors preserve the executed prefix and return no result handle.
+`hm_execution_proofs.ml` proves heap extension and ownership of successful
+results. The fixture executes allocation, close/transfer and clean copying,
+and checks that concrete run against the witness. The recursive inference
+driver and semantic typing bridge remain unfinished.

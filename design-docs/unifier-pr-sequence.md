@@ -82,7 +82,9 @@ Runtime termination remains outside scope.
 - [x] Environment templates with protected boundary transport and constructed
   empty, monomorphic, weakened and model-transported instance translators.
   The let translator remains in the one-let bridge below.
-- [ ] Interleaved execution witnesses for actual richer-node operations.
+- [x] Interleaved execution witnesses for actual richer-node operations, with
+  heap extension and successful-result ownership. A concrete let trace checks
+  allocation, close/transfer and clean copying; the driver remains below.
 - [ ] Richer-node let-free inference, including monomorphic recursive lambdas:
   model extension, model restriction, soundness and rejection.
 - [ ] One-let bridge: construct baseline and alternative RHS models, apply
