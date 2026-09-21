@@ -15650,6 +15650,12 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
                ( expression locals record,
                  Data_types.lbl_res_type_path label,
                  Longident.last lid.txt ))
+      | Texp_unboxed_field { record; lid; label; _ } ->
+          mk
+            (Rexp_unboxed_field
+               ( expression locals record,
+                 Data_types.gen_lbl_res_type_path label,
+                 Longident.last lid.txt ))
       | Texp_ifthenelse (condition, ifso, ifnot) ->
           mk
             (Rexp_ifthenelse
@@ -15744,7 +15750,7 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
       | Texp_unboxed_unit | Texp_unboxed_bool _ | Texp_let _
       | Texp_letmutable _ | Texp_function _ | Texp_match _ | Texp_try _
       | Texp_unboxed_tuple _ | Texp_variant _ | Texp_atomic_loc _
-      | Texp_unboxed_field _ | Texp_setfield _ | Texp_idx _
+      | Texp_setfield _ | Texp_idx _
       | Texp_list_comprehension _ | Texp_array_comprehension _
       | Texp_while _ | Texp_for _ | Texp_send _ | Texp_new _
       | Texp_mutvar _ | Texp_setinstvar _

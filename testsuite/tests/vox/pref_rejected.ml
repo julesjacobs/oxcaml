@@ -123,6 +123,51 @@ Error: The value "Pref.read" is "partial"
          which is expected to be "total".
 |}]
 
+module Duplicated_join = struct
+  let bad (t : int Pref.token @ unique) =
+    let refine_ result = Pref.join t t in ()
+end;;
+[%%expect{|
+Line 3, characters 37-38:
+3 |     let refine_ result = Pref.join t t in ()
+                                         ^
+Error: This value is used here, but it is also being used as unique at:
+Line 3, characters 35-36:
+3 |     let refine_ result = Pref.join t t in ()
+                                       ^
+
+|}]
+
+module Ghost_split = struct
+  let bad (h : int Pref.heap @ immutable ghost) (t : int Pref.token @ unique) =
+    let _ = ghost_ (Pref.split h t) in ()
+end;;
+[%%expect{|
+Line 3, characters 33-34:
+3 |     let _ = ghost_ (Pref.split h t) in ()
+                                     ^
+Error: This value is "aliased"
+         because it is used in an expression (at line 3, characters 12-35).
+       However, the highlighted expression is expected to be "unique".
+|}]
+
+module Split_stale = struct
+  let bad (h : int Pref.heap @ immutable ghost) (t : int Pref.token @ unique) =
+    let refine_ parts = Pref.split h t in
+    let left = parts.#Pref.left in
+    let refine_ result = Pref.join t left in ()
+end;;
+[%%expect{|
+Line 5, characters 35-36:
+5 |     let refine_ result = Pref.join t left in ()
+                                       ^
+Error: This value is used here, but it has already been used as unique at:
+Line 3, characters 37-38:
+3 |     let refine_ parts = Pref.split h t in
+                                         ^
+
+|}]
+
 module Forged = struct
   let bad (h : int Pref.heap @ ghost) : int Pref.token = h
 end;;
@@ -213,7 +258,42 @@ Error: The value "Pref.write" is "partial"
          which is expected to be "total".
 |}]
 
+module Wrong_fragment = struct
+  let bad () =
+    let value = 7 in
+    let refine_ t = Pref.empty () in
+    let refine_ a = Pref.alloc value t in
+    let p = a.Pref.value in
+    let t = a.Pref.state in
+    let refine_ b = Pref.alloc value t in
+    let q = b.Pref.value in
+    let t = b.Pref.state in
+    let selection = ghost_ (Pref.Heap.put (Pref.Heap.empty ()) p value) in
+    let refine_ parts = Pref.split selection t in
+    let left = parts.#Pref.left in
+    let left : {t : int Pref.token | Pref.Heap.mem (Pref.own t) q} = refine_ left in
+    let refine_ ignored = Pref.read q left in ()
+end;;
+[%%expect{|
+Line 14, characters 69-81:
+14 |     let left : {t : int Pref.token | Pref.Heap.mem (Pref.own t) q} = refine_ left in
+                                                                          ^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
 
+module Overlapping_maps = struct
+  let bad (p : int Pref.t @ immutable) =
+    let h = ghost_ (Pref.Heap.put (Pref.Heap.empty ()) p 7) in
+    let u = () in
+    let claim : {u : unit | Pref.Heap.disjoint h h} = refine_ u in
+    ignore claim
+end;;
+[%%expect{|
+Line 5, characters 54-63:
+5 |     let claim : {u : unit | Pref.Heap.disjoint h h} = refine_ u in
+                                                          ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
 
 module Typed_heap_diagonal = struct
   type callback = {
@@ -248,3 +328,14 @@ Error: The value "p" has type "bool Pref.t"
        Type "bool" is not compatible with type "int"
 |}]
 
+let wrong_join (ints : int Pref.token @ unique)
+    (bools : bool Pref.token @ unique) =
+  Pref.join ints bools;;
+[%%expect{|
+Line 3, characters 17-22:
+3 |   Pref.join ints bools;;
+                     ^^^^^
+Error: The value "bools" has type "bool Pref.token"
+       but an expression was expected of type "int Pref.token"
+       Type "bool" is not compatible with type "int"
+|}]

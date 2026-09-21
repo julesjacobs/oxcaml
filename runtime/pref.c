@@ -76,3 +76,41 @@ CAMLprim value caml_pref_heap_put(value heap, value cell, value initial)
 {
   return Val_unit;
 }
+
+CAMLprim void caml_pref_split(value selection) { }
+CAMLprim value caml_pref_split_bytecode(value selection, value token)
+{
+  CAMLparam0();
+  CAMLlocal1(pair);
+  pair = caml_alloc_small(2, 0);
+  Field(pair, 0) = Val_unit;
+  Field(pair, 1) = Val_unit;
+  CAMLreturn(pair);
+}
+CAMLprim void caml_pref_join(void) { }
+CAMLprim value caml_pref_join_bytecode(value left, value right)
+{
+  return Val_unit;
+}
+CAMLprim value caml_pref_heap_union(value left, value right) { return Val_unit; }
+CAMLprim value caml_pref_heap_restrict(value heap, value selected)
+{
+  return Val_unit;
+}
+CAMLprim value caml_pref_heap_exclude(value heap, value selected)
+{
+  return Val_unit;
+}
+
+CAMLprim value caml_pref_heap_disjoint(value a, value b) { return Val_unit; }
+CAMLprim value caml_pref_heap_same_domain(value a, value b) { return Val_unit; }
+CAMLprim value caml_pref_heap_law2(value a, value b) { return Val_unit; }
+CAMLprim value caml_pref_heap_law3(value a, value b, value c) { return Val_unit; }
+CAMLprim value caml_pref_heap_law4(value a, value b, value c, value d)
+{
+  return Val_unit;
+}
+CAMLprim value caml_pref_heap_law5(value a, value b, value c, value d, value e)
+{
+  return Val_unit;
+}
