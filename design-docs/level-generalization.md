@@ -115,6 +115,29 @@ one fresh variable with the outer variable, and generalizes. The shared variable
 stays finite and the independent variable becomes generic. The fixture constructs
 its origin callbacks from allocations and the actual unification evidence.
 
+## Relative principal generalization
+
+`relative_generalization.ml` characterizes the selected scheme by models of the
+original solved heap. Fix a model `rho` and the assignments of the finite saved
+roots at or below the cutoff. The scheme instances are exactly the result values
+of models that agree on those roots:
+
+- `relative_interpret` uses saved-root origins and model agreement along paths
+  to represent any compatible model by its own parameter choices.
+- `with_relative_model` constructs a compatible model for arbitrary parameter
+  choices using the finite forest and level order.
+- `with_relative_copy` realizes a compatible model's result in the actual copied
+  heap while retaining `rho` on every original handle.
+
+The saved-root predicate is selective: existing generic nodes are not fixed as
+monomorphic roots. These are total checked functions with explicit callbacks;
+no quantified SMT assumptions or principal-scheme oracle are inputs.
+`relative_generalization_demo.ml` constructs a mixed generalized argument and
+shared result after actual lowering, closing and copying, and consumes the
+model equalities. The rejection fixture checks that a fixed boundary cannot be
+varied, a low variable cannot become a parameter, and unconstrained variable
+models do not automatically agree.
+
 ## Remaining integration
 
 These are verified primitives, not a principal let-polymorphic inferencer.
