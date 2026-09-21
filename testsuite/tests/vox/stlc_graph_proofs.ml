@@ -27,6 +27,12 @@ let rec (built_frame @ total) : (h : node Pref.heap) @ immutable -> (env : env) 
     | GLam (arg, body, p, middle) ->
       let h1 = H.put h arg Var in let env1 = Bind (arg, env) in
       built_frame h1 env1 body middle x (refine_ u); refine_ u
+    | GRec (arg, result, p, body) ->
+      let h1 = H.put h arg Var in let h2 = H.put h1 result Var in
+      let h3 = H.put h2 p (Arrow (arg, result)) in
+      let env1 = Bind (arg, Bind (p, env)) in
+      built_frame h3 env1 body after x (refine_ u);
+      built_frame h3 env1 body after p (refine_ u); refine_ u
     | GApp (f, a, p, arrow, h1, h2) ->
       built_frame h env f h1 x (refine_ u);
       built_frame h1 env a h2 x (refine_ u); refine_ u)
@@ -64,6 +70,13 @@ let rec (built_equations @ total) : (h : node Pref.heap) @ immutable -> (env : e
       let keep : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem middle x) || H.mem after x}
           @ total = fun x -> let u = () in refine_ u in
       let cs = constraints body in equations_frame middle after keep cs (refine_ u); refine_ u
+    | GRec (arg, result, p, body) ->
+      let h1 = H.put h arg Var in let h2 = H.put h1 result Var in
+      let h3 = H.put h2 p (Arrow (arg, result)) in
+      let env1 = Bind (arg, Bind (p, env)) in
+      built_equations h3 env1 body after (refine_ u);
+      built_frame h3 env1 body after result (refine_ u);
+      let last = Equal (root body, result) in equations_allocated_def after last; refine_ u
     | GApp (f, a, p, arrow, h1, h2) ->
       built_equations h env f h1 (refine_ u); built_equations h1 env a h2 (refine_ u);
       let keep1 : (x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1 x) || H.mem after x}
@@ -101,6 +114,22 @@ let rec (built_finite_at @ total) : (h : node Pref.heap) @ immutable ->
       built_frame h1 env1 body middle arg (refine_ u);
       let v = Arrow (arg, root body) in allocatable_def middle v;
       let refine_ t = allocation_finite_at middle trees2 p v x (refine_ u) in refine_ t
+    | GRec (arg, result, p, body) ->
+      let h1 = H.put h arg Var in let h2 = H.put h1 result Var in
+      let h3 = H.put h2 p (Arrow (arg, result)) in
+      let env1 = Bind (arg, Bind (p, env)) in
+      let v = Var in allocatable_def h v; allocatable_def h1 v;
+      let trees1 : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
+          (if H.mem h1 x then finite h1 t else H.at h1 x === None)} @ immutable total = fun x ->
+        let u = () in let refine_ t = allocation_finite_at h trees arg v x (refine_ u) in refine_ t in
+      let trees2 : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
+          (if H.mem h2 x then finite h2 t else H.at h2 x === None)} @ immutable total = fun x ->
+        let u = () in let refine_ t = allocation_finite_at h1 trees1 result v x (refine_ u) in refine_ t in
+      let arrow = Arrow (arg, result) in allocatable_def h2 arrow;
+      let trees3 : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
+          (if H.mem h3 x then finite h3 t else H.at h3 x === None)} @ immutable total = fun x ->
+        let u = () in let refine_ t = allocation_finite_at h2 trees2 p arrow x (refine_ u) in refine_ t in
+      let refine_ t = built_finite_at h3 trees3 env1 body after x (refine_ u) in refine_ t
     | GApp (f, a, p, arrow, h1, h2) ->
       let trees1 : (x : node Pref.t) @ immutable -> {t : tree | Unifier_finite_spec.root t === x &&
           (if H.mem h1 x then finite h1 t else H.at h1 x === None)} @ immutable total = fun x ->
@@ -122,6 +151,12 @@ let (allocation_mem @ total) : (h : node Pref.heap) @ immutable ->
     {u : unit | H.mem (H.put h p v) p} @ ghost = fun h p v -> ghost_ (
   let u = () in refine_ u)
 
+let (allocation_keeps_mem @ total) : (h : node Pref.heap) @ immutable ->
+    (p : node Pref.t) @ immutable -> (v : node) @ immutable ->
+    (x : node Pref.t) @ immutable ->
+    {u : unit | not (H.mem h x) || H.mem (H.put h p v) x} @ ghost =
+  fun h p v x -> ghost_ (let u = () in refine_ u)
+
 let rec (built_contents @ total) : (h : node Pref.heap) @ immutable -> (env : env) @ immutable ->
     (g : graph) @ immutable -> (after : node Pref.heap) @ immutable -> (x : node Pref.t) @ immutable ->
     {u : unit | built h env g after && H.mem h x} ->
@@ -133,6 +168,11 @@ let rec (built_contents @ total) : (h : node Pref.heap) @ immutable -> (env : en
     let h1 = H.put h arg Var in let env1 = Bind (arg, env) in
     built_frame h1 env1 body middle x (refine_ u);
     built_contents h1 env1 body middle x (refine_ u); refine_ u
+  | GRec (arg, result, p, body) ->
+    let h1 = H.put h arg Var in let h2 = H.put h1 result Var in
+    let h3 = H.put h2 p (Arrow (arg, result)) in
+    let env1 = Bind (arg, Bind (p, env)) in
+    built_contents h3 env1 body after x (refine_ u); refine_ u
   | GApp (f, a, p, arrow, h1, h2) ->
     built_frame h env f h1 x (refine_ u);
     built_frame h1 env a h2 x (refine_ u);
@@ -172,6 +212,15 @@ let rec (generation_sound @ total) : (h : node Pref.heap) @ immutable -> (env : 
         let u = () in refine_ u in
       generation_sound h1 env1 body middle rho mid (refine_ u);
       context_of_def rho env1; refine_ u
+    | GRec (arg, result, p, body) ->
+      let h1 = H.put h arg Var in let h2 = H.put h1 result Var in
+      let h3 = H.put h2 p (Arrow (arg, result)) in
+      let env1 = Bind (arg, Bind (p, env)) in
+      let cs = constraints g in satisfies_def rho cs;
+      let last = Equal (root body, result) in satisfies_def rho last;
+      built_contents h3 env1 body after p (refine_ u);
+      generation_sound h3 env1 body after rho model (refine_ u);
+      let rest = Bind (p, env) in context_of_def rho rest; context_of_def rho env1; refine_ u
     | GApp (f, a, p, arrow, h1, h2) ->
       let cs = constraints g in satisfies_def rho cs;
       let pair = And (constraints f, constraints a) in satisfies_def rho pair;

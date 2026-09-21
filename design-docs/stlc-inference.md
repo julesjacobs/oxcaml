@@ -1,6 +1,7 @@
 # Principal inference for closed STLC terms
 
-This stage adds variables, a Boolean constant, lambda abstraction and application.
+This stage supports variables, a Boolean constant, lambda abstraction,
+monomorphic recursive lambdas and application.
 The public `Stlc_infer.infer` API accepts a closed term with an explicit
 `scoped_term Z e` refinement. Variables use de Bruijn indices. A caller handling
 raw syntax can test this executable predicate before calling inference.
@@ -13,6 +14,13 @@ A lambda allocates a fresh parameter variable, generates its body, and allocates
 an arrow from the parameter to the body's result. An application generates both
 children, allocates a fresh result variable and the required argument/result
 arrow, and records equality of that arrow with the function's type.
+
+A recursive lambda allocates an argument variable, a reserved result variable
+and their arrow before generating the body. The body environment has the
+argument at index 0, the recursive function at index 1, then the enclosing
+environment. Every recursive use shares the same arrow. Its final constraint
+equates the body's type with the reserved result variable. The returned root is
+the preallocated arrow; no recursive type or polymorphic recursion is introduced.
 
 `stlc_solve.ml` processes the generated equalities with the existing mutable
 unifier. A binary equation tree gives constant-time concatenation during
@@ -31,7 +39,7 @@ constraints to the end of the term.
 
 `stlc_spec.ml` defines the syntax, contexts and the independent declarative
 `typed` predicate. Its witnesses have the ordinary variable, constant,
-abstraction and application rules. The remaining predicates specify generation
+abstraction, application and monomorphic recursive-lambda rules. The remaining predicates specify generation
 (`built`), solving (`solved`) and their composition (`inferred`). The returned
 root is tied to the actual execution witness and finite unfolding tree.
 
@@ -66,6 +74,14 @@ a model of the generated graph satisfying its constraints. Fresh node values
 are constructed from the supplied typing; no model or invariant constructor is
 assumed.
 
+The recursive-lambda case extends a supplied model three times, assigning the
+argument and result types supplied by the declarative derivation and their
+arrow to the self handle. Body completeness preserves those assignments and
+constructs its result at the reserved type, establishing the final equality.
+Soundness uses the same shared arrow equation and body/result equality. The
+public `inference_sound`, `with_typing_factor` and `inference_rejects` statements
+therefore cover recursive lambdas without changes.
+
 `stlc_solve_proofs.ml` composes the unifier's exact model and rejection theorems
 through the equation tree. It also preserves finite unfoldings on failure.
 `stlc_inference_proofs.ml` combines these with canonical readback. Factorization
@@ -92,5 +108,13 @@ solver and an unbound variable passed to the closed-term API. Both test files
 run with bytecode and native compilation. Lambda inspection checks that proof
 calls and witness construction erase while the runtime equation tree remains.
 
-Monomorphic recursive functions, mutable levels, generic templates and
-let-polymorphism remain subsequent stages.
+Recursive tests cover the argument, self-calls, application, captured enclosing
+binders, self-return occurs failure, argument self-application, and incompatible
+recursive uses. A recursive identity has an explicit Boolean-instance typing
+that consumes the factorization contract. Negative proof tests additionally
+reject omitting the body/result equality, using the self binder as the argument,
+a non-arrow recursive type and an out-of-scope recursive-body index.
+
+Mutable levels, generic templates and let-polymorphism remain subsequent stages.
+A completed recursive lambda can later be generalized by an enclosing let;
+recursive uses inside its own body remain monomorphic.

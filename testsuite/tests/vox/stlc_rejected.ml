@@ -115,3 +115,64 @@ Line 5, characters 43-52:
                                                ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
+
+module Missing_recursive_constraint = struct
+  let bad : (arg : node Pref.t) @ immutable -> (result : node Pref.t) @ immutable ->
+      (self : node Pref.t) @ immutable -> (body : graph) @ immutable ->
+      {cs : equations | cs === constraints (GRec (arg, result, self, body))} @ immutable ghost =
+    fun arg result self body -> ghost_ (
+      let g = GRec (arg, result, self, body) in constraints_def g;
+      let cs = constraints body in refine_ cs)
+end;;
+[%%expect{|
+Line 7, characters 35-45:
+7 |       let cs = constraints body in refine_ cs)
+                                       ^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Wrong_recursive_binder = struct
+  let bad : unit ->
+      {d : typing | typed No_types (Recursive (Bound (S Z))) (TArrow (TBool, TBool)) d}
+      @ immutable ghost = fun () -> ghost_ (
+    let a = TBool in let t = TArrow (a, a) in let zero = Z in let one = S zero in
+    let body = Bound one in let e = Recursive body in let empty = No_types in
+    let rest = Type (t, empty) in let ctx = Type (a, rest) in let v = Variable in
+    lookup_type_def ctx one; lookup_type_def rest zero; typed_def ctx body a v;
+    let d = Recursion (a, a, v) in typed_def empty e t d; refine_ d)
+end;;
+[%%expect{|
+Line 9, characters 58-67:
+9 |     let d = Recursion (a, a, v) in typed_def empty e t d; refine_ d)
+                                                              ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Recursive_non_arrow = struct
+  let bad : unit -> {d : typing | typed No_types (Recursive Boolean) TBool d}
+      @ immutable ghost = fun () -> ghost_ (
+    let empty = No_types in let e = Recursive Boolean in let t = TBool in
+    let d = Recursion (t, t, Constant) in typed_def empty e t d; refine_ d)
+end;;
+[%%expect{|
+Line 5, characters 65-74:
+5 |     let d = Recursion (t, t, Constant) in typed_def empty e t d; refine_ d)
+                                                                     ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Unbound_recursive_variable = struct
+  let bad () =
+    let zero = Z in let one = S zero in let two = S one in
+    let body = Bound two in let e = Recursive body in
+    ghost_ (scoped_term_def zero e; scoped_term_def two body;
+      present_def two two; present_def one one; present_def zero zero);
+    let e : {e : term | scoped_term Z e} = refine_ e in
+    let refine_ r = Stlc_infer.infer e in r.#ok
+end;;
+[%%expect{|
+Line 7, characters 43-52:
+7 |     let e : {e : term | scoped_term Z e} = refine_ e in
+                                               ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
