@@ -1,0 +1,57 @@
+Consultation: https://chatgpt.com/c/6aae7538-d54c-83ea-b463-dc5e651d7f9e
+GPT-6 Pro; completed initial response after 17m30s.
+Design synopsis (proposed, not a checked proof):
+
+Use finite syntactic value/environment certificates. Prove capture-avoiding
+substitution preserves certificates. The original proposal uses induction on
+fuel for evaluation; the user has since requested a partial, fuel-free evaluator
+with ghost typing evidence and unreachable_ () in impossible runtime branches.
+
+Erase well-formedness bookkeeping from D.typed into R.typed: drop n, context_wf,
+mono_wf, arguments_wf and scheme_wf, but retain exact scheme arity checks and
+let RHS weakening. Prove D.typed implies R.typed by structural recursion on
+the original derivation. Soundness of the more permissive R judgement must be
+proved; it is not assumed.
+
+judgement = J_value of value * mono | J_environment of value * context
+certificate = Leaf | Capture of context * typing * certificate
+                   | Extend of certificate * certificate
+
+Leaf proves True:Boolean or Empty:Empty_context. Capture proves a closure has
+an arrow type from a body derivation and captured-environment certificate.
+Recursive closure evidence contains no self certificate. Its body is typed
+under argument, self-arrow, captured context. At application, insert the existing
+closure certificate into the body's environment certificate.
+Extend proves Bind(v,env):Binding(Forall(k,a),g) from certificates for v:a and
+env:g. These are finite symbolic certificates, not implicit universal booleans.
+
+Finite substitution representation: {front: arguments; tail: index}.
+If front has m elements, index i<m maps to front[i]; m+j maps to Parameter(tail+j).
+Lift through k binders to preserve the first k parameters and shift substituted
+types. Acting on a scheme Forall(k,a) acts on a using the lifted substitution.
+Opening uses {front=args;tail=Z}; weakening uses {front=No_arguments;tail=k}.
+
+Required algebra: action commutes with type shifts and opening schemes;
+action on weakened contexts commutes with lifting. Prove pointwise index
+lemmas structurally, then type/context lemmas structurally. A split_index
+helper can return None with present k i, or Some j with i=add k j.
+No function extensionality or general substitution-composition theorem needed.
+
+Transform typing derivations structurally: substitute argument/result types;
+lift through let-generalized binders in the RHS derivation. Prove this preserves
+R.typed using lookup substitution, arguments length, action/open commutation,
+and context/lift/weakening commutation.
+
+Transport certificates structurally: Leaf stays Leaf; Capture substitutes its
+captured context and body derivation and transports its environment certificate;
+Extend transports its head under lift k substitution and tail under the original
+substitution. Runtime values are unchanged by all these operations.
+
+Typed lookup uses environment certificates and instantiates the head certificate
+at index zero, recurring into the tail at successors. This does not evaluate the
+value again or invoke inference.
+
+The direct partial interpreter should replace the fuel-indexed soundness theorem
+with a recursive refinement contract. Total ghost substitution and certificate
+operations remain necessary. This adaptation has not yet been independently
+fully implemented or checked.
