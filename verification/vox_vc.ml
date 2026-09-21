@@ -2537,7 +2537,7 @@ and expression_desc ctx s e =
   | Texp_match (scrutinee, _, cases, [], _)
     when List.for_all (fun c -> snd (split_pattern c.c_lhs) = None) cases ->
     let s, value = eval s scrutinee in
-    computation_cases ctx s value cases
+    computation_cases ctx s scrutinee.exp_type value cases
   | _ ->
     (* Unknown evaluation/control-flow forms lose outgoing facts, but cannot
        hide obligations in their children or delayed bodies. *)
@@ -2594,19 +2594,43 @@ and value_bindings ctx s rec_flag bindings eliminate =
 
 and value_cases ctx s value cases = cases_with_pattern ctx s value cases
 
-and computation_cases ctx s value cases = cases_with_pattern ctx s value cases
+and computation_cases ctx s scrutinee_type value cases =
+  cases_with_pattern ~scrutinee_type ctx s value cases
 
 and cases_with_pattern : type k.
-    context -> state -> value option -> k case list -> state * value option =
- fun ctx s value cases ->
+    ?scrutinee_type:Types.type_expr ->
+    context ->
+    state ->
+    value option ->
+    k case list ->
+    state * value option =
+ fun ?scrutinee_type ctx s value cases ->
   if impossible s
   then s, None
   else
     match cases with
     | [] -> branch s (Boolean false), None
     | c :: cases ->
-      let matched = pattern ctx s value c.c_lhs in
-      let rest s = cases_with_pattern ctx s value cases in
+      (* A generalized nullary constructor can have a different datatype
+         instance from the pattern after refinement elaboration. *)
+      let matched_value =
+        match scrutinee_type, scalar value with
+        | Some source, Some term
+          when Some (term_sort term)
+               <> sort ctx.encoding c.c_lhs.pat_env c.c_lhs.pat_type ->
+          begin match expose_head ctx term with
+          | Construct (constructor, [])
+            when same_nominal_data_type c.c_lhs.pat_env source c.c_lhs.pat_type
+            ->
+            construct ctx c.c_lhs.pat_env c.c_lhs.pat_type
+              (Constructor.label constructor)
+              []
+          | _ -> None
+          end
+        | _ -> value
+      in
+      let matched = pattern ctx s matched_value c.c_lhs in
+      let rest s = cases_with_pattern ?scrutinee_type ctx s value cases in
       guarded_case ctx (expression ctx) c.c_rhs.exp_loc s matched c.c_guard
         c.c_rhs rest
 

@@ -169,14 +169,15 @@ alias adaptation remain useful ergonomics targets.
 
 ## Registered allocation and forest transport
 
-An unannotated runtime `let desc1 = Var` followed by pooled allocation and a
-ghost descriptor match caused an uncaught `Vox_smt.Sort_error`: `reachable:
-Expected datatype(Copy_spec.shape), got datatype(Copy_spec.shape)`. Explicitly
-annotating `let desc1 : desc = Var` makes the fixture check. The failure was
-reproduced with one allocation and the subsequent descriptor predicates/match;
-removing either portion stopped reproducing it. The encoding cause is not yet
-diagnosed and no compiler fix is included. Vox should report the distinct sort
-identities and source location rather than escaping with this exception.
+An unannotated `let desc1 = Var` could trigger an uncaught sort mismatch after
+using it in a refinement and then pattern matching. The minimized regression
+requires no heap operations: the scrutinee and pattern carry different
+instantiations of the polymorphic datatype. The verifier now reinstantiates a
+known nullary constructor at the pattern's type after checking nominal type
+identity. Other sort mismatches lose outgoing pattern facts conservatively.
+The positive fixture proves the constructor branch; the rejection fixture
+rejects its negation. The pooled allocation fixture no longer needs the explicit
+`desc` annotation.
 
 Forest and pool-coverage transport work with explicit total callbacks. Heap
 aliases still require repeated dependent callback annotations at composition
