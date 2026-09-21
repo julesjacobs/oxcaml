@@ -92,7 +92,7 @@ Runtime termination remains outside scope.
   including nested lets and failure prefixes.
 - [x] Richer-node let-free soundness: construct independent declarative typing
   witnesses for finite readback, including monomorphic recursive lambdas.
-- [ ] Richer-node let-free model extension, completeness, principality and
+- [x] Richer-node let-free model extension, completeness, principality and
   rejection against independent declarative typing.
 - [ ] One-let bridge: construct baseline and alternative RHS models, apply
   relative generalization, and consume the resulting factorization for `id id`.
