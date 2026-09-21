@@ -66,7 +66,7 @@ module Substitute_before_abstraction = struct
       fun _x -> Copy_spec.Variable q in
     let substituted = Hm_substitution.substitute_type rho t in
     Hm_substitution.substitute_type_def rho t; rho_def p;
-    let value = Copy_spec.Variable q in Hm_type_proofs.embed_def value;
+    let value = Copy_spec.Variable q in Hm_declarative.embed_def value;
     avoids_def names substituted; position_def names q;
     let u = () in let _fresh : {u : unit | avoids names substituted} = refine_ u in refine_ u)
 end;;

@@ -10,6 +10,10 @@ type typing = Variable of arguments | Constant | Abstraction of mono * typing
   | Application of mono * typing * typing | Recursion of mono * mono * typing
   | Let_binding of scheme * typing * typing [@@inductive]
 
+let[@def] rec (embed @ total) (t : Copy_spec.ty @ immutable) = match t with
+  | Copy_spec.Variable p -> Free p | Copy_spec.Boolean -> Boolean
+  | Copy_spec.Function (a, b) -> Function (embed a, embed b)
+
 let[@def] rec (add @ total) (a : index @ immutable) (b : index @ immutable) =
   match a with Z -> b | S a -> S (add a b)
 let[@def] rec (present @ total) (n : index @ immutable) (i : index @ immutable) =
