@@ -88,8 +88,12 @@ Runtime termination remains outside scope.
 - [x] Actual richer-node let-free driver, including monomorphic recursive
   lambdas: checked execution witnesses, pool/level/ownership preservation,
   cleanup invariants and explicit failure prefixes.
-- [ ] Richer-node let-free semantics: model extension, model restriction,
-  soundness and rejection against independent declarative typing.
+- [x] Finite forests and model restriction through every execution constructor,
+  including nested lets and failure prefixes.
+- [x] Richer-node let-free soundness: construct independent declarative typing
+  witnesses for finite readback, including monomorphic recursive lambdas.
+- [ ] Richer-node let-free model extension, completeness, principality and
+  rejection against independent declarative typing.
 - [ ] One-let bridge: construct baseline and alternative RHS models, apply
   relative generalization, and consume the resulting factorization for `id id`.
 - [ ] Nested execution transport for forests, levels, pools and active RHS origins.
