@@ -252,9 +252,9 @@ Representative-pool migration:
 - [x] Prove terminal redirection transports representative paths and low bounds.
 - [x] Implement representative-only fused closing/transfer as a separate checked
   primitive; prove coverage and bounds for its retained entries.
-- [ ] Migrate copy classification, templates, protected boundaries and the
-  inference sharing shortcut to effective levels.
-- [ ] Migrate lowering and the full HM runtime/semantic ladder, then switch the
+- [x] Migrate copy classification, templates and protected boundaries to
+  effective levels; use the certified copier for every variable occurrence.
+- [x] Migrate lowering and the full HM runtime/semantic ladder, then switch the
   inference driver to representative-only pools.
 - [ ] Route retained representatives directly to their enclosing level pools.
 - [ ] Complete regression, erasure, review and publication of the pool migration.
@@ -284,7 +284,7 @@ Effective-level copying now has a separate checked runtime and proof ladder:
   including the final heap after cleanup.
 - [x] Preserve finite forests, effective ordering, bounds, leaf provenance,
   pool scope and representative-only pool coverage.
-- [ ] Switch the active HM driver and its sharing shortcut to this copier.
+- [x] Connect the replacement HM driver to this copier for every variable occurrence.
 
 The stale-link fixture exercises finite sharing, generic copying, repeated
 instantiation, shared arrows, stale stored levels and memo cleanup. Its initial
@@ -309,7 +309,7 @@ Descriptor-first lowering migration:
 - [x] Pass depth-200,000 shared-graph regression in bytecode/native code;
   inspect erased native calling conventions.
 - [x] Complete review and publish the lowering batch.
-- [ ] Connect this lowering operation to the effective unifier and HM driver.
+- [x] Connect this lowering operation to the effective unifier and HM driver.
 
 The semantic lowering certificate is independent of representative functions.
 It contains the terminal-write trace and a concrete bounded tree: links carry
@@ -342,7 +342,7 @@ Effective unifier migration (in progress):
   effective trace and metadata proofs.
 - [x] Prove physical protection of effectively generic nodes and preservation of
   representative-only pool coverage.
-- [ ] Integrate the effective unifier into the full HM driver and reclose its
+- [x] Integrate the effective unifier into the full HM driver and reclose its
   public conclusions.
 - [ ] Switch the HM driver to representative-only pools and direct enclosing
   pool routing; complete integrated regression, erasure checks and review.
@@ -373,8 +373,11 @@ HM effective-level integration:
 - [x] Prove finite representative registration and bound preservation through
   every execution case; derive parent-pool coverage and closing preservation.
 - [x] Add an allocator whose contract permits stale child-link levels.
-- [ ] Migrate the remaining execution cases, metadata and public HM proofs.
-- [ ] Connect the complete driver and representative pools, including routing.
+- [x] Migrate all execution cases, metadata and public HM proofs to the
+  effective trace; prove soundness, completeness, rejection and principality.
+- [x] Connect the complete CPS driver to the effective allocator, certified
+  copier, effective unifier and representative-only closing/transfer.
+- [ ] Route retained representatives directly to their enclosing level pools.
 
 The reflected-function-alias crash found during this work is fixed in PR #182.
 The compiler regressions, Merlin tests and review pass. Local lambdas inside
@@ -399,3 +402,26 @@ The combined copier/unifier/HM proof suite passes in bytecode and native mode
 with the replacement execution spec, finite-graph proof and model-restriction
 proof included. The existing stale-alias and depth-200,000 runtime cases still
 pass. No new runtime driver is claimed by this semantic batch.
+
+The replacement driver is now `hm_effective_infer.closed_hm`. It compiles terms
+once, uses the fast environment, copies every variable occurrence through the
+certified effective copier, and uses the effective unifier and allocator.
+Its CPS worker preserves the representative-level runtime invariant. There is
+no raw Link-level classification in this entry point.
+
+`Hm_effective_sound.closed_sound` and `closed_principal`, together with
+`Hm_effective_complete.closed_completes`, `closed_reject` and `closed_factor`,
+now apply to this driver's actual execution trace. The new provenance proof
+uses finite-graph witnesses rather than carrying the runtime invariant.
+The earlier `hm_infer` and its theorem modules remain as a regression baseline.
+
+Direct enclosing-pool routing remains unfinished: `close_and_transfer` still
+moves retained representatives into the immediate parent pool. Consequently a
+low-level representative can be rescanned at several enclosing let boundaries.
+The current driver does not claim to remove that cost.
+
+The effective driver suite passes in bytecode and native code, including
+polymorphic completeness and principality applied to actual runtime results.
+Native Cmm retains only depth, pool, environment, term and continuation in the
+worker; heap witnesses, traces and proof callbacks are erased.
+`codex review --uncommitted` found no actionable defects.
