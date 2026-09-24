@@ -318,3 +318,11 @@ function type: unfolding equal heap expressions and wrapping the outer callback
 in `refine_` did not adapt a nested callback argument. An explicit adapter with
 the callee's heap expression and a refined inner callback works. This is a
 remaining elaboration usability issue; no assumption was added to bypass it.
+
+### Array initialization length
+
+`Iarray.init` does not expose a refinement proving that its result has the
+requested length. `Hm_pool_capacity.create` therefore checks the length before
+converting the array to `Borrow_iarray.Owned_array.t`. A checked library contract
+for initialization would remove this redundant runtime guard. The routed
+inferencer requires no compiler change for this workaround.
