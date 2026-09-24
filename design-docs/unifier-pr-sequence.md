@@ -99,7 +99,11 @@ Runtime termination remains outside scope.
   failure. Let-free theorem contracts remain available.
 - [ ] One-let bridge: construct baseline and alternative RHS models, apply
   relative generalization, and consume the resulting factorization for `id id`.
-- [ ] Nested execution transport for forests, levels, pools and active RHS origins.
+- [x] Nested execution transport for forests, levels, pools and active RHS origins.
+  `run_origin` constructs saved-root paths across every execution constructor;
+  `rhs_interpret` derives relative interpretation from two RHS models agreeing
+  on the saved low boundary. Constructing these models from declarative RHS
+  typings remains in the one-let bridge.
 - [ ] Public closed-term HM soundness, completeness, principality and rejection;
   nested-let, mixed-boundary and saved-garbage regression cases.
 

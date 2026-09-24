@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml generalize_spec.ml pooled_spec.ml nested_pool_spec.ml copy_cleanup_spec.ml hm_declarative.ml hm_environment_spec.ml hm_execution_spec.ml hm_runtime_spec.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml generalize_spec.ml pooled_spec.ml nested_pool_spec.ml copy_cleanup_spec.ml hm_declarative.ml hm_environment_spec.ml hm_execution_spec.ml hm_runtime_spec.ml provenance_spec.ml";
  readonly_files = "hm_runtime_rejected.ml";
  compile_only = "true";
  {
@@ -83,5 +83,41 @@ end;;
 Line 7, characters 51-60:
 7 |     Level_spec.at_level_def after p; let u = () in refine_ u)
                                                        ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Invent_saved_origin = struct
+  let (bad @ total) : (p : node Pref.t) @ immutable ->
+      (o : Provenance_spec.origin) @ immutable ->
+      {u : unit | let saved = H.empty () in
+        let after = H.put saved p (cell Var 0) in
+        Provenance_spec.originates saved after 0 p o} @ ghost = fun p o -> ghost_ (
+    let saved = H.empty () in let desc : desc = Var in
+    let after = H.put saved p (cell desc 0) in
+    Provenance_spec.originates_def saved after 0 p o;
+    match o with Provenance_spec.Origin (root, _) ->
+      Level_spec.below_def saved root 0; Level_spec.at_level_def saved root;
+      let u = () in refine_ u)
+end;;
+[%%expect{|
+Line 12, characters 20-29:
+12 |       let u = () in refine_ u)
+                         ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Forget_boundary_agreement = struct
+  let[@def] rho : node Pref.t @ immutable total -> ty @ immutable total = fun _p -> Boolean
+  let[@def] eta : node Pref.t @ immutable total -> ty @ immutable total = fun _p -> Function (Boolean, Boolean)
+  let (bad @ total) : (p : node Pref.t) @ immutable ->
+      {u : unit | interpret rho eta (Boundary p) === eta p} @ ghost = fun p -> ghost_ (
+    let schema = Boundary p in
+    interpret_def rho eta schema; rho_def p; eta_def p;
+    let u = () in refine_ u)
+end;;
+[%%expect{|
+Line 8, characters 18-27:
+8 |     let u = () in refine_ u)
+                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
