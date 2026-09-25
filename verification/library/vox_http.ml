@@ -1,22 +1,8 @@
+open Vox_http_spec
+
+module Internal = struct
 module S = Vox_sequence
 
-type bytes : immutable_data mod total = int list
-type request : immutable_data mod total = {
-  request_line : bytes;
-  headers : int list list;
-  body : bytes;
-}
-type malformed : immutable_data mod total =
-  | Invalid_byte | Invalid_crlf | Invalid_request_line | Invalid_header
-  | Invalid_content_length | Conflicting_content_length
-  | Unsupported_transfer_encoding | Transfer_encoding_content_length
-  | Invalid_host
-[@@inductive]
-type resource : immutable_data mod total = Message_bytes | Body_bytes
-[@@inductive]
-type framing : immutable_data mod total =
-  | Length of int | Bad of malformed | Too_large of resource
-[@@inductive]
 type phase : immutable_data mod total =
   | Request_line
   | Headers of bytes * int list list
@@ -31,105 +17,6 @@ type core : immutable_data mod total =
 type state : immutable_data mod total = { core : core; budget : int }
 type result : immutable_data mod total = { state : state; rest : bytes }
 
-let[@def] rec equal_bytes (left : bytes) (right : bytes) =
-  match left, right with
-  | [], [] -> true
-  | x :: xs, y :: ys -> x = y && equal_bytes xs ys
-  | _ -> false
-let[@def] byte b = 0 <= b && b <= 255
-let[@def] token b =
-  (65 <= b && b <= 90) || (97 <= b && b <= 122)
-  || (48 <= b && b <= 57) || b = 33 || b = 35 || b = 36 || b = 37
-  || b = 38 || b = 39 || b = 42 || b = 43 || b = 45 || b = 46
-  || b = 94 || b = 95 || b = 96 || b = 124 || b = 126
-let[@def] visible b = 33 <= b && b <= 126
-let[@def] value_byte b = b = 9 || (32 <= b && b <= 126) || (128 <= b && b <=
-  255)
-let[@def] lower b = if 65 <= b && b <= 90 then b + 32 else b
-let[@def] rec lower_all xs = match xs with [] -> [] | b :: bs -> lower b ::
-  lower_all bs
-let[@def] rec all_token xs = match xs with [] -> true | b :: bs -> token b &&
-  all_token bs
-let[@def] rec all_visible xs = match xs with [] -> true | b :: bs -> visible b
-  && all_visible bs
-let[@def] rec all_value xs = match xs with [] -> true | b :: bs -> value_byte b
-  && all_value bs
-let[@def] nonempty (xs : bytes) = match xs with [] -> false | _ :: _ -> true
-let[@def] rec split (delimiter : int) (xs : bytes) =
-  match xs with
-  | [] -> ([], [])
-  | b :: bs -> if b = delimiter then ([], bs)
-    else let (before, after) = split delimiter bs in (b :: before, after)
-let[@def] rec trim_left xs =
-  match xs with b :: bs when b = 32 || b = 9 -> trim_left bs | _ -> xs
-let[@def] rec trim_right xs =
-  match xs with
-  | [] -> []
-  | b :: bs -> let rest = trim_right bs in
-    if (b = 32 || b = 9) && not (nonempty rest) then [] else b :: rest
-let[@def] trim xs = trim_right (trim_left xs)
-let[@def] valid_request_line line =
-  let (meth, rest) = split 32 line in
-  let (target, version) = split 32 rest in
-  nonempty meth && all_token meth && nonempty target && all_visible target
-  && equal_bytes version [72; 84; 84; 80; 47; 49; 46; 49]
-let[@def] header line =
-  let (name, value) = split 58 line in
-  if nonempty name && all_token name && all_value value
-  then Some (lower_all name, trim value) else None
-let[@def] rec has_colon line =
-  match line with [] -> false | b :: bs -> b = 58 || has_colon bs
-let[@def] valid_header line = has_colon line && (match header line with None ->
-  false | Some _ -> true)
-let[@def] request_parts request =
-  let (meth, rest) = split 32 request.request_line in
-  let (target, _) = split 32 rest in
-  (meth, target)
-let[@def] header_field line =
-  if valid_header line then header line else None
-let[@def] rec decimal value digits =
-  match digits with
-  | [] -> Length value
-  | b :: bs ->
-    if b < 48 || b > 57 then Bad Invalid_content_length
-    else if value > 819 || (value = 819 && b > 50) then Too_large Body_bytes
-    else decimal (value * 10 + b - 48) bs
-let[@def] content_length digits =
-  if nonempty digits then decimal 0 digits else Bad Invalid_content_length
-let[@def] is_cl name = equal_bytes name
-  [99;111;110;116;101;110;116;45;108;101;110;103;116;104]
-let[@def] is_host name = equal_bytes name [104;111;115;116]
-let[@def] rec has_name (which : bytes) (headers : int list list) =
-  match headers with
-  | [] -> false
-  | line :: rest -> let (name, _) = split 58 line in
-    equal_bytes (lower_all name) which || has_name which rest
-let[@def] rec frame_fields headers previous hosts =
-  match headers with
-  | [] -> if hosts <> 1 then Bad Invalid_host
-    else (match previous with None -> Length 0 | Some n -> Length n)
-  | line :: rest ->
-    if not (valid_header line) then Bad Invalid_header
-    else match header line with
-    | None -> Bad Invalid_header
-    | Some (name, value) ->
-      if is_host name then
-        if hosts <> 0 || not (nonempty value) then Bad Invalid_host
-        else frame_fields rest previous 1
-      else if is_cl name then
-        (match content_length value with
-        | Bad e -> Bad e | Too_large r -> Too_large r
-        | Length n -> match previous with
-          | Some old when old <> n -> Bad Conflicting_content_length
-          | _ -> frame_fields rest (Some n) hosts)
-      else frame_fields rest previous hosts
-let[@def] framing headers =
-  if has_name [116;114;97;110;115;102;101;114;45;101;110;99;111;100;105;110;103]
-    headers then
-    if has_name [99;111;110;116;101;110;116;45;108;101;110;103;116;104] headers
-    then Bad Transfer_encoding_content_length else Bad
-      Unsupported_transfer_encoding
-  else frame_fields headers None 0
 let[@def] finish_line (phase : phase @ immutable total) (line : bytes @
   immutable total) =
   match phase with
@@ -174,32 +61,6 @@ let[@def] rec feed (state : state @ immutable total) (input : bytes @ immutable
       {state = {state with core = Limit Message_bytes}; rest = input}
     else feed (advance state b) bs
 let[@def] consumed before after = before.budget - after.budget
-let[@def] rec wire_headers headers tail =
-  match headers with [] -> 13 :: 10 :: tail
-  | line :: rest -> S.append line (13 :: 10 :: wire_headers rest tail)
-let[@def] serialize request =
-  S.append request.request_line (13 :: 10 :: wire_headers request.headers
-    request.body)
-let[@def] rec safe_line line =
-  match line with [] -> true | b :: bs -> byte b && b <> 13 && b <> 10 &&
-    safe_line bs
-let[@def] rec header_lines headers =
-  match headers with [] -> true
-  | line :: rest -> nonempty line && safe_line line && valid_header line &&
-    header_lines rest
-let[@def] rec sized n bytes =
-  match bytes with [] -> n = 0
-  | b :: rest -> n > 0 && byte b && sized (n - 1) rest
-let[@def] rec fits budget bytes =
-  match bytes with [] -> budget >= 0
-  | _ :: rest -> budget > 0 && fits (budget - 1) rest
-let[@def] well_formed request =
-  valid_request_line request.request_line && safe_line request.request_line
-  && header_lines request.headers
-  && (match framing request.headers with Length n -> sized n request.body | _ ->
-    false)
-  && fits 16384 (serialize request)
-
 let[@def] rec drain (core : core @ immutable total) (input : bytes @ immutable
   total) =
   if terminal core then (core, input)
@@ -500,15 +361,1027 @@ let (roundtrip @ total) (request : request) (suffix : bytes) :
     let u = () in refine_ u)
   else let u = () in refine_ u
 
-let (parse @ total) (input : bytes @ immutable total) :
-    {result : result |
-      result === feed (initial ()) input &&
-      S.length input === Bigint.add
-        (Bigint.of_int (consumed (initial ()) result.state)) (S.length
-          result.rest)
-      && S.drop (Bigint.of_int (consumed (initial ()) result.state)) input ===
-        result.rest} =
+let[@def] semantic_request request =
+  valid_request_line request.request_line && safe_line request.request_line
+  && header_lines request.headers
+  && (match framing request.headers with
+      | Length n -> 0 <= n && n <= 8192 && sized n request.body
+      | _ -> false)
+
+let[@def] valid_core core =
+  match core with
+  | Line (phase, line, _) -> safe_line line &&
+      (match phase with
+       | Request_line -> true
+       | Headers (request_line, headers) ->
+         valid_request_line request_line && safe_line request_line
+         && header_lines headers)
+  | Body (request_line, headers, remaining, body) ->
+    valid_request_line request_line && safe_line request_line
+    && header_lines headers &&
+      (match framing headers with
+       | Length n -> 0 < remaining && remaining <= n && n <= 8192
+         && sized (n - remaining) body
+       | _ -> false)
+  | Complete request -> semantic_request request
+  | Malformed _ | Limit _ -> true
+
+let[@def] rec header_prefix headers tail =
+  match headers with
+  | [] -> tail
+  | line :: rest -> S.append line (13 :: 10 :: header_prefix rest tail)
+
+let[@def] observed core =
+  match core with Malformed _ | Limit _ -> false | _ -> true
+
+let[@def] core_wire core =
+  match core with
+  | Line (phase, line, cr) ->
+    let tail = S.append line (if cr then [13] else []) in
+    (match phase with
+     | Request_line -> tail
+     | Headers (request_line, headers) ->
+       S.append request_line (13 :: 10 :: header_prefix headers tail))
+  | Body (request_line, headers, _, body) ->
+    serialize {request_line; headers; body}
+  | Complete request -> serialize request
+  | Malformed _ | Limit _ -> []
+
+let[@def] reachable state prefix = ghost_ (
+  0 <= state.budget && state.budget <= 16384 && valid_core state.core
+  && S.length prefix === Bigint.of_int (16384 - state.budget)
+  && (if observed state.core then core_wire state.core === prefix else true))
+
+let rec (safe_append @ total) : (xs : bytes) -> (ys : bytes) ->
+    {u : unit | safe_line (S.append xs ys) =
+      (safe_line xs && safe_line ys)} =
+  fun xs ys ->
+  safe_line_def xs; S.append_def xs ys;
+  match xs with
+  | [] -> let u = () in refine_ u
+  | b :: bs ->
+    safe_line_def (S.append xs ys); safe_append bs ys;
+    let u = () in refine_ u
+
+let rec (headers_append @ total) : (xs : int list list) ->
+    (ys : int list list) ->
+    {u : unit | header_lines (S.append xs ys) =
+      (header_lines xs && header_lines ys)} =
+  fun xs ys ->
+  header_lines_def xs; S.append_def xs ys;
+  match xs with
+  | [] -> let u = () in refine_ u
+  | line :: rest ->
+    header_lines_def (S.append xs ys); headers_append rest ys;
+    let u = () in refine_ u
+
+let rec (sized_snoc @ total) : (n : int) -> (xs : bytes) -> (b : int) ->
+    {u : unit | if 0 <= n && n < 8192 && sized n xs && byte b then
+      sized (n + 1) (S.append xs [b]) else true} =
+  fun n xs b ->
+  sized_def n xs; S.append_def xs [b];
+  match xs with
+  | [] -> sized_def (n + 1) [b]; sized_def n [];
+    let u = () in refine_ u
+  | h :: rest ->
+    if 0 <= n && n < 8192 && sized n xs && byte b then (
+      sized_snoc (n - 1) rest b;
+      sized_def (n + 1) (S.append xs [b]);
+      let u = () in refine_ u)
+    else let u = () in refine_ u
+
+let rec (decimal_bounds @ total) : (value : int) -> (digits : bytes) ->
+    {u : unit | if 0 <= value && value <= 8192 then
+      match decimal value digits with
+      | Length n -> 0 <= n && n <= 8192 | _ -> true
+      else true} =
+  fun value digits ->
+  decimal_def value digits;
+  match digits with
+  | [] -> let u = () in refine_ u
+  | b :: bs ->
+    if 0 <= value && value <= 8192 && 48 <= b && b <= 57
+       && not (value > 819 || (value = 819 && b > 50)) then (
+      decimal_bounds (value * 10 + b - 48) bs;
+      let u = () in refine_ u)
+    else let u = () in refine_ u
+
+let[@def] previous_bounded previous =
+  match previous with None -> true | Some n -> 0 <= n && n <= 8192
+
+let rec (frame_bounds @ total) : (headers : int list list) ->
+    (previous : int option) -> (hosts : int) ->
+    {u : unit | if previous_bounded previous then
+      match frame_fields headers previous hosts with
+      | Length n -> 0 <= n && n <= 8192 | _ -> true
+      else true} =
+  fun headers previous hosts ->
+  previous_bounded_def previous;
+  frame_fields_def headers previous hosts;
+  match headers with
+  | [] -> let u = () in refine_ u
+  | line :: rest ->
+    if valid_header line then (
+      match header line with
+      | None -> let u = () in refine_ u
+      | Some (name, value) ->
+        if is_host name then (
+          frame_bounds rest previous 1; let u = () in refine_ u)
+        else if is_cl name then (
+          content_length_def value; decimal_bounds 0 value;
+          match content_length value with
+          | Bad _ | Too_large _ -> let u = () in refine_ u
+          | Length n -> previous_bounded_def (Some n);
+            frame_bounds rest (Some n) hosts; let u = () in refine_ u)
+        else (frame_bounds rest previous hosts; let u = () in refine_ u))
+    else let u = () in refine_ u
+
+let (framing_bounds @ total) (headers : int list list) :
+    {u : unit | match framing headers with
+      | Length n -> 0 <= n && n <= 8192 | _ -> true} =
+  framing_def headers;
+  previous_bounded_def None; frame_bounds headers None 0;
+  let u = () in refine_ u
+
+let (finish_valid @ total) (phase : phase) (line : bytes) :
+    {u : unit | if valid_core (Line (phase, line, true)) then
+      valid_core (finish_line phase line) else true} =
+  valid_core_def (Line (phase, line, true));
+  finish_line_def phase line;
+  match phase with
+  | Request_line ->
+    valid_core_def (Line (Headers (line, []), [], false));
+    valid_core_def (Malformed Invalid_request_line);
+    safe_line_def []; header_lines_def [];
+    let u = () in refine_ u
+  | Headers (request_line, headers) ->
+    if nonempty line then (
+      valid_core_def (Line
+        (Headers (request_line, S.append headers [line]), [], false));
+      valid_core_def (Malformed Invalid_header);
+      safe_line_def []; header_lines_def [line]; header_lines_def [];
+      headers_append headers [line];
+      let u = () in refine_ u)
+    else (
+      framing_bounds headers;
+      match framing headers with
+      | Bad e -> valid_core_def (Malformed e); let u = () in refine_ u
+      | Too_large r -> valid_core_def (Limit r); let u = () in refine_ u
+      | Length n ->
+        if n = 0 then (
+          let request = {request_line; headers; body = []} in
+          valid_core_def (Complete request); semantic_request_def request;
+          sized_def n []; let u = () in refine_ u)
+        else (
+          valid_core_def (Body (request_line, headers, n, []));
+          sized_def (n - n) []; let u = () in refine_ u))
+
+let (step_valid @ total) (core : core) (b : int) :
+    {u : unit | if valid_core core && not (terminal core) then
+      valid_core (step core b) else true} =
+  valid_core_def core; terminal_def core; step_def core b;
+  if not (byte b) then (
+    valid_core_def (Malformed Invalid_byte); let u = () in refine_ u)
+  else match core with
+  | Complete _ | Malformed _ | Limit _ -> let u = () in refine_ u
+  | Line (phase, line, cr) ->
+    if cr then (
+      finish_valid phase line;
+      valid_core_def (Malformed Invalid_crlf); let u = () in refine_ u)
+    else if b = 13 then (
+      valid_core_def (Line (phase, line, true)); let u = () in refine_ u)
+    else if b = 10 then (
+      valid_core_def (Malformed Invalid_crlf); let u = () in refine_ u)
+    else (
+      safe_line_def [b]; safe_line_def []; safe_append line [b];
+      valid_core_def (Line (phase, S.append line [b], false));
+      let u = () in refine_ u)
+  | Body (request_line, headers, remaining, body) ->
+    match framing headers with
+    | Bad _ | Too_large _ -> let u = () in refine_ u
+    | Length n ->
+      sized_snoc (n - remaining) body b;
+      let next = S.append body [b] in
+      if remaining = 1 then (
+        let request = {request_line; headers; body = next} in
+        valid_core_def (Complete request); semantic_request_def request;
+        let u = () in refine_ u)
+      else (
+        valid_core_def (Body
+          (request_line, headers, remaining - 1, next));
+        let u = () in refine_ u)
+
+let (crlf_append @ total) (xs : bytes) (ys : bytes) :
+    {u : unit | S.append (13 :: 10 :: xs) ys ===
+      13 :: 10 :: S.append xs ys} =
+  S.append_def (13 :: 10 :: xs) ys;
+  S.append_def (10 :: xs) ys;
+  let u = () in refine_ u
+
+let rec (header_prefix_append @ total) : (headers : int list list) ->
+    (xs : bytes) -> (ys : bytes) ->
+    {u : unit | S.append (header_prefix headers xs) ys ===
+      header_prefix headers (S.append xs ys)} =
+  fun headers xs ys ->
+  header_prefix_def headers xs;
+  header_prefix_def headers (S.append xs ys);
+  match headers with
+  | [] -> let u = () in refine_ u
+  | line :: rest ->
+    header_prefix_append rest xs ys;
+    let tail = 13 :: 10 :: header_prefix rest xs in
+    S.append_associative line tail ys;
+    crlf_append (header_prefix rest xs) ys;
+    let u = () in refine_ u
+
+let rec (header_prefix_concat @ total) : (left : int list list) ->
+    (right : int list list) -> (tail : bytes) ->
+    {u : unit | header_prefix (S.append left right) tail ===
+      header_prefix left (header_prefix right tail)} =
+  fun left right tail ->
+  S.append_def left right;
+  header_prefix_def left (header_prefix right tail);
+  match left with
+  | [] -> let u = () in refine_ u
+  | line :: rest ->
+    header_prefix_def (S.append left right) tail;
+    header_prefix_concat rest right tail;
+    let u = () in refine_ u
+
+let rec (wire_headers_prefix @ total) : (headers : int list list) ->
+    (body : bytes) ->
+    {u : unit | wire_headers headers body ===
+      header_prefix headers (13 :: 10 :: body)} =
+  fun headers body ->
+  wire_headers_def headers body;
+  header_prefix_def headers (13 :: 10 :: body);
+  match headers with
+  | [] -> let u = () in refine_ u
+  | _ :: rest -> wire_headers_prefix rest body;
+    let u = () in refine_ u
+
+let[@def] request_prefix request_line headers tail =
+  S.append request_line (13 :: 10 :: header_prefix headers tail)
+
+let (request_prefix_append @ total) (line : bytes)
+    (headers : int list list) (xs : bytes) (ys : bytes) :
+    {u : unit | S.append (request_prefix line headers xs) ys ===
+      request_prefix line headers (S.append xs ys)} =
+  request_prefix_def line headers xs;
+  request_prefix_def line headers (S.append xs ys);
+  S.append_associative line (13 :: 10 :: header_prefix headers xs) ys;
+  crlf_append (header_prefix headers xs) ys;
+  header_prefix_append headers xs ys;
+  let u = () in refine_ u
+
+let (serialize_prefix @ total) (request : request) :
+    {u : unit | serialize request === request_prefix
+      request.request_line request.headers (13 :: 10 :: request.body)} =
+  serialize_def request;
+  wire_headers_prefix request.headers request.body;
+  request_prefix_def request.request_line request.headers
+    (13 :: 10 :: request.body);
+  let u = () in refine_ u
+
+let (serialize_append @ total) (line : bytes) (headers : int list list)
+    (body : bytes) (tail : bytes) :
+    {u : unit | S.append (serialize {request_line = line; headers; body})
+      tail === serialize
+        {request_line = line; headers; body = S.append body tail}} =
+  serialize_prefix {request_line = line; headers; body};
+  serialize_prefix
+    {request_line = line; headers; body = S.append body tail};
+  request_prefix_append line headers (13 :: 10 :: body) tail;
+  crlf_append body tail;
+  let u = () in refine_ u
+
+let (line_wire @ total) (phase : phase) (line : bytes) (cr : bool) :
+    {u : unit | core_wire (Line (phase, line, cr)) ===
+      (match phase with
+       | Request_line -> S.append line (if cr then [13] else [])
+       | Headers (request_line, headers) -> request_prefix request_line
+           headers (S.append line (if cr then [13] else [])))} =
+  core_wire_def (Line (phase, line, cr));
+  match phase with
+  | Request_line -> let u = () in refine_ u
+  | Headers (request_line, headers) ->
+    request_prefix_def request_line headers
+      (S.append line (if cr then [13] else []));
+    let u = () in refine_ u
+
+let (finish_wire @ total) (phase : phase) (line : bytes) :
+    {u : unit | if observed (finish_line phase line) then
+      core_wire (finish_line phase line) ===
+      S.append (core_wire (Line (phase, line, true))) [10] else true} =
+  finish_line_def phase line;
+  line_wire phase line true;
+  S.append_associative line [13] [10]; S.append_def [13] [10];
+  S.append_def [] [10];
+  match phase with
+  | Request_line ->
+    observed_def (Malformed Invalid_request_line);
+    let next = Line (Headers (line, []), [], false) in
+    core_wire_def next; S.append_def ([] : bytes) [];
+    header_prefix_def [] [];
+    let u = () in refine_ u
+  | Headers (request_line, headers) ->
+    request_prefix_append request_line headers (S.append line [13]) [10];
+    if nonempty line then (
+      observed_def (Malformed Invalid_header);
+      line_wire (Headers (request_line, S.append headers [line])) [] false;
+      S.append_def ([] : bytes) [];
+      request_prefix_def request_line (S.append headers [line]) [];
+      request_prefix_def request_line headers (S.append line [13;10]);
+      header_prefix_concat headers [line] [];
+      header_prefix_def [line] []; header_prefix_def [] [];
+      let u = () in refine_ u)
+    else (
+      nonempty_def line;
+      S.append_def ([] : bytes) [13;10];
+      match framing headers with
+      | Bad e -> observed_def (Malformed e); let u = () in refine_ u
+      | Too_large r -> observed_def (Limit r); let u = () in refine_ u
+      | Length n ->
+        let request = {request_line; headers; body = []} in
+        serialize_prefix request;
+        if n = 0 then (
+          core_wire_def (Complete request); let u = () in refine_ u)
+        else (
+          core_wire_def (Body (request_line, headers, n, []));
+          let u = () in refine_ u))
+
+let (step_wire @ total) (core : core) (b : int) :
+    {u : unit | if not (terminal core) && observed (step core b) then
+      core_wire (step core b) === S.append (core_wire core) [b]
+      else true} =
+  terminal_def core; step_def core b;
+  if not (byte b) then (
+    observed_def (Malformed Invalid_byte); let u = () in refine_ u)
+  else match core with
+  | Complete _ | Malformed _ | Limit _ -> let u = () in refine_ u
+  | Body (request_line, headers, n, body) ->
+    core_wire_def core;
+    let next = S.append body [b] in
+    serialize_append request_line headers body [b];
+    core_wire_def (Complete {request_line; headers; body = next});
+    core_wire_def (Body (request_line, headers, n - 1, next));
+    let u = () in refine_ u
+  | Line (phase, line, cr) ->
+    if cr then (
+      finish_wire phase line;
+      observed_def (Malformed Invalid_crlf); let u = () in refine_ u)
+    else (
+      line_wire phase line false; S.append_nil line;
+      if b = 10 then (
+        observed_def (Malformed Invalid_crlf); let u = () in refine_ u)
+      else (
+        line_wire phase line true;
+        line_wire phase (S.append line [b]) false;
+        S.append_nil (S.append line [b]);
+        match phase with
+        | Request_line -> let u = () in refine_ u
+        | Headers (request_line, headers) ->
+          request_prefix_append request_line headers line [b];
+          let u = () in refine_ u))
+
+let (initial_reachable @ total) (_unit : unit) :
+    {u : unit | reachable (initial ()) []} =
+  initial_def (); reachable_def (initial ()) [];
+  valid_core_def (Line (Request_line, [], false)); safe_line_def [];
+  observed_def (Line (Request_line, [], false));
+  core_wire_def (Line (Request_line, [], false));
+  S.append_def ([] : bytes) []; S.length_def ([] : bytes);
+  let u = () in refine_ u
+
+let (advance_reachable @ total) (state : state) (prefix : bytes) (b : int) :
+    {u : unit | if reachable state prefix && not (terminal state.core)
+      && state.budget > 0 then
+      reachable (advance state b) (S.append prefix [b]) else true} =
+  reachable_def state prefix; advance_def state b;
+  reachable_def (advance state b) (S.append prefix [b]);
+  step_valid state.core b; step_wire state.core b;
+  S.append_length prefix [b]; S.length_def [b]; S.length_def ([] : bytes);
+  observed_def state.core; terminal_def state.core;
+  let u = () in refine_ u
+
+let rec (feed_reachable @ total) : (state : state) -> (prefix : bytes) ->
+    (input : bytes) ->
+    {u : unit | if reachable state prefix then
+      let result = feed state input in
+      reachable result.state (S.append prefix
+        (S.take (Bigint.of_int (consumed state result.state)) input))
+      else true} =
+  fun state prefix input ->
+  reachable_def state prefix; feed_def state input;
+  if terminal state.core then (
+    consumed_def state state; S.take_def 0Z input; S.append_nil prefix;
+    let u = () in refine_ u)
+  else match input with
+  | [] ->
+    consumed_def state state; S.take_def 0Z input; S.append_nil prefix;
+    let u = () in refine_ u
+  | b :: bs ->
+    if state.budget <= 0 then (
+      let stopped = {state with core = Limit Message_bytes} in
+      consumed_def state stopped; S.take_def 0Z input; S.append_nil prefix;
+      reachable_def stopped prefix;
+      valid_core_def stopped.core; observed_def stopped.core;
+      let u = () in refine_ u)
+    else (
+      let next = advance state b in
+      advance_reachable state prefix b; advance_def state b;
+      feed_reachable next (S.append prefix [b]) bs;
+      accounting next bs;
+      let result = feed next bs in
+      consumed_def state result.state; consumed_def next result.state;
+      let count = Bigint.of_int (consumed state result.state) in
+      let tail_count = Bigint.of_int (consumed next result.state) in
+      S.take_def count input;
+      S.append_associative prefix [b] (S.take tail_count bs);
+      S.append_def [b] (S.take tail_count bs);
+      S.append_def [] (S.take tail_count bs);
+      let u = () in refine_ u)
+
+let rec (length_nonnegative @ total) : (xs : bytes) ->
+    {u : unit | 0Z <= S.length xs} =
+  fun xs -> S.length_def xs;
+  match xs with
+  | [] -> let u = () in refine_ u
+  | _ :: rest -> length_nonnegative rest; let u = () in refine_ u
+
+let rec (fits_length @ total) : (budget : int) -> (xs : bytes) ->
+    {u : unit | if 0 <= budget && budget <= 16384 then
+      fits budget xs = (S.length xs <= Bigint.of_int budget) else true} =
+  fun budget xs ->
+  fits_def budget xs; S.length_def xs;
+  match xs with
+  | [] -> let u = () in refine_ u
+  | _ :: rest ->
+    if budget > 0 && budget <= 16384 then (
+      fits_length (budget - 1) rest; let u = () in refine_ u)
+    else (length_nonnegative rest; let u = () in refine_ u)
+
+let (reachable_completion @ total) (state : state) (prefix : bytes) :
+    {u : unit | if reachable state prefix then
+      match state.core with
+      | Complete request -> well_formed request
+        && serialize request === prefix
+      | _ -> true else true} =
+  reachable_def state prefix;
+  match state.core with
+  | Complete request ->
+    valid_core_def state.core; observed_def state.core;
+    core_wire_def state.core;
+    semantic_request_def request; well_formed_def request;
+    fits_length 16384 (serialize request);
+    let u = () in refine_ u
+  | _ -> let u = () in refine_ u
+
+let (accepted_input @ total) (input : bytes) :
+    {u : unit | let result = feed (initial ()) input in
+      reachable result.state
+        (S.take (Bigint.of_int (consumed (initial ()) result.state)) input)
+      && (match result.state.core with
+          | Complete request -> well_formed request
+            && S.take (Bigint.of_int
+                (consumed (initial ()) result.state)) input ===
+              serialize request
+            && input === S.append (serialize request) result.rest
+          | _ -> true)} =
+  initial_reachable ();
   let start = initial () in
+  feed_reachable start [] input;
   let result = feed start input in
-  ghost_ (initial_def (); accounting start input);
+  let prefix = S.take (Bigint.of_int (consumed start result.state)) input in
+  S.append_def [] prefix;
+  reachable_completion result.state prefix;
+  initial_def (); suffix_preservation start input;
+  let u = () in refine_ u
+
+let (framing_rejection @ total) (headers : int list list) :
+    {u : unit | if has_transfer_encoding headers then
+      framing headers ===
+        (if has_content_length headers then Bad Transfer_encoding_content_length
+         else Bad Unsupported_transfer_encoding)
+      else true} =
+  has_transfer_encoding_def headers; has_content_length_def headers;
+  framing_def headers; let u = () in refine_ u
+
+let rec (equal_bytes_sound @ total) : (xs : bytes) -> (ys : bytes) ->
+    {u : unit | if equal_bytes xs ys then xs === ys else true} =
+  fun xs ys ->
+  equal_bytes_def xs ys;
+  match xs, ys with
+  | x :: rest, y :: tail ->
+    equal_bytes_sound rest tail; let u = () in refine_ u
+  | _ -> let u = () in refine_ u
+
+let (host_not_cl @ total) (name : bytes) :
+    {u : unit | not (is_host name && is_cl name)} =
+  is_host_def name; is_cl_def name;
+  equal_bytes_sound name [104;111;115;116];
+  equal_bytes_sound name
+    [99;111;110;116;101;110;116;45;108;101;110;103;116;104];
+  let u = () in refine_ u
+
+let[@def] previous_matches (previous : int option) (n : int) =
+  match previous with None -> true | Some old -> old = n
+
+let rec (frame_agreement @ total) : (headers : int list list) ->
+    (previous : int option) -> (hosts : int) ->
+    {u : unit | match frame_fields headers previous hosts with
+      | Length n -> content_lengths_match headers n
+        && previous_matches previous n
+      | _ -> true} =
+  fun headers previous hosts ->
+  frame_fields_def headers previous hosts;
+  match frame_fields headers previous hosts with
+  | Bad _ | Too_large _ -> let u = () in refine_ u
+  | Length n ->
+    content_lengths_match_def headers n;
+    previous_matches_def previous n;
+    match headers with
+    | [] -> let u = () in refine_ u
+    | line :: rest ->
+      header_field_def line;
+      match header line with
+      | None -> let u = () in refine_ u
+      | Some (name, value) ->
+        if is_host name then (
+          host_not_cl name;
+          frame_agreement rest previous 1;
+          let u = () in refine_ u)
+        else if is_cl name then (
+          match content_length value with
+          | Bad _ | Too_large _ -> let u = () in refine_ u
+          | Length m ->
+            frame_agreement rest (Some m) hosts;
+            previous_matches_def (Some m) n;
+            let u = () in refine_ u)
+        else (
+          frame_agreement rest previous hosts;
+          let u = () in refine_ u)
+
+let (well_formed_framing @ total) (request : request) :
+    {u : unit | if well_formed request then
+      not (has_transfer_encoding request.headers)
+      && (match framing request.headers with
+          | Length n -> 0 <= n && n <= 8192 && sized n request.body
+            && content_lengths_match request.headers n
+          | _ -> false)
+      else true} =
+  well_formed_def request;
+  framing_def request.headers; has_transfer_encoding_def request.headers;
+  frame_agreement request.headers None 0;
+  framing_bounds request.headers;
+  let u = () in refine_ u
+
+let rec (sized_length @ total) : (n : int) -> (xs : bytes) ->
+    {u : unit | if 0 <= n && n <= 8192 && sized n xs then
+      S.length xs === Bigint.of_int n else true} =
+  fun n xs ->
+  sized_def n xs; S.length_def xs;
+  match xs with
+  | [] -> let u = () in refine_ u
+  | _ :: rest ->
+    if 0 <= n && n <= 8192 && sized n xs then (
+      sized_length (n - 1) rest; let u = () in refine_ u)
+    else let u = () in refine_ u
+
+let[@def] previous_value previous =
+  match previous with None -> 0 | Some n -> n
+
+let rec (frame_default @ total) : (headers : int list list) ->
+    (previous : int option) -> (hosts : int) ->
+    {u : unit | if not (has_content_length headers) then
+      match frame_fields headers previous hosts with
+      | Length n -> n = previous_value previous | _ -> true
+      else true} =
+  fun headers previous hosts ->
+  frame_fields_def headers previous hosts;
+  has_content_length_def headers;
+  previous_value_def previous;
+  match headers with
+  | [] -> let u = () in refine_ u
+  | line :: rest ->
+    has_name_def
+      [99;111;110;116;101;110;116;45;108;101;110;103;116;104] headers;
+    has_content_length_def rest;
+    header_def line;
+    match header line with
+    | None -> let u = () in refine_ u
+    | Some (name, _) ->
+      is_cl_def name;
+      if is_host name then (
+        frame_default rest previous 1; let u = () in refine_ u)
+      else (
+        frame_default rest previous hosts; let u = () in refine_ u)
+
+let (no_content_length_body @ total) (request : request) :
+    {u : unit | if well_formed request
+        && not (has_content_length request.headers) then
+      request.body === [] else true} =
+  well_formed_def request; well_formed_framing request;
+  framing_def request.headers; has_transfer_encoding_def request.headers;
+  frame_default request.headers None 0; previous_value_def None;
+  sized_def 0 request.body;
+  let u = () in refine_ u
+
+let (body_agreement @ total) (request : request) :
+    {u : unit | if well_formed request then
+      not (has_transfer_encoding request.headers)
+      && (match framing request.headers with
+          | Length n -> 0 <= n && n <= 8192
+            && S.length request.body === Bigint.of_int n
+            && content_lengths_match request.headers n
+          | _ -> false)
+      else true} =
+  well_formed_framing request;
+  match framing request.headers with
+  | Bad _ | Too_large _ -> let u = () in refine_ u
+  | Length n -> sized_length n request.body; let u = () in refine_ u
+
+let (header_outcome @ total) (line : bytes) (headers : int list list) :
+    {u : unit | let request = {request_line = line; headers; body = []} in
+      if valid_request_line line && safe_line line && header_lines headers
+        && fits 16384 (serialize request) then
+      let result = feed (initial ()) (serialize request) in
+      result.rest === [] && result.state.core ===
+        (match framing headers with
+         | Bad e -> Malformed e
+         | Too_large r -> Limit r
+         | Length n -> if n = 0 then Complete request
+             else Body (line, headers, n, []))
+      else true} =
+  let request = {request_line = line; headers; body = []} in
+  let wire = serialize request in
+  serialize_def request;
+  let segment = S.append line [13;10] in
+  let tail = wire_headers headers [] in
+  let start = Line (Request_line, [], false) in
+  drain_line Request_line [] line; S.append_def [] line;
+  drain_append start segment tail;
+  S.append_associative line [13;10] tail;
+  S.append_def [13;10] tail; S.append_def [10] tail; S.append_def [] tail;
+  finish_line_def Request_line line;
+  terminal_def (Line (Headers (line, []), [], false));
+  drain_headers line [] headers [];
+  S.append_def [] headers;
+  let ending = finish_line (Headers (line, headers)) [] in
+  drain_empty ending;
+  finish_line_def (Headers (line, headers)) []; nonempty_def [];
+  initial_def (); feed_matches_drain (initial ()) wire;
+  let u = () in refine_ u
+
+let rec (incomplete_suffix @ total) : (state : state) -> (input : bytes) ->
+    {u : unit | let result = feed state input in
+      if not (terminal result.state.core) then result.rest === [] else true} =
+  fun state input ->
+  feed_def state input;
+  if terminal state.core then let u = () in refine_ u
+  else match input with
+  | [] -> let u = () in refine_ u
+  | b :: rest ->
+    if state.budget <= 0 then (
+      terminal_def (Limit Message_bytes); let u = () in refine_ u)
+    else (
+      incomplete_suffix (advance state b) rest;
+      let u = () in refine_ u)
+
+end
+
+module S = Vox_sequence
+
+let[@def] good (machine : Internal.state) = ghost_ (
+  0 <= machine.budget && machine.budget <= 16384
+  && Internal.valid_core machine.core
+  && (if Internal.observed machine.core then
+        S.length (Internal.core_wire machine.core) ===
+          Bigint.of_int (16384 - machine.budget)
+      else true))
+
+type state = {machine : Internal.state | good machine}
+type result : immutable_data mod total = { state : state; rest : bytes }
+
+let[@def] machine_of (state : state) =
+  let refine_ machine = state in machine
+
+let[@def] total_consumed (state : state) =
+  let refine_ machine = state in 16384 - machine.budget
+
+let[@def] consumed (before : state) (after : state) =
+  total_consumed after - total_consumed before
+
+let[@def] processed (state : state) = ghost_ (
+  let refine_ machine = state in Internal.core_wire machine.core)
+
+let[@def] status (state : state) =
+  let refine_ machine = state in
+  match machine.core with
+  | Internal.Line _ | Internal.Body _ -> Incomplete
+  | Internal.Complete request -> Complete request
+  | Internal.Malformed error -> Malformed error
+  | Internal.Limit resource -> Limit resource
+
+let (reachable_good @ total) (machine : Internal.state) (prefix : bytes) :
+    {u : unit | if Internal.reachable machine prefix then good machine
+      else true} =
+  Internal.reachable_def machine prefix; good_def machine;
+  let u = () in refine_ u
+
+let (good_reachable @ total) (machine : Internal.state) :
+    {u : unit | if good machine && Internal.observed machine.core then
+      Internal.reachable machine (Internal.core_wire machine.core)
+      else true} =
+  good_def machine;
+  Internal.reachable_def machine (Internal.core_wire machine.core);
+  let u = () in refine_ u
+
+let (feed_good @ total) (machine : Internal.state) (input : bytes) :
+    {u : unit | if good machine then
+      good (Internal.feed machine input).state else true} =
+  good_reachable machine;
+  if Internal.observed machine.core then (
+    Internal.feed_reachable machine (Internal.core_wire machine.core) input;
+    let answer = Internal.feed machine input in
+    let prefix = S.append (Internal.core_wire machine.core)
+      (S.take (Bigint.of_int (Internal.consumed machine answer.state)) input) in
+    reachable_good answer.state prefix;
+    let u = () in refine_ u)
+  else (
+    Internal.observed_def machine.core;
+    Internal.terminal_def machine.core;
+    Internal.feed_def machine input;
+    let u = () in refine_ u)
+
+let (state_sound @ total) (state : state) :
+    {u : unit | 0 <= total_consumed state && total_consumed state <= 16384
+      && (match status state with
+          | Incomplete -> S.length (processed state) ===
+              Bigint.of_int (total_consumed state)
+          | Complete request -> well_formed request
+            && serialize request === processed state
+            && S.length (processed state) ===
+              Bigint.of_int (total_consumed state)
+          | Malformed _ | Limit _ -> processed state === [])} =
+  let refine_ machine = state in
+  good_def machine; status_def state; processed_def state;
+  total_consumed_def state;
+  good_reachable machine;
+  Internal.reachable_completion machine (Internal.core_wire machine.core);
+  Internal.observed_def machine.core;
+  match machine.core with
+  | Internal.Line _ | Internal.Body _ | Internal.Complete _ ->
+    let u = () in refine_ u
+  | Internal.Malformed _ | Internal.Limit _ ->
+    Internal.core_wire_def machine.core;
+    let u = () in refine_ u
+
+let (make_initial @ total) (_unit : unit) :
+    {state : state | status state === Incomplete
+      && total_consumed state = 0 && processed state === []
+      && machine_of state === Internal.initial ()} =
+  let machine = Internal.initial () in
+  ghost_ (Internal.initial_reachable (); reachable_good machine []);
+  let state : state = refine_ machine in
+  ghost_ (
+    status_def state; total_consumed_def state; processed_def state;
+    machine_of_def state;
+    Internal.initial_def ();
+    Internal.core_wire_def machine.core;
+    S.append_def ([] : bytes) []);
+  refine_ state
+
+let (run @ total) (state : state) (input : bytes) :
+    {result : result |
+      machine_of result.state ===
+        (Internal.feed (machine_of state) input).state
+      && result.rest === (Internal.feed (machine_of state) input).rest
+      && total_consumed state <= total_consumed result.state
+      && total_consumed result.state <= 16384
+      && S.length input === Bigint.add
+        (Bigint.of_int (consumed state result.state)) (S.length result.rest)
+      && S.drop (Bigint.of_int (consumed state result.state)) input ===
+        result.rest
+      && S.append
+        (S.take (Bigint.of_int (consumed state result.state)) input)
+        result.rest === input
+      && (match status result.state with
+          | Incomplete -> result.rest === [] | _ -> true)
+      && (match status result.state with
+          | Incomplete | Complete _ -> processed result.state ===
+              S.append (processed state)
+                (S.take (Bigint.of_int (consumed state result.state)) input)
+          | Malformed _ | Limit _ -> true)
+      && (match status result.state with
+          | Complete request -> well_formed request
+            && serialize request === processed result.state
+          | _ -> true)} =
+  let refine_ machine = state in
+  let answer = Internal.feed machine input in
+  ghost_ (feed_good machine input);
+  let next : state = refine_ answer.state in
+  let result = {state = next; rest = answer.rest} in
+  ghost_ (
+    good_def machine; good_reachable machine;
+    machine_of_def state; machine_of_def next;
+    Internal.accounting machine input;
+    Internal.incomplete_suffix machine input;
+    Internal.terminal_def answer.state.core;
+    Internal.suffix_preservation machine input;
+    consumed_def state next;
+    total_consumed_def state; total_consumed_def next;
+    Internal.consumed_def machine answer.state;
+    processed_def state; processed_def next;
+    status_def next; status_def state;
+    Internal.feed_reachable machine (Internal.core_wire machine.core) input;
+    let prefix = S.append (Internal.core_wire machine.core)
+      (S.take (Bigint.of_int (Internal.consumed machine answer.state)) input) in
+    Internal.reachable_def answer.state prefix;
+    Internal.observed_def answer.state.core;
+    Internal.observed_def machine.core;
+    Internal.terminal_def machine.core;
+    Internal.feed_def machine input;
+    state_sound next);
+  refine_ result
+
+let[@def] initial (_unit : unit) :
+    {state : state | status state === Incomplete
+      && total_consumed state = 0 && processed state === []} =
+  let refine_ state = make_initial _unit in refine_ state
+
+let[@def] feed (state : state) (input : bytes) :
+    {result : result |
+      total_consumed state <= total_consumed result.state
+      && total_consumed result.state <= 16384
+      && S.length input === Bigint.add
+        (Bigint.of_int (consumed state result.state)) (S.length result.rest)
+      && S.drop (Bigint.of_int (consumed state result.state)) input ===
+        result.rest
+      && S.append
+        (S.take (Bigint.of_int (consumed state result.state)) input)
+        result.rest === input
+      && (match status result.state with
+          | Incomplete -> result.rest === [] | _ -> true)
+      && (match status result.state with
+          | Incomplete | Complete _ -> processed result.state ===
+              S.append (processed state)
+                (S.take (Bigint.of_int (consumed state result.state)) input)
+          | Malformed _ | Limit _ -> true)
+      && (match status result.state with
+          | Complete request -> well_formed request
+            && serialize request === processed result.state
+          | _ -> true)} =
+  let refine_ result = run state input in refine_ result
+
+let (initial_machine @ total) (_unit : unit) :
+    {u : unit | machine_of (initial ()) === Internal.initial ()} =
+  initial_def ();
+  let refine_ state = make_initial () in
+  let u = () in refine_ u
+
+let (feed_machine @ total) (state : state) (input : bytes) :
+    {u : unit | let answer = Internal.feed (machine_of state) input in
+      let result = feed state input in
+      machine_of result.state === answer.state && result.rest === answer.rest} =
+  feed_def state input;
+  let refine_ result = run state input in
+  let u = () in refine_ u
+
+let (machine_injective @ total) (left : state) (right : state) :
+    {u : unit | if machine_of left === machine_of right then left === right
+      else true} =
+  machine_of_def left; machine_of_def right;
+  let u = () in refine_ u
+
+let (consumed_machine @ total) (left : state) (right : state) :
+    {u : unit | consumed left right =
+      Internal.consumed (machine_of left) (machine_of right)} =
+  consumed_def left right;
+  total_consumed_def left; total_consumed_def right;
+  machine_of_def left; machine_of_def right;
+  Internal.consumed_def (machine_of left) (machine_of right);
+  let u = () in refine_ u
+
+let (chunking_invariance @ total) (state : state)
+    (left : bytes) (right : bytes) :
+    {u : unit | feed state (S.append left right) ===
+      (let first = feed state left in
+       feed first.state (S.append first.rest right))} =
+  let first = feed state left in
+  let last = feed first.state (S.append first.rest right) in
+  let whole = feed state (S.append left right) in
+  feed_machine state left;
+  feed_machine first.state (S.append first.rest right);
+  feed_machine state (S.append left right);
+  Internal.chunking_invariance (machine_of state) left right;
+  machine_injective last.state whole.state;
+  let u = () in refine_ u
+
+let (request_separation @ total) (state : state)
+    (prefix : bytes) (suffix : bytes) :
+    {u : unit | let first = feed state prefix in
+      match status first.state with
+      | Complete _ -> feed state (S.append prefix suffix) ===
+          {state = first.state; rest = S.append first.rest suffix}
+      | _ -> true} =
+  let first = feed state prefix in
+  let whole = feed state (S.append prefix suffix) in
+  feed_machine state prefix; feed_machine state (S.append prefix suffix);
+  status_def first.state; machine_of_def first.state;
+  Internal.request_separation (machine_of state) prefix suffix;
+  machine_injective first.state whole.state;
+  let u = () in refine_ u
+
+let (terminal_preservation @ total) (state : state) (input : bytes) :
+    {u : unit | if is_terminal (status state) then
+      feed state input === {state; rest = input} else true} =
+  let result = feed state input in
+  feed_machine state input;
+  machine_of_def state; status_def state;
+  is_terminal_def (status state);
+  Internal.terminal_def (machine_of state).core;
+  Internal.feed_def (machine_of state) input;
+  machine_injective state result.state;
+  let u = () in refine_ u
+
+let (roundtrip @ total) (request : request) (suffix : bytes) :
+    {u : unit | if well_formed request then
+      let result = feed (initial ()) (S.append (serialize request) suffix) in
+      status result.state === Complete request && result.rest === suffix
+      && Bigint.of_int (consumed (initial ()) result.state) ===
+        S.length (serialize request)
+      else true} =
+  let start = initial () in
+  let input = S.append (serialize request) suffix in
+  let result = feed start input in
+  initial_machine (); feed_machine start input;
+  Internal.roundtrip request suffix;
+  consumed_machine start result.state;
+  status_def result.state; machine_of_def result.state;
+  let u = () in refine_ u
+
+let (header_outcome @ total) (line : bytes) (headers : int list list) :
+    {u : unit | let request = {request_line = line; headers; body = []} in
+      if valid_request_line line && safe_line line && header_lines headers
+        && fits 16384 (serialize request) then
+      let result = feed (initial ()) (serialize request) in
+      result.rest === [] && status result.state ===
+        (match framing headers with
+         | Bad e -> Malformed e
+         | Too_large r -> Limit r
+         | Length n -> if n = 0 then Complete request else Incomplete)
+      else true} =
+  let request = {request_line = line; headers; body = []} in
+  let result = feed (initial ()) (serialize request) in
+  initial_machine (); feed_machine (initial ()) (serialize request);
+  Internal.header_outcome line headers;
+  status_def result.state; machine_of_def result.state;
+  let u = () in refine_ u
+
+let (framing_rejection @ total) (headers : int list list) :
+    {u : unit | if has_transfer_encoding headers then
+      framing headers ===
+        (if has_content_length headers then
+           Bad Transfer_encoding_content_length
+         else Bad Unsupported_transfer_encoding)
+      else true} =
+  Internal.framing_rejection headers
+
+let (body_agreement @ total) (request : request) :
+    {u : unit | if well_formed request then
+      not (has_transfer_encoding request.headers)
+      && (match framing request.headers with
+          | Length n -> 0 <= n && n <= 8192
+            && S.length request.body === Bigint.of_int n
+            && content_lengths_match request.headers n
+          | _ -> false)
+      else true} =
+  Internal.body_agreement request
+
+let (no_content_length_body @ total) (request : request) :
+    {u : unit | if well_formed request
+        && not (has_content_length request.headers) then
+      request.body === [] else true} =
+  Internal.no_content_length_body request
+
+let (parse @ total) (input : bytes) :
+    {result : result |
+      result === feed (initial ()) input
+      && S.length input === Bigint.add
+        (Bigint.of_int (consumed (initial ()) result.state))
+        (S.length result.rest)
+      && S.drop (Bigint.of_int (consumed (initial ()) result.state)) input
+        === result.rest
+      && (match status result.state with
+          | Complete request -> well_formed request
+            && S.take (Bigint.of_int
+                (consumed (initial ()) result.state)) input ===
+              serialize request
+            && input === S.append (serialize request) result.rest
+          | _ -> true)} =
+  let start = initial () in
+  let refine_ result = feed start input in
+  ghost_ (S.append_def []
+    (S.take (Bigint.of_int (consumed start result.state)) input));
   refine_ result

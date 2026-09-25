@@ -12,15 +12,16 @@ bytecode and native modes. Checking uses `-principal` except for
 an upstream `immutable_data` inference issue
 prevents those modules from compiling in principal mode. All modules undergo
 refinement and termination checking. The build installs `Vox_sequence`,
-`Vox_int_sequence`, `Vox_iarray`, `Vox_http`, `Vox_sat`, `Vox_cdcl`,
+`Vox_int_sequence`, `Vox_iarray`, `Vox_http_spec`, `Vox_http`, `Vox_sat`, `Vox_cdcl`,
 `Vox_cdcl_total`, `Borrow`, `Borrow_iarray`, the permission, raw-memory, atomic and verified-table
 modules, and the `vox_borrow` archive
 under the configured prefix's `lib/ocaml/vox`. The archive name is historical;
 its modules include the ownership primitives and derived collections.
 
 [`Vox_http`](vox_http.md) is an incremental HTTP/1.1 request parser with direct
-roundtrip, chunking, accounting, and request-separation proofs. Run its streaming
-demo with `verification/demos/http_stream.sh`.
+accepted-input soundness, roundtrip, chunking, accounting, and request-separation
+proofs. Its semantic module and sealed API define the human review surface.
+Run its streaming demo with `verification/demos/http_stream.sh`.
 
 [`Vox_sat`](vox_sat.md) is a bounded DPLL solver for in-memory CNFs. Its SAT
 and UNSAT guarantees are checked in Vox.

@@ -2,28 +2,87 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml vox_http.mli vox_http.ml http_parser.ml";
+ all_modules = "vox_sequence.mli vox_sequence.ml vox_http_spec.mli vox_http_spec.ml vox_http.mli vox_http.ml http_parser.ml";
  { bytecode; }
  { native; }
 *)
+open Vox_http_spec
 open Vox_http
+module S = Vox_sequence
 
 let (decode_serialized @ total) (request : request) (suffix : bytes) :
     {result : result | if well_formed request then
-      result.state.core === Complete request && result.rest === suffix else true} =
+      (status result.state) === Complete request && result.rest === suffix else true} =
   let input = S.append (serialize request) suffix in
   let refine_ result = parse input in
   ghost_ (roundtrip request suffix);
   refine_ result
 
+let (accept_untrusted @ total) (input : bytes) :
+    {result : result | match (status result.state) with
+      | Complete request -> well_formed request
+        && not (has_transfer_encoding request.headers)
+        && (match framing request.headers with
+            | Length n -> S.length request.body === Bigint.of_int n
+              && content_lengths_match request.headers n
+            | _ -> false)
+      | _ -> true} =
+  let refine_ result = parse input in
+  match (status result.state) with
+  | Complete request -> ghost_ (body_agreement request); refine_ result
+  | _ -> refine_ result
+
+let (stream_two @ total) (first : bytes) (second : bytes) :
+    {result : result | match status result.state with
+      | Complete request -> well_formed request
+        && S.append first second === S.append (serialize request) result.rest
+      | _ -> true} =
+  let start = initial () in
+  let refine_ part = feed start first in
+  let refine_ result = feed part.state (S.append part.rest second) in
+  ghost_ (
+    chunking_invariance start first second;
+    let refine_ whole = parse (S.append first second) in
+    let u = () in
+    (refine_ u : {u : unit | result === whole
+      && (match status result.state with
+          | Complete request -> S.append first second ===
+              S.append (serialize request) result.rest
+          | _ -> true)}));
+  refine_ result
+
+let (reject_transfer_encoding @ total) (line : bytes)
+    (headers : int list list) :
+    {result : result |
+      let request = {request_line = line; headers; body = []} in
+      if valid_request_line line && safe_line line && header_lines headers
+        && fits 16384 (serialize request) && has_transfer_encoding headers then
+      (status result.state) ===
+        (if has_content_length headers then
+           Malformed Transfer_encoding_content_length
+         else Malformed Unsupported_transfer_encoding)
+      else true} =
+  let request = {request_line = line; headers; body = []} in
+  let result = feed (initial ()) (serialize request) in
+  ghost_ (header_outcome line headers; framing_rejection headers);
+  refine_ result
+
 let bytes text = List.init (String.length text) (fun i -> Char.code text.[i])
 let text bs = String.of_seq (List.to_seq (List.map Char.chr bs))
-let run text = feed (initial ()) (bytes text)
-let complete result = match result.state.core with Complete request -> request | _ -> assert false
+let run text =
+  let input = bytes text in
+  let refine_ result = parse input in
+  (match (status result.state) with
+   | Complete request ->
+     assert (well_formed request);
+     assert (input = serialize request @ result.rest)
+   | _ -> ());
+  result
+let complete result = match (status result.state) with Complete request -> request | _ -> assert false
 let malformed expected wire =
-  match (run wire).state.core with Malformed actual -> assert (actual = expected) | _ -> assert false
+  match (status (run wire).state) with Malformed actual -> assert (actual = expected) | _ -> assert false
 let limited expected wire =
-  match (run wire).state.core with Limit actual -> assert (actual = expected) | _ -> assert false
+  match (status (run wire).state) with Limit actual -> assert (actual = expected) | _ -> assert false
 let request = {
   request_line = bytes "POST /submit?q=1 HTTP/1.1";
   headers = List.map bytes ["Host: example.test"; "Content-Length: 5"; "X-Trace: yes"];
@@ -44,13 +103,15 @@ let () =
   assert (consumed (initial ()) result.state = List.length wire);
   assert ((complete (feed (initial ()) result.rest)).request_line = bytes "GET /health HTTP/1.1");
   let joined = wire @ bytes get in
-  let refine_ parsed = parse joined in
+  let refine_ parsed = accept_untrusted joined in
   assert (parsed = result);
   for cut = 0 to List.length joined do
     let left = List.filteri (fun i _ -> i < cut) joined in
     let right = List.filteri (fun i _ -> i >= cut) joined in
     let first = feed (initial ()) left in
-    assert (feed first.state (first.rest @ right) = feed (initial ()) joined)
+    assert (feed first.state (first.rest @ right) = feed (initial ()) joined);
+    let refine_ streamed = stream_two left right in
+    assert (streamed = parsed)
   done;
   let state = List.fold_left (fun state byte ->
     let result = feed state [byte] in assert (result.rest = []); result.state)
@@ -59,7 +120,7 @@ let () =
   for cut = 0 to List.length wire - 1 do
     let prefix = List.filteri (fun i _ -> i < cut) wire in
     let result = feed (initial ()) prefix in
-    assert (not (terminal result.state.core));
+    assert (not (is_terminal (status result.state)));
     assert (result.rest = []);
     assert (consumed (initial ()) result.state = cut)
   done;
@@ -84,6 +145,16 @@ let () =
     (framing "Transfer-Encoding: chunked\r\nContent-Length: 0\r\n");
   malformed Transfer_encoding_content_length
     (framing "content-length: 0\r\nTRANSFER-ENCODING: gzip, chunked\r\n");
+  List.iter (fun fields ->
+    let headers = List.map bytes fields in
+    let refine_ result = reject_transfer_encoding
+      (bytes "POST / HTTP/1.1") headers in
+    assert ((status result.state) =
+      (if has_content_length headers then
+         Malformed Transfer_encoding_content_length
+       else Malformed Unsupported_transfer_encoding)))
+    [["Host: a"; "Transfer-Encoding: chunked"];
+     ["Host: a"; "Content-Length: 0"; "Transfer-Encoding: chunked"]];
   assert ((complete (run (framing "cOnTeNt-LeNgTh:\t0001 \t\r\nContent-Length: 1\r\n" ^ "x"))).body = bytes "x");
   assert ((complete (run (framing ""))).body = []);
   let binary = List.init 256 Fun.id in
@@ -108,14 +179,14 @@ let () =
   let exact = short ^ String.make (16384 - String.length short - 4) 'x' ^ "\r\n\r\n" in
   let result = run (exact ^ get) in
   ignore (complete result);
-  assert (result.state.budget = 0 && result.rest = bytes get);
+  assert (total_consumed result.state = 16384 && result.rest = bytes get);
   let over = short ^ String.make 16384 'x' in
   let result = run over in
-  assert (result.state.core = Limit Message_bytes);
+  assert ((status result.state) = Limit Message_bytes);
   assert (consumed (initial ()) result.state = 16384);
   assert (List.length result.rest = String.length over - 16384);
-  assert ((feed (initial ()) [256]).state.core = Malformed Invalid_byte);
-  assert ((feed (initial ()) [-1]).state.core = Malformed Invalid_byte);
+  assert ((status (feed (initial ()) [256]).state) = Malformed Invalid_byte);
+  assert ((status (feed (initial ()) [-1]).state) = Malformed Invalid_byte);
   let boundary = bytes "GET / HTTP/1.1\r\nHost: a\r\n\r\n" in
   let result = feed (initial ()) (boundary @ [256]) in
   ignore (complete result); assert (result.rest = [256]);
@@ -124,9 +195,9 @@ let () =
     "Host: example.test\r\n\r\n"] in
   let rec dispatch state input requests =
     let result = feed state input in
-    match result.state.core with
+    match (status result.state) with
     | Complete request -> dispatch (initial ()) result.rest (request :: requests)
-    | Line _ | Body _ -> assert (result.rest = []); (result.state, requests)
+    | Incomplete -> assert (result.rest = []); (result.state, requests)
     | Malformed _ | Limit _ -> assert false
   in
   let (_, requests) = List.fold_left (fun (state, requests) chunk ->

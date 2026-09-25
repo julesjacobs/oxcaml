@@ -10,16 +10,9 @@
  ocamlc.byte;
  module = "vox_http.mli";
  ocamlc.byte;
- module = "http_suffix_rejected.ml";
+ module = "http_private_rejected.ml";
  ocamlc_byte_exit_status = "2";
  ocamlc.byte;
  check-ocamlc.byte-output;
 *)
-open Vox_http_spec
-open Vox_http
-
-let (discard_pipeline @ total) (request : request) (suffix : bytes) :
-    {u : unit | if well_formed request then
-      (feed (initial ()) (Vox_sequence.append (serialize request) suffix)).rest === [] else true} =
-  roundtrip request suffix;
-  let u = () in refine_ u
+let hidden = Vox_http.Internal.feed

@@ -6,7 +6,7 @@ prefix=${1:?Usage: build.sh COMPILER_PREFIX}
 prefix=$(cd "$prefix" && pwd)
 output="$root/_build/vox-library"
 destination="$prefix/lib/ocaml/vox"
-modules=(vox_sequence vox_http vox_int_sequence vox_iarray
+modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray
          vox_sat vox_cdcl vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
          vox_merge_sort borrow borrow_iarray

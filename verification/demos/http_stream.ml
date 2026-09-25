@@ -1,3 +1,4 @@
+open Vox_http_spec
 open Vox_http
 
 let bytes text = List.init (String.length text) (fun i -> Char.code text.[i])
@@ -14,7 +15,7 @@ let chunks =
 
 let rec deliver state input =
   let result = feed state input in
-  match result.state.core with
+  match status result.state with
   | Complete request ->
     Printf.printf "complete: %s; body=%S; consumed=%d; suffix=%d bytes\n"
       (text request.request_line)
@@ -22,7 +23,7 @@ let rec deliver state input =
       (consumed (initial ()) result.state)
       (List.length result.rest);
     if result.rest = [] then initial () else deliver (initial ()) result.rest
-  | Line _ | Body _ ->
+  | Incomplete ->
     Printf.printf "incomplete: consumed=%d\n"
       (consumed (initial ()) result.state);
     result.state
