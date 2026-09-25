@@ -924,7 +924,7 @@ open Vox_sat_spec
       (match clause_at formula index with
        | Some clause -> same_clause_reflexive clause
        | None -> ());
-      refine_ derivation)
+      derivation)
 
   let (resolve_proof @ total) :
       (formula : formula) -> (index : int) ->
@@ -948,7 +948,7 @@ open Vox_sat_spec
       conclusion_def formula derivation;
       same_clause_reflexive
         (resolve_clause index left_clause right_clause);
-      refine_ derivation)
+      derivation)
 
   let (empty_proof_at @ total) :
       (formula : formula) ->
@@ -986,7 +986,7 @@ open Vox_sat_spec
         aligned formula (clause :: database) (proof :: proofs)} @ ghost =
     fun formula clause proof database proofs -> ghost_ (
       aligned_def formula (clause :: database) (proof :: proofs);
-      refine_ ())
+      ())
 
   let[@def] rec learned_clause_at database index =
     match database with
@@ -1043,7 +1043,7 @@ open Vox_sat_spec
       derivation_valid_def formula proof;
       conclusion_def formula proof;
       same_clause_reflexive [];
-      refine_ proof) in
+      proof) in
     {clause = []; proof}
 
   let (original_result @ total) :
