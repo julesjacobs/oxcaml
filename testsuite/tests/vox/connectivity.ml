@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find.mli vox_union_find.ml vox_union_find_online.mli vox_union_find_online.ml vox_connectivity.mli vox_connectivity.ml connectivity.ml";
+ all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find.mli vox_union_find.ml vox_union_find_online.mli vox_union_find_online.ml vox_connectivity.mli vox_connectivity.ml vox_union_find_online_cost.ml connectivity.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
@@ -12,6 +12,7 @@
 module C = Vox_big_credits.Make ()
 module U = Vox_connectivity.Make (C)
 module K = Vox_ackermann
+module Q = Vox_union_find_online_cost
 
 type funded = #{ state : U.t; wallet : C.token @@ ghost total }
 type result = #{ value : U.elem @@ aliased; owned : funded }
@@ -104,14 +105,25 @@ let find : (x : U.elem) @ immutable ->
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let r = #{value; owned} in refine_ r
 
+let initially_empty (x : U.elem @ immutable) =
+  let amount = ghost_ 1Z in
+  let refine_ fee = C.Budget.create amount in
+  let refine_ state = U.create fee in
+  ghost_ (U.empty_law (borrow_ state) x);
+  let proof : {u : unit | not (U.contains (U.snapshot state) x)} = () in
+  let refine_ proof = proof in ()
+
 let run () =
   if max_int >= 8 then (
   let initial = ghost_ 1000Z in
   let refine_ wallet = C.Budget.create initial in
   let refine_ owned = create wallet in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = allocate owned in
   let #{value = x0; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account1 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.added_law before after x0 x0; U.observe x0 (borrow_ owned.#state);
@@ -119,6 +131,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = allocate owned in
   let #{value = x1; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account2 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.added_law before after x1 x0; U.observe x0 (borrow_ owned.#state);
@@ -127,6 +141,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = allocate owned in
   let #{value = x2; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account3 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.added_law before after x2 x0; U.observe x0 (borrow_ owned.#state);
@@ -136,6 +152,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = allocate owned in
   let #{value = x3; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account4 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.added_law before after x3 x0; U.observe x0 (borrow_ owned.#state);
@@ -146,6 +164,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = allocate owned in
   let #{value = x4; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account5 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.added_law before after x4 x0; U.observe x0 (borrow_ owned.#state);
@@ -157,6 +177,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = join x0 x1 owned in
   let #{value = merged; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account6 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.joined_law before after x0 x1 merged x0; U.observe x0 (borrow_ owned.#state);
@@ -168,6 +190,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = join x2 x3 owned in
   let #{value = merged; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account7 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.joined_law before after x2 x3 merged x0; U.observe x0 (borrow_ owned.#state);
@@ -179,6 +203,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = join x1 x2 owned in
   let #{value = merged; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account8 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.joined_law before after x1 x2 merged x0; U.observe x0 (borrow_ owned.#state);
@@ -190,6 +216,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = join x0 x3 owned in
   let #{value = merged; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account9 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.joined_law before after x0 x3 merged x0; U.observe x0 (borrow_ owned.#state);
@@ -206,6 +234,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = find x0 owned in
   let #{value = root0; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account10 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.found_law before after x0 x0; U.observe x0 (borrow_ owned.#state);
@@ -215,6 +245,8 @@ let run () =
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let refine_ r = find x3 owned in
   let #{value = root3; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account11 = ghost_ (U.account (borrow_ owned.#state)) in
   let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
   ghost_ (
     U.found_law before after x3 x0; U.observe x0 (borrow_ owned.#state);
@@ -230,5 +262,95 @@ let run () =
     not (U.connected (U.snapshot owned.#state) x0 x4) &&
     U.ticks owned.#state <= initial} = () in
   let refine_ proof = proof in
+  ghost_ (
+    let trace11 : Q.step list = [] in
+    let trace10 = {Q.operation = Q.Find; account = account11} :: trace11 in
+    let trace9 = {Q.operation = Q.Find; account = account10} :: trace10 in
+    let trace8 = {Q.operation = Q.Union; account = account9} :: trace9 in
+    let trace7 = {Q.operation = Q.Union; account = account8} :: trace8 in
+    let trace6 = {Q.operation = Q.Union; account = account7} :: trace7 in
+    let trace5 = {Q.operation = Q.Union; account = account6} :: trace6 in
+    let trace4 = {Q.operation = Q.Allocate; account = account5} :: trace5 in
+    let trace3 = {Q.operation = Q.Allocate; account = account4} :: trace4 in
+    let trace2 = {Q.operation = Q.Allocate; account = account3} :: trace3 in
+    let trace1 = {Q.operation = Q.Allocate; account = account2} :: trace2 in
+    let trace0 = {Q.operation = Q.Allocate; account = account1} :: trace1 in
+    Q.trace_def 8Z 1Z trace0;
+    Q.final_account_def 1Z trace0;
+    Q.count_def Q.Allocate trace0;
+    Q.count_def Q.Find trace0;
+    Q.count_def Q.Union trace0;
+    Q.trace_def 8Z account1 trace1;
+    Q.final_account_def account1 trace1;
+    Q.count_def Q.Allocate trace1;
+    Q.count_def Q.Find trace1;
+    Q.count_def Q.Union trace1;
+    Q.trace_def 8Z account2 trace2;
+    Q.final_account_def account2 trace2;
+    Q.count_def Q.Allocate trace2;
+    Q.count_def Q.Find trace2;
+    Q.count_def Q.Union trace2;
+    Q.trace_def 8Z account3 trace3;
+    Q.final_account_def account3 trace3;
+    Q.count_def Q.Allocate trace3;
+    Q.count_def Q.Find trace3;
+    Q.count_def Q.Union trace3;
+    Q.trace_def 8Z account4 trace4;
+    Q.final_account_def account4 trace4;
+    Q.count_def Q.Allocate trace4;
+    Q.count_def Q.Find trace4;
+    Q.count_def Q.Union trace4;
+    Q.trace_def 8Z account5 trace5;
+    Q.final_account_def account5 trace5;
+    Q.count_def Q.Allocate trace5;
+    Q.count_def Q.Find trace5;
+    Q.count_def Q.Union trace5;
+    Q.trace_def 8Z account6 trace6;
+    Q.final_account_def account6 trace6;
+    Q.count_def Q.Allocate trace6;
+    Q.count_def Q.Find trace6;
+    Q.count_def Q.Union trace6;
+    Q.trace_def 8Z account7 trace7;
+    Q.final_account_def account7 trace7;
+    Q.count_def Q.Allocate trace7;
+    Q.count_def Q.Find trace7;
+    Q.count_def Q.Union trace7;
+    Q.trace_def 8Z account8 trace8;
+    Q.final_account_def account8 trace8;
+    Q.count_def Q.Allocate trace8;
+    Q.count_def Q.Find trace8;
+    Q.count_def Q.Union trace8;
+    Q.trace_def 8Z account9 trace9;
+    Q.final_account_def account9 trace9;
+    Q.count_def Q.Allocate trace9;
+    Q.count_def Q.Find trace9;
+    Q.count_def Q.Union trace9;
+    Q.trace_def 8Z account10 trace10;
+    Q.final_account_def account10 trace10;
+    Q.count_def Q.Allocate trace10;
+    Q.count_def Q.Find trace10;
+    Q.count_def Q.Union trace10;
+    Q.trace_def 8Z account11 trace11;
+    Q.final_account_def account11 trace11;
+    Q.count_def Q.Allocate trace11;
+    Q.count_def Q.Find trace11;
+    Q.count_def Q.Union trace11;
+    Q.fee_def 8Z Q.Allocate; Q.fee_def 8Z Q.Find; Q.fee_def 8Z Q.Union;
+    Q.find_fee_def 8Z; Q.union_fee_def 8Z;
+    Q.same_def Q.Allocate Q.Allocate;
+    Q.same_def Q.Allocate Q.Find;
+    Q.same_def Q.Allocate Q.Union;
+    Q.same_def Q.Find Q.Allocate;
+    Q.same_def Q.Find Q.Find;
+    Q.same_def Q.Find Q.Union;
+    Q.same_def Q.Union Q.Allocate;
+    Q.same_def Q.Union Q.Find;
+    Q.same_def Q.Union Q.Union;
+    let u = () in
+    let refine_ checked = (refine_ u : {u : unit | Q.trace 8Z 1Z trace0}) in
+    Q.sequence 8Z trace0 (U.ticks (borrow_ owned.#state));
+    let u = () in
+    let refine_ proof = (refine_ u : {u : unit |
+      U.ticks owned.#state <= Q.budget 8Z 5Z 2Z 4Z}) in ());
   print_endline "connectivity and paid-prefix bound: ok")
 let () = run ()

@@ -151,6 +151,10 @@ The implementation adds no trusted credit or sorting primitive. See
 splitting and merging, overflow and reuse
 rejections, and integer and ranked-record clients.
 
+The ordered semantic review surfaces and reproducible public-only client,
+rejection and erasure checks for both cost demos are in
+[`../review/cost-boundaries.md`](../review/cost-boundaries.md).
+
 ## Union-find time credits
 
 `Vox_union_find_online.Make (Credits)` provides the growing interface.

@@ -83,6 +83,25 @@ module Make (C : Vox_big_credits.S) = struct
     root_def (snapshot state) x; member_def x (borrow_ state);
     representative_def x (borrow_ state); let u = () in refine_ u)
 
+  let rec (empty_paths @ total) : (paths : M.path list) @ immutable ->
+      (x : M.elem) @ immutable ->
+      {u : unit | F.size paths >= 0Z &&
+        (if F.size paths = 0Z then not (F.member x paths) else true)} @ ghost =
+      fun paths x -> ghost_ (
+    F.size_def paths; F.member_def x paths;
+    (match paths with [] -> () | _ :: rest -> empty_paths rest x);
+    let u = () in refine_ u)
+
+  let (empty_law @ total) :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      (x : M.elem) @ immutable ->
+      {u : unit | if size state = 0Z then
+        not (contains (snapshot state) x) else true} @ ghost =
+      fun state x -> ghost_ (
+    size_def (borrow_ state); snapshot_def (borrow_ state);
+    contains_def (snapshot state) x; empty_paths (contents state) x;
+    let u = () in refine_ u)
+
   let (added_law @ total) : (before : snapshot) @ immutable ->
       (after : snapshot) @ immutable -> (x : M.elem) @ immutable ->
       (q : M.elem) @ immutable ->

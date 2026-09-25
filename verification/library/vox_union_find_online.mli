@@ -81,6 +81,12 @@ module Make (C : Vox_big_credits.S) : sig
     (s : t) @ local immutable total forkable unyielding ->
     {u : unit | representative x s === (ghost_ (F.representative x (contents s)))} @@ total
 
+  val empty_law :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      (x : M.elem) @ immutable ->
+      {u : unit | if size state = 0Z then
+        not (contains (snapshot state) x) else true} @ ghost @@ total
+
   val account_bounds :
       (state : t) @ local immutable total ghost forkable unyielding ->
       {u : unit | ticks state <= account state} @ ghost @@ total
