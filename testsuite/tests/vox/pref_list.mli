@@ -62,8 +62,7 @@ val empty : unit ->
 val cons : (value : int) ->
   (b : {b : built | b.pointer === root b.model && valid b.model
       && Pref.own b.state === heap b.model}) @ unique ->
-  {r : built | let refine_ b = b in
-      r.pointer === root r.model && valid r.model
+  {r : built | r.pointer === root r.model && valid r.model
       && Pref.own r.state === heap r.model
       && (match r.model with Nil -> false | Cons (n, xs) ->
         n.value = value && xs === b.model)} @ unique

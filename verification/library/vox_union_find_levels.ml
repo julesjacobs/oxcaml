@@ -20,7 +20,7 @@ let rec (range_absent @ total) : (low : Bigint.t) -> (high : Bigint.t) ->
   range_def low high xs; mem_def x xs;
   (match xs with [] -> () | h :: tail ->
     range_absent (Bigint.add h 1Z) high tail x);
-  let u = () in refine_ u
+  ()
 
 let rec (insert_size @ total) : (low : Bigint.t) -> (high : Bigint.t) ->
     (x : Bigint.t) -> (xs : Bigint.t list) ->
@@ -38,7 +38,7 @@ let rec (insert_size @ total) : (low : Bigint.t) -> (high : Bigint.t) ->
     else (
       insert_size (Bigint.add h 1Z) high x tail;
       size_def (h :: insert x tail)));
-  let u = () in refine_ u
+  ()
 
 let rec (insert_range @ total) : (low : Bigint.t) -> (high : Bigint.t) ->
     (xs : Bigint.t list) -> (x : Bigint.t) ->
@@ -55,7 +55,7 @@ let rec (insert_range @ total) : (low : Bigint.t) -> (high : Bigint.t) ->
       else (
         insert_range (Bigint.add h 1Z) high tail x;
         range_def low high (h :: insert x tail)));
-  let u = () in refine_ u
+  ()
 
 let rec (range_size @ total) : (low : Bigint.t) -> (high : Bigint.t) ->
     (xs : Bigint.t list) ->
@@ -65,7 +65,7 @@ let rec (range_size @ total) : (low : Bigint.t) -> (high : Bigint.t) ->
   range_def low high xs; size_def xs;
   (match xs with [] -> () | h :: tail ->
     range_size (Bigint.add h 1Z) high tail);
-  let u = () in refine_ u
+  ()
 
 let rec (insert_mem @ total) : (x : Bigint.t) -> (xs : Bigint.t list) ->
     (target : Bigint.t) ->
@@ -80,4 +80,4 @@ let rec (insert_mem @ total) : (x : Bigint.t) -> (xs : Bigint.t list) ->
       else (
         insert_mem x tail target;
         mem_def target (h :: insert x tail)));
-  let u = () in refine_ u
+  ()

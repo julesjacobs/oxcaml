@@ -26,7 +26,7 @@ module Make (O : Vox_ordered_sequence.Order)
     S.append_def nil rest;
     S.append_def nil merged;
     S.append_def before other;
-    let u = () in refine_ u)
+    ())
 
   let (lower @ total) (first : O.elt @ immutable) (second : O.elt @ immutable)
       (tail : O.elt list @ immutable) :
@@ -36,5 +36,5 @@ module Make (O : Vox_ordered_sequence.Order)
     P.sorted_def values;
     P.all_weaken tail second first;
     P.all_def values first;
-    let u = () in refine_ u)
+    ())
 end

@@ -54,43 +54,43 @@ module Empty = struct
   module C = Vox_credits.Make ()
   let bad () =
     let zero = 0 in
-    let initial : {n : int | n >= 0} = refine_ zero in
-    let refine_ token = C.Budget.create initial in
-    C.tick (refine_ token)
+    let initial : {n : int | n >= 0} = zero in
+    let token = C.Budget.create initial in
+    C.tick (token)
 end;;
 [%%expect{|
-Line 7, characters 11-26:
-7 |     C.tick (refine_ token)
-               ^^^^^^^^^^^^^^^
+Line 7, characters 11-18:
+7 |     C.tick (token)
+               ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 module Oversplit = struct
   module C = Vox_credits.Make ()
   let bad (token : {t : C.token | C.credits t = 3} @ unique total ghost) =
-    let refine_ token = token in
+    let token = token in
     let amount = 4 in
-    C.split amount (refine_ token)
+    C.split amount (token)
 end;;
 [%%expect{|
-Line 6, characters 19-34:
-6 |     C.split amount (refine_ token)
-                       ^^^^^^^^^^^^^^^
+Line 6, characters 19-26:
+6 |     C.split amount (token)
+                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 module Duplicate_merge = struct
   module C = Vox_credits.Make ()
   let bad (token : C.token @ unique total ghost) =
-    C.merge token (refine_ token)
+    C.merge token (token)
 end;;
 [%%expect{|
-Line 4, characters 27-32:
-4 |     C.merge token (refine_ token)
-                               ^^^^^
+Line 4, characters 18-25:
+4 |     C.merge token (token)
+                      ^^^^^^^
 Error: This value is used here, but it is also being used as unique at:
 Line 4, characters 12-17:
-4 |     C.merge token (refine_ token)
+4 |     C.merge token (token)
                 ^^^^^
 
 |}]
@@ -101,14 +101,14 @@ module Overflow = struct
       (right : {t : C.token | C.credits left > 0 && C.credits t > 0 &&
         C.credits left + C.credits t < 0}) @ unique total ghost ->
       C.token @ unique total ghost = fun left right ->
-    let refine_ right = right in
-    let refine_ result = C.merge left (refine_ right) in
+    let right = right in
+    let result = C.merge left (right) in
     result
 end;;
 [%%expect{|
-Line 8, characters 38-53:
-8 |     let refine_ result = C.merge left (refine_ right) in
-                                          ^^^^^^^^^^^^^^^
+Line 8, characters 30-37:
+8 |     let result = C.merge left (right) in
+                                  ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -155,25 +155,25 @@ module Free_comparison = struct
   type result = #{ before : bool; state : C.token @@ ghost }
   let (bad @ total) : (left : int) -> (right : int) ->
       (token : {t : C.token | C.credits t > 0}) @ unique total ghost ->
-      {r : result | let refine_ token = token in
+      {r : result | let token = token in
         r.#before = (left <= right) &&
         C.credits r.#state = C.credits token - 1} @ unique =
       fun left right token ->
-    let refine_ token = token in
+    let token = token in
     let result = #{ before = left <= right; state = token } in
-    refine_ result
+    result
 end;;
 [%%expect{|
-Line 12, characters 4-18:
-12 |     refine_ result
-         ^^^^^^^^^^^^^^
+Line 12, characters 4-10:
+12 |     result
+         ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 module Duplicate_partition = struct
   module C = Vox_credits.Make ()
   let bad (parts : C.partition @ unique total) =
-    let _ = C.merge parts.left (refine_ parts.right) in
+    let _ = C.merge parts.left (parts.right) in
     parts.left
 end;;
 [%%expect{|
@@ -182,7 +182,7 @@ Line 5, characters 4-14:
         ^^^^^^^^^^
 Error: This value is used here, but it has already been used as unique at:
 Line 4, characters 20-30:
-4 |     let _ = C.merge parts.left (refine_ parts.right) in
+4 |     let _ = C.merge parts.left (parts.right) in
                         ^^^^^^^^^^
 
 |}]
@@ -190,15 +190,15 @@ Line 4, characters 20-30:
 module Escaping_observation = struct
   module C = Vox_credits.Make ()
   let bad (token : {t : C.token | C.credits t > 0} @ unique total ghost) =
-    let refine_ token = token in
+    let token = token in
     let observer = ghost_ (fun () -> C.credits token) in
-    let _ = C.tick (refine_ token) in
+    let _ = C.tick (token) in
     observer
 end;;
 [%%expect{|
-Line 6, characters 28-33:
-6 |     let _ = C.tick (refine_ token) in
-                                ^^^^^
+Line 6, characters 19-26:
+6 |     let _ = C.tick (token) in
+                       ^^^^^^^
 Error: This value is used here as unique, but it has already been used at:
 Line 5, characters 47-52:
 5 |     let observer = ghost_ (fun () -> C.credits token) in
@@ -210,18 +210,18 @@ module Exhausted = struct
   module C = Vox_credits.Make ()
   let bad () =
     let two = 2 in
-    let amount : {n : int | n >= 0} = refine_ two in
-    let refine_ start = C.Budget.create amount in
-    let first : {t : C.token | C.credits t > 0} = refine_ start in
-    let refine_ after_one = C.tick first in
-    let second : {t : C.token | C.credits t > 0} = refine_ after_one in
-    let refine_ after_two = C.tick second in
-    C.tick (refine_ after_two)
+    let amount : {n : int | n >= 0} = two in
+    let start = C.Budget.create amount in
+    let first : {t : C.token | C.credits t > 0} = start in
+    let after_one = C.tick first in
+    let second : {t : C.token | C.credits t > 0} = after_one in
+    let after_two = C.tick second in
+    C.tick (after_two)
 end;;
 [%%expect{|
-Line 11, characters 11-30:
-11 |     C.tick (refine_ after_two)
-                ^^^^^^^^^^^^^^^^^^^
+Line 11, characters 11-22:
+11 |     C.tick (after_two)
+                ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -229,16 +229,21 @@ module False_after_tick = struct
   module C = Vox_credits.Make ()
   let bad () =
     let one = 1 in
-    let amount : {n : int | n >= 0} = refine_ one in
-    let refine_ token = C.Budget.create amount in
-    let positive : {t : C.token | C.credits t > 0} = refine_ token in
-    let refine_ spent = C.tick positive in
+    let amount : {n : int | n >= 0} = one in
+    let token = C.Budget.create amount in
+    let positive : {t : C.token | C.credits t > 0} = token in
+    let spent = C.tick positive in
     let u = () in
-    (refine_ u : {u : unit | false})
+    (u : {u : unit | false})
 end;;
 [%%expect{|
-Line 10, characters 5-14:
-10 |     (refine_ u : {u : unit | false})
-          ^^^^^^^^^
+Line 8, characters 8-13:
+8 |     let spent = C.tick positive in
+            ^^^^^
+Warning 26 [unused-var]: unused variable "spent".
+
+Line 10, characters 5-6:
+10 |     (u : {u : unit | false})
+          ^
 Error: Refinement could not be proved (counterexample)
 |}]

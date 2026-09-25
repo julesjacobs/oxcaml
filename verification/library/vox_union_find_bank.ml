@@ -32,7 +32,7 @@ let (redirect_value @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   (match H.at h q with
   | Some (M.Link (_, parent)) -> R.redirect_weight h x r parent
   | _ -> ());
-  let u = () in refine_ u)
+  ())
 
 let rec (redirect_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (h : P.heap) @ immutable -> (paths : M.path list) @ immutable ->
@@ -52,7 +52,7 @@ let rec (redirect_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   | p :: rest ->
       redirect_potential cap alpha h rest x r;
       redirect_value cap alpha h x r (M.head p));
-  let u = () in refine_ u)
+  ())
 
 let rec (refresh_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (h : P.heap) @ immutable -> (selected : M.path) @ immutable ->
@@ -69,7 +69,7 @@ let rec (refresh_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
       M.refresh_valid h selected p;
       refresh_potential cap alpha h selected rest observed;
       potential_def cap alpha observed (M.refresh selected p :: F.refresh selected rest));
-  let u = () in refine_ u)
+  ())
 
 let (compressed_value_frame @ total) : (cap : Bigint.t) ->
     (alpha : Bigint.t) -> (h : P.heap) @ immutable ->
@@ -85,7 +85,7 @@ let (compressed_value_frame @ total) : (cap : Bigint.t) ->
       M.compressed_rank h selected parent;
       R.weight_def after parent; R.weight_def h parent
   | _ -> ());
-  let u = () in refine_ u)
+  ())
 
 module B = Vox_union_find_amortized
 module C = Vox_union_find_path_cost
@@ -106,18 +106,18 @@ let (release_step @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   B.release_def cap alpha h p; B.edges_def h p;
   match p with
   | M.Stop _ -> C.loss_def cap alpha (R.weight h (M.root p)) [];
-      let u = () in refine_ u
+      ()
   | M.Step (x, rest) ->
       value_def cap alpha h x; M.rank_def h x; R.weight_def h x;
       B.release_def cap alpha h rest;
       if R.weight h x <= 0Z then (
         V.node_phi_def cap alpha (R.weight h x) (R.weight h (M.head rest));
         V.node_phi_def cap alpha (R.weight h x) (R.weight h (M.root p));
-        let u = () in refine_ u)
+        ())
       else (
         let edge = {C.rank = R.weight h x; parent = R.weight h (M.head rest)} in
         C.loss_def cap alpha (R.weight h (M.root p)) (edge :: B.edges h rest);
-        let u = () in refine_ u))
+        ()))
 
 let rec (compression_potential @ total) : (cap : Bigint.t) ->
     (alpha : Bigint.t) -> (h : P.heap) @ immutable ->
@@ -135,7 +135,7 @@ let rec (compression_potential @ total) : (cap : Bigint.t) ->
   | M.Stop _ ->
       F.refresh_valid h selected paths;
       refresh_potential cap alpha h selected paths h;
-      let u = () in refine_ u
+      ()
   | M.Step (x, rest) ->
       compression_potential cap alpha h rest paths;
       F.refresh_valid h rest paths;
@@ -151,7 +151,7 @@ let rec (compression_potential @ total) : (cap : Bigint.t) ->
       let after = M.compressed h selected in
       refresh_potential cap alpha h rest paths after;
       refresh_potential cap alpha h selected paths after;
-      let u = () in refine_ u)
+      ())
 
 let (value_nonnegative @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (h : P.heap) @ immutable -> (p : M.path) @ immutable ->
@@ -162,18 +162,18 @@ let (value_nonnegative @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   value_def cap alpha h (M.head p);
   R.weight_def h (M.head p); M.rank_def h (M.head p);
   match p with
-  | M.Stop _ -> let u = () in refine_ u
+  | M.Stop _ -> ()
   | M.Step (x, rest) ->
       R.bounds cap h rest;
       let rank = R.weight h x in
       let parent = R.weight h (M.head rest) in
       if M.valid h p && R.ordered cap h p && alpha >= 1Z &&
         A.iter cap alpha 1Z 1Z >= cap && rank > 0Z then (
-        let u = () in V.analyze cap alpha rank parent (refine_ u);
-        let u = () in refine_ u)
+        let u = () in V.analyze cap alpha rank parent (u);
+        ())
       else (
         V.node_phi_def cap alpha rank parent;
-        let u = () in refine_ u))
+        ()))
 
 let rec (nonnegative @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (h : P.heap) @ immutable -> (paths : M.path list) @ immutable ->
@@ -186,7 +186,7 @@ let rec (nonnegative @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   (match paths with
   | [] -> ()
   | p :: rest -> value_nonnegative cap alpha h p; nonnegative cap alpha h rest);
-  let u = () in refine_ u)
+  ())
 
 let rec (fresh_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (h : P.heap) @ immutable -> (paths : M.path list) @ immutable ->
@@ -207,7 +207,7 @@ let rec (fresh_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
       | M.Step (_, tail) ->
           M.valid_def h tail; R.fresh_weight h x (M.head tail));
       fresh_potential cap alpha h rest x);
-  let u = () in refine_ u)
+  ())
 
 let (allocate_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (h : P.heap) @ immutable -> (paths : M.path list) @ immutable ->
@@ -220,7 +220,7 @@ let (allocate_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   let after = H.put h x (M.Root 0) in
   potential_def cap alpha after (M.Stop x :: paths);
   M.head_def (M.Stop x); value_def cap alpha after x;
-  let u = () in refine_ u)
+  ())
 
 module D = Vox_union_find_mass
 module J = Vox_union_find_link
@@ -257,11 +257,11 @@ let (link_value @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
         let rank = R.weight h q in
         let parent = R.weight after winner in
         if not (x === y) && q === loser && rank > 0Z then (
-          let u = () in V.analyze cap alpha rank parent (refine_ u);
-          let u = () in refine_ u)
+          let u = () in V.analyze cap alpha rank parent (u);
+          ())
         else (
           V.node_phi_def cap alpha rank parent;
-          let u = () in refine_ u)
+          ())
     | M.Step (_, rest) ->
         R.bounds cap h rest; F.closed_def paths rest;
         let parent = M.head rest in
@@ -270,13 +270,13 @@ let (link_value @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
         let old_parent = R.weight h parent in
         let new_parent = R.weight after parent in
         if rank > 0Z then (
-          let u = () in V.compression cap alpha rank old_parent new_parent (refine_ u);
-          let u = () in refine_ u)
+          let u = () in V.compression cap alpha rank old_parent new_parent (u);
+          ())
         else (
           V.node_phi_def cap alpha rank old_parent;
           V.node_phi_def cap alpha rank new_parent;
-          let u = () in refine_ u))
-  else let u = () in refine_ u)
+          ()))
+  else ())
 
 let rec (link_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     (h : P.heap) @ immutable -> (x : M.elem) @ immutable ->
@@ -296,13 +296,13 @@ let rec (link_potential @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
   potential_def cap alpha h queries;
   let after = M.linked h x y in
   match queries with
-  | [] -> potential_def cap alpha after []; let u = () in refine_ u
+  | [] -> potential_def cap alpha after []; ()
   | p :: rest ->
       link_value cap alpha h x y paths p;
       link_potential cap alpha h x y paths rest;
       M.joined_valid h x y p;
       potential_def cap alpha after (M.joined_path h x y p :: F.join h x y rest);
-      let u = () in refine_ u)
+      ())
 
 
 let (reparameterize_value @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
@@ -317,16 +317,16 @@ let (reparameterize_value @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   value_def small a h (M.head p); value_def large b h (M.head p);
   R.weight_def h (M.head p); M.rank_def h (M.head p);
   match p with
-  | M.Stop _ -> let u = () in refine_ u
+  | M.Stop _ -> ()
   | M.Step (x, rest) ->
     R.bounds small h rest;
     if M.valid h p && R.ordered small h p && small <= large &&
       1Z <= a && a <= b && b <= Bigint.add a 1Z && A.iter small a 1Z 1Z >= small
     then (
       let rank = R.weight h x in let parent = R.weight h (M.head rest) in
-      let u = () in V.reparameterize small large a b rank parent (refine_ u);
-      let u = () in refine_ u)
-    else let u = () in refine_ u)
+      let u = () in V.reparameterize small large a b rank parent (u);
+      ())
+    else ())
 
 let rec (reparameterize @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
     (a : Bigint.t) -> (b : Bigint.t) -> (h : P.heap) @ immutable ->
@@ -341,4 +341,4 @@ let rec (reparameterize @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   (match paths with [] -> () | p :: rest ->
     reparameterize_value small large a b h p;
     reparameterize small large a b h rest);
-  let u = () in refine_ u)
+  ())

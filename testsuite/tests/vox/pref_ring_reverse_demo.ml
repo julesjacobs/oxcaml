@@ -11,17 +11,16 @@ open Pref_ring
 open Pref_ring_reverse
 
 let run_reverse_demo () =
-  let refine_ frame = Pref_ring_alloc.make_frame () in
+  let frame = Pref_ring_alloc.make_frame () in
   let unrelated = frame.value in
   let frame_token = frame.state in
   let u = () in
   let frame_contents : {u : unit | H.mem (Pref.own frame_token) unrelated
-    && H.at (Pref.own frame_token) unrelated === Some 42} = refine_ u in
-  let refine_ frame_contents = frame_contents in
-  let refine_ t = Pref.empty () in
+    && H.at (Pref.own frame_token) unrelated === Some 42} = u in
+  let t = Pref.empty () in
   let flag = true in
   let data = 0 in
-  let refine_ r = make_node flag data t in
+  let r = make_node flag data t in
   let s = r.node in
   let t = r.state in
   let flag = false in
@@ -31,8 +30,8 @@ let run_reverse_demo () =
     && H.mem (Pref.own t) s.prev
     && H.mem (Pref.own t) s.next
     && H.mem (Pref.own t) s.prev
-    && H.mem (Pref.own t) s.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s s s flag data t in
+    && H.mem (Pref.own t) s.next} = t in
+  let r = Pref_ring_alloc.extend s s s flag data t in
   let a = r.node in
   let t = r.state in
   let flag = false in
@@ -42,8 +41,8 @@ let run_reverse_demo () =
     && H.mem (Pref.own t) a.prev
     && H.mem (Pref.own t) a.next
     && H.mem (Pref.own t) s.prev
-    && H.mem (Pref.own t) s.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s a s flag data t in
+    && H.mem (Pref.own t) s.next} = t in
+  let r = Pref_ring_alloc.extend s a s flag data t in
   let b = r.node in
   let t = r.state in
   let flag = false in
@@ -53,8 +52,8 @@ let run_reverse_demo () =
     && H.mem (Pref.own t) a.prev
     && H.mem (Pref.own t) a.next
     && H.mem (Pref.own t) b.prev
-    && H.mem (Pref.own t) b.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s a b flag data t in
+    && H.mem (Pref.own t) b.next} = t in
+  let r = Pref_ring_alloc.extend s a b flag data t in
   let c = r.node in
   let t = r.state in
   let t : {t : Pref.token | true
@@ -111,18 +110,16 @@ let run_reverse_demo () =
       && not (b.prev === c.prev)
       && not (b.prev === c.next)
       && not (b.next === c.prev)
-      && not (b.next === c.next)} = refine_ t in
-  let refine_ result = reverse_demo s a b c t in
+      && not (b.next === c.next)} = t in
+  let result = reverse_demo s a b c t in
   ghost_ (let u = () in
-    let refine_ proof = (refine_ u : {u : unit | ring (Pref.own result) s [c; b; a] &&
+    let proof = (u : {u : unit | ring (Pref.own result) s [c; b; a] &&
       path (Pref.own result) false [c; b; a] s && path (Pref.own result) true [a; b; c] s}) in ());
 
   let actual : {v : int | v = 42} =
     let borrowed = borrow_ frame_token in
-    let borrowed : {t : Pref.token | H.mem (Pref.own t) unrelated} = refine_
-        borrowed in
-    let refine_ actual = Pref.read unrelated borrowed in refine_ actual in
-  let refine_ actual = actual in
+    let borrowed : {t : Pref.token | H.mem (Pref.own t) unrelated} = borrowed in
+    let actual = Pref.read unrelated borrowed in actual in
   assert (actual = 42)
 
 let () = run_reverse_demo ()

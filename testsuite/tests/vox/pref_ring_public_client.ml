@@ -14,7 +14,7 @@ let (at_put @ total) (h : Pref.heap @ immutable)
     (q : node option Pref.t @ immutable) :
     {u : unit | H.at (H.put h p v) q ===
       (if p === q then Some v else H.at h q)} @ ghost =
-  ghost_ (let u = () in refine_ u)
+  ghost_ (())
 
 let splice_preserves_frame_cell (left : node @ immutable) (first : node @ immutable)
     (last : node @ immutable) (right : node @ immutable)
@@ -37,9 +37,7 @@ let splice_preserves_frame_cell (left : node @ immutable) (first : node @ immuta
       && H.at (Pref.own t) destination_right.prev === Some (Some
           destination_left)}
       @ unique)
-    : {r : Pref.token | let refine_ t = t in
-      H.at (Pref.own r) q === H.at (Pref.own t) q} @ unique =
-  let refine_ t = t in
+    : {r : Pref.token | H.at (Pref.own r) q === H.at (Pref.own t) q} @ unique =
   let before = ghost_ (Pref.own (borrow_ t)) in
   ghost_ (
     at_put before left.next (Some right) q;
@@ -53,21 +51,21 @@ let splice_preserves_frame_cell (left : node @ immutable) (first : node @ immuta
     at_put h last.next (Some destination_right) q;
     let h = H.put h last.next (Some destination_right) in
     at_put h destination_right.prev (Some last) q);
-  let refine_ result = splice_range left first last right
+  let result = splice_range left first last right
     destination_left destination_right t in
-  refine_ result
+  result
 
 let run () =
-  let refine_ token = Pref.empty () in
+  let token = Pref.empty () in
   let sentinel = true in
   let payload = 42 in
-  let refine_ made = make_node sentinel payload token in
+  let made = make_node sentinel payload token in
   let n = made.node in
   let token = made.state in
-  let refine_ token = connect n n token in
+  let token = connect n n token in
   let next = n.next in
-  let token : {t : Pref.token | H.mem (Pref.own t) next} = refine_ token in
-  let refine_ value = Pref.read next (borrow_ token) in
+  let token : {t : Pref.token | H.mem (Pref.own t) next} = token in
+  let value = Pref.read next (borrow_ token) in
   assert (value = Some n)
 
 let () = run ()

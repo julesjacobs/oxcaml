@@ -26,13 +26,12 @@ module Unchanged_tree = struct
       (t : {t : Pref.token | valid model && Pref.own t === heap model}) @ unique ->
       {t : Pref.token | Pref.own t === heap (flipped model)} @ unique =
     fun model t ->
-    let refine_ t = t in
-    refine_ t
+    t
 end;;
 [%%expect{|
-Line 9, characters 4-13:
-9 |     refine_ t
-        ^^^^^^^^^
+Line 8, characters 4-5:
+8 |     t
+        ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -40,14 +39,19 @@ module Shared_subtree = struct
   let bad (n : node @ immutable) =
     let model = ghost_ (Branch (n, Empty, Empty)) in
     let shared = ghost_ (Branch (n, model, model)) in
-    let refine_ definition = ghost_ (valid_def shared) in
+    let definition = ghost_ (valid_def shared) in
     let u = () in
-    let claim : {u : unit | valid shared} = refine_ u in
+    let claim : {u : unit | valid shared} = u in
     ignore claim
 end;;
 [%%expect{|
-Line 7, characters 44-53:
-7 |     let claim : {u : unit | valid shared} = refine_ u in
-                                                ^^^^^^^^^
+Line 5, characters 8-18:
+5 |     let definition = ghost_ (valid_def shared) in
+            ^^^^^^^^^^
+Warning 26 [unused-var]: unused variable "definition".
+
+Line 7, characters 44-45:
+7 |     let claim : {u : unit | valid shared} = u in
+                                                ^
 Error: Refinement could not be proved (counterexample)
 |}]

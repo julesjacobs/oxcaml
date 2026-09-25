@@ -55,24 +55,22 @@ let[@def] (connected @ total) (h : Pref.heap @ immutable)
 let connect (left : node @ immutable) (right : node @ immutable)
     (t : {t : Pref.token | H.mem (Pref.own t) left.next
       && H.mem (Pref.own t) right.prev} @ unique)
-    : {r : Pref.token | let refine_ t = t in Pref.own r === connected (Pref.own
+    : {r : Pref.token | Pref.own r === connected (Pref.own
         t) left right
       && Pref.own r === H.put (H.put (Pref.own t) left.next (Some right))
         right.prev (Some left)}
       @ unique =
-  let refine_ t = t in
   let before = ghost_ (Pref.own (borrow_ t)) in
-  let proof = ghost_ (connected_def before left right) in
-  let refine_ proof = proof in
+  let _ = ghost_ (connected_def before left right) in
   let p = left.next in
   let q = right.prev in
   let right_value = Some right in
   let left_value = Some left in
-  let t : {t : Pref.token | H.mem (Pref.own t) p} = refine_ t in
-  let refine_ t = Pref.write p right_value t in
-  let t : {t : Pref.token | H.mem (Pref.own t) q} = refine_ t in
-  let refine_ t = Pref.write q left_value t in
-  refine_ t
+  let t : {t : Pref.token | H.mem (Pref.own t) p} = t in
+  let t = Pref.write p right_value t in
+  let t : {t : Pref.token | H.mem (Pref.own t) q} = t in
+  let t = Pref.write q left_value t in
+  t
 
 let[@def] (inserted @ total) (h : Pref.heap @ immutable)
     (left : node @ immutable) (n : node @ immutable) (right : node @ immutable)
@@ -88,34 +86,32 @@ let insert_between (left : node @ immutable) (n : node @ immutable)
       && H.at (Pref.own t) n.next === Some (Some n)
       && H.at (Pref.own t) n.prev === Some (Some n)
       && not (n === left) && not (n === right)} @ unique)
-    : {r : Pref.token | let refine_ t = t in Pref.own r === inserted (Pref.own
+    : {r : Pref.token | Pref.own r === inserted (Pref.own
         t) left n right
       && Pref.own r === H.put (H.put
         (H.put (H.put (Pref.own t) left.next (Some n)) n.prev (Some left))
         n.next (Some right)) right.prev (Some n)}
       @ unique =
-  let refine_ t = t in
   let before = ghost_ (Pref.own (borrow_ t)) in
-  let proof = ghost_ (
-    let refine_ unfolded = present_def before left in
-    let refine_ b = present_def before n in
-    let refine_ c = present_def before right in
-    let refine_ d = inserted_def before left n right in
-    let refine_ e = connected_def before left n in
+  let _ = ghost_ (
+    let _ = present_def before left in
+    let _ = present_def before n in
+    let _ = present_def before right in
+    let _ = inserted_def before left n right in
+    let _ = connected_def before left n in
     let u = () in
     let proof : {u : unit | H.mem before left.next && H.mem before n.prev
       && H.mem (connected before left n) n.next
       && H.mem (connected before left n) right.prev
       && inserted before left n right ===
-        connected (connected before left n) n right} = refine_ u in proof) in
-  let refine_ proof = proof in
+        connected (connected before left n) n right} = u in proof) in
   let t : {t : Pref.token | H.mem (Pref.own t) left.next
-    && H.mem (Pref.own t) n.prev} = refine_ t in
-  let refine_ t = connect left n t in
+    && H.mem (Pref.own t) n.prev} = t in
+  let t = connect left n t in
   let t : {t : Pref.token | H.mem (Pref.own t) n.next
-    && H.mem (Pref.own t) right.prev} = refine_ t in
-  let refine_ t = connect n right t in
-  refine_ t
+    && H.mem (Pref.own t) right.prev} = t in
+  let t = connect n right t in
+  t
 
 let[@def] (removed @ total) (h : Pref.heap @ immutable)
     (left : node @ immutable) (n : node @ immutable) (right : node @ immutable)
@@ -131,47 +127,44 @@ let remove (sentinel : node @ immutable) (left : node @ immutable)
       && H.at (Pref.own t) n.prev === Some (Some left)
       && H.at (Pref.own t) n.next === Some (Some right)
       && H.at (Pref.own t) right.prev === Some (Some n)} @ unique)
-    : {r : Pref.token | let refine_ t = t in Pref.own r === removed (Pref.own t)
+    : {r : Pref.token | Pref.own r === removed (Pref.own t)
         left n right
       && Pref.own r === H.put (H.put
         (H.put (H.put (Pref.own t) left.next (Some right)) right.prev (Some
             left))
         n.next (Some n)) n.prev (Some n)}
       @ unique =
-  let refine_ t = t in
   let before = ghost_ (Pref.own (borrow_ t)) in
-  let proof = ghost_ (
-    let refine_ unfolded = present_def before left in
-    let refine_ b = present_def before n in
-    let refine_ c = present_def before right in
-    let refine_ d = removed_def before left n right in
-    let refine_ e = connected_def before left right in
+  let _ = ghost_ (
+    let _ = present_def before left in
+    let _ = present_def before n in
+    let _ = present_def before right in
+    let _ = removed_def before left n right in
+    let _ = connected_def before left right in
     let u = () in
     let proof : {u : unit | H.mem before left.next && H.mem before right.prev
       && H.mem (connected before left right) n.next
       && H.mem (connected before left right) n.prev
       && removed before left n right ===
-        connected (connected before left right) n n} = refine_ u in proof) in
-  let refine_ proof = proof in
+        connected (connected before left right) n n} = u in proof) in
   let t : {t : Pref.token | H.mem (Pref.own t) left.next
-    && H.mem (Pref.own t) right.prev} = refine_ t in
-  let refine_ t = connect left right t in
+    && H.mem (Pref.own t) right.prev} = t in
+  let t = connect left right t in
   let t : {t : Pref.token | H.mem (Pref.own t) n.next
-    && H.mem (Pref.own t) n.prev} = refine_ t in
-  let refine_ t = connect n n t in
-  refine_ t
+    && H.mem (Pref.own t) n.prev} = t in
+  let t = connect n n t in
+  t
 
 let read_link : (p : node option Pref.t) @ immutable ->
     (expected : node) @ immutable ghost ->
     (t : {t : Pref.token | H.mem (Pref.own t) p
       && H.at (Pref.own t) p === Some (Some expected)}) @ local read ->
     {n : node | n === expected} @ immutable = fun p expected t ->
-  let refine_ t = t in
-  let b : {t : Pref.token | H.mem (Pref.own t) p} = refine_ t in
-  let refine_ v = Pref.read p b in
+  let b : {t : Pref.token | H.mem (Pref.own t) p} = t in
+  let v = Pref.read p b in
   match v with
   | None -> failwith "unlinked node"
-  | Some n -> refine_ n
+  | Some n -> n
 
 let rec walk : (backward : bool) -> (cursor : node) @ immutable ->
     (stop : node) @ immutable -> (model : node list) @ immutable ghost ->
@@ -179,39 +172,36 @@ let rec walk : (backward : bool) -> (cursor : node) @ immutable ->
       && path (Pref.own t) backward model stop}) @ local read ->
     {ns : node list | ns === model} @ immutable =
   fun backward cursor stop model t ->
-  let refine_ t = t in
   let h = ghost_ (Pref.own t) in
-  let proof = ghost_ (
-    let refine_ unfolded = path_def h backward model stop in
-    let refine_ b = head_def model stop in
-    let refine_ c = tail_def model in
+  let _ = ghost_ (
+    let _ = path_def h backward model stop in
+    let _ = head_def model stop in
+    let _ = tail_def model in
     let u = () in
     let proof : {u : unit | (match model with
       | [] -> cursor === stop
       | n :: rest -> cursor === n && not cursor.sentinel
         && rest === tail model && present h cursor
         && H.at h (field backward cursor) === Some (Some (head rest stop))
-        && path h backward rest stop)} = refine_ u in proof) in
-  let refine_ proof = proof in
+        && path h backward rest stop)} = u in proof) in
   if cursor.sentinel then
-    let ns = [] in refine_ ns
+    let ns = [] in ns
   else
     let p = field backward cursor in
     let rest = ghost_ (tail model) in
     let expected = ghost_ (head rest stop) in
-    let proof = ghost_ (
-      let refine_ unfolded = present_def h cursor in
-      let refine_ b = field_def backward cursor in
+    let _ = ghost_ (
+      let _ = present_def h cursor in
+      let _ = field_def backward cursor in
       let u = () in
-      let proof : {u : unit | H.mem h p} = refine_ u in proof) in
-    let refine_ proof = proof in
+      let proof : {u : unit | H.mem h p} = u in proof) in
     let b : {t : Pref.token | H.mem (Pref.own t) p
-      && H.at (Pref.own t) p === Some (Some expected)} = refine_ t in
-    let refine_ next = read_link p expected b in
+      && H.at (Pref.own t) p === Some (Some expected)} = t in
+    let next = read_link p expected b in
     let b : {t : Pref.token | stop.sentinel && next === head rest stop
-      && path (Pref.own t) backward rest stop} = refine_ t in
-    let refine_ ns = walk backward next stop rest b in
-    let ns = cursor :: ns in refine_ ns
+      && path (Pref.own t) backward rest stop} = t in
+    let ns = walk backward next stop rest b in
+    let ns = cursor :: ns in ns
 
 let[@def] (value @ total) (h : Pref.heap @ immutable)
     (p : node option Pref.t @ immutable) =
@@ -230,61 +220,57 @@ let rec (owns_put @ total) :
     {u : unit | not (owns h ns) || owns (H.put h p v) ns} @ ghost =
   fun h ns p v -> ghost_ (
     let updated = H.put h p v in
-    let refine_ unfolded = owns_def h ns in
-    let refine_ b = owns_def updated ns in
+    let _ = owns_def h ns in
+    let _ = owns_def updated ns in
     match ns with
-    | [] -> let u = () in refine_ u
+    | [] -> ()
     | n :: rest ->
-      let refine_ c = present_def h n in
-      let refine_ d = present_def updated n in
-      let refine_ e = owns_put h rest p v in
-      let u = () in refine_ u)
+      let _ = present_def h n in
+      let _ = present_def updated n in
+      let _ = owns_put h rest p v in
+      ())
 
 let rec reverse_nodes : (ns : node list) @ immutable ->
     (t : {t : Pref.token | owns (Pref.own t) ns}) @ unique ->
-    {t' : Pref.token | let refine_ t = t in Pref.own t' === flipped_all
+    {t' : Pref.token | Pref.own t' === flipped_all
         (Pref.own t) ns}
       @ unique = fun ns t ->
-  let refine_ t = t in
   let before = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ unfolded = ghost_ (owns_def before ns) in
-  let refine_ b = ghost_ (flipped_all_def before ns) in
+  let _ = ghost_ (owns_def before ns) in
+  let _ = ghost_ (flipped_all_def before ns) in
   match ns with
-  | [] -> refine_ t
+  | [] -> t
   | n :: rest ->
     let p = n.prev in
     let q = n.next in
-    let refine_ unfolded = ghost_ (present_def before n) in
+    let _ = ghost_ (present_def before n) in
     let prev : {v : node option | Some v === H.at before p} =
       let b = borrow_ t in
-      let b : {t : Pref.token | H.mem (Pref.own t) p} = refine_ b in
-      let refine_ prev = Pref.read p b in refine_ prev in
-    let refine_ prev = prev in
+      let b : {t : Pref.token | H.mem (Pref.own t) p} = b in
+      let prev = Pref.read p b in prev in
     let next : {v : node option | Some v === H.at before q} =
       let b = borrow_ t in
-      let b : {t : Pref.token | H.mem (Pref.own t) q} = refine_ b in
-      let refine_ next = Pref.read q b in refine_ next in
-    let refine_ next = next in
-    let proof = ghost_ (
-      let refine_ unfolded = value_def before p in
-      let refine_ b = value_def before q in
-      let refine_ c = flipped_def before n in
-      let refine_ d = owns_put before rest p next in
+      let b : {t : Pref.token | H.mem (Pref.own t) q} = b in
+      let next = Pref.read q b in next in
+    let _ = ghost_ (
+      let _ = value_def before p in
+      let _ = value_def before q in
+      let _ = flipped_def before n in
+      let _ = owns_put before rest p next in
       let h = H.put before p next in
-      let refine_ e = owns_put h rest q prev in
+      let _ = owns_put h rest q prev in
       let u = () in
       let proof : {u : unit |
         H.put (H.put before p next) q prev === flipped before n
-        && owns (H.put (H.put before p next) q prev) rest} = refine_ u in proof)
+        && owns (H.put (H.put before p next) q prev) rest} = u in proof)
             in
-    let refine_ proof = proof in
-    let t : {t : Pref.token | H.mem (Pref.own t) p} = refine_ t in
-    let refine_ t = Pref.write p next t in
-    let t : {t : Pref.token | H.mem (Pref.own t) q} = refine_ t in
-    let refine_ t = Pref.write q prev t in
-    let t : {t : Pref.token | owns (Pref.own t) rest} = refine_ t in
-    let refine_ t = reverse_nodes rest t in
-    refine_ t
+    let t : {t : Pref.token | H.mem (Pref.own t) p} = t in
+    let t = Pref.write p next t in
+    let t : {t : Pref.token | H.mem (Pref.own t) q} = t in
+    let t = Pref.write q prev t in
+    let t : {t : Pref.token | owns (Pref.own t) rest} = t in
+    let t = reverse_nodes rest t in
+    t
 
 type created = { node : node @@ aliased; state : Pref.token }
 
@@ -302,28 +288,28 @@ let make_node (sentinel : bool) (value : int) (t : Pref.token @ unique)
         (H.put (H.put (Pref.own t) r.node.prev None) r.node.next None)
         r.node.prev (Some r.node)) r.node.next (Some r.node)} @ unique =
   let initial : node option = None in
-  let refine_ a = Pref.alloc initial t in
+  let a = Pref.alloc initial t in
   let prev = a.value in
   let t = a.state in
-  let refine_ b = Pref.alloc initial t in
+  let b = Pref.alloc initial t in
   let next = b.value in
   let t = b.state in
   let node = {value; sentinel; prev; next} in
   let v = Some node in
-  let t : {t : Pref.token | H.mem (Pref.own t) prev} = refine_ t in
-  let refine_ t = Pref.write prev v t in
-  let t : {t : Pref.token | H.mem (Pref.own t) next} = refine_ t in
-  let refine_ t = Pref.write next v t in
+  let t : {t : Pref.token | H.mem (Pref.own t) prev} = t in
+  let t = Pref.write prev v t in
+  let t : {t : Pref.token | H.mem (Pref.own t) next} = t in
+  let t = Pref.write next v t in
   let after = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ definition = ghost_ (present_def after node) in
+  let _ = ghost_ (present_def after node) in
   let result = {node; state = t} in
-  refine_ result
+  result
 
 let (mem_put @ total) (h : Pref.heap @ immutable)
     (p : node option Pref.t @ immutable) (v : node option @ immutable)
     (q : node option Pref.t @ immutable) :
     {u : unit | not (H.mem h q) || H.mem (H.put h p v) q} @ ghost =
-  ghost_ (let u = () in refine_ u)
+  ghost_ (())
 
 let splice_range (left : node @ immutable) (first : node @ immutable)
     (last : node @ immutable) (right : node @ immutable)
@@ -342,8 +328,7 @@ let splice_range (left : node @ immutable) (first : node @ immutable)
       && H.at (Pref.own t) destination_right.prev === Some (Some
           destination_left)}
       @ unique)
-    : {r : Pref.token | let refine_ t = t in
-      Pref.own r === H.put (H.put
+    : {r : Pref.token | Pref.own r === H.put (H.put
         (H.put (H.put
           (H.put (H.put (Pref.own t) left.next (Some right)) right.prev (Some
               left))
@@ -351,15 +336,13 @@ let splice_range (left : node @ immutable) (first : node @ immutable)
               destination_left))
         last.next (Some destination_right)) destination_right.prev (Some last)}
       @ unique =
-  let refine_ t = t in
   let before = ghost_ (Pref.own (borrow_ t)) in
   let u = () in
-  let contents : {u : unit |
+  let _ : {u : unit |
     H.mem before left.next && H.mem before right.prev
     && H.mem before destination_left.next && H.mem before first.prev
     && H.mem before last.next
-      && H.mem before destination_right.prev} = refine_ u in
-  let refine_ contents = contents in
+      && H.mem before destination_right.prev} = u in
   let p0 = left.next in
   let v0 = Some right in
   let p1 = right.prev in
@@ -373,39 +356,39 @@ let splice_range (left : node @ immutable) (first : node @ immutable)
   let p5 = destination_right.prev in
   let v5 = Some last in
   let h = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ preserved = ghost_ (mem_put h p0 v0 p1) in
-  let refine_ preserved = ghost_ (mem_put h p0 v0 p2) in
-  let refine_ preserved = ghost_ (mem_put h p0 v0 p3) in
-  let refine_ preserved = ghost_ (mem_put h p0 v0 p4) in
-  let refine_ preserved = ghost_ (mem_put h p0 v0 p5) in
-  let t : {t : Pref.token | H.mem (Pref.own t) p0} = refine_ t in
-  let refine_ t = Pref.write p0 v0 t in
+  let _ = ghost_ (mem_put h p0 v0 p1) in
+  let _ = ghost_ (mem_put h p0 v0 p2) in
+  let _ = ghost_ (mem_put h p0 v0 p3) in
+  let _ = ghost_ (mem_put h p0 v0 p4) in
+  let _ = ghost_ (mem_put h p0 v0 p5) in
+  let t : {t : Pref.token | H.mem (Pref.own t) p0} = t in
+  let t = Pref.write p0 v0 t in
   let h = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ preserved = ghost_ (mem_put h p1 v1 p2) in
-  let refine_ preserved = ghost_ (mem_put h p1 v1 p3) in
-  let refine_ preserved = ghost_ (mem_put h p1 v1 p4) in
-  let refine_ preserved = ghost_ (mem_put h p1 v1 p5) in
-  let t : {t : Pref.token | H.mem (Pref.own t) p1} = refine_ t in
-  let refine_ t = Pref.write p1 v1 t in
+  let _ = ghost_ (mem_put h p1 v1 p2) in
+  let _ = ghost_ (mem_put h p1 v1 p3) in
+  let _ = ghost_ (mem_put h p1 v1 p4) in
+  let _ = ghost_ (mem_put h p1 v1 p5) in
+  let t : {t : Pref.token | H.mem (Pref.own t) p1} = t in
+  let t = Pref.write p1 v1 t in
   let h = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ preserved = ghost_ (mem_put h p2 v2 p3) in
-  let refine_ preserved = ghost_ (mem_put h p2 v2 p4) in
-  let refine_ preserved = ghost_ (mem_put h p2 v2 p5) in
-  let t : {t : Pref.token | H.mem (Pref.own t) p2} = refine_ t in
-  let refine_ t = Pref.write p2 v2 t in
+  let _ = ghost_ (mem_put h p2 v2 p3) in
+  let _ = ghost_ (mem_put h p2 v2 p4) in
+  let _ = ghost_ (mem_put h p2 v2 p5) in
+  let t : {t : Pref.token | H.mem (Pref.own t) p2} = t in
+  let t = Pref.write p2 v2 t in
   let h = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ preserved = ghost_ (mem_put h p3 v3 p4) in
-  let refine_ preserved = ghost_ (mem_put h p3 v3 p5) in
-  let t : {t : Pref.token | H.mem (Pref.own t) p3} = refine_ t in
-  let refine_ t = Pref.write p3 v3 t in
+  let _ = ghost_ (mem_put h p3 v3 p4) in
+  let _ = ghost_ (mem_put h p3 v3 p5) in
+  let t : {t : Pref.token | H.mem (Pref.own t) p3} = t in
+  let t = Pref.write p3 v3 t in
   let h = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ preserved = ghost_ (mem_put h p4 v4 p5) in
-  let t : {t : Pref.token | H.mem (Pref.own t) p4} = refine_ t in
-  let refine_ t = Pref.write p4 v4 t in
-  let t : {t : Pref.token | H.mem (Pref.own t) p5} = refine_ t in
-  let refine_ t = Pref.write p5 v5 t in
+  let _ = ghost_ (mem_put h p4 v4 p5) in
+  let t : {t : Pref.token | H.mem (Pref.own t) p4} = t in
+  let t = Pref.write p4 v4 t in
+  let t : {t : Pref.token | H.mem (Pref.own t) p5} = t in
+  let t = Pref.write p5 v5 t in
 
-  refine_ t
+  t
 
 let traverse : (backward : bool) -> (sentinel : node) @ immutable ->
     (expected : node list) @ immutable ghost ->
@@ -415,24 +398,22 @@ let traverse : (backward : bool) -> (sentinel : node) @ immutable ->
       && path (Pref.own t) backward expected sentinel}) @ local read ->
     {ns : node list | ns === expected} @ immutable =
   fun backward sentinel expected t ->
-  let refine_ t = t in
   let h = ghost_ (Pref.own t) in
   let p = field backward sentinel in
   let start = ghost_ (head expected sentinel) in
-  let proof = ghost_ (
-    let refine_ unfolded = present_def h sentinel in
-    let refine_ b = field_def backward sentinel in
+  let _ = ghost_ (
+    let _ = present_def h sentinel in
+    let _ = field_def backward sentinel in
     let u = () in
-    let proof : {u : unit | H.mem h p} = refine_ u in proof) in
-  let refine_ proof = proof in
+    let proof : {u : unit | H.mem h p} = u in proof) in
   let b : {t : Pref.token | H.mem (Pref.own t) p
-    && H.at (Pref.own t) p === Some (Some start)} = refine_ t in
-  let refine_ first = read_link p start b in
+    && H.at (Pref.own t) p === Some (Some start)} = t in
+  let first = read_link p start b in
   let b : {t : Pref.token | sentinel.sentinel
     && first === head expected sentinel
-    && path (Pref.own t) backward expected sentinel} = refine_ t in
-  let refine_ ns = walk backward first sentinel expected b in
-  refine_ ns
+    && path (Pref.own t) backward expected sentinel} = t in
+  let ns = walk backward first sentinel expected b in
+  ns
 
 
 let detach (n : node @ immutable) (left : node @ immutable)
@@ -446,8 +427,7 @@ let detach (n : node @ immutable) (left : node @ immutable)
       && not (n.prev === n.next)
       && not (left.next === n.prev) && not (left.next === n.next)
       && not (right.prev === n.prev) && not (right.prev === n.next)} @ unique) :
-    {r : Pref.partition | let refine_ t = t in
-      Pref.own r.#left === H.restrict (Pref.own t)
+    {r : Pref.partition | let t = t in Pref.own r.#left === H.restrict (Pref.own t)
         (H.put (H.put (H.empty ()) n.prev (Some n)) n.next (Some n))
       && Pref.own r.#right === H.exclude (Pref.own t)
         (H.put (H.put (H.empty ()) n.prev (Some n)) n.next (Some n))
@@ -458,8 +438,7 @@ let detach (n : node @ immutable) (left : node @ immutable)
       && not (H.mem (Pref.own r.#right) n.next)
       && H.at (Pref.own r.#right) left.next === Some (Some right)
       && H.at (Pref.own r.#right) right.prev === Some (Some left)} @ unique =
-  let refine_ t = t in
   let selection = ghost_ (H.put (H.put (H.empty ()) n.prev (Some n))
     n.next (Some n)) in
-  let refine_ parts = Pref.split selection t in
-  refine_ parts
+  let parts = Pref.split selection t in
+  parts

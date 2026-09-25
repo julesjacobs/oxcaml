@@ -60,8 +60,7 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
     {r : Pref.token | ring (Pref.own r) s [c; b; a] &&
       path (Pref.own r) false [c; b; a] s && path (Pref.own r) true [a; b; c] s} @ unique =
   fun s a b c t ->
-  let refine_ t = t in
-  let refine_ t = Pref_ring_reverse_setup.build_source s a b c (refine_ t) in
+  let t = Pref_ring_reverse_setup.build_source s a b c (t) in
   let forward = ghost_ [a; b; c] in
   let h = ghost_ (Pref.own (borrow_ t)) in
   let proof = ghost_ (
@@ -88,27 +87,24 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && H.at h b.prev === Some (Some a)
       && H.at h b.next === Some (Some c)
       && H.at h c.prev === Some (Some b)
-      && H.at h c.next === Some (Some s)} = refine_ h in
-    let refine_ proof = certify3 s a b c refined in
+      && H.at h c.next === Some (Some s)} = h in
+    let proof = certify3 s a b c refined in
     let result : {u : unit | ring h s [a; b; c] && path h false [a; b; c] s
       && path h true [c; b; a] s && present h s && owns h (s :: [a; b; c])
       && H.at h (field false s) === Some (Some (head [a; b; c] s))
-      && H.at h (field true s) === Some (Some (head [c; b; a] s))} = refine_
-          proof in result) in
-  let refine_ proof = proof in
+      && H.at h (field true s) === Some (Some (head [c; b; a] s))} = proof in result) in
   let direction = false in
   let collected : {ns : node list | ns === forward} =
     let borrowed = borrow_ t in
     let borrowed : {t : Pref.token | s.sentinel && present (Pref.own t) s
       && H.at (Pref.own t) (field direction s) === Some (Some (head forward s))
-      && path (Pref.own t) direction forward s} = refine_ borrowed in
-    let refine_ collected = traverse direction s forward borrowed in
-    refine_ collected in
-  let refine_ collected = collected in
+      && path (Pref.own t) direction forward s} = borrowed in
+    let collected = traverse direction s forward borrowed in
+    collected in
   let ns = s :: collected in
   let before = ghost_ (Pref.own (borrow_ t)) in
-  let t : {t : Pref.token | owns (Pref.own t) ns} = refine_ t in
-  let refine_ t = reverse_nodes ns t in
+  let t : {t : Pref.token | owns (Pref.own t) ns} = t in
+  let t = reverse_nodes ns t in
   let proof = ghost_ (
     let refined : {h : Pref.heap | H.mem h s.prev
       && H.mem h s.next
@@ -153,8 +149,8 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && not (b.prev === c.next)
       && not (b.next === c.prev)
       && not (b.next === c.next)
-      && not (c.prev === c.next)} = refine_ before in
-    let refine_ proof = Pref_ring_reverse_model.contents s a b c refined in
+      && not (c.prev === c.next)} = before in
+    let proof = Pref_ring_reverse_model.contents s a b c refined in
     let result : {u : unit | H.mem (flipped_all before ns) s.prev
       && H.mem (flipped_all before ns) s.next
       && H.at (flipped_all before ns) s.prev === Some (Some a)
@@ -170,9 +166,8 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && H.mem (flipped_all before ns) c.prev
       && H.mem (flipped_all before ns) c.next
       && H.at (flipped_all before ns) c.prev === Some (Some s)
-      && H.at (flipped_all before ns) c.next === Some (Some b)} = refine_ proof
+      && H.at (flipped_all before ns) c.next === Some (Some b)} = proof
           in result) in
-  let refine_ proof = proof in
   let h = ghost_ (Pref.own (borrow_ t)) in
   let proof = ghost_ (
     let refined : {h : Pref.heap | s.sentinel
@@ -198,12 +193,10 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && H.at h b.prev === Some (Some c)
       && H.at h b.next === Some (Some a)
       && H.at h a.prev === Some (Some b)
-      && H.at h a.next === Some (Some s)} = refine_ h in
-    let refine_ proof = certify3 s c b a refined in
+      && H.at h a.next === Some (Some s)} = h in
+    let proof = certify3 s c b a refined in
     let result : {u : unit | ring h s [c; b; a] && path h false [c; b; a] s
       && path h true [a; b; c] s && present h s && owns h (s :: [c; b; a])
       && H.at h (field false s) === Some (Some (head [c; b; a] s))
-      && H.at h (field true s) === Some (Some (head [a; b; c] s))} = refine_
-          proof in result) in
-  let refine_ proof = proof in
-  refine_ t
+      && H.at h (field true s) === Some (Some (head [a; b; c] s))} = proof in result) in
+  t

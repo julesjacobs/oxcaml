@@ -20,8 +20,7 @@ module Laws = struct
       {u : unit | append Nil ys === ys} =
     let nil = Nil in
     append_def nil ys;
-    let u = () in
-    refine_ u
+    ()
 
   let rec (append_nil_right @ total) :
       (xs : t) ->
@@ -31,15 +30,13 @@ module Laws = struct
     append_def xs nil;
     match xs with
     | Nil ->
-      let u = () in
-      refine_ u
+      ()
     | Cons (_, tail) ->
       let induction : {u : unit | append tail Nil === tail} =
         append_nil_right tail
       in
       induction;
-      let u = () in
-      refine_ u
+      ()
 
   let rec (append_associative @ total) :
       (xs : t) ->
@@ -57,8 +54,7 @@ module Laws = struct
     append_def xs yz;
     match xs with
     | Nil ->
-      let u = () in
-      refine_ u
+      ()
     | Cons (_, tail) ->
       let induction :
           {u : unit |
@@ -66,8 +62,7 @@ module Laws = struct
         append_associative tail ys zs
       in
       induction;
-      let u = () in
-      refine_ u
+      ()
 
   let rec (length_append @ total) :
       (xs : t) ->
@@ -81,8 +76,7 @@ module Laws = struct
     length_def xs;
     match xs with
     | Nil ->
-      let u = () in
-      refine_ u
+      ()
     | Cons (_, tail) ->
       let induction :
           {u : unit |
@@ -90,8 +84,7 @@ module Laws = struct
         length_append tail ys
       in
       induction;
-      let u = () in
-      refine_ u
+      ()
 
   let rec (sum_append @ total) :
       (xs : t) ->
@@ -105,14 +98,12 @@ module Laws = struct
     sum_def xs;
     match xs with
     | Nil ->
-      let u = () in
-      refine_ u
+      ()
     | Cons (_, tail) ->
       let induction :
           {u : unit | sum (append tail ys) === sum tail + sum ys} =
         sum_append tail ys
       in
       induction;
-      let u = () in
-      refine_ u
+      ()
 end

@@ -23,10 +23,10 @@ let (add_correct @ total) (left @ total) (right @ total) input :
   eval_def result input;
   let u = () in
   match left, right with
-  | Lit _, Lit _ -> refine_ u
-  | Lit 0, _ -> refine_ u
-  | _, Lit 0 -> refine_ u
-  | _ -> refine_ u
+  | Lit _, Lit _ -> u
+  | Lit 0, _ -> u
+  | _, Lit 0 -> u
+  | _ -> u
 
 let[@def] rec fold (expression @ total) : t @ total =
   match expression with
@@ -42,17 +42,17 @@ let rec (fold_correct @ total) :
   eval_def expression input;
   let u = () in
   match expression with
-  | Lit _ | Input -> refine_ u
+  | Lit _ | Input -> u
   | Add (left, right) ->
     fold_correct left input;
     fold_correct right input;
     let left = fold left in
     let right = fold right in
     add_correct left right input;
-    refine_ u
+    u
 
 let (eval_folded @ total) (expression @ total) input :
     {result : int | result === eval expression input} =
   let (result @ total) = (eval (fold expression) input : int @ total) in
   ghost_ (fold_correct expression input);
-  refine_ result
+  result
