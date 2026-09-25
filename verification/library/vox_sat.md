@@ -7,12 +7,10 @@ formula is satisfiable and an empty clause makes a formula unsatisfiable.
 The checked result contract has four outcomes:
 
 - `Ok {answer = Sat assignment; ...}`: `assignment` has exactly `n` Boolean
-  values and satisfies `formula`. `solve` also runs the executable `check`
-  against the original accepted formula before returning `Sat`.
-- `Ok {answer = Unsat; ...}`: `unsat_at n formula report assignment` proves
-  that every assignment of length `n` fails to satisfy `formula`. The report
-  from `solve` carries the formula-specific `refutes` premise needed to call
-  this lemma.
+  values and satisfies `formula`, proved during search and reconstruction.
+- `Ok {answer = Unsat; ...}`: `Vox_sat_spec.unsatisfiable n formula` holds.
+  `unsat_at n formula assignment` proves that every Boolean assignment,
+  including shorter or longer lists, fails to satisfy `formula`.
 - `Ok {answer = Unknown; ...}`: the search-node budget was exhausted; there is
   no satisfiability claim.
 - `Error ...`: the variable count is outside `0..256`, the formula exceeds
@@ -67,5 +65,8 @@ The trust boundary includes Vox's compiler, VC generation and ghost erasure,
 Z3's reported `unsat` result, and the compiler/runtime execution stack. This
 module introduces no SAT-specific external primitive or unchecked axiom.
 
-[`Vox_cdcl`](vox_cdcl.md) uses this module's resolution kernel to prove
+[`Vox_cdcl`](vox_cdcl.md) uses the private resolution kernel to prove
 learned clauses and derive an empty clause for UNSAT.
+
+See [the review boundary](vox_sat_boundary.md) for the complete public review
+surface and the separately compiled client.

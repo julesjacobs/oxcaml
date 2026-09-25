@@ -1,4 +1,4 @@
-File "sat_solver_rejected.ml", line 19, characters 28-34:
-19 |   unsat_at 1 [[Positive 0]] report [true]
-                                 ^^^^^^
+File "sat_solver_rejected.ml", line 21, characters 13-27:
+21 |   unsat_at 1 [[Positive 0]] [true]
+                  ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)

@@ -2,9 +2,11 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sat.mli vox_sat.ml sat_total_probe.ml";
+ all_modules = "vox_sat_spec.mli vox_sat_spec.ml vox_sat_proof.mli vox_sat_proof.ml vox_sat.mli vox_sat.ml sat_total_probe.ml";
  { bytecode; }
 *)
+
+open Vox_sat_spec
 
 type reason = Decision | Original of int | Learned of int [@@inductive]
 type binding : immutable_data mod total = {
@@ -13,7 +15,7 @@ type binding : immutable_data mod total = {
   reason : reason;
 }
 type trail_item : immutable_data mod total = {
-  literal : Vox_sat.literal;
+  literal : Vox_sat_spec.literal;
   level : int;
 }
 type state : immutable_data mod total = {

@@ -1,4 +1,4 @@
-open Vox_sat
+open Vox_sat_spec
 
 let random_3cnf n clauses seed =
   let state = Random.State.make [|seed|] in
@@ -18,7 +18,7 @@ let run n clauses =
   | Ok report ->
     let status = match report.answer with
       | Vox_cdcl.Sat _ -> "sat"
-      | Vox_cdcl.Unsat _ -> "unsat"
+      | Vox_cdcl.Unsat -> "unsat"
       | Vox_cdcl.Unknown -> "unknown"
     in
     let s = report.statistics in
