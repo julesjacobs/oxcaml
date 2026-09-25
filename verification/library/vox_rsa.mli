@@ -5,15 +5,15 @@ open Spec
 
 val modexp : (a : t) -> (exponent : {e : t | e >= 0Z}) ->
   (modulus : {n : t | n > 0Z}) ->
-  {r : t | let refine_ e = exponent in let refine_ n = modulus in
+  {r : t | let e = exponent in let n = modulus in
     0Z <= r && r < n && r = power a e mod n} @@ total
 val encrypt : (a : t) -> (exponent : {e : t | e >= 0Z}) ->
   (modulus : {n : t | n > 0Z}) ->
-  {r : t | let refine_ e = exponent in let refine_ n = modulus in
+  {r : t | let e = exponent in let n = modulus in
     0Z <= r && r < n && r = power a e mod n} @@ total
 val decrypt : (a : t) -> (exponent : {e : t | e >= 0Z}) ->
   (modulus : {n : t | n > 0Z}) ->
-  {r : t | let refine_ e = exponent in let refine_ n = modulus in
+  {r : t | let e = exponent in let n = modulus in
     0Z <= r && r < n && r = power a e mod n} @@ total
 
 val roundtrip_correct :
@@ -23,10 +23,10 @@ val roundtrip_correct :
 
 val roundtrip : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
   (message : {m : t | valid_key p q e d && 0Z <= m && m < p * q}) ->
-  {r : t | let refine_ m = message in r = m} @@ total
+  {r : t | r = message} @@ total
 
 val decrypt_crt : (ciphertext : t) ->
   (exponent : {d : t | d >= 0Z}) ->
   (p : t) -> (other_prime : {q : t | prime p && prime q && p <> q}) ->
-  {r : t | let refine_ d = exponent in let refine_ q = other_prime in
+  {r : t | let d = exponent in let q = other_prime in
     0Z <= r && r < p * q && r = power ciphertext d mod (p * q)} @@ total

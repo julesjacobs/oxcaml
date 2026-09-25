@@ -14,24 +14,24 @@ module Spec = Vox_rsa.Spec
 
 let (roundtrip @ total) p q e d
     (message : {m : t | Spec.valid_key p q e d && 0Z <= m && m < p * q}) :
-    {r : t | let refine_ m = message in r = m} =
-  let refine_ m = message in
+    {r : t | r = message} =
+  let m = message in
   ghost_ (Spec.valid_key_def p q e d);
   ghost_ (Spec.prime_def p); ghost_ (Spec.prime_def q);
   let n = p * q in
-  let refine_ c = Vox_rsa.encrypt m (refine_ e) (refine_ n) in
-  let refine_ r = Vox_rsa.decrypt c (refine_ d) (refine_ n) in
+  let c = Vox_rsa.encrypt m e n in
+  let r = Vox_rsa.decrypt c d n in
   ghost_ (Vox_rsa.roundtrip_correct p q e d m);
-  refine_ r
+  r
 
 let (crt_equivalence @ total) c (exponent : {d : t | d >= 0Z}) p
     (other_prime : {q : t | Spec.prime p && Spec.prime q && p <> q}) :
-    {r : t | let refine_ d = exponent in let refine_ q = other_prime in
+    {r : t | let d = exponent in let q = other_prime in
       r = Spec.power c d mod (p * q)} =
-  let refine_ d = exponent in let refine_ q = other_prime in
+  let d = exponent in let q = other_prime in
   ghost_ (Spec.prime_def p); ghost_ (Spec.prime_def q);
   let n = p * q in
-  let refine_ ordinary = Vox_rsa.decrypt c (refine_ d) (refine_ n) in
-  let refine_ crt = Vox_rsa.decrypt_crt c (refine_ d) p (refine_ q) in
-  ghost_ (let u = () in (refine_ u : {u : unit | ordinary = crt}));
-  refine_ crt
+  let ordinary = Vox_rsa.decrypt c d n in
+  let crt = Vox_rsa.decrypt_crt c d p q in
+  ghost_ ((() : {u : unit | ordinary = crt}));
+  crt

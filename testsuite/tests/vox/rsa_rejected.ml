@@ -17,31 +17,31 @@
 
 let negative_exponent () =
   let e = -1Z in let n = 35Z in
-  Vox_rsa.modexp 2Z (refine_ e) (refine_ n);;
+  Vox_rsa.modexp 2Z e n;;
 [%%expect{|
-Line 3, characters 20-31:
-3 |   Vox_rsa.modexp 2Z (refine_ e) (refine_ n);;
-                        ^^^^^^^^^^^
+Line 3, characters 20-21:
+3 |   Vox_rsa.modexp 2Z e n;;
+                        ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let zero_modulus () =
   let e = 3Z in let n = 0Z in
-  Vox_rsa.modexp 2Z (refine_ e) (refine_ n);;
+  Vox_rsa.modexp 2Z e n;;
 [%%expect{|
-Line 3, characters 32-43:
-3 |   Vox_rsa.modexp 2Z (refine_ e) (refine_ n);;
-                                    ^^^^^^^^^^^
+Line 3, characters 22-23:
+3 |   Vox_rsa.modexp 2Z e n;;
+                          ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let repeated_prime () =
   let p = 5Z in let e = 3Z in let d = 3Z in let m = 5Z in
-  Vox_rsa.roundtrip p p e d (refine_ m);;
+  Vox_rsa.roundtrip p p e d m;;
 [%%expect{|
-Line 3, characters 28-39:
-3 |   Vox_rsa.roundtrip p p e d (refine_ m);;
-                                ^^^^^^^^^^^
+Line 3, characters 28-29:
+3 |   Vox_rsa.roundtrip p p e d m;;
+                                ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -50,11 +50,11 @@ let invalid_inverse () =
   ghost_ (Vox_rsa.Spec.prime_def p);
   ghost_ (Vox_rsa.Spec.prime_def q);
   ghost_ (Vox_rsa.Spec.lambda_def p q);
-  Vox_rsa.roundtrip p q e d (refine_ m);;
+  Vox_rsa.roundtrip p q e d m;;
 [%%expect{|
-Line 6, characters 28-39:
-6 |   Vox_rsa.roundtrip p q e d (refine_ m);;
-                                ^^^^^^^^^^^
+Line 6, characters 28-29:
+6 |   Vox_rsa.roundtrip p q e d m;;
+                                ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -63,11 +63,11 @@ let message_too_large () =
   ghost_ (Vox_rsa.Spec.prime_def p);
   ghost_ (Vox_rsa.Spec.prime_def q);
   ghost_ (Vox_rsa.Spec.lambda_def p q);
-  Vox_rsa.roundtrip p q e d (refine_ m);;
+  Vox_rsa.roundtrip p q e d m;;
 [%%expect{|
-Line 6, characters 28-39:
-6 |   Vox_rsa.roundtrip p q e d (refine_ m);;
-                                ^^^^^^^^^^^
+Line 6, characters 28-29:
+6 |   Vox_rsa.roundtrip p q e d m;;
+                                ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -81,11 +81,11 @@ let composite_prime () =
   ghost_ (Vox_rsa.Spec.no_divisors_def p 5Z);
   ghost_ (Vox_rsa.Spec.no_divisors_def p 4Z);
   ghost_ (Vox_rsa.Spec.no_divisors_def p 3Z);
-  Vox_rsa.roundtrip p q e e (refine_ m);;
+  Vox_rsa.roundtrip p q e e m;;
 [%%expect{|
-Line 11, characters 28-39:
-11 |   Vox_rsa.roundtrip p q e e (refine_ m);;
-                                 ^^^^^^^^^^^
+Line 11, characters 28-29:
+11 |   Vox_rsa.roundtrip p q e e m;;
+                                 ^
 Error: Refinement could not be proved (counterexample)
 |}]
 

@@ -19,17 +19,16 @@ let (lambda_lcm @ total) (p : t) (q : t) (multiple : t) :
       else true} =
   prime_def p; prime_def q; lambda_def p q;
   lcm_properties (p - 1Z) (q - 1Z) multiple;
-  let u = () in refine_ u
+  ()
 
 let (reduce_divisor @ total) (a : t) (p : t) (q : t) :
     {u : unit | if p > 0Z && q > 0Z then
       (a mod (p * q)) mod p = a mod p else true} =
-  let u = () in
-  if p <= 0Z || q <= 0Z then refine_ u
+  if p <= 0Z || q <= 0Z then ()
   else begin
     let r = a mod (p * q) in
     remainder_unique a p (q * (a / (p * q)) + r / p) (r mod p);
-    refine_ u
+    ()
   end
 
 
@@ -42,7 +41,7 @@ let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
   let u = () in
   if not (prime p && prime q && p <> q
       && e > 0Z && d > 0Z && (e * d - 1Z) mod lambda p q = 0Z
-      && 0Z <= m && m < p * q) then refine_ u
+      && 0Z <= m && m < p * q) then u
   else begin
     let k = e * d - 1Z in
     lambda_lcm p q k;
@@ -56,7 +55,7 @@ let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
     reduce_divisor a p q;
     reduce_divisor a q p;
     crt_unique p q (a mod (p * q)) m;
-    refine_ u
+    u
   end
 
 let encrypt = modexp
@@ -71,21 +70,21 @@ let (roundtrip_correct @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
   reduce_power (power m e) d n;
   power_multiply m e d;
   rsa_power p q e d m;
-  let u = () in refine_ u
+  ()
 
 let (roundtrip @ total) : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
     (message : {m : t | valid_key p q e d && 0Z <= m && m < p * q}) ->
-    {r : t | let refine_ m = message in r = m} =
+    {r : t | r = message} =
   fun p q e d message ->
-  let refine_ m = message in
+  let m = message in
   ghost_ (valid_key_def p q e d);
   ghost_ (prime_def p);
   ghost_ (prime_def q);
   let n = p * q in
-  let refine_ ciphertext = encrypt m (refine_ e) (refine_ n) in
-  let refine_ plaintext = decrypt ciphertext (refine_ d) (refine_ n) in
+  let ciphertext = encrypt m e n in
+  let plaintext = decrypt ciphertext d n in
   ghost_ (roundtrip_correct p q e d m);
-  refine_ plaintext
+  plaintext
 
 let (prime_inverse @ total) (p : t) (q : t) :
     {u : unit | if prime p && prime q && p <> q then
@@ -93,7 +92,7 @@ let (prime_inverse @ total) (p : t) (q : t) :
   distinct_prime_nondivisor p q;
   fermat_little p q;
   power_def p (q - 1Z);
-  let u = () in refine_ u
+  ()
 
 let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
     {r : t | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
@@ -103,49 +102,48 @@ let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
   let h = v mod q in
   let r = rp + p * h in
   ghost_ begin
-    let u = () in
     if not (p > 0Z && q > 1Z && 0Z <= rp && rp < p
       && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z) then
-      (refine_ u : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
+      (() : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
         && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
         0Z <= r && r < p * q && r mod p = rp && r mod q = rq else true})
     else begin
       let quotient = (rq - rp) * ((p * inverse) / q) - p * (v / q) in
-      (refine_ u : {u : unit | r = q * quotient + rq});
+      (() : {u : unit | r = q * quotient + rq});
       remainder_unique r p h rp;
       remainder_unique r q quotient rq;
-      (refine_ u : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
+      (() : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
         && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
         0Z <= r && r < p * q && r mod p = rp && r mod q = rq else true})
     end
   end;
-  refine_ r
+  r
 
 let (decrypt_crt @ total) : (ciphertext : t) ->
     (exponent : {d : t | d >= 0Z}) ->
     (p : t) -> (other_prime : {q : t | prime p && prime q && p <> q}) ->
-    {r : t | let refine_ d = exponent in let refine_ q = other_prime in
+    {r : t | let d = exponent in let q = other_prime in
       0Z <= r && r < p * q && r = power ciphertext d mod (p * q)} =
   fun ciphertext exponent p other_prime ->
-  let refine_ d = exponent in
-  let refine_ q = other_prime in
+  let d = exponent in
+  let q = other_prime in
   ghost_ (prime_def p);
   ghost_ (prime_def q);
-  let refine_ rp = modexp ciphertext exponent (refine_ p) in
-  let refine_ rq = modexp ciphertext exponent (refine_ q) in
+  let rp = modexp ciphertext exponent p in
+  let rq = modexp ciphertext exponent q in
   let inverse_exponent = q - 2Z in
-  let refine_ inverse = modexp p (refine_ inverse_exponent) (refine_ q) in
+  let inverse = modexp p inverse_exponent q in
   ghost_ begin
     prime_inverse p q;
     reduce_left (power p (q - 2Z)) p q;
-    let u = () in (refine_ u : {u : unit | (p * inverse) mod q = 1Z})
+    (() : {u : unit | (p * inverse) mod q = 1Z})
   end;
-  let refine_ r = recombine p q rp rq inverse in
+  let r = recombine p q rp rq inverse in
   ghost_ begin
     let a = power ciphertext d in
     reduce_divisor a p q;
     reduce_divisor a q p;
     crt_unique p q r (a mod (p * q));
-    let u = () in (refine_ u : {u : unit | r = power ciphertext d mod (p * q)})
+    (() : {u : unit | r = power ciphertext d mod (p * q)})
   end;
-  refine_ r
+  r
