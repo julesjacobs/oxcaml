@@ -36,7 +36,7 @@ let compress source =
         C.encode_model_size input 0 plan block 0 (Raw.footprint block);
         F.model_wire input wire 0 plan block 0 (Raw.footprint block);
         let _ : {u : unit | Vox_lz4_spec_wire.wire_matches_plan input wire 0 0 plan} =
-          refine_ () in
+          () in
         ());
       let output = String.init (Iarray.length wire) (Iarray.get wire) in
       EB.release { EB.block; permission; used };

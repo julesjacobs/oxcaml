@@ -56,7 +56,7 @@ let (compressed_decodes @ total) :
     (capacity : int) -> (block : M.t) ->
     {u : unit | not (Vox_lz4_spec.compresses source wire
       && Iarray.length (V.contents source) <= capacity && capacity <= 4194304)
-      || let refine_ result =
+      || let result =
            Vox_lz4_spec_decode.decode_model (V.contents wire) 0 (-1)
              (Iarray.length (V.contents wire)) capacity block 0
              (M.footprint block) in

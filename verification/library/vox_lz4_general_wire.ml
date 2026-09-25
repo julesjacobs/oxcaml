@@ -34,7 +34,7 @@ let (decode_end @ total) :
       && (last_match_start < 0 ||
           (anchor <= Iarray.length source - 5
            && last_match_start <= Iarray.length source - 12)))
-      || let refine_ result =
+      || let result =
            Vox_lz4_spec_decode.decode_model wire cursor last_match_start fuel
              capacity block anchor heap in
          result.D.kind === D.Done
@@ -100,9 +100,9 @@ let (decode_sequence_step @ total) :
     if Vox_lz4_spec_wire.wire_matches_plan source wire anchor cursor
          (P.Sequence (step, rest)) then begin
       let literals : {n : int | 0 <= n && n <= 4194304} =
-        refine_ (step.position - anchor) in
+        (step.position - anchor) in
       let match_code : {n : int | 0 <= n && n <= 4194304} =
-        refine_ (step.length - 4) in
+        (step.length - 4) in
       let literal_extensions = Vox_lz4_spec_wire.extra_count literals in
       let match_extensions = Vox_lz4_spec_wire.extra_count match_code in
       let literal_pos = cursor + 1 + literal_extensions in
@@ -119,29 +119,29 @@ let (decode_sequence_step @ total) :
       let token = Vox_lz4_spec_decode.byte_of_char
         (Vox_sequence.iarray_get wire cursor) in
       let _ : {u : unit |
-        token = Vox_lz4_spec_token.match_token literals match_code} = refine_ () in
+        token = Vox_lz4_spec_token.match_token literals match_code} = () in
       let literal_nibble : {n : int | 0 <= n && n <= 15} =
         Vox_lz4_spec_decode.high4 token in
       let _ : {u : unit | literal_nibble =
-        Vox_lz4_spec_decode.high4 (Vox_lz4_spec_bytes.literal_token literals)} = refine_ () in
+        Vox_lz4_spec_decode.high4 (Vox_lz4_spec_bytes.literal_token literals)} = () in
       let cursor1 : {i : int | 0 <= i && i <= Iarray.length wire} =
-        refine_ (cursor + 1) in
+        (cursor + 1) in
       let _ : {u : unit | literals < 15 ||
         Vox_lz4_spec_bytes.extension_bytes wire cursor1 (literals - 15)} =
-        refine_ () in
+        () in
       let _ : {u : unit |
         literal_pos = cursor1 + R.extra_count literals} =
-        refine_ () in
+        () in
       let _ : {u : unit |
         cursor1 + R.extra_count literals <= Iarray.length wire} =
-        refine_ () in
+        () in
       let _ : {u : unit |
         R.extra_count literals <= Iarray.length wire - cursor1} =
-        refine_ () in
+        () in
       R.read_literal_length wire cursor1 literals literal_nibble;
       let _ : {u : unit | Vox_lz4_spec_decode.read_length wire cursor1
         literal_nibble === D.Length (literal_pos, literals)} =
-        refine_ () in
+        () in
       let distance = Vox_lz4_spec_token.split_distance step.distance in
       Vox_lz4_spec_bytes.wire_byte_def wire distance_pos distance.low;
       Vox_lz4_spec_bytes.source_at_def wire distance_pos;
@@ -154,23 +154,23 @@ let (decode_sequence_step @ total) :
       let high = Vox_lz4_spec_decode.byte_of_char
         (Vox_sequence.iarray_get wire (distance_pos + 1)) in
       let _ : {u : unit | low + 256 * high = step.distance} =
-        refine_ () in
+        () in
       let match_nibble : {n : int | 0 <= n && n <= 15} =
         Vox_lz4_spec_decode.low15 token in
       let match_cursor : {i : int | 0 <= i && i <= Iarray.length wire} =
-        refine_ (distance_pos + 2) in
+        (distance_pos + 2) in
       R.read_match_length wire match_cursor match_code
         match_nibble;
       let _ : {u : unit | Vox_lz4_spec_decode.read_length wire match_cursor
         match_nibble ===
         D.Length (distance_pos + 2 + match_extensions, match_code)} =
-        refine_ () in
+        () in
       R.literal_heap_substitute heap block anchor wire literal_pos
         source anchor literals;
       let _ : {u : unit |
         Vox_lz4_spec_decode.literal_heap heap block anchor wire literal_pos literals ===
         Vox_lz4_spec_decode.literal_heap heap block anchor source anchor literals} =
-        refine_ () in
+        () in
       Vox_lz4_spec_decode.decode_model_def wire cursor last_match_start fuel
         capacity block anchor heap
     end;
@@ -188,7 +188,7 @@ let rec (decode_plan @ total) :
       && (last_match_start < 0 ||
           (anchor <= Iarray.length source - 5
            && last_match_start <= Iarray.length source - 12)))
-      || let refine_ result =
+      || let result =
            Vox_lz4_spec_decode.decode_model wire cursor last_match_start fuel
              capacity block anchor heap in
          result.D.kind === D.Done
@@ -224,7 +224,7 @@ let rec (decode_plan @ total) :
            last_match_start fuel capacity block heap step rest;
          let next_fuel : {n : int | 0 < n
            && Iarray.length wire - next_cursor <= n} =
-           refine_ (fuel - 1) in
+           (fuel - 1) in
          decode_plan source wire (step.position + step.length)
            next_cursor step.position next_fuel capacity block after_match
            rest);
@@ -236,7 +236,7 @@ let (decode_wire_matches_source @ total) :
     (capacity : {c : int | Iarray.length source <= c && c <= 4194304}) ->
     (block : M.t) ->
     {u : unit | not (Vox_lz4_spec_wire.wire_matches_plan source wire 0 0 plan)
-      || let refine_ result =
+      || let result =
            Vox_lz4_spec_decode.decode_model wire 0 (-1) (Iarray.length wire)
              capacity block 0 (M.footprint block) in
          result.D.kind === D.Done

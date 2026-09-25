@@ -10,7 +10,7 @@ let (match_token @ total) :
     (code : {n : int | 0 <= n && n <= 4194304}) ->
     {token : M.byte | token = (if code >= 15 then 31 else 16 + code)} =
   fun code ->
-  if code >= 15 then 31 else refine_ (16 + code)
+  if code >= 15 then 31 else (16 + code)
 
 let[@def] rec (same_prefix @ total) (source : char iarray @ immutable)
     (first : char) (count : int) = ghost_ (
@@ -121,7 +121,7 @@ let rec emit_extensions :
       let buffer = B.append buffer 255 in
       emit_extensions (remaining - 255) buffer
     else
-      let byte : M.byte = refine_ remaining in
+      let byte : M.byte = remaining in
       B.append buffer byte
 [@@decreases remaining]
 
@@ -131,7 +131,7 @@ let (literal_capacity @ total) :
     {capacity : int | capacity = 1 + length + extensions
       && 1 <= capacity && capacity <= 4210768} =
   fun length extensions ->
-    refine_ (1 + length + extensions)
+    (1 + length + extensions)
 
 let (match_capacity @ total) :
     (match_code : {n : int | 0 <= n}) ->
@@ -143,7 +143,7 @@ let (match_capacity @ total) :
     {capacity : int | capacity = 5 + suffix + match_extensions
       + literal_extensions && 1 <= capacity && capacity <= 4210768} =
   fun match_code suffix match_extensions literal_extensions ->
-    refine_ (5 + suffix + match_extensions + literal_extensions)
+    (5 + suffix + match_extensions + literal_extensions)
 
 type literal_model_result = {
   literal_count : int;
@@ -173,7 +173,7 @@ let encode_literals : (source : char iarray) ->
     {r : B.t option | match r with
       | None -> true
       | Some buffer ->
-        let refine_ model = literal_model source buffer.block in
+        let model = literal_model source buffer.block in
         Iarray.length source <= 4194304
         && buffer.used = model.literal_count
         && P.own buffer.permission === model.literal_state} @ unique =
@@ -290,7 +290,7 @@ let encode : (source : char iarray) ->
     {r : B.t option | match r with
       | None -> true
       | Some buffer ->
-        let refine_ model = encode_model source buffer.block in
+        let model = encode_model source buffer.block in
         Iarray.length source <= 4194304
         && buffer.used = model.count
         && P.own buffer.permission === model.state} @ unique =

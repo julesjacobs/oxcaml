@@ -81,7 +81,7 @@ let rec emit :
     {r : B.t option | match r with
       | None -> true
       | Some after ->
-        let refine_ model =
+        let model =
           encode_model source anchor plan buffer.block buffer.used
             (G.own buffer.permission) in
         after.block === buffer.block
@@ -144,7 +144,7 @@ let encode :
     {r : B.t option | match r with
       | None -> true
       | Some buffer ->
-        let refine_ model =
+        let model =
           encode_model source 0 plan buffer.block 0
             (M.footprint buffer.block) in
         buffer.used = model.count

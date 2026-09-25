@@ -3,7 +3,7 @@ module D = Vox_lz4_string_decode
 module V = Vox_string_view
 module R = Vox_lz4_streaming_roundtrip
 
-let max_block_size : {n : int | n = 4194304} = refine_ 4194304
+let max_block_size : {n : int | n = 4194304} = 4194304
 
 type malformed = D.malformed =
   | Empty_block

@@ -70,7 +70,7 @@ let rec decode_sequences : (source : char iarray) ->
     (input_pos : int) -> (last_match_start : int) -> (fuel : int) ->
     (buffer : B.t) @ unique ->
     {r : outcome |
-      let refine_ model =
+      let model =
         Vox_lz4_spec_decode.decode_model source input_pos last_match_start fuel
           (M.length buffer.block) buffer.block buffer.used
           (P.own buffer.permission) in
@@ -146,7 +146,7 @@ let decode : (source : char iarray) -> (capacity : int) ->
     {r : (status * B.t) option | match r with
       | None -> true
       | Some (status, buffer) ->
-        let refine_ model =
+        let model =
           Vox_lz4_spec_decode.decode_model source 0 (-1) (Iarray.length source) capacity
             buffer.block 0 (M.footprint buffer.block) in
         M.length buffer.block = capacity

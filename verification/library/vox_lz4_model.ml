@@ -15,7 +15,7 @@ let (source_position @ total) :
       && 0 <= source && source < written + copied} =
   fun written distance copied ->
     let source = written + copied - distance in
-    refine_ source
+    source
 
 (* Read each source byte from the output produced so far. In particular,
    distance one repeats the most recently written byte. *)

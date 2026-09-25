@@ -147,14 +147,14 @@ let rec (extension_heap_outside @ total) :
         heap_put_other heap block used query 255;
         extension_heap_outside next block (used + 1) (remaining - 255) query
       end else
-        heap_put_other heap block used query (refine_ remaining);
+        heap_put_other heap block used query (remaining);
     ())
 [@@decreases remaining]
 
 let (extension_first_byte @ total) :
     (remaining : {n : int | 0 <= n && n <= 4194304}) ->
     {byte : M.byte | byte = (if remaining >= 255 then 255 else remaining)} =
-  fun remaining -> if remaining >= 255 then 255 else refine_ remaining
+  fun remaining -> if remaining >= 255 then 255 else remaining
 
 let (extension_heap_first @ total) :
     (heap : P.heap) -> (block : M.t) ->
@@ -174,7 +174,7 @@ let (extension_heap_first @ total) :
         extension_heap_outside next block (used + 1) (remaining - 255) used;
         heap_put_at heap block used 255
       end else
-        heap_put_at heap block used (refine_ remaining);
+        heap_put_at heap block used (remaining);
     ())
 
 include Vox_lz4_spec_bytes
@@ -197,7 +197,7 @@ let rec (extension_heap_wire @ total) :
        && Vox_lz4_spec_bytes.prefix_matches wire (E.extension_heap heap block used remaining)
             block (used + Vox_lz4_spec_bytes.extension_count remaining) then begin
       let index : {i : int | 0 <= i && i < Iarray.length wire} =
-        refine_ used in
+        used in
       extension_heap_first heap block used remaining;
       snapshot_at wire (E.extension_heap heap block used remaining) block
         (used + Vox_lz4_spec_bytes.extension_count remaining) index;
@@ -229,7 +229,7 @@ let rec (literal_heap_wire @ total) :
             (E.literal_heap heap block used source first remaining)
             block (used + remaining) then begin
       let index : {i : int | 0 <= i && i < Iarray.length wire} =
-        refine_ used in
+        used in
       literal_heap_at heap block used source first remaining 0;
       snapshot_at wire
         (E.literal_heap heap block used source first remaining)
@@ -321,7 +321,7 @@ let rec (literal_heap_substitute @ total) :
     Vox_lz4_spec_decode.literal_heap_def heap block used source first remaining;
     Vox_lz4_spec_bytes.literal_bytes_def wire cursor source first remaining;
     if remaining = 0 || not (Vox_lz4_spec_bytes.literal_bytes wire cursor source first remaining)
-    then let u = () in refine_ u
+    then let u = () in u
     else
       match Vox_lz4_spec_bytes.source_at wire cursor, Vox_lz4_spec_bytes.source_at source first with
       | Some c, Some s ->
@@ -333,9 +333,9 @@ let rec (literal_heap_substitute @ total) :
                      (Some observed_byte) in
         literal_heap_substitute next block (used + 1) wire (cursor + 1)
           source (first + 1) (remaining - 1);
-        let u = () in refine_ u
+        let u = () in u
       | _ ->
-        let u = () in refine_ u)
+        let u = () in u)
 [@@decreases remaining]
 
 let[@def] (literal_token_of_source @ total)
@@ -364,7 +364,7 @@ let[@def] (literal_wire @ total) (source : char iarray @ immutable)
 let (literal_layout @ total) :
     (source : char iarray) -> (wire : char iarray) -> (block : M.t) ->
     {u : unit |
-      let refine_ model = E.literal_model source block in
+      let model = E.literal_model source block in
       not (Iarray.length source <= 4194304
         && Iarray.length wire = model.E.literal_count
         && Vox_lz4_spec_bytes.prefix_matches wire model.E.literal_state block
@@ -384,7 +384,7 @@ let (literal_layout @ total) :
       literal_token_of_source_def source;
       literal_extra_of_source_def source;
       let bounded_extensions : {e : int | 0 <= e && e <= 16449} =
-        refine_ extensions in
+        extensions in
       let needed = E.literal_capacity length bounded_extensions in
       E.literal_model_def source block;
       let initial = M.footprint block in
@@ -398,7 +398,7 @@ let (literal_layout @ total) :
                     source 0 length in
       let model = E.literal_model source block in
       let _ : {u : unit | model.E.literal_count = needed
-        && model.E.literal_state === final} = refine_ () in
+        && model.E.literal_state === final} = () in
       if Iarray.length wire = needed
          && Vox_lz4_spec_bytes.prefix_matches wire final block needed then begin
         literal_heap_wire wire after_extensions block (1 + extensions)
@@ -407,7 +407,7 @@ let (literal_layout @ total) :
         literal_heap_frame_prefix wire after_extensions block
           (1 + extensions) source 0 length (1 + extensions);
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire after_extensions block
-          (1 + extensions)} = refine_ () in
+          (1 + extensions)} = () in
         if length >= 15 then begin
           extension_heap_wire wire after_token block 1 (length - 15);
           S.prefix_matches_prefix wire after_extensions block
@@ -416,26 +416,26 @@ let (literal_layout @ total) :
             (length - 15) 1
         end;
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire after_token block 1} =
-          refine_ () in
+          () in
         heap_put_at initial block 0 (Vox_lz4_spec_bytes.literal_token length);
         snapshot_at wire after_token block 1 0;
         let _ : {u : unit | match Vox_lz4_spec_bytes.source_at wire 0 with
           | Some c -> Vox_lz4_spec_decode.byte_of_char c = literal_token_of_source source
-          | None -> false} = refine_ () in
+          | None -> false} = () in
         let _ : {u : unit | length < 15
-          || Vox_lz4_spec_bytes.extension_bytes wire 1 (length - 15)} = refine_ () in
+          || Vox_lz4_spec_bytes.extension_bytes wire 1 (length - 15)} = () in
         let _ : {u : unit | Vox_lz4_spec_bytes.literal_bytes wire (1 + extensions)
-          source 0 length} = refine_ () in
+          source 0 length} = () in
         ()
       end;
-      let u = () in refine_ u
+      let u = () in u
     end else
-      let u = () in refine_ u)
+      let u = () in u)
 
 let (literal_layout_wire @ total) :
     (source : char iarray) -> (wire : char iarray) -> (block : M.t) ->
     {u : unit |
-      let refine_ model = E.literal_model source block in
+      let model = E.literal_model source block in
       not (Iarray.length source <= 4194304
         && Iarray.length wire = model.E.literal_count
         && Vox_lz4_spec_bytes.prefix_matches wire model.E.literal_state block
@@ -589,7 +589,7 @@ let (read_match_length @ total) :
 let (decode_literal_wire @ total) :
     (source : char iarray) -> (wire : char iarray) -> (block : M.t) ->
     {u : unit | not (literal_wire source wire)
-      || let refine_ result =
+      || let result =
            Vox_lz4_spec_decode.decode_model wire 0 (-1) (Iarray.length wire)
              (Iarray.length source) block 0 (M.footprint block) in
          result.D.kind === D.Done
@@ -714,7 +714,7 @@ let (decode_run_wire @ total) :
     (code : {n : int | 0 <= n && n <= 4194304}) ->
     (suffix : {n : int | 0 <= n && n <= 4194304}) ->
     {u : unit | not (run_wire source wire run_end code suffix)
-      || let refine_ result =
+      || let result =
            Vox_lz4_spec_decode.decode_model wire 0 (-1) (Iarray.length wire)
              (Iarray.length source) block 0 (M.footprint block) in
          result.D.kind === D.Done
@@ -738,19 +738,19 @@ let (decode_run_wire @ total) :
       let first_nibble : {n : int | 0 <= n && n <= 15} =
         Vox_lz4_spec_decode.high4 first_token in
       let cursor1 : {i : int | 0 <= i && i <= Iarray.length wire} =
-        refine_ 1 in
+        1 in
       Vox_lz4_spec_decode.read_length_def wire cursor1 first_nibble;
       let _ : {u : unit | Vox_lz4_spec_decode.read_length wire cursor1 first_nibble ===
-        D.Length (1, 1)} = refine_ () in
+        D.Length (1, 1)} = () in
       wire_byte_get wire 2 1;
       wire_byte_get wire 3 0;
       let match_nibble : {n : int | 0 <= n && n <= 15} =
         Vox_lz4_spec_decode.low15 first_token in
       let cursor4 : {i : int | 0 <= i && i <= Iarray.length wire} =
-        refine_ 4 in
+        4 in
       read_match_length wire cursor4 code match_nibble;
       let _ : {u : unit | Vox_lz4_spec_decode.read_length wire cursor4 match_nibble ===
-        D.Length (4 + match_extra, code)} = refine_ () in
+        D.Length (4 + match_extra, code)} = () in
       let final_token_pos = 4 + match_extra in
       let final_token = Vox_lz4_spec_decode.byte_of_char
                           (Vox_sequence.iarray_get wire final_token_pos) in
@@ -759,29 +759,29 @@ let (decode_run_wire @ total) :
       let final_nibble : {n : int | 0 <= n && n <= 15} =
         Vox_lz4_spec_decode.high4 final_token in
       let final_cursor : {i : int | 0 <= i && i <= Iarray.length wire} =
-        refine_ (final_token_pos + 1) in
+        (final_token_pos + 1) in
       read_literal_length wire final_cursor suffix final_nibble;
       let _ : {u : unit | Vox_lz4_spec_decode.read_length wire final_cursor
         final_nibble === D.Length (5 + match_extra + literal_extra,
-                                   suffix)} = refine_ () in
+                                   suffix)} = () in
       let initial = M.footprint block in
       let after_first = Vox_lz4_spec_decode.literal_heap initial block 0 wire 1 1 in
       literal_heap_substitute initial block 0 wire 1 source 0 1;
       let _ : {u : unit | after_first ===
-        Vox_lz4_spec_decode.literal_heap initial block 0 source 0 1} = refine_ () in
+        Vox_lz4_spec_decode.literal_heap initial block 0 source 0 1} = () in
       Vox_lz4_spec_decode.literal_heap_def initial block 0 source 0 1;
       let after_put = H.put initial (M.location block 0)
                         (Some (Vox_lz4_spec_decode.byte_of_char first)) in
       Vox_lz4_spec_decode.literal_heap_def after_put block 1 source 1 0;
       heap_put_at initial block 0 (Vox_lz4_spec_decode.byte_of_char first);
       let _ : {u : unit | H.at after_first (M.location block 0) ===
-        Some (Some (Vox_lz4_spec_decode.byte_of_char first))} = refine_ () in
+        Some (Some (Vox_lz4_spec_decode.byte_of_char first))} = () in
       copy_constant_to_source after_first block 1 source first run_end 1
         (run_end - 1);
       let after_run = Vox_lz4_spec_decode.copy_heap after_first block 1 1 (run_end - 1) in
       let _ : {u : unit | after_run ===
         Vox_lz4_spec_decode.literal_heap after_first block 1 source 1 (run_end - 1)} =
-        refine_ () in
+        () in
       let final_literal_pos = 5 + match_extra + literal_extra in
       literal_heap_substitute after_run block run_end wire final_literal_pos
         source run_end suffix;
@@ -789,7 +789,7 @@ let (decode_run_wire @ total) :
       literal_heap_append initial block 0 source 0 run_end suffix;
       let _ : {u : unit | Vox_lz4_spec_decode.literal_heap after_run block run_end wire
         final_literal_pos suffix ===
-        Vox_lz4_spec_decode.literal_heap initial block 0 source 0 length} = refine_ () in
+        Vox_lz4_spec_decode.literal_heap initial block 0 source 0 length} = () in
       Vox_lz4_spec_decode.decode_model_def wire final_token_pos 1 (compressed - 1) length
         block run_end after_run;
       Vox_lz4_spec_decode.decode_model_def wire 0 (-1) compressed length block 0 initial
@@ -802,7 +802,7 @@ let (run_layout @ total) :
     (code : {n : int | 0 <= n && n <= 4194304}) ->
     (suffix : {n : int | 0 <= n && n <= 4194304}) ->
     {u : unit |
-      let refine_ model = E.encode_model source block in
+      let model = E.encode_model source block in
       not (E.plan_of_source source === E.Initial_run run_end
         && code = run_end - 5
         && suffix = Iarray.length source - run_end
@@ -820,11 +820,11 @@ let (run_layout @ total) :
       extra_count_def code;
       extra_count_def suffix;
       let bounded_match : {e : int | 0 <= e
-        && 255 * e <= code + 255} = refine_ match_extra in
+        && 255 * e <= code + 255} = match_extra in
       let bounded_literal : {e : int | 0 <= e
-        && e <= 16450 - match_extra} = refine_ literal_extra in
+        && e <= 16450 - match_extra} = literal_extra in
       let bounded_suffix : {n : int | 5 <= n && n <= 4194299} =
-        refine_ suffix in
+        suffix in
       let needed = E.match_capacity code bounded_suffix bounded_match
                      bounded_literal in
       let initial = M.footprint block in
@@ -853,7 +853,7 @@ let (run_layout @ total) :
                     final_literal_pos source run_end suffix in
       let model = E.encode_model source block in
       let _ : {u : unit | model.E.count = needed
-        && model.E.state === final} = refine_ () in
+        && model.E.state === final} = () in
       if Iarray.length wire = needed
          && Vox_lz4_spec_bytes.prefix_matches wire final block needed then begin
         literal_heap_wire wire after_literal_extensions block
@@ -862,7 +862,7 @@ let (run_layout @ total) :
         literal_heap_frame_prefix wire after_literal_extensions block
           final_literal_pos source run_end suffix final_literal_pos;
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
-          after_literal_extensions block final_literal_pos} = refine_ () in
+          after_literal_extensions block final_literal_pos} = () in
         if suffix >= 15 then begin
           extension_heap_wire wire after_final_token block
             (final_token_pos + 1) (suffix - 15);
@@ -872,7 +872,7 @@ let (run_layout @ total) :
             (final_token_pos + 1) (suffix - 15) (final_token_pos + 1)
         end;
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire after_final_token block
-          (final_token_pos + 1)} = refine_ () in
+          (final_token_pos + 1)} = () in
         heap_put_at after_match_extensions block final_token_pos
           (Vox_lz4_spec_bytes.literal_token suffix);
         snapshot_at wire after_final_token block (final_token_pos + 1)
@@ -882,7 +882,7 @@ let (run_layout @ total) :
         prefix_matches_put_outside wire after_match_extensions block
           final_token_pos final_token_pos (Vox_lz4_spec_bytes.literal_token suffix);
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire after_match_extensions
-          block final_token_pos} = refine_ () in
+          block final_token_pos} = () in
         if code >= 15 then begin
           extension_heap_wire wire after_offset block 4 (code - 15);
           S.prefix_matches_prefix wire after_match_extensions block
@@ -891,7 +891,7 @@ let (run_layout @ total) :
             (code - 15) 4
         end;
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire after_offset block 4} =
-          refine_ () in
+          () in
         heap_put_at after_offset_low block 3 0;
         snapshot_at wire after_offset block 4 3;
         S.prefix_matches_prefix wire after_offset block 4 3;
@@ -901,35 +901,35 @@ let (run_layout @ total) :
         S.prefix_matches_prefix wire after_offset_low block 3 2;
         prefix_matches_put_outside wire after_literal block 2 2 1;
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire after_literal block 2} =
-          refine_ () in
+          () in
         literal_heap_wire wire after_token block 1 source 0 1;
         S.prefix_matches_prefix wire after_literal block 2 1;
         literal_heap_frame_prefix wire after_token block 1 source 0 1 1;
         let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire after_token block 1} =
-          refine_ () in
+          () in
         heap_put_at initial block 0 (E.match_token code);
         snapshot_at wire after_token block 1 0;
         Vox_lz4_spec_bytes.wire_byte_def wire 0 (E.match_token code);
         let _ : {u : unit | Vox_lz4_spec_bytes.wire_byte wire 0 (E.match_token code)} =
-          refine_ () in
+          () in
         let _ : {u : unit | Vox_lz4_spec_bytes.literal_bytes wire 1 source 0 1} =
-          refine_ () in
+          () in
         let one : M.byte = 1 in
         let zero : M.byte = 0 in
         Vox_lz4_spec_bytes.wire_byte_def wire 2 one;
         Vox_lz4_spec_bytes.wire_byte_def wire 3 zero;
         let _ : {u : unit | Vox_lz4_spec_bytes.wire_byte wire 2 one
-          && Vox_lz4_spec_bytes.wire_byte wire 3 zero} = refine_ () in
+          && Vox_lz4_spec_bytes.wire_byte wire 3 zero} = () in
         let _ : {u : unit | code < 15
-          || Vox_lz4_spec_bytes.extension_bytes wire 4 (code - 15)} = refine_ () in
+          || Vox_lz4_spec_bytes.extension_bytes wire 4 (code - 15)} = () in
         Vox_lz4_spec_bytes.wire_byte_def wire final_token_pos (Vox_lz4_spec_bytes.literal_token suffix);
         let _ : {u : unit | Vox_lz4_spec_bytes.wire_byte wire final_token_pos
-          (Vox_lz4_spec_bytes.literal_token suffix)} = refine_ () in
+          (Vox_lz4_spec_bytes.literal_token suffix)} = () in
         let _ : {u : unit | suffix < 15
           || Vox_lz4_spec_bytes.extension_bytes wire (final_token_pos + 1) (suffix - 15)} =
-          refine_ () in
+          () in
         let _ : {u : unit | Vox_lz4_spec_bytes.literal_bytes wire final_literal_pos
-          source run_end suffix} = refine_ () in
+          source run_end suffix} = () in
         ()
       end
     end;

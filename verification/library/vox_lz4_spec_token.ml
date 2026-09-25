@@ -7,7 +7,7 @@ let (match_token @ total) :
   fun literals match_code ->
     let high = if literals >= 15 then 15 else literals in
     let low = if match_code >= 15 then 15 else match_code in
-    refine_ (16 * high + low)
+    (16 * high + low)
 
 type distance_bytes = { low : Raw_memory.byte; high : Raw_memory.byte }
 
@@ -41,4 +41,4 @@ let (split_distance @ total) :
     let low, high =
       if low >= 256 then low - 256, high + 1
       else low, high in
-    { low = refine_ low; high = refine_ high }
+    { low = low; high = high }

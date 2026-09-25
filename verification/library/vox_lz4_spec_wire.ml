@@ -26,9 +26,9 @@ let[@def] rec (wire_matches_plan @ total)
            source anchor literals
     | Vox_lz4_spec_plan.Sequence (step, rest) ->
       let literals : {n : int | 0 <= n && n <= 4194304} =
-        refine_ (step.position - anchor) in
+        (step.position - anchor) in
       let match_code : {n : int | 0 <= n && n <= 4194304} =
-        refine_ (step.length - 4) in
+        (step.length - 4) in
       let literal_extensions = extra_count literals in
       let match_extensions = extra_count match_code in
       let literal_pos = cursor + 1 + literal_extensions in

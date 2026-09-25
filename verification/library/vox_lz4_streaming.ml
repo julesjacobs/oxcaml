@@ -21,7 +21,7 @@ let[@inline always] split_distance :
     let high = distance / 256 in
     let low = distance - 256 * high in
     let _ = ghost_ (Vox_lz4_spec_token.split_distance distance) in
-    { E.low = refine_ low; high = refine_ high }
+    { E.low = low; high = high }
 
 let[@inline always] emit_head :
     (model : {m : char iarray | Iarray.length m <= 4194304}) @ ghost ->
@@ -35,9 +35,9 @@ let[@inline always] emit_head :
     {after : B.t | after.block === buffer.block
       && C.encoded_size model (step.position + step.length) rest <=
            M.length after.block - after.used
-      && let refine_ before_model = E.encode_model model anchor
+      && let before_model = E.encode_model model anchor
            (P.Sequence (step, rest)) buffer.block buffer.used (G.own buffer.permission) in
-         let refine_ after_model = E.encode_model model (step.position + step.length)
+         let after_model = E.encode_model model (step.position + step.length)
            rest after.block after.used (G.own after.permission) in
          before_model.E.count = after_model.E.count
          && before_model.E.state === after_model.E.state} @ unique =
@@ -65,7 +65,7 @@ let[@inline always] emit_head :
         C.encoded_size_loose_bound model
           (step.position + step.length) rest);
       let _ : {u : unit | needed <= M.length block - used} =
-        ghost_ (refine_ ()) in
+        ghost_ (()) in
       let token = Vox_lz4_spec_token.match_token literals match_code in
       let buffer = B.append buffer token in
       let buffer =
@@ -94,7 +94,7 @@ let rec scan :
       C.encoded_size model anchor (Vox_lz4_spec_scan.scan model entries position anchor fuel)
         <= M.length b.block - b.used}) @ unique ->
     {after : B.t |
-      let refine_ encoded = E.encode_model model anchor
+      let encoded = E.encode_model model anchor
           (Vox_lz4_spec_scan.scan model entries position anchor fuel)
           buffer.block buffer.used (G.own buffer.permission) in
       after.block === buffer.block && after.used = encoded.E.count
@@ -133,7 +133,7 @@ let encode :
     {r : B.t option | match r with
       | None -> true
       | Some buffer ->
-        let refine_ encoded = E.encode_model model 0 (Vox_lz4_spec_scan.from_source model)
+        let encoded = E.encode_model model 0 (Vox_lz4_spec_scan.from_source model)
             buffer.block 0 (M.footprint buffer.block) in
         buffer.used = encoded.E.count
         && G.own buffer.permission === encoded.E.state} @ unique =

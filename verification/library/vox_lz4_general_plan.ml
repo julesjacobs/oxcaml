@@ -33,7 +33,7 @@ let rec (build_plan @ total) :
     | More (anchor, step, rest) ->
       ghost_ (Vox_lz4_spec_plan.valid_plan_def source anchor (Sequence (step, End)));
       let anchor : {a : int | 0 <= a && a <= Iarray.length source} =
-        refine_ anchor in
+        anchor in
       ghost_ (
         Vox_lz4_spec_plan.valid_plan_def source endpoint suffix;
         Vox_lz4_spec_plan.valid_plan_def source anchor (Sequence (step, suffix)));

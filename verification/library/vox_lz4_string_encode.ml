@@ -62,7 +62,7 @@ let rec emit :
       C.encoded_size model anchor plan <= M.length b.block - b.used})
       @ unique ->
     {after : B.t |
-      let refine_ encoded_model =
+      let encoded_model =
         E.encode_model model anchor plan buffer.block buffer.used
           (G.own buffer.permission) in
       after.block === buffer.block
@@ -84,7 +84,7 @@ let rec emit :
       let needed = 1 + extensions + literals in
       ghost_ (Vox_lz4_spec_wire.extra_count_def literals);
       let _ : {u : unit | needed <= M.length block - used} =
-        ghost_ (refine_ ()) in
+        ghost_ (()) in
       let token = Vox_lz4_spec_bytes.literal_token literals in
       let buffer = B.append buffer token in
       let buffer =
@@ -108,7 +108,7 @@ let rec emit :
         C.encoded_size_loose_bound model
           (step.position + step.length) rest);
       let _ : {u : unit | needed <= M.length block - used} =
-        ghost_ (refine_ ()) in
+        ghost_ (()) in
       let token = Vox_lz4_spec_token.match_token literals match_code in
       let buffer = B.append buffer token in
       let buffer =
@@ -131,7 +131,7 @@ let encode :
     {r : B.t option | match r with
       | None -> true
       | Some buffer ->
-        let refine_ encoded_model =
+        let encoded_model =
           E.encode_model model 0 plan buffer.block 0
             (M.footprint buffer.block) in
         buffer.used = encoded_model.E.count

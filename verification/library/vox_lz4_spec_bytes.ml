@@ -2,7 +2,7 @@ let (literal_token @ total) :
     (length : {n : int | 0 <= n && n <= 4194304}) ->
     {token : Raw_memory.byte | token = (if length >= 15 then 240 else length * 16)} =
   fun length ->
-  if length >= 15 then 240 else refine_ (length * 16)
+  if length >= 15 then 240 else (length * 16)
 
 external same_char : (left : char) -> (right : char) ->
   {same : bool | same = (left === right)} @@ total = "%eq"

@@ -94,7 +94,7 @@ let rec (encoded_size_bound @ total) :
            255 * (encoded_size source anchor plan
              - (Iarray.length source - anchor))
            <= (Iarray.length source - anchor) + 255 * 16} =
-           refine_ () in
+           () in
          ()
        | P.Sequence (step, rest) ->
          let literals = step.position - anchor in
@@ -105,42 +105,42 @@ let rec (encoded_size_bound @ total) :
          sequence_cost_bound literals step.length;
          encoded_size_bound source next rest;
          let _ : {u : unit | Vox_lz4_spec_plan.valid_plan source next rest} =
-           refine_ () in
+           () in
          let _ : {u : unit |
            255 * (segment - consumed) <= consumed} =
-           refine_ () in
+           () in
          let _ : {u : unit |
            255 * (encoded_size source next rest
              - (Iarray.length source - next))
            <= (Iarray.length source - next) + 255 * 16} =
-           refine_ () in
+           () in
          let _ : {u : unit |
            encoded_size source anchor plan =
              segment + encoded_size source next rest} =
-           refine_ () in
+           () in
          let _ : {u : unit |
            Iarray.length source - anchor =
              consumed + (Iarray.length source - next)} =
-           refine_ () in
+           () in
          let _ : {u : unit |
            255 * (segment + encoded_size source next rest
              - (consumed + (Iarray.length source - next))) =
            255 * (segment - consumed)
              + 255 * (encoded_size source next rest
                  - (Iarray.length source - next))} =
-           refine_ () in
+           () in
          let _ : {u : unit |
            255 * (segment - consumed)
              + 255 * (encoded_size source next rest
                  - (Iarray.length source - next))
            <= consumed + (Iarray.length source - next)
                 + 255 * 16} =
-           refine_ () in
+           () in
          let _ : {u : unit |
            255 * (encoded_size source anchor plan
              - (Iarray.length source - anchor))
            <= (Iarray.length source - anchor) + 255 * 16} =
-           refine_ () in
+           () in
          ());
     ())
 
@@ -176,22 +176,22 @@ let (encoded_size_capacity @ total) :
       let size = encoded_size source anchor plan in
       let budget = extension_budget remaining in
       let _ : {u : unit | 0 <= size && size <= 2 * remaining + 16} =
-        refine_ () in
+        () in
       let _ : {u : unit | 255 * (size - remaining)
-        <= remaining + 255 * 16} = refine_ () in
+        <= remaining + 255 * 16} = () in
       let _ : {u : unit |
         255 * (size - remaining - 16) =
           255 * (size - remaining) - 255 * 16} =
-        refine_ () in
+        () in
       let _ : {u : unit |
         255 * (size - remaining) - 255 * 16 <= remaining} =
-        refine_ () in
+        () in
       let _ : {u : unit | 255 * (size - remaining - 16)
-        <= remaining} = refine_ () in
+        <= remaining} = () in
       let _ : {u : unit | remaining < 255 * budget} =
-        refine_ () in
+        () in
       let _ : {u : unit | size <= remaining + budget + 15} =
-        refine_ () in
+        () in
       ()
     end;
     ())
@@ -217,7 +217,7 @@ let rec (encode_model_size @ total) :
          let _ : {u : unit |
            (E.encode_model source anchor plan block used heap).E.count
              = used + encoded_size source anchor plan} =
-           refine_ () in
+           () in
          ()
        | P.Sequence (step, rest) ->
          let literals = step.position - anchor in
@@ -259,6 +259,6 @@ let rec (encode_model_size @ total) :
          let _ : {u : unit |
            (E.encode_model source anchor plan block used heap).E.count
              = used + encoded_size source anchor plan} =
-           refine_ () in
+           () in
          ());
     ())
