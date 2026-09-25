@@ -80,8 +80,8 @@ let rec (range_at @ total) : (p : t) @ immutable -> (lo : int) ->
       @ ghost = fun p lo hi i -> ghost_ (
   range_def p lo hi;
   if 0 <= lo && lo < hi then begin
-    let refine_ distinct = location_law p p (hi - 1) i in
-    let refine_ induction = range_at p lo (hi - 1) i in
+    let _ = location_law p p (hi - 1) i in
+    let _ = range_at p lo (hi - 1) i in
     let updated = H.put (range p lo (hi - 1)) (location p (hi - 1)) None in
     let _present = H.mem updated (location p i) in
     let _value = H.at updated (location p i) in

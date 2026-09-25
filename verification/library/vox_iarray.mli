@@ -8,7 +8,7 @@ val at : ('a : immutable_data).
 val at_get : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
   (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-  {u : unit | let refine_ i = index in
+  {u : unit | let i = index in
     at values i === Some (get values index)} @@ total
 val at_outside : ('a : immutable_data).
   (values : 'a iarray) @ immutable -> (index : int) ->
@@ -51,17 +51,17 @@ external set : ('a : immutable_data).
 external sub : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
   (position : {i : int | 0 <= i && i <= Iarray.length values}) ->
-  (size : {n : int | let refine_ p = position in
+  (size : {n : int | let p = position in
     0 <= n && n <= Iarray.length values - p}) ->
-  {result : 'a iarray | let refine_ n = size in Iarray.length result = n}
+  {result : 'a iarray | let n = size in Iarray.length result = n}
     @ immutable total @@ total = "caml_vox_iarray_sub"
 
 val set_read : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
   (index : {i : int | 0 <= i && i < Iarray.length values}) ->
   (value : 'a) @ immutable -> (query : int) ->
-  {u : unit | let refine_ i = index in
-    let refine_ changed = set values index value in
+  {u : unit | let i = index in
+    let changed = set values index value in
     at changed query === (if i = query then Some value else at values query)} @@
       total
 

@@ -21,13 +21,13 @@ external empty : unit -> {t : token | own t === Heap.empty ()} @ unique ghost
 external read : ('a : immutable_data).
   (p : 'a t) @ immutable ->
   (t : {t : token | Heap.mem (own t) p}) @ local read ghost ->
-  {v : 'a | let refine_ t = t in Some v === Heap.at (own t) p} @ immutable
+  {v : 'a | let t = t in Some v === Heap.at (own t) p} @ immutable
   = "caml_pref_read_bytecode" "caml_pref_read"
 
 external write : ('a : immutable_data).
   (p : 'a t) @ immutable -> (v : 'a) @ immutable ->
   (t : {t : token | Heap.mem (own t) p}) @ unique read_write ghost ->
-  {u : token | let refine_ t = t in
+  {u : token | let t = t in
     own u === Heap.put (own t) p v} @ unique ghost
   = "caml_pref_write_bytecode" "caml_pref_write"
 
