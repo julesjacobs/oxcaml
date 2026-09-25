@@ -63,7 +63,8 @@ let true_ =
 let is_false node = node == false_
 
 let create ?bit_order arities =
-  if Array.exists (fun n -> n <= 0) arities then invalid_arg "Solver_mdd.create";
+  if Array.exists (fun n -> n <= 0) arities
+  then invalid_arg "Solver_mdd.create";
   let width cardinality =
     let rec loop bits maximum =
       if maximum >= cardinality - 1
@@ -551,7 +552,8 @@ let find_sat manager node =
       else begin
         let var = variable_of_bit manager bit_index in
         let bit = bit_position manager var bit_index in
-        values.(var) <- values.(var) lor (1 lsl (manager.widths.(var) - bit - 1));
+        values.(var) <-
+          values.(var) lor (1 lsl (manager.widths.(var) - bit - 1));
         loop high
       end
   in
