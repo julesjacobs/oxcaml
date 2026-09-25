@@ -19,4 +19,15 @@ if grep -E 'empty_unsatisfiable|semantic_unsat_at|exhaustive_result|rejects_exte
   echo 'SAT proof code survived in a public entrypoint.' >&2
   exit 1
 fi
+for backend in byte native; do
+  for module in vox_sat vox_cdcl vox_cdcl_total; do
+    expected=1
+    if [[ "$module" == vox_cdcl_total ]]; then expected=2; fi
+    actual=$(grep -c '(apply ' "$module.$backend.lambda")
+    if [[ "$actual" != "$expected" ]]; then
+      echo "Unexpected runtime calls in $module ($backend)." >&2
+      exit 1
+    fi
+  done
+done
 printf 'Public SAT proof bridges erase in bytecode and native Lambda.\n'
