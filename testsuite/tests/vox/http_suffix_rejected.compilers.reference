@@ -1,4 +1,4 @@
-File "http_suffix_rejected.ml", line 25, characters 16-25:
-25 |   let u = () in refine_ u
-                     ^^^^^^^^^
+File "http_suffix_rejected.ml", line 25, characters 2-4:
+25 |   ()
+       ^^
 Error: Refinement could not be proved (counterexample)

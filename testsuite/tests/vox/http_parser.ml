@@ -14,9 +14,9 @@ let (decode_serialized @ total) (request : request) (suffix : bytes) :
     {result : result | if well_formed request then
       (status result.state) === Complete request && result.rest === suffix else true} =
   let input = S.append (serialize request) suffix in
-  let refine_ result = parse input in
+  let result = parse input in
   ghost_ (roundtrip request suffix);
-  refine_ result
+  result
 
 let (accept_untrusted @ total) (input : bytes) :
     {result : result | match (status result.state) with
@@ -27,10 +27,10 @@ let (accept_untrusted @ total) (input : bytes) :
               && content_lengths_match request.headers n
             | _ -> false)
       | _ -> true} =
-  let refine_ result = parse input in
+  let result = parse input in
   match (status result.state) with
-  | Complete request -> ghost_ (body_agreement request); refine_ result
-  | _ -> refine_ result
+  | Complete request -> ghost_ (body_agreement request); result
+  | _ -> result
 
 let (stream_two @ total) (first : bytes) (second : bytes) :
     {result : result | match status result.state with
@@ -38,18 +38,17 @@ let (stream_two @ total) (first : bytes) (second : bytes) :
         && S.append first second === S.append (serialize request) result.rest
       | _ -> true} =
   let start = initial () in
-  let refine_ part = feed start first in
-  let refine_ result = feed part.state (S.append part.rest second) in
+  let part = feed start first in
+  let result = feed part.state (S.append part.rest second) in
   ghost_ (
     chunking_invariance start first second;
-    let refine_ whole = parse (S.append first second) in
-    let u = () in
-    (refine_ u : {u : unit | result === whole
+    let whole = parse (S.append first second) in
+    (() : {u : unit | result === whole
       && (match status result.state with
           | Complete request -> S.append first second ===
               S.append (serialize request) result.rest
           | _ -> true)}));
-  refine_ result
+  result
 
 let (reject_transfer_encoding @ total) (line : bytes)
     (headers : int list list) :
@@ -65,13 +64,13 @@ let (reject_transfer_encoding @ total) (line : bytes)
   let request = {request_line = line; headers; body = []} in
   let result = feed (initial ()) (serialize request) in
   ghost_ (header_outcome line headers; framing_rejection headers);
-  refine_ result
+  result
 
 let bytes text = List.init (String.length text) (fun i -> Char.code text.[i])
 let text bs = String.of_seq (List.to_seq (List.map Char.chr bs))
 let run text =
   let input = bytes text in
-  let refine_ result = parse input in
+  let result = parse input in
   (match (status result.state) with
    | Complete request ->
      assert (well_formed request);
@@ -97,20 +96,20 @@ let () =
     Some (bytes "content-length", bytes "005"));
   assert (header_field (bytes "Missing-colon") = None);
   let wire = serialize request in
-  let refine_ result = decode_serialized request (bytes get) in
+  let result = decode_serialized request (bytes get) in
   assert (complete result = request);
   assert (result.rest = bytes get);
   assert (consumed (initial ()) result.state = List.length wire);
   assert ((complete (feed (initial ()) result.rest)).request_line = bytes "GET /health HTTP/1.1");
   let joined = wire @ bytes get in
-  let refine_ parsed = accept_untrusted joined in
+  let parsed = accept_untrusted joined in
   assert (parsed = result);
   for cut = 0 to List.length joined do
     let left = List.filteri (fun i _ -> i < cut) joined in
     let right = List.filteri (fun i _ -> i >= cut) joined in
     let first = feed (initial ()) left in
     assert (feed first.state (first.rest @ right) = feed (initial ()) joined);
-    let refine_ streamed = stream_two left right in
+    let streamed = stream_two left right in
     assert (streamed = parsed)
   done;
   let state = List.fold_left (fun state byte ->
@@ -147,7 +146,7 @@ let () =
     (framing "content-length: 0\r\nTRANSFER-ENCODING: gzip, chunked\r\n");
   List.iter (fun fields ->
     let headers = List.map bytes fields in
-    let refine_ result = reject_transfer_encoding
+    let result = reject_transfer_encoding
       (bytes "POST / HTTP/1.1") headers in
     assert ((status result.state) =
       (if has_content_length headers then

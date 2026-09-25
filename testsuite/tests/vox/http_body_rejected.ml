@@ -21,5 +21,5 @@ open Vox_http
 let (discard_body @ total) (input : bytes) :
     {u : unit | match (status (feed (initial ()) input).state) with
       | Complete request -> request.body === [] | _ -> true} =
-  let refine_ result = parse input in
-  let u = () in refine_ u
+  let _ = parse input in
+  ()
