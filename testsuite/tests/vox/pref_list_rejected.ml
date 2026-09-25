@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_list.ml";
+ all_modules = "pref.mli pref.ml pref_list.mli pref_list.ml pref_list_client.ml";
  readonly_files = "pref_list_rejected.ml";
  compile_only = "true";
  {

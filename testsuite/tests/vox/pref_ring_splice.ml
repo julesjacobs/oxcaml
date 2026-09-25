@@ -56,7 +56,9 @@ let splice_demo : (s : node) @ immutable -> (d : node) @ immutable -> (a : node)
       && not (a.prev === b.prev)
       && not (a.prev === b.next)
       && not (a.next === b.prev)
-      && not (a.next === b.next)}) @ unique -> unit =
+      && not (a.next === b.next)}) @ unique ->
+    {r : Pref.token | ring (Pref.own r) s [] && ring (Pref.own r) d [a; b] &&
+      path (Pref.own r) false [a; b] d && path (Pref.own r) true [b; a] d} @ unique =
   fun s d a b t ->
   let refine_ t = t in
   let refine_ t = Pref_ring_splice_setup.build_source s d a b (refine_ t) in
@@ -139,8 +141,6 @@ let splice_demo : (s : node) @ immutable -> (d : node) @ immutable -> (a : node)
     && H.at (Pref.own t) d.next === Some (Some d)
     && H.at (Pref.own t) d.prev === Some (Some d)} = refine_ t in
   let refine_ t = splice_range s a b s d d t in
-  let source_empty = [] in
-  let source_empty_back = [] in
   let h = ghost_ (Pref.own (borrow_ t)) in
   let proof = ghost_ (
     let refined : {h : Pref.heap | s.sentinel
@@ -156,16 +156,6 @@ let splice_demo : (s : node) @ immutable -> (d : node) @ immutable -> (a : node)
       && H.at h (field true s) === Some (Some (head [] s))} = refine_ proof in
           result) in
   let refine_ proof = proof in
-  (let borrowed = borrow_ t in
-  let borrowed : {t : Pref.token | s.sentinel && present (Pref.own t) s
-    && H.at (Pref.own t) (field false s) === Some (Some (head source_empty s))
-    && H.at (Pref.own t) (field true s) === Some (Some (head source_empty_back
-        s))
-    && path (Pref.own t) false source_empty s
-    && path (Pref.own t) true source_empty_back s} = refine_ borrowed in
-  check_traversal s source_empty source_empty_back borrowed);
-  let destination_pair = [a; b] in
-  let destination_pair_back = [b; a] in
   let h = ghost_ (Pref.own (borrow_ t)) in
   let proof = ghost_ (
     let refined : {h : Pref.heap | d.sentinel
@@ -193,13 +183,4 @@ let splice_demo : (s : node) @ immutable -> (d : node) @ immutable -> (a : node)
       && H.at h (field true d) === Some (Some (head [b; a] d))} = refine_ proof
           in result) in
   let refine_ proof = proof in
-  (let borrowed = borrow_ t in
-  let borrowed : {t : Pref.token | d.sentinel && present (Pref.own t) d
-    && H.at (Pref.own t) (field false d) === Some (Some (head destination_pair
-        d))
-    && H.at (Pref.own t) (field true d) === Some (Some (head
-        destination_pair_back d))
-    && path (Pref.own t) false destination_pair d
-    && path (Pref.own t) true destination_pair_back d} = refine_ borrowed in
-  check_traversal d destination_pair destination_pair_back borrowed);
-  ()
+  refine_ t

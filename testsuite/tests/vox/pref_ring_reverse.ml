@@ -56,11 +56,13 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && not (b.prev === c.prev)
       && not (b.prev === c.next)
       && not (b.next === c.prev)
-      && not (b.next === c.next)}) @ unique -> unit =
+      && not (b.next === c.next)}) @ unique ->
+    {r : Pref.token | ring (Pref.own r) s [c; b; a] &&
+      path (Pref.own r) false [c; b; a] s && path (Pref.own r) true [a; b; c] s} @ unique =
   fun s a b c t ->
   let refine_ t = t in
   let refine_ t = Pref_ring_reverse_setup.build_source s a b c (refine_ t) in
-  let forward = [a; b; c] in
+  let forward = ghost_ [a; b; c] in
   let h = ghost_ (Pref.own (borrow_ t)) in
   let proof = ghost_ (
     let refined : {h : Pref.heap | s.sentinel
@@ -171,8 +173,6 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && H.at (flipped_all before ns) c.next === Some (Some b)} = refine_ proof
           in result) in
   let refine_ proof = proof in
-  let reversed = [c; b; a] in
-  let reversed_back = [a; b; c] in
   let h = ghost_ (Pref.own (borrow_ t)) in
   let proof = ghost_ (
     let refined : {h : Pref.heap | s.sentinel
@@ -206,11 +206,4 @@ let reverse_demo : (s : node) @ immutable -> (a : node) @ immutable -> (b :
       && H.at h (field true s) === Some (Some (head [a; b; c] s))} = refine_
           proof in result) in
   let refine_ proof = proof in
-  (let borrowed = borrow_ t in
-  let borrowed : {t : Pref.token | s.sentinel && present (Pref.own t) s
-    && H.at (Pref.own t) (field false s) === Some (Some (head reversed s))
-    && H.at (Pref.own t) (field true s) === Some (Some (head reversed_back s))
-    && path (Pref.own t) false reversed s
-    && path (Pref.own t) true reversed_back s} = refine_ borrowed in
-  check_traversal s reversed reversed_back borrowed);
-  ()
+  refine_ t

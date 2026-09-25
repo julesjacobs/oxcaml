@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_ring.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_heap.ml pref_ring_insert_remove.ml pref_ring_insert_remove_demo.ml";
+ all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_heap.ml pref_ring_insert_remove.ml pref_ring_insert_remove_demo.ml";
  { bytecode; }
  { native; }
 *)

@@ -1,4 +1,5 @@
 open Pref_ring
+open Pref_ring_proofs
 
 let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
     immutable ->
