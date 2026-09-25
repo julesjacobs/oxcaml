@@ -26,25 +26,25 @@ let invalid_permutation (left : int list) (right : int list) =
   let (same @ total) : (target : int) ->
       {u : unit | Vox_int_sequence.count left target ===
         Vox_int_sequence.count right target} = fun target ->
-    let u = () in refine_ u in
-  let refine_ result = Vox_int_sequence.count_extensional left right same in
+    let u = () in u in
+  let _ = Vox_int_sequence.count_extensional left right same in
   ();;
 [%%expect{|
-Line 5, characters 18-27:
-5 |     let u = () in refine_ u in
-                      ^^^^^^^^^
+Line 5, characters 18-19:
+5 |     let u = () in u in
+                      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let invalid_count (before : int list) (after : int list) (target : int) =
-  let refine_ equality = Vox_int_sequence.permutation_count before after target in
+  let _ = Vox_int_sequence.permutation_count before after target in
   let u : {u : unit | Vox_int_sequence.count before target ===
-    Vox_int_sequence.count after target} = let u = () in refine_ u in
-  let refine_ result = u in
+    Vox_int_sequence.count after target} = let u = () in u in
+  let _ = u in
   ();;
 [%%expect{|
-Line 4, characters 57-66:
-4 |     Vox_int_sequence.count after target} = let u = () in refine_ u in
-                                                             ^^^^^^^^^
+Line 4, characters 57-58:
+4 |     Vox_int_sequence.count after target} = let u = () in u in
+                                                             ^
 Error: Refinement could not be proved (counterexample)
 |}]

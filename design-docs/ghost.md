@@ -7,7 +7,7 @@ field modality that erases data from representations.
     @ ghost             -- the value may only flow to ghost positions
     { x : t @@ ghost }  -- a ghost record field: occupies no slot
 
-`ghost_` takes one simple expression, like `refine_` and `assume_`.
+`ghost_` takes one simple expression.
 Parenthesize a call or use `begin ... end` for a proof block:
 
 ```ocaml
@@ -321,7 +321,7 @@ ordinary, sound mode inference and is pinned as such.
 Refinement predicates are ghost contexts. Runtime replay by `assume_` uses
 a real context: it cannot read a ghost operand or ghost data in its predicate.
 Proof calls can be erased while their result refinements remain available:
-`let refine_ proof = ghost_ (lemma x) in ...`.
+`ghost_ (lemma x); ...`.
 
 The predicate representation retains `ghost_`, including in generated
 `[@def]` equations and serialized interfaces. Logical evaluation uses the

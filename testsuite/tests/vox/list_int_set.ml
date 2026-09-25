@@ -15,7 +15,7 @@
     let (empty @ total) : t =
       let xs = Nil in
       ghost_ (valid_def xs);
-      refine_ xs
+      xs
 
     let[@def] rec (lookup_repr @ total) element xs =
       match xs with
@@ -24,7 +24,7 @@
         element = head || lookup_repr element tail
 
     let[@def] (lookup @ total) element (set : t) =
-      let refine_ xs = set in
+      let xs = set in
       lookup_repr element xs
 
     let[@def] rec (add_repr @ total) element xs =
@@ -54,12 +54,10 @@
       same_repr_def xs xs;
       match xs with
       | Nil ->
-        let u = () in
-        refine_ u
+        ()
       | Cons (_, tail) ->
         same_repr_reflexive tail;
-        let u = () in
-        refine_ u
+        ()
 
     let rec (same_repr_equal @ total) :
         (left : repr) ->
@@ -72,14 +70,14 @@
       if same_repr left right then
         (same_repr_def left right;
         match left with
-        | Nil -> refine_ u
+        | Nil -> u
         | Cons (_, left_tail) ->
           match right with
-          | Nil -> refine_ u
+          | Nil -> u
           | Cons (_, right_tail) ->
             same_repr_equal left_tail right_tail;
-            refine_ u)
-      else refine_ u
+            u)
+      else u
 
     let rec (lookup_add_repr @ total) :
         (element : int) ->
@@ -96,12 +94,10 @@
       lookup_repr_def element xs;
       match xs with
       | Nil ->
-        let u = () in
-        refine_ u
+        ()
       | Cons (_, tail) ->
         lookup_add_repr element added tail;
-        let u = () in
-        refine_ u
+        ()
 
     let rec (all_greater_transitive @ total) :
         (lower : int) ->
@@ -117,13 +113,13 @@
         match xs with
         | Nil ->
           all_greater_def lower xs;
-          refine_ u
+          u
         | Cons (_, tail) ->
           all_greater_def middle xs;
           all_greater_def lower xs;
           all_greater_transitive lower middle tail;
-          refine_ u
-      else refine_ u
+          u
+      else u
 
     let rec (add_preserves_lower @ total) :
         (lower : int) ->
@@ -141,18 +137,18 @@
         match xs with
         | Nil ->
           all_greater_def lower result;
-          refine_ u
+          u
         | Cons (head, tail) ->
           all_greater_def lower xs;
-          if element = head then refine_ u
+          if element = head then u
           else if element < head then
             (all_greater_def lower result;
-            refine_ u)
+            u)
           else
             (add_preserves_lower lower element tail;
             all_greater_def lower result;
-            refine_ u)
-      else refine_ u
+            u)
+      else u
 
     let rec (add_valid @ total) :
         (element : int) ->
@@ -169,38 +165,37 @@
         | Nil ->
           valid_def result;
           all_greater_def element xs;
-          refine_ u
+          u
         | Cons (head, tail) ->
           valid_def xs;
-          if element = head then refine_ u
+          if element = head then u
           else if element < head then
             (all_greater_transitive element head tail;
             valid_def result;
             all_greater_def element xs;
-            refine_ u)
+            u)
           else
             (add_preserves_lower head element tail;
             add_valid element tail;
             valid_def result;
-            refine_ u)
-      else refine_ u
+            u)
+      else u
 
     let[@def] (add @ total) :
         int -> t -> t @ immutable contended =
       fun element set ->
-      let refine_ xs = set in
+      let xs = set in
       let (result @ total) = (add_repr element xs : repr @ total) in
       ghost_ (add_valid element xs);
-      refine_ result
+      result
 
     let (lookup_empty @ total) element :
         {u : unit | lookup element empty === false} =
       let empty_set = empty in
-      let refine_ xs = empty_set in
+      let xs = empty_set in
       lookup_def element empty_set;
       lookup_repr_def element xs;
-      let u = () in
-      refine_ u
+      ()
 
     let (lookup_add @ total) :
         (element : int) ->
@@ -211,18 +206,17 @@
           === (element = added || lookup element set)}
           @ immutable contended =
       fun element added set ->
-      let refine_ xs = set in
+      let xs = set in
       let result = add added set in
       add_def added set;
-      let refine_ ys = result in
+      let ys = result in
       let expected = add_repr added xs in
       same_repr_reflexive expected;
       same_repr_equal ys expected;
       lookup_add_repr element added xs;
       lookup_def element result;
       lookup_def element set;
-      let u = () in
-      refine_ u
+      ()
 
     let[@def] rec (union_repr @ total) left right =
       match left with
@@ -241,14 +235,14 @@
       if valid left && valid right then
         (union_repr_def left right;
         match left with
-        | Nil -> refine_ u
+        | Nil -> u
         | Cons (head, tail) ->
           let added = add_repr head right in
           valid_def left;
           add_valid head right;
           union_valid tail added;
-          refine_ u)
-      else refine_ u
+          u)
+      else u
 
     let rec (lookup_union_repr @ total) :
         (element : int) ->
@@ -265,23 +259,21 @@
       lookup_repr_def element left;
       match left with
       | Nil ->
-        let u = () in
-        refine_ u
+        ()
       | Cons (head, tail) ->
         let added = add_repr head right in
         lookup_add_repr element head right;
         lookup_union_repr element tail added;
-        let u = () in
-        refine_ u
+        ()
 
     let[@def] (union @ total) :
         t -> t -> t @ immutable contended =
       fun left right ->
-      let refine_ xs = left in
-      let refine_ ys = right in
+      let xs = left in
+      let ys = right in
       let (result @ total) = (union_repr xs ys : repr @ total) in
       ghost_ (union_valid xs ys);
-      refine_ result
+      result
 
     let (lookup_union @ total) :
         (element : int) ->
@@ -292,11 +284,11 @@
           === (lookup element left || lookup element right)}
           @ immutable contended =
       fun element left right ->
-      let refine_ xs = left in
-      let refine_ ys = right in
+      let xs = left in
+      let ys = right in
       let result = union left right in
       union_def left right;
-      let refine_ zs = result in
+      let zs = result in
       let expected = union_repr xs ys in
       same_repr_reflexive expected;
       same_repr_equal zs expected;
@@ -304,8 +296,7 @@
       lookup_def element result;
       lookup_def element left;
       lookup_def element right;
-      let u = () in
-      refine_ u
+      ()
 
     let[@def] rec (size_repr @ total) xs =
       match xs with
@@ -319,12 +310,10 @@
       size_repr_def xs;
       match xs with
       | Nil ->
-        let u = () in
-        refine_ u
+        ()
       | Cons (_, tail) ->
         size_nonnegative tail;
-        let u = () in
-        refine_ u
+        ()
 
     let rec (size_zero_repr @ total) :
         (xs : repr) ->
@@ -334,27 +323,24 @@
       size_repr_def xs;
       match xs with
       | Nil ->
-        let u = () in
-        refine_ u
+        ()
       | Cons (_, tail) ->
         size_nonnegative tail;
-        let u = () in
-        refine_ u
+        ()
 
     let[@def] (size @ total) (set : t) =
-      let refine_ xs = set in
+      let xs = set in
       size_repr xs
 
     let (size_zero @ total) (set : t) :
         {u : unit |
           (size set === 0Z) === (set === empty)} =
       let empty_set = empty in
-      let refine_ xs = set in
-      let refine_ empty_repr = empty_set in
+      let xs = set in
+      let _ = empty_set in
       size_def set;
       size_zero_repr xs;
-      let u = () in
-      refine_ u
+      ()
 
     let rec (lookup_below @ total) :
         (lower : int) ->
@@ -370,13 +356,13 @@
         match xs with
         | Nil ->
           lookup_repr_def element xs;
-          refine_ u
+          u
         | Cons (_, tail) ->
           all_greater_def lower xs;
           lookup_repr_def element xs;
           lookup_below lower element tail;
-          refine_ u
-      else refine_ u
+          u
+      else u
 
     let rec (extensional_repr @ total) :
         (left : repr) ->
@@ -396,19 +382,19 @@
         match left with
         | Nil ->
           (match right with
-           | Nil -> refine_ u
+           | Nil -> u
            | Cons (right_head, _) ->
              premise right_head;
              lookup_repr_def right_head left;
              lookup_repr_def right_head right;
-             refine_ u)
+             u)
         | Cons (left_head, left_tail) ->
           match right with
           | Nil ->
             premise left_head;
             lookup_repr_def left_head left;
             lookup_repr_def left_head right;
-            refine_ u
+            u
           | Cons (right_head, right_tail) ->
             premise left_head;
             premise right_head;
@@ -418,10 +404,10 @@
             lookup_repr_def right_head right;
             if left_head < right_head then
               (lookup_below right_head left_head right_tail;
-              refine_ u)
+              u)
             else if right_head < left_head then
               (lookup_below left_head right_head left_tail;
-              refine_ u)
+              u)
             else
               let (tail_premise @ total) :
                   (element : int) ->
@@ -435,12 +421,12 @@
                 if element = left_head then
                   (lookup_below left_head element left_tail;
                   lookup_below right_head element right_tail;
-                  refine_ u)
-                else refine_ u
+                  u)
+                else u
               in
               extensional_repr left_tail right_tail tail_premise;
-              refine_ u)
-      else refine_ u
+              u)
+      else u
 
     let (extensional @ total) :
         (left : t) ->
@@ -450,8 +436,8 @@
           @ total ->
         {u : unit | left === right} @ immutable contended =
       fun left right premise ->
-      let refine_ xs = left in
-      let refine_ ys = right in
+      let xs = left in
+      let ys = right in
       let (repr_premise @ total) :
           (element : int) ->
           {u : unit |
@@ -460,9 +446,7 @@
         premise element;
         lookup_def element left;
         lookup_def element right;
-        let u = () in
-        refine_ u
+        ()
       in
       extensional_repr xs ys repr_premise;
-      let u = () in
-      refine_ u
+      ()

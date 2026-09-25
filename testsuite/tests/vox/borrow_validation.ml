@@ -14,29 +14,29 @@ module Spec = Vox_int_sequence
 
 let validate_slice : (s : int Slice.t) @ local unique ->
     {u : unit | Spec.sorted (Slice.final s)} = fun s ->
-  let refine_ values = Slice.snapshot (borrow_ s) in
+  let values = Slice.snapshot (borrow_ s) in
   let checked : {xs : int iarray | Spec.sorted (Model.of_iarray xs)} = assume_ values in
-  let refine_ checked = checked in
-  let refine_ closed = Slice.finish s in
-  let u = () in refine_ u
+  let _ = checked in
+  let _ = Slice.finish s in
+  ()
 
 let validate : (a : int Owned_array.t) @ unique ->
     {r : int Owned_array.t | Spec.sorted (Owned_array.contents r)} @ unique = fun a ->
   let post = ghost_ (fun (_ : unit @ immutable) (after : int Model.t @ immutable) ->
         Spec.sorted after) in
-  let refine_ result = Owned_array.with_mut a post (fun loan ->
-    let refine_ s = loan in
-    let refine_ u = validate_slice s in
-    refine_ u) in
+  let result = Owned_array.with_mut a post (fun loan ->
+    let s = loan in
+    let u = validate_slice s in
+    u) in
   let {state; _} = result in
 
-  refine_ state
+  state
 
 let check (values : int list) =
   let input = Iarray.of_list values in
-  let refine_ a = Owned_array.of_iarray input in
-  let refine_ a = validate a in
-  let refine_ output = Owned_array.into_iarray a in
+  let a = Owned_array.of_iarray input in
+  let a = validate a in
+  let output = Owned_array.into_iarray a in
   assert (Iarray.to_list output = values)
 
 let () =

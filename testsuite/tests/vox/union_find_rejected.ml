@@ -52,13 +52,13 @@ module No_membership = struct
   module U = Vox_union_find.Make (C)
   let bad (x : Vox_union_find_model.elem @ immutable)
       (state : {s : U.t | U.valid s} @ unique read_write total) =
-    let refine_ state = state in
-    (refine_ state : {s : U.t | U.valid s && U.member x s})
+    let state = state in
+    (state : {s : U.t | U.valid s && U.member x s})
 end;;
 [%%expect{|
-Line 7, characters 5-18:
-7 |     (refine_ state : {s : U.t | U.valid s && U.member x s})
-         ^^^^^^^^^^^^^
+Line 7, characters 5-10:
+7 |     (state : {s : U.t | U.valid s && U.member x s})
+         ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -68,14 +68,14 @@ module No_fee = struct
   let bad : (x : Vox_union_find_model.elem) @ immutable ->
       (state : {s : U.t | U.valid s && U.member x s}) @ unique read_write total ->
       U.result @ unique = fun x state ->
-    let refine_ zero = C.empty () in
-    let refine_ result = U.find x state (refine_ zero) in
+    let zero = C.empty () in
+    let result = U.find x state (zero) in
     result
 end;;
 [%%expect{|
-Line 8, characters 40-54:
-8 |     let refine_ result = U.find x state (refine_ zero) in
-                                            ^^^^^^^^^^^^^^
+Line 8, characters 32-38:
+8 |     let result = U.find x state (zero) in
+                                    ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -84,19 +84,19 @@ module Reuse_state = struct
   module U = Vox_union_find.Make (C)
   let bad : (x : Vox_union_find_model.elem) @ immutable ->
       (state : {s : U.t | U.valid s && U.member x s}) @ unique read_write total ->
-      (fee1 : {b : C.token | let refine_ state = state in
+      (fee1 : {b : C.token | let state = state in
         C.credits b >= Vox_union_find_amortized.find_fee state.#U.alpha})
         @ unique total ghost ->
-      (fee2 : {b : C.token | let refine_ state = state in
+      (fee2 : {b : C.token | let state = state in
         C.credits b >= Vox_union_find_amortized.find_fee state.#U.alpha})
         @ unique total ghost -> U.result @ unique = fun x state fee1 fee2 ->
     let _ = U.find x state fee1 in
-    let refine_ result = U.find x state fee2 in result
+    let result = U.find x state fee2 in result
 end;;
 [%%expect{|
-Line 13, characters 34-39:
-13 |     let refine_ result = U.find x state fee2 in result
-                                       ^^^^^
+Line 13, characters 26-31:
+13 |     let result = U.find x state fee2 in result
+                               ^^^^^
 Error: This value is used here, but it has already been used as unique at:
 Line 12, characters 21-26:
 12 |     let _ = U.find x state fee1 in
@@ -109,13 +109,13 @@ module Zero_capacity = struct
   module U = Vox_union_find.Make (C)
   let bad () =
     let capacity = 0Z in let amount = 1Z in
-    let input : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create input in
-    U.create (refine_ capacity) (refine_ fee)
+    let input : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create input in
+    U.create (capacity) (fee)
 end;;
 [%%expect{|
-Line 8, characters 13-31:
-8 |     U.create (refine_ capacity) (refine_ fee)
-                 ^^^^^^^^^^^^^^^^^^
+Line 8, characters 13-23:
+8 |     U.create (capacity) (fee)
+                 ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

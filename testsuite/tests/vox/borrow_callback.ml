@@ -16,13 +16,13 @@ module Callback = struct
       (value : 'a) ->
       (post : ('r @ immutable -> 'a @ immutable -> bool @ ghost)) @ ghost ->
       ((input : {input : 'a | input === value}) ->
-       {result : 'r | let refine_ input = input in post result input}) ->
+       {result : 'r | let input = input in post result input}) ->
       {pair : 'r * 'a | match pair with result, output -> post result output} =
     fun value post body ->
-    let input : {input : _ | input === value} = refine_ value in
-    let refine_ result = body input in
+    let input : {input : _ | input === value} = value in
+    let result = body input in
     let pair = result, value in
-    refine_ pair
+    pair
 end;;
 [%%expect{|
 module Callback :
@@ -32,7 +32,7 @@ module Callback :
         (value : 'a) ->
         (post : ('r @ immutable -> 'a @ immutable -> bool @ ghost)) @ ghost ->
         ((input' : {input : 'a | input === value}) ->
-         {result : 'r | let refine_ input = input' in post result input}) ->
+         {result : 'r | let input = input' in post result input}) ->
         {pair : 'r * 'a
           | match pair with | (result, output) -> post result output}
   end
@@ -47,15 +47,15 @@ module Client = struct
       ghost_ (result = after + 1 && after = before)
     in
     let erased_post = ghost_ post in
-    let refine_ pair = run value erased_post (fun input ->
-      let refine_ input = input in
+    let pair = run value erased_post (fun input ->
+      let input = input in
       let result = input + 1 in
       ghost_ (post_def result input);
-      refine_ result)
+      result)
     in
     let result, output = pair in
     ghost_ (post_def result output);
-    refine_ result
+    result
 end;;
 [%%expect{|
 module Client :
@@ -86,7 +86,7 @@ module Model :
         'a t @ local immutable -> 'a list @ total stateful ghost
     val contents_def :
       ('a : immutable_data).
-        (value : 'a t) @ immutable ->
+        (value : 'a t) @ local forkable unyielding immutable ->
         {u : unit | (contents value) === value.contents}
     val observe : ('a : immutable_data). 'a t @ unique total -> 'a t
   end

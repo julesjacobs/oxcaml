@@ -31,7 +31,7 @@ module Demo : sig end = struct
     let added = Int_set.Refined.add x set in
     let joined = if b then singleton else added in
     let present = Int_set.mem x joined in
-    let (_ : {r : bool | r}) = refine_ present in
+    let (_ : {r : bool | r}) = present in
     ()
 
   let (membership_laws @ total) x (set @ total) =
@@ -51,9 +51,9 @@ module Demo : sig end = struct
           && Int_set.mem x inter
           && Int_set.mem x removed = false
           && Int_set.mem x diff = false} =
-      refine_ result
+      result
     in
-    let refine_ proof = proof in
+    let _ = proof in
     ()
 
   let (aliased_operations @ total) x (set @ total) =
@@ -61,8 +61,8 @@ module Demo : sig end = struct
     let contains = Int_set.mem in
     let present = contains x (insert x set) in
     let unit = () in
-    let proof : {u : unit | present} = refine_ unit in
-    let refine_ proof = proof in
+    let proof : {u : unit | present} = unit in
+    let _ = proof in
     ()
 
   let (module_aliased_operations @ total) x (set @ total) =
@@ -70,8 +70,8 @@ module Demo : sig end = struct
       Int_set_alias.mem x
         (Int_set_alias.Refined.add x set)
     in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 
   let (ascribed_operations @ total) x (set @ total) =
@@ -79,15 +79,15 @@ module Demo : sig end = struct
       Int_set_ascribed.mem x
         (Int_set_ascribed.Refined.add x set)
     in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 
   let (more_labels @ total) x =
     let set = More_labeled_set.Refined.singleton x in
     let present = More_labeled_set.mem x set in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 
   let (refined_find @ total) :
@@ -102,16 +102,16 @@ module Demo : sig end = struct
       Int_set.Refined.find
     in
     let representative = find set member in
-    let refine_ member = member in
+    let member = member in
     let singleton = Int_set.Refined.singleton member in
     let unit = () in
     let proof :
         {u : unit |
           Int_set.mem representative set
           && Int_set.mem representative singleton} =
-      refine_ unit
+      unit
     in
-    let refine_ proof = proof in
+    let _ = proof in
     ()
 
   module Verify_singletons (Order : Set.TotalOrderedType) = struct
@@ -119,8 +119,8 @@ module Demo : sig end = struct
 
     let (member @ total) (element @ total) =
       let present = S.mem element (S.Refined.singleton element) in
-      let proof : {b : bool | b} = refine_ present in
-      let refine_ proof = proof in
+      let proof : {b : bool | b} = present in
+      let _ = proof in
       ()
   end
 
@@ -134,15 +134,15 @@ module Demo : sig end = struct
 
   let ordinary_equality set =
     let result = set in
-    let proof : {result : Ordinary_set.t | result === set} = refine_ result in
-    let refine_ proof = proof in
+    let proof : {result : Ordinary_set.t | result === set} = result in
+    let _ = proof in
     result
 
   let ordinary_find set x =
     ignore (Int_set.find x set);
     let present = Int_set.mem x set in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 
   let (total_apis @ total) set =
@@ -236,16 +236,16 @@ module Total_equality_rejected : sig end = struct
     external compare : int -> int -> int @@ total = "%compare"
   end
   module S = Set.MakeTotal (Order)
-  let rejected set : {result : S.t | result === set} = refine_ set
+  let rejected set : {result : S.t | result === set} = set
 end;;
 [%%expect{|
 Line 7, characters 37-51:
-7 |   let rejected set : {result : S.t | result === set} = refine_ set
+7 |   let rejected set : {result : S.t | result === set} = set
                                          ^^^^^^^^^^^^^^
 Error: Unsupported refinement predicate in VC generation
-Line 7, characters 55-66:
-7 |   let rejected set : {result : S.t | result === set} = refine_ set
-                                                           ^^^^^^^^^^^
+Line 7, characters 55-58:
+7 |   let rejected set : {result : S.t | result === set} = set
+                                                           ^^^
   Required by this refinement introduction
 |}]
 
@@ -255,14 +255,14 @@ module Ordinary_operations_unrecognized : sig end = struct
   let rejected x =
     let set = S.singleton x in
     let present = S.mem x set in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 7, characters 33-48:
-7 |     let proof : {b : bool | b} = refine_ present in
-                                     ^^^^^^^^^^^^^^^
+Line 7, characters 33-40:
+7 |     let proof : {b : bool | b} = present in
+                                     ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -275,14 +275,14 @@ module Caught_find_does_not_assume_normal_return : sig end = struct
   let rejected set x =
     ignore (try S.find x set with Not_found -> x);
     let present = S.mem x set in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 10, characters 33-48:
-10 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 10, characters 33-40:
+10 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -293,16 +293,16 @@ module Nested_set_equality_rejected : sig end = struct
   end
   module S = Set.MakeTotal (Order)
   type box = Box of S.t [@@inductive]
-  let rejected box : {result : box | result === box} = refine_ box
+  let rejected box : {result : box | result === box} = box
 end;;
 [%%expect{|
 Line 8, characters 37-51:
-8 |   let rejected box : {result : box | result === box} = refine_ box
+8 |   let rejected box : {result : box | result === box} = box
                                          ^^^^^^^^^^^^^^
 Error: Unsupported refinement predicate in VC generation
-Line 8, characters 55-66:
-8 |   let rejected box : {result : box | result === box} = refine_ box
-                                                           ^^^^^^^^^^^
+Line 8, characters 55-58:
+8 |   let rejected box : {result : box | result === box} = box
+                                                           ^^^
   Required by this refinement introduction
 |}]
 
@@ -315,14 +315,14 @@ module Lookalike_operations_unrecognized : sig end = struct
   let rejected x =
     let set = S.singleton x in
     let present = S.mem x set in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 10, characters 33-48:
-10 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 10, characters 33-40:
+10 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -347,14 +347,14 @@ module Shadowed_operation_unrecognized : sig end = struct
   end
   let rejected x =
     let present = Forged.mem x (Forged.Refined.add x Forged.empty) in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 22, characters 33-48:
-22 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 22, characters 33-40:
+22 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -366,14 +366,14 @@ module Ordinary_total_constructors_unrecognized : sig end = struct
   module S = Set.MakeTotal (Order)
   let rejected x =
     let present = S.mem x (S.add x S.empty) in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 9, characters 33-48:
-9 |     let proof : {b : bool | b} = refine_ present in
-                                     ^^^^^^^^^^^^^^^
+Line 9, characters 33-40:
+9 |     let proof : {b : bool | b} = present in
+                                     ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -392,14 +392,13 @@ module Separate_classes : sig end = struct
   let rejected () : {u : unit | Second.mem 2 (Second.Refined.singleton 1)} =
     let first = First.mem 2 (First.Refined.singleton 1) in
     let fact : {b : bool | b} = assume_ first in
-    let refine_ fact = fact in
-    let result = () in
-    refine_ result
+    let _ = fact in
+    ()
 end;;
 [%%expect{|
-Line 18, characters 4-18:
-18 |     refine_ result
-         ^^^^^^^^^^^^^^
+Line 17, characters 4-6:
+17 |     ()
+         ^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -468,13 +467,13 @@ module Refined_find_rejects_partial_container : sig end = struct
   let rejected () =
     let set = S.singleton partial_element in
     let _found = S.find total_query set in
-    let member : {x : Order.t | S.mem x set} = refine_ total_query in
+    let member : {x : Order.t | S.mem x set} = total_query in
     let _found = S.Refined.find set member in
     ()
 end;;
 [%%expect{|
 Line 12, characters 40-43:
-12 |     let member : {x : Order.t | S.mem x set} = refine_ total_query in
+12 |     let member : {x : Order.t | S.mem x set} = total_query in
                                              ^^^
 Error: The value "set" is "partial"
        but is expected to be "total"

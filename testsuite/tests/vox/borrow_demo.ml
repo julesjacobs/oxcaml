@@ -24,33 +24,32 @@ let swap_ends : ('a : immutable_data). (a : 'a Owned_array.t) @ unique ->
       (if Bigint.compare (Model.length before) 0Z > 0 then
         Model.swap before 0Z (Bigint.sub (Model.length before) 1Z)
        else before)) in
-  let refine_ result = Owned_array.with_mut a post (fun loan ->
-    let refine_ s = loan in
-    let refine_ n = Slice.length (borrow_ s) in
+  let result = Owned_array.with_mut a post (fun loan ->
+    let s = loan in
+    let n = Slice.length (borrow_ s) in
     let s2 =
       if n > 0 then
         let zero = 0 in
         let last = n - 1 in
         let first : {i : int | 0 <= i
           && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
-          refine_ zero in
+          zero in
         let second : {i : int | 0 <= i
           && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
-          refine_ last in
-        let refine_ swapped = Slice.swap s first second in
+          last in
+        let swapped = Slice.swap s first second in
         swapped
       else s in
     Slice.finish s2;
-    let u = () in
-    refine_ u) in
+    ()) in
   let {state; _} = result in
-  refine_ state
+  state
 
 let check (values : int list) (expected : int list) =
   let source = Iarray.of_list values in
-  let refine_ a = Owned_array.of_iarray source in
-  let refine_ a = swap_ends a in
-  let refine_ result = Owned_array.into_iarray a in
+  let a = Owned_array.of_iarray source in
+  let a = swap_ends a in
+  let result = Owned_array.into_iarray a in
   assert (Iarray.to_list result = expected);
   assert (Iarray.to_list source = values)
 
@@ -66,9 +65,9 @@ type items : immutable_data = int list
 let () =
   let shared : items = [1; 2] in
   let input : items iarray = [: shared; [3] :] in
-  let refine_ a = Owned_array.of_iarray input in
-  let refine_ a = swap_ends a in
-  let refine_ output = Owned_array.into_iarray a in
+  let a = Owned_array.of_iarray input in
+  let a = swap_ends a in
+  let output = Owned_array.into_iarray a in
   assert (Iarray.to_list output = [[3]; [1; 2]]);
   assert (Iarray.to_list input = [[1; 2]; [3]]);
   assert (shared = [1; 2])

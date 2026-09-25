@@ -65,7 +65,7 @@ let unfolded () : {r : int | r = 1} =
   let n = 1 in
   let r = Fib.fib n in
   Fib.fib_def n;
-  refine_ r;;
+  r;;
 [%%expect{|
 val unfolded : unit -> {r : int | r = 1} = <fun>
 |}]
@@ -78,20 +78,20 @@ module Measures = struct
     loop 0
 
   let rec (refined_measure @ total) : {n : int | 0 <= n} -> int = fun n ->
-    let refine_ value = n in
+    let value = n in
     if value > 0 then
       let next = value - 1 in
-      let checked : {n : int | 0 <= n} = refine_ next in
+      let checked : {n : int | 0 <= n} = next in
       refined_measure checked
     else 0
-  [@@decreases let refine_ value = n in value]
+  [@@decreases let value = n in value]
 
   let rec (postcondition @ total) : int -> {r : int | r = 0} = fun n ->
     if n > 0 then
       let next = n - 1 in
-      let refine_ r = postcondition next in
+      let r = postcondition next in
       postcondition r
-    else let r = 0 in refine_ r
+    else let r = 0 in r
   [@@decreases n]
 
   let rec (negative @ total) n =
@@ -312,12 +312,12 @@ Error: recursive calls must supply every value parameter
 |}]
 
 let rec circular : (n : int) -> {r : int | r < n} = fun n ->
-  let refine_ r = circular n in refine_ r
+  let r = circular n in r
 [@@decreases n];;
 [%%expect{|
-Line 2, characters 18-28:
-2 |   let refine_ r = circular n in refine_ r
-                      ^^^^^^^^^^
+Line 2, characters 10-20:
+2 |   let r = circular n in r
+              ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 Line 3, characters 13-14:
 3 | [@@decreases n];;

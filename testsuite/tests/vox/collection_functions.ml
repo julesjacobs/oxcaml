@@ -20,14 +20,14 @@ let partial_clamp : (x : int) @ immutable ->
   else
     let y = if x < 0 then 0 else x in
     ghost_ (grows_def x y);
-    refine_ y
+    y
 
 let clamp (xs : int list) :
     {ys : int list | map_rel grows xs ys && length xs === length ys} =
   let f = partial_clamp in
-  let refine_ ys = map grows f xs in
+  let ys = map grows f xs in
   ghost_ (map_length grows xs ys);
-  refine_ ys
+  ys
 
 let[@def] count_relation : int list @ immutable total ->
     (Bigint.t @ immutable -> bool) @ total =
@@ -48,8 +48,8 @@ let count_step : (x : int) @ immutable -> (xs : int list) @ immutable ghost ->
       count_relation_def inputs result;
       length_def inputs;
       let u = () in
-      (refine_ u : {u : unit | count_relation (x :: xs) result}));
-    refine_ result
+      (u : {u : unit | count_relation (x :: xs) result}));
+    result
 
 let count (xs : int list) : {n : Bigint.t | n === length xs} =
   let initial = 0Z in
@@ -58,18 +58,18 @@ let count (xs : int list) : {n : Bigint.t | n === length xs} =
     let empty : int list = [] in
     count_relation_def empty initial;
     length_def empty;
-    (refine_ u : {u : unit | count_relation [] initial}));
+    (u : {u : unit | count_relation [] initial}));
   let step = count_step in
-  let refine_ n = fold_right_ih count_relation step xs initial (refine_ u) in
+  let n = fold_right_ih count_relation step xs initial (u) in
   ghost_ (count_relation_def xs n);
-  refine_ n
+  n
 
 let () =
   let inputs = [-2; 3; 0] in
-  let refine_ ys = clamp inputs in
+  let ys = clamp inputs in
   assert (ys = [0; 3; 0]);
   let inputs = [1; 2; 3] in
-  let refine_ n = count inputs in
+  let n = count inputs in
   assert (Bigint.equal n 3Z);
   let inputs = [13] in
   (match clamp inputs with
@@ -91,7 +91,7 @@ let ih_clamp_step : (x : int) @ immutable ->
     {y : int | same_length (x :: xs) (y :: ys)} @ immutable total =
     fun x xs ys premise ->
   premise;
-  let refine_ y = partial_clamp x in
+  let y = partial_clamp x in
   ghost_ (
     let inputs = x :: xs in
     let outputs = y :: ys in
@@ -100,8 +100,8 @@ let ih_clamp_step : (x : int) @ immutable ->
     length_def inputs;
     length_def outputs;
     let u = () in
-    (refine_ u : {u : unit | same_length (x :: xs) (y :: ys)}));
-  refine_ y
+    (u : {u : unit | same_length (x :: xs) (y :: ys)}));
+  y
 
 let ih_clamp (xs : int list) :
     {ys : int list | length xs === length ys} =
@@ -109,11 +109,11 @@ let ih_clamp (xs : int list) :
   ghost_ (
     let empty : int list = [] in
     same_length_def empty empty;
-    (refine_ u : {u : unit | same_length [] []}));
+    (u : {u : unit | same_length [] []}));
   let step = ih_clamp_step in
-  let refine_ ys = map_ih same_length step xs (refine_ u) in
+  let ys = map_ih same_length step xs (u) in
   ghost_ (same_length_def xs ys);
-  refine_ ys
+  ys
 
 let[@def] shifted : int @ immutable total ->
     (int @ immutable total -> (int @ immutable -> bool) @ total) @ total =
@@ -128,17 +128,17 @@ let shift (delta : int) (xs : int list) :
     else
       let y = x + delta in
       ghost_ (shifted_def delta x y);
-      refine_ y in
-  let refine_ ys = map r f xs in
+      y in
+  let ys = map r f xs in
   ghost_ (map_length r xs ys);
-  (refine_ ys : {ys : int list | length xs === length ys})
+  (ys : {ys : int list | length xs === length ys})
 
 let () =
   let xs = [-2; 3; 0] in
-  let refine_ ys = ih_clamp xs in
+  let ys = ih_clamp xs in
   assert (ys = [0; 3; 0]);
   let delta = 7 in
-  let refine_ ys = shift delta xs in
+  let ys = shift delta xs in
   assert (ys = [5; 10; 7]);
   let xs = [13] in
   (match ih_clamp xs with
@@ -161,7 +161,7 @@ let increment : (x : int) @ immutable -> (acc : Bigint.t) @ immutable ->
   else
     let result = Bigint.add acc 1Z in
     ghost_ (increment_relation_def x acc result);
-    refine_ result
+    result
 
 let (count_preserved @ total) :
     (x : int) @ immutable -> (tail : int list) @ immutable ->
@@ -175,7 +175,7 @@ let (count_preserved @ total) :
   increment_relation_def x acc result;
   count_relation_def inputs result;
   length_def inputs;
-  let u = () in refine_ u
+  ()
 
 let count_separate (xs : int list) : {n : Bigint.t | n === length xs} =
   let u = () in
@@ -184,18 +184,18 @@ let count_separate (xs : int list) : {n : Bigint.t | n === length xs} =
     let empty : int list = [] in
     count_relation_def empty initial;
     length_def empty;
-    (refine_ u : {u : unit | count_relation [] initial}));
+    (u : {u : unit | count_relation [] initial}));
   let preserve = ghost_ count_preserved in
   let step = increment in
-  let refine_ n =
+  let n =
     fold_right increment_relation count_relation step preserve xs initial
-      (refine_ u) in
+      (u) in
   ghost_ (count_relation_def xs n);
-  refine_ n
+  n
 
 let () =
   let xs = [1; 2; 3] in
-  let refine_ n = count_separate xs in
+  let n = count_separate xs in
   assert (Bigint.equal n 3Z);
   let xs = [13] in
   match count_separate xs with
@@ -209,10 +209,10 @@ let[@def] next_count : int @ immutable total ->
 let count_exact : (x : int) @ immutable -> (acc : Bigint.t) @ immutable ->
     {result : Bigint.t | result === next_count x acc} @ immutable total =
     fun x acc ->
-  let refine_ result = increment x acc in
+  let result = increment x acc in
   ghost_ (increment_relation_def x acc result);
   ghost_ (next_count_def x acc);
-  refine_ result
+  result
 
 let (count_model_preserved @ total) :
     (x : int) @ immutable -> (tail : int list) @ immutable ->
@@ -224,13 +224,13 @@ let (count_model_preserved @ total) :
   next_count_def x acc;
   increment_relation_def x acc result;
   let u = () in
-  count_preserved x tail acc result (refine_ u);
-  refine_ u
+  count_preserved x tail acc result (u);
+  u
 
 let count_by_model (xs : int list) : {n : Bigint.t | n === length xs} =
   let initial = 0Z in
   let step = count_exact in
-  let refine_ n = fold_model next_count step xs initial in
+  let n = fold_model next_count step xs initial in
   ghost_ (
     let empty : int list = [] in
     count_relation_def empty initial;
@@ -238,15 +238,15 @@ let count_by_model (xs : int list) : {n : Bigint.t | n === length xs} =
     let u = () in
     let preserve = count_model_preserved in
     model_invariant next_count count_relation preserve xs initial
-        (refine_ u);
+        (u);
     count_relation_def xs n;
-    (refine_ u : {u : unit | n === length xs}));
-  refine_ n
+    (u : {u : unit | n === length xs}));
+  n
 
 let count_by_trace (xs : int list) : {n : Bigint.t | n === length xs} =
   let initial = 0Z in
   let step = increment in
-  let refine_ result = fold_trace increment_relation step xs initial in
+  let result = fold_trace increment_relation step xs initial in
   let n = result.value in
   ghost_ (
     let empty : int list = [] in
@@ -256,17 +256,17 @@ let count_by_trace (xs : int list) : {n : Bigint.t | n === length xs} =
     let history = result.trace in
     let u = () in
     trace_invariant increment_relation count_relation
-      preserve xs initial n history (refine_ u);
+      preserve xs initial n history (u);
     count_relation_def xs n;
-    (refine_ u : {u : unit | n === length xs}));
-  refine_ n
+    (u : {u : unit | n === length xs}));
+  n
 
 let () =
   List.iter (fun xs ->
-    let refine_ a = count xs in
-    let refine_ b = count_separate xs in
-    let refine_ c = count_by_model xs in
-    let refine_ d = count_by_trace xs in
+    let a = count xs in
+    let b = count_separate xs in
+    let c = count_by_model xs in
+    let d = count_by_trace xs in
     assert (Bigint.equal a b && Bigint.equal b c && Bigint.equal c d))
     [[]; [1]; [1; 2; 3]; [-2; 0; 7]];
   List.iter (fun f ->
@@ -274,5 +274,5 @@ let () =
     match f xs with
     | exception Failure message -> assert (message = "increment")
     | _ -> failwith "expected partial callback")
-    [(fun xs -> let refine_ n = count_by_model xs in n);
-     (fun xs -> let refine_ n = count_by_trace xs in n)]
+    [(fun xs -> let n = count_by_model xs in n);
+     (fun xs -> let n = count_by_trace xs in n)]

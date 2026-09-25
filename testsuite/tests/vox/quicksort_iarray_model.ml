@@ -33,14 +33,14 @@ let (swap_partition @ total) : (values : int iarray) -> (pivot : int) ->
   range_grow swapped pivot low_side zero lower;
   if lower = scan then
     (range_empty swapped pivot high_side next_lower next_scan;
-    let u = () in refine_ u)
+    let u = () in u)
   else
     (range_get values pivot high_side lower scan lower;
     range_shrink values pivot high_side lower scan next_lower scan;
     range_set values pivot high_side next_lower scan lower y;
     range_set intermediate pivot high_side next_lower scan scan x;
     range_grow swapped pivot high_side next_lower scan;
-    let u = () in refine_ u)
+    let u = () in u)
 
 let (glue_partition @ total) : (before : int iarray) ->
     (after : int iarray) -> (pivot : int) -> (index : int) ->
@@ -57,7 +57,7 @@ let (glue_partition @ total) : (before : int iarray) ->
         (slice after (index + 1) (Iarray.length after))} @ ghost ->
     {u : unit | sorted after && permutation before after} =
     fun before after pivot index premise ->
-  let refine_ premise = premise in
+  let _ = premise in
   let zero = 0 in
   let next = index + 1 in
   let size = Iarray.length before in
@@ -73,16 +73,16 @@ let (glue_partition @ total) : (before : int iarray) ->
   range_slice before pivot high next size;
   let premise = () in
   all_permutation old_left left pivot low
-    (refine_ premise);
+    (premise);
   all_permutation old_right right pivot high
-    (refine_ premise);
+    (premise);
   count_extensional before after (fun target ->
     count_decompose3 before index next target;
     count_decompose3 after index next target;
     permutation_count old_left left target;
     permutation_count old_right right target;
-    let u = () in refine_ u);
+    let u = () in u);
   element_slice before index next zero;
   element_slice after index next zero;
   sorted_glue after pivot index;
-  let u = () in refine_ u
+  let u = () in u
