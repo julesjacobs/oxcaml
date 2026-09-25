@@ -9,6 +9,7 @@ from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--output', type=Path)
+parser.add_argument('--compiler', type=Path)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
 source = Path(__file__).resolve().parent
@@ -19,7 +20,7 @@ private = output / 'implementation'
 public = output / 'public'
 private.mkdir(exist_ok=True)
 public.mkdir(exist_ok=True)
-compiler = root / '_install/bin/ocamlopt.opt'
+compiler = (args.compiler or root / '_install/bin/ocamlopt.opt').resolve()
 flags = ['-opaque', '-principal', '-extension', 'refinement_types']
 
 
@@ -87,7 +88,7 @@ false_claim.write_text('''open Dfa_semantics
 let (false_equality @ total) (left : Dfa_semantics.machine)
     (right : Dfa_semantics.machine) (word : int list) :
     {u : unit | Dfa_semantics.run left word === Dfa_semantics.run right word} =
-  let u = () in refine_ u
+  let u = () in u
 ''')
 compile_file(false_claim, public / 'false_equality.cmx', [public],
              reject='Refinement could not be proved')

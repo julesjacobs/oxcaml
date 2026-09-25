@@ -75,7 +75,12 @@ stack-space guarantee is claimed.
 
 ## Reproduce the checks
 
-From a configured worktree, run these sequentially:
+These sources require implicit refinement introduction and elimination. The
+migration was checked with the compiler from commit
+`9d5d8fca7a3261a3b06c293fe7aa30a38b9a2ef0`; the original #133 base is too old.
+PR #200 is stacked on the shared implicit-refinement dependency, PR #207.
+
+From a worktree configured with a compatible compiler, run these sequentially:
 
 ```sh
 ./dev init
@@ -96,6 +101,10 @@ and the erasure audit, use the installed compiler:
 make -s install
 python3 testsuite/tests/vox/dfa_boundary_check.py
 ```
+
+An existing compatible installation can be used without rebuilding this
+checkout: pass `--compiler /path/to/installation/bin/ocamlopt.opt`. All generated
+files and rejection fixtures remain in the script's private output directory.
 
 The script prints its output directory. It compiles the public `.mli` files,
 then compiles `dfa_public_client.ml` in a directory containing only the two

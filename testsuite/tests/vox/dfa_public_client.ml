@@ -8,7 +8,7 @@ let (equal_words @ total) (left : Dfa_semantics.machine)
     {u : unit | if Dfa_equivalence.compare left right limit === Dfa_equivalence.Equivalent then
       Dfa_semantics.run left word === Dfa_semantics.run right word else true} =
   ghost_ (Dfa_equivalence.compare_equal left right limit word);
-  let u = () in refine_ u
+  let u = () in u
 
 let (comparison_finishes @ total) (left : Dfa_semantics.machine)
     (right : Dfa_semantics.machine) (limit : int) :
@@ -22,7 +22,7 @@ let (comparison_finishes @ total) (left : Dfa_semantics.machine)
       | Dfa_equivalence.Equivalent | Dfa_equivalence.Inequivalent -> true
       else true} =
   ghost_ (Dfa_equivalence.compare_complete left right limit);
-  let u = () in refine_ u
+  let u = () in u
 
 let (distinguishing_word @ total) (left : Dfa_semantics.machine)
     (right : Dfa_semantics.machine) (limit : int) :
@@ -30,8 +30,8 @@ let (distinguishing_word @ total) (left : Dfa_semantics.machine)
       if Dfa_equivalence.compare left right limit === Dfa_equivalence.Inequivalent then
         Dfa_semantics.run left word.ghost <> Dfa_semantics.run right word.ghost
       else true} =
-  let refine_ word = Dfa_equivalence.comparison_witness left right limit in
-  refine_ word
+  let word = Dfa_equivalence.comparison_witness left right limit in
+  word
 
 let (minimum @ total) (source : Dfa_semantics.machine) (limit : int)
     (other : Dfa_semantics.machine)
@@ -43,7 +43,7 @@ let (minimum @ total) (source : Dfa_semantics.machine) (limit : int)
         Bigint.compare (Dfa_semantics.state_size reduced)
           (Dfa_semantics.state_size other) <= 0 else true} =
   ghost_ (Dfa_equivalence.reduce_minimum source limit other agreement);
-  let u = () in refine_ u
+  let u = () in u
 
 let (reduction_finishes @ total) (source : Dfa_semantics.machine) (limit : int) :
     {u : unit | if Dfa_semantics.valid source && Dfa_semantics.labels_bounded source &&
@@ -53,24 +53,24 @@ let (reduction_finishes @ total) (source : Dfa_semantics.machine) (limit : int) 
       | None -> false | Some reduced -> Dfa_semantics.valid reduced
       else true} =
   ghost_ (Dfa_equivalence.reduce_complete source limit);
-  let u = () in refine_ u
+  let u = () in u
 
 let (minimized_regex @ total) (root : Regex_semantics.t) (limit : int)
     (word : int list) :
     {u : unit | match Regex_language.lower root with None -> true | Some source ->
       match Dfa_equivalence.reduce source limit with None -> true | Some reduced ->
         Dfa_semantics.run reduced word === Regex_language.matches root word} =
-  let refine_ _proof = ghost_ (
+  let _proof = ghost_ (
     ghost_ (Regex_language.lower_matches root word);
     let source = Regex_language.lower root in
     let u = () in
-    (match source with None -> refine_ u | Some machine ->
+    (match source with None -> u | Some machine ->
       ghost_ (Dfa_equivalence.reduce_preserves machine limit word);
-      refine_ u)
+      u)
     : {u : unit | match Regex_language.lower root with None -> true | Some source ->
         match Dfa_equivalence.reduce source limit with None -> true | Some reduced ->
           Dfa_semantics.run reduced word === Regex_language.matches root word}) in
-  let u = () in refine_ u
+  let u = () in u
 
 let (membership_implies_matching @ total) (root : Regex_semantics.t)
     (proof : Regex_semantics.Membership.evidence) (word : int list) :
@@ -78,7 +78,7 @@ let (membership_implies_matching @ total) (root : Regex_semantics.t)
       Regex_semantics.Membership.word proof === word then
       Regex_language.matches root word else true} =
   ghost_ (Regex_language.complete root word proof);
-  let u = () in refine_ u
+  let u = () in u
 
 let (epsilon_matches @ total) () :
     {u : unit | Regex_language.matches Regex_semantics.Epsilon []} =
@@ -88,7 +88,7 @@ let (epsilon_matches @ total) () :
   ghost_ (Regex_semantics.Membership.valid_def root proof);
   ghost_ (Regex_semantics.Membership.word_def proof);
   ghost_ (Regex_language.complete root word proof);
-  let u = () in refine_ u
+  let u = () in u
 
 let () =
   let source : Dfa_semantics.machine = 0, [0, false, ([], 0)] in

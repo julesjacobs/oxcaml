@@ -121,10 +121,10 @@ end = struct
     append_def xs nil;
     let u = () in
     match xs with
-    | [] -> refine_ u
+    | [] -> u
     | _ :: rest ->
       append_nil rest;
-      refine_ u
+      u
 
   let[@def] rec equal a b =
     match a with
@@ -143,27 +143,27 @@ end = struct
     equal_def a b;
     let u = () in
     match a with
-    | Empty | Epsilon | Symbol _ -> refine_ u
+    | Empty | Epsilon | Symbol _ -> u
     | Alt (a1, a2) ->
       (match b with
        | Alt (b1, b2) ->
          equal_correct a1 b1;
          equal_correct a2 b2;
-         refine_ u
-       | _ -> refine_ u)
+         u
+       | _ -> u)
     | Seq (a1, a2) ->
       (match b with
        | Seq (b1, b2) ->
          equal_correct a1 b1;
          equal_correct a2 b2;
-         refine_ u
-       | _ -> refine_ u)
+         u
+       | _ -> u)
     | Star a ->
       (match b with
        | Star b ->
          equal_correct a b;
-         refine_ u
-       | _ -> refine_ u)
+         u
+       | _ -> u)
 
   let (rank @ total) r =
     match r with
@@ -230,14 +230,14 @@ end = struct
     equal_correct a r;
     let u = () in
     match r with
-    | Empty -> refine_ u
+    | Empty -> u
     | Alt (head, tail) ->
       equal_correct a head;
       let next = insert a tail in
       insert_contains a tail query;
       contains_def query next;
-      refine_ u
-    | _ -> refine_ u
+      u
+    | _ -> u
 
   let rec (add_contains @ total) : (a : t) -> (acc : t) -> (query : t) ->
       {u : unit | contains query (add_alternatives a acc) ===
@@ -247,15 +247,15 @@ end = struct
     contains_def query a;
     let u = () in
     match a with
-    | Empty -> refine_ u
+    | Empty -> u
     | Alt (left, right) ->
       let next = add_alternatives right acc in
       add_contains right acc query;
       add_contains left next query;
-      refine_ u
+      u
     | _ ->
       insert_contains a acc query;
-      refine_ u
+      u
 
   let (alt_contains @ total) (a @ total) (b @ total) query :
       {u : unit | contains query (alt a b) ===
@@ -266,7 +266,7 @@ end = struct
     contains_def query empty;
     add_contains b empty query;
     add_contains a next query;
-    let u = () in refine_ u
+    let u = () in u
 
   let rec (select_alternative @ total) : (r : t) -> (p : evidence) ->
       {choice : t * evidence |
@@ -282,12 +282,12 @@ end = struct
       | Alt (left, right) ->
         (match p with
          | Alt_left inner ->
-           let refine_ choice = select_alternative left inner in
+           let choice = select_alternative left inner in
            let (a : t), _ = choice in
            ghost_ (contains_def a r);
            choice
          | Alt_right inner ->
-           let refine_ choice = select_alternative right inner in
+           let choice = select_alternative right inner in
            let (a : t), _ = choice in
            ghost_ (contains_def a r);
            choice
@@ -297,7 +297,7 @@ end = struct
         ghost_ (equal_correct r r);
         r, p
     in
-    refine_ result
+    result
 
   let rec (inject_alternative @ total) :
       (r : t) -> (a : t) -> (p : evidence) ->
@@ -310,13 +310,13 @@ end = struct
       match r with
       | Alt (left, right) ->
         if contains a left then
-          let refine_ q = inject_alternative left a p in
+          let q = inject_alternative left a p in
           let result = Alt_left q in
           ghost_ (valid_def r result);
           ghost_ (word_def result);
           result
         else
-          let refine_ q = inject_alternative right a p in
+          let q = inject_alternative right a p in
           let result = Alt_right q in
           ghost_ (valid_def r result);
           ghost_ (word_def result);
@@ -325,7 +325,7 @@ end = struct
         ghost_ (equal_correct a r);
         p
     in
-    refine_ result
+    result
 
   let (alt_expand @ total) (a @ total) (b @ total) p :
       {q : evidence |
@@ -333,12 +333,12 @@ end = struct
         else true} =
     let simplified = alt a b in
     let original = Alt (a, b) in
-    let refine_ choice = select_alternative simplified p in
+    let choice = select_alternative simplified p in
     let (leaf : t), (inner : evidence) = choice in
     ghost_ (alt_contains a b leaf);
     ghost_ (contains_def leaf original);
-    let refine_ q = inject_alternative original leaf inner in
-    refine_ q
+    let q = inject_alternative original leaf inner in
+    q
 
   let (alt_contract @ total) (a @ total) (b @ total) p :
       {q : evidence |
@@ -346,12 +346,12 @@ end = struct
         else true} =
     let simplified = alt a b in
     let original = Alt (a, b) in
-    let refine_ choice = select_alternative original p in
+    let choice = select_alternative original p in
     let (leaf : t), (inner : evidence) = choice in
     ghost_ (contains_def leaf original);
     ghost_ (alt_contains a b leaf);
-    let refine_ q = inject_alternative simplified leaf inner in
-    refine_ q
+    let q = inject_alternative simplified leaf inner in
+    q
 
   let[@def] seq (a @ total) (b @ total) : t @ total =
     match a, b with
@@ -384,7 +384,7 @@ end = struct
     let pw = ghost_ (word p) in
     ghost_ (append_def nil pw);
     ghost_ (append_nil pw);
-    refine_ q
+    q
 
   let (seq_contract @ total) (a @ total) (b @ total) p :
       {q : evidence |
@@ -411,7 +411,7 @@ end = struct
          | _ -> p)
       | _ -> Epsilon_match
     in
-    refine_ q
+    q
 
   let[@def] rec nullable r =
     match r with
@@ -444,20 +444,20 @@ end = struct
       | Star _ -> Star_empty
       | Alt (a, b) ->
         if nullable a then
-          let refine_ p = epsilon a in
+          let p = epsilon a in
           let result = Alt_left p in
           ghost_ (valid_def r result);
           ghost_ (word_def result);
           result
         else
-          let refine_ p = epsilon b in
+          let p = epsilon b in
           let result = Alt_right p in
           ghost_ (valid_def r result);
           ghost_ (word_def result);
           result
       | Seq (a, b) ->
-        let refine_ p = epsilon a in
-        let refine_ q = epsilon b in
+        let p = epsilon a in
+        let q = epsilon b in
         let result = Seq_match (p, q) in
         ghost_ (valid_def r result);
         ghost_ (word_def result);
@@ -468,7 +468,7 @@ end = struct
     in
     ghost_ (valid_def r result);
     ghost_ (word_def result);
-    refine_ result
+    result
   let rec (expand @ total) : (r : t) -> (c : int) -> (p : evidence) ->
       {q : evidence |
         if valid (derive c r) p then valid r q && word q === c :: word p
@@ -485,19 +485,19 @@ end = struct
       | Alt (a, b) ->
         let da = derive c a in
         let db = derive c b in
-        let refine_ p = alt_expand da db p in
+        let p = alt_expand da db p in
         let original = ghost_ (Alt (da, db)) in
         ghost_ (valid_def original p);
         ghost_ (word_def p);
         (match p with
          | Alt_left inner ->
-           let refine_ q = expand a c inner in
+           let q = expand a c inner in
            let result = Alt_left q in
            ghost_ (valid_def r result);
            ghost_ (word_def result);
            result
          | Alt_right inner ->
-           let refine_ q = expand b c inner in
+           let q = expand b c inner in
            let result = Alt_right q in
            ghost_ (valid_def r result);
            ghost_ (word_def result);
@@ -508,19 +508,19 @@ end = struct
         let db = derive c b in
         let product = seq da b in
         if nullable a then
-          let refine_ p = alt_expand product db p in
+          let p = alt_expand product db p in
           let original = ghost_ (Alt (product, db)) in
           ghost_ (valid_def original p);
           ghost_ (word_def p);
           (match p with
            | Alt_left inner ->
-             let refine_ inner = seq_expand da b inner in
+             let inner = seq_expand da b inner in
              let left_derivative = ghost_ (Seq (derive c a, b)) in
              ghost_ (valid_def left_derivative inner);
              ghost_ (word_def inner);
              (match inner with
               | Seq_match (left, right) ->
-                let refine_ q = expand a c left in
+                let q = expand a c left in
                 let result = Seq_match (q, right) in
                 ghost_ (valid_def r result);
                 ghost_ (word_def result);
@@ -530,8 +530,8 @@ end = struct
                 result
               | _ -> Epsilon_match)
            | Alt_right right ->
-             let refine_ left = epsilon a in
-             let refine_ q = expand b c right in
+             let left = epsilon a in
+             let q = expand b c right in
              let result = Seq_match (left, q) in
              ghost_ (valid_def r result);
              ghost_ (word_def result);
@@ -541,13 +541,13 @@ end = struct
              result
            | _ -> Epsilon_match)
         else
-          let refine_ p = seq_expand da b p in
+          let p = seq_expand da b p in
           let original = ghost_ (Seq (da, b)) in
           ghost_ (valid_def original p);
           ghost_ (word_def p);
           (match p with
            | Seq_match (left, right) ->
-             let refine_ q = expand a c left in
+             let q = expand a c left in
              let result = Seq_match (q, right) in
              ghost_ (valid_def r result);
              ghost_ (word_def result);
@@ -558,13 +558,13 @@ end = struct
            | _ -> Epsilon_match)
       | Star a ->
         let da = derive c a in
-        let refine_ p = seq_expand da r p in
+        let p = seq_expand da r p in
         let original = ghost_ (Seq (da, r)) in
         ghost_ (valid_def original p);
         ghost_ (word_def p);
         (match p with
          | Seq_match (left, right) ->
-           let refine_ q = expand a c left in
+           let q = expand a c left in
            let result = Star_step (q, right) in
            ghost_ (valid_def r result);
            ghost_ (word_def result);
@@ -576,12 +576,12 @@ end = struct
     in
     ghost_ (valid_def r result);
     ghost_ (word_def result);
-    refine_ result
+    result
   let (append_empty @ total) (xs : int list) (ys : int list) :
       {u : unit | (append xs ys === []) === (xs === [] && ys === [])} =
     append_def xs ys;
     let u = () in
-    match xs with [] -> refine_ u | _ :: _ -> refine_ u
+    match xs with [] -> u | _ :: _ -> u
 
   let rec (empty_complete @ total) : (r : t) -> (p : evidence) ->
       {u : unit | if valid r p && word p === [] then nullable r else true}
@@ -592,19 +592,19 @@ end = struct
     nullable_def r;
     let u = () in
     match p with
-    | Epsilon_match | Symbol_match _ | Star_empty | Star_step _ -> refine_ u
+    | Epsilon_match | Symbol_match _ | Star_empty | Star_step _ -> u
     | Alt_left inner ->
       (match r with
        | Alt (a, _) ->
          empty_complete a inner;
-         refine_ u
-       | _ -> refine_ u)
+         u
+       | _ -> u)
     | Alt_right inner ->
       (match r with
        | Alt (_, b) ->
          empty_complete b inner;
-         refine_ u
-       | _ -> refine_ u)
+         u
+       | _ -> u)
     | Seq_match (left, right) ->
       (match r with
        | Seq (a, b) ->
@@ -613,8 +613,8 @@ end = struct
          append_empty lw rw;
          empty_complete a left;
          empty_complete b right;
-         refine_ u
-       | _ -> refine_ u)
+         u
+       | _ -> u)
 
   let rec (contract @ total) :
       (r : t) -> (c : int) -> (s : int list) -> (p : evidence) ->
@@ -633,27 +633,27 @@ end = struct
       | Alt_left inner ->
         (match r with
          | Alt (a, b) ->
-           let refine_ q = contract a c s inner in
+           let q = contract a c s inner in
            let da = derive c a in
            let db = derive c b in
            let original = ghost_ (Alt (da, db)) in
            let result = Alt_left q in
            ghost_ (valid_def original result);
            ghost_ (word_def result);
-           let refine_ result = alt_contract da db result in
+           let result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
       | Alt_right inner ->
         (match r with
          | Alt (a, b) ->
-           let refine_ q = contract b c s inner in
+           let q = contract b c s inner in
            let da = derive c a in
            let db = derive c b in
            let original = ghost_ (Alt (da, db)) in
            let result = Alt_right q in
            ghost_ (valid_def original result);
            ghost_ (word_def result);
-           let refine_ result = alt_contract da db result in
+           let result = alt_contract da db result in
            result
          | _ -> Epsilon_match)
       | Seq_match (left, right) ->
@@ -669,24 +669,24 @@ end = struct
            (match lw with
             | [] ->
               ghost_ (empty_complete a left);
-              let refine_ q = contract b c s right in
+              let q = contract b c s right in
               let result = Alt_right q in
               ghost_ (valid_def sum result);
               ghost_ (word_def result);
-              let refine_ result = alt_contract product db result in
+              let result = alt_contract product db result in
               result
             | h :: rest ->
-              let refine_ q = contract a h rest left in
+              let q = contract a h rest left in
               let pair = Seq_match (q, right) in
               let pair_regex = ghost_ (Seq (derive c a, b)) in
               ghost_ (valid_def pair_regex pair);
               ghost_ (word_def pair);
-              let refine_ pair = seq_contract da b pair in
+              let pair = seq_contract da b pair in
               if nullable a then
                 let result = Alt_left pair in
                 ghost_ (valid_def sum result);
                 ghost_ (word_def result);
-                let refine_ result = alt_contract product db result in
+                let result = alt_contract product db result in
                 result
               else pair)
          | _ -> Epsilon_match)
@@ -698,22 +698,22 @@ end = struct
            ghost_ (append_def lw rw);
            (match lw with
             | [] ->
-              let refine_ q = contract r c s right in
+              let q = contract r c s right in
               q
             | h :: rest ->
-              let refine_ q = contract a h rest left in
+              let q = contract a h rest left in
               let da = derive c a in
               let original = ghost_ (Seq (da, r)) in
               let result = Seq_match (q, right) in
               ghost_ (valid_def original result);
               ghost_ (word_def result);
-              let refine_ result = seq_contract da r result in
+              let result = seq_contract da r result in
               result)
          | _ -> Epsilon_match)
     in
     ghost_ (valid_def derivative result);
     ghost_ (word_def result);
-    refine_ result
+    result
   let rec (sound @ total) : (r : t) -> (s : int list) ->
       {p : evidence | if matches r s then valid r p && word p === s else true}
         @ immutable contended =
@@ -721,13 +721,13 @@ end = struct
     ghost_ (matches_def r s);
     match s with
     | [] ->
-      let refine_ p = epsilon r in
-      refine_ p
+      let p = epsilon r in
+      p
     | c :: rest ->
       let derivative = derive c r in
-      let refine_ p = sound derivative rest in
-      let refine_ q = expand r c p in
-      refine_ q
+      let p = sound derivative rest in
+      let q = expand r c p in
+      q
 
   let rec (complete @ total) : (r : t) -> (s : int list) -> (p : evidence) ->
       {u : unit | if valid r p && word p === s then matches r s else true}
@@ -738,12 +738,12 @@ end = struct
     match s with
     | [] ->
       empty_complete r p;
-      refine_ u
+      u
     | c :: rest ->
       let derivative = derive c r in
-      let refine_ q = contract r c rest p in
+      let q = contract r c rest p in
       complete derivative rest q;
-      refine_ u
+      u
 
   let (recognize @ total) (r @ total) (s : int list) :
       {result : evidence option |
@@ -751,10 +751,10 @@ end = struct
         | None -> matches r s === false
         | Some p -> matches r s && valid r p && word p === s} =
     if matches r s then
-      let refine_ p = sound r s in
-      let result = Some p in refine_ result
+      let p = sound r s in
+      let result = Some p in result
     else
-      let result = None in refine_ result
+      let result = None in result
 
   module Dfa = struct
     let[@def] rec member r (xs : t list) =
@@ -774,10 +774,10 @@ end = struct
       member_def r joined;
       let u = () in
       match xs with
-      | [] -> refine_ u
+      | [] -> u
       | _ :: rest ->
         join_member rest ys r;
-        refine_ u
+        u
 
     let[@def] rec suffix (xs : t list) b =
       match xs with [] -> [] | a :: rest -> Seq (a, b) :: suffix rest b
@@ -797,8 +797,8 @@ end = struct
         (match r with
          | Seq (a, _) ->
            member_def a xs;
-           refine_ u
-         | _ -> refine_ u)
+           u
+         | _ -> u)
       | a :: rest ->
         let head = Seq (a, b) in
         equal_correct r head;
@@ -807,8 +807,8 @@ end = struct
          | Seq (left, _) ->
            member_def left xs;
            equal_correct left a;
-           refine_ u
-         | _ -> refine_ u)
+           u
+         | _ -> u)
 
     let[@def] rec support r =
       match r with
@@ -830,7 +830,7 @@ end = struct
       match r with
       | Empty | Epsilon ->
         member_def p sr;
-        refine_ u
+        u
       | Symbol _ ->
         member_def p sr;
         let epsilon = Epsilon in
@@ -838,7 +838,7 @@ end = struct
         let nil = [] in
         member_def p nil;
         member_def q sp;
-        refine_ u
+        u
       | Alt (a, b) ->
         let sa = support a in
         let sb = support b in
@@ -846,7 +846,7 @@ end = struct
         join_member sa sb q;
         support_closed a p q;
         support_closed b p q;
-        refine_ u
+        u
       | Seq (a, b) ->
         let sa = support a in
         let sb = support b in
@@ -866,9 +866,9 @@ end = struct
            (match q with
             | Seq (next, _) ->
               support_closed a inner next;
-              refine_ u
-            | _ -> refine_ u)
-         | _ -> refine_ u)
+              u
+            | _ -> u)
+         | _ -> u)
       | Star a ->
         let sa = support a in
         suffix_member sa r p;
@@ -883,9 +883,9 @@ end = struct
            (match q with
             | Seq (next, _) ->
               support_closed a inner next;
-              refine_ u
-            | _ -> refine_ u)
-         | _ -> refine_ u)
+              u
+            | _ -> u)
+         | _ -> u)
 
     let[@def] rec partial c r =
       match r with
@@ -908,7 +908,7 @@ end = struct
       | Empty | Epsilon | Symbol _ ->
         let nil = [] in
         member_def p nil;
-        refine_ u
+        u
       | Alt (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -918,7 +918,7 @@ end = struct
         join_member sa sb p;
         partial_supported a c p;
         partial_supported b c p;
-        refine_ u
+        u
       | Seq (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -934,8 +934,8 @@ end = struct
         (match p with
          | Seq (inner, _) ->
            partial_supported a c inner;
-           refine_ u
-         | _ -> refine_ u)
+           u
+         | _ -> u)
       | Star a ->
         let da = partial c a in
         let sa = support a in
@@ -944,8 +944,8 @@ end = struct
         (match p with
          | Seq (inner, _) ->
            partial_supported a c inner;
-           refine_ u
-         | _ -> refine_ u)
+           u
+         | _ -> u)
     let rec (partial_contract @ total) :
         (r : t) -> (c : int) -> (s : int list) -> (p : evidence) ->
         {choice : t * evidence |
@@ -964,7 +964,7 @@ end = struct
         | Alt_left inner ->
           (match r with
            | Alt (a, b) ->
-             let refine_ choice = partial_contract a c s inner in
+             let choice = partial_contract a c s inner in
              let k, _ = choice in
              let da = partial c a in
              let db = partial c b in
@@ -974,7 +974,7 @@ end = struct
         | Alt_right inner ->
           (match r with
            | Alt (a, b) ->
-             let refine_ choice = partial_contract b c s inner in
+             let choice = partial_contract b c s inner in
              let k, _ = choice in
              let da = partial c a in
              let db = partial c b in
@@ -993,12 +993,12 @@ end = struct
              (match lw with
               | [] ->
                 empty_complete a left;
-                let refine_ choice = partial_contract b c s right in
+                let choice = partial_contract b c s right in
                 let k, _ = choice in
                 join_member mapped db k;
                 choice
               | h :: rest ->
-                let refine_ choice = partial_contract a h rest left in
+                let choice = partial_contract a h rest left in
                 let k, inner = choice in
                 let target = Seq (k, b) in
                 let q = Seq_match (inner, right) in
@@ -1017,10 +1017,10 @@ end = struct
              append_def lw rw;
              (match lw with
               | [] ->
-                let refine_ choice = partial_contract r c s right in
+                let choice = partial_contract r c s right in
                 choice
               | h :: rest ->
-                let refine_ choice = partial_contract a h rest left in
+                let choice = partial_contract a h rest left in
                 let k, inner = choice in
                 let target = Seq (k, r) in
                 let q = Seq_match (inner, right) in
@@ -1038,7 +1038,7 @@ end = struct
       equal_correct k epsilon;
       valid_def k q;
       word_def q;
-      refine_ result
+      result
 
     let rec (partial_expand @ total) :
         (r : t) -> (c : int) -> (k : t) -> (p : evidence) ->
@@ -1065,9 +1065,9 @@ end = struct
           join_member da db k;
           let q =
             if member k da then
-              let refine_ q = partial_expand a c k p in Alt_left q
+              let q = partial_expand a c k p in Alt_left q
             else
-              let refine_ q = partial_expand b c k p in Alt_right q
+              let q = partial_expand b c k p in Alt_right q
           in
           valid_def r q;
           word_def q;
@@ -1081,7 +1081,7 @@ end = struct
           if member k mapped then
             (match k, p with
              | Seq (inner, _), Seq_match (left, right) ->
-               let refine_ q = partial_expand a c inner left in
+               let q = partial_expand a c inner left in
                let result = Seq_match (q, right) in
                valid_def r result;
                word_def result;
@@ -1091,8 +1091,8 @@ end = struct
                result
              | _ -> Epsilon_match)
           else
-            let refine_ left = epsilon a in
-            let refine_ q = partial_expand b c k p in
+            let left = epsilon a in
+            let q = partial_expand b c k p in
             let result = Seq_match (left, q) in
             valid_def r result;
             word_def result;
@@ -1105,7 +1105,7 @@ end = struct
           suffix_member da r k;
           (match k, p with
            | Seq (inner, _), Seq_match (left, right) ->
-             let refine_ q = partial_expand a c inner left in
+             let q = partial_expand a c inner left in
              let result = Star_step (q, right) in
              valid_def r result;
              word_def result;
@@ -1117,7 +1117,7 @@ end = struct
       in
       valid_def r result;
       word_def result;
-      refine_ result
+      result
 
     let[@def] rec accepts (xs : t list) (s : int list) =
       match xs with [] -> false | r :: rest -> matches r s || accepts rest s
@@ -1131,11 +1131,11 @@ end = struct
       accepts_def xs s;
       let u = () in
       match xs with
-      | [] -> refine_ u
+      | [] -> u
       | head :: rest ->
         equal_correct r head;
         accepts_member rest r s;
-        refine_ u
+        u
 
     let rec (accepts_pick @ total) : (xs : t list) -> (s : int list) ->
         {r : t | if accepts xs s then member r xs && matches r s else true}
@@ -1151,11 +1151,11 @@ end = struct
             member_def head xs;
             head)
           else
-            let refine_ r = accepts_pick rest s in
+            let r = accepts_pick rest s in
             member_def r xs;
             r
       in
-      refine_ result
+      result
 
     let (partial_correct @ total) (r @ total) c s :
         {u : unit | accepts (partial c r) s === matches r (c :: s)} =
@@ -1163,19 +1163,19 @@ end = struct
       let whole = c :: s in
       let u = () in
       if matches r whole then
-        let refine_ p = sound r whole in
-        let refine_ choice = partial_contract r c s p in
+        let p = sound r whole in
+        let choice = partial_contract r c s p in
         let k, q = choice in
         complete k s q;
         accepts_member derivative k s;
-        refine_ u
+        u
       else if accepts derivative s then
-        let refine_ k = accepts_pick derivative s in
-        let refine_ p = sound k s in
-        let refine_ q = partial_expand r c k p in
+        let k = accepts_pick derivative s in
+        let p = sound k s in
+        let q = partial_expand r c k p in
         complete r whole q;
-        refine_ u
-      else refine_ u
+        u
+      else u
 
     let[@def] rec same_state (xs : t list) (ys : t list) =
       match xs with
@@ -1189,14 +1189,14 @@ end = struct
       same_state_def xs ys;
       let u = () in
       match xs with
-      | [] -> refine_ u
+      | [] -> u
       | x :: rest ->
         (match ys with
-         | [] -> refine_ u
+         | [] -> u
          | y :: tail ->
            equal_correct x y;
            same_state_correct rest tail;
-           refine_ u)
+           u)
 
     let[@def] rec has_state (xs : t list) (states : t list list) =
       match states with [] -> false | state :: rest -> same_state xs state || has_state xs rest
@@ -1215,10 +1215,10 @@ end = struct
       has_state_def state joined;
       let u = () in
       match xs with
-      | [] -> refine_ u
+      | [] -> u
       | _ :: rest ->
         combine_has rest ys state;
-        refine_ u
+        u
 
     let[@def] rec prepend r (states : t list list) =
       match states with [] -> [] | state :: rest -> (r :: state) :: prepend r rest
@@ -1236,20 +1236,20 @@ end = struct
       match states with
       | [] ->
         (match state with
-         | [] -> refine_ u
+         | [] -> u
          | _ :: rest ->
            has_state_def rest states;
-           refine_ u)
+           u)
       | first :: tail ->
         let head = r :: first in
         same_state_correct state head;
         prepend_has r tail state;
         (match state with
-         | [] -> refine_ u
+         | [] -> u
          | _ :: rest ->
            has_state_def rest states;
            same_state_correct rest first;
-           refine_ u)
+           u)
 
     let[@def] rec powerset (universe : t list) =
       match universe with
@@ -1276,11 +1276,11 @@ end = struct
       member_def query universe;
       let u = () in
       match universe with
-      | [] -> refine_ u
+      | [] -> u
       | head :: rest ->
         equal_correct query head;
         restrict_member rest candidates query;
-        refine_ u
+        u
 
     let rec (powerset_cover @ total) : (universe : t list) -> (candidates : t list) ->
         {u : unit | has_state (restrict universe candidates) (powerset universe)}
@@ -1296,14 +1296,14 @@ end = struct
         let nil = [] in
         same_state_correct result nil;
         has_state_def result states;
-        refine_ u
+        u
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
         powerset_cover rest candidates;
         combine_has smaller extended result;
         prepend_has head smaller result;
-        refine_ u
+        u
 
     let rec (powerset_member @ total) :
         (universe : t list) -> (state : t list) -> (query : t) ->
@@ -1321,7 +1321,7 @@ end = struct
         has_state_def state nil;
         same_state_correct state nil;
         member_def query state;
-        refine_ u
+        u
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
@@ -1331,13 +1331,13 @@ end = struct
         (match state with
          | [] ->
            member_def query state;
-           refine_ u
+           u
          | first :: tail ->
            member_def query state;
            equal_correct query first;
            equal_correct query head;
            powerset_member rest tail query;
-           refine_ u)
+           u)
 
     let[@def] rec step c (state : t list) =
       match state with [] -> [] | r :: rest -> join (partial c r) (step c rest)
@@ -1363,25 +1363,25 @@ end = struct
             equal_correct head head;
             head)
           else
-            let refine_ r = step_pick rest c query in
+            let r = step_pick rest c query in
             member_def r state;
             r
       in
-      refine_ result
+      result
 
     let (step_supported @ total) (root @ total) (state : t list) c query :
         {u : unit | if has_state state (powerset (root :: support root))
           && member query (step c state)
           then member query (root :: support root) else true} =
       let universe = root :: support root in
-      let refine_ r = step_pick state c query in
+      let r = step_pick state c query in
       powerset_member universe state r;
       partial_supported r c query;
       support_closed root r query;
       member_def r universe;
       equal_correct r root;
       member_def query universe;
-      let u = () in refine_ u
+      let u = () in u
 
     let rec (accepts_join @ total) :
         (xs : t list) -> (ys : t list) -> (s : int list) ->
@@ -1394,10 +1394,10 @@ end = struct
       accepts_def joined s;
       let u = () in
       match xs with
-      | [] -> refine_ u
+      | [] -> u
       | _ :: rest ->
         accepts_join rest ys s;
-        refine_ u
+        u
 
     let rec (step_correct @ total) : (state : t list) -> (c : int) -> (s : int list) ->
         {u : unit | accepts (step c state) s === accepts state (c :: s)}
@@ -1411,14 +1411,14 @@ end = struct
       match state with
       | [] ->
         accepts_def next s;
-        refine_ u
+        u
       | head :: rest ->
         let dh = partial c head in
         let dr = step c rest in
         accepts_join dh dr s;
         partial_correct head c s;
         step_correct rest c s;
-        refine_ u
+        u
 
     let (next_correct @ total) (root @ total) (state : t list) c s :
         {u : unit | if has_state state (powerset (root :: support root)) then
@@ -1430,17 +1430,17 @@ end = struct
       step_correct state c s;
       let u = () in
       if accepts next s then
-        let refine_ query = accepts_pick next s in
+        let query = accepts_pick next s in
         step_supported root state c query;
         restrict_member universe next query;
         accepts_member target query s;
-        refine_ u
+        u
       else if accepts target s then
-        let refine_ query = accepts_pick target s in
+        let query = accepts_pick target s in
         restrict_member universe next query;
         accepts_member next query s;
-        refine_ u
-      else refine_ u
+        u
+      else u
 
     let[@def] rec has_letter c (letters : int list) =
       match letters with [] -> false | d :: rest -> c = d || has_letter c rest
@@ -1456,10 +1456,10 @@ end = struct
       has_letter_def c joined;
       let u = () in
       match xs with
-      | [] -> refine_ u
+      | [] -> u
       | _ :: rest ->
         append_letter rest ys c;
-        refine_ u
+        u
 
     let[@def] rec letters r =
       match r with
@@ -1480,12 +1480,12 @@ end = struct
       match r with
       | Empty | Epsilon ->
         member_def q ds;
-        refine_ u
+        u
       | Symbol _ ->
         let nil = [] in
         member_def q nil;
         has_letter_def c alphabet;
-        refine_ u
+        u
       | Alt (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -1495,7 +1495,7 @@ end = struct
         join_member da db q;
         partial_letter a c q;
         partial_letter b c q;
-        refine_ u
+        u
       | Seq (a, b) ->
         let da = partial c a in
         let db = partial c b in
@@ -1508,15 +1508,15 @@ end = struct
         partial_letter b c q;
         (match q with
          | Seq (inner, _) ->
-           partial_letter a c inner; refine_ u
-         | _ -> refine_ u)
+           partial_letter a c inner; u
+         | _ -> u)
       | Star a ->
         let da = partial c a in
         suffix_member da r q;
         (match q with
          | Seq (inner, _) ->
-           partial_letter a c inner; refine_ u
-         | _ -> refine_ u)
+           partial_letter a c inner; u
+         | _ -> u)
 
     let[@def] rec alphabet (universe : t list) =
       match universe with
@@ -1533,24 +1533,24 @@ end = struct
       alphabet_def universe;
       let u = () in
       match universe with
-      | [] -> refine_ u
+      | [] -> u
       | head :: rest ->
         let lh = letters head in
         let lr = alphabet rest in
         append_letter lh lr c;
         equal_correct r head;
         alphabet_member rest r c;
-        refine_ u
+        u
 
     let (step_letter @ total) (universe : t list) state c query :
         {u : unit | if has_state state (powerset universe)
           && member query (step c state)
           then has_letter c (alphabet universe) else true} =
-      let refine_ r = step_pick state c query in
+      let r = step_pick state c query in
       powerset_member universe state r;
       partial_letter r c query;
       alphabet_member universe r c;
-      let u = () in refine_ u
+      let u = () in u
 
     type row = (int * t list) list
 
@@ -1577,10 +1577,10 @@ end = struct
       has_letter_def c labels;
       let u = () in
       match labels with
-      | [] -> refine_ u
+      | [] -> u
       | _ :: rest ->
         build_row_correct universe state rest c;
-        refine_ u
+        u
 
     let rec (powerset_empty @ total) : (universe : t list) ->
         {u : unit | has_state [] (powerset universe)} @ immutable contended =
@@ -1593,13 +1593,13 @@ end = struct
       | [] ->
         has_state_def nil states;
         same_state_correct nil nil;
-        refine_ u
+        u
       | head :: rest ->
         let smaller = powerset rest in
         let extended = prepend head smaller in
         combine_has smaller extended nil;
         powerset_empty rest;
-        refine_ u
+        u
 
     let (row_closed @ total) (root @ total) (state : t list) c :
         {u : unit | has_state
@@ -1612,10 +1612,10 @@ end = struct
       build_row_correct universe state labels c;
       powerset_cover universe next;
       let u = () in
-      if has_letter c labels then refine_ u
+      if has_letter c labels then u
       else
         (powerset_empty universe;
-        refine_ u)
+        u)
 
     let (row_correct @ total) (root @ total) (state : t list) c s :
         {u : unit | if has_state state (powerset (root :: support root)) then
@@ -1629,13 +1629,13 @@ end = struct
       build_row_correct universe state labels c;
       next_correct root state c s;
       let u = () in
-      if has_letter c labels then refine_ u
+      if has_letter c labels then u
       else
         (step_correct state c s;
-        let refine_ query = accepts_pick next s in
+        let query = accepts_pick next s in
         step_letter universe state c query;
         accepts_def nil s;
-        refine_ u)
+        u)
 
     type table = (t list * bool * row) list
     type automaton = t list * table
@@ -1659,7 +1659,7 @@ end = struct
       let nil = [] in
       contains_in_def source nil;
       has_state_def source nil;
-      let u = () in refine_ u
+      let u = () in u
 
     let (contains_in_cons @ total) source head rest :
         {u : unit | contains_in source (head :: rest) ===
@@ -1668,7 +1668,7 @@ end = struct
       contains_in_def source sources;
       contains_in_def source rest;
       has_state_def source sources;
-      let u = () in refine_ u
+      let u = () in u
 
     let[@def] contains_state (dfa : automaton) state =
       contains_in state (states dfa)
@@ -1677,7 +1677,7 @@ end = struct
         {u : unit | contains_state dfa source ===
           contains_in source (states dfa)} =
       contains_state_def dfa source;
-      let u = () in refine_ u
+      let u = () in u
 
     let[@def] universe_size root = List.length (root :: support root)
 
@@ -1702,10 +1702,10 @@ end = struct
       table_states_def table;
       let u = () in
       match sources with
-      | [] -> refine_ u
+      | [] -> u
       | _ :: rest ->
         table_states_build_table universe rest;
-        refine_ u
+        u
 
     let[@def] rec final (table : table) state =
       match table with
@@ -1730,7 +1730,7 @@ end = struct
     let (default_empty @ total) (dfa : automaton) (source : state) :
         {u : unit | default dfa source === []} =
       default_def dfa source;
-      let u = () in refine_ u
+      let u = () in u
 
     let[@def] rec edge_labels (edges : row) =
       match edges with
@@ -1754,7 +1754,7 @@ end = struct
       let nil = [] in
       label_member_def letter nil;
       has_letter_def letter nil;
-      let u = () in refine_ u
+      let u = () in u
 
     let (label_member_cons @ total) (letter : int) (head : int) rest :
         {u : unit | label_member letter (head :: rest) ===
@@ -1763,7 +1763,7 @@ end = struct
       label_member_def letter letters;
       label_member_def letter rest;
       has_letter_def letter letters;
-      let u = () in refine_ u
+      let u = () in u
 
     let rec (transition_outside @ total) :
         (edges : row) -> (letter : int) ->
@@ -1777,10 +1777,10 @@ end = struct
       transition_def edges letter;
       let u = () in
       match edges with
-      | [] -> refine_ u
+      | [] -> u
       | (_, _) :: rest ->
         transition_outside rest letter;
-        refine_ u
+        u
 
     let rec (advance_outside @ total) :
         (table : table) -> (source : state) -> (letter : int) ->
@@ -1794,14 +1794,14 @@ end = struct
       advance_def table source letter;
       let u = () in
       match table with
-      | [] -> refine_ u
+      | [] -> u
       | (key, _, edges) :: rest ->
         if same_state source key then begin
           transition_outside edges letter;
-          refine_ u
+          u
         end else begin
           advance_outside rest source letter;
-          refine_ u
+          u
         end
 
     let (next_outside_labels @ total) (dfa : automaton)
@@ -1814,7 +1814,7 @@ end = struct
       labels_def dfa source;
       next_def dfa source letter;
       advance_outside table source letter;
-      let u = () in refine_ u
+      let u = () in u
 
     let rec (table_final @ total) :
         (universe : t list) -> (states : t list list) -> (state : t list) ->
@@ -1828,11 +1828,11 @@ end = struct
       has_state_def state states;
       let u = () in
       match states with
-      | [] -> refine_ u
+      | [] -> u
       | head :: rest ->
         same_state_correct state head;
         table_final universe rest state;
-        refine_ u
+        u
 
     let rec (table_advance @ total) :
         (universe : t list) -> (states : t list list) -> (state : t list) -> (c : int) ->
@@ -1847,11 +1847,11 @@ end = struct
       has_state_def state states;
       let u = () in
       match states with
-      | [] -> refine_ u
+      | [] -> u
       | head :: rest ->
         same_state_correct state head;
         table_advance universe rest state c;
-        refine_ u
+        u
 
     let[@def] rec execute (table : table) state (s : int list) =
       match s with
@@ -1873,14 +1873,14 @@ end = struct
       match s with
       | [] ->
         table_final universe states state;
-        refine_ u
+        u
       | c :: rest ->
         let target = advance table state c in
         table_advance universe states state c;
         row_closed root state c;
         row_correct root state c rest;
         execute_correct root rest target;
-        refine_ u
+        u
 
     let[@def] compile (root @ total) : automaton @ total =
       let universe = root :: support root in
@@ -1906,7 +1906,7 @@ end = struct
       next_def dfa source letter;
       table_advance universe sources source letter;
       row_closed root source letter;
-      let u = () in refine_ u
+      let u = () in u
 
     let (compiled_initial_member @ total) (root : t) :
         {u : unit | contains_state (compile root) (initial (compile root))} =
@@ -1929,7 +1929,7 @@ end = struct
       table_states_build_table universe sources;
       contains_state_def dfa source;
       contains_in_def source enumerated;
-      let u = () in refine_ u
+      let u = () in u
 
     let (compiled_empty_member @ total) (root : t) :
         {u : unit | contains_state (compile root) []} =
@@ -1944,7 +1944,7 @@ end = struct
       table_states_build_table universe sources;
       contains_state_def dfa nil;
       contains_in_def nil enumerated;
-      let u = () in refine_ u
+      let u = () in u
 
     let[@def] run (dfa : automaton) s =
       match dfa with (initial, table) -> execute table initial s
@@ -1959,7 +1959,7 @@ end = struct
       run_from_def dfa state nil;
       output_def dfa state;
       execute_def table state nil;
-      let u = () in refine_ u
+      let u = () in u
 
     let (run_from_letter @ total) (dfa : automaton) (state : state)
         (letter : int) (suffix : int list) :
@@ -1972,7 +1972,7 @@ end = struct
       next_def dfa state letter;
       execute_def table state word;
       run_from_def dfa target suffix;
-      let u = () in refine_ u
+      let u = () in u
 
     let (run_initial @ total) (dfa : automaton) (word : int list) :
         {u : unit | run dfa word === run_from dfa (initial dfa) word} =
@@ -1980,7 +1980,7 @@ end = struct
       run_def dfa word;
       run_from_def dfa initial_state word;
       initial_def dfa;
-      let u = () in refine_ u
+      let u = () in u
 
     let (correct @ total) (root @ total) (s : int list) :
         {u : unit | run (compile root) s === matches root s} =
@@ -2000,28 +2000,28 @@ end = struct
       execute_correct root s initial;
       accepts_def initial s;
       accepts_def nil s;
-      let u = () in refine_ u
+      let u = () in u
 
     let (sound @ total) (root @ total) (s : int list) :
         {p : evidence | if run (compile root) s then valid root p && word p === s
           else true} =
       ghost_ (correct root s);
-      let refine_ p = sound root s in
-      refine_ p
+      let p = sound root s in
+      p
 
     let (complete @ total) (root @ total) (s : int list) (p : evidence) :
         {u : unit | if valid root p && word p === s then run (compile root) s
           else true} =
       correct root s;
       complete root s p;
-      let u = () in refine_ u
+      let u = () in u
 
   end
 
   let (membership_word @ total) (p : Membership.evidence) :
     {u : unit | Membership.word p === Regex_semantics.Membership.word p} =
-    let u = () in refine_ u
+    let u = () in u
   let (membership_valid @ total) (r : t) (p : Membership.evidence) :
     {u : unit | Membership.valid r p === Regex_semantics.Membership.valid r p} =
-    let u = () in refine_ u
+    let u = () in u
 end;;

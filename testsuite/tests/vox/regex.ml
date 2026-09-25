@@ -283,7 +283,7 @@ module Dfa_client = struct
     let dfa = Regex.Dfa.compile r in
     let result = Regex.Dfa.run dfa s in
     ghost_ (Regex.Dfa.correct r s);
-    refine_ result
+    result
 end;;
 [%%expect{|
 module Dfa_client :
@@ -298,8 +298,8 @@ let () =
   let r = Regex.Star (Regex.Symbol 0) in
   let yes = [0; 0] in
   let no = [0; 1] in
-  let refine_ accepted = Dfa_client.verified r yes in
-  let refine_ rejected = Dfa_client.verified r no in
+  let accepted = Dfa_client.verified r yes in
+  let rejected = Dfa_client.verified r no in
   assert (accepted && not rejected)
 ;;
 [%%expect{|
@@ -346,7 +346,7 @@ let () =
     List.iter (fun (s : int list) ->
       let expected = member r s in
       assert (matches r s = expected);
-      let refine_ result = recognize r s in
+      let result = recognize r s in
       match result with
       | None -> assert (not expected)
       | Some (p : evidence) ->
@@ -366,7 +366,7 @@ let () =
   assert (valid r p && word p = s);
   ghost_ (complete r s p);
   ghost_ (Dfa.complete r s p);
-  let refine_ witness = Dfa.sound r s in
+  let witness = Dfa.sound r s in
   assert (valid r witness && word witness = s);
   assert (Dfa.run (Dfa.compile r) s);
   assert (matches r s);
@@ -376,7 +376,7 @@ let () =
   assert (valid r p && word p = s);
   ghost_ (complete r s p);
   ghost_ (Dfa.complete r s p);
-  let refine_ witness = Dfa.sound r s in
+  let witness = Dfa.sound r s in
   assert (valid r witness && word witness = s);
   assert (Dfa.run (Dfa.compile r) s);
   assert (matches r s);
@@ -491,12 +491,12 @@ let fabricated_evidence r s :
         Regex.Membership.valid r p && Regex.Membership.word p === s
       else true} =
   let p = Regex.Membership.Epsilon_match in
-  refine_ p
+  p
 ;;
 [%%expect{|
-Line 7, characters 2-11:
-7 |   refine_ p
-      ^^^^^^^^^
+Line 7, characters 2-3:
+7 |   p
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -506,12 +506,12 @@ let reversed_completeness r s p :
       then Regex.matches r s === false else true} =
   Regex.complete r s p;
   let u = () in
-  refine_ u
+  u
 ;;
 [%%expect{|
-Line 7, characters 2-11:
-7 |   refine_ u
-      ^^^^^^^^^
+Line 7, characters 2-3:
+7 |   u
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -521,11 +521,11 @@ let reversed_dfa_completeness r s p :
       then Regex.Dfa.run (Regex.Dfa.compile r) s === false else true} =
   Regex.Dfa.complete r s p;
   let u = () in
-  refine_ u
+  u
 ;;
 [%%expect{|
-Line 7, characters 2-11:
-7 |   refine_ u
-      ^^^^^^^^^
+Line 7, characters 2-3:
+7 |   u
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
