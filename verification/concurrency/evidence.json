@@ -1,0 +1,76 @@
+{
+  "baseline": "d143961f173da258a7c4220a8f140c81871a2c60",
+  "date": "2026-09-25",
+  "configuration": {
+    "multidomain": true,
+    "poll_insertion": true,
+    "architecture": "arm64"
+  },
+  "command": "verification/concurrency/check.sh",
+  "backends": [
+    "bytecode",
+    "native"
+  ],
+  "public_clients": [
+    "one_shot_demo",
+    "one_shot_public_client",
+    "channel_buffer_demo",
+    "atomic_lock",
+    "reference_lock_parallel",
+    "unique_lock_demo",
+    "unique_lock_parallel",
+    "unique_lock_buffer_client"
+  ],
+  "negative_cases": 15,
+  "library_principal": true,
+  "client_principal": false,
+  "parallel_updates_per_fixture": 4000,
+  "parallel_domains_per_fixture": 4,
+  "source_sha256": {
+    "verification/library/one_shot.ml": "2d60fb986eac2e65904a4f5d0efe8d1db407177e8eb4211fe5117d60135563c4",
+    "verification/library/one_shot.mli": "4ad055cffe92e7d557a5ace6eee1e628328955a1b988c8a7cb34ea89d2b1d7e8",
+    "verification/library/channel_buffer.ml": "84c62073bd1c942be2e2bd5a18678f35cf8954e01314efb7e4a21cdb4f9bd55d",
+    "verification/library/channel_buffer.mli": "b2e0f3e479f02de05068a9ff7e76089e366b6d84a99cda4f8f9dbd3b90a5ae71",
+    "verification/library/unique_lock.ml": "a41accd399ddf34af829e5082a80217c7ded07b7949dfed638b5dc31b72408e1",
+    "verification/library/unique_lock.mli": "5188ef23509d9ae28a9de653945c60b407b6122b8e36620740c7c590ab65cd46",
+    "verification/library/reference_lock.ml": "c2eec4aa69207a86d28ac71c9186c38264d5a61c3c6a05822d3f57d3e95fd74a",
+    "verification/library/reference_lock.mli": "d1b9ffa9ddca945ea1a7f65e08bc8ad9db5c8ea1a4f243c485fbc448f3a1b69e"
+  },
+  "erasure": {
+    "reviewed_modules": [
+      "one_shot",
+      "channel_buffer",
+      "unique_lock",
+      "reference_lock"
+    ],
+    "formats": [
+      "Lambda",
+      "native Cmm",
+      "native arm64 assembly"
+    ],
+    "excluded_runtime_observations": [
+      "caml_pref_own",
+      "caml_pref_heap_*",
+      "caml_pref_split",
+      "caml_pref_join",
+      "caml_vox_atomic_key",
+      "caml_unique_cell_location"
+    ],
+    "retained_effects": [
+      "atomic CAS",
+      "payload cell moves",
+      "reference reads/writes",
+      "buffer reads/writes/free"
+    ]
+  },
+  "existing_regression": {
+    "command": "./dev test vox/one_shot_rejected.ml",
+    "result": "passed, bytecode and native expect checks"
+  },
+  "limitations": [
+    "runtime tests do not prove liveness or concurrent primitive soundness",
+    "initial-value and increment-count behaviors are not public refinement theorems",
+    "constant-snapshot mutable client proves authority, not byte preservation across release/reacquisition",
+    "normal-return reclamation only; no exception/cancellation recovery or leak freedom"
+  ]
+}
