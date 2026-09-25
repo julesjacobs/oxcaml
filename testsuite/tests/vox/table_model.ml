@@ -123,7 +123,7 @@ let () =
     Initial.initial 16 None view;
     I.Map.empty_lookup 16 (None : (int * int) option) 42);
   let answer : {v : int option | v === None} =
-    Search.find_opt r.value (refine_ view) 42 (borrow_ r.state) in
+    Search.find_opt r.value view 42 (borrow_ r.state) in
   assert (answer = None)
 
 module Mutation = Vox_table_mutation.Make (Int_key)

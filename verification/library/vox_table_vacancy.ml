@@ -27,7 +27,7 @@ module Make (Key : Vox_table_map.Key)
       (match entry with
        | Some (key, _) ->
          let (_ : {u : unit | 0 <= (Key.hash key land 127) &&
-           (Key.hash key land 127) <= 127}) = refine_ () in ()
+           (Key.hash key land 127) <= 127}) = () in ()
        | None -> ())
     | None -> ())
 
@@ -85,7 +85,7 @@ module Make (Key : Vox_table_map.Key)
         if deleted <> 0 || empty <> 0 then begin
           let mask = if deleted <> 0 then deleted else empty in
           let byte = if deleted <> 0 then 254 else 128 in
-          let lane = B.first (refine_ mask) in
+          let lane = B.first mask in
           let index = (group + lane) land (capacity - 1) in
           ghost_ (
             Read.I.wrap_def capacity (group + lane);

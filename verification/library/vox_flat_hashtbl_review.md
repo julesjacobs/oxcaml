@@ -2,7 +2,9 @@
 
 Baseline: `d143961f17`, the inspected remote head of PR #193. This boundary
 change does not alter the typed-heap migration or the table algorithm.
-`vox_table_implementation.ml` is the previous executable driver, unchanged.
+`vox_table_implementation.ml` retains the previous executable driver. Obsolete
+explicit refinement introductions in the table modules now use implicit checking;
+the contracts, ghost proof boundaries and executable algorithm are unchanged.
 
 ## Ordered review files
 

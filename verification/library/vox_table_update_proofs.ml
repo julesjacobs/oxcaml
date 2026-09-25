@@ -696,7 +696,7 @@ module Make (Key : Vox_table_map.Key)
         cell_at before.model before.model.slots 0Z (Bigint.of_int index)
           (Some (key, value));
         M.control_def before.model index;
-        let (_ : {u : unit | (Key.hash key land 127) <> 254}) = refine_ () in
+        let (_ : {u : unit | (Key.hash key land 127) <> 254}) = () in
         remove_shape before.model index after.model;
         remove_reachability before index after;
         Vox_table_model_proofs.remove_fields before.model index;

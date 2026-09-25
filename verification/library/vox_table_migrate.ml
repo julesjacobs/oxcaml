@@ -34,7 +34,7 @@ module Make (Key : Vox_table_map.Key) = struct
       (match entry with
        | Some (key, _) ->
          let (_ : {u : unit | 0 <= (Key.hash key land 127) &&
-           (Key.hash key land 127) <= 127}) = refine_ () in ()
+           (Key.hash key land 127) <= 127}) = () in ()
        | None -> ())
     | None -> ())
 
@@ -98,7 +98,7 @@ module Make (Key : Vox_table_map.Key) = struct
         ghost_ (Proof.destination_absent source_view.model.slots
           (Bigint.of_int index)
           before.model.slots key value);
-        let inserted = Insert.try_insert destination before (refine_ key)
+        let inserted = Insert.try_insert destination before key
           value token in
         if inserted.#inserted then begin
           ghost_ (
