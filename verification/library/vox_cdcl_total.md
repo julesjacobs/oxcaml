@@ -34,8 +34,11 @@ has a fuel-exhaustion result, and both failed unit-enqueue branches are proved
 unreachable. A 256-variable implication chain therefore needs only one search
 step; the boundary regression checks it with search fuel `1`.
 
-Trail coverage is proved from initialization through enqueue, propagation,
-decisions, and backtracking: every assigned variable occurs on the trail.
+Trail coverage, consistency, uniqueness, and decision-level ordering are proved
+from initialization through enqueue, propagation, decisions, and backtracking.
+Every assigned variable occurs exactly once on the trail, with the stored
+value. Levels decrease weakly from newest to oldest; a decision is the oldest
+assignment at its level, and decision levels are positive.
 The current-variable list contains only assigned variables at the current
 decision level. These facts prove that `find_latest` succeeds on a nonempty
 current-variable list and that its result has a binding.
@@ -51,14 +54,20 @@ counter increments cannot overflow.
 Assignment-length preservation removes the final runtime length check. Failed
 decision selection, decision enqueue, conflict-source lookup, trail lookup,
 selected-variable lookup, and reason fetch are proved unreachable. The remaining
-obligations concern trail order, reason clauses being unit when assigned,
+obligations concern reason clauses being unit when assigned,
 preservation of a conflict during resolution, successful asserting-clause
 construction, and global search progress. Decision levels are nonnegative and
 bounded by the current level. Successful asserting-clause construction proves
 a strictly smaller backjump target and a current-level asserting variable;
-backtracking makes that variable unassigned, so learned enqueue succeeds. Selecting a
-decision reason during analysis and the root-empty-clause check also remain
-unproved failure paths. No eventual-decision theorem is proved for CDCL alone.
+backtracking makes that variable unassigned, so learned enqueue succeeds.
+
+Conflict analysis cannot select a decision reason when resolution is required:
+with multiple current-level variables, another occurs earlier than the selected
+variable, contradicting the decision-order invariant. At level zero, positivity
+excludes decisions altogether. Learned clauses retain valid input indices;
+together with conflict scanning and level bounds, this proves a successful
+root analysis returns the empty clause. No eventual-decision theorem is proved
+for CDCL alone.
 Successful conflict analysis does prove that its clause remains conflicting
 and has at most one current-level variable, or none when analyzing at the root.
 

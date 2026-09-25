@@ -287,3 +287,18 @@ val semantic_unsat_at : (n : int) ->
   (formula : {f : formula | unsatisfiable n f}) ->
   (assignment : bool list) ->
   {u : unit | not (eval_formula assignment formula)} @@ total
+
+val result_clause_valid : (n : int) -> (formula : formula) ->
+  (entry : {e : proof_result |
+    derivation_valid formula e.proof
+    && same_clause (conclusion formula e.proof) e.clause}) ->
+  {u : unit | if valid_formula n formula then valid_clause n entry.clause
+    else true} @@ total
+
+val scan_conflict_head : (partial : bool option list) ->
+  (literal : literal) -> (rest : literal list) ->
+  {u : unit | match scan_formula partial [literal :: rest] with
+    | Scan_conflict _ ->
+      (match literal with Positive v | Negative v ->
+        not (partial_lookup partial v === None))
+    | Scan_unit _ | Scan_stable -> true} @@ total

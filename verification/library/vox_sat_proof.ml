@@ -1735,3 +1735,129 @@ let (semantic_unsat_at @ total) :
   rejects_extensions_at [] n formula (resize_assignment n assignment);
   append_assignment_def [] (resize_assignment n assignment);
   resize_assignment_formula n assignment formula
+
+let rec (remove_valid @ total) : (n : int) -> (index : int) ->
+    (clause : literal list) ->
+    {u : unit | if valid_clause n clause then
+      valid_clause n (remove_positive index clause)
+      && valid_clause n (remove_negative index clause) else true} =
+  fun n index clause ->
+  valid_clause_def n clause;
+  remove_positive_def index clause;
+  remove_negative_def index clause;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    remove_valid n index rest;
+    valid_clause_def n (literal :: remove_positive index rest);
+    valid_clause_def n (literal :: remove_negative index rest)
+
+let rec (append_valid @ total) : (n : int) ->
+    (left : literal list) -> (right : literal list) ->
+    {u : unit | if valid_clause n left && valid_clause n right then
+      valid_clause n (append_clause left right) else true} =
+  fun n left right ->
+  append_clause_def left right;
+  valid_clause_def n left;
+  match left with
+  | [] -> ()
+  | literal :: rest ->
+    append_valid n rest right;
+    valid_clause_def n (literal :: append_clause rest right)
+
+let rec (dedup_valid @ total) : (n : int) -> (clause : literal list) ->
+    {u : unit | if valid_clause n clause then
+      valid_clause n (dedup_clause clause) else true} =
+  fun n clause ->
+  dedup_clause_def clause;
+  valid_clause_def n clause;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    dedup_valid n rest;
+    valid_clause_def n (literal :: dedup_clause rest)
+
+let rec (same_clause_valid @ total) : (n : int) ->
+    (left : literal list) -> (right : literal list) ->
+    {u : unit | if same_clause left right && valid_clause n left then
+      valid_clause n right else true} =
+  fun n left right ->
+  same_clause_def left right;
+  valid_clause_def n left;
+  valid_clause_def n right;
+  match left, right with
+  | first :: rest, second :: tail ->
+    same_literal_def first second;
+    valid_literal_def n first;
+    valid_literal_def n second;
+    same_clause_valid n rest tail
+  | [], [] | [], _ :: _ | _ :: _, [] -> ()
+
+let rec (clause_at_valid @ total) : (n : int) -> (formula : formula) ->
+    (index : int) ->
+    {u : unit | if valid_formula n formula then
+      match clause_at formula index with
+      | None -> true | Some clause -> valid_clause n clause else true} =
+  fun n formula index ->
+  clause_at_def formula index;
+  valid_formula_def n formula;
+  match formula with
+  | [] -> ()
+  | _ :: rest ->
+    if index <> 0 then clause_at_valid n rest (index - 1);
+    ()
+
+let rec (derivation_clause_valid @ total) :
+    (n : int) -> (formula : formula) -> (proof : derivation) @ ghost ->
+    {u : unit | if valid_formula n formula && derivation_valid formula proof
+      then valid_clause n (conclusion formula proof) else true} =
+  fun n formula proof ->
+  ghost_ (
+    derivation_valid_def formula proof;
+    conclusion_def formula proof;
+    match proof with
+    | Input index ->
+      clause_at_valid n formula index;
+      valid_clause_def n []
+    | Exhaustion _ -> valid_clause_def n []
+    | Resolution (index, left_clause, right_clause, left, right) ->
+      derivation_clause_valid n formula left;
+      derivation_clause_valid n formula right;
+      same_clause_valid n (conclusion formula left) left_clause;
+      same_clause_valid n (conclusion formula right) right_clause;
+      remove_valid n index left_clause;
+      remove_valid n index right_clause;
+      append_valid n (remove_positive index left_clause)
+        (remove_negative index right_clause);
+      dedup_valid n (append_clause (remove_positive index left_clause)
+        (remove_negative index right_clause));
+      resolve_clause_def index left_clause right_clause);
+  ()
+
+let (result_clause_valid @ total) : (n : int) -> (formula : formula) ->
+    (entry : {e : proof_result |
+      derivation_valid formula e.proof
+      && same_clause (conclusion formula e.proof) e.clause}) ->
+    {u : unit | if valid_formula n formula then valid_clause n entry.clause
+      else true} =
+  fun n formula entry ->
+  ghost_ (
+    derivation_clause_valid n formula entry.proof;
+    same_clause_valid n (conclusion formula entry.proof) entry.clause);
+  ()
+
+let (scan_conflict_head @ total) :
+    (partial : bool option list) -> (literal : literal) ->
+    (rest : literal list) ->
+    {u : unit | match scan_formula partial [literal :: rest] with
+      | Scan_conflict _ ->
+        (match literal with Positive v | Negative v ->
+          not (partial_lookup partial v === None))
+      | Scan_unit _ | Scan_stable -> true} =
+  fun partial literal rest ->
+  scan_formula_def partial [literal :: rest];
+  scan_formula_from_def partial 0 [literal :: rest];
+  scan_formula_from_def partial 1 [];
+  scan_clause_def partial (literal :: rest);
+  partial_literal_def partial literal;
+  ()
