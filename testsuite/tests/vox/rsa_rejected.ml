@@ -2,7 +2,8 @@
  has-z3;
  flags = "-extension refinement_types -smt-timeout 10000";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_rsa_arithmetic.ml vox_rsa_number_theory.ml";
+ all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
+ all_modules += " vox_rsa_number_theory.ml";
  all_modules += " vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml";
  readonly_files = "rsa_rejected.ml";
  compile_only = "true";
@@ -46,9 +47,9 @@ Error: Refinement could not be proved (counterexample)
 
 let invalid_inverse () =
   let p = 5Z in let q = 7Z in let e = 2Z in let d = 2Z in let m = 2Z in
-  ghost_ (Vox_rsa.Number_theory.prime_def p);
-  ghost_ (Vox_rsa.Number_theory.prime_def q);
-  ghost_ (Vox_rsa.lambda_def p q);
+  ghost_ (Vox_rsa.Spec.prime_def p);
+  ghost_ (Vox_rsa.Spec.prime_def q);
+  ghost_ (Vox_rsa.Spec.lambda_def p q);
   Vox_rsa.roundtrip p q e d (refine_ m);;
 [%%expect{|
 Line 6, characters 28-39:
@@ -59,9 +60,9 @@ Error: Refinement could not be proved (counterexample)
 
 let message_too_large () =
   let p = 5Z in let q = 7Z in let e = 5Z in let d = 5Z in let m = 35Z in
-  ghost_ (Vox_rsa.Number_theory.prime_def p);
-  ghost_ (Vox_rsa.Number_theory.prime_def q);
-  ghost_ (Vox_rsa.lambda_def p q);
+  ghost_ (Vox_rsa.Spec.prime_def p);
+  ghost_ (Vox_rsa.Spec.prime_def q);
+  ghost_ (Vox_rsa.Spec.lambda_def p q);
   Vox_rsa.roundtrip p q e d (refine_ m);;
 [%%expect{|
 Line 6, characters 28-39:
@@ -72,11 +73,34 @@ Error: Refinement could not be proved (counterexample)
 
 let composite_prime () =
   let p = 9Z in let q = 7Z in let e = 1Z in let m = 1Z in
-  ghost_ (Vox_rsa.Number_theory.prime_divisors p 3Z);
+  ghost_ (Vox_rsa.Spec.valid_key_def p q e e);
+  ghost_ (Vox_rsa.Spec.prime_def p);
+  ghost_ (Vox_rsa.Spec.no_divisors_def p 8Z);
+  ghost_ (Vox_rsa.Spec.no_divisors_def p 7Z);
+  ghost_ (Vox_rsa.Spec.no_divisors_def p 6Z);
+  ghost_ (Vox_rsa.Spec.no_divisors_def p 5Z);
+  ghost_ (Vox_rsa.Spec.no_divisors_def p 4Z);
+  ghost_ (Vox_rsa.Spec.no_divisors_def p 3Z);
   Vox_rsa.roundtrip p q e e (refine_ m);;
 [%%expect{|
-Line 4, characters 28-39:
-4 |   Vox_rsa.roundtrip p q e e (refine_ m);;
-                                ^^^^^^^^^^^
+Line 11, characters 28-39:
+11 |   Vox_rsa.roundtrip p q e e (refine_ m);;
+                                 ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+|}]
+
+module Hidden_proof = Vox_rsa.Proof;;
+[%%expect{|
+Line 1, characters 22-35:
+1 | module Hidden_proof = Vox_rsa.Proof;;
+                          ^^^^^^^^^^^^^
+Error: Unbound module "Vox_rsa.Proof"
+|}]
+
+let hidden_helper = Vox_rsa.lambda_lcm;;
+[%%expect{|
+Line 1, characters 20-38:
+1 | let hidden_helper = Vox_rsa.lambda_lcm;;
+                        ^^^^^^^^^^^^^^^^^^
+Error: Unbound value "Vox_rsa.lambda_lcm"
 |}]

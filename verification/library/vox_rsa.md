@@ -13,7 +13,7 @@ in the implementation and no fixed bound on the primes, exponents, or modulus.
 Bigint primitives and their mathematical SMT encoding belong to Vox's trusted
 base; this demo does not verify their C implementation.
 
-`Vox_rsa.Modular.power a e` specifies ordinary integer exponentiation by
+`Vox_rsa.Spec.power a e` specifies ordinary integer exponentiation by
 multiplication, with `power a 0 = 1`. For every integer base, nonnegative
 exponent, and positive modulus, the executable operation guarantees:
 
@@ -27,12 +27,36 @@ exponents `e` and `d` satisfying `(e*d - 1) mod lcm(p-1,q-1) = 0`, and every
 `0 <= m < p*q`. This includes zero and multiples of either prime. The public
 [interface](vox_rsa.mli) states the result refinements and theorem contracts.
 
-`Vox_rsa.Number_theory.prime p` means `p > 1` and no integer in `[2,p-1]`
-divides `p`. The predicate executes trial division; it does not include an RSA
-or Fermat test. `prime_divisors` derives the usual divisor characterization.
-`lambda_lcm` proves that `lambda p q` is the least positive common multiple
-of `p-1` and `q-1`. Input validation is deliberately simple and takes linear
-work in the prime candidate; the examples are not a practical key generator.
+`Vox_rsa.Spec.prime p` means `p > 1` and no integer in `[2,p-1]`
+divides `p`. Its definition is trial division, independent of RSA and Fermat. `Spec.valid_key`
+exposes exactly the prime, distinctness, positivity, and inverse premises above.
+`Spec.lcm` uses Euclid's `Spec.gcd`; the implementation proves its
+common-multiple and leastness properties.
+
+## Exact transitive human-review surface
+
+Read these files in order to audit the meaning of every public claim:
+
+1. [`stdlib/bigint.mli`](../../stdlib/bigint.mli): unbounded integer primitives,
+   their arithmetic contracts, and the division/remainder convention.
+2. [`vox_rsa_spec.ml`](vox_rsa_spec.ml): complete definitions of `power`,
+   `no_divisors`, `prime`, `gcd`, `lcm`, `lambda`, and `valid_key`.
+   `gcd` is a semantic dependency of `lcm`; `no_divisors` is a semantic
+   dependency of `prime`. Both are included in this review surface.
+3. [`vox_rsa_spec.mli`](vox_rsa_spec.mli): the sealed semantic API and complete
+   checked definition equations for each of those definitions.
+4. [`vox_rsa.mli`](vox_rsa.mli): contracts for the actual executable operations
+   and the encryption/decryption composition theorem `roundtrip_correct`.
+5. This document: domain, termination, erasure, and trust conventions.
+
+These claims additionally trust Vox's refinement checker, its SMT encoding and
+solver, ghost erasure, and the underlying compiler/runtime. `@@ total` requires
+termination in Vox's model; it does not promise enough physical memory or time.
+No additional arithmetic axioms or trusted RSA primitives are introduced.
+The public signature aliases only the sealed semantic module. It exposes no
+permutation, product, Fermat, Bézout, or induction machinery. The four
+implementation files below are outside the semantic review surface: their
+proofs and executable results are checked against the public contracts.
 
 ## Proof structure
 
@@ -80,6 +104,8 @@ From a configured worktree:
 ./dev init
 ./dev test vox/rsa.ml
 ./dev test vox/rsa_rejected.ml
+./dev test vox/rsa_public_client.ml
+python3 testsuite/tests/vox/check_rsa_boundary.py
 ```
 
 The fixture includes a statically proved non-coprime example, differential
@@ -92,3 +118,9 @@ coercion in the ghost proof under `-principal`; these tests omit that flag.
 `rsa_rejected.ml` rejects invalid preconditions, including a composite factor.
 Runtime `assume_` checks in the test harness validate input preconditions only;
 they are not part of the implementation or its correctness proof.
+
+`rsa_public_client.ml` derives the general encryption/decryption composition
+and CRT equivalence using only `Vox_rsa` and `Vox_rsa.Spec`.
+`check_rsa_boundary.py` separately compiles it with only `vox_rsa.cmi` and
+`vox_rsa_spec.cmi` as library interfaces, then links and runs it. No proof-module
+interface is available while compiling the client.

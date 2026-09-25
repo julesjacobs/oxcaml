@@ -2,13 +2,14 @@
  has-z3;
  flags = "-extension refinement_types -smt-timeout 10000";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_rsa_arithmetic.ml vox_rsa_number_theory.ml";
+ all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
+ all_modules += " vox_rsa_number_theory.ml";
  all_modules += " vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml rsa.ml";
  { bytecode; }
  { native; }
 *)
 
-module Number_theory = Vox_rsa.Number_theory
+module Number_theory = Vox_rsa.Spec
 
 let (example_primes @ total) () :
     {u : unit | Number_theory.prime 5Z && Number_theory.prime 7Z} =
@@ -23,7 +24,13 @@ let (example_primes @ total) () :
 let (static_example @ total) () : {r : Bigint.t | r = 5Z} =
   let p = 5Z in let q = 7Z in let e = 5Z in let m = 5Z in
   ghost_ (example_primes ());
-  ghost_ (Vox_rsa.lambda_lcm p q 24Z);
+  ghost_ (Vox_rsa.Spec.gcd_def 4Z 6Z);
+  ghost_ (Vox_rsa.Spec.gcd_def 6Z 4Z);
+  ghost_ (Vox_rsa.Spec.gcd_def 4Z 2Z);
+  ghost_ (Vox_rsa.Spec.gcd_def 2Z 0Z);
+  ghost_ (Vox_rsa.Spec.lcm_def 4Z 6Z);
+  ghost_ (Vox_rsa.Spec.lambda_def p q);
+  ghost_ (Vox_rsa.Spec.valid_key_def p q e e);
   let refine_ r = Vox_rsa.roundtrip p q e e (refine_ m) in
   refine_ r
 
@@ -65,15 +72,12 @@ let () =
         for di = 1 to 24 do
           let e = Bigint.of_int ei in
           let d = Bigint.of_int di in
-          if Bigint.((e * d - 1Z) mod Vox_rsa.lambda p q = 0Z) then
+          if Bigint.((e * d - 1Z) mod Vox_rsa.Spec.lambda p q = 0Z) then
             for mi = 0 to pi * qi - 1 do
               let m = Bigint.of_int mi in
               let refine_ result = Vox_rsa.roundtrip p q e d
                 (assume_ m : {m : Bigint.t |
-                  Number_theory.prime p && Number_theory.prime q && p <> q
-                  && e > 0Z && d > 0Z
-                  && Bigint.modulo (Bigint.sub (Bigint.mul e d) 1Z)
-                    (Vox_rsa.lambda p q) = 0Z
+                  Vox_rsa.Spec.valid_key p q e d
                   && 0Z <= m && m < Bigint.mul p q}) in
               assert (result = m)
             done
@@ -82,14 +86,12 @@ let () =
     end) primes) primes;
   let p = 5Z in
   let q = 7Z in
-  let e = Bigint.(12Z * Vox_rsa.Modular.power 10Z 100Z + 1Z) in
+  let e = Bigint.(12Z * Vox_rsa.Spec.power 10Z 100Z + 1Z) in
   List.iter (fun mi ->
     let m = Bigint.of_int mi in
     let refine_ result = Vox_rsa.roundtrip p q e e
       (assume_ m : {m : Bigint.t |
-        Number_theory.prime p && Number_theory.prime q && p <> q
-        && e > 0Z && Bigint.modulo (Bigint.sub (Bigint.mul e e) 1Z)
-          (Vox_rsa.lambda p q) = 0Z
+        Vox_rsa.Spec.valid_key p q e e
         && 0Z <= m && m < Bigint.mul p q}) in
     assert (result = m)) [0; 5; 7; 34];
   List.iter (fun pi -> List.iter (fun qi ->
@@ -115,7 +117,8 @@ let () =
     Number_theory.prime q && p <> q}) in
   let refine_ d = (assume_ d : {d : Bigint.t | d > 0Z &&
     Bigint.modulo (Bigint.sub (Bigint.mul e d) 1Z)
-      (Vox_rsa.lambda p q) = 0Z}) in
+      (Vox_rsa.Spec.lambda p q) = 0Z}) in
+  ghost_ (Vox_rsa.Spec.valid_key_def p q e d);
   for mi = 0 to 3232 do
     let m = Bigint.of_int mi in
     let refine_ m = (assume_ m : {m : Bigint.t |
@@ -137,10 +140,7 @@ let () =
     let m = Bigint.of_int mi in
     let refine_ r = Vox_rsa.roundtrip p q e d
       (assume_ m : {m : Bigint.t |
-        Number_theory.prime p && Number_theory.prime q && p <> q
-        && e > 0Z && d > 0Z
-        && Bigint.modulo (Bigint.sub (Bigint.mul e d) 1Z)
-          (Vox_rsa.lambda p q) = 0Z
+        Vox_rsa.Spec.valid_key p q e d
         && 0Z <= m && m < Bigint.mul p q}) in
     assert (r = m)) [0; 257; 65537; 65538; 16843008];
   print_endline

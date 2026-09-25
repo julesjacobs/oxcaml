@@ -1,10 +1,6 @@
 open Bigint
+open Vox_rsa_spec
 open Vox_rsa_arithmetic
-
-let[@def] rec gcd a b =
-  if a < 0Z || b < 0Z then 0Z
-  else if b = 0Z then a else gcd b (a mod b)
-[@@decreases b]
 
 type bezout = { g : t; x : t; y : t }
 
@@ -29,12 +25,6 @@ let rec (extended_gcd @ total) : (a : t) -> (b : t) ->
     refine_ r
   end
 [@@decreases b]
-
-let[@def] rec no_divisors p k =
-  if k < 2Z then true else p mod k <> 0Z && no_divisors p (k - 1Z)
-[@@decreases k]
-
-let[@def] prime p = p > 1Z && no_divisors p (p - 1Z)
 
 let rec (no_divisors_at @ total) : (p : t) -> (k : t) -> (d : t) ->
     {u : unit | if no_divisors p k && 2Z <= d && d <= k
@@ -68,9 +58,6 @@ let (prime_cancel @ total) (p : t) (a : t) (b : t) :
   let refine_ r = prime_coprime p a in
   divides_sum p (a * b) p r.x (r.y * b);
   let u = () in refine_ u
-
-let[@def] lcm a b =
-  if a <= 0Z || b <= 0Z then 0Z else (a / gcd a b) * b
 
 let (lcm_properties @ total) (a : t) (b : t) (multiple : t) :
     {u : unit | if a > 0Z && b > 0Z then

@@ -1,4 +1,5 @@
 open Bigint
+open Vox_rsa_spec
 open Vox_rsa_arithmetic
 open Vox_rsa_number_theory
 

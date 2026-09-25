@@ -1,8 +1,5 @@
 open Bigint
-let[@def] rec power a e =
-  if e <= 0Z then 1Z else a * power a (e - 1Z)
-[@@decreases e]
-
+open Vox_rsa_spec
 let rec (power_add @ total) : (a : t) -> (e : t) -> (f : t) ->
     {u : unit | if e >= 0Z && f >= 0Z then
       power a (e + f) = power a e * power a f else true} = fun a e f ->

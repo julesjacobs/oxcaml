@@ -101,7 +101,10 @@ from `./dev`, since both use the worktree's Dune lock.
 RSA encryption and decryption. The roundtrip theorem covers arbitrary distinct primes,
 arbitrary positive valid exponents, and every message below `pq`, including
 non-coprime messages. All arithmetic uses `Bigint`; proof calls
-erase. `rsa_rejected.ml` checks invalid uses. See the
+erase. `rsa_rejected.ml` checks invalid uses and hidden proof exports.
+`rsa_public_client.ml` derives composition and CRT equivalence through the
+sealed public interface. `check_rsa_boundary.py` compiles that client with
+only the two public CMIs available, then links and runs it. See the
 [specification and proof boundaries](../../../verification/library/vox_rsa.md).
 
 ## Arithmetic proof boundaries

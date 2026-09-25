@@ -1,17 +1,11 @@
 open Bigint
-module Modular = Vox_rsa_arithmetic
-module Number_theory = Vox_rsa_number_theory
-module Proof = Vox_rsa_fermat
-open Modular
-open Number_theory
-open Proof
+module Spec = Vox_rsa_spec
+open Spec
+open Vox_rsa_arithmetic
+open Vox_rsa_number_theory
+open Vox_rsa_fermat
 
-let modexp = Modular.modexp
-let fermat = Proof.fermat
-let fermat_period = Proof.fermat_period
-let crt_unique = Number_theory.crt_unique
-
-let[@def] lambda p q = lcm (p - 1Z) (q - 1Z)
+let modexp = Vox_rsa_arithmetic.modexp
 
 let (lambda_lcm @ total) (p : t) (q : t) (multiple : t) :
     {u : unit | if prime p && prime q && p <> q then
@@ -68,24 +62,29 @@ let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
 let encrypt = modexp
 let decrypt = modexp
 
+let (roundtrip_correct @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
+    {u : unit | if valid_key p q e d && 0Z <= m && m < p * q then
+      power (power m e mod (p * q)) d mod (p * q) = m else true} =
+  valid_key_def p q e d;
+  prime_def p; prime_def q;
+  let n = p * q in
+  reduce_power (power m e) d n;
+  power_multiply m e d;
+  rsa_power p q e d m;
+  let u = () in refine_ u
+
 let (roundtrip @ total) : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
-    (message : {m : t | prime p && prime q && p <> q
-      && e > 0Z && d > 0Z && (e * d - 1Z) mod lambda p q = 0Z
-      && 0Z <= m && m < p * q}) ->
+    (message : {m : t | valid_key p q e d && 0Z <= m && m < p * q}) ->
     {r : t | let refine_ m = message in r = m} =
   fun p q e d message ->
   let refine_ m = message in
+  ghost_ (valid_key_def p q e d);
   ghost_ (prime_def p);
   ghost_ (prime_def q);
   let n = p * q in
   let refine_ ciphertext = encrypt m (refine_ e) (refine_ n) in
   let refine_ plaintext = decrypt ciphertext (refine_ d) (refine_ n) in
-  ghost_ begin
-    reduce_power (power m e) d n;
-    power_multiply m e d;
-    rsa_power p q e d m;
-    let u = () in (refine_ u : {u : unit | plaintext = m})
-  end;
+  ghost_ (roundtrip_correct p q e d m);
   refine_ plaintext
 
 let (prime_inverse @ total) (p : t) (q : t) :
