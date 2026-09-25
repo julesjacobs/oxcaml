@@ -222,10 +222,11 @@ val include_functor_signatures : Env.t -> mark:bool ->
   signature -> signature -> modes:modes -> (Ident.t * module_coercion) list
 
 (** Check an implementation against an interface *)
-val check_implementation: Env.t -> modes:modes -> signature -> signature -> unit
+val check_implementation: ?self_check:bool -> Env.t -> modes:modes ->
+  signature -> signature -> unit
 
 val compunit:
-      Env.t -> mark:bool -> string -> modes:modes ->
+      ?self_check:bool -> Env.t -> mark:bool -> string -> modes:modes ->
       signature -> string -> signature -> Shape.t -> module_coercion * Shape.t
 
 val compunit_as_argument:
