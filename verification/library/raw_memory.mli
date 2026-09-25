@@ -1,13 +1,16 @@
 @@ portable
 
-(** Manually freed byte buffers. External memory operations and location
+(** Explicitly freed byte buffers with GC-backed reclamation. External memory operations and location
     identity laws are trusted; coverage and range lemmas are verified.
     Allocation failure returns the original token on normal return. Managed
     allocation and identity exhaustion may raise Out_of_memory.
     Exceptions consume the passed authority; handlers must not restore it.
     Split unrelated ownership before a fallible call to retain that frame.
-    Storage is released only by [free]. Dropping a token or descriptor does
-    not free storage, including after exceptional exits. *)
+    [free] releases storage promptly. A finalizer also releases storage once
+    the descriptor is unreachable, including after exceptional exits. Dropping
+    a token alone does not release storage while the descriptor is reachable.
+    Finalizer timing is unspecified; neither reclamation nor exception safety
+    is part of the normal-return refinement contracts. *)
 module P = Ghost_pref
 module H = P.Heap
 

@@ -97,11 +97,15 @@ Detailed diagnostic reasons/positions are not specified by the total model;
 its three statuses are specified. Compression need not shrink every source.
 There is one final copy from raw storage into a fresh GC string.
 
-The known exceptional leaks remain: allocation failure during compressor scanning
-or decoder sequence processing can abandon the raw buffer. Exceptions consume
-ownership authority, and the raw allocation has no finalizer. The string-copy
-handler retains authority and frees on failure. No exception-safety theorem is
-claimed.
+Allocation failure during compressor scanning or decoder sequence processing
+consumes ownership authority. Unreachable raw carriers have a GC finalizer,
+which releases abandoned storage without restoring that authority. Normal
+returns and string-copy failures release explicitly; clearing the pointer
+prevents a later finalizer from freeing it twice. External bytes are accounted
+to the collector through a major-heap carrier. Review this trusted lifetime
+mechanism in `runtime/pref.c` alongside the raw-memory interface.
+Reclamation on exceptional exits is GC-dependent, with no prompt-cleanup
+guarantee. No exception-safety theorem is claimed.
 
 ## Reproducible checks
 
@@ -113,5 +117,10 @@ claimed.
   and links/runs it in bytecode and native modes. It checks Lambda output for
   erased semantic dependencies and rejects access to hidden implementation
   modules, runtime use of ghost contents, and a false compression identity.
+- `python3 verification/benchmarks/lz4_finalizers.py` checks live-buffer GC
+  safety, explicit release without double reclamation, and GC reclamation after
+  simulated synchronous `Out_of_memory` exits following actual compressor and
+  decoder processing, in bytecode and native modes. This is not allocator fault
+  injection inside the public calls.
 - Existing LZ4 differential, malformed-input, maximum-size and interoperability
   regressions continue to exercise the same public mutable entrypoints.

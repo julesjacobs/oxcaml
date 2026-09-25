@@ -267,11 +267,32 @@ CAMLprim value caml_unique_cell_replace_bytecode(value cell, value initial,
   return unique_cell_replace(cell, initial, 2);
 }
 
-/* The descriptor survives free and keeps allocation identity independent of
-   address reuse. Its custom payload is unscanned and has no finalizer. */
+/* The first payload word is also loaded by the native raw-byte builtins. */
+struct raw_memory_buffer {
+  unsigned char *data;
+  mlsize_t bytes;
+};
+
+#define Raw_memory_buffer(v) \
+  ((struct raw_memory_buffer *) Data_custom_val(v))
+#define Raw_memory_data(p) Raw_memory_buffer(Field(p, 2))->data
+
+static void raw_memory_release(value carrier)
+{
+  struct raw_memory_buffer *buffer = Raw_memory_buffer(carrier);
+  if (buffer->data != NULL) {
+    free(buffer->data);
+    buffer->data = NULL;
+    caml_free_dependent_memory(carrier, buffer->bytes);
+    buffer->bytes = 0;
+  }
+}
+
+/* Explicit free and collection share the same release operation. Descriptor
+   identity survives free; unreachable storage is reclaimed after exceptions. */
 static struct custom_operations raw_memory_ops = {
   "vox.raw_memory",
-  custom_finalize_default,
+  raw_memory_release,
   custom_compare_default,
   custom_hash_default,
   custom_serialize_default,
@@ -280,16 +301,19 @@ static struct custom_operations raw_memory_ops = {
   custom_fixed_length_default
 };
 
-#define Raw_memory_data(p) \
-  (*((unsigned char **) Data_custom_val(Field(p, 2))))
-
 static value raw_memory_malloc(value size, mlsize_t fields)
 {
   CAMLparam1(size);
   CAMLlocal4(carrier, handle, some, result);
   uintnat id = pref_fresh_id();
-  carrier = caml_alloc_custom(&raw_memory_ops, sizeof(unsigned char *), 0, 1);
-  *((unsigned char **) Data_custom_val(carrier)) = NULL;
+  /* Keep the carrier in the major heap: explicit release must not leave a
+     young dependent-memory entry to be charged again on promotion. */
+  carrier = caml_alloc_shr(
+    1 + (sizeof(struct raw_memory_buffer) + sizeof(value) - 1) / sizeof(value),
+    Custom_tag);
+  Custom_ops_val(carrier) = &raw_memory_ops;
+  Raw_memory_buffer(carrier)->data = NULL;
+  Raw_memory_buffer(carrier)->bytes = 0;
   handle = caml_alloc_small(3, Object_tag);
   Field(handle, 0) = size;
   Field(handle, 1) = Val_long(id);
@@ -300,9 +324,12 @@ static value raw_memory_malloc(value size, mlsize_t fields)
   Field(result, 0) = Val_none;
   if (fields == 2) Field(result, 1) = Val_unit;
   /* No managed allocations or raising operations after acquiring storage. */
-  unsigned char *data = malloc(Long_val(size) == 0 ? 1 : Long_val(size));
+  mlsize_t bytes = Long_val(size) == 0 ? 1 : Long_val(size);
+  unsigned char *data = malloc(bytes);
   if (data != NULL) {
     Raw_memory_data(handle) = data;
+    Raw_memory_buffer(carrier)->bytes = bytes;
+    caml_alloc_dependent_memory(carrier, bytes);
     Field(result, 0) = some;
   }
   CAMLreturn(result);
@@ -364,7 +391,7 @@ CAMLprim value caml_raw_memory_write_bytecode(value handle, value index,
 
 CAMLprim void caml_raw_memory_free(value handle)
 {
-  free(Raw_memory_data(handle));
+  raw_memory_release(Field(handle, 2));
 }
 
 CAMLprim value caml_raw_memory_free_bytecode(value handle, value token)

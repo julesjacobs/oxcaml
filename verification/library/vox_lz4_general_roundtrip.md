@@ -64,13 +64,18 @@ handle across GC allocation, reacquires its raw pointer, and copies the
 initialized prefix. The raw buffer is then freed. Malloc storage is never
 reinterpreted as a GC array or string.
 
-Exceptional cleanup is incomplete: allocation failure during scanning or
-decoding can leak the raw buffer. These calls consume ownership authority on
-exceptional exits, so a handler cannot reuse the input token to free storage.
-Raw storage has no finalizer. The normal-return theorem does not establish
-exception safety; fixing this needs a separate ownership or storage-lifetime
-design. The final string-copy step retains authority and does release the
-buffer if copying raises.
+Allocation failure during scanning or decoding consumes ownership authority.
+The unreachable raw carrier now has a GC finalizer that releases abandoned
+storage; handlers do not restore the input token. Normal returns and final-copy
+failures still release storage explicitly. Explicit release clears the pointer,
+so later finalization does not free it twice. External byte counts are registered
+with the collector, and the carrier is allocated in the major heap so explicit
+release cannot leave stale young-generation accounting.
+
+Reclamation after an exceptional exit occurs when the carrier is collected;
+there is no prompt-cleanup guarantee. This runtime lifetime mechanism is trusted,
+and the normal-return theorem still makes no exception-safety or termination
+claim about the mutable entrypoints.
 
 Native lowering turns integer-table access and raw byte access into loads and
 stores. Bytecode uses the C primitives. Both implement the same contracts;

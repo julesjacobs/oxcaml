@@ -247,8 +247,8 @@ let decode : (model : char iarray) @ ghost ->
     match B.create capacity with
     | None -> None
     | Some buffer ->
-      (* An exceptional exit consumes buffer authority. A handler cannot
-         restore it to release storage; raw storage has no finalizer. *)
+      (* Exceptions consume authority; unreachable storage is reclaimed by
+         the raw carrier finalizer without restoring the input token. *)
       Some (decode_sequences model source 0 (-1) (V.length source) buffer)
 
 module EB = Vox_lz4_encode_buffer

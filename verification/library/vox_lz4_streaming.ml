@@ -148,6 +148,6 @@ let encode :
         Vox_lz4_spec_scan.from_source_def model;
         C.encoded_size_capacity model 0 (Vox_lz4_spec_scan.from_source model);
         C.extension_budget_def length);
-      (* An exceptional exit consumes buffer authority. A handler cannot
-         restore it to release storage; raw storage has no finalizer. *)
+      (* Exceptions consume authority; unreachable storage is reclaimed by
+         the raw carrier finalizer without restoring the input token. *)
       Some (scan model source (ghost_ []) table 0 0 (length + 1) buffer)
