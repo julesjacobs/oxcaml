@@ -33,11 +33,11 @@ let (stuck_is_equivalent @ total) :
   fun () -> ghost_ (
   observable_equal_def Stuck Stuck;
   let u = () in
-  refine_ u);;
+  u);;
 [%%expect{|
-Line 8, characters 2-11:
-8 |   refine_ u);;
-      ^^^^^^^^^
+Line 8, characters 2-3:
+8 |   u);;
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -46,10 +46,10 @@ let (different_results_are_equivalent @ total) :
   fun () -> ghost_ (
   observable_equal_def (Done 1) (Done 2);
   let u = () in
-  refine_ u);;
+  u);;
 [%%expect{|
-Line 6, characters 2-11:
-6 |   refine_ u);;
-      ^^^^^^^^^
+Line 6, characters 2-3:
+6 |   u);;
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]

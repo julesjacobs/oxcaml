@@ -25,13 +25,13 @@ let (verified_run @ total) :
   let allocation = allocate program physical in
   ghost_ (preserves program physical args fuel);
   match allocation with
-  | None -> let result = None in refine_ result
+  | None -> let result = None in result
   | Some allocation ->
     ghost_ (initial_of_allocation_def allocation args);
     let target = advance allocation.code fuel
       (initial_of_allocation allocation args) in
     let result = Some target in
-    refine_ result
+    result
 
 let example =
   { registers = 7; inputs = [0]; code = [
@@ -62,7 +62,7 @@ let () =
       allocation.physical (List.length allocation.input_slots);
     List.iter (fun input ->
       let source = advance example.code (fuel 80) (source_initial example [input]) in
-      let refine_ checked = verified_run example 3 [input] (fuel 80) in
+      let checked = verified_run example 3 [input] (fuel 80) in
       let target = match checked with
         | Some target -> target
         | None -> failwith "allocation failed" in
