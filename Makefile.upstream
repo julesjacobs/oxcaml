@@ -1092,6 +1092,8 @@ runtime_COMMON_C_SOURCES = \
   bigarray \
   bigint \
   borrow \
+  pref \
+  vox_control \
   blake2 \
   callback \
   codefrag \

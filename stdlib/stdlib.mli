@@ -32,10 +32,11 @@
 
 (** {1 Exceptions} *)
 
-external raise : ('a : value_or_null). exn -> 'a @ portable unique = "%reraise"
+external[@layout_poly] raise :
+  ('a : any). exn -> 'a @ portable unique = "%reraise"
 (** Raise the given exception value *)
 
-external raise_notrace : ('a : value_or_null). exn -> 'a @ portable unique
+external[@layout_poly] raise_notrace : ('a : any). exn -> 'a @ portable unique
   = "%raise_notrace"
 (** A faster version [raise] which does not record the backtrace.
     @since 4.02
@@ -374,12 +375,14 @@ external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%orint"
+external ( lor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%orint"
 (** Bitwise logical or.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%xorint"
+external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%xorint"
 (** Bitwise logical exclusive or.
     Left-associative operator, see {!Ocaml_operators} for more information.
 *)
@@ -393,7 +396,8 @@ external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%lslint"
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%lsrint"
+external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%lsrint"
 (** [n lsr m] shifts [n] to the right by [m] bits.
     This is a logical shift: zeroes are inserted regardless of
     the sign of [n].

@@ -1471,7 +1471,10 @@ let dummy_constant = tagged_immediate (0xBBBB / 2)
 
 let rec placeholder_of_layout loc (layout : layout) =
   match layout with
-  | Pvalue _ -> dummy_constant
+  | Pvalue _ ->
+      (* The placeholder need not inhabit the declared variant or record shape.
+         Keep its representation hidden from the optimizer. *)
+      Lprim (Popaque layout, [dummy_constant], loc)
   | Punboxed_product layouts ->
       Lprim (Pmake_unboxed_product layouts,
              List.map (placeholder_of_layout loc) layouts, loc)

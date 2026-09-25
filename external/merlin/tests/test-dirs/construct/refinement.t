@@ -57,3 +57,15 @@
   $ $MERLIN single errors -extension refinement_types \
   > -filename optional.ml <optional.ml | revert-newlines | jq '.value'
   []
+
+  $ cat >unboxed.ml <<EOF
+  > type pair = #{ left : int; right : int }
+  > let f (p : { r : pair | r.#left = r.#right }) = p
+  > EOF
+
+  $ inferred=$($MERLIN single type-enclosing -position 2:4 \
+  > -extension refinement_types -filename unboxed.ml <unboxed.ml | revert-newlines | jq -r '.value[0].type')
+  $ printf 'type pair = #{ left : int; right : int }\nexternal f : %s = "%%identity"\n' "$inferred" >unboxed.ml
+  $ $MERLIN single errors -extension refinement_types \
+  > -filename unboxed.ml <unboxed.ml | revert-newlines | jq '.value'
+  []

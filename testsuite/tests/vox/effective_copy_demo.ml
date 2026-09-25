@@ -1,0 +1,253 @@
+(* TEST
+ has-z3;
+ flags = "-extension refinement_types";
+ source_directories = "${test_source_directory}/../../../verification/library";
+ all_modules = "pref.mli pref.ml copy_spec.ml copy_heap_proofs.ml copy_model_proofs.ml copy_complete_proofs.ml copy_sound_proofs.ml copy_template_proofs.ml copy_algorithm.ml level_spec.ml lower_locality_spec.ml level_proofs.ml lower_locality_proofs.ml level_lower.ml level_unifier_spec.ml marked_occurs_proofs.ml level_unifier_proofs.ml level_unifier_metadata.ml marked_occurs.ml level_unifier.ml level_copy_proofs.ml generalize_spec.ml generalize_proofs.ml generalize_scheme_proofs.ml generalize.ml level_finite_spec.ml level_finite_proofs.ml level_mgu_spec.ml level_mgu_proofs.ml forest_transport.ml pooled_spec.ml pooled_proofs.ml pooled_allocation_proofs.ml pooled_allocator.ml pooled_copy.ml provenance_spec.ml provenance_proofs.ml relative_generalization.ml compression_model_proofs.ml compression_finite_proofs.ml hm_declarative.ml hm_environment_spec.ml compression_spec.ml compression_path_proofs.ml compressed_representative.ml compression_proofs.ml leaf_provenance_spec.ml leaf_provenance_proofs.ml structure_finite_proofs.ml structure_model_proofs.ml structure_spec.ml structure_link.mli structure_link.ml structure_origin_proofs.ml compression_origin_proofs.ml optimized_unifier_spec.ml optimized_metadata.ml optimized_finite_proofs.ml optimized_model_proofs.ml optimized_origin_proofs.ml optimized_link_proofs.ml optimized_link.ml pruned_lower_proofs.ml pruned_lower.ml pruned_bind.ml optimized_unifier.ml copy_order_proofs.ml ordered_copy.ml copy_cleanup_spec.ml copy_cleanup_proofs.ml copy_cleanup.mli copy_cleanup.ml clean_pooled_copy.ml clean_copy.ml nested_pool_spec.ml nested_pool_proofs.ml nested_pool.ml representative_level.ml representative_pool_spec.ml representative_pool_proofs.ml representative_pool.mli representative_pool.ml effective_level.ml effective_template.ml representative_mutation.ml effective_copy_spec.ml effective_copy_heap_proofs.ml effective_copy_metadata.ml effective_copy_complete.ml effective_copy_sound.ml effective_copy_template.ml effective_copy_finite.ml effective_copy_order.ml effective_copy_origin.ml effective_copy_pool.ml effective_copy_runtime.mli effective_copy_runtime.ml representative_certificate.ml copy_certificate_spec.ml copy_certificate_capture.ml copy_certificate_proofs.ml certified_copy.mli certified_copy.ml hm_type_proofs.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_freshness_proofs.ml hm_template_instance_proofs.ml hm_execution_spec.ml hm_effective_environment.ml hm_effective_variable.ml effective_lower_spec.ml effective_lower_proofs.ml effective_lower_paths.ml effective_lower_tree.ml effective_lower_write.mli effective_lower_write.ml terminal_lower_spec.ml terminal_lower_proofs.ml effective_lower_runtime.mli effective_lower_runtime.ml graph_occurs.mli graph_occurs.ml effective_compression_spec.ml effective_compression_proofs.ml effective_unifier_spec.ml effective_unifier_model.ml effective_unifier_finite.ml effective_unifier_frame.ml effective_unifier_mgu.ml effective_scan_proofs.ml effective_bind_proofs.ml effective_bind.mli effective_bind.ml effective_compression_metadata.ml effective_unifier_heads.ml effective_unifier_metadata.ml effective_unifier_order.ml graph_representative.mli graph_representative.ml effective_compressed_representative.mli effective_compressed_representative.ml effective_link_proofs.ml effective_link.mli effective_link.ml effective_unifier_runtime.mli effective_unifier_runtime.ml forest_heads.ml hm_effective_execution_spec.ml hm_effective_forest.ml hm_effective_model.ml effective_unifier_pool.ml hm_effective_runtime.ml hm_effective_allocation.ml effective_allocator.mli effective_allocator.ml hm_effective_copy_runtime.ml hm_effective_registration.ml hm_effective_bound.ml hm_effective_closing.ml effective_copy_demo.ml";
+ { bytecode; }
+ { native; }
+*)
+open Copy_spec
+open Generalize_spec
+open Copy_cleanup_spec
+open Effective_copy_spec
+open Effective_copy_heap_proofs
+module M = Effective_copy_metadata
+module E = Effective_level
+module R = Representative_level
+module U = Level_unifier_spec
+module C = Effective_copy_runtime
+
+let[@def] (head @ total) (p : node Pref.t @ immutable) (q : node Pref.t @ immutable)
+    (x : node Pref.t @ immutable total) : R.representative @ immutable total =
+  let refine_ same = Pref.equal x p in
+  if same then {R.root = q; path = U.Via (q, U.Here)} else {R.root = x; path = U.Here}
+
+let run generic =
+  let refine_ state = Pref.empty () in
+  let level = if generic then Generic else Finite 0 in
+  let leaf = {desc = Var; level; memo = Empty_memo; visited = false} in
+  let refine_ step = Pref.alloc leaf state in let q = step.value in let state = step.state in
+  let alias = {desc = Link q; level = Finite 7; memo = Empty_memo; visited = false} in
+  let refine_ step = Pref.alloc alias state in let p = step.value in let state = step.state in
+  let pair = {desc = Arrow (p, p); level = Generic; memo = Empty_memo; visited = false} in
+  let refine_ step = Pref.alloc pair state in let root = step.value in let state = step.state in
+  let saved = ghost_ (Pref.own (borrow_ state)) in
+  let base = Empty in let depth = 1 in
+  let c = {C.saved = ghost_ saved; epoch = ghost_ root; depth = ghost_ depth; base = ghost_ base} in
+  let heads : E.heads Ghost.t = {Ghost.ghost = ghost_ (head p q)} in
+  let scope : (((x : node Pref.t) @ immutable -> {u : unit |
+      not (H.mem c.C.saved x) || source_ok c.C.saved x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
+    source_ok_def c.C.saved x; let u = () in refine_ u)} in
+  let clean : (((x : node Pref.t) @ immutable -> {u : unit |
+      match H.at c.C.saved x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
+    {Ghost.ghost = ghost_ (fun x -> let u = () in refine_ u)} in
+  let witness : (((x : node Pref.t) @ immutable -> {u : unit |
+      E.valid_head c.C.saved heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
+    E.valid_head_def c.C.saved heads.Ghost.ghost x;
+    head_def p q x; let refine_ same = Pref.equal x p in
+    let r = heads.Ghost.ghost x in U.resolves_def c.C.saved x r.root r.path;
+    U.terminal_def c.C.saved x; U.observe_def c.C.saved x;
+    let here = U.Here in U.resolves_def c.C.saved q q here;
+    U.terminal_def c.C.saved q; U.observe_def c.C.saved q;
+    let u = () in refine_ u)} in
+  let state : {t : Pref.token | Pref.own t === c.C.saved && H.mem c.C.saved root} = refine_ state in
+  let refine_ state = state in
+
+  ghost_ (
+    let wrong = {R.root = p; path = U.Here} in
+    let fake = Representative_certificate.Entry
+      (p, wrong, Representative_certificate.Empty) in
+    Representative_certificate.certificate_valid_def c.C.saved fake;
+    let path = U.Here in U.resolves_def c.C.saved p p path;
+    U.terminal_def c.C.saved p; U.observe_def c.C.saved p;
+    let u = () in
+    let _ : {u : unit | not (Representative_certificate.certificate_valid c.C.saved fake)} = refine_ u in ());
+  let refine_ out = Certified_copy.instantiate c heads scope clean witness (refine_ depth) base root (refine_ state) in
+  ghost_ (let u = () in Copy_certificate_proofs.replay c.C.saved out.#certificate
+    heads.Ghost.ghost witness.Ghost.ghost c.C.epoch c.C.depth out.#history root out.#value (refine_ u));
+  let result = out.#value in let state = out.#state in let d = ghost_ out.#history in
+  let after = ghost_ (Pref.own (borrow_ state)) in
+  ghost_ (let u = () in target_allocated c.C.saved heads.Ghost.ghost root depth d root result (refine_ u);
+    M.result_at c.C.saved heads.Ghost.ghost root depth d result (refine_ u);
+    let raw = heap c.C.saved root depth d in let trail = Pooled_spec.touched d in
+    swept_at_def raw after trail result; ());
+  let state : {t : Pref.token | H.mem (Pref.own t) result} = refine_ state in
+  let refine_ copied = Pref.read result (borrow_ state) in let refine_ state = state in
+  assert (copied.level = Finite 1);
+  (match copied.desc with
+   | Arrow (a, b) -> let refine_ same = Pref.equal a b in assert same; let refine_ same = Pref.equal a p in assert (same = not generic)
+   | _ -> failwith "expected shared arrow");
+  (match out.#pool with
+   | Entry (_, Empty) -> assert (not generic)
+   | Entry (_, Entry (_, Empty)) -> assert generic
+   | _ -> failwith "unexpected allocation count");
+  ghost_ (let u = () in M.saved_observe c.C.saved heads.Ghost.ghost root depth d p (refine_ u);
+    M.saved_observe c.C.saved heads.Ghost.ghost root depth d q (refine_ u));
+  let state : {t : Pref.token | H.mem (Pref.own t) p} = refine_ state in
+  let refine_ original = Pref.read p (borrow_ state) in let refine_ state = state in
+  assert (original.level = Finite 7); assert (original.desc = Link q);
+  assert (original.memo = Empty_memo);
+  let state : {t : Pref.token | H.mem (Pref.own t) q} = refine_ state in
+  let refine_ original = Pref.read q (borrow_ state) in let refine_ state = state in
+  assert (original.memo = Empty_memo);
+  let c2 = {C.saved = ghost_ after; epoch = ghost_ root; depth = ghost_ depth; base = ghost_ base} in
+  let next_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ (fun x ->
+    if H.mem c.C.saved x then heads.Ghost.ghost x else {R.root = x; path = U.Here})} in
+  let next_witness : (((x : node Pref.t) @ immutable -> {u : unit |
+      E.valid_head c2.C.saved next_heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
+    let u = () in M.result_head c.C.saved heads.Ghost.ghost next_heads.Ghost.ghost witness.Ghost.ghost root depth d x (refine_ u);
+    refine_ u)} in
+  ghost_ (
+    let raw = heap c.C.saved root depth d in let trail = Pooled_spec.touched d in
+    let full_scope : ((x : node Pref.t) @ immutable -> {u : unit |
+        if H.mem c.C.saved x then source_ok c.C.saved x else H.at c.C.saved x === None}) @ total = fun x ->
+      scope.Ghost.ghost x; let u = () in refine_ u in
+    let raw_witness : ((x : node Pref.t) @ immutable -> {u : unit |
+        E.valid_head raw next_heads.Ghost.ghost x}) @ total = fun x -> let u = () in
+      M.history_head c.C.saved heads.Ghost.ghost next_heads.Ghost.ghost witness.Ghost.ghost root depth d x (refine_ u); refine_ u in
+    let framing : ((x : node Pref.t) @ immutable -> {u : unit | swept_at raw c2.C.saved trail x}) @ total = fun x ->
+      let u = () in M.result_at c.C.saved heads.Ghost.ghost root depth d x (refine_ u); refine_ u in
+    let bounds : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem c.C.saved x)
+        || E.level c.C.saved heads.Ghost.ghost x === Generic || E.effective_below c.C.saved heads.Ghost.ghost x depth}) @ total = fun x ->
+      E.level_def c.C.saved heads.Ghost.ghost x; E.effective_below_def c.C.saved heads.Ghost.ghost x depth;
+      head_def p q x; let refine_ same = Pref.equal x p in
+      let r = heads.Ghost.ghost x in Level_spec.at_level_def c.C.saved r.root;
+      let u = () in refine_ u in
+    let order : ((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered c.C.saved heads.Ghost.ghost x}) @ total = fun x ->
+      E.effective_ordered_def c.C.saved heads.Ghost.ghost x; let u = () in refine_ u in
+    let facts : ((x : node Pref.t) @ immutable -> {u : unit |
+        Hm_effective_runtime.runtime_at c.C.saved heads.Ghost.ghost depth base x}) @ total = fun x ->
+      witness.Ghost.ghost x; full_scope x; bounds x; order x;
+      Hm_effective_runtime.runtime_at_def c.C.saved heads.Ghost.ghost depth base x;
+      Hm_effective_runtime.safe_def c.C.saved heads.Ghost.ghost x;
+      Hm_effective_runtime.depth_bound_def c.C.saved heads.Ghost.ghost depth x;
+      let cut = depth - 1 in R.representative_covered_def c.C.saved cut base x;
+      U.terminal_def c.C.saved x; U.observe_def c.C.saved x;
+      covered_def c.C.saved cut base x; Level_spec.at_level_def c.C.saved x;
+      let u = () in refine_ u in
+    let u = () in
+    Hm_effective_copy_runtime.copy_runtime c.C.saved heads.Ghost.ghost
+      next_heads.Ghost.ghost depth base facts root d (refine_ raw_witness) result (refine_ u);
+    Hm_effective_copy_runtime.copy_runtime c.C.saved heads.Ghost.ghost
+      next_heads.Ghost.ghost depth base facts root d (refine_ raw_witness) p (refine_ u);
+    Effective_copy_order.copy_ordered c.C.saved full_scope heads.Ghost.ghost next_heads.Ghost.ghost witness.Ghost.ghost root depth bounds order d (refine_ raw_witness) result (refine_ u);
+    Effective_copy_order.sweep_ordered raw c2.C.saved next_heads.Ghost.ghost trail framing result;
+    ());
+  let next_scope : (((x : node Pref.t) @ immutable -> {u : unit |
+      not (H.mem c2.C.saved x) || source_ok c2.C.saved x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
+    let full_scope : ((y : node Pref.t) @ immutable -> {u : unit |
+        if H.mem c.C.saved y then source_ok c.C.saved y else H.at c.C.saved y === None}) @ total = fun y ->
+      scope.Ghost.ghost y; let u = () in refine_ u in
+    let raw = heap c.C.saved root depth d in let trail = Pooled_spec.touched d in
+    let framing : ((y : node Pref.t) @ immutable -> {u : unit | swept_at raw c2.C.saved trail y}) @ total = fun y ->
+      let u = () in M.result_at c.C.saved heads.Ghost.ghost root depth d y (refine_ u); refine_ u in
+    let u = () in M.history_scope c.C.saved heads.Ghost.ghost full_scope root depth d x (refine_ u);
+    Copy_cleanup_proofs.sweep_scope raw c2.C.saved trail framing x (refine_ u); refine_ u)} in
+  let next_clean : (((x : node Pref.t) @ immutable -> {u : unit |
+      match H.at c2.C.saved x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
+    {Ghost.ghost = ghost_ (fun x -> clean.Ghost.ghost x; let u = () in
+      M.clean_result c.C.saved heads.Ghost.ghost root depth d x (refine_ u); refine_ u)} in
+  ghost_ (let u = () in M.saved_observe c.C.saved heads.Ghost.ghost root depth d root (refine_ u));
+  let state : {t : Pref.token | Pref.own t === c2.C.saved && H.mem c2.C.saved root} = refine_ state in
+  let refine_ state = state in
+
+  let refine_ second = Certified_copy.instantiate c2 next_heads next_scope next_clean next_witness (refine_ depth) base root (refine_ state) in
+  let refine_ same = Pref.equal result second.#value in assert (not same);
+  ()
+
+let () = run false; run true
+
+let allocate_stale_alias () =
+  let refine_ state = Pref.empty () in
+  let leaf = {desc = Var; level = Finite 0; memo = Empty_memo; visited = false} in
+  let refine_ step = Pref.alloc leaf state in let q = step.value in
+  let alias = {desc = Link q; level = Finite 7; memo = Empty_memo; visited = false} in
+  let refine_ step = Pref.alloc alias step.state in let p = step.value in
+  let saved : Pref.heap Ghost.t = {Ghost.ghost = ghost_ (Pref.own (borrow_ step.state))} in
+  let desc = Arrow (p, p) in let depth = 1 in let pool = Empty in
+  ghost_ (
+    cell_def desc depth; let v = cell desc depth in payload_scoped_def saved.Ghost.ghost v;
+    pool_scoped_def saved.Ghost.ghost pool;
+    Level_spec.below_def saved.Ghost.ghost p depth;
+    Level_spec.at_level_def saved.Ghost.ghost p;
+    let u = () in let _ : {u : unit | not (Level_spec.below saved.Ghost.ghost p depth)} = refine_ u in ());
+  let refine_ out = Effective_allocator.allocate saved depth desc pool (refine_ step.state) in
+  let state = out.#state in let result = out.#value in
+  ghost_ (
+    let v = cell desc depth in Copy_heap_proofs.put_frame saved.Ghost.ghost result v result; ());
+  let state : {t : Pref.token | H.mem (Pref.own t) result} = refine_ state in
+  let refine_ value = Pref.read result (borrow_ state) in
+  assert (value.level = Finite 1);
+  assert (value.desc = Arrow (p, p))
+
+let () = allocate_stale_alias ()
+
+let[@def] (here @ total) (x : node Pref.t @ immutable total) : R.representative @ immutable total =
+  {R.root = x; path = U.Here}
+
+let rec pool_size n = function Empty -> n | Entry (_, rest) -> pool_size (n + 1) rest
+
+let rec deep : int -> int -> (h : Pref.heap Ghost.t) @ immutable ->
+    (scope : (((x : node Pref.t) @ immutable -> {u : unit |
+      if H.mem h.Ghost.ghost x then source_ok h.Ghost.ghost x else H.at h.Ghost.ghost x === None})) Ghost.t) @ total ->
+    (clean : (((x : node Pref.t) @ immutable -> {u : unit |
+      match H.at h.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t) @ total ->
+    (terminal : (((x : node Pref.t) @ immutable -> {u : unit |
+      not (H.mem h.Ghost.ghost x) || U.terminal h.Ghost.ghost x})) Ghost.t) @ total ->
+    (p : node Pref.t) @ immutable ->
+    (state : {t : Pref.token | Pref.own t === h.Ghost.ghost && H.mem h.Ghost.ghost p}) @ unique -> unit =
+  fun count expected h scope clean terminal p state ->
+  let refine_ state = state in
+  if count = 0 then (
+    let depth = 1 in let base = Empty in
+    let c = {C.saved = h.Ghost.ghost; epoch = ghost_ p; depth = ghost_ depth; base = ghost_ base} in
+    let heads : E.heads Ghost.t = {Ghost.ghost = ghost_ here} in
+    let scope : (((x : node Pref.t) @ immutable -> {u : unit |
+        not (H.mem c.C.saved x) || source_ok c.C.saved x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
+      scope.Ghost.ghost x; let u = () in refine_ u)} in
+    let clean : (((x : node Pref.t) @ immutable -> {u : unit |
+        match H.at c.C.saved x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
+      {Ghost.ghost = ghost_ (refine_ clean.Ghost.ghost)} in
+    let witness : (((x : node Pref.t) @ immutable -> {u : unit |
+        E.valid_head c.C.saved heads.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (fun x ->
+      terminal.Ghost.ghost x; E.valid_head_def c.C.saved heads.Ghost.ghost x; here_def x;
+      let path = U.Here in U.resolves_def c.C.saved x x path; let u = () in refine_ u)} in
+    let refine_ out = Certified_copy.instantiate c heads scope clean witness (refine_ depth) base p (refine_ state) in
+    assert (pool_size 0 out.#pool = expected))
+  else (
+    let desc = Arrow (p, p) in
+    let node = {desc; level = Generic; memo = Empty_memo; visited = false} in
+    let refine_ step = Pref.alloc node state in let q = step.value in let state = step.state in
+    let after : Pref.heap Ghost.t = {Ghost.ghost = ghost_ (Pref.own (borrow_ state))} in
+    let next_scope : (((x : node Pref.t) @ immutable -> {u : unit |
+        if H.mem after.Ghost.ghost x then source_ok after.Ghost.ghost x else H.at after.Ghost.ghost x === None})) Ghost.t =
+      {Ghost.ghost = ghost_ (fun x ->
+        payload_scoped_def h.Ghost.ghost node; let u = () in
+        Copy_model_proofs.put_scope h.Ghost.ghost scope.Ghost.ghost q node x (refine_ u); refine_ u)} in
+    let next_clean : (((x : node Pref.t) @ immutable -> {u : unit |
+        match H.at after.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
+      {Ghost.ghost = ghost_ (fun x -> clean.Ghost.ghost x;
+        Copy_heap_proofs.put_frame h.Ghost.ghost q node x; let u = () in refine_ u)} in
+    let next_terminal : (((x : node Pref.t) @ immutable -> {u : unit |
+        not (H.mem after.Ghost.ghost x) || U.terminal after.Ghost.ghost x})) Ghost.t =
+      {Ghost.ghost = ghost_ (fun x -> terminal.Ghost.ghost x;
+        Copy_heap_proofs.put_frame h.Ghost.ghost q node x;
+        U.terminal_def h.Ghost.ghost x; U.terminal_def after.Ghost.ghost x;
+        U.observe_def h.Ghost.ghost x; U.observe_def after.Ghost.ghost x; let u = () in refine_ u)} in
+    deep (count - 1) expected after next_scope next_clean next_terminal q (refine_ state))
+
+let () =
+  let refine_ state = Pref.empty () in
+  let leaf = {desc = Var; level = Generic; memo = Empty_memo; visited = false} in
+  let refine_ step = Pref.alloc leaf state in let p = step.value in let state = step.state in
+  let h : Pref.heap Ghost.t = {Ghost.ghost = ghost_ (Pref.own (borrow_ state))} in
+  let scope : (((x : node Pref.t) @ immutable -> {u : unit |
+      if H.mem h.Ghost.ghost x then source_ok h.Ghost.ghost x else H.at h.Ghost.ghost x === None})) Ghost.t =
+    {Ghost.ghost = ghost_ (fun x -> source_ok_def h.Ghost.ghost x; let u = () in refine_ u)} in
+  let clean : (((x : node Pref.t) @ immutable -> {u : unit |
+      match H.at h.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t =
+    {Ghost.ghost = ghost_ (fun x -> let u = () in refine_ u)} in
+  let terminal : (((x : node Pref.t) @ immutable -> {u : unit |
+      not (H.mem h.Ghost.ghost x) || U.terminal h.Ghost.ghost x})) Ghost.t =
+    {Ghost.ghost = ghost_ (fun x -> U.terminal_def h.Ghost.ghost x; U.observe_def h.Ghost.ghost x; let u = () in refine_ u)} in
+  deep 200000 200001 h scope clean terminal p (refine_ state)

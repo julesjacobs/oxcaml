@@ -62,10 +62,7 @@ Line 4, characters 6-11:
           ^^^^^
 Warning 26 [unused-var]: unused variable "proof".
 
-Line 5, characters 2-11:
-5 |   refine_ y;;
-      ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+val not_eliminated : unit -> {n : int | n = 5} = <fun>
 |}]
 
 let alias () : {n : int | n = 5} =
@@ -396,4 +393,146 @@ let record_let_unfold () : {n : int | n = 7} =
   refine_ result;;
 [%%expect{|
 val record_let_unfold : unit -> {n : int | n = 7} = <fun>
+|}]
+
+module Function_alias = struct
+  type callback = int -> int
+  type curried = int -> callback
+
+  let[@def] (identity @ total) (x : int) =
+    let f : callback @ total = fun y -> y in
+    f x
+
+  let[@def] (first @ total) (x : int) (y : int) =
+    let f : curried @ total = fun a b -> a in
+    f x y
+end;;
+[%%expect{|
+module Function_alias :
+  sig
+    type callback = int -> int
+    type curried = int -> callback
+    val identity : int -> int
+    val identity_def :
+      (x : int) ->
+      {u : unit
+        | (identity x) ===
+            (let (f : callback) = (fun y -> y : callback) in f x)}
+    val first : int -> int -> int
+    val first_def :
+      (x : int) ->
+      (y : int) ->
+      {u : unit
+        | (first x y) ===
+            (let (f : curried) = (fun a -> fun b -> a : curried) in f x y)}
+  end
+|}]
+
+module Local_definition = struct
+let[@def] (local_empty @ total) (xs : int list @ local immutable) =
+  match xs with [] -> true | _ -> false
+let (local_lemma @ total) (xs : int list @ local immutable) :
+    {u : unit | local_empty xs === (match xs with [] -> true | _ -> false)} =
+  local_empty_def xs;
+  ()
+end;;
+[%%expect{|
+module Local_definition :
+  sig
+    val local_empty : int list @ local immutable -> bool
+    val local_empty_def :
+      (xs : int list) @ local forkable unyielding immutable ->
+      {u : unit
+        | (local_empty xs) === (match xs with | [] -> true | _ -> false)}
+    val local_lemma :
+      (xs : int list) @ local immutable ->
+      {u : unit
+        | (local_empty xs) === (match xs with | [] -> true | _ -> false)}
+  end
+|}]
+
+let local_function_lemma () : {n : int | n = 1} =
+  Function_alias.identity_def 1;
+  Function_alias.identity 1;;
+[%%expect{|
+val local_function_lemma : unit -> {n : int | n = 1} = <fun>
+|}]
+
+module Captured_function = struct
+  let[@def] (add @ total) (x : int) (y : int) =
+    let f = fun z -> x + z in
+    f y
+end;;
+[%%expect{|
+module Captured_function :
+  sig
+    val add : int -> int -> int
+    val add_def :
+      (x : int) ->
+      (y : int) -> {u : unit | (add x y) === (let f z = x + z in f y)}
+  end
+|}]
+
+let captured_function_lemma () : {n : int | n = 7} =
+  Captured_function.add_def 3 4;
+  Captured_function.add 3 4;;
+[%%expect{|
+val captured_function_lemma : unit -> {n : int | n = 7} = <fun>
+|}]
+
+let curried_function_lemma () : {n : int | n = 3} =
+  Function_alias.first_def 3 4;
+  Function_alias.first 3 4;;
+[%%expect{|
+val curried_function_lemma : unit -> {n : int | n = 3} = <fun>
+|}]
+
+let false_captured_function () : {n : int | n = 8} =
+  Captured_function.add_def 3 4;
+  Captured_function.add 3 4;;
+[%%expect{|
+Line 3, characters 2-27:
+3 |   Captured_function.add 3 4;;
+      ^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let false_curried_function () : {n : int | n = 4} =
+  Function_alias.first_def 3 4;
+  Function_alias.first 3 4;;
+[%%expect{|
+Line 3, characters 2-26:
+3 |   Function_alias.first 3 4;;
+      ^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+module Partial_function = struct
+  let[@def] (call @ total) (x : int) =
+    let f y = if y = 0 then failwith "zero" else y in
+    f x
+end;;
+[%%expect{|
+Line 3, characters 28-36:
+3 |     let f y = if y = 0 then failwith "zero" else y in
+                                ^^^^^^^^
+Error: The value "failwith" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 2-4, characters 27-7
+         which is expected to be "total".
+|}]
+
+module Mutable_function = struct
+  let[@def] (read @ total) (x : int ref) =
+    let f () = !x in
+    f ()
+end;;
+[%%expect{|
+Line 3, characters 15-16:
+3 |     let f () = !x in
+                   ^
+Error: The value "(!)" is "partial"
+       but is expected to be "total"
+         because it is used inside the function at lines 2-4, characters 27-8
+         which is expected to be "total".
 |}]

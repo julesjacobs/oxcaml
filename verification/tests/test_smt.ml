@@ -44,6 +44,10 @@ let () =
       app Div [n; n], Int63;
       app Rem [n; n], Int63;
       app Neg [n], Int63;
+      app Bit_and [n; n], Int63;
+      app Bit_or [n; n], Int63;
+      app Bit_xor [n; n], Int63;
+      app Shift_right_logical [n; n], Int63;
       app Eq [n; n], Bool;
       app Ne [p; p], Bool;
       app Lt [n; n], Bool;
@@ -108,6 +112,10 @@ let () =
       Mul;
       Div;
       Rem;
+      Bit_and;
+      Bit_or;
+      Bit_xor;
+      Shift_right_logical;
       Neg;
       Eq;
       Ne;
@@ -483,3 +491,41 @@ let () =
       | _ -> failwith "Sort checking must precede process startup"
       | exception Sort_error _ -> ());
       print_endline "SMT interface tests passed")
+
+let () =
+  let x = Symbol.create ~label:"x" Int63 in
+  let q =
+    query ~symbols:[x]
+      ~facts:[{ label = "branch"; term = app Lt [Var x; integer 0] }]
+      (app Ge [Var x; integer 0])
+  in
+  assert (
+    explain_invalid q (Some [x, Int_value (-1L)])
+    = "Goal (goal): (x >= 0)\n\
+       Assumption (branch): (x < 0)\n\
+       Model: x = -1\n\
+       The solver found a model satisfying the assumptions and falsifying the \
+       goal.");
+  let f = Function.create ~label:"clamp" ~arguments:[Int63] ~result:Int63 in
+  let q = query ~functions:[f] (app Ge [Call (f, [integer 0]); integer 0]) in
+  assert (
+    explain_invalid q None
+    = "Goal (goal): (clamp(0) >= 0)\n\
+       The solver did not return printable model values.\n\
+       Opaque functions: clamp\n\
+       A model of opaque calls may indicate missing facts, not a runtime \
+       counterexample.\n\
+       The solver found a model satisfying the assumptions and falsifying the \
+       goal.")
+
+let () =
+  let left = Symbol.create ~label:"value" Int63 in
+  let right = Symbol.create ~label:"value" Int63 in
+  let q = query ~symbols:[left; right] (app Eq [Var left; Var right]) in
+  assert (
+    explain_invalid q (Some [left, Int_value 0L; right, Int_value 1L])
+    = "Goal (goal): (value[v0] = value[v1])\n\
+       Model: value[v0] = 0\n\
+       Model: value[v1] = 1\n\
+       The solver found a model satisfying the assumptions and falsifying the \
+       goal.")

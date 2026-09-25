@@ -199,6 +199,7 @@ and refinement_expression_desc =
   | Rexp_apply of
       refinement_expression * (Asttypes.arg_label * refinement_expression) list
   | Rexp_logical_equal of refinement_expression * refinement_expression
+  | Rexp_refinement of type_expr * refinement_expression
   | Rexp_ghost of refinement_expression
   | Rexp_tuple of (string option * refinement_expression) list
   | Rexp_construct of Path.t * refinement_expression list
@@ -210,6 +211,7 @@ and refinement_expression_desc =
       * refinement_expression option
   | Rexp_array of Asttypes.mutable_flag * refinement_expression list
   | Rexp_field of refinement_expression * Path.t * string
+  | Rexp_unboxed_field of refinement_expression * Path.t * string
   | Rexp_ifthenelse of
       refinement_expression * refinement_expression
       * refinement_expression option
@@ -237,6 +239,7 @@ and refinement_case =
 and refinement_pattern =
   { rpat_desc : refinement_pattern_desc;
     rpat_type : type_expr;
+    rpat_refinements : type_expr list;
     rpat_type_constraint : bool;
     rpat_loc : Location.t }
 

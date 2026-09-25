@@ -1,0 +1,277 @@
+Flat hash table work plan (2026-09-19)
+
+Scope: runtime table, ownership API, full normal-return correctness proof,
+SIMD foundation, and installed-compiler benchmarks in one PR.
+
+Design
+- Unique keys, power-of-two capacity, triangular probing in 16-byte groups.
+- Scanned interleaved key/value backing array and byte controls, with 15
+  wraparound clones. Empty=128, Deleted=254, fingerprints=0..127.
+- Check matching candidates before terminating on Empty. Occupancy includes
+  live entries and tombstones and stays at or below 7/8 capacity.
+- Rebuild at the same capacity with >=capacity/8 tombstones; otherwise double.
+- Aliased handles, erased views, and one unique ghost token owning one or
+  more heterogeneous tables. A table's private region includes its header
+  and both backing blocks. Rebuilding preserves handle identity.
+- Both keys and payloads currently require immutable_data. Hash/equality are
+  pure total functions, with explicit equality/hash laws. Stateful callbacks
+  and disjoint-frame lending await proper borrowing.
+
+Checklist
+[x] Exact machine-integer bitwise reasoning and rejection tests.
+[x] Typed storage contracts connecting actual payload/control writes to models.
+[x] Finite map, representation, clone, counter and probe-route invariants.
+[x] Triangular inverse coverage and guaranteed vacancy/non-exhaustion.
+[x] Concrete lookup, insertion, replacement, removal and clear proofs.
+[x] Concrete migration, rebuild/publication and public replace proofs.
+[x] Public .mli with functional correctness and ownership/frame contracts.
+[x] Public client proving a stored value is returned, and removal is observed.
+[x] Aliased handle and heterogeneous tables under one token, including resize.
+[x] Randomized differential operations and pointer/GC-compaction tests.
+[x] Rejected clients: stale view, missing ownership, token reuse, false value.
+[x] Compiler proof suite, including false-goal rejection after query slicing.
+[x] Borrowing design consultation; implementation deferred.
+[x] Final NEON/scalar boundary/differential tests and full runtime build.
+[x] Complete library installation, retaining -principal where supported.
+[x] Installed-compiler benchmarks against Hashtbl.Make and scalar ablation.
+[x] Final review; the bytecode stack-growth finding is fixed.
+[x] New stacked PR: https://github.com/julesjacobs/oxcaml/pull/191
+
+Proof boundary
+The actual imperative algorithm is checked against typed C storage contracts.
+The public operations establish normal-return functional correctness and exact
+ownership/frame preservation. Probe coverage and vacancy non-exhaustion are
+proved. General termination, allocation success and absence of capacity-limit
+exceptions are not claimed. Migration retries with a larger destination on an
+incomplete copy; no theorem says the first selected destination always suffices.
+
+The trusted boundary includes C storage, exact SIMD/scalar matching, the Vox
+checker/SMT solver and the existing finite-map heap laws. Heap.put_law adds
+standard write-back identity when the value already occupies the location.
+No assume_ or whole-table correctness axiom is introduced. SIMD differential
+tests are not a machine-code proof. SSE2 is implemented but not run on this
+arm64 machine.
+
+Vox findings
+- Mixed Int/BitVec reasoning made bounded bitclear decrease time out. Bitwise
+  queries now use machine-width bitvectors consistently, including comparisons
+  and datatype fields. Integer-only queries retain the existing encoding.
+- Irrelevant SSA definitions inflated individual proof retries. Dependency
+  slicing removes unused definitions without strengthening premises.
+- Heap observation expansion had a shared budget across obligations. Suppress
+  duplicate propagation and regenerate observations for individual retries.
+  A 48-write regression checks valid reads and rejection of a false read.
+- Slicing initially pruned lengths needed by latent array observations. Follow
+  observation definitions during dependency collection. Expand explicit heap
+  observations before slicing the initial batch; early slicing is restricted
+  to individual retries. Existing raw_memory_demo covers explicit hints.
+  The existing complete
+  iarray_borrow test checks the affected array slicing lemmas.
+- Result-only polymorphic definition lemmas can lose phantom type connections.
+  Use explicit polymorphic signatures and a type-carrying model/entry argument.
+  A locally abstract alternative encountered Ctype.Unify and is not used.
+  Follow-up reproducers confirm the result-only type-instantiation limitation;
+  a small locally abstract example reports a scope error rather than crashing.
+  The original crash has not been reproduced or claimed fixed.
+- Alias investigation: actual module aliases preserve predicate identity,
+  including through inferred functor results. Separate functor applications
+  have distinct values; their definition lemmas establish the connection.
+  Regression examples cover both. Proof functors keep explicit invariant
+  parameters to avoid repeatedly rebuilding these connections.
+- Refined structural-recursion parameters now retain the inductive status of
+  their payload. Descendant recursion is accepted; unchanged-root recursion
+  remains rejected.
+- A boxed all-void result is rejected. Mutations use unboxed records carrying
+  erased views and ghost tokens; creation also carries the runtime handle.
+- Standard raise and raise_notrace now have layout-polymorphic results.
+  Resize uses standard raise for its erased unboxed result. Ordinary failwith
+  and invalid_arg retain their existing value_or_null signatures.
+- String literals now have consistent logical identities and distinct byte
+  contents are provably unequal. Physical equality remains unknown. The table
+  client proves a stored string is returned, across GC and compaction.
+- For-loop bodies now receive inclusive bounds in both directions. Body facts
+  do not escape the loop. Mask tests no longer need redundant bounds guards.
+
+Proof-design consultation:
+https://chatgpt.com/c/6aaedb5c-0f48-83ea-b5cb-36e89a402e3a
+
+- Out of scope by user request: OxCaml -principal rejects passing int option (and tuple options) to a
+  polymorphic immutable_data parameter, even without refinement_types enabled.
+  Explicit kind annotations do not fix this. Build the new table modules with
+  normal type inference while retaining every refinement/termination check;
+  existing library modules retain -principal. No test or warning is disabled.
+
+Benchmark: verification/benchmarks/flat_hashtbl_results.csv records five runs
+per workload using the installed optimized arm64 compiler (-O3), shuffled
+integer keys, and integer/string payloads. Base v0.17.3 is rebuilt with the
+same compiler and hash function. Reproduce with:
+  python3 verification/benchmarks/flat_hashtbl.py --prepare-base /tmp/vox-base \
+    --build-dir /tmp/vox-flat --repeats 5 --implementations stdlib simd base
+At 1,048,576 integer entries, median Base/flat ratios are 1.87x build,
+2.18x hit, 3.46x miss, 2.13x replacement and 1.98x churn. Median flat times
+are 78.66, 22.76, 9.22, 30.25 and 47.72 ns/op respectively. These five runs
+use work factor 10, matching build sinks and precomputed replacement values.
+Tiny builds/churn remain slower than Base and Stdlib. At 57,344 entries
+(7/8 occupancy), misses take 18.88 ns vs Base's 13.40 ns. These results do
+not establish performance for string keys or AMD64. String rows use integer
+keys with string payloads. Find/mem allocate zero bytes. Churn can grow the
+table; it is not a steady-state dense-table measurement.
+Native lookup emits direct storage loads, SIMD comparisons, and hardware CTZ,
+with no calls to C storage-read or control-match helpers. Allocation and
+pointer-slot mutation still use runtime helpers. SIMD has a scalar C fallback;
+the scalar ablation removes matching builtins from both interface and source.
+The full table proof, native/bytecode stress tests, exhaustive control masks,
+ownership rejection, and solver regressions pass.
+
+- Review found linear bytecode stack consumption during migration. Carry the
+  original heap as a ghost loop parameter and discharge frame composition
+  before recursion, making the call structurally tail-recursive even with -g.
+  The client fills and reads 65,536 entries with a bounded bytecode stack.
+
+Performance follow-up (Pro consultation, 2026-09-20)
+[x] Tested native UMAXV empty reduction; rejected and reverted. Exhaustive
+    tests and binary-emitter cross-check passed, but six interleaved pairs
+    showed no small-table gain and 4-7% regressions at 1,048,576 entries.
+    Data: /tmp/vox-table-perf/umaxv-paired.csv.
+[x] Removed the equality callback from the measured integer group worker by
+    keeping groups out of line. The specialized worker compares directly and
+    has a 16-byte frame. Forced comparator annotations were ineffective or
+    warned in generic code and were removed.
+[x] Added missing ghost_ around creation route list and native no-op lowering
+    for caml_pref_empty, preserving argument evaluation. Saves 384 bytes per
+    creation: one-entry build allocation falls from 760 to 376 bytes.
+[x] Capacity-16 lookup uses one fingerprint scan and the exhaustion proof.
+    Further candidate-loop specialization was tested and rejected: tiny gains
+    sacrificed large-table equality inlining and regressed larger misses.
+[x] Hash once across lookup, vacancy search, insertion and resize retry;
+    existing wrappers preserve compatibility. Search and vacancy remain
+    separate traversals.
+[x] Value-only replacement with GC-safe storage contract. The key witness is
+    an erased record; a bare polymorphic ghost parameter still occupies a
+    native argument slot. The native primitive updates only the value using
+    caml_modify. Tests replace pointer values after promotion and compact.
+[x] Six interleaved paired baseline/variant runs at work factor 20. Retained
+    version improves integer throughput at 1,048,576 entries by 1.09x build,
+    1.21x hit, 1.07x miss, 1.26x replacement and 1.14x churn (median paired
+    ratios). At 1-8 entries, respective gains span 1.37-1.68x, 1.19-1.20x,
+    1.25-1.43x, 1.67-1.85x and 1.30-1.37x.
+    Data: verification/benchmarks/flat_hashtbl_program_paired.csv.
+[x] Final refreshed Base/Stdlib comparison: 1,350 samples, five runs per
+    implementation/payload/size/operation. Compiler from make install; no
+    concurrent builds or reviews during timing. Full table proof and
+    native/bytecode tests, ownership rejection and git diff --check pass.
+    codex review --uncommitted found a missing work_factor binding in Base
+    source generation; fixed, benchmarked successfully and rereviewed clean.
+    Final assembly confirms inline integer equality, a 16-byte group frame,
+    no pref_empty/creation route-list calls and value-only replacement.
+
+Remaining experiments from Pro's broader program:
+[x] First-group peeling tested and rejected; see follow-up below.
+[ ] Nonzero CTZ and capacity caching.
+[x] Combined absence/vacancy traversal implemented and proved, then rejected
+    after paired performance experiments; see follow-up below.
+[ ] Diagnostic probing/rebuild counts and load-factor/cleanup experiments.
+[ ] Small representation, including promotion proof and retained memory.
+[ ] String keys, allocating comparators, mixed/skewed access, shuffled builds,
+    long aging churn and broader workload coverage.
+
+Follow-up experiments: first group, combined insertion, small tables
+(2026-09-20; no algorithm changes retained)
+
+- First-group peeling passed the full table proof and native/bytecode tests.
+  It caused the specialized comparator to become out of line again and
+  regressed hits/replacement. Restored the prior search implementation.
+- Combined insertion checked each group's candidates before selecting a
+  vacancy. A tombstone was remembered while the existing search continuation
+  ruled out a later duplicate; empty termination established absence. The
+  saved route witness was ghost, and rebuild discarded the saved vacancy.
+  Full table proofs and bytecode/native runtime tests passed.
+- Tested unboxed index/byte returns, explicit first-insertion-probe inlining,
+  a single encoded runtime index with ghost byte/route, capacity-16 fallback,
+  and explicit replacement inlining. Each benchmark compilation checked the
+  complete library refinements. The strongest compromise (replace-inline)
+  improved build/replacement/churn at 64-1,024 entries by about 5-11%, but
+  slowed replacement at 1-8 entries by 11-13% and dense 57,344-entry misses
+  by about 8%. Rejected instead of trading away the across-sizes objective.
+  Its library patch is /tmp/vox-table-next/encoded-insertion.patch.
+- A policy preferring an empty slot without first looking for tombstones
+  avoided one control comparison, but substantially regressed churn. Rejected.
+- Paired data: verification/benchmarks/flat_hashtbl_followup_results.csv.
+  Each row summarizes six pairs, work factor 20, both payloads, seven sizes.
+  Integer keys throughout; string payloads are not string keys. The fused
+  run used fixed baseline-first order; later two-variant runs alternated.
+  Raw runs and binaries: /tmp/vox-table-next/. Benchmarks used the installed
+  optimized compiler without concurrent builds or reviews. Reported ranges
+  are observed paired ratios, not confidence intervals. Unchanged lookup
+  source also changed measured dense misses: generated-code layout and
+  specialization remain relevant, and the exact cause is not established.
+- Separately measured a benchmark-only, unverified eight-slot dense-array
+  prototype with integer and actual string keys, against Stdlib, at 1/2/4/8
+  entries. Five runs used precomputed keys and separately allocated equal
+  strings for hits. String keys had a common prefix. At 1 entry, hits were
+  1.89/1.99 ns (dense/Stdlib, int), 3.98/11.01 ns (string). At 8 entries,
+  misses were 7.44/1.58 ns (int), 22.13/11.91 ns (string). No promotion path
+  or correctness proof was implemented for this prototype. These fixed-order
+  microbenchmarks do not compare against the verified SIMD table or establish
+  a universal small-table policy. Source/data: /tmp/vox-table-next/small.ml,
+  /tmp/vox-table-next/small.csv. A generic eight-entry linear mode was not
+  adopted. A single allocation containing SIMD controls and entries remains
+  unevaluated and would require a separate storage/promotion proof.
+- Retained a deterministic test: fill across multiple probe groups, delete
+  in the first group, replace a later-group key without increasing length,
+  then insert an absent key and verify that the tombstone is reused.
+- Final ./dev test vox/table_model.ml passes bytecode/native proofs and runtime
+  checks. codex review --uncommitted completed with no actionable findings.
+- Vox issue observed: placing the new test before the existing two-table
+  pointer ownership test caused a refinement counterexample at pointer_fill
+  alias 0 first.view other.state. Appending the identical test after existing
+  tests passed. No ownership contract or proof was weakened. Declaration-order
+  sensitivity remains unexplained and merits a minimized compiler reproducer.
+
+Small-table follow-up: combined storage writes and direct initial-slot lookup
+- Combined entry/control/count updates into one exact-contract storage
+  primitive, retaining both caml_modify barriers. The map invariant proof
+  remained in Vox. Full bytecode/native proof and runtime tests passed;
+  codex review --uncommitted exited clean. Interface ABI was seven native
+  arguments and nine bytecode arguments. The experiment was reverted.
+- Six alternating paired runs at work factor 20 improved 8-16-entry build
+  by approximately 7-10%, but regressed 57,344-entry misses and did not close
+  the small-table Stdlib gap. Source unchanged for lookup, so the precise
+  cause of the dense regression remains unidentified. Results appended as
+  fused-write to flat_hashtbl_followup_results.csv. Raw data and the patch
+  are /tmp/vox-small-win/paired.csv and /tmp/vox-small-win/fused-write.patch.
+- Direct initial-slot lookup (with verified initialized-read evidence and
+  ordinary group-search fallback) passed refinement checking. Three-run
+  measurements with combined writes: one-entry hit 2.51 ns vs Stdlib 1.98,
+  eight-entry hit 3.44 vs 1.87. Misses and churn regressed. Reverted.
+  Direct experiment source is in /tmp/vox-small-win/direct; measurements are
+  /tmp/vox-small-win/direct.csv. These are integer keys, including string
+  payload rows. Compiler came from make install, with no competing builds
+  or reviews during timing. No new runtime or algorithm changes retained.
+- The objective of beating Stdlib across small-table workloads remains unmet.
+
+Hashbrown ARM64 eight-byte group experiment
+- Implemented eight-byte SIMD groups, seven clone bytes, and sparse masks
+  with one bit per byte (bits 0,8,...,56), plus an empty flag at bit 57.
+  Reduced default/minimum capacity to eight. Updated all probe, coverage,
+  mutation, mask and ownership proofs without weakening the map contract.
+- Full table_model bytecode/native proofs and runtime tests passed, as did
+  control_group exhaustive SIMD checks and table_ownership_rejected.
+  codex review --uncommitted exited 0 with no actionable findings.
+- Assembly used exactly an eight-byte load, vector comparison and scalar
+  mask extraction, with no ADDP reduction or scan C call.
+- Six alternating paired measurements, work factor 20, used the make-install
+  compiler with no concurrent builds or reviews. All nine sizes and both
+  payload types were measured; keys were integers. Source and raw results:
+  /tmp/vox-group8/experiment.patch and /tmp/vox-group8/paired.csv.
+  Medians and paired ratios are recorded as group8 in
+  verification/benchmarks/flat_hashtbl_followup_results.csv.
+- Reverted the experiment. At 57,344 entries, int hits were 6.92/8.10 ns
+  (baseline/group8), misses 17.16/21.61. At 1,024 entries, churn was
+  13.61/17.02. One-entry build improved 45.33/32.86, but eight-entry build
+  regressed 15.66/31.64 because capacity eight requires a resize after seven
+  entries. The width and initial-capacity changes were measured together;
+  their individual contributions to build time were not isolated.
+- The three-run Stdlib comparison still showed slower small-table lookups;
+  the paired baseline comparison is the basis for rejecting the change.
+  Safe deletion-to-empty and capacities below group width remain unimplemented.

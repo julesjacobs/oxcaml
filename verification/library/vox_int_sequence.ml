@@ -51,13 +51,13 @@ let rec (element_at @ total) : (values : int list) -> (index : Bigint.t) ->
   element_def values index;
   length_def values;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
-    if index = 0Z then let u = () in refine_ u
+    if index = 0Z then ()
     else
       let next = (Bigint.sub index 1Z) in
       element_at tail next;
-      let u = () in refine_ u
+      ()
 
 let (swap_equation @ total) : (values : int list) ->
     (first : Bigint.t) -> (second : Bigint.t) ->
@@ -70,7 +70,7 @@ let (swap_equation @ total) : (values : int list) ->
   element_at values first;
   element_at values second;
   swap_def values first second;
-  let u = () in refine_ u
+  ()
 
 let rec (element_set @ total) : (values : int list) ->
     (index : Bigint.t) -> (query : Bigint.t) -> (value : int) ->
@@ -87,13 +87,13 @@ let rec (element_set @ total) : (values : int list) ->
   element_def changed query;
   length_def values;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
-    if query = 0Z then let u = () in refine_ u
+    if query = 0Z then ()
     else
       let next_index = (Bigint.sub index 1Z) in
       let next_query = (Bigint.sub query 1Z) in
-      if index = 0Z then let u = () in refine_ u
+      if index = 0Z then ()
       else
         (element_set tail next_index next_query value;
         let changed_tail = set tail next_index value in
@@ -102,7 +102,7 @@ let rec (element_set @ total) : (values : int list) ->
         element_at tail next_query;
         set_length tail next_index value;
         element_at changed_tail next_query;
-        let u = () in refine_ u)
+        ())
 
 let rec (insert_commute @ total) : (first : int) -> (second : int) ->
     (values : int list) ->
@@ -115,22 +115,22 @@ let rec (insert_commute @ total) : (first : int) -> (second : int) ->
   insert_def first right;
   insert_def second left;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
-    if first <= head && second <= head then let u = () in refine_ u
+    if first <= head && second <= head then ()
     else if first <= head then
       let part = insert second tail in
       let cons = head :: part in
       insert_def first cons;
-      let u = () in refine_ u
+      ()
     else if second <= head then
       let part = insert first tail in
       let cons = head :: part in
       insert_def second cons;
-      let u = () in refine_ u
+      ()
     else
       (insert_commute first second tail;
-      let u = () in refine_ u)
+      ())
 
 let rec (range_empty @ total) : (values : int list) -> (bound : int) ->
     (lower : bool) -> (first : Bigint.t) -> (past : Bigint.t) ->
@@ -139,14 +139,14 @@ let rec (range_empty @ total) : (values : int list) -> (bound : int) ->
     fun values bound lower first past ->
   range_def values bound lower first past;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
-    if past <= 0Z then let u = () in refine_ u
+    if past <= 0Z then ()
     else
       let next_first = if first > 0Z then (Bigint.sub first 1Z) else 0Z in
       let next_past = (Bigint.sub past 1Z) in
       range_empty tail bound lower next_first next_past;
-      let u = () in refine_ u
+      ()
 
 let rec (range_shrink @ total) : (values : int list) -> (bound : int) ->
     (lower : bool) -> (first : Bigint.t) -> (past : Bigint.t) ->
@@ -158,7 +158,7 @@ let rec (range_shrink @ total) : (values : int list) -> (bound : int) ->
   range_def values bound lower first past;
   range_def values bound lower new_first new_past;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     let next_first = if first > 0Z then (Bigint.sub first 1Z) else 0Z in
     let next_past = (Bigint.sub past 1Z) in
@@ -167,7 +167,7 @@ let rec (range_shrink @ total) : (values : int list) -> (bound : int) ->
     let next_new_past = (Bigint.sub new_past 1Z) in
     range_shrink tail bound lower next_first next_past
       next_new_first next_new_past;
-    let u = () in refine_ u
+    ()
 
 let rec (range_get @ total) : (values : int list) -> (bound : int) ->
     (lower : bool) -> (first : Bigint.t) -> (past : Bigint.t) -> (index :
@@ -181,9 +181,9 @@ let rec (range_get @ total) : (values : int list) -> (bound : int) ->
   at_def values index;
   element_def values index;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
-    if index = 0Z then let u = () in refine_ u
+    if index = 0Z then ()
     else
       let next_first = if first > 0Z then (Bigint.sub first 1Z) else 0Z in
       let next_past = (Bigint.sub past 1Z) in
@@ -192,7 +192,7 @@ let rec (range_get @ total) : (values : int list) -> (bound : int) ->
         next_index;
       element_at tail next_index;
       element_def tail next_index;
-      let u = () in refine_ u
+      ()
 
 let rec (range_grow @ total) : (values : int list) -> (bound : int) ->
     (lower : bool) -> (first : Bigint.t) -> (past : Bigint.t) ->
@@ -208,19 +208,19 @@ let rec (range_grow @ total) : (values : int list) -> (bound : int) ->
   at_def values past;
   element_def values past;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     let next_first = if first > 0Z then (Bigint.sub first 1Z) else 0Z in
     let next_past = (Bigint.sub past 1Z) in
     if past = 0Z then
       let zero = 0Z in
       range_def tail bound lower zero zero;
-      let u = () in refine_ u
+      ()
     else
       (element_at tail next_past;
       element_def tail next_past;
       range_grow tail bound lower next_first next_past;
-      let u = () in refine_ u)
+      ())
 
 let rec (range_set @ total) : (values : int list) -> (bound : int) ->
     (lower : bool) -> (first : Bigint.t) -> (past : Bigint.t) ->
@@ -235,16 +235,16 @@ let rec (range_set @ total) : (values : int list) -> (bound : int) ->
   range_def values bound lower first past;
   range_def changed bound lower first past;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
-    if index = 0Z then let u = () in refine_ u
+    if index = 0Z then ()
     else
       let next_first = if first > 0Z then (Bigint.sub first 1Z) else 0Z in
       let next_past = (Bigint.sub past 1Z) in
       let next_index = (Bigint.sub index 1Z) in
       range_set tail bound lower next_first next_past
         next_index value;
-      let u = () in refine_ u
+      ()
 
 let (element_equation @ total) : (values : int list) -> (index : Bigint.t) ->
     {u : unit | element values index ===
@@ -255,18 +255,18 @@ let (element_equation @ total) : (values : int list) -> (index : Bigint.t) ->
   at_def values index;
   element_def values index;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     let next = (Bigint.sub index 1Z) in
     element_def tail next;
-    let u = () in refine_ u
+    ()
 
 let (bag_cons @ total) : (head : int) -> (tail : int list) ->
     {u : unit | bag (head :: tail) === insert head (bag tail)} = fun head tail
       ->
   let values = head :: tail in
   bag_def values;
-  let u = () in refine_ u
+  ()
 
 let rec (bag_exchange @ total) : (head : int) -> (values : int list) -> (index :
   Bigint.t) ->
@@ -279,16 +279,16 @@ let rec (bag_exchange @ total) : (head : int) -> (values : int list) -> (index :
   set_def values index head;
   bag_cons head values;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | value :: tail ->
     let tail_bag = bag tail in
     bag_cons value tail;
-    let refine_ head_tail = bag_cons head tail in
+    let _ = bag_cons head tail in
     insert_commute head value tail_bag;
     if index = 0Z then
       let head_tail = head :: tail in
       bag_cons value head_tail;
-      let u = () in refine_ u
+      ()
     else
       let next = (Bigint.sub index 1Z) in
       let chosen = element tail next in
@@ -300,7 +300,7 @@ let rec (bag_exchange @ total) : (head : int) -> (values : int list) -> (index :
       bag_cons value changed_tail;
       bag_cons chosen changed_tail;
       insert_commute chosen value changed_bag;
-      let u = () in refine_ u
+      ()
 
 let rec (bag_swap @ total) : (values : int list) ->
     (first : Bigint.t) -> (second : Bigint.t) ->
@@ -318,18 +318,18 @@ let rec (bag_swap @ total) : (values : int list) ->
   set_def values first y;
   set_def intermediate second x;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let i = (Bigint.sub first 1Z) in
     let j = (Bigint.sub second 1Z) in
     if first = 0Z then
-      if second = 0Z then let u = () in refine_ u
+      if second = 0Z then ()
       else
         (bag_exchange head tail j;
-        let u = () in refine_ u)
+        ())
     else if second = 0Z then
       (bag_exchange head tail i;
-      let u = () in refine_ u)
+      ())
     else
       let tail_first = set tail i y in
       let tail_changed = set tail_first j x in
@@ -337,7 +337,7 @@ let rec (bag_swap @ total) : (values : int list) ->
       bag_swap tail i j;
       bag_cons head tail;
       bag_cons head tail_changed;
-      let u = () in refine_ u
+      ()
 
 let (permutation_swap @ total) : (values : int list) ->
     (first : Bigint.t) -> (second : Bigint.t) ->
@@ -349,12 +349,12 @@ let (permutation_swap @ total) : (values : int list) ->
   swap_equation values first second;
   bag_swap values first second;
   permutation_def values swapped;
-  let u = () in refine_ u
+  ()
 
 let (permutation_refl @ total) : (values : int list) ->
     {u : unit | permutation values values} = fun values ->
   permutation_def values values;
-  let u = () in refine_ u
+  ()
 
 let (permutation_trans @ total) : (first : int list) -> (second : int list) ->
     (third : int list) ->
@@ -363,7 +363,7 @@ let (permutation_trans @ total) : (first : int list) -> (second : int list) ->
   permutation_def first second;
   permutation_def second third;
   permutation_def first third;
-  let u = () in refine_ u
+  ()
 
 let (element_swap @ total) : (values : int list) -> (first : Bigint.t) ->
     (second : Bigint.t) -> (query : Bigint.t) ->
@@ -382,7 +382,7 @@ let (element_swap @ total) : (values : int list) -> (first : Bigint.t) ->
   set_length values first y;
   element_set values first query y;
   element_set intermediate second query x;
-  let u = () in refine_ u
+  ()
 
 let rec (range_sub @ total) : (values : int list) -> (bound : int) -> (lower :
   bool) ->
@@ -401,9 +401,9 @@ let rec (range_sub @ total) : (values : int list) -> (bound : int) -> (lower :
   take_def width rest;
   all_def selected bound lower;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
-    if past <= 0Z then let u = () in refine_ u
+    if past <= 0Z then ()
     else
       let next_first = if first > 0Z then (Bigint.sub first 1Z) else 0Z in
       let next_past = (Bigint.sub past 1Z) in
@@ -413,7 +413,7 @@ let rec (range_sub @ total) : (values : int list) -> (bound : int) -> (lower :
       sub_def tail next_first next_past;
       drop_def next_first tail;
       take_def next_width next_rest;
-      let u = () in refine_ u
+      ()
 
 let rec (all_append @ total) : (left : int list) -> (right : int list) ->
     (bound : int) -> (lower : bool) ->
@@ -425,10 +425,10 @@ let rec (all_append @ total) : (left : int list) -> (right : int list) ->
   all_def left bound lower;
   all_def joined bound lower;
   match left with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     all_append tail right bound lower;
-    let u = () in refine_ u
+    ()
 
 let rec (all_insert @ total) : (value : int) -> (values : int list) ->
     (bound : int) -> (lower : bool) ->
@@ -440,10 +440,10 @@ let rec (all_insert @ total) : (value : int) -> (values : int list) ->
   all_def values bound lower;
   all_def inserted bound lower;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     all_insert value tail bound lower;
-    let u = () in refine_ u
+    ()
 
 let rec (all_bag @ total) : (values : int list) -> (bound : int) -> (lower :
   bool) ->
@@ -452,12 +452,12 @@ let rec (all_bag @ total) : (values : int list) -> (bound : int) -> (lower :
   bag_def values;
   all_def values bound lower;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let tail_bag = bag tail in
     all_insert head tail_bag bound lower;
     all_bag tail bound lower;
-    let u = () in refine_ u
+    ()
 
 let (all_permutation @ total) : (before : int list) -> (after : int list) ->
     (bound : int) -> (lower : bool) ->
@@ -467,7 +467,7 @@ let (all_permutation @ total) : (before : int list) -> (after : int list) ->
   permutation_def before after;
   all_bag before bound lower;
   all_bag after bound lower;
-  let u = () in refine_ u
+  ()
 
 let rec (all_weaken @ total) : (values : int list) -> (old_bound : int) ->
     (new_bound : int) -> (lower : bool) ->
@@ -478,12 +478,12 @@ let rec (all_weaken @ total) : (values : int list) -> (old_bound : int) ->
   all_def values old_bound lower;
   all_def values new_bound lower;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     accepts_def head old_bound lower;
     accepts_def head new_bound lower;
     all_weaken tail old_bound new_bound lower;
-    let u = () in refine_ u
+    ()
 
 let (sorted_short @ total) : (values : int list) ->
     {u : unit | if length values <= 1Z then sorted values else true} = fun
@@ -491,13 +491,13 @@ let (sorted_short @ total) : (values : int list) ->
   length_def values;
   sorted_def values;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let side = false in
     length_def tail;
     sorted_def tail;
     all_def tail head side;
-    let u = () in refine_ u
+    ()
 
 let rec (sorted_glue @ total) : (left : int list) -> (pivot : int) -> (right :
   int list) ->
@@ -514,7 +514,7 @@ let rec (sorted_glue @ total) : (left : int list) -> (pivot : int) -> (right :
   all_def left pivot low_side;
   sorted_def joined;
   match left with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     accepts_def head pivot low_side;
     accepts_def pivot head high_side;
@@ -522,7 +522,7 @@ let rec (sorted_glue @ total) : (left : int list) -> (pivot : int) -> (right :
     all_def pivot_right head high_side;
     all_append tail pivot_right head high_side;
     sorted_glue tail pivot right;
-    let u = () in refine_ u
+    ()
 
 let[@def] rec insert_all (left : int list) (right : int list) =
   match left with [] -> right | head :: tail -> insert head (insert_all tail
@@ -537,12 +537,12 @@ let rec (insert_all_insert @ total) : (value : int) -> (left : int list) ->
   insert_all_def left right;
   insert_all_def inserted right;
   match left with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let combined = insert_all tail right in
     insert_all_insert value tail right;
     insert_commute value head combined;
-    let u = () in refine_ u
+    ()
 
 let rec (insert_all_bag @ total) : (left : int list) -> (right : int list) ->
     {u : unit | insert_all (bag left) right === insert_all left right} = fun
@@ -550,12 +550,12 @@ let rec (insert_all_bag @ total) : (left : int list) -> (right : int list) ->
   bag_def left;
   insert_all_def left right;
   match left with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let tail_bag = bag tail in
     insert_all_insert head tail_bag right;
     insert_all_bag tail right;
-    let u = () in refine_ u
+    ()
 
 let rec (bag_append @ total) : (left : int list) -> (right : int list) ->
     {u : unit | bag (append left right) === insert_all left (bag right)} = fun
@@ -566,10 +566,10 @@ let rec (bag_append @ total) : (left : int list) -> (right : int list) ->
   bag_def joined;
   insert_all_def left right_bag;
   match left with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     bag_append tail right;
-    let u = () in refine_ u
+    ()
 
 let (permutation_append @ total) : (left : int list) -> (right : int list) ->
     (new_left : int list) -> (new_right : int list) ->
@@ -587,7 +587,7 @@ let (permutation_append @ total) : (left : int list) -> (right : int list) ->
   bag_append new_left new_right;
   insert_all_bag left right_bag;
   insert_all_bag new_left new_right_bag;
-  let u = () in refine_ u
+  ()
 
 let rec (sub_one @ total) : (values : int list) -> (index : Bigint.t) ->
     {u : unit | if 0Z <= index && index < length values then
@@ -604,16 +604,16 @@ let rec (sub_one @ total) : (values : int list) -> (index : Bigint.t) ->
   drop_def index values;
   take_def one rest;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     if index = 0Z then
       (take_def zero tail;
-      let u = () in refine_ u)
+      ())
     else
       let next = (Bigint.sub index 1Z) in
       sub_one tail next;
       sub_def tail next index;
-      let u = () in refine_ u
+      ()
 
 let[@def] rec count (values : int list) (target : int) =
   match values with
@@ -632,10 +632,10 @@ let rec (insert_count @ total) : (value : int) -> (values : int list) -> (target
   count_def values target;
   count_def inserted target;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     insert_count value tail target;
-    let u = () in refine_ u
+    ()
 
 let rec (bag_count @ total) : (values : int list) -> (target : int) ->
     {u : unit | count (bag values) target === count values target} = fun values
@@ -643,12 +643,12 @@ let rec (bag_count @ total) : (values : int list) -> (target : int) ->
   bag_def values;
   count_def values target;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let tail_bag = bag tail in
     insert_count head tail_bag target;
     bag_count tail target;
-    let u = () in refine_ u
+    ()
 
 let (permutation_count @ total) : (before : int list) -> (after : int list) ->
   (target : int) ->
@@ -658,15 +658,15 @@ let (permutation_count @ total) : (before : int list) -> (after : int list) ->
   permutation_def before after;
   bag_count before target;
   bag_count after target;
-  let u = () in refine_ u
+  ()
 let rec (count_nonnegative @ total) : (values : int list) -> (target : int) ->
     {u : unit | 0Z <= count values target} = fun values target ->
   count_def values target;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     count_nonnegative tail target;
-    let u = () in refine_ u
+    ()
 
 let rec (count_below @ total) : (values : int list) -> (bound : int) ->
     (target : int) ->
@@ -676,11 +676,11 @@ let rec (count_below @ total) : (values : int list) -> (bound : int) ->
   all_def values bound lower;
   count_def values target;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     accepts_def head bound lower;
     count_below tail bound target;
-    let u = () in refine_ u
+    ()
 
 let rec (insert_sorted @ total) : (value : int) -> (values : int list) ->
     {u : unit | if sorted values then sorted (insert value values) else true} =
@@ -693,18 +693,18 @@ let rec (insert_sorted @ total) : (value : int) -> (values : int list) ->
   match values with
   | [] ->
     all_def values value lower;
-    let u = () in refine_ u
+    ()
   | head :: tail ->
     if value <= head then
       (all_weaken tail head value lower;
       accepts_def head value lower;
       all_def values value lower;
-      let u = () in refine_ u)
+      ())
     else
       (insert_sorted value tail;
       accepts_def value head lower;
       all_insert value tail head lower;
-      let u = () in refine_ u)
+      ())
 
 let rec (bag_sorted @ total) : (values : int list) ->
     {u : unit | sorted (bag values)} = fun values ->
@@ -712,12 +712,12 @@ let rec (bag_sorted @ total) : (values : int list) ->
   match values with
   | [] ->
     sorted_def values;
-    let u = () in refine_ u
+    ()
   | head :: tail ->
     let rest = bag tail in
     bag_sorted tail;
     insert_sorted head rest;
-    let u = () in refine_ u
+    ()
 
 let rec (sorted_count_extensional @ total) :
     (left : int list) -> (right : int list) ->
@@ -732,13 +732,13 @@ let rec (sorted_count_extensional @ total) :
     match left with
     | [] ->
       (match right with
-       | [] -> refine_ u
+       | [] -> u
        | head :: tail ->
         same head;
         count_def left head;
         count_def right head;
         count_nonnegative tail head;
-        refine_ u)
+        u)
     | x :: xs ->
       match right with
       | [] ->
@@ -746,7 +746,7 @@ let rec (sorted_count_extensional @ total) :
         count_def left x;
         count_def right x;
         count_nonnegative xs x;
-        refine_ u
+        u
       | y :: ys ->
         if x < y then
           (same x;
@@ -754,24 +754,24 @@ let rec (sorted_count_extensional @ total) :
           count_def right x;
           count_nonnegative xs x;
           count_below ys y x;
-          refine_ u)
+          u)
         else if y < x then
           (same y;
           count_def left y;
           count_def right y;
           count_nonnegative ys y;
           count_below xs x y;
-          refine_ u)
+          u)
         else
           let (same_tail @ total) : (target : int) ->
               {u : unit | count xs target === count ys target} = fun target ->
             same target;
             count_def left target;
             count_def right target;
-            let u = () in refine_ u in
+            () in
           sorted_count_extensional xs ys same_tail;
-          refine_ u)
-  else refine_ u
+          u)
+  else u
 
 let (count_extensional @ total) :
     (left : int list) -> (right : int list) ->
@@ -785,12 +785,12 @@ let (count_extensional @ total) :
     same target;
     bag_count left target;
     bag_count right target;
-    let u = () in refine_ u in
+    () in
   bag_sorted left;
   bag_sorted right;
   sorted_count_extensional one two same_bag;
   permutation_def left right;
-  let u = () in refine_ u
+  ()
 
 let[@def] multiplicity (values : multiset) (target : int) = count values target
 
@@ -800,7 +800,7 @@ let (bag_multiplicity @ total) : (values : int list) -> (target : int) ->
   let model = bag values in
   multiplicity_def model target;
   bag_count values target;
-  let u = () in refine_ u
+  ()
 
 let rec (count_append @ total) : (left : int list) -> (right : int list) ->
     (target : int) ->
@@ -812,10 +812,10 @@ let rec (count_append @ total) : (left : int list) -> (right : int list) ->
   count_def left target;
   count_def joined target;
   match left with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     count_append tail right target;
-    let u = () in refine_ u
+    ()
 
 let (permutation_rotate @ total) : (left : int list) -> (right : int list) ->
     {u : unit | permutation (append left right) (append right left)} =
@@ -826,9 +826,9 @@ let (permutation_rotate @ total) : (left : int list) -> (right : int list) ->
       {u : unit | count before target === count after target} = fun target ->
     count_append left right target;
     count_append right left target;
-    let u = () in refine_ u in
+    () in
   count_extensional before after same;
-  let u = () in refine_ u
+  ()
 
 let rec (all_get @ total) : (values : int list) -> (bound : int) ->
     (lower : bool) -> (index : Bigint.t) ->
@@ -839,11 +839,11 @@ let rec (all_get @ total) : (values : int list) -> (bound : int) ->
   length_def values;
   element_equation values index;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     let previous = Bigint.sub index 1Z in
     all_get tail bound lower previous;
-    let u = () in refine_ u
+    ()
 
 let rec (ordered @ total) : (values : int list) ->
     (first : Bigint.t) -> (last : Bigint.t) ->
@@ -855,7 +855,7 @@ let rec (ordered @ total) : (values : int list) ->
   element_equation values first;
   element_equation values last;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let i = Bigint.sub first 1Z in
     let j = Bigint.sub last 1Z in
@@ -864,7 +864,7 @@ let rec (ordered @ total) : (values : int list) ->
     all_get tail head lower j;
     accepts_def value head lower;
     ordered tail i j;
-    let u = () in refine_ u
+    ()
 
 let rec (sorted_take @ total) : (values : int list) -> (count : Bigint.t) ->
     {u : unit | if sorted values && 0Z <= count && count <= length values then
@@ -875,16 +875,16 @@ let rec (sorted_take @ total) : (values : int list) -> (count : Bigint.t) ->
   take_def count values;
   sorted_def selected;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     let next = Bigint.sub count 1Z in
     let prefix = take next tail in
     let suffix = drop next tail in
     let lower = false in
     sorted_take tail next;
-    let refine_ partition = cut tail next in
+    let _ = cut tail next in
     all_append prefix suffix head lower;
-    let u = () in refine_ u
+    ()
 
 let rec (sorted_drop @ total) : (values : int list) -> (count : Bigint.t) ->
     {u : unit | if sorted values then sorted (drop count values) else true} =
@@ -894,11 +894,11 @@ let rec (sorted_drop @ total) : (values : int list) -> (count : Bigint.t) ->
   drop_def count values;
   sorted_def selected;
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     let next = Bigint.sub count 1Z in
     sorted_drop tail next;
-    let u = () in refine_ u
+    ()
 
 let (sorted_sub @ total) : (values : int list) -> (first : Bigint.t) ->
     (past : Bigint.t) ->
@@ -908,10 +908,10 @@ let (sorted_sub @ total) : (values : int list) -> (first : Bigint.t) ->
   let rest = drop first values in
   let count = Bigint.sub past first in
   sub_def values first past;
-  let refine_ partition = cut values first in
+  let _ = cut values first in
   sorted_drop values first;
   sorted_take rest count;
-  let u = () in refine_ u
+  ()
 
 let rec (all_intro @ total) : (values : int list) -> (bound : int) ->
     (lower : bool) ->
@@ -922,16 +922,16 @@ let rec (all_intro @ total) : (values : int list) -> (bound : int) ->
   length_def values;
   all_def values bound lower;
   element_equation values zero;
-  let refine_ head = proof zero in
+  let _ = proof zero in
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | _ :: tail ->
     all_intro tail bound lower (fun index ->
       let next = Bigint.add index 1Z in
-      let refine_ known = proof next in
+      let _ = proof next in
       element_equation values next;
-      let u = () in refine_ u);
-    let u = () in refine_ u
+      ());
+    ()
 
 let rec (sorted_intro @ total) : (values : int list) ->
     ((first : Bigint.t) -> (last : Bigint.t) ->
@@ -942,25 +942,25 @@ let rec (sorted_intro @ total) : (values : int list) ->
   let lower = false in
   sorted_def values;
   length_def values;
-  let refine_ first = element_equation values zero in
+  let _ = element_equation values zero in
   match values with
-  | [] -> let u = () in refine_ u
+  | [] -> ()
   | head :: tail ->
     all_intro tail head lower (fun index ->
       let next = Bigint.add index 1Z in
       let value = element tail index in
-      let refine_ known = proof zero next in
+      let _ = proof zero next in
       element_equation values next;
       accepts_def value head lower;
-      let u = () in refine_ u);
+      ());
     sorted_intro tail (fun first last ->
       let i = Bigint.add first 1Z in
       let j = Bigint.add last 1Z in
-      let refine_ known = proof i j in
+      let _ = proof i j in
       element_equation values i;
       element_equation values j;
-      let u = () in refine_ u);
-    let u = () in refine_ u
+      ());
+    ()
 
 let (sorted_set @ total) : (values : int list) -> (index : Bigint.t) ->
     (value : int) ->
@@ -983,6 +983,6 @@ let (sorted_set @ total) : (values : int list) -> (index : Bigint.t) ->
       ordered values first last;
       ordered values first previous;
       ordered values next last;
-      let u = () in refine_ u);
-    let u = () in refine_ u
-  else let u = () in refine_ u
+      ());
+    ()
+  else ()

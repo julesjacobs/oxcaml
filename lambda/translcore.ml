@@ -1060,6 +1060,11 @@ and transl_exp0_desc ~in_new_scope ~scopes (layout : Lambda.layout) e =
       end
   | Texp_unboxed_field{ record = arg; record_sort = arg_sort;
                         label = lbl; record_repres; _ } ->
+    if lbl.lbl_ghost then
+      let arg_sort = Jkind.Sort.default_for_transl_and_get arg_sort in
+      let targ = transl_exp ~scopes (layout_exp arg_sort arg) arg in
+      Lsequence (targ, transl_ghost ~scopes layout e)
+    else
     begin match record_repres with
     | Record_unboxed_product_undetermined ->
       fatal_error "transl_exp0: undetermined record representation"
@@ -1285,6 +1290,8 @@ and transl_exp0_desc ~in_new_scope ~scopes (layout : Lambda.layout) e =
                   event_before ~scopes ifso (transl_exp ~scopes layout ifso),
                   lambda_unit,
                   Lambda.layout_unit)
+  | Texp_sequence (expr1, _, expr2) when is_ghost_exp expr1 ->
+      event_before ~scopes expr2 (transl_exp ~scopes layout expr2)
   | Texp_sequence(expr1, sort', expr2) ->
       let sort' = Jkind.Sort.default_for_transl_and_get sort' in
       let layout' = layout_exp sort' expr1 in
@@ -2915,6 +2922,7 @@ and transl_record_unboxed_product ~scopes loc env fields repres opt_init_expr =
       Array.map
         (fun (lbl, lbl_sort, definition) ->
             let lbl_sort = Jkind.Sort.default_for_transl_and_get lbl_sort in
+            if lbl.lbl_ghost then layout_ghost else
             match definition with
             | Kept (typ, _mut, _) -> layout env lbl.lbl_loc lbl_sort typ
             | Overridden (_lid, expr) -> layout_exp lbl_sort expr)
@@ -2923,9 +2931,15 @@ and transl_record_unboxed_product ~scopes loc env fields repres opt_init_expr =
     in
     let ll =
       Array.mapi
-        (fun i (_lbl, lbl_sort, definition) ->
+        (fun i (lbl, lbl_sort, definition) ->
             let lbl_sort = Jkind.Sort.default_for_transl_and_get lbl_sort in
             match definition with
+            | Kept _ when lbl.lbl_ghost ->
+              void_value (of_location ~scopes loc)
+            | Overridden (_, expr) when lbl.lbl_ghost ->
+              Lsequence
+                (transl_exp ~scopes (layout_exp lbl_sort expr) expr,
+                 void_value (of_location ~scopes loc))
             | Kept (_typ, _mut, _) ->
               let access = Punboxed_product_field (i, shape) in
               Lprim (access, [Lvar init_id], of_location ~scopes loc)

@@ -1,5 +1,25 @@
 # Vox demos
 
+For a first tour, use `bounded_clamp.ml`, then `checked_windows.ml`, then
+`queue_client.ml`. They introduce static contracts, runtime validation, and
+abstract verified data structures. `clamp.ml` remains a separate regression
+fixture for explicit equations, opacity, and additional laws.
+
+`connectivity.ml` is a client of the sealed `Vox_connectivity` interface. It
+inserts five elements, merges components, and performs finds across several
+capacity epochs. Its ghost snapshots support membership and connectivity
+proofs without exposing forests or heaps, including that an isolated vertex
+stays disconnected after repeated unions and finds. One caller-owned wallet
+pays for all operations, and conservation proves the charged-prefix bound. This
+client uses a finite budget; the online data structure requires no advance
+population limit. The lower-level accounting regressions remain in
+`union_find_online.ml`.
+
+To investigate a rejected refinement, compile with `-dvc`. The diagnostic
+includes the encoded goal, assumptions, available signed model values and
+opaque function names. Opaque models describe the verifier's assumptions;
+they need not be executable counterexamples.
+
 An executable tour of the PR stack, not a replacement for detailed regression
 tests. Each PR adds its demos; run every demo present at the current checkout:
 
@@ -27,6 +47,7 @@ legacy-mode defaults.
 | Logical equality | `equality.ml` | `===` is logical equality in predicates and a checked equality in `assume_`. |
 | Definition lemmas | `definitions.ml` | Explicit unfolding proves calls; ignored lemmas do not expose equations. |
 | Clamp laws | `clamp.ml` | Explicit equations prove interval bounds, identity, and idempotence. |
+| Recursive closures | `closure_termination.ml`, `scoped_termination.ml` | Named and returned callbacks retain structural or numerical descent obligations. |
 | Structural recursion | `structural.ml` | Checked inductive values support terminating recursive traversals. |
 | Expression evaluation | `expressions.ml` | Structural recursion establishes termination; induction proves constant folding preserves wrapping-integer evaluation. |
 | Numerical recursion | `numerical.ml`, `fibonacci.ml` | Decreasing measures establish totality; tail-recursive and fast-doubling results equal naive Fibonacci. |
@@ -52,6 +73,7 @@ legacy-mode defaults.
 | Parallel slices | `borrow_parallel.ml` | Disjoint callbacks, sequential fallback, and joining before exception propagation. |
 | Quicksort | `quicksort.mli`, `quicksort_client.ml` | Sequential and parallel in-place sorting establish sortedness and multiplicity-preserving permutation on normal return. |
 | Ghost code | `ghost*.ml` | Total proof computations erase; ghost values remain usable in static predicates and cannot be read by runtime checks. |
+| Time credits | `time_credits.ml`, `time_credits_rejected.ml`, `merge_sort.ml`, `merge_sort_rejected.ml` | Unique ghost credits split and merge; generic merge sort preserves full-element multiplicities and uses at most `n * ceil(log2 n)` comparison calls. |
 
 `unchecked.ml`, accepted at the refinement-former stage, now demonstrates
 rejection by VC generation. Solver-dependent tests require Z3 on `PATH` and
@@ -100,9 +122,10 @@ identities use `assume_`; ghost expressions require total computations.
 negative inputs to zero, and computes Fibonacci 100 without overflow guards.
 Its inductive proof erases at the fast-doubling operation boundary.
 
-Structural recursion does not fix the existing totality loophole through
-ordinary negative datatypes. A successful demo is not a claim of global
-soundness; never execute known-divergent examples.
+Total elimination requires the checked datatype guarantee.
+`negative_totality.ml` checks that negative variants, recursive records, and
+alias-hidden negative types cannot bypass it; the partial versions remain legal.
+These regressions are not a mechanized soundness proof of Vox.
 
 ## Additional demos
 
@@ -283,3 +306,69 @@ range, and permutation mathematics used by quicksort and `collection_theory.ml`.
 The latter verifies rotation and observes preserved multiplicities through an
 abstract multiset interface. `collection_rejected.ml` checks representation
 abstraction and the premises required by the count laws.
+
+## Permission refs
+
+`pref.mli` exposes one erased unique token and its finite-map observation
+`Pref.own`. Reads borrow the token; writes consume it and return its successor.
+The current map determines both permission and value. Saved ghost maps remain
+historical observations after writes. Native code omits token fields and
+arguments. Bytecode retains the existing `void` unit placeholders; neither
+backend stores an ownership map. `pref_layout.ml` checks the wrapper layouts.
+
+Pref identities have kind `immutable_data`; they carry no ownership themselves.
+Payloads can include recursive records and immutable function fields. Executable
+reads and writes are partial, so a higher-order store cannot introduce recursion
+into total code. Ghost map observations and split/join remain total.
+
+`Pref.split selection token` returns two erased token fields, dividing ownership
+by the domain of `selection`. `Pref.join left right` consumes both tokens and
+returns their disjoint union. Each live token occurrence owns a disjoint fragment;
+uniqueness prevents joining a token with itself. Maps are observations and cannot
+be converted into tokens.
+
+`prefs.ml` checks updates, frames, old snapshots, and stable runtime identity.
+`pref_swap.ml` verifies a swap against a whole-map postcondition;
+`pref_payloads.ml` exercises the GC write barrier with a list payload.
+`pref_staging.ml` checks that partial application does not execute an erased-token
+write early. `pref_rejected.ml` rejects missing permission, stale ownership,
+ghost writes, and false map claims. `pref_modes.ml` exercises zero-layout
+uniqueness and the payload-kind boundary.
+
+`pref_records.ml` checks recursive and higher-order payloads. `pref_split.ml`
+checks split/write/join and historical observations. `pref_tree.ml` verifies a
+partial binary-tree mirror against a total inductive model, including validity,
+exact heap contents, and preservation of an unrelated frame. Its runtime client
+mirrors an asymmetric tree and checks every link and an unrelated integer cell.
+`pref_list.ml` verifies in-place linked-list reversal with separate ownership
+for the remaining list and reversed prefix. Its contract gives the exact reversed
+node model and preserves an unrelated frame. A checked traversal compares node
+identities before and after reversal, including empty, singleton, repeated-value,
+and 1,000-node lists; reversing twice restores the original order.
+`pref_list_rejected.ml` rejects a no-op claimed to reverse a list and an attempt
+to drop a node from the owned map. These examples use the existing Pref laws.
+
+The `pref_ring_*_demo.ml` tests exercise circular doubly linked lists with a
+sentinel. Both link cells appear in the same ownership map. The examples check
+empty and singleton cycles, insertion, removal with split/join of the detached
+node's ownership, a cross-ring range splice, reversal, and traversal in both
+directions. An unrelated integer remains in a separate ownership token and is
+checked afterwards.
+
+Local mutation contracts specify exact map updates; the concrete examples
+establish the resulting whole-cycle predicates. The splice contract checks
+boundary links, so callers remain responsible for range validity and destination
+placement. Reversal collects an auxiliary list of node handles, includes the
+sentinel, and swaps each node's links. The supporting proof modules use the
+existing Pref laws without additional trusted declarations.
+`pref_ring_rejected.ml` rejects sentinel removal, a missing backward-link update,
+and a no-op claimed to reverse a list.
+
+The recursive payload examples currently require ordinary inference;
+`-principal` cannot establish their recursive `immutable_data` bounds.
+
+The solver supplies ground empty/update/lookup, union, restriction, exclusion,
+and disjointness laws over a common location sort. Generic finite-map laws in
+`Pref.Heap` are trusted specifications; the tree functions and proofs are checked.
+Different payload sorts do not imply distinct locations. The encoding is
+conservative across typed views; it does not supply general heap extensionality.

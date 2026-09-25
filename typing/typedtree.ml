@@ -170,6 +170,7 @@ and 'a pattern_data =
    }
 
 and pat_extra =
+  | Tpat_refinement of Types.type_expr
   | Tpat_constraint of core_type option * Mode.Alloc.Const.t modes
   | Tpat_type of Path.t * Longident.t loc
   | Tpat_open of Path.t * Longident.t loc * Env.t
@@ -266,6 +267,8 @@ and exp_extra =
   | Texp_borrowed
   | Texp_ghost_region
   | Texp_refine
+  | Texp_refinement of { source : Types.type_expr; target : Types.type_expr }
+  | Texp_value_name of Ident.t
   | Texp_let_refine of Ident.t * string loc
 
 and arg_label = Types.arg_label =

@@ -1,6 +1,6 @@
 open Vox_smt
 
-let queries source =
+let queries ?(retry = false) source =
   Language_extension.enable Refinement_types ();
   Typecore.reset_delayed_checks ();
   let parsed = Parse.implementation (Lexing.from_string source) in
@@ -9,8 +9,14 @@ let queries source =
   in
   Typecore.force_delayed_checks ();
   let result = ref [] in
-  Vox_vc.generate tree ~prove:(fun _ query ->
+  let first = ref true in
+  Vox_vc.generate tree ~prove:(fun loc query ->
       check ~int_width:63 query;
+      if retry && !first
+      then begin
+        first := false;
+        Location.raise_errorf ~loc "Exercise individual-obligation retry"
+      end;
       result := query :: !result);
   List.rev !result
 
@@ -18,6 +24,28 @@ let prelude =
   "external ge : int -> int -> bool @@ total = \"%greaterequal\"\n\
    external add : int -> int -> int @@ total = \"%addint\"\n\
    type nonnegative = {n : int | ge n 0}\n"
+
+let () =
+  let source =
+    prelude ^ "let f (x : int) =\n" ^ "let (_ : nonnegative) = refine_ x in\n"
+    ^ String.concat "" (List.init 40 (fun _ -> "let x = add x x in\n"))
+    ^ "let (_ : {n : int | n === x}) = refine_ x in ()"
+  in
+  let batch = queries source in
+  let separate = queries ~retry:true source in
+  match batch, separate with
+  | [batch], [first; second] ->
+    assert (List.length first.facts < List.length batch.facts / 2);
+    let solve q =
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    in
+    assert (match solve first with Invalid _ -> true | _ -> false);
+    assert (solve second = Valid)
+  | _ -> failwith "Expected a batch and two individual obligations"
 
 let size count body =
   let steps = String.concat "" (List.init count (fun _ -> body)) in
@@ -196,6 +224,38 @@ let () =
   let small = lambda_size 20 in
   let large = lambda_size 80 in
   assert (large < 5 * small);
+  let repeated_size count =
+    let predicate =
+      String.concat " && " (List.init count (fun _ -> "ge (p x) 0"))
+    in
+    let source =
+      prelude
+      ^ "external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n"
+      ^ "let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init 20 (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n" ^ "let (_ : {u : unit | " ^ predicate
+      ^ "}) = refine_ u in ()"
+    in
+    match queries source with
+    | [q] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+    | _ -> failwith "Expected one repeated ghost-lambda query"
+  in
+  assert (repeated_size 20 < 3 * repeated_size 1);
+  assert (
+    solve
+      ("let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init 20 (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n"
+      ^ "let (_ : {u : unit | ge (p x) (p x)}) = refine_ u in ()")
+    = Valid);
+  assert (
+    match
+      solve
+        "let f () = let p = ghost_ (fun (x : int) -> add x 1) in\n\
+         let u = () in let (_ : {u : unit | p 1 === p 2}) = refine_ u in ()"
+    with
+    | Invalid _ -> true
+    | _ -> false);
   print_endline "Ghost lambdas preserve obligations and share substitutions"
 
 let () =
@@ -224,3 +284,95 @@ let () =
   assert (solve 20 = Valid);
   assert (match solve 10 with Invalid _ -> true | _ -> false);
   print_endline "Iarray equality transports nested observations"
+
+let () =
+  let prelude =
+    "type pointer : immutable_data\n\
+     type heap : immutable_data\n\
+     external empty : unit -> heap @@ total = \"caml_pref_heap_empty\"\n\
+     external mem : heap -> pointer -> bool @@ total = \"caml_pref_heap_mem\"\n\
+     external put : heap -> pointer -> int -> heap @@ total = \
+     \"caml_pref_heap_put\"\n\
+     external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n"
+  in
+  let query source =
+    match queries (prelude ^ source) with
+    | [q] -> q
+    | _ -> failwith "Expected one Pref identity query"
+  in
+  let identity_size count =
+    let parameters =
+      String.concat " "
+        (List.init count (fun i -> Printf.sprintf "(p%d : pointer)" i))
+    in
+    let observations =
+      String.concat " && "
+        (List.init count (fun i -> Printf.sprintf "mem h p%d === mem h p%d" i i))
+    in
+    let q =
+      query
+        ("let f (h : heap) " ^ parameters
+       ^ " = let u = () in let (_ : {u : unit | " ^ observations
+       ^ "}) = refine_ u in ()")
+    in
+    String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+  in
+  assert (identity_size 80 < 5 * identity_size 20);
+  let solve predicate =
+    let q =
+      query
+        ("let f (p : pointer) (q : pointer) = let u = () in\n"
+       ^ "let (_ : {u : unit | " ^ predicate ^ "}) = refine_ u in ()")
+    in
+    (Vox_smt_solver.check
+       ~config:{ Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+       ~int_width:63 q)
+      .validity
+  in
+  assert (solve "mem (put (empty ()) p 0) q === (p === q)" = Valid);
+  assert (match solve "p === q" with Invalid _ -> true | _ -> false);
+  assert (
+    match solve "(p === q) === false" with Invalid _ -> true | _ -> false);
+  print_endline "Pref identity equations scale linearly"
+
+let () =
+  let source =
+    "type pointer : immutable_data\n\
+     type heap : immutable_data\n\
+     type 'a option = None | Some of 'a\n\
+     external put : heap -> pointer -> int -> heap @@ total = \
+     \"caml_pref_heap_put\"\n\
+     external at : heap -> pointer -> int option @@ total = \
+     \"caml_pref_heap_at\"\n\
+     external write : (h : heap) -> (p : pointer) -> (v : int) ->\n\
+     {r : heap | r === put h p v} = \"test_heap_write\"\n\
+     let f (h : heap) "
+    ^ String.concat " "
+        (List.init 48 (fun i -> Printf.sprintf "(p%d : pointer)" i))
+    ^ " =\n"
+    ^ String.concat ""
+        (List.init 48 (fun i ->
+             Printf.sprintf
+               "let h = write h p%d %d in\n\
+                let u = () in\n\
+                let (_ : {u : unit | at h p%d === Some %d}) = refine_ u in\n"
+               i i i i))
+    ^ "let u = () in\n\
+       let (_ : {u : unit | at h p47 === Some 999}) = refine_ u in ()"
+  in
+  let qs = queries ~retry:true source in
+  assert (List.length qs = 49);
+  List.iteri
+    (fun index query ->
+      let validity =
+        (Vox_smt_solver.check
+           ~config:
+             { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+           ~int_width:63 query)
+          .validity
+      in
+      if index < 48
+      then assert (validity = Valid)
+      else assert (match validity with Invalid _ -> true | _ -> false))
+    qs;
+  print_endline "Heap observations are regenerated for individual obligations"

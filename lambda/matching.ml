@@ -2714,10 +2714,23 @@ let get_expr_args_record_unboxed_product ~scopes head { arg; mut; _ } rem =
           Alias, compose_mut mut Immutable
       in
       let lbl_sort =
-        Jkind.Sort.default_for_transl_and_get
+        if lbl.lbl_ghost then
+          let field_type =
+            Ctype.apply head.pat_env [lbl.lbl_res] lbl.lbl_arg [head.pat_type]
+          in
+          match
+            Ctype.type_sort ~why:Match ~fixed:false head.pat_env field_type
+          with
+          | Ok s -> Jkind.Sort.default_for_transl_and_get s
+          | Error _ -> fatal_error "unrepresentable ghost field"
+        else Jkind.Sort.default_for_transl_and_get
           (unboxed_label_sort lbl lbl_repres)
       in
       let layout = Typeopt.layout_of_sort lbl.lbl_loc lbl_sort in
+      let access =
+        if lbl.lbl_ghost then Lambda.placeholder_of_layout loc layout
+        else access
+      in
       {
         arg = access;
         binding_kind;
