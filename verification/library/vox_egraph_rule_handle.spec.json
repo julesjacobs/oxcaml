@@ -1,0 +1,889 @@
+{
+  "schema_version": 1,
+  "files": [
+    {
+      "path": "verification/library/vox_egraph_language_spec.ml",
+      "sha256": "00d9f07dad334bcec4d079e6861a57b7a30ee6906aafdbcd06ea0de9797bd33d",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "type",
+          "name": "sort",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "type sort = Integer | Boolean"
+        },
+        {
+          "kind": "type",
+          "name": "value",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "type value = Int_value of int | Bool_value of bool"
+        },
+        {
+          "kind": "type",
+          "name": "expr",
+          "start_line": 3,
+          "end_line": 12,
+          "code": "type expr =\n  | Int_lit of int\n  | Bool_lit of bool\n  | Int_input\n  | Bool_input\n  | Add of expr * expr\n  | Eq_int of expr * expr\n  | Int_if of expr * expr * expr\n  | Bool_if of expr * expr * expr\n[@@inductive]"
+        },
+        {
+          "kind": "type",
+          "name": "env",
+          "start_line": 14,
+          "end_line": 14,
+          "code": "type env = { int_input : int; bool_input : bool }"
+        },
+        {
+          "kind": "let",
+          "name": "as_int",
+          "start_line": 16,
+          "end_line": 17,
+          "code": "let[@def] (as_int @ total) (value : value @ immutable) =\n  match value with Int_value x -> x | Bool_value _ -> 0"
+        },
+        {
+          "kind": "let",
+          "name": "as_bool",
+          "start_line": 19,
+          "end_line": 20,
+          "code": "let[@def] (as_bool @ total) (value : value @ immutable) =\n  match value with Bool_value x -> x | Int_value _ -> false"
+        },
+        {
+          "kind": "let",
+          "name": "sort",
+          "start_line": 22,
+          "end_line": 41,
+          "code": "let[@def] rec (sort @ total) (expr : expr @ immutable) =\n  match expr with\n  | Int_lit _ | Int_input -> Some Integer\n  | Bool_lit _ | Bool_input -> Some Boolean\n  | Add (left, right) ->\n    (match sort left, sort right with\n     | Some Integer, Some Integer -> Some Integer\n     | _ -> None)\n  | Eq_int (left, right) ->\n    (match sort left, sort right with\n     | Some Integer, Some Integer -> Some Boolean\n     | _ -> None)\n  | Int_if (condition, yes, no) ->\n    (match sort condition, sort yes, sort no with\n     | Some Boolean, Some Integer, Some Integer -> Some Integer\n     | _ -> None)\n  | Bool_if (condition, yes, no) ->\n    (match sort condition, sort yes, sort no with\n     | Some Boolean, Some Boolean, Some Boolean -> Some Boolean\n     | _ -> None)"
+        },
+        {
+          "kind": "let",
+          "name": "eval",
+          "start_line": 43,
+          "end_line": 63,
+          "code": "let[@def] rec (eval @ total) (expr : expr @ immutable)\n    (env : env @ immutable) =\n  match expr with\n  | Int_lit value -> Int_value value\n  | Bool_lit value -> Bool_value value\n  | Int_input -> Int_value env.int_input\n  | Bool_input -> Bool_value env.bool_input\n  | Add (left, right) ->\n    Int_value (as_int (eval left env) + as_int (eval right env))\n  | Eq_int (left, right) ->\n    Bool_value (as_int (eval left env) = as_int (eval right env))\n  | Int_if (condition, yes, no) ->\n    let choose_yes = as_bool (eval condition env) in\n    let yes_value = as_int (eval yes env) in\n    let no_value = as_int (eval no env) in\n    Int_value (if choose_yes then yes_value else no_value)\n  | Bool_if (condition, yes, no) ->\n    let choose_yes = as_bool (eval condition env) in\n    let yes_value = as_bool (eval yes env) in\n    let no_value = as_bool (eval no env) in\n    Bool_value (if choose_yes then yes_value else no_value)"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_rule_spec.ml",
+      "sha256": "7ede7ac0054b169704ea0ce4738da4634cd91861c227df72d421730fb1e66c45",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "L",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "type",
+          "name": "pat",
+          "start_line": 3,
+          "end_line": 13,
+          "code": "type pat =\n  | Var of int\n  | Int_lit of int\n  | Bool_lit of bool\n  | Int_input\n  | Bool_input\n  | Add of pat * pat\n  | Eq_int of pat * pat\n  | Int_if of pat * pat * pat\n  | Bool_if of pat * pat * pat\n[@@inductive]"
+        },
+        {
+          "kind": "type",
+          "name": "rule",
+          "start_line": 15,
+          "end_line": 15,
+          "code": "type rule = { vars : L.sort list; lhs : pat; rhs : pat }"
+        },
+        {
+          "kind": "type",
+          "name": "t",
+          "start_line": 16,
+          "end_line": 16,
+          "code": "type t = No_rules | Rule_cons of rule * t [@@inductive]"
+        },
+        {
+          "kind": "type",
+          "name": "subst",
+          "start_line": 17,
+          "end_line": 17,
+          "code": "type subst = L.expr list"
+        },
+        {
+          "kind": "let",
+          "name": "lookup_sort",
+          "start_line": 19,
+          "end_line": 26,
+          "code": "let[@def] rec (lookup_sort @ total) (vars : L.sort list @ immutable)\n    (index : int) =\n  match vars with\n  | [] -> None\n  | sort :: rest ->\n    if index < 0 then None\n    else if index = 0 then Some sort\n    else lookup_sort rest (index - 1)"
+        },
+        {
+          "kind": "let",
+          "name": "lookup_expr",
+          "start_line": 28,
+          "end_line": 35,
+          "code": "let[@def] rec (lookup_expr @ total) (subst : subst @ immutable)\n    (index : int) =\n  match subst with\n  | [] -> L.Int_lit 0\n  | expr :: rest ->\n    if index < 0 then L.Int_lit 0\n    else if index = 0 then expr\n    else lookup_expr rest (index - 1)"
+        },
+        {
+          "kind": "let",
+          "name": "pat_sort",
+          "start_line": 37,
+          "end_line": 58,
+          "code": "let[@def] rec (pat_sort @ total) (vars : L.sort list @ immutable)\n    (pat : pat @ immutable) =\n  match pat with\n  | Var index -> lookup_sort vars index\n  | Int_lit _ | Int_input -> Some L.Integer\n  | Bool_lit _ | Bool_input -> Some L.Boolean\n  | Add (a, b) ->\n    (match pat_sort vars a, pat_sort vars b with\n     | Some L.Integer, Some L.Integer -> Some L.Integer\n     | _ -> None)\n  | Eq_int (a, b) ->\n    (match pat_sort vars a, pat_sort vars b with\n     | Some L.Integer, Some L.Integer -> Some L.Boolean\n     | _ -> None)\n  | Int_if (c, y, n) ->\n    (match pat_sort vars c, pat_sort vars y, pat_sort vars n with\n     | Some L.Boolean, Some L.Integer, Some L.Integer -> Some L.Integer\n     | _ -> None)\n  | Bool_if (c, y, n) ->\n    (match pat_sort vars c, pat_sort vars y, pat_sort vars n with\n     | Some L.Boolean, Some L.Boolean, Some L.Boolean -> Some L.Boolean\n     | _ -> None)"
+        },
+        {
+          "kind": "let",
+          "name": "occurs",
+          "start_line": 60,
+          "end_line": 66,
+          "code": "let[@def] rec (occurs @ total) (index : int) (pat : pat @ immutable) =\n  match pat with\n  | Var other -> index = other\n  | Int_lit _ | Bool_lit _ | Int_input | Bool_input -> false\n  | Add (a, b) | Eq_int (a, b) -> occurs index a || occurs index b\n  | Int_if (c, y, n) | Bool_if (c, y, n) ->\n    occurs index c || occurs index y || occurs index n"
+        },
+        {
+          "kind": "let",
+          "name": "vars_in",
+          "start_line": 68,
+          "end_line": 75,
+          "code": "let[@def] rec (vars_in @ total) (pat : pat @ immutable)\n    (lhs : pat @ immutable) =\n  match pat with\n  | Var index -> occurs index lhs\n  | Int_lit _ | Bool_lit _ | Int_input | Bool_input -> true\n  | Add (a, b) | Eq_int (a, b) -> vars_in a lhs && vars_in b lhs\n  | Int_if (c, y, n) | Bool_if (c, y, n) ->\n    vars_in c lhs && vars_in y lhs && vars_in n lhs"
+        },
+        {
+          "kind": "let",
+          "name": "rule_valid",
+          "start_line": 77,
+          "end_line": 81,
+          "code": "let[@def] (rule_valid @ total) (rule : rule @ immutable) =\n  (match pat_sort rule.vars rule.lhs, pat_sort rule.vars rule.rhs with\n   | Some L.Integer, Some L.Integer | Some L.Boolean, Some L.Boolean ->\n     true\n   | _ -> false) && vars_in rule.rhs rule.lhs"
+        },
+        {
+          "kind": "let",
+          "name": "valid",
+          "start_line": 83,
+          "end_line": 86,
+          "code": "let[@def] rec (valid @ total) (rules : t @ immutable) =\n  match rules with\n  | No_rules -> true\n  | Rule_cons (rule, rest) -> rule_valid rule && valid rest"
+        },
+        {
+          "kind": "let",
+          "name": "subst_valid",
+          "start_line": 88,
+          "end_line": 96,
+          "code": "let[@def] rec (subst_valid @ total) (vars : L.sort list @ immutable)\n    (subst : subst @ immutable) =\n  match vars, subst with\n  | [], [] -> true\n  | sort :: vars, expr :: subst ->\n    (match sort, L.sort expr with\n     | L.Integer, Some L.Integer | L.Boolean, Some L.Boolean -> true\n     | _ -> false) && subst_valid vars subst\n  | _ -> false"
+        },
+        {
+          "kind": "let",
+          "name": "instantiate",
+          "start_line": 98,
+          "end_line": 111,
+          "code": "let[@def] rec (instantiate @ total) (pat : pat @ immutable)\n    (subst : subst @ immutable) =\n  match pat with\n  | Var index -> lookup_expr subst index\n  | Int_lit n -> L.Int_lit n\n  | Bool_lit b -> L.Bool_lit b\n  | Int_input -> L.Int_input\n  | Bool_input -> L.Bool_input\n  | Add (a, b) -> L.Add (instantiate a subst, instantiate b subst)\n  | Eq_int (a, b) -> L.Eq_int (instantiate a subst, instantiate b subst)\n  | Int_if (c, y, n) ->\n    L.Int_if (instantiate c subst, instantiate y subst, instantiate n subst)\n  | Bool_if (c, y, n) ->\n    L.Bool_if (instantiate c subst, instantiate y subst, instantiate n subst)"
+        },
+        {
+          "kind": "let",
+          "name": "lookup_rule",
+          "start_line": 113,
+          "end_line": 120,
+          "code": "let[@def] rec (lookup_rule @ total) (rules : t @ immutable)\n    (index : int) =\n  match rules with\n  | No_rules -> None\n  | Rule_cons (rule, rest) ->\n    if index < 0 then None\n    else if index = 0 then Some rule\n    else lookup_rule rest (index - 1)"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_derivation_spec.ml",
+      "sha256": "06cfa5110283db0d6557d8acc1c8f59c1da721d138dd15127d82016b9de44330",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "L",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "module",
+          "name": "R",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module R = Vox_egraph_rule_spec"
+        },
+        {
+          "kind": "type",
+          "name": "evidence",
+          "start_line": 4,
+          "end_line": 13,
+          "code": "type evidence =\n  | Refl of L.expr\n  | Sym of evidence\n  | Trans of evidence * evidence\n  | Add_cong of evidence * evidence\n  | Eq_cong of evidence * evidence\n  | Int_if_cong of evidence * evidence * evidence\n  | Bool_if_cong of evidence * evidence * evidence\n  | Rule of int * R.rule * R.subst\n[@@inductive]"
+        },
+        {
+          "kind": "let",
+          "name": "endpoints",
+          "start_line": 15,
+          "end_line": 42,
+          "code": "let[@def] rec (endpoints @ total) (proof : evidence @ immutable) =\n  match proof with\n  | Refl expr -> (expr, expr)\n  | Sym child -> let a, b = endpoints child in (b, a)\n  | Trans (first, second) ->\n    let a, _ = endpoints first in\n    let _, b = endpoints second in\n    (a, b)\n  | Add_cong (a, b) ->\n    let al, ar = endpoints a in\n    let bl, br = endpoints b in\n    (L.Add (al, bl), L.Add (ar, br))\n  | Eq_cong (a, b) ->\n    let al, ar = endpoints a in\n    let bl, br = endpoints b in\n    (L.Eq_int (al, bl), L.Eq_int (ar, br))\n  | Int_if_cong (c, y, n) ->\n    let cl, cr = endpoints c in\n    let yl, yr = endpoints y in\n    let nl, nr = endpoints n in\n    (L.Int_if (cl, yl, nl), L.Int_if (cr, yr, nr))\n  | Bool_if_cong (c, y, n) ->\n    let cl, cr = endpoints c in\n    let yl, yr = endpoints y in\n    let nl, nr = endpoints n in\n    (L.Bool_if (cl, yl, nl), L.Bool_if (cr, yr, nr))\n  | Rule (_, rule, subst) ->\n    (R.instantiate rule.lhs subst, R.instantiate rule.rhs subst)"
+        },
+        {
+          "kind": "let",
+          "name": "left",
+          "start_line": 44,
+          "end_line": 45,
+          "code": "let[@def] (left @ total) (proof : evidence @ immutable) =\n  let a, _ = endpoints proof in a"
+        },
+        {
+          "kind": "let",
+          "name": "right",
+          "start_line": 47,
+          "end_line": 48,
+          "code": "let[@def] (right @ total) (proof : evidence @ immutable) =\n  let _, b = endpoints proof in b"
+        },
+        {
+          "kind": "let",
+          "name": "valid",
+          "start_line": 50,
+          "end_line": 75,
+          "code": "let[@def] rec (valid @ total) (rules : R.t @ immutable)\n    (proof : evidence @ immutable) = ghost_ (\n  match proof with\n  | Refl expr -> (match L.sort expr with Some _ -> true | None -> false)\n  | Sym child -> valid rules child\n  | Trans (first, second) ->\n    valid rules first && valid rules second && right first === left second\n  | Add_cong (a, b) ->\n    valid rules a && valid rules b && L.sort (left a) === Some L.Integer &&\n    L.sort (left b) === Some L.Integer\n  | Eq_cong (a, b) ->\n    valid rules a && valid rules b && L.sort (left a) === Some L.Integer &&\n    L.sort (left b) === Some L.Integer\n  | Int_if_cong (c, y, n) ->\n    valid rules c && valid rules y && valid rules n &&\n    L.sort (left c) === Some L.Boolean &&\n    L.sort (left y) === Some L.Integer &&\n    L.sort (left n) === Some L.Integer\n  | Bool_if_cong (c, y, n) ->\n    valid rules c && valid rules y && valid rules n &&\n    L.sort (left c) === Some L.Boolean &&\n    L.sort (left y) === Some L.Boolean &&\n    L.sort (left n) === Some L.Boolean\n  | Rule (index, rule, subst) ->\n    R.lookup_rule rules index === Some rule &&\n    R.rule_valid rule && R.subst_valid rule.vars subst)"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_match_spec.ml",
+      "sha256": "d77a52dca2f3f5dd377eed24432b8363b503200becb2f9903484ba8667fff145",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "L",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "module",
+          "name": "R",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module R = Vox_egraph_rule_spec"
+        },
+        {
+          "kind": "type",
+          "name": "node",
+          "start_line": 4,
+          "end_line": 13,
+          "code": "type node =\n  | Int_lit of int\n  | Bool_lit of bool\n  | Int_input\n  | Bool_input\n  | Add of int * int\n  | Eq_int of int * int\n  | Int_if of int * int * int\n  | Bool_if of int * int * int\n[@@inductive]"
+        },
+        {
+          "kind": "type",
+          "name": "graph",
+          "start_line": 15,
+          "end_line": 19,
+          "code": "type graph = {\n  count : int;\n  nodes : node option iarray;\n  classes : int iarray;\n}"
+        },
+        {
+          "kind": "let",
+          "name": "node",
+          "start_line": 21,
+          "end_line": 24,
+          "code": "let[@def] (node @ total) (graph : graph @ immutable) (id : int) =\n  if 0 <= id && id < graph.count && id < Iarray.length graph.nodes then\n    Iarray.Refined.get graph.nodes (id)\n  else None"
+        },
+        {
+          "kind": "let",
+          "name": "class_id",
+          "start_line": 26,
+          "end_line": 29,
+          "code": "let[@def] (class_id @ total) (graph : graph @ immutable) (id : int) =\n  if 0 <= id && id < graph.count && id < Iarray.length graph.classes then\n    Some (Iarray.Refined.get graph.classes (id))\n  else None"
+        },
+        {
+          "kind": "let",
+          "name": "same",
+          "start_line": 31,
+          "end_line": 34,
+          "code": "let[@def] (same @ total) (graph : graph @ immutable) (a : int) (b : int) =\n  match class_id graph a, class_id graph b with\n  | Some x, Some y -> x = y\n  | _ -> false"
+        },
+        {
+          "kind": "let",
+          "name": "binding",
+          "start_line": 36,
+          "end_line": 43,
+          "code": "let[@def] rec (binding @ total) (bindings : int list @ immutable)\n    (index : int) =\n  match bindings with\n  | [] -> None\n  | id :: rest ->\n    if index < 0 then None\n    else if index = 0 then Some id\n    else binding rest (index - 1)"
+        },
+        {
+          "kind": "let",
+          "name": "member",
+          "start_line": 45,
+          "end_line": 47,
+          "code": "let[@def] rec (member @ total) (value : int)\n    (values : int list @ immutable) =\n  match values with [] -> false | x :: rest -> value = x || member value rest"
+        },
+        {
+          "kind": "let",
+          "name": "in_classes",
+          "start_line": 49,
+          "end_line": 51,
+          "code": "let[@def] (in_classes @ total) (graph : graph @ immutable) (id : int)\n    (classes : int list @ immutable) =\n  match class_id graph id with None -> false | Some c -> member c classes"
+        },
+        {
+          "kind": "let",
+          "name": "layer",
+          "start_line": 53,
+          "end_line": 66,
+          "code": "let[@def] (layer @ total) (graph : graph @ immutable)\n    (pat : R.pat @ immutable) (first : int list @ immutable)\n    (second : int list @ immutable) (third : int list @ immutable)\n    (value : node @ immutable) =\n  match pat, value with\n  | R.Int_lit a, Int_lit b -> a = b\n  | R.Bool_lit a, Bool_lit b -> a = b\n  | R.Int_input, Int_input | R.Bool_input, Bool_input -> true\n  | R.Add _, Add (a, b) | R.Eq_int _, Eq_int (a, b) ->\n    in_classes graph a first && in_classes graph b second\n  | R.Int_if _, Int_if (c, a, b) | R.Bool_if _, Bool_if (c, a, b) ->\n    in_classes graph c first && in_classes graph a second &&\n    in_classes graph b third\n  | _ -> false"
+        },
+        {
+          "kind": "let",
+          "name": "collect",
+          "start_line": 68,
+          "end_line": 79,
+          "code": "let[@def] rec (collect @ total) (graph : graph @ immutable)\n    (pat : R.pat @ immutable) (first : int list @ immutable)\n    (second : int list @ immutable) (third : int list @ immutable)\n    (count : int) =\n  if count <= 0 then []\n  else\n    let rest = collect graph pat first second third (count - 1) in\n    match node graph (count - 1), class_id graph (count - 1) with\n    | Some value, Some label ->\n      if layer graph pat first second third value then label :: rest else rest\n    | _ -> rest\n  [@@decreases if count > 0 then count else 0]"
+        },
+        {
+          "kind": "let",
+          "name": "classes",
+          "start_line": 81,
+          "end_line": 96,
+          "code": "let[@def] rec (classes @ total) (graph : graph @ immutable)\n    (pat : R.pat @ immutable) (bindings : int list @ immutable) =\n  match pat with\n  | R.Var index ->\n    (match binding bindings index with\n     | None -> []\n     | Some id ->\n       match class_id graph id with None -> [] | Some label -> [label])\n  | R.Add (left, right) | R.Eq_int (left, right) ->\n    collect graph pat (classes graph left bindings)\n      (classes graph right bindings) [] graph.count\n  | R.Int_if (condition, yes, no) | R.Bool_if (condition, yes, no) ->\n    collect graph pat (classes graph condition bindings)\n      (classes graph yes bindings) (classes graph no bindings) graph.count\n  | R.Int_lit _ | R.Bool_lit _ | R.Int_input | R.Bool_input ->\n    collect graph pat [] [] [] graph.count"
+        },
+        {
+          "kind": "let",
+          "name": "matches",
+          "start_line": 98,
+          "end_line": 100,
+          "code": "let[@def] (matches @ total) (graph : graph @ immutable)\n    (pat : R.pat @ immutable) (bindings : int list @ immutable)\n    (root : int) = in_classes graph root (classes graph pat bindings)"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_snapshot_spec.ml",
+      "sha256": "5015b885ba853b0a6b7c191539ce32fd74a5598f4fb8c1c3a7af703c20eca716",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "Q",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module Q = Vox_egraph_match_spec"
+        },
+        {
+          "kind": "module",
+          "name": "L",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "let",
+          "name": "origin",
+          "start_line": 4,
+          "end_line": 31,
+          "code": "let[@def] rec (origin @ total) (graph : Q.graph @ immutable) (id : int) =\n  match Q.node graph id with\n  | None -> None\n  | Some (Q.Int_lit value) -> Some (L.Int_lit value)\n  | Some (Q.Bool_lit value) -> Some (L.Bool_lit value)\n  | Some Q.Int_input -> Some L.Int_input\n  | Some Q.Bool_input -> Some L.Bool_input\n  | Some (Q.Add (a, b)) ->\n    if 0 <= a && a < id && 0 <= b && b < id then\n      (match origin graph a, origin graph b with\n       | Some a, Some b -> Some (L.Add (a, b)) | _ -> None)\n    else None\n  | Some (Q.Eq_int (a, b)) ->\n    if 0 <= a && a < id && 0 <= b && b < id then\n      (match origin graph a, origin graph b with\n       | Some a, Some b -> Some (L.Eq_int (a, b)) | _ -> None)\n    else None\n  | Some (Q.Int_if (c, a, b)) ->\n    if 0 <= c && c < id && 0 <= a && a < id && 0 <= b && b < id then\n      (match origin graph c, origin graph a, origin graph b with\n       | Some c, Some a, Some b -> Some (L.Int_if (c, a, b)) | _ -> None)\n    else None\n  | Some (Q.Bool_if (c, a, b)) ->\n    if 0 <= c && c < id && 0 <= a && a < id && 0 <= b && b < id then\n      (match origin graph c, origin graph a, origin graph b with\n       | Some c, Some a, Some b -> Some (L.Bool_if (c, a, b)) | _ -> None)\n    else None\n  [@@decreases if id > 0 then id else 0]"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_preservation_spec.ml",
+      "sha256": "044e87e556c5365f885867c6b8893f84d0a300709945ad3d8c8c203191b5e11a",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "Q",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module Q = Vox_egraph_match_spec"
+        },
+        {
+          "kind": "module",
+          "name": "S",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module S = Vox_egraph_snapshot_spec"
+        },
+        {
+          "kind": "let",
+          "name": "origins",
+          "start_line": 4,
+          "end_line": 9,
+          "code": "let[@def] rec (origins @ total) (before : Q.graph @ immutable)\n    (after : Q.graph @ immutable) (count : int) = ghost_ (\n  if count <= 0 then true\n  else S.origin before (count - 1) === S.origin after (count - 1) &&\n    origins before after (count - 1))\n  [@@decreases if count > 0 then count else 0]"
+        },
+        {
+          "kind": "let",
+          "name": "extends",
+          "start_line": 11,
+          "end_line": 12,
+          "code": "let[@def] (extends @ total) (before : Q.graph @ immutable) (after : Q.graph @ immutable) = ghost_ (\n  before.count <= after.count && origins before after before.count)"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_saturation_spec.ml",
+      "sha256": "af4d33429dd5743bc8873def76bf1f4312e9e7762602231d207215ebf5c8a62c",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "L",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "module",
+          "name": "R",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module R = Vox_egraph_rule_spec"
+        },
+        {
+          "kind": "module",
+          "name": "Q",
+          "start_line": 3,
+          "end_line": 3,
+          "code": "module Q = Vox_egraph_match_spec"
+        },
+        {
+          "kind": "let",
+          "name": "node_sort",
+          "start_line": 5,
+          "end_line": 8,
+          "code": "let[@def] (node_sort @ total) (node : Q.node @ immutable) =\n  match node with\n  | Q.Int_lit _ | Q.Int_input | Q.Add _ | Q.Int_if _ -> L.Integer\n  | Q.Bool_lit _ | Q.Bool_input | Q.Eq_int _ | Q.Bool_if _ -> L.Boolean"
+        },
+        {
+          "kind": "let",
+          "name": "binding_valid",
+          "start_line": 10,
+          "end_line": 22,
+          "code": "let[@def] rec (binding_valid @ total) (graph : Q.graph @ immutable)\n    (vars : L.sort list @ immutable) (bindings : int list @ immutable) =\n  match vars, bindings with\n  | [], [] -> true\n  | sort :: vars, id :: bindings ->\n    (if id < 0 then true else\n      match Q.node graph id with\n      | None -> false\n      | Some node ->\n        match sort, node_sort node with\n        | L.Integer, L.Integer | L.Boolean, L.Boolean -> true\n        | _ -> false) && binding_valid graph vars bindings\n  | _ -> false"
+        },
+        {
+          "kind": "let",
+          "name": "closed_instance",
+          "start_line": 24,
+          "end_line": 28,
+          "code": "let[@def] (closed_instance @ total) (graph : Q.graph @ immutable)\n    (rule : R.rule @ immutable) (bindings : int list @ immutable) (root : int) =\n  not (binding_valid graph rule.vars bindings) ||\n  not (Q.matches graph rule.lhs bindings root) ||\n  Q.matches graph rule.rhs bindings root"
+        },
+        {
+          "kind": "let",
+          "name": "closed_roots",
+          "start_line": 30,
+          "end_line": 35,
+          "code": "let[@def] rec (closed_roots @ total) (graph : Q.graph @ immutable)\n    (rule : R.rule @ immutable) (bindings : int list @ immutable) (count : int) =\n  if count <= 0 then true\n  else closed_instance graph rule bindings (count - 1) &&\n    closed_roots graph rule bindings (count - 1)\n  [@@decreases if count > 0 then count else 0]"
+        },
+        {
+          "kind": "type",
+          "name": "cases",
+          "start_line": 37,
+          "end_line": 37,
+          "code": "type cases = End | Case of int list * cases [@@inductive]"
+        },
+        {
+          "kind": "let",
+          "name": "append",
+          "start_line": 39,
+          "end_line": 40,
+          "code": "let[@def] rec (append @ total) (first : cases @ immutable) (second : cases @ immutable) =\n  match first with End -> second | Case (ids, rest) -> Case (ids, append rest second)"
+        },
+        {
+          "kind": "let",
+          "name": "prepend",
+          "start_line": 42,
+          "end_line": 45,
+          "code": "let[@def] rec (prepend @ total) (id : int) (suffixes : cases @ immutable) =\n  match suffixes with\n  | End -> End\n  | Case (ids, rest) -> Case (id :: ids, prepend id rest)"
+        },
+        {
+          "kind": "let",
+          "name": "choices",
+          "start_line": 47,
+          "end_line": 50,
+          "code": "let[@def] rec (choices @ total) (count : int) (suffixes : cases @ immutable) =\n  if count <= 0 then prepend (-1) suffixes\n  else append (prepend (count - 1) suffixes) (choices (count - 1) suffixes)\n  [@@decreases if count > 0 then count else 0]"
+        },
+        {
+          "kind": "let",
+          "name": "assignments",
+          "start_line": 52,
+          "end_line": 55,
+          "code": "let[@def] rec (assignments @ total) (count : int) (vars : L.sort list @ immutable) =\n  match vars with\n  | [] -> Case ([], End)\n  | _ :: vars -> choices count (assignments count vars)"
+        },
+        {
+          "kind": "let",
+          "name": "closed_cases",
+          "start_line": 57,
+          "end_line": 61,
+          "code": "let[@def] rec (closed_cases @ total) (graph : Q.graph @ immutable)\n    (rule : R.rule @ immutable) (cases : cases @ immutable) =\n  match cases with\n  | End -> true\n  | Case (ids, rest) -> closed_roots graph rule ids graph.count && closed_cases graph rule rest"
+        },
+        {
+          "kind": "let",
+          "name": "closed_rule",
+          "start_line": 63,
+          "end_line": 64,
+          "code": "let[@def] (closed_rule @ total) (graph : Q.graph @ immutable) (rule : R.rule @ immutable) =\n  closed_cases graph rule (assignments graph.count rule.vars)"
+        },
+        {
+          "kind": "let",
+          "name": "closed_rules",
+          "start_line": 66,
+          "end_line": 69,
+          "code": "let[@def] rec (closed_rules @ total) (graph : Q.graph @ immutable) (rules : R.t @ immutable) =\n  match rules with\n  | R.No_rules -> true\n  | R.Rule_cons (rule, rest) -> closed_rule graph rule && closed_rules graph rest"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_congruence_spec.ml",
+      "sha256": "a90851bb612b812a7ebe628fc35552076c940b1a28a7c597bcf0395433780a2f",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "Q",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module Q = Vox_egraph_match_spec"
+        },
+        {
+          "kind": "let",
+          "name": "same_node",
+          "start_line": 3,
+          "end_line": 14,
+          "code": "let[@def] (same_node @ total) (graph : Q.graph @ immutable)\n    (left : Q.node @ immutable) (right : Q.node @ immutable) =\n  match left, right with\n  | Q.Int_lit a, Q.Int_lit b -> a = b\n  | Q.Bool_lit a, Q.Bool_lit b -> a = b\n  | Q.Int_input, Q.Int_input | Q.Bool_input, Q.Bool_input -> true\n  | Q.Add (a, b), Q.Add (x, y) | Q.Eq_int (a, b), Q.Eq_int (x, y) ->\n    Q.same graph a x && Q.same graph b y\n  | Q.Int_if (c, a, b), Q.Int_if (z, x, y)\n  | Q.Bool_if (c, a, b), Q.Bool_if (z, x, y) ->\n    Q.same graph c z && Q.same graph a x && Q.same graph b y\n  | _ -> false"
+        },
+        {
+          "kind": "let",
+          "name": "pair",
+          "start_line": 16,
+          "end_line": 19,
+          "code": "let[@def] (pair @ total) (graph : Q.graph @ immutable) (left : int) (right : int) =\n  match Q.node graph left, Q.node graph right with\n  | Some a, Some b -> not (same_node graph a b) || Q.same graph left right\n  | _ -> true"
+        },
+        {
+          "kind": "let",
+          "name": "row",
+          "start_line": 21,
+          "end_line": 24,
+          "code": "let[@def] rec (row @ total) (graph : Q.graph @ immutable) (left : int) (count : int) =\n  if count <= 0 then true\n  else pair graph left (count - 1) && row graph left (count - 1)\n  [@@decreases if count > 0 then count else 0]"
+        },
+        {
+          "kind": "let",
+          "name": "rows",
+          "start_line": 26,
+          "end_line": 29,
+          "code": "let[@def] rec (rows @ total) (graph : Q.graph @ immutable) (count : int) =\n  if count <= 0 then true\n  else row graph (count - 1) graph.count && rows graph (count - 1)\n  [@@decreases if count > 0 then count else 0]"
+        },
+        {
+          "kind": "let",
+          "name": "closed",
+          "start_line": 31,
+          "end_line": 31,
+          "code": "let[@def] (closed @ total) (graph : Q.graph @ immutable) = rows graph graph.count"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_fixedpoint_spec.ml",
+      "sha256": "a3def918bd5461e8716ab09481304ac283cea9ed8d9419fb6cf99bf648bece0a",
+      "role": "semantic_definitions",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "R",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module R = Vox_egraph_rule_spec"
+        },
+        {
+          "kind": "module",
+          "name": "Q",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module Q = Vox_egraph_match_spec"
+        },
+        {
+          "kind": "module",
+          "name": "C",
+          "start_line": 3,
+          "end_line": 3,
+          "code": "module C = Vox_egraph_saturation_spec"
+        },
+        {
+          "kind": "module",
+          "name": "G",
+          "start_line": 4,
+          "end_line": 4,
+          "code": "module G = Vox_egraph_congruence_spec"
+        },
+        {
+          "kind": "let",
+          "name": "fixed",
+          "start_line": 6,
+          "end_line": 7,
+          "code": "let[@def] (fixed @ total) (graph : Q.graph @ immutable) (rules : R.t @ immutable) =\n  R.valid rules && C.closed_rules graph rules && G.closed graph"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_interpret_wrapping.mli",
+      "sha256": "a2b66bcb961b517788e531a8ec3b3f0dc86f9e8bddbe769e294f35e2bb039d24",
+      "role": "public_contracts",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "L",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "module",
+          "name": "R",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module R = Vox_egraph_rule_spec"
+        },
+        {
+          "kind": "module",
+          "name": "E",
+          "start_line": 3,
+          "end_line": 3,
+          "code": "module E = Vox_egraph_derivation_spec"
+        },
+        {
+          "kind": "val",
+          "name": "sound",
+          "start_line": 5,
+          "end_line": 16,
+          "code": "val sound :\n    (rules : R.t) @ immutable -> (proof : E.evidence) @ immutable ->\n    (env : L.env) @ immutable ->\n    ((index : int) -> (rule : R.rule) @ immutable ->\n      (subst : R.subst) @ immutable ->\n      {u : unit | R.lookup_rule rules index === Some rule &&\n        R.rule_valid rule && R.subst_valid rule.vars subst} ->\n      {u : unit | L.eval (R.instantiate rule.lhs subst) env ===\n        L.eval (R.instantiate rule.rhs subst) env} @ ghost) @ total ->\n    {u : unit | E.valid rules proof} ->\n    {u : unit | L.eval (E.left proof) env ===\n      L.eval (E.right proof) env} @ ghost @@ total"
+        }
+      ]
+    },
+    {
+      "path": "verification/library/vox_egraph_rule_handle.mli",
+      "sha256": "71b95c1eabb510111683a359ebdff22f892a452dab4e6fe99721a47cbe589f42",
+      "role": "public_contracts",
+      "declarations": [
+        {
+          "kind": "module",
+          "name": "Preserves",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module Preserves = Vox_egraph_preservation_spec"
+        },
+        {
+          "kind": "module",
+          "name": "R",
+          "start_line": 2,
+          "end_line": 2,
+          "code": "module R = Vox_egraph_rule_spec"
+        },
+        {
+          "kind": "module",
+          "name": "Q",
+          "start_line": 3,
+          "end_line": 3,
+          "code": "module Q = Vox_egraph_match_spec"
+        },
+        {
+          "kind": "module",
+          "name": "L",
+          "start_line": 4,
+          "end_line": 4,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "module",
+          "name": "Snapshot",
+          "start_line": 5,
+          "end_line": 5,
+          "code": "module Snapshot = Vox_egraph_snapshot_spec"
+        },
+        {
+          "kind": "type",
+          "name": "t",
+          "start_line": 7,
+          "end_line": 7,
+          "code": "type t"
+        },
+        {
+          "kind": "val",
+          "name": "model",
+          "start_line": 9,
+          "end_line": 9,
+          "code": "val model : t @ local immutable -> Q.graph @ immutable ghost @@ total"
+        },
+        {
+          "kind": "val",
+          "name": "rules",
+          "start_line": 10,
+          "end_line": 10,
+          "code": "val rules : t @ local immutable -> R.t @ immutable ghost @@ total"
+        },
+        {
+          "kind": "val",
+          "name": "create",
+          "start_line": 12,
+          "end_line": 13,
+          "code": "val create : (input_rules : {rs : R.t | R.valid rs}) @ immutable ->\n    {state : t | (model state).count = 0 && rules state === input_rules} @ unique"
+        },
+        {
+          "kind": "type",
+          "name": "admit_result",
+          "start_line": 15,
+          "end_line": 15,
+          "code": "type admit_result = #{id : int option @@ aliased; state : t}"
+        },
+        {
+          "kind": "val",
+          "name": "admit",
+          "start_line": 17,
+          "end_line": 24,
+          "code": "val admit : (state : t) @ unique -> (expr : L.expr) @ immutable ->\n    {r : admit_result | rules r.#state === rules state &&\n      Preserves.extends (model state) (model r.#state) &&\n      (model r.#state).count >= (model state).count &&\n      (match r.#id with\n       | None -> L.sort expr === None || (model r.#state).count = 512\n       | Some id -> 0 <= id && id < (model r.#state).count &&\n         Snapshot.origin (model r.#state) id === Some expr)} @ unique"
+        },
+        {
+          "kind": "module",
+          "name": "E",
+          "start_line": 26,
+          "end_line": 26,
+          "code": "module E = Vox_egraph_derivation_spec"
+        },
+        {
+          "kind": "module",
+          "name": "Fixed",
+          "start_line": 27,
+          "end_line": 27,
+          "code": "module Fixed = Vox_egraph_fixedpoint_spec"
+        },
+        {
+          "kind": "type",
+          "name": "equality",
+          "start_line": 29,
+          "end_line": 29,
+          "code": "type equality = Equal | Not_proved | Invalid_input | Node_limit"
+        },
+        {
+          "kind": "type",
+          "name": "query_result",
+          "start_line": 30,
+          "end_line": 30,
+          "code": "type query_result = #{status : equality; state : t; proof : E.evidence option @@ ghost}"
+        },
+        {
+          "kind": "val",
+          "name": "query",
+          "start_line": 32,
+          "end_line": 41,
+          "code": "val query : (state : t) @ unique -> (left : L.expr) @ immutable -> (right : L.expr) @ immutable ->\n    {r : query_result | rules r.#state === rules state &&\n      Preserves.extends (model state) (model r.#state) &&\n      (match r.#status, r.#proof with\n       | Equal, Some proof -> E.valid (rules state) proof &&\n         E.left proof === left && E.right proof === right\n       | Not_proved, None -> true\n       | Invalid_input, None -> L.sort left === None || L.sort right === None\n       | Node_limit, None -> (model r.#state).count = 512\n       | _ -> false)} @ unique"
+        },
+        {
+          "kind": "type",
+          "name": "saturation_status",
+          "start_line": 43,
+          "end_line": 43,
+          "code": "type saturation_status = Fixed_point | Saturation_node_limit | Search_limit | Rebuild_limit | Round_limit"
+        },
+        {
+          "kind": "type",
+          "name": "saturation_result",
+          "start_line": 44,
+          "end_line": 44,
+          "code": "type saturation_result = #{status : saturation_status; fuel : int; state : t}"
+        },
+        {
+          "kind": "val",
+          "name": "saturate",
+          "start_line": 46,
+          "end_line": 55,
+          "code": "val saturate : (state : t) @ unique -> (rounds : int) -> (rebuild_passes : int) ->\n    (fuel : {f : int | 0 <= f && f <= 4611686018427387903}) ->\n    {r : saturation_result | rules r.#state === rules state &&\n      Preserves.extends (model state) (model r.#state) &&\n      0 <= r.#fuel && r.#fuel <= fuel &&\n      (match r.#status with\n       | Fixed_point -> Fixed.fixed (model r.#state) (rules state)\n       | Saturation_node_limit -> (model r.#state).count = 512\n       | Search_limit -> r.#fuel = 0\n       | Rebuild_limit | Round_limit -> true)} @ unique"
+        },
+        {
+          "kind": "val",
+          "name": "preserved_origin",
+          "start_line": 57,
+          "end_line": 59,
+          "code": "val preserved_origin : (before : Q.graph) @ immutable -> (after : Q.graph) @ immutable -> (id : int) ->\n    {u : unit | Preserves.extends before after && 0 <= id && id < before.count} ->\n    {u : unit | Snapshot.origin before id === Snapshot.origin after id} @ ghost @@ total"
+        },
+        {
+          "kind": "type",
+          "name": "class_result",
+          "start_line": 61,
+          "end_line": 61,
+          "code": "type class_result = #{equal : bool; state : t; proof : E.evidence option @@ ghost}"
+        },
+        {
+          "kind": "val",
+          "name": "same_class",
+          "start_line": 63,
+          "end_line": 72,
+          "code": "val same_class : (state : t) @ unique ->\n    (a : {i : int | 0 <= i && i < (model state).count}) ->\n    (b : {i : int | 0 <= i && i < (model state).count}) ->\n    {r : class_result | model r.#state === model state && rules r.#state === rules state &&\n      r.#equal = Q.same (model state) a b &&\n      (match r.#proof with\n       | None -> not r.#equal\n       | Some proof -> r.#equal && E.valid (rules state) proof &&\n         Snapshot.origin (model state) a === Some (E.left proof) &&\n         Snapshot.origin (model state) b === Some (E.right proof))} @ unique @@ total"
+        }
+      ]
+    }
+  ],
+  "primitive_code": [
+    {
+      "path": "stdlib/iarray.mli",
+      "sha256": "9b4b19788bcf3edfda667ed0b995d2e9db0a29f935fa1194c67e8772c0cfcd00",
+      "role": "trusted_semantic_primitives",
+      "declarations": [
+        {
+          "kind": "trusted_primitive",
+          "name": "Iarray.length",
+          "start_line": 35,
+          "end_line": 39,
+          "code": "external length :\n  ('a : any mod separable).\n  ('a iarray[@local_opt]) @ immutable contended -> int\n  @@ total = \"%array_length\"\n[@@layout_poly]"
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Iarray.Refined.get",
+          "start_line": 53,
+          "end_line": 62,
+          "code": "module Refined : sig\n  (** Bounds-checked operations whose bounds are expressed in their types. *)\n\n  external get :\n    ('a : any mod separable).\n    (a : ('a iarray[@local_opt])) ->\n    {i : int | 0 <= i && i < length a} ->\n    ('a[@local_opt]) @ total @@ total = \"%array_safe_get\"\n  [@@layout_poly]\nend"
+        }
+      ]
+    },
+    {
+      "path": "stdlib/stdlib.mli",
+      "sha256": "40c28c27f13b99055ead2b35a40d6d9930b2435bf8677f4c3e1e9303b0d99619",
+      "role": "trusted_semantic_primitives",
+      "declarations": [
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( = )",
+          "start_line": 129,
+          "end_line": 129,
+          "code": "external ( = ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) -> bool = \"%equal\""
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( <> )",
+          "start_line": 134,
+          "end_line": 134,
+          "code": "external ( <> ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) -> bool = \"%notequal\""
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( < )",
+          "start_line": 139,
+          "end_line": 139,
+          "code": "external ( < ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) -> bool = \"%lessthan\""
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( > )",
+          "start_line": 144,
+          "end_line": 144,
+          "code": "external ( > ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) -> bool = \"%greaterthan\""
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( <= )",
+          "start_line": 149,
+          "end_line": 149,
+          "code": "external ( <= ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) -> bool = \"%lessequal\""
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( >= )",
+          "start_line": 154,
+          "end_line": 154,
+          "code": "external ( >= ) : ('a : value_or_null) . ('a[@local_opt]) -> ('a[@local_opt]) -> bool = \"%greaterequal\""
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( + )",
+          "start_line": 318,
+          "end_line": 319,
+          "code": "external ( + ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total\n  = \"%addint\""
+        },
+        {
+          "kind": "trusted_primitive",
+          "name": "Stdlib.( - )",
+          "start_line": 324,
+          "end_line": 325,
+          "code": "external ( - ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total\n  = \"%subint\""
+        }
+      ]
+    }
+  ]
+}
