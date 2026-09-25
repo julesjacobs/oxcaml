@@ -23,7 +23,9 @@ opt-in, and resource exhaustion remains a separate operational outcome.
 The coordinating task supplied the recorded standing authorization for
 staging, committing, pushing, and opening PRs without merging. Production
 changes are committed, and the required Merlin import script completed without
-conflicts. Merlin tests and PR publication are in progress.
+conflicts. The complete Merlin suite also passes after portable shell fixes
+to five test fixtures. The finite reference is published as PR #210 and the production adapter as
+PR #211. Both are open and unmerged.
 
 The sections below preserve the investigation history; earlier failing-gate
 statements describe intermediate revisions.
@@ -720,3 +722,45 @@ The final symbolic suite took 909.5 seconds. All source hashes match the
 pre-suite manifest. There are no remaining observed compiler-gate failures.
 Production Merlin synchronization is proceeding under the standing
 authorization supplied by the coordinating task.
+
+
+### Merlin integration and publication
+
+The recorded standing authorization in the coordination audit permits staging,
+committing, pushing, and opening PRs without merging. The finite reference is
+open at https://github.com/julesjacobs/oxcaml/pull/210, based on the exact Vox
+revision `c8a7c2f223`.
+
+Production commits `d7fe76a2a6`, `db52fe1623`, and `31f66c70a4` contain the
+compiler change, explicit exclusions of standalone reference/oracle modules
+from Merlin, and the required script-generated frontend import. The import
+completed without conflicts. The first Merlin test run exposed macOS shell
+portability issues in five existing fixtures. Portable numeric whitespace
+handling, file copying, output formatting, and flag extraction preserve their
+expected output. The replacement flag extractor matches the original distinct
+flag sets for both installed compilers (166 bytecode flags, 426 native flags).
+
+The complete forced Merlin suite passes using normal macOS tools:
+`make -s merlin-test MERLIN_TEST_OCAML_PATH="$PWD/_install" ARGS='@runtest --force'`.
+Log: `/tmp/mode-final3-merlin-final.log`. No output expectations were promoted.
+The finite reference checkout's `make fmt` reports only pre-existing line-length
+violations in unrelated library/benchmark files. New-source whitespace checks
+pass; final EOF whitespace cleanup leaves proof declarations unchanged.
+
+
+Final publication: finite reference https://github.com/julesjacobs/oxcaml/pull/210;
+production adapter https://github.com/julesjacobs/oxcaml/pull/211. Both are open
+and unmerged. The production checkout is clean at `b67a612d6d`. Final bootstrap,
+formatting, and the forced complete Merlin suite pass (`/tmp/mode-final3-final-boot.log`,
+`/tmp/mode-final4-fmt.log`, `/tmp/mode-final4-merlin.log`). Compiler edits after
+the passing full suite only wrap whitespace in three solver source files;
+whitespace-stripped contents were checked equal before and after. The final
+bootstrap reparses/rebuilds those files. Subsequent functional edits are confined
+to Merlin shell fixtures and the import script's Bash-3 empty-array handling,
+which was checked with empty and populated arrays.
+
+The finite-reference branch deliberately excludes the preserved experimental
+compiler/merlin solver edits and `typing-modes/solver_regressions.ml` still dirty
+in its checkout; the production repair is delivered separately in PR #211.
+The exact public inventory hash remains
+`e041e5ff8321b64c1b7436398d592832b3316a627a20e017371765815440bbe3`.
