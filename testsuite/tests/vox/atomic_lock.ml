@@ -11,17 +11,17 @@ open Reference_lock
 module P = Ghost_pref
 let () =
   let zero = 0 in
-  let initial : {n : int | 0 <= n} = refine_ zero in
+  let initial : {n : int | 0 <= n} = zero in
   let a = make initial in
   for _i = 1 to 10 do assert (try_increment a) done;
-  let refine_ r = try_acquire a in
+  let r = try_acquire a in
   assert r.P.value;
   if r.P.value then begin
     let t = r.P.state in
-    let t : {t : int P.token | owned a (P.own t)} = refine_ t in
+    let t : {t : int P.token | owned a (P.own t)} = t in
     let actual = read_owned a (borrow_ t) in
     assert (actual = 10);
-    let refine_ failed = try_acquire a in
+    let failed = try_acquire a in
     assert (not failed.P.value);
     let _ = release a t in ()
   end;

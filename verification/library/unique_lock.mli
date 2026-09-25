@@ -34,15 +34,13 @@ module Make (V : Unique_cell.Payload) : sig @@ portable
     (token : {t : contents Ghost_pref.token |
       match Ghost_pref.Heap.at (Ghost_pref.own t) (location a) with
       | Some (Some _) -> true | _ -> false}) @ unique ghost ->
-    {r : V.t step | let refine_ token = token in
-      Ghost_pref.Heap.at (Ghost_pref.own token) (location a)
+    {r : V.t step | Ghost_pref.Heap.at (Ghost_pref.own token) (location a)
         === Some (Some (V.snapshot r.value)) &&
       Ghost_pref.own r.state === Ghost_pref.Heap.put (Ghost_pref.own token)
         (location a) None} @ unique
   val put : (a : t) -> (value : V.t) @ unique ->
     (token : {t : contents Ghost_pref.token |
       Ghost_pref.Heap.at (Ghost_pref.own t) (location a) === Some None}) @ unique ghost ->
-    {t : contents Ghost_pref.token | let refine_ token = token in
-      Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token)
+    {t : contents Ghost_pref.token | Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token)
         (location a) (Some (V.snapshot value))} @ unique ghost
 end

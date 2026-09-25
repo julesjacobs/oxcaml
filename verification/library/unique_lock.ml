@@ -19,16 +19,16 @@ type storage = { cell : Cell.t; atomic : A.t }
 type t = {a : storage | (A.key a.atomic).Invariant.cell === a.cell}
 type contents = Cell.contents
 let make (x : V.t @ unique) : t =
-  let refine_ e = P.empty () in
-  let refine_ allocation = Cell.create x e in
+  let e = P.empty () in
+  let allocation = Cell.create x e in
   let p = allocation.Cell.value in
   let t = allocation.Cell.state in
   let h = ghost_ (P.own (borrow_ t)) in
   let zero = 0 in
   ghost_ (good_def p h);
   ghost_ (Invariant.holds_def { cell = p } zero h);
-  let g : {g : Cell.contents P.token | Invariant.holds { cell = p } zero (P.own g)} = refine_ t in
-  let refine_ a = A.create (ghost_ { cell = p }) zero g in
+  let g : {g : Cell.contents P.token | Invariant.holds { cell = p } zero (P.own g)} = t in
+  let a = A.create (ghost_ { cell = p }) zero g in
   let result : t = { cell = p; atomic = a } in result
 let try_acquire (a : t) :
     {r : (bool, Cell.contents) P.step | if r.P.value then good (a.cell) (P.own r.P.state)
@@ -36,15 +36,13 @@ let try_acquire (a : t) :
   let p = a.cell in
   let zero = 0 in
   let one = 1 in
-  let refine_ e = P.empty () in
+  let e = P.empty () in
   let[@def] (post @ total) (success : bool @ immutable)
       (h : Cell.contents P.heap @ immutable) =
     ghost_ (if success then good p h else h === P.Heap.empty ()) in
   let erased_post = ghost_ post in
-  let refine_ r = A.compare_and_set a.atomic zero one erased_post e
+  let r = A.compare_and_set a.atomic zero one erased_post e
     (ghost_ (fun before inside outside ->
-      let refine_ inside = inside in
-      let refine_ outside = outside in
       let hi = ghost_ (P.own (borrow_ inside)) in
       let ho = ghost_ (P.own (borrow_ outside)) in
       let after = ghost_ (if before = zero then one else before) in
@@ -53,12 +51,12 @@ let try_acquire (a : t) :
       ghost_ (Invariant.holds_def { cell = p } after ho);
       ghost_ (post_def success hi);
       let r : A.transfer = { restored = outside; outgoing = inside } in
-      refine_ r)) in
+      r)) in
   let success = r.#value in
   let h = ghost_ (P.own (borrow_ r.#state)) in
   ghost_ (post_def success h);
   let result : (bool, Cell.contents) P.step = { value = success; state = r.#state } in
-  refine_ result
+  result
 let release : (a : t) ->
     {t : Cell.contents P.token | good (a.cell) (P.own t)} @ unique ghost ->
     {t : Cell.contents P.token | P.own t === P.Heap.empty ()} @ unique ghost =
@@ -66,17 +64,14 @@ let release : (a : t) ->
   let p = a.cell in
   let zero = 0 in
   let one = 1 in
-  let refine_ t = t in
   let ht = ghost_ (P.own (borrow_ t)) in
   ghost_ (good_def p ht);
   let[@def] (post @ total) (success : bool @ immutable)
       (h : Cell.contents P.heap @ immutable) =
     ghost_ (success && h === P.Heap.empty ()) in
   let erased_post = ghost_ post in
-  let refine_ r = A.compare_and_set a.atomic one zero erased_post t
+  let r = A.compare_and_set a.atomic one zero erased_post t
     (ghost_ (fun before inside outside ->
-      let refine_ inside = inside in
-      let refine_ outside = outside in
       let hi = ghost_ (P.own (borrow_ inside)) in
       let ho = ghost_ (P.own (borrow_ outside)) in
       let after = ghost_ (if before = one then zero else before) in
@@ -87,12 +82,12 @@ let release : (a : t) ->
       ghost_ (Invariant.holds_def { cell = p } after ho);
       ghost_ (post_def success hi);
       let r : A.transfer = { restored = outside; outgoing = inside } in
-      refine_ r)) in
+      r)) in
   let success = r.#value in
   let h = ghost_ (P.own (borrow_ r.#state)) in
   ghost_ (post_def success h);
   let t = r.#state in
-  refine_ t
+  t
 
 let[@def] (location @ total) (a : t @ local immutable) = ghost_ (Cell.location a.cell)
 let[@def] (owned @ total) (a : t @ immutable)
@@ -125,8 +120,7 @@ let take : (a : t) ->
     (token : {t : contents Ghost_pref.token |
       match Ghost_pref.Heap.at (Ghost_pref.own t) (location a) with
       | Some (Some _) -> true | _ -> false}) @ unique ghost ->
-    {r : V.t step | let refine_ token = token in
-      Ghost_pref.Heap.at (Ghost_pref.own token) (location a)
+    {r : V.t step | Ghost_pref.Heap.at (Ghost_pref.own token) (location a)
         === Some (Some (V.snapshot r.value)) &&
       Ghost_pref.own r.state === Ghost_pref.Heap.put (Ghost_pref.own token)
         (location a) None} @ unique = fun a t ->
@@ -136,8 +130,7 @@ let take : (a : t) ->
 let put : (a : t) -> (value : V.t) @ unique ->
     (token : {t : contents Ghost_pref.token |
       Ghost_pref.Heap.at (Ghost_pref.own t) (location a) === Some None}) @ unique ghost ->
-    {t : contents Ghost_pref.token | let refine_ token = token in
-      Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token)
+    {t : contents Ghost_pref.token | Ghost_pref.own t === Ghost_pref.Heap.put (Ghost_pref.own token)
         (location a) (Some (V.snapshot value))} @ unique ghost = fun a value t ->
   ghost_ (location_def a); Cell.put a.cell value t
 
