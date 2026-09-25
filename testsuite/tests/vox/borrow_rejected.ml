@@ -39,19 +39,19 @@ open Borrow;;
 
 module Stale_handle = struct
   let rejected (s : int Slice.t @ local unique) =
-    let refine_ first = Slice.finish s in
-    let refine_ second = Slice.length (borrow_ s) in
+    let first = Slice.finish s in
+    let second = Slice.length (borrow_ s) in
     ()
 end;;
 [%%expect{|
-Line 4, characters 38-49:
-4 |     let refine_ second = Slice.length (borrow_ s) in
-                                          ^^^^^^^^^^^
+Line 4, characters 30-41:
+4 |     let second = Slice.length (borrow_ s) in
+                                  ^^^^^^^^^^^
 Error: This value is borrowed here,
        but it has already been used as unique at:
-Line 3, characters 37-38:
-3 |     let refine_ first = Slice.finish s in
-                                         ^
+Line 3, characters 29-30:
+3 |     let first = Slice.finish s in
+                                 ^
 
 |}]
 
@@ -59,21 +59,21 @@ module Parent_during_borrow = struct
   let rejected (a : int Owned_array.t @ unique) =
     let[@def] (post @ total) (u : unit @ immutable) (after : int list @ immutable) = ghost_ true in
     let erased = ghost_ post in
-    let refine_ result = Owned_array.with_mut a erased (fun loan ->
-      let refine_ s = loan in
-      let refine_ array = Owned_array.into_iarray a in
-      let refine_ u = Slice.finish s in
-      refine_ u) in
+    let result = Owned_array.with_mut a erased (fun loan ->
+      let s = loan in
+      let array = Owned_array.into_iarray a in
+      let u = Slice.finish s in
+      u) in
     ()
 end;;
 [%%expect{|
-Line 7, characters 50-51:
-7 |       let refine_ array = Owned_array.into_iarray a in
-                                                      ^
+Line 7, characters 42-43:
+7 |       let array = Owned_array.into_iarray a in
+                                              ^
 Error: This value is used here, but it is also being used as unique at:
-Line 5, characters 46-47:
-5 |     let refine_ result = Owned_array.with_mut a erased (fun loan ->
-                                                  ^
+Line 5, characters 38-39:
+5 |     let result = Owned_array.with_mut a erased (fun loan ->
+                                          ^
 
 |}]
 
@@ -91,33 +91,33 @@ module Unproved_postcondition = struct
   let rejected (a : int Owned_array.t @ unique) =
     let[@def] (post @ total) (u : unit @ immutable) (after : int list @ immutable) = ghost_ false in
     let erased = ghost_ post in
-    let refine_ result = Owned_array.with_mut a erased (fun loan ->
-      let refine_ s = loan in
-      let refine_ u = Slice.finish s in
-      refine_ u) in
+    let result = Owned_array.with_mut a erased (fun loan ->
+      let s = loan in
+      let u = Slice.finish s in
+      u) in
     result
 end;;
 [%%expect{|
-Line 8, characters 6-15:
-8 |       refine_ u) in
-          ^^^^^^^^^
+Line 8, characters 6-7:
+8 |       u) in
+          ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 module Out_of_bounds = struct
   let rejected (s : int Slice.t @ local unique) =
-    let refine_ size = Slice.length (borrow_ s) in
+    let size = Slice.length (borrow_ s) in
     let state = s in
     let index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} =
-      refine_ size in
-    let refine_ result = Slice.get (borrow_ state) index in
+      size in
+    let _ = Slice.get (borrow_ state) index in
     ()
 end;;
 [%%expect{|
-Line 7, characters 6-18:
-7 |       refine_ size in
-          ^^^^^^^^^^^^
+Line 7, characters 6-10:
+7 |       size in
+          ^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -150,14 +150,14 @@ module Stale_model = struct
       (index : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0}) ->
       (value : int) -> {u : unit | Slice.final s === Slice.current s} = fun s index value ->
-    let refine_ changed = Slice.set s index value in
-    let refine_ closed = Slice.finish changed in
-    let u = () in refine_ u
+    let changed = Slice.set s index value in
+    let _ = Slice.finish changed in
+    let u = () in u
 end;;
 [%%expect{|
-Line 8, characters 18-27:
-8 |     let u = () in refine_ u
-                      ^^^^^^^^^
+Line 8, characters 18-19:
+8 |     let u = () in u
+                      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -168,7 +168,7 @@ module Shared_element = struct
       (index : {i : int | 0 <= i
         && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0}) -> unit =
       fun s index ->
-    let refine_ value = Slice.get (borrow_ s) index in
+    let value = Slice.get (borrow_ s) index in
     require_unique value
 end;;
 [%%expect{|
@@ -192,7 +192,7 @@ module Local_observation = struct
   let check (values : int list @ local immutable) =
     let equal = ghost_ (values === values) in
     let u = () in
-    let refine_ proof = (refine_ u : {u : unit | equal}) in
+    let _ = (u : {u : unit | equal}) in
     ()
 end;;
 [%%expect{|
@@ -254,32 +254,32 @@ module Split_consistency = struct
     let[@def] (post @ total) (u : unit @ immutable)
         (left : int Model.t @ immutable) (right : int Model.t @ immutable) = ghost_ true in
     let erased = ghost_ post in
-    let refine_ n = Slice.length (borrow_ s) in
+    let n = Slice.length (borrow_ s) in
     let state = s in
     let half = n / 2 in
     let cut : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) <= 0} =
-      refine_ half in
-    let refine_ result = Slice.split_at state cut erased (fun l r ->
-      let refine_ left = l in
-      let refine_ right = r in
+      half in
+    let result = Slice.split_at state cut erased (fun l r ->
+      let left = l in
+      let right = r in
       let lf = ghost_ (Slice.final (borrow_ left)) in
       let rf = ghost_ (Slice.final (borrow_ right)) in
-      let refine_ lclosed = Slice.finish left in
-      let refine_ rclosed = Slice.finish right in
+      let _ = Slice.finish left in
+      let _ = Slice.finish right in
       let u = () in
-      let refine_ equation = ghost_ (post_def u lf rf) in
-      refine_ u) in
+      let _ = ghost_ (post_def u lf rf) in
+      u) in
     let {state; _} = result in
-    let refine_ closed = Slice.finish state in
+    let _ = Slice.finish state in
     if n = 2 then
       let u = () in
-      let refine_ impossible = (refine_ u : {u : unit | false}) in ()
+      let _ = (u : {u : unit | false}) in ()
 end;;
 [%%expect{|
-Line 26, characters 32-41:
-26 |       let refine_ impossible = (refine_ u : {u : unit | false}) in ()
-                                     ^^^^^^^^^
+Line 26, characters 15-16:
+26 |       let _ = (u : {u : unit | false}) in ()
+                    ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -291,21 +291,21 @@ module Frame_child_extent = struct
     @@ total = "caml_borrow_frame_left"
 
   let rejected (s : int Slice.t @ local unique) =
-    let refine_ n = Slice.length (borrow_ s) in
+    let n = Slice.length (borrow_ s) in
     let state = s in
     if n = 2 then (
       let frame, left, right = split state 1 in
       let _lf = ghost_ (Slice.final (borrow_ left)) in
       let _ff = ghost_ (left_final (borrow_ frame)) in
-      let refine_ lclosed = Slice.finish left in
-      let refine_ rclosed = Slice.finish right in
+      let _ = Slice.finish left in
+      let _ = Slice.finish right in
       let u = () in
-      let refine_ impossible = (refine_ u : {u : unit | false}) in ())
+      let _ = (u : {u : unit | false}) in ())
 end;;
 [%%expect{|
-Line 18, characters 32-41:
-18 |       let refine_ impossible = (refine_ u : {u : unit | false}) in ())
-                                     ^^^^^^^^^
+Line 18, characters 15-16:
+18 |       let _ = (u : {u : unit | false}) in ())
+                    ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -324,14 +324,14 @@ Error: The value "Array.get" is "partial"
 module Overlapping_access = struct
   let rejected (s : int Slice.t @ local unique) =
     let view = borrow_ s in
-    let refine_ closed = Slice.finish s in
-    let refine_ size = Slice.length view in
+    let closed = Slice.finish s in
+    let size = Slice.length view in
     ()
 end;;
 [%%expect{|
-Line 4, characters 38-39:
-4 |     let refine_ closed = Slice.finish s in
-                                          ^
+Line 4, characters 30-31:
+4 |     let closed = Slice.finish s in
+                                  ^
 Error: This value is used as "unique" here, but it is being borrowed.
 Line 3, characters 15-24:
 3 |     let view = borrow_ s in
@@ -339,8 +339,8 @@ Line 3, characters 15-24:
   The value is being borrowed
 Lines 3-6, characters 4-6:
 3 | ....let view = borrow_ s in
-4 |     let refine_ closed = Slice.finish s in
-5 |     let refine_ size = Slice.length view in
+4 |     let closed = Slice.finish s in
+5 |     let size = Slice.length view in
 6 |     ()
   during this borrow context
 |}]

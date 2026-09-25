@@ -30,9 +30,9 @@ Use the compiler's `-dvc` option to inspect a failed goal, its encoded
 assumptions, model values, and opaque calls. Models involving opaque calls can
 indicate missing facts rather than a runtime bug.
 
-Integers retain OCaml's wrapping arithmetic. `assume_` validates at runtime;
-`refine_` asks the verifier for a proof. Proof code explicitly wrapped in
-`ghost_` is erased. See the [library guide](verification/library/README.md)
+Integers retain OCaml's wrapping arithmetic. Refinement annotations ask the
+verifier for a proof implicitly; `assume_` validates at runtime. Proof code
+wrapped in `ghost_` is erased. See the [library guide](verification/library/README.md)
 for the ownership and trusted-primitive boundaries.
 
 ## Underlying OxCaml compiler

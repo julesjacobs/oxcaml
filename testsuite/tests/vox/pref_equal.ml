@@ -9,26 +9,26 @@
 
 let equal_alias (p : int Pref.t @ immutable) : {b : bool | b} =
   let alias = p in
-  let refine_ b = Pref.equal p alias in refine_ b
+  let b = Pref.equal p alias in b
 
 let () =
   let value = 42 in
-  let refine_ t = Pref.empty () in
-  let refine_ a = Pref.alloc value t in
+  let t = Pref.empty () in
+  let a = Pref.alloc value t in
   let p = a.value in let t = a.state in
-  let refine_ b = Pref.alloc value t in
+  let b = Pref.alloc value t in
   let q = b.value in let t = b.state in
-  let refine_ different = Pref.equal p q in
-  let proof : {u : unit | not different} = let u = () in refine_ u in
-  let refine_ proof = proof in
+  let different = Pref.equal p q in
+  let proof : {u : unit | not different} = () in
+  let _ = proof in
   assert (not different);
-  let refine_ same = equal_alias p in
+  let same = equal_alias p in
   assert same;
-  let t : {t : Pref.token | Pref.Heap.mem (Pref.own t) p} = refine_ t in
+  let t : {t : Pref.token | Pref.Heap.mem (Pref.own t) p} = t in
   let other = 7 in
-  let refine_ t = Pref.write p other t in
-  let refine_ different = Pref.equal p q in
+  let t = Pref.write p other t in
+  let different = Pref.equal p q in
   assert (not different);
-  let t : {t : Pref.token | Pref.Heap.mem (Pref.own t) q} = refine_ t in
-  let refine_ contents = Pref.read q t in
+  let t : {t : Pref.token | Pref.Heap.mem (Pref.own t) q} = t in
+  let contents = Pref.read q t in
   assert (contents = 42)

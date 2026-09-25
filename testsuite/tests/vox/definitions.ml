@@ -34,8 +34,8 @@ module Definitions :
 let unfolded () : {n : int | n = 5} =
   let x = 3 in
   let y = next x in
-  let refine_ proof = next_def x in
-  refine_ y;;
+  let _ = next_def x in
+  y;;
 [%%expect{|
 val unfolded : unit -> {n : int | n = 5} = <fun>
 |}]
@@ -43,25 +43,20 @@ val unfolded : unit -> {n : int | n = 5} = <fun>
 let opaque () : {n : int | n = 5} =
   let x = 3 in
   let y = next x in
-  refine_ y;;
+  y;;
 [%%expect{|
-Line 4, characters 2-11:
-4 |   refine_ y;;
-      ^^^^^^^^^
+Line 4, characters 2-3:
+4 |   y;;
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let not_eliminated () : {n : int | n = 5} =
   let x = 3 in
   let y = next x in
-  let proof = next_def x in
-  refine_ y;;
+  let _ = next_def x in
+  y;;
 [%%expect{|
-Line 4, characters 6-11:
-4 |   let proof = next_def x in
-          ^^^^^
-Warning 26 [unused-var]: unused variable "proof".
-
 val not_eliminated : unit -> {n : int | n = 5} = <fun>
 |}]
 
@@ -69,8 +64,8 @@ let alias () : {n : int | n = 5} =
   let g = next in
   let x = 3 in
   let y = g x in
-  let refine_ proof = next_def x in
-  refine_ y;;
+  let _ = next_def x in
+  y;;
 [%%expect{|
 val alias : unit -> {n : int | n = 5} = <fun>
 |}]
@@ -79,8 +74,8 @@ let local_capture (x : int) : {n : int | n = x + 3} =
   let offset = 3 in
   let[@def] add (y : int) = y + offset in
   let result : int = add x in
-  let refine_ proof = add_def x in
-  refine_ result;;
+  let _ = add_def x in
+  result;;
 [%%expect{|
 val local_capture : (x : int) -> {n : int | n = (x + 3)} = <fun>
 |}]
@@ -90,12 +85,12 @@ let shadowing () : {n : int | n = 1} =
   let x = 0 in
   let f x = x + 2 in
   let y = f x in
-  let refine_ proof = f_def x in
-  refine_ y;;
+  let _ = f_def x in
+  y;;
 [%%expect{|
-Line 7, characters 2-11:
-7 |   refine_ y;;
-      ^^^^^^^^^
+Line 7, characters 2-3:
+7 |   y;;
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -104,20 +99,20 @@ let multiple () : {n : int | n = 4} =
   let x = 3 in
   let y = 9 in
   let result = choose b x y in
-  let refine_ proof = choose_def b x y in
-  refine_ result;;
+  let _ = choose_def b x y in
+  result;;
 [%%expect{|
 val multiple : unit -> {n : int | n = 4} = <fun>
 |}]
 
 let wrapping x : {n : int | n > x} =
   let result = next x in
-  let refine_ proof = next_def x in
-  refine_ result;;
+  let _ = next_def x in
+  result;;
 [%%expect{|
-Line 4, characters 2-16:
-4 |   refine_ result;;
-      ^^^^^^^^^^^^^^
+Line 4, characters 2-8:
+4 |   result;;
+      ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -126,8 +121,8 @@ let shadowed_equality () : {n : int | n = 5} =
   let[@def] f (x : int) = x + 2 in
   let x = 3 in
   let y : int = f x in
-  let refine_ proof = f_def x in
-  refine_ y;;
+  let _ = f_def x in
+  y;;
 [%%expect{|
 Line 2, characters 6-11:
 2 |   let ( = ) _ _ = false in
@@ -141,11 +136,11 @@ let partial_calls (f : int -> int) (x : int) : {n : int | n = 0} =
   let a = f x in
   let (_ : {n : int | n = 0}) = assume_ a in
   let b = f x in
-  refine_ b;;
+  b;;
 [%%expect{|
-Line 5, characters 2-11:
-5 |   refine_ b;;
-      ^^^^^^^^^
+Line 5, characters 2-3:
+5 |   b;;
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -153,7 +148,7 @@ let total_calls (f @ total) (x : int) : {n : int | n = 0} =
   let a = f x in
   let (_ : {n : int | n = 0}) = assume_ a in
   let b = f x in
-  refine_ b;;
+  b;;
 [%%expect{|
 val total_calls : (int -> int @ total) @ total -> int -> {n : int | n = 0} =
   <fun>
@@ -166,12 +161,12 @@ let stateful_total_calls_are_fresh r : {n : int | n = 0} =
   r := a + 1;
   let b = stateful_total_read r in
   let n = a - b in
-  refine_ n;;
+  n;;
 [%%expect{|
 external stateful_total_read : int ref -> int = "%field0"
-Line 8, characters 2-11:
-8 |   refine_ n;;
-      ^^^^^^^^^
+Line 8, characters 2-3:
+8 |   n;;
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -184,11 +179,11 @@ let closure_instances make : {n : int | n = 1} =
   let y = a x in
   let (_ : {n : int | n = 1}) = assume_ y in
   let result = b x in
-  refine_ result;;
+  result;;
 [%%expect{|
-Line 10, characters 2-16:
-10 |   refine_ result;;
-       ^^^^^^^^^^^^^^
+Line 10, characters 2-8:
+10 |   result;;
+       ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -197,8 +192,8 @@ module Module_alias = struct
   let verified () : {n : int | n = 5} =
     let x = 3 in
     let y = M.g x in
-    let refine_ proof = next_def x in
-    refine_ y
+    let _ = next_def x in
+    y
 end;;
 [%%expect{|
 module Module_alias :
@@ -212,8 +207,8 @@ let local_module_alias () : {n : int | n = 5} =
   let module M = struct let (g @ total) = Definitions.next end in
   let x = 3 in
   let y : int = M.g x in
-  let refine_ proof = next_def x in
-  refine_ y;;
+  let _ = next_def x in
+  y;;
 [%%expect{|
 val local_module_alias : unit -> {n : int | n = 5} = <fun>
 |}]
@@ -228,13 +223,13 @@ val wrap_def : (x : int) -> {u : unit | (wrap x) === (Wrap x)} = <fun>
 
 let translated_datatype_definition_lemma (x : int) :
     {n : int | n = x} =
-  let refine_ proof = wrap_def x in
+  let _ = wrap_def x in
   let n = 0 in
-  refine_ n;;
+  n;;
 [%%expect{|
-Line 5, characters 2-11:
-5 |   refine_ n;;
-      ^^^^^^^^^
+Line 5, characters 2-3:
+5 |   n;;
+      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -244,9 +239,9 @@ module Datatype_definition = struct
 
   let use () : {n : int | n = 0} =
     let (wrapped @ total stateless) = wrapped_argument in
-    let refine_ proof = wrapped_zero_def wrapped in
+    let _ = wrapped_zero_def wrapped in
     let n = wrapped_zero wrapped in
-    refine_ n
+    n
 end;;
 [%%expect{|
 module Datatype_definition :
@@ -265,19 +260,18 @@ module Polymorphic = struct
   let (identity_law @ total) :
       (x : ('a : immutable_data)) -> {u : unit | identity x === x} =
     fun x ->
-    let refine_ equation = identity_def x in
-    let u = () in
-    refine_ u
+    let _ = identity_def x in
+    ()
 
   let integer (x : int) : {y : int | y === x} =
     let result = identity x in
-    let refine_ equation = identity_def x in
-    refine_ result
+    let _ = identity_def x in
+    result
 
   let boolean (x : bool) : {y : bool | y === x} =
     let result = identity x in
-    let refine_ equation = identity_def x in
-    refine_ result
+    let _ = identity_def x in
+    result
 end
 ;;
 [%%expect{|
@@ -330,8 +324,8 @@ module Let_patterns :
 let tuple_let_unfold () : {n : int | n = 7} =
   let pair = 3, 4 in
   let result = Let_patterns.sum pair in
-  let refine_ proof = Let_patterns.sum_def pair in
-  refine_ result;;
+  let _ = Let_patterns.sum_def pair in
+  result;;
 [%%expect{|
 val tuple_let_unfold : unit -> {n : int | n = 7} = <fun>
 |}]
@@ -339,12 +333,12 @@ val tuple_let_unfold : unit -> {n : int | n = 7} = <fun>
 let tuple_let_wrong () : {n : int | n = 8} =
   let pair = 3, 4 in
   let result = Let_patterns.sum pair in
-  let refine_ proof = Let_patterns.sum_def pair in
-  refine_ result;;
+  let _ = Let_patterns.sum_def pair in
+  result;;
 [%%expect{|
-Line 5, characters 2-16:
-5 |   refine_ result;;
-      ^^^^^^^^^^^^^^
+Line 5, characters 2-8:
+5 |   result;;
+      ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -370,7 +364,7 @@ let tuple_let_predicate (pair : int * int) :
     {n : int | let x, y = pair in n = x + y} =
   let x, y = pair in
   let result = x + y in
-  refine_ result;;
+  result;;
 [%%expect{|
 val tuple_let_predicate :
   (pair : (int * int)) -> {n : int | match pair with | (x, y) -> n = (x + y)} =
@@ -380,8 +374,8 @@ val tuple_let_predicate :
 let nested_let_unfold () : {n : int | n = 12} =
   let pair = 3, (4, 5) in
   let result = Let_patterns.nested pair in
-  let refine_ proof = Let_patterns.nested_def pair in
-  refine_ result;;
+  let _ = Let_patterns.nested_def pair in
+  result;;
 [%%expect{|
 val nested_let_unfold : unit -> {n : int | n = 12} = <fun>
 |}]
@@ -389,8 +383,8 @@ val nested_let_unfold : unit -> {n : int | n = 12} = <fun>
 let record_let_unfold () : {n : int | n = 7} =
   let fields = { Let_patterns.left = 3; right = 4 } in
   let result = Let_patterns.fields_sum fields in
-  let refine_ proof = Let_patterns.fields_sum_def fields in
-  refine_ result;;
+  let _ = Let_patterns.fields_sum_def fields in
+  result;;
 [%%expect{|
 val record_let_unfold : unit -> {n : int | n = 7} = <fun>
 |}]

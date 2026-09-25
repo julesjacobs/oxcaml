@@ -39,12 +39,12 @@ type positive = {n : number | n > (Bigint.of_int 0)}
 |}]
 
 let next (x : number) : {r : number | r > x} =
-  let r = Bigint.add x Bigint.one in refine_ r
+  let r = Bigint.add x Bigint.one in r
 let numeric_equal (x : number) : {b : bool | b} =
   let y = Bigint.add x Bigint.zero in
-  let b = x = y in refine_ b
+  let b = x = y in b
 let compare_equal (x : number) : {r : int | r = 0} =
-  let r = Bigint.compare x x in refine_ r;;
+  let r = Bigint.compare x x in r;;
 [%%expect{|
 val next : (x : number) -> {r : number | r > x} = <fun>
 val numeric_equal : number -> {b : bool | b} = <fun>
@@ -53,18 +53,18 @@ val compare_equal : number -> {r : int | r = 0} = <fun>
 
 let physical_equal (x : number) : {b : bool | b} =
   let y = Bigint.add x Bigint.zero in
-  let b = x == y in refine_ b;;
+  let b = x == y in b;;
 [%%expect{|
-Line 3, characters 20-29:
-3 |   let b = x == y in refine_ b;;
-                        ^^^^^^^^^
+Line 3, characters 20-21:
+3 |   let b = x == y in b;;
+                        ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let signed_min () : {r : number | r = -4611686018427387904Z} =
-  let r = Bigint.of_int (-4611686018427387904) in refine_ r
+  let r = Bigint.of_int (-4611686018427387904) in r
 let nonnegative_int (x : int) : {r : number | r >= 0Z} =
-  let r = if x >= 0 then Bigint.of_int x else Bigint.zero in refine_ r;;
+  let r = if x >= 0 then Bigint.of_int x else Bigint.zero in r;;
 [%%expect{|
 val signed_min :
   unit ->
@@ -84,11 +84,11 @@ val nonnegative_int : int -> {r : number | r >= (Bigint.of_int 0)} = <fun>
 let zero_divisor (x : number) : {r : number | r = x} =
   let q = Bigint.div x 0Z in
   let r = Bigint.modulo x 0Z in
-  let result = Bigint.add q r in refine_ result
+  let result = Bigint.add q r in result
 let euclidean (a : number) (b : number) : {r : number | r = a} =
   let q = Bigint.div a b in
   let r = Bigint.modulo a b in
-  let result = Bigint.(b * q + r) in refine_ result;;
+  let result = Bigint.(b * q + r) in result;;
 [%%expect{|
 val zero_divisor : (x : number) -> {r : number | r = x} = <fun>
 val euclidean : (a : number) -> number -> {r : number | r = a} = <fun>
@@ -100,11 +100,11 @@ module Shadow_ops : sig val ( + ) : Bigint.t -> Bigint.t -> Bigint.t end
 |}]
 
 let shadowed_open () : {r : number | r = 2Z} =
-  let r = Shadow_ops.(1Z + 1Z) in refine_ r;;
+  let r = Shadow_ops.(1Z + 1Z) in r;;
 [%%expect{|
-Line 2, characters 34-43:
-2 |   let r = Shadow_ops.(1Z + 1Z) in refine_ r;;
-                                      ^^^^^^^^^
+Line 2, characters 34-35:
+2 |   let r = Shadow_ops.(1Z + 1Z) in r;;
+                                      ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -124,7 +124,7 @@ module Definitions :
 let unfolded (x : number) : {r : number | r > x} =
   let r = Definitions.next x in
   Definitions.next_def x;
-  refine_ r;;
+  r;;
 [%%expect{|
 val unfolded : (x : number) -> {r : number | r > x} = <fun>
 |}]
@@ -176,12 +176,12 @@ Line 1, characters 58-59:
 |}]
 
 let rec refined_measure (bound : {n : number | n >= 0Z}) =
-  let refine_ n = bound in
+  let n = bound in
   if n > 0Z then
     let m = Bigint.(n - 1Z) in
-    refined_measure (refine_ m)
+    refined_measure (m)
   else Bigint.zero
-[@@decreases let refine_ n = bound in n];;
+[@@decreases let n = bound in n];;
 [%%expect{|
 val refined_measure : {n : number | n >= (Bigint.of_int 0)} -> Bigint.t =
   <fun>
