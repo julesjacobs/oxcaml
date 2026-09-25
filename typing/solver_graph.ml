@@ -302,7 +302,9 @@ let project ?(budget = budget ()) graph variables =
       let variable =
         List.fold_left
           (fun best variable ->
-            if degree graph variable < degree graph best then variable else best)
+            if degree graph variable < degree graph best
+            then variable
+            else best)
           (List.hd variables) (List.tl variables)
       in
       let rest = List.filter (( <> ) variable) variables in

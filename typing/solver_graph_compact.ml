@@ -287,7 +287,9 @@ let project ?(allow_self_edges = false) graph variables =
       let selected =
         List.fold_left
           (fun best variable ->
-            if degree graph variable < degree graph best then variable else best)
+            if degree graph variable < degree graph best
+            then variable
+            else best)
           (List.hd variables) (List.tl variables)
       in
       let remaining = List.filter (( <> ) selected) variables in
@@ -302,9 +304,8 @@ let satisfies graph assignment =
   && for_alli (fun index values -> values.(assignment.(index))) graph.unary
   && List.for_all
        (fun edge ->
-         graph.orders.(edge.target).(edge.morph.(assignment.(edge.source))).(assignment.(
-                                                                             edge
-                                                                               .target)))
+         graph.orders.(edge.target).(edge.morph.(
+           assignment.(edge.source))).(assignment.(edge.target)))
        graph.edges
 
 let path_order graph =
@@ -385,7 +386,8 @@ let least_model graph intervals fixed =
               | _ -> ());
               if
                 not
-                  graph.orders.(edge.target).(next).(snd intervals.(edge.target))
+                  graph.orders.(edge.target).(next).(
+                    snd intervals.(edge.target))
               then raise No_model;
               values.(edge.target) <- next;
               changed := true
@@ -463,7 +465,8 @@ let implies graph consequence =
                      && premise.target = edge.target
                      && for_alli
                           (fun value result ->
-                            graph.orders.(edge.target).(edge.morph.(value)).(result))
+                            graph.orders.(edge.target).(edge.morph.(
+                              value)).(result))
                           premise.morph)
                    graph.edges
           in
@@ -487,8 +490,8 @@ let implies graph consequence =
                         | None -> false
                         | Some assignment ->
                           not
-                            consequence.orders.(edge.target).(edge.morph.(value)).(
-                            assignment.(edge.target)))
+                            consequence.orders.(edge.target).(edge.morph.(
+                              value)).(assignment.(edge.target)))
                      || loop (value + 1))
                 in
                 loop 0
