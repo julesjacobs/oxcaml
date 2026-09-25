@@ -1,0 +1,2 @@
+# The installed formatter does not parse Vox refinement syntax.
+disable=true
