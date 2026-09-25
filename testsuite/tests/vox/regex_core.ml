@@ -1,9 +1,9 @@
 module Regex : sig
-  type t = Empty | Epsilon | Symbol of int | Alt of t * t | Seq of t * t | Star of t
+  type t = Regex_semantics.t = Empty | Epsilon | Symbol of int | Alt of t * t | Seq of t * t | Star of t
   [@@inductive]
 
   module Membership : sig
-    type evidence =
+    type evidence = Regex_semantics.Membership.evidence =
       | Epsilon_match
       | Symbol_match of int
       | Alt_left of evidence
@@ -103,44 +103,14 @@ module Regex : sig
       {u : unit | if valid root p && word p === s then run (compile root) s
         else true} @@ total
   end
+  val membership_word : (p : Membership.evidence) ->
+    {u : unit | Membership.word p === Regex_semantics.Membership.word p} @@ total
+  val membership_valid : (r : t) -> (p : Membership.evidence) ->
+    {u : unit | Membership.valid r p === Regex_semantics.Membership.valid r p} @@ total
 end = struct
-  type t = Empty | Epsilon | Symbol of int | Alt of t * t | Seq of t * t | Star of t
+  type t = Regex_semantics.t = Empty | Epsilon | Symbol of int | Alt of t * t | Seq of t * t | Star of t
   [@@inductive]
-
-  module Membership = struct
-    type evidence =
-      | Epsilon_match
-      | Symbol_match of int
-      | Alt_left of evidence
-      | Alt_right of evidence
-      | Seq_match of evidence * evidence
-      | Star_empty
-      | Star_step of evidence * evidence
-    [@@inductive]
-
-    let[@def] rec append (xs : int list) ys =
-      match xs with [] -> ys | x :: rest -> x :: append rest ys
-
-    let[@def] rec word p =
-      match p with
-      | Epsilon_match | Star_empty -> []
-      | Symbol_match c -> [c]
-      | Alt_left p | Alt_right p -> word p
-      | Seq_match (p, q) | Star_step (p, q) -> append (word p) (word q)
-
-    let[@def] rec valid r p =
-      match p with
-      | Epsilon_match -> (match r with Epsilon -> true | _ -> false)
-      | Symbol_match c -> (match r with Symbol d -> c = d | _ -> false)
-      | Alt_left p -> (match r with Alt (a, _) -> valid a p | _ -> false)
-      | Alt_right p -> (match r with Alt (_, b) -> valid b p | _ -> false)
-      | Seq_match (p, q) ->
-        (match r with Seq (a, b) -> valid a p && valid b q | _ -> false)
-      | Star_empty -> (match r with Star _ -> true | _ -> false)
-      | Star_step (p, q) ->
-        (match r with Star a -> valid a p && valid r q | _ -> false)
-
-  end
+  module Membership = Regex_semantics.Membership
 
   open Membership
 
@@ -2048,4 +2018,10 @@ end = struct
 
   end
 
+  let (membership_word @ total) (p : Membership.evidence) :
+    {u : unit | Membership.word p === Regex_semantics.Membership.word p} =
+    let u = () in refine_ u
+  let (membership_valid @ total) (r : t) (p : Membership.evidence) :
+    {u : unit | Membership.valid r p === Regex_semantics.Membership.valid r p} =
+    let u = () in refine_ u
 end;;

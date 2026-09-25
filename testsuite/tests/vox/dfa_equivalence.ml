@@ -1,6 +1,6 @@
 (* TEST
  has-z3;
- readonly_files = "dfa_equivalence_core.ml";
+ readonly_files = "dfa_semantics.ml dfa_equivalence_proof.ml dfa_equivalence_core.ml";
  {
    flags = "-extension refinement_types";
    { expect; }
@@ -12,13 +12,236 @@
  }
 *)
 
+#use "dfa_semantics.ml";;
+#use "dfa_equivalence_proof.ml";;
 #use "dfa_equivalence_core.ml";;
 [%%expect{|
-module Dfa_equivalence :
+module Dfa_semantics :
   sig
     type row = (int * int) list * int
     type raw = int * (int * bool * row) list
-    type machine : value mod immutable
+    type machine = raw
+    val has_key : int -> (int * bool * row) list -> bool
+    val has_key_def :
+      (key : int) ->
+      (table : (int * bool * row) list) ->
+      {u : unit
+        | (has_key key table) ===
+            (match table with
+             | [] -> false
+             | (candidate, _, _)::rest ->
+                 (key = candidate) || (has_key key rest))}
+    val has_state : machine -> int -> bool
+    val has_state_def :
+      (machine : machine) ->
+      (state : int) ->
+      {u : unit
+        | (has_state machine state) ===
+            (match machine with | (_, table) -> has_key state table)}
+    val unique_keys : (int * bool * row) list -> bool
+    val unique_keys_def :
+      (table : (int * bool * row) list) ->
+      {u : unit
+        | (unique_keys table) ===
+            (match table with
+             | [] -> true
+             | (key, _, _)::rest ->
+                 (not (has_key key rest)) && (unique_keys rest))}
+    val has_label : int -> (int * int) list -> bool
+    val has_label_def :
+      (label : int) ->
+      (edges : (int * int) list) ->
+      {u : unit
+        | (has_label label edges) ===
+            (match edges with
+             | [] -> false
+             | (candidate, _)::rest ->
+                 (label = candidate) || (has_label label rest))}
+    val unique_labels : (int * int) list -> bool
+    val unique_labels_def :
+      (edges : (int * int) list) ->
+      {u : unit
+        | (unique_labels edges) ===
+            (match edges with
+             | [] -> true
+             | (label, _)::rest ->
+                 (not (has_label label rest)) && (unique_labels rest))}
+    val targets_valid : (int * bool * row) list -> (int * int) list -> bool
+    val targets_valid_def :
+      (table : (int * bool * row) list) ->
+      (edges : (int * int) list) ->
+      {u : unit
+        | (targets_valid table edges) ===
+            (match edges with
+             | [] -> true
+             | (_, target)::rest ->
+                 (has_key target table) && (targets_valid table rest))}
+    val rows_valid :
+      (int * bool * row) list -> (int * bool * row) list -> bool
+    val rows_valid_def :
+      (table : (int * bool * row) list) ->
+      (remaining : (int * bool * row) list) ->
+      {u : unit
+        | (rows_valid table remaining) ===
+            (match remaining with
+             | [] -> true
+             | (_, _, (edges, default))::rest ->
+                 (unique_labels edges) &&
+                   ((has_key default table) &&
+                      ((targets_valid table edges) && (rows_valid table rest))))}
+    val valid : machine -> bool
+    val valid_def :
+      (machine : machine) ->
+      {u : unit
+        | (valid machine) ===
+            (match machine with
+             | (initial, table) ->
+                 (has_key initial table) &&
+                   ((unique_keys table) && (rows_valid table table)))}
+    val edge_step : (int * int) list -> int -> int -> int
+    val edge_step_def :
+      (edges : (int * int) list) ->
+      (default : int) ->
+      (c : int) ->
+      {u : unit
+        | (edge_step edges default c) ===
+            (match edges with
+             | [] -> default
+             | (label, target)::rest ->
+                 if c = label then target else edge_step rest default c)}
+    val row_step : row -> int -> int
+    val row_step_def :
+      (row : row) ->
+      (c : int) ->
+      {u : unit
+        | (row_step row c) ===
+            (match row with | (edges, default) -> edge_step edges default c)}
+    val edge_labels : (int * int) list -> int list
+    val edge_labels_def :
+      (edges : (int * int) list) ->
+      {u : unit
+        | (edge_labels edges) ===
+            (match edges with
+             | [] -> []
+             | (label, _)::rest -> label :: (edge_labels rest))}
+    val row_labels : row -> int list
+    val row_labels_def :
+      (row : row) ->
+      {u : unit
+        | (row_labels row) ===
+            (match row with | (edges, _) -> edge_labels edges)}
+    val view : (int * bool * row) list -> int -> bool * row
+    val view_def :
+      (table : (int * bool * row) list) ->
+      (state : int) ->
+      {u : unit
+        | (view table state) ===
+            (match table with
+             | [] -> (false, ([], 0))
+             | (key, accepting, row)::rest ->
+                 if key = state then (accepting, row) else view rest state)}
+    val final : machine -> int -> bool
+    val final_def :
+      (machine : machine) ->
+      (state : int) ->
+      {u : unit
+        | (final machine state) ===
+            (match machine with
+             | (_, table) ->
+                 (match view table state with | (accepting, _) -> accepting))}
+    val step : machine -> int -> int -> int
+    val step_def :
+      (machine : machine) ->
+      (state : int) ->
+      (c : int) ->
+      {u : unit
+        | (step machine state c) ===
+            (match machine with
+             | (_, table) ->
+                 (match view table state with | (_, row) -> row_step row c))}
+    val labels : machine -> int -> int list
+    val labels_def :
+      (machine : machine) ->
+      (state : int) ->
+      {u : unit
+        | (labels machine state) ===
+            (match machine with
+             | (_, table) ->
+                 (match view table state with | (_, row) -> row_labels row))}
+    val execute : machine -> int -> int list -> bool
+    val execute_def :
+      (machine : machine) ->
+      (state : int) ->
+      (word : int list) ->
+      {u : unit
+        | (execute machine state word) ===
+            (match word with
+             | [] -> final machine state
+             | c::rest -> execute machine (step machine state c) rest)}
+    val run : machine -> int list -> bool
+    val run_def :
+      (machine : machine) ->
+      (word : int list) ->
+      {u : unit
+        | (run machine word) ===
+            (match machine with
+             | (initial, _) -> execute machine initial word)}
+    val big_length : 'a list -> Bigint.t
+    val big_length_def :
+      (xs : 'a list) ->
+      {u : unit
+        | (big_length xs) ===
+            (match xs with
+             | [] -> Bigint.of_int 0
+             | _::rest -> Bigint.add (Bigint.of_int 1) (big_length rest))}
+    val state_ids : (int * bool * row) list -> int list
+    val state_ids_def :
+      (table : (int * bool * row) list) ->
+      {u : unit
+        | (state_ids table) ===
+            (match table with
+             | [] -> []
+             | (state, _, _)::rest -> state :: (state_ids rest))}
+    val state_size : machine -> Bigint.t
+    val state_size_def :
+      (machine : machine) ->
+      {u : unit
+        | (state_size machine) ===
+            (match machine with | (_, table) -> big_length (state_ids table))}
+    val list_size : int list -> int
+    val list_size_def :
+      (xs : int list) ->
+      {u : unit
+        | (list_size xs) ===
+            (match xs with
+             | [] -> 0
+             | _::rest ->
+                 let size = list_size rest in
+                 if size >= 129 then 129 else size + 1)}
+    val bounded_labels_from : machine -> int list -> bool
+    val bounded_labels_from_def :
+      (machine : machine) ->
+      (states : int list) ->
+      {u : unit
+        | (bounded_labels_from machine states) ===
+            (match states with
+             | [] -> true
+             | state::rest ->
+                 ((list_size (labels machine state)) <= 64) &&
+                   (bounded_labels_from machine rest))}
+    val labels_bounded : machine -> bool
+    val labels_bounded_def :
+      (machine : machine) ->
+      {u : unit
+        | (labels_bounded machine) ===
+            (match machine with
+             | (_, table) -> bounded_labels_from machine (state_ids table))}
+  end
+module Dfa_proof :
+  sig
+    type row = (int * int) list * int
+    type raw = int * (int * bool * row) list
+    type machine = Dfa_semantics.machine
     type relation = (int * int) list
     type decision = Equal of relation | Different of int list | Limit
     [@@inductive]
@@ -31,7 +254,7 @@ module Dfa_equivalence :
       {u : unit
         | match of_raw raw with
           | None -> true
-          | Some machine -> valid machine}
+          | Some machine -> Dfa_semantics.valid machine}
       @@ total
     val reject_all : machine @@ total
     val run : machine -> int list -> bool @@ total
@@ -199,7 +422,7 @@ module Dfa_equivalence :
       (word : int list) ->
       {u : unit
         | if (of_raw raw) === (Some machine)
-          then (run machine word) === (raw_run raw word)
+          then (Dfa_semantics.run machine word) === (raw_run raw word)
           else true}
       @@ total
     val of_raw_final :
@@ -208,7 +431,7 @@ module Dfa_equivalence :
       (state : int) ->
       {u : unit
         | if (of_raw raw) === (Some machine)
-          then (final machine state) === (raw_final raw state)
+          then (Dfa_semantics.final machine state) === (raw_final raw state)
           else true}
       @@ total
     val of_raw_step :
@@ -218,14 +441,17 @@ module Dfa_equivalence :
       (letter : int) ->
       {u : unit
         | if (of_raw raw) === (Some machine)
-          then (step machine state letter) === (raw_step raw state letter)
+          then
+            (Dfa_semantics.step machine state letter) ===
+              (raw_step raw state letter)
           else true}
       @@ total
     val run_from_empty :
       (machine : machine) ->
       (state : int) ->
-      {u : unit | (run_from machine state []) === (final machine state)} @@
-      total
+      {u : unit
+        | (run_from machine state []) === (Dfa_semantics.final machine state)}
+      @@ total
     val run_from_letter :
       (machine : machine) ->
       (state : int) ->
@@ -233,7 +459,8 @@ module Dfa_equivalence :
       (suffix : int list) ->
       {u : unit
         | (run_from machine state (letter :: suffix)) ===
-            (run_from machine (step machine state letter) suffix)}
+            (run_from machine (Dfa_semantics.step machine state letter)
+               suffix)}
       @@ total
     val reached : machine -> int list -> int @@ total
     val state_count : machine -> int @@ total
@@ -243,8 +470,8 @@ module Dfa_equivalence :
       (machine : machine) ->
       (word : int list) ->
       {u : unit
-        | if valid machine
-          then has_state machine (reached machine word)
+        | if Dfa_semantics.valid machine
+          then Dfa_semantics.has_state machine (reached machine word)
           else true}
       @@ total
     val check : machine -> machine -> relation -> bool @@ total
@@ -257,15 +484,16 @@ module Dfa_equivalence :
       {decision : decision
         | (valid_decision left right decision) &&
             (if
-               (valid left) &&
-                 ((valid right) &&
-                    ((labels_bounded left) &&
-                       ((labels_bounded right) &&
+               (Dfa_semantics.valid left) &&
+                 ((Dfa_semantics.valid right) &&
+                    ((Dfa_semantics.labels_bounded left) &&
+                       ((Dfa_semantics.labels_bounded right) &&
                           ((0 < limit) &&
                              ((limit <= 65536) &&
                                 ((Bigint.compare
-                                    (Bigint.mul (state_size left)
-                                       (state_size right))
+                                    (Bigint.mul
+                                       (Dfa_semantics.state_size left)
+                                       (Dfa_semantics.state_size right))
                                     (Bigint.of_int limit))
                                    <= 0))))))
              then
@@ -283,15 +511,16 @@ module Dfa_equivalence :
       (limit : int) ->
       {u : unit
         | if
-            (valid left) &&
-              ((valid right) &&
-                 ((labels_bounded left) &&
-                    ((labels_bounded right) &&
+            (Dfa_semantics.valid left) &&
+              ((Dfa_semantics.valid right) &&
+                 ((Dfa_semantics.labels_bounded left) &&
+                    ((Dfa_semantics.labels_bounded right) &&
                        ((0 < limit) &&
                           ((limit <= 65536) &&
                              ((Bigint.compare
-                                 (Bigint.mul (state_size left)
-                                    (state_size right)) (Bigint.of_int limit))
+                                 (Bigint.mul (Dfa_semantics.state_size left)
+                                    (Dfa_semantics.state_size right))
+                                 (Bigint.of_int limit))
                                 <= 0))))))
           then
             match compare left right limit with
@@ -306,7 +535,8 @@ module Dfa_equivalence :
       (word : int list) ->
       {u : unit
         | if (compare left right limit) === Equivalent
-          then (run left word) === (run right word)
+          then
+            (Dfa_semantics.run left word) === (Dfa_semantics.run right word)
           else true}
       @@ total
     val comparison_witness :
@@ -316,7 +546,8 @@ module Dfa_equivalence :
       {witness : int list Ghost.t
         | if (compare left right limit) === Inequivalent
           then
-            (run left witness.Ghost.ghost) <> (run right witness.Ghost.ghost)
+            (Dfa_semantics.run left witness.Ghost.ghost) <>
+              (Dfa_semantics.run right witness.Ghost.ghost)
           else true}
       @@ total
     val decision_correct :
@@ -328,8 +559,12 @@ module Dfa_equivalence :
         | if valid_decision left right decision
           then
             match decision with
-            | Equal _ -> (run left word) === (run right word)
-            | Different witness -> (run left witness) <> (run right witness)
+            | Equal _ ->
+                (Dfa_semantics.run left word) ===
+                  (Dfa_semantics.run right word)
+            | Different witness ->
+                (Dfa_semantics.run left witness) <>
+                  (Dfa_semantics.run right witness)
             | Limit -> true
           else true}
       @@ total
@@ -342,7 +577,9 @@ module Dfa_equivalence :
       (word : int list) ->
       {u : unit
         | if check_reduction source candidate certificate
-          then (run source word) === (run candidate word)
+          then
+            (Dfa_semantics.run source word) ===
+              (Dfa_semantics.run candidate word)
           else true}
       @@ total
     val access_for :
@@ -353,7 +590,7 @@ module Dfa_equivalence :
       {word' : int list option
         | if
             (check_reduction source candidate certificate) &&
-              (has_state candidate state)
+              (Dfa_semantics.has_state candidate state)
           then
             match word' with
             | None -> false
@@ -369,8 +606,8 @@ module Dfa_equivalence :
       {word' : int list option
         | if
             (check_reduction source candidate certificate) &&
-              ((has_state candidate p) &&
-                 ((has_state candidate q) && (p <> q)))
+              ((Dfa_semantics.has_state candidate p) &&
+                 ((Dfa_semantics.has_state candidate q) && (p <> q)))
           then
             match word' with
             | None -> false
@@ -389,11 +626,12 @@ module Dfa_equivalence :
       {u : unit
         | if
             (check_reduction source candidate certificate) &&
-              ((has_state candidate state) && (valid other))
+              ((Dfa_semantics.has_state candidate state) &&
+                 (Dfa_semantics.valid other))
           then
             match access_image certificate other state with
             | None -> false
-            | Some image -> has_state other image
+            | Some image -> Dfa_semantics.has_state other image
           else true}
       @@ total
     val images_distinct :
@@ -408,8 +646,8 @@ module Dfa_equivalence :
         | if
             (check_reduction source candidate certificate) &&
               ((check candidate other relation) &&
-                 ((has_state candidate p) &&
-                    ((has_state candidate q) && (p <> q))))
+                 ((Dfa_semantics.has_state candidate p) &&
+                    ((Dfa_semantics.has_state candidate q) && (p <> q))))
           then
             match ((access_image certificate other p),
                     (access_image certificate other q))
@@ -427,9 +665,12 @@ module Dfa_equivalence :
       {u : unit
         | if
             (check_reduction source candidate certificate) &&
-              ((check candidate other relation) && (valid other))
+              ((check candidate other relation) &&
+                 (Dfa_semantics.valid other))
           then
-            (Bigint.compare (state_size candidate) (state_size other)) <= 0
+            (Bigint.compare (Dfa_semantics.state_size candidate)
+               (Dfa_semantics.state_size other))
+              <= 0
           else true}
       @@ total
     val minimum_count_semantic :
@@ -438,11 +679,17 @@ module Dfa_equivalence :
       (certificate : reduction_certificate) ->
       (other : machine) ->
       ((word : int list) ->
-       {u : unit | (run candidate word) === (run other word)}) @ total ->
+       {u : unit
+         | (Dfa_semantics.run candidate word) ===
+             (Dfa_semantics.run other word)}) @ total ->
       {u : unit
-        | if (check_reduction source candidate certificate) && (valid other)
+        | if
+            (check_reduction source candidate certificate) &&
+              (Dfa_semantics.valid other)
           then
-            (Bigint.compare (state_size candidate) (state_size other)) <= 0
+            (Bigint.compare (Dfa_semantics.state_size candidate)
+               (Dfa_semantics.state_size other))
+              <= 0
           else true}
       @@ total
     val minimum_count_source_semantic :
@@ -451,11 +698,16 @@ module Dfa_equivalence :
       (certificate : reduction_certificate) ->
       (other : machine) ->
       ((word : int list) ->
-       {u : unit | (run source word) === (run other word)}) @ total ->
+       {u : unit
+         | (Dfa_semantics.run source word) === (Dfa_semantics.run other word)}) @ total ->
       {u : unit
-        | if (check_reduction source candidate certificate) && (valid other)
+        | if
+            (check_reduction source candidate certificate) &&
+              (Dfa_semantics.valid other)
           then
-            (Bigint.compare (state_size candidate) (state_size other)) <= 0
+            (Bigint.compare (Dfa_semantics.state_size candidate)
+               (Dfa_semantics.state_size other))
+              <= 0
           else true}
       @@ total
     val diagnose_reduction :
@@ -463,11 +715,11 @@ module Dfa_equivalence :
       (limit : int) ->
       {result : (machine * reduction_certificate) option
         | (if
-             (valid source) &&
-               ((labels_bounded source) &&
+             (Dfa_semantics.valid source) &&
+               ((Dfa_semantics.labels_bounded source) &&
                   ((0 < limit) &&
                      ((limit <= 64) &&
-                        ((Bigint.compare (state_size source)
+                        ((Bigint.compare (Dfa_semantics.state_size source)
                             (Bigint.of_int limit))
                            <= 0))))
            then match result with | None -> false | Some _ -> true
@@ -483,17 +735,17 @@ module Dfa_equivalence :
       (limit : int) ->
       {u : unit
         | if
-            (valid source) &&
-              ((labels_bounded source) &&
+            (Dfa_semantics.valid source) &&
+              ((Dfa_semantics.labels_bounded source) &&
                  ((0 < limit) &&
                     ((limit <= 64) &&
-                       ((Bigint.compare (state_size source)
+                       ((Bigint.compare (Dfa_semantics.state_size source)
                            (Bigint.of_int limit))
                           <= 0))))
           then
             match reduce source limit with
             | None -> false
-            | Some candidate -> valid candidate
+            | Some candidate -> Dfa_semantics.valid candidate
           else true}
       @@ total
     val reduce_preserves :
@@ -504,23 +756,27 @@ module Dfa_equivalence :
         | let result = reduce source limit in
           match result with
           | None -> true
-          | Some candidate -> (run source word) === (run candidate word)}
+          | Some candidate ->
+              (Dfa_semantics.run source word) ===
+                (Dfa_semantics.run candidate word)}
       @@ total
     val reduce_minimum :
       (source : machine) ->
       (limit : int) ->
       (other : machine) ->
       ((word : int list) ->
-       {u : unit | (run source word) === (run other word)}) @ total ->
+       {u : unit
+         | (Dfa_semantics.run source word) === (Dfa_semantics.run other word)}) @ total ->
       {u : unit
         | let result = reduce source limit in
           match result with
           | None -> true
           | Some candidate ->
-              if valid other
+              if Dfa_semantics.valid other
               then
-                (Bigint.compare (state_size candidate) (state_size other)) <=
-                  0
+                (Bigint.compare (Dfa_semantics.state_size candidate)
+                   (Dfa_semantics.state_size other))
+                  <= 0
               else true}
       @@ total
     val check_agrees :
@@ -530,13 +786,139 @@ module Dfa_equivalence :
       (word : int list) ->
       {u : unit
         | if check left right relation
-          then (run left word) === (run right word)
+          then
+            (Dfa_semantics.run left word) === (Dfa_semantics.run right word)
           else true}
+      @@ total
+    val valid_semantics :
+      (machine : machine) ->
+      {u : unit | (valid machine) === (Dfa_semantics.valid machine)} @@ total
+    val run_semantics :
+      (machine : machine) ->
+      (word : int list) ->
+      {u : unit | (run machine word) === (Dfa_semantics.run machine word)} @@
+      total
+    val state_size_semantics :
+      (machine : machine) ->
+      {u : unit
+        | (state_size machine) === (Dfa_semantics.state_size machine)}
+      @@ total
+    val labels_bounded_semantics :
+      (machine : machine) ->
+      {u : unit
+        | (labels_bounded machine) === (Dfa_semantics.labels_bounded machine)}
+      @@ total
+  end
+module Dfa_equivalence :
+  sig
+    type machine = Dfa_semantics.machine
+    type comparison = Equivalent | Inequivalent | Comparison_limit
+    [@@inductive]
+    val compare :
+      Dfa_semantics.machine ->
+      Dfa_semantics.machine -> int -> comparison @ total @@ total
+    val compare_complete :
+      (left : Dfa_semantics.machine) ->
+      (right : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | if
+            (Dfa_semantics.valid left) &&
+              ((Dfa_semantics.valid right) &&
+                 ((Dfa_semantics.labels_bounded left) &&
+                    ((Dfa_semantics.labels_bounded right) &&
+                       ((0 < limit) &&
+                          ((limit <= 65536) &&
+                             ((Bigint.compare
+                                 (Bigint.mul (Dfa_semantics.state_size left)
+                                    (Dfa_semantics.state_size right))
+                                 (Bigint.of_int limit))
+                                <= 0))))))
+          then
+            match compare left right limit with
+            | Comparison_limit -> false
+            | Equivalent | Inequivalent -> true
+          else true}
+      @@ total
+    val compare_equal :
+      (left : Dfa_semantics.machine) ->
+      (right : Dfa_semantics.machine) ->
+      (limit : int) ->
+      (word : int list) ->
+      {u : unit
+        | if (compare left right limit) === Equivalent
+          then
+            (Dfa_semantics.run left word) === (Dfa_semantics.run right word)
+          else true}
+      @@ total
+    val comparison_witness :
+      (left : Dfa_semantics.machine) ->
+      (right : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {witness : int list Ghost.t
+        | if (compare left right limit) === Inequivalent
+          then
+            (Dfa_semantics.run left witness.Ghost.ghost) <>
+              (Dfa_semantics.run right witness.Ghost.ghost)
+          else true}
+      @@ total
+    val reduce :
+      Dfa_semantics.machine -> int -> Dfa_semantics.machine option @ total @@
+      total
+    val reduce_complete :
+      (source : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | if
+            (Dfa_semantics.valid source) &&
+              ((Dfa_semantics.labels_bounded source) &&
+                 ((0 < limit) &&
+                    ((limit <= 64) &&
+                       ((Bigint.compare (Dfa_semantics.state_size source)
+                           (Bigint.of_int limit))
+                          <= 0))))
+          then
+            match reduce source limit with
+            | None -> false
+            | Some candidate -> Dfa_semantics.valid candidate
+          else true}
+      @@ total
+    val reduce_preserves :
+      (source : Dfa_semantics.machine) ->
+      (limit : int) ->
+      (word : int list) ->
+      {u : unit
+        | let result = reduce source limit in
+          match result with
+          | None -> true
+          | Some candidate ->
+              (Dfa_semantics.run source word) ===
+                (Dfa_semantics.run candidate word)}
+      @@ total
+    val reduce_minimum :
+      (source : Dfa_semantics.machine) ->
+      (limit : int) ->
+      (other : Dfa_semantics.machine) ->
+      ((word : int list) ->
+       {u : unit
+         | (Dfa_semantics.run source word) === (Dfa_semantics.run other word)}) @ total ->
+      {u : unit
+        | let result = reduce source limit in
+          match result with
+          | None -> true
+          | Some candidate ->
+              if Dfa_semantics.valid other
+              then
+                (Bigint.compare (Dfa_semantics.state_size candidate)
+                   (Dfa_semantics.state_size other))
+                  <= 0
+              else true}
       @@ total
   end
 |}]
 
 let () =
+  let open Dfa_proof in
   let open Dfa_equivalence in
   assert (valid reject_all);
   let singleton = reject_all in
@@ -665,6 +1047,7 @@ let () =
 |}]
 
 let () =
+  let open Dfa_proof in
   let open Dfa_equivalence in
   let raw = 0,
     [0, false, ([1, 1; 2, 5], 4);
@@ -691,6 +1074,7 @@ let () =
 |}]
 
 let () =
+  let open Dfa_proof in
   let open Dfa_equivalence in
   let first = List.init 33 (fun label -> label, 1) in
   let second = List.init 33 (fun label -> label + 33, 0) in
@@ -710,6 +1094,7 @@ let () =
 |}]
 
 let () =
+  let open Dfa_proof in
   let open Dfa_equivalence in
   let raw = 0, [0, false, ([7, 1; 9, 2], 0);
                 1, true, ([], 1); 2, true, ([], 2)] in

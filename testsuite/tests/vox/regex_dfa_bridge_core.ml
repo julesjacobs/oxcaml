@@ -1,24 +1,24 @@
 module Regex_dfa_bridge : sig
-  val lower : Regex.Dfa.automaton -> Dfa_equivalence.machine option @@ total
+  val lower : Regex.Dfa.automaton -> Dfa_proof.machine option @@ total
   val lower_compiled_matches : (root : Regex.t) -> (word : int list) ->
     {u : unit | match lower (Regex.Dfa.compile root) with
       | None -> true
-      | Some machine -> Dfa_equivalence.run machine word ===
+      | Some machine -> Dfa_semantics.run machine word ===
         Regex.matches root word} @@ total
 end = struct
   open Regex.Dfa
 
   let rec (simulation_run_from @ total) :
-      (dfa : automaton) -> (raw : Dfa_equivalence.raw) ->
+      (dfa : automaton) -> (raw : Dfa_proof.raw) ->
       (source_of : (int -> state)) @ total ->
       (output_agrees : ((id : int) ->
-        {u : unit | Dfa_equivalence.raw_final raw id ===
+        {u : unit | Dfa_proof.raw_final raw id ===
           output dfa (source_of id)})) @ total ->
       (step_agrees : ((id : int) -> (letter : int) ->
-        {u : unit | source_of (Dfa_equivalence.raw_step raw id letter)
+        {u : unit | source_of (Dfa_proof.raw_step raw id letter)
           === next dfa (source_of id) letter})) @ total ->
       (id : int) -> (word : int list) ->
-      {u : unit | Dfa_equivalence.raw_run_from raw id word ===
+      {u : unit | Dfa_proof.raw_run_from raw id word ===
         run_from dfa (source_of id) word} @ immutable contended =
     fun dfa raw source_of output_agrees step_agrees id word ->
     let source = source_of id in
@@ -26,13 +26,13 @@ end = struct
     match word with
     | [] ->
       output_agrees id;
-      Dfa_equivalence.raw_run_from_empty raw id;
+      Dfa_proof.raw_run_from_empty raw id;
       run_from_empty dfa source;
       refine_ u
     | letter :: suffix ->
-      let target = Dfa_equivalence.raw_step raw id letter in
+      let target = Dfa_proof.raw_step raw id letter in
       step_agrees id letter;
-      Dfa_equivalence.raw_run_from_letter raw id letter suffix;
+      Dfa_proof.raw_run_from_letter raw id letter suffix;
       run_from_letter dfa source letter suffix;
       simulation_run_from dfa raw source_of output_agrees step_agrees
         target suffix;
@@ -257,17 +257,17 @@ end = struct
       (edges : (int * int) list) -> (fallback : int) ->
       (letter : int) ->
       {u : unit | edge_lookup edges fallback letter ===
-        Dfa_equivalence.raw_edge_step edges fallback letter}
+        Dfa_proof.raw_edge_step edges fallback letter}
         @ immutable contended =
     fun edges fallback letter ->
     edge_lookup_def edges fallback letter;
     let u = () in
     match edges with
     | [] ->
-      Dfa_equivalence.raw_edge_step_empty fallback letter;
+      Dfa_proof.raw_edge_step_empty fallback letter;
       refine_ u
     | (label, target) :: rest ->
-      Dfa_equivalence.raw_edge_step_cons label target rest fallback letter;
+      Dfa_proof.raw_edge_step_cons label target rest fallback letter;
       edge_lookup_agrees rest fallback letter;
       refine_ u
 
@@ -347,21 +347,21 @@ end = struct
     | _ -> refine_ u
 
   let (built_head_final @ total) (dfa : automaton)
-      (source : state) (id : int) (row : Dfa_equivalence.row)
-      (tail : (int * bool * Dfa_equivalence.row) list) :
+      (source : state) (id : int) (row : Dfa_proof.row)
+      (tail : (int * bool * Dfa_proof.row) list) :
       {u : unit | let raw =
           id, (id, output dfa source, row) :: tail in
-        Dfa_equivalence.raw_final raw id === output dfa source} =
+        Dfa_proof.raw_final raw id === output dfa source} =
     let accepting = output dfa source in
     let table = (id, accepting, row) :: tail in
     let raw = id, table in
-    Dfa_equivalence.raw_view_cons id accepting row tail id;
-    Dfa_equivalence.raw_final_view raw id;
+    Dfa_proof.raw_view_cons id accepting row tail id;
+    Dfa_proof.raw_final_view raw id;
     let u = () in refine_ u
 
   let (built_head_step @ total) (dfa : automaton)
       (all_states : state list) (source : state) (id : int)
-      (tail : (int * bool * Dfa_equivalence.row) list)
+      (tail : (int * bool * Dfa_proof.row) list)
       (letter : int) :
       {u : unit | let letters =
           distinct_letters (labels dfa source) [] in
@@ -370,7 +370,7 @@ end = struct
         | Some fallback, Some edges ->
           let raw = id, (id, output dfa source,
             (edges, fallback)) :: tail in
-          Dfa_equivalence.raw_step raw id letter ===
+          Dfa_proof.raw_step raw id letter ===
             target_index dfa all_states source fallback letter
         | _ -> true} =
     let letters = distinct_letters (labels dfa source) [] in
@@ -385,9 +385,9 @@ end = struct
       let raw = id, table in
       built_row_step dfa all_states source letter;
       edge_lookup_agrees edges fallback letter;
-      Dfa_equivalence.raw_view_cons id accepting row tail id;
-      Dfa_equivalence.raw_row_step_edges edges fallback letter;
-      Dfa_equivalence.raw_step_view raw id letter;
+      Dfa_proof.raw_view_cons id accepting row tail id;
+      Dfa_proof.raw_row_step_edges edges fallback letter;
+      Dfa_proof.raw_step_view raw id letter;
       refine_ u
     | _ -> refine_ u
 
@@ -399,7 +399,7 @@ end = struct
           match index (default dfa source) all_states,
             build_edges dfa all_states source letters with
           | Some fallback, Some edges ->
-            Dfa_equivalence.raw_row_step (edges, fallback) letter ===
+            Dfa_proof.raw_row_step (edges, fallback) letter ===
               next_index dfa all_states source letter
           | _ -> true
         else true} =
@@ -413,7 +413,7 @@ end = struct
     | Some fallback, Some edges ->
       built_row_step dfa all_states source letter;
       edge_lookup_agrees edges fallback letter;
-      Dfa_equivalence.raw_row_step_edges edges fallback letter;
+      Dfa_proof.raw_row_step_edges edges fallback letter;
       index_complete target all_states;
       target_index_def dfa all_states source fallback letter;
       target_index_def dfa all_states source zero letter;
@@ -489,7 +489,7 @@ end = struct
       {u : unit | match index_from source remaining start,
           build_table dfa all_states remaining start with
         | Some target, Some table ->
-          Dfa_equivalence.raw_has_key table target
+          Dfa_proof.raw_has_key table target
         | _ -> true} @ immutable contended =
     fun dfa all_states remaining start source ->
     index_from_def source remaining start;
@@ -508,7 +508,7 @@ end = struct
         | Some fallback, Some edges, Some tail ->
           let accepting = output dfa head in
           let row = edges, fallback in
-          Dfa_equivalence.raw_has_key_cons start accepting row tail start;
+          Dfa_proof.raw_has_key_cons start accepting row tail start;
           refine_ u
         | _ -> refine_ u
       end else begin
@@ -518,7 +518,7 @@ end = struct
         | Some target, Some fallback, Some edges, Some tail ->
           let accepting = output dfa head in
           let row = edges, fallback in
-          Dfa_equivalence.raw_has_key_cons start accepting row tail target;
+          Dfa_proof.raw_has_key_cons start accepting row tail target;
           refine_ u
         | _ -> refine_ u
       end
@@ -529,8 +529,8 @@ end = struct
       {u : unit | match index_from source remaining start,
           build_table dfa all_states remaining start with
         | Some target, Some table ->
-          if Dfa_equivalence.raw_unique_keys table then
-            let accepting, _ = Dfa_equivalence.raw_view table target in
+          if Dfa_proof.raw_unique_keys table then
+            let accepting, _ = Dfa_proof.raw_view table target in
             accepting === output dfa source
           else true
         | _ -> true} @ immutable contended =
@@ -552,7 +552,7 @@ end = struct
         | Some fallback, Some edges, Some tail ->
           let accepting = output dfa head in
           let row = edges, fallback in
-          Dfa_equivalence.raw_view_cons start accepting row tail start;
+          Dfa_proof.raw_view_cons start accepting row tail start;
           refine_ u
         | _ -> refine_ u
       end else begin
@@ -563,10 +563,10 @@ end = struct
         | Some target, Some fallback, Some edges, Some tail ->
           let accepting = output dfa head in
           let row = edges, fallback in
-          Dfa_equivalence.raw_unique_tail start accepting row tail;
-          Dfa_equivalence.raw_tail_key_distinct
+          Dfa_proof.raw_unique_tail start accepting row tail;
+          Dfa_proof.raw_tail_key_distinct
             start accepting row tail target;
-          Dfa_equivalence.raw_view_cons start accepting row tail target;
+          Dfa_proof.raw_view_cons start accepting row tail target;
           refine_ u
         | _ -> refine_ u
       end
@@ -578,10 +578,10 @@ end = struct
       {u : unit | match index_from source remaining start,
           build_table dfa all_states remaining start with
         | Some target, Some table ->
-          if Dfa_equivalence.raw_unique_keys table &&
+          if Dfa_proof.raw_unique_keys table &&
             member_state (next dfa source letter) all_states then
-            let _, row = Dfa_equivalence.raw_view table target in
-            Dfa_equivalence.raw_row_step row letter ===
+            let _, row = Dfa_proof.raw_view table target in
+            Dfa_proof.raw_row_step row letter ===
               next_index dfa all_states source letter
           else true
         | _ -> true} @ immutable contended =
@@ -604,7 +604,7 @@ end = struct
           let accepting = output dfa head in
           let row = edges, fallback in
           built_row_index_step dfa all_states head letter;
-          Dfa_equivalence.raw_view_cons start accepting row tail start;
+          Dfa_proof.raw_view_cons start accepting row tail start;
           refine_ u
         | _ -> refine_ u
       end else begin
@@ -615,10 +615,10 @@ end = struct
         | Some target, Some fallback, Some edges, Some tail ->
           let accepting = output dfa head in
           let row = edges, fallback in
-          Dfa_equivalence.raw_unique_tail start accepting row tail;
-          Dfa_equivalence.raw_tail_key_distinct
+          Dfa_proof.raw_unique_tail start accepting row tail;
+          Dfa_proof.raw_tail_key_distinct
             start accepting row tail target;
-          Dfa_equivalence.raw_view_cons start accepting row tail target;
+          Dfa_proof.raw_view_cons start accepting row tail target;
           refine_ u
         | _ -> refine_ u
       end
@@ -830,14 +830,14 @@ end = struct
         {u : unit | if contains_state dfa source then
           contains_state dfa (next dfa source letter) else true})) @ total ->
       (all_states : state list) ->
-      (table : (int * bool * Dfa_equivalence.row) list) ->
+      (table : (int * bool * Dfa_proof.row) list) ->
       (source : state) -> (id : int) -> (word : int list) ->
       {u : unit | if all_states === (initial dfa :: [] :: states dfa) &&
         build_table dfa all_states all_states 0 === Some table &&
-        Dfa_equivalence.raw_unique_keys table &&
+        Dfa_proof.raw_unique_keys table &&
         contains_state dfa source &&
         index source all_states === Some id then
-        Dfa_equivalence.raw_run_from (0, table) id word ===
+        Dfa_proof.raw_run_from (0, table) id word ===
           run_from dfa source word
         else true} @ immutable contended =
     fun dfa closure all_states table source id word ->
@@ -848,8 +848,8 @@ end = struct
     match word with
     | [] ->
       indexed_output_sound dfa all_states all_states zero source;
-      Dfa_equivalence.raw_final_view raw id;
-      Dfa_equivalence.raw_run_from_empty raw id;
+      Dfa_proof.raw_final_view raw id;
+      Dfa_proof.raw_run_from_empty raw id;
       run_from_empty dfa source;
       refine_ u
     | letter :: suffix ->
@@ -858,14 +858,14 @@ end = struct
       member_prefix dfa target;
       index_complete target all_states;
       indexed_step_sound dfa all_states all_states zero source letter;
-      Dfa_equivalence.raw_step_view raw id letter;
+      Dfa_proof.raw_step_view raw id letter;
       (match index target all_states with
        | None -> refine_ u
        | Some target_id ->
          index_def target all_states;
          next_index_def dfa all_states source letter;
          target_index_def dfa all_states source zero letter;
-         Dfa_equivalence.raw_run_from_letter raw id letter suffix;
+         Dfa_proof.raw_run_from_letter raw id letter suffix;
          run_from_letter dfa source letter suffix;
          raw_run_indexed dfa closure all_states table target target_id suffix;
          refine_ u)
@@ -874,8 +874,8 @@ end = struct
       {u : unit | let dfa = compile root in
         match lower_raw dfa with
         | None -> true
-        | Some raw -> if Dfa_equivalence.raw_valid raw then
-            Dfa_equivalence.raw_run raw word === run dfa word
+        | Some raw -> if Dfa_proof.raw_valid raw then
+            Dfa_proof.raw_run raw word === run dfa word
           else true} =
     let (dfa @ total) = compile root in
     let all_states = initial dfa :: [] :: states dfa in
@@ -895,24 +895,24 @@ end = struct
     | None -> refine_ u
     | Some (initial_id, table) ->
       let raw = initial_id, table in
-      Dfa_equivalence.raw_valid_unique raw;
+      Dfa_proof.raw_valid_unique raw;
       initial_index dfa;
       lower_raw_def dfa;
       raw_run_indexed dfa closure all_states table source zero word;
-      Dfa_equivalence.raw_run_initial raw word;
+      Dfa_proof.raw_run_initial raw word;
       run_initial dfa word;
       refine_ u
 
   let[@def] lower dfa =
     match lower_raw dfa with
     | None -> None
-    | Some raw -> Dfa_equivalence.of_raw raw
+    | Some raw -> Dfa_proof.of_raw raw
 
   let (lower_compiled_matches @ total) (root : Regex.t)
       (word : int list) :
       {u : unit | match lower (compile root) with
         | None -> true
-        | Some machine -> Dfa_equivalence.run machine word ===
+        | Some machine -> Dfa_semantics.run machine word ===
           Regex.matches root word} =
     let (dfa @ total) = compile root in
     lower_def dfa;
@@ -922,10 +922,10 @@ end = struct
     match lower_raw dfa with
     | None -> refine_ u
     | Some raw ->
-      Dfa_equivalence.of_raw_raw_valid raw;
-      (match Dfa_equivalence.of_raw raw with
+      Dfa_proof.of_raw_raw_valid raw;
+      (match Dfa_proof.of_raw raw with
        | None -> refine_ u
        | Some machine ->
-         Dfa_equivalence.of_raw_run raw machine word;
+         Dfa_proof.of_raw_run raw machine word;
          refine_ u)
 end;;
