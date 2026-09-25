@@ -75,7 +75,8 @@ val original_result :
     | None -> clause_at formula index === None
     | Some entry ->
       derivation_valid formula entry.proof
-      && same_clause (conclusion formula entry.proof) entry.clause}
+      && same_clause (conclusion formula entry.proof) entry.clause
+          && clause_at formula index === Some entry.clause}
   @@ total
 val resolve_result :
   (formula : formula) -> (index : int) ->
@@ -89,7 +90,8 @@ val resolve_result :
     derivation_valid formula e.proof
     && same_clause (conclusion formula e.proof) e.clause
     && same_clause e.clause
-      (resolve_clause index left.clause right.clause)} @@ total
+      (resolve_clause index left.clause right.clause)
+        && e.clause === resolve_clause index left.clause right.clause} @@ total
 val empty_result_at :
   (formula : formula) ->
   (entry : {e : proof_result |
@@ -125,7 +127,8 @@ val database_at :
     | None -> clause_at (database_clauses entries) index === None
     | Some entry ->
       derivation_valid formula entry.proof
-      && same_clause (conclusion formula entry.proof) entry.clause}
+      && same_clause (conclusion formula entry.proof) entry.clause
+          && clause_at (database_clauses entries) index === Some entry.clause}
   @@ total
 
 type clause_source = Original_clause of int | Learned_clause of int
@@ -153,7 +156,8 @@ val fetch_result :
     | None -> source_clause formula database source === None
     | Some entry ->
       derivation_valid formula entry.proof
-      && same_clause (conclusion formula entry.proof) entry.clause}
+      && same_clause (conclusion formula entry.proof) entry.clause
+          && source_clause formula database source === Some entry.clause}
   @@ total
 val execute_resolution :
   (formula : formula) ->
@@ -295,10 +299,85 @@ val result_clause_valid : (n : int) -> (formula : formula) ->
   {u : unit | if valid_formula n formula then valid_clause n entry.clause
     else true} @@ total
 
+val partial_literal : bool option list -> literal -> bool option @@ total
+val partial_literal_def : (partial : bool option list) -> (literal : literal) ->
+  {u : unit | partial_literal partial literal ===
+    (match literal with
+     | Positive index -> partial_lookup partial index
+     | Negative index -> match partial_lookup partial index with
+       | None -> None | Some value -> Some (not value))} @@ total
+
 val scan_conflict_head : (partial : bool option list) ->
   (literal : literal) -> (rest : literal list) ->
   {u : unit | match scan_formula partial [literal :: rest] with
     | Scan_conflict _ ->
       (match literal with Positive v | Negative v ->
         not (partial_lookup partial v === None))
+        && partial_literal partial literal === Some false
+        && (match scan_formula partial [rest] with
+          | Scan_conflict _ -> true | Scan_stable | Scan_unit _ -> false)
     | Scan_unit _ | Scan_stable -> true} @@ total
+
+val same_literal : literal -> literal -> bool @@ total
+val same_literal_def : (left : literal) -> (right : literal) ->
+  {u : unit | same_literal left right ===
+    (match left, right with
+     | Positive x, Positive y | Negative x, Negative y -> x = y
+     | Positive _, Negative _ | Negative _, Positive _ -> false)} @@ total
+val false_except : bool option list -> literal -> literal list -> bool @@ total
+val false_except_def : (partial : bool option list) -> (forced : literal) ->
+  (clause : literal list) ->
+  {u : unit | false_except partial forced clause ===
+    (match clause with
+     | [] -> true
+     | literal :: rest ->
+       (same_literal literal forced
+        || (match partial_literal partial literal with Some false -> true
+            | Some true | None -> false))
+       && false_except partial forced rest)} @@ total
+val has_literal : literal -> literal list -> bool @@ total
+val has_literal_def : (literal : literal) -> (clause : literal list) ->
+  {u : unit | has_literal literal clause ===
+    (match clause with
+     | [] -> false
+     | candidate :: rest ->
+       same_literal literal candidate || has_literal literal rest)} @@ total
+val scan_formula_unit_reason : (limit : {n : int | 0 <= n}) @ ghost ->
+  (partial : bool option list) ->
+  (formula : {f : formula | clauses_fit limit f}) ->
+  {u : unit | match scan_formula partial formula with
+    | Scan_unit (index, forced) ->
+      (match clause_at formula index with
+       | None -> false | Some clause -> false_except partial forced clause
+          && has_literal forced clause)
+    | Scan_stable | Scan_conflict _ -> true} @@ total
+
+val source_clause_valid : (n : int) -> (formula : formula) ->
+  (database : proof_result list) -> (source : clause_source) ->
+  {u : unit | if valid_formula n formula && database_valid formula database
+    then match source_clause formula database source with
+      | None -> true | Some clause -> valid_clause n clause
+    else true} @@ total
+
+val false_clause : bool option list -> literal list -> bool @@ total
+val conflict_characterization : (partial : bool option list) ->
+  (clause : literal list) ->
+  {u : unit | false_clause partial clause =
+    (match scan_formula partial [clause] with
+     | Scan_conflict _ -> true | Scan_stable | Scan_unit _ -> false)} @@ total
+val resolve_false_clause : (partial : bool option list) ->
+  (index : int) -> (value : bool) ->
+  (current : literal list) -> (reason : literal list) ->
+  {u : unit | if false_clause partial current && false_except partial
+      (if value then Positive index else Negative index) reason then
+    false_clause partial (if value then resolve_clause index reason current
+      else resolve_clause index current reason) else true} @@ total
+
+val scan_formula_conflict_clause : (limit : {n : int | 0 <= n}) @ ghost ->
+  (partial : bool option list) ->
+  (formula : {f : formula | clauses_fit limit f}) ->
+  {u : unit | match scan_formula partial formula with
+    | Scan_conflict index ->
+      (match clause_at formula index with
+       | None -> false | Some clause -> false_clause partial clause)
+    | Scan_stable | Scan_unit _ -> true} @@ total

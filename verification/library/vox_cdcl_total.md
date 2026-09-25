@@ -47,6 +47,19 @@ Stored reason sources are also proved valid throughout search. Original reasons
 refer to input clauses; learned reasons have valid insertion ordinals and refer
 to existing learned clauses. Prepending a learned clause preserves all old
 references, and backtracking preserves the references of retained bindings.
+Each stored non-decision reason contains the assigned literal. Every pivot
+literal has that polarity, and every other literal is false at an
+assignment level no higher than the explained binding. Unit propagation
+establishes this property from the scanner; asserting-clause construction and
+backtracking establish it for learned enqueue. Enqueue, backtracking, and
+learned-database insertion preserve it. Scanner-to-source proofs use the
+existing input bound and exact learned-database length to exclude index wrap.
+
+Resolution is oriented by the selected binding's value. The reason invariant
+proves that the resolvent stays conflicting. Analysis therefore no longer
+reconstructs a partial assignment or rescans the current clause to check the
+conflict at every resolution step.
+
 The learned counter equals the database length. An erased bound ties the
 learned counter plus remaining search fuel to the initial fuel, proving that
 counter increments cannot overflow.
@@ -54,9 +67,9 @@ counter increments cannot overflow.
 Assignment-length preservation removes the final runtime length check. Failed
 decision selection, decision enqueue, conflict-source lookup, trail lookup,
 selected-variable lookup, and reason fetch are proved unreachable. The remaining
-obligations concern reason clauses being unit when assigned,
-preservation of a conflict during resolution, successful asserting-clause
-construction, and global search progress. Decision levels are nonnegative and
+obligations concern successful asserting-clause construction and global search
+progress. Analysis still uses a fuel budget; a structural progress proof also
+needs the strict order of reason antecedents within a decision level. Decision levels are nonnegative and
 bounded by the current level. Successful asserting-clause construction proves
 a strictly smaller backjump target and a current-level asserting variable;
 backtracking makes that variable unassigned, so learned enqueue succeeds.
@@ -97,7 +110,7 @@ on 2026-09-25 (median of five runs):
 | Formula | Mutable CDCL | Bounded persistent CDCL | Combined solver |
 | --- | ---: | ---: | ---: |
 | 50 variables, 218 clauses (UNSAT) | 0.006 s | 0.009 s | 0.009 s |
-| 100 variables, 430 clauses (SAT) | 0.175 s | 0.259 s | 0.261 s |
+| 100 variables, 430 clauses (SAT) | 0.180 s | 0.280 s | 0.267 s |
 
 The combined solver uses CDCL fuel `1_000_000` and fallback depth `n + 1`.
 CDCL decides both instances, so these timings measure its successful path.

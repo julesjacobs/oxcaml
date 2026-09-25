@@ -1053,7 +1053,8 @@ open Vox_sat_spec
         | None -> clause_at formula index === None
         | Some entry ->
           derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause} =
+          && same_clause (conclusion formula entry.proof) entry.clause
+          && clause_at formula index === Some entry.clause} =
     fun formula index ->
     match clause_at formula index with
     | None -> None
@@ -1073,7 +1074,8 @@ open Vox_sat_spec
         derivation_valid formula e.proof
         && same_clause (conclusion formula e.proof) e.clause
         && same_clause e.clause
-          (resolve_clause index left.clause right.clause)} =
+          (resolve_clause index left.clause right.clause)
+        && e.clause === resolve_clause index left.clause right.clause} =
     fun formula index left right ->
     let clause = resolve_clause index left.clause right.clause in
     let proof = resolve_proof formula index
@@ -1135,7 +1137,8 @@ open Vox_sat_spec
         | None -> clause_at (database_clauses entries) index === None
         | Some entry ->
           derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause} =
+          && same_clause (conclusion formula entry.proof) entry.clause
+          && clause_at (database_clauses entries) index === Some entry.clause} =
     fun formula entries index ->
     ghost_ (database_valid_def formula entries);
     ghost_ (database_clauses_def entries);
@@ -1171,7 +1174,8 @@ open Vox_sat_spec
         | None -> source_clause formula database source === None
         | Some entry ->
           derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause} =
+          && same_clause (conclusion formula entry.proof) entry.clause
+          && source_clause formula database source === Some entry.clause} =
     fun formula database source ->
     ghost_ (source_clause_def formula database source);
     match source with
@@ -1853,6 +1857,9 @@ let (scan_conflict_head @ total) :
       | Scan_conflict _ ->
         (match literal with Positive v | Negative v ->
           not (partial_lookup partial v === None))
+        && partial_literal partial literal === Some false
+        && (match scan_formula partial [rest] with
+          | Scan_conflict _ -> true | Scan_stable | Scan_unit _ -> false)
       | Scan_unit _ | Scan_stable -> true} =
   fun partial literal rest ->
   scan_formula_def partial [literal :: rest];
@@ -1860,4 +1867,261 @@ let (scan_conflict_head @ total) :
   scan_formula_from_def partial 1 [];
   scan_clause_def partial (literal :: rest);
   partial_literal_def partial literal;
+  scan_formula_def partial [rest];
+  scan_formula_from_def partial 0 [rest];
+  ()
+
+let[@def] rec false_except partial forced clause =
+  match clause with
+  | [] -> true
+  | literal :: rest ->
+    (same_literal literal forced ||
+      (match partial_literal partial literal with Some false -> true
+       | Some true | None -> false))
+    && false_except partial forced rest
+
+let rec (conflict_false_except @ total) : (partial : bool option list) ->
+    (forced : literal) -> (clause : literal list) ->
+    {u : unit | if scan_clause partial clause === Clause_conflict then
+      false_except partial forced clause else true} =
+  fun partial forced clause ->
+  scan_clause_def partial clause;
+  false_except_def partial forced clause;
+  match clause with
+  | [] -> ()
+  | _ :: rest -> conflict_false_except partial forced rest
+
+let rec (scan_clause_unit_reason @ total) : (partial : bool option list) ->
+    (clause : literal list) ->
+    {u : unit | match scan_clause partial clause with
+      | Clause_unit forced -> false_except partial forced clause
+        && has_literal forced clause
+      | Clause_satisfied | Clause_open | Clause_conflict -> true} =
+  fun partial clause ->
+  scan_clause_def partial clause;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    scan_clause_unit_reason partial rest;
+    conflict_false_except partial literal rest;
+    same_literal_def literal literal;
+    match scan_clause partial clause with
+    | Clause_unit forced ->
+      false_except_def partial forced clause;
+      has_literal_def forced clause
+    | Clause_satisfied | Clause_open | Clause_conflict -> ()
+
+let rec (scan_formula_from_unit_reason @ total) :
+    (partial : bool option list) -> (limit : {n : int | 0 <= n}) ->
+    (start : {n : int | 0 <= n && n <= limit}) ->
+    (formula : {f : formula | clauses_fit (limit - start) f}) ->
+    {u : unit | match scan_formula_from partial start formula with
+      | Scan_unit (index, forced) -> start <= index && index < limit
+        && (match clause_at formula (index - start) with
+          | None -> false
+          | Some clause -> false_except partial forced clause
+            && has_literal forced clause)
+      | Scan_stable | Scan_conflict _ -> true} =
+  fun partial limit start formula ->
+  scan_formula_from_def partial start formula;
+  clauses_fit_def (limit - start) formula;
+  match formula with
+  | [] -> ()
+  | clause :: rest ->
+    scan_clause_unit_reason partial clause;
+    scan_formula_from_unit_reason partial limit (start + 1) rest;
+    match scan_formula_from partial start formula with
+    | Scan_unit (index, _) -> clause_at_def formula (index - start)
+    | Scan_stable | Scan_conflict _ -> ()
+
+let (scan_formula_unit_reason @ total) :
+    (limit : {n : int | 0 <= n}) @ ghost ->
+    (partial : bool option list) ->
+    (formula : {f : formula | clauses_fit limit f}) ->
+    {u : unit | match scan_formula partial formula with
+      | Scan_unit (index, forced) ->
+        (match clause_at formula index with
+         | None -> false
+         | Some clause -> false_except partial forced clause
+            && has_literal forced clause)
+      | Scan_stable | Scan_conflict _ -> true} =
+  fun limit partial formula ->
+  ghost_ (
+    scan_formula_def partial formula;
+    scan_formula_from_unit_reason partial limit 0 formula);
+  ()
+
+let rec (database_formula_valid @ total) : (n : int) -> (formula : formula) ->
+    (database : proof_result list) ->
+    {u : unit | if valid_formula n formula && database_valid formula database
+      then valid_formula n (database_clauses database) else true} =
+  fun n formula database ->
+  ghost_ (
+    database_valid_def formula database;
+    database_clauses_def database;
+    valid_formula_def n (database_clauses database);
+    match database with
+    | [] -> ()
+    | entry :: rest ->
+      if database_valid formula database then
+        result_clause_valid n formula entry;
+      database_formula_valid n formula rest);
+  ()
+
+let (source_clause_valid @ total) : (n : int) -> (formula : formula) ->
+    (database : proof_result list) -> (source : clause_source) ->
+    {u : unit | if valid_formula n formula && database_valid formula database
+      then match source_clause formula database source with
+        | None -> true | Some clause -> valid_clause n clause
+      else true} =
+  fun n formula database source ->
+  source_clause_def formula database source;
+  database_formula_valid n formula database;
+  match source with
+  | Original_clause index -> clause_at_valid n formula index
+  | Learned_clause index -> clause_at_valid n (database_clauses database) index
+
+let[@def] rec false_clause partial clause =
+  match clause with
+  | [] -> true
+  | literal :: rest ->
+    (match partial_literal partial literal with Some false -> true
+     | Some true | None -> false)
+    && false_clause partial rest
+
+let rec (scan_clause_false @ total) : (partial : bool option list) ->
+    (clause : literal list) ->
+    {u : unit | (scan_clause partial clause === Clause_conflict)
+      = false_clause partial clause} =
+  fun partial clause ->
+  scan_clause_def partial clause;
+  false_clause_def partial clause;
+  match clause with
+  | [] -> ()
+  | _ :: rest -> scan_clause_false partial rest
+
+let (conflict_characterization @ total) : (partial : bool option list) ->
+    (clause : literal list) ->
+    {u : unit | false_clause partial clause =
+      (match scan_formula partial [clause] with
+       | Scan_conflict _ -> true | Scan_stable | Scan_unit _ -> false)} =
+  fun partial clause ->
+  scan_clause_false partial clause;
+  scan_formula_def partial [clause];
+  scan_formula_from_def partial 0 [clause];
+  scan_formula_from_def partial 1 [];
+  ()
+
+let rec (remove_false @ total) : (partial : bool option list) ->
+    (index : int) -> (clause : literal list) ->
+    {u : unit | if false_clause partial clause then
+      false_clause partial (remove_positive index clause)
+      && false_clause partial (remove_negative index clause) else true} =
+  fun partial index clause ->
+  false_clause_def partial clause;
+  remove_positive_def index clause;
+  remove_negative_def index clause;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    remove_false partial index rest;
+    false_clause_def partial (literal :: remove_positive index rest);
+    false_clause_def partial (literal :: remove_negative index rest)
+
+let rec (remove_except @ total) : (partial : bool option list) ->
+    (index : int) -> (value : bool) -> (clause : literal list) ->
+    {u : unit | if false_except partial
+        (if value then Positive index else Negative index) clause then
+      false_clause partial (if value then remove_positive index clause
+        else remove_negative index clause) else true} =
+  fun partial index value clause ->
+  let forced = if value then Positive index else Negative index in
+  false_except_def partial forced clause;
+  remove_positive_def index clause;
+  remove_negative_def index clause;
+  match clause with
+  | [] -> false_clause_def partial []
+  | literal :: rest ->
+    same_literal_def literal forced;
+    remove_except partial index value rest;
+    false_clause_def partial (literal :: remove_positive index rest);
+    false_clause_def partial (literal :: remove_negative index rest)
+
+let rec (append_false @ total) : (partial : bool option list) ->
+    (left : literal list) -> (right : literal list) ->
+    {u : unit | if false_clause partial left && false_clause partial right then
+      false_clause partial (append_clause left right) else true} =
+  fun partial left right ->
+  append_clause_def left right;
+  false_clause_def partial left;
+  match left with
+  | [] -> ()
+  | literal :: rest ->
+    append_false partial rest right;
+    false_clause_def partial (literal :: append_clause rest right)
+
+let rec (dedup_false @ total) : (partial : bool option list) ->
+    (clause : literal list) ->
+    {u : unit | if false_clause partial clause then
+      false_clause partial (dedup_clause clause) else true} =
+  fun partial clause ->
+  dedup_clause_def clause;
+  false_clause_def partial clause;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    dedup_false partial rest;
+    false_clause_def partial (literal :: dedup_clause rest)
+
+let (resolve_false_clause @ total) : (partial : bool option list) ->
+    (index : int) -> (value : bool) ->
+    (current : literal list) -> (reason : literal list) ->
+    {u : unit | if false_clause partial current && false_except partial
+        (if value then Positive index else Negative index) reason then
+      false_clause partial (if value then resolve_clause index reason current
+        else resolve_clause index current reason) else true} =
+  fun partial index value current reason ->
+  remove_false partial index current;
+  remove_except partial index value reason;
+  let left, right = if value then reason, current else current, reason in
+  append_false partial (remove_positive index left) (remove_negative index
+    right);
+  dedup_false partial (append_clause (remove_positive index left)
+    (remove_negative index right));
+  resolve_clause_def index left right
+
+let rec (scan_formula_from_conflict_clause @ total) :
+    (partial : bool option list) -> (limit : {n : int | 0 <= n}) ->
+    (start : {n : int | 0 <= n && n <= limit}) ->
+    (formula : {f : formula | clauses_fit (limit - start) f}) ->
+    {u : unit | match scan_formula_from partial start formula with
+      | Scan_conflict index -> start <= index && index < limit
+        && (match clause_at formula (index - start) with
+          | None -> false | Some clause -> false_clause partial clause)
+      | Scan_stable | Scan_unit _ -> true} =
+  fun partial limit start formula ->
+  scan_formula_from_def partial start formula;
+  clauses_fit_def (limit - start) formula;
+  match formula with
+  | [] -> ()
+  | clause :: rest ->
+    scan_clause_false partial clause;
+    scan_formula_from_conflict_clause partial limit (start + 1) rest;
+    match scan_formula_from partial start formula with
+    | Scan_conflict index -> clause_at_def formula (index - start)
+    | Scan_stable | Scan_unit _ -> ()
+
+let (scan_formula_conflict_clause @ total) :
+    (limit : {n : int | 0 <= n}) @ ghost ->
+    (partial : bool option list) ->
+    (formula : {f : formula | clauses_fit limit f}) ->
+    {u : unit | match scan_formula partial formula with
+      | Scan_conflict index ->
+        (match clause_at formula index with
+         | None -> false | Some clause -> false_clause partial clause)
+      | Scan_stable | Scan_unit _ -> true} =
+  fun limit partial formula ->
+  ghost_ (
+    scan_formula_def partial formula;
+    scan_formula_from_conflict_clause partial limit 0 formula);
   ()
