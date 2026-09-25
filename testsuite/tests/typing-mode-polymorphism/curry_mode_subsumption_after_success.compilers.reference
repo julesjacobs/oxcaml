@@ -1,0 +1,20 @@
+File "curry_mode_subsumption_after_success.ml", lines 17-19, characters 46-3:
+17 | ..............................................struct
+18 |   let f (x @ local) y = y
+19 | end
+Error: Signature mismatch:
+       Modules do not match:
+         sig val f : 'a @ local -> 'b -> 'b end
+       is not included in
+         sig val f : 'a -> 'b -> 'b @@ stateless end
+       Values do not match:
+         val f : 'a @ local -> 'b -> 'b
+       is not included in
+         val f : 'a -> 'b -> 'b @@ stateless
+       The type 'a @ local -> 'b -> 'b is not compatible with the type
+         'a -> 'b -> 'b
+       The return mode was expected to be global but is local
+       File "curry_mode_subsumption_after_success.ml", line 10, characters 6-7:
+         Expected declaration
+       File "curry_mode_subsumption_after_success.ml", line 18, characters 6-7:
+         Actual declaration

@@ -65,6 +65,14 @@ end
 module type Lattices_mono = sig
   include Lattices with type 'a elt := 'a
 
+  (** Complete enumeration of the finite carrier of an object. *)
+  val elements : 'a obj -> 'a list
+
+  (** Ordering hint for the bits of an index into [elements], most significant
+      bit first. Ranks must be distinct and nonnegative within each object.
+      Matching ranks across objects keep corresponding axes adjacent. *)
+  val symbolic_bit_order : 'a obj -> int array
+
   (** Morphism from object of base type ['a] to object of base type ['b] with
       allowance ['d]. See Note [Allowance] in allowance.mli.
 
@@ -182,6 +190,17 @@ type 'd branch =
 [@@ocaml.warning "-62"]
 
 module type Solver_mono = sig
+  exception Exact_zap_impossible
+
+  exception Exact_resource_limit
+
+  exception Exact_inconsistent_state
+
+  type quantifier =
+    | Outer
+    | Universal of int
+    | Existential of int
+
   (* These first few types will be replaced with types from
      the Lattices_mono *)
 
@@ -199,10 +218,6 @@ module type Solver_mono = sig
       to create a new copy scope, and reset it once all copies have been made *)
   type copy_scope
 
-  (** Runs a function [f] in a fresh mode copy scope, which gets cleaned up once
-      [f] is finished *)
-  val with_copy_scope : (copy_scope -> 'a) -> 'a
-
   type 'd hint_morph constraint 'd = 'l * 'r
 
   type 'd hint_const constraint 'd = 'l * 'r
@@ -218,11 +233,20 @@ module type Solver_mono = sig
       changes to the global log in [types.ml]. *)
   type changes
 
+  val set_creation_log : (changes ref -> unit) -> unit
+
+  (** Runs a function [f] in a fresh mode copy scope, which gets cleaned up once
+      [f] is finished *)
+  val with_copy_scope : (copy_scope -> 'a) -> 'a
+
   (** An empty sequence of changes. *)
   val empty_changes : changes
 
   (** Undo the sequence of changes recorded. *)
   val undo_changes : changes -> unit
+
+  val with_subsumption_scope :
+    commit:('a -> bool) -> (unit -> 'a) -> log:changes ref option -> 'a
 
   (** A mode with carrier type ['a] and allowance ['d]. See Note [Allowance] in
       allowance.mli.*)
@@ -269,8 +293,27 @@ module type Solver_mono = sig
   val zap_to_ceil :
     'a obj -> ('a, 'l * allowed) mode -> log:changes ref option -> 'a
 
+  type zap_failure =
+    | No_constant
+    | Zap_resource_limit
+
+  val zap_to_floor_detailed :
+    'a obj ->
+    ('a, allowed * 'r) mode ->
+    log:changes ref option ->
+    ('a, zap_failure) result
+
+  val zap_to_ceil_detailed :
+    'a obj ->
+    ('a, 'l * allowed) mode ->
+    log:changes ref option ->
+    ('a, zap_failure) result
+
   (** Create a new mode variable of the full range at given level. *)
   val newvar : 'a obj -> int -> ('a, 'l * 'r) mode
+
+  val newvar_quantified :
+    'a obj -> level:int -> quantifier -> ('a, 'l * 'r) mode
 
   (** Remove hints from all vars that have been created. This doesn't affect
       hints that were applied on top of vars. For example:
@@ -299,6 +342,11 @@ module type Solver_mono = sig
       right_hint : ('a, right_only) hint_raw
     }
 
+  type 'a submode_failure =
+    | Inequality of 'a error_raw
+    | Inconsistent_relation
+    | Resource_limit
+
   (** Try to constrain the first mode below the second mode. [pinpoint]
       describes the thing that has both modes. *)
   val submode :
@@ -308,6 +356,14 @@ module type Solver_mono = sig
     ('a, 'l * allowed) mode ->
     log:changes ref option ->
     (unit, 'a error_raw) result
+
+  val submode_detailed :
+    pinpoint ->
+    'a obj ->
+    ('a, allowed * 'r) mode ->
+    ('a, 'l * allowed) mode ->
+    log:changes ref option ->
+    (unit, 'a submode_failure) result
 
   (** Lowers a level of a variable. *)
   val update_level :
@@ -354,6 +410,7 @@ module type Solver_mono = sig
       counter (see [reset_persistent_id]). Returns either the freshly copied
       mode, or the copy cached in [copy_scope]. *)
   val copy :
+    ?log:changes ref option ->
     copy_scope:copy_scope ->
     copy_from_level:int ->
     copy_below_level:int ->
