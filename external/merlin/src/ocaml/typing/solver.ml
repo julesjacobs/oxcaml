@@ -18,6 +18,17 @@ open Solver_intf
 module Fmt = Format_doc
 
 module Solver_mono (H : Hint) (C : Lattices_mono) = struct
+  exception Exact_zap_impossible
+
+  exception Exact_resource_limit
+
+  exception Exact_inconsistent_state
+
+  type quantifier =
+    | Outer
+    | Universal of int
+    | Existential of int
+
   type ('a, 'd) hint =
     | Apply :
         'd H.Morph.t * ('b, 'a, 'd) C.morph * ('b, 'd) ahint
@@ -311,6 +322,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
 
   type 'a var =
     { mutable level : int;
+      quantifier : quantifier option;
+      scope_order : int option;
           (** The level of the variable. This has the same meaning as the level
               field of a [type_expr]. *)
       mutable vlower : 'a lmorphvar VarMap.t;
@@ -355,11 +368,30 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       mutable subst : 'a var option;
           (** Similar to Tsubst in a type, the [subst] field holds an optional
               copy used during instantiation *)
-      mutable gencopy : 'a var option
+      mutable gencopy : 'a var option;
           (** Calls to [generalize_structure] creates additional copies to make
               sure the bounds of a generalize structure is rigid: [gencopy]
               caches such copies *)
+      mutable exact : exact_component list
     }
+
+  and exact_component =
+    { members : anyvar list;
+      guard_rows : anyvalue list list;
+      witness_rows : anyvalue list list;
+      graph_stamp : (Obj.t * Obj.t * Obj.t * Obj.t) list;
+      symbolic : exact_symbolic option
+    }
+
+  and exact_symbolic =
+    { manager : Solver_mdd.manager;
+      guard : Solver_mdd.node;
+      witness : Solver_mdd.node
+    }
+
+  and anyvar = Var : 'a C.obj * 'a var -> anyvar
+
+  and anyvalue = Value : 'a C.obj * 'a -> anyvalue
 
   and 'b lmorphvar = ('b, left_only) morphvar
 
@@ -372,11 +404,11 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     constraint 'd = _ * _
   [@@ocaml.warning "-62"]
 
-  type anyvar = Var : 'a var -> anyvar [@@unboxed]
-
   let get_key dst (Amorphvar (v, m, _)) = Key (dst, v.id, m)
 
   module VarSet = Set.Make (Int)
+
+  let vars = ref []
 
   type change =
     | Cupper : 'a var * 'a * ('a, right_only) Comp_hint.t -> change
@@ -385,6 +417,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     | Cvupper : 'a var * 'a rmorphvar VarMap.t -> change
     | Clevel : 'a var * int -> change
     | Cgencopy : 'a var * 'a var option -> change
+    | Cexact : 'a var * exact_component list -> change
+    | Cvars of anyvar list
 
   type changes = change list
 
@@ -399,6 +433,12 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     | Cvupper (v, vupper) -> v.vupper <- vupper
     | Clevel (v, level) -> v.level <- level
     | Cgencopy (v, copy) -> v.gencopy <- copy
+    | Cexact (v, exact) -> v.exact <- exact
+    | Cvars previous -> vars := previous
+
+  let creation_log : (changes ref -> unit) ref = ref (fun _ -> ())
+
+  let set_creation_log f = creation_log := f
 
   let empty_changes = []
 
@@ -411,7 +451,10 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
   type copy_change =
     | Coptcopy : 'a C.obj * int * 'a var * 'a var option -> copy_change
 
-  type copy_scope = { mutable saved_copies : copy_change list }
+  type copy_scope =
+    { mutable saved_copies : copy_change list;
+      mutable copied_exact : (exact_component * exact_component) list
+    }
 
   type ('a, 'd) mode =
     | Amode :
@@ -441,6 +484,21 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
   let generic_level = Ident.highest_scope
 
   let rigid_level = generic_level - 1
+
+  let active_scope = ref None
+
+  let next_scope_order = ref 2
+
+  let quantifier_of_var v =
+    match v.quantifier with
+    | Some quantifier -> quantifier
+    | None ->
+      let order = Option.value v.scope_order ~default:0 in
+      if v.level = rigid_level
+      then Universal order
+      else if v.level > rigid_level
+      then Existential (order + 1)
+      else Outer
 
   let fatal_if_rigid mutation v =
     if v.level = rigid_level
@@ -841,8 +899,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     (match log with
     | None -> ()
     | Some log -> log := Clower (v, v.lower, v.lower_hint) :: !log);
-    v.lower <- C.join obj v.lower a;
-    v.lower_hint <- hint_biased_join obj a a_hint v.lower v.lower_hint
+    v.lower_hint <- hint_biased_join obj a a_hint v.lower v.lower_hint;
+    v.lower <- C.join obj v.lower a
 
   (** Calling [update_upper ~log obj v a a_hint] assumes that
       [not (v.upper <= a)]. Arguments are not checked and used directly. They
@@ -852,8 +910,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     (match log with
     | None -> ()
     | Some log -> log := Cupper (v, v.upper, v.upper_hint) :: !log);
-    v.upper <- C.meet obj v.upper a;
-    v.upper_hint <- hint_biased_meet obj v.upper v.upper_hint a a_hint
+    v.upper_hint <- hint_biased_meet obj v.upper v.upper_hint a a_hint;
+    v.upper <- C.meet obj v.upper a
 
   (** Arguments are not checked and used directly. They must satisfy the
       INVARIANT listed above. *)
@@ -1204,12 +1262,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       | Misc.Is_not_eq -> false
       | Misc.Is_eq -> true
 
-  (** Handles [f v <= g u] where both [v] and [u] are rigid. Neither variable
-      can be mutated, so the constraint must already hold for all valuations of
-      [v] and [u] within their bounds; we check that the optimal ceiling of
-      [f v] is below the floor of [g u]. [v] is temporarily zapped to its
-      ceiling to make its bounds precise; the zapping is reverted before
-      returning. *)
+  (** Check [f v <= g u] at each feasible value of the left rigid variable.
+      Fixing [v] before finding the floor of [u] preserves their dependency. *)
   let submode_mvmv_rigid_both : type a b c l r.
       log:_ ->
       H.Pinpoint.t ->
@@ -1224,21 +1278,46 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
    fun ~log:_ _pp dst v f _f_hint u g _g_hint ->
     let src_f = C.src dst f in
     let src_g = C.src dst g in
-    let zap_log_v, ceil =
-      zap_to_ceil_morphvar_aux src_f
-        (Amorphvar (v, C.id, Comp_hint.Morph_hint.Id))
+    let rec check = function
+      | [] -> Ok ()
+      | value :: rest ->
+        let slice_log = ref empty_changes in
+        let lower_result =
+          submode_cmv ~allow_rigid:true ~log:(Some slice_log) H.Pinpoint.unknown
+            src_f value (Comp_hint.Unknown value)
+            (Amorphvar (v, C.id, Comp_hint.Morph_hint.Id))
+        in
+        let feasible =
+          match lower_result with
+          | Error _ -> false
+          | Ok () ->
+            Result.is_ok
+              (submode_mvc ~allow_rigid:true ~log:(Some slice_log)
+                 H.Pinpoint.unknown src_f
+                 (Amorphvar (v, C.id, Comp_hint.Morph_hint.Id))
+                 value (Comp_hint.Unknown value))
+        in
+        if not feasible
+        then begin
+          undo_changes !slice_log;
+          check rest
+        end
+        else begin
+          let floor_log, floor =
+            zap_to_floor_morphvar_aux src_g
+              (Amorphvar (u, C.id, Comp_hint.Morph_hint.Id))
+          in
+          undo_changes floor_log;
+          undo_changes !slice_log;
+          let left = C.apply dst f value in
+          let right = C.apply dst g floor in
+          if C.le dst left right
+          then check rest
+          else
+            Error (left, Comp_hint.Unknown left, right, Comp_hint.Unknown right)
+        end
     in
-    let zap_log_u, floor =
-      zap_to_floor_morphvar_aux src_g
-        (Amorphvar (u, C.id, Comp_hint.Morph_hint.Id))
-    in
-    undo_changes zap_log_u;
-    undo_changes zap_log_v;
-    let ceil = C.apply dst f ceil in
-    let floor = C.apply dst g floor in
-    if C.le dst ceil floor
-    then Ok ()
-    else Error (ceil, Comp_hint.Unknown ceil, floor, Comp_hint.Unknown floor)
+    check (C.elements src_f)
 
   (** Handles [f v <= g u] where [u] is rigid but [v] is not. We cannot add the
       arrow [g' (f v)] to [u.vlower]; instead we enforce the constraint for
@@ -1727,8 +1806,6 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       update_level_finalize ~allow_rigid:true ~log dst level u
     end
 
-  let vars = ref []
-
   let live_id = ref 0
 
   let next_live_id () =
@@ -1749,7 +1826,7 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     id
 
   let fresh ?(neg = false) ?upper ?upper_hint ?lower ?lower_hint ?vlower ?vupper
-      ~level obj =
+      ?quantifier ?scope_order ~level obj =
     let id = if neg then next_persistent_id () else next_live_id () in
     let upper, upper_hint =
       match upper, upper_hint with
@@ -1769,8 +1846,13 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     let vupper = Option.value vupper ~default:VarMap.empty in
     let gencopy = None in
     let subst = None in
+    let scope_order =
+      match !active_scope with Some _ as scope -> scope | None -> scope_order
+    in
     let var =
       { level;
+        quantifier;
+        scope_order;
         upper;
         upper_hint;
         lower;
@@ -1779,10 +1861,12 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         vupper;
         id;
         gencopy;
-        subst
+        subst;
+        exact = []
       }
     in
-    vars := Var var :: !vars;
+    !creation_log (ref [Cvars !vars]);
+    vars := Var (obj, var) :: !vars;
     var
 
   let unhint_morphvar (Amorphvar (v, f, _)) =
@@ -1794,7 +1878,7 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     v.vlower <- VarMap.map unhint_morphvar v.vlower;
     v.vupper <- VarMap.map unhint_morphvar v.vupper
 
-  let erase_hints () = List.iter (fun (Var v) -> unhint_var v) !vars
+  let erase_hints () = List.iter (fun (Var (_, v)) -> unhint_var v) !vars
 
   type ('a, 'd) hint_raw = ('a, 'd) Comp_hint.t
 
@@ -1804,6 +1888,15 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       right : 'a;
       right_hint : ('a, right_only) hint_raw
     }
+
+  type 'a submode_failure =
+    | Inequality of 'a error_raw
+    | Inconsistent_relation
+    | Resource_limit
+
+  type 'a exact_failure =
+    | Exact_inequality of 'a error_raw
+    | Exact_inconsistent
 
   (* Moves every reachable variable from [u] such that
   [current_level] < [u.level] < [generic_level] to
@@ -1826,7 +1919,13 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         generalize_topology_v ~log ~current_level v
       in
       VarMap.iter do_gen u.vupper;
-      VarMap.iter do_gen u.vlower
+      VarMap.iter do_gen u.vlower;
+      List.iter
+        (fun component ->
+          List.iter
+            (fun (Var (_, v)) -> generalize_topology_v ~log ~current_level v)
+            component.members)
+        u.exact
     end
 
   (* creates a copy of the variable [u] such that [u] < [copy] and [copy] < [u] via
@@ -1838,7 +1937,11 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     (* If bounds are already tight, there is no need to create a copy *)
     if (not (C.le dst u.upper u.lower)) && u.level = generic_level
     then begin
-      let copy = fresh ~upper:u.upper ~lower:u.lower ~level:current_level dst in
+      let copy =
+        fresh ~upper:u.upper ~lower:u.lower ?quantifier:u.quantifier
+          ?scope_order:u.scope_order ~level:current_level dst
+      in
+      copy.exact <- u.exact;
       let ok1 =
         submode_mvmv ~allow_rigid:true ~log H.Pinpoint.unknown dst
           (Amorphvar (copy, C.id, Comp_hint.Morph_hint.Id))
@@ -1920,6 +2023,7 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         && C.le dst u.lower (C.min dst)
         && VarMap.is_empty vlower_above_current
         && VarMap.is_empty vupper_above_current
+        && u.exact = []
       then
         (* the bounds are fully open *)
         update_level_v ~log dst current_level u
@@ -1986,7 +2090,7 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
           generalize_structure_v ~log obj ~current_level v)
         mvs
 
-  let fresh_mode_copy_scope () = { saved_copies = [] }
+  let fresh_mode_copy_scope () = { saved_copies = []; copied_exact = [] }
 
   let undo_copy_change = function
     | Coptcopy (dst, update_to_level, v, copy) ->
@@ -1997,7 +2101,12 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         v.subst;
       v.subst <- copy
 
-  let cleanup_mode_copy_scope l = List.iter undo_copy_change l.saved_copies
+  let cleanup_mode_copy_scope l =
+    (* Copy finalization establishes the graph representation at the copy's
+       level. Copies can survive type backtracking through abbreviation caches;
+       undoing finalization would leave them at that level with unfinalized
+       edges, including edges stored on shared variables. *)
+    List.iter undo_copy_change l.saved_copies
 
   let with_copy_scope f =
     let scope = fresh_mode_copy_scope () in
@@ -2012,6 +2121,7 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     | Some v' -> trace_gencopy ~target_level v'
 
   let rec copy_v : type a.
+      ?copy_hidden:bool ->
       copy_scope:_ ->
       copy_from_level:int ->
       copy_below_level:int ->
@@ -2020,16 +2130,21 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
       a C.obj ->
       a var ->
       a var =
-   fun ~copy_scope ~copy_from_level ~copy_below_level ~copy_to_level ~cause obj
-       v ->
-    let in_window = v.level >= copy_from_level && v.level < copy_below_level in
+   fun ?(copy_hidden = false) ~copy_scope ~copy_from_level ~copy_below_level
+       ~copy_to_level ~cause obj v ->
+    let hidden = copy_hidden && v.level > generic_level in
+    let in_window =
+      hidden || (v.level >= copy_from_level && v.level < copy_below_level)
+    in
     if cause = `Restore then assert (v.id < 0);
     if not in_window
     then v
     else
       (* generalize_structure might have already created a copy, cached in [gencopy].
          If such a copy exist, we return it *)
-      let target_level = Option.value copy_to_level ~default:v.level in
+      let target_level =
+        if hidden then v.level else Option.value copy_to_level ~default:v.level
+      in
       let gencopy = trace_gencopy ~target_level v in
       begin match gencopy with
       | Some v' -> v'
@@ -2039,7 +2154,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         | None ->
           let copy =
             fresh ~neg:(cause = `Save) ~upper:v.upper ~lower:v.lower
-              ~level:v.level obj
+              ?quantifier:v.quantifier ?scope_order:v.scope_order ~level:v.level
+              obj
           in
           set_optcopy ~changes:copy_scope obj ~target_level v (Some copy);
           let vupper =
@@ -2047,8 +2163,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
               (fun _ (Amorphvar (u, f, f_hint)) acc ->
                 let src = C.src obj f in
                 let ucopy =
-                  copy_v ~copy_scope ~copy_from_level ~copy_below_level
-                    ~copy_to_level ~cause src u
+                  copy_v ~copy_hidden ~copy_scope ~copy_from_level
+                    ~copy_below_level ~copy_to_level ~cause src u
                 in
                 let x = Amorphvar (ucopy, f, f_hint) in
                 VarMap.add (get_key obj x) x acc)
@@ -2059,8 +2175,8 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
               (fun _ (Amorphvar (u, f, f_hint)) acc ->
                 let src = C.src obj f in
                 let ucopy =
-                  copy_v ~copy_scope ~copy_from_level ~copy_below_level
-                    ~copy_to_level ~cause src u
+                  copy_v ~copy_hidden ~copy_scope ~copy_from_level
+                    ~copy_below_level ~copy_to_level ~cause src u
                 in
                 let x = Amorphvar (ucopy, f, f_hint) in
                 VarMap.add (get_key obj x) x acc)
@@ -2072,9 +2188,13 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
           copy)
       end
 
-  let copy (type a l r) ~copy_scope ~copy_from_level ~copy_below_level
-      ?copy_to_level ?(cause = `Neither) (obj : a C.obj) (a : (a, l * r) mode) :
-      (a, l * r) mode =
+  let prepare_copied_component : (bool * exact_component -> exact_component) ref
+      =
+    ref snd
+
+  let copy (type a l r) ?(log = None) ~copy_scope ~copy_from_level
+      ~copy_below_level ?copy_to_level ?(cause = `Neither) (obj : a C.obj)
+      (a : (a, l * r) mode) : (a, l * r) mode =
     (* We never want to copy variables above [generic_level]. *)
     assert (copy_below_level <= generic_level + 1);
     Option.iter
@@ -2085,140 +2205,1986 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         (* We never copy to levels above [generic_level] *)
         assert (l <= generic_level))
       copy_to_level;
-    match a with
-    | Amodevar (Amorphvar (v, f, f_hint)) ->
-      let obj = C.src obj f in
-      let vcopy =
-        copy_v ~copy_scope ~copy_from_level ~copy_below_level ~copy_to_level
-          ~cause obj v
+    let result : (a, l * r) mode =
+      match a with
+      | Amodevar (Amorphvar (v, f, f_hint)) ->
+        let obj = C.src obj f in
+        let vcopy =
+          copy_v ~copy_scope ~copy_from_level ~copy_below_level ~copy_to_level
+            ~cause obj v
+        in
+        if vcopy == v then a else Amodevar (Amorphvar (vcopy, f, f_hint))
+      | Amode _ -> a
+      | Amodejoin (a, a_hint, mvs) ->
+        let mvscopy =
+          VarMap.fold
+            (fun _ (Amorphvar (v, f, f_hint)) acc ->
+              let src = C.src obj f in
+              let vcopy =
+                copy_v ~copy_scope ~copy_from_level ~copy_below_level
+                  ~copy_to_level ~cause src v
+              in
+              let x = Amorphvar (vcopy, f, f_hint) in
+              VarMap.add (get_key obj x) x acc)
+            mvs VarMap.empty
+        in
+        Amodejoin (a, a_hint, mvscopy)
+      | Amodemeet (a, a_hint, mvs) ->
+        let mvscopy =
+          VarMap.fold
+            (fun _ (Amorphvar (v, f, f_hint)) acc ->
+              let src = C.src obj f in
+              let vcopy =
+                copy_v ~copy_scope ~copy_from_level ~copy_below_level
+                  ~copy_to_level ~cause src v
+              in
+              let x = Amorphvar (vcopy, f, f_hint) in
+              VarMap.add (get_key obj x) x acc)
+            mvs VarMap.empty
+        in
+        Amodemeet (a, a_hint, mvscopy)
+    in
+    let rec copy_components () =
+      let components =
+        List.concat_map
+          (function Coptcopy (_, _, v, _) -> v.exact)
+          copy_scope.saved_copies
       in
-      if vcopy == v then a else Amodevar (Amorphvar (vcopy, f, f_hint))
-    | Amode _ -> a
-    | Amodejoin (a, a_hint, mvs) ->
-      let mvscopy =
-        VarMap.fold
-          (fun _ (Amorphvar (v, f, f_hint)) acc ->
-            let src = C.src obj f in
-            let vcopy =
-              copy_v ~copy_scope ~copy_from_level ~copy_below_level
-                ~copy_to_level ~cause src v
+      match
+        List.find_opt
+          (fun component ->
+            not
+              (List.exists
+                 (fun (old, copied) -> old == component || copied == component)
+                 copy_scope.copied_exact))
+          components
+      with
+      | None -> ()
+      | Some component ->
+        let members =
+          List.map
+            (fun (Var (member_obj, v)) ->
+              let copy =
+                copy_v ~copy_hidden:true ~copy_scope ~copy_from_level
+                  ~copy_below_level ~copy_to_level ~cause member_obj v
+              in
+              Var (member_obj, copy))
+            component.members
+        in
+        let copied = { component with members } in
+        let rigidified =
+          List.exists2
+            (fun (Var (_, before)) (Var (_, after)) ->
+              match quantifier_of_var before, quantifier_of_var after with
+              | (Outer | Existential _), Universal _ -> true
+              | _ -> false)
+            component.members members
+        in
+        let copied = !prepare_copied_component (rigidified, copied) in
+        copy_scope.copied_exact
+          <- (component, copied) :: copy_scope.copied_exact;
+        List.iter
+          (fun (Var (_, v)) ->
+            (match log with
+            | None -> ()
+            | Some log -> log := Cexact (v, v.exact) :: !log);
+            v.exact <- copied :: v.exact)
+          copied.members;
+        copy_components ()
+    in
+    copy_components ();
+    result
+
+  (* Persistent IDs are reused between saved copies. *)
+  let exact_var_key v = Obj.repr v
+
+  let row_value : type a. a C.obj -> a var -> anyvar list -> anyvalue list -> a
+      =
+   fun obj v members row ->
+    let rec find : anyvar list -> anyvalue list -> a =
+     fun members row ->
+      match members, row with
+      | Var (_, w) :: members, Value (value_obj, value) :: row ->
+        if exact_var_key w == exact_var_key v
+        then
+          match C.equal_obj obj value_obj with
+          | Misc.Is_eq -> value
+          | Misc.Is_not_eq ->
+            Misc.fatal_error "Solver: exact component object mismatch"
+        else find members row
+      | [], [] -> Misc.fatal_error "Solver: missing exact component variable"
+      | _ -> Misc.fatal_error "Solver: malformed exact component row"
+    in
+    find members row
+
+  let equal_anyvalue (Value (obj_a, a)) (Value (obj_b, b)) =
+    match C.equal_obj obj_a obj_b with
+    | Misc.Is_not_eq -> false
+    | Misc.Is_eq -> C.le obj_a a b && C.le obj_a b a
+
+  let rec equal_values left right =
+    match left, right with
+    | [], [] -> true
+    | a :: left, b :: right -> equal_anyvalue a b && equal_values left right
+    | _ -> false
+
+  let eval_exact_morphvar : type a l r.
+      a C.obj -> anyvar list -> anyvalue list -> (a, l * r) morphvar -> a =
+   fun obj members row (Amorphvar (v, f, _)) ->
+    let src = C.src obj f in
+    C.apply obj f (row_value src v members row)
+
+  let eval_exact_mode : type a l r.
+      a C.obj -> anyvar list -> anyvalue list -> (a, l * r) mode -> a =
+   fun obj members row -> function
+    | Amode (value, _, _) -> value
+    | Amodevar mv -> eval_exact_morphvar obj members row mv
+    | Amodejoin (constant, _, mvs) ->
+      VarMap.fold
+        (fun _ mv acc ->
+          C.join obj acc (eval_exact_morphvar obj members row mv))
+        mvs constant
+    | Amodemeet (constant, _, mvs) ->
+      VarMap.fold
+        (fun _ mv acc ->
+          C.meet obj acc (eval_exact_morphvar obj members row mv))
+        mvs constant
+
+  let exact_graph_model members row =
+    let rec check members' row' =
+      match members', row' with
+      | [], [] -> true
+      | Var (obj, v) :: rest, Value (value_obj, value) :: values -> (
+        match C.equal_obj obj value_obj with
+        | Misc.Is_not_eq -> false
+        | Misc.Is_eq ->
+          C.le obj v.lower value && C.le obj value v.upper
+          && VarMap.for_all
+               (fun _ mv ->
+                 C.le obj (eval_exact_morphvar obj members row mv) value)
+               v.vlower
+          && VarMap.for_all
+               (fun _ mv ->
+                 C.le obj value (eval_exact_morphvar obj members row mv))
+               v.vupper
+          && check rest values)
+      | _ -> Misc.fatal_error "Solver: malformed exact component row"
+    in
+    check members row
+
+  let exact_components members =
+    List.fold_left
+      (fun components (Var (_, v)) ->
+        List.fold_left
+          (fun components component ->
+            if List.exists (fun other -> other == component) components
+            then components
+            else component :: components)
+          components v.exact)
+      [] members
+
+  let exact_component_model component_rows component members row =
+    let projection =
+      List.map
+        (fun (Var (obj, v)) -> Value (obj, row_value obj v members row))
+        component.members
+    in
+    List.exists (equal_values projection) component_rows
+
+  let exact_mode_vars : type a l r. a C.obj -> (a, l * r) mode -> anyvar list =
+   fun obj -> function
+    | Amode _ -> []
+    | Amodevar (Amorphvar (v, f, _)) -> [Var (C.src obj f, v)]
+    | Amodejoin (_, _, mvs) ->
+      VarMap.fold
+        (fun _ (Amorphvar (v, f, _)) acc -> Var (C.src obj f, v) :: acc)
+        mvs []
+    | Amodemeet (_, _, mvs) ->
+      VarMap.fold
+        (fun _ (Amorphvar (v, f, _)) acc -> Var (C.src obj f, v) :: acc)
+        mvs []
+
+  let exact_neighbors ?(include_fixed = false) (Var (obj, v)) =
+    let from_map map =
+      VarMap.fold
+        (fun _ (Amorphvar (u, f, _)) ids ->
+          let src = C.src obj f in
+          if include_fixed || not (C.le src u.upper u.lower)
+          then exact_var_key u :: ids
+          else ids)
+        map []
+    in
+    from_map v.vlower @ from_map v.vupper
+
+  let exact_connected_members seeds =
+    let id (Var (_, v)) = exact_var_key v in
+    let add id ids = if List.memq id ids then ids else id :: ids in
+    let rec close ids =
+      let next =
+        List.fold_left
+          (fun ids (Var (_, v) as member) ->
+            let neighbors = exact_neighbors member in
+            let component_members =
+              List.concat_map
+                (fun component -> List.map id component.members)
+                v.exact
             in
-            let x = Amorphvar (vcopy, f, f_hint) in
-            VarMap.add (get_key obj x) x acc)
-          mvs VarMap.empty
+            if
+              List.memq (exact_var_key v) ids
+              || List.exists (fun id -> List.memq id ids) neighbors
+              || List.exists (fun id -> List.memq id ids) component_members
+            then
+              List.fold_left
+                (fun ids id -> add id ids)
+                ids
+                ((exact_var_key v :: neighbors) @ component_members)
+            else ids)
+          ids !vars
       in
-      Amodejoin (a, a_hint, mvscopy)
-    | Amodemeet (a, a_hint, mvs) ->
-      let mvscopy =
-        VarMap.fold
-          (fun _ (Amorphvar (v, f, f_hint)) acc ->
-            let src = C.src obj f in
-            let vcopy =
-              copy_v ~copy_scope ~copy_from_level ~copy_below_level
-                ~copy_to_level ~cause src v
+      if List.length next = List.length ids then ids else close next
+    in
+    let ids =
+      close (List.fold_left (fun ids member -> add (id member) ids) [] seeds)
+    in
+    let rec complete ids =
+      let selected =
+        List.filter (fun member -> List.memq (id member) ids) !vars
+      in
+      let next =
+        List.fold_left
+          (fun ids member ->
+            List.fold_left
+              (fun ids key -> add key ids)
+              ids
+              (exact_neighbors ~include_fixed:true member))
+          ids selected
+        |> close
+      in
+      if List.length next = List.length ids then ids else complete next
+    in
+    let ids = complete ids in
+    List.rev !vars |> List.filter (fun member -> List.memq (id member) ids)
+
+  let exact_member_index members v =
+    let rec find index = function
+      | [] -> Misc.fatal_error "Solver: missing exact component variable"
+      | Var (_, w) :: rest ->
+        if exact_var_key v == exact_var_key w
+        then index
+        else find (index + 1) rest
+    in
+    find 0 members
+
+  let exact_symbolic_predicate manager support predicate =
+    let support = List.sort_uniq Int.compare support in
+    let assignment = Array.make (Solver_mdd.arity manager) 0 in
+    let rec build = function
+      | [] ->
+        if predicate assignment then Solver_mdd.true_ else Solver_mdd.false_
+      | index :: rest ->
+        Solver_mdd.mk manager index
+          (Array.init (Solver_mdd.cardinality manager index) (fun value ->
+               assignment.(index) <- value;
+               build rest))
+    in
+    build support
+
+  let exact_graph_stamp members =
+    List.map
+      (fun (Var (_, v)) ->
+        Obj.repr v.lower, Obj.repr v.upper, Obj.repr v.vlower, Obj.repr v.vupper)
+      members
+
+  type symbolic_morph_key =
+    | Symbolic_morph :
+        'b C.obj * ('a, 'b, 'd) C.morph * bool
+        -> symbolic_morph_key
+
+  module Symbolic_morph_map = Map.Make (struct
+    type t = symbolic_morph_key
+
+    let compare (Symbolic_morph (left, f, reverse))
+        (Symbolic_morph (right, g, reverse')) =
+      let c = C.compare_obj left right in
+      if c <> 0
+      then c
+      else
+        match C.equal_obj left right with
+        | Misc.Is_not_eq -> assert false
+        | Misc.Is_eq ->
+          let c = C.compare_morph left f g in
+          if c <> 0 then c else Bool.compare reverse reverse'
+  end)
+
+  let symbolic_morphs = ref Symbolic_morph_map.empty
+
+  let exact_symbolic_edge manager ~source_index ~target_index obj f ~reverse =
+    let source = C.src obj f in
+    let source_values = Array.of_list (C.elements source) in
+    let target_values = Array.of_list (C.elements obj) in
+    let holds source_value target_value =
+      let mapped = C.apply obj f source_values.(source_value) in
+      let target = target_values.(target_value) in
+      if reverse then C.le obj target mapped else C.le obj mapped target
+    in
+    if source_index = target_index
+    then
+      exact_symbolic_predicate manager [source_index] (fun assignment ->
+          holds assignment.(source_index) assignment.(source_index))
+    else
+      let key = Symbolic_morph (obj, f, reverse) in
+      let template, node =
+        match Symbolic_morph_map.find_opt key !symbolic_morphs with
+        | Some cached -> cached
+        | None ->
+          let template =
+            Solver_mdd.create
+              ~bit_order:
+                [| C.symbolic_bit_order source; C.symbolic_bit_order obj |]
+              [| Array.length source_values; Array.length target_values |]
+          in
+          let node =
+            exact_symbolic_predicate template [0; 1] (fun assignment ->
+                holds assignment.(0) assignment.(1))
+          in
+          let node = Solver_mdd.factor template node in
+          symbolic_morphs
+            := Symbolic_morph_map.add key (template, node) !symbolic_morphs;
+          template, node
+      in
+      Solver_mdd.import manager ~old_manager:template
+        ~old_to_new:[| source_index; target_index |]
+        node
+
+  let exact_same_members members component =
+    List.length members = List.length component.members
+    && List.for_all2
+         (fun (Var (_, v)) (Var (_, w)) -> exact_var_key v == exact_var_key w)
+         members component.members
+
+  let exact_same_stamp (lo, hi, below, above) (lo', hi', below', above') =
+    lo == lo' && hi == hi' && below == below' && above == above'
+
+  let exact_reusable members component =
+    (* The component already entails its stamped graph. The bounds and edge
+       maps are immutable values, so unchanged fields preserve that invariant. *)
+    exact_same_members members component
+    && List.for_all2 exact_same_stamp
+         (exact_graph_stamp members)
+         component.graph_stamp
+
+  let exact_symbolic_snapshot members components =
+    let arities =
+      Array.of_list
+        (List.map (fun (Var (obj, _)) -> List.length (C.elements obj)) members)
+    in
+    let bit_order =
+      Array.of_list
+        (List.map (fun (Var (obj, _)) -> C.symbolic_bit_order obj) members)
+    in
+    let manager = Solver_mdd.create ~bit_order arities in
+    let value_index (Var (obj, _)) value =
+      let rec find index = function
+        | [] -> Misc.fatal_error "Solver: exact value outside lattice"
+        | candidate :: rest ->
+          if equal_anyvalue (Value (obj, candidate)) value
+          then index
+          else find (index + 1) rest
+      in
+      find 0 (C.elements obj)
+    in
+    let cube component row =
+      let choices =
+        List.map2
+          (fun (Var (_, v) as member) value ->
+            exact_member_index members v, value_index member value)
+          component.members row
+        |> List.sort (fun (left, _) (right, _) -> Int.compare left right)
+      in
+      List.fold_right
+        (fun (index, chosen) rest ->
+          Solver_mdd.mk manager index
+            (Array.init (Solver_mdd.cardinality manager index) (fun value ->
+                 if value = chosen then rest else Solver_mdd.false_)))
+        choices Solver_mdd.true_
+    in
+    let from_rows component rows =
+      List.fold_left
+        (fun relation row ->
+          Solver_mdd.or_ manager relation (cube component row))
+        Solver_mdd.false_ rows
+    in
+    let guards = ref [Solver_mdd.true_] in
+    let witnesses = ref [Solver_mdd.true_] in
+    List.iter
+      (fun component ->
+        let component_guard, component_witness =
+          match component.symbolic with
+          | None ->
+            ( from_rows component component.guard_rows,
+              from_rows component component.witness_rows )
+          | Some symbolic ->
+            let old_to_new =
+              Array.of_list
+                (List.map
+                   (fun (Var (_, v)) -> exact_member_index members v)
+                   component.members)
             in
-            let x = Amorphvar (vcopy, f, f_hint) in
-            VarMap.add (get_key obj x) x acc)
-          mvs VarMap.empty
+            ( Solver_mdd.import manager ~old_manager:symbolic.manager
+                ~old_to_new symbolic.guard,
+              Solver_mdd.import manager ~old_manager:symbolic.manager
+                ~old_to_new symbolic.witness )
+        in
+        guards := component_guard :: !guards;
+        witnesses := component_witness :: !witnesses;
+        Solver_mdd.compact ~threshold:100_000 manager (!guards @ !witnesses))
+      components;
+    let atoms = ref [] in
+    let add atom = atoms := atom :: !atoms in
+    let edges = Hashtbl.create 31 in
+    let add_edge i j atom =
+      let key = Int.min i j, Int.max i j in
+      Hashtbl.replace edges key
+        (atom :: Option.value (Hashtbl.find_opt edges key) ~default:[])
+    in
+    let old_stamps =
+      List.concat_map
+        (fun component ->
+          List.map2
+            (fun (Var (_, v)) stamp -> exact_var_key v, stamp)
+            component.members component.graph_stamp)
+        components
+    in
+    let stamps = Array.of_list (exact_graph_stamp members) in
+    List.iteri
+      (fun index (Var (obj, v)) ->
+        let values = Array.of_list (C.elements obj) in
+        add
+          (Solver_mdd.factor manager
+             (exact_symbolic_predicate manager [index] (fun assignment ->
+                  let value = values.(assignment.(index)) in
+                  C.le obj v.lower value && C.le obj value v.upper))))
+      members;
+    List.iteri
+      (fun index (Var (obj, v)) ->
+        let unchanged =
+          List.exists
+            (fun (key, stamp) ->
+              key == exact_var_key v && exact_same_stamp stamp stamps.(index))
+            old_stamps
+        in
+        if not unchanged
+        then begin
+          VarMap.iter
+            (fun _ (Amorphvar (u, f, _)) ->
+              let source_index = exact_member_index members u in
+              add_edge source_index index
+                (exact_symbolic_edge manager ~source_index ~target_index:index
+                   obj f ~reverse:false))
+            v.vlower;
+          VarMap.iter
+            (fun _ (Amorphvar (u, f, _)) ->
+              let source_index = exact_member_index members u in
+              add_edge source_index index
+                (exact_symbolic_edge manager ~source_index ~target_index:index
+                   obj f ~reverse:true))
+            v.vupper
+        end)
+      members;
+    Hashtbl.fold
+      (fun key constraints groups -> (key, constraints) :: groups)
+      edges []
+    |> List.sort (fun (key, left) (other_key, right) ->
+        let c = Int.compare (List.length right) (List.length left) in
+        if c = 0 then Stdlib.compare key other_key else c)
+    |> List.iter (fun (_, constraints) ->
+        add (Solver_mdd.and_many manager constraints));
+    let atoms = List.rev !atoms in
+    let roots = !guards @ !witnesses @ atoms in
+    let conjoin relations = Solver_mdd.and_many manager (relations @ atoms) in
+    Solver_mdd.compact manager roots;
+    let guard = conjoin !guards in
+    Solver_mdd.compact manager (guard :: roots);
+    let witness =
+      if List.for_all2 ( == ) !guards !witnesses
+      then guard
+      else conjoin !witnesses
+    in
+    { members;
+      guard_rows = [];
+      witness_rows = [];
+      graph_stamp = exact_graph_stamp members;
+      symbolic = Some { manager; guard; witness }
+    }
+
+  let exact_materialize_fixed ~log component =
+    let install : type a. a C.obj -> a var -> a -> unit =
+     fun obj v value ->
+      if not (C.le obj value v.lower)
+      then update_lower ~allow_rigid:true ~log obj v value (Unknown value);
+      if not (C.le obj v.upper value)
+      then update_upper ~allow_rigid:true ~log obj v value (Unknown value)
+    in
+    match component.symbolic with
+    | Some symbolic -> (
+      match Solver_mdd.find_sat symbolic.manager symbolic.guard with
+      | None -> ()
+      | Some assignment ->
+        let alternative =
+          Option.get
+            (Solver_mdd.find_sat ~prefer_high:true symbolic.manager
+               symbolic.guard)
+        in
+        let varying =
+          Array.mapi (fun i value -> value <> alternative.(i)) assignment
+        in
+        List.iteri
+          (fun index (Var (obj, v)) ->
+            if
+              (not varying.(index))
+              && quantifier_of_var v = Outer
+              && not (C.le obj v.upper v.lower)
+            then begin
+              let chosen = assignment.(index) in
+              let equal =
+                exact_symbolic_predicate symbolic.manager [index] (fun values ->
+                    values.(index) = chosen)
+              in
+              match
+                Solver_mdd.counterexample symbolic.manager symbolic.guard equal
+              with
+              | None -> install obj v (List.nth (C.elements obj) chosen)
+              | Some other ->
+                Array.iteri
+                  (fun i value ->
+                    if value <> assignment.(i) then varying.(i) <- true)
+                  other
+            end)
+          component.members)
+    | None -> (
+      match component.guard_rows with
+      | [] -> ()
+      | first :: rest ->
+        List.iter
+          (fun (Var (obj, v)) ->
+            if quantifier_of_var v = Outer && not (C.le obj v.upper v.lower)
+            then begin
+              let value = row_value obj v component.members first in
+              if
+                List.for_all
+                  (fun row ->
+                    let other = row_value obj v component.members row in
+                    C.le obj value other && C.le obj other value)
+                  rest
+              then install obj v value
+            end)
+          component.members)
+
+  let exact_without_fixed component =
+    let fixed, members =
+      List.partition
+        (fun (Var (obj, v)) -> C.le obj v.upper v.lower)
+        component.members
+    in
+    if fixed = []
+    then component
+    else
+      let retained =
+        List.map
+          (fun (Var (_, v)) -> exact_member_index component.members v)
+          members
       in
-      Amodemeet (a, a_hint, mvscopy)
+      let graph_stamp = List.map (List.nth component.graph_stamp) retained in
+      match component.symbolic with
+      | None ->
+        let project rows =
+          List.filter_map
+            (fun row ->
+              if
+                List.for_all
+                  (fun (Var (obj, v)) ->
+                    let value = row_value obj v component.members row in
+                    C.le obj v.lower value && C.le obj value v.upper)
+                  fixed
+              then Some (List.map (List.nth row) retained)
+              else None)
+            rows
+        in
+        { members;
+          graph_stamp;
+          symbolic = None;
+          guard_rows = project component.guard_rows;
+          witness_rows = project component.witness_rows
+        }
+      | Some symbolic ->
+        let fixed_values = Array.make (List.length component.members) None in
+        List.iter
+          (fun (Var (obj, v)) ->
+            let index = exact_member_index component.members v in
+            let rec find i = function
+              | [] -> assert false
+              | value :: rest ->
+                if C.le obj v.lower value && C.le obj value v.upper
+                then i
+                else find (i + 1) rest
+            in
+            fixed_values.(index) <- Some (find 0 (C.elements obj)))
+          fixed;
+        let manager =
+          Solver_mdd.create
+            ~bit_order:
+              (Array.of_list
+                 (List.map
+                    (fun (Var (obj, _)) -> C.symbolic_bit_order obj)
+                    members))
+            (Array.of_list
+               (List.map
+                  (fun (Var (obj, _)) -> List.length (C.elements obj))
+                  members))
+        in
+        let old_to_new =
+          Array.of_list
+            (List.map
+               (fun (Var (obj, v)) ->
+                 if C.le obj v.upper v.lower
+                 then -1
+                 else exact_member_index members v)
+               component.members)
+        in
+        let import =
+          Solver_mdd.import ~fixed:fixed_values manager
+            ~old_manager:symbolic.manager ~old_to_new
+        in
+        { members;
+          graph_stamp;
+          guard_rows = [];
+          witness_rows = [];
+          symbolic =
+            Some
+              { manager;
+                guard = import symbolic.guard;
+                witness = import symbolic.witness
+              }
+        }
+
+  let exact_without_fixed component =
+    let component = exact_without_fixed component in
+    match component.symbolic with
+    | None -> component
+    | Some symbolic ->
+      let support =
+        Solver_mdd.support symbolic.manager [symbolic.guard; symbolic.witness]
+      in
+      if Array.for_all Fun.id support
+      then component
+      else
+        let retained =
+          List.init (Array.length support) Fun.id
+          |> List.filter (Array.get support)
+        in
+        let members = List.map (List.nth component.members) retained in
+        let manager =
+          Solver_mdd.create
+            ~bit_order:
+              (Array.of_list
+                 (List.map
+                    (fun (Var (obj, _)) -> C.symbolic_bit_order obj)
+                    members))
+            (Array.of_list
+               (List.map
+                  (fun (Var (obj, _)) -> List.length (C.elements obj))
+                  members))
+        in
+        let mapping = Array.make (Array.length support) (-1) in
+        List.iteri (fun index old -> mapping.(old) <- index) retained;
+        let import =
+          Solver_mdd.import manager ~old_manager:symbolic.manager
+            ~old_to_new:mapping
+        in
+        { members;
+          graph_stamp = List.map (List.nth component.graph_stamp) retained;
+          guard_rows = [];
+          witness_rows = [];
+          symbolic =
+            Some
+              { manager;
+                guard = import symbolic.guard;
+                witness = import symbolic.witness
+              }
+        }
+
+  let exact_owns component v =
+    List.exists
+      (fun (Var (_, u)) -> exact_var_key u == exact_var_key v)
+      component.members
+
+  let rec exact_split_components component =
+    match component.symbolic with
+    | None -> [component]
+    | Some symbolic ->
+      let members = Array.of_list component.members in
+      let count = Array.length members in
+      let parent = Array.init count Fun.id in
+      let rec root i = if parent.(i) = i then i else root parent.(i) in
+      let index v =
+        let rec find i =
+          if i = count
+          then None
+          else
+            let (Var (_, u)) = members.(i) in
+            if exact_var_key u == exact_var_key v then Some i else find (i + 1)
+        in
+        find 0
+      in
+      Array.iteri
+        (fun i (Var (_, v)) ->
+          let edge _ (Amorphvar (u, _, _)) =
+            match index u with
+            | None -> ()
+            | Some j -> parent.(root i) <- root j
+          in
+          VarMap.iter edge v.vlower;
+          VarMap.iter edge v.vupper)
+        members;
+      let groups =
+        List.init count Fun.id
+        |> List.fold_left
+             (fun groups i ->
+               let r = root i in
+               let old = Option.value (List.assoc_opt r groups) ~default:[] in
+               (r, i :: old) :: List.remove_assoc r groups)
+             []
+        |> List.map snd
+      in
+      let manager = symbolic.manager in
+      let project keep guard witness =
+        let projected_members = List.map (Array.get members) keep in
+        let new_manager =
+          Solver_mdd.create
+            ~bit_order:
+              (Array.of_list
+                 (List.map
+                    (fun (Var (obj, _)) -> C.symbolic_bit_order obj)
+                    projected_members))
+            (Array.of_list
+               (List.map
+                  (fun (Var (obj, _)) -> List.length (C.elements obj))
+                  projected_members))
+        in
+        let mapping = Array.make count (-1) in
+        List.iteri
+          (fun new_index old_index -> mapping.(old_index) <- new_index)
+          keep;
+        let import =
+          Solver_mdd.import new_manager ~old_manager:manager ~old_to_new:mapping
+        in
+        { members = projected_members;
+          guard_rows = [];
+          witness_rows = [];
+          graph_stamp = List.map (List.nth component.graph_stamp) keep;
+          symbolic =
+            Some
+              { manager = new_manager;
+                guard = import guard;
+                witness = import witness
+              }
+        }
+      in
+      let rec try_groups = function
+        | [] -> [component]
+        | group :: remaining ->
+          let group = List.sort Int.compare group in
+          let rest =
+            List.init count Fun.id
+            |> List.filter (fun i -> not (List.mem i group))
+          in
+          let guard_left = Solver_mdd.exists_many manager rest symbolic.guard in
+          let guard_right =
+            Solver_mdd.exists_many manager group symbolic.guard
+          in
+          let witness_left =
+            Solver_mdd.exists_many manager rest symbolic.witness
+          in
+          let witness_right =
+            Solver_mdd.exists_many manager group symbolic.witness
+          in
+          let independent relation left right =
+            Solver_mdd.entails manager
+              (Solver_mdd.and_ manager left right)
+              relation
+          in
+          if
+            independent symbolic.guard guard_left guard_right
+            && independent symbolic.witness witness_left witness_right
+          then
+            project group guard_left witness_left
+            :: exact_split_components (project rest guard_right witness_right)
+          else try_groups remaining
+      in
+      if List.length groups <= 1 then [component] else try_groups groups
+
+  let exact_order_members members components =
+    match components with
+    | [component]
+      when List.length members = List.length component.members
+           && List.for_all
+                (fun (Var (_, v)) ->
+                  List.exists
+                    (fun (Var (_, u)) -> exact_var_key v == exact_var_key u)
+                    members)
+                component.members ->
+      component.members
+    | _ ->
+      if List.length members < 64 || components = []
+      then members
+      else
+        let largest =
+          List.fold_left
+            (fun best component ->
+              if List.length component.members > List.length best.members
+              then component
+              else best)
+            (List.hd components) components
+        in
+        let key (Var (_, v)) = exact_var_key v in
+        let contains ordered member =
+          List.exists (fun x -> key x == key member) ordered
+        in
+        let merge ordered component =
+          let rec loop ordered = function
+            | [] -> ordered
+            | member :: rest when contains ordered member -> loop ordered rest
+            | member :: rest ->
+              let successor = List.find_opt (contains ordered) rest in
+              let rec insert = function
+                | [] -> [member]
+                | x :: xs as remaining ->
+                  if
+                    match successor with
+                    | Some next -> key x == key next
+                    | None -> false
+                  then member :: remaining
+                  else x :: insert xs
+              in
+              loop (insert ordered) rest
+          in
+          loop ordered component.members
+        in
+        let ordered = List.fold_left merge largest.members components in
+        let missing =
+          List.filter (fun member -> not (contains ordered member)) members
+        in
+        let ordered =
+          List.fold_left
+            (fun ordered member ->
+              let neighbors = exact_neighbors member in
+              let adjacent =
+                List.mapi
+                  (fun index (Var (_, v)) ->
+                    if List.memq (exact_var_key v) neighbors
+                    then Some index
+                    else None)
+                  ordered
+                |> List.filter_map Fun.id
+              in
+              let after =
+                match adjacent with
+                | [] -> List.length ordered
+                | xs -> 1 + List.nth xs (List.length xs / 2)
+              in
+              let rec insert n = function
+                | rest when n = 0 -> member :: rest
+                | [] -> [member]
+                | x :: xs -> x :: insert (n - 1) xs
+              in
+              insert after ordered)
+            ordered missing
+        in
+        let shared, private_members =
+          List.partition
+            (fun (Var (_, v)) ->
+              List.length
+                (List.filter
+                   (fun component -> exact_owns component v)
+                   components)
+              > 1)
+            ordered
+        in
+        shared @ private_members
+
+  let exact_order_members members components =
+    let ordered = exact_order_members members components in
+    if List.length ordered < 64
+    then ordered
+    else
+      let seen = ref [] in
+      let result = ref [] in
+      let rec emit (Var (obj, v) as member) =
+        let key = exact_var_key v in
+        if not (List.memq key !seen)
+        then begin
+          seen := key :: !seen;
+          result := member :: !result;
+          let identities : type a l r.
+              a C.obj -> (a, l * r) morphvar VarMap.t -> Obj.t list =
+           fun obj map ->
+            VarMap.fold
+              (fun _ (Amorphvar (u, f, _)) keys ->
+                if C.compare_morph obj f C.id = 0
+                then exact_var_key u :: keys
+                else keys)
+              map []
+          in
+          let lower = identities obj v.vlower
+          and upper = identities obj v.vupper in
+          List.iter
+            (fun (Var (_, u) as neighbor) ->
+              let key = exact_var_key u in
+              if List.memq key lower && List.memq key upper then emit neighbor)
+            ordered
+        end
+      in
+      List.iter emit ordered;
+      List.rev !result
+
+  let exact_snapshot_cache = ref None
+
+  let exact_snapshot seeds =
+    let members = exact_connected_members seeds in
+    let components = exact_components members in
+    let members = exact_order_members members components in
+    let cached =
+      match !exact_snapshot_cache with
+      | Some (inputs, component)
+        when List.length inputs = List.length components
+             && List.for_all2 ( == ) inputs components
+             && exact_reusable members component ->
+        Some component
+      | _ -> None
+    in
+    match cached, components with
+    | Some component, _ -> Some component
+    | _, [component] when exact_reusable members component -> Some component
+    | _ ->
+      let max_rows = 10_000 in
+      let within_limit =
+        List.fold_left
+          (fun count (Var (obj, _)) ->
+            let cardinality = List.length (C.elements obj) in
+            if cardinality = 0 || count > max_rows / cardinality
+            then max_rows + 1
+            else count * cardinality)
+          1 members
+        <= max_rows
+      in
+      if
+        List.exists (fun component -> component.symbolic <> None) components
+        || Sys.getenv_opt "OCAML_EXPERIMENTAL_SYMBOLIC_MODES" = Some "force"
+        || (not within_limit)
+           && Sys.getenv_opt "OCAML_EXPERIMENTAL_SYMBOLIC_MODES" = Some "1"
+      then
+        try
+          let component = exact_symbolic_snapshot members components in
+          exact_snapshot_cache := Some (components, component);
+          Some component
+        with Solver_mdd.Limit -> None
+      else if not within_limit
+      then None
+      else
+        let rec enumerate = function
+          | [] -> [[]]
+          | Var (obj, _) :: rest ->
+            let tails = enumerate rest in
+            List.concat_map
+              (fun value ->
+                List.map (fun tail -> Value (obj, value) :: tail) tails)
+              (C.elements obj)
+        in
+        let graph_rows =
+          enumerate members |> List.filter (exact_graph_model members)
+        in
+        let guard_rows =
+          List.filter
+            (fun row ->
+              List.for_all
+                (fun component ->
+                  exact_component_model component.guard_rows component members
+                    row)
+                components)
+            graph_rows
+        in
+        let witness_rows =
+          List.filter
+            (fun row ->
+              List.for_all
+                (fun component ->
+                  exact_component_model component.witness_rows component members
+                    row)
+                components)
+            graph_rows
+        in
+        Some
+          { members;
+            guard_rows;
+            witness_rows;
+            graph_stamp = exact_graph_stamp members;
+            symbolic = None
+          }
+
+  type var_predicate = { check : 'a. 'a var -> bool }
+
+  let exact_mode_has : type a l r. var_predicate -> (a, l * r) mode -> bool =
+   fun { check } -> function
+    | Amode _ -> false
+    | Amodevar (Amorphvar (v, _, _)) -> check v
+    | Amodejoin (_, _, mvs) ->
+      VarMap.exists (fun _ (Amorphvar (v, _, _)) -> check v) mvs
+    | Amodemeet (_, _, mvs) ->
+      VarMap.exists (fun _ (Amorphvar (v, _, _)) -> check v) mvs
+
+  let exact_same_on selected members left right =
+    List.for_all
+      (fun (Var (obj, v)) ->
+        equal_anyvalue
+          (Value (obj, row_value obj v members left))
+          (Value (obj, row_value obj v members right)))
+      selected
+
+  let rec exact_groups selected members = function
+    | [] -> []
+    | first :: rest ->
+      let same, different =
+        List.partition (exact_same_on selected members first) rest
+      in
+      (first :: same) :: exact_groups selected members different
+
+  let exact_quantifier_blocks members =
+    let rank = function
+      | Outer -> assert false
+      | Universal order -> order, 0
+      | Existential order -> order, 1
+    in
+    let quantified =
+      List.filter_map
+        (fun (Var (_, v) as member) ->
+          match quantifier_of_var v with
+          | Outer -> None
+          | (Universal _ | Existential _) as quantifier ->
+            Some (quantifier, member))
+        members
+      |> List.sort (fun (left, _) (right, _) ->
+          compare (rank left) (rank right))
+    in
+    let rec blocks = function
+      | [] -> []
+      | (quantifier, member) :: rest ->
+        let same, other =
+          List.partition (fun (current, _) -> current = quantifier) rest
+        in
+        (quantifier, member :: List.map snd same) :: blocks other
+    in
+    blocks quantified
+
+  let exact_quantified_accepts members guard_rows witness_rows =
+    let rec check guard_rows witness_rows = function
+      | [] -> witness_rows <> []
+      | (Outer, _) :: _ -> assert false
+      | (Universal _, vars) :: rest ->
+        exact_groups vars members guard_rows
+        |> List.for_all (fun guard_group ->
+            let first = List.hd guard_group in
+            let matching_witnesses =
+              List.filter (exact_same_on vars members first) witness_rows
+            in
+            check guard_group matching_witnesses rest)
+      | (Existential _, vars) :: rest ->
+        exact_groups vars members witness_rows
+        |> List.exists (fun witness_group ->
+            let first = List.hd witness_group in
+            let matching_guards =
+              List.filter (exact_same_on vars members first) guard_rows
+            in
+            check matching_guards witness_group rest)
+    in
+    check guard_rows witness_rows (exact_quantifier_blocks members)
+
+  let exact_good_outer_groups component witness_rows =
+    let members = component.members in
+    let outer =
+      List.filter (fun (Var (_, v)) -> quantifier_of_var v = Outer) members
+    in
+    let good_groups =
+      exact_groups outer members component.guard_rows
+      |> List.filter (fun guard_rows ->
+          let first = List.hd guard_rows in
+          let matching_witnesses =
+            List.filter (exact_same_on outer members first) witness_rows
+          in
+          exact_quantified_accepts members guard_rows matching_witnesses)
+    in
+    outer, good_groups
+
+  let exact_symbolic_row component assignment =
+    List.mapi
+      (fun index (Var (obj, _)) ->
+        let value = List.nth (C.elements obj) assignment.(index) in
+        Value (obj, value))
+      component.members
+
+  type exact_irreducibles =
+    | Irreducibles : 'a C.obj * 'a list * 'a list -> exact_irreducibles
+
+  let irreducibles_cache = ref []
+
+  let exact_irreducibles : type a. a C.obj -> a list * a list =
+   fun obj ->
+    let rec find : exact_irreducibles list -> a list * a list = function
+      | Irreducibles (other, joins, meets) :: rest -> (
+        match C.equal_obj obj other with
+        | Misc.Is_eq -> joins, meets
+        | Misc.Is_not_eq -> find rest)
+      | [] ->
+        let values = C.elements obj in
+        let joins =
+          List.filter
+            (fun value ->
+              let lower =
+                List.fold_left
+                  (fun acc other ->
+                    if C.le obj other value && not (C.le obj value other)
+                    then C.join obj acc other
+                    else acc)
+                  (C.min obj) values
+              in
+              not (C.le obj value lower))
+            values
+        in
+        let meets =
+          List.filter
+            (fun value ->
+              let upper =
+                List.fold_left
+                  (fun acc other ->
+                    if C.le obj value other && not (C.le obj other value)
+                    then C.meet obj acc other
+                    else acc)
+                  (C.max obj) values
+              in
+              not (C.le obj upper value))
+            values
+        in
+        irreducibles_cache
+          := Irreducibles (obj, joins, meets) :: !irreducibles_cache;
+        joins, meets
+    in
+    find !irreducibles_cache
+
+  let exact_symbolic_mode_bound : type a l r.
+      exact_component ->
+      a C.obj ->
+      (a, l * r) mode ->
+      lower:bool ->
+      a ->
+      Solver_mdd.node =
+   fun component obj mode ~lower value ->
+    let manager = (Option.get component.symbolic).manager in
+    let truth b = if b then Solver_mdd.true_ else Solver_mdd.false_ in
+    let morph_bound lower value (Amorphvar (v, f, _)) =
+      let index = exact_member_index component.members v in
+      let values = Array.of_list (C.elements (C.src obj f)) in
+      exact_symbolic_predicate manager [index] (fun assignment ->
+          let actual = C.apply obj f values.(assignment.(index)) in
+          if lower then C.le obj value actual else C.le obj actual value)
+    in
+    match mode with
+    | Amode (actual, _, _) ->
+      truth (if lower then C.le obj value actual else C.le obj actual value)
+    | Amodevar morph -> morph_bound lower value morph
+    | Amodejoin (constant, _, morphs) ->
+      let upper value =
+        VarMap.fold
+          (fun _ morph relation ->
+            Solver_mdd.and_ manager relation (morph_bound false value morph))
+          morphs
+          (truth (C.le obj constant value))
+      in
+      if not lower
+      then upper value
+      else
+        List.fold_left
+          (fun relation bound ->
+            if C.le obj value bound
+            then relation
+            else
+              Solver_mdd.and_ manager relation
+                (Solver_mdd.not_ manager (upper bound)))
+          Solver_mdd.true_
+          (snd (exact_irreducibles obj))
+    | Amodemeet (constant, _, morphs) ->
+      let lower_bound value =
+        VarMap.fold
+          (fun _ morph relation ->
+            Solver_mdd.and_ manager relation (morph_bound true value morph))
+          morphs
+          (truth (C.le obj value constant))
+      in
+      if lower
+      then lower_bound value
+      else
+        List.fold_left
+          (fun relation bound ->
+            if C.le obj bound value
+            then relation
+            else
+              Solver_mdd.and_ manager relation
+                (Solver_mdd.not_ manager (lower_bound bound)))
+          Solver_mdd.true_
+          (fst (exact_irreducibles obj))
+
+  let exact_symbolic_mode_atom : type a l r.
+      exact_component ->
+      Solver_mdd.manager ->
+      a C.obj ->
+      (a, allowed * r) mode ->
+      (a, l * allowed) mode ->
+      Solver_mdd.node =
+   fun component manager obj left right ->
+    List.fold_left
+      (fun relation bound ->
+        let left_bound =
+          exact_symbolic_mode_bound component obj left ~lower:true bound
+        in
+        let right_bound =
+          exact_symbolic_mode_bound component obj right ~lower:true bound
+        in
+        let implication =
+          Solver_mdd.or_ manager
+            (Solver_mdd.not_ manager left_bound)
+            right_bound
+        in
+        Solver_mdd.and_ manager relation implication)
+      Solver_mdd.true_
+      (fst (exact_irreducibles obj))
+
+  let exact_symbolic_good_outer ?scope component witness =
+    let symbolic = Option.get component.symbolic in
+    let manager = symbolic.manager in
+    Solver_mdd.compact manager [symbolic.guard; witness];
+    let blocks =
+      List.rev (exact_quantifier_blocks component.members)
+      |> List.filter_map (fun (quantifier, members) ->
+          let members =
+            List.filter
+              (fun (Var (_, v)) ->
+                match scope with
+                | None -> true
+                | Some order -> v.scope_order = Some order)
+              members
+          in
+          if members = [] then None else Some (quantifier, members))
+    in
+    let same_kind left right =
+      match left, right with
+      | Existential _, Existential _ | Universal _, Universal _ -> true
+      | _ -> false
+    in
+    let rec coalesce = function
+      | (q, xs) :: (r, ys) :: rest when same_kind q r ->
+        coalesce ((q, xs @ ys) :: rest)
+      | block :: rest -> block :: coalesce rest
+      | [] -> []
+    in
+    let blocks = coalesce blocks in
+    let rec eliminate domain winning = function
+      | [] -> winning
+      | (quantifier, vars) :: rest ->
+        let indices =
+          List.map
+            (fun (Var (_, v)) -> exact_member_index component.members v)
+            vars
+        in
+        let universal =
+          match quantifier with
+          | Outer -> assert false
+          | Existential _ -> false
+          | Universal _ -> true
+        in
+        let domain, winning =
+          Solver_mdd.eliminate_guarded manager ~universal indices ~domain
+            ~witness:winning
+        in
+        Solver_mdd.compact ~threshold:100_000 manager
+          [symbolic.guard; witness; domain; winning];
+        eliminate domain winning rest
+    in
+    eliminate symbolic.guard witness blocks
+
+  let exact_symbolic_restrict component witness =
+    let symbolic = Option.get component.symbolic in
+    let manager = symbolic.manager in
+    let good = exact_symbolic_good_outer component witness in
+    Solver_mdd.compact manager [symbolic.guard; witness; good];
+    let guard = Solver_mdd.and_ manager symbolic.guard good in
+    Solver_mdd.compact manager [guard; witness; good];
+    let witness = Solver_mdd.and_ manager witness good in
+    { component with symbolic = Some { symbolic with guard; witness } }
+
+  let with_subsumption_scope ~commit f ~log =
+    let previous = !active_scope in
+    let before = !vars in
+    let order = !next_scope_order in
+    next_scope_order := order + 2;
+    active_scope := Some order;
+    Fun.protect
+      ~finally:(fun () -> active_scope := previous)
+      (fun () ->
+        let result = f () in
+        if commit result
+        then begin
+          let local v =
+            v.scope_order = Some order && quantifier_of_var v <> Outer
+          in
+          let rec created current =
+            if current == before
+            then []
+            else
+              match current with
+              | [] -> assert false
+              | (Var (_, v) as member) :: rest ->
+                if local v then member :: created rest else created rest
+          in
+          let created = created !vars in
+          let rec close () =
+            match exact_components created with
+            | [] -> ()
+            | component :: _ ->
+              let component =
+                match exact_snapshot component.members with
+                | None -> raise Exact_resource_limit
+                | Some component ->
+                  if Option.is_some component.symbolic
+                  then component
+                  else exact_symbolic_snapshot component.members [component]
+              in
+              let symbolic = Option.get component.symbolic in
+              let locals, members =
+                List.partition (fun (Var (_, v)) -> local v) component.members
+              in
+              let indices =
+                List.map
+                  (fun (Var (_, v)) -> exact_member_index component.members v)
+                  locals
+              in
+              Solver_mdd.compact symbolic.manager
+                [symbolic.guard; symbolic.witness];
+              let guard =
+                Solver_mdd.exists_many symbolic.manager indices symbolic.guard
+              in
+              let winning =
+                exact_symbolic_good_outer ~scope:order component
+                  symbolic.witness
+              in
+              Solver_mdd.compact symbolic.manager [guard; winning];
+              let witness = Solver_mdd.and_ symbolic.manager guard winning in
+              let manager =
+                Solver_mdd.create
+                  ~bit_order:
+                    (Array.of_list
+                       (List.map
+                          (fun (Var (obj, _)) -> C.symbolic_bit_order obj)
+                          members))
+                  (Array.of_list
+                     (List.map
+                        (fun (Var (obj, _)) -> List.length (C.elements obj))
+                        members))
+              in
+              let old_to_new =
+                Array.of_list
+                  (List.map
+                     (fun (Var (_, v)) ->
+                       if local v then -1 else exact_member_index members v)
+                     component.members)
+              in
+              let guard =
+                Solver_mdd.import manager ~old_manager:symbolic.manager
+                  ~old_to_new guard
+              in
+              let witness =
+                Solver_mdd.import manager ~old_manager:symbolic.manager
+                  ~old_to_new witness
+              in
+              List.iter
+                (fun (Var (_, v)) ->
+                  let keep _ (Amorphvar (u, _, _)) = not (local u) in
+                  let lower =
+                    if local v
+                    then VarMap.empty
+                    else VarMap.filter keep v.vlower
+                  in
+                  let upper =
+                    if local v
+                    then VarMap.empty
+                    else VarMap.filter keep v.vupper
+                  in
+                  if lower != v.vlower
+                  then set_vlower ~allow_rigid:true ~log v lower;
+                  if upper != v.vupper
+                  then set_vupper ~allow_rigid:true ~log v upper)
+                component.members;
+              let replacement =
+                { members;
+                  guard_rows = [];
+                  witness_rows = [];
+                  graph_stamp = exact_graph_stamp members;
+                  symbolic = Some { manager; guard; witness }
+                }
+              in
+              exact_materialize_fixed ~log replacement;
+              let redundant =
+                try
+                  let graph = exact_symbolic_snapshot members [] in
+                  let graph = Option.get graph.symbolic in
+                  let retained = Option.get replacement.symbolic in
+                  let import =
+                    Solver_mdd.import graph.manager
+                      ~old_manager:retained.manager
+                      ~old_to_new:(Array.init (List.length members) Fun.id)
+                  in
+                  Solver_mdd.entails graph.manager graph.guard
+                    (import retained.guard)
+                  && Solver_mdd.entails graph.manager graph.guard
+                       (import retained.witness)
+                with Solver_mdd.Limit -> false
+              in
+              let replacement = exact_without_fixed replacement in
+              let replacements =
+                try if redundant then [] else exact_split_components replacement
+                with Solver_mdd.Limit ->
+                  let symbolic = Option.get replacement.symbolic in
+                  Solver_mdd.compact symbolic.manager
+                    [symbolic.guard; symbolic.witness];
+                  [replacement]
+              in
+              List.iter
+                (fun (Var (obj, v)) ->
+                  (match log with
+                  | None -> ()
+                  | Some log -> log := Cexact (v, v.exact) :: !log);
+                  v.exact
+                    <- (if local v || C.le obj v.upper v.lower
+                        then []
+                        else
+                          List.filter
+                            (fun component ->
+                              List.exists
+                                (fun (Var (_, u)) ->
+                                  exact_var_key u == exact_var_key v)
+                                component.members)
+                            replacements))
+                component.members;
+              close ()
+          in
+          close ()
+        end;
+        result)
+
+  let exact_static_bound : type a l r.
+      a C.obj -> (a, l * r) mode -> lower:bool -> a =
+   fun obj mode ~lower ->
+    let morph_bound morph =
+      if lower then mlower obj morph else mupper obj morph
+    in
+    match mode with
+    | Amode (value, _, _) -> value
+    | Amodevar morph -> morph_bound morph
+    | Amodejoin (value, _, morphs) ->
+      VarMap.fold
+        (fun _ morph value -> C.join obj value (morph_bound morph))
+        morphs value
+    | Amodemeet (value, _, morphs) ->
+      VarMap.fold
+        (fun _ morph value -> C.meet obj value (morph_bound morph))
+        morphs value
+
+  let exact_submode : type a l r.
+      log:change list ref option ->
+      a C.obj ->
+      (a, allowed * r) mode ->
+      (a, l * allowed) mode ->
+      (unit, a exact_failure) result option =
+   fun ~log obj left right ->
+    let rigid =
+      exact_mode_has
+        { check =
+            (fun v ->
+              match quantifier_of_var v with
+              | Universal _ -> true
+              | Outer | Existential _ -> false)
+        }
+        left
+      || exact_mode_has
+           { check =
+               (fun v ->
+                 match quantifier_of_var v with
+                 | Universal _ -> true
+                 | Outer | Existential _ -> false)
+           }
+           right
+    in
+    let owned =
+      exact_mode_has { check = (fun v -> v.exact <> []) } left
+      || exact_mode_has { check = (fun v -> v.exact <> []) } right
+    in
+    if not (rigid || owned)
+    then None
+    else begin
+      let lower = exact_static_bound obj left ~lower:true in
+      let upper = exact_static_bound obj right ~lower:false in
+      if not (C.le obj lower upper)
+      then
+        Some
+          (Error
+             (Exact_inequality
+                { left = lower;
+                  left_hint = Comp_hint.Unknown lower;
+                  right = upper;
+                  right_hint = Comp_hint.Unknown upper
+                }))
+      else
+        match
+          exact_snapshot (exact_mode_vars obj left @ exact_mode_vars obj right)
+        with
+        | None -> raise Exact_resource_limit
+        | Some component -> (
+          let members = component.members in
+          match component.symbolic with
+          | Some symbolic ->
+            let manager = symbolic.manager in
+            Solver_mdd.compact manager [symbolic.guard; symbolic.witness];
+            let atom =
+              exact_symbolic_mode_atom component manager obj left right
+            in
+            Solver_mdd.compact manager [symbolic.guard; symbolic.witness; atom];
+            let witness = Solver_mdd.and_ manager symbolic.witness atom in
+            let replacement = exact_symbolic_restrict component witness in
+            let replacement_symbolic = Option.get replacement.symbolic in
+            if Solver_mdd.is_false replacement_symbolic.guard
+            then
+              let fallback =
+                Solver_mdd.counterexample manager symbolic.witness atom
+              in
+              let failing, unavoidable =
+                try
+                  let unavoidable =
+                    List.filter_map
+                      (fun bound ->
+                        let premise =
+                          exact_symbolic_mode_bound component obj left
+                            ~lower:true bound
+                        in
+                        let conclusion =
+                          exact_symbolic_mode_bound component obj right
+                            ~lower:true bound
+                        in
+                        let clause =
+                          Solver_mdd.or_ manager
+                            (Solver_mdd.not_ manager premise)
+                            conclusion
+                        in
+                        let candidate =
+                          Solver_mdd.and_ manager symbolic.witness clause
+                        in
+                        let good =
+                          exact_symbolic_good_outer component candidate
+                        in
+                        if
+                          Solver_mdd.is_false
+                            (Solver_mdd.and_ manager symbolic.guard good)
+                        then Some (bound, clause)
+                        else None)
+                      (fst (exact_irreducibles obj))
+                  in
+                  let unavoidable =
+                    match unavoidable with
+                    | [] -> None
+                    | (bound, clause) :: rest ->
+                      Some
+                        (List.fold_left
+                           (fun (bound, clause) (next_bound, next_clause) ->
+                             ( C.join obj bound next_bound,
+                               Solver_mdd.and_ manager clause next_clause ))
+                           (bound, clause) rest)
+                  in
+                  let failing_atom =
+                    match unavoidable with
+                    | None -> atom
+                    | Some (_, clause) -> clause
+                  in
+                  let failing =
+                    Solver_mdd.and_ manager symbolic.witness
+                      (Solver_mdd.not_ manager failing_atom)
+                  in
+                  let failing =
+                    match unavoidable with
+                    | None -> Solver_mdd.find_sat manager failing
+                    | Some (bound, _) -> (
+                      let full_bound =
+                        exact_symbolic_mode_bound component obj left ~lower:true
+                          bound
+                      in
+                      match
+                        Solver_mdd.find_sat manager
+                          (Solver_mdd.and_ manager failing full_bound)
+                      with
+                      | Some _ as assignment -> assignment
+                      | None -> Solver_mdd.find_sat manager failing)
+                  in
+                  failing, unavoidable
+                with Solver_mdd.Limit -> fallback, None
+              in
+              Some
+                (Error
+                   (match failing with
+                   | None -> Exact_inconsistent
+                   | Some assignment ->
+                     let row = exact_symbolic_row component assignment in
+                     let a =
+                       match unavoidable with
+                       | None -> eval_exact_mode obj members row left
+                       | Some (bound, _) ->
+                         C.meet obj bound (eval_exact_mode obj members row left)
+                     in
+                     let b = eval_exact_mode obj members row right in
+                     Exact_inequality
+                       { left = a;
+                         left_hint = Comp_hint.Unknown a;
+                         right = b;
+                         right_hint = Comp_hint.Unknown b
+                       }))
+            else begin
+              exact_materialize_fixed ~log replacement;
+              let replacement = exact_without_fixed replacement in
+              List.iter
+                (fun (Var (obj, v)) ->
+                  (match log with
+                  | None -> ()
+                  | Some log -> log := Cexact (v, v.exact) :: !log);
+                  v.exact
+                    <- (if
+                          C.le obj v.upper v.lower
+                          || not (exact_owns replacement v)
+                        then []
+                        else [replacement]))
+                members;
+              Some (Ok ())
+            end
+          | None ->
+            let satisfies row =
+              C.le obj
+                (eval_exact_mode obj members row left)
+                (eval_exact_mode obj members row right)
+            in
+            let witness_rows = List.filter satisfies component.witness_rows in
+            let outer, good_outer_groups =
+              exact_good_outer_groups component witness_rows
+            in
+            let good_outer_row row =
+              List.exists
+                (fun rows -> exact_same_on outer members (List.hd rows) row)
+                good_outer_groups
+            in
+            let guard_rows = List.concat good_outer_groups in
+            let witness_rows = List.filter good_outer_row witness_rows in
+            if guard_rows = []
+            then begin
+              let failing =
+                List.find_opt
+                  (fun row -> not (satisfies row))
+                  component.witness_rows
+              in
+              Some
+                (Error
+                   (match failing with
+                   | None -> Exact_inconsistent
+                   | Some row ->
+                     let a = eval_exact_mode obj members row left in
+                     let b = eval_exact_mode obj members row right in
+                     Exact_inequality
+                       { left = a;
+                         left_hint = Comp_hint.Unknown a;
+                         right = b;
+                         right_hint = Comp_hint.Unknown b
+                       }))
+            end
+            else begin
+              let component = { component with guard_rows; witness_rows } in
+              exact_materialize_fixed ~log component;
+              let component = exact_without_fixed component in
+              List.iter
+                (fun (Var (obj, v)) ->
+                  (match log with
+                  | None -> ()
+                  | Some log -> log := Cexact (v, v.exact) :: !log);
+                  v.exact
+                    <- (if C.le obj v.upper v.lower then [] else [component]))
+                members;
+              Some (Ok ())
+            end)
+    end
+
+  let exact_mode_envelope : type a l r.
+      a C.obj -> (a, l * r) mode -> (a * a) option =
+   fun obj mode ->
+    let owned = exact_mode_has { check = (fun v -> v.exact <> []) } mode in
+    if not owned
+    then None
+    else
+      match exact_snapshot (exact_mode_vars obj mode) with
+      | None -> raise Exact_resource_limit
+      | Some component -> (
+        let rigid =
+          exact_mode_has
+            { check =
+                (fun v ->
+                  match quantifier_of_var v with
+                  | Universal _ -> true
+                  | Outer | Existential _ -> false)
+            }
+            mode
+        in
+        match component.symbolic with
+        | Some symbolic ->
+          let manager = symbolic.manager in
+          Solver_mdd.compact manager [symbolic.guard; symbolic.witness];
+          let relation = if rigid then symbolic.guard else symbolic.witness in
+          if Solver_mdd.is_false relation
+          then Misc.fatal_error "Solver: empty exact component";
+          let joins, meets = exact_irreducibles obj in
+          let entailed lower value =
+            let bound =
+              exact_symbolic_mode_bound component obj mode ~lower value
+            in
+            Solver_mdd.entails manager relation bound
+          in
+          let lower =
+            List.fold_left
+              (fun lower value ->
+                if entailed true value then C.join obj lower value else lower)
+              (C.min obj) joins
+          in
+          let upper =
+            List.fold_left
+              (fun upper value ->
+                if entailed false value then C.meet obj upper value else upper)
+              (C.max obj) meets
+          in
+          Some (lower, upper)
+        | None -> (
+          let rows =
+            if rigid then component.guard_rows else component.witness_rows
+          in
+          let envelope =
+            List.fold_left
+              (fun acc row ->
+                let value = eval_exact_mode obj component.members row mode in
+                match acc with
+                | None -> Some (value, value)
+                | Some (lower, upper) ->
+                  Some (C.meet obj lower value, C.join obj upper value))
+              None rows
+          in
+          match envelope with
+          | Some envelope -> Some envelope
+          | None -> Misc.fatal_error "Solver: empty exact component"))
+
+  let reclassify_exact_relation component =
+    let members = component.members in
+    let replacement =
+      match component.symbolic with
+      | Some symbolic ->
+        let manager = symbolic.manager in
+        let projected =
+          List.fold_left
+            (fun relation (Var (_, v)) ->
+              match quantifier_of_var v with
+              | Existential _ ->
+                Solver_mdd.exists manager
+                  (exact_member_index members v)
+                  relation
+              | Outer | Universal _ -> relation)
+            symbolic.witness members
+        in
+        let guard = Solver_mdd.and_ manager symbolic.guard projected in
+        { component with symbolic = Some { symbolic with guard } }
+      | None ->
+        let selected =
+          List.filter
+            (fun (Var (_, v)) ->
+              match quantifier_of_var v with
+              | Outer | Universal _ -> true
+              | Existential _ -> false)
+            members
+        in
+        let guard_rows =
+          List.filter
+            (fun guard_row ->
+              List.exists
+                (exact_same_on selected members guard_row)
+                component.witness_rows)
+            component.guard_rows
+        in
+        { component with guard_rows }
+    in
+    replacement
+
+  let () =
+    prepare_copied_component
+      := fun (rigidified, component) ->
+           exact_without_fixed
+             (if rigidified
+              then reclassify_exact_relation component
+              else component)
+
+  let reclassify_exact_component ~log component =
+    let members = component.members in
+    let replacement = reclassify_exact_relation component in
+    List.iter
+      (fun (Var (_, v)) ->
+        (match log with
+        | None -> ()
+        | Some log -> log := Cexact (v, v.exact) :: !log);
+        v.exact
+          <- List.map
+               (fun existing ->
+                 if existing == component then replacement else existing)
+               v.exact)
+      members
+
+  let update_level_exact_v : type a. log:_ -> a C.obj -> int -> a var -> unit =
+   fun ~log obj level v ->
+    let old_level = v.level in
+    let components = v.exact in
+    update_level_v ~log obj level v;
+    if old_level > rigid_level && v.level <= rigid_level
+    then List.iter (reclassify_exact_component ~log) components
 
   let update_level (type a l r) (level : int) (obj : a C.obj)
       (a : (a, l * r) mode) ~log =
     match a with
     | Amodevar (Amorphvar (v, f, _)) ->
       let obj = C.src obj f in
-      update_level_v ~log obj level v
+      update_level_exact_v ~log obj level v
     | Amode _ -> ()
     | Amodejoin (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _)) ->
           let obj = C.src obj f in
-          update_level_v ~log obj level v)
+          update_level_exact_v ~log obj level v)
         mvs
     | Amodemeet (_, _, mvs) ->
       VarMap.iter
         (fun _ (Amorphvar (v, f, _)) ->
           let obj = C.src obj f in
-          update_level_v ~log obj level v)
+          update_level_exact_v ~log obj level v)
         mvs
 
   let submode (type a r l) (pp : H.Pinpoint.t) (obj : a C.obj)
       (a : (a, allowed * r) mode) (b : (a, l * allowed) mode) ~log =
-    let submode_cc ~log:_ _pp obj left left_hint right right_hint =
-      if C.le obj left right
-      then Ok ()
-      else Error { left; left_hint; right; right_hint }
-    in
-    let submode_mvc ~log pp obj v right right_hint =
-      Result.map_error
-        (fun (left, left_hint) -> { left; left_hint; right; right_hint })
-        (submode_mvc ~allow_rigid:false ~log pp obj v right right_hint)
-    in
-    let submode_cmv ~log pp obj left left_hint v =
-      Result.map_error
-        (fun (right, right_hint) -> { left; left_hint; right; right_hint })
-        (submode_cmv ~allow_rigid:false ~log pp obj left left_hint v)
-    in
-    let submode_mvmv ~log pp obj v u =
-      Result.map_error
-        (fun (left, left_hint, right, right_hint) ->
-          { left; left_hint; right; right_hint })
-        (submode_mvmv ~allow_rigid:false ~log pp obj v u)
-    in
-    match a, b with
-    | ( Amode (left, left_hint_lower, _left_hint_upper),
-        Amode (right, _right_hint_lower, right_hint_upper) ) ->
-      submode_cc ~log pp obj left
-        (Comp_hint.disallow_right left_hint_lower)
-        right
-        (Comp_hint.disallow_left right_hint_upper)
-    | Amodevar v, Amode (right, _right_hint_lower, right_hint_upper) ->
-      submode_mvc ~log pp obj v right (Comp_hint.disallow_left right_hint_upper)
-    | Amode (left, left_hint_lower, _left_hint_upper), Amodevar v ->
-      submode_cmv ~log pp obj left (Comp_hint.disallow_right left_hint_lower) v
-    | Amodevar v, Amodevar u -> submode_mvmv ~log pp obj v u
-    | Amode (a, a_hint_lower, _a_hint_upper), Amodemeet (b, b_hint, mvs) ->
-      Result.bind
-        (submode_cc ~log pp obj a
-           (Comp_hint.disallow_right a_hint_lower)
-           b b_hint)
-        (fun () ->
-          find_error
-            (fun mv ->
-              submode_cmv ~log pp obj a
-                (Comp_hint.disallow_right a_hint_lower)
-                mv)
-            mvs)
-    | Amodevar mv, Amodemeet (b, b_hint, mvs) ->
-      Result.bind (submode_mvc ~log pp obj mv b b_hint) (fun () ->
-          find_error (fun mv' -> submode_mvmv ~log pp obj mv mv') mvs)
-    | Amodejoin (a, a_hint, mvs), Amode (b, _b_hint_lower, b_hint_upper) ->
-      Result.bind
-        (submode_cc ~log pp obj a a_hint b
-           (Comp_hint.disallow_left b_hint_upper))
-        (fun () ->
-          find_error
-            (fun mv' ->
-              submode_mvc ~log pp obj mv' b
-                (Comp_hint.disallow_left b_hint_upper))
-            mvs)
-    | Amodejoin (a, a_hint, mvs), Amodevar mv ->
-      Result.bind (submode_cmv ~log pp obj a a_hint mv) (fun () ->
-          find_error (fun mv' -> submode_mvmv ~log pp obj mv' mv) mvs)
-    | Amodejoin (a, a_hint, mvs), Amodemeet (b, b_hint, mus) ->
-      (* TODO: mabye create a intermediate variable? *)
-      Result.bind (submode_cc ~log pp obj a a_hint b b_hint) (fun () ->
-          Result.bind
-            (find_error (fun mv -> submode_mvc ~log pp obj mv b b_hint) mvs)
-            (fun () ->
-              Result.bind
-                (find_error (fun mu -> submode_cmv ~log pp obj a a_hint mu) mus)
-                (fun () ->
-                  find_error
-                    (fun mu ->
-                      find_error (fun mv -> submode_mvmv ~log pp obj mv mu) mvs)
-                    mus)))
+    match exact_submode ~log obj a b with
+    | Some (Ok ()) -> Ok ()
+    | Some (Error (Exact_inequality error)) -> Error error
+    | Some (Error Exact_inconsistent) -> raise Exact_inconsistent_state
+    | None -> (
+      let submode_cc ~log:_ _pp obj left left_hint right right_hint =
+        if C.le obj left right
+        then Ok ()
+        else Error { left; left_hint; right; right_hint }
+      in
+      let submode_mvc ~log pp obj v right right_hint =
+        Result.map_error
+          (fun (left, left_hint) -> { left; left_hint; right; right_hint })
+          (submode_mvc ~allow_rigid:false ~log pp obj v right right_hint)
+      in
+      let submode_cmv ~log pp obj left left_hint v =
+        Result.map_error
+          (fun (right, right_hint) -> { left; left_hint; right; right_hint })
+          (submode_cmv ~allow_rigid:false ~log pp obj left left_hint v)
+      in
+      let submode_mvmv ~log pp obj v u =
+        Result.map_error
+          (fun (left, left_hint, right, right_hint) ->
+            { left; left_hint; right; right_hint })
+          (submode_mvmv ~allow_rigid:false ~log pp obj v u)
+      in
+      match a, b with
+      | ( Amode (left, left_hint_lower, _left_hint_upper),
+          Amode (right, _right_hint_lower, right_hint_upper) ) ->
+        submode_cc ~log pp obj left
+          (Comp_hint.disallow_right left_hint_lower)
+          right
+          (Comp_hint.disallow_left right_hint_upper)
+      | Amodevar v, Amode (right, _right_hint_lower, right_hint_upper) ->
+        submode_mvc ~log pp obj v right
+          (Comp_hint.disallow_left right_hint_upper)
+      | Amode (left, left_hint_lower, _left_hint_upper), Amodevar v ->
+        submode_cmv ~log pp obj left
+          (Comp_hint.disallow_right left_hint_lower)
+          v
+      | Amodevar v, Amodevar u -> submode_mvmv ~log pp obj v u
+      | Amode (a, a_hint_lower, _a_hint_upper), Amodemeet (b, b_hint, mvs) ->
+        Result.bind
+          (submode_cc ~log pp obj a
+             (Comp_hint.disallow_right a_hint_lower)
+             b b_hint)
+          (fun () ->
+            find_error
+              (fun mv ->
+                submode_cmv ~log pp obj a
+                  (Comp_hint.disallow_right a_hint_lower)
+                  mv)
+              mvs)
+      | Amodevar mv, Amodemeet (b, b_hint, mvs) ->
+        Result.bind (submode_mvc ~log pp obj mv b b_hint) (fun () ->
+            find_error (fun mv' -> submode_mvmv ~log pp obj mv mv') mvs)
+      | Amodejoin (a, a_hint, mvs), Amode (b, _b_hint_lower, b_hint_upper) ->
+        Result.bind
+          (submode_cc ~log pp obj a a_hint b
+             (Comp_hint.disallow_left b_hint_upper))
+          (fun () ->
+            find_error
+              (fun mv' ->
+                submode_mvc ~log pp obj mv' b
+                  (Comp_hint.disallow_left b_hint_upper))
+              mvs)
+      | Amodejoin (a, a_hint, mvs), Amodevar mv ->
+        Result.bind (submode_cmv ~log pp obj a a_hint mv) (fun () ->
+            find_error (fun mv' -> submode_mvmv ~log pp obj mv' mv) mvs)
+      | Amodejoin (a, a_hint, mvs), Amodemeet (b, b_hint, mus) ->
+        (* TODO: mabye create a intermediate variable? *)
+        Result.bind (submode_cc ~log pp obj a a_hint b b_hint) (fun () ->
+            Result.bind
+              (find_error (fun mv -> submode_mvc ~log pp obj mv b b_hint) mvs)
+              (fun () ->
+                Result.bind
+                  (find_error
+                     (fun mu -> submode_cmv ~log pp obj a a_hint mu)
+                     mus)
+                  (fun () ->
+                    find_error
+                      (fun mu ->
+                        find_error
+                          (fun mv -> submode_mvmv ~log pp obj mv mu)
+                          mvs)
+                      mus))))
+
+  let submode_detailed pp obj left right ~log =
+    try
+      match submode pp obj left right ~log with
+      | Ok () -> Ok ()
+      | Error error -> Error (Inequality error)
+    with
+    | Exact_inconsistent_state -> Error Inconsistent_relation
+    | Exact_resource_limit | Solver_mdd.Limit -> Error Resource_limit
 
   let populate_hint obj a hint =
     let ahint = Comp_hint.populate obj hint in
@@ -2310,23 +4276,156 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
 
   let get_loose_ceil : type a l r. a C.obj -> (a, l * r) mode -> a =
    fun obj m ->
-    match m with
-    | Amode (a, _a_hint_lower, _a_hint_upper) -> a
-    | Amodevar mv -> mupper obj mv
-    | Amodemeet (a, _a_hint, mvs) ->
-      VarMap.fold (fun _ mv acc -> C.meet obj acc (mupper obj mv)) mvs a
-    | Amodejoin (a, _a_hint, mvs) ->
-      VarMap.fold (fun _ mv acc -> C.join obj acc (mupper obj mv)) mvs a
+    match exact_mode_envelope obj m with
+    | Some (_, upper) -> upper
+    | None -> (
+      match m with
+      | Amode (a, _a_hint_lower, _a_hint_upper) -> a
+      | Amodevar mv -> mupper obj mv
+      | Amodemeet (a, _a_hint, mvs) ->
+        VarMap.fold (fun _ mv acc -> C.meet obj acc (mupper obj mv)) mvs a
+      | Amodejoin (a, _a_hint, mvs) ->
+        VarMap.fold (fun _ mv acc -> C.join obj acc (mupper obj mv)) mvs a)
 
   let get_loose_floor : type a l r. a C.obj -> (a, l * r) mode -> a =
    fun obj m ->
-    match m with
-    | Amode (a, _a_hint_lower, _a_hint_upper) -> a
-    | Amodevar mv -> mlower obj mv
-    | Amodejoin (a, _a_hint, mvs) ->
-      VarMap.fold (fun _ mv acc -> C.join obj acc (mupper obj mv)) mvs a
-    | Amodemeet (a, _a_hint, mvs) ->
-      VarMap.fold (fun _ mv acc -> C.meet obj acc (mlower obj mv)) mvs a
+    match exact_mode_envelope obj m with
+    | Some (lower, _) -> lower
+    | None -> (
+      match m with
+      | Amode (a, _a_hint_lower, _a_hint_upper) -> a
+      | Amodevar mv -> mlower obj mv
+      | Amodejoin (a, _a_hint, mvs) ->
+        VarMap.fold (fun _ mv acc -> C.join obj acc (mlower obj mv)) mvs a
+      | Amodemeet (a, _a_hint, mvs) ->
+        VarMap.fold (fun _ mv acc -> C.meet obj acc (mlower obj mv)) mvs a)
+
+  let exact_zap : type a l r.
+      a C.obj ->
+      (a, l * r) mode ->
+      toward:[`Floor | `Ceil] ->
+      log:change list ref option ->
+      a option =
+   fun obj mode ~toward ~log ->
+    if not (exact_mode_has { check = (fun v -> v.exact <> []) } mode)
+    then None
+    else
+      match exact_snapshot (exact_mode_vars obj mode) with
+      | None -> raise Exact_resource_limit
+      | Some component -> (
+        let members = component.members in
+        match component.symbolic with
+        | Some symbolic -> (
+          let manager = symbolic.manager in
+          Solver_mdd.compact manager [symbolic.guard; symbolic.witness];
+          let candidate value =
+            let atom =
+              Solver_mdd.and_ manager
+                (exact_symbolic_mode_bound component obj mode ~lower:true value)
+                (exact_symbolic_mode_bound component obj mode ~lower:false value)
+            in
+            let witness = Solver_mdd.and_ manager symbolic.witness atom in
+            let replacement = exact_symbolic_restrict component witness in
+            if Solver_mdd.is_false (Option.get replacement.symbolic).guard
+            then None
+            else Some replacement
+          in
+          let chosen =
+            List.fold_left
+              (fun chosen value ->
+                let better =
+                  match chosen with
+                  | None -> true
+                  | Some (previous, _) -> (
+                    match toward with
+                    | `Floor -> C.le obj value previous
+                    | `Ceil -> C.le obj previous value)
+                in
+                if not better
+                then chosen
+                else
+                  match candidate value with
+                  | None -> chosen
+                  | Some component -> Some (value, component))
+              None (C.elements obj)
+          in
+          match chosen with
+          | None -> raise Exact_zap_impossible
+          | Some (value, replacement) ->
+            (match log with
+            | None -> ()
+            | Some _ -> exact_materialize_fixed ~log replacement);
+            let replacement = exact_without_fixed replacement in
+            (match log with
+            | None -> ()
+            | Some log ->
+              List.iter
+                (fun (Var (obj, v)) ->
+                  log := Cexact (v, v.exact) :: !log;
+                  v.exact
+                    <- (if
+                          C.le obj v.upper v.lower
+                          || not (exact_owns replacement v)
+                        then []
+                        else [replacement]))
+                members);
+            Some value)
+        | None -> (
+          let candidate value =
+            let witness_rows =
+              List.filter
+                (fun row ->
+                  let actual = eval_exact_mode obj members row mode in
+                  C.le obj actual value && C.le obj value actual)
+                component.witness_rows
+            in
+            let outer, good_outer_groups =
+              exact_good_outer_groups component witness_rows
+            in
+            let guard_rows = List.concat good_outer_groups in
+            if guard_rows = []
+            then None
+            else
+              let witness_rows =
+                List.filter
+                  (fun row ->
+                    List.exists (exact_same_on outer members row) guard_rows)
+                  witness_rows
+              in
+              Some { component with guard_rows; witness_rows }
+          in
+          let chosen =
+            List.fold_left
+              (fun chosen value ->
+                match candidate value, chosen with
+                | None, _ -> chosen
+                | Some component, None -> Some (value, component)
+                | Some component, Some (previous, _) ->
+                  let better =
+                    match toward with
+                    | `Floor -> C.le obj value previous
+                    | `Ceil -> C.le obj previous value
+                  in
+                  if better then Some (value, component) else chosen)
+              None (C.elements obj)
+          in
+          match chosen with
+          | None -> raise Exact_zap_impossible
+          | Some (value, component) ->
+            (match log with
+            | None -> ()
+            | Some _ -> exact_materialize_fixed ~log component);
+            let component = exact_without_fixed component in
+            (match log with
+            | None -> ()
+            | Some log ->
+              List.iter
+                (fun (Var (obj, v)) ->
+                  log := Cexact (v, v.exact) :: !log;
+                  v.exact
+                    <- (if C.le obj v.upper v.lower then [] else [component]))
+                members);
+            Some value))
 
   (** Zaps a morphvar to its floor and returns the floor. [commit] could be
       [Some log], in which case the zapping is appended to [log]; it could also
@@ -2341,25 +4440,28 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
 
   let zap_to_floor : type a r. a C.obj -> (a, allowed * r) mode -> log:_ -> a =
    fun obj m ~log ->
-    match m with
-    | Amode (a, _a_hint_lower, _a_hint_upper) -> a
-    | Amodevar mv -> zap_to_floor_morphvar obj mv ~commit:log
-    | Amodejoin (a, _a_hint, mvs) ->
-      let floor =
-        VarMap.fold
-          (fun _ mv acc ->
-            C.join obj acc (zap_to_floor_morphvar obj mv ~commit:None))
-          mvs a
-      in
-      VarMap.iter
-        (fun _ mv ->
-          (* We want a hint for why [floor] is low. However, we only have hint
+    match exact_zap obj m ~toward:`Floor ~log with
+    | Some value -> value
+    | None -> (
+      match m with
+      | Amode (a, _a_hint_lower, _a_hint_upper) -> a
+      | Amodevar mv -> zap_to_floor_morphvar obj mv ~commit:log
+      | Amodejoin (a, _a_hint, mvs) ->
+        let floor =
+          VarMap.fold
+            (fun _ mv acc ->
+              C.join obj acc (zap_to_floor_morphvar obj mv ~commit:None))
+            mvs a
+        in
+        VarMap.iter
+          (fun _ mv ->
+            (* We want a hint for why [floor] is low. However, we only have hint
              for why [floor] is high. There is no hint to use. *)
-          submode_mvc ~allow_rigid:true H.Pinpoint.unknown obj mv floor
-            (Unknown floor) ~log
-          |> Result.get_ok)
-        mvs;
-      floor
+            submode_mvc ~allow_rigid:true H.Pinpoint.unknown obj mv floor
+              (Unknown floor) ~log
+            |> Result.get_ok)
+          mvs;
+        floor)
 
   (** Zaps a morphvar to its ceiling and returns the ceiling. [commit] could be
       [Some log], in which case the zapping is appended to [log]; it could also
@@ -2374,47 +4476,56 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
 
   let zap_to_ceil : type a l. a C.obj -> (a, l * allowed) mode -> log:_ -> a =
    fun obj m ~log ->
-    match m with
-    | Amode (a, _a_hint_lower, _a_hint_upper) -> a
-    | Amodevar mv -> zap_to_ceil_morphvar obj mv ~commit:log
-    | Amodemeet (a, _a_hint, mvs) ->
-      let ceil =
-        VarMap.fold
-          (fun _ mv acc ->
-            C.meet obj acc (zap_to_ceil_morphvar obj mv ~commit:None))
-          mvs a
-      in
-      VarMap.iter
-        (fun _ mv ->
-          let ok =
-            submode_cmv ~allow_rigid:true H.Pinpoint.unknown obj ceil
-              (Unknown ceil) mv ~log
-          in
-          assert (Result.is_ok ok))
-        mvs;
-      ceil
+    match exact_zap obj m ~toward:`Ceil ~log with
+    | Some value -> value
+    | None -> (
+      match m with
+      | Amode (a, _a_hint_lower, _a_hint_upper) -> a
+      | Amodevar mv -> zap_to_ceil_morphvar obj mv ~commit:log
+      | Amodemeet (a, _a_hint, mvs) ->
+        let ceil =
+          VarMap.fold
+            (fun _ mv acc ->
+              C.meet obj acc (zap_to_ceil_morphvar obj mv ~commit:None))
+            mvs a
+        in
+        VarMap.iter
+          (fun _ mv ->
+            let ok =
+              submode_cmv ~allow_rigid:true H.Pinpoint.unknown obj ceil
+                (Unknown ceil) mv ~log
+            in
+            assert (Result.is_ok ok))
+          mvs;
+        ceil)
 
   let get_floor : type a r. a C.obj -> (a, allowed * r) mode -> a =
    fun obj m ->
-    match m with
-    | Amode (a, _a_hint_lower, _a_hint_upper) -> a
-    | Amodevar mv -> zap_to_floor_morphvar obj mv ~commit:None
-    | Amodejoin (a, _a_hint, mvs) ->
-      VarMap.fold
-        (fun _ mv acc ->
-          C.join obj acc (zap_to_floor_morphvar obj mv ~commit:None))
-        mvs a
+    match exact_mode_envelope obj m with
+    | Some (lower, _) -> lower
+    | None -> (
+      match m with
+      | Amode (a, _a_hint_lower, _a_hint_upper) -> a
+      | Amodevar mv -> zap_to_floor_morphvar obj mv ~commit:None
+      | Amodejoin (a, _a_hint, mvs) ->
+        VarMap.fold
+          (fun _ mv acc ->
+            C.join obj acc (zap_to_floor_morphvar obj mv ~commit:None))
+          mvs a)
 
   let get_ceil : type a l. a C.obj -> (a, l * allowed) mode -> a =
    fun obj m ->
-    match m with
-    | Amode (a, _a_hint_lower, _a_hint_upper) -> a
-    | Amodevar mv -> zap_to_ceil_morphvar obj mv ~commit:None
-    | Amodemeet (a, _a_hint, mvs) ->
-      VarMap.fold
-        (fun _ mv acc ->
-          C.meet obj acc (zap_to_ceil_morphvar obj mv ~commit:None))
-        mvs a
+    match exact_mode_envelope obj m with
+    | Some (_, upper) -> upper
+    | None -> (
+      match m with
+      | Amode (a, _a_hint_lower, _a_hint_upper) -> a
+      | Amodevar mv -> zap_to_ceil_morphvar obj mv ~commit:None
+      | Amodemeet (a, _a_hint, mvs) ->
+        VarMap.fold
+          (fun _ mv acc ->
+            C.meet obj acc (zap_to_ceil_morphvar obj mv ~commit:None))
+          mvs a)
 
   let to_const_exn obj m =
     let floor = get_floor obj m in
@@ -2427,6 +4538,20 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
         floor
         (Fmt.compat (C.print obj))
         ceil
+
+  type zap_failure =
+    | No_constant
+    | Zap_resource_limit
+
+  let zap_to_floor_detailed obj mode ~log =
+    try Ok (zap_to_floor obj mode ~log) with
+    | Exact_zap_impossible -> Error No_constant
+    | Exact_resource_limit | Solver_mdd.Limit -> Error Zap_resource_limit
+
+  let zap_to_ceil_detailed obj mode ~log =
+    try Ok (zap_to_ceil obj mode ~log) with
+    | Exact_zap_impossible -> Error No_constant
+    | Exact_resource_limit | Solver_mdd.Limit -> Error Zap_resource_limit
 
   let to_of_const_exn : type a.
       a C.obj -> (a, allowed * allowed) mode -> (a, allowed * allowed) mode =
@@ -2450,121 +4575,140 @@ module Solver_mono (H : Hint) (C : Lattices_mono) = struct
     let u = fresh ~level obj in
     Amodevar (Amorphvar (u, C.id, Id))
 
-  let newvar_above (type a r) (obj : a C.obj) (level : int)
-      (m : (a, allowed * r) mode) ~log =
-    match disallow_right m with
-    | Amode (a, a_hint_lower, _a_hint_upper) ->
-      if C.le obj (C.max obj) a
-      then Amode (a, Comp_hint.allow_left a_hint_lower, Max), false
-      else
-        ( Amodevar
-            (Amorphvar
-               ( fresh ~lower:a
-                   ~lower_hint:(Comp_hint.disallow_right a_hint_lower)
-                   ~level obj,
-                 C.id,
-                 Id )),
-          true )
-    | Amodevar (Amorphvar (v, _, _) as mv) ->
-      if v.level <= level
-      then
-        (* [~lower] is not precise (because [mlower mv] is not precise), but
-         it doesn't need to be *)
-        ( Amodevar
-            (Amorphvar
-               ( fresh ~lower:(mlower obj mv) ~lower_hint:(mlower_hint mv)
-                   ~vlower:(VarMap.singleton (get_key obj mv) mv)
-                   ~level obj,
-                 C.id,
-                 Id )),
-          true )
-      else
-        let u = fresh ~level obj in
-        let mu = Amorphvar (u, C.id, Id) in
-        let ok =
-          submode_mvmv ~allow_rigid:false ~log H.Pinpoint.unknown obj mv mu
-        in
-        assert (Result.is_ok ok);
-        allow_right (Amodevar mu), true
-    | Amodejoin (a, a_hint, mvs) ->
-      if VarMap.for_all (fun _ (Amorphvar (v, _, _)) -> v.level <= level) mvs
-      then
-        (* [~lower] is not precise here, but it doesn't need to be *)
-        ( Amodevar
-            (Amorphvar
-               ( fresh ~lower:a ~lower_hint:a_hint ~vlower:mvs ~level obj,
-                 C.id,
-                 Id )),
-          true )
-      else
-        let u = fresh ~level obj in
-        let mu = Amorphvar (u, C.id, Id) in
-        submode_cmv ~allow_rigid:false H.Pinpoint.unknown obj ~log a a_hint mu
-        |> Result.get_ok;
-        VarMap.iter
-          (fun _ mv ->
-            let ok =
-              submode_mvmv ~allow_rigid:false ~log H.Pinpoint.unknown obj mv mu
-            in
-            assert (Result.is_ok ok))
-          mvs;
-        allow_right (Amodevar mu), true
+  let newvar_quantified obj ~level quantifier =
+    let u = fresh ~level ~quantifier obj in
+    Amodevar (Amorphvar (u, C.id, Id))
 
-  let newvar_below (type a l) (obj : a C.obj) (level : int)
-      (m : (a, l * allowed) mode) ~log =
-    match disallow_left m with
-    | Amode (a, _a_hint_lower, a_hint_upper) ->
-      if C.le obj a (C.min obj)
-      then Amode (a, Min, Comp_hint.allow_right a_hint_upper), false
-      else
-        ( Amodevar
-            (Amorphvar
-               ( fresh ~upper:a
-                   ~upper_hint:(Comp_hint.disallow_left a_hint_upper)
-                   ~level obj,
-                 C.id,
-                 Id )),
-          true )
-    | Amodevar (Amorphvar (v, _, _) as mv) ->
-      if v.level < level
-      then
-        (* [~upper] is not precise (because [mupper mv] is not precise), but
+  let newvar_above (type a r l s) (obj : a C.obj) (level : int)
+      (m : (a, allowed * r) mode) ~log : (a, l * s) mode * bool =
+    let result : (a, l * s) mode * bool =
+      match disallow_right m with
+      | Amode (a, a_hint_lower, _a_hint_upper) ->
+        if C.le obj (C.max obj) a
+        then Amode (a, Comp_hint.allow_left a_hint_lower, Max), false
+        else
+          ( Amodevar
+              (Amorphvar
+                 ( fresh ~lower:a
+                     ~lower_hint:(Comp_hint.disallow_right a_hint_lower)
+                     ~level obj,
+                   C.id,
+                   Id )),
+            true )
+      | Amodevar (Amorphvar (v, _, _) as mv) ->
+        if v.level <= level
+        then
+          (* [~lower] is not precise (because [mlower mv] is not precise), but
          it doesn't need to be *)
-        ( Amodevar
-            (Amorphvar
-               ( fresh ~upper:(mupper obj mv) ~upper_hint:(mupper_hint mv)
-                   ~vupper:(VarMap.singleton (get_key obj mv) mv)
-                   ~level obj,
-                 C.id,
-                 Id )),
-          true )
-      else
-        let u = fresh ~level obj in
-        let mu = Amorphvar (u, C.id, Id) in
-        submode_mvmv ~allow_rigid:false H.Pinpoint.unknown obj ~log mu mv
-        |> Result.get_ok;
-        allow_left (Amodevar mu), true
-    | Amodemeet (a, a_hint, mvs) ->
-      if VarMap.for_all (fun _ (Amorphvar (v, _, _)) -> v.level < level) mvs
-      then
-        (* [~upper] is not precise here, but it doesn't need to be *)
-        ( Amodevar
-            (Amorphvar
-               ( fresh ~upper:a ~upper_hint:a_hint ~vupper:mvs ~level obj,
-                 C.id,
-                 Id )),
-          true )
-      else
-        let u = fresh ~level obj in
-        let mu = Amorphvar (u, C.id, Id) in
-        submode_mvc ~allow_rigid:false H.Pinpoint.unknown obj ~log mu a a_hint
-        |> Result.get_ok;
-        VarMap.iter
-          (fun _ mv ->
-            submode_mvmv ~allow_rigid:false H.Pinpoint.unknown obj ~log mu mv
-            |> Result.get_ok)
-          mvs;
-        allow_left (Amodevar mu), true
+          ( Amodevar
+              (Amorphvar
+                 ( fresh ~lower:(mlower obj mv) ~lower_hint:(mlower_hint mv)
+                     ~vlower:(VarMap.singleton (get_key obj mv) mv)
+                     ~level obj,
+                   C.id,
+                   Id )),
+            true )
+        else
+          let u = fresh ~level obj in
+          let mu = Amorphvar (u, C.id, Id) in
+          let ok =
+            submode_mvmv ~allow_rigid:false ~log H.Pinpoint.unknown obj mv mu
+          in
+          assert (Result.is_ok ok);
+          allow_right (Amodevar mu), true
+      | Amodejoin (a, a_hint, mvs) ->
+        if VarMap.for_all (fun _ (Amorphvar (v, _, _)) -> v.level <= level) mvs
+        then
+          (* [~lower] is not precise here, but it doesn't need to be *)
+          ( Amodevar
+              (Amorphvar
+                 ( fresh ~lower:a ~lower_hint:a_hint ~vlower:mvs ~level obj,
+                   C.id,
+                   Id )),
+            true )
+        else
+          let u = fresh ~level obj in
+          let mu = Amorphvar (u, C.id, Id) in
+          submode_cmv ~allow_rigid:false H.Pinpoint.unknown obj ~log a a_hint mu
+          |> Result.get_ok;
+          VarMap.iter
+            (fun _ mv ->
+              let ok =
+                submode_mvmv ~allow_rigid:false ~log H.Pinpoint.unknown obj mv
+                  mu
+              in
+              assert (Result.is_ok ok))
+            mvs;
+          allow_right (Amodevar mu), true
+    in
+    (match fst result with
+    | Amodevar (Amorphvar (v, _, _)) ->
+      v.exact <- exact_components (exact_mode_vars obj m) @ v.exact
+    | Amode _ | Amodejoin _ | Amodemeet _ -> ());
+    result
+
+  let newvar_below (type a l s r) (obj : a C.obj) (level : int)
+      (m : (a, l * allowed) mode) ~log : (a, s * r) mode * bool =
+    let result : (a, s * r) mode * bool =
+      match disallow_left m with
+      | Amode (a, _a_hint_lower, a_hint_upper) ->
+        if C.le obj a (C.min obj)
+        then Amode (a, Min, Comp_hint.allow_right a_hint_upper), false
+        else
+          ( Amodevar
+              (Amorphvar
+                 ( fresh ~upper:a
+                     ~upper_hint:(Comp_hint.disallow_left a_hint_upper)
+                     ~level obj,
+                   C.id,
+                   Id )),
+            true )
+      | Amodevar (Amorphvar (v, _, _) as mv) ->
+        if v.level < level
+        then
+          (* [~upper] is not precise (because [mupper mv] is not precise), but
+         it doesn't need to be *)
+          ( Amodevar
+              (Amorphvar
+                 ( fresh ~upper:(mupper obj mv) ~upper_hint:(mupper_hint mv)
+                     ~vupper:(VarMap.singleton (get_key obj mv) mv)
+                     ~level obj,
+                   C.id,
+                   Id )),
+            true )
+        else
+          let u = fresh ~level obj in
+          let mu = Amorphvar (u, C.id, Id) in
+          submode_mvmv ~allow_rigid:false H.Pinpoint.unknown obj ~log mu mv
+          |> Result.get_ok;
+          allow_left (Amodevar mu), true
+      | Amodemeet (a, a_hint, mvs) ->
+        if VarMap.for_all (fun _ (Amorphvar (v, _, _)) -> v.level < level) mvs
+        then
+          (* [~upper] is not precise here, but it doesn't need to be *)
+          ( Amodevar
+              (Amorphvar
+                 ( fresh ~upper:a ~upper_hint:a_hint ~vupper:mvs ~level obj,
+                   C.id,
+                   Id )),
+            true )
+        else
+          let u = fresh ~level obj in
+          let mu = Amorphvar (u, C.id, Id) in
+          submode_mvc ~allow_rigid:false H.Pinpoint.unknown obj ~log mu a a_hint
+          |> Result.get_ok;
+          VarMap.iter
+            (fun _ mv ->
+              submode_mvmv ~allow_rigid:false H.Pinpoint.unknown obj ~log mu mv
+              |> Result.get_ok)
+            mvs;
+          allow_left (Amodevar mu), true
+    in
+    (match fst result with
+    | Amodevar (Amorphvar (v, _, _)) ->
+      v.exact <- exact_components (exact_mode_vars obj m) @ v.exact
+    | Amode _ | Amodejoin _ | Amodemeet _ -> ());
+    result
 
   (** Exposed description of mode variables, used for printing generic mode
       variables *)

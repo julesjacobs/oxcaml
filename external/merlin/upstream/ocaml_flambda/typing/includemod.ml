@@ -1368,13 +1368,14 @@ let () =
 (* Check that an implementation of a compilation unit meets its
    interface. *)
 
-let compunit0
+let compunit0 ?(self_check = false)
     ~comparison env ~mark impl_name ~modes impl_sig intf_name intf_sig
     unit_shape =
   let loc = Location.in_file impl_name in
+  let core = if self_check then core_inclusion_self_check else core_inclusion in
   let direction = Directionality.strictly_positive ~mark ~both:false in
   match
-    signatures ~core:core_inclusion ~direction ~loc env Subst.identity
+    signatures ~core ~direction ~loc env Subst.identity
       ~modes impl_sig intf_sig unit_shape
   with Result.Error reasons ->
     let diff = Error.diff impl_name intf_name reasons in
@@ -1649,9 +1650,10 @@ let modtypes ~loc env ~mark ~modes mty1 mty2 =
   | Ok (cc, _) -> cc
   | Error reason -> raise (Error (env, Error.(In_Module_type reason)))
 
-let gen_signatures env ~direction ~modes sig1 sig2 =
+let gen_signatures ?(self_check = false) env ~direction ~modes sig1 sig2 =
+  let core = if self_check then core_inclusion_self_check else core_inclusion in
   match
-    signatures ~core:core_inclusion ~direction ~loc:Location.none env
+    signatures ~core ~direction ~loc:Location.none env
       Subst.identity ~modes sig1 sig2 Shape.dummy_mod
   with
   | Ok (cc, _) -> cc
@@ -1661,11 +1663,11 @@ let signatures env ~mark ~modes sig1 sig2 =
   let direction = Directionality.unknown ~mark in
   gen_signatures env ~direction ~modes sig1 sig2
 
-let check_implementation env ~modes impl intf =
+let check_implementation ?(self_check = false) env ~modes impl intf =
   let direction =
     Directionality.strictly_positive ~mark:true ~both:false
   in
-  ignore (gen_signatures env ~direction ~modes impl intf)
+  ignore (gen_signatures ~self_check env ~direction ~modes impl intf)
 
 let include_functor_signatures env ~mark sig1 sig2 ~modes =
   let sig1 = List.map Subst.Lazy.of_signature_item sig1 in

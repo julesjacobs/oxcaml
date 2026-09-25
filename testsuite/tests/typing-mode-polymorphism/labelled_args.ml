@@ -98,7 +98,9 @@ let () =
 
 let foo = fst ~label2:()
 [%%expect{|
-val foo : label1:'a @ [< 'm & global] -> 'a @ [> 'm] = <fun>
+val foo :
+  label1:'a @ [< 'm & 'n & global] ->
+  'a @ [> 'm | 'n mod many portable forkable unyielding stateless] = <fun>
 |}]
 
 (* partially applying a labelled function yield

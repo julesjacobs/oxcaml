@@ -344,6 +344,62 @@ module type S = sig
         [false]). *)
     val check_composition_jobs :
       full:bool -> unit -> (unit -> (unit, error) result) list
+
+    val rigid_regionality_accepts_invalid : unit -> bool
+
+    val rigid_flexible_regionality_accepts_invalid : unit -> bool
+
+    val rigid_flexible_sequential_assertions : unit -> bool
+
+    val rigid_flexible_copy_preserves_assertions : unit -> bool
+
+    val rigidification_preserves_exact_constraint : unit -> bool
+
+    val exact_newvar_above_preserves_constraint : unit -> bool
+
+    val exact_no_constant_zap_is_rejected : unit -> bool
+
+    val exact_resource_limit_is_separate : unit -> bool
+
+    val exact_first_rigid_limit_is_separate : unit -> bool
+
+    val exact_inequality_failure_is_separate : unit -> bool
+
+    val exact_failures_have_diagnostics : unit -> bool
+
+    val exact_gencopy_preserves_constraint : unit -> bool
+
+    val nested_scope_order_distinguished : unit -> bool
+
+    val nested_scope_pairs_match_oracle : unit -> int
+
+    val scoped_conditional_residual_matches_oracle : unit -> int
+
+    val copied_hidden_witnesses_are_fresh : unit -> bool
+
+    val correlated_envelopes_preserve_bounds : unit -> bool
+
+    val nested_scopes_preserve_dependencies : unit -> bool
+
+    val exact_distinguishes_reused_persistent_ids : unit -> bool
+
+    val rigid_correlated_regionality_checks : unit -> bool
+
+    val loose_floor_of_join_is_lower : unit -> bool
+
+    val rigid_regionality_matches_oracle : unit -> bool
+
+    val rigid_right_preserves_outer_dependency : unit -> bool
+
+    val rigid_left_preserves_outer_dependency : unit -> bool
+
+    val exception_rolls_back_mode_changes : unit -> bool
+
+    val rigid_constant_right_preserves_outer_dependency : unit -> bool
+
+    val rigid_conditional_zap_preserves_residual : unit -> bool
+
+    val rigid_constant_left_preserves_outer_dependency : unit -> bool
   end
 
   val print_longident : (Fmt.formatter -> Longident.t -> unit) ref
@@ -384,6 +440,8 @@ module type S = sig
   type copy_scope
 
   val with_copy_scope : (copy_scope -> 'a) -> 'a
+
+  val with_subsumption_scope : commit:('a -> bool) -> (unit -> 'a) -> 'a
 
   type nonrec allowed = allowed
 

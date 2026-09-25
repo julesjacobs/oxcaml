@@ -302,6 +302,10 @@
   typeopt
   value_rec_check
   typecore
+  solver_exact
+  solver_graph
+  solver_graph_compact
+  solver_mdd
   solver_intf
   solver
   mode_hint

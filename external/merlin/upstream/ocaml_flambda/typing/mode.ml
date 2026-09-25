@@ -1721,6 +1721,21 @@ module Lattices_mono = struct
     in
     Lazy.force elements
 
+  let elements obj = get_elements ~full:true obj
+
+  let symbolic_bit_order : type a. a obj -> int array = function
+    | Locality -> [| 0 |]
+    | Regionality -> [| 0; 1 |]
+    | Linearity | Uniqueness_op -> [| 2 |]
+    | Portability | Contention_op -> [| 4; 6 |]
+    | Forkable -> [| 8 |]
+    | Yielding -> [| 10 |]
+    | Statefulness | Visibility_op -> [| 12; 14 |]
+    | Staticity_op -> [| 16 |]
+    | Comonadic_with_locality -> [| 0; 2; 4; 6; 8; 10; 12; 14 |]
+    | Comonadic_with_regionality -> [| 0; 1; 2; 4; 6; 8; 10; 12; 14 |]
+    | Monadic_op -> [| 2; 4; 6; 12; 14; 16 |]
+
   module Locality_morph = struct
     (* Following is a chain of adjunctions (this can be extended one
 	       further, but we never need the missing operation). *)
@@ -4350,7 +4365,7 @@ module Lattices_mono = struct
   end
 end
 
-module For_testing = struct
+module For_testing_lattice = struct
   open Lattices_mono
 
   let ( let* ) xs f = List.concat_map f xs
@@ -5376,11 +5391,11 @@ let undo_changes = S.undo_changes
 (* To be filled in by [types.ml] *)
 let append_changes : (changes ref -> unit) ref = ref (fun _ -> assert false)
 
-let set_append_changes f = append_changes := f
+let set_append_changes f =
+  append_changes := f;
+  S.set_creation_log f
 
 type copy_scope = S.copy_scope
-
-let with_copy_scope = S.with_copy_scope
 
 type ('a, 'd) mode = ('a, 'd) S.mode
 
@@ -5448,6 +5463,18 @@ let () =
   Location.register_error_of_exn (function
     | Submode_error_simple_context (pp, err) ->
       Some (Error.print_packed_simple_context pp err)
+    | S.Exact_zap_impossible ->
+      Some
+        (Location.errorf ~loc:Location.none
+           "This mode depends on a rigid variable and has no constant value")
+    | S.Exact_resource_limit | Solver_mdd.Limit ->
+      Some
+        (Location.errorf ~loc:Location.none
+           "Mode constraint solving exceeded its exact search limit")
+    | S.Exact_inconsistent_state ->
+      Some
+        (Location.errorf ~loc:Location.none
+           "Mode constraints have no consistent quantified assignment")
     | _ -> None)
 
 module type Common_axis_pos = sig
@@ -5482,22 +5509,35 @@ end
 let try_with_log op =
   let log' = ref S.empty_changes in
   let log = Some log' in
-  match op ~log with
-  | Ok _ as x ->
-    !append_changes log';
-    x
-  | Error _ as x ->
+  try
+    match op ~log with
+    | Ok _ as x ->
+      !append_changes log';
+      x
+    | Error _ as x ->
+      S.undo_changes !log';
+      x
+  with exn ->
     S.undo_changes !log';
-    x
+    raise exn
 [@@inline]
 
 let with_log op =
   let log' = ref S.empty_changes in
   let log = Some log' in
-  let r = op ~log in
-  !append_changes log';
-  r
+  try
+    let r = op ~log in
+    !append_changes log';
+    r
+  with exn ->
+    S.undo_changes !log';
+    raise exn
 [@@inline]
+
+let with_copy_scope = S.with_copy_scope
+
+let with_subsumption_scope ~commit f =
+  with_log (fun ~log -> S.with_subsumption_scope ~commit f ~log)
 
 let equate_from_submode submode_log m1 m2 ~log =
   match submode_log m1 m2 ~log with
@@ -5592,36 +5632,43 @@ module Comonadic_gen (Obj : Obj) = struct
 
   let generalize_topology ~current_level a =
     if Language_extension.(is_at_least Mode_polymorphism Alpha)
-    then S.generalize_topology ~log:None ~current_level a
+    then with_log (fun ~log -> S.generalize_topology ~log ~current_level a)
 
   let generalize ~current_level a =
     if Language_extension.(is_at_least Mode_polymorphism Alpha)
-    then S.generalize ~log:None ~current_level obj a
+    then with_log (fun ~log -> S.generalize ~log ~current_level obj a)
 
   let generalize_structure ~current_level a =
     if Language_extension.(is_at_least Mode_polymorphism Alpha)
-    then S.generalize_structure ~log:None ~current_level obj a
+    then with_log (fun ~log -> S.generalize_structure ~log ~current_level obj a)
 
   let instantiate ~copy_scope ~current_level a =
     let copy_from_level = generic_level in
     let copy_below_level = generic_level + 1 in
     let copy_to_level = choose_level current_level in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level ~copy_to_level obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level
+          ~copy_to_level obj a)
 
   let copy_generic ~copy_scope a =
     let copy_from_level = generic_level in
     let copy_below_level = generic_level + 1 in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level obj a)
 
   let copy_for_saving ~copy_scope a =
     let copy_from_level = 0 in
     let copy_below_level = generic_level + 1 in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level ~cause:`Save obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level ~cause:`Save
+          obj a)
 
   let copy_for_restoring ~copy_scope a =
     let copy_from_level = 0 in
     let copy_below_level = generic_level + 1 in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level ~cause:`Restore obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level
+          ~cause:`Restore obj a)
 
   let join l = S.join obj l
 
@@ -5799,36 +5846,43 @@ module Monadic_gen (Obj : Obj) = struct
 
   let generalize_topology ~current_level a =
     if Language_extension.(is_at_least Mode_polymorphism Alpha)
-    then S.generalize_topology ~log:None ~current_level a
+    then with_log (fun ~log -> S.generalize_topology ~log ~current_level a)
 
   let generalize ~current_level a =
     if Language_extension.(is_at_least Mode_polymorphism Alpha)
-    then S.generalize ~log:None ~current_level obj a
+    then with_log (fun ~log -> S.generalize ~log ~current_level obj a)
 
   let generalize_structure ~current_level a =
     if Language_extension.(is_at_least Mode_polymorphism Alpha)
-    then S.generalize_structure ~log:None ~current_level obj a
+    then with_log (fun ~log -> S.generalize_structure ~log ~current_level obj a)
 
   let instantiate ~copy_scope ~current_level a =
     let copy_from_level = generic_level in
     let copy_below_level = generic_level + 1 in
     let copy_to_level = choose_level current_level in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level ~copy_to_level obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level
+          ~copy_to_level obj a)
 
   let copy_generic ~copy_scope a =
     let copy_from_level = generic_level in
     let copy_below_level = generic_level + 1 in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level obj a)
 
   let copy_for_saving ~copy_scope a =
     let copy_from_level = 0 in
     let copy_below_level = generic_level + 1 in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level ~cause:`Save obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level ~cause:`Save
+          obj a)
 
   let copy_for_restoring ~copy_scope a =
     let copy_from_level = 0 in
     let copy_below_level = generic_level + 1 in
-    S.copy ~copy_scope ~copy_from_level ~copy_below_level ~cause:`Restore obj a
+    with_log (fun ~log ->
+        S.copy ~log ~copy_scope ~copy_from_level ~copy_below_level
+          ~cause:`Restore obj a)
 
   let print_error pp err = Error.print_all pp obj err
 
@@ -8867,4 +8921,770 @@ module Crossing = struct
         comonadic = Comonadic.Modality comonadic
       } =
     { monadic; comonadic }
+end
+
+module For_testing = struct
+  include For_testing_lattice
+
+  let regionality_to_global =
+    C.Simple
+      (C.Simple_morph.Core
+         (C.Core_morph.Locality_restricted
+            C.Locality_morph.Regional_to_global_regionality))
+
+  let rigid_regionality_accepts_invalid () =
+    let obj = C.Regionality in
+    assert (
+      not
+        (C.le obj C.Regionality.Regional
+           (C.apply obj regionality_to_global C.Regionality.Regional)));
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let hr = S.apply obj regionality_to_global (S.disallow_left r) in
+    let log = ref S.empty_changes in
+    let answer =
+      S.submode Hint_for_solver.Pinpoint.unknown obj r hr ~log:(Some log)
+    in
+    S.undo_changes !log;
+    Result.is_ok answer
+
+  let rigid_flexible_regionality_accepts_invalid () =
+    let obj = C.Regionality in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let a : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let hr = S.apply obj regionality_to_global (S.disallow_left r) in
+    let log = ref S.empty_changes in
+    let answer =
+      match
+        S.submode Hint_for_solver.Pinpoint.unknown obj r a ~log:(Some log)
+      with
+      | Error _ -> false
+      | Ok () ->
+        Result.is_ok
+          (S.submode Hint_for_solver.Pinpoint.unknown obj a hr ~log:(Some log))
+    in
+    S.undo_changes !log;
+    answer
+
+  let rigid_flexible_sequential_assertions () =
+    let obj = C.Regionality in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let a : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let hr = S.apply obj regionality_to_global (S.disallow_left r) in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result = constrain r a && not (constrain a hr) in
+    S.undo_changes !log;
+    result
+
+  let rigid_flexible_copy_preserves_assertions () =
+    let obj = C.Regionality in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let a : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let hr = S.apply obj regionality_to_global (S.disallow_left r) in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain r a
+      && S.with_copy_scope (fun copy_scope ->
+          let copied =
+            S.copy ~copy_scope ~copy_from_level:S.generic_level
+              ~copy_below_level:(S.generic_level + 1) obj a
+          in
+          not (constrain copied hr))
+    in
+    S.undo_changes !log;
+    result
+
+  let rigidification_preserves_exact_constraint () =
+    let obj = C.Regionality in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let a : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain r a
+      &&
+      (S.update_level S.rigid_level obj a ~log:(Some log);
+       constrain r a)
+    in
+    S.undo_changes !log;
+    result
+
+  let exact_newvar_above_preserves_constraint () =
+    let obj = C.Regionality in
+    let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let u : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let regional = S.of_const obj C.Regionality.Regional in
+    let global = S.of_const obj C.Regionality.Global in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain x u
+      &&
+      (S.update_level S.rigid_level obj u ~log:(Some log);
+       constrain regional u
+       &&
+       let above, _ = S.newvar_above obj 0 x ~log:(Some log) in
+       not (constrain above global))
+    in
+    S.undo_changes !log;
+    result
+
+  let exact_no_constant_zap_is_rejected () =
+    let obj = C.Regionality in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let a : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain r a && constrain a r
+      &&
+      match S.zap_to_floor_detailed obj a ~log:(Some log) with
+      | Error S.No_constant -> true
+      | Error S.Zap_resource_limit | Ok _ -> false
+    in
+    S.undo_changes !log;
+    result
+
+  let exact_resource_limit_is_separate () =
+    let obj = C.Regionality in
+    let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let y : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let rec add_above count (mode : (_, allowed * allowed) S.mode) =
+      if count = 0
+      then mode
+      else
+        let above : (_, allowed * allowed) S.mode =
+          fst (S.newvar_above obj 0 mode ~log:(Some log))
+        in
+        add_above (count - 1) above
+    in
+    let result =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj x r ~log:(Some log))
+      && (S.update_level S.rigid_level obj r ~log:(Some log);
+          Result.is_ok
+            (S.submode Hint_for_solver.Pinpoint.unknown obj y r ~log:(Some log)))
+      &&
+      let last = add_above 7 y in
+      match
+        Solver_mdd.For_testing.with_node_limit 2 (fun () ->
+            S.submode_detailed Hint_for_solver.Pinpoint.unknown obj last
+              (S.of_const obj C.Regionality.Global)
+              ~log:(Some log))
+      with
+      | Error S.Resource_limit -> true
+      | Error (S.Inequality _ | S.Inconsistent_relation) | Ok () -> false
+    in
+    S.undo_changes !log;
+    result
+
+  let exact_first_rigid_limit_is_separate () =
+    Solver_mdd.For_testing.with_node_limit 2 (fun () ->
+        let obj = C.Regionality in
+        let vars : (_, allowed * allowed) S.mode list =
+          List.init 9 (fun _ -> S.newvar obj S.generic_level)
+        in
+        let log = ref S.empty_changes in
+        let constrain left right =
+          Result.is_ok
+            (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+               ~log:(Some log))
+        in
+        let rec link = function
+          | left :: (right :: _ as rest) -> constrain left right && link rest
+          | _ -> true
+        in
+        let result =
+          link vars
+          &&
+          let first = List.hd vars in
+          S.update_level S.rigid_level obj first ~log:(Some log);
+          match
+            S.submode_detailed Hint_for_solver.Pinpoint.unknown obj first
+              (S.of_const obj C.Regionality.Regional)
+              ~log:(Some log)
+          with
+          | Error S.Resource_limit -> true
+          | Error (S.Inequality _ | S.Inconsistent_relation) | Ok () -> false
+        in
+        S.undo_changes !log;
+        result)
+
+  let exact_inequality_failure_is_separate () =
+    let obj = C.Regionality in
+    match
+      S.submode_detailed Hint_for_solver.Pinpoint.unknown obj
+        (S.of_const obj C.Regionality.Regional)
+        (S.of_const obj C.Regionality.Global)
+        ~log:None
+    with
+    | Error (S.Inequality _) -> true
+    | Error (S.Inconsistent_relation | S.Resource_limit) | Ok () -> false
+
+  let exact_failures_have_diagnostics () =
+    let registered exn =
+      match Location.error_of_exn exn with
+      | Some (`Ok _) -> true
+      | Some `Already_displayed | None -> false
+    in
+    registered S.Exact_zap_impossible
+    && registered S.Exact_resource_limit
+    && registered S.Exact_inconsistent_state
+
+  let exact_gencopy_preserves_constraint () =
+    let obj = C.Regionality in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let a : (_, allowed * allowed) S.mode = S.newvar obj 1 in
+    let regional = S.of_const obj C.Regionality.Regional in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain regional a && constrain r a
+      &&
+      (S.generalize_structure ~current_level:0 obj a ~log:(Some log);
+       S.with_copy_scope (fun copy_scope ->
+           let copy =
+             S.copy ~copy_scope ~copy_from_level:S.generic_level
+               ~copy_below_level:(S.generic_level + 1) ~copy_to_level:0 obj a
+           in
+           not (constrain copy regional)))
+    in
+    S.undo_changes !log;
+    result
+
+  let nested_scope_order_distinguished () =
+    let obj = C.Regionality in
+    let check existential_order universal_order =
+      let a : (_, allowed * allowed) S.mode =
+        S.newvar_quantified obj ~level:S.generic_level
+          (S.Existential existential_order)
+      in
+      let s : (_, allowed * allowed) S.mode =
+        S.newvar_quantified obj ~level:S.rigid_level
+          (S.Universal universal_order)
+      in
+      let log = ref S.empty_changes in
+      let constrain left right =
+        Result.is_ok
+          (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+             ~log:(Some log))
+      in
+      let result = constrain a s && constrain s a in
+      S.undo_changes !log;
+      result
+    in
+    check 1 0 && not (check 0 1)
+
+  let nested_scope_pairs_match_oracle () =
+    let obj = C.Regionality in
+    let elements = C.elements obj in
+    let regional = C.Regionality.Regional in
+    let predicates =
+      [0, 1; 1, 0; 1, 2; 2, 1; 0, 2; 2, 0; 3, 1; 1, 3; 3, 2; 2, 3]
+    in
+    let prefixes =
+      [ [0, true; 1, false; 2, true];
+        [1, false; 0, true; 2, true];
+        [0, true; 2, true; 1, false] ]
+    in
+    let mismatches = ref 0 in
+    List.iter
+      (fun prefix ->
+        List.iter
+          (fun first ->
+            List.iter
+              (fun second ->
+                let tags =
+                  List.mapi
+                    (fun order (index, universal) ->
+                      ( index,
+                        if universal
+                        then S.Universal order
+                        else S.Existential order ))
+                    prefix
+                in
+                let modes : (_, allowed * allowed) S.mode array =
+                  Array.init 3 (fun index ->
+                      let quantifier = List.assoc index tags in
+                      let level =
+                        match quantifier with
+                        | S.Universal _ -> S.rigid_level
+                        | S.Existential _ -> S.generic_level
+                        | S.Outer -> assert false
+                      in
+                      S.newvar_quantified obj ~level quantifier)
+                in
+                let constant = S.of_const obj regional in
+                let mode index =
+                  if index = 3 then constant else modes.(index)
+                in
+                let constrain (left, right) log =
+                  Result.is_ok
+                    (S.submode Hint_for_solver.Pinpoint.unknown obj (mode left)
+                       (mode right) ~log:(Some log))
+                in
+                let log = ref S.empty_changes in
+                let actual = constrain first log && constrain second log in
+                S.undo_changes !log;
+                let values = Array.make 3 regional in
+                let value index =
+                  if index = 3 then regional else values.(index)
+                in
+                let holds (left, right) = C.le obj (value left) (value right) in
+                let rec evaluate = function
+                  | [] -> holds first && holds second
+                  | (index, universal) :: rest ->
+                    let check candidate =
+                      values.(index) <- candidate;
+                      evaluate rest
+                    in
+                    if universal
+                    then List.for_all check elements
+                    else List.exists check elements
+                in
+                if actual <> evaluate prefix then incr mismatches)
+              predicates)
+          predicates)
+      prefixes;
+    !mismatches
+
+  let scoped_conditional_residual_matches_oracle () =
+    let obj = C.Regionality in
+    let mismatches = ref 0 in
+    List.iter
+      (fun x_value ->
+        List.iter
+          (fun y_value ->
+            let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+            let y : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+            let log = ref S.empty_changes in
+            let constrain left right =
+              Result.is_ok
+                (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+                   ~log:(Some log))
+            in
+            let scoped =
+              S.with_subsumption_scope ~commit:Fun.id
+                (fun () ->
+                  let r : (_, allowed * allowed) S.mode =
+                    S.newvar obj S.generic_level
+                  in
+                  let a : (_, allowed * allowed) S.mode =
+                    S.newvar obj S.generic_level
+                  in
+                  constrain x r
+                  &&
+                  (S.update_level S.rigid_level obj r ~log:(Some log);
+                   constrain a r && constrain y a))
+                ~log:(Some log)
+            in
+            let exact mode value =
+              let value = S.of_const obj value in
+              constrain value mode && constrain mode value
+            in
+            let actual = scoped && exact x x_value && exact y y_value in
+            if actual <> C.le obj y_value x_value then incr mismatches;
+            S.undo_changes !log)
+          (C.elements obj))
+      (C.elements obj);
+    !mismatches
+
+  let copied_hidden_witnesses_are_fresh () =
+    let obj = C.Regionality in
+    let a : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let hidden : (_, allowed * allowed) S.mode =
+      S.newvar obj (S.generic_level + 1)
+    in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain a hidden && constrain hidden a
+      &&
+      (S.generalize ~current_level:0 obj a ~log:(Some log);
+       S.with_subsumption_scope ~commit:Fun.id
+         (fun () ->
+           S.with_copy_scope (fun copy_scope ->
+               let copied =
+                 S.copy ~copy_scope ~copy_from_level:S.generic_level
+                   ~copy_below_level:(S.generic_level + 1)
+                   ~copy_to_level:S.rigid_level obj a
+               in
+               constrain copied (S.of_const obj C.Regionality.Local)
+               && not (constrain copied (S.of_const obj C.Regionality.Regional))))
+         ~log:(Some log))
+    in
+    S.undo_changes !log;
+    result
+
+  let correlated_envelopes_preserve_bounds () =
+    let obj = C.Regionality in
+    let check dual =
+      let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+      let y : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+      let r : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+      let log = ref S.empty_changes in
+      let constrain left right =
+        Result.is_ok
+          (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+             ~log:(Some log))
+      in
+      let regional = S.of_const obj C.Regionality.Regional in
+      let guard =
+        if dual
+        then constrain r x && constrain r y
+        else constrain x r && constrain y r
+      in
+      S.update_level S.rigid_level obj r ~log:(Some log);
+      let asserted =
+        if dual then constrain r regional else constrain regional r
+      in
+      let result =
+        guard && asserted
+        &&
+        if dual
+        then S.get_ceil obj (S.meet obj [x; y]) = C.Regionality.Regional
+        else S.get_floor obj (S.join obj [x; y]) = C.Regionality.Regional
+      in
+      S.undo_changes !log;
+      result
+    in
+    check false && check true
+
+  let nested_scopes_preserve_dependencies () =
+    let obj = C.Regionality in
+    let check universal_first =
+      let log = ref S.empty_changes in
+      let constrain left right =
+        Result.is_ok
+          (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+             ~log:(Some log))
+      in
+      let result =
+        S.with_subsumption_scope ~commit:Fun.id
+          (fun () ->
+            let outer : (_, allowed * allowed) S.mode =
+              S.newvar obj
+                (if universal_first then S.rigid_level else S.generic_level)
+            in
+            S.with_subsumption_scope ~commit:Fun.id
+              (fun () ->
+                let inner : (_, allowed * allowed) S.mode =
+                  S.newvar obj
+                    (if universal_first then S.generic_level else S.rigid_level)
+                in
+                constrain outer inner && constrain inner outer)
+              ~log:(Some log))
+          ~log:(Some log)
+      in
+      S.undo_changes !log;
+      result
+    in
+    check true && not (check false)
+
+  let exact_distinguishes_reused_persistent_ids () =
+    let obj = C.Regionality in
+    let copy () =
+      let original : (_, allowed * allowed) S.mode =
+        S.newvar obj S.generic_level
+      in
+      S.reset_persistent_id ();
+      S.with_copy_scope (fun copy_scope ->
+          S.copy ~copy_scope ~copy_from_level:S.generic_level
+            ~copy_below_level:(S.generic_level + 1) ~cause:`Save obj original)
+    in
+    let left = copy () in
+    let right = copy () in
+    let rigid : (_, allowed * allowed) S.mode = S.newvar obj S.rigid_level in
+    let global = S.of_const obj C.Regionality.Global in
+    let local = S.of_const obj C.Regionality.Local in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain rigid left && constrain local left && constrain left local
+      && constrain global right && constrain right global
+      && not (constrain left right)
+    in
+    S.undo_changes !log;
+    result
+
+  let rigid_correlated_regionality_checks () =
+    let obj = C.Regionality in
+    let r : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let u : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let constrain a b =
+      S.submode Hint_for_solver.Pinpoint.unknown obj a b ~log:(Some log)
+    in
+    assert (Result.is_ok (constrain r u));
+    S.update_level S.rigid_level obj r ~log:(Some log);
+    S.update_level S.rigid_level obj u ~log:(Some log);
+    let hu = S.apply obj regionality_to_global (S.disallow_left u) in
+    let valid_before = Result.is_ok (constrain r u) in
+    let invalid = Result.is_ok (constrain r hu) in
+    let valid_after = Result.is_ok (constrain r u) in
+    let invalid_again = Result.is_ok (constrain r hu) in
+    S.undo_changes !log;
+    valid_before && (not invalid) && valid_after && not invalid_again
+
+  let loose_floor_of_join_is_lower () =
+    let obj = C.Regionality in
+    let v : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let joined = S.join obj [S.of_const obj C.Regionality.Regional; v] in
+    C.le obj (S.get_loose_floor obj joined) (S.get_floor obj joined)
+
+  let rigid_regionality_matches_oracle () =
+    let obj = C.Regionality in
+    let values = C.elements obj in
+    let le = C.le obj in
+    let h = C.apply obj regionality_to_global in
+    let relations = [0; 1; 2; 3] in
+    List.for_all
+      (fun r_lower ->
+        List.for_all
+          (fun r_upper ->
+            List.for_all
+              (fun u_lower ->
+                List.for_all
+                  (fun u_upper ->
+                    List.for_all
+                      (fun relation ->
+                        let models r u =
+                          le r_lower r && le r r_upper && le u_lower u
+                          && le u u_upper
+                          && (relation <> 1 || le r u)
+                          && (relation <> 2 || le u r)
+                          && (relation <> 3 || (le r u && le u r))
+                        in
+                        let expected query =
+                          List.for_all
+                            (fun rv ->
+                              List.for_all
+                                (fun uv ->
+                                  (not (models rv uv))
+                                  ||
+                                  match query with
+                                  | 0 -> le rv (h uv)
+                                  | 1 -> le uv (h rv)
+                                  | 2 -> le rv uv
+                                  | _ -> le uv rv)
+                                values)
+                            values
+                        in
+                        let r : (_, allowed * allowed) S.mode =
+                          S.newvar obj S.generic_level
+                        in
+                        let u : (_, allowed * allowed) S.mode =
+                          S.newvar obj S.generic_level
+                        in
+                        let base_log = ref S.empty_changes in
+                        let constrain log a b =
+                          Result.is_ok
+                            (S.submode Hint_for_solver.Pinpoint.unknown obj a b
+                               ~log:(Some log))
+                        in
+                        let constant x = S.of_const obj x in
+                        let base_ok =
+                          constrain base_log (constant r_lower) r
+                          && constrain base_log r (constant r_upper)
+                          && constrain base_log (constant u_lower) u
+                          && constrain base_log u (constant u_upper)
+                          && (relation <> 1 || constrain base_log r u)
+                          && (relation <> 2 || constrain base_log u r)
+                          && (relation <> 3
+                             || constrain base_log r u && constrain base_log u r
+                             )
+                        in
+                        let feasible =
+                          List.exists
+                            (fun rv ->
+                              List.exists (fun uv -> models rv uv) values)
+                            values
+                        in
+                        let result =
+                          if not base_ok
+                          then not feasible
+                          else if not feasible
+                          then false
+                          else begin
+                            S.update_level S.rigid_level obj r
+                              ~log:(Some base_log);
+                            S.update_level S.rigid_level obj u
+                              ~log:(Some base_log);
+                            let hu =
+                              S.apply obj regionality_to_global
+                                (S.disallow_left u)
+                            in
+                            let hr =
+                              S.apply obj regionality_to_global
+                                (S.disallow_left r)
+                            in
+                            let check query left right =
+                              let query_log = ref S.empty_changes in
+                              let actual = constrain query_log left right in
+                              S.undo_changes !query_log;
+                              actual = expected query
+                            in
+                            check 0 r hu && check 1 u hr && check 2 r u
+                            && check 3 u r
+                          end
+                        in
+                        S.undo_changes !base_log;
+                        result)
+                      relations)
+                  values)
+              values)
+          values)
+      values
+
+  let rigid_right_preserves_outer_dependency () =
+    let obj = C.Regionality in
+    let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let v : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let u : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let constrain a b =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj a b ~log:(Some log))
+    in
+    assert (constrain x u);
+    S.update_level S.rigid_level obj u ~log:(Some log);
+    let result =
+      constrain v u
+      && constrain (S.of_const obj C.Regionality.Regional) x
+      && constrain (S.of_const obj C.Regionality.Regional) v
+    in
+    S.undo_changes !log;
+    result
+
+  let rigid_left_preserves_outer_dependency () =
+    let obj = C.Regionality in
+    let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let v : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let u : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let constrain a b =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj a b ~log:(Some log))
+    in
+    assert (constrain u x);
+    S.update_level S.rigid_level obj u ~log:(Some log);
+    let result =
+      constrain u v
+      && constrain x (S.of_const obj C.Regionality.Regional)
+      && constrain v (S.of_const obj C.Regionality.Regional)
+      && constrain (S.of_const obj C.Regionality.Regional) x
+      && constrain (S.of_const obj C.Regionality.Regional) v
+    in
+    S.undo_changes !log;
+    result
+
+  let exception_rolls_back_mode_changes () =
+    let obj = C.Regionality in
+    let lower = S.of_const obj C.Regionality.Regional in
+    let check run =
+      let v : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+      let raised =
+        try
+          ignore
+            (run (fun ~log ->
+                 match
+                   S.submode Hint_for_solver.Pinpoint.unknown obj lower v ~log
+                 with
+                 | Error _ -> assert false
+                 | Ok () -> raise Exit));
+          false
+        with Exit -> true
+      in
+      raised && C.le obj (S.get_floor obj v) (C.min obj)
+    in
+    check try_with_log && check with_log
+
+  let rigid_constant_right_preserves_outer_dependency () =
+    let obj = C.Regionality in
+    let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let u : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let constrain a b =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj a b ~log:(Some log))
+    in
+    assert (constrain x u);
+    S.update_level S.rigid_level obj u ~log:(Some log);
+    let regional = S.of_const obj C.Regionality.Regional in
+    let result = constrain regional u && constrain regional x in
+    S.undo_changes !log;
+    result
+
+  let rigid_conditional_zap_preserves_residual () =
+    let obj = C.Regionality in
+    let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let u : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let regional = S.of_const obj C.Regionality.Regional in
+    let log = ref S.empty_changes in
+    let constrain left right =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj left right
+           ~log:(Some log))
+    in
+    let result =
+      constrain x u
+      &&
+      (S.update_level S.rigid_level obj u ~log:(Some log);
+       constrain regional u
+       && C.le obj C.Regionality.Regional (S.get_floor obj x)
+       && C.le obj C.Regionality.Regional (S.zap_to_floor obj x ~log:(Some log)))
+    in
+    S.undo_changes !log;
+    result
+
+  let rigid_constant_left_preserves_outer_dependency () =
+    let obj = C.Regionality in
+    let x : (_, allowed * allowed) S.mode = S.newvar obj 0 in
+    let u : (_, allowed * allowed) S.mode = S.newvar obj S.generic_level in
+    let log = ref S.empty_changes in
+    let constrain a b =
+      Result.is_ok
+        (S.submode Hint_for_solver.Pinpoint.unknown obj a b ~log:(Some log))
+    in
+    assert (constrain u x);
+    S.update_level S.rigid_level obj u ~log:(Some log);
+    let regional = S.of_const obj C.Regionality.Regional in
+    let result = constrain u regional && constrain x regional in
+    S.undo_changes !log;
+    result
 end

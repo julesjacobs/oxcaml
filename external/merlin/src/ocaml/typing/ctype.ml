@@ -6926,6 +6926,8 @@ let moregeneral ~self_check env inst_nongen
  *)
   with_level ~level:(subject_level - 1) begin fun () ->
     match with_local_level_generalize begin fun () ->
+      Mode.with_subsumption_scope
+        ~commit:(fun (_, result) -> Result.is_ok result) begin fun () ->
       assert (!current_level = subject_level);
       (*
         Generic variables are first duplicated with [instance].  So,
@@ -6950,6 +6952,7 @@ let moregeneral ~self_check env inst_nongen
         end;
         subj_inst, Ok (subj_inst_sorts, pat_inst_sorts)
       with Moregen_trace trace -> subj_inst, Error trace
+      end
     end
       ~before_generalize:(fun (subj_inst, _) ->
         ignore
@@ -6981,11 +6984,13 @@ let moregeneral ~self_check env inst_nongen
   end
 
 let is_moregeneral env inst_nongen pat_sch subj_sch =
-  match
-    moregeneral ~self_check:false env inst_nongen [] [] pat_sch subj_sch
-  with
-  | _ -> true
-  | exception Moregen _ -> false
+  let snapshot = Btype.snapshot () in
+  Fun.protect ~finally:(fun () -> Btype.backtrack snapshot) (fun () ->
+    match
+      moregeneral ~self_check:false env inst_nongen [] [] pat_sch subj_sch
+    with
+    | _ -> true
+    | exception Moregen _ -> false)
 
 let all_distinct_vars env vars =
   let tys = ref TypeSet.empty in

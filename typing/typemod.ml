@@ -4765,8 +4765,8 @@ let type_implementation target modulename initial_env ast =
               Includecore.Specific ((mode, None), mode)
             in
             Profile.record_call "check_sig" (fun () ->
-              Includemod.compunit initial_env ~mark:true sourcefile ~modes
-                sg "(inferred signature)" simple_sg shape)
+              Includemod.compunit ~self_check:true initial_env ~mark:true
+                sourcefile ~modes sg "(inferred signature)" simple_sg shape)
           in
           check_nongen_signature finalenv simple_sg;
           let zap_modality =
