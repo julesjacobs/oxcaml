@@ -153,3 +153,10 @@ The implementation adds no trusted credit or sorting primitive. See
 `merge_sort_rejected.ml` in the Vox fixtures for borrowed observations,
 splitting and merging, overflow and reuse
 rejections, and integer and ranked-record clients.
+
+## Flat hash table
+
+`Vox_verified_flat_hashtbl.Make` exposes finite-map equations, abstract snapshots
+and normal-return ownership contracts. Start with the
+[ordered review surface](vox_flat_hashtbl_review.md); the public-only client
+check is `verification/clients/check_flat_hashtbl_public.sh`.

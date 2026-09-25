@@ -17,8 +17,6 @@ module Key = struct
 end
 
 module V = Vox_verified_flat_hashtbl.Make (Key)
-module I = V.Spec
-module T = Vox_table_storage
 module P = Ghost_pref
 module H = P.Heap
 module Standard = Hashtbl.Make (Key)
@@ -47,13 +45,12 @@ let report name payload n operation count (bytes, time) =
 let rec fill : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) ->
-    (view : {v : 'a I.view | I.valid v}) @ immutable ->
-    (token : {t : (Key.t, 'a) Vox_table_model.state P.token | H.at (P.own t)
-      (T.location table) === Some
-      view.model})
+    (view : 'a V.view) @ immutable ->
+    (token : {t : 'a V.state P.token | H.at (P.own t)
+      (V.location table) === Some
+      (V.model view)})
       @ unique read_write ghost ->
-    {r : 'a V.result | I.valid r.#view &&
-      H.at (P.own r.#state) (T.location table) === Some r.#view.model} @
+    {r : 'a V.result | H.at (P.own r.#state) (V.location table) === Some (V.model r.#view)} @
         unique =
   fun table values index view token ->
     if index >= Iarray.length values then #{V.view; state = token} else begin
@@ -65,13 +62,12 @@ let rec fill : ('a : immutable_data).
 let rec churn : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) -> (offset : int) ->
-    (view : {v : 'a I.view | I.valid v}) @ immutable ->
-    (token : {t : (Key.t, 'a) Vox_table_model.state P.token | H.at (P.own t)
-      (T.location table) === Some
-      view.model})
+    (view : 'a V.view) @ immutable ->
+    (token : {t : 'a V.state P.token | H.at (P.own t)
+      (V.location table) === Some
+      (V.model view)})
       @ unique read_write ghost ->
-    {r : 'a V.result | I.valid r.#view &&
-      H.at (P.own r.#state) (T.location table) === Some r.#view.model} @
+    {r : 'a V.result | H.at (P.own r.#state) (V.location table) === Some (V.model r.#view)} @
         unique =
   fun table values index offset view token ->
     if index >= Iarray.length values then #{V.view; state = token} else begin
@@ -85,13 +81,12 @@ let rec churn : ('a : immutable_data).
 let rec churn_rounds : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) -> (offset : int) ->
-    (view : {v : 'a I.view | I.valid v}) @ immutable ->
-    (token : {t : (Key.t, 'a) Vox_table_model.state P.token | H.at (P.own t)
-      (T.location table) === Some
-      view.model})
+    (view : 'a V.view) @ immutable ->
+    (token : {t : 'a V.state P.token | H.at (P.own t)
+      (V.location table) === Some
+      (V.model view)})
       @ unique read_write ghost ->
-    {r : 'a V.result | I.valid r.#view &&
-      H.at (P.own r.#state) (T.location table) === Some r.#view.model} @
+    {r : 'a V.result | H.at (P.own r.#state) (V.location table) === Some (V.model r.#view)} @
         unique =
   fun table values index offset view token ->
     if index = 0 then #{V.view; state = token} else
@@ -102,13 +97,12 @@ let rec churn_rounds : ('a : immutable_data).
 let rec replace_rounds : ('a : immutable_data).
     (table : 'a V.t) @ immutable -> (values : 'a iarray) @ immutable -> (index
       : int) ->
-    (view : {v : 'a I.view | I.valid v}) @ immutable ->
-    (token : {t : (Key.t, 'a) Vox_table_model.state P.token | H.at (P.own t)
-      (T.location table) === Some
-      view.model})
+    (view : 'a V.view) @ immutable ->
+    (token : {t : 'a V.state P.token | H.at (P.own t)
+      (V.location table) === Some
+      (V.model view)})
       @ unique read_write ghost ->
-    {r : 'a V.result | I.valid r.#view &&
-      H.at (P.own r.#state) (T.location table) === Some r.#view.model} @
+    {r : 'a V.result | H.at (P.own r.#state) (V.location table) === Some (V.model r.#view)} @
         unique =
   fun table values index view token ->
     if index = 0 then #{V.view; state = token} else
