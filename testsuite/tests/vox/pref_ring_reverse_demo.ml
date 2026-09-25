@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_ring.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_reverse_model.ml pref_ring_reverse_setup.ml pref_ring_reverse.ml pref_ring_reverse_demo.ml";
+ all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_reverse_model.ml pref_ring_reverse_setup.ml pref_ring_reverse.mli pref_ring_reverse.ml pref_ring_reverse_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -112,7 +112,10 @@ let run_reverse_demo () =
       && not (b.prev === c.next)
       && not (b.next === c.prev)
       && not (b.next === c.next)} = refine_ t in
-  reverse_demo s a b c t;
+  let refine_ result = reverse_demo s a b c t in
+  ghost_ (let u = () in
+    let refine_ proof = (refine_ u : {u : unit | ring (Pref.own result) s [c; b; a] &&
+      path (Pref.own result) false [c; b; a] s && path (Pref.own result) true [a; b; c] s}) in ());
 
   let actual : {v : int | v = 42} =
     let borrowed = borrow_ frame_token in

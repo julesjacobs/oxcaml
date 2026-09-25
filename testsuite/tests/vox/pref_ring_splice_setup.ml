@@ -1,4 +1,5 @@
 open Pref_ring
+open Pref_ring_proofs
 
 let build_source : (s : node) @ immutable -> (d : node) @ immutable -> (a :
     node) @ immutable -> (b : node) @ immutable -> (t : {t : Pref.token | true

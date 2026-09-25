@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_ring.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_splice_model.ml pref_ring_splice_setup.ml pref_ring_splice.ml pref_ring_splice_demo.ml";
+ all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_splice_model.ml pref_ring_splice_setup.ml pref_ring_splice.mli pref_ring_splice.ml pref_ring_splice_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -112,7 +112,10 @@ let run_splice_demo () =
       && not (a.prev === b.next)
       && not (a.next === b.prev)
       && not (a.next === b.next)} = refine_ t in
-  splice_demo s d a b t;
+  let refine_ result = splice_demo s d a b t in
+  ghost_ (let u = () in
+    let refine_ proof = (refine_ u : {u : unit | ring (Pref.own result) s [] && ring (Pref.own result) d [a; b] &&
+      path (Pref.own result) false [a; b] d && path (Pref.own result) true [b; a] d}) in ());
 
   let actual : {v : int | v = 42} =
     let borrowed = borrow_ frame_token in

@@ -1,4 +1,5 @@
 open Pref_ring
+open Pref_ring_proofs
 
 let[@def] (after @ total) (h : Pref.heap @ immutable)
     (s : node @ immutable) (d : node @ immutable)
