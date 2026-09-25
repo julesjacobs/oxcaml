@@ -1,0 +1,4 @@
+File "sat_cdcl_array_bound_rejected.ml", line 14, characters 46-52:
+14 |   {index : int | 0 <= index && index < length values} ->
+                                                   ^^^^^^
+Error: This value is immutable but is expected to be read_write.
