@@ -11,17 +11,16 @@ open Pref_ring
 open Pref_ring_splice
 
 let run_splice_demo () =
-  let refine_ frame = Pref_ring_alloc.make_frame () in
+  let frame = Pref_ring_alloc.make_frame () in
   let unrelated = frame.value in
   let frame_token = frame.state in
   let u = () in
   let frame_contents : {u : unit | H.mem (Pref.own frame_token) unrelated
-    && H.at (Pref.own frame_token) unrelated === Some 42} = refine_ u in
-  let refine_ frame_contents = frame_contents in
-  let refine_ t = Pref.empty () in
+    && H.at (Pref.own frame_token) unrelated === Some 42} = u in
+  let t = Pref.empty () in
   let flag = true in
   let data = 0 in
-  let refine_ r = make_node flag data t in
+  let r = make_node flag data t in
   let s = r.node in
   let t = r.state in
   let flag = true in
@@ -31,8 +30,8 @@ let run_splice_demo () =
     && H.mem (Pref.own t) s.prev
     && H.mem (Pref.own t) s.next
     && H.mem (Pref.own t) s.prev
-    && H.mem (Pref.own t) s.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s s s flag data t in
+    && H.mem (Pref.own t) s.next} = t in
+  let r = Pref_ring_alloc.extend s s s flag data t in
   let d = r.node in
   let t = r.state in
   let flag = false in
@@ -42,8 +41,8 @@ let run_splice_demo () =
     && H.mem (Pref.own t) d.prev
     && H.mem (Pref.own t) d.next
     && H.mem (Pref.own t) s.prev
-    && H.mem (Pref.own t) s.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s d s flag data t in
+    && H.mem (Pref.own t) s.next} = t in
+  let r = Pref_ring_alloc.extend s d s flag data t in
   let a = r.node in
   let t = r.state in
   let flag = false in
@@ -53,8 +52,8 @@ let run_splice_demo () =
     && H.mem (Pref.own t) d.prev
     && H.mem (Pref.own t) d.next
     && H.mem (Pref.own t) a.prev
-    && H.mem (Pref.own t) a.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s d a flag data t in
+    && H.mem (Pref.own t) a.next} = t in
+  let r = Pref_ring_alloc.extend s d a flag data t in
   let b = r.node in
   let t = r.state in
   let t : {t : Pref.token | true
@@ -111,18 +110,16 @@ let run_splice_demo () =
       && not (a.prev === b.prev)
       && not (a.prev === b.next)
       && not (a.next === b.prev)
-      && not (a.next === b.next)} = refine_ t in
-  let refine_ result = splice_demo s d a b t in
+      && not (a.next === b.next)} = t in
+  let result = splice_demo s d a b t in
   ghost_ (let u = () in
-    let refine_ proof = (refine_ u : {u : unit | ring (Pref.own result) s [] && ring (Pref.own result) d [a; b] &&
+    let proof = (u : {u : unit | ring (Pref.own result) s [] && ring (Pref.own result) d [a; b] &&
       path (Pref.own result) false [a; b] d && path (Pref.own result) true [b; a] d}) in ());
 
   let actual : {v : int | v = 42} =
     let borrowed = borrow_ frame_token in
-    let borrowed : {t : Pref.token | H.mem (Pref.own t) unrelated} = refine_
-        borrowed in
-    let refine_ actual = Pref.read unrelated borrowed in refine_ actual in
-  let refine_ actual = actual in
+    let borrowed : {t : Pref.token | H.mem (Pref.own t) unrelated} = borrowed in
+    let actual = Pref.read unrelated borrowed in actual in
   assert (actual = 42)
 
 let () = run_splice_demo ()

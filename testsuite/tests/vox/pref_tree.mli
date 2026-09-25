@@ -82,8 +82,7 @@ val branch : (value : int) ->
       && Pref.own b.state === heap b.model}) @ unique ->
   (r : {b : built | b.pointer === root b.model && valid b.model
       && Pref.own b.state === heap b.model}) @ unique ->
-  {b : built | let refine_ l = l in let refine_ r = r in
-      b.pointer === root b.model && valid b.model
+  {b : built | b.pointer === root b.model && valid b.model
       && Pref.own b.state === heap b.model
       && (match b.model with Empty -> false | Branch (n, lm, rm) ->
         n.value = value && lm === l.model && rm === r.model)} @ unique

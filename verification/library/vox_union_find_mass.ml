@@ -22,7 +22,7 @@ let rec (mass_bounds @ total) : (cap : Bigint.t) -> (h : P.heap) @ immutable ->
   (match paths with
   | [] -> ()
   | p :: rest -> R.bounds cap h p; mass_bounds cap h rest x);
-  let u = () in refine_ u)
+  ())
 
 let rec (component_bounds @ total) : (h : P.heap) @ immutable ->
     (paths : M.path list) @ immutable -> (x : M.elem) @ immutable ->
@@ -31,7 +31,7 @@ let rec (component_bounds @ total) : (h : P.heap) @ immutable ->
        else true)} @ ghost = fun h paths x -> ghost_ (
   components_def h paths; F.member_def x paths; F.size_def paths;
   (match paths with [] -> () | _ :: rest -> component_bounds h rest x);
-  let u = () in refine_ u)
+  ())
 
 let rec (compressed_root @ total) : (h : P.heap) @ immutable ->
     (p : M.path) @ immutable -> (x : M.elem) @ immutable ->
@@ -43,7 +43,7 @@ let rec (compressed_root @ total) : (h : P.heap) @ immutable ->
   let after = M.compressed h p in
   M.is_root_def after x;
   match p with
-  | M.Stop _ -> let u = () in refine_ u
+  | M.Stop _ -> ()
   | M.Step (y, rest) ->
       compressed_root h rest x;
       let middle = M.compressed h rest in
@@ -51,8 +51,8 @@ let rec (compressed_root @ total) : (h : P.heap) @ immutable ->
       M.is_root_def after x;
       let _ = H.mem (H.put middle y (M.Link (M.rank h y, M.root rest))) x in
       let _ = H.at (H.put middle y (M.Link (M.rank h y, M.root rest))) x in
-      if x === y then (let u = () in refine_ u)
-      else (let u = () in refine_ u))
+      if x === y then (())
+      else (()))
 
 let rec (compression @ total) : (h : P.heap) @ immutable ->
     (p : M.path) @ immutable -> (paths : M.path list) @ immutable ->
@@ -64,7 +64,7 @@ let rec (compression @ total) : (h : P.heap) @ immutable ->
   mass_def h paths; components_def h paths;
   let after = M.compressed h p in
   match paths with
-  | [] -> mass_def after []; components_def after []; let u = () in refine_ u
+  | [] -> mass_def after []; components_def after []; ()
   | q :: rest ->
       M.refresh_valid h p q;
       M.compressed_rank h p (M.head q); compressed_root h p (M.head q);
@@ -72,7 +72,7 @@ let rec (compression @ total) : (h : P.heap) @ immutable ->
       compression h p rest;
       mass_def after (M.refresh p q :: F.refresh p rest);
       components_def after (M.refresh p q :: F.refresh p rest);
-      let u = () in refine_ u)
+      ())
 
 let (linked_weight @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -86,18 +86,18 @@ let (linked_weight @ total) : (h : P.heap) @ immutable ->
   M.rank_def h x; M.rank_def h y; M.rank_def h q;
   M.rank_def (M.linked h x y) q;
   R.weight_def h q; R.weight_def (M.linked h x y) q;
-  if x === y then let u = () in refine_ u
+  if x === y then ()
   else if M.rank h x < M.rank h y then (
     M.rank_def (H.put h x (M.Link (M.rank h x, y))) q;
-    let u = () in refine_ u)
+    ())
   else if M.rank h y < M.rank h x then (
     M.rank_def (H.put h y (M.Link (M.rank h y, x))) q;
-    let u = () in refine_ u)
+    ())
   else (
     let middle = H.put h y (M.Link (M.rank h y, x)) in
     M.rank_def middle q;
     M.rank_def (H.put middle x (M.Root (M.rank h x + 1))) q;
-    let u = () in refine_ u))
+    ()))
 
 let (linked_root @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -110,24 +110,24 @@ let (linked_root @ total) : (h : P.heap) @ immutable ->
   M.is_root_def h x; M.is_root_def h y; M.is_root_def h q;
   M.is_root_def (M.linked h x y) q;
   M.rank_def h x; M.rank_def h y;
-  if x === y then let u = () in refine_ u
+  if x === y then ()
   else if M.rank h x < M.rank h y then (
     let after = H.put h x (M.Link (M.rank h x, y)) in
     M.is_root_def after q;
     let _ = H.mem after q in let _ = H.at after q in
-    let u = () in refine_ u)
+    ())
   else if M.rank h y < M.rank h x then (
     let after = H.put h y (M.Link (M.rank h y, x)) in
     M.is_root_def after q;
     let _ = H.mem after q in let _ = H.at after q in
-    let u = () in refine_ u)
+    ())
   else (
     let middle = H.put h y (M.Link (M.rank h y, x)) in
     let after = H.put middle x (M.Root (M.rank h x + 1)) in
     M.is_root_def middle q; M.is_root_def after q;
     let _ = H.mem middle q in let _ = H.at middle q in
     let _ = H.mem after q in let _ = H.at after q in
-    let u = () in refine_ u))
+    ()))
 
 let rec (link_sums @ total) : (h : P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -149,14 +149,14 @@ let rec (link_sums @ total) : (h : P.heap) @ immutable ->
   mass_def h paths; components_def h paths;
   let after = M.linked h x y in
   match paths with
-  | [] -> mass_def after []; components_def after []; let u = () in refine_ u
+  | [] -> mass_def after []; components_def after []; ()
   | p :: rest ->
       M.joined_valid h x y p; link_sums h x y rest;
       linked_weight h x y (M.head p); linked_root h x y (M.head p);
       M.is_root_def h x; M.is_root_def h y;
       mass_def after (M.joined_path h x y p :: F.join h x y rest);
       components_def after (M.joined_path h x y p :: F.join h x y rest);
-      let u = () in refine_ u)
+      ())
 
 let rec (fresh_sums @ total) : (h : P.heap) @ immutable ->
     (paths : M.path list) @ immutable -> (x : M.elem) @ immutable ->
@@ -175,7 +175,7 @@ let rec (fresh_sums @ total) : (h : P.heap) @ immutable ->
       M.is_root_def h (M.head p); M.is_root_def after (M.head p);
       let _ = H.mem after (M.head p) in
       fresh_sums h rest x);
-  let u = () in refine_ u)
+  ())
 
 let (allocate_sums @ total) : (h : P.heap) @ immutable ->
     (paths : M.path list) @ immutable -> (x : M.elem) @ immutable ->
@@ -189,7 +189,7 @@ let (allocate_sums @ total) : (h : P.heap) @ immutable ->
   mass_def after (M.Stop x :: paths); components_def after (M.Stop x :: paths);
   M.head_def (M.Stop x); R.weight_def after x; M.rank_def after x;
   M.is_root_def after x; let _ = H.mem after x in
-  let u = () in refine_ u)
+  ())
 
 let rec (linked_mass_bounds @ total) : (cap : Bigint.t) ->
     (h : P.heap) @ immutable -> (x : M.elem) @ immutable ->
@@ -205,13 +205,13 @@ let rec (linked_mass_bounds @ total) : (cap : Bigint.t) ->
   F.join_def h x y paths; F.member_def q paths;
   let after = M.linked h x y in
   match paths with
-  | [] -> mass_def after []; let u = () in refine_ u
+  | [] -> mass_def after []; ()
   | p :: rest ->
       R.bounds cap h p; M.joined_valid h x y p;
       linked_weight h x y (M.head p);
       linked_mass_bounds cap h x y rest q;
       mass_def after (M.joined_path h x y p :: F.join h x y rest);
-      let u = () in refine_ u)
+      ())
 
 let (linked_capacity @ total) : (cap : Bigint.t) ->
     (h : P.heap) @ immutable -> (x : M.elem) @ immutable ->
@@ -230,7 +230,7 @@ let (linked_capacity @ total) : (cap : Bigint.t) ->
   F.join_member h x y paths winner;
   linked_root h x y winner;
   component_bounds (M.linked h x y) (F.join h x y paths) winner;
-  let u = () in refine_ u)
+  ())
 
 let rec (population_bounds @ total) : (cap : Bigint.t) ->
     (h : P.heap) @ immutable -> (paths : M.path list) @ immutable ->
@@ -242,4 +242,4 @@ let rec (population_bounds @ total) : (cap : Bigint.t) ->
   R.all_ordered_def cap h paths;
   (match paths with [] -> () | p :: rest ->
     R.bounds cap h p; population_bounds cap h rest);
-  let u = () in refine_ u)
+  ())

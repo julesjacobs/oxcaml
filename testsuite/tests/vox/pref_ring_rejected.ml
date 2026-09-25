@@ -31,20 +31,19 @@ module Remove_sentinel = struct
         && H.at (Pref.own t) s.next === Some (Some right)
         && H.at (Pref.own t) right.prev === Some (Some s)}) @ unique ->
       Pref.token @ unique = fun s left right t ->
-    let refine_ t = t in
     let t : {t : Pref.token | present (Pref.own t) left
       && present (Pref.own t) s && present (Pref.own t) right
       && not (s === s)
       && H.at (Pref.own t) left.next === Some (Some s)
       && H.at (Pref.own t) s.prev === Some (Some left)
       && H.at (Pref.own t) s.next === Some (Some right)
-      && H.at (Pref.own t) right.prev === Some (Some s)} = refine_ t in
-    let refine_ t = remove s left s right t in t
+      && H.at (Pref.own t) right.prev === Some (Some s)} = t in
+    let t = remove s left s right t in t
 end;;
 [%%expect{|
-Line 20, characters 59-68:
-20 |       && H.at (Pref.own t) right.prev === Some (Some s)} = refine_ t in
-                                                                ^^^^^^^^^
+Line 19, characters 59-60:
+19 |       && H.at (Pref.own t) right.prev === Some (Some s)} = t in
+                                                                ^
 Error: Refinement could not be proved (counterexample)
 |}, Principal{|
 Line 8, characters 29-38:
@@ -63,21 +62,24 @@ module Missing_backward_update = struct
   let bad (left : node @ immutable) (right : node @ immutable)
       (t : {t : Pref.token | H.mem (Pref.own t) left.next
         && H.mem (Pref.own t) right.prev} @ unique) :
-      {r : Pref.token | let refine_ t = t in
-        Pref.own r === connected (Pref.own t) left right} @ unique =
-    let refine_ t = t in
+      {r : Pref.token | Pref.own r === connected (Pref.own t) left right} @ unique =
     let before = ghost_ (Pref.own (borrow_ t)) in
-    let refine_ definition = ghost_ (connected_def before left right) in
+    let definition = ghost_ (connected_def before left right) in
     let p = left.next in
     let v = Some right in
-    let t : {t : Pref.token | H.mem (Pref.own t) p} = refine_ t in
-    let refine_ t = Pref.write p v t in
-    refine_ t
+    let t : {t : Pref.token | H.mem (Pref.own t) p} = t in
+    let t = Pref.write p v t in
+    t
 end;;
 [%%expect{|
-Line 14, characters 4-13:
-14 |     refine_ t
-         ^^^^^^^^^
+Line 7, characters 8-18:
+7 |     let definition = ghost_ (connected_def before left right) in
+            ^^^^^^^^^^
+Warning 26 [unused-var]: unused variable "definition".
+
+Line 12, characters 4-5:
+12 |     t
+         ^
 Error: Refinement could not be proved (counterexample)
 |}, Principal{|
 Line 3, characters 48-57:
@@ -95,19 +97,17 @@ Error: The field access "left.next" has type "Pref_ring.node option Pref.t"
 module No_reversal = struct
   let bad (ns : node list @ immutable)
       (t : {t : Pref.token | owns (Pref.own t) ns} @ unique) :
-      {r : Pref.token | let refine_ t = t in
-        Pref.own r === flipped_all (Pref.own t) ns} @ unique =
-    let refine_ t = t in
-    refine_ t
+      {r : Pref.token | Pref.own r === flipped_all (Pref.own t) ns} @ unique =
+    t
 end;;
 [%%expect{|
-Line 7, characters 4-13:
-7 |     refine_ t
-        ^^^^^^^^^
+Line 5, characters 4-5:
+5 |     t
+        ^
 Error: Refinement could not be proved (counterexample)
 |}, Principal{|
-Line 7, characters 4-13:
-7 |     refine_ t
-        ^^^^^^^^^
+Line 5, characters 4-5:
+5 |     t
+        ^
 Error: Refinement could not be proved (counterexample)
 |}]

@@ -16,7 +16,7 @@ let (bound @ total) : (alpha : Bigint.t) -> (allocations : Bigint.t) ->
     fun alpha allocations finds unions ->
   budget_def alpha allocations finds unions;
   A.find_fee_def alpha; A.union_fee_def alpha;
-  let u = () in refine_ u
+  ()
 
 type operation = Allocate | Find | Union
 let[@def] same (left : operation) (right : operation) =
@@ -46,7 +46,7 @@ let rec (telescope @ total) : (alpha : Bigint.t) -> (initial : Bigint.t) ->
   trace_def alpha initial steps; final_account_def initial steps;
   total_fee_def alpha steps;
   (match steps with [] -> () | s :: rest -> telescope alpha s.account rest);
-  let u = () in refine_ u
+  ()
 
 let rec (fees @ total) : (alpha : Bigint.t) -> (steps : step list) ->
     {u : unit | Bigint.add 1Z (total_fee alpha steps) =
@@ -61,7 +61,7 @@ let rec (fees @ total) : (alpha : Bigint.t) -> (steps : step list) ->
       fees alpha rest; fee_def alpha s.operation;
       same_def s.operation Allocate; same_def s.operation Find; same_def s.operation Union;
       budget_def alpha (count Allocate rest) (count Find rest) (count Union rest));
-  let u = () in refine_ u
+  ()
 
 let (sequence @ total) : (alpha : Bigint.t) -> (steps : step list) ->
     (ticks : Bigint.t) ->
@@ -69,4 +69,4 @@ let (sequence @ total) : (alpha : Bigint.t) -> (steps : step list) ->
       ticks <= budget alpha (count Allocate steps) (count Find steps)
         (count Union steps) else true} = fun alpha steps ticks ->
   telescope alpha 1Z steps; fees alpha steps;
-  let u = () in refine_ u
+  ()

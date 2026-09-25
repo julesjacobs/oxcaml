@@ -58,10 +58,10 @@ let splice_first_node : (s : node) @ immutable -> (d : node) @ immutable -> (a :
       && not (a.next === b.next)}) @ unique ->
     {r : Pref.token | H.at (Pref.own r) d.next === Some (Some a)} @ unique =
   fun s d a b t ->
-  let refine_ result = Pref_ring_splice.splice_demo s d a b t in
+  let result = Pref_ring_splice.splice_demo s d a b t in
   ghost_ (ring_def (Pref.own (borrow_ result)) d [a; b];
     head_def [a; b] d);
-  refine_ result
+  result
 
 let reverse_first_node : (s : node) @ immutable -> (a : node) @ immutable -> (b :
     node) @ immutable -> (c : node) @ immutable -> (t : {t : Pref.token | true
@@ -121,7 +121,7 @@ let reverse_first_node : (s : node) @ immutable -> (a : node) @ immutable -> (b 
       && not (b.next === c.next)}) @ unique ->
     {r : Pref.token | H.at (Pref.own r) s.next === Some (Some c)} @ unique =
   fun s a b c t ->
-  let refine_ result = Pref_ring_reverse.reverse_demo s a b c t in
+  let result = Pref_ring_reverse.reverse_demo s a b c t in
   ghost_ (ring_def (Pref.own (borrow_ result)) s [c; b; a];
     head_def [c; b; a] s);
-  refine_ result
+  result

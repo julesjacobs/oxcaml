@@ -1,9 +1,39 @@
 (* TEST
- flags = "-extension refinement_types";
  has-z3;
- modules = "int_list_laws.ml";
- { expect; }
- { expect.opt; }
+ flags = "-extension refinement_types";
+ all_modules = "int_list_laws.mli int_list_laws.ml";
+ readonly_files = "int_lists.ml";
+ compile_only = "true";
+ {
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "int_list_laws";
+   run-expect;
+   check-program-output;
+ }
+ {
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "int_list_laws";
+   run-expectnat;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "int_list_laws";
+   run-expect;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "int_list_laws";
+   run-expectnat;
+   check-program-output;
+ }
 *)
 
 let () =

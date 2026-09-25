@@ -68,9 +68,9 @@ module Reuse_state = struct
   module U = Vox_connectivity.Make (C)
   let bad : (x : U.elem) @ immutable ->
       (state : {s : U.t | U.valid s && U.member x s}) @ unique read_write total ->
-      (fee1 : {b : C.token | let refine_ state = state in C.credits b = U.find_fee state})
+      (fee1 : {b : C.token | let state = state in C.credits b = U.find_fee state})
         @ unique total ghost ->
-      (fee2 : {b : C.token | let refine_ state = state in C.credits b = U.find_fee state})
+      (fee2 : {b : C.token | let state = state in C.credits b = U.find_fee state})
         @ unique total ghost -> U.result @ unique = fun x state fee1 fee2 ->
     let _ = U.find x state fee1 in
     U.find x state fee2
@@ -103,13 +103,13 @@ module Nonmember = struct
   module U = Vox_connectivity.Make (C)
   let bad (x : U.elem @ immutable)
       (state : {s : U.t | U.valid s} @ unique read_write total) =
-    let refine_ state = state in
-    (refine_ state : {s : U.t | U.valid s && U.member x s})
+    let state = state in
+    (state : {s : U.t | U.valid s && U.member x s})
 end;;
 [%%expect{|
-Line 7, characters 5-18:
-7 |     (refine_ state : {s : U.t | U.valid s && U.member x s})
-         ^^^^^^^^^^^^^
+Line 7, characters 5-10:
+7 |     (state : {s : U.t | U.valid s && U.member x s})
+         ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -158,7 +158,7 @@ Error: Refinement could not be proved (counterexample)
 module Insufficient_wallet = struct
   module C = Vox_big_credits.Make ()
   let bad () =
-    let refine_ wallet = C.Budget.create 10Z in
+    let wallet = C.Budget.create 10Z in
     C.split 11Z wallet
 end;;
 [%%expect{|

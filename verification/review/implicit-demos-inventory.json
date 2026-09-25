@@ -1,0 +1,445 @@
+{
+  "base": "5355e755bcdec9fe57805f521155586a8b2e8348",
+  "count_method": "refine_ identifiers outside comments and string/expect-output literals",
+  "removed": 2068,
+  "files": [
+    {
+      "file": "testsuite/tests/vox/clamp.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "49a77d8b926ba2c0d33b3bacfeecc8d4b429c570a37cb6b5e54d0b8de77ec314"
+    },
+    {
+      "file": "testsuite/tests/vox/clamp_api.ml",
+      "before": 5,
+      "after": 0,
+      "sha256": "058d14eed73d1d13a0aab11c2661e2ced751fba6f1543bc8f265f08cda7775fe"
+    },
+    {
+      "file": "testsuite/tests/vox/clamp_api.mli",
+      "before": 1,
+      "after": 0,
+      "sha256": "94a2ecfb7c266256a233ffd3a1aec387943f464ef26857b6138a39abd06a83ac"
+    },
+    {
+      "file": "testsuite/tests/vox/connectivity.ml",
+      "before": 44,
+      "after": 0,
+      "sha256": "566b64a71bf962ead14d1eaf9068ba57a754a661e5dbe399f9cf7be76a1f20d3"
+    },
+    {
+      "file": "testsuite/tests/vox/connectivity_rejected.ml",
+      "before": 5,
+      "after": 0,
+      "sha256": "379e5ea6dd415f9e1ed7bc772dc7003b41561af484c44c6665ff8a2a0748cf52"
+    },
+    {
+      "file": "testsuite/tests/vox/expression_folding.ml",
+      "before": 7,
+      "after": 0,
+      "sha256": "783cfe40ebd56476ef14d3ae49002d46b849546b15be87d4b6c55d43ffb8440f"
+    },
+    {
+      "file": "testsuite/tests/vox/expressions.ml",
+      "before": 3,
+      "after": 0,
+      "sha256": "ced6fcbb0fd649437d6e22284b52a31ba8bfdc164a9df2d9230bf715fbf16208"
+    },
+    {
+      "file": "testsuite/tests/vox/int_list_laws.ml",
+      "before": 9,
+      "after": 0,
+      "sha256": "1f7b98f65bba734ec1467537efc64ef380cf5ae68c1fab10fcd12354a15486a1"
+    },
+    {
+      "file": "testsuite/tests/vox/int_lists.ml",
+      "before": 0,
+      "after": 0,
+      "sha256": "b2515d06b0c68fcb5c952081db5836c4d752c051de33092f54685bfd0fc3be73"
+    },
+    {
+      "file": "testsuite/tests/vox/merge_sort.ml",
+      "before": 37,
+      "after": 0,
+      "sha256": "a2d3e5b7e602de5559987d03eab9604a03ca1499b734b951da2bc7ecea3b61a5"
+    },
+    {
+      "file": "testsuite/tests/vox/merge_sort_rejected.ml",
+      "before": 22,
+      "after": 0,
+      "sha256": "fb78c7df84c49a1c50d8a6b077b71b5e05774cb17d891def1da34b76525bbd64"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_list.ml",
+      "before": 80,
+      "after": 0,
+      "sha256": "5e8a5520d8b25555f0ab1b72bcc1126bf4d20439eaeb81230fab276fd62e6b52"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_list.mli",
+      "before": 1,
+      "after": 0,
+      "sha256": "04d0759613b76e302ce8e23992e331120415bc8c9f2cb2e84ca9bde6ac209d0b"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_list_client.ml",
+      "before": 25,
+      "after": 0,
+      "sha256": "d988e2f2876bdf030864ff4dc8912140f3acd541ae196bb11c2408509e67d733"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_list_rejected.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "840337a6f32fcd0aa82a33644a38a4ab4980e7d371bb3b2f2ec9c5ca3085bfef"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring.ml",
+      "before": 146,
+      "after": 0,
+      "sha256": "5525aedebac282d1455920dc9cbfe49760dfcb927d482004997a3a8f0b0fa184"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring.mli",
+      "before": 6,
+      "after": 0,
+      "sha256": "63fd8a68dcae973134d1f70285e7497df64eace3594dcfbd2002ee0684c642bb"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_alloc.ml",
+      "before": 19,
+      "after": 0,
+      "sha256": "0a1ac59e293544dd9bf47ee4d69172c55f0a422a2d9bde2990dafe8e03c43ceb"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_checks.ml",
+      "before": 123,
+      "after": 0,
+      "sha256": "4c07ab419a6e3d5f26287e867db655131c85de140ab6dc897189b16f38b14394"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_examples_client.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "a679325b123d48aa06df19d5653c3ee8ccb143a03b8adbf34893661b4037ae8f"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_heap.ml",
+      "before": 28,
+      "after": 0,
+      "sha256": "3bebccd70f86c132a14a9f0f8ac7c69b9e2be419e32332b062d7d5f688db4e0d"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_insert_remove.ml",
+      "before": 82,
+      "after": 0,
+      "sha256": "6217671021b92b4b285659e9689128b94ea26df224a33ad9f939f306cf639ff4"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_insert_remove_demo.ml",
+      "before": 14,
+      "after": 0,
+      "sha256": "48f994876a04899151487d1f9e45836347cef85b5ba34ab2aae233e26bcff0ac"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_proofs.ml",
+      "before": 7,
+      "after": 0,
+      "sha256": "7dc3ed5b4f4b24c4534b3da9ade29f6459f4671ac1f140c71cdb7e33dd7d20f4"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_public_client.ml",
+      "before": 10,
+      "after": 0,
+      "sha256": "fd6c822a242c8873eefad2eaafe38c926bf34e9425779df4b30a5ec722322ae7"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_rejected.ml",
+      "before": 12,
+      "after": 0,
+      "sha256": "4c7b503a2c362834f38211312a0287f3760cb21c220235bf49d2f2e388f9c791"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_reverse.ml",
+      "before": 22,
+      "after": 0,
+      "sha256": "3ec3eb889d11b155726d2cf2f395f99c30cd232f43a73cfee011fcb1045a06ed"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_reverse_demo.ml",
+      "before": 19,
+      "after": 0,
+      "sha256": "9116da9cdbdd2ed45d7bbff87c130c7e01a5c0075231e9c745c0376c5a72d66b"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_reverse_model.ml",
+      "before": 40,
+      "after": 0,
+      "sha256": "2c99aa65f66f75c2b699d901a8968ff1473c1a57b7216c48a9a277b50631a8ed"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_reverse_setup.ml",
+      "before": 52,
+      "after": 0,
+      "sha256": "8274d54eb72eff1a0dd8e57ff6c2e7f68d45f318ccea54992fc76cfc078a71d2"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_splice.ml",
+      "before": 19,
+      "after": 0,
+      "sha256": "c9752b42b56f3881af5a7e040656ab49029ac6e514c8f55522571324161c10d5"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_splice_demo.ml",
+      "before": 19,
+      "after": 0,
+      "sha256": "40bb7d51cefbec9f64e5738f3850eb9f9d9f49d9f72af4805a37d030dff8dee8"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_splice_model.ml",
+      "before": 32,
+      "after": 0,
+      "sha256": "36214bcb58d22c6484bf3edd14fb01b6942233d2d8e52188c6137dfb471d340c"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_ring_splice_setup.ml",
+      "before": 40,
+      "after": 0,
+      "sha256": "8e0d838794d9790bbd29a87ff3857ce837c131ff2970da207b3633d349eaf767"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_tree.ml",
+      "before": 136,
+      "after": 0,
+      "sha256": "3f6dc2db339325503300de77c3ac9fe6465208b634df16b6ea5cfb6183ccac8d"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_tree.mli",
+      "before": 2,
+      "after": 0,
+      "sha256": "df19c7d91f048afa85b8a6d6acceda7541d47d318908f3e98ec94e2f52ad3ccb"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_tree_client.ml",
+      "before": 24,
+      "after": 0,
+      "sha256": "35af1f4012f284b59ed914f75fabc719e70fc0105c212891f5afffafda494075"
+    },
+    {
+      "file": "testsuite/tests/vox/pref_tree_rejected.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "ef1528db5117f4248061e1b794814d9d352039cd4412e4318233b2308ded3ed6"
+    },
+    {
+      "file": "testsuite/tests/vox/time_credits.ml",
+      "before": 30,
+      "after": 0,
+      "sha256": "e57b691eb256903b325c1b422703e462f5bf034231f4e1b613dafbbf3448b125"
+    },
+    {
+      "file": "testsuite/tests/vox/time_credits_rejected.ml",
+      "before": 27,
+      "after": 0,
+      "sha256": "67ee0f36770d5fed4e9d4345c7ae30d24e7b658939758718be182d5827ee468a"
+    },
+    {
+      "file": "testsuite/tests/vox/union_find_online.ml",
+      "before": 142,
+      "after": 0,
+      "sha256": "c5c01bcfa4b4353f183917a63ee0357af2ade03dee7dd1e9b9d37aa7043f66ab"
+    },
+    {
+      "file": "testsuite/tests/vox/union_find_online_rejected.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "2ee1029572281efc2fc14f6e208b8a4230e10b010ce056500f2a1bf1889b9a5c"
+    },
+    {
+      "file": "verification/library/vox_ackermann.ml",
+      "before": 56,
+      "after": 0,
+      "sha256": "03b4f80678f0aa95922cccf64c0cdef89c4138c85ddcee9b8b5bf9ed18c311ea"
+    },
+    {
+      "file": "verification/library/vox_big_credits.ml",
+      "before": 30,
+      "after": 0,
+      "sha256": "c5b28ce3b58e32bee90bf33f63e8168cbc3056e79e1d8c2cb4204a6306cde75a"
+    },
+    {
+      "file": "verification/library/vox_big_credits.mli",
+      "before": 4,
+      "after": 0,
+      "sha256": "518496f80088465130e3da434145e4f2346b6e3bd29ca67b2e282b0d6715c46c"
+    },
+    {
+      "file": "verification/library/vox_connectivity.mli",
+      "before": 5,
+      "after": 0,
+      "sha256": "9531b11945f89e291327b6e145674985a0faa93d0cfd83096e520780fc090369"
+    },
+    {
+      "file": "verification/library/vox_credits.ml",
+      "before": 30,
+      "after": 0,
+      "sha256": "bb8f94cd2c1dc7170998576dd1d7276db99c44b1e41af967f63ea173a4db186e"
+    },
+    {
+      "file": "verification/library/vox_credits.mli",
+      "before": 4,
+      "after": 0,
+      "sha256": "e0bb728d13fec95cae87db308265ce486fa7b0520a3170374dec32bf137d6eff"
+    },
+    {
+      "file": "verification/library/vox_merge_proofs.ml",
+      "before": 2,
+      "after": 0,
+      "sha256": "fd8fb7448bf0561b995fd8627c9e951410d4e8a6bf933c73714d1a2ba382d840"
+    },
+    {
+      "file": "verification/library/vox_merge_sort.ml",
+      "before": 40,
+      "after": 0,
+      "sha256": "399f7247ebfbfcbc69e4bc6676b3c8358e9f53f9b0e848653fea6307226971e7"
+    },
+    {
+      "file": "verification/library/vox_merge_sort.mli",
+      "before": 2,
+      "after": 0,
+      "sha256": "7edb99169e23d8dfdce691b899e7e7ccf512a0ae7e9ccb3805d8b1072cfc1d3f"
+    },
+    {
+      "file": "verification/library/vox_ordered_sequence.ml",
+      "before": 20,
+      "after": 0,
+      "sha256": "9751a198de4e4a2ca1a4ca87bcb976eaae434be25a8349e6c15c0c7fa9a51b58"
+    },
+    {
+      "file": "verification/library/vox_sort_cost.ml",
+      "before": 10,
+      "after": 0,
+      "sha256": "32a240f6886e7478005e3f3d05f083a8293ffd3a556f0b39679488fd45e21150"
+    },
+    {
+      "file": "verification/library/vox_union_find.ml",
+      "before": 90,
+      "after": 0,
+      "sha256": "a39215554a56f55d804f990c1d62042864397c543d7f1264b5cd16a6d32a8116"
+    },
+    {
+      "file": "verification/library/vox_union_find.mli",
+      "before": 13,
+      "after": 0,
+      "sha256": "8fecf8c67b61dca9ba730b8d02ed83ae14dc09224a8037952ed0d44dc7c015fa"
+    },
+    {
+      "file": "verification/library/vox_union_find_amortized.ml",
+      "before": 7,
+      "after": 0,
+      "sha256": "f044f910f8fd0468ee5dca87942005a7073b2d76b2c6d980217f483edc6c4c23"
+    },
+    {
+      "file": "verification/library/vox_union_find_bank.ml",
+      "before": 30,
+      "after": 0,
+      "sha256": "440e9bb79d6f274eafb54932d893cfa9f18a5d41b44e804240fd2f9727c6b790"
+    },
+    {
+      "file": "verification/library/vox_union_find_complexity.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "37a52e8fe18050d81f660db7fce1a769b1c7dd0aa6654b6d9d31c8ee42bcc92e"
+    },
+    {
+      "file": "verification/library/vox_union_find_forest.ml",
+      "before": 38,
+      "after": 0,
+      "sha256": "a8f80affb5c5f82567f61f7be2964baf08234d5fc5c859430bff4b0ece65f655"
+    },
+    {
+      "file": "verification/library/vox_union_find_levels.ml",
+      "before": 5,
+      "after": 0,
+      "sha256": "252d9423e63d112c0ceb2890bf025525f673f94fc7b42fc6e010bf35741b9e9f"
+    },
+    {
+      "file": "verification/library/vox_union_find_link.ml",
+      "before": 10,
+      "after": 0,
+      "sha256": "fbd5bc934bed659c97e77a872ac16321a1cbd8ba215b1ff06b2319a53a87b3a9"
+    },
+    {
+      "file": "verification/library/vox_union_find_mass.ml",
+      "before": 23,
+      "after": 0,
+      "sha256": "b63252270da52a0b823977322d225ce602feb3d2ea2cdd47b071928527a8e9d9"
+    },
+    {
+      "file": "verification/library/vox_union_find_model.ml",
+      "before": 23,
+      "after": 0,
+      "sha256": "5225b7478267272cd87e94764491729d740b15522c5e3b19e5f2e77328fe0f87"
+    },
+    {
+      "file": "verification/library/vox_union_find_online.ml",
+      "before": 92,
+      "after": 0,
+      "sha256": "46d79494f054c8d38af2734f978a728ebadab7c3312e84dc7da49fd9a31d851e"
+    },
+    {
+      "file": "verification/library/vox_union_find_online.mli",
+      "before": 10,
+      "after": 0,
+      "sha256": "c5c033ff95335660f5792b878c0dbd872586323ea76cf9155d959f85070dbaaf"
+    },
+    {
+      "file": "verification/library/vox_union_find_online_cost.ml",
+      "before": 4,
+      "after": 0,
+      "sha256": "270532b019c9a9028804c7b8dde96b30d7d7c696ec6c0e3569aa7539314d4e8f"
+    },
+    {
+      "file": "verification/library/vox_union_find_path_cost.ml",
+      "before": 16,
+      "after": 0,
+      "sha256": "796f7fa0c8cb8c2841fa38be49b89c7b01a8430bc28f5850269f54e818fca021"
+    },
+    {
+      "file": "verification/library/vox_union_find_potential.ml",
+      "before": 68,
+      "after": 0,
+      "sha256": "9f85d808b97662cb98383c08d8edd8a8c968b499c5e86e87c659137d7e9ae18b"
+    },
+    {
+      "file": "verification/library/vox_union_find_rank.ml",
+      "before": 16,
+      "after": 0,
+      "sha256": "cff9c65fb34980dda7f7bf75728450e597c342614390db8db55c48bf68163707"
+    },
+    {
+      "file": "verification/library/vox_union_find_simple.ml",
+      "before": 44,
+      "after": 0,
+      "sha256": "2f5d0bffd44932f1ca24692dea1f9c3668166d9776b657a3f379e1c2a9ab74ad"
+    },
+    {
+      "file": "verification/library/vox_union_find_simple.mli",
+      "before": 5,
+      "after": 0,
+      "sha256": "066a058d0143ea33f41fae05f2bc598a2a5e5884956707fd265cbc2f4f25fdee"
+    },
+    {
+      "file": "verification/library/vox_union_find_spec.ml",
+      "before": 2,
+      "after": 0,
+      "sha256": "6d0c9961da59871b29798a936f38aaf9d6a8fc629971875f450c72cf52424012"
+    },
+    {
+      "file": "verification/library/vox_union_find_worker.ml",
+      "before": 55,
+      "after": 0,
+      "sha256": "65b0efff115f8015ec17bcbed2f1055df71774b23778abd9ce7a229fb9cd22fd"
+    }
+  ]
+}

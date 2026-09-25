@@ -1,14 +1,38 @@
 (* TEST
  has-z3;
- modules = "expression_folding.ml";
+ flags = "-extension refinement_types";
+ all_modules = "expression_folding.mli expression_folding.ml";
+ readonly_files = "expressions.ml";
+ compile_only = "true";
  {
-   flags = "-extension refinement_types";
-   { expect; }
-   { expect.opt; }
- }{
-   flags = "-extension refinement_types -principal";
-   { expect; }
-   { expect.opt; }
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "expression_folding";
+   run-expect;
+   check-program-output;
+ }
+ {
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "expression_folding";
+   run-expectnat;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "expression_folding";
+   run-expect;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "expression_folding";
+   run-expectnat;
+   check-program-output;
  }
 *)
 
@@ -24,11 +48,11 @@ let () =
   Format.printf "input=4 result=%d; input=10 result=%d@."
     (eval expression 4) (eval expression 10);
   let input = 4 in
-  let refine_ result = eval_folded expression input in
+  let result = eval_folded expression input in
   Format.printf "folded=%d@." result;
   let overflow = Add (Lit max_int, Lit 1) in
   let input = 0 in
-  let refine_ result = eval_folded overflow input in
+  let result = eval_folded overflow input in
   Format.printf "wrapping addition preserved=%b@."
     (result = min_int)
 ;;
@@ -51,12 +75,12 @@ let bad_fold (a : int) (b : int) input :
   Expr.eval_def original input;
   Expr.eval_def result input;
   let u = () in
-  refine_ u
+  u
 ;;
 [%%expect{|
-Line 14, characters 2-11:
-14 |   refine_ u
-       ^^^^^^^^^
+Line 14, characters 2-3:
+14 |   u
+       ^
 Error: Refinement could not be proved (counterexample)
 |}]
 

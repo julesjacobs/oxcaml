@@ -29,14 +29,13 @@ module No_reversal = struct
       {r : result | r.pointer === root (rev_append xs Nil)
         && Pref.own r.state === heap (rev_append xs Nil)} @ unique =
     fun pointer xs t ->
-    let refine_ t = t in
     let r = {pointer; state = t} in
-    refine_ r
+    r
 end;;
 [%%expect{|
-Line 13, characters 4-13:
-13 |     refine_ r
-         ^^^^^^^^^
+Line 12, characters 4-5:
+12 |     r
+         ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -44,12 +43,11 @@ module Lost_node = struct
   let bad : (n : node) @ immutable -> (xs : model) @ immutable ghost ->
       (t : {t : Pref.token | Pref.own t === heap (Cons (n, xs))}) @ unique ->
       {t : Pref.token | Pref.own t === heap xs} @ unique = fun n xs t ->
-    let refine_ t = t in
-    refine_ t
+    t
 end;;
 [%%expect{|
-Line 6, characters 4-13:
-6 |     refine_ t
-        ^^^^^^^^^
+Line 5, characters 4-5:
+5 |     t
+        ^
 Error: Refinement could not be proved (counterexample)
 |}]

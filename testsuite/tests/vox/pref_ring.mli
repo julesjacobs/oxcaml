@@ -103,7 +103,7 @@ val connect : (left : node) @ immutable ->
   (right : node) @ immutable ->
   (t : {t : Pref.token | H.mem (Pref.own t) left.next
       && H.mem (Pref.own t) right.prev}) @ unique ->
-  {r : Pref.token | let refine_ t = t in Pref.own r === connected (Pref.own
+  {r : Pref.token | Pref.own r === connected (Pref.own
         t) left right
       && Pref.own r === H.put (H.put (Pref.own t) left.next (Some right))
         right.prev (Some left)}
@@ -130,7 +130,7 @@ val insert_between : (left : node) @ immutable ->
       && H.at (Pref.own t) n.next === Some (Some n)
       && H.at (Pref.own t) n.prev === Some (Some n)
       && not (n === left) && not (n === right)}) @ unique ->
-  {r : Pref.token | let refine_ t = t in Pref.own r === inserted (Pref.own
+  {r : Pref.token | Pref.own r === inserted (Pref.own
         t) left n right
       && Pref.own r === H.put (H.put
         (H.put (H.put (Pref.own t) left.next (Some n)) n.prev (Some left))
@@ -159,7 +159,7 @@ val remove : (sentinel : node) @ immutable ->
       && H.at (Pref.own t) n.prev === Some (Some left)
       && H.at (Pref.own t) n.next === Some (Some right)
       && H.at (Pref.own t) right.prev === Some (Some n)}) @ unique ->
-  {r : Pref.token | let refine_ t = t in Pref.own r === removed (Pref.own t)
+  {r : Pref.token | Pref.own r === removed (Pref.own t)
         left n right
       && Pref.own r === H.put (H.put
         (H.put (H.put (Pref.own t) left.next (Some right)) right.prev (Some
@@ -196,7 +196,7 @@ val flipped_all_def :
             | n::rest -> flipped_all (flipped h n) rest))} @@ total
 val reverse_nodes : (ns : node list) @ immutable ->
     (t : {t : Pref.token | owns (Pref.own t) ns}) @ unique ->
-    {t' : Pref.token | let refine_ t = t in Pref.own t' === flipped_all
+    {t' : Pref.token | Pref.own t' === flipped_all
         (Pref.own t) ns}
       @ unique
 type created = { node : node @@ aliased; state : Pref.token; }
@@ -234,8 +234,7 @@ val splice_range : (left : node) @ immutable ->
           destination_right)
       && H.at (Pref.own t) destination_right.prev === Some (Some
           destination_left)}) @ unique ->
-  {r : Pref.token | let refine_ t = t in
-      Pref.own r === H.put (H.put
+  {r : Pref.token | Pref.own r === H.put (H.put
         (H.put (H.put
           (H.put (H.put (Pref.own t) left.next (Some right)) right.prev (Some
               left))
@@ -262,8 +261,7 @@ val detach : (n : node) @ immutable ->
       && not (n.prev === n.next)
       && not (left.next === n.prev) && not (left.next === n.next)
       && not (right.prev === n.prev) && not (right.prev === n.next)}) @ unique ->
-  {r : Pref.partition | let refine_ t = t in
-      Pref.own r.#left === H.restrict (Pref.own t)
+  {r : Pref.partition | let t = t in Pref.own r.#left === H.restrict (Pref.own t)
         (H.put (H.put (H.empty ()) n.prev (Some n)) n.next (Some n))
       && Pref.own r.#right === H.exclude (Pref.own t)
         (H.put (H.put (H.empty ()) n.prev (Some n)) n.next (Some n))

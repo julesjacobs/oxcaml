@@ -12,20 +12,20 @@ module type S = sig
 
   val tick : (token : {t : token | credits t > 0})
       @ unique total ghost ->
-    {t : token | let refine_ token = token in
+    {t : token | let token = token in
       credits t = credits token - 1} @ unique total ghost @@ total
 
   val split : (amount : int) @ ghost ->
     (token : {t : token | 0 <= amount && amount <= credits t})
       @ unique total ghost ->
-    {p : partition | let refine_ token = token in credits p.left = amount &&
+    {p : partition | let token = token in credits p.left = amount &&
       credits p.right = credits token - amount} @ unique @@ total
 
   val merge : (left : token) @ unique total ghost ->
     (right : {t : token | 0 <= credits left && 0 <= credits t &&
       0 <= credits left + credits t})
       @ unique total ghost ->
-    {t : token | let refine_ right = right in
+    {t : token | let right = right in
       credits t = credits left + credits right} @ unique total ghost @@ total
 
 end
@@ -36,70 +36,70 @@ module Make () = struct
   type partition = { left : token @@ ghost; right : token @@ ghost }
 
   let[@def] credits (token : token @ local immutable total ghost) =
-    ghost_ (let refine_ balance = token.balance in balance)
+    ghost_ (let balance = token.balance in balance)
 
   let (nonnegative @ total) (token : token @ local immutable total ghost) :
       {u : unit | 0 <= credits token} @ ghost = ghost_ (
     credits_def token;
-    let refine_ balance = token.balance in
-    let u = () in refine_ u)
+    let _ = token.balance in
+    ())
 
   let (tick @ total) (token : {t : token | credits t > 0}
         @ unique total ghost) :
-      {t : token | let refine_ token = token in
+      {t : token | let token = token in
       credits t = credits token - 1} @ unique total ghost =
-    let refine_ token = token in
+    let token = token in
     ghost_ (credits_def (borrow_ token));
     let result = { balance = ghost_ (
-      let refine_ balance = token.balance in
-      let n = balance - 1 in (refine_ n : amount)) } in
+      let balance = token.balance in
+      let n = balance - 1 in (n : amount)) } in
     ghost_ (credits_def token; credits_def (borrow_ result));
-    refine_ result
+    result
 
   let (split @ total) (amount : int @ ghost)
       (token : {t : token | 0 <= amount && amount <= credits t}
         @ unique total ghost) :
-      {p : partition | let refine_ token = token in credits p.left = amount &&
+      {p : partition | let token = token in credits p.left = amount &&
         credits p.right = credits token - amount} @ unique =
-    let refine_ token = token in
-    let left = { balance = ghost_ (refine_ amount : amount) } in
+    let token = token in
+    let left = { balance = ghost_ (amount : amount) } in
     ghost_ (credits_def (borrow_ token));
     let right = { balance = ghost_ (
-      let refine_ balance = token.balance in
-      let n = balance - amount in (refine_ n : amount)) } in
+      let balance = token.balance in
+      let n = balance - amount in (n : amount)) } in
     let result = { left; right } in
     ghost_ (credits_def token; credits_def (borrow_ result.left);
       credits_def (borrow_ result.right));
-    refine_ result
+    result
 
   let (merge @ total) (left : token @ unique total ghost)
       (right : {t : token | 0 <= credits left && 0 <= credits t &&
         0 <= credits left + credits t}
         @ unique total ghost) :
-      {t : token | let refine_ right = right in
+      {t : token | let right = right in
       credits t = credits left + credits right} @ unique total ghost =
-    let refine_ right = right in
+    let right = right in
     ghost_ (credits_def (borrow_ left); credits_def (borrow_ right));
     let result = { balance = ghost_ (
-      let refine_ a = left.balance in
-      let refine_ b = right.balance in
-      let n = a + b in (refine_ n : amount)) } in
+      let a = left.balance in
+      let b = right.balance in
+      let n = a + b in (n : amount)) } in
     ghost_ (credits_def left; credits_def right; credits_def (borrow_ result));
-    refine_ result
+    result
 
   module Budget = struct
     let (create @ total) (amount : {n : int | n >= 0} @ ghost) :
-        {t : token | let refine_ amount = amount in credits t = amount}
+        {t : token | let amount = amount in credits t = amount}
         @ unique total ghost =
-      let refine_ amount = amount in
-      let result = { balance = ghost_ (refine_ amount : amount) } in
+      let amount = amount in
+      let result = { balance = ghost_ (amount : amount) } in
       ghost_ (credits_def (borrow_ result));
-      refine_ result
+      result
   end
   let (empty @ total) () :
       {t : token | credits t = 0} @ unique total ghost =
     let zero = 0 in
-    let initial : amount = refine_ zero in
-    let refine_ result = Budget.create initial in
-    refine_ result
+    let initial : amount = zero in
+    let result = Budget.create initial in
+    result
 end
