@@ -17,7 +17,7 @@ type contents : immutable_data = byte option
 type allocation : immutable_data = t option
 
 external length : t @ local immutable -> {n : int | n >= 0}
-  @@ total = "caml_raw_memory_length"
+  @@ total = "caml_raw_memory_length" [@@noalloc] [@@builtin] [@@no_effects]
 
 external equal : (p : t) @ immutable -> (q : t) @ immutable ->
   {b : bool | b = (p === q)} @ total
@@ -71,7 +71,8 @@ external read : (p : t) @ immutable ->
     match H.at (P.own s) (location p i) with
     | Some (Some _) -> true | _ -> false}) @ local read ghost ->
   {v : byte | H.at (P.own token) (location p i) === Some (Some v)}
-  = "caml_raw_memory_read_bytecode" "caml_raw_memory_read"
+  = "caml_raw_memory_read_bytecode"
+    "caml_raw_memory_read" [@@noalloc] [@@builtin] [@@no_effects]
 
 external write : (p : t) @ immutable ->
   (i : {i : int | 0 <= i && i < length p}) -> (v : byte) ->
@@ -79,7 +80,8 @@ external write : (p : t) @ immutable ->
     @ unique read_write ghost ->
   {s : P.token | P.own s === H.put (P.own token) (location p i) (Some v)}
     @ unique ghost
-  = "caml_raw_memory_write_bytecode" "caml_raw_memory_write"
+  = "caml_raw_memory_write_bytecode"
+    "caml_raw_memory_write" [@@noalloc] [@@builtin]
 
 (** Consume the deallocation permission and every byte, initialized or not. *)
 external free : (p : t) @ immutable ->
@@ -87,7 +89,7 @@ external free : (p : t) @ immutable ->
     && covers (P.own s) p 0 (length p)}) @ unique read_write ghost ->
   {s : P.token | P.own s === H.exclude (P.own token) (footprint p)}
     @ unique ghost
-  = "caml_raw_memory_free_bytecode" "caml_raw_memory_free"
+  = "caml_raw_memory_free_bytecode" "caml_raw_memory_free" [@@noalloc]
 
 val range_at : (p : t) @ immutable -> (lo : int) ->
     (hi : int) -> (i : int) ->

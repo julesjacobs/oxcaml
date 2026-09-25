@@ -334,6 +334,22 @@ CAMLprim value caml_raw_memory_read_bytecode(value handle, value index,
   return caml_raw_memory_read(handle, index);
 }
 
+CAMLprim value caml_raw_memory_copy_string(value handle, value count)
+{
+  CAMLparam2(handle, count);
+  CAMLlocal1(result);
+  mlsize_t length = Long_val(count);
+  result = caml_alloc_string(length);
+  memcpy(Bytes_val(result), Raw_memory_data(handle), length);
+  CAMLreturn(result);
+}
+
+CAMLprim value caml_raw_memory_copy_string_bytecode(value handle, value count,
+                                                   value token)
+{
+  return caml_raw_memory_copy_string(handle, count);
+}
+
 CAMLprim void caml_raw_memory_write(value handle, value index, value byte)
 {
   Raw_memory_data(handle)[Long_val(index)] = Long_val(byte);

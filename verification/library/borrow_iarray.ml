@@ -287,6 +287,30 @@ module Owned_array = struct
   external into_iarray : ('a : immutable_data).
     (a : 'a t) @ unique -> {values : 'a iarray | values === contents a}
     @@ portable total = "caml_borrow_into_iarray"
+  external get : ('a : immutable_data).
+    (a : 'a t) @ local immutable ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    {value : 'a | let refine_ i = index in
+      Some value === Vox_iarray.at (contents a) i}
+    @@ portable total = "caml_borrow_get"
+  external set : ('a : immutable_data).
+    (a : 'a t) @ unique ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    (value : 'a) @ immutable ->
+    {r : 'a t | let refine_ i = index in
+      contents r === Vox_iarray.updated (contents a) i value}
+    @ unique @@ portable total = "caml_borrow_set"
+  external get_int : (a : int t) @ local immutable ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    {value : int | let refine_ i = index in
+      Some value === Vox_iarray.at (contents a) i}
+    @@ portable total = "caml_borrow_int_get" [@@noalloc] [@@builtin] [@@no_effects]
+  external set_int : (a : int t) @ unique ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    (value : int) @ immutable ->
+    {r : int t | let refine_ i = index in
+      contents r === Vox_iarray.updated (contents a) i value}
+    @ unique @@ portable total = "caml_borrow_int_set" [@@noalloc] [@@builtin]
   let (with_mut @ total) : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a iarray @ total immutable -> bool @
