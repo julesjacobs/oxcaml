@@ -59,8 +59,9 @@ algorithm and theorem as a reference throughout this separate Vox development.
 - [ ] Copy-memo cleanup: release retained prior instances and prove descriptor,
   level and model preservation.
 - [x] Vox sort-encoding crash: minimize, fix and add a compiler regression.
-- [ ] Vox dependent-callback adaptation: reduce explicit forwarding annotations
-  while preserving checked function contracts and totality.
+- [x] Vox dependent-callback adaptation: refine expressions and projected proof
+  callbacks through one evaluated local binding, preserving checked contracts,
+  totality and curried application timing. Frontend and Merlin checks pass.
 
 For every item: implement the runtime change, check the semantic proofs, run
 positive and rejection tests, inspect ghost erasure, and review before publishing
