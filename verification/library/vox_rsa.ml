@@ -1,0 +1,152 @@
+open Bigint
+module Modular = Vox_rsa_arithmetic
+module Number_theory = Vox_rsa_number_theory
+module Proof = Vox_rsa_fermat
+open Modular
+open Number_theory
+open Proof
+
+let modexp = Modular.modexp
+let fermat = Proof.fermat
+let fermat_period = Proof.fermat_period
+let crt_unique = Number_theory.crt_unique
+
+let[@def] lambda p q = lcm (p - 1Z) (q - 1Z)
+
+let (lambda_lcm @ total) (p : t) (q : t) (multiple : t) :
+    {u : unit | if prime p && prime q && p <> q then
+      lambda p q > 0Z
+      && lambda p q mod (p - 1Z) = 0Z
+      && lambda p q mod (q - 1Z) = 0Z
+      && (if multiple > 0Z && multiple mod (p - 1Z) = 0Z
+            && multiple mod (q - 1Z) = 0Z
+          then multiple mod lambda p q = 0Z && multiple >= lambda p q
+          else true)
+      else true} =
+  prime_def p; prime_def q; lambda_def p q;
+  lcm_properties (p - 1Z) (q - 1Z) multiple;
+  let u = () in refine_ u
+
+let (reduce_divisor @ total) (a : t) (p : t) (q : t) :
+    {u : unit | if p > 0Z && q > 0Z then
+      (a mod (p * q)) mod p = a mod p else true} =
+  let u = () in
+  if p <= 0Z || q <= 0Z then refine_ u
+  else begin
+    let r = a mod (p * q) in
+    remainder_unique a p (q * (a / (p * q)) + r / p) (r mod p);
+    refine_ u
+  end
+
+
+let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
+    {u : unit | if prime p && prime q && p <> q
+      && e > 0Z && d > 0Z && (e * d - 1Z) mod lambda p q = 0Z
+      && 0Z <= m && m < p * q
+      then power m (e * d) mod (p * q) = m else true} =
+  prime_def p; prime_def q; lambda_def p q;
+  let u = () in
+  if not (prime p && prime q && p <> q
+      && e > 0Z && d > 0Z && (e * d - 1Z) mod lambda p q = 0Z
+      && 0Z <= m && m < p * q) then refine_ u
+  else begin
+    let k = e * d - 1Z in
+    lambda_lcm p q k;
+    divides_transitive (p - 1Z) (lambda p q) k;
+    divides_transitive (q - 1Z) (lambda p q) k;
+    let kp = k / (p - 1Z) in
+    let kq = k / (q - 1Z) in
+    fermat_period m p kp;
+    fermat_period m q kq;
+    let a = power m (e * d) in
+    reduce_divisor a p q;
+    reduce_divisor a q p;
+    crt_unique p q (a mod (p * q)) m;
+    refine_ u
+  end
+
+let encrypt = modexp
+let decrypt = modexp
+
+let (roundtrip @ total) : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
+    (message : {m : t | prime p && prime q && p <> q
+      && e > 0Z && d > 0Z && (e * d - 1Z) mod lambda p q = 0Z
+      && 0Z <= m && m < p * q}) ->
+    {r : t | let refine_ m = message in r = m} =
+  fun p q e d message ->
+  let refine_ m = message in
+  ghost_ (prime_def p);
+  ghost_ (prime_def q);
+  let n = p * q in
+  let refine_ ciphertext = encrypt m (refine_ e) (refine_ n) in
+  let refine_ plaintext = decrypt ciphertext (refine_ d) (refine_ n) in
+  ghost_ begin
+    reduce_power (power m e) d n;
+    power_multiply m e d;
+    rsa_power p q e d m;
+    let u = () in (refine_ u : {u : unit | plaintext = m})
+  end;
+  refine_ plaintext
+
+let (prime_inverse @ total) (p : t) (q : t) :
+    {u : unit | if prime p && prime q && p <> q then
+      (p * power p (q - 2Z)) mod q = 1Z else true} =
+  distinct_prime_nondivisor p q;
+  fermat_little p q;
+  power_def p (q - 1Z);
+  let u = () in refine_ u
+
+let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
+    {r : t | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
+      && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
+      0Z <= r && r < p * q && r mod p = rp && r mod q = rq else true} =
+  let v = (rq - rp) * inverse in
+  let h = v mod q in
+  let r = rp + p * h in
+  ghost_ begin
+    let u = () in
+    if not (p > 0Z && q > 1Z && 0Z <= rp && rp < p
+      && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z) then
+      (refine_ u : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
+        && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
+        0Z <= r && r < p * q && r mod p = rp && r mod q = rq else true})
+    else begin
+      let quotient = (rq - rp) * ((p * inverse) / q) - p * (v / q) in
+      (refine_ u : {u : unit | r = q * quotient + rq});
+      remainder_unique r p h rp;
+      remainder_unique r q quotient rq;
+      (refine_ u : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
+        && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
+        0Z <= r && r < p * q && r mod p = rp && r mod q = rq else true})
+    end
+  end;
+  refine_ r
+
+let (decrypt_crt @ total) : (ciphertext : t) ->
+    (exponent : {d : t | d >= 0Z}) ->
+    (p : t) -> (other_prime : {q : t | prime p && prime q && p <> q}) ->
+    {r : t | let refine_ d = exponent in let refine_ q = other_prime in
+      0Z <= r && r < p * q && r = power ciphertext d mod (p * q)} =
+  fun ciphertext exponent p other_prime ->
+  let refine_ d = exponent in
+  let refine_ q = other_prime in
+  ghost_ (prime_def p);
+  ghost_ (prime_def q);
+  let refine_ rp = modexp ciphertext exponent (refine_ p) in
+  let refine_ rq = modexp ciphertext exponent (refine_ q) in
+  let inverse_exponent = q - 2Z in
+  let refine_ inverse = modexp p (refine_ inverse_exponent) (refine_ q) in
+  ghost_ begin
+    prime_inverse p q;
+    reduce_left (power p (q - 2Z)) p q;
+    let u = () in (refine_ u : {u : unit | (p * inverse) mod q = 1Z})
+  end;
+  let refine_ r = recombine p q rp rq inverse in
+  ghost_ begin
+    let a = power ciphertext d in
+    reduce_divisor a p q;
+    reduce_divisor a q p;
+    crt_unique p q r (a mod (p * q));
+    let u = () in (refine_ u : {u : unit | r = power ciphertext d mod (p * q)})
+  end;
+  refine_ r
