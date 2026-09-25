@@ -1,6 +1,6 @@
 # Verified Myers diff
 
-Run the byte-string demo from the worktree root after `./dev init`:
+Run from the worktree root after `./dev init`:
 
 ```sh
 scripts/run-diff-demo
@@ -11,115 +11,120 @@ scripts/run-diff-demo '' 'hello'
 scripts/check-diff-erasure
 ```
 
-The library accepts integer lists; the executable maps bytes to integers.
+## Exact human-review surface
+
+Read these two public interfaces, in order:
+
+1. **`verification/library/vox_diff_spec.mli`**: integer-sequence and edit
+   types; complete checked equations for `source`, `target`, `cost`, `apply`,
+   `invert`, `size`, `script_size`, and `minimum_cost`. These are all the
+   observations used by the public claims. The minimum-cost recurrence
+   decreases the sum of input lengths; it contains no fuel, frontier,
+   certificate, suffix invariant, or opaque auxiliary predicate.
+2. **`verification/library/vox_diff.mli`**: the actual total `diff` operation,
+   accepted size limits, permitted error, deterministic tie policy, output
+   bounds, arbitrary competing-script optimality, and inversion theorems.
+
+Their transitive semantic dependencies are the standard finite inductive
+list, option and result types, machine integers with ordinary value equality,
+and mathematical signed integers. The shared primitive review anchors are
+`stdlib/list.mli`'s inductive list declaration, `stdlib/stdlib.mli`'s result
+sum, and `stdlib/bigint.mli`'s `t`, `add`, numeric equality/comparison and
+integer-literal interpretation. `None`/`Some`, `unit`, Boolean connectives and
+`===` use Vox's built-in algebraic types and logical value equality. Bigint
+addition and comparisons in these contracts are exact, not wrapping machine
+arithmetic. The compiler's refinement/totality checker, inductive-type rules,
+SMT encoding and solver, and runtime primitive implementations are trusted;
+no new axiom or external declaration is added. The shared totality and
+resource-exhaustion convention is documented in `design-docs/vox-v1.md`.
+
+Those primitive meanings and the two public interfaces exhaust the semantic
+review surface. No claim depends on an uninterpreted predicate in a private
+module. Each equation is checked against an implementation; it is not an
+assumed axiom. Since its recursive calls decrease finite inputs, the equation
+completely characterizes the observation. The implementation of an equation
+can change without changing the claim a reviewer is being asked to accept.
+
+`vox_diff_spec.ml` implements those equations; its private fuel implementation
+and the proof of the distance recurrence are hidden by `vox_diff_spec.mli`.
+`vox_diff.ml` contains private `Proof` and `M` modules for suffix reasoning,
+reconstruction, and optimality induction, together with the executable
+frontier code and erased proof calls. `vox_diff.mli` exposes none of those
+modules, helpers, representations, or refinement invariants. There is no
+separate importable metric/proof module and no module-type-of re-export.
+
+## Public guarantees
+
 `Keep x` consumes and emits `x`, `Delete x` consumes `x`, and `Insert x`
 emits `x`. Application rejects mismatched consumed values and leftover input.
-Substitution uses deletion plus insertion. Keep costs zero; both edits cost one.
+Keep costs zero; both edits cost one. Substitution uses deletion plus insertion.
 
-## Public contract
+For inputs of at most 1,000,000 elements each, `diff` always returns a script
+whose application to the source produces the target. Its cost equals the
+specified minimum cost and its length is at most the combined input length.
+The only error is `Input_too_large`, exactly for an oversized input.
 
-`vox_diff.mli` exposes a total `diff old fresh`. Each input may contain at most
-1,000,000 elements. Accepted inputs always return `Ok script`; the only error
-is `Input_too_large`.
+`optimal_at` derives the cost comparison against **any** script that applies
+successfully to the same source and target. There is no size restriction on
+that competing script. `inverse_patch` restores the source from the target;
+`invert_correct` also proves source/target exchange and cost preservation.
+These theorem calls can be erased with `ghost_`.
 
-The result refinement proves:
-
-- `source script === old` and `target script === fresh`;
-- `apply old script === Some fresh`;
-- `cost script = Vox_diff_metric.metric old fresh`;
-- the input-size limits, nonnegative cost, and at most
-  `size old + size fresh` operations.
-
-`optimal_at old fresh computed other` proves that **every** script `other`
-whose application produces `fresh` has cost at least that of `computed`.
-There is no bound on the competing script. `apply_characterization` connects
-application with the source/target specification. `inverse_patch` proves that
-applying the inverted script to its target restores its source;
-`invert_correct` also proves cost preservation.
-
-`diff.ml` includes a separately compiled total client that uses only the public
-interface to derive application, inversion, and comparison against an arbitrary
-competing script. `diff_rejected.ml` rejects forged optimality evidence and a
-wrong patch result, and omission of the competing-script validity premise.
-
-## Executable algorithm and tie rule
+## Executable algorithm and proof boundary
 
 At edit depth `d`, the frontier has `d + 1` slots for diagonals
-`-d, -d + 2, ..., d`. A present slot stores the selected old-input position,
-residual input lists, and a shared reverse script. An absent slot has no
-retained candidate. Pruning preserves an optimal continuation; it does not
-represent every path of that edit depth. An edit consumes one list head,
-then `snake` consumes
-all equal heads as Keeps. Reconstruction reverses the selected script once.
-There are no list-index searches, copied full frontiers, or appended scripts.
+`-d, -d + 2, ..., d`. A present slot stores an old-input position, residual
+input lists, and a shared reverse script. An absent slot has no retained
+candidate; pruning preserves an optimal continuation rather than every path.
+An edit consumes one list head, then `snake` greedily consumes equal heads as
+Keeps. Reconstruction reverses the selected script once. On equal post-edit
+old-input positions, insertion wins. For example, `a` to `b` returns
+`Delete 'a'; Insert 'b'`.
 
-For two legal predecessors on the same destination diagonal, compare their
-old-input positions **after the edit and before the snake**. Choose deletion
-only when its position is strictly greater; choose insertion on equality.
-Use the available candidate when the other edit is impossible. Frontier scans
-run from the lowest diagonal upward. These rules fix the returned script;
-for example, `a` to `b` returns `Delete 'a'; Insert 'b'`.
+The private proof establishes an independent script lower bound, synchronous
+suffix cropping, frontier dominance, preservation of remaining distance by
+snake, and progress of a settled unfinished frontier. `search` returns a
+script costing at most the mathematical distance; the lower bound proves
+universal optimality. The exhausted-search branch is checked unreachable.
 
-## Direct proof
+All calls from diff to model computations or proofs are inside `ghost_`.
+Neither the distance recurrence nor an output checker runs during diff.
+Reverse scripts contain reconstruction data, with no proof certificates.
+Ghost arguments may leave dummy ABI arguments, but no proof computation.
 
-`vox_diff_spec.ml` defines operations, application, inversion, sequence size,
-and suffix relations. `vox_diff_metric.ml` defines the usual insertion/deletion
-distance recurrence independently of frontier search and proves:
+## Resource bounds and limitations
 
-1. Every script's cost bounds the distance between its source and target.
-2. Removing equally many elements from both input prefixes cannot increase
-   distance (`strip` and `crop`).
-3. Distance is nonnegative, bounded by the combined input length, and zero
-   only for equal sequences.
+For input lengths `N` and `M`, let `S = N + M` and minimum edit cost `D`.
+Checked internal invariants establish `S <= 2,000,000`, bounded positions,
+nonnegative depth, frontier width `depth + 1`, and
+`depth + remaining_fuel <= S`. Search starts with fuel `S` and decreases it;
+snake decreases its old-input tail length. Other traversals use structural
+recursion. Machine-integer increments and decrements have proved bounds.
 
-The runtime functions in `vox_diff.ml` maintain refined invariants directly.
-`dominance` applies the suffix theorem to candidates on the same diagonal.
-`snake` preserves remaining distance. `branches` shows that, for an unfinished
-settled entry, some edit reduces the remaining distance budget by one.
-`advance` preserves the existence of such an entry after pruning. `search`
-therefore returns a script costing at most the initial mathematical distance.
-The independent script lower bound proves equality and universal optimality.
-The exhausted-search branch uses checked `unreachable_ ()`.
+The loop structure and checked invariants imply at most `D + 1` levels and
+slots per frontier, at most `(D + 1)(D + 2)/2` snake calls, at most `N` Keep
+steps per snake, and at most `S` output operations. Each size validation
+inspects at most 1,000,001 cells. The aggregate sums are derived, not a
+mechanized allocation/time cost semantics. The sharper amortized Myers bound
+and linear-space reconstruction are not proved. Shared reverse scripts may
+retain many candidate paths. The length limit is not a promise that every
+worst-case input fits available RAM or stack.
 
-Every invocation of these model computations and proofs from the algorithm
-is inside `ghost_`. Neither the distance recurrence nor an output checker
-runs during diff. The reverse scripts contain reconstruction data, with no
-proof certificates. Ghost arguments may leave dummy ABI arguments in bytecode;
-they carry no model or proof computation. The erasure audit checks emitted
-bytecode and native Lambda call targets, including reconstruction, and
-rejects surviving proof,
-metric, or bigint computations in the executable diff functions.
+## Boundary and execution evidence
 
-## Termination and resource bounds
+`testsuite/tests/vox/diff_public_client.ml` imports only `Vox_diff_spec` and
+`Vox_diff`. It derives patch correctness, inversion and arbitrary-script
+optimality, and proves the error case impossible for accepted input sizes.
+`scripts/check-diff-erasure` compiles it in a directory containing only the
+two public `.cmi` files, in bytecode and native principal modes. The same
+script audits executable Lambda call targets, including reconstruction, for
+surviving model, proof, certificate or bigint computations.
 
-Let `N` and `M` be input lengths, `S = N + M`, and `D` the minimum edit cost.
-The checked invariants establish `S <= 2,000,000`, `0 <= x <= 1,000,000`,
-nonnegative edit depth, frontier width `depth + 1`, and
-`depth + remaining_fuel <= S`. Search starts with fuel `S` and strictly
-decreases it. Snake decreases the mathematical length of its old-input tail.
-Frontier traversal, reconstruction, and input validation use structural
-recursion. All machine-integer increments and decrements have proved bounds.
-No proof depends on wrapping arithmetic behaving like unbounded arithmetic.
-
-The invariants and loop structure give these operational bounds:
-
-- At most `D + 1 <= S + 1` frontier levels and slots in any one frontier.
-- At most `(D + 1)(D + 2)/2` calls to snake, including the initial call.
-- At most `N` Keep steps per snake and at most `S` reconstructed operations.
-- Each length validation inspects at most 1,000,001 input cells.
-
-The elementary sums above are derived from the checked width and descent
-invariants; a separate allocation/time cost semantics is not mechanized.
-The sharper amortized Myers time bound and a linear-space reconstruction
-variant are not proved here. Shared reverse scripts can retain many candidate
-paths. Totality follows Vox's resource-exhaustion convention: the accepted
-length limit does not promise that every worst-case input fits available RAM
-or the runtime stack.
-
-Tests cover all 3,969 pairs of binary sequences of length at most five,
-200 seeded random pairs, all byte values and extreme integer payloads,
-empty inputs, repeated elements, deterministic ties,
-a 10,000-byte common prefix, malformed patches, the exact million-element
-limit, and rejection above the limit. Edit cost is compared with an independent
-row-based dynamic-programming oracle. Bytecode, native, and both principal
-variants run the same tests. No compiler changes or new trusted axioms are used.
+`diff_rejected.ml` rejects forged optimality, a wrong patch result, omission
+of competing-script validity, access to private reconstruction, and access
+to private metric fuel. Runtime tests cover all 3,969 short binary input
+pairs, 200 seeded random pairs, all byte values, extreme integer payloads,
+empty inputs, repeated elements, ties, a 10,000-byte common prefix, malformed
+patches, the exact million-element limit and oversized-input rejection.
+An independent dynamic-programming oracle checks edit cost. The tests run in
+bytecode, native, and both principal variants.

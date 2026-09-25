@@ -59,41 +59,59 @@ def audit(compiler):
             prefix="diff-erasure-", dir=root / "_build") as tmp:
         tmp = pathlib.Path(tmp)
         dumps = {}
-        units = ("vox_diff_spec.ml", "vox_diff_metric.ml",
+        units = ("vox_diff_spec.mli", "vox_diff_spec.ml",
                  "vox_diff.mli", "vox_diff.ml")
         for unit in units:
             shutil.copyfile(root / "verification/library" / unit, tmp / unit)
             result = subprocess.run(
                 [str(compiler), "-extension", "refinement_types",
-                 "-drawlambda", "-c", unit],
+                 "-drawlambda", *(["-opaque"] if unit.endswith(".mli")
+                                   else []), "-c", unit],
                 cwd=tmp, check=True, text=True, capture_output=True)
             dumps[unit] = result.stderr
-        spec = dumps["vox_diff_spec.ml"]
-        exports_start = spec.rindex("(makeblock 0 source/")
-        exports = re.findall(r"([\w]+)/\d+", spec[exports_start:])
+        implementation = dumps["vox_diff.ml"]
+        exports_start = implementation.index("(makeblock 0 apply_source/")
+        exports_end = implementation.index(")", exports_start)
+        exports = re.findall(
+            r"([\w]+)/\d+", implementation[exports_start:exports_end])
         reverse_index = exports.index("reverse_into")
         for name, allowed in expected.items():
             body = function_body(dumps["vox_diff.ml"], name)
             direct = re.findall(r"\(apply\s+([\w]+)/\d+", body)
             assert set(direct) == allowed, (name, direct, allowed)
-            assert "Vox_diff_metric" not in body, name
+            assert "minimum_cost" not in body, name
             assert "bigint" not in body.lower(), name
             external_calls = re.findall(
-                r"\(apply\s+\(field_imm\s+\d+\s+"
-                r"\(global\s+(\w+)!?\)\)", body)
-            wanted = ["Vox_diff_spec"] if name == "finished" else []
+                r"\(apply\s+\(field_imm\s+(\d+)\s+Proof/\d+\)", body)
+            wanted = [str(reverse_index)] if name == "finished" else []
             assert external_calls == wanted, (name, external_calls)
-            if name == "finished":
-                indices = re.findall(
-                    r"\(apply\s+\(field_imm\s+(\d+)", body)
-                assert indices == [str(reverse_index)], indices
             calls = re.findall(r"\(apply\b", body)
             assert len(calls) == len(direct) + len(external_calls), name
-        body = function_body(spec, "reverse_into")
+        body = function_body(implementation, "reverse_into")
         calls = re.findall(r"\(apply\s+([\w]+)/\d+", body)
         assert calls == ["reverse_into"]
         assert "global" not in body and "bigint" not in body.lower()
-    print(f"{compiler.name}: diff calls contain no proof, metric, "
+        public = tmp / "public"
+        public.mkdir()
+        for unit in ("vox_diff_spec.cmi", "vox_diff.cmi"):
+            shutil.copyfile(tmp / unit, public / unit)
+        client = root / "testsuite/tests/vox/diff_public_client.ml"
+        client_result = subprocess.run(
+            [str(compiler), "-extension", "refinement_types", "-principal",
+             "-drawlambda",
+             "-c", "-o", "diff_public_client.cmo" if compiler.name == "ocamlc"
+             else "diff_public_client.cmx", str(client)],
+            cwd=public, check=True, text=True, capture_output=True)
+        for name in ("verified_client", "accepted"):
+            body = function_body(client_result.stderr, name)
+            calls = re.findall(
+                r"\(apply\s+\(field_imm\s+0\s+\(global Vox_diff!\)\)",
+                body)
+            assert len(calls) == 1, (name, calls)
+            assert len(re.findall(r"\(apply\b", body)) == 1, name
+            assert "Vox_diff_spec" not in body, name
+    print(f"{compiler.name}: public-only client passes; "
+          "diff calls contain no proof, metric, "
           "certificate, or bigint computations.")
 
 

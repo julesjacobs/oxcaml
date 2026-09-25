@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_diff_spec.ml vox_diff_metric.ml vox_diff.mli vox_diff.ml diff.ml";
+ all_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml diff_public_client.ml diff.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
@@ -11,22 +11,6 @@
 
 open Vox_diff_spec
 open Vox_diff
-
-let (verified_client @ total) : (old : int list) -> (fresh : int list) ->
-    (other : script) ->
-    {r : (script, error) result | match r with Error _ -> true | Ok s ->
-      apply old s === Some fresh
-      && apply fresh (invert s) === Some old
-      && (if apply old other === Some fresh then cost s <= cost other else true)} =
-    fun old fresh other ->
-  let refine_ result = diff old fresh in
-  match result with
-  | Error _ -> refine_ result
-  | Ok s ->
-    let computed : {s : script | cost s = Vox_diff_metric.metric old fresh} = refine_ s in
-    ghost_ (optimal_at old fresh computed other);
-    ghost_ (inverse_patch s);
-    refine_ result
 
 let bytes s = List.init (String.length s) (fun i -> Char.code s.[i])
 
@@ -56,7 +40,7 @@ let check old fresh =
     assert (apply fresh (invert script) = Some old);
     assert (cost script = Bigint.of_int (distance old fresh));
     assert (invert (invert script) = script);
-    assert (verified_client old fresh script = Ok script);
+    assert (Diff_public_client.verified_client old fresh script = Ok script);
     script
 
 let rec words n =

@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_diff_spec.ml vox_diff_metric.ml vox_diff.mli vox_diff.ml";
+ all_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml";
  readonly_files = "diff_rejected.ml";
  compile_only = "true";
  { setup-ocamlc.byte-build-env; ocamlc.byte; run-expect; check-program-output; }
@@ -17,10 +17,10 @@ let nonminimal () =
   cost_def script;
   cost_def [Insert 97];
   cost_def [];
-  Vox_diff_metric.equation [97] [97];
-  Vox_diff_metric.equation [] [];
+  minimum_cost_equation [97] [97];
+  minimum_cost_equation [] [];
   size_def [];
-  let computed : {s : script | cost s = Vox_diff_metric.metric [97] [97]} =
+  let computed : {s : script | cost s = minimum_cost [97] [97]} =
     refine_ script in
   Vox_diff.optimal_at [97] [97] computed [Keep 97];;
 [%%expect{|
@@ -50,7 +50,7 @@ let omit_validity old fresh other =
   | Error _ -> ()
   | Ok script ->
     let computed : {s : script |
-      cost s = Vox_diff_metric.metric old fresh} = refine_ script in
+      cost s = minimum_cost old fresh} = refine_ script in
     ghost_ (Vox_diff.optimal_at old fresh computed other);
     let u = () in
     (refine_ u : {u : unit | cost script <= cost other});;
@@ -59,4 +59,20 @@ Line 10, characters 5-14:
 10 |     (refine_ u : {u : unit | cost script <= cost other});;
           ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+|}]
+
+let hidden_reconstruction = Vox_diff.Proof.reverse_into;;
+[%%expect{|
+Line 1, characters 28-42:
+1 | let hidden_reconstruction = Vox_diff.Proof.reverse_into;;
+                                ^^^^^^^^^^^^^^
+Error: Unbound module "Vox_diff.Proof"
+|}]
+
+let hidden_metric_fuel = Vox_diff_spec.distance;;
+[%%expect{|
+Line 1, characters 25-47:
+1 | let hidden_metric_fuel = Vox_diff_spec.distance;;
+                             ^^^^^^^^^^^^^^^^^^^^^^
+Error: Unbound value "Vox_diff_spec.distance"
 |}]

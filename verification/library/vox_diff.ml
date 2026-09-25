@@ -1,5 +1,291 @@
 open Vox_diff_spec
-module M = Vox_diff_metric
+
+module Proof = struct
+  let rec (apply_source @ total) (script : script) :
+      {u : unit | apply (source script) script === Some (target script)} =
+    source_def script;
+    target_def script;
+    apply_def (source script) script;
+    (match script with [] -> () | _ :: rest -> apply_source rest);
+    let u = () in refine_ u
+
+  let rec (invert_correct @ total) (script : script) :
+      {u : unit | source (invert script) === target script
+        && target (invert script) === source script
+        && cost (invert script) = cost script} =
+    invert_def script;
+    source_def script;
+    target_def script;
+    cost_def script;
+    source_def (invert script);
+    target_def (invert script);
+    cost_def (invert script);
+    (match script with [] -> () | _ :: rest -> invert_correct rest);
+    let u = () in refine_ u
+
+  let[@def] rec restore_old (rev : script) (suffix : int list) =
+    match rev with
+    | [] -> suffix
+    | Keep x :: rest | Delete x :: rest -> restore_old rest (x :: suffix)
+    | Insert _ :: rest -> restore_old rest suffix
+
+  let[@def] rec restore_new (rev : script) (suffix : int list) =
+    match rev with
+    | [] -> suffix
+    | Keep x :: rest | Insert x :: rest -> restore_new rest (x :: suffix)
+    | Delete _ :: rest -> restore_new rest suffix
+
+  let rec (reverse_into @ total) : (rev : script) -> (suffix : script) ->
+      {s : script | source s === restore_old rev (source suffix)
+        && target s === restore_new rev (target suffix)
+        && cost s = Bigint.add (cost rev) (cost suffix)} = fun rev suffix ->
+    ghost_ (cost_def rev);
+    ghost_ (restore_old_def rev (source suffix));
+    ghost_ (restore_new_def rev (target suffix));
+    match rev with
+    | [] -> refine_ suffix
+    | op :: rest ->
+      let next = op :: suffix in
+      ghost_ (cost_def next);
+      ghost_ (source_def next);
+      ghost_ (target_def next);
+      let refine_ result = reverse_into rest next in
+      refine_ result
+
+  let rec (size_nonnegative @ total) (values : int list) :
+      {u : unit | 0Z <= size values} =
+    size_def values;
+    (match values with [] -> () | _ :: rest -> size_nonnegative rest);
+    let u = () in refine_ u
+
+  let[@def] rec suffix (whole : int list) (tail : int list) =
+    ghost_ (whole === tail || match whole with
+      | [] -> false | _ :: rest -> suffix rest tail)
+
+  let rec (suffix_bounds @ total) : (whole : int list) -> (tail : int list) ->
+      {u : unit | if suffix whole tail then
+        size tail <= size whole && (if size tail = size whole then tail ===
+          whole
+          else true)
+        else true} = fun whole tail ->
+    suffix_def whole tail;
+    size_def whole;
+    (match whole with
+     | [] -> ()
+     | _ :: rest -> suffix_bounds rest tail);
+    let u = () in refine_ u
+
+  let rec (suffix_step @ total) : (whole : int list) -> (head : int) ->
+      (tail : int list) ->
+      {u : unit | if suffix whole (head :: tail) then suffix whole tail else
+        true} =
+      fun whole head tail ->
+    suffix_def whole (head :: tail);
+    suffix_def whole tail;
+    suffix_def tail tail;
+    match whole with
+    | [] -> let u = () in refine_ u
+    | _ :: rest ->
+      suffix_step rest head tail;
+      let u = () in refine_ u
+
+  let rec (suffix_compare @ total) : (whole : int list) ->
+      (shorter : int list) -> (longer : int list) ->
+      {u : unit | if suffix whole shorter && suffix whole longer
+        && size shorter <= size longer then suffix longer shorter else true} =
+      fun whole shorter longer ->
+    suffix_def whole shorter;
+    suffix_def whole longer;
+    suffix_def longer shorter;
+    suffix_bounds whole shorter;
+    suffix_bounds whole longer;
+    (match whole with
+     | [] -> ()
+     | _ :: rest -> suffix_compare rest shorter longer);
+    let u = () in refine_ u
+
+  let (size_zero @ total) (values : int list) :
+      {u : unit | if size values = 0Z then values === [] else true} =
+    size_def values;
+    (match values with [] -> () | _ :: rest -> size_nonnegative rest);
+    let u = () in refine_ u
+
+  let rec (apply_characterization @ total) : (old : int list) -> (script :
+    script) ->
+      {u : unit | apply old script ===
+        (if old === source script then Some (target script) else None)} =
+      fun old script ->
+    apply_def old script;
+    source_def script;
+    target_def script;
+    (match script with
+     | [] -> ()
+     | Insert _ :: rest -> apply_characterization old rest
+     | Keep _ :: rest | Delete _ :: rest ->
+       match old with [] -> () | _ :: tail -> apply_characterization tail
+         rest);
+    let u = () in refine_ u
+
+  let (inverse_patch @ total) (script : script) :
+      {u : unit | apply (target script) (invert script) === Some (source
+        script)}
+        =
+    invert_correct script;
+    apply_source (invert script);
+    let u = () in refine_ u
+
+  let rec (script_bounds @ total) (script : script) :
+      {u : unit | 0Z <= cost script && cost script <= script_size script
+        && script_size script <= Bigint.add (size (source script)) (size
+          (target
+          script))} =
+    source_def script;
+    target_def script;
+    cost_def script;
+    script_size_def script;
+    size_def (source script);
+    size_def (target script);
+    (match script with [] -> () | _ :: rest -> script_bounds rest);
+    let u = () in refine_ u
+end
+
+module M = struct
+  open Proof
+
+  let rec (neighbors_aux @ total) : (fuel : Bigint.t) ->
+      (old : int list) -> (fresh : int list) -> (a : int) -> (b : int) ->
+      {u : unit | if fuel = Bigint.add (size old) (size fresh) then
+        minimum_cost old fresh <= Bigint.add 1Z (minimum_cost (a :: old) fresh)
+        && minimum_cost (a :: old) fresh <= Bigint.add 1Z (minimum_cost old
+          fresh)
+        && minimum_cost old fresh <= Bigint.add 1Z (minimum_cost old (b ::
+          fresh))
+        && minimum_cost old (b :: fresh) <= Bigint.add 1Z (minimum_cost old
+          fresh)
+        else true} = fun fuel old fresh a b ->
+    if fuel <> Bigint.add (size old) (size fresh) then
+      let u = () in refine_ u
+    else (
+      size_def old;
+      size_def fresh;
+      size_nonnegative old;
+      size_nonnegative fresh;
+      minimum_cost_equation old fresh;
+      minimum_cost_equation (a :: old) fresh;
+      minimum_cost_equation old (b :: fresh);
+      size_def (a :: old);
+      size_def (b :: fresh);
+      (match fresh with
+       | [] -> ()
+       | head :: tail ->
+         size_nonnegative tail;
+         neighbors_aux (Bigint.sub fuel 1Z) old tail a head);
+      (match old with
+       | [] -> ()
+       | head :: tail ->
+         size_nonnegative tail;
+         neighbors_aux (Bigint.sub fuel 1Z) tail fresh head b);
+      let u = () in refine_ u)
+  [@@decreases fuel]
+
+  let (neighbors @ total) (old : int list) (fresh : int list) (a : int) (b :
+    int)
+    :
+      {u : unit |
+        minimum_cost old fresh <= Bigint.add 1Z (minimum_cost (a :: old) fresh)
+        && minimum_cost (a :: old) fresh <= Bigint.add 1Z (minimum_cost old
+          fresh)
+        && minimum_cost old fresh <= Bigint.add 1Z (minimum_cost old (b ::
+          fresh))
+        && minimum_cost old (b :: fresh) <= Bigint.add 1Z (minimum_cost old
+          fresh)} =
+    neighbors_aux (Bigint.add (size old) (size fresh)) old fresh a b;
+    let u = () in refine_ u
+
+  let (strip @ total) (old : int list) (fresh : int list) (a : int) (b : int) :
+      {u : unit | minimum_cost old fresh <= minimum_cost (a :: old) (b ::
+        fresh)} =
+    minimum_cost_equation (a :: old) (b :: fresh);
+    neighbors old fresh a b;
+    let u = () in refine_ u
+
+  let rec (lower_bound @ total) (script : script) :
+      {u : unit | minimum_cost (source script) (target script) <= cost script}
+        =
+    source_def script;
+    target_def script;
+    cost_def script;
+    match script with
+    | [] ->
+      minimum_cost_equation [] [];
+      size_def [];
+      let u = () in refine_ u
+    | op :: rest ->
+      lower_bound rest;
+      (match op with
+       | Keep a -> minimum_cost_equation (a :: source rest) (a :: target rest)
+       | Delete a -> neighbors (source rest) (target rest) a a
+       | Insert b -> neighbors (source rest) (target rest) b b);
+      let u = () in refine_ u
+
+  let rec (crop @ total) : (old : int list) -> (fresh : int list) ->
+      (old_tail : int list) -> (new_tail : int list) ->
+      {u : unit | if suffix old old_tail && suffix fresh new_tail
+        && Bigint.sub (size old) (size old_tail) =
+           Bigint.sub (size fresh) (size new_tail)
+        then minimum_cost old_tail new_tail <= minimum_cost old fresh else
+          true} =
+      fun old fresh old_tail new_tail ->
+    suffix_bounds old old_tail;
+    suffix_bounds fresh new_tail;
+    suffix_def old old_tail;
+    suffix_def fresh new_tail;
+    size_def old;
+    size_def fresh;
+    size_nonnegative old_tail;
+    size_nonnegative new_tail;
+    (match old, fresh with
+     | a :: ats, b :: bts ->
+       crop ats bts old_tail new_tail;
+       strip ats bts a b
+     | _ -> ());
+    let u = () in refine_ u
+
+  let rec (properties_aux @ total) : (fuel : Bigint.t) ->
+      (old : int list) -> (fresh : int list) ->
+      {u : unit | if fuel = Bigint.add (size old) (size fresh) then
+        0Z <= minimum_cost old fresh && minimum_cost old fresh <= fuel
+        && (if minimum_cost old fresh = 0Z then old === fresh else true)
+        else true} = fun fuel old fresh ->
+    if fuel <> Bigint.add (size old) (size fresh) then let u = () in refine_ u
+    else (
+      minimum_cost_equation old fresh;
+      size_def old;
+      size_def fresh;
+      size_nonnegative old;
+      size_nonnegative fresh;
+      size_zero old;
+      size_zero fresh;
+      (match old, fresh with
+       | a :: ats, b :: bts ->
+         size_nonnegative ats;
+         size_nonnegative bts;
+         properties_aux (Bigint.sub fuel 2Z) ats bts;
+         properties_aux (Bigint.sub fuel 1Z) ats fresh;
+         properties_aux (Bigint.sub fuel 1Z) old bts;
+       | _ -> ());
+      let u = () in refine_ u)
+  [@@decreases fuel]
+
+  let (properties @ total) (old : int list) (fresh : int list) :
+      {u : unit | 0Z <= minimum_cost old fresh
+        && minimum_cost old fresh <= Bigint.add (size old) (size fresh)
+        && (if minimum_cost old fresh = 0Z then old === fresh else true)} =
+    properties_aux (Bigint.add (size old) (size fresh)) old fresh;
+    let u = () in refine_ u
+end
+
+open Proof
 
 type entry = { x : int; old_tail : int list;
   new_tail : int list; rev : script }
@@ -28,7 +314,8 @@ let[@def] optional_settled candidate =
   match candidate with None -> true | Some e -> settled e
 
 let[@def] good candidate budget =
-  match candidate with None -> false | Some e -> M.metric e.old_tail e.new_tail
+  match candidate with None -> false | Some e -> minimum_cost e.old_tail
+    e.new_tail
     <= budget
 
 let[@def] unfinished candidate =
@@ -53,7 +340,8 @@ let[@def] rec frontier_unfinished frontier =
 let (dominance @ total) : (old : int list) -> (fresh : int list) ->
     (k : Bigint.t) -> (depth : Bigint.t) -> (a : entry) -> (b : entry) ->
     {u : unit | if valid old fresh k depth a && valid old fresh k depth b
-      && b.x <= a.x then M.metric a.old_tail a.new_tail <= M.metric b.old_tail
+      && b.x <= a.x then minimum_cost a.old_tail a.new_tail <= minimum_cost
+        b.old_tail
         b.new_tail
       else true} = fun old fresh k depth a b ->
   valid_def old fresh k depth a;
@@ -69,7 +357,8 @@ let rec (snake @ total) : (remaining : Bigint.t) @ ghost ->
     (candidate : {e : entry | valid old fresh k depth e && remaining = size
       e.old_tail}) ->
     {r : entry | let refine_ e = candidate in valid old fresh k depth r
-      && settled r && M.metric r.old_tail r.new_tail = M.metric e.old_tail
+      && settled r && minimum_cost r.old_tail r.new_tail = minimum_cost
+        e.old_tail
         e.new_tail} =
     fun remaining old fresh k depth candidate ->
   let refine_ e = candidate in
@@ -89,7 +378,7 @@ let rec (snake @ total) : (remaining : Bigint.t) @ ghost ->
     ghost_ (suffix_step fresh b bts);
     ghost_ (cost_def rev);
     ghost_ (valid_def old fresh k depth next);
-    ghost_ (M.equation e.old_tail e.new_tail);
+    ghost_ (minimum_cost_equation e.old_tail e.new_tail);
     let smaller = ghost_ (Bigint.sub remaining 1Z) in
     let next : {e : entry | valid old fresh k depth e && smaller = size
       e.old_tail} = refine_ next in
@@ -200,14 +489,13 @@ let (branches @ total) (candidate : entry option) (deletion : entry option)
    | None -> ()
    | Some e ->
      settled_def e;
-     M.equation e.old_tail e.new_tail;
+     minimum_cost_equation e.old_tail e.new_tail;
      size_def e.old_tail;
      size_def e.new_tail;
      match e.old_tail, e.new_tail with
-     | _ :: ats, _ :: bts -> M.min_def (M.metric ats e.new_tail) (M.metric
-       e.old_tail bts)
-     | [], _ :: bts -> M.equation [] bts
-     | _ :: ats, [] -> M.equation ats []
+     | _ :: _, _ :: _ -> ()
+     | [], _ :: bts -> minimum_cost_equation [] bts
+     | _ :: ats, [] -> minimum_cost_equation ats []
      | [], [] -> ());
   let u = () in refine_ u
 
@@ -436,7 +724,7 @@ let (diff @ total) : (old : int list) -> (fresh : int list) ->
       | Error Input_too_large -> 1000000Z < size old || 1000000Z < size fresh
       | Ok s -> size old <= 1000000Z && size fresh <= 1000000Z
         && source s === old && target s === fresh
-        && apply old s === Some fresh && cost s = M.metric old fresh
+        && apply old s === Some fresh && cost s = minimum_cost old fresh
         && 0Z <= cost s && script_size s <= Bigint.add (size old) (size fresh)}
           = fun old fresh ->
   let refine_ n = bounded_length 1000000 old in
@@ -456,7 +744,7 @@ let (diff @ total) : (old : int list) -> (fresh : int list) ->
     let refine_ first = snake remaining (ghost_ old) (ghost_ fresh) (ghost_ 0Z)
       (ghost_ 0Z) candidate in
     let frontier = [Some first] in
-    let budget = ghost_ (M.metric old fresh) in
+    let budget = ghost_ (minimum_cost old fresh) in
     let fuel = n + m in
     ghost_ (optional_valid_def old fresh 0Z 0Z (Some first));
     ghost_ (optional_settled_def (Some first));
@@ -483,7 +771,8 @@ let (diff @ total) : (old : int list) -> (fresh : int list) ->
       result
 
 let (optimal_at @ total) : (old : int list) -> (fresh : int list) ->
-    (computed : {s : script | cost s = M.metric old fresh}) -> (other : script)
+    (computed : {s : script | cost s = minimum_cost old fresh}) -> (other :
+      script)
       ->
     {u : unit | let refine_ s = computed in
       if apply old other === Some fresh then cost s <= cost other else true} =
@@ -492,3 +781,14 @@ let (optimal_at @ total) : (old : int list) -> (fresh : int list) ->
   apply_characterization old other;
   M.lower_bound other;
   let u = () in refine_ u
+
+let (invert_correct @ total) (script : script) :
+    {u : unit | source (invert script) === target script
+      && target (invert script) === source script
+      && cost (invert script) = cost script} =
+  Proof.invert_correct script
+
+let (inverse_patch @ total) (script : script) :
+    {u : unit | apply (target script) (invert script) === Some (source script)}
+      =
+  Proof.inverse_patch script
