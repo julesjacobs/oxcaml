@@ -225,7 +225,7 @@ for file in $(git diff --no-ext-diff --name-only); do
 done
 
 # Copy any newly-imported files into src/ocaml
-for file in "${new_files[@]}"; do
+for file in ${new_files[@]+"${new_files[@]}"}; do
   tgt="$(merlin-target "$file")"
   if [[ -z "$tgt" ]]; then continue; fi
   tgt=src/ocaml/$tgt
