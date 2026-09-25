@@ -43,6 +43,9 @@ Combined `solve_with_fallback fuel depth_fuel n formula` additionally proves
 `Unknown -> depth_fuel <= n`; accepted inputs and `depth_fuel >= n + 1`
 therefore force a decision. This is combined-solver completeness. CDCL eventual
 progress remains unproved; the separate fallback has not replaced its API.
+The CDCL contract permits `Unknown` at every nonnegative fuel value: the proof
+does not exclude search exhaustion, analysis exhaustion, or failed
+asserting-clause construction. Fuel monotonicity is not part of the contract.
 The fallback can visit exponentially many nodes. Totality uses Vox's logical
 execution model, without a bound on available memory, stack, or elapsed time.
 Mutable CDCL is only proved sound when it returns.
@@ -89,7 +92,10 @@ or level-bound helpers in
 `testsuite/tests/vox/sat_solver.ml`, `sat_cdcl.ml`, and `sat_cdcl_total.ml`
 exercise the public APIs. `sat_kernel.ml` separately checks private resolution
 operations. Rejection tests retain forged-UNSAT, mutable-totality, loop-totality,
-and mutable-array-bound checks. The build and native benchmark use the
+and mutable-array-bound checks. Public-interface rejection tests also prevent
+claiming CDCL completeness at fuel `n + 1` or combined completeness at fallback
+depth `n`; the positive `sufficient_depth` client proves the latter at `n + 1`.
+The build and native benchmark use the
 installed compiler produced by `make install`.
 
 Trust includes Vox's type/refinement and termination checking, VC generation,

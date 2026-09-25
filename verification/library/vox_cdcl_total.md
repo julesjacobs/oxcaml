@@ -7,7 +7,10 @@ variables. Vox checks the public
 `solve` function as total. This proves termination and sound answers, but does
 not prove that sufficient fuel guarantees a decision. Exhaustion returns
 `Unknown`. Some internal checks also return `Unknown` and are not yet proved
-unreachable from the initial state.
+unreachable from the initial state. The public contract permits `Unknown` for
+every accepted input and fuel value. It gives no sufficient CDCL fuel bound,
+no monotonicity guarantee when fuel increases, and no eventual CDCL decision
+theorem.
 
 Accepted inputs have 0–256 variables, at most 4,096 clauses, and at most
 65,536 literal occurrences. Every literal index must be in `[0, n)`, and fuel
@@ -68,8 +71,9 @@ Assignment-length preservation removes the final runtime length check. Failed
 decision selection, decision enqueue, conflict-source lookup, trail lookup,
 selected-variable lookup, and reason fetch are proved unreachable. The remaining
 obligations concern successful asserting-clause construction and global search
-progress. Analysis still uses a fuel budget; a structural progress proof also
-needs the strict order of reason antecedents within a decision level. Decision levels are nonnegative and
+progress. Analysis still uses a fuel budget. Strict antecedent order and the
+smaller trail rank of each antecedent are proved; a decreasing measure for the
+whole conflicting clause remains unproved. Decision levels are nonnegative and
 bounded by the current level. Successful asserting-clause construction proves
 a strictly smaller backjump target and a current-level asserting variable;
 backtracking makes that variable unassigned, so learned enqueue succeeds.
@@ -83,6 +87,18 @@ root analysis returns the empty clause. No eventual-decision theorem is proved
 for CDCL alone.
 Successful conflict analysis does prove that its clause remains conflicting
 and has at most one current-level variable, or none when analyzing at the root.
+
+The remaining proof obligations are distinct:
+
+| Obligation | Checked guarantee | Still unproved |
+| --- | --- | --- |
+| Analysis termination | Decreasing fuel; each reason antecedent has smaller trail rank than its pivot | A whole-clause decrease that removes analysis fuel and guarantees a result |
+| Asserting-clause construction | If construction succeeds, its target is smaller and learned enqueue succeeds | Construction always succeeds after nonroot analysis; analysis currently permits zero current-level variables |
+| Global CDCL progress | Search terminates with its supplied fuel and preserves soundness | A global progress measure and sufficient CDCL budget guaranteeing a decision |
+
+The `Unknown` returns not excluded by the current proof are search
+fuel exhaustion, analysis fuel exhaustion, and failed asserting-clause
+construction. The interface does not expose which caused a particular result.
 
 `solve_with_fallback fuel depth_fuel n formula` first calls the bounded CDCL
 solver. If CDCL returns `Unknown`, it calls private `Vox_sat_proof.decide_depth`, a persistent
@@ -118,6 +134,9 @@ CDCL decides both instances, so these timings measure its successful path.
 Run `./dev test vox/sat_cdcl_total.ml` for the totality, soundness, learning,
 backjump, and truth-table tests. The matched benchmark is
 `verification/benchmarks/vox_cdcl_compare.ml`.
+`sat_cdcl_progress_rejected.ml` and `sat_cdcl_fallback_depth_rejected.ml`
+reject clients that claim a CDCL decision at fuel `n + 1`, or a combined-solver
+decision at fallback depth `n`, respectively.
 
 See [the review boundary](vox_sat_boundary.md). The fallback remains a separate
 entrypoint pending the architecture choice; it does not replace bounded CDCL.

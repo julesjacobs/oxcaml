@@ -16,6 +16,10 @@ type report = {
 
 type input_error = Invalid_fuel | Invalid_input of Vox_sat_spec.input_error
 
+(** Bounded CDCL: termination and sound answers. [Unknown] is permitted for
+    every accepted input and fuel value. It can result from search or analysis
+    exhaustion, or failure to construct an asserting clause. No sufficient
+    fuel bound, monotonicity in fuel, or eventual CDCL decision is promised. *)
 val solve :
   (fuel : int) -> (n : int) ->
   (formula : Vox_sat_spec.formula) ->
@@ -43,6 +47,10 @@ val solve :
       | Unsat -> Vox_sat_spec.unsatisfiable n formula
       | Unknown -> true} @@ total
 
+(** Runs bounded CDCL, then a separate DPLL search if CDCL returns [Unknown].
+    For accepted inputs and nonnegative CDCL fuel, [depth_fuel >= n + 1]
+    guarantees a decision. This guarantee belongs to the combined solver.
+    [statistics] describes only its CDCL attempt. *)
 val solve_with_fallback :
   (fuel : int) -> (depth_fuel : int) -> (n : int) ->
   (formula : Vox_sat_spec.formula) ->
