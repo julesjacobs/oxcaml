@@ -3,6 +3,8 @@ open Typedtree
 open Vox_smt
 open Vox_encoding
 
+exception Unproved of Location.error
+
 module Term_table = Hashtbl.Make (struct
   type t = term
 
@@ -144,7 +146,8 @@ module Symbolic_keys = Hashtbl.Make (struct
 end)
 
 type context =
-  { encoding : Vox_encoding.context;
+  { poll : unit -> unit;
+    encoding : Vox_encoding.context;
     mutable datatypes : datatype_declaration list;
     mutable functions : Function.t list;
     function_cache : (string * sort list * sort, Function.t) Hashtbl.t;
@@ -1877,6 +1880,7 @@ let expression_constructor ctx env ty (c : Data_types.constructor_description) =
     end
 
 let rec predicate ctx env s e =
+  ctx.poll ();
   if impossible s
   then s, None
   else
@@ -2404,6 +2408,7 @@ let complete_checks entry s checks =
     s (List.rev checks)
 
 let rec expression ?deferred ctx s e =
+  ctx.poll ();
   if impossible s
   then s, None
   else
@@ -3029,6 +3034,7 @@ let slice_goal ctx query term =
   }
 
 let query ctx code =
+  ctx.poll ();
   let definitions = ref [] in
   let share = function
     | App _ as term ->
@@ -3040,6 +3046,7 @@ let query ctx code =
   in
   let goals = ref [] in
   let rec forward code reachable =
+    ctx.poll ();
     List.fold_left
       (fun reachable -> function
         | Assume p -> share (both And reachable p)
@@ -3229,7 +3236,7 @@ let verify_batch ctx prove code =
   let query = slice_goal ctx query query.goal.term in
   let prove_one (o : obligation) q =
     try prove o.loc q
-    with Location.Error error ->
+    with Unproved error ->
       let s = { empty with omitted_premises = o.omitted_premises } in
       raise
         (Location.Error
@@ -3240,15 +3247,16 @@ let verify_batch ctx prove code =
   | [(o, _)] -> prove_one o query
   | (first, _) :: _ -> (
     try prove first.loc query
-    with Location.Error _ ->
+    with Unproved _ ->
       List.iter
         (fun (o, term) ->
           let query = expand term in
           prove_one o (slice_goal ctx query term))
         goals)
 
-let context ~prove ~verify_introductions =
-  { encoding = Vox_encoding.create_context ();
+let context ~poll ~prove ~verify_introductions =
+  { poll;
+    encoding = Vox_encoding.create_context ();
     datatypes = [];
     functions = [];
     function_cache = Hashtbl.create 32;
@@ -3278,12 +3286,14 @@ let context ~prove ~verify_introductions =
     check_call = (fun _ _ _ _ -> ())
   }
 
-let generate ~prove str =
+let generate ?(poll = fun () -> ()) ~prove str =
+  poll ();
   let exception Has_obligation in
   let scan =
     { Tast_iterator.default_iterator with
       expr =
         (fun self e ->
+          poll ();
           if Option.is_some (intro_loc e) then raise Has_obligation;
           Tast_iterator.default_iterator.expr self e)
     }
@@ -3291,14 +3301,15 @@ let generate ~prove str =
   match scan.structure scan str with
   | () -> ()
   | exception Has_obligation ->
-    let ctx = context ~prove ~verify_introductions:true in
+    let ctx = context ~poll ~prove ~verify_introductions:true in
     let result, _ = structure ctx empty str in
     List.iter (verify_batch ctx ctx.prove) (List.rev ctx.batches);
     verify_batch ctx prove result.code
 
-let check_termination ~prove ~self ~fn ~measure =
+let check_termination ~poll ~prove ~self ~fn ~measure =
+  poll ();
   let params, body = Recursive_function.parameters fn in
-  let ctx = context ~prove ~verify_introductions:false in
+  let ctx = context ~poll ~prove ~verify_introductions:false in
   let reject e =
     Location.raise_errorf ~loc:e.exp_loc
       "Unsupported decreases expression: expected scalar primitive operations"

@@ -102,19 +102,28 @@ module Frequency_probe = struct
   module Key = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
+    let (reflexive @ total) (x : t) :
+        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+    let (antisymmetric @ total) (x : t) (y : t) :
+        {u : unit | (compare x y < 0) = (compare y x > 0)
+          && (compare x y = 0) = (compare y x = 0)} @ ghost =
+      ghost_ (refine_ ())
+    let (transitive @ total) (x : t) (y : t) (z : t) :
+        {u : unit | not (compare x y <= 0 && compare y z <= 0)
+          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
   end
   module M = Map.MakeTotal (Key)
   let whole_map_model (map : Bigint.t M.t) :
       {result : Bigint.t M.t | result === map} = refine_ map
 end;;
 [%%expect{|
-Line 8, characters 31-45:
-8 |       {result : Bigint.t M.t | result === map} = refine_ map
-                                   ^^^^^^^^^^^^^^
+Line 17, characters 31-45:
+17 |       {result : Bigint.t M.t | result === map} = refine_ map
+                                    ^^^^^^^^^^^^^^
 Error: Unsupported refinement predicate in VC generation
-Line 8, characters 49-60:
-8 |       {result : Bigint.t M.t | result === map} = refine_ map
-                                                     ^^^^^^^^^^^
+Line 17, characters 49-60:
+17 |       {result : Bigint.t M.t | result === map} = refine_ map
+                                                      ^^^^^^^^^^^
   Required by this refinement introduction
 |}]
 

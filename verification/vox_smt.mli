@@ -138,22 +138,25 @@ val term_sort : term -> sort
     is supported. Operators have fixed arity. [Integer] constants must be signed
     63-bit integers; [Big_integer] constants use canonical decimal text.
     Undeclared and duplicate symbols are errors. *)
-val check : int_width:int -> query -> unit
+val check : ?poll:(unit -> unit) -> int_width:int -> query -> unit
 
-(** Always checks sorts first. Names [v0], [v1], ... follow declaration order.
+(** [poll] is called during traversal and may raise to cancel construction.
+    Always checks sorts first. Names [v0], [v1], ... follow declaration order.
     Includes options, declarations, assertions and a satisfiability check, but
     not [exit]. Bitvector queries use Z3 simplification and equation elimination
     before its SMT tactic. No quantifiers can be represented. Machine integers
     are bounded SMT integers. Addition, subtraction, negation, division, and
     remainder have exact signed 63-bit semantics. Queries with bitwise
     operations represent all machine integers as 63-bit vectors and use ALL;
-    explicit conversions to mathematical integers preserve the sign.
-    Multiplication is a shared uninterpreted function. Queries using [Int],
+    explicit conversions to mathematical integers preserve the sign. Constant
+    multiplication and bitvector multiplication are exact. Other integer-encoded
+    multiplication is a shared uninterpreted function. Queries using [Int],
     opaque sorts, datatypes, or general machine division use ALL; other queries
     use QF_LIA or QF_UFLIA. Callers must exclude zero divisors when modeling
     OCaml normal returns. [Int_div]/[Int_mod] use Euclidean semantics; callers
     must supply the zero-divisor behavior. *)
-val to_smtlib : int_width:int -> timeout_ms:int -> query -> string
+val to_smtlib :
+  ?poll:(unit -> unit) -> int_width:int -> timeout_ms:int -> query -> string
 
 (** Integer model values are signed, including on a narrower host. *)
 type value =

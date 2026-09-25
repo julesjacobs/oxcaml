@@ -792,6 +792,7 @@ let ocaml_ignored_flags =
 let ocaml_ignored_parametrized_flags =
   [ "-cc";
     "-smt-solver";
+    "-smt-budget";
     "-smt-timeout";
     "-cclib";
     "-ccopt";

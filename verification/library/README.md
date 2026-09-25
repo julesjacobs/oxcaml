@@ -6,10 +6,15 @@ From a configured Vox checkout with Z3 on `PATH`:
 make vox-library
 ```
 
-This builds and installs the final compiler, verifies the library with
-`-principal` in bytecode and native modes, and installs `Vox_sequence`,
-`Vox_int_sequence`, `Vox_iarray`, `Borrow`, `Borrow_iarray`, and `vox_borrow`
-under the configured prefix's `lib/ocaml/vox`.
+This builds and installs the final compiler and verifies the library in
+bytecode and native modes. Checking uses `-principal` except for `vox_table_*`
+and `vox_verified_flat_hashtbl`: an upstream `immutable_data` inference issue
+prevents those modules from compiling in principal mode. All modules undergo
+refinement and termination checking. The build installs `Vox_sequence`,
+`Vox_int_sequence`, `Vox_iarray`, `Borrow`, `Borrow_iarray`, the permission,
+raw-memory, atomic and verified-table modules, and the `vox_borrow` archive
+under the configured prefix's `lib/ocaml/vox`. The archive name is historical;
+its modules include the ownership primitives and derived collections.
 
 With the worktree-local prefix from the agent guide, compile a client with:
 

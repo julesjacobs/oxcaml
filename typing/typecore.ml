@@ -8266,7 +8266,9 @@ and type_expect_
       Language_extension.assert_enabled ~loc Refinement_types ();
       let operand_type =
         newvar
-          (Jkind.Builtin.value ~why:(Unknown "logical equality operand"))
+          (if Env.in_ghost_context env
+           then Jkind.Builtin.any ~why:Dummy_jkind
+           else Jkind.Builtin.value ~why:(Unknown "logical equality operand"))
       in
       let left =
         type_expect env mode_max left

@@ -29,7 +29,15 @@ module type OrderedType =
 module type TotalOrderedType =
   sig
     type t
-    val compare: t -> t -> int @@ total
+    val compare: t @ immutable -> t @ immutable -> int @@ total
+    val reflexive : (x : t) -> {u : unit | compare x x = 0}
+      @ ghost @@ total
+    val antisymmetric : (x : t) -> (y : t) ->
+      {u : unit | (compare x y < 0) = (compare y x > 0)
+        && (compare x y = 0) = (compare y x = 0)} @ ghost @@ total
+    val transitive : (x : t) -> (y : t) -> (z : t) ->
+      {u : unit | not (compare x y <= 0 && compare y z <= 0)
+        || compare x z <= 0} @ ghost @@ total
   end
 
 module type S =

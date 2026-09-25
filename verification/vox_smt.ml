@@ -293,7 +293,8 @@ let rec term_sort = function
     | Conditional, [_; t; _] -> term_sort t
     | Conditional, _ -> error "ite expects 3 operands")
 
-let check ~int_width q =
+let check ?(poll = fun () -> ()) ~int_width q =
+  poll ();
   if int_width <> 63 then raise (Unsupported_target int_width);
   let datatypes = Hashtbl.create 16 in
   List.iter
@@ -359,7 +360,9 @@ let check ~int_width q =
     if actual <> expected
     then error "Expected %s, got %s" (sort_name expected) (sort_name actual)
   in
-  let rec infer = function
+  let rec infer term =
+    poll ();
+    match term with
     | Boolean _ -> Bool
     | Integer n ->
       if n < -4611686018427387904L || n > 4611686018427387903L
@@ -439,8 +442,8 @@ let check ~int_width q =
   List.iter fact q.facts;
   fact q.goal
 
-let to_smtlib ~int_width ~timeout_ms q =
-  check ~int_width q;
+let to_smtlib ?(poll = fun () -> ()) ~int_width ~timeout_ms q =
+  check ~poll ~int_width q;
   if timeout_ms <= 0 then invalid_arg "Vox_smt.to_smtlib: timeout_ms";
   let names = Hashtbl.create 16 in
   List.iteri
@@ -478,6 +481,7 @@ let to_smtlib ~int_width ~timeout_ms q =
   let maximum = "4611686018427387903" in
   let modulus = "9223372036854775808" in
   let rec iter f term =
+    poll ();
     f term;
     match term with
     | Boolean _ | Integer _ | Big_integer _ | Var _ -> ()
@@ -580,7 +584,9 @@ let to_smtlib ~int_width ~timeout_ms q =
     | Opaque id -> Hashtbl.find opaque_names id
     | Datatype datatype -> Hashtbl.find datatype_names datatype.datatype_id
   in
-  let rec term = function
+  let rec term value =
+    poll ();
+    match value with
     | Boolean v -> add (string_of_bool v)
     | Integer value ->
       if has_bitwise
@@ -680,6 +686,7 @@ let to_smtlib ~int_width ~timeout_ms q =
         (if has_bitwise
          then
            match op with
+           | Mul -> "bvmul"
            | Add -> "bvadd"
            | Sub -> "bvsub"
            | Neg -> "bvneg"
@@ -791,13 +798,8 @@ let to_smtlib ~int_width ~timeout_ms q =
       \  (ite (= y 0) 0\n\
       \    (let ((r (mod (int63_abs x) (int63_abs y))))\n\
       \      (ite (< x 0) (- r) r))))\n";
-  if multiplications <> []
-  then
-    add
-      (if has_bitwise
-       then
-         "(declare-fun int63_mul ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))\n"
-       else "(declare-fun int63_mul (Int Int) Int)\n");
+  if multiplications <> [] && not has_bitwise
+  then add "(declare-fun int63_mul (Int Int) Int)\n";
   List.iter
     (fun id ->
       add
@@ -875,6 +877,22 @@ let to_smtlib ~int_width ~timeout_ms q =
       | Int63 -> bounded (Var symbol))
     q.symbols;
   List.iter bounded multiplications;
+  if not has_bitwise
+  then
+    List.iter
+      (function
+        | App (Mul, ([Integer factor; value] | [value; Integer factor])) as
+          multiplication ->
+          add "(assert (= ";
+          term multiplication;
+          add " (- (mod (+ (* ";
+          integer factor;
+          add " ";
+          term value;
+          add ") 4611686018427387904) 9223372036854775808) ";
+          add "4611686018427387904)))\n"
+        | _ -> ())
+      multiplications;
   List.iter bounded int63_results;
   List.iter
     (fun f ->

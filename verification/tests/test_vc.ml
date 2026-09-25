@@ -1,6 +1,7 @@
 open Vox_smt
 
-let queries ?(retry = false) source =
+let queries ?(retry = false) ?(poll = fun () -> ())
+    ?(before_query = fun _ _ -> ()) source =
   Language_extension.enable Refinement_types ();
   Typecore.reset_delayed_checks ();
   let parsed = Parse.implementation (Lexing.from_string source) in
@@ -10,12 +11,15 @@ let queries ?(retry = false) source =
   Typecore.force_delayed_checks ();
   let result = ref [] in
   let first = ref true in
-  Vox_vc.generate tree ~prove:(fun loc query ->
+  Vox_vc.generate ~poll tree ~prove:(fun loc query ->
+      before_query loc query;
       check ~int_width:63 query;
       if retry && !first
       then begin
         first := false;
-        Location.raise_errorf ~loc "Exercise individual-obligation retry"
+        raise
+          (Vox_vc.Unproved
+             (Location.errorf ~loc "Exercise individual-obligation retry"))
       end;
       result := query :: !result);
   List.rev !result
@@ -401,3 +405,22 @@ let () =
       else assert (match validity with Invalid _ -> true | _ -> false))
     qs;
   print_endline "Heap observations are regenerated for individual obligations"
+
+let () =
+  match queries ~poll:(fun () -> raise Exit) (prelude ^ "let x = 0") with
+  | _ -> failwith "Expected VC construction cancellation"
+  | exception Exit -> ()
+
+let () =
+  let calls = ref 0 in
+  let before_query loc _ =
+    incr calls;
+    Location.raise_errorf ~loc "Infrastructure failure"
+  in
+  let source =
+    prelude ^ "let f (x : int) = let a : nonnegative = refine_ x in "
+    ^ "let b : nonnegative = refine_ x in a, b"
+  in
+  match queries ~before_query source with
+  | _ -> failwith "Expected infrastructure failure"
+  | exception Location.Error _ -> assert (!calls = 1)
