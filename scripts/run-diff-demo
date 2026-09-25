@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+compiler="$root/_install/bin/ocamlc"
+if [ ! -x "$compiler" ]; then
+  echo 'Configure with a local _install prefix, then run ./dev init first.' >&2
+  exit 1
+fi
+build="$root/_build/diff-demo"
+mkdir -p "$build"
+for unit in vox_diff_spec.ml vox_diff_metric.ml vox_diff.mli vox_diff.ml; do
+  cp "$root/verification/library/$unit" "$build/$unit"
+done
+cp "$root/verification/demos/diff.ml" "$build/diff_demo.ml"
+cd "$build"
+"$compiler" -extension refinement_types -o diff-demo \
+  vox_diff_spec.ml vox_diff_metric.ml vox_diff.mli vox_diff.ml diff_demo.ml
+exec ./diff-demo "$@"
