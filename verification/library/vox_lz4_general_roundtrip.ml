@@ -14,7 +14,7 @@ module G = Ghost_pref
 
 let roundtrip_plan_capacity :
     (source : {s : char iarray | Iarray.length s <= 4194304}) ->
-    (plan : {p : P.plan | P.valid_plan source 0 p}) ->
+    (plan : {p : P.plan | Vox_lz4_spec_plan.valid_plan source 0 p}) ->
     (capacity : {c : int |
       Iarray.length source <= c && c <= 4194304}) ->
     {r : (D.status * DB.t) option | match r with
@@ -26,7 +26,7 @@ let roundtrip_plan_capacity :
         && R.output_matches (G.own decoded.permission) decoded.block
              source decoded.used} @ unique =
   fun source plan capacity ->
-    ghost_ (P.valid_plan_def source 0 plan);
+    ghost_ (Vox_lz4_spec_plan.valid_plan_def source 0 plan);
     match Z.encode source plan with
     | None -> None
     | Some encoded ->
@@ -60,7 +60,7 @@ let roundtrip_plan_capacity :
 
 let roundtrip_plan :
     (source : {s : char iarray | Iarray.length s <= 4194304}) ->
-    (plan : {p : P.plan | P.valid_plan source 0 p}) ->
+    (plan : {p : P.plan | Vox_lz4_spec_plan.valid_plan source 0 p}) ->
     {r : (D.status * DB.t) option | match r with
       | None -> true
       | Some (status, decoded) ->

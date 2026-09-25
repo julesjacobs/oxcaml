@@ -11,25 +11,21 @@ module G = Ghost_pref
 module D = Vox_lz4_packed
 module R = Vox_lz4_roundtrip
 
-let[@def] (compresses @ total) (source : string @ immutable)
-    (wire : string @ immutable) = ghost_ (
-  let model = V.contents source in
-  if Iarray.length model > 4194304 then false
-  else W.wire_matches_plan model (V.contents wire) 0 0 (F.from_source model))
+include Vox_lz4_spec
 
 let compress :
     (model : {m : char iarray | Iarray.length m <= 4194304}) @ ghost ->
     (source : {s : string | V.contents s === model}) ->
     {wire : string |
-      W.wire_matches_plan model (V.contents wire) 0 0 (F.from_source model)} =
+      Vox_lz4_spec_wire.wire_matches_plan model (V.contents wire) 0 0 (Vox_lz4_spec_scan.from_source model)} =
   fun model source ->
-    let plan = ghost_ (F.from_source model) in
+    let plan = ghost_ (Vox_lz4_spec_scan.from_source model) in
     match E.encode model source with
     | None -> raise Out_of_memory
     | Some buffer ->
       let { B.block; permission; used } = buffer in
       let wire : {s : string | Iarray.length (V.contents s) = used
-          && Vox_lz4_snapshot.prefix_matches (V.contents s)
+          && Vox_lz4_spec_bytes.prefix_matches (V.contents s)
                (G.own permission) block used} =
         try Copy.copy_prefix block used (borrow_ permission)
         with exn ->
@@ -45,23 +41,23 @@ let compress :
       wire
 
 let compress_string : (source : string) ->
-    {wire : string | compresses source wire} =
+    {wire : string | Vox_lz4_spec.compresses source wire} =
   fun source ->
     if V.length source > 4194304 then
       invalid_arg "Vox_lz4.compress: block too large"
     else
       let model = ghost_ (V.contents source) in
       let wire = compress model source in
-      ghost_ (compresses_def source wire);
+      ghost_ (Vox_lz4_spec.compresses_def source wire);
       wire
 
 let (compressed_decodes @ total) :
     (source : string) -> (wire : string) ->
     (capacity : int) -> (block : M.t) ->
-    {u : unit | not (compresses source wire
+    {u : unit | not (Vox_lz4_spec.compresses source wire
       && Iarray.length (V.contents source) <= capacity && capacity <= 4194304)
       || let refine_ result =
-           D.decode_model (V.contents wire) 0 (-1)
+           Vox_lz4_spec_decode.decode_model (V.contents wire) 0 (-1)
              (Iarray.length (V.contents wire)) capacity block 0
              (M.footprint block) in
          result.D.kind === D.Done
@@ -69,12 +65,12 @@ let (compressed_decodes @ total) :
          && R.output_matches result.D.state block
               (V.contents source) result.D.count} @ ghost =
   fun source wire capacity block -> ghost_ (
-    compresses_def source wire;
-    if compresses source wire
+    Vox_lz4_spec.compresses_def source wire;
+    if Vox_lz4_spec.compresses source wire
        && Iarray.length (V.contents source) <= capacity
        && capacity <= 4194304 then begin
       let model = V.contents source in
-      let plan = F.from_source model in
+      let plan = Vox_lz4_spec_scan.from_source model in
       W.decode_wire_matches_source model (V.contents wire) plan capacity block
     end;
     ())

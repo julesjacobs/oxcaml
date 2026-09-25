@@ -16,13 +16,13 @@ let[@def] (compresses @ total) (source : string @ immutable)
     (wire : string @ immutable) = ghost_ (
   let model = V.contents source in
   if Iarray.length model > 4194304 then false
-  else W.wire_matches_plan model (V.contents wire) 0 0 (F.from_source model))
+  else Vox_lz4_spec_wire.wire_matches_plan model (V.contents wire) 0 0 (F.from_source model))
 
 let compress :
     (model : {m : char iarray | Iarray.length m <= 4194304}) @ ghost ->
     (source : {s : string | V.contents s === model}) ->
     {wire : string |
-      W.wire_matches_plan model (V.contents wire) 0 0 (F.from_source model)} =
+      Vox_lz4_spec_wire.wire_matches_plan model (V.contents wire) 0 0 (F.from_source model)} =
   fun model source ->
     let plan = S.from_source model source in
     match E.encode model source plan with
@@ -30,7 +30,7 @@ let compress :
     | Some buffer ->
       let { B.block; permission; used } = buffer in
       let wire : {s : string | Iarray.length (V.contents s) = used
-          && Vox_lz4_snapshot.prefix_matches (V.contents s)
+          && Vox_lz4_spec_bytes.prefix_matches (V.contents s)
                (G.own permission) block used} =
         try Copy.copy_prefix block used (borrow_ permission)
         with exn ->
@@ -62,7 +62,7 @@ let (compressed_decodes @ total) :
     {u : unit | not (compresses source wire
       && Iarray.length (V.contents source) <= capacity && capacity <= 4194304)
       || let refine_ result =
-           D.decode_model (V.contents wire) 0 (-1)
+           Vox_lz4_spec_decode.decode_model (V.contents wire) 0 (-1)
              (Iarray.length (V.contents wire)) capacity block 0
              (M.footprint block) in
          result.D.kind === D.Done

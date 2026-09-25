@@ -8,7 +8,7 @@ let from_source
   let rec scan hashes positions (position : {p : int | 0 <= p}) =
     if position > length - 12 then positions
     else
-      let hash = Match.hash4 source position in
+      let hash = Vox_lz4_spec_match.hash4 source position in
       let candidate =
         match Hashes.find_opt hash hashes with
         | None -> -1
@@ -16,7 +16,7 @@ let from_source
       let hashes = Hashes.add hash position hashes in
       let positions = Positions.add position candidate positions in
       let limit = length - 5 - position in
-      match Match.choose_match source position limit candidate with
+      match Vox_lz4_spec_match.choose_match source position limit candidate with
       | None -> scan hashes positions (position + 1)
       | Some choice ->
         scan hashes positions (position + choice.length)

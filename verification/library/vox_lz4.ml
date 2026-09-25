@@ -3,7 +3,7 @@ module D = Vox_lz4_string_decode
 module V = Vox_string_view
 module R = Vox_lz4_streaming_roundtrip
 
-let max_block_size = 4194304
+let max_block_size : {n : int | n = 4194304} = refine_ 4194304
 
 type malformed = D.malformed =
   | Empty_block
@@ -20,12 +20,12 @@ type decode_error = D.decode_error =
   | Invalid_capacity
 
 let compress : (source : string) ->
-    {wire : string | C.compresses source wire} =
+    {wire : string | Vox_lz4_spec.compresses source wire} =
   fun source -> C.compress_string source
 
 let decompress_verified : (wire : string) ->
     (capacity : {n : int | 0 <= n && n <= 4194304}) ->
-    {decoded : D.decoded | D.matches_model wire capacity decoded} =
+    {decoded : D.decoded | Vox_lz4_spec.matches_model wire capacity decoded} =
   fun wire capacity -> D.decode_string wire capacity
 
 let decompress ?(capacity = max_block_size) wire =
@@ -49,3 +49,5 @@ let compress_decompress : (source : string) ->
       match decoded.D.output with
       | Some output -> output
       | None -> assert false
+
+let (roundtrip @ total) = R.roundtrip

@@ -16,13 +16,13 @@ let rec scan :
     (anchor : {a : int | 0 <= a && a <= position}) ->
     (fuel : {f : int | f = Iarray.length model - position + 1}) ->
     (pending : {p : P.pending | P.valid_pending model 0 anchor p}) ->
-    {r : P.plan | P.valid_plan model 0 r
+    {r : P.plan | Vox_lz4_spec_plan.valid_plan model 0 r
       && r === F.scan model entries position anchor fuel pending} =
   fun model source entries table position anchor fuel pending ->
     ghost_ (F.scan_def model entries position anchor fuel pending);
     if position > V.length source - 12 then begin
       let _ = B.into_iarray table in
-      ghost_ (P.valid_plan_def model anchor P.End);
+      ghost_ (Vox_lz4_spec_plan.valid_plan_def model anchor P.End);
       P.build_plan model 0 anchor pending P.End
     end else begin
       let hash = M.hash4 source model position in
@@ -43,8 +43,8 @@ let rec scan :
         let step = { P.position; distance = choice.distance;
                      length = choice.length } in
         ghost_ (
-          P.valid_plan_def model next P.End;
-          P.valid_plan_def model anchor (P.Sequence (step, P.End));
+          Vox_lz4_spec_plan.valid_plan_def model next P.End;
+          Vox_lz4_spec_plan.valid_plan_def model anchor (P.Sequence (step, P.End));
           P.valid_pending_def model 0 next
             (P.More (anchor, step, pending)));
         scan model source entries table next next (fuel - choice.length)
@@ -55,7 +55,7 @@ let rec scan :
 let from_source :
     (model : {m : char iarray | Iarray.length m <= 4194304}) @ ghost ->
     (source : {s : string | V.contents s === model}) ->
-    {r : P.plan | P.valid_plan model 0 r && r === F.from_source model} =
+    {r : P.plan | Vox_lz4_spec_plan.valid_plan model 0 r && r === F.from_source model} =
   fun model source ->
     let table = B.of_iarray T.empty_table in
     ghost_ (

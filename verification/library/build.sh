@@ -9,7 +9,11 @@ destination="$prefix/lib/ocaml/vox"
 modules=(vox_sequence vox_int_sequence vox_iarray vox_string_view
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
          vox_merge_sort vox_lz4_model borrow borrow_iarray
-         pref ghost_pref raw_memory vox_lz4_buffer vox_lz4_packed
+         pref ghost_pref raw_memory
+         vox_lz4_spec_storage vox_lz4_spec_decode vox_lz4_spec_bytes vox_lz4_spec_match
+         vox_lz4_spec_plan vox_lz4_spec_token vox_lz4_spec_wire
+         vox_lz4_spec_hashes vox_lz4_spec_scan vox_lz4_spec
+         vox_lz4_buffer vox_lz4_packed
          vox_lz4_encode_buffer vox_lz4_packed_encode vox_lz4_snapshot
          vox_lz4_string_copy
          vox_lz4_roundtrip vox_lz4_general_match vox_lz4_string_match

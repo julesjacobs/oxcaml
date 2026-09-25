@@ -3,7 +3,7 @@
  flags = "-extension refinement_types -principal";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml \
-                raw_memory.mli raw_memory.ml vox_lz4_buffer.ml \
+                raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml vox_lz4_buffer.ml \
                 lz4_buffer.ml";
  { bytecode; }
  { native; }

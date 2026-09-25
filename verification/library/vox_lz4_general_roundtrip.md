@@ -4,21 +4,24 @@ The public `Vox_lz4` codec uses the checked streaming compressor and checked
 string decoder. Both mutate owned storage. The compressor emits sequences as
 it scans; its reference match plan exists only in ghost code.
 
+The exact transitive review surface is listed in
+[`vox_lz4_review_boundary.md`](vox_lz4_review_boundary.md).
+
 ## Specification
 
 The API is partial: allocation can fail, and unsupported source sizes raise
 `Invalid_argument`. Its specification concerns normal returns.
 
 - `Vox_lz4.compress` returns a string satisfying
-  `Vox_lz4_streaming_codec.compresses source wire`. This states that its bytes
+  `Vox_lz4_spec.compresses source wire`. This states that its bytes
   are the wire format of `Vox_lz4_forward_model.from_source (contents source)`.
 - `Vox_lz4.decompress_verified` returns a decoded result satisfying
-  `Vox_lz4_string_decode.matches_model wire capacity decoded`. Its status
+  `Vox_lz4_spec.matches_model wire capacity decoded`. Its status
   equals the total decoder's status. On success, its length and every output
   byte equal the total decoder's result. An erased allocation witness connects
   the returned string with that model. `Vox_lz4.decompress` adapts this same
   result to the conventional string/result API.
-- `Vox_lz4_streaming_roundtrip.roundtrip` is a total ghost theorem: if the wire
+- `Vox_lz4.roundtrip` is a total ghost theorem: if the wire
   satisfies `compresses`, the decoded result satisfies `matches_model`, and
   capacity is at least the source length, decoding succeeds and the output
   contents equal the source contents.

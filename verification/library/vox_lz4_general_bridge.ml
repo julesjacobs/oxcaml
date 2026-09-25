@@ -15,42 +15,42 @@ let rec (model_preserves_earlier_byte @ total) :
     (used : {n : int | 0 <= n && n <= 4210768}) ->
     (heap : G.heap) -> (query : {i : int | i < used}) ->
     {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan
+      && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used)
       || H.at (E.encode_model source anchor plan block used heap).E.state
            (M.location block query) ===
          H.at heap (M.location block query)} @ ghost =
   fun source anchor plan block used heap query -> ghost_ (
-    P.valid_plan_def source anchor plan;
+    Vox_lz4_spec_plan.valid_plan_def source anchor plan;
     C.encoded_size_def source anchor plan;
     E.encode_model_def source anchor plan block used heap;
     if Iarray.length source <= 4194304
-       && P.valid_plan source anchor plan
+       && Vox_lz4_spec_plan.valid_plan source anchor plan
        && C.encoded_size source anchor plan <= 4210768 - used then begin
       match plan with
       | P.End ->
-        P.valid_plan_def source anchor P.End;
+        Vox_lz4_spec_plan.valid_plan_def source anchor P.End;
         C.encoded_size_def source anchor P.End;
-        P.valid_plan_def source anchor P.End;
+        Vox_lz4_spec_plan.valid_plan_def source anchor P.End;
         let literals : {n : int | 0 <= n && n <= 4194304} =
           refine_ (Iarray.length source - anchor) in
         let extensions = R.extra_count literals in
         R.extra_count_def literals;
-        W.extra_count_def literals;
+        Vox_lz4_spec_wire.extra_count_def literals;
         let after_token =
           H.put heap (M.location block used)
-            (Some (X.literal_token literals)) in
+            (Some (Vox_lz4_spec_bytes.literal_token literals)) in
         let after_extensions =
           if literals >= 15 then
             X.extension_heap after_token block (used + 1)
               (literals - 15)
           else after_token in
-        R.heap_put_other heap block used query (X.literal_token literals);
+        R.heap_put_other heap block used query (Vox_lz4_spec_bytes.literal_token literals);
         if literals >= 15 then begin
           let remaining : {n : int | 0 <= n && n <= 4194304} =
             refine_ (literals - 15) in
           let _ : {u : unit |
-            X.extension_count remaining <=
+            Vox_lz4_spec_bytes.extension_count remaining <=
               4210768 - (used + 1)} = refine_ () in
           R.extension_heap_outside after_token block (used + 1)
             (literals - 15) query
@@ -63,9 +63,9 @@ let rec (model_preserves_earlier_byte @ total) :
           H.at heap (M.location block query)} = refine_ () in
         ()
       | P.Sequence (step, rest) ->
-        P.valid_plan_def source anchor (P.Sequence (step, rest));
+        Vox_lz4_spec_plan.valid_plan_def source anchor (P.Sequence (step, rest));
         C.encoded_size_def source anchor (P.Sequence (step, rest));
-        P.valid_plan_def source anchor (P.Sequence (step, rest));
+        Vox_lz4_spec_plan.valid_plan_def source anchor (P.Sequence (step, rest));
         let literals : {n : int | 0 <= n && n <= 4194304} =
           refine_ (step.position - anchor) in
         let match_code : {n : int | 0 <= n && n <= 4194304} =
@@ -76,9 +76,9 @@ let rec (model_preserves_earlier_byte @ total) :
           (step.position + step.length) rest;
         R.extra_count_def literals;
         R.extra_count_def match_code;
-        W.extra_count_def literals;
-        W.extra_count_def match_code;
-        let token : M.byte = E.match_token literals match_code in
+        Vox_lz4_spec_wire.extra_count_def literals;
+        Vox_lz4_spec_wire.extra_count_def match_code;
+        let token : M.byte = Vox_lz4_spec_token.match_token literals match_code in
         let after_token =
           H.put heap (M.location block used) (Some token) in
         let after_literal_extensions =
@@ -91,7 +91,7 @@ let rec (model_preserves_earlier_byte @ total) :
           X.literal_heap after_literal_extensions block literal_pos
             source anchor literals in
         let distance_pos = literal_pos + literals in
-        let distance = E.split_distance step.distance in
+        let distance = Vox_lz4_spec_token.split_distance step.distance in
         let after_low = H.put after_literals
           (M.location block distance_pos) (Some distance.low) in
         let after_high = H.put after_low
@@ -125,7 +125,7 @@ let rec (model_preserves_earlier_byte @ total) :
         ()
       end;
     let result : {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan
+      && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used)
       || H.at (E.encode_model source anchor plan block used heap).E.state
            (M.location block query) ===
@@ -138,15 +138,15 @@ let rec (model_preserves_prefix @ total) :
     (used : {n : int | 0 <= n && n <= 4210768}) ->
     (heap : G.heap) -> (count : {n : int | 0 <= n && n <= used}) ->
     {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan
+      && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used
-      && S.prefix_matches wire
+      && Vox_lz4_spec_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block count)
-      || S.prefix_matches wire heap block count} @ ghost =
+      || Vox_lz4_spec_bytes.prefix_matches wire heap block count} @ ghost =
   fun wire source anchor plan block used heap count -> ghost_ (
-    S.prefix_matches_def wire heap block count;
-    S.prefix_matches_def wire
+    Vox_lz4_spec_bytes.prefix_matches_def wire heap block count;
+    Vox_lz4_spec_bytes.prefix_matches_def wire
       (E.encode_model source anchor plan block used heap).E.state
       block count;
     if count > 0 then begin
@@ -156,12 +156,12 @@ let rec (model_preserves_prefix @ total) :
         (count - 1)
     end;
     let result : {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan
+      && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used
-      && S.prefix_matches wire
+      && Vox_lz4_spec_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block count)
-      || S.prefix_matches wire heap block count} = refine_ () in
+      || Vox_lz4_spec_bytes.prefix_matches wire heap block count} = refine_ () in
     result)
 [@@decreases count]
 
@@ -175,29 +175,29 @@ let (end_model_wire @ total) :
       && C.encoded_size source anchor P.End <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor P.End block used heap).E.count
-      && S.prefix_matches wire
+      && Vox_lz4_spec_bytes.prefix_matches wire
            (E.encode_model source anchor P.End block used heap).E.state
            block (Iarray.length wire))
-      || W.wire_matches_plan source wire anchor used P.End} @ ghost =
+      || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used P.End} @ ghost =
   fun source wire anchor block used heap -> ghost_ (
-    P.valid_plan_def source anchor P.End;
+    Vox_lz4_spec_plan.valid_plan_def source anchor P.End;
     C.encoded_size_def source anchor P.End;
     E.encode_model_def source anchor P.End block used heap;
-    W.wire_matches_plan_def source wire anchor used P.End;
+    Vox_lz4_spec_wire.wire_matches_plan_def source wire anchor used P.End;
     if Iarray.length source <= 4194304
        && C.encoded_size source anchor P.End <= 4210768 - used
        && Iarray.length wire =
             (E.encode_model source anchor P.End block used heap).E.count
-       && S.prefix_matches wire
+       && Vox_lz4_spec_bytes.prefix_matches wire
             (E.encode_model source anchor P.End block used heap).E.state
             block (Iarray.length wire) then begin
       let literals : {n : int | 0 <= n && n <= 4194304} =
         refine_ (Iarray.length source - anchor) in
       let extensions = R.extra_count literals in
       R.extra_count_def literals;
-      W.extra_count_def literals;
+      Vox_lz4_spec_wire.extra_count_def literals;
       let after_token = H.put heap (M.location block used)
-        (Some (X.literal_token literals)) in
+        (Some (Vox_lz4_spec_bytes.literal_token literals)) in
       let after_extensions =
         if literals >= 15 then
           X.extension_heap after_token block (used + 1)
@@ -221,23 +221,23 @@ let (end_model_wire @ total) :
         R.extension_heap_frame_prefix wire after_token block (used + 1)
           (literals - 15) (used + 1)
       end;
-      R.heap_put_at heap block used (X.literal_token literals);
+      R.heap_put_at heap block used (Vox_lz4_spec_bytes.literal_token literals);
       R.snapshot_at wire after_token block (used + 1) used;
-      R.wire_byte_def wire used (X.literal_token literals);
+      Vox_lz4_spec_bytes.wire_byte_def wire used (Vox_lz4_spec_bytes.literal_token literals);
       let _ : {u : unit |
         Iarray.length wire = used + 1 + extensions + literals} =
         refine_ () in
       let _ : {u : unit |
-        R.wire_byte wire used (X.literal_token literals)} =
+        Vox_lz4_spec_bytes.wire_byte wire used (Vox_lz4_spec_bytes.literal_token literals)} =
         refine_ () in
       let _ : {u : unit | literals < 15 ||
-        R.extension_bytes wire (used + 1) (literals - 15)} =
+        Vox_lz4_spec_bytes.extension_bytes wire (used + 1) (literals - 15)} =
         refine_ () in
       let _ : {u : unit |
-        R.literal_bytes wire (used + 1 + extensions)
+        Vox_lz4_spec_bytes.literal_bytes wire (used + 1 + extensions)
           source anchor literals} = refine_ () in
       let _ : {u : unit |
-        W.wire_matches_plan source wire anchor used P.End} =
+        Vox_lz4_spec_wire.wire_matches_plan source wire anchor used P.End} =
         refine_ () in
       ()
     end;
@@ -245,32 +245,32 @@ let (end_model_wire @ total) :
       && C.encoded_size source anchor P.End <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor P.End block used heap).E.count
-      && S.prefix_matches wire
+      && Vox_lz4_spec_bytes.prefix_matches wire
            (E.encode_model source anchor P.End block used heap).E.state
            block (Iarray.length wire))
-      || W.wire_matches_plan source wire anchor used P.End} =
+      || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used P.End} =
       refine_ () in
     result)
 
 let (encoded_size_positive @ total) :
     (source : char iarray) -> (anchor : int) -> (plan : P.plan) ->
     {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan)
+      && Vox_lz4_spec_plan.valid_plan source anchor plan)
       || 0 < C.encoded_size source anchor plan} @ ghost =
   fun source anchor plan -> ghost_ (
-    P.valid_plan_def source anchor plan;
+    Vox_lz4_spec_plan.valid_plan_def source anchor plan;
     C.encoded_size_def source anchor plan;
     C.encoded_size_loose_bound source anchor plan;
     if Iarray.length source <= 4194304
-       && P.valid_plan source anchor plan then begin
+       && Vox_lz4_spec_plan.valid_plan source anchor plan then begin
       match plan with
       | P.End ->
-        P.valid_plan_def source anchor P.End;
+        Vox_lz4_spec_plan.valid_plan_def source anchor P.End;
         C.encoded_size_def source anchor P.End;
         let literals : {n : int | 0 <= n && n <= 4194304} =
           refine_ (Iarray.length source - anchor) in
-        let extensions = W.extra_count literals in
-        W.extra_count_def literals;
+        let extensions = Vox_lz4_spec_wire.extra_count literals in
+        Vox_lz4_spec_wire.extra_count_def literals;
         let _ : {u : unit |
           C.encoded_size source anchor P.End =
             1 + extensions + literals} = refine_ () in
@@ -278,7 +278,7 @@ let (encoded_size_positive @ total) :
           0 < C.encoded_size source anchor P.End} = refine_ () in
         ()
       | P.Sequence (step, rest) ->
-        P.valid_plan_def source anchor (P.Sequence (step, rest));
+        Vox_lz4_spec_plan.valid_plan_def source anchor (P.Sequence (step, rest));
         let literals : {n : int | 0 <= n && n <= 4194304} =
           refine_ (step.position - anchor) in
         let code : {n : int | 0 <= n && n <= 4194304} =
@@ -286,10 +286,10 @@ let (encoded_size_positive @ total) :
         C.encoded_size_def source anchor (P.Sequence (step, rest));
         C.encoded_size_loose_bound source
           (step.position + step.length) rest;
-        let literal_extensions = W.extra_count literals in
-        let match_extensions = W.extra_count code in
-        W.extra_count_def literals;
-        W.extra_count_def code;
+        let literal_extensions = Vox_lz4_spec_wire.extra_count literals in
+        let match_extensions = Vox_lz4_spec_wire.extra_count code in
+        Vox_lz4_spec_wire.extra_count_def literals;
+        Vox_lz4_spec_wire.extra_count_def code;
         let _ : {u : unit |
           0 <= C.encoded_size source (step.position + step.length)
             rest} = refine_ () in
@@ -303,7 +303,7 @@ let (encoded_size_positive @ total) :
         ()
     end;
     let result : {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan)
+      && Vox_lz4_spec_plan.valid_plan source anchor plan)
       || 0 < C.encoded_size source anchor plan} = refine_ () in
     result)
 
@@ -314,35 +314,35 @@ let rec (model_wire @ total) :
     (used : {n : int | 0 <= n && n <= 4210768}) ->
     (heap : G.heap) ->
     {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan
+      && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor plan block used heap).E.count
-      && S.prefix_matches wire
+      && Vox_lz4_spec_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block (Iarray.length wire))
-      || W.wire_matches_plan source wire anchor used plan} @ ghost =
+      || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used plan} @ ghost =
   fun source wire anchor plan block used heap -> ghost_ (
-    P.valid_plan_def source anchor plan;
+    Vox_lz4_spec_plan.valid_plan_def source anchor plan;
     C.encoded_size_def source anchor plan;
     E.encode_model_def source anchor plan block used heap;
-    W.wire_matches_plan_def source wire anchor used plan;
+    Vox_lz4_spec_wire.wire_matches_plan_def source wire anchor used plan;
     if Iarray.length source <= 4194304
-       && P.valid_plan source anchor plan
+       && Vox_lz4_spec_plan.valid_plan source anchor plan
        && C.encoded_size source anchor plan <= 4210768 - used
        && Iarray.length wire =
             (E.encode_model source anchor plan block used heap).E.count
-       && S.prefix_matches wire
+       && Vox_lz4_spec_bytes.prefix_matches wire
             (E.encode_model source anchor plan block used heap).E.state
             block (Iarray.length wire) then begin
       match plan with
       | P.End -> end_model_wire source wire anchor block used heap
       | P.Sequence (step, rest) ->
-        P.valid_plan_def source anchor (P.Sequence (step, rest));
+        Vox_lz4_spec_plan.valid_plan_def source anchor (P.Sequence (step, rest));
         C.encoded_size_def source anchor (P.Sequence (step, rest));
         E.encode_model_def source anchor (P.Sequence (step, rest))
           block used heap;
-        W.wire_matches_plan_def source wire anchor used
+        Vox_lz4_spec_wire.wire_matches_plan_def source wire anchor used
           (P.Sequence (step, rest));
         let literals : {n : int | 0 <= n && n <= 4194304} =
           refine_ (step.position - anchor) in
@@ -352,11 +352,11 @@ let rec (model_wire @ total) :
         let match_extensions = R.extra_count match_code in
         R.extra_count_def literals;
         R.extra_count_def match_code;
-        W.extra_count_def literals;
-        W.extra_count_def match_code;
+        Vox_lz4_spec_wire.extra_count_def literals;
+        Vox_lz4_spec_wire.extra_count_def match_code;
         C.encoded_size_loose_bound source
           (step.position + step.length) rest;
-        let token : M.byte = E.match_token literals match_code in
+        let token : M.byte = Vox_lz4_spec_token.match_token literals match_code in
         let after_token =
           H.put heap (M.location block used) (Some token) in
         let after_literal_extensions =
@@ -369,7 +369,7 @@ let rec (model_wire @ total) :
           X.literal_heap after_literal_extensions block literal_pos
             source anchor literals in
         let distance_pos = literal_pos + literals in
-        let distance = E.split_distance step.distance in
+        let distance = Vox_lz4_spec_token.split_distance step.distance in
         let after_low = H.put after_literals
           (M.location block distance_pos) (Some distance.low) in
         let after_high = H.put after_low
@@ -403,7 +403,7 @@ let rec (model_wire @ total) :
         model_preserves_prefix wire source
           (step.position + step.length) rest block next_used
           after_match_extensions next_used;
-        let _ : {u : unit | S.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
           after_match_extensions block next_used} = refine_ () in
         S.prefix_matches_prefix wire after_match_extensions block
           next_used (distance_pos + 2);
@@ -414,7 +414,7 @@ let rec (model_wire @ total) :
             (distance_pos + 2) (match_code - 15)
             (distance_pos + 2)
         end;
-        let _ : {u : unit | S.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
           after_high block (distance_pos + 2)} = refine_ () in
         S.prefix_matches_prefix wire after_high block
           (distance_pos + 2) (distance_pos + 1);
@@ -424,7 +424,7 @@ let rec (model_wire @ total) :
           (distance_pos + 1) distance_pos;
         R.prefix_matches_put_outside wire after_literals block
           distance_pos distance_pos distance.low;
-        let _ : {u : unit | S.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
           after_literals block distance_pos} = refine_ () in
         R.literal_heap_wire wire after_literal_extensions block
           literal_pos source anchor literals;
@@ -432,7 +432,7 @@ let rec (model_wire @ total) :
           distance_pos literal_pos;
         R.literal_heap_frame_prefix wire after_literal_extensions block
           literal_pos source anchor literals literal_pos;
-        let _ : {u : unit | S.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
           after_literal_extensions block literal_pos} = refine_ () in
         S.prefix_matches_prefix wire after_literal_extensions block
           literal_pos (used + 1);
@@ -443,52 +443,52 @@ let rec (model_wire @ total) :
             (used + 1) (literals - 15) (used + 1)
         end;
         let _ : {u : unit |
-          S.prefix_matches wire after_token block (used + 1)} =
+          Vox_lz4_spec_bytes.prefix_matches wire after_token block (used + 1)} =
           refine_ () in
         R.heap_put_at heap block used token;
         R.snapshot_at wire after_token block (used + 1) used;
-        R.wire_byte_def wire used token;
+        Vox_lz4_spec_bytes.wire_byte_def wire used token;
         R.heap_put_at after_literals block distance_pos distance.low;
         R.snapshot_at wire after_low block
           (distance_pos + 1) distance_pos;
-        R.wire_byte_def wire distance_pos distance.low;
+        Vox_lz4_spec_bytes.wire_byte_def wire distance_pos distance.low;
         R.heap_put_at after_low block (distance_pos + 1) distance.high;
         R.snapshot_at wire after_high block
           (distance_pos + 2) (distance_pos + 1);
-        R.wire_byte_def wire (distance_pos + 1) distance.high;
+        Vox_lz4_spec_bytes.wire_byte_def wire (distance_pos + 1) distance.high;
         let _ : {u : unit | next_used < Iarray.length wire} =
           refine_ () in
-        let _ : {u : unit | R.wire_byte wire used token} =
+        let _ : {u : unit | Vox_lz4_spec_bytes.wire_byte wire used token} =
           refine_ () in
         let _ : {u : unit | literals < 15 ||
-          R.extension_bytes wire (used + 1) (literals - 15)} =
+          Vox_lz4_spec_bytes.extension_bytes wire (used + 1) (literals - 15)} =
           refine_ () in
         let _ : {u : unit |
-          R.literal_bytes wire literal_pos source anchor literals} =
+          Vox_lz4_spec_bytes.literal_bytes wire literal_pos source anchor literals} =
           refine_ () in
         let _ : {u : unit |
-          R.wire_byte wire distance_pos distance.low
-          && R.wire_byte wire (distance_pos + 1) distance.high} =
+          Vox_lz4_spec_bytes.wire_byte wire distance_pos distance.low
+          && Vox_lz4_spec_bytes.wire_byte wire (distance_pos + 1) distance.high} =
           refine_ () in
         let _ : {u : unit | match_code < 15 ||
-          R.extension_bytes wire (distance_pos + 2)
+          Vox_lz4_spec_bytes.extension_bytes wire (distance_pos + 2)
             (match_code - 15)} = refine_ () in
         let _ : {u : unit |
-          W.wire_matches_plan source wire
+          Vox_lz4_spec_wire.wire_matches_plan source wire
             (step.position + step.length) next_used rest} =
           refine_ () in
         let _ : {u : unit |
-          W.wire_matches_plan source wire anchor used
+          Vox_lz4_spec_wire.wire_matches_plan source wire anchor used
             (P.Sequence (step, rest))} = refine_ () in
         ()
     end;
     let result : {u : unit | not (Iarray.length source <= 4194304
-      && P.valid_plan source anchor plan
+      && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor plan block used heap).E.count
-      && S.prefix_matches wire
+      && Vox_lz4_spec_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block (Iarray.length wire))
-      || W.wire_matches_plan source wire anchor used plan} = refine_ () in
+      || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used plan} = refine_ () in
     result)

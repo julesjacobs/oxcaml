@@ -16,18 +16,18 @@ let rec copy_literals_into :
     (permission : {p : P.token |
       M.covers (P.own p) block 0 (M.length block)
       && P.Heap.mem (P.own p) (M.location block (-1))
-      && B.initialized (P.own p) block used}) @ unique ghost ->
+      && Vox_lz4_spec_storage.initialized (P.own p) block used}) @ unique ghost ->
     {after : B.t | after.block === block
       && after.used = used + remaining
       && P.own after.permission ===
-           D.literal_heap (P.own permission) block used
+           Vox_lz4_spec_decode.literal_heap (P.own permission) block used
              model first remaining} @ unique =
   fun model source first remaining block used permission ->
-    ghost_ (D.literal_heap_def (P.own (borrow_ permission))
+    ghost_ (Vox_lz4_spec_decode.literal_heap_def (P.own (borrow_ permission))
       block used model first remaining);
     if remaining = 0 then { B.block; permission; used }
     else
-      let value = Vox_lz4_packed.byte_of_char (V.get source first) in
+      let value = Vox_lz4_spec_decode.byte_of_char (V.get source first) in
       ghost_ (Vox_iarray.at_get model first);
       let buffer = B.append { B.block; permission; used } value in
       let { B.block; permission; used } = buffer in
@@ -44,7 +44,7 @@ let copy_literals :
     {after : B.t | after.block === buffer.B.block
       && after.used = buffer.B.used + remaining
       && P.own after.permission ===
-           D.literal_heap (P.own buffer.B.permission) buffer.B.block buffer.B.used
+           Vox_lz4_spec_decode.literal_heap (P.own buffer.B.permission) buffer.B.block buffer.B.used
              model first remaining} @ unique =
   fun model source first remaining buffer ->
     let { B.block; permission; used } = buffer in
@@ -59,14 +59,14 @@ let rec copy_match_into :
     (permission : {p : P.token |
       M.covers (P.own p) block 0 (M.length block)
       && P.Heap.mem (P.own p) (M.location block (-1))
-      && B.initialized (P.own p) block used}) @ unique ghost ->
+      && Vox_lz4_spec_storage.initialized (P.own p) block used}) @ unique ghost ->
     {after : B.t | after.block === block
       && after.used = used + remaining
       && P.own after.permission ===
-           D.copy_heap (P.own permission) block used distance remaining} @ unique =
+           Vox_lz4_spec_decode.copy_heap (P.own permission) block used distance remaining} @ unique =
   fun distance remaining block used permission ->
     let before = ghost_ (P.own (borrow_ permission)) in
-    ghost_ (D.copy_heap_def before block used distance remaining);
+    ghost_ (Vox_lz4_spec_decode.copy_heap_def before block used distance remaining);
     if remaining = 0 then { B.block; permission; used }
     else
       let index = used - distance in
@@ -87,25 +87,13 @@ let copy_match :
     {after : B.t | after.block === buffer.B.block
       && after.used = buffer.B.used + remaining
       && P.own after.permission ===
-           D.copy_heap (P.own buffer.B.permission) buffer.B.block buffer.B.used
+           Vox_lz4_spec_decode.copy_heap (P.own buffer.B.permission) buffer.B.block buffer.B.used
              distance remaining} @ unique =
   fun distance remaining buffer ->
     let { B.block; permission; used } = buffer in
     copy_match_into distance remaining block used permission
 
-type malformed =
-  | Empty_block
-  | Truncated_length
-  | Truncated_literals
-  | Truncated_offset
-  | Zero_offset
-  | Offset_beyond_output
-  | Invalid_terminal_sequence
-
-type decode_error =
-  | Malformed of malformed * int
-  | Output_limit
-  | Invalid_capacity
+include Vox_lz4_spec
 
 type length_read = { length_result : D.length_result; cursor : int }
 
@@ -121,13 +109,13 @@ let rec read_extended_length :
     (cursor : {i : int | 0 <= i && i <= Iarray.length model}) ->
     (length : {n : int | 0 <= n && n <= 4194304}) ->
     (fuel : {f : int | 0 <= f}) ->
-    {r : length_read | r.length_result === D.read_extended_length model cursor length fuel} =
+    {r : length_read | r.length_result === Vox_lz4_spec_decode.read_extended_length model cursor length fuel} =
   fun model source cursor length fuel ->
-    ghost_ (D.read_extended_length_def model cursor length fuel);
+    ghost_ (Vox_lz4_spec_decode.read_extended_length_def model cursor length fuel);
     if fuel = 0 || cursor = V.length source then
       { length_result = Length_truncated; cursor }
     else
-      let extension = D.byte_of_char (V.get source cursor) in
+      let extension = Vox_lz4_spec_decode.byte_of_char (V.get source cursor) in
       ghost_ (Vox_iarray.at_get model cursor);
       if extension > 4194304 - length then
         { length_result = Length_limit; cursor = cursor + 1 }
@@ -144,9 +132,9 @@ let read_length :
     (source : {s : string | V.contents s === model}) ->
     (cursor : {i : int | 0 <= i && i <= Iarray.length model}) ->
     (initial : {n : int | 0 <= n && n <= 15}) ->
-    {r : length_read | r.length_result === D.read_length model cursor initial} =
+    {r : length_read | r.length_result === Vox_lz4_spec_decode.read_length model cursor initial} =
   fun model source cursor initial ->
-    ghost_ (D.read_length_def model cursor initial);
+    ghost_ (Vox_lz4_spec_decode.read_length_def model cursor initial);
     if initial < 15 then { length_result = Length (cursor, initial); cursor }
     else read_extended_length model source cursor 15 (V.length source - cursor)
 
@@ -156,7 +144,7 @@ let rec decode_sequences : (model : char iarray) @ ghost ->
     (buffer : B.t) @ unique ->
     {r : outcome |
       let refine_ model =
-        decode_model model input_pos last_match_start fuel
+        Vox_lz4_spec_decode.decode_model model input_pos last_match_start fuel
           (M.length buffer.B.block) buffer.B.block buffer.B.used
           (P.own buffer.B.permission) in
       (match r.error with None -> r.status === D.Done
@@ -167,7 +155,7 @@ let rec decode_sequences : (model : char iarray) @ ghost ->
   fun model source input_pos last_match_start fuel buffer ->
   let { B.block; permission; used } = buffer in
   let before = ghost_ (P.own (borrow_ permission)) in
-  ghost_ (decode_model_def model input_pos last_match_start fuel
+  ghost_ (Vox_lz4_spec_decode.decode_model_def model input_pos last_match_start fuel
             (M.length block) block used before);
   let buffer : B.t = { B.block; permission; used } in
   let n = V.length source in
@@ -175,10 +163,10 @@ let rec decode_sequences : (model : char iarray) @ ghost ->
     { status = D.Malformed; buffer; error = Some (Malformed
         ((if n = 0 then Empty_block else Invalid_terminal_sequence), input_pos)) }
   else
-    let token = byte_of_char (V.get source input_pos) in
+    let token = Vox_lz4_spec_decode.byte_of_char (V.get source input_pos) in
     ghost_ (Vox_iarray.at_get model input_pos);
     let after_token = input_pos + 1 in
-    let literal_length = read_length model source after_token (high4 token) in
+    let literal_length = read_length model source after_token (Vox_lz4_spec_decode.high4 token) in
     match literal_length.length_result with
     | Length_truncated -> { status = D.Malformed; buffer;
         error = Some (Malformed (Truncated_length, literal_length.cursor)) }
@@ -195,7 +183,7 @@ let rec decode_sequences : (model : char iarray) @ ghost ->
         else
           let after_literals = literal_pos + literal_count in
           if after_literals = n then
-            if low15 token <> 0
+            if Vox_lz4_spec_decode.low15 token <> 0
                || (last_match_start >= 0
                    && (literal_count < 5
                        || last_match_start > used + literal_count - 12))
@@ -206,9 +194,9 @@ let rec decode_sequences : (model : char iarray) @ ghost ->
           else if n - after_literals < 2 then
             { status = D.Malformed; buffer; error = Some (Malformed (Truncated_offset, after_literals)) }
           else
-            let low = byte_of_char (V.get source after_literals) in
+            let low = Vox_lz4_spec_decode.byte_of_char (V.get source after_literals) in
             let high =
-              byte_of_char (V.get source (after_literals + 1)) in
+              Vox_lz4_spec_decode.byte_of_char (V.get source (after_literals + 1)) in
             ghost_ (Vox_iarray.at_get model after_literals;
               Vox_iarray.at_get model (after_literals + 1));
             let distance = low + high * 256 in
@@ -217,7 +205,7 @@ let rec decode_sequences : (model : char iarray) @ ghost ->
                 ((if distance = 0 then Zero_offset else Offset_beyond_output), after_literals + 2)) }
             else
               let match_length = read_length model source (after_literals + 2)
-                      (low15 token) in
+                      (Vox_lz4_spec_decode.low15 token) in
               match match_length.length_result with
               | Length_truncated -> { status = D.Malformed; buffer;
                   error = Some (Malformed (Truncated_length, match_length.cursor)) }
@@ -246,7 +234,7 @@ let decode : (model : char iarray) @ ghost ->
         let refine_ buffer = outcome.buffer in
         let refine_ status = outcome.status in
         let refine_ model =
-          decode_model model 0 (-1) (Iarray.length model) capacity
+          Vox_lz4_spec_decode.decode_model model 0 (-1) (Iarray.length model) capacity
             buffer.B.block 0 (M.footprint buffer.B.block) in
         (match outcome.error with None -> status === D.Done
           | Some _ -> not (status === D.Done))
@@ -269,41 +257,18 @@ module Snapshot = Vox_lz4_snapshot
 
 let rec (initialized_bridge @ total) :
     (heap : P.heap) -> (block : M.t) -> (count : int) ->
-    {u : unit | B.initialized heap block count =
-      EB.initialized heap block count} @ ghost =
+    {u : unit | Vox_lz4_spec_storage.initialized heap block count =
+      Vox_lz4_spec_storage.initialized heap block count} @ ghost =
   fun heap block count -> ghost_ (
-    B.initialized_def heap block count;
-    EB.initialized_def heap block count;
+    Vox_lz4_spec_storage.initialized_def heap block count;
+    Vox_lz4_spec_storage.initialized_def heap block count;
     if count > 0 then initialized_bridge heap block (count - 1);
     ())
 [@@decreases count]
 
-type decoded = {
-  output : string option;
-  status : D.status;
-  error : decode_error option;
-  block : M.t @@ ghost;
-}
-
-let[@def] (matches_model @ total) (wire : string @ immutable)
-    (capacity : int) (result : decoded @ immutable) = ghost_ (
-  let model = D.decode_model (V.contents wire) 0 (-1)
-      (Iarray.length (V.contents wire)) capacity result.block 0
-      (M.footprint result.block) in
-  M.length result.block = capacity
-  && result.status === model.D.kind
-  && (match result.error with None -> result.status === D.Done
-      | Some _ -> not (result.status === D.Done))
-  && match result.output with
-     | None -> not (result.status === D.Done)
-     | Some output -> result.status === D.Done
-         && Iarray.length (V.contents output) = model.D.count
-         && Snapshot.prefix_matches (V.contents output) model.D.state
-              result.block model.D.count)
-
 let decode_string : (wire : string) ->
     (capacity : {n : int | 0 <= n && n <= 4194304}) ->
-    {r : decoded | matches_model wire capacity r} =
+    {r : decoded | Vox_lz4_spec.matches_model wire capacity r} =
   fun wire capacity ->
     let model = ghost_ (V.contents wire) in
     match decode model wire capacity with
@@ -313,13 +278,13 @@ let decode_string : (wire : string) ->
       match status with
       | D.Malformed | D.Output_limit ->
         let decoded = { output = None; status; error; block = ghost_ block } in
-        ghost_ (matches_model_def wire capacity decoded);
+        ghost_ (Vox_lz4_spec.matches_model_def wire capacity decoded);
         B.release { B.block; permission; used };
         decoded
       | D.Done ->
         let _ = ghost_ (initialized_bridge (P.own (borrow_ permission)) block used) in
         let output : {s : string | Iarray.length (V.contents s) = used
-            && Snapshot.prefix_matches (V.contents s)
+            && Vox_lz4_spec_bytes.prefix_matches (V.contents s)
                  (P.own permission) block used} =
           try Copy.copy_prefix block used (borrow_ permission)
           with exn ->
@@ -327,6 +292,6 @@ let decode_string : (wire : string) ->
             raise exn
         in
         let decoded = { output = Some output; status; error; block = ghost_ block } in
-        ghost_ (matches_model_def wire capacity decoded);
+        ghost_ (Vox_lz4_spec.matches_model_def wire capacity decoded);
         B.release { B.block; permission; used };
         decoded

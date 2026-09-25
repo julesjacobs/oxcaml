@@ -18,7 +18,7 @@ let compress source =
   let hints = Iarray.init length (fun position ->
     if position < 0 || position > length - 4 then -1
     else
-      let hash = M.hash4 input position in
+      let hash = Vox_lz4_spec_match.hash4 input position in
       let previous = table.(hash) in
       table.(hash) <- position;
       previous) in
@@ -35,7 +35,7 @@ let compress source =
         C.encoded_size_capacity input 0 plan;
         C.encode_model_size input 0 plan block 0 (Raw.footprint block);
         F.model_wire input wire 0 plan block 0 (Raw.footprint block);
-        let _ : {u : unit | W.wire_matches_plan input wire 0 0 plan} =
+        let _ : {u : unit | Vox_lz4_spec_wire.wire_matches_plan input wire 0 0 plan} =
           refine_ () in
         ());
       let output = String.init (Iarray.length wire) (Iarray.get wire) in

@@ -16,11 +16,11 @@ module V = Vox_string_view
 
 let[@inline always] split_distance :
     (distance : {d : int | 0 <= d && d <= 65535}) ->
-    {r : E.distance_bytes | r === E.split_distance distance} =
+    {r : E.distance_bytes | r === Vox_lz4_spec_token.split_distance distance} =
   fun distance ->
     let high = distance / 256 in
     let low = distance - 256 * high in
-    let _ = ghost_ (E.split_distance distance) in
+    let _ = ghost_ (Vox_lz4_spec_token.split_distance distance) in
     { E.low = refine_ low; high = refine_ high }
 
 let[@inline always] emit_head :
@@ -28,7 +28,7 @@ let[@inline always] emit_head :
     (source : {s : string | V.contents s === model}) ->
     (anchor : {a : int | 0 <= a && a <= Iarray.length model}) ->
     (step : P.sequence) ->
-    (rest : {p : P.plan | P.valid_plan model anchor (P.Sequence (step, p))}) @ ghost ->
+    (rest : {p : P.plan | Vox_lz4_spec_plan.valid_plan model anchor (P.Sequence (step, p))}) @ ghost ->
     (buffer : {b : B.t |
       C.encoded_size model anchor (P.Sequence (step, rest)) <=
         M.length b.block - b.used}) @ unique ->
@@ -44,7 +44,7 @@ let[@inline always] emit_head :
   fun model source anchor step rest buffer ->
     let { B.block; permission; used } = buffer in
     ghost_ (
-      P.valid_plan_def model anchor (P.Sequence (step, rest));
+      Vox_lz4_spec_plan.valid_plan_def model anchor (P.Sequence (step, rest));
       C.encoded_size_def model anchor (P.Sequence (step, rest));
       E.encode_model_def model anchor (P.Sequence (step, rest)) block used
         (G.own (borrow_ permission)));
@@ -52,21 +52,21 @@ let[@inline always] emit_head :
       let literals = step.position - anchor in
       let match_code = step.length - 4 in
       let literal_extensions =
-        if literals >= 15 then X.extension_count (literals - 15)
+        if literals >= 15 then Vox_lz4_spec_bytes.extension_count (literals - 15)
         else 0 in
       let match_extensions =
-        if match_code >= 15 then X.extension_count (match_code - 15)
+        if match_code >= 15 then Vox_lz4_spec_bytes.extension_count (match_code - 15)
         else 0 in
       let needed =
         1 + literal_extensions + literals + 2 + match_extensions in
       ghost_ (
-        Vox_lz4_general_wire.extra_count_def literals;
-        Vox_lz4_general_wire.extra_count_def match_code;
+        Vox_lz4_spec_wire.extra_count_def literals;
+        Vox_lz4_spec_wire.extra_count_def match_code;
         C.encoded_size_loose_bound model
           (step.position + step.length) rest);
       let _ : {u : unit | needed <= M.length block - used} =
         ghost_ (refine_ ()) in
-      let token = E.match_token literals match_code in
+      let token = Vox_lz4_spec_token.match_token literals match_code in
       let buffer = B.append buffer token in
       let buffer =
         if literals >= 15 then X.emit_extensions (literals - 15) buffer
@@ -91,16 +91,16 @@ let rec scan :
     (anchor : {a : int | 0 <= a && a <= position}) ->
     (fuel : {f : int | f = Iarray.length model - position + 1}) ->
     (buffer : {b : B.t |
-      C.encoded_size model anchor (F.scan model entries position anchor fuel)
+      C.encoded_size model anchor (Vox_lz4_spec_scan.scan model entries position anchor fuel)
         <= M.length b.block - b.used}) @ unique ->
     {after : B.t |
       let refine_ encoded = E.encode_model model anchor
-          (F.scan model entries position anchor fuel)
+          (Vox_lz4_spec_scan.scan model entries position anchor fuel)
           buffer.block buffer.used (G.own buffer.permission) in
       after.block === buffer.block && after.used = encoded.E.count
       && G.own after.permission === encoded.E.state} @ unique =
   fun model source entries table position anchor fuel buffer ->
-    ghost_ (F.scan_def model entries position anchor fuel);
+    ghost_ (Vox_lz4_spec_scan.scan_def model entries position anchor fuel);
     if position > V.length source - 12 then begin
       let _ = Table.into_iarray table in
       S.emit model source anchor P.End buffer
@@ -121,8 +121,8 @@ let rec scan :
       | Some choice ->
         let next = position + choice.length in
         let step = { P.position; distance = choice.distance; length = choice.length } in
-        let rest = ghost_ (F.scan model entries next next (fuel - choice.length)) in
-        ghost_ (P.valid_plan_def model anchor (P.Sequence (step, rest)));
+        let rest = ghost_ (Vox_lz4_spec_scan.scan model entries next next (fuel - choice.length)) in
+        ghost_ (Vox_lz4_spec_plan.valid_plan_def model anchor (P.Sequence (step, rest)));
         let buffer = emit_head model source anchor step rest buffer in
         scan model source entries table next next (fuel - choice.length) buffer
 [@@decreases fuel]
@@ -133,20 +133,20 @@ let encode :
     {r : B.t option | match r with
       | None -> true
       | Some buffer ->
-        let refine_ encoded = E.encode_model model 0 (F.from_source model)
+        let refine_ encoded = E.encode_model model 0 (Vox_lz4_spec_scan.from_source model)
             buffer.block 0 (M.footprint buffer.block) in
         buffer.used = encoded.E.count
         && G.own buffer.permission === encoded.E.state} @ unique =
   fun model source ->
     let length = V.length source in
-    let capacity = length + X.extension_count length + 15 in
+    let capacity = length + Vox_lz4_spec_bytes.extension_count length + 15 in
     let table = Table.of_iarray T.empty_table in
     match B.create capacity with
     | None -> let _ = Table.into_iarray table in None
     | Some buffer ->
       ghost_ (
-        F.from_source_def model;
-        C.encoded_size_capacity model 0 (F.from_source model);
+        Vox_lz4_spec_scan.from_source_def model;
+        C.encoded_size_capacity model 0 (Vox_lz4_spec_scan.from_source model);
         C.extension_budget_def length);
       (* An exceptional exit consumes buffer authority. A handler cannot
          restore it to release storage; raw storage has no finalizer. *)

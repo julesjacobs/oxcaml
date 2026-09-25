@@ -2,24 +2,16 @@ module P = Ghost_pref
 module H = P.Heap
 module M = Raw_memory
 
-let[@def] rec (initialized @ total) (h : P.heap @ immutable)
-    (p : M.t @ immutable) (count : int) = ghost_ (
-  if count <= 0 then true
-  else
-    (match H.at h (M.location p (count - 1)) with
-     | Some (Some _) -> true
-     | _ -> false)
-    && initialized h p (count - 1))
-[@@decreases count]
+include Vox_lz4_spec_storage
 
 let rec (initialized_get @ total) :
     (h : P.heap) @ immutable -> (p : M.t) @ immutable ->
     (count : int) -> (index : int) ->
-    {u : unit | not (initialized h p count && 0 <= index && index < count)
+    {u : unit | not (Vox_lz4_spec_storage.initialized h p count && 0 <= index && index < count)
       || match H.at h (M.location p index) with
          | Some (Some _) -> true | _ -> false} @ ghost =
   fun h p count index -> ghost_ (
-    initialized_def h p count;
+    Vox_lz4_spec_storage.initialized_def h p count;
     if 0 <= index && index < count && count - 1 <> index then
       initialized_get h p (count - 1) index;
     ())
@@ -28,13 +20,13 @@ let rec (initialized_get @ total) :
 let rec (write_preserves_initialized @ total) :
     (h : P.heap) @ immutable -> (p : M.t) @ immutable ->
     (count : int) -> (index : int) -> (value : M.byte) ->
-    {u : unit | not (initialized h p count && 0 <= count && count <= index)
-      || initialized (H.put h (M.location p index) (Some value)) p count}
+    {u : unit | not (Vox_lz4_spec_storage.initialized h p count && 0 <= count && count <= index)
+      || Vox_lz4_spec_storage.initialized (H.put h (M.location p index) (Some value)) p count}
       @ ghost =
   fun h p count index value -> ghost_ (
-    initialized_def h p count;
-    initialized_def (H.put h (M.location p index) (Some value)) p count;
-    if count > 0 && count <= index && initialized h p count then begin
+    Vox_lz4_spec_storage.initialized_def h p count;
+    Vox_lz4_spec_storage.initialized_def (H.put h (M.location p index) (Some value)) p count;
+    if count > 0 && count <= index && Vox_lz4_spec_storage.initialized h p count then begin
       M.location_law p p (count - 1) index;
       write_preserves_initialized h p (count - 1) index value
     end;
@@ -44,12 +36,12 @@ let rec (write_preserves_initialized @ total) :
 let (append_initialized @ total) :
     (h : P.heap) @ immutable -> (p : M.t) @ immutable ->
     (count : int) -> (value : M.byte) ->
-    {u : unit | not (0 <= count && initialized h p count)
-      || initialized (H.put h (M.location p count) (Some value)) p
+    {u : unit | not (0 <= count && Vox_lz4_spec_storage.initialized h p count)
+      || Vox_lz4_spec_storage.initialized (H.put h (M.location p count) (Some value)) p
            (count + 1)} @ ghost =
   fun h p count value -> ghost_ (
     write_preserves_initialized h p count count value;
-    initialized_def (H.put h (M.location p count) (Some value)) p
+    Vox_lz4_spec_storage.initialized_def (H.put h (M.location p count) (Some value)) p
       (count + 1);
     ())
 
@@ -64,7 +56,7 @@ type t : value mod portable contended = {s : storage |
   && M.length s.block <= 4194304
   && M.covers (P.own s.permission) s.block 0 (M.length s.block)
   && H.mem (P.own s.permission) (M.location s.block (-1))
-  && initialized (P.own s.permission) s.block s.used}
+  && Vox_lz4_spec_storage.initialized (P.own s.permission) s.block s.used}
 
 let used : (s : t) @ local aliased -> {n : int | n = s.used} =
   fun s -> s.used
@@ -92,7 +84,7 @@ let create (capacity : {n : int | 0 <= n && n <= 4194304}) :
     ghost_ (
       let h = P.own (borrow_ permission) in
       let marker = M.location block (-1) in
-      initialized_def h block 0;
+      Vox_lz4_spec_storage.initialized_def h block 0;
       let _ = H.mem h marker in
       ());
     Some { block; permission; used = 0 }
