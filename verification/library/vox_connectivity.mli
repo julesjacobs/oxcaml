@@ -1,3 +1,9 @@
+(* Public observations describe a growing partition. [valid] and
+   [added]/[found]/[joined] are proof evidence produced by the operations;
+   clients only eliminate that evidence using the laws below. Their private
+   representation is not part of the semantic model. The laws specify every
+   membership and representative observation at any queried element. *)
+
 module Make (C : Vox_big_credits.S) : sig
   type elem : immutable_data
   type t : (void & void & void & void & void) & void & void
@@ -77,6 +83,12 @@ module Make (C : Vox_big_credits.S) : sig
       (state : t) @ local immutable total ghost forkable unyielding ->
       {u : unit | contains (snapshot state) x = member x state &&
         root (snapshot state) x === representative x state} @ ghost @@ total
+
+  val empty_law :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      (x : elem) @ immutable ->
+      {u : unit | if size state = 0Z then
+        not (contains (snapshot state) x) else true} @ ghost @@ total
 
   val account_bounds :
       (state : t) @ local immutable total ghost forkable unyielding ->
