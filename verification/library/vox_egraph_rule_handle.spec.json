@@ -239,6 +239,13 @@
       "declarations": [
         {
           "kind": "module",
+          "name": "L",
+          "start_line": 1,
+          "end_line": 1,
+          "code": "module L = Vox_egraph_language_spec"
+        },
+        {
+          "kind": "module",
           "name": "R",
           "start_line": 2,
           "end_line": 2,
