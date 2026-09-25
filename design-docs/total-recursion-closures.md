@@ -41,8 +41,8 @@ For measures it is the existing numerical order: strictly decreasing signed
 machine integers, or nonnegative decreasing `Bigint` values. No new trusted
 primitive, SMT axiom, or measure rule is introduced. This is a justification of
 the extension relative to the existing datatype, totality and verification
-rules, not a mechanized soundness proof of Vox. In particular, the pre-existing
-negative-datatype totality issue documented in the Vox test guide remains.
+rules, not a mechanized soundness proof of Vox. The negative-datatype
+elimination boundary is covered by `negative_totality.ml`.
 
 Checking is conservative at closure construction. For example, a callback that
 unconditionally recurses on `n - 1` and is only called later under `n > 0` remains

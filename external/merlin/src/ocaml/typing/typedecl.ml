@@ -591,12 +591,12 @@ let transl_labels (type rep) ~(record_form : rep record_form) ~new_var_jkind
       (fun () ->
          (* The [ghost] modality is representation-bearing (the field
             occupies no slot) and is carried as a flag on the label rather
-            than as a mode modality. It is only meaningful on boxed record
-            fields; anywhere else it is left in the list for
+            than as a mode modality. It is supported on boxed records and
+            unboxed products; elsewhere it is left in the list for
             [Typemode.transl_modalities] to reject. *)
          let ghost, modalities =
            match kloc with
-           | Record { unboxed = false } ->
+           | Record { unboxed = false } | Record_unboxed_product ->
              let ghost, rest =
                List.partition
                  (fun {Location.txt = Parsetree.Modality m; _} ->
@@ -2465,7 +2465,9 @@ let compute_record_kind (type rep) env loc (form : rep record_form)
           List.map2
             (fun (lbl, ty) jkind ->
                 let layout =
-                  match Jkind.extract_layout env jkind with
+                  match Jkind.extract_layout env
+                    (if lbl.Types.ld_ghost then
+                       Jkind.Builtin.void ~why:Ghost_record else jkind) with
                   | Ok layout -> layout
                   | Error _ ->
                       Jkind.Layout.Any Jkind_types.Scannable_axes.max

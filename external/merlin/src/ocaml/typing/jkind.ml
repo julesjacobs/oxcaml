@@ -2422,7 +2422,10 @@ let of_type_decl_overapproximate_unknown ~context env
 let for_unboxed_record_with_updates lbls =
   let open Types in
   let tys_modalities =
-    List.map (fun (lbl, ld_type, _) -> ld_type, lbl.ld_modalities) lbls
+    List.filter_map
+      (fun (lbl, ld_type, _) ->
+        if lbl.ld_ghost then None else Some (ld_type, lbl.ld_modalities))
+      lbls
   in
   let layouts = List.map (fun (_, _, layout) -> layout) lbls in
   Builtin.product ~why:Unboxed_record tys_modalities layouts

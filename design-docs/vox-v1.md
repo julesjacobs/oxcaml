@@ -112,16 +112,13 @@ recursion-combinator signature; it does not verify its implementation.
 
 ### Work required before calling this v1
 
-**1. Resolve the totality boundary.** The demo README explicitly records a
-totality loophole through ordinary negative datatypes. The implementation's
-`check_inductive_decl` restricts declarations marked `[@@inductive]`; that
-restriction alone does not establish a totality guarantee for ordinary types.
-This review has not independently reproduced the documented loophole. First
-recover a compile-only regression and determine its current status. If it
-remains, either fix totality checking or enforce a precisely defined fragment
-at the proof boundary. A documented request to avoid such programs is
-insufficient for the proposed totality contract. This is the primary potential
-semantic blocker; it should be settled before adding more capabilities.
+**1. Maintain the totality boundary.** The formerly documented negative-datatype
+loophole is blocked by the checked guarantee required for total elimination
+(`declaration_can_pattern_match_total` and `can_pattern_match_total`).
+`negative_totality.ml` covers negative variants, recursive record projection,
+and aliases, including attempted false refinements. Keep these compile-only
+regressions as the datatype and totality rules evolve. This audit is not a
+mechanized soundness proof.
 
 **2. Complete the checked-construction workflow.** Extend the existing sorted
 array demo with a total executable sortedness validator, the laws connecting

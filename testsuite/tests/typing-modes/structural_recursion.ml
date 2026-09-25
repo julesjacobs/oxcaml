@@ -709,13 +709,10 @@ Line 3, characters 4-21:
         ^^^^^^^^^^^^^^^^^
 Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
 |}, Principal{|
-Line 3, characters 4-8:
+Line 3, characters 4-21:
 3 |     let* x = n in f x
-        ^^^^
-Error: This value is "immutable"
-         because it is used inside the function at lines 2-3, characters 29-21
-         which is expected to be "stateless".
-       However, the highlighted expression is expected to be "read_write".
+        ^^^^^^^^^^^^^^^^^
+Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
 |}]
 
 module Test_recursive_andop = struct
@@ -729,13 +726,10 @@ Line 4, characters 9-25:
              ^^^^^^^^^^^^^^^^
 Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
 |}, Principal{|
-Line 4, characters 15-19:
+Line 4, characters 9-25:
 4 |     let* x = n and* y = m in (x, y)
-                   ^^^^
-Error: This value is "immutable"
-         because it is used inside the function at lines 3-4, characters 29-35
-         which is expected to be "stateless".
-       However, the highlighted expression is expected to be "read_write".
+             ^^^^^^^^^^^^^^^^
+Error: This recursive function cannot be total: the recursive function cannot be used as a binding operator.
 |}]
 
 type 'a shared_identity = 'a
