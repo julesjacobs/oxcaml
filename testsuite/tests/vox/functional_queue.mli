@@ -14,6 +14,5 @@ val enqueue : ('a : immutable_data).
 val dequeue : ('a : immutable_data).
   (q : {q : 'a t | (contents q === []) === false}) @ immutable ->
   {r : 'a * 'a t |
-    let refine_ original = q in
-    match r with head, tail -> contents original === head :: contents tail}
+    match r with head, tail -> contents q === head :: contents tail}
   @ immutable total @@ total

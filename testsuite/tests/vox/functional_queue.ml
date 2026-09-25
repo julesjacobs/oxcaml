@@ -24,7 +24,7 @@ let rec (reverse_append_correct @ total) :
   append_def reversed acc;
   let u = () in
   match xs with
-  | [] -> refine_ u
+  | [] -> u
   | head :: tail ->
     let next = head :: acc in
     let singleton = [head] in
@@ -34,14 +34,14 @@ let rec (reverse_append_correct @ total) :
     append_associative rest singleton acc;
     append_def singleton acc;
     append_def nil acc;
-    refine_ u
+    u
 
 type ('a : immutable_data) representation = {front : 'a list; rear : 'a list}
 type ('a : immutable_data) t = {q : 'a representation |
   match q.front with [] -> q.rear === [] | _ :: _ -> true}
 
 let[@def] contents (q : 'a t @ immutable) : 'a list @ total =
-  let refine_ q = q in
+  let q = q in
   append q.front (reverse q.rear)
 
 let (normalize @ total) :
@@ -54,10 +54,10 @@ let (normalize @ total) :
     | [] ->
       let reversed = reverse_append rear nil in
       let raw = {front = reversed; rear = []} in
-      refine_ raw
+      raw
     | _ :: _ ->
       let raw = {front; rear} in
-      refine_ raw
+      raw
   in
   ghost_ (
     reverse_def nil;
@@ -74,25 +74,25 @@ let (normalize @ total) :
         ()
       | _ :: _ -> ()
     in
-    (refine_ proof : {u : unit |
+    (proof : {u : unit |
       contents q === append front (reverse rear)}));
-  refine_ q
+  q
 
 let (empty @ total) : {q : 'a t | contents q === []} @ immutable =
   let nil : 'a list = [] in
-  let refine_ result = normalize nil nil in
+  let result = normalize nil nil in
   ghost_ (reverse_def nil);
   ghost_ (append_def nil nil);
-  refine_ result
+  result
 
 let (enqueue @ total) : (q : 'a t) @ immutable -> (value : 'a) @ immutable ->
     {r : 'a t | contents r === append (contents q) [value]} @ immutable total =
   fun q value ->
-  let refine_ raw = q in
+  let raw = q in
   let front = raw.front in
   let rear = raw.rear in
   let next_rear = value :: rear in
-  let refine_ result = normalize front next_rear in
+  let result : 'a t = normalize front next_rear in
   ghost_ (
     let singleton = [value] in
     let reversed = reverse rear in
@@ -100,19 +100,18 @@ let (enqueue @ total) : (q : 'a t) @ immutable -> (value : 'a) @ immutable ->
     reverse_def next_rear;
     append_associative front reversed singleton;
     let u = () in
-    (refine_ u : {u : unit | contents result === append (contents q) [value]}));
-  refine_ result
+    (u : {u : unit | contents result === append (contents q) [value]}));
+  result
 
 let (dequeue @ total) :
     (q : {q : 'a t | (contents q === []) === false}) @ immutable ->
     {r : 'a * 'a t |
-      let refine_ original = q in
-      match r with head, tail -> contents original === head :: contents tail}
+      match r with head, tail -> contents q === head :: contents tail}
       @ immutable total =
   fun q ->
-  let refine_ original = q in
+  let original : 'a t = q in
   ghost_ (contents_def original);
-  let refine_ raw = original in
+  let raw = original in
   let front = raw.front in
   let rear = raw.rear in
   let reversed = ghost_ (reverse rear) in
@@ -120,12 +119,12 @@ let (dequeue @ total) :
   match front with
   | [] ->
     ghost_ (reverse_def rear);
-    let nonempty : {xs : 'a list | (xs === []) === false} = refine_ front in
+    let nonempty : {xs : 'a list | (xs === []) === false} = front in
     let head = List.Refined.hd nonempty in
-    let refine_ rest = empty in
-    let result = head, rest in
-    refine_ result
+    let rest = empty in
+    let result : 'a * 'a t = head, rest in
+    result
   | head :: tail ->
-    let refine_ rest = normalize tail rear in
-    let result = head, rest in
-    refine_ result
+    let rest = normalize tail rear in
+    let result : 'a * 'a t = head, rest in
+    result
