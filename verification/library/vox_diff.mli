@@ -30,8 +30,9 @@ val diff : (old : int list) -> (fresh : int list) ->
 val optimal_at : (old : int list) -> (fresh : int list) ->
   (computed : {s : script | cost s = minimum_cost old fresh}) ->
   (other : script) ->
-  {u : unit | let refine_ s = computed in
-    if apply old other === Some fresh then cost s <= cost other else true}
+  {u : unit |
+    if apply old other === Some fresh then cost computed <= cost other
+    else true}
   @@ total
 
 val invert_correct : (script : script) ->

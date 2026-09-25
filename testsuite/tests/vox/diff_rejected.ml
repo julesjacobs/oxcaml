@@ -21,43 +21,41 @@ let nonminimal () =
   minimum_cost_equation [] [];
   size_def [];
   let computed : {s : script | cost s = minimum_cost [97] [97]} =
-    refine_ script in
+    script in
   Vox_diff.optimal_at [97] [97] computed [Keep 97];;
 [%%expect{|
-Line 10, characters 4-18:
-10 |     refine_ script in
-         ^^^^^^^^^^^^^^
+Line 10, characters 4-10:
+10 |     script in
+         ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let wrong_target old fresh =
-  let refine_ result = Vox_diff.diff old fresh in
+  let result = Vox_diff.diff old fresh in
   match result with
   | Error _ -> ()
   | Ok script ->
-    let u = () in
-    (refine_ u : {u : unit | apply old script === Some old});;
+    (() : {u : unit | apply old script === Some old});;
 [%%expect{|
-Line 7, characters 5-14:
-7 |     (refine_ u : {u : unit | apply old script === Some old});;
-         ^^^^^^^^^
+Line 6, characters 5-7:
+6 |     (() : {u : unit | apply old script === Some old});;
+         ^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let omit_validity old fresh other =
-  let refine_ result = Vox_diff.diff old fresh in
+  let result = Vox_diff.diff old fresh in
   match result with
   | Error _ -> ()
   | Ok script ->
     let computed : {s : script |
-      cost s = minimum_cost old fresh} = refine_ script in
+      cost s = minimum_cost old fresh} = script in
     ghost_ (Vox_diff.optimal_at old fresh computed other);
-    let u = () in
-    (refine_ u : {u : unit | cost script <= cost other});;
+    (() : {u : unit | cost script <= cost other});;
 [%%expect{|
-Line 10, characters 5-14:
-10 |     (refine_ u : {u : unit | cost script <= cost other});;
-          ^^^^^^^^^
+Line 9, characters 5-7:
+9 |     (() : {u : unit | cost script <= cost other});;
+         ^^
 Error: Refinement could not be proved (counterexample)
 |}]
 

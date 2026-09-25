@@ -51,7 +51,7 @@ let rec (size_nonnegative @ total) (values : int list) :
     {u : unit | 0Z <= size values} =
   size_def values;
   (match values with [] -> () | _ :: rest -> size_nonnegative rest);
-  let u = () in refine_ u
+  ()
 
 let[@def] rec distance (fuel : Bigint.t) (old : int list) (fresh : int list) =
   if fuel <= 0Z then 0Z else
@@ -95,4 +95,4 @@ let (minimum_cost_equation @ total) (old : int list) (fresh : int list) :
      minimum_cost_def ats fresh;
      minimum_cost_def old bts
    | _ -> ());
-  let u = () in refine_ u
+  ()
