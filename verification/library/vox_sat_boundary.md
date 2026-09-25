@@ -56,6 +56,14 @@ ordinary `Sat assignment`, nullary `Unsat`, or `Unknown`. Their ghost calls
 establish the semantic contracts. Clients neither inspect a derivation nor
 supply a solver invariant. Private interfaces are excluded from installation.
 
+Persistent CDCL preserves strict reason order: every nonpivot variable in a
+stored reason occurs older than its assignment on the unique trail. This
+invariant survives enqueue, backtracking, and learned-clause insertion, and
+applies to the reason selected during conflict analysis. A checked trail-rank
+lemma gives each antecedent a smaller rank than its pivot. Analysis still uses
+fuel; clause-level decrease, asserting-clause success, and global CDCL progress
+remain open.
+
 Learned clauses remain executable solver data. Their derivations erase.
 Semantic enumeration is used only in proofs of returned answers; solvers do
 not run it, accumulate a proof trace, or perform a final formula check.
@@ -74,7 +82,8 @@ The client cannot import a private interface.
 `verification/clients/check_sat_erasure.sh _install` checks bytecode/native
 Lambda for surviving public proof bridges or semantic enumeration calls.
 The public `unsat_at` body erases to unit. Native symbol inspection also finds
-no unassigned-count, reason-source, trail-coverage, or level-bound helpers in
+no unassigned-count, reason-source, reason-order, trail-rank, trail-coverage,
+or level-bound helpers in
 `vox_cdcl_total_proof.o`; propagation remains executable.
 
 `testsuite/tests/vox/sat_solver.ml`, `sat_cdcl.ml`, and `sat_cdcl_total.ml`

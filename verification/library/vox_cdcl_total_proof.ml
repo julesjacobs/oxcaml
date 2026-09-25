@@ -1014,6 +1014,370 @@ let (unit_enqueue_reason @ total) : (n : int) -> (formula : formula) ->
       unit_clause_reason n bindings level forced clause;
       reason_contains_literal forced clause
 
+let rec (reason_slots_at @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) ->
+    (bindings : binding option list) -> (offset : Bigint.t) ->
+    (remaining : binding option list) -> (index : Bigint.t) ->
+    {u : unit | if reason_semantics_from formula database learned bindings
+        offset remaining then match Vox_sequence.at remaining index with
+      | Some (Some binding) -> binding_reason formula database learned bindings
+          (Bigint.add offset index) binding
+      | Some None | None -> true
+      else true} =
+  fun formula database learned bindings offset remaining index ->
+  reason_semantics_from_def formula database learned bindings offset remaining;
+  Vox_sequence.at_def remaining index;
+  match remaining with
+  | [] -> ()
+  | _ :: rest ->
+    if not (Bigint.equal index 0Z) then
+      reason_slots_at formula database learned bindings (Bigint.add offset 1Z)
+        rest (Bigint.sub index 1Z);
+    ()
+
+let (reason_semantics_at @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) ->
+    (bindings : binding option list) -> (index : Bigint.t) ->
+    {u : unit | if reason_semantics formula database learned bindings then
+      match Vox_sequence.at bindings index with
+      | Some (Some binding) -> binding_reason formula database learned bindings
+          index binding
+      | Some None | None -> true
+      else true} =
+  fun formula database learned bindings index ->
+  reason_semantics_def formula database learned bindings;
+  reason_slots_at formula database learned bindings 0Z bindings index
+
+let[@def] rec trail_after index trail =
+  match trail with
+  | [] -> []
+  | literal :: rest ->
+    if Bigint.equal (Bigint.of_int (variable literal)) index then rest
+    else trail_after index rest
+
+let[@def] rec earlier_clause trail pivot clause =
+  match clause with
+  | [] -> true
+  | literal :: rest ->
+    (Bigint.equal (Bigint.of_int (variable literal)) pivot
+      || trail_has (Bigint.of_int (variable literal)) (trail_after pivot trail))
+    && earlier_clause trail pivot rest
+
+let[@def] binding_order formula database learned trail pivot
+    (binding : binding) =
+  match source_of_reason learned binding.reason with
+  | None -> true
+  | Some source -> match source_clause formula database source with
+    | None -> false
+    | Some clause -> earlier_clause trail pivot clause
+
+let[@def] rec reason_order_from formula database learned
+    (bindings : binding option list) whole remaining =
+  match remaining with
+  | [] -> true
+  | literal :: rest ->
+    (match at bindings (variable literal) with
+     | Some (Some binding) -> binding_order formula database learned whole
+         (Bigint.of_int (variable literal)) binding
+     | Some None | None -> false)
+    && reason_order_from formula database learned bindings whole rest
+
+let[@def] reason_order formula database learned bindings trail =
+  reason_order_from formula database learned bindings trail trail
+
+let rec (reason_order_member @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) ->
+    (bindings : binding option list) -> (whole : literal list) ->
+    (remaining : literal list) -> (v : int) ->
+    {u : unit | if reason_order_from formula database learned bindings whole
+        remaining && trail_has (Bigint.of_int v) remaining then
+      match at bindings v with
+      | Some (Some binding) -> binding_order formula database learned whole
+          (Bigint.of_int v) binding
+      | Some None | None -> false
+      else true} =
+  fun formula database learned bindings whole remaining v ->
+  reason_order_from_def formula database learned bindings whole remaining;
+  trail_has_def (Bigint.of_int v) remaining;
+  match remaining with
+  | [] -> ()
+  | literal :: rest ->
+    if variable literal <> v then
+      reason_order_member formula database learned bindings whole rest v;
+    ()
+
+let[@def] rec trail_rank index trail =
+  match trail with
+  | [] -> 0Z
+  | literal :: rest ->
+    if Bigint.equal (Bigint.of_int (variable literal)) index then
+      Bigint.add (Vox_sequence.length rest) 1Z
+    else trail_rank index rest
+
+let rec (trail_rank_bounds @ total) : (trail : literal list) ->
+    (index : Bigint.t) ->
+    {u : unit | Bigint.compare 0Z (trail_rank index trail) <= 0
+      && Bigint.compare (trail_rank index trail) (Vox_sequence.length trail)
+        <= 0
+      && (if trail_has index trail then
+        Bigint.compare 0Z (trail_rank index trail) < 0
+        else trail_rank index trail === 0Z)} =
+  fun trail index ->
+  trail_rank_def index trail;
+  trail_has_def index trail;
+  Vox_sequence.length_def trail;
+  match trail with
+  | [] -> ()
+  | _ :: rest -> trail_rank_bounds rest index
+
+let rec (trail_after_subset @ total) : (trail : literal list) ->
+    (pivot : Bigint.t) -> (query : Bigint.t) ->
+    {u : unit | if trail_has query (trail_after pivot trail) then
+      trail_has query trail else true} =
+  fun trail pivot query ->
+  trail_after_def pivot trail;
+  trail_has_def query trail;
+  match trail with
+  | [] -> ()
+  | _ :: rest -> trail_after_subset rest pivot query
+
+let rec (trail_antecedent_rank @ total) : (trail : literal list) ->
+    (pivot : Bigint.t) -> (query : Bigint.t) ->
+    {u : unit | if trail_unique trail
+        && trail_has query (trail_after pivot trail) then
+      Bigint.compare (trail_rank query trail) (trail_rank pivot trail) < 0
+      else true} =
+  fun trail pivot query ->
+  trail_unique_def trail;
+  trail_after_def pivot trail;
+  trail_rank_def pivot trail;
+  trail_rank_def query trail;
+  match trail with
+  | [] -> trail_has_def query []
+  | literal :: rest ->
+    trail_rank_bounds rest query;
+    trail_rank_bounds rest pivot;
+    if Bigint.equal (Bigint.of_int (variable literal)) pivot then ()
+    else (
+      trail_after_subset rest pivot query;
+      trail_antecedent_rank rest pivot query)
+
+let rec (earlier_clause_cons @ total) : (literal : literal) ->
+    (trail : literal list) -> (pivot : Bigint.t) -> (clause : literal list) ->
+    {u : unit | if earlier_clause trail pivot clause then
+      earlier_clause (literal :: trail) pivot clause else true} =
+  fun literal trail pivot clause ->
+  earlier_clause_def trail pivot clause;
+  earlier_clause_def (literal :: trail) pivot clause;
+  trail_after_def pivot (literal :: trail);
+  match clause with
+  | [] -> ()
+  | first :: rest ->
+    trail_after_subset trail pivot (Bigint.of_int (variable first));
+    earlier_clause_cons literal trail pivot rest
+
+let (binding_order_cons @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) -> (literal : literal) ->
+    (trail : literal list) -> (pivot : Bigint.t) -> (binding : binding) ->
+    {u : unit | if binding_order formula database learned trail pivot binding
+      then
+      binding_order formula database learned (literal :: trail) pivot binding
+      else true} =
+  fun formula database learned literal trail pivot binding ->
+  binding_order_def formula database learned trail pivot binding;
+  binding_order_def formula database learned (literal :: trail) pivot binding;
+  match source_of_reason learned binding.reason with
+  | None -> ()
+  | Some source -> match source_clause formula database source with
+    | None -> ()
+    | Some clause -> earlier_clause_cons literal trail pivot clause
+
+let rec (reason_order_cons @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) ->
+    (bindings : binding option list) -> (literal : literal) ->
+    (whole : literal list) -> (remaining : literal list) ->
+    {u : unit | if reason_order_from formula database learned bindings whole
+        remaining then reason_order_from formula database learned bindings
+        (literal :: whole) remaining else true} =
+  fun formula database learned bindings literal whole remaining ->
+  reason_order_from_def formula database learned bindings whole remaining;
+  reason_order_from_def formula database learned bindings (literal :: whole)
+    remaining;
+  match remaining with
+  | [] -> ()
+  | first :: rest ->
+    (match at bindings (variable first) with
+     | Some (Some binding) -> binding_order_cons formula database learned
+       literal
+         whole (Bigint.of_int (variable first)) binding
+     | Some None | None -> ());
+    reason_order_cons formula database learned bindings literal whole rest
+
+let rec (reason_order_set @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) ->
+    (bindings : binding option list) -> (index : int) -> (entry : binding) ->
+    (whole : literal list) -> (remaining : literal list) ->
+    {u : unit | if reason_order_from formula database learned bindings whole
+        remaining && trail_consistent bindings remaining
+        && at bindings index === Some None then
+      reason_order_from formula database learned
+        (Vox_sequence.set bindings (Bigint.of_int index) (Some entry)) whole
+        remaining else true} =
+  fun formula database learned bindings index entry whole remaining ->
+  let next = Vox_sequence.set bindings (Bigint.of_int index) (Some entry) in
+  reason_order_from_def formula database learned bindings whole remaining;
+  reason_order_from_def formula database learned next whole remaining;
+  trail_consistent_def bindings remaining;
+  match remaining with
+  | [] -> ()
+  | literal :: rest ->
+    let v = variable literal in
+    at_def bindings index;
+    at_def bindings v;
+    at_def next v;
+    binding_at_set bindings (Bigint.of_int index) (Some entry) (Bigint.of_int
+      v);
+    reason_order_set formula database learned bindings index entry whole rest
+
+let rec (reason_clause_earlier @ total) : (bindings : binding option list) ->
+    (trail : literal list) -> (forced : literal) -> (level : int) ->
+    (value : bool) -> (clause : literal list) ->
+    {u : unit | if trail_covers bindings trail && reason_clause bindings
+        (Bigint.of_int (variable forced)) level value clause then
+      earlier_clause (forced :: trail) (Bigint.of_int (variable forced)) clause
+      else true} =
+  fun bindings trail forced level value clause ->
+  let pivot = Bigint.of_int (variable forced) in
+  reason_clause_def bindings pivot level value clause;
+  earlier_clause_def (forced :: trail) pivot clause;
+  trail_after_def pivot (forced :: trail);
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    let query = Bigint.of_int (variable literal) in
+    at_def bindings (variable literal);
+    binding_at_bounds bindings query;
+    trail_covers_def bindings trail;
+    covered_member bindings trail (Vox_sequence.length bindings) query;
+    reason_clause_earlier bindings trail forced level value rest
+
+let (enqueue_binding_order @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) ->
+    (bindings : binding option list) -> (trail : literal list) ->
+    (literal : literal) -> (binding : binding) ->
+    {u : unit | if trail_covers bindings trail && binding_reason formula
+      database
+        learned bindings (Bigint.of_int (variable literal)) binding then
+      binding_order formula database learned (literal :: trail)
+        (Bigint.of_int (variable literal)) binding else true} =
+  fun formula database learned bindings trail literal binding ->
+  let pivot = Bigint.of_int (variable literal) in
+  binding_reason_def formula database learned bindings pivot binding;
+  binding_order_def formula database learned (literal :: trail) pivot binding;
+  match source_of_reason learned binding.reason with
+  | None -> ()
+  | Some source -> match source_clause formula database source with
+    | None -> ()
+    | Some clause -> reason_clause_earlier bindings trail literal binding.level
+        binding.value clause
+
+let (reason_order_enqueue @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) ->
+    (bindings : binding option list) -> (trail : literal list) ->
+    (literal : literal) -> (binding : binding) ->
+    {u : unit | if reason_order formula database learned bindings trail
+        && trail_consistent bindings trail
+        && at bindings (variable literal) === Some None
+        && binding_order formula database learned (literal :: trail)
+          (Bigint.of_int (variable literal)) binding then
+      reason_order formula database learned
+        (Vox_sequence.set bindings (Bigint.of_int (variable literal))
+          (Some binding)) (literal :: trail) else true} =
+  fun formula database learned bindings trail literal binding ->
+  let index = Bigint.of_int (variable literal) in
+  let next = Vox_sequence.set bindings index (Some binding) in
+  reason_order_def formula database learned bindings trail;
+  reason_order_def formula database learned next (literal :: trail);
+  reason_order_from_def formula database learned next (literal :: trail)
+    (literal :: trail);
+  reason_order_cons formula database learned bindings literal trail trail;
+  reason_order_set formula database learned bindings (variable literal) binding
+    (literal :: trail) trail;
+  at_def bindings (variable literal);
+  at_def next (variable literal);
+  binding_at_set bindings index (Some binding) index
+
+let (binding_order_prepend @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) -> (limit : int) ->
+    (entry : proof_result) -> (trail : literal list) ->
+    (index : Bigint.t) -> (binding : binding) ->
+    {u : unit | if 0 <= learned && learned < limit
+        && reason_source_valid formula database learned binding.reason
+        && binding_order formula database learned trail index binding then
+      binding_order formula (entry :: database) (learned + 1) trail index
+        binding else true} =
+  fun formula database learned limit entry trail index binding ->
+  reason_source_valid_def formula database learned binding.reason;
+  binding_order_def formula database learned trail index binding;
+  binding_order_def formula (entry :: database) (learned + 1) trail index
+    binding;
+  source_of_reason_def learned binding.reason;
+  source_of_reason_def (learned + 1) binding.reason;
+  match binding.reason with
+  | Decision -> ()
+  | Original source ->
+    source_clause_def formula database (Original_clause source);
+    source_clause_def formula (entry :: database) (Original_clause source)
+  | Learned ordinal ->
+    source_clause_def formula database (Learned_clause (learned - 1 - ordinal));
+    source_clause_def formula (entry :: database)
+      (Learned_clause (learned + 1 - 1 - ordinal));
+    database_clauses_def (entry :: database);
+    clause_at_def (database_clauses (entry :: database))
+      (learned + 1 - 1 - ordinal)
+
+let rec (reason_order_prepend_from @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) -> (limit : int) ->
+    (entry : proof_result) -> (bindings : binding option list) ->
+    (whole : literal list) -> (remaining : literal list) ->
+    {u : unit | if 0 <= learned && learned < limit
+        && reason_sources_valid formula database learned bindings
+        && reason_order_from formula database learned bindings whole remaining
+      then reason_order_from formula (entry :: database) (learned + 1) bindings
+        whole remaining else true} =
+  fun formula database learned limit entry bindings whole remaining ->
+  reason_order_from_def formula database learned bindings whole remaining;
+  reason_order_from_def formula (entry :: database) (learned + 1) bindings whole
+    remaining;
+  match remaining with
+  | [] -> ()
+  | literal :: rest ->
+    let v = variable literal in
+    at_def bindings v;
+    reason_sources_at formula database learned bindings (Bigint.of_int v);
+    (match at bindings v with
+     | Some (Some binding) -> binding_order_prepend formula database learned
+         limit entry whole (Bigint.of_int v) binding
+     | Some None | None -> ());
+    reason_order_prepend_from formula database learned limit entry bindings
+      whole
+      rest
+
+let (reason_order_prepend @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) -> (limit : int) ->
+    (entry : proof_result) -> (bindings : binding option list) ->
+    (trail : literal list) ->
+    {u : unit | if 0 <= learned && learned < limit
+        && reason_sources_valid formula database learned bindings
+        && reason_order formula database learned bindings trail then
+      reason_order formula (entry :: database) (learned + 1) bindings trail
+      else true} =
+  fun formula database learned limit entry bindings trail ->
+  reason_order_def formula database learned bindings trail;
+  reason_order_def formula (entry :: database) (learned + 1) bindings trail;
+  reason_order_prepend_from formula database learned limit entry bindings trail
+    trail
+
 let (enqueue @ total) (formula : formula @ ghost)
     (database : proof_result list @ ghost) (state : state) literal reason :
     {result : state option | match result with
@@ -1040,6 +1404,14 @@ let (enqueue @ total) (formula : formula @ ghost)
           else true)
         && (if trail_covers state.bindings state.trail then
           trail_covers next.bindings next.trail else true)
+        && (if reason_order formula database state.learned state.bindings
+          state.trail
+            && trail_consistent state.bindings state.trail
+            && trail_covers state.bindings state.trail
+            && enqueue_reason formula database state.learned state.bindings
+              literal state.level reason then
+          reason_order formula database next.learned next.bindings next.trail
+          else true)
         && (if reason_semantics formula database state.learned state.bindings
             && enqueue_reason formula database state.learned state.bindings
               literal state.level reason then
@@ -1066,6 +1438,10 @@ let (enqueue @ total) (formula : formula @ ghost)
         literal state.level reason;
       binding_reason_def formula database state.learned state.bindings
         (Bigint.of_int v) binding;
+      enqueue_binding_order formula database state.learned state.bindings
+        state.trail literal binding;
+      reason_order_enqueue formula database state.learned state.bindings
+        state.trail literal binding;
       reason_semantics_set formula database state.learned state.bindings
         (Bigint.of_int v) binding;
       preceding_level_def binding;
@@ -1363,6 +1739,122 @@ let (reason_semantics_retained @ total) : (formula : formula) ->
     bindings);
   reason_slots_retained formula database learned bindings target 0Z bindings
 
+let rec (trail_after_retained @ total) : (target : int) ->
+    (bindings : binding option list) -> (trail : literal list) ->
+    (pivot : Bigint.t) ->
+    {u : unit | if (match Vox_sequence.at bindings pivot with
+        | Some (Some binding) -> binding.level <= target
+        | Some None | None -> false) then
+      trail_after pivot (retain_trail target bindings trail) ===
+        retain_trail target bindings (trail_after pivot trail) else true} =
+  fun target bindings trail pivot ->
+  trail_after_def pivot trail;
+  retain_trail_def target bindings trail;
+  trail_after_def pivot (retain_trail target bindings trail);
+  match trail with
+  | [] -> ()
+  | literal :: rest ->
+    at_def bindings (variable literal);
+    trail_after_def pivot (literal :: retain_trail target bindings rest);
+    trail_after_retained target bindings rest pivot
+
+let rec (earlier_clause_retained @ total) : (target : int) ->
+    (bindings : binding option list) -> (trail : literal list) ->
+    (pivot : Bigint.t) -> (level : int) -> (value : bool) ->
+    (clause : literal list) ->
+    {u : unit | if earlier_clause trail pivot clause
+        && reason_clause bindings pivot level value clause && level <= target
+        && (match Vox_sequence.at bindings pivot with
+          | Some (Some binding) -> binding.level <= target
+          | Some None | None -> false) then
+      earlier_clause (retain_trail target bindings trail) pivot clause
+      else true} =
+  fun target bindings trail pivot level value clause ->
+  earlier_clause_def trail pivot clause;
+  earlier_clause_def (retain_trail target bindings trail) pivot clause;
+  reason_clause_def bindings pivot level value clause;
+  trail_after_retained target bindings trail pivot;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    let index = Bigint.of_int (variable literal) in
+    at_def bindings (variable literal);
+    retained_trail_member target bindings (trail_after pivot trail) index;
+    earlier_clause_retained target bindings trail pivot level value rest
+
+let (binding_order_retained @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) -> (target : int) ->
+    (bindings : binding option list) -> (trail : literal list) ->
+    (pivot : Bigint.t) -> (binding : binding) ->
+    {u : unit | if binding_order formula database learned trail pivot binding
+        && binding_reason formula database learned bindings pivot binding
+        && Vox_sequence.at bindings pivot === Some (Some binding)
+        && binding.level <= target then
+      binding_order formula database learned (retain_trail target bindings
+        trail)
+        pivot binding else true} =
+  fun formula database learned target bindings trail pivot binding ->
+  binding_order_def formula database learned trail pivot binding;
+  binding_order_def formula database learned (retain_trail target bindings
+    trail)
+    pivot binding;
+  binding_reason_def formula database learned bindings pivot binding;
+  match source_of_reason learned binding.reason with
+  | None -> ()
+  | Some source -> match source_clause formula database source with
+    | None -> ()
+    | Some clause -> earlier_clause_retained target bindings trail pivot
+        binding.level binding.value clause
+
+let rec (reason_order_retained_from @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) -> (target : int) ->
+    (bindings : binding option list) -> (whole : literal list) ->
+    (remaining : literal list) ->
+    {u : unit | if reason_order_from formula database learned bindings whole
+        remaining && reason_semantics formula database learned bindings then
+      reason_order_from formula database learned (retained_bindings target
+        bindings)
+        (retain_trail target bindings whole)
+        (retain_trail target bindings remaining) else true} =
+  fun formula database learned target bindings whole remaining ->
+  let next = retained_bindings target bindings in
+  reason_order_from_def formula database learned bindings whole remaining;
+  reason_order_from_def formula database learned next
+    (retain_trail target bindings whole) (retain_trail target bindings
+      remaining);
+  retain_trail_def target bindings remaining;
+  match remaining with
+  | [] -> ()
+  | literal :: rest ->
+    let v = variable literal in
+    at_def bindings v;
+    at_def next v;
+    retained_binding_at target bindings (Bigint.of_int v);
+    reason_order_from_def formula database learned next
+      (retain_trail target bindings whole)
+      (literal :: retain_trail target bindings rest);
+    reason_semantics_at formula database learned bindings (Bigint.of_int v);
+    (match at bindings v with
+     | Some (Some binding) -> binding_order_retained formula database learned
+         target bindings whole (Bigint.of_int v) binding
+     | Some None | None -> ());
+    reason_order_retained_from formula database learned target bindings whole
+      rest
+
+let (reason_order_retained @ total) : (formula : formula) ->
+    (database : proof_result list) -> (learned : int) -> (target : int) ->
+    (bindings : binding option list) -> (trail : literal list) ->
+    {u : unit | if reason_order formula database learned bindings trail
+        && reason_semantics formula database learned bindings then
+      reason_order formula database learned (retained_bindings target bindings)
+        (retain_trail target bindings trail) else true} =
+  fun formula database learned target bindings trail ->
+  reason_order_def formula database learned bindings trail;
+  reason_order_def formula database learned (retained_bindings target bindings)
+    (retain_trail target bindings trail);
+  reason_order_retained_from formula database learned target bindings trail
+    trail
+
 let (backtrack @ total) (formula : formula @ ghost)
     (database : proof_result list @ ghost) (state : state) target :
     {next : state | next.learned = state.learned && next.level = target
@@ -1380,6 +1872,11 @@ let (backtrack @ total) (formula : formula @ ghost)
           else true)
         && (if trail_covers state.bindings state.trail then
         trail_covers next.bindings next.trail else true)
+      && (if reason_order formula database state.learned state.bindings
+        state.trail
+          && reason_semantics formula database state.learned state.bindings then
+        reason_order formula database next.learned next.bindings next.trail
+        else true)
       && (if reason_semantics formula database state.learned state.bindings then
         reason_semantics formula database next.learned next.bindings else true)
       && (if reason_sources_valid formula database state.learned state.bindings
@@ -1388,6 +1885,8 @@ let (backtrack @ total) (formula : formula @ ghost)
   let bindings = retain_bindings target state.bindings in
   let trail = retain_trail target state.bindings state.trail in
   ghost_ (
+    reason_order_retained formula database state.learned target state.bindings
+      state.trail;
     reason_semantics_retained formula database state.learned state.bindings
       target;
     retained_trail_ordered target state.bindings state.trail state.level;
@@ -1697,40 +2196,6 @@ let rec (find_latest @ total) :
         | Some None | None -> ());
       find_latest (ghost_ bindings) (ghost_ level) rest variables)
 
-let rec (reason_slots_at @ total) : (formula : formula) ->
-    (database : proof_result list) -> (learned : int) ->
-    (bindings : binding option list) -> (offset : Bigint.t) ->
-    (remaining : binding option list) -> (index : Bigint.t) ->
-    {u : unit | if reason_semantics_from formula database learned bindings
-        offset remaining then match Vox_sequence.at remaining index with
-      | Some (Some binding) -> binding_reason formula database learned bindings
-          (Bigint.add offset index) binding
-      | Some None | None -> true
-      else true} =
-  fun formula database learned bindings offset remaining index ->
-  reason_semantics_from_def formula database learned bindings offset remaining;
-  Vox_sequence.at_def remaining index;
-  match remaining with
-  | [] -> ()
-  | _ :: rest ->
-    if not (Bigint.equal index 0Z) then
-      reason_slots_at formula database learned bindings (Bigint.add offset 1Z)
-        rest (Bigint.sub index 1Z);
-    ()
-
-let (reason_semantics_at @ total) : (formula : formula) ->
-    (database : proof_result list) -> (learned : int) ->
-    (bindings : binding option list) -> (index : Bigint.t) ->
-    {u : unit | if reason_semantics formula database learned bindings then
-      match Vox_sequence.at bindings index with
-      | Some (Some binding) -> binding_reason formula database learned bindings
-          index binding
-      | Some None | None -> true
-      else true} =
-  fun formula database learned bindings index ->
-  reason_semantics_def formula database learned bindings;
-  reason_slots_at formula database learned bindings 0Z bindings index
-
 let rec (reason_false_except @ total) : (bindings : binding option list) ->
     (pivot : int) -> (level : int) -> (value : bool) ->
     (clause : literal list) ->
@@ -1760,7 +2225,8 @@ let rec (analyze @ total) :
       && trail_consistent s.bindings s.trail && trail_unique s.trail
       && trail_ordered s.bindings s.trail s.level
       && reason_sources_valid formula database s.learned s.bindings
-      && reason_semantics formula database s.learned s.bindings}) ->
+      && reason_semantics formula database s.learned s.bindings
+      && reason_order formula database s.learned s.bindings s.trail}) ->
     (stop : {s : int | state.level = 0 || 1 <= s}) -> (fuel : int) ->
     (current : {e : proof_result |
       derivation_valid formula e.proof
@@ -1823,6 +2289,13 @@ let rec (analyze @ total) :
                source_of_reason_def state.learned binding.reason;
                reason_semantics_at formula database state.learned state.bindings
                  (Bigint.of_int v);
+               covered_variable state.trail variables v;
+               reason_order_def formula database state.learned state.bindings
+                 state.trail;
+               reason_order_member formula database state.learned state.bindings
+                 state.trail state.trail v;
+               binding_order_def formula database state.learned state.trail
+                 (Bigint.of_int v) binding;
                binding_reason_def formula database state.learned state.bindings
                  (Bigint.of_int v) binding);
              (match source_of_reason state.learned binding.reason with
@@ -1836,6 +2309,8 @@ let rec (analyze @ total) :
                   None
                 | Some reason ->
                   ghost_ (
+                    let _ : {u : unit | earlier_clause state.trail
+                      (Bigint.of_int v) reason.clause} = () in
                     reason_false_except state.bindings v binding.level
                       binding.value reason.clause;
                     conflict_characterization partial current.clause;
@@ -2027,6 +2502,10 @@ let rec (propagate @ total) : (n : int) @ ghost ->
         && next.learned = state.learned && next.level = state.level
         && levels_bounded next.level next.bindings
         && reason_sources_valid formula database next.learned next.bindings
+        && (if reason_order formula database state.learned state.bindings
+          state.trail
+            then reason_order formula database next.learned next.bindings
+              next.trail else true)
         && (if reason_semantics formula database state.learned state.bindings
             then reason_semantics formula database next.learned next.bindings
             else true)
@@ -2045,6 +2524,10 @@ let rec (propagate @ total) : (n : int) @ ghost ->
         && next.learned = state.learned && next.level = state.level
         && levels_bounded next.level next.bindings
         && reason_sources_valid formula database next.learned next.bindings
+        && (if reason_order formula database state.learned state.bindings
+          state.trail
+            then reason_order formula database next.learned next.bindings
+              next.trail else true)
         && (if reason_semantics formula database state.learned state.bindings
             then reason_semantics formula database next.learned next.bindings
             else true)
@@ -2187,7 +2670,8 @@ let rec (search @ total) :
       && 0 <= s.learned
       && Vox_sequence.length database === Bigint.of_int s.learned
       && reason_sources_valid formula database s.learned s.bindings
-      && reason_semantics formula database s.learned s.bindings}) ->
+      && reason_semantics formula database s.learned s.bindings
+      && reason_order formula database s.learned s.bindings s.trail}) ->
     (fuel : {f : int | 0 <= f
       && Bigint.compare
         (Bigint.add (Bigint.of_int state.learned) (Bigint.of_int f))
@@ -2291,6 +2775,8 @@ let rec (search @ total) :
                      state target in
                    ghost_ (at_def state.bindings (variable literal));
                    ghost_ (
+                     reason_order_prepend formula database state.learned limit
+                       learned state.bindings state.trail;
                      reason_semantics_prepend formula database state.learned
                        limit learned state.bindings;
                      reason_sources_prepend formula database
@@ -2382,7 +2868,9 @@ let (solve @ total) :
     ghost_ (
       Vox_sequence.length_def database;
       unassigned_reason_sources formula database 0 initial.bindings;
-      unassigned_reason_semantics formula database 0 initial.bindings);
+      unassigned_reason_semantics formula database 0 initial.bindings;
+      reason_order_def formula database 0 initial.bindings [];
+      reason_order_from_def formula database 0 initial.bindings [] []);
     let report = search (ghost_ fuel) (ghost_ n) formula scores database
       initial fuel in
     match report.answer with
