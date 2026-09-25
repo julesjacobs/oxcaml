@@ -137,15 +137,14 @@ val alloc : ('a : immutable_data).
 external read : ('a : immutable_data).
   (p : 'a t) @ immutable ->
   (t : {t : 'a token | Heap.mem (own t) p}) @ local read ->
-  {v : 'a | let refine_ t = t in Some v === Heap.at (own t) p} @ immutable
+  {v : 'a | Some v === Heap.at (own t) p} @ immutable
   = "caml_pref_read_bytecode" "caml_pref_read"
 
 (** Consume writable ownership and return the updated finite map. *)
 external write : ('a : immutable_data).
   (p : 'a t) @ immutable -> (v : 'a) @ immutable ->
   (t : {t : 'a token | Heap.mem (own t) p}) @ unique read_write ->
-  {u : 'a token | let refine_ t = t in
-    own u === Heap.put (own t) p v} @ unique
+  {u : 'a token | own u === Heap.put (own t) p v} @ unique
   = "caml_pref_write_bytecode" "caml_pref_write"
 
 (** Runtime identity comparison for handles. *)

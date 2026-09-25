@@ -76,7 +76,7 @@ val iarray_at : ('a : immutable_data).
 val iarray_at_get : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-    {u : unit | let refine_ i = index in
+    {u : unit | let i = index in
       iarray_at values i === Some (iarray_get values index)} @@ total
 val from_iarray_unfold : ('a : immutable_data).
   (values : 'a iarray) @ immutable -> (count : int) ->
@@ -154,7 +154,7 @@ val of_iarray_length : ('a : immutable_data).
 val of_iarray_at : ('a : immutable_data).
   (values : 'a iarray) @ immutable ->
   (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-  {u : unit | let refine_ i = index in
+  {u : unit | let i = index in
     at (of_iarray values) (Bigint.of_int i) === Some (iarray_get values index)}
       @@ total
 
@@ -166,7 +166,7 @@ module Iarray : sig
   val get : ('a : immutable_data).
     (values : 'a iarray) @ immutable ->
     (index : {i : int | 0 <= i && i < Iarray.length values}) ->
-    {value : 'a | let refine_ i = index in
+    {value : 'a | let i = index in
       at (of_iarray values) (Bigint.of_int i) === Some value
         && value === iarray_get values index}
     @ immutable total @@ total
