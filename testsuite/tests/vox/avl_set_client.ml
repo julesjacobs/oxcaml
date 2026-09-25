@@ -26,7 +26,7 @@ let () =
           lookup element ascending === lookup element ascending} =
       fun _element ->
       let u = () in
-      refine_ u
+      u
     in
     extensional ascending ascending same_lookup;
     ())
@@ -34,3 +34,14 @@ let () =
   Format.printf "semantic equal = %b; representation equal = %b@."
     (equal ascending descending)
     (ascending = descending)
+
+let () =
+  List.iter (fun values ->
+    let set = List.fold_left (fun set value -> Avl_sets.add value set)
+      Avl_sets.empty values in
+    List.iter (fun value -> assert (Avl_sets.lookup value set)) values;
+    assert (Bigint.to_int_opt (Avl_sets.size set) =
+      Some (List.length (List.sort_uniq Int.compare values))))
+    [[1; 2; 3]; [3; 2; 1]; [3; 1; 2]; [1; 3; 2];
+     [min_int; max_int; 0; min_int]; List.init 200 Fun.id;
+     List.init 200 (fun i -> 199 - i)]
