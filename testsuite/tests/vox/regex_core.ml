@@ -1,0 +1,2027 @@
+module Regex : sig
+  type t = Regex_semantics.t = Empty | Epsilon | Symbol of int | Alt of t * t | Seq of t * t | Star of t
+  [@@inductive]
+
+  module Membership : sig
+    type evidence = Regex_semantics.Membership.evidence =
+      | Epsilon_match
+      | Symbol_match of int
+      | Alt_left of evidence
+      | Alt_right of evidence
+      | Seq_match of evidence * evidence
+      | Star_empty
+      | Star_step of evidence * evidence
+    [@@inductive]
+
+    val word : evidence -> int list @@ total
+    val valid : t -> evidence -> bool @@ total
+  end
+
+  open Membership
+  val alt : t -> t -> t @@ total
+  val nullable : t -> bool @@ total
+  val derive : int -> t -> t @@ total
+  val matches : t -> int list -> bool @@ total
+  val sound : (r : t) -> (s : int list) ->
+    {p : evidence | if matches r s then valid r p && word p === s else true}
+    @@ total
+  val complete : (r : t) -> (s : int list) -> (p : evidence) ->
+    {u : unit | if valid r p && word p === s then matches r s else true}
+    @@ total
+  val recognize : (r : t) -> (s : int list) ->
+    {result : evidence option |
+      match result with
+      | None -> matches r s === false
+      | Some p -> matches r s && valid r p && word p === s}
+    @@ total
+  module Dfa : sig
+    type automaton : value mod immutable
+    type state = t list
+    val compile : t @ total -> automaton @ total @@ total
+    val run : automaton -> int list -> bool @@ total
+    val initial : automaton -> state @@ total
+    val states : automaton -> state list @@ total
+    val contains_in : state -> state list -> bool @@ total
+    val contains_in_empty : (source : state) ->
+      {u : unit | contains_in source [] === false} @@ total
+    val contains_state : automaton -> state -> bool @@ total
+    val contains_state_equation : (dfa : automaton) -> (source : state) ->
+      {u : unit | contains_state dfa source ===
+        contains_in source (states dfa)} @@ total
+    val output : automaton -> state -> bool @@ total
+    val next : automaton -> state -> int -> state @@ total
+    val compiled_next_member : (root : t) -> (source : state) ->
+      (letter : int) ->
+      {u : unit | if contains_state (compile root) source then
+        contains_state (compile root) (next (compile root) source letter)
+        else true} @@ total
+    val compiled_initial_member : (root : t) ->
+      {u : unit | contains_state (compile root) (initial (compile root))}
+      @@ total
+    val compiled_empty_member : (root : t) ->
+      {u : unit | contains_state (compile root) []} @@ total
+    val default : automaton -> state -> state @@ total
+    val default_empty : (dfa : automaton) -> (source : state) ->
+      {u : unit | default dfa source === []} @@ total
+    val labels : automaton -> state -> int list @@ total
+    val label_member : int -> int list -> bool @@ total
+    val label_member_empty : (letter : int) ->
+      {u : unit | label_member letter [] === false} @@ total
+    val label_member_cons : (letter : int) -> (head : int) ->
+      (rest : int list) ->
+      {u : unit | label_member letter (head :: rest) ===
+        (letter = head || label_member letter rest)} @@ total
+    val next_outside_labels : (dfa : automaton) -> (source : state) ->
+      (letter : int) ->
+      {u : unit | if not (label_member letter (labels dfa source)) then
+        next dfa source letter === [] else true} @@ total
+    val run_from : automaton -> state -> int list -> bool @@ total
+    val same_state : state -> state -> bool @@ total
+    val contains_in_cons : (source : state) -> (head : state) ->
+      (rest : state list) ->
+      {u : unit | contains_in source (head :: rest) ===
+        (same_state source head || contains_in source rest)} @@ total
+    val same_state_correct : (left : state) -> (right : state) ->
+      {u : unit | same_state left right === (left === right)} @@ total
+    val run_from_empty : (dfa : automaton) -> (state : state) ->
+      {u : unit | run_from dfa state [] === output dfa state} @@ total
+    val run_from_letter : (dfa : automaton) -> (state : state) ->
+      (letter : int) -> (suffix : int list) ->
+      {u : unit | run_from dfa state (letter :: suffix) ===
+        run_from dfa (next dfa state letter) suffix} @@ total
+    val run_initial : (dfa : automaton) -> (word : int list) ->
+      {u : unit | run dfa word === run_from dfa (initial dfa) word}
+      @@ total
+    val universe_size : t -> int @@ total
+    val state_count : automaton -> int @@ total
+    val correct : (root : t) -> (s : int list) ->
+      {u : unit | run (compile root) s === matches root s} @@ total
+    val sound : (root : t) -> (s : int list) ->
+      {p : evidence | if run (compile root) s then valid root p && word p === s
+        else true} @@ total
+    val complete : (root : t) -> (s : int list) -> (p : evidence) ->
+      {u : unit | if valid root p && word p === s then run (compile root) s
+        else true} @@ total
+  end
+  val membership_word : (p : Membership.evidence) ->
+    {u : unit | Membership.word p === Regex_semantics.Membership.word p} @@ total
+  val membership_valid : (r : t) -> (p : Membership.evidence) ->
+    {u : unit | Membership.valid r p === Regex_semantics.Membership.valid r p} @@ total
+end = struct
+  type t = Regex_semantics.t = Empty | Epsilon | Symbol of int | Alt of t * t | Seq of t * t | Star of t
+  [@@inductive]
+  module Membership = Regex_semantics.Membership
+
+  open Membership
+
+  let rec (append_nil @ total) : (xs : int list) ->
+      {u : unit | append xs [] === xs} @ immutable contended =
+    fun xs ->
+    let nil = [] in
+    append_def xs nil;
+    let u = () in
+    match xs with
+    | [] -> u
+    | _ :: rest ->
+      append_nil rest;
+      u
+
+  let[@def] rec equal a b =
+    match a with
+    | Empty -> (match b with Empty -> true | _ -> false)
+    | Epsilon -> (match b with Epsilon -> true | _ -> false)
+    | Symbol c -> (match b with Symbol d -> c = d | _ -> false)
+    | Alt (a1, a2) ->
+      (match b with Alt (b1, b2) -> equal a1 b1 && equal a2 b2 | _ -> false)
+    | Seq (a1, a2) ->
+      (match b with Seq (b1, b2) -> equal a1 b1 && equal a2 b2 | _ -> false)
+    | Star a -> (match b with Star b -> equal a b | _ -> false)
+
+  let rec (equal_correct @ total) : (a : t) -> (b : t) ->
+      {u : unit | equal a b === (a === b)} @ immutable contended =
+    fun a b ->
+    equal_def a b;
+    let u = () in
+    match a with
+    | Empty | Epsilon | Symbol _ -> u
+    | Alt (a1, a2) ->
+      (match b with
+       | Alt (b1, b2) ->
+         equal_correct a1 b1;
+         equal_correct a2 b2;
+         u
+       | _ -> u)
+    | Seq (a1, a2) ->
+      (match b with
+       | Seq (b1, b2) ->
+         equal_correct a1 b1;
+         equal_correct a2 b2;
+         u
+       | _ -> u)
+    | Star a ->
+      (match b with
+       | Star b ->
+         equal_correct a b;
+         u
+       | _ -> u)
+
+  let (rank @ total) r =
+    match r with
+    | Empty -> 0 | Epsilon -> 1 | Symbol _ -> 2
+    | Alt _ -> 3 | Seq _ -> 4 | Star _ -> 5
+
+  let rec (compare @ total) a b =
+    match a with
+    | Empty | Epsilon -> rank a - rank b
+    | Symbol c ->
+      (match b with
+       | Symbol d -> if c < d then -1 else if c = d then 0 else 1
+       | _ -> rank a - rank b)
+    | Alt (a1, a2) ->
+      (match b with
+       | Alt (b1, b2) ->
+         let first = compare a1 b1 in
+         if first = 0 then compare a2 b2 else first
+       | _ -> rank a - rank b)
+    | Seq (a1, a2) ->
+      (match b with
+       | Seq (b1, b2) ->
+         let first = compare a1 b1 in
+         if first = 0 then compare a2 b2 else first
+       | _ -> rank a - rank b)
+    | Star inner ->
+      (match b with Star other -> compare inner other | _ -> rank a - rank b)
+
+  let[@def] rec insert (a @ total) (r @ total) : t @ total =
+    match r with
+    | Empty -> a
+    | Alt (head, tail) ->
+      if equal a head then r
+      else if compare a head < 0 then Alt (a, r)
+      else Alt (head, insert a tail)
+    | _ ->
+      if equal a r then r
+      else if compare a r < 0 then Alt (a, r)
+      else Alt (r, a)
+
+  let[@def] rec add_alternatives (a @ total) (acc @ total) : t @ total =
+    match a with
+    | Empty -> acc
+    | Alt (left, right) -> add_alternatives left (add_alternatives right acc)
+    | _ -> insert a acc
+
+  let[@def] alt (a @ total) (b @ total) : t @ total =
+    add_alternatives a (add_alternatives b Empty)
+
+  let[@def] rec contains a r =
+    match r with
+    | Empty -> false
+    | Alt (left, right) -> contains a left || contains a right
+    | _ -> equal a r
+
+  let rec (insert_contains @ total) : (a : t) -> (r : t) -> (query : t) ->
+      {u : unit | contains query (insert a r) ===
+        (contains query a || contains query r)} @ immutable contended =
+    fun a r query ->
+    let result = insert a r in
+    insert_def a r;
+    contains_def query r;
+    contains_def query result;
+    equal_correct a r;
+    let u = () in
+    match r with
+    | Empty -> u
+    | Alt (head, tail) ->
+      equal_correct a head;
+      let next = insert a tail in
+      insert_contains a tail query;
+      contains_def query next;
+      u
+    | _ -> u
+
+  let rec (add_contains @ total) : (a : t) -> (acc : t) -> (query : t) ->
+      {u : unit | contains query (add_alternatives a acc) ===
+        (contains query a || contains query acc)} @ immutable contended =
+    fun a acc query ->
+    add_alternatives_def a acc;
+    contains_def query a;
+    let u = () in
+    match a with
+    | Empty -> u
+    | Alt (left, right) ->
+      let next = add_alternatives right acc in
+      add_contains right acc query;
+      add_contains left next query;
+      u
+    | _ ->
+      insert_contains a acc query;
+      u
+
+  let (alt_contains @ total) (a @ total) (b @ total) query :
+      {u : unit | contains query (alt a b) ===
+        (contains query a || contains query b)} =
+    let empty = Empty in
+    let next = add_alternatives b empty in
+    alt_def a b;
+    contains_def query empty;
+    add_contains b empty query;
+    add_contains a next query;
+    let u = () in u
+
+  let rec (select_alternative @ total) : (r : t) -> (p : evidence) ->
+      {choice : t * evidence |
+        if valid r p then
+          match choice with a, q ->
+            contains a r && valid a q && word q === word p
+        else true} @ immutable contended =
+    fun r p ->
+    ghost_ (valid_def r p);
+    ghost_ (word_def p);
+    let result =
+      match r with
+      | Alt (left, right) ->
+        (match p with
+         | Alt_left inner ->
+           let choice = select_alternative left inner in
+           let (a : t), _ = choice in
+           ghost_ (contains_def a r);
+           choice
+         | Alt_right inner ->
+           let choice = select_alternative right inner in
+           let (a : t), _ = choice in
+           ghost_ (contains_def a r);
+           choice
+         | _ -> r, p)
+      | _ ->
+        ghost_ (contains_def r r);
+        ghost_ (equal_correct r r);
+        r, p
+    in
+    result
+
+  let rec (inject_alternative @ total) :
+      (r : t) -> (a : t) -> (p : evidence) ->
+      {q : evidence |
+        if contains a r && valid a p then valid r q && word q === word p
+        else true} @ immutable contended =
+    fun r a p ->
+    ghost_ (contains_def a r);
+    let result =
+      match r with
+      | Alt (left, right) ->
+        if contains a left then
+          let q = inject_alternative left a p in
+          let result = Alt_left q in
+          ghost_ (valid_def r result);
+          ghost_ (word_def result);
+          result
+        else
+          let q = inject_alternative right a p in
+          let result = Alt_right q in
+          ghost_ (valid_def r result);
+          ghost_ (word_def result);
+          result
+      | _ ->
+        ghost_ (equal_correct a r);
+        p
+    in
+    result
+
+  let (alt_expand @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (alt a b) p then valid (Alt (a, b)) q && word q === word p
+        else true} =
+    let simplified = alt a b in
+    let original = Alt (a, b) in
+    let choice = select_alternative simplified p in
+    let (leaf : t), (inner : evidence) = choice in
+    ghost_ (alt_contains a b leaf);
+    ghost_ (contains_def leaf original);
+    let q = inject_alternative original leaf inner in
+    q
+
+  let (alt_contract @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (Alt (a, b)) p then valid (alt a b) q && word q === word p
+        else true} =
+    let simplified = alt a b in
+    let original = Alt (a, b) in
+    let choice = select_alternative original p in
+    let (leaf : t), (inner : evidence) = choice in
+    ghost_ (contains_def leaf original);
+    ghost_ (alt_contains a b leaf);
+    let q = inject_alternative simplified leaf inner in
+    q
+
+  let[@def] seq (a @ total) (b @ total) : t @ total =
+    match a, b with
+    | Empty, _ | _, Empty -> Empty
+    | Epsilon, _ -> b
+    | _, Epsilon -> a
+    | _ -> Seq (a, b)
+
+  let (seq_expand @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (seq a b) p then valid (Seq (a, b)) q && word q === word p
+        else true} =
+    let simplified = ghost_ (seq a b) in
+    let original = ghost_ (Seq (a, b)) in
+    ghost_ (seq_def a b);
+    ghost_ (valid_def simplified p);
+    let empty = Epsilon_match in
+    ghost_ (word_def empty);
+    let epsilon = Epsilon in
+    ghost_ (valid_def epsilon empty);
+    let q = match a, b with
+      | Empty, _ | _, Empty -> Epsilon_match
+      | Epsilon, _ -> Seq_match (empty, p)
+      | _, Epsilon -> Seq_match (p, empty)
+      | _ -> p
+    in
+    ghost_ (valid_def original q);
+    ghost_ (word_def q);
+    let nil = [] in
+    let pw = ghost_ (word p) in
+    ghost_ (append_def nil pw);
+    ghost_ (append_nil pw);
+    q
+
+  let (seq_contract @ total) (a @ total) (b @ total) p :
+      {q : evidence |
+        if valid (Seq (a, b)) p then valid (seq a b) q && word q === word p
+        else true} =
+    let original = ghost_ (Seq (a, b)) in
+    ghost_ (seq_def a b);
+    ghost_ (valid_def original p);
+    ghost_ (word_def p);
+    let q = match p with
+      | Seq_match (left, right) ->
+        ghost_ (valid_def a left);
+        ghost_ (valid_def b right);
+        ghost_ (word_def left);
+        ghost_ (word_def right);
+        let lw = ghost_ (word left) in
+        let rw = ghost_ (word right) in
+        ghost_ (append_def lw rw);
+        ghost_ (append_nil lw);
+        (match a, b with
+         | Empty, _ | _, Empty -> Epsilon_match
+         | Epsilon, _ -> right
+         | _, Epsilon -> left
+         | _ -> p)
+      | _ -> Epsilon_match
+    in
+    q
+
+  let[@def] rec nullable r =
+    match r with
+    | Empty | Symbol _ -> false
+    | Epsilon | Star _ -> true
+    | Alt (a, b) -> nullable a || nullable b
+    | Seq (a, b) -> nullable a && nullable b
+
+  let[@def] rec derive c r =
+    match r with
+    | Empty | Epsilon -> Empty
+    | Symbol d -> if c = d then Epsilon else Empty
+    | Alt (a, b) -> alt (derive c a) (derive c b)
+    | Seq (a, b) ->
+      if nullable a then alt (seq (derive c a) b) (derive c b)
+      else seq (derive c a) b
+    | Star a -> seq (derive c a) (Star a)
+
+  let[@def] rec matches r (s : int list) =
+    match s with [] -> nullable r | c :: rest -> matches (derive c r) rest
+
+  let rec (epsilon @ total) : (r : t) ->
+      {p : evidence | if nullable r then valid r p && word p === [] else true}
+        @ immutable contended =
+    fun r ->
+    ghost_ (nullable_def r);
+    let result =
+      match r with
+      | Empty | Epsilon | Symbol _ -> Epsilon_match
+      | Star _ -> Star_empty
+      | Alt (a, b) ->
+        if nullable a then
+          let p = epsilon a in
+          let result = Alt_left p in
+          ghost_ (valid_def r result);
+          ghost_ (word_def result);
+          result
+        else
+          let p = epsilon b in
+          let result = Alt_right p in
+          ghost_ (valid_def r result);
+          ghost_ (word_def result);
+          result
+      | Seq (a, b) ->
+        let p = epsilon a in
+        let q = epsilon b in
+        let result = Seq_match (p, q) in
+        ghost_ (valid_def r result);
+        ghost_ (word_def result);
+        let left = ghost_ (word p) in
+        let right = ghost_ (word q) in
+        ghost_ (append_def left right);
+        result
+    in
+    ghost_ (valid_def r result);
+    ghost_ (word_def result);
+    result
+  let rec (expand @ total) : (r : t) -> (c : int) -> (p : evidence) ->
+      {q : evidence |
+        if valid (derive c r) p then valid r q && word q === c :: word p
+        else true} @ immutable contended =
+    fun r c p ->
+    let derivative = ghost_ (derive c r) in
+    ghost_ (derive_def c r);
+    ghost_ (valid_def derivative p);
+    ghost_ (word_def p);
+    let result =
+      match r with
+      | Empty | Epsilon -> Epsilon_match
+      | Symbol _ -> Symbol_match c
+      | Alt (a, b) ->
+        let da = derive c a in
+        let db = derive c b in
+        let p = alt_expand da db p in
+        let original = ghost_ (Alt (da, db)) in
+        ghost_ (valid_def original p);
+        ghost_ (word_def p);
+        (match p with
+         | Alt_left inner ->
+           let q = expand a c inner in
+           let result = Alt_left q in
+           ghost_ (valid_def r result);
+           ghost_ (word_def result);
+           result
+         | Alt_right inner ->
+           let q = expand b c inner in
+           let result = Alt_right q in
+           ghost_ (valid_def r result);
+           ghost_ (word_def result);
+           result
+         | _ -> Epsilon_match)
+      | Seq (a, b) ->
+        let da = derive c a in
+        let db = derive c b in
+        let product = seq da b in
+        if nullable a then
+          let p = alt_expand product db p in
+          let original = ghost_ (Alt (product, db)) in
+          ghost_ (valid_def original p);
+          ghost_ (word_def p);
+          (match p with
+           | Alt_left inner ->
+             let inner = seq_expand da b inner in
+             let left_derivative = ghost_ (Seq (derive c a, b)) in
+             ghost_ (valid_def left_derivative inner);
+             ghost_ (word_def inner);
+             (match inner with
+              | Seq_match (left, right) ->
+                let q = expand a c left in
+                let result = Seq_match (q, right) in
+                ghost_ (valid_def r result);
+                ghost_ (word_def result);
+                let qw = ghost_ (word q) in
+                let rw = ghost_ (word right) in
+                ghost_ (append_def qw rw);
+                result
+              | _ -> Epsilon_match)
+           | Alt_right right ->
+             let left = epsilon a in
+             let q = expand b c right in
+             let result = Seq_match (left, q) in
+             ghost_ (valid_def r result);
+             ghost_ (word_def result);
+             let lw = ghost_ (word left) in
+             let qw = ghost_ (word q) in
+             ghost_ (append_def lw qw);
+             result
+           | _ -> Epsilon_match)
+        else
+          let p = seq_expand da b p in
+          let original = ghost_ (Seq (da, b)) in
+          ghost_ (valid_def original p);
+          ghost_ (word_def p);
+          (match p with
+           | Seq_match (left, right) ->
+             let q = expand a c left in
+             let result = Seq_match (q, right) in
+             ghost_ (valid_def r result);
+             ghost_ (word_def result);
+             let qw = ghost_ (word q) in
+             let rw = ghost_ (word right) in
+             ghost_ (append_def qw rw);
+             result
+           | _ -> Epsilon_match)
+      | Star a ->
+        let da = derive c a in
+        let p = seq_expand da r p in
+        let original = ghost_ (Seq (da, r)) in
+        ghost_ (valid_def original p);
+        ghost_ (word_def p);
+        (match p with
+         | Seq_match (left, right) ->
+           let q = expand a c left in
+           let result = Star_step (q, right) in
+           ghost_ (valid_def r result);
+           ghost_ (word_def result);
+           let qw = ghost_ (word q) in
+           let rw = ghost_ (word right) in
+           ghost_ (append_def qw rw);
+           result
+         | _ -> Epsilon_match)
+    in
+    ghost_ (valid_def r result);
+    ghost_ (word_def result);
+    result
+  let (append_empty @ total) (xs : int list) (ys : int list) :
+      {u : unit | (append xs ys === []) === (xs === [] && ys === [])} =
+    append_def xs ys;
+    let u = () in
+    match xs with [] -> u | _ :: _ -> u
+
+  let rec (empty_complete @ total) : (r : t) -> (p : evidence) ->
+      {u : unit | if valid r p && word p === [] then nullable r else true}
+        @ immutable contended =
+    fun r p ->
+    valid_def r p;
+    word_def p;
+    nullable_def r;
+    let u = () in
+    match p with
+    | Epsilon_match | Symbol_match _ | Star_empty | Star_step _ -> u
+    | Alt_left inner ->
+      (match r with
+       | Alt (a, _) ->
+         empty_complete a inner;
+         u
+       | _ -> u)
+    | Alt_right inner ->
+      (match r with
+       | Alt (_, b) ->
+         empty_complete b inner;
+         u
+       | _ -> u)
+    | Seq_match (left, right) ->
+      (match r with
+       | Seq (a, b) ->
+         let lw = word left in
+         let rw = word right in
+         append_empty lw rw;
+         empty_complete a left;
+         empty_complete b right;
+         u
+       | _ -> u)
+
+  let rec (contract @ total) :
+      (r : t) -> (c : int) -> (s : int list) -> (p : evidence) ->
+      {q : evidence |
+        if valid r p && word p === c :: s
+        then valid (derive c r) q && word q === s else true}
+        @ immutable contended =
+    fun r c s p ->
+    let derivative = ghost_ (derive c r) in
+    ghost_ (derive_def c r);
+    ghost_ (valid_def r p);
+    ghost_ (word_def p);
+    let result =
+      match p with
+      | Epsilon_match | Star_empty | Symbol_match _ -> Epsilon_match
+      | Alt_left inner ->
+        (match r with
+         | Alt (a, b) ->
+           let q = contract a c s inner in
+           let da = derive c a in
+           let db = derive c b in
+           let original = ghost_ (Alt (da, db)) in
+           let result = Alt_left q in
+           ghost_ (valid_def original result);
+           ghost_ (word_def result);
+           let result = alt_contract da db result in
+           result
+         | _ -> Epsilon_match)
+      | Alt_right inner ->
+        (match r with
+         | Alt (a, b) ->
+           let q = contract b c s inner in
+           let da = derive c a in
+           let db = derive c b in
+           let original = ghost_ (Alt (da, db)) in
+           let result = Alt_right q in
+           ghost_ (valid_def original result);
+           ghost_ (word_def result);
+           let result = alt_contract da db result in
+           result
+         | _ -> Epsilon_match)
+      | Seq_match (left, right) ->
+        (match r with
+         | Seq (a, b) ->
+           let da = derive c a in
+           let db = derive c b in
+           let product = seq da b in
+           let sum = ghost_ (Alt (product, db)) in
+           let lw = word left in
+           let rw = ghost_ (word right) in
+           ghost_ (append_def lw rw);
+           (match lw with
+            | [] ->
+              ghost_ (empty_complete a left);
+              let q = contract b c s right in
+              let result = Alt_right q in
+              ghost_ (valid_def sum result);
+              ghost_ (word_def result);
+              let result = alt_contract product db result in
+              result
+            | h :: rest ->
+              let q = contract a h rest left in
+              let pair = Seq_match (q, right) in
+              let pair_regex = ghost_ (Seq (derive c a, b)) in
+              ghost_ (valid_def pair_regex pair);
+              ghost_ (word_def pair);
+              let pair = seq_contract da b pair in
+              if nullable a then
+                let result = Alt_left pair in
+                ghost_ (valid_def sum result);
+                ghost_ (word_def result);
+                let result = alt_contract product db result in
+                result
+              else pair)
+         | _ -> Epsilon_match)
+      | Star_step (left, right) ->
+        (match r with
+         | Star a ->
+           let lw = word left in
+           let rw = ghost_ (word right) in
+           ghost_ (append_def lw rw);
+           (match lw with
+            | [] ->
+              let q = contract r c s right in
+              q
+            | h :: rest ->
+              let q = contract a h rest left in
+              let da = derive c a in
+              let original = ghost_ (Seq (da, r)) in
+              let result = Seq_match (q, right) in
+              ghost_ (valid_def original result);
+              ghost_ (word_def result);
+              let result = seq_contract da r result in
+              result)
+         | _ -> Epsilon_match)
+    in
+    ghost_ (valid_def derivative result);
+    ghost_ (word_def result);
+    result
+  let rec (sound @ total) : (r : t) -> (s : int list) ->
+      {p : evidence | if matches r s then valid r p && word p === s else true}
+        @ immutable contended =
+    fun r s ->
+    ghost_ (matches_def r s);
+    match s with
+    | [] ->
+      let p = epsilon r in
+      p
+    | c :: rest ->
+      let derivative = derive c r in
+      let p = sound derivative rest in
+      let q = expand r c p in
+      q
+
+  let rec (complete @ total) : (r : t) -> (s : int list) -> (p : evidence) ->
+      {u : unit | if valid r p && word p === s then matches r s else true}
+        @ immutable contended =
+    fun r s p ->
+    matches_def r s;
+    let u = () in
+    match s with
+    | [] ->
+      empty_complete r p;
+      u
+    | c :: rest ->
+      let derivative = derive c r in
+      let q = contract r c rest p in
+      complete derivative rest q;
+      u
+
+  let (recognize @ total) (r @ total) (s : int list) :
+      {result : evidence option |
+        match result with
+        | None -> matches r s === false
+        | Some p -> matches r s && valid r p && word p === s} =
+    if matches r s then
+      let p = sound r s in
+      let result = Some p in result
+    else
+      let result = None in result
+
+  module Dfa = struct
+    let[@def] rec member r (xs : t list) =
+      match xs with [] -> false | x :: rest -> equal r x || member r rest
+
+    let[@def] rec join (xs : t list) ys =
+      match xs with [] -> ys | x :: rest -> x :: join rest ys
+
+    let rec (join_member @ total) :
+        (xs : t list) -> (ys : t list) -> (r : t) ->
+        {u : unit | member r (join xs ys) === (member r xs || member r ys)}
+          @ immutable contended =
+      fun xs ys r ->
+      let joined = join xs ys in
+      join_def xs ys;
+      member_def r xs;
+      member_def r joined;
+      let u = () in
+      match xs with
+      | [] -> u
+      | _ :: rest ->
+        join_member rest ys r;
+        u
+
+    let[@def] rec suffix (xs : t list) b =
+      match xs with [] -> [] | a :: rest -> Seq (a, b) :: suffix rest b
+
+    let rec (suffix_member @ total) :
+        (xs : t list) -> (b : t) -> (r : t) ->
+        {u : unit | member r (suffix xs b) ===
+          (match r with Seq (a, tail) -> tail === b && member a xs | _ -> false)}
+          @ immutable contended =
+      fun xs b r ->
+      let result = suffix xs b in
+      suffix_def xs b;
+      member_def r result;
+      let u = () in
+      match xs with
+      | [] ->
+        (match r with
+         | Seq (a, _) ->
+           member_def a xs;
+           u
+         | _ -> u)
+      | a :: rest ->
+        let head = Seq (a, b) in
+        equal_correct r head;
+        suffix_member rest b r;
+        (match r with
+         | Seq (left, _) ->
+           member_def left xs;
+           equal_correct left a;
+           u
+         | _ -> u)
+
+    let[@def] rec support r =
+      match r with
+      | Empty | Epsilon -> []
+      | Symbol _ -> [Epsilon]
+      | Alt (a, b) -> join (support a) (support b)
+      | Seq (a, b) -> join (suffix (support a) b) (support b)
+      | Star a -> suffix (support a) r
+
+    let rec (support_closed @ total) : (r : t) -> (p : t) -> (q : t) ->
+        {u : unit | if member p (support r) && member q (support p)
+          then member q (support r) else true} @ immutable contended =
+      fun r p q ->
+      let sr = support r in
+      let sp = support p in
+      support_def r;
+      support_def p;
+      let u = () in
+      match r with
+      | Empty | Epsilon ->
+        member_def p sr;
+        u
+      | Symbol _ ->
+        member_def p sr;
+        let epsilon = Epsilon in
+        equal_correct p epsilon;
+        let nil = [] in
+        member_def p nil;
+        member_def q sp;
+        u
+      | Alt (a, b) ->
+        let sa = support a in
+        let sb = support b in
+        join_member sa sb p;
+        join_member sa sb q;
+        support_closed a p q;
+        support_closed b p q;
+        u
+      | Seq (a, b) ->
+        let sa = support a in
+        let sb = support b in
+        let left = suffix sa b in
+        join_member left sb p;
+        join_member left sb q;
+        suffix_member sa b p;
+        suffix_member sa b q;
+        support_closed b p q;
+        (match p with
+         | Seq (inner, tail) ->
+           let si = support inner in
+           let st = support tail in
+           let mapped = suffix si tail in
+           join_member mapped st q;
+           suffix_member si tail q;
+           (match q with
+            | Seq (next, _) ->
+              support_closed a inner next;
+              u
+            | _ -> u)
+         | _ -> u)
+      | Star a ->
+        let sa = support a in
+        suffix_member sa r p;
+        suffix_member sa r q;
+        (match p with
+         | Seq (inner, tail) ->
+           let si = support inner in
+           let st = support tail in
+           let mapped = suffix si tail in
+           join_member mapped st q;
+           suffix_member si tail q;
+           (match q with
+            | Seq (next, _) ->
+              support_closed a inner next;
+              u
+            | _ -> u)
+         | _ -> u)
+
+    let[@def] rec partial c r =
+      match r with
+      | Empty | Epsilon -> []
+      | Symbol d -> if c = d then [Epsilon] else []
+      | Alt (a, b) -> join (partial c a) (partial c b)
+      | Seq (a, b) ->
+        let left = suffix (partial c a) b in
+        if nullable a then join left (partial c b) else left
+      | Star a -> suffix (partial c a) r
+
+    let rec (partial_supported @ total) : (r : t) -> (c : int) -> (p : t) ->
+        {u : unit | if member p (partial c r) then member p (support r) else true}
+          @ immutable contended =
+      fun r c p ->
+      partial_def c r;
+      support_def r;
+      let u = () in
+      match r with
+      | Empty | Epsilon | Symbol _ ->
+        let nil = [] in
+        member_def p nil;
+        u
+      | Alt (a, b) ->
+        let da = partial c a in
+        let db = partial c b in
+        let sa = support a in
+        let sb = support b in
+        join_member da db p;
+        join_member sa sb p;
+        partial_supported a c p;
+        partial_supported b c p;
+        u
+      | Seq (a, b) ->
+        let da = partial c a in
+        let db = partial c b in
+        let sa = support a in
+        let sb = support b in
+        let dl = suffix da b in
+        let sl = suffix sa b in
+        join_member dl db p;
+        join_member sl sb p;
+        suffix_member da b p;
+        suffix_member sa b p;
+        partial_supported b c p;
+        (match p with
+         | Seq (inner, _) ->
+           partial_supported a c inner;
+           u
+         | _ -> u)
+      | Star a ->
+        let da = partial c a in
+        let sa = support a in
+        suffix_member da r p;
+        suffix_member sa r p;
+        (match p with
+         | Seq (inner, _) ->
+           partial_supported a c inner;
+           u
+         | _ -> u)
+    let rec (partial_contract @ total) :
+        (r : t) -> (c : int) -> (s : int list) -> (p : evidence) ->
+        {choice : t * evidence |
+          if valid r p && word p === c :: s then
+            match choice with k, q ->
+              member k (partial c r) && valid k q && word q === s
+          else true} @ immutable contended =
+      fun r c s p ->
+      let derivative = partial c r in
+      partial_def c r;
+      valid_def r p;
+      word_def p;
+      let result =
+        match p with
+        | Epsilon_match | Star_empty | Symbol_match _ -> Epsilon, Epsilon_match
+        | Alt_left inner ->
+          (match r with
+           | Alt (a, b) ->
+             let choice = partial_contract a c s inner in
+             let k, _ = choice in
+             let da = partial c a in
+             let db = partial c b in
+             join_member da db k;
+             choice
+           | _ -> Empty, Epsilon_match)
+        | Alt_right inner ->
+          (match r with
+           | Alt (a, b) ->
+             let choice = partial_contract b c s inner in
+             let k, _ = choice in
+             let da = partial c a in
+             let db = partial c b in
+             join_member da db k;
+             choice
+           | _ -> Empty, Epsilon_match)
+        | Seq_match (left, right) ->
+          (match r with
+           | Seq (a, b) ->
+             let da = partial c a in
+             let db = partial c b in
+             let mapped = suffix da b in
+             let lw = word left in
+             let rw = word right in
+             append_def lw rw;
+             (match lw with
+              | [] ->
+                empty_complete a left;
+                let choice = partial_contract b c s right in
+                let k, _ = choice in
+                join_member mapped db k;
+                choice
+              | h :: rest ->
+                let choice = partial_contract a h rest left in
+                let k, inner = choice in
+                let target = Seq (k, b) in
+                let q = Seq_match (inner, right) in
+                suffix_member da b target;
+                join_member mapped db target;
+                valid_def target q;
+                word_def q;
+                target, q)
+           | _ -> Empty, Epsilon_match)
+        | Star_step (left, right) ->
+          (match r with
+           | Star a ->
+             let da = partial c a in
+             let lw = word left in
+             let rw = word right in
+             append_def lw rw;
+             (match lw with
+              | [] ->
+                let choice = partial_contract r c s right in
+                choice
+              | h :: rest ->
+                let choice = partial_contract a h rest left in
+                let k, inner = choice in
+                let target = Seq (k, r) in
+                let q = Seq_match (inner, right) in
+                suffix_member da r target;
+                valid_def target q;
+                word_def q;
+                target, q)
+           | _ -> Empty, Epsilon_match)
+      in
+      let k, q = result in
+      member_def k derivative;
+      let nil = [] in
+      member_def k nil;
+      let epsilon = Epsilon in
+      equal_correct k epsilon;
+      valid_def k q;
+      word_def q;
+      result
+
+    let rec (partial_expand @ total) :
+        (r : t) -> (c : int) -> (k : t) -> (p : evidence) ->
+        {q : evidence | if member k (partial c r) && valid k p
+          then valid r q && word q === c :: word p else true}
+          @ immutable contended =
+      fun r c k p ->
+      let derivative = partial c r in
+      partial_def c r;
+      member_def k derivative;
+      valid_def k p;
+      word_def p;
+      let nil = [] in
+      member_def k nil;
+      let epsilon_regex = Epsilon in
+      equal_correct k epsilon_regex;
+      let result =
+        match r with
+        | Empty | Epsilon -> Epsilon_match
+        | Symbol _ -> Symbol_match c
+        | Alt (a, b) ->
+          let da = partial c a in
+          let db = partial c b in
+          join_member da db k;
+          let q =
+            if member k da then
+              let q = partial_expand a c k p in Alt_left q
+            else
+              let q = partial_expand b c k p in Alt_right q
+          in
+          valid_def r q;
+          word_def q;
+          q
+        | Seq (a, b) ->
+          let da = partial c a in
+          let db = partial c b in
+          let mapped = suffix da b in
+          join_member mapped db k;
+          suffix_member da b k;
+          if member k mapped then
+            (match k, p with
+             | Seq (inner, _), Seq_match (left, right) ->
+               let q = partial_expand a c inner left in
+               let result = Seq_match (q, right) in
+               valid_def r result;
+               word_def result;
+               let qw = word q in
+               let rw = word right in
+               append_def qw rw;
+               result
+             | _ -> Epsilon_match)
+          else
+            let left = epsilon a in
+            let q = partial_expand b c k p in
+            let result = Seq_match (left, q) in
+            valid_def r result;
+            word_def result;
+            let lw = word left in
+            let qw = word q in
+            append_def lw qw;
+            result
+        | Star a ->
+          let da = partial c a in
+          suffix_member da r k;
+          (match k, p with
+           | Seq (inner, _), Seq_match (left, right) ->
+             let q = partial_expand a c inner left in
+             let result = Star_step (q, right) in
+             valid_def r result;
+             word_def result;
+             let qw = word q in
+             let rw = word right in
+             append_def qw rw;
+             result
+           | _ -> Epsilon_match)
+      in
+      valid_def r result;
+      word_def result;
+      result
+
+    let[@def] rec accepts (xs : t list) (s : int list) =
+      match xs with [] -> false | r :: rest -> matches r s || accepts rest s
+
+    let rec (accepts_member @ total) :
+        (xs : t list) -> (r : t) -> (s : int list) ->
+        {u : unit | if member r xs && matches r s then accepts xs s else true}
+          @ immutable contended =
+      fun xs r s ->
+      member_def r xs;
+      accepts_def xs s;
+      let u = () in
+      match xs with
+      | [] -> u
+      | head :: rest ->
+        equal_correct r head;
+        accepts_member rest r s;
+        u
+
+    let rec (accepts_pick @ total) : (xs : t list) -> (s : int list) ->
+        {r : t | if accepts xs s then member r xs && matches r s else true}
+          @ immutable contended =
+      fun xs s ->
+      accepts_def xs s;
+      let result =
+        match xs with
+        | [] -> Empty
+        | head :: rest ->
+          if matches head s then
+            (equal_correct head head;
+            member_def head xs;
+            head)
+          else
+            let r = accepts_pick rest s in
+            member_def r xs;
+            r
+      in
+      result
+
+    let (partial_correct @ total) (r @ total) c s :
+        {u : unit | accepts (partial c r) s === matches r (c :: s)} =
+      let derivative = partial c r in
+      let whole = c :: s in
+      let u = () in
+      if matches r whole then
+        let p = sound r whole in
+        let choice = partial_contract r c s p in
+        let k, q = choice in
+        complete k s q;
+        accepts_member derivative k s;
+        u
+      else if accepts derivative s then
+        let k = accepts_pick derivative s in
+        let p = sound k s in
+        let q = partial_expand r c k p in
+        complete r whole q;
+        u
+      else u
+
+    let[@def] rec same_state (xs : t list) (ys : t list) =
+      match xs with
+      | [] -> (match ys with [] -> true | _ :: _ -> false)
+      | x :: rest ->
+        (match ys with [] -> false | y :: tail -> equal x y && same_state rest tail)
+
+    let rec (same_state_correct @ total) : (xs : t list) -> (ys : t list) ->
+        {u : unit | same_state xs ys === (xs === ys)} @ immutable contended =
+      fun xs ys ->
+      same_state_def xs ys;
+      let u = () in
+      match xs with
+      | [] -> u
+      | x :: rest ->
+        (match ys with
+         | [] -> u
+         | y :: tail ->
+           equal_correct x y;
+           same_state_correct rest tail;
+           u)
+
+    let[@def] rec has_state (xs : t list) (states : t list list) =
+      match states with [] -> false | state :: rest -> same_state xs state || has_state xs rest
+
+    let[@def] rec combine (xs : t list list) ys =
+      match xs with [] -> ys | x :: rest -> x :: combine rest ys
+
+    let rec (combine_has @ total) :
+        (xs : t list list) -> (ys : t list list) -> (state : t list) ->
+        {u : unit | has_state state (combine xs ys) ===
+          (has_state state xs || has_state state ys)} @ immutable contended =
+      fun xs ys state ->
+      let joined = combine xs ys in
+      combine_def xs ys;
+      has_state_def state xs;
+      has_state_def state joined;
+      let u = () in
+      match xs with
+      | [] -> u
+      | _ :: rest ->
+        combine_has rest ys state;
+        u
+
+    let[@def] rec prepend r (states : t list list) =
+      match states with [] -> [] | state :: rest -> (r :: state) :: prepend r rest
+
+    let rec (prepend_has @ total) :
+        (r : t) -> (states : t list list) -> (state : t list) ->
+        {u : unit | has_state state (prepend r states) ===
+          (match state with [] -> false | head :: rest -> head === r && has_state rest states)}
+          @ immutable contended =
+      fun r states state ->
+      let result = prepend r states in
+      prepend_def r states;
+      has_state_def state result;
+      let u = () in
+      match states with
+      | [] ->
+        (match state with
+         | [] -> u
+         | _ :: rest ->
+           has_state_def rest states;
+           u)
+      | first :: tail ->
+        let head = r :: first in
+        same_state_correct state head;
+        prepend_has r tail state;
+        (match state with
+         | [] -> u
+         | _ :: rest ->
+           has_state_def rest states;
+           same_state_correct rest first;
+           u)
+
+    let[@def] rec powerset (universe : t list) =
+      match universe with
+      | [] -> [[]]
+      | head :: rest ->
+        let smaller = powerset rest in
+        combine smaller (prepend head smaller)
+
+    let[@def] rec restrict (universe : t list) (candidates : t list) =
+      match universe with
+      | [] -> []
+      | head :: rest ->
+        if member head candidates then head :: restrict rest candidates
+        else restrict rest candidates
+
+    let rec (restrict_member @ total) :
+        (universe : t list) -> (candidates : t list) -> (query : t) ->
+        {u : unit | member query (restrict universe candidates) ===
+          (member query universe && member query candidates)} @ immutable contended =
+      fun universe candidates query ->
+      let result = restrict universe candidates in
+      restrict_def universe candidates;
+      member_def query result;
+      member_def query universe;
+      let u = () in
+      match universe with
+      | [] -> u
+      | head :: rest ->
+        equal_correct query head;
+        restrict_member rest candidates query;
+        u
+
+    let rec (powerset_cover @ total) : (universe : t list) -> (candidates : t list) ->
+        {u : unit | has_state (restrict universe candidates) (powerset universe)}
+          @ immutable contended =
+      fun universe candidates ->
+      let result = restrict universe candidates in
+      let states = powerset universe in
+      restrict_def universe candidates;
+      powerset_def universe;
+      let u = () in
+      match universe with
+      | [] ->
+        let nil = [] in
+        same_state_correct result nil;
+        has_state_def result states;
+        u
+      | head :: rest ->
+        let smaller = powerset rest in
+        let extended = prepend head smaller in
+        powerset_cover rest candidates;
+        combine_has smaller extended result;
+        prepend_has head smaller result;
+        u
+
+    let rec (powerset_member @ total) :
+        (universe : t list) -> (state : t list) -> (query : t) ->
+        {u : unit | if has_state state (powerset universe) && member query state
+          then member query universe else true} @ immutable contended =
+      fun universe state query ->
+      let states = powerset universe in
+      powerset_def universe;
+      member_def query universe;
+      let u = () in
+      match universe with
+      | [] ->
+        let nil = [] in
+        has_state_def state states;
+        has_state_def state nil;
+        same_state_correct state nil;
+        member_def query state;
+        u
+      | head :: rest ->
+        let smaller = powerset rest in
+        let extended = prepend head smaller in
+        combine_has smaller extended state;
+        prepend_has head smaller state;
+        powerset_member rest state query;
+        (match state with
+         | [] ->
+           member_def query state;
+           u
+         | first :: tail ->
+           member_def query state;
+           equal_correct query first;
+           equal_correct query head;
+           powerset_member rest tail query;
+           u)
+
+    let[@def] rec step c (state : t list) =
+      match state with [] -> [] | r :: rest -> join (partial c r) (step c rest)
+
+    let rec (step_pick @ total) : (state : t list) -> (c : int) -> (query : t) ->
+        {r : t | if member query (step c state)
+          then member r state && member query (partial c r) else true}
+          @ immutable contended =
+      fun state c query ->
+      let next = step c state in
+      step_def c state;
+      let result =
+        match state with
+        | [] ->
+          member_def query next;
+          Empty
+        | head :: rest ->
+          let dh = partial c head in
+          let dr = step c rest in
+          join_member dh dr query;
+          if member query dh then
+            (member_def head state;
+            equal_correct head head;
+            head)
+          else
+            let r = step_pick rest c query in
+            member_def r state;
+            r
+      in
+      result
+
+    let (step_supported @ total) (root @ total) (state : t list) c query :
+        {u : unit | if has_state state (powerset (root :: support root))
+          && member query (step c state)
+          then member query (root :: support root) else true} =
+      let universe = root :: support root in
+      let r = step_pick state c query in
+      powerset_member universe state r;
+      partial_supported r c query;
+      support_closed root r query;
+      member_def r universe;
+      equal_correct r root;
+      member_def query universe;
+      let u = () in u
+
+    let rec (accepts_join @ total) :
+        (xs : t list) -> (ys : t list) -> (s : int list) ->
+        {u : unit | accepts (join xs ys) s === (accepts xs s || accepts ys s)}
+          @ immutable contended =
+      fun xs ys s ->
+      let joined = join xs ys in
+      join_def xs ys;
+      accepts_def xs s;
+      accepts_def joined s;
+      let u = () in
+      match xs with
+      | [] -> u
+      | _ :: rest ->
+        accepts_join rest ys s;
+        u
+
+    let rec (step_correct @ total) : (state : t list) -> (c : int) -> (s : int list) ->
+        {u : unit | accepts (step c state) s === accepts state (c :: s)}
+          @ immutable contended =
+      fun state c s ->
+      let next = step c state in
+      let whole = c :: s in
+      step_def c state;
+      accepts_def state whole;
+      let u = () in
+      match state with
+      | [] ->
+        accepts_def next s;
+        u
+      | head :: rest ->
+        let dh = partial c head in
+        let dr = step c rest in
+        accepts_join dh dr s;
+        partial_correct head c s;
+        step_correct rest c s;
+        u
+
+    let (next_correct @ total) (root @ total) (state : t list) c s :
+        {u : unit | if has_state state (powerset (root :: support root)) then
+          accepts (restrict (root :: support root) (step c state)) s
+          === accepts state (c :: s) else true} =
+      let universe = root :: support root in
+      let next = step c state in
+      let target = restrict universe next in
+      step_correct state c s;
+      let u = () in
+      if accepts next s then
+        let query = accepts_pick next s in
+        step_supported root state c query;
+        restrict_member universe next query;
+        accepts_member target query s;
+        u
+      else if accepts target s then
+        let query = accepts_pick target s in
+        restrict_member universe next query;
+        accepts_member next query s;
+        u
+      else u
+
+    let[@def] rec has_letter c (letters : int list) =
+      match letters with [] -> false | d :: rest -> c = d || has_letter c rest
+
+    let rec (append_letter @ total) :
+        (xs : int list) -> (ys : int list) -> (c : int) ->
+        {u : unit | has_letter c (append xs ys) ===
+          (has_letter c xs || has_letter c ys)} @ immutable contended =
+      fun xs ys c ->
+      let joined = append xs ys in
+      append_def xs ys;
+      has_letter_def c xs;
+      has_letter_def c joined;
+      let u = () in
+      match xs with
+      | [] -> u
+      | _ :: rest ->
+        append_letter rest ys c;
+        u
+
+    let[@def] rec letters r =
+      match r with
+      | Empty | Epsilon -> []
+      | Symbol c -> [c]
+      | Alt (a, b) | Seq (a, b) -> append (letters a) (letters b)
+      | Star a -> letters a
+
+    let rec (partial_letter @ total) : (r : t) -> (c : int) -> (q : t) ->
+        {u : unit | if member q (partial c r) then has_letter c (letters r)
+          else true} @ immutable contended =
+      fun r c q ->
+      let ds = partial c r in
+      let alphabet = letters r in
+      partial_def c r;
+      letters_def r;
+      let u = () in
+      match r with
+      | Empty | Epsilon ->
+        member_def q ds;
+        u
+      | Symbol _ ->
+        let nil = [] in
+        member_def q nil;
+        has_letter_def c alphabet;
+        u
+      | Alt (a, b) ->
+        let da = partial c a in
+        let db = partial c b in
+        let la = letters a in
+        let lb = letters b in
+        append_letter la lb c;
+        join_member da db q;
+        partial_letter a c q;
+        partial_letter b c q;
+        u
+      | Seq (a, b) ->
+        let da = partial c a in
+        let db = partial c b in
+        let left = suffix da b in
+        let la = letters a in
+        let lb = letters b in
+        append_letter la lb c;
+        join_member left db q;
+        suffix_member da b q;
+        partial_letter b c q;
+        (match q with
+         | Seq (inner, _) ->
+           partial_letter a c inner; u
+         | _ -> u)
+      | Star a ->
+        let da = partial c a in
+        suffix_member da r q;
+        (match q with
+         | Seq (inner, _) ->
+           partial_letter a c inner; u
+         | _ -> u)
+
+    let[@def] rec alphabet (universe : t list) =
+      match universe with
+      | [] -> []
+      | r :: rest -> append (letters r) (alphabet rest)
+
+    let rec (alphabet_member @ total) :
+        (universe : t list) -> (r : t) -> (c : int) ->
+        {u : unit | if member r universe && has_letter c (letters r)
+          then has_letter c (alphabet universe) else true}
+          @ immutable contended =
+      fun universe r c ->
+      member_def r universe;
+      alphabet_def universe;
+      let u = () in
+      match universe with
+      | [] -> u
+      | head :: rest ->
+        let lh = letters head in
+        let lr = alphabet rest in
+        append_letter lh lr c;
+        equal_correct r head;
+        alphabet_member rest r c;
+        u
+
+    let (step_letter @ total) (universe : t list) state c query :
+        {u : unit | if has_state state (powerset universe)
+          && member query (step c state)
+          then has_letter c (alphabet universe) else true} =
+      let r = step_pick state c query in
+      powerset_member universe state r;
+      partial_letter r c query;
+      alphabet_member universe r c;
+      let u = () in u
+
+    type row = (int * t list) list
+
+    let[@def] rec build_row universe state (labels : int list) : row =
+      match labels with
+      | [] -> []
+      | c :: rest ->
+        (c, restrict universe (step c state)) :: build_row universe state rest
+
+    let[@def] rec transition (row : row) c =
+      match row with
+      | [] -> []
+      | (d, target) :: rest -> if c = d then target else transition rest c
+
+    let rec (build_row_correct @ total) :
+        (universe : t list) -> (state : t list) -> (labels : int list) -> (c : int) ->
+        {u : unit | transition (build_row universe state labels) c ===
+          (if has_letter c labels then restrict universe (step c state) else [])}
+          @ immutable contended =
+      fun universe state labels c ->
+      let row = build_row universe state labels in
+      build_row_def universe state labels;
+      transition_def row c;
+      has_letter_def c labels;
+      let u = () in
+      match labels with
+      | [] -> u
+      | _ :: rest ->
+        build_row_correct universe state rest c;
+        u
+
+    let rec (powerset_empty @ total) : (universe : t list) ->
+        {u : unit | has_state [] (powerset universe)} @ immutable contended =
+      fun universe ->
+      let states = powerset universe in
+      let nil = [] in
+      powerset_def universe;
+      let u = () in
+      match universe with
+      | [] ->
+        has_state_def nil states;
+        same_state_correct nil nil;
+        u
+      | head :: rest ->
+        let smaller = powerset rest in
+        let extended = prepend head smaller in
+        combine_has smaller extended nil;
+        powerset_empty rest;
+        u
+
+    let (row_closed @ total) (root @ total) (state : t list) c :
+        {u : unit | has_state
+          (transition (build_row (root :: support root) state
+            (alphabet (root :: support root))) c)
+          (powerset (root :: support root))} =
+      let universe = root :: support root in
+      let labels = alphabet universe in
+      let next = step c state in
+      build_row_correct universe state labels c;
+      powerset_cover universe next;
+      let u = () in
+      if has_letter c labels then u
+      else
+        (powerset_empty universe;
+        u)
+
+    let (row_correct @ total) (root @ total) (state : t list) c s :
+        {u : unit | if has_state state (powerset (root :: support root)) then
+          accepts (transition (build_row (root :: support root) state
+            (alphabet (root :: support root))) c) s === accepts state (c :: s)
+          else true} =
+      let universe = root :: support root in
+      let labels = alphabet universe in
+      let next = step c state in
+      let nil = [] in
+      build_row_correct universe state labels c;
+      next_correct root state c s;
+      let u = () in
+      if has_letter c labels then u
+      else
+        (step_correct state c s;
+        let query = accepts_pick next s in
+        step_letter universe state c query;
+        accepts_def nil s;
+        u)
+
+    type table = (t list * bool * row) list
+    type automaton = t list * table
+    type state = t list
+
+    let[@def] initial (dfa : automaton) =
+      let initial, _ = dfa in initial
+
+    let[@def] rec table_states (table : table) =
+      match table with
+      | [] -> []
+      | (state, _, _) :: rest -> state :: table_states rest
+
+    let[@def] states (dfa : automaton) =
+      let _, table = dfa in table_states table
+
+    let[@def] contains_in state sources = has_state state sources
+
+    let (contains_in_empty @ total) source :
+        {u : unit | contains_in source [] === false} =
+      let nil = [] in
+      contains_in_def source nil;
+      has_state_def source nil;
+      let u = () in u
+
+    let (contains_in_cons @ total) source head rest :
+        {u : unit | contains_in source (head :: rest) ===
+          (same_state source head || contains_in source rest)} =
+      let sources = head :: rest in
+      contains_in_def source sources;
+      contains_in_def source rest;
+      has_state_def source sources;
+      let u = () in u
+
+    let[@def] contains_state (dfa : automaton) state =
+      contains_in state (states dfa)
+
+    let (contains_state_equation @ total) (dfa : automaton) source :
+        {u : unit | contains_state dfa source ===
+          contains_in source (states dfa)} =
+      contains_state_def dfa source;
+      let u = () in u
+
+    let[@def] universe_size root = List.length (root :: support root)
+
+    let[@def] state_count (dfa : automaton) =
+      let _, table = dfa in
+      List.length table
+
+    let[@def] rec build_table universe (states : t list list) : table =
+      match states with
+      | [] -> []
+      | state :: rest ->
+        (state, accepts state [], build_row universe state (alphabet universe))
+          :: build_table universe rest
+
+    let rec (table_states_build_table @ total) :
+        (universe : t list) -> (sources : t list list) ->
+        {u : unit | table_states (build_table universe sources) === sources}
+        @ immutable contended =
+      fun universe sources ->
+      let table = build_table universe sources in
+      build_table_def universe sources;
+      table_states_def table;
+      let u = () in
+      match sources with
+      | [] -> u
+      | _ :: rest ->
+        table_states_build_table universe rest;
+        u
+
+    let[@def] rec final (table : table) state =
+      match table with
+      | [] -> false
+      | (key, accepting, _) :: rest ->
+        if same_state state key then accepting else final rest state
+
+    let[@def] rec advance (table : table) state c =
+      match table with
+      | [] -> []
+      | (key, _, row) :: rest ->
+        if same_state state key then transition row c else advance rest state c
+
+    let[@def] output (dfa : automaton) state =
+      let _, table = dfa in final table state
+
+    let[@def] next (dfa : automaton) state c =
+      let _, table = dfa in advance table state c
+
+    let[@def] default (_dfa : automaton) (_state : state) : state = []
+
+    let (default_empty @ total) (dfa : automaton) (source : state) :
+        {u : unit | default dfa source === []} =
+      default_def dfa source;
+      let u = () in u
+
+    let[@def] rec edge_labels (edges : row) =
+      match edges with
+      | [] -> []
+      | (letter, _) :: rest -> letter :: edge_labels rest
+
+    let[@def] rec row_labels (table : table) state =
+      match table with
+      | [] -> []
+      | (key, _, edges) :: rest ->
+        if same_state state key then edge_labels edges
+        else row_labels rest state
+
+    let[@def] labels (dfa : automaton) state =
+      let _, table = dfa in row_labels table state
+
+    let[@def] label_member c letters = has_letter c letters
+
+    let (label_member_empty @ total) letter :
+        {u : unit | label_member letter [] === false} =
+      let nil = [] in
+      label_member_def letter nil;
+      has_letter_def letter nil;
+      let u = () in u
+
+    let (label_member_cons @ total) (letter : int) (head : int) rest :
+        {u : unit | label_member letter (head :: rest) ===
+          (letter = head || label_member letter rest)} =
+      let letters = head :: rest in
+      label_member_def letter letters;
+      label_member_def letter rest;
+      has_letter_def letter letters;
+      let u = () in u
+
+    let rec (transition_outside @ total) :
+        (edges : row) -> (letter : int) ->
+        {u : unit | if not (has_letter letter (edge_labels edges)) then
+          transition edges letter === [] else true}
+          @ immutable contended =
+      fun edges letter ->
+      let letters = edge_labels edges in
+      edge_labels_def edges;
+      has_letter_def letter letters;
+      transition_def edges letter;
+      let u = () in
+      match edges with
+      | [] -> u
+      | (_, _) :: rest ->
+        transition_outside rest letter;
+        u
+
+    let rec (advance_outside @ total) :
+        (table : table) -> (source : state) -> (letter : int) ->
+        {u : unit | if not (has_letter letter (row_labels table source))
+          then advance table source letter === [] else true}
+          @ immutable contended =
+      fun table source letter ->
+      let letters = row_labels table source in
+      row_labels_def table source;
+      has_letter_def letter letters;
+      advance_def table source letter;
+      let u = () in
+      match table with
+      | [] -> u
+      | (key, _, edges) :: rest ->
+        if same_state source key then begin
+          transition_outside edges letter;
+          u
+        end else begin
+          advance_outside rest source letter;
+          u
+        end
+
+    let (next_outside_labels @ total) (dfa : automaton)
+        (source : state) (letter : int) :
+        {u : unit | if not (label_member letter (labels dfa source)) then
+          next dfa source letter === [] else true} =
+      let _, table = dfa in
+      let source_labels = labels dfa source in
+      label_member_def letter source_labels;
+      labels_def dfa source;
+      next_def dfa source letter;
+      advance_outside table source letter;
+      let u = () in u
+
+    let rec (table_final @ total) :
+        (universe : t list) -> (states : t list list) -> (state : t list) ->
+        {u : unit | if has_state state states then
+          final (build_table universe states) state === accepts state [] else true}
+          @ immutable contended =
+      fun universe states state ->
+      let table = build_table universe states in
+      build_table_def universe states;
+      final_def table state;
+      has_state_def state states;
+      let u = () in
+      match states with
+      | [] -> u
+      | head :: rest ->
+        same_state_correct state head;
+        table_final universe rest state;
+        u
+
+    let rec (table_advance @ total) :
+        (universe : t list) -> (states : t list list) -> (state : t list) -> (c : int) ->
+        {u : unit | if has_state state states then
+          advance (build_table universe states) state c ===
+          transition (build_row universe state (alphabet universe)) c else true}
+          @ immutable contended =
+      fun universe states state c ->
+      let table = build_table universe states in
+      build_table_def universe states;
+      advance_def table state c;
+      has_state_def state states;
+      let u = () in
+      match states with
+      | [] -> u
+      | head :: rest ->
+        same_state_correct state head;
+        table_advance universe rest state c;
+        u
+
+    let[@def] rec execute (table : table) state (s : int list) =
+      match s with
+      | [] -> final table state
+      | c :: rest -> execute table (advance table state c) rest
+
+    let rec (execute_correct @ total) :
+        (root : t) -> (s : int list) -> (state : t list) ->
+        {u : unit | if has_state state (powerset (root :: support root)) then
+          execute (build_table (root :: support root)
+            (powerset (root :: support root))) state s === accepts state s
+          else true} @ immutable contended =
+      fun root s state ->
+      let universe = root :: support root in
+      let states = powerset universe in
+      let table = build_table universe states in
+      execute_def table state s;
+      let u = () in
+      match s with
+      | [] ->
+        table_final universe states state;
+        u
+      | c :: rest ->
+        let target = advance table state c in
+        table_advance universe states state c;
+        row_closed root state c;
+        row_correct root state c rest;
+        execute_correct root rest target;
+        u
+
+    let[@def] compile (root @ total) : automaton @ total =
+      let universe = root :: support root in
+      ([root], build_table universe (powerset universe))
+
+    let (compiled_next_member @ total) (root : t) (source : state)
+        (letter : int) :
+        {u : unit | if contains_state (compile root) source then
+          contains_state (compile root) (next (compile root) source letter)
+          else true} =
+      let universe = root :: support root in
+      let sources = powerset universe in
+      let dfa = compile root in
+      let enumerated = states dfa in
+      let target = next dfa source letter in
+      compile_def root;
+      states_def dfa;
+      table_states_build_table universe sources;
+      contains_state_def dfa source;
+      contains_state_def dfa target;
+      contains_in_def source enumerated;
+      contains_in_def target enumerated;
+      next_def dfa source letter;
+      table_advance universe sources source letter;
+      row_closed root source letter;
+      let u = () in u
+
+    let (compiled_initial_member @ total) (root : t) :
+        {u : unit | contains_state (compile root) (initial (compile root))} =
+      let universe = root :: support root in
+      let residuals = support root in
+      let smaller = powerset residuals in
+      let extended = prepend root smaller in
+      let sources = powerset universe in
+      let dfa = compile root in
+      let source = initial dfa in
+      let enumerated = states dfa in
+      let singleton = [root] in
+      compile_def root;
+      initial_def dfa;
+      powerset_def universe;
+      powerset_empty residuals;
+      prepend_has root smaller singleton;
+      combine_has smaller extended singleton;
+      states_def dfa;
+      table_states_build_table universe sources;
+      contains_state_def dfa source;
+      contains_in_def source enumerated;
+      let u = () in u
+
+    let (compiled_empty_member @ total) (root : t) :
+        {u : unit | contains_state (compile root) []} =
+      let universe = root :: support root in
+      let sources = powerset universe in
+      let dfa = compile root in
+      let nil = [] in
+      let enumerated = states dfa in
+      powerset_empty universe;
+      compile_def root;
+      states_def dfa;
+      table_states_build_table universe sources;
+      contains_state_def dfa nil;
+      contains_in_def nil enumerated;
+      let u = () in u
+
+    let[@def] run (dfa : automaton) s =
+      match dfa with (initial, table) -> execute table initial s
+
+    let[@def] run_from (dfa : automaton) state s =
+      let _, table = dfa in execute table state s
+
+    let (run_from_empty @ total) (dfa : automaton) (state : state) :
+        {u : unit | run_from dfa state [] === output dfa state} =
+      let _, table = dfa in
+      let nil = [] in
+      run_from_def dfa state nil;
+      output_def dfa state;
+      execute_def table state nil;
+      let u = () in u
+
+    let (run_from_letter @ total) (dfa : automaton) (state : state)
+        (letter : int) (suffix : int list) :
+        {u : unit | run_from dfa state (letter :: suffix) ===
+          run_from dfa (next dfa state letter) suffix} =
+      let _, table = dfa in
+      let word = letter :: suffix in
+      let target = next dfa state letter in
+      run_from_def dfa state word;
+      next_def dfa state letter;
+      execute_def table state word;
+      run_from_def dfa target suffix;
+      let u = () in u
+
+    let (run_initial @ total) (dfa : automaton) (word : int list) :
+        {u : unit | run dfa word === run_from dfa (initial dfa) word} =
+      let initial_state, table = dfa in
+      run_def dfa word;
+      run_from_def dfa initial_state word;
+      initial_def dfa;
+      let u = () in u
+
+    let (correct @ total) (root @ total) (s : int list) :
+        {u : unit | run (compile root) s === matches root s} =
+      let universe = root :: support root in
+      let residuals = support root in
+      let smaller = powerset residuals in
+      let extended = prepend root smaller in
+      let initial = [root] in
+      let nil = [] in
+      let dfa = compile root in
+      compile_def root;
+      run_def dfa s;
+      powerset_def universe;
+      combine_has smaller extended initial;
+      prepend_has root smaller initial;
+      powerset_empty residuals;
+      execute_correct root s initial;
+      accepts_def initial s;
+      accepts_def nil s;
+      let u = () in u
+
+    let (sound @ total) (root @ total) (s : int list) :
+        {p : evidence | if run (compile root) s then valid root p && word p === s
+          else true} =
+      ghost_ (correct root s);
+      let p = sound root s in
+      p
+
+    let (complete @ total) (root @ total) (s : int list) (p : evidence) :
+        {u : unit | if valid root p && word p === s then run (compile root) s
+          else true} =
+      correct root s;
+      complete root s p;
+      let u = () in u
+
+  end
+
+  let (membership_word @ total) (p : Membership.evidence) :
+    {u : unit | Membership.word p === Regex_semantics.Membership.word p} =
+    let u = () in u
+  let (membership_valid @ total) (r : t) (p : Membership.evidence) :
+    {u : unit | Membership.valid r p === Regex_semantics.Membership.valid r p} =
+    let u = () in u
+end;;
