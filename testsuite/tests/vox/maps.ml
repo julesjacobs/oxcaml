@@ -19,15 +19,15 @@ module Demo : sig end = struct
       else if x.id < y.id then -1 else if x.id > y.id then 1 else 0
     let (reflexive @ total) (x : t) :
         {u : unit | compare x x = 0} @ ghost =
-      ghost_ (compare_def x x; refine_ ())
+      ghost_ (compare_def x x; ())
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (compare_def x y; compare_def y x; refine_ ())
+      ghost_ (compare_def x y; compare_def y x; ())
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
           || compare x z <= 0} @ ghost =
-      ghost_ (compare_def x y; compare_def y z; compare_def x z; refine_ ())
+      ghost_ (compare_def x y; compare_def y z; compare_def x z; ())
   end
 
   module M = Map.MakeTotal (Key)
@@ -46,8 +46,8 @@ module Demo : sig end = struct
     let right = M.Refined.singleton key 20 in
     let wrapped = if b then {map = left} else {map = right} in
     let map = wrapped.map in
-    let found = M.Refined.find map (refine_ key) in
-    let (_ : {r : int | r = 10 || r = 20}) = refine_ found in
+    let found = M.Refined.find map key in
+    let (_ : {r : int | r = 10 || r = 20}) = found in
     ()
 
   let (constructor_laws @ total) (key @ total) =
@@ -56,7 +56,7 @@ module Demo : sig end = struct
     let added = M.Refined.add key 20 singleton in
     let wrapped = {map = added} in
     let removed = M.Refined.remove key added in
-    let found = M.Refined.find added (refine_ key) in
+    let found = M.Refined.find added key in
     let result = () in
     let proof :
         {u : unit |
@@ -66,26 +66,26 @@ module Demo : sig end = struct
           && M.mem key wrapped.map
           && found = 20
           && M.mem key removed = false} =
-      refine_ result
+      result
     in
-    let refine_ proof = proof in
+    let _ = proof in
     ()
 
   let ordinary_find_assumes_normal_return map key =
     let found = M.find key map in
     let present = M.mem key map in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     found
 
   let (multiple_value_sorts @ total) (key @ total) =
     let ints = M.Refined.singleton key 7 in
     let bools = M.Refined.singleton key true in
-    let integer = M.Refined.find ints (refine_ key) in
-    let boolean = M.Refined.find bools (refine_ key) in
+    let integer = M.Refined.find ints key in
+    let boolean = M.Refined.find bools key in
     let result = () in
-    let proof : {u : unit | integer = 7 && boolean} = refine_ result in
-    let refine_ proof = proof in
+    let proof : {u : unit | integer = 7 && boolean} = result in
+    let _ = proof in
     ()
 
   let (cross_sort_comparator_class @ total) :
@@ -94,12 +94,12 @@ module Demo : sig end = struct
       unit =
     fun key equivalent ->
     let bools = M.Refined.singleton key true in
-    let refine_ equivalent = equivalent in
+    let equivalent = equivalent in
     let present = M.mem equivalent bools in
-    let found = M.Refined.find bools (refine_ equivalent) in
+    let found = M.Refined.find bools equivalent in
     let result = () in
-    let proof : {u : unit | present && found} = refine_ result in
-    let refine_ proof = proof in
+    let proof : {u : unit | present && found} = result in
+    let _ = proof in
     ()
 
   let (local_aliases @ total) (key @ total) (input @ total) =
@@ -107,45 +107,45 @@ module Demo : sig end = struct
     let lookup = M.Refined.find in
     let contains = M.mem in
     let map = insert key 31 input in
-    let found : int = lookup map (refine_ key) in
+    let found : int = lookup map key in
     let result = () in
-    let proof : {u : unit | contains key map && found = 31} = refine_ result in
-    let refine_ proof = proof in
+    let proof : {u : unit | contains key map && found = 31} = result in
+    let _ = proof in
     ()
 
   let (module_aliases @ total) (key @ total) =
     let map = Alias.Refined.singleton key false in
-    let found = Alias.Refined.find map (refine_ key) in
+    let found = Alias.Refined.find map key in
     let result = () in
     let proof : {u : unit | Alias.mem key map && found = false} =
-      refine_ result
+      result
     in
-    let refine_ proof = proof in
+    let _ = proof in
     ()
 
   let (ascribed_aliases @ total) (key @ total) =
     let map = Ascribed.Refined.singleton key 42 in
-    let found = Ascribed.Refined.find map (refine_ key) in
+    let found = Ascribed.Refined.find map key in
     let result = () in
     let proof : {u : unit | Ascribed.mem key map && found = 42} =
-      refine_ result
+      result
     in
-    let refine_ proof = proof in
+    let _ = proof in
     ()
 
   let (more_labels @ total) (key @ total) =
     let empty = More_labeled.Refined.empty () in
     let map = More_labeled.Refined.singleton key 17 in
-    let found = More_labeled.Refined.find map (refine_ key) in
+    let found = More_labeled.Refined.find map key in
     let result = () in
     let proof :
         {u : unit |
           More_labeled.mem key empty = false
           && More_labeled.mem key map
           && found = 17} =
-      refine_ result
+      result
     in
-    let refine_ proof = proof in
+    let _ = proof in
     ()
 
   module Verify (Order : Map.TotalOrderedType) = struct
@@ -161,8 +161,8 @@ module Demo : sig end = struct
     let (singleton_member @ total)
         (key @ total) (data @ total) =
       let present = M.mem key (M.Refined.singleton key data) in
-      let proof : {b : bool | b} = refine_ present in
-      let refine_ proof = proof in
+      let proof : {b : bool | b} = present in
+      let _ = proof in
       ()
   end
 
@@ -170,8 +170,8 @@ module Demo : sig end = struct
 
   let ordinary_equality map =
     let result = map in
-    let proof : {result : int Ordinary.t | result === map} = refine_ result in
-    let refine_ proof = proof in
+    let proof : {result : int Ordinary.t | result === map} = result in
+    let _ = proof in
     result
 
   let (total_apis @ total) map =
@@ -219,14 +219,14 @@ module Sequence_consumers : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let (rejected @ total) sequence = ignore (M.add_seq sequence M.empty)
@@ -246,14 +246,14 @@ module Callback_relative_totality : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let partial _ _ = failwith "callback"
@@ -277,26 +277,26 @@ module Total_equality_rejected : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
-  let rejected map : {result : int M.t | result === map} = refine_ map
+  let rejected map : {result : int M.t | result === map} = map
 end;;
 [%%expect{|
 Line 16, characters 41-55:
-16 |   let rejected map : {result : int M.t | result === map} = refine_ map
+16 |   let rejected map : {result : int M.t | result === map} = map
                                               ^^^^^^^^^^^^^^
 Error: Unsupported refinement predicate in VC generation
-Line 16, characters 59-70:
-16 |   let rejected map : {result : int M.t | result === map} = refine_ map
-                                                                ^^^^^^^^^^^
+Line 16, characters 59-62:
+16 |   let rejected map : {result : int M.t | result === map} = map
+                                                                ^^^
   Required by this refinement introduction
 |}]
 
@@ -305,27 +305,27 @@ module Nested_total_equality_rejected : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   type box = Box of int M.t [@@inductive]
-  let rejected box : {result : box | result === box} = refine_ box
+  let rejected box : {result : box | result === box} = box
 end;;
 [%%expect{|
 Line 17, characters 37-51:
-17 |   let rejected box : {result : box | result === box} = refine_ box
+17 |   let rejected box : {result : box | result === box} = box
                                           ^^^^^^^^^^^^^^
 Error: Unsupported refinement predicate in VC generation
-Line 17, characters 55-66:
-17 |   let rejected box : {result : box | result === box} = refine_ box
-                                                            ^^^^^^^^^^^
+Line 17, characters 55-58:
+17 |   let rejected box : {result : box | result === box} = box
+                                                            ^^^
   Required by this refinement introduction
 |}]
 
@@ -334,27 +334,27 @@ module Ordinary_constructors_unrecognized : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let rejected key =
     let map = M.add key 1 M.empty in
     let present = M.mem key map in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 19, characters 33-48:
-19 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 19, characters 33-40:
+19 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -363,27 +363,27 @@ module Ordinary_make_operations_unrecognized : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.Make (Order)
   let rejected key =
     let map = M.add key 1 M.empty in
     let present = M.mem key map in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 19, characters 33-48:
-19 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 19, characters 33-40:
+19 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -392,27 +392,27 @@ module Caught_find_has_no_normal_return_fact : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let rejected map key =
     ignore (try M.find key map with Not_found -> 0);
     let present = M.mem key map in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 19, characters 33-48:
-19 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 19, characters 33-40:
+19 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -421,27 +421,27 @@ module Overwrite_old_value_rejected : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let rejected key =
     let map = M.Refined.add key 2 (M.Refined.singleton key 1) in
-    let found = M.Refined.find map (refine_ key) in
-    let proof : {n : int | n = 1} = refine_ found in
-    let refine_ proof = proof in
+    let found = M.Refined.find map key in
+    let proof : {n : int | n = 1} = found in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 19, characters 36-49:
-19 |     let proof : {n : int | n = 1} = refine_ found in
-                                         ^^^^^^^^^^^^^
+Line 19, characters 36-41:
+19 |     let proof : {n : int | n = 1} = found in
+                                         ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -450,27 +450,27 @@ module Different_key_preservation_needs_a_distinct_class : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let rejected key other =
     let map = M.Refined.add key 2 (M.Refined.singleton other 1) in
-    let found = M.Refined.find map (refine_ other) in
-    let proof : {n : int | n = 1} = refine_ found in
-    let refine_ proof = proof in
+    let found = M.Refined.find map other in
+    let proof : {n : int | n = 1} = found in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 19, characters 36-49:
-19 |     let proof : {n : int | n = 1} = refine_ found in
-                                         ^^^^^^^^^^^^^
+Line 19, characters 36-41:
+19 |     let proof : {n : int | n = 1} = found in
+                                         ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -479,24 +479,24 @@ module Removed_lookup_rejected : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let rejected key =
     let map = M.Refined.remove key (M.Refined.singleton key 1) in
-    M.Refined.find map (refine_ key)
+    M.Refined.find map key
 end;;
 [%%expect{|
-Line 18, characters 23-36:
-18 |     M.Refined.find map (refine_ key)
-                            ^^^^^^^^^^^^^
+Line 18, characters 23-26:
+18 |     M.Refined.find map key
+                            ^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -505,29 +505,29 @@ module Cross_sort_contents_do_not_leak : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let rejected key =
     let ints = M.Refined.singleton key 1 in
     let bools = M.Refined.singleton key false in
-    let _integer = M.Refined.find ints (refine_ key) in
-    let found = M.Refined.find bools (refine_ key) in
-    let proof : {b : bool | b} = refine_ found in
-    let refine_ proof = proof in
+    let _integer = M.Refined.find ints key in
+    let found = M.Refined.find bools key in
+    let proof : {b : bool | b} = found in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 21, characters 33-46:
-21 |     let proof : {b : bool | b} = refine_ found in
-                                      ^^^^^^^^^^^^^
+Line 21, characters 33-38:
+21 |     let proof : {b : bool | b} = found in
+                                      ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -536,43 +536,43 @@ module Separate_functor_classes : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module Second_order = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module First = Map.MakeTotal (First_order)
   module Second = Map.MakeTotal (Second_order)
   let rejected key other =
     let first = First.mem other (First.Refined.singleton key 0) in
     let fact : {b : bool | b} = assume_ first in
-    let refine_ fact = fact in
+    let _ = fact in
     let second = Second.mem other (Second.Refined.singleton key false) in
-    let proof : {b : bool | b} = refine_ second in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = second in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 35, characters 33-47:
-35 |     let proof : {b : bool | b} = refine_ second in
-                                      ^^^^^^^^^^^^^^
+Line 35, characters 33-39:
+35 |     let proof : {b : bool | b} = second in
+                                      ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -581,14 +581,14 @@ module Shadowed_refined_operation_unrecognized : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module Real = Map.MakeTotal (Order)
   module Forged = struct
@@ -609,14 +609,14 @@ module Shadowed_refined_operation_unrecognized : sig end = struct
   let rejected key =
     let map = Forged.Refined.add key 1 Forged.empty in
     let present = Forged.mem key map in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 34, characters 33-48:
-34 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 34, characters 33-40:
+34 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -625,14 +625,14 @@ module Shadowed_mem_unrecognized : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module Real = Map.MakeTotal (Order)
   module Forged : sig
@@ -657,14 +657,14 @@ module Shadowed_mem_unrecognized : sig end = struct
   let rejected key =
     let map = Forged.Refined.singleton key 1 in
     let present = Forged.mem key map in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 38, characters 33-48:
-38 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 38, characters 33-40:
+38 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -673,14 +673,14 @@ module Shadowed_find_unrecognized : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module Real = Map.MakeTotal (Order)
   module Forged : sig
@@ -697,14 +697,14 @@ module Shadowed_find_unrecognized : sig end = struct
     let map = Forged.singleton other 1 in
     ignore (Forged.find key map);
     let present = Forged.mem key map in
-    let proof : {b : bool | b} = refine_ present in
-    let refine_ proof = proof in
+    let proof : {b : bool | b} = present in
+    let _ = proof in
     ()
 end;;
 [%%expect{|
-Line 30, characters 33-48:
-30 |     let proof : {b : bool | b} = refine_ present in
-                                      ^^^^^^^^^^^^^^^
+Line 30, characters 33-40:
+30 |     let proof : {b : bool | b} = present in
+                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -713,14 +713,14 @@ module Refined_key_constructor_preserves_access : sig end = struct
     type t = { mutable key : int }
     let[@def] compare (_x : t @ immutable) (_y : t @ immutable) = 0
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (compare_def x x; refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ (compare_def x x; ())
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (compare_def x y; compare_def y x; refine_ ())
+      ghost_ (compare_def x y; compare_def y x; ())
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; ())
   end
   module M = Map.MakeTotal (Order)
   let singleton = M.Refined.singleton
@@ -738,14 +738,14 @@ module Refined_value_constructor_preserves_access : sig end = struct
     type t = int
     external compare : t -> t -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let singleton = M.Refined.singleton
@@ -764,14 +764,14 @@ module Refined_find_preserves_access : sig end = struct
     type t = int
     external compare : t -> t -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let ordinary map key = (M.find key map).payload <- 1
@@ -790,14 +790,14 @@ module Refined_key_rejects_partial_closure : sig end = struct
     type t = unit -> unit
     let[@def] compare (_x : t @ immutable) (_y : t @ immutable) = 0
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (compare_def x x; refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ (compare_def x x; ())
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (compare_def x y; compare_def y x; refine_ ())
+      ghost_ (compare_def x y; compare_def y x; ())
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; ())
   end
   module M = Map.MakeTotal (Order)
   let partial_key () = failwith "partial"
@@ -820,14 +820,14 @@ module Refined_value_rejects_partial_closure : sig end = struct
     type t = int
     external compare : t -> t -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let partial_value () = failwith "partial"
@@ -849,14 +849,14 @@ module Refined_find_rejects_partial_container : sig end = struct
     type t = int
     external compare : t -> t -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module M = Map.MakeTotal (Order)
   let partial_value () = failwith "partial"
@@ -864,13 +864,13 @@ module Refined_find_rejects_partial_container : sig end = struct
     let map = M.singleton 0 partial_value in
     let _found = M.find 0 map in
     let key = 0 in
-    let member : {key : int | M.mem key map} = refine_ key in
+    let member : {key : int | M.mem key map} = key in
     let _found = M.Refined.find map member in
     ()
 end;;
 [%%expect{|
 Line 21, characters 40-43:
-21 |     let member : {key : int | M.mem key map} = refine_ key in
+21 |     let member : {key : int | M.mem key map} = key in
                                              ^^^
 Error: The value "map" is "partial"
        but is expected to be "total"
@@ -882,14 +882,14 @@ module Refined_accepts_total_closures : sig end = struct
     type t = unit -> unit
     let[@def] compare (_x : t @ immutable) (_y : t @ immutable) = 0
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (compare_def x x; refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ (compare_def x x; ())
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (compare_def x y; compare_def y x; refine_ ())
+      ghost_ (compare_def x y; compare_def y x; ())
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ (compare_def x y; compare_def y z; compare_def x z; ())
   end
   module M = Map.MakeTotal (Order)
   let total_key () = ()
@@ -905,14 +905,14 @@ module Immutable_collections : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module S = Map.MakeTotal (Key)
   module L = MoreLabels.Map.MakeTotal (Key)
@@ -930,14 +930,14 @@ module Mutable_collection : sig end = struct
     type t = int
     external compare : t -> t -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
   module S = Map.MakeTotal (Key)
   type t : immutable_data = int ref S.t
@@ -956,14 +956,14 @@ module Polymorphic_sparse_pair : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
 
   module Updates = Map.MakeTotal (Index)
@@ -977,30 +977,30 @@ module Polymorphic_sparse_pair : sig end = struct
       {results : 'a * 'a |
         match results with result, base_result -> result === base_result} =
     fun base updates index ->
-    let refine_ raw_index = index in
+    let raw_index = index in
     let updates = Updates.Refined.remove raw_index updates in
     let base_result = Iarray.Refined.get base index in
     let result =
       if Updates.mem raw_index updates then
-        let member : {key : int | Updates.mem key updates} = refine_ raw_index in
+        let member : {key : int | Updates.mem key updates} = raw_index in
         Updates.Refined.find updates member
       else Iarray.Refined.get base index
     in
     let results = result, base_result in
-    refine_ results
+    results
 
   let () =
     let base = [: 10 :] in
     let updates = Updates.Refined.singleton 0 99 in
     let zero = 0 in
-    let index : {i : int | 0 <= i && i < Iarray.length base} = refine_ zero in
-    let refine_ pair = clear_reads_base base updates index in
+    let index : {i : int | 0 <= i && i < Iarray.length base} = zero in
+    let pair = clear_reads_base base updates index in
     let left, right = pair in
     assert (left = 10 && right = 10);
     let base = [: true :] in
     let updates = Updates.Refined.singleton 0 false in
-    let index : {i : int | 0 <= i && i < Iarray.length base} = refine_ zero in
-    let refine_ pair = clear_reads_base base updates index in
+    let index : {i : int | 0 <= i && i < Iarray.length base} = zero in
+    let pair = clear_reads_base base updates index in
     let left, right = pair in
     assert (left && right)
 end;;
