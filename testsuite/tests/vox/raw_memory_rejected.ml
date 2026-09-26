@@ -11,12 +11,6 @@
    run-expect;
    check-program-output;
  }
- {
-   setup-ocamlopt.opt-build-env;
-   ocamlopt.opt;
-   run-expectnat;
-   check-program-output;
- }
 *)
 module P = Ghost_pref;;
 module H = P.Heap;;

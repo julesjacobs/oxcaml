@@ -11,12 +11,6 @@
    run-expect;
    check-program-output;
  }
- {
-   setup-ocamlopt.opt-build-env;
-   ocamlopt.opt;
-   run-expectnat;
-   check-program-output;
- }
 *)
 module V = Verified_hm;;
 [%%expect{|

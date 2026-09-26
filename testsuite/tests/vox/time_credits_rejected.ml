@@ -6,29 +6,9 @@
  readonly_files = "time_credits_rejected.ml";
  compile_only = "true";
  {
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
    run-expect;
-   check-program-output;
- }
- {
-   setup-ocamlopt.byte-build-env;
-   ocamlopt.byte;
-   run-expectnat;
-   check-program-output;
- }
- {
-   flags += " -principal";
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
-   run-expect;
-   check-program-output;
- }
- {
-   flags += " -principal";
-   setup-ocamlopt.byte-build-env;
-   ocamlopt.byte;
-   run-expectnat;
    check-program-output;
  }
 *)

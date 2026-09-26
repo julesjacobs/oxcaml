@@ -5,8 +5,8 @@
  readonly_files = "register_allocation_erasure.ml";
  compile_only = "true";
  {
-   setup-ocamlopt.byte-build-env;
-   ocamlopt.byte;
+   setup-ocamlopt.opt-build-env;
+   ocamlopt.opt;
    flags += " -drawlambda -dcanonical-ids";
    run-expectnat;
    check-program-output;

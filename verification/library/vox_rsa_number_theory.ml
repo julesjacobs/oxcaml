@@ -49,7 +49,9 @@ let (prime_coprime @ total) (p : t) (a : t) :
   prime_divisors p r.g;
   r
 
-let (prime_cancel @ total) (p : t) (a : t) (b : t) :
+(* Nonlinear integer arithmetic (products modulo a prime); Z3 needs about
+   0.6 s (warning 222). *)
+let[@warning "-222"] (prime_cancel @ total) (p : t) (a : t) (b : t) :
     {u : unit | if prime p && a >= 0Z && a mod p <> 0Z
       && (a * b) mod p = 0Z then b mod p = 0Z else true} =
   prime_def p;

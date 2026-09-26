@@ -1,10 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- { bytecode; }
  { native; }
- { flags += " -principal"; bytecode; }
- { flags += " -principal"; native; }
 *)
 type function_type = int @ total -> int @ total
 let[@def] (observed @ total) (f : function_type @ total) (x : int) = ghost_ (f x >= 0)

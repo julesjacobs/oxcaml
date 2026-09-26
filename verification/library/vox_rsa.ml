@@ -94,7 +94,9 @@ let (prime_inverse @ total) (p : t) (q : t) :
   power_def p (q - 1Z);
   ()
 
-let (recombine_correct @ total)
+(* Nonlinear integer arithmetic (the CRT recombination); Z3 needs about
+   0.7 s (warning 222). *)
+let[@warning "-222"] (recombine_correct @ total)
     (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
     {u : unit | let r = rp + p * (((rq - rp) * inverse) mod q) in
       if p > 0Z && q > 1Z && 0Z <= rp && rp < p

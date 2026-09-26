@@ -5,7 +5,7 @@
  all_modules = "vox_diff_spec.mli vox_diff_spec.ml vox_diff.mli vox_diff.ml";
  readonly_files = "diff_rejected.ml";
  compile_only = "true";
- { setup-ocamlc.byte-build-env; ocamlc.byte; run-expect; check-program-output; }
+ { setup-ocamlc.opt-build-env; ocamlc.opt; run-expect; check-program-output; }
 *)
 
 open Vox_diff_spec;;

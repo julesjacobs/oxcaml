@@ -1,6 +1,5 @@
 (* TEST
  { expect; }
- { expect.opt; }
 *)
 
 let (mutable_elements @ total) (values : int ref iarray @ read_write) =

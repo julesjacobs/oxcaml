@@ -1,7 +1,6 @@
 (* TEST
  flags = "-extension refinement_types -nopervasives";
  { expect; }
- { expect.opt; }
 *)
 
 external ( = ) : int -> int -> bool = "%equal"

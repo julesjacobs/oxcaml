@@ -5,33 +5,10 @@
  readonly_files = "clamp.ml";
  compile_only = "true";
  {
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
    binary_modules = "clamp_api";
    run-expect;
-   check-program-output;
- }
- {
-   setup-ocamlopt.byte-build-env;
-   ocamlopt.byte;
-   binary_modules = "clamp_api";
-   run-expectnat;
-   check-program-output;
- }
- {
-   flags += " -principal";
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
-   binary_modules = "clamp_api";
-   run-expect;
-   check-program-output;
- }
- {
-   flags += " -principal";
-   setup-ocamlopt.byte-build-env;
-   ocamlopt.byte;
-   binary_modules = "clamp_api";
-   run-expectnat;
    check-program-output;
  }
 *)

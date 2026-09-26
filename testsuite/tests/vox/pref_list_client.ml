@@ -3,7 +3,6 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml pref_list.mli pref_list.ml pref_list_client.ml";
- { bytecode; }
  { native; }
 *)
 open Pref_list

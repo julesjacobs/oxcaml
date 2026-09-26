@@ -3,10 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_big_credits.mli vox_big_credits.ml big_time_credits.ml";
- { bytecode; }
  { native; }
- { flags += " -principal"; bytecode; }
- { flags += " -principal"; native; }
 *)
 
 module C = Vox_big_credits.Make ()

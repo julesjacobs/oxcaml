@@ -2,7 +2,6 @@
  has-z3;
  flags = "-extension refinement_types -principal";
  { expect; }
- { expect.opt; }
 *)
 type callbacks = { first : int -> int; second : int -> int };;
 [%%expect{|

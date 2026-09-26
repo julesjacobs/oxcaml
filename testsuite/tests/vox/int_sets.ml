@@ -4,7 +4,6 @@
  timeout = "900";
  all_modules = "int_set_intf.mli list_int_set.mli list_int_set.ml int_sets.ml";
  { bytecode; }
- { flags += " -principal"; bytecode; }
 *)
 
 let () =

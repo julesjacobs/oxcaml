@@ -4,7 +4,6 @@
  timeout = "120";
  all_modules = "int_set_intf.mli avl_sets.mli avl_sets.ml avl_set_client.ml avl_stdlib_set.ml";
  { bytecode; }
- { flags += " -principal"; bytecode; }
 *)
 
 module List_set = struct

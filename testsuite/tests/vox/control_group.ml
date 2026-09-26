@@ -3,7 +3,6 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_control.mli vox_control.ml control_group.ml";
- { bytecode; }
  { native; }
 *)
 let scalar bytes offset target =

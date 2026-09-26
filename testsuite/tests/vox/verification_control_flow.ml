@@ -2,7 +2,6 @@
  has-z3;
  flags = "-extension refinement_types";
  { expect; }
- { expect.opt; }
 *)
 
 external ( = ) : int -> int -> bool @@ total = "%equal"

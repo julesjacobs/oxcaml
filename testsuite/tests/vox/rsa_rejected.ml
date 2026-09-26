@@ -1,6 +1,6 @@
 (* TEST
  has-z3;
- flags = "-extension refinement_types -smt-timeout 10000";
+ flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
  all_modules += " vox_rsa_number_theory.ml";
@@ -8,8 +8,8 @@
  readonly_files = "rsa_rejected.ml";
  compile_only = "true";
  {
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
    run-expect;
    check-program-output;
  }

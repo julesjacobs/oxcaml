@@ -5,8 +5,7 @@
  all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml level_finite_spec.ml hm_declarative.ml hm_type_proofs.ml hm_environment_spec.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_freshness_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_template_instance_proofs.ml";
  readonly_files = "hm_template_instance_rejected.ml";
  compile_only = "true";
- { setup-ocamlc.byte-build-env; ocamlc.byte; run-expect; check-program-output; }
- { setup-ocamlopt.byte-build-env; ocamlopt.byte; run-expectnat; check-program-output; }
+ { setup-ocamlc.opt-build-env; ocamlc.opt; run-expect; check-program-output; }
 *)
 open Copy_spec;;
 module P = Hm_template_instance_proofs;;

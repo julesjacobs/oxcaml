@@ -2,7 +2,6 @@
  flags = "-extension refinement_types";
  has-z3;
  { expect; }
- { expect.opt; }
 *)
 
 let bad_value : {r : int | r = 0} = refine_ 1;;

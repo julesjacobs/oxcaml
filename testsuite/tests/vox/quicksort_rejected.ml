@@ -2,20 +2,20 @@
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sequence.mli vox_int_sequence.mli borrow.mli quicksort.mli";
- setup-ocamlc.byte-build-env;
+ setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
  module = "vox_sequence.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "vox_int_sequence.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "borrow.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "quicksort.mli";
- ocamlc.byte;
+ ocamlc.opt;
  expect;
 *)
 
-#directory "ocamlc.byte";;
+#directory "ocamlc.opt";;
 
 let (blocking_sort @ total) (values : int Borrow.Owned_array.t @ unique) =
   let refine_ result = Quicksort.parallel_sort_array ~max_domains:1 values in

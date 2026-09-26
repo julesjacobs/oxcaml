@@ -27,7 +27,7 @@ def check(compiler, extension):
         public = build / "public"
         implementation.mkdir()
         public.mkdir()
-        flags = ["-extension", "refinement_types", "-smt-timeout", "10000"]
+        flags = ["-extension", "refinement_types"]
 
         def run(arguments, directory):
             subprocess.run([str(compiler), *arguments], cwd=directory, check=True)

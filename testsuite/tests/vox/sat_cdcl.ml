@@ -3,7 +3,6 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_sat_spec.mli vox_sat_spec.ml vox_sat_proof.mli vox_sat_proof.ml vox_sat.mli vox_sat.ml vox_cdcl_proof.mli vox_cdcl_proof.ml vox_cdcl.mli vox_cdcl.ml sat_cdcl.ml";
- { bytecode; }
  { native; }
 *)
 

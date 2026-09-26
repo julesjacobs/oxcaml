@@ -2,16 +2,16 @@
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sequence.mli functional_queue.mli";
- setup-ocamlc.byte-build-env;
+ setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
  module = "vox_sequence.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "functional_queue.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "queue_rejected.ml";
- ocamlc_byte_exit_status = "2";
- ocamlc.byte;
- check-ocamlc.byte-output;
+ ocamlc_opt_exit_status = "2";
+ ocamlc.opt;
+ check-ocamlc.opt-output;
 *)
 
 let () =

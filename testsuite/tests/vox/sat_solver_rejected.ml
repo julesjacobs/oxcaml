@@ -2,16 +2,16 @@
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sat_spec.mli vox_sat.mli";
- setup-ocamlc.byte-build-env;
+ setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
  module = "vox_sat_spec.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "vox_sat.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "sat_solver_rejected.ml";
- ocamlc_byte_exit_status = "2";
- ocamlc.byte;
- check-ocamlc.byte-output;
+ ocamlc_opt_exit_status = "2";
+ ocamlc.opt;
+ check-ocamlc.opt-output;
 *)
 
 open Vox_sat_spec

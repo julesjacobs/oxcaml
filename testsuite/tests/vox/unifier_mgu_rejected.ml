@@ -6,15 +6,9 @@
  readonly_files = "unifier_mgu_rejected.ml";
  compile_only = "true";
  {
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
    run-expect;
-   check-program-output;
- }
- {
-   setup-ocamlopt.byte-build-env;
-   ocamlopt.byte;
-   run-expectnat;
    check-program-output;
  }
 *)

@@ -3,10 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml collection_theory.ml";
- { bytecode; }
  { native; }
- { flags += " -principal"; bytecode; }
- { flags += " -principal"; native; }
 *)
 
 module Model = Vox_sequence

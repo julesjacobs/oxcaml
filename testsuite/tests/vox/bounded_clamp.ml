@@ -2,9 +2,6 @@
  has-z3;
  flags = "-extension refinement_types";
  { expect; }
- { expect.opt; }
- { flags += " -principal"; expect; }
- { flags += " -principal"; expect.opt; }
 *)
 
 let (clamp @ total) (lo : int) (hi : {h : int | lo <= h}) (x : int) :

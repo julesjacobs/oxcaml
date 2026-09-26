@@ -3,7 +3,10 @@ module P = Vox_table_probe
 type capacity = {c : int | 16 <= c && c <= 1073741824 &&
   c land (c - 1) = 0}
 
-let (wrap_add @ total) (capacity : capacity)
+(* Z3 proves this by bit-blasting the 63-bit sum against a symbolic mask,
+   which takes about 0.2 s (warning 222). Splitting it into lemmas about
+   masking below and above [capacity] did not make it cheaper. *)
+let[@warning "-222"] (wrap_add @ total) (capacity : capacity)
     (value : {v : int | 0 <= v && v < capacity})
     (delta : {d : int | 0 <= d && d <= capacity}) :
     {u : unit | (value + delta) land (capacity - 1) =

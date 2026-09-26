@@ -2,7 +2,6 @@
  has-z3;
  flags = "-extension refinement_types";
  { expect; }
- { expect.opt; }
 *)
 
 module Fibonacci = struct

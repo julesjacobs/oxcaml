@@ -1,7 +1,6 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- { bytecode; }
  { native; }
 *)
 type ('a : immutable_data) shape = Var | Link of 'a

@@ -6,8 +6,8 @@
  readonly_files = "egraph_rule_rejected.ml";
  compile_only = "true";
  {
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
    run-expect;
    check-program-output;
  }

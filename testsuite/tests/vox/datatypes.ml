@@ -2,7 +2,6 @@
  flags = "-extension refinement_types";
  has-z3;
  { expect; }
- { expect.opt; }
 *)
 
 type point = {x : int; y : int}

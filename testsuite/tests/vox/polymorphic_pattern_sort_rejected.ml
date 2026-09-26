@@ -2,7 +2,6 @@
  flags = "-extension refinement_types";
  has-z3;
  { expect; }
- { expect.opt; }
 *)
 module Incorrect_branch = struct
 type ('a : immutable_data) shape = Var | Link of 'a

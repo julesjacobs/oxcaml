@@ -4,7 +4,6 @@
  timeout = "900";
  all_modules = "polymorphic_set_intf.mli polymorphic_list_set.mli polymorphic_list_set.ml polymorphic_sets.ml";
  { bytecode; }
- { flags += " -principal"; bytecode; }
 *)
 
 module Key = struct

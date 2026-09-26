@@ -2,33 +2,29 @@
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library ${test_source_directory}/../../../runtime";
  readonly_files = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml sorted_array_proofs.ml borrow.c";
- setup-ocamlc.byte-build-env;
- flags = "-extension refinement_types -principal -I ocamlc.byte";
- module = "vox_sequence.mli"; ocamlc.byte;
- module = "vox_sequence.ml"; ocamlc.byte; ocamlopt.byte;
- module = "vox_int_sequence.mli"; ocamlc.byte;
- module = "vox_int_sequence.ml"; ocamlc.byte; ocamlopt.byte;
- module = "vox_iarray.mli"; ocamlc.byte;
- module = "vox_iarray.ml"; ocamlc.byte; ocamlopt.byte;
+ setup-ocamlc.opt-build-env;
+ flags = "-extension refinement_types -principal -I ocamlc.opt";
+ module = "vox_sequence.mli"; ocamlc.opt;
+ module = "vox_sequence.ml"; ocamlc.opt; ocamlopt.opt;
+ module = "vox_int_sequence.mli"; ocamlc.opt;
+ module = "vox_int_sequence.ml"; ocamlc.opt; ocamlopt.opt;
+ module = "vox_iarray.mli"; ocamlc.opt;
+ module = "vox_iarray.ml"; ocamlc.opt; ocamlopt.opt;
  unset module;
  all_modules = "borrow.c";
  program = "collection_runtime.cmxs";
  flags = "-shared";
- ocamlopt.byte;
+ ocamlopt.opt;
  all_modules = "sorted_arrays.ml";
- binary_modules = "ocamlc.byte/vox_sequence ocamlc.byte/vox_int_sequence ocamlc.byte/vox_iarray";
+ binary_modules = "ocamlc.opt/vox_sequence ocamlc.opt/vox_int_sequence ocamlc.opt/vox_iarray";
  {
-   flags = "-extension refinement_types -I ocamlc.byte";
+   flags = "-extension refinement_types -I ocamlc.opt";
    { expect; }
-   { flags += " ocamlc.byte/collection_runtime.cmxs"; expect.opt; }
- }{
-   flags = "-extension refinement_types -principal -I ocamlc.byte";
-   { expect; }
-   { flags += " ocamlc.byte/collection_runtime.cmxs"; expect.opt; }
+   { flags += " ocamlc.opt/collection_runtime.cmxs"; expect.opt; }
  }
 *)
 
-#directory "ocamlc.byte";;
+#directory "ocamlc.opt";;
 
 #use "sorted_array_proofs.ml";;
 [%%expect{|

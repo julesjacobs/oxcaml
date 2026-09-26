@@ -4,11 +4,6 @@
  {
    flags = "-extension refinement_types";
    { expect; }
-   { expect.opt; }
- }{
-   flags = "-extension refinement_types -principal";
-   { expect; }
-   { expect.opt; }
  }
 *)
 

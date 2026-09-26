@@ -2,18 +2,18 @@
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sequence.mli vox_int_sequence.mli vox_iarray.mli";
- setup-ocamlc.byte-build-env;
+ setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
  module = "vox_sequence.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "vox_int_sequence.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "vox_iarray.mli";
- ocamlc.byte;
+ ocamlc.opt;
  expect;
 *)
 
-#directory "ocamlc.byte";;
+#directory "ocamlc.opt";;
 
 let wrong_update () =
   let values = [: 1; 2 :] in

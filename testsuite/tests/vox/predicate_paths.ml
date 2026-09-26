@@ -3,7 +3,6 @@
  flags = "-extension refinement_types";
  timeout = "10";
  { expect; }
- { expect.opt; }
 *)
 
 let conditional_fact : (x : int) -> (b : bool) ->

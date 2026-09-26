@@ -6,8 +6,8 @@
  readonly_files = "egraph_ghost_arrays_erasure.ml vox_egraph_ghost_arrays.ml";
  compile_only = "true";
  {
-   setup-ocamlc.byte-build-env;
-   ocamlc.byte;
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
    run-expect;
    check-program-output;
  }

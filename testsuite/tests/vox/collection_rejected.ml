@@ -2,16 +2,16 @@
  has-z3;
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sequence.mli vox_int_sequence.mli";
- setup-ocamlc.byte-build-env;
+ setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
  module = "vox_sequence.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "vox_int_sequence.mli";
- ocamlc.byte;
+ ocamlc.opt;
  expect;
 *)
 
-#directory "ocamlc.byte";;
+#directory "ocamlc.opt";;
 
 let invalid_representation : Vox_int_sequence.multiset = [2; 1];;
 [%%expect{|

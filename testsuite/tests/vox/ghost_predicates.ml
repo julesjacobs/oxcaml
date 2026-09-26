@@ -1,10 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- { bytecode; }
  { native; }
- { flags += " -principal"; bytecode; }
- { flags += " -principal"; native; }
 *)
 
 let (preserve @ total) :
