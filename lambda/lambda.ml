@@ -1473,8 +1473,10 @@ let rec placeholder_of_layout loc (layout : layout) =
   match layout with
   | Pvalue _ ->
       (* The placeholder need not inhabit the declared variant or record shape.
-         Keep its representation hidden from the optimizer. *)
-      Lprim (Popaque layout, [dummy_constant], loc)
+         Keep its representation hidden from the optimizer. [Pobj_magic] does
+         that in Flambda but is dropped in Cmm, so an unused placeholder
+         compiles to nothing. *)
+      Lprim (Pobj_magic layout, [dummy_constant], loc)
   | Punboxed_product layouts ->
       Lprim (Pmake_unboxed_product layouts,
              List.map (placeholder_of_layout loc) layouts, loc)

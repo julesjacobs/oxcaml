@@ -21,14 +21,16 @@ module L = Vox_egraph_language_spec
 module E = Vox_egraph_derivation_spec
 (let
   (origins/0 =
-     (function {nlocal = 0} param/0[value<int>] : addrarray (opaque 24029)))
+     (function {nlocal = 0} param/0[value<int>] : addrarray
+       (obj_magic 24029)))
   (apply (field_imm 1 (global Toploop!)) "origins" origins/0))
 val origins :
   unit -> {values : L.expr iarray | (Iarray.length values) = 512} @ ghost =
   <fun>
 (let
   (edges/0 =
-     (function {nlocal = 0} param/1[value<int>] : addrarray (opaque 24029)))
+     (function {nlocal = 0} param/1[value<int>] : addrarray
+       (obj_magic 24029)))
   (apply (field_imm 1 (global Toploop!)) "edges" edges/0))
 val edges :
   unit ->
