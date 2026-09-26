@@ -177,6 +177,7 @@ module TyVarEnv : sig
   val protect_reentrant : (unit -> 'a) -> 'a
 
   type poly_univars
+  val current_univars : unit -> poly_univars
   val with_univars : poly_univars -> (unit -> 'a) -> 'a
   (* evaluate with a locally extended set of univars *)
 
@@ -407,6 +408,8 @@ end = struct
       if String.equal name n
       then t, s
       else find_poly_univars name rest
+
+  let current_univars () = !univars
 
   let with_univars new_ones f =
     assert_univars new_ones;

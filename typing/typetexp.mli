@@ -36,6 +36,11 @@ module TyVarEnv : sig
   (** Preserve the caller's type-variable state during predicate typing. *)
 
   type poly_univars
+
+  val current_univars : unit -> poly_univars
+  (** The univars in scope, for types written inside a refinement predicate
+      that belongs to a polymorphic type. *)
+
   val make_poly_univars :
     Env.t -> (string Location.loc * Env.stage) list -> poly_univars
     (** A variant of [make_poly_univars_jkinds] that gets variables

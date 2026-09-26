@@ -10334,11 +10334,18 @@ and type_coerce
        instance ty', Texp_coerce (Some cty, cty'))
 
 and type_constraint env sty type_mode =
+  (* Inside a refinement predicate, the univars of the enclosing type stay in
+     scope. *)
+  let univars =
+    if !typing_refinement_predicate
+    then Some (Typetexp.TyVarEnv.current_univars ())
+    else None
+  in
   (* Pretend separate = true, 1% slowdown for lablgtk *)
   let cty =
     with_local_level_generalize_structure begin fun () ->
-      Typetexp.transl_simple_type ~new_var_jkind:Any env ~closed:false type_mode
-        sty
+      Typetexp.transl_simple_type ~new_var_jkind:Any env ?univars
+        ~closed:false type_mode sty
     end
   in
   cty.ctyp_type, Texp_constraint cty
@@ -10422,6 +10429,10 @@ and type_newtype
         Hashtbl.add seen (get_id t) ();
         match get_desc t with
         | Tconstr (Path.Pident id', _, _) when id == id' -> link_type t ty
+        | Trefine { ref_pred; _ } ->
+            Refinement_predicate.fold_types (fun () t -> replace t) ()
+              ref_pred;
+            Btype.iter_type_expr replace t
         | _ -> Btype.iter_type_expr replace t
       end
     in
