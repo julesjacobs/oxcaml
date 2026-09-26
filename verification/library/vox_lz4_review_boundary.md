@@ -122,7 +122,9 @@ guarantee. No exception-safety theorem is claimed.
 ## Reproducible checks
 
 - `make -s vox-library` checks all semantic definitions, existing proofs,
-  implementations and the sealed public interface in bytecode and native modes.
+  implementations and the sealed public interface once, in the bytecode
+  compilation; the native compilation of the same sources passes
+  `-smt-assume-verified`.
 - `python3 verification/benchmarks/lz4_boundary_check.py` copies only the public
   CMIs into an isolated directory, separately compiles `vox_lz4_public_client.ml`,
   derives byte identity from the two actual calls and exported total theorem,

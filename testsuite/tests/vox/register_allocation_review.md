@@ -63,8 +63,7 @@ records. No additional axioms, assumed allocator predicates, or trusted
 allocation primitives are introduced. Runtime resource exhaustion is outside
 the register-machine model.
 
-The public client runs in bytecode and native code, each with and without
-principal mode. `register_allocation_rejected.ml` checks that an internal graph
+The public client runs in bytecode and native code. `register_allocation_rejected.ml` checks that an internal graph
 operation is hidden and that neither stuck states nor different returned
 values can satisfy observable equality. `register_allocation_erasure.ml`
 checks the runtime form of a client calling the public ghost theorem.

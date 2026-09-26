@@ -95,8 +95,8 @@ From a worktree configured with a compatible compiler, run these sequentially:
 ./dev test vox/regex.ml
 ```
 
-The DFA test checks bytecode and native expect modes, with and without
-`-principal`, including ordinary and diagnostic results, exact and insufficient
+The DFA test runs its phrases once in the expect toplevel and covers
+ordinary and diagnostic results, exact and insufficient
 budgets, unreachable states, default transitions, and 66 global labels spread
 across two states.
 

@@ -112,7 +112,8 @@ The fixture includes a statically proved non-coprime example, differential
 modular-power tests, all messages and valid exponents through 24 for prime
 pairs chosen from `{2,3,5,7,11,13}`, every message modulo `53*61`, non-coprime
 examples modulo `65537*257`, exponents over 100 decimal digits, and CRT
-equivalence checks. Bytecode and native execution are tested. The current compiler rejects a Bigint access-mode
+equivalence checks. The public client runs in bytecode and native code; the
+other tests run as bytecode. The current compiler rejects a Bigint access-mode
 coercion in the ghost proof under `-principal`; these tests omit that flag.
 
 `rsa_rejected.ml` rejects invalid preconditions, including a composite factor.

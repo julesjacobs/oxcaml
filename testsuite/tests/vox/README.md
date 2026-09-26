@@ -15,6 +15,15 @@ client uses a finite budget; the online data structure requires no advance
 population limit. The lower-level accounting regressions remain in
 `union_find_online.ml`.
 
+Each proof test compiles once, as bytecode: refinement checking does not
+depend on the backend, and bytecode is the fastest to build. Public clients
+(the evidence cited by the demo pages), tests that inspect runtime
+representations, and tests of runtime or layout behaviour run in both
+bytecode and native code. The LZ4 tests run natively because their inputs
+are large. `./dev test` lists proofs that exceed the solver resource warning
+threshold at the end of the run (resource counts differ between platforms,
+so they are not part of test output).
+
 To investigate a rejected refinement, compile with `-dvc`. The diagnostic
 includes the encoded goal, assumptions, available signed model values and
 opaque function names. Opaque models describe the verifier's assumptions;

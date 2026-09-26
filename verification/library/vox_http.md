@@ -189,7 +189,7 @@ From the configured worktree:
 verification/demos/http_stream.sh
 ```
 
-This verifies and executes the focused fixture in bytecode and native modes.
+This verifies the focused fixture and runs it as bytecode.
 The rejected fixtures prevent a client from claiming that parsing discards a
 pipelined suffix or that every accepted body is empty, and reject access to
 private implementation helpers. The separately compiled positive clients
