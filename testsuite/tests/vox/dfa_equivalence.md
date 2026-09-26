@@ -33,11 +33,17 @@ Read these files in order; all paths are relative to the repository root:
    solver/runtime primitive correspondence form the existing trusted base.
    The demo adds no assumptions or external primitives.
 
+For DFA comparison/minimization alone, read items 1 and 3 plus the primitive
+contracts in item 5. Regex matching and lowering additionally require items 2
+and 4. The combined route needs their union; separating their presentation does
+not remove a semantic dependency or shrink the combined claim.
+
 This is the transitive specification surface. The concrete DFA table is the
 public semantic input/output model; search queues, partitions, processed
 histories, and certificates are implementation details. The four demo files
 above have no dependencies on a proof module. Checked `.mli` files prevent the
-public implementation from exporting auxiliary helpers.
+public implementation from exporting auxiliary helpers. The implementation
+modules rely on those interfaces instead of repeating their entire signatures.
 
 `dfa_equivalence_proof.ml` contains the sealed `Dfa_proof` implementation and
 its auxiliary interface for diagnostic tests and bridge proofs. `regex_core.ml`
@@ -103,20 +109,22 @@ python3 testsuite/tests/vox/dfa_boundary_check.py
 ```
 
 An existing compatible installation can be used without rebuilding this
-checkout: pass `--compiler /path/to/installation/bin/ocamlopt.opt`. All generated
+checkout: pass `--compiler /path/to/installation/bin/ocamlopt.opt` for native
+checks or `--compiler /path/to/installation/bin/ocamlc.opt` for bytecode checks. All generated
 files and rejection fixtures remain in the script's private output directory.
 
 The script prints its output directory. It compiles the public `.mli` files,
-then compiles `dfa_public_client.ml` in a directory containing only the two
-semantic-module CMIs and two public-interface CMIs. No proof-module CMI is
-available there; the public interfaces are compiled with `-opaque`. The client derives equality, a ghost distinguishing word,
-comparison/minimization completion, minimum state count against an arbitrary
-equivalent valid DFA, and preservation through regex lowering and minimization.
-It links and runs ordinary comparison, reduction, and regex-lowering smoke
-cases after the isolated compilation. The script also checks rejection of access to a hidden certificate helper and
-an unsupported universal equality claim.
+then compiles `dfa_public_client.ml` with only `Dfa_semantics` and the public
+DFA interface available. `regex_public_client.ml` additionally gets the regex
+semantic module and public regex interface. No proof-module CMI is available
+to either client; the public interfaces are compiled with `-opaque`.
+The DFA client derives equality, a ghost distinguishing word, completion, and
+minimum state count. The regex client derives membership/matching and language
+preservation through lowering and minimization. The script links and runs
+smoke cases, rejects hidden certificate/definition helpers and proof modules,
+and rejects an unsupported universal equality claim.
 
-The script saves native Lambda dumps and checks transitive local calls starting
+The script saves Lambda dumps for the selected compiler and checks transitive local calls starting
 at ordinary `compare` and `reduce`. Public theorem bodies must contain no
 runtime calls. Inspect the retained dumps as well, including indirect calls to
 the semantic modules. Expected ordinary paths:
@@ -129,7 +137,8 @@ the semantic modules. Expected ordinary paths:
   its current partition, with the prior partition and decreasing measure erased.
 - Neither path calls `candidate`, `search_product`, `append_word`,
   `quotient_relation`, `quotient_access`, `cover_rows`, `copy_access`,
-  `copy_separations`, or `same_class_pairs`.
+  `copy_separations`, `same_class_pairs`, `copy_word`, `copy_relation`,
+  `copy_table`, or `copy_machine`.
 - `comparison_witness` and regex `sound` have empty product results.
   `compare_complete`, `compare_equal`, `reduce_complete`, `reduce_preserves`,
   `reduce_minimum`, regex `complete`, and `lower_matches` contain no runtime
@@ -137,3 +146,40 @@ the semantic modules. Expected ordinary paths:
   and fuel are constant placeholders.
 
 The diagnostic APIs intentionally retain their certificate-producing paths.
+
+The alphabet/class accumulators require total lists, and alphabet, partition,
+class and quotient producers return total values directly. This removes four
+identity traversals from ordinary minimization and the partition traversal
+from each refinement round. Producer equations and public claims are unchanged.
+Diagnostic access/separation witness copies retain their existing conversion
+to total data; they are absent from ordinary execution.
+
+`state_size` counts table rows directly. Private `state_ids_length` and
+`state_size_via_ids` prove equality with the former ID-list count for every raw
+table, including malformed tables. The audit checks that the emitted
+`state_size` calls only `big_length` and constructs no list.
+
+The independent regex membership model and optional-lowering contract remain
+unchanged. Reachable-state construction is deferred: it would add a worklist,
+closure and termination invariants, and change the implementation of lowering
+without making the semantic review surface smaller. The derivative matcher is
+already small. Proof wrappers that connect private operations to the public
+entrypoints remain because direct function aliases do not satisfy the checked
+public refinement interface.
+
+### Minimization proof placement
+
+`minimize_proved` calls the private `minimization_certificate` helper once,
+inside `ghost_`. The helper contains the relation-respect proof, distinguishing
+word construction, and separation cases. Its input refinements state the
+source validity, access and closure facts, refinement result identity, and
+budget and quotient facts required to produce the complete
+`check_reduction` certificate. The ordinary pipeline retains its small local
+facts and contains no certificate construction block.
+
+This extraction improves the source layout, not runtime allocation. On both
+backends, the emitted bodies of `minimize_proved`, `refine_to_stable`, `reduce`,
+and `compare` match the accepted pre-extraction bodies modulo identifier
+stamps and whitespace. The private `proved` and `stable_partition` wrappers
+still appear in emitted code. The boundary gate rejects any ordinary call
+graph that reaches `minimization_certificate`.

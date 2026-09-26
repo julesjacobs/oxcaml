@@ -107,7 +107,7 @@ module Dfa_semantics = struct
 
   let[@def] state_size (machine : machine) =
     let _, table = machine in
-    big_length (state_ids table)
+    big_length table
 
   let[@def] rec list_size (xs : int list) =
     match xs with

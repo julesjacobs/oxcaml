@@ -207,7 +207,7 @@ module Dfa_semantics :
       (machine : machine) ->
       {u : unit
         | (state_size machine) ===
-            (match machine with | (_, table) -> big_length (state_ids table))}
+            (match machine with | (_, table) -> big_length table)}
     val list_size : int list -> int
     val list_size_def :
       (xs : int list) ->
@@ -812,11 +812,30 @@ module Dfa_proof :
 module Dfa_equivalence :
   sig
     type machine = Dfa_semantics.machine
-    type comparison = Equivalent | Inequivalent | Comparison_limit
+    type comparison =
+      Dfa_proof.comparison =
+        Equivalent
+      | Inequivalent
+      | Comparison_limit
     [@@inductive]
     val compare :
       Dfa_semantics.machine ->
-      Dfa_semantics.machine -> int -> comparison @ total @@ total
+      Dfa_semantics.machine -> int -> comparison @ total
+    val compare_def :
+      (left : Dfa_semantics.machine) ->
+      (right : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | (compare left right limit) ===
+            (Dfa_proof.compare left right limit : comparison)}
+    val reduce :
+      Dfa_semantics.machine -> int -> Dfa_semantics.machine option @ total
+    val reduce_def :
+      (source : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | (reduce source limit) ===
+            (Dfa_proof.reduce source limit : Dfa_semantics.machine option)}
     val compare_complete :
       (left : Dfa_semantics.machine) ->
       (right : Dfa_semantics.machine) ->
@@ -839,7 +858,6 @@ module Dfa_equivalence :
             | Comparison_limit -> false
             | Equivalent | Inequivalent -> true
           else true}
-      @@ total
     val compare_equal :
       (left : Dfa_semantics.machine) ->
       (right : Dfa_semantics.machine) ->
@@ -850,7 +868,6 @@ module Dfa_equivalence :
           then
             (Dfa_semantics.run left word) === (Dfa_semantics.run right word)
           else true}
-      @@ total
     val comparison_witness :
       (left : Dfa_semantics.machine) ->
       (right : Dfa_semantics.machine) ->
@@ -861,10 +878,6 @@ module Dfa_equivalence :
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
           else true}
-      @@ total
-    val reduce :
-      Dfa_semantics.machine -> int -> Dfa_semantics.machine option @ total @@
-      total
     val reduce_complete :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->
@@ -882,7 +895,6 @@ module Dfa_equivalence :
             | None -> false
             | Some candidate -> Dfa_semantics.valid candidate
           else true}
-      @@ total
     val reduce_preserves :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->
@@ -894,7 +906,6 @@ module Dfa_equivalence :
           | Some candidate ->
               (Dfa_semantics.run source word) ===
                 (Dfa_semantics.run candidate word)}
-      @@ total
     val reduce_minimum :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->
@@ -913,7 +924,6 @@ module Dfa_equivalence :
                    (Dfa_semantics.state_size other))
                   <= 0
               else true}
-      @@ total
   end
 |}, Principal{|
 module Dfa_semantics :
@@ -1108,7 +1118,7 @@ module Dfa_semantics :
       (machine : machine) ->
       {u : unit
         | (state_size machine) ===
-            (match machine with | (_, table) -> big_length (state_ids table))}
+            (match machine with | (_, table) -> big_length table)}
     val list_size : int list -> int
     val list_size_def :
       (xs : int list) ->
@@ -1713,11 +1723,30 @@ module Dfa_proof :
 module Dfa_equivalence :
   sig
     type machine = Dfa_semantics.machine
-    type comparison = Equivalent | Inequivalent | Comparison_limit
+    type comparison =
+      Dfa_proof.comparison =
+        Equivalent
+      | Inequivalent
+      | Comparison_limit
     [@@inductive]
     val compare :
       Dfa_semantics.machine ->
-      Dfa_semantics.machine -> int -> comparison @ total @@ total
+      Dfa_semantics.machine -> int -> comparison @ total
+    val compare_def :
+      (left : Dfa_semantics.machine) ->
+      (right : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | (compare left right limit) ===
+            (Dfa_proof.compare left right limit : comparison)}
+    val reduce :
+      Dfa_semantics.machine -> int -> Dfa_semantics.machine option @ total
+    val reduce_def :
+      (source : Dfa_semantics.machine) ->
+      (limit : int) ->
+      {u : unit
+        | (reduce source limit) ===
+            (Dfa_proof.reduce source limit : Dfa_semantics.machine option)}
     val compare_complete :
       (left : Dfa_semantics.machine) ->
       (right : Dfa_semantics.machine) ->
@@ -1740,7 +1769,6 @@ module Dfa_equivalence :
             | Comparison_limit -> false
             | Equivalent | Inequivalent -> true
           else true}
-      @@ total
     val compare_equal :
       (left : Dfa_semantics.machine) ->
       (right : Dfa_semantics.machine) ->
@@ -1751,7 +1779,6 @@ module Dfa_equivalence :
           then
             (Dfa_semantics.run left word) === (Dfa_semantics.run right word)
           else true}
-      @@ total
     val comparison_witness :
       (left : Dfa_semantics.machine) ->
       (right : Dfa_semantics.machine) ->
@@ -1762,10 +1789,6 @@ module Dfa_equivalence :
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
           else true}
-      @@ total
-    val reduce :
-      Dfa_semantics.machine -> int -> Dfa_semantics.machine option @ total @@
-      total
     val reduce_complete :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->
@@ -1783,7 +1806,6 @@ module Dfa_equivalence :
             | None -> false
             | Some candidate -> Dfa_semantics.valid candidate
           else true}
-      @@ total
     val reduce_preserves :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->
@@ -1795,7 +1817,6 @@ module Dfa_equivalence :
           | Some candidate ->
               (Dfa_semantics.run source word) ===
                 (Dfa_semantics.run candidate word)}
-      @@ total
     val reduce_minimum :
       (source : Dfa_semantics.machine) ->
       (limit : int) ->
@@ -1814,7 +1835,6 @@ module Dfa_equivalence :
                    (Dfa_semantics.state_size other))
                   <= 0
               else true}
-      @@ total
   end
 |}]
 

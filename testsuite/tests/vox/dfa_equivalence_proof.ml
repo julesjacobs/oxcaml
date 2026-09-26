@@ -282,6 +282,30 @@ end = struct
     let _, table = machine in
     List.length table
 
+  let rec (state_ids_length @ total) :
+      (table : (int * bool * row) list) ->
+      {u : unit | big_length (state_ids table) === big_length table}
+      @ immutable contended =
+    fun table ->
+    let ids = ghost_ (state_ids table) in
+    ghost_ (state_ids_def table);
+    ghost_ (big_length_def table);
+    ghost_ (big_length_def ids);
+    let u = () in
+    match table with
+    | [] -> u
+    | _ :: rest ->
+      ghost_ (state_ids_length rest);
+      u
+
+  let (state_size_via_ids @ total) (source : machine) :
+      {u : unit | let _, table = source in
+        state_size source === big_length (state_ids table)} =
+    let _, table = source in
+    ghost_ (state_size_def source);
+    ghost_ (state_ids_length table);
+    let u = () in u
+
   let[@def] of_raw (raw : raw @ total) : machine option @ total =
     if valid raw then Some raw else None
 
@@ -1802,8 +1826,8 @@ end = struct
     ghost_ (image_ids_distinct_semantic source candidate certificate other agreement
       candidate_states);
     ghost_ (included_bound images other_states);
-    ghost_ (state_size_def candidate);
-    ghost_ (state_size_def other);
+    ghost_ (state_size_via_ids candidate);
+    ghost_ (state_size_via_ids other);
     let u = () in u
 
   let (minimum_count_source_semantic @ total) (source : machine)
@@ -1846,8 +1870,8 @@ end = struct
     ghost_ (image_ids_distinct source candidate certificate other relation
       candidate_states);
     ghost_ (included_bound images other_states);
-    ghost_ (state_size_def candidate);
-    ghost_ (state_size_def other);
+    ghost_ (state_size_via_ids candidate);
+    ghost_ (state_size_via_ids other);
     let u = () in u
 
   let rec (list_size_properties @ total) :
@@ -2247,8 +2271,8 @@ end = struct
     ghost_ (pairs_valid_included left right pairs);
     ghost_ (relation_included_bound pairs domain);
     ghost_ (state_product_length left_states right_states);
-    ghost_ (state_size_def left);
-    ghost_ (state_size_def right);
+    ghost_ (state_size_via_ids left);
+    ghost_ (state_size_via_ids right);
     let u = () in u
 
   let rec (related_included @ total) :
@@ -3425,9 +3449,9 @@ end = struct
     let states = state_ids table in
     ghost_ (bounded_labels_rebased source p states);
     ghost_ (bounded_labels_rebased source q states);
-    ghost_ (state_size_def source);
-    ghost_ (state_size_def left);
-    ghost_ (state_size_def right);
+    ghost_ (state_size_via_ids source);
+    ghost_ (state_size_via_ids left);
+    ghost_ (state_size_via_ids right);
     let decision = candidate left right limit in
     match decision with
     | Limit -> let result = Limit in result
@@ -3665,7 +3689,7 @@ end = struct
     ghost_ (access_states_included source entries);
     ghost_ (states_of_entries_length entries);
     ghost_ (included_bound states domain);
-    ghost_ (state_size_def source);
+    ghost_ (state_size_via_ids source);
     let u = () in u
 
   let (access_fresh_bound @ total) (source : machine)
@@ -3688,7 +3712,7 @@ end = struct
     ghost_ (distinct_ints_def extended);
     ghost_ (included_bound extended domain);
     ghost_ (big_length_def extended);
-    ghost_ (state_size_def source);
+    ghost_ (state_size_via_ids source);
     let u = () in u
 
   let (reachable_states_step @ total) (source : machine)
@@ -5204,7 +5228,7 @@ end = struct
     let u = () in u
 
   let[@def] rec refine_partition_rows source partition alphabet
-      states remaining =
+      states remaining : relation @ total =
     match remaining with
     | [] -> []
     | state :: rest ->
@@ -5239,7 +5263,7 @@ end = struct
         u
       end
 
-  let[@def] refine_partition source partition alphabet states =
+  let[@def] refine_partition source partition alphabet states : relation @ total =
     refine_partition_rows source partition alphabet states states
 
   let (refine_partition_exact @ total) (source : machine)
@@ -5349,7 +5373,7 @@ end = struct
       left right letter);
     let u = () in u
 
-  let[@def] rec initial_partition source states =
+  let[@def] rec initial_partition source states : relation @ total =
     match states with
     | [] -> []
     | state :: rest ->
@@ -5768,7 +5792,7 @@ end = struct
     ghost_ (accepting_partition_def source next states);
     let u = () in u
 
-  let[@def] insert_letter letter alphabet =
+  let[@def] insert_letter letter (alphabet : int list @ total) : int list @ total =
     if has_letter letter alphabet then alphabet else letter :: alphabet
 
   let (insert_letter_member @ total) (letter : int)
@@ -5797,7 +5821,7 @@ end = struct
       quotient_access partition rest
 
   let[@def] rec (collect_classes @ total) :
-      (int * int) list -> int list -> int list @ immutable contended =
+      (int * int) list -> int list -> int list @ total immutable contended =
     fun partition states ->
     match states with
     | [] -> []
@@ -5954,7 +5978,7 @@ end = struct
       ghost_ (quotient_access_word_source source partition rest class_id);
       u
 
-  let[@def] rec quotient_edges source partition representative alphabet =
+  let[@def] rec quotient_edges source partition representative alphabet : relation @ total =
     match alphabet with
     | [] -> []
     | letter :: rest ->
@@ -6026,7 +6050,8 @@ end = struct
         u
       end
 
-  let[@def] rec quotient_table source partition alphabet classes =
+  let[@def] rec quotient_table source partition alphabet classes :
+      (int * bool * row) list @ total =
     match classes with
     | [] -> []
     | representative :: rest ->
@@ -6146,7 +6171,7 @@ end = struct
       ghost_ (quotient_table_view source partition alphabet rest representative);
       u
 
-  let[@def] rec add_letters letters alphabet =
+  let[@def] rec add_letters letters (alphabet : int list @ total) : int list @ total =
     match letters with
     | [] -> alphabet
     | letter :: rest ->
@@ -6185,7 +6210,7 @@ end = struct
       ghost_ (insert_letter_distinct letter tail);
       u
 
-  let[@def] rec collect_alphabet source states =
+  let[@def] rec collect_alphabet source states : int list @ total =
     match states with
     | [] -> []
     | state :: rest ->
@@ -6258,12 +6283,12 @@ end = struct
       u
     end
 
-  let[@def] quotient_raw source partition states classes initial =
+  let[@def] quotient_raw source partition states classes initial : machine @ total =
     partition_class partition initial,
     quotient_table source partition
       (collect_alphabet source states) classes
 
-  let[@def] rec (quotient_relation @ total) partition states =
+  let[@def] rec (quotient_relation @ total) partition states : relation @ total =
     match states with
     | [] -> []
     | state :: rest ->
@@ -7367,7 +7392,7 @@ end = struct
     let _, table = source in
     let states = state_ids table in
     ghost_ (big_length_nonnegative states);
-    ghost_ (state_size_def source);
+    ghost_ (state_size_via_ids source);
     ghost_ (separation_budget_def source pair_limit);
     let u = () in u
 
@@ -7492,17 +7517,6 @@ end = struct
       let tail = copy_word rest in
       let result = letter :: tail in result
 
-  let rec (copy_relation @ total) :
-      (relation : relation) ->
-      {result : relation | result === relation}
-        @ total immutable contended =
-    fun relation ->
-    match relation with
-    | [] -> let result = [] in result
-    | pair :: rest ->
-      let tail = copy_relation rest in
-      let result = pair :: tail in result
-
   let rec (copy_access @ total) :
       (access : (int * int list) list) ->
       {result : (int * int list) list | result === access}
@@ -7528,27 +7542,6 @@ end = struct
       let copied_rest = copy_separations rest in
       let result = (p, q, copied_word) :: copied_rest in
       result
-
-  let rec (copy_table @ total) :
-      (table : (int * bool * row) list) ->
-      {result : (int * bool * row) list | result === table}
-        @ total immutable contended =
-    fun table ->
-    match table with
-    | [] -> let result = [] in result
-    | (state, accepting, (edges, fallback)) :: rest ->
-      let copied_edges = copy_relation edges in
-      let copied_rest = copy_table rest in
-      let result = (state, accepting, (copied_edges, fallback)) ::
-        copied_rest in
-      result
-
-  let (copy_machine @ total) (machine : machine) :
-      {result : machine | result === machine} @ total =
-    let initial, table = machine in
-    let copied_table = copy_table table in
-    let result = initial, copied_table in
-    result
 
   let (quotient_of_raw_preserves @ total) (source : machine)
       (entries : (int * int list) list)
@@ -7596,8 +7589,7 @@ end = struct
         else true} @ total immutable contended =
     fun source alphabet states partition measure ->
     let _measure = measure in
-    let original_next = refine_partition source partition alphabet states in
-    let next = copy_relation original_next in
+    let next = refine_partition source partition alphabet states in
     ghost_ (same_class_pairs_nonnegative partition states);
     ghost_ (letters_in_refl states);
     ghost_ (refinement_stable_rows source partition alphabet states states);
@@ -7632,8 +7624,7 @@ end = struct
     fun source alphabet states partition measure entries relation ->
     let _measure = measure in
     ghost_ (refine_to_stable_def source alphabet states partition measure);
-    let original_next = refine_partition source partition alphabet states in
-    let next = copy_relation original_next in
+    let next = refine_partition source partition alphabet states in
     ghost_ (relation_included_self relation);
     ghost_ (refine_partition_respects source entries partition relation relation
       alphabet);
@@ -7748,10 +7739,8 @@ end = struct
       | Some entries ->
         let original_reachable = states_of_entries entries in
         let reachable = copy_word original_reachable in
-        let original_alphabet = collect_alphabet source reachable in
-        let alphabet = copy_word original_alphabet in
-        let original_initial_classes = initial_partition source reachable in
-        let initial_classes = copy_relation original_initial_classes in
+        let alphabet = collect_alphabet source reachable in
+        let initial_classes = initial_partition source reachable in
         let refinement_measure = ghost_ (same_class_pairs initial_classes reachable) in
         ghost_ (same_class_pairs_nonnegative initial_classes reachable);
         let refinement_measure : {n : Bigint.t |
@@ -7762,21 +7751,17 @@ end = struct
             initial_classes refinement_measure in
         let previous = ghost_ partition_result.prior_value.ghost in
         let partition = partition_result.stable_value in
-        let original_class_ids = collect_classes partition reachable in
-        let class_ids = copy_word original_class_ids in
+        let class_ids = collect_classes partition reachable in
         let pair_limit = square_limit limit in
         ghost_ (separation_budget_from_limit source limit pair_limit);
-        let original_candidate_raw =
+        let candidate_raw =
           quotient_raw source partition reachable class_ids initial in
-        let candidate_raw = copy_machine original_candidate_raw in
         ghost_ (initial_accepting_partition source reachable);
         ghost_ (quotient_valid source entries previous);
         ghost_ (of_raw_def candidate_raw);
         let reduced = candidate_raw in
-        let original_equivalent =
-          quotient_relation partition reachable in
         let equivalent =
-          copy_relation original_equivalent in
+          quotient_relation partition reachable in
         ghost_ (initial_accepting_partition source reachable);
         ghost_ (quotient_check_reduced source entries previous
           partition reduced);
@@ -7842,6 +7827,102 @@ end = struct
     result_proof : 'proof Ghost.t @@ total;
   }
 
+  let (minimization_certificate @ total)
+      (source : {source : machine | valid source && labels_bounded source})
+      (entries : {entries : (int * int list) list |
+        let initial, _ = source in
+        all_reach_closed source entries entries && access_member initial entries &&
+        access_valid source entries})
+      (reachable : {states : int list | states === states_of_entries entries})
+      (alphabet : {letters : int list | letters === collect_alphabet source reachable})
+      (initial_classes : {partition : relation |
+        partition === initial_partition source reachable} @ total)
+      (refinement_measure : {n : Bigint.t |
+        n === same_class_pairs initial_classes reachable &&
+        Bigint.compare 0Z n <= 0})
+      (partition_result : {result : relation stable_partition |
+        result === refine_to_stable source alphabet
+          reachable initial_classes refinement_measure})
+      (pair_limit : {n : int | separation_budget source n})
+      (reduced : {reduced : machine |
+        let initial, _ = source in
+        let reachable = states_of_entries entries in
+        let partition = partition_result.stable_value in
+        valid reduced && reduced === quotient_raw source partition reachable
+          (collect_classes partition reachable) initial}) :
+      {certificate : reduction_certificate |
+        check_reduction source reduced certificate} =
+    let _ = ghost_ (refine_to_stable source alphabet reachable
+      initial_classes refinement_measure) in
+    let previous = partition_result.prior_value.ghost in
+    let partition = partition_result.stable_value in
+    let class_ids = collect_classes partition reachable in
+    let candidate_raw = reduced in
+    ghost_ (initial_accepting_partition source reachable);
+    ghost_ (of_raw_def candidate_raw);
+    let equivalent =
+      quotient_relation partition reachable in
+    ghost_ (quotient_check_reduced source entries previous
+      partition reduced);
+    ghost_ (quotient_all_access_reduced source entries previous
+      partition reduced);
+    ghost_ (of_raw_valid candidate_raw);
+    ghost_ (valid_def reduced);
+    let original_access = quotient_access partition entries in
+    let access = copy_access original_access in
+    let empty = [] in
+    ghost_ (all_separated_def source class_ids empty empty);
+    let (respect @ total) (relation : relation) :
+        {u : unit | if all_closed source source relation relation then
+          partition_respects partition reachable relation else true} =
+      ghost_ (initial_partition_respects source reachable relation
+        relation);
+      ghost_ (refine_to_stable_respects source alphabet reachable
+        initial_classes refinement_measure entries relation);
+      let u = () in u in
+    let (distinguish @ total) (p : int) (q : int) :
+        {result : int list option |
+          (match result with None -> true | Some word ->
+            run_from source p word <> run_from source q word) &&
+          (if separation_budget source pair_limit &&
+            has_letter p class_ids && has_letter q class_ids && p <> q
+           then match result with None -> false | Some _ -> true
+           else true)} =
+      ghost_ (separation_budget_def source pair_limit);
+      ghost_ (letters_in_refl reachable);
+      ghost_ (collect_classes_representatives source previous alphabet
+        reachable reachable p);
+      ghost_ (collect_classes_representatives source previous alphabet
+        reachable reachable q);
+      ghost_ (collect_classes_fixed source previous alphabet reachable
+        reachable p);
+      ghost_ (collect_classes_fixed source previous alphabet reachable
+        reachable q);
+      ghost_ (states_of_entries_member entries p);
+      ghost_ (states_of_entries_member entries q);
+      ghost_ (access_member_valid source entries p);
+      ghost_ (access_member_valid source entries q);
+      let result = distinguish_classes source reachable
+        partition respect p q pair_limit in
+      result in
+    ghost_ (letters_in_refl class_ids);
+    let separation = cover_rows source class_ids
+      class_ids empty pair_limit distinguish in
+    (match separation with
+     | None ->
+       let certificate : reduction_certificate = [], [], [] in
+       (certificate : {certificate : reduction_certificate |
+         check_reduction source reduced certificate})
+     | Some separation ->
+       let separation =
+         copy_separations separation in
+       ghost_ (quotient_all_separated_reduced source entries previous
+         partition reduced separation);
+       let certificate = equivalent, access, separation in
+       ghost_ (check_reduction_def source reduced certificate);
+       (certificate : {certificate : reduction_certificate |
+         check_reduction source reduced certificate}))
+
   let[@def] (minimize_proved @ total) (source : machine) (limit : int) :
       {result : (machine, reduction_certificate) proved option |
         (if valid source && labels_bounded source &&
@@ -7867,10 +7948,8 @@ end = struct
         ghost_ (state_search_valid_def search);
         ghost_ (state_search_view_def search);
         let reachable = search.seen_states in
-        let original_alphabet = collect_alphabet source reachable in
-        let alphabet = copy_word original_alphabet in
-        let original_initial_classes = initial_partition source reachable in
-        let initial_classes = copy_relation original_initial_classes in
+        let alphabet = collect_alphabet source reachable in
+        let initial_classes = initial_partition source reachable in
         let refinement_measure = ghost_ (same_class_pairs initial_classes reachable) in
         ghost_ (same_class_pairs_nonnegative initial_classes reachable);
         let refinement_measure : {n : Bigint.t |
@@ -7881,84 +7960,17 @@ end = struct
             initial_classes refinement_measure in
         let previous = ghost_ partition_result.prior_value.ghost in
         let partition = partition_result.stable_value in
-        let original_class_ids = collect_classes partition reachable in
-        let class_ids = copy_word original_class_ids in
+        let class_ids = collect_classes partition reachable in
         let pair_limit = ghost_ (square_limit limit) in
         ghost_ (separation_budget_from_limit source limit pair_limit);
-        let original_candidate_raw =
+        let candidate_raw =
           quotient_raw source partition reachable class_ids initial in
-        let candidate_raw = copy_machine original_candidate_raw in
         ghost_ (initial_accepting_partition source reachable);
         ghost_ (quotient_valid source entries previous);
         ghost_ (of_raw_def candidate_raw);
         let reduced = candidate_raw in
-        let certificate = ghost_ (
-        let original_equivalent =
-          quotient_relation partition reachable in
-        let equivalent =
-          copy_relation original_equivalent in
-        ghost_ (initial_accepting_partition source reachable);
-        ghost_ (quotient_check_reduced source entries previous
-          partition reduced);
-        ghost_ (quotient_all_access_reduced source entries previous
-          partition reduced);
-        ghost_ (of_raw_valid candidate_raw);
-        ghost_ (valid_def reduced);
-        let original_access = quotient_access partition entries in
-        let access = copy_access original_access in
-        let empty = [] in
-        ghost_ (all_separated_def source class_ids empty empty);
-        let (respect @ total) (relation : relation) :
-            {u : unit | if all_closed source source relation relation then
-              partition_respects partition reachable relation else true} =
-          ghost_ (initial_partition_respects source reachable relation
-            relation);
-          ghost_ (refine_to_stable_respects source alphabet reachable
-            initial_classes refinement_measure entries relation);
-          let u = () in u in
-        let (distinguish @ total) (p : int) (q : int) :
-            {result : int list option |
-              (match result with None -> true | Some word ->
-                run_from source p word <> run_from source q word) &&
-              (if separation_budget source pair_limit &&
-                has_letter p class_ids && has_letter q class_ids && p <> q
-               then match result with None -> false | Some _ -> true
-               else true)} =
-          ghost_ (separation_budget_def source pair_limit);
-          ghost_ (letters_in_refl reachable);
-          ghost_ (collect_classes_representatives source previous alphabet
-            reachable reachable p);
-          ghost_ (collect_classes_representatives source previous alphabet
-            reachable reachable q);
-          ghost_ (collect_classes_fixed source previous alphabet reachable
-            reachable p);
-          ghost_ (collect_classes_fixed source previous alphabet reachable
-            reachable q);
-          ghost_ (states_of_entries_member entries p);
-          ghost_ (states_of_entries_member entries q);
-          ghost_ (access_member_valid source entries p);
-          ghost_ (access_member_valid source entries q);
-          let result = distinguish_classes source reachable
-            partition respect p q pair_limit in
-          result in
-        ghost_ (letters_in_refl class_ids);
-        let separation = cover_rows source class_ids
-          class_ids empty pair_limit distinguish in
-        (match separation with
-         | None ->
-           let certificate : reduction_certificate = [], [], [] in
-           (certificate : {certificate : reduction_certificate |
-             check_reduction source reduced certificate})
-         | Some separation ->
-           let separation =
-             copy_separations separation in
-           ghost_ (quotient_all_separated_reduced source entries previous
-             partition reduced separation);
-           let certificate = equivalent, access, separation in
-           ghost_ (check_reduction_def source reduced certificate);
-           (certificate : {certificate : reduction_certificate |
-             check_reduction source reduced certificate}))
-        ) in
+        let certificate = ghost_ (minimization_certificate source entries
+          reachable alphabet initial_classes refinement_measure partition_result pair_limit reduced) in
         let packet = { result_value = reduced;
           result_proof = { ghost = certificate } } in
         let result = Some packet in result

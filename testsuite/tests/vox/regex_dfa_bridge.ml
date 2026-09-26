@@ -467,7 +467,7 @@ module Dfa_semantics :
       (machine : machine) ->
       {u : unit
         | (state_size machine) ===
-            (match machine with | (_, table) -> big_length (state_ids table))}
+            (match machine with | (_, table) -> big_length table)}
     val list_size : int list -> int
     val list_size_def :
       (xs : int list) ->
@@ -1262,7 +1262,7 @@ module Dfa_semantics :
       (machine : machine) ->
       {u : unit
         | (state_size machine) ===
-            (match machine with | (_, table) -> big_length (state_ids table))}
+            (match machine with | (_, table) -> big_length table)}
     val list_size : int list -> int
     val list_size_def :
       (xs : int list) ->

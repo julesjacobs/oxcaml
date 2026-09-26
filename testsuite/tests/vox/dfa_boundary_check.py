@@ -20,7 +20,10 @@ private = output / 'implementation'
 public = output / 'public'
 private.mkdir(exist_ok=True)
 public.mkdir(exist_ok=True)
+dfa_public = output / 'dfa-public'
+dfa_public.mkdir(exist_ok=True)
 compiler = (args.compiler or root / '_install/bin/ocamlopt.opt').resolve()
+object_suffix = '.cmo' if compiler.name.startswith('ocamlc') else '.cmx'
 flags = ['-opaque', '-principal', '-extension', 'refinement_types']
 
 
@@ -62,26 +65,36 @@ for unit, opens in units:
         semantic_opens = tuple(name for name in opens
                                if name in ('Dfa_semantics', 'Regex_semantics'))
         compile_file(interface, private / (unit + '.cmi'), [private], semantic_opens)
-    dumps[unit] = compile_file(source / (unit + '.ml'), private / (unit + '.cmx'),
+    dumps[unit] = compile_file(source / (unit + '.ml'), private / (unit + object_suffix),
                                [private], opens, dump=True)
 
 for unit in ['dfa_semantics', 'regex_semantics', 'dfa_equivalence_core', 'regex_language']:
     shutil.copyfile(private / (unit + '.cmi'), public / (unit + '.cmi'))
-compile_file(source / 'dfa_public_client.ml', public / 'dfa_public_client.cmx', [public], dump=True)
+for unit in ['dfa_semantics', 'dfa_equivalence_core']:
+    shutil.copyfile(private / (unit + '.cmi'), dfa_public / (unit + '.cmi'))
+compile_file(source / 'dfa_public_client.ml', dfa_public / ('dfa_public_client' + object_suffix),
+             [dfa_public], dump=True)
+compile_file(source / 'regex_public_client.ml', public / ('regex_public_client' + object_suffix),
+             [public], dump=True)
 
 executable = output / 'public_client.exe'
 subprocess.run([str(compiler), '-I', str(private),
-                *(str(private / (unit + '.cmx')) for unit, _ in units),
-                str(public / 'dfa_public_client.cmx'), '-o', str(executable)],
+                *(str(private / (unit + object_suffix)) for unit, _ in units),
+                str(dfa_public / ('dfa_public_client' + object_suffix)),
+                str(public / ('regex_public_client' + object_suffix)), '-o', str(executable)],
                cwd=output, check=True)
 subprocess.run([str(executable)], cwd=output, check=True)
 
 hidden = output / 'hidden_certificate.ml'
 hidden.write_text('open Dfa_equivalence_core\nlet hidden = Dfa_equivalence.check_reduction\n')
-compile_file(hidden, public / 'hidden_certificate.cmx', [public], reject='Unbound value')
+compile_file(hidden, public / ('hidden_certificate' + object_suffix), [public], reject='Unbound value')
+hidden_definition = output / 'hidden_definition.ml'
+hidden_definition.write_text('open Dfa_equivalence_core\nlet hidden = Dfa_equivalence.compare_def\n')
+compile_file(hidden_definition, public / ('hidden_definition' + object_suffix), [public],
+             reject='Unbound value')
 hidden_module = output / 'hidden_proof_module.ml'
 hidden_module.write_text('module Hidden = Dfa_equivalence_proof.Dfa_proof\n')
-compile_file(hidden_module, public / 'hidden_proof_module.cmx', [public],
+compile_file(hidden_module, public / ('hidden_proof_module' + object_suffix), [public],
              reject='Unbound module')
 false_claim = output / 'false_equality.ml'
 false_claim.write_text('''open Dfa_semantics
@@ -90,7 +103,7 @@ let (false_equality @ total) (left : Dfa_semantics.machine)
     {u : unit | Dfa_semantics.run left word === Dfa_semantics.run right word} =
   let u = () in u
 ''')
-compile_file(false_claim, public / 'false_equality.cmx', [public],
+compile_file(false_claim, public / ('false_equality' + object_suffix), [public],
              reject='Refinement could not be proved')
 
 
@@ -107,10 +120,16 @@ def function_bodies(dump):
     return bodies
 
 
+semantic_bodies = function_bodies(dumps['dfa_semantics'])
+size_calls = set(re.findall(r'\(apply\s+(\w+)/\d+', semantic_bodies['state_size']))
+if size_calls != {'big_length'} or 'makeblock' in semantic_bodies['state_size']:
+    raise RuntimeError('state_size must count rows directly without constructing state IDs')
+
 bodies = function_bodies(dumps['dfa_equivalence_proof'])
 forbidden = {'append_word', 'quotient_relation', 'quotient_access', 'cover_rows',
              'copy_access', 'copy_separations', 'same_class_pairs', 'candidate',
-             'search_product'}
+             'search_product', 'copy_word', 'copy_relation', 'copy_table', 'copy_machine',
+             'minimization_certificate'}
 for entry in ['compare', 'reduce']:
     pending, visited = [entry], set()
     while pending:
