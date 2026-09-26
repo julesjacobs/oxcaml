@@ -3530,7 +3530,8 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
           verify_batch ctx prove
             (Assert
                { loc = call.exp_loc;
-                 origin = measure.exp_loc;
+                 (* The error already points at the decreases attribute. *)
+                 origin = call.exp_loc;
                  goal =
                    (let value = required measure.exp_loc value in
                     match term_sort entry_measure with
