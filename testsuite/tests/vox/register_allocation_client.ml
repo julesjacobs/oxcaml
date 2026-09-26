@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  all_modules = "register_allocation_spec.ml register_allocation.mli register_allocation.ml register_allocation_client.ml";
- { native; }
+ { bytecode; }
 *)
 
 open Register_allocation_spec

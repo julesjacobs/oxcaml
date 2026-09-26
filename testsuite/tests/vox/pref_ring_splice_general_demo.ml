@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_general.mli pref_ring_general.ml pref_ring_splice_general.mli pref_ring_splice_general.ml pref_ring_splice_fixture.ml pref_ring_splice_general_demo.ml";
- { native; }
+ { bytecode; }
 *)
 open Pref_ring
 open Pref_ring_general

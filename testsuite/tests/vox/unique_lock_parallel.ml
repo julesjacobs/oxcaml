@@ -4,7 +4,7 @@
  flags = "-extension refinement_types -alert -do_not_spawn_domains";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml verified_atomic.mli verified_atomic.ml unique_cell.mli unique_cell.ml unique_lock.mli unique_lock.ml unique_lock_demo.ml unique_lock_parallel.ml";
- { native; }
+ { bytecode; }
 *)
 
 open Unique_lock_demo

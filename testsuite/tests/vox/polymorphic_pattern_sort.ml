@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- { native; }
+ { bytecode; }
 *)
 type ('a : immutable_data) shape = Var | Link of 'a
 let[@def] (is_var @ total) (x : int shape @ immutable) =

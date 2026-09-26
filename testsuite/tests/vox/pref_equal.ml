@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml pref_equal.ml";
- { native; }
+ { bytecode; }
 *)
 
 let equal_alias (p : int Pref.t @ immutable) : {b : bool | b} =

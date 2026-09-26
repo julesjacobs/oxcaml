@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml pref_split.ml";
- { native; }
+ { bytecode; }
 *)
 
 let () =

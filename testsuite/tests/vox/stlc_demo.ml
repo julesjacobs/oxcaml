@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml unifier_spec.ml unifier_proofs.ml unifier.ml unifier_finite_spec.ml unifier_finite_proofs.ml unifier_mgu_spec.ml unifier_mgu_proofs.ml stlc_spec.ml stlc_graph_proofs.ml stlc_model_proofs.ml stlc_complete_proofs.ml stlc_solve_proofs.ml stlc_inference_proofs.ml stlc_generate.ml stlc_solve.ml stlc_infer.ml stlc_demo.ml";
- { native; }
+ { bytecode; }
 *)
 open Unifier_spec
 open Unifier_finite_spec

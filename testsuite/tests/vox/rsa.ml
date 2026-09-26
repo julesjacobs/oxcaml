@@ -5,7 +5,7 @@
  all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
  all_modules += " vox_rsa_number_theory.ml";
  all_modules += " vox_rsa_fermat.ml vox_rsa.mli vox_rsa.ml rsa.ml";
- { native; }
+ { bytecode; }
 *)
 
 module Number_theory = Vox_rsa.Spec

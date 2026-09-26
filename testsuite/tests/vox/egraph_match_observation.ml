@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml vox_egraph_language_spec.ml vox_egraph_rule_spec.ml vox_egraph_union_spec.ml vox_egraph_match_spec.ml vox_egraph_match_observation.ml vox_egraph_match_scan.ml vox_egraph_match_budget_spec.ml vox_egraph_match_bounded.ml egraph_match_observation.ml";
- { native; }
+ { bytecode; }
 *)
 
 module O = Vox_egraph_match_observation

@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml level_finite_spec.ml level_mgu_spec.ml hm_declarative.ml hm_type_proofs.ml hm_environment_spec.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_freshness_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_template_instance_proofs.ml hm_scheme_transport_proofs.ml hm_template_instance_demo.ml";
- { native; }
+ { bytecode; }
 *)
 open Copy_spec
 module P = Hm_template_instance_proofs

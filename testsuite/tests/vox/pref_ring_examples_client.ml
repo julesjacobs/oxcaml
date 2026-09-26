@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_splice_model.ml pref_ring_splice_setup.ml pref_ring_splice.mli pref_ring_splice.ml pref_ring_reverse_model.ml pref_ring_reverse_setup.ml pref_ring_reverse.mli pref_ring_reverse.ml pref_ring_examples_client.ml";
- { native; }
+ { bytecode; }
 *)
 
 (* Public-only client of the concrete splice and reverse results. The rings

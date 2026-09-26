@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli vox_int_sequence.ml vox_iarray.mli vox_iarray.ml sparse_overlay.mli sparse_overlay.ml sparse_overlay_client.ml";
- { native; }
+ { bytecode; }
 *)
 
 module Client (Element : sig type t : immutable_data end) = struct

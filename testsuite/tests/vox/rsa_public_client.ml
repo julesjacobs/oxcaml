@@ -5,7 +5,7 @@
  all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa_arithmetic.ml";
  all_modules += " vox_rsa_number_theory.ml vox_rsa_fermat.ml";
  all_modules += " vox_rsa.mli vox_rsa.ml rsa_public_client.ml";
- { native; }
+ { bytecode; }
 *)
 
 open Bigint

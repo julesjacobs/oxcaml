@@ -3,7 +3,7 @@
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml raw_memory.mli raw_memory.ml raw_memory_demo.ml";
- { native; }
+ { bytecode; }
 *)
 module P = Ghost_pref
 module H = P.Heap

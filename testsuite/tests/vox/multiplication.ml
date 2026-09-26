@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- { native; }
+ { bytecode; }
 *)
 
 let (zero @ total) (x : int) : {r : int | r = 0} =
