@@ -24,8 +24,9 @@ val state_sound : (state : state) ->
 val initial : unit ->
   {state : state | status state === Incomplete
     && total_consumed state = 0 && processed state === []} @@ total
-val feed : (state : state) -> (input : bytes) ->
-  {result : result |
+val transition : state -> bytes -> result -> bool @ ghost @@ total
+val transition_def : (state : state) -> (input : bytes) -> (result : result) ->
+  {u : unit | transition state input result === ghost_ (
     total_consumed state <= total_consumed result.state
     && total_consumed result.state <= 16384
     && Vox_sequence.length input === Bigint.add
@@ -47,16 +48,14 @@ val feed : (state : state) -> (input : bytes) ->
     && (match status result.state with
         | Complete request -> well_formed request
           && serialize request === processed result.state
-        | _ -> true)} @@ total
+        | _ -> true))} @@ total
+val feed : (state : state) -> (input : bytes) ->
+  {result : result | transition state input result} @@ total
 
 val parse : (input : bytes) ->
   {result : result |
     result === feed (initial ()) input
-    && Vox_sequence.length input === Bigint.add
-      (Bigint.of_int (consumed (initial ()) result.state))
-      (Vox_sequence.length result.rest)
-    && Vox_sequence.drop
-      (Bigint.of_int (consumed (initial ()) result.state)) input === result.rest
+    && transition (initial ()) input result
     && (match status result.state with
         | Complete request -> well_formed request
           && Vox_sequence.take

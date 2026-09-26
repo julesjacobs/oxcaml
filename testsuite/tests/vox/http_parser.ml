@@ -10,6 +10,53 @@ open Vox_http_spec
 open Vox_http
 module S = Vox_sequence
 
+let (feed_clauses @ total) (state : state) (input : bytes) :
+  {result : result |
+    total_consumed state <= total_consumed result.state
+    && total_consumed result.state <= 16384
+    && Vox_sequence.length input === Bigint.add
+      (Bigint.of_int (consumed state result.state))
+      (Vox_sequence.length result.rest)
+    && Vox_sequence.drop (Bigint.of_int (consumed state result.state)) input
+      === result.rest
+    && Vox_sequence.append
+      (Vox_sequence.take (Bigint.of_int (consumed state result.state)) input)
+      result.rest === input
+    && (match status result.state with
+        | Incomplete -> result.rest === [] | _ -> true)
+    && (match status result.state with
+        | Incomplete | Complete _ -> processed result.state ===
+            Vox_sequence.append (processed state)
+              (Vox_sequence.take
+                (Bigint.of_int (consumed state result.state)) input)
+        | Malformed _ | Limit _ -> true)
+    && (match status result.state with
+        | Complete request -> well_formed request
+          && serialize request === processed result.state
+        | _ -> true)} =
+  let result = feed state input in
+  ghost_ (transition_def state input result);
+  result
+
+let (parse_clauses @ total) (input : bytes) :
+  {result : result |
+    result === feed (initial ()) input
+    && Vox_sequence.length input === Bigint.add
+      (Bigint.of_int (consumed (initial ()) result.state))
+      (Vox_sequence.length result.rest)
+    && Vox_sequence.drop
+      (Bigint.of_int (consumed (initial ()) result.state)) input === result.rest
+    && (match status result.state with
+        | Complete request -> well_formed request
+          && Vox_sequence.take
+            (Bigint.of_int (consumed (initial ()) result.state)) input ===
+            serialize request
+          && input === Vox_sequence.append (serialize request) result.rest
+        | _ -> true)} =
+  let result = parse input in
+  ghost_ (transition_def (initial ()) input result);
+  result
+
 let (decode_serialized @ total) (request : request) (suffix : bytes) :
     {result : result | if well_formed request then
       (status result.state) === Complete request && result.rest === suffix else true} =
@@ -203,3 +250,35 @@ let () =
     dispatch state (bytes chunk) requests) (initial (), []) chunks in
   assert (List.length requests = 2);
   assert (List.rev requests = [request; complete (run get)])
+
+let () =
+  let check_splits wire cuts =
+    let input = bytes wire in
+    let expected = feed (initial ()) input in
+    List.iter (fun cut ->
+      let first = feed (initial ()) (List.filteri (fun i _ -> i < cut) input) in
+      let rest = List.filteri (fun i _ -> i >= cut) input in
+      assert (feed first.state (first.rest @ rest) = expected)) cuts;
+    let suffix = [256; 13; 10; 0] in
+    assert (feed expected.state suffix = {state = expected.state; rest = suffix})
+  in
+  let headers = ["X-First: one"; "Host: a"; "Content-Length: 0003";
+    "X-First: two"; "content-length: 3"; "X-Last: three"] in
+  let wire = "POST / HTTP/1.1\r\n" ^ String.concat "\r\n" headers ^ "\r\n\r\nabc" in
+  assert ((complete (run wire)).headers = List.map bytes headers);
+  check_splits wire (List.init (String.length wire + 1) Fun.id);
+  malformed Invalid_host
+    "GET / HTTP/1.1\r\nHost:\r\nContent-Length: bad\r\n\r\n";
+  malformed Invalid_content_length
+    "GET / HTTP/1.1\r\nContent-Length: bad\r\nHost:\r\n\r\n";
+  let prefix = "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 8192\r\n\r\n" in
+  let body = String.init 8192 (fun i -> Char.chr (i mod 256)) in
+  let wire = prefix ^ body in
+  check_splits wire [0; 1; String.length prefix - 1; String.length prefix;
+    String.length prefix + 1; String.length wire - 1; String.length wire];
+  let prefix = "GET / HTTP/1.1\r\nHost: a\r\nX: " in
+  let wire = prefix ^ String.make (16384 - String.length prefix - 4) 'x'
+    ^ "\r\n\r\n" in
+  check_splits wire [0; 1; String.length prefix; 16380; 16381; 16382; 16383; 16384];
+  let over = prefix ^ String.make 16384 'x' in
+  check_splits over [0; String.length prefix; 16383; 16384; 16385]

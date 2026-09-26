@@ -22,6 +22,7 @@ Read these files in order; this is the complete semantic review surface:
    semantic definition is hidden in its body. Neither file contains parser
    states, invariants, induction helpers, or implementation aliases.
 2. [`vox_http.mli`](vox_http.mli): the sealed executable API, state observations,
+   the complete checked `transition_def` equation shared by `feed` and `parse`,
    and all public laws. Every predicate refers to definitions in the first
    file or to the observation laws here. `state` is abstract. Its only
    constructors are `initial` and `feed`; callers supply ordinary input bytes,
@@ -54,8 +55,16 @@ accumulators, the reachable-state invariant, its transition proofs, and proof
 helpers are private. `Vox_http.Internal` is inaccessible to clients. Both the
 ordinary parser state and the sealed state type contain no proof certificate;
 the latter is an erased refinement of the former. Public wrappers erase their
-proof calls and invoke the same byte driver. No model aliases expose that
-implementation through the interface.
+proof calls and invoke the same byte driver. Its line, body, and pending-header
+accumulators use cons; lines, headers, and bodies are reversed once when each
+is complete. Headers remain in wire order while receiving a body.
+
+A private forward-state model retains the grammar and wire proofs. `Driver`
+proves each byte transition and complete feed simulate that model, including
+all errors, budget outcomes and suffixes. Reversal is involutive, so model
+state equality implies driver state equality for the chunking law. Model
+conversion and simulation calls occur only in ghost blocks on the parsing
+path. No model aliases expose the implementation through the interface.
 
 ## Supported wire language
 
@@ -150,19 +159,20 @@ beyond the bound.
   feeding the first result's unconsumed suffix followed by `b`. This applies
   to incomplete input, completion, malformed input, and limits. Induction
   extends it to any finite chunk partition.
-- The `feed` contract equates the consumed count with the input length minus
+- The complete public `transition_def` equation, shared by `feed` and `parse`,
+  equates the consumed count with the input length minus
   the returned suffix length, identifies the suffix by `drop`, and reconstructs
   the input by concatenating its consumed prefix with that suffix.
 
-The serializer proof uses induction over actual byte transitions, lines,
-headers, and body. Its unbudgeted `drain` helper is connected to `feed` by
+The serializer proof uses induction over forward-model byte transitions, lines,
+headers, and body, connected to the executable driver by simulation. Its unbudgeted `drain` helper is connected to `feed` by
 `feed_matches_drain` under a proved sufficient-budget condition. Neither helper
 is invoked by the runtime parser. There are no added axioms or trusted HTTP
 primitives. The trusted boundary is Vox and Z3, including the existing sequence-length
 primitive, mathematical-integer primitives, arithmetic encoding, refinement
 checking, and ghost erasure. All new semantic definitions, the byte driver,
 and their proofs are checked; no new axiom or primitive is introduced.
-Accepted-input soundness uses a forward invariant over actual transitions;
+Accepted-input soundness uses a forward invariant and the driver simulation;
 it does not assume the input came from `serialize` or check a final result.
 The serializer roundtrip proof remains the complementary completeness law
 for the supported well-formed requests.
@@ -184,7 +194,8 @@ The rejected fixtures prevent a client from claiming that parsing discards a
 pipelined suffix or that every accepted body is empty, and reject access to
 private implementation helpers. The separately compiled positive clients
 import only `Vox_http_spec` and `Vox_http` (plus the public sequence interface).
-They prove soundness for arbitrary input, two-chunk reconstruction without
+They derive every former explicit feed/parse clause from `transition_def` and
+prove soundness for arbitrary input, two-chunk reconstruction without
 invariant arguments, serializer roundtrip, and byte-parser TE rejection. The
 streaming script builds with the installed compiler and
 prints each incomplete/completed state. The positive fixture includes a
@@ -194,7 +205,8 @@ prefix; malformed request lines and headers; framing ambiguity; and exact
 message/body limits.
 
 This is a bounded functional demonstration, not a production HTTP server.
-It uses persistent forward lists, so appending individual bytes has quadratic
-allocation/work within a line or body. Its bounds do not cover OCaml stack or
+Accumulator work and allocation are linear in the accumulated bytes and
+headers: each is consed once and reversed once at completion. This is a source
+complexity observation, not a verified cost theorem. Its bounds do not cover OCaml stack or
 heap exhaustion. It supplies no socket transport, response parser, chunked
 encoding, URI/Host semantic validation, or application request policy.

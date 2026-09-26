@@ -1050,6 +1050,167 @@ let rec (incomplete_suffix @ total) : (state : state) -> (input : bytes) ->
 
 end
 
+module Reverse = struct
+module S = Vox_sequence
+let[@def] rec onto (xs : ('a : immutable_data) list @ immutable total)
+    (tail : 'a list @ immutable total) : 'a list @ immutable total =
+  match xs with [] -> tail | x :: rest -> onto rest (x :: tail)
+let[@def] rev (xs : ('a : immutable_data) list @ immutable total) :
+    'a list @ immutable total = onto xs []
+let rec (onto_append @ total) :
+    (xs : ('a : immutable_data) list) @ immutable total ->
+    (tail : 'a list) @ immutable total ->
+    {u : unit | onto xs tail === S.append (rev xs) tail} =
+  fun xs tail ->
+  onto_def xs tail; onto_def xs []; rev_def xs;
+  match xs with
+  | [] -> S.append_def [] tail; ()
+  | x :: rest ->
+    onto_append rest [x]; onto_append rest (x :: tail);
+    S.append_associative (rev rest) [x] tail;
+    S.append_def [x] tail; S.append_def [] tail; ()
+let (cons @ total) :
+    (x : ('a : immutable_data)) @ immutable total ->
+    (xs : 'a list) @ immutable total ->
+    {u : unit | rev (x :: xs) === S.append (rev xs) [x]} =
+  fun x xs ->
+  rev_def (x :: xs); onto_def (x :: xs) []; onto_append xs [x]; ()
+let rec (append @ total) :
+    (xs : ('a : immutable_data) list) @ immutable total ->
+    (ys : 'a list) @ immutable total ->
+    {u : unit | rev (S.append xs ys) === S.append (rev ys) (rev xs)} =
+  fun xs ys ->
+  S.append_def xs ys;
+  match xs with
+  | [] -> rev_def xs; onto_def xs []; S.append_nil (rev ys); ()
+  | x :: rest ->
+    cons x rest; cons x (S.append rest ys); append rest ys;
+    S.append_associative (rev ys) (rev rest) [x]; ()
+let rec (involution @ total) :
+    (xs : ('a : immutable_data) list) @ immutable total ->
+    {u : unit | rev (rev xs) === xs} =
+  fun xs ->
+  match xs with
+  | [] -> rev_def xs; onto_def xs []; ()
+  | x :: rest ->
+    cons x rest; append (rev rest) [x]; involution rest;
+    rev_def [x]; onto_def [x] []; onto_def [] [x];
+    S.append_def [x] rest; S.append_def [] rest; ()
+end
+
+module Driver = struct
+open Internal
+let[@def] phase (p : phase @ immutable total) =
+  match p with Request_line -> Request_line
+  | Headers (line, headers) -> Headers (line, Reverse.rev headers)
+let[@def] core (c : core @ immutable total) =
+  match c with
+  | Line (p, line, cr) -> Line (phase p, Reverse.rev line, cr)
+  | Body (line, headers, n, body) -> Body (line, headers, n, Reverse.rev body)
+  | Complete _ | Malformed _ | Limit _ -> c
+let[@def] model (s : state @ immutable total) =
+  {core = core s.core; budget = s.budget}
+let[@def] finish (p : phase @ immutable total)
+    (line : bytes @ immutable total) =
+  match p with
+  | Request_line -> if valid_request_line line then
+      Line (Headers (line, []), [], false) else Malformed Invalid_request_line
+  | Headers (request_line, headers) ->
+    if nonempty line then
+      if valid_header line then
+        Line (Headers (request_line, line :: headers), [], false)
+      else Malformed Invalid_header
+    else
+      let headers = Reverse.rev headers in
+      match framing headers with
+      | Bad e -> Malformed e | Too_large r -> Limit r
+      | Length n -> if n = 0 then Complete {request_line; headers; body = []}
+        else Body (request_line, headers, n, [])
+let[@def] push (c : core @ immutable total) (b : int) =
+  if not (byte b) then Malformed Invalid_byte else
+  match c with
+  | Complete _ | Malformed _ | Limit _ -> c
+  | Line (p, line, cr) ->
+    if cr then if b = 10 then finish p (Reverse.rev line)
+      else Malformed Invalid_crlf
+    else if b = 13 then Line (p, line, true)
+    else if b = 10 then Malformed Invalid_crlf
+    else Line (p, b :: line, false)
+  | Body (request_line, headers, remaining, body) ->
+    let body = b :: body in
+    if remaining = 1 then
+      Complete {request_line; headers; body = Reverse.rev body}
+    else Body (request_line, headers, remaining - 1, body)
+let[@def] rec consume (state : state @ immutable total)
+    (input : bytes @ immutable total) =
+  if terminal state.core then {state; rest = input}
+  else match input with
+  | [] -> {state; rest = []}
+  | b :: bs -> if state.budget <= 0 then
+      {state = {state with core = Limit Message_bytes}; rest = input}
+    else consume {core = push state.core b; budget = state.budget - 1} bs
+
+let (core_terminal @ total) (c : core @ immutable total) :
+    {u : unit | terminal (core c) === terminal c} =
+  core_def c; terminal_def c; terminal_def (core c); ()
+let (finish_simulation @ total) (p : phase @ immutable total)
+    (line : bytes @ immutable total) :
+    {u : unit | core (finish p line) ===
+      Internal.finish_line (phase p) line} =
+  finish_def p line; phase_def p;
+  Internal.finish_line_def (phase p) line;
+  Reverse.rev_def ([] : bytes); Reverse.onto_def ([] : bytes) [];
+  Reverse.rev_def ([] : bytes list); Reverse.onto_def ([] : bytes list) [];
+  match p with
+  | Request_line ->
+    core_def (finish p line); phase_def (Headers (line, [])); ()
+  | Headers (request_line, headers) ->
+    Reverse.cons line headers;
+    core_def (finish p line);
+    phase_def (Headers (request_line, line :: headers)); ()
+let (step_simulation @ total) (c : core @ immutable total) (b : int) :
+    {u : unit | core (push c b) === Internal.step (core c) b} =
+  push_def c b; core_def c; Internal.step_def (core c) b;
+  core_def (push c b);
+  match c with
+  | Line (p, line, cr) ->
+    Reverse.cons b line;
+    finish_simulation p (Reverse.rev line); ()
+  | Body (_, _, _, body) -> Reverse.cons b body; ()
+  | Complete _ | Malformed _ | Limit _ -> ()
+let rec (simulation @ total) : (s : state) @ immutable total ->
+    (input : bytes) @ immutable total ->
+    {u : unit | let actual = consume s input in
+      let expected = Internal.feed (model s) input in
+      model actual.state === expected.state && actual.rest === expected.rest} =
+  fun s input ->
+  consume_def s input; model_def s; Internal.feed_def (model s) input;
+  core_terminal s.core;
+  if terminal s.core then () else
+  match input with
+  | [] -> ()
+  | b :: bs ->
+    if s.budget <= 0 then (
+      model_def {s with core = Limit Message_bytes};
+      core_def (Limit Message_bytes); ())
+    else (
+      step_simulation s.core b;
+      let next = {core = push s.core b; budget = s.budget - 1} in
+      model_def next; Internal.advance_def (model s) b;
+      simulation next bs; ())
+let (involution @ total) (s : state @ immutable total) :
+    {u : unit | model (model s) === s} =
+  model_def s; model_def (model s); core_def s.core;
+  core_def (core s.core);
+  match s.core with
+  | Line (p, line, _) ->
+    Reverse.involution line; phase_def p; phase_def (phase p);
+    (match p with Request_line -> ()
+     | Headers (_, headers) -> Reverse.involution headers); ()
+  | Body (_, _, _, body) -> Reverse.involution body; ()
+  | Complete _ | Malformed _ | Limit _ -> ()
+end
+
 module S = Vox_sequence
 
 let[@def] good (machine : Internal.state) = ghost_ (
@@ -1060,11 +1221,10 @@ let[@def] good (machine : Internal.state) = ghost_ (
           Bigint.of_int (16384 - machine.budget)
       else true))
 
-type state = {machine : Internal.state | good machine}
+type state = {machine : Internal.state | good (Driver.model machine)}
 type result : immutable_data mod total = { state : state; rest : bytes }
 
-let[@def] machine_of (state : state) =
-  let machine = state in machine
+let[@def] machine_of (state : state) = Driver.model state
 
 let[@def] total_consumed (state : state) =
   let machine = state in 16384 - machine.budget
@@ -1073,7 +1233,7 @@ let[@def] consumed (before : state) (after : state) =
   total_consumed after - total_consumed before
 
 let[@def] processed (state : state) = ghost_ (
-  let machine = state in Internal.core_wire machine.core)
+  let machine = Driver.model state in Internal.core_wire machine.core)
 
 let[@def] status (state : state) =
   let machine = state in
@@ -1082,6 +1242,23 @@ let[@def] status (state : state) =
   | Internal.Complete request -> Complete request
   | Internal.Malformed error -> Malformed error
   | Internal.Limit resource -> Limit resource
+
+let (status_model @ total) (state : state) :
+    {u : unit | status state ===
+      (match (machine_of state).core with
+       | Internal.Line _ | Internal.Body _ -> Incomplete
+       | Internal.Complete request -> Complete request
+       | Internal.Malformed error -> Malformed error
+       | Internal.Limit resource -> Limit resource)} =
+  status_def state; machine_of_def state;
+  Driver.model_def state; Driver.core_def state.core; ()
+
+let (initial_model @ total) (_unit : unit) :
+    {u : unit | Driver.model (Internal.initial ()) === Internal.initial ()} =
+  Internal.initial_def (); Driver.model_def (Internal.initial ());
+  Driver.core_def (Internal.initial ()).core;
+  Driver.phase_def Internal.Request_line;
+  Reverse.rev_def ([] : bytes); Reverse.onto_def ([] : bytes) []; ()
 
 let (reachable_good @ total) (machine : Internal.state) (prefix : bytes) :
     {u : unit | if Internal.reachable machine prefix then good machine
@@ -1124,8 +1301,9 @@ let (state_sound @ total) (state : state) :
             && S.length (processed state) ===
               Bigint.of_int (total_consumed state)
           | Malformed _ | Limit _ -> processed state === [])} =
-  let machine = state in
-  good_def machine; status_def state; processed_def state;
+  let machine = Driver.model state in
+  good_def machine; status_model state; machine_of_def state;
+  Driver.model_def state; processed_def state;
   total_consumed_def state;
   good_reachable machine;
   Internal.reachable_completion machine (Internal.core_wire machine.core);
@@ -1137,27 +1315,8 @@ let (state_sound @ total) (state : state) :
     Internal.core_wire_def machine.core;
     ()
 
-let (make_initial @ total) (_unit : unit) :
-    {state : state | status state === Incomplete
-      && total_consumed state = 0 && processed state === []
-      && machine_of state === Internal.initial ()} =
-  let machine = Internal.initial () in
-  ghost_ (Internal.initial_reachable (); reachable_good machine []);
-  let state : state = machine in
-  ghost_ (
-    status_def state; total_consumed_def state; processed_def state;
-    machine_of_def state;
-    Internal.initial_def ();
-    Internal.core_wire_def machine.core;
-    S.append_def ([] : bytes) []);
-  state
-
-let (run @ total) (state : state) (input : bytes) :
-    {result : result |
-      machine_of result.state ===
-        (Internal.feed (machine_of state) input).state
-      && result.rest === (Internal.feed (machine_of state) input).rest
-      && total_consumed state <= total_consumed result.state
+let[@def] transition (state : state) (input : bytes) (result : result) =
+  ghost_ (total_consumed state <= total_consumed result.state
       && total_consumed result.state <= 16384
       && S.length input === Bigint.add
         (Bigint.of_int (consumed state result.state)) (S.length result.rest)
@@ -1176,33 +1335,70 @@ let (run @ total) (state : state) (input : bytes) :
       && (match status result.state with
           | Complete request -> well_formed request
             && serialize request === processed result.state
-          | _ -> true)} =
-  let machine = state in
+          | _ -> true))
+
+let (make_initial @ total) (_unit : unit) :
+    {state : state | status state === Incomplete
+      && total_consumed state = 0 && processed state === []
+      && machine_of state === Internal.initial ()} =
+  let machine = Internal.initial () in
+  ghost_ (initial_model (); Internal.initial_reachable ();
+    reachable_good machine []);
+  let state : state = machine in
+  ghost_ (
+    status_model state; total_consumed_def state; processed_def state;
+    machine_of_def state; Driver.model_def state;
+    Internal.initial_def ();
+    Internal.core_wire_def machine.core;
+    S.append_def ([] : bytes) []);
+  state
+
+let (driver_result_facts @ total) (state : state) (input : bytes)
+    (result : {r : result | let answer = Driver.consume state input in
+      r.state === answer.state && r.rest === answer.rest}) :
+    {u : unit |
+      machine_of result.state ===
+        (Internal.feed (machine_of state) input).state
+      && result.rest === (Internal.feed (machine_of state) input).rest
+      && transition state input result} =
+  Driver.simulation state input;
+  let next = result.state in
+  let machine = Driver.model state in
   let answer = Internal.feed machine input in
-  ghost_ (feed_good machine input);
+  Driver.model_def state; Driver.model_def next;
+  good_def machine; good_reachable machine;
+  machine_of_def state; machine_of_def next;
+  Internal.accounting machine input;
+  Internal.incomplete_suffix machine input;
+  Internal.terminal_def answer.state.core;
+  Internal.suffix_preservation machine input;
+  consumed_def state next;
+  total_consumed_def state; total_consumed_def next;
+  Internal.consumed_def machine answer.state;
+  processed_def state; processed_def next;
+  status_model next; status_model state;
+  Internal.feed_reachable machine (Internal.core_wire machine.core) input;
+  let prefix = S.append (Internal.core_wire machine.core)
+    (S.take (Bigint.of_int (Internal.consumed machine answer.state)) input) in
+  Internal.reachable_def answer.state prefix;
+  Internal.observed_def answer.state.core;
+  Internal.observed_def machine.core;
+  Internal.terminal_def machine.core;
+  Internal.feed_def machine input;
+  state_sound next; transition_def state input result;
+  ()
+
+let (run @ total) (state : state) (input : bytes) :
+    {result : result |
+      machine_of result.state ===
+        (Internal.feed (machine_of state) input).state
+      && result.rest === (Internal.feed (machine_of state) input).rest
+      && transition state input result} =
+  let answer = Driver.consume state input in
+  ghost_ (Driver.simulation state input; feed_good (Driver.model state) input);
   let next : state = answer.state in
   let result = {state = next; rest = answer.rest} in
-  ghost_ (
-    good_def machine; good_reachable machine;
-    machine_of_def state; machine_of_def next;
-    Internal.accounting machine input;
-    Internal.incomplete_suffix machine input;
-    Internal.terminal_def answer.state.core;
-    Internal.suffix_preservation machine input;
-    consumed_def state next;
-    total_consumed_def state; total_consumed_def next;
-    Internal.consumed_def machine answer.state;
-    processed_def state; processed_def next;
-    status_def next; status_def state;
-    Internal.feed_reachable machine (Internal.core_wire machine.core) input;
-    let prefix = S.append (Internal.core_wire machine.core)
-      (S.take (Bigint.of_int (Internal.consumed machine answer.state)) input) in
-    Internal.reachable_def answer.state prefix;
-    Internal.observed_def answer.state.core;
-    Internal.observed_def machine.core;
-    Internal.terminal_def machine.core;
-    Internal.feed_def machine input;
-    state_sound next);
+  ghost_ (driver_result_facts state input result);
   result
 
 let[@def] initial (_unit : unit) :
@@ -1211,27 +1407,7 @@ let[@def] initial (_unit : unit) :
   make_initial _unit
 
 let[@def] feed (state : state) (input : bytes) :
-    {result : result |
-      total_consumed state <= total_consumed result.state
-      && total_consumed result.state <= 16384
-      && S.length input === Bigint.add
-        (Bigint.of_int (consumed state result.state)) (S.length result.rest)
-      && S.drop (Bigint.of_int (consumed state result.state)) input ===
-        result.rest
-      && S.append
-        (S.take (Bigint.of_int (consumed state result.state)) input)
-        result.rest === input
-      && (match status result.state with
-          | Incomplete -> result.rest === [] | _ -> true)
-      && (match status result.state with
-          | Incomplete | Complete _ -> processed result.state ===
-              S.append (processed state)
-                (S.take (Bigint.of_int (consumed state result.state)) input)
-          | Malformed _ | Limit _ -> true)
-      && (match status result.state with
-          | Complete request -> well_formed request
-            && serialize request === processed result.state
-          | _ -> true)} =
+    {result : result | transition state input result} =
   run state input
 
 let (initial_machine @ total) (_unit : unit) :
@@ -1251,15 +1427,17 @@ let (feed_machine @ total) (state : state) (input : bytes) :
 let (machine_injective @ total) (left : state) (right : state) :
     {u : unit | if machine_of left === machine_of right then left === right
       else true} =
-  machine_of_def left; machine_of_def right;
-  ()
+  machine_of_def left; Driver.model_def left;
+  machine_of_def right; Driver.model_def right;
+  Driver.involution left; Driver.involution right; ()
 
 let (consumed_machine @ total) (left : state) (right : state) :
     {u : unit | consumed left right =
       Internal.consumed (machine_of left) (machine_of right)} =
   consumed_def left right;
   total_consumed_def left; total_consumed_def right;
-  machine_of_def left; machine_of_def right;
+  machine_of_def left; Driver.model_def left;
+  machine_of_def right; Driver.model_def right;
   Internal.consumed_def (machine_of left) (machine_of right);
   ()
 
@@ -1288,7 +1466,8 @@ let (request_separation @ total) (state : state)
   let first = feed state prefix in
   let whole = feed state (S.append prefix suffix) in
   feed_machine state prefix; feed_machine state (S.append prefix suffix);
-  status_def first.state; machine_of_def first.state;
+  status_model first.state; machine_of_def first.state;
+  Driver.model_def first.state;
   Internal.request_separation (machine_of state) prefix suffix;
   machine_injective first.state whole.state;
   ()
@@ -1298,7 +1477,7 @@ let (terminal_preservation @ total) (state : state) (input : bytes) :
       feed state input === {state; rest = input} else true} =
   let result = feed state input in
   feed_machine state input;
-  machine_of_def state; status_def state;
+  machine_of_def state; Driver.model_def state; status_model state;
   is_terminal_def (status state);
   Internal.terminal_def (machine_of state).core;
   Internal.feed_def (machine_of state) input;
@@ -1318,7 +1497,8 @@ let (roundtrip @ total) (request : request) (suffix : bytes) :
   initial_machine (); feed_machine start input;
   Internal.roundtrip request suffix;
   consumed_machine start result.state;
-  status_def result.state; machine_of_def result.state;
+  status_model result.state; machine_of_def result.state;
+  Driver.model_def result.state;
   ()
 
 let (header_outcome @ total) (line : bytes) (headers : int list list) :
@@ -1336,7 +1516,8 @@ let (header_outcome @ total) (line : bytes) (headers : int list list) :
   let result = feed (initial ()) (serialize request) in
   initial_machine (); feed_machine (initial ()) (serialize request);
   Internal.header_outcome line headers;
-  status_def result.state; machine_of_def result.state;
+  status_model result.state; machine_of_def result.state;
+  Driver.model_def result.state;
   ()
 
 let (framing_rejection @ total) (headers : int list list) :
@@ -1368,11 +1549,7 @@ let (no_content_length_body @ total) (request : request) :
 let (parse @ total) (input : bytes) :
     {result : result |
       result === feed (initial ()) input
-      && S.length input === Bigint.add
-        (Bigint.of_int (consumed (initial ()) result.state))
-        (S.length result.rest)
-      && S.drop (Bigint.of_int (consumed (initial ()) result.state)) input
-        === result.rest
+      && transition (initial ()) input result
       && (match status result.state with
           | Complete request -> well_formed request
             && S.take (Bigint.of_int
@@ -1382,6 +1559,6 @@ let (parse @ total) (input : bytes) :
           | _ -> true)} =
   let start = initial () in
   let result = feed start input in
-  ghost_ (S.append_def []
+  ghost_ (transition_def start input result; S.append_def []
     (S.take (Bigint.of_int (consumed start result.state)) input));
   result
