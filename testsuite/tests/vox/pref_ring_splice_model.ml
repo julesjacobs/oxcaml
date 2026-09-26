@@ -1,4 +1,5 @@
 open Pref_ring
+open Pref_ring_proofs
 
 let[@def] (after @ total) (h : node option Pref.heap @ immutable)
     (s : node @ immutable) (d : node @ immutable)
@@ -53,7 +54,7 @@ let (contents @ total) (s : node @ immutable) (d : node @ immutable)
       && not (a.next === b.prev)
       && not (a.next === b.next)
       && not (b.prev === b.next)} @ immutable) :
-    {u : unit | let refine_ h = h in H.mem (after h s d a b) s.prev
+    {u : unit | H.mem (after h s d a b) s.prev
       && H.mem (after h s d a b) s.next
       && H.at (after h s d a b) s.prev === Some (Some s)
       && H.at (after h s d a b) s.next === Some (Some s)
@@ -69,57 +70,55 @@ let (contents @ total) (s : node @ immutable) (d : node @ immutable)
       && H.mem (after h s d a b) b.next
       && H.at (after h s d a b) b.prev === Some (Some a)
       && H.at (after h s d a b) b.next === Some (Some d)} @ ghost =
-  let refine_ h = h in
   ghost_ (
     let before = h in
     let after_model = after h s d a b in
-    let refine_ expanded = after_def h s d a b in
+    let _expanded = after_def h s d a b in
     let h0 = before in
     let p = s.next in
     let v = Some s in
-    let refine_ observed = put_observations h0 p v s in
-    let refine_ observed = put_observations h0 p v d in
-    let refine_ observed = put_observations h0 p v a in
-    let refine_ observed = put_observations h0 p v b in
+    let _observed = put_observations h0 p v s in
+    let _observed = put_observations h0 p v d in
+    let _observed = put_observations h0 p v a in
+    let _observed = put_observations h0 p v b in
     let h1 = H.put h0 p v in
     let p = s.prev in
     let v = Some s in
-    let refine_ observed = put_observations h1 p v s in
-    let refine_ observed = put_observations h1 p v d in
-    let refine_ observed = put_observations h1 p v a in
-    let refine_ observed = put_observations h1 p v b in
+    let _observed = put_observations h1 p v s in
+    let _observed = put_observations h1 p v d in
+    let _observed = put_observations h1 p v a in
+    let _observed = put_observations h1 p v b in
     let h2 = H.put h1 p v in
     let p = d.next in
     let v = Some a in
-    let refine_ observed = put_observations h2 p v s in
-    let refine_ observed = put_observations h2 p v d in
-    let refine_ observed = put_observations h2 p v a in
-    let refine_ observed = put_observations h2 p v b in
+    let _observed = put_observations h2 p v s in
+    let _observed = put_observations h2 p v d in
+    let _observed = put_observations h2 p v a in
+    let _observed = put_observations h2 p v b in
     let h3 = H.put h2 p v in
     let p = a.prev in
     let v = Some d in
-    let refine_ observed = put_observations h3 p v s in
-    let refine_ observed = put_observations h3 p v d in
-    let refine_ observed = put_observations h3 p v a in
-    let refine_ observed = put_observations h3 p v b in
+    let _observed = put_observations h3 p v s in
+    let _observed = put_observations h3 p v d in
+    let _observed = put_observations h3 p v a in
+    let _observed = put_observations h3 p v b in
     let h4 = H.put h3 p v in
     let p = b.next in
     let v = Some d in
-    let refine_ observed = put_observations h4 p v s in
-    let refine_ observed = put_observations h4 p v d in
-    let refine_ observed = put_observations h4 p v a in
-    let refine_ observed = put_observations h4 p v b in
+    let _observed = put_observations h4 p v s in
+    let _observed = put_observations h4 p v d in
+    let _observed = put_observations h4 p v a in
+    let _observed = put_observations h4 p v b in
     let h5 = H.put h4 p v in
     let p = d.prev in
     let v = Some b in
-    let refine_ observed = put_observations h5 p v s in
-    let refine_ observed = put_observations h5 p v d in
-    let refine_ observed = put_observations h5 p v a in
-    let refine_ observed = put_observations h5 p v b in
+    let _observed = put_observations h5 p v s in
+    let _observed = put_observations h5 p v d in
+    let _observed = put_observations h5 p v a in
+    let _observed = put_observations h5 p v b in
     let h6 = H.put h5 p v in
     let u = () in
-    let expanded : {u : unit | h6 === after_model} = refine_ u in
-    let refine_ expanded = expanded in
+    let _expanded : {u : unit | h6 === after_model} = u in
     let proof : {u : unit | H.mem after_model s.prev
       && H.mem after_model s.next
       && H.at after_model s.prev === Some (Some s)
@@ -135,5 +134,5 @@ let (contents @ total) (s : node @ immutable) (d : node @ immutable)
       && H.mem after_model b.prev
       && H.mem after_model b.next
       && H.at after_model b.prev === Some (Some a)
-      && H.at after_model b.next === Some (Some d)} = refine_ u in
-    let refine_ proof = proof in refine_ proof)
+      && H.at after_model b.next === Some (Some d)} = u in
+    proof)

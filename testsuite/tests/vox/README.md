@@ -382,16 +382,35 @@ The `pref_ring_*_demo.ml` tests exercise circular doubly linked lists with a
 sentinel. Both link cells appear in the same ownership map. The examples check
 empty and singleton cycles, insertion, removal with split/join of the detached
 node's ownership, a cross-ring range splice, reversal, and traversal in both
-directions. An unrelated empty node cell remains in the frame and is checked afterwards.
+directions. An unrelated `int` cell lives in a separate `int Pref.token` and is
+checked afterwards.
 
 Local mutation contracts specify exact map updates; the concrete examples
-establish the resulting whole-cycle predicates. The splice contract checks
+establish the resulting whole-cycle predicates. The raw splice contract checks
 boundary links, so callers remain responsible for range validity and destination
 placement. Reversal collects an auxiliary list of node handles, includes the
 sentinel, and swaps each node's links. The supporting proof modules use the
 existing Pref laws without additional trusted declarations.
+`pref_ring.mli`, `pref_ring_splice.mli` and `pref_ring_reverse.mli` are the
+public interfaces; `pref_ring_public_client.ml` and
+`pref_ring_examples_client.ml` use only them.
+
+`pref_ring_general.ml` reverses a separated ring of any length, with the exact
+physical-node reverse and flipped heap. `pref_ring_splice_general.ml` moves any
+nonempty contiguous range between two separated rings at arbitrary source and
+destination positions; both resulting node lists, both ring invariants,
+combined separation and the exact six-write heap are checked. Each has an
+unboxed `Owned` facade over one token with `adopt`/`release` bridges;
+`pref_ring_general_client.ml`, `pref_ring_splice_general_client.ml` and the
+`_demo` tests use them.
 `pref_ring_rejected.ml` rejects sentinel removal, a missing backward-link update,
-and a no-op claimed to reverse a list.
+a no-op claimed to reverse a list and a hidden helper lookup.
+`pref_ring_general_rejected.ml` rejects reversal without separation, a wrong
+range endpoint, a wrong destination placement, reuse of consumed handles and
+released raw tokens, and lookups of private proofs.
+
+Under `-principal` the rejection tests fail earlier, with a kind error on
+`node option Pref.token`; their `Principal{|...|}` blocks record this.
 
 The recursive payload examples currently require ordinary inference;
 `-principal` cannot establish their recursive `immutable_data` bounds.
