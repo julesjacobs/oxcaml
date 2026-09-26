@@ -373,3 +373,18 @@ and disjointness laws over a common location sort. Generic finite-map laws in
 `Pref.Heap` are trusted specifications; the tree functions and proofs are checked.
 Different payload sorts do not imply distinct locations. The encoding is
 conservative across typed views; it does not supply general heap extensionality.
+
+## Myers diff
+
+`diff.ml` exercises the directly verified Myers frontier algorithm and its
+public correctness, minimum-edit-cost, and inverse-patch contracts.
+`diff_rejected.ml` rejects forged optimality and a wrong patch result.
+The executable compares all binary inputs through length five with an
+independent distance oracle and covers ties, repeated elements, empty inputs,
+long common prefixes, and the input-size boundary. See
+[`vox_diff.md`](../../../verification/library/vox_diff.md) for the proof,
+resource bounds, byte-string demo, and generated-code erasure audit.
+The review surface is `vox_diff_spec.mli` and `vox_diff.mli`; the former
+completely characterizes every public observation. `diff_public_client.ml`
+uses only those interfaces, and the erasure audit compiles it with only
+the two public `.cmi` files available.
