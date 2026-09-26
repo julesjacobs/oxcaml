@@ -56,7 +56,7 @@ computes the length after any update from `count_put` or `count_erase`.
 Physical empty slots are absent from the public model. Checked ghost
 compaction bridges preserve lookup, key equivalence, distinctness, map
 updates and cardinality.
-`model` identifies the exact owned storage version associated with a snapshot.
+`version` identifies the exact owned storage state associated with a snapshot.
 The snapshot has void layout and is immutable. A saved snapshot grants no
 access without the matching current ownership token.
 
@@ -144,12 +144,14 @@ aliased handles, GC compaction and subsequent lookup. Additional cases update
 a key beyond a tombstone without duplication and replace/remove logically
 different keys in the same `Key.equal` equivalence class.
 
-Both bytecode and native clients pass. Thirteen rejection cases pass in both modes:
+Both bytecode and native clients pass. Thirteen rejection cases pass in both modes (six ownership or refinement
+errors and seven abstraction checks):
 false reflexivity, inconsistent hashing, hidden invariant/implementation/proof/
 representation/compaction/list-model access, constructing a `Map.t` from a
 list, stale views, missing ownership, token reuse and a false lookup result. The erasure check inspects both emitted Lambda files: generic
 execution contains no calls to the map/ownership observations or semantic
-lemmas. Native snapshots and tokens have zero layout, and mutation results
+lemmas, and neither the default nor the `-O3` native Cmm calls an ownership
+primitive. Native snapshots and tokens have zero layout, and mutation results
 contain only zero-layout fields. There is no runtime certificate accumulation
 or final semantic checker. Runtime asserts in regression clients are tests.
 `_build/flat-hashtbl-public/erasure.json` records the checked properties.

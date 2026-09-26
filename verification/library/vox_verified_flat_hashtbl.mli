@@ -1,46 +1,48 @@
-(** A flat hash table verified against a finite-map model.
+(** A flat hash table verified against an abstract finite map.
 
     [Make (Key)] is a mutable open-addressing hash table that probes in
     groups of sixteen slots with SIMD control-byte matching. Each operation's
     contract states its result in terms of [Map], an abstract finite map
     from keys (up to [Key.equal]) to values. Keys and values must be
-    [immutable_data].
+    [immutable_data]. In contracts, [===] is logical equality at any type
+    and [=] is ordinary equality on integers.
 
     {2 Ghost state}
 
     A table is a runtime handle [table : 'a t] together with ghost state,
     which the compiler checks and then erases:
 
-    - [location table] is the heap location owned by the handle. It stays
-      the same for the table's lifetime, including when storage is rebuilt.
-      The handle is immutable and may be aliased; all access to the storage
-      goes through a token.
+    - [location table] is the ghost heap location at which tokens record
+      this table's storage. It stays the same for the table's lifetime,
+      including when the storage is rebuilt. The handle itself is immutable
+      and may be aliased.
     - A view ['a view] is an immutable snapshot of one version of the table.
       [bindings view] is its contents, [capacity view] its slot count and
-      [model view] the exact storage version.
+      [version view] its exact storage state.
     - A token ['a state P.token] is affine ownership of a heap. Reads borrow
-      a token whose heap holds [model view] at [location table]. Mutations
+      a token whose heap holds [version view] at [location table]. Mutations
       consume the token and return a new view and a token whose heap
-      differs only at [location table].
+      differs only at [location table]. [create] takes only a token.
 
     A view grants no access by itself: an operation accepts it only with a
-    token whose heap holds its [model]. After a mutation, use the returned
+    token whose heap holds its [version]. After a mutation, use the returned
     view. Views and tokens carry no runtime data.
 
     {2 Normal return and exceptions}
 
-    Each postcondition describes a normal return. The possible exceptions
-    are:
+    Each postcondition describes a normal return; exceptional behaviour is
+    not checked. By the code:
 
     - [find] raises [Not_found] if the key has no binding.
     - [replace] raises [Invalid_argument] if the table would need more than
       2{^30} slots.
-    - Any operation can raise [Out_of_memory] or [Stack_overflow].
+    - Any operation can raise [Out_of_memory] or [Stack_overflow], and
+      asynchronous exceptions can arrive as usual.
 
     A mutation that raises loses the token it consumed, together with any
-    other ownership that token carried. Split off ownership that must
-    survive before the call. Termination, running time, memory reclamation
-    and concurrent use are not specified. *)
+    other ownership that token carried: the table can no longer be used.
+    Split off ownership that must survive before the call. Termination,
+    running time, memory reclamation and concurrent use are not specified. *)
 
 module P = Ghost_pref
 module H = P.Heap
@@ -102,14 +104,14 @@ module Make (Key : Key) : sig
   type ('a : immutable_data) view : void mod total
 
   val location : ('a : immutable_data). 'a t -> 'a state P.t @ ghost @@ total
-  val model : ('a : immutable_data).
+  val version : ('a : immutable_data).
     'a view @ immutable -> 'a state @ ghost @@ total
   val bindings : ('a : immutable_data).
     'a view @ immutable -> 'a Map.t @ ghost @@ total
   val capacity : ('a : immutable_data).
     'a view @ immutable -> {n : int | 16 <= n && n <= 1073741824} @ ghost @@ total
 
-  type ('a : immutable_data) created = {
+  type ('a : immutable_data) created = #{
     table : 'a t @@ aliased;
     view : 'a view @@ aliased immutable;
     token : 'a state P.token @@ ghost;
@@ -122,33 +124,33 @@ module Make (Key : Key) : sig
   (** A new empty table of capacity 16 at a fresh location. *)
   val create : ('a : immutable_data).
     (token : 'a state P.token) @ unique ghost ->
-    {r : 'a created | bindings r.view === Map.empty && capacity r.view = 16 &&
-      not (H.mem (P.own token) (location r.table)) &&
-      P.own r.token === H.put (P.own token) (location r.table) (model r.view)} @ unique
+    {r : 'a created | bindings r.#view === Map.empty && capacity r.#view = 16 &&
+      not (H.mem (P.own token) (location r.#table)) &&
+      P.own r.#token === H.put (P.own token) (location r.#table) (version r.#view)} @ unique
 
   val length : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {n : int | 0 <= n && Bigint.of_int n = Map.count (bindings view)}
 
   val find_opt : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {value : 'a option | value === Map.lookup (bindings view) key}
 
   (** Raises [Not_found] if [key] has no binding. *)
   val find : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {value : 'a | Map.lookup (bindings view) key === Some value}
 
   val mem : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {present : bool | present = (match Map.lookup (bindings view) key with
       | None -> false | Some _ -> true)}
 
@@ -158,24 +160,24 @@ module Make (Key : Key) : sig
     (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
     (value : 'a) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
+      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.put (bindings before) key value &&
-      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique
+      P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique
 
   val remove : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
+      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.erase (bindings before) key &&
-      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique
+      P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique
 
   (** Removes every binding and drops the table's references to their
       values. The capacity is unchanged. *)
   val clear : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
+      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.empty &&
       capacity r.#view = capacity before &&
-      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique
+      P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique
 end

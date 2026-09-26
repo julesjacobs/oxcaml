@@ -50,12 +50,12 @@ module Key :
 let stale_view () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.token in
-  V.find_opt r.table r.view 1 (borrow_ changed.#token);;
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
+  V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
 [%%expect{|
-Line 5, characters 39-53:
-5 |   V.find_opt r.table r.view 1 (borrow_ changed.#token);;
-                                           ^^^^^^^^^^^^^^
+Line 5, characters 41-55:
+5 |   V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
+                                             ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -63,40 +63,40 @@ let missing_ownership () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
   let empty = Ghost_pref.empty () in
-  V.find_opt r.table r.view 1 (borrow_ empty);;
+  V.find_opt r.#table r.#view 1 (borrow_ empty);;
 [%%expect{|
-Line 5, characters 39-44:
-5 |   V.find_opt r.table r.view 1 (borrow_ empty);;
-                                           ^^^^^
+Line 5, characters 41-46:
+5 |   V.find_opt r.#table r.#view 1 (borrow_ empty);;
+                                             ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let reused_token () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.token in
-  let again = V.replace r.table changed.#view 2 90 r.token in
-  V.length r.table again.#view (borrow_ again.#token);;
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
+  let again = V.replace r.#table changed.#view 2 90 r.#token in
+  V.length r.#table again.#view (borrow_ again.#token);;
 [%%expect{|
-Line 5, characters 51-58:
-5 |   let again = V.replace r.table changed.#view 2 90 r.token in
-                                                       ^^^^^^^
+Line 5, characters 52-60:
+5 |   let again = V.replace r.#table changed.#view 2 90 r.#token in
+                                                        ^^^^^^^^
 Error: This value is used here, but it has already been used as unique at:
-Line 4, characters 46-53:
-4 |   let changed = V.replace r.table r.view 1 84 r.token in
-                                                  ^^^^^^^
+Line 4, characters 48-56:
+4 |   let changed = V.replace r.#table r.#view 1 84 r.#token in
+                                                    ^^^^^^^^
 
 |}]
 
 let wrong_value () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.token in
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
   let value : {v : int | v = 85} =
-    V.find r.table changed.#view 1 (borrow_ changed.#token) in value;;
+    V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
 [%%expect{|
-Line 6, characters 4-59:
-6 |     V.find r.table changed.#view 1 (borrow_ changed.#token) in value;;
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 6, characters 4-60:
+6 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

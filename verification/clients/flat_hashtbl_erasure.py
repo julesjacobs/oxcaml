@@ -19,11 +19,12 @@ for compiler in ('ocamlc', 'ocamlopt'):
         assert re.search(r'token/\d+\[#\(\)\]', exercise)
         assert '#(#(), #())' in exercise
         reports[compiler]['snapshot_and_token_have_zero_native_layout'] = True
-cmm = (output / 'ocamlopt.cmm').read_text()
-assert 'find_after_replace' in cmm
-# Native code calls no ownership primitive: tokens and heaps are erased.
-assert 'caml_pref' not in cmm, 'ghost ownership primitive survives in Cmm'
-assert not re.search(r'put_get|erase_get|count_put|count_erase|lookup_empty', cmm)
+for name in ('ocamlopt.cmm', 'ocamlopt-O3.cmm'):
+    cmm = (output / name).read_text()
+    assert 'find_after_replace' in cmm
+    # Native code calls no ownership primitive: tokens and heaps are erased.
+    assert 'caml_pref' not in cmm, ('ghost ownership primitive survives', name)
+    assert not re.search(r'put_get|erase_get|count_put|count_erase|lookup_empty', cmm), name
 reports['ocamlopt']['native_cmm_calls_no_ownership_primitive_or_lemma'] = True
 (output / 'erasure.json').write_text(json.dumps(reports, indent=2) + '\n')
 print('Public-client erasure checks passed.')

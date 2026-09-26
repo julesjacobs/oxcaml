@@ -24,14 +24,14 @@ module Make (Key : Key) = struct
     I.valid v.storage && Assoc.same v.map (Bridge.compact v.storage.model.slots)}
 
   let location = T.location
-  let[@def] (model @ total) (view : 'a view @ immutable) = ghost_ view.storage.model
+  let[@def] (version @ total) (view : 'a view @ immutable) = ghost_ view.storage.model
   let[@def] (bindings @ total) (view : 'a view @ immutable) : 'a Map.t @ ghost =
     ghost_ view.map
   let[@def] (capacity @ total) (view : 'a view @ immutable) :
       {n : int | 16 <= n && n <= 1073741824} @ ghost = ghost_ (
     I.valid_def view.storage; I.shape_def view.storage.model;
     view.storage.model.capacity)
-  type ('a : immutable_data) created = {
+  type ('a : immutable_data) created = #{
     table : 'a t @@ aliased;
     view : 'a view @@ aliased immutable;
     token : 'a state P.token @@ ghost;
@@ -116,93 +116,93 @@ module Make (Key : Key) = struct
 
   let create : ('a : immutable_data).
     (token : 'a state P.token) @ unique ghost ->
-    {r : 'a created | bindings r.view === Map.empty && capacity r.view = 16 &&
-      not (H.mem (P.own token) (location r.table)) &&
-      P.own r.token === H.put (P.own token) (location r.table) (model r.view)} @ unique = fun token ->
+    {r : 'a created | bindings r.#view === Map.empty && capacity r.#view = 16 &&
+      not (H.mem (P.own token) (location r.#table)) &&
+      P.own r.#token === H.put (P.own token) (location r.#table) (version r.#view)} @ unique = fun token ->
     let r = Impl.create token in
     ghost_ (empty_view r.view 16;
       M.initial_def 16 (Impl.Mutation.empty_entry r.table));
     let view : 'a view = {storage = r.view; map = Map.empty} in
-    ghost_ (model_def view; bindings_def view; capacity_def view);
-    {table = r.table; view; token = r.state}
+    ghost_ (version_def view; bindings_def view; capacity_def view);
+    #{table = r.table; view; token = r.state}
 
   let length : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {n : int | 0 <= n && Bigint.of_int n = Map.count (bindings view)} = fun table view token ->
-    ghost_ (model_def view; count_agrees view;
+    ghost_ (version_def view; count_agrees view;
       I.valid_def view.storage; I.shape_def view.storage.model);
     Impl.length table (storage view) token
 
   let find_opt : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {value : 'a option | value === Map.lookup (bindings view) key} = fun table view key token ->
-    ghost_ (model_def view; lookup_agrees view key);
+    ghost_ (version_def view; lookup_agrees view key);
     Impl.find_opt table (storage view) key token
 
   let find : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {value : 'a | Map.lookup (bindings view) key === Some value} = fun table view key token ->
-    ghost_ (model_def view; lookup_agrees view key);
+    ghost_ (version_def view; lookup_agrees view key);
     Impl.find table (storage view) key token
 
   let mem : ('a : immutable_data).
     (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
+      H.at (P.own t) (location table) === Some (version view)}) @ local read ghost ->
     {present : bool | present = (match Map.lookup (bindings view) key with
       | None -> false | Some _ -> true)} = fun table view key token ->
-    ghost_ (model_def view; lookup_agrees view key);
+    ghost_ (version_def view; lookup_agrees view key);
     Impl.mem table (storage view) key token
 
   let replace : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
     (value : 'a) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
+      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.put (bindings before) key value &&
-      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique = fun table before key value token ->
-    ghost_ (model_def before);
+      P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique = fun table before key value token ->
+    ghost_ (version_def before);
     let r = Impl.replace table (storage before) key value token in
     ghost_ (put_view before key value r.#view);
     let view : 'a view =
       {storage = r.#view; map = ghost_ (Map.put (bindings before) key value)} in
-    ghost_ (model_def view; bindings_def view);
+    ghost_ (version_def view; bindings_def view);
     #{view; token = r.#state}
 
   let remove : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
+      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.erase (bindings before) key &&
-      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique = fun table before key token ->
-    ghost_ (model_def before);
+      P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique = fun table before key token ->
+    ghost_ (version_def before);
     let r = Impl.remove table (storage before) key token in
     ghost_ (erase_view before key r.#view);
     let view : 'a view =
       {storage = r.#view; map = ghost_ (Map.erase (bindings before) key)} in
-    ghost_ (model_def view; bindings_def view);
+    ghost_ (version_def view; bindings_def view);
     #{view; token = r.#state}
 
   let clear : ('a : immutable_data).
     (table : 'a t) -> (before : 'a view) @ immutable ->
     (token : {t : 'a state P.token |
-      H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
+      H.at (P.own t) (location table) === Some (version before)}) @ unique read_write ghost ->
     {r : 'a updated | bindings r.#view === Map.empty &&
       capacity r.#view = capacity before &&
-      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique = fun table before token ->
-    ghost_ (model_def before);
+      P.own r.#token === H.put (P.own token) (location table) (version r.#view)} @ unique = fun table before token ->
+    ghost_ (version_def before);
     let r = Impl.clear table (storage before) token in
     ghost_ (empty_view r.#view before.storage.model.capacity;
       M.initial_def before.storage.model.capacity
         (Impl.Mutation.empty_entry table));
     let view : 'a view = {storage = r.#view; map = Map.empty} in
-    ghost_ (model_def view; bindings_def view; capacity_def before;
+    ghost_ (version_def view; bindings_def view; capacity_def before;
       capacity_def view);
     #{view; token = r.#state}
 end

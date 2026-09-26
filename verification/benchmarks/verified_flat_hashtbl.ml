@@ -48,9 +48,9 @@ let rec fill : ('a : immutable_data).
     (view : 'a V.view) @ immutable ->
     (token : {t : 'a V.state P.token | H.at (P.own t)
       (V.location table) === Some
-      (V.model view)})
+      (V.version view)})
       @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.model r.#view)} @
+    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
         unique =
   fun table values index view token ->
     if index >= Iarray.length values then #{V.view; token} else begin
@@ -65,9 +65,9 @@ let rec churn : ('a : immutable_data).
     (view : 'a V.view) @ immutable ->
     (token : {t : 'a V.state P.token | H.at (P.own t)
       (V.location table) === Some
-      (V.model view)})
+      (V.version view)})
       @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.model r.#view)} @
+    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
         unique =
   fun table values index offset view token ->
     if index >= Iarray.length values then #{V.view; token} else begin
@@ -84,9 +84,9 @@ let rec churn_rounds : ('a : immutable_data).
     (view : 'a V.view) @ immutable ->
     (token : {t : 'a V.state P.token | H.at (P.own t)
       (V.location table) === Some
-      (V.model view)})
+      (V.version view)})
       @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.model r.#view)} @
+    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
         unique =
   fun table values index offset view token ->
     if index = 0 then #{V.view; token} else
@@ -100,9 +100,9 @@ let rec replace_rounds : ('a : immutable_data).
     (view : 'a V.view) @ immutable ->
     (token : {t : 'a V.state P.token | H.at (P.own t)
       (V.location table) === Some
-      (V.model view)})
+      (V.version view)})
       @ unique read_write ghost ->
-    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.model r.#view)} @
+    {r : 'a V.updated | H.at (P.own r.#token) (V.location table) === Some (V.version r.#view)} @
         unique =
   fun table values index view token ->
     if index = 0 then #{V.view; token} else
@@ -118,14 +118,14 @@ let verified : ('a : immutable_data).
   let timing = stamp () in
   for _batch = 1 to batches do
     let r : 'a V.created = V.create (P.empty ()) in
-    let _ = fill r.table values 0 r.view r.token in
-    ignore (Sys.opaque_identity r.table)
+    let _ = fill r.#table values 0 r.#view r.#token in
+    ignore (Sys.opaque_identity r.#table)
   done;
   report name payload n "build" (batches * n) timing;
   let r : 'a V.created = V.create (P.empty ()) in
-  let built = fill r.table values 0 r.view r.token in
+  let built = fill r.#table values 0 r.#view r.#token in
   for i = 0 to n - 1 do
-    assert (V.find r.table built.#view (key i) (borrow_ built.#token) =
+    assert (V.find r.#table built.#view (key i) (borrow_ built.#token) =
       (Iarray.get values i))
   done;
   let hits, misses = queries n in
@@ -135,7 +135,7 @@ let verified : ('a : immutable_data).
   for _round = 1 to rounds do
     for i = 0 to n - 1 do
       ignore (Sys.opaque_identity
-        (V.find r.table built.#view (Iarray.get hits i) (borrow_ built.#token)))
+        (V.find r.#table built.#view (Iarray.get hits i) (borrow_ built.#token)))
     done
   done;
   report name payload n "hit" iterations timing;
@@ -143,7 +143,7 @@ let verified : ('a : immutable_data).
   let found = ref 0 in
   for _round = 1 to rounds do
     for i = 0 to n - 1 do
-      if V.mem r.table built.#view (Iarray.get misses i) (borrow_ built.#token)
+      if V.mem r.#table built.#view (Iarray.get misses i) (borrow_ built.#token)
         then
         incr found
     done
@@ -151,17 +151,17 @@ let verified : ('a : immutable_data).
   report name payload n "miss" iterations timing;
   assert (!found = 0);
   let timing = stamp () in
-  let built = replace_rounds r.table values batches built.#view built.#token in
+  let built = replace_rounds r.#table values batches built.#view built.#token in
   report name payload n "replace" (batches * n) timing;
   let timing = stamp () in
-  let changed = churn_rounds r.table values batches 0
+  let changed = churn_rounds r.#table values batches 0
     built.#view built.#token in
   report name payload n "churn" (2 * n * batches) timing;
   let offset = if batches mod 2 = 0 then 0 else n in
   for i = 0 to n - 1 do
-    assert (not (V.mem r.table changed.#view (key (i + n - offset))
+    assert (not (V.mem r.#table changed.#view (key (i + n - offset))
       (borrow_ changed.#token)));
-    assert (V.find r.table changed.#view (key (i + offset)) (borrow_
+    assert (V.find r.#table changed.#view (key (i + offset)) (borrow_
       changed.#token) = (Iarray.get values i))
   done
 

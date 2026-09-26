@@ -20,6 +20,7 @@ for compiler in ocamlc ocamlopt; do
   ./"$compiler.exe"
 done
 "$prefix/bin/ocamlopt" "${flags[@]}" -dcmm -c flat_hashtbl_public.ml 2> ocamlopt.cmm
+"$prefix/bin/ocamlopt" "${flags[@]}" -O3 -dcmm -c flat_hashtbl_public.ml 2> ocamlopt-O3.cmm
 python3 "$root/verification/clients/flat_hashtbl_rejections.py" "$prefix" "$output"
 python3 "$root/verification/clients/flat_hashtbl_erasure.py" "$output"
 printf 'Public-only bytecode/native clients and rejection checks passed.\n'

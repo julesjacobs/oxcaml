@@ -29,24 +29,24 @@ end
     'hidden_representation': ('let f (v : int V.view) = v.storage', 'Unbound record field'),
     'stale': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.token in
-  V.find_opt r.table r.view 1 (borrow_ changed.#token)
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
+  V.find_opt r.#table r.#view 1 (borrow_ changed.#token)
 ''', 'Refinement could not be proved'),
     'missing_ownership': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
   let empty = Ghost_pref.empty () in
-  V.find_opt r.table r.view 1 (borrow_ empty)
+  V.find_opt r.#table r.#view 1 (borrow_ empty)
 ''', 'Refinement could not be proved'),
     'reused_token': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.token in
-  V.replace r.table changed.#view 2 90 r.token
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
+  V.replace r.#table changed.#view 2 90 r.#token
 ''', 'already been used as unique'),
     'false_lookup': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.token in
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
   let value : {v : int | v = 85} =
-    V.find r.table changed.#view 1 (borrow_ changed.#token) in value
+    V.find r.#table changed.#view 1 (borrow_ changed.#token) in value
 ''', 'Refinement could not be proved'),
 }
 for compiler in ('ocamlc', 'ocamlopt'):
