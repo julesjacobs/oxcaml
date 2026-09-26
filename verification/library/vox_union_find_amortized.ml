@@ -26,21 +26,21 @@ let rec (encode @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.node P.
   match p with
   | M.Stop _ ->
       C.chain_def (R.weight h (M.head p)) (R.weight h (M.root p)) [];
-      C.length_def []; let u = () in refine_ u
+      C.length_def []; ()
   | M.Step (x, rest) ->
       encode cap h rest; R.bounds cap h rest;
       if R.weight h x <= 0Z then (
         C.chain_def (R.weight h x) (R.weight h (M.root rest)) (edges h rest);
         C.chain_def (R.weight h (M.head rest)) (R.weight h (M.root rest))
           (edges h rest);
-        let u = () in refine_ u)
+        ())
       else (
         let edge = {C.rank = R.weight h x;
           parent = R.weight h (M.head rest)} in
         C.chain_def (R.weight h x) (R.weight h (M.root rest))
           (edge :: edges h rest);
         C.length_def (edge :: edges h rest);
-        let u = () in refine_ u))
+        ()))
 
 let[@def] release (cap : Bigint.t) (alpha : Bigint.t)
     (h : Vox_union_find_model.node P.heap @ immutable) (p : M.path @ immutable) =
@@ -62,9 +62,9 @@ let (find_bound @ total) : (cap : Bigint.t) -> (alpha : Bigint.t) ->
     let root = R.weight h (M.root p) in
     let lower = R.weight h (M.head p) in
     let path = edges h p in
-    let u = () in C.counting cap alpha lower root path (refine_ u);
-    let u = () in C.bound cap alpha lower root path (refine_ u);
+    let u = () in C.counting cap alpha lower root path (u);
+    let u = () in C.bound cap alpha lower root path (u);
     release_def cap alpha h p;
     Vox_union_find_worker.cost_def (M.depth p); find_fee_def alpha;
-    let u = () in refine_ u)
-  else let u = () in refine_ u)
+    ())
+  else ())

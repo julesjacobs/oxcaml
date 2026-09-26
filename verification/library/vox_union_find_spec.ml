@@ -38,7 +38,7 @@ let (find_root @ total) : (h : Vox_union_find_model.node P.heap) @ immutable ->
   F.closed_root paths p; M.terminal h p;
   D.compressed_root h p (M.root p); F.refresh_member h p paths (M.root p);
   F.representative_def x paths; find_heap_def h paths x; find_paths_def paths x;
-  let u = () in refine_ u)
+  ())
 
 let (union_representative @ total) : (h : Vox_union_find_model.node P.heap) @ immutable ->
     (paths : M.path list) @ immutable -> (x : M.elem) @ immutable ->
@@ -73,4 +73,4 @@ let (union_representative @ total) : (h : Vox_union_find_model.node P.heap) @ im
   F.join_representative after (F.representative x paths)
     (F.representative y first) second q;
   union_paths_def h paths x y; union_root_def h paths x y;
-  let u = () in refine_ u)
+  ())

@@ -24,18 +24,18 @@ let (at @ total) : (h : Vox_union_find_model.node P.heap) @ immutable -> (x : M.
          Some (M.Root (M.rank h x + 1))
        else H.at h q)} @ ghost = fun h x y q -> ghost_ (
   M.linked_def h x y; M.winner_def h x y;
-  if x === y then let u = () in refine_ u
+  if x === y then ()
   else if M.rank h x < M.rank h y then (
     let _ = H.at (H.put h x (M.Link (M.rank h x, y))) q in
-    let u = () in refine_ u)
+    ())
   else if M.rank h y < M.rank h x then (
     let _ = H.at (H.put h y (M.Link (M.rank h y, x))) q in
-    let u = () in refine_ u)
+    ())
   else (
     let middle = H.put h y (M.Link (M.rank h y, x)) in
     let _ = H.at middle q in
     let _ = H.at (H.put middle x (M.Root (M.rank h x + 1))) q in
-    let u = () in refine_ u))
+    ()))
 
 let rec (ordered @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.node P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -54,7 +54,7 @@ let rec (ordered @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.node P
   D.linked_capacity cap h x y paths (M.head p);
   D.linked_weight h x y (M.head p);
   if x === y then (
-    M.linked_def h x y; let u = () in refine_ u)
+    M.linked_def h x y; ())
   else (
     let loser = if M.rank h x < M.rank h y then x else y in
     let winner = if M.rank h x < M.rank h y then y else x in
@@ -67,17 +67,17 @@ let rec (ordered @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.node P
           R.ordered_def cap after (M.Step (q, M.Stop winner));
           M.head_def (M.Step (q, M.Stop winner));
           R.ordered_def cap after (M.Stop winner); M.head_def (M.Stop winner);
-          let u = () in refine_ u)
+          ())
         else (
           R.ordered_def cap after p;
-          let u = () in refine_ u)
+          ())
     | M.Step (q, rest) ->
         ordered cap h x y paths rest;
         M.joined_valid h x y rest; M.joined_path_def h x y rest;
         D.linked_weight h x y (M.head rest);
         R.ordered_def cap after (M.Step (q, M.extend loser winner rest));
         M.head_def (M.Step (q, M.extend loser winner rest));
-        let u = () in refine_ u))
+        ()))
 
 let rec (all_ordered @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.node P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -90,8 +90,8 @@ let rec (all_ordered @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.no
   F.complete_def paths queries; F.join_def h x y queries;
   let after = M.linked h x y in
   match queries with
-  | [] -> R.all_ordered_def cap after []; let u = () in refine_ u
+  | [] -> R.all_ordered_def cap after []; ()
   | p :: rest ->
       ordered cap h x y paths p; all_ordered cap h x y paths rest;
       R.all_ordered_def cap after (M.joined_path h x y p :: F.join h x y rest);
-      let u = () in refine_ u)
+      ())

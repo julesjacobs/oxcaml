@@ -1,6 +1,10 @@
+(* Public observations describe a growing partition. States are valid by
+   construction. The transition laws specify membership and roots for every
+   queried element; their private proof representation is hidden. *)
+
 module Make (C : Vox_big_credits.S) : sig
   type elem : immutable_data
-  type t : (void & void & void & void & void) & void & void
+  type t : (void & void & void & void & void & void) & void & void
   type result = #{value : elem @@ aliased; state : t}
 
   type snapshot : immutable_data
@@ -59,24 +63,17 @@ module Make (C : Vox_big_credits.S) : sig
   val account :
     t @ local immutable total ghost forkable unyielding ->
     Bigint.t @ ghost @@ total
-  val valid :
-    t @ local immutable total ghost forkable unyielding ->
-    bool @ ghost @@ total
   val find_fee :
     t @ local immutable total ghost forkable unyielding ->
     Bigint.t @ ghost @@ total
   val union_fee :
     t @ local immutable total ghost forkable unyielding ->
     Bigint.t @ ghost @@ total
-  val member : elem @ immutable ->
-    t @ local immutable total ghost forkable unyielding -> bool @ ghost @@ total
-  val representative : elem @ immutable ->
-    t @ local immutable total ghost forkable unyielding ->
-    elem @ immutable ghost @@ total
-  val observe : (x : elem) @ immutable ->
+  val empty_law :
       (state : t) @ local immutable total ghost forkable unyielding ->
-      {u : unit | contains (snapshot state) x = member x state &&
-        root (snapshot state) x === representative x state} @ ghost @@ total
+      (x : elem) @ immutable ->
+      {u : unit | if size state = 0Z then
+        not (contains (snapshot state) x) else true} @ ghost @@ total
 
   val account_bounds :
       (state : t) @ local immutable total ghost forkable unyielding ->
@@ -84,14 +81,14 @@ module Make (C : Vox_big_credits.S) : sig
 
   val observations :
       (state : t) @ local immutable total ghost forkable unyielding ->
-      {u : unit | if valid state then 0Z <= size state &&
+      {u : unit | 0Z <= size state &&
         size state <= Bigint.of_int max_int && find_fee state >= 12Z &&
-        union_fee state >= 36Z else true} @ ghost @@ total
+        union_fee state >= 36Z} @ ghost @@ total
 
   val fee_bounds :
       (state : t) @ local immutable total ghost forkable unyielding ->
       (population : Bigint.t) -> (a : Bigint.t) ->
-      {u : unit | if valid state && 1Z <= population &&
+      {u : unit | if 1Z <= population &&
         size state <= population &&
         1Z <= a && Vox_ackermann.iter population a 1Z 1Z >= population &&
           Vox_ackermann.below population a
@@ -99,37 +96,39 @@ module Make (C : Vox_big_credits.S) : sig
           union_fee state <= Bigint.add (Bigint.mul 12Z a) 36Z else true}
       @ ghost @@ total
 
+  val events : t @ local immutable total ghost forkable unyielding ->
+    Vox_union_find_events.event list @ ghost @@ total
+  val event_cost : (s : t) @ local immutable total ghost forkable unyielding ->
+    {u : unit | ticks s = Vox_union_find_events.total (events s)} @ ghost @@ total
+
   val create : (fee : {b : C.token | C.credits b = 1Z}) @ unique total ghost ->
-      {s : t | valid s && size s = 0Z && account s = 1Z} @ unique
+      {s : t | size s = 0Z && account s = 1Z} @ unique
 
   val make_set :
-      (state : {s : t | valid s && size s < Bigint.of_int max_int}) @ unique
+      (state : {s : t | size s < Bigint.of_int max_int}) @ unique
         read_write total ->
       (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
-        added (snapshot state) (snapshot r.#state) r.#value &&
+      {r : result | let state = state in added (snapshot state) (snapshot r.#state) r.#value &&
         size r.#state = Bigint.add (size state) 1Z &&
-        member r.#value r.#state &&
+        contains (snapshot r.#state) r.#value &&
         account r.#state = Bigint.add (account state) 11Z} @ unique
 
   val find : (x : elem) @ immutable ->
-      (state : {s : t | valid s && member x s}) @ unique read_write total ->
-      (fee : {b : C.token | let refine_ state = state in
+      (state : {s : t | contains (snapshot s) x}) @ unique read_write total ->
+      (fee : {b : C.token | let state = state in
         C.credits b = find_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
-        found (snapshot state) (snapshot r.#state) x &&
-        size r.#state = size state && r.#value === representative x state &&
+      {r : result | let state = state in found (snapshot state) (snapshot r.#state) x &&
+        size r.#state = size state && r.#value === root (snapshot state) x &&
         account r.#state = Bigint.add (account state) (find_fee state)} @ unique
 
   val union : (x : elem) @ immutable -> (y : elem) @ immutable ->
-      (state : {s : t | valid s && member x s && member y s}) @ unique
+      (state : {s : t | contains (snapshot s) x && contains (snapshot s) y}) @ unique
         read_write total ->
-      (fee : {b : C.token | let refine_ state = state in
+      (fee : {b : C.token | let state = state in
         C.credits b = union_fee state})
         @ unique total ghost ->
-      {r : result | let refine_ state = state in valid r.#state &&
-        joined (snapshot state) (snapshot r.#state) x y r.#value &&
+      {r : result | let state = state in joined (snapshot state) (snapshot r.#state) x y r.#value &&
         size r.#state = size state &&
         account r.#state = Bigint.add (account state) (union_fee state)}
       @ unique

@@ -23,7 +23,7 @@ let rec (bounds @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.node P.
     fun cap h p -> ghost_ (
   ordered_def cap h p; M.head_def p; M.root_def p;
   (match p with M.Stop _ -> () | M.Step (_, rest) -> bounds cap h rest);
-  let u = () in refine_ u)
+  ())
 
 let (redirect_weight @ total) : (h : Vox_union_find_model.node P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (r : M.elem) @ immutable ->
@@ -33,7 +33,7 @@ let (redirect_weight @ total) : (h : Vox_union_find_model.node P.heap) @ immutab
   let after = H.put h x (M.Link (M.rank h x, r)) in
   weight_def after q; weight_def h q;
   M.rank_def after q; M.rank_def h q;
-  let u = () in refine_ u)
+  ())
 
 let rec (redirect_ordered @ total) : (cap : Bigint.t) ->
     (h : Vox_union_find_model.node P.heap) @ immutable -> (selected : M.path) @ immutable ->
@@ -51,7 +51,7 @@ let rec (redirect_ordered @ total) : (cap : Bigint.t) ->
   match p with
   | M.Stop y ->
       ordered_def cap after p; redirect_weight h x r y;
-      let u = () in refine_ u
+      ()
   | M.Step (y, rest) ->
       if y === x then (
         ordered_def cap after (M.Step (y, M.Stop r));
@@ -59,7 +59,7 @@ let rec (redirect_ordered @ total) : (cap : Bigint.t) ->
         ordered_def cap after (M.Stop r); M.head_def (M.Stop r);
         redirect_weight h x r y; redirect_weight h x r r;
         ordered_def cap h selected; M.head_def selected; M.root_def selected;
-        let u = () in refine_ u)
+        ())
       else (
         redirect_ordered cap h selected x r rest;
         M.redirect_valid h selected x r rest;
@@ -67,7 +67,7 @@ let rec (redirect_ordered @ total) : (cap : Bigint.t) ->
         ordered_def cap after (M.Step (y, next));
         M.head_def (M.Step (y, next));
         redirect_weight h x r y; redirect_weight h x r (M.head rest);
-        let u = () in refine_ u))
+        ()))
 
 let rec (refresh_ordered @ total) : (cap : Bigint.t) ->
     (h : Vox_union_find_model.node P.heap) @ immutable -> (selected : M.path) @ immutable ->
@@ -80,7 +80,7 @@ let rec (refresh_ordered @ total) : (cap : Bigint.t) ->
   M.head_def selected; M.root_def selected;
   M.compressed_def h selected; M.refresh_def selected p;
   match selected with
-  | M.Stop _ -> let u = () in refine_ u
+  | M.Stop _ -> ()
   | M.Step (x, rest) ->
       bounds cap h selected;
       refresh_ordered cap h rest p;
@@ -91,7 +91,7 @@ let rec (refresh_ordered @ total) : (cap : Bigint.t) ->
       let middle = M.compressed h rest in
       let witness = M.refresh rest selected in
       redirect_ordered cap middle witness x (M.root rest) (M.refresh rest p);
-      let u = () in refine_ u)
+      ())
 
 let rec (contains_rank @ total) : (cap : Bigint.t) ->
     (h : Vox_union_find_model.node P.heap) @ immutable -> (p : M.path) @ immutable ->
@@ -103,7 +103,7 @@ let rec (contains_rank @ total) : (cap : Bigint.t) ->
   (match p with
   | M.Stop _ -> ()
   | M.Step (_, rest) -> bounds cap h p; contains_rank cap h rest x);
-  let u = () in refine_ u)
+  ())
 
 module F = Vox_union_find_forest
 let[@def] rec all_ordered (cap : Bigint.t) (h : Vox_union_find_model.node P.heap @ immutable)
@@ -118,7 +118,7 @@ let rec (lookup_ordered @ total) : (cap : Bigint.t) ->
     fun cap h paths x -> ghost_ (
   all_ordered_def cap h paths; F.member_def x paths; F.lookup_def x paths;
   (match paths with [] -> () | _ :: rest -> lookup_ordered cap h rest x);
-  let u = () in refine_ u)
+  ())
 
 let rec (refresh_all_ordered @ total) : (cap : Bigint.t) ->
     (h : Vox_union_find_model.node P.heap) @ immutable -> (selected : M.path) @ immutable ->
@@ -130,11 +130,11 @@ let rec (refresh_all_ordered @ total) : (cap : Bigint.t) ->
   F.valid_def h paths; all_ordered_def cap h paths; F.refresh_def selected paths;
   let after = M.compressed h selected in
   match paths with
-  | [] -> all_ordered_def cap after []; let u = () in refine_ u
+  | [] -> all_ordered_def cap after []; ()
   | p :: rest ->
       refresh_ordered cap h selected p; refresh_all_ordered cap h selected rest;
       all_ordered_def cap after (M.refresh selected p :: F.refresh selected rest);
-      let u = () in refine_ u)
+      ())
 
 let (fresh_weight @ total) : (h : Vox_union_find_model.node P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (q : M.elem) @ immutable ->
@@ -143,7 +143,7 @@ let (fresh_weight @ total) : (h : Vox_union_find_model.node P.heap) @ immutable 
     fun h x q -> ghost_ (
   let after = H.put h x (M.Root 0) in
   weight_def after q; weight_def h q; M.rank_def after q; M.rank_def h q;
-  let u = () in refine_ u)
+  ())
 
 let rec (fresh_ordered @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.node P.heap) @ immutable ->
     (x : M.elem) @ immutable -> (p : M.path) @ immutable ->
@@ -158,7 +158,7 @@ let rec (fresh_ordered @ total) : (cap : Bigint.t) -> (h : Vox_union_find_model.
   | M.Step (_, rest) ->
       M.valid_def h rest; fresh_weight h x (M.head rest);
       fresh_ordered cap h x rest);
-  let u = () in refine_ u)
+  ())
 
 let rec (fresh_all_ordered @ total) : (cap : Bigint.t) ->
     (h : Vox_union_find_model.node P.heap) @ immutable -> (x : M.elem) @ immutable ->
@@ -171,7 +171,7 @@ let rec (fresh_all_ordered @ total) : (cap : Bigint.t) ->
   (match paths with
   | [] -> ()
   | p :: rest -> fresh_ordered cap h x p; fresh_all_ordered cap h x rest);
-  let u = () in refine_ u)
+  ())
 
 let rec (weaken @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
     (h : Vox_union_find_model.node P.heap) @ immutable -> (p : M.path) @ immutable ->
@@ -179,7 +179,7 @@ let rec (weaken @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
       else true} @ ghost = fun small large h p -> ghost_ (
   ordered_def small h p; ordered_def large h p;
   (match p with M.Stop _ -> () | M.Step (_, rest) -> weaken small large h rest);
-  let u = () in refine_ u)
+  ())
 
 let rec (weaken_all @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
     (h : Vox_union_find_model.node P.heap) @ immutable -> (paths : M.path list) @ immutable ->
@@ -188,4 +188,4 @@ let rec (weaken_all @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
   all_ordered_def small h paths; all_ordered_def large h paths;
   (match paths with [] -> () | p :: rest ->
     weaken small large h p; weaken_all small large h rest);
-  let u = () in refine_ u)
+  ())

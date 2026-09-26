@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find.mli vox_union_find.ml vox_union_find_complexity.ml union_find.ml";
+ all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find_events.mli vox_union_find_events.ml vox_union_find.mli vox_union_find.ml vox_union_find_complexity.ml union_find.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
@@ -16,20 +16,20 @@ module H = P.Heap
 module M = Vox_union_find_model
 
 let () =
-  let refine_ memory = P.empty () in
-  let refine_ r = P.alloc (M.Root 3) memory in
+  let memory = P.empty () in
+  let r = P.alloc (M.Root 3) memory in
   let root = r.P.value in
-  let refine_ p = P.alloc (M.Link (2, root)) r.P.state in
+  let p = P.alloc (M.Link (2, root)) r.P.state in
   let parent = p.P.value in
-  let refine_ x = P.alloc (M.Link (1, parent)) p.P.state in
+  let x = P.alloc (M.Link (1, parent)) p.P.state in
   let start = x.P.value in
-  let refine_ f = P.alloc (M.Root 0) x.P.state in
+  let f = P.alloc (M.Root 0) x.P.state in
   let frame = f.P.value in
   let path = ghost_ (M.Step (start, M.Step (parent, M.Stop root))) in
   let before = ghost_ (P.own (borrow_ f.P.state)) in
   let amount = 10Z in
-  let initial : {n : Bigint.t | n >= 0Z} = refine_ amount in
-  let refine_ bank = C.Budget.create initial in
+  let initial : {n : Bigint.t | n >= 0Z} = amount in
+  let bank = C.Budget.create initial in
   let state = { W.memory = f.P.state; bank } in
   ghost_ (
     M.valid_def before path; M.head_def path; M.depth_def path;
@@ -42,14 +42,14 @@ let () =
   let depth = 2Z in
   let input : {s : W.resource | M.valid (W.heap s) path &&
     start === M.head path && depth = M.depth path &&
-    W.balance s >= Vox_union_find_worker.cost depth} = refine_ state in
-  let refine_ result = W.find depth path start input in
+    W.balance s >= Vox_union_find_worker.cost depth} = state in
+  let result = W.find depth path start input in
   let #{ W.value; state } = result in
   ghost_ (
     M.root_def path; M.root_def (M.Step (parent, M.Stop root));
     M.root_def (M.Stop root);
     let u = () in
-    (refine_ u : {u : unit | value === root && W.balance state = 0Z}));
+    (u : {u : unit | value === root && W.balance state = 0Z}));
   assert (Pref.equal value root);
   ghost_ (
     W.heap_def (borrow_ state);
@@ -60,12 +60,12 @@ let () =
     M.compressed_mem before path start;
     M.compressed_mem before path frame;
     let u = () in
-    (refine_ u : {u : unit | H.mem (P.own state.memory) start &&
+    (u : {u : unit | H.mem (P.own state.memory) start &&
       H.mem (P.own state.memory) frame}));
   let memory : {t : Vox_union_find_model.node P.token | H.mem (P.own t) start &&
-    H.mem (P.own t) frame} = refine_ state.memory in
-  let refine_ actual = P.read start (borrow_ memory) in
-  let refine_ unchanged = P.read frame (borrow_ memory) in
+    H.mem (P.own t) frame} = state.memory in
+  let actual = P.read start (borrow_ memory) in
+  let unchanged = P.read frame (borrow_ memory) in
   (match actual with M.Root _ -> assert false
     | M.Link (_, p) -> assert (Pref.equal p root));
   (match unchanged with M.Root rank -> assert (rank = 0)
@@ -78,20 +78,20 @@ module Q = Vox_union_find_complexity
 
 let () =
   let capacity = 4Z in let amount = 2000Z in
-  let initial : {n : Bigint.t | n >= 0Z} = refine_ amount in
-  let refine_ fee = C.Budget.create initial in
+  let initial : {n : Bigint.t | n >= 0Z} = amount in
+  let fee = C.Budget.create initial in
   let cap : {n : Bigint.t | 1Z <= n && n <= Bigint.of_int max_int} = assume_ capacity in
-  let payment : {b : C.token | C.credits b >= 1Z} = refine_ fee in
-  let refine_ initialized = U.create cap payment in
+  let payment : {b : C.token | C.credits b >= 1Z} = fee in
+  let initialized = U.create cap payment in
   let #{U.state; refund} = initialized in
   let proof_alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.alpha_def (borrow_ state); U.alpha_bounds (borrow_ state));
   ghost_ (F.size_def []);
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state));
-  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = refine_ state in
-  let payment : {b : C.token | C.credits b >= 3Z} = refine_ refund in
-  let refine_ added = U.make_set input payment in
+  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = state in
+  let payment : {b : C.token | C.credits b >= 3Z} = refund in
+  let added = U.make_set input payment in
   let #{U.value = x0; state; refund} = added in
   let account0 = ghost_ (U.account (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x0);
@@ -100,9 +100,9 @@ let () =
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state));
-  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = refine_ state in
-  let payment : {b : C.token | C.credits b >= 3Z} = refine_ refund in
-  let refine_ added = U.make_set input payment in
+  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = state in
+  let payment : {b : C.token | C.credits b >= 3Z} = refund in
+  let added = U.make_set input payment in
   let #{U.value = x1; state; refund} = added in
   let account1 = ghost_ (U.account (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x1);
@@ -112,9 +112,9 @@ let () =
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state));
-  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = refine_ state in
-  let payment : {b : C.token | C.credits b >= 3Z} = refine_ refund in
-  let refine_ added = U.make_set input payment in
+  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = state in
+  let payment : {b : C.token | C.credits b >= 3Z} = refund in
+  let added = U.make_set input payment in
   let #{U.value = x2; state; refund} = added in
   let account2 = ghost_ (U.account (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x2);
@@ -125,9 +125,9 @@ let () =
     ());
   let old_paths = ghost_ (U.contents (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state));
-  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = refine_ state in
-  let payment : {b : C.token | C.credits b >= 3Z} = refine_ refund in
-  let refine_ added = U.make_set input payment in
+  let input : {s : U.t | U.valid s && F.size s.#paths < s.#capacity} = state in
+  let payment : {b : C.token | C.credits b >= 3Z} = refund in
+  let added = U.make_set input payment in
   let #{U.value = x3; state; refund} = added in
   let account3 = ghost_ (U.account (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); M.head_def (M.Stop x3);
@@ -141,18 +141,18 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x0 s && U.member x1 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.union_fee input.#U.alpha} = refine_ refund in
+  let input : {s : U.t | U.valid s && U.member x0 s && U.member x1 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.union_fee input.#U.alpha} = refund in
   let before_x0 = ghost_ (U.representative x0 (borrow_ input)) in
   let before_x1 = ghost_ (U.representative x1 (borrow_ input)) in
   let before_x2 = ghost_ (U.representative x2 (borrow_ input)) in
   ghost_ (U.union_semantics x0 x1 x2 (borrow_ input));
-  let refine_ joined = U.union x0 x1 input payment in
+  let joined = U.union x0 x1 input payment in
   let #{U.value = joined_root; state; refund} = joined in
   ghost_ (U.representative_def x2 (borrow_ state);
     let u = () in
-    ignore (refine_ u : {u : unit | U.representative x2 state ===
+    ignore (u : {u : unit | U.representative x2 state ===
       (if before_x2 === before_x0 || before_x2 === before_x1
        then joined_root else before_x2)}));
   let account4 = ghost_ (U.account (borrow_ state)) in
@@ -167,10 +167,10 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x2 s && U.member x3 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.union_fee input.#U.alpha} = refine_ refund in
-  let refine_ joined = U.union x2 x3 input payment in
+  let input : {s : U.t | U.valid s && U.member x2 s && U.member x3 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.union_fee input.#U.alpha} = refund in
+  let joined = U.union x2 x3 input payment in
   let #{U.value = _; state; refund} = joined in
   let account5 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
@@ -184,10 +184,10 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x0 s && U.member x2 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.union_fee input.#U.alpha} = refine_ refund in
-  let refine_ joined = U.union x0 x2 input payment in
+  let input : {s : U.t | U.valid s && U.member x0 s && U.member x2 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.union_fee input.#U.alpha} = refund in
+  let joined = U.union x0 x2 input payment in
   let #{U.value = _; state; refund} = joined in
   let account6 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
@@ -201,10 +201,10 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.union_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x1 s && U.member x3 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.union_fee input.#U.alpha} = refine_ refund in
-  let refine_ joined = U.union x1 x3 input payment in
+  let input : {s : U.t | U.valid s && U.member x1 s && U.member x3 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.union_fee input.#U.alpha} = refund in
+  let joined = U.union x1 x3 input payment in
   let #{U.value = _; state; refund} = joined in
   let account7 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
@@ -218,17 +218,17 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.find_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x0 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.find_fee input.#U.alpha} = refine_ refund in
+  let input : {s : U.t | U.valid s && U.member x0 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.find_fee input.#U.alpha} = refund in
   let before_x2 = ghost_ (U.representative x2 (borrow_ input)) in
   ghost_ (U.find_semantics x0 x2 (borrow_ input));
-  let refine_ found = U.find x0 input payment in
+  let found = U.find x0 input payment in
   let #{U.value = r0; state; refund} = found in
   ghost_ (U.representative_def x2 (borrow_ state);
     Vox_union_find_spec.find_paths_def old_paths x0;
     let u = () in
-    ignore (refine_ u : {u : unit | U.representative x2 state === before_x2}));
+    ignore (u : {u : unit | U.representative x2 state === before_x2}));
   let account8 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state);
@@ -241,10 +241,10 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.find_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x1 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.find_fee input.#U.alpha} = refine_ refund in
-  let refine_ found = U.find x1 input payment in
+  let input : {s : U.t | U.valid s && U.member x1 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.find_fee input.#U.alpha} = refund in
+  let found = U.find x1 input payment in
   let #{U.value = r1; state; refund} = found in
   let account9 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
@@ -258,10 +258,10 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.find_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x2 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.find_fee input.#U.alpha} = refine_ refund in
-  let refine_ found = U.find x2 input payment in
+  let input : {s : U.t | U.valid s && U.member x2 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.find_fee input.#U.alpha} = refund in
+  let found = U.find x2 input payment in
   let #{U.value = r2; state; refund} = found in
   let account10 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
@@ -275,10 +275,10 @@ let () =
   let alpha = ghost_ (U.alpha (borrow_ state)) in
   ghost_ (U.contents_def (borrow_ state); U.alpha_def (borrow_ state);
     A.find_fee_def alpha);
-  let input : {s : U.t | U.valid s && U.member x3 s} = refine_ state in
-  let payment : {b : C.token | let refine_ input = input in
-    C.credits b >= A.find_fee input.#U.alpha} = refine_ refund in
-  let refine_ found = U.find x3 input payment in
+  let input : {s : U.t | U.valid s && U.member x3 s} = state in
+  let payment : {b : C.token | let input = input in
+    C.credits b >= A.find_fee input.#U.alpha} = refund in
+  let found = U.find x3 input payment in
   let #{U.value = r3; state; refund} = found in
   let account11 = ghost_ (U.account (borrow_ state)) in
   let new_paths = ghost_ (U.contents (borrow_ state)) in
@@ -290,7 +290,7 @@ let () =
     ());
   assert (Pref.equal r0 r1); assert (Pref.equal r0 r2); assert (Pref.equal r0 r3);
   ghost_ (U.account_bounds (borrow_ state); C.nonnegative (borrow_ refund);
-    let u = () in (refine_ u : {u : unit | U.ticks state <= 2000Z &&
+    let u = () in (u : {u : unit | U.ticks state <= 2000Z &&
       Bigint.add (U.account state) (C.credits refund) = 2000Z}));
   let steps = ghost_ [
     {Q.operation = Q.Allocate; account = account0};
@@ -359,6 +359,6 @@ let () =
     Q.fee_def proof_alpha Q.Union;
     U.account_bounds (borrow_ state);
     Q.sequence proof_alpha steps (U.ticks (borrow_ state));
-    let u = () in (refine_ u : {u : unit |
+    let u = () in (u : {u : unit |
       U.ticks state <= Q.budget proof_alpha 4Z 4Z 4Z}));
   ()

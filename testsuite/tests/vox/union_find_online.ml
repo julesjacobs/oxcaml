@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find.mli vox_union_find.ml vox_union_find_complexity.ml vox_union_find_simple.mli vox_union_find_simple.ml vox_union_find_online.mli vox_union_find_online.ml vox_union_find_online_cost.ml union_find_online.ml";
+ all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find_events.mli vox_union_find_events.ml vox_union_find.mli vox_union_find.ml vox_union_find_complexity.ml vox_union_find_simple.mli vox_union_find_simple.ml vox_union_find_online.mli vox_union_find_online.ml vox_union_find_online_cost.ml union_find_online.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
@@ -23,31 +23,31 @@ module Fixed_client = struct
   let run () =
     if max_int >= 4 then (
     let amount = 1Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 1Z} = refine_ fee in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 1Z} = fee in
     let limit = 4Z in
-    let cap : {n : Bigint.t | 1Z <= n && n <= Bigint.of_int max_int} = refine_ limit in
-    let refine_ state = U.create cap payment in
+    let cap : {n : Bigint.t | 1Z <= n && n <= Bigint.of_int max_int} = limit in
+    let state = U.create cap payment in
     let population = ghost_ 4Z in
-    let cap : {n : Bigint.t | 1Z <= n} = refine_ population in
-    let refine_ alpha = ghost_ (K.inverse cap) in
-    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = refine_ state in
+    let cap : {n : Bigint.t | 1Z <= n} = population in
+    let alpha = ghost_ (K.inverse cap) in
+    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = state in
     let amount = 3Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 3Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 3Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x0; state} = added in
     let account0 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = state in
     let amount = 3Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 3Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 3Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x1; state} = added in
     let account1 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x1 :: old_paths);
@@ -56,13 +56,13 @@ module Fixed_client = struct
     ghost_ (U.member_def x0 (borrow_ state); U.member_def x1 (borrow_ state);
       U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s && U.member x1 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s && U.member x1 s} = state in
     let amount = ghost_ (U.union_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.union_fee input} = refine_ fee in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.union_fee input} = fee in
     ghost_ (U.union_semantics x0 x1 x0 (borrow_ input));
-    let refine_ joined = U.union x0 x1 input payment in
+    let joined = U.union x0 x1 input payment in
     let #{U.value = root; state} = joined in
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
       F.member_same before (U.contents (borrow_ state)) x1;
@@ -72,12 +72,12 @@ module Fixed_client = struct
     let account2 = ghost_ (U.account (borrow_ state)) in
     ghost_ (U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s} = state in
     let amount = ghost_ (U.find_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.find_fee input} = refine_ fee in
-    let refine_ found = U.find x0 input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.find_fee input} = fee in
+    let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
@@ -85,12 +85,12 @@ module Fixed_client = struct
     let account3 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = state in
     let amount = 3Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 3Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 3Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x2; state} = added in
     let account4 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x2 :: old_paths);
@@ -99,13 +99,13 @@ module Fixed_client = struct
     ghost_ (U.member_def x0 (borrow_ state); U.member_def x2 (borrow_ state);
       U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s && U.member x2 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s && U.member x2 s} = state in
     let amount = ghost_ (U.union_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.union_fee input} = refine_ fee in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.union_fee input} = fee in
     ghost_ (U.union_semantics x0 x2 x0 (borrow_ input));
-    let refine_ joined = U.union x0 x2 input payment in
+    let joined = U.union x0 x2 input payment in
     let #{U.value = root; state} = joined in
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
       F.member_same before (U.contents (borrow_ state)) x2;
@@ -115,12 +115,12 @@ module Fixed_client = struct
     let account5 = ghost_ (U.account (borrow_ state)) in
     ghost_ (U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s} = state in
     let amount = ghost_ (U.find_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.find_fee input} = refine_ fee in
-    let refine_ found = U.find x0 input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.find_fee input} = fee in
+    let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
@@ -128,12 +128,12 @@ module Fixed_client = struct
     let account6 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < U.capacity s} = state in
     let amount = 3Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 3Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 3Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x3; state} = added in
     let account7 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x3 :: old_paths);
@@ -142,13 +142,13 @@ module Fixed_client = struct
     ghost_ (U.member_def x0 (borrow_ state); U.member_def x3 (borrow_ state);
       U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s && U.member x3 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s && U.member x3 s} = state in
     let amount = ghost_ (U.union_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.union_fee input} = refine_ fee in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.union_fee input} = fee in
     ghost_ (U.union_semantics x0 x3 x0 (borrow_ input));
-    let refine_ joined = U.union x0 x3 input payment in
+    let joined = U.union x0 x3 input payment in
     let #{U.value = root; state} = joined in
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
       F.member_same before (U.contents (borrow_ state)) x3;
@@ -158,12 +158,12 @@ module Fixed_client = struct
     let account8 = ghost_ (U.account (borrow_ state)) in
     ghost_ (U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s} = state in
     let amount = ghost_ (U.find_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.find_fee input} = refine_ fee in
-    let refine_ found = U.find x0 input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.find_fee input} = fee in
+    let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
@@ -194,7 +194,7 @@ module Fixed_client = struct
       Q.trace_def alpha account9 steps10;
       Q.fee_def alpha Q.Allocate; Q.fee_def alpha Q.Find; Q.fee_def alpha Q.Union;
       U.account_bounds (borrow_ state);
-      let u = () in let _ : {u : unit | Q.trace alpha 1Z steps0} = refine_ u in
+      let u = () in let _ : {u : unit | Q.trace alpha 1Z steps0} = u in
       Q.final_account_def 1Z steps0;
       Q.count_def Q.Allocate steps0;
       Q.count_def Q.Find steps0;
@@ -250,7 +250,7 @@ module Fixed_client = struct
       Q.same_def Q.Union Q.Union;
       Q.sequence alpha steps0 (U.ticks (borrow_ state));
       let u = () in
-      let _ : {u : unit | U.ticks state <= Q.budget alpha 4Z 3Z 3Z} = refine_ u in ());
+      let _ : {u : unit | U.ticks state <= Q.budget alpha 4Z 3Z 3Z} = u in ());
     ())
 end
 
@@ -260,29 +260,29 @@ module Growing_client = struct
   let run () =
     if max_int >= 9 then (
     let amount = 1Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 1Z} = refine_ fee in
-    let refine_ state = U.create payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 1Z} = fee in
+    let state = U.create payment in
     let population = ghost_ 9Z in
-    let cap : {n : Bigint.t | 1Z <= n} = refine_ population in
-    let refine_ alpha = ghost_ (K.inverse cap) in
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let cap : {n : Bigint.t | 1Z <= n} = population in
+    let alpha = ghost_ (K.inverse cap) in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x0; state} = added in
     let account0 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x1; state} = added in
     let account1 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x1 :: old_paths);
@@ -291,13 +291,13 @@ module Growing_client = struct
     ghost_ (U.member_def x0 (borrow_ state); U.member_def x1 (borrow_ state);
       U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) population alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s && U.member x1 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s && U.member x1 s} = state in
     let amount = ghost_ (U.union_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.union_fee input} = refine_ fee in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.union_fee input} = fee in
     ghost_ (U.union_semantics x0 x1 x0 (borrow_ input));
-    let refine_ joined = U.union x0 x1 input payment in
+    let joined = U.union x0 x1 input payment in
     let #{U.value = root; state} = joined in
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
       F.member_same before (U.contents (borrow_ state)) x1;
@@ -307,12 +307,12 @@ module Growing_client = struct
     let account2 = ghost_ (U.account (borrow_ state)) in
     ghost_ (U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) population alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s} = state in
     let amount = ghost_ (U.find_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.find_fee input} = refine_ fee in
-    let refine_ found = U.find x0 input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.find_fee input} = fee in
+    let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
@@ -320,12 +320,12 @@ module Growing_client = struct
     let account3 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x2; state} = added in
     let account4 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x2 :: old_paths);
@@ -334,13 +334,13 @@ module Growing_client = struct
     ghost_ (U.member_def x0 (borrow_ state); U.member_def x2 (borrow_ state);
       U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) population alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s && U.member x2 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s && U.member x2 s} = state in
     let amount = ghost_ (U.union_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.union_fee input} = refine_ fee in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.union_fee input} = fee in
     ghost_ (U.union_semantics x0 x2 x0 (borrow_ input));
-    let refine_ joined = U.union x0 x2 input payment in
+    let joined = U.union x0 x2 input payment in
     let #{U.value = root; state} = joined in
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
       F.member_same before (U.contents (borrow_ state)) x2;
@@ -350,12 +350,12 @@ module Growing_client = struct
     let account5 = ghost_ (U.account (borrow_ state)) in
     ghost_ (U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) population alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s} = state in
     let amount = ghost_ (U.find_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.find_fee input} = refine_ fee in
-    let refine_ found = U.find x0 input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.find_fee input} = fee in
+    let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
@@ -363,72 +363,72 @@ module Growing_client = struct
     let account6 = ghost_ (U.account (borrow_ state)) in
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x3; state} = added in
     let account7 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x3 :: old_paths);
       M.head_def (M.Stop x3); U.member_def x0 (borrow_ state));
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x4; state} = added in
     let account8 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x4 :: old_paths);
       M.head_def (M.Stop x4); U.member_def x0 (borrow_ state));
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x5; state} = added in
     let account9 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x5 :: old_paths);
       M.head_def (M.Stop x5); U.member_def x0 (borrow_ state));
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x6; state} = added in
     let account10 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x6 :: old_paths);
       M.head_def (M.Stop x6); U.member_def x0 (borrow_ state));
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x7; state} = added in
     let account11 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x7 :: old_paths);
       M.head_def (M.Stop x7); U.member_def x0 (borrow_ state));
     let old_paths = ghost_ (U.contents (borrow_ state)) in
     ghost_ (U.member_def x0 (borrow_ state));
-    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = refine_ state in
+    let input : {s : U.t | U.valid s && U.size s < Bigint.of_int max_int} = state in
     let amount = 11Z in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = 11Z} = refine_ fee in
-    let refine_ added = U.make_set input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = 11Z} = fee in
+    let added = U.make_set input payment in
     let #{U.value = x8; state} = added in
     let account12 = ghost_ (U.account (borrow_ state)) in
     ghost_ (F.member_def x0 (M.Stop x8 :: old_paths);
@@ -437,13 +437,13 @@ module Growing_client = struct
     ghost_ (U.member_def x0 (borrow_ state); U.member_def x8 (borrow_ state);
       U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) population alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s && U.member x8 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s && U.member x8 s} = state in
     let amount = ghost_ (U.union_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.union_fee input} = refine_ fee in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.union_fee input} = fee in
     ghost_ (U.union_semantics x0 x8 x0 (borrow_ input));
-    let refine_ joined = U.union x0 x8 input payment in
+    let joined = U.union x0 x8 input payment in
     let #{U.value = root; state} = joined in
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
       F.member_same before (U.contents (borrow_ state)) x8;
@@ -453,12 +453,12 @@ module Growing_client = struct
     let account13 = ghost_ (U.account (borrow_ state)) in
     ghost_ (U.observations (borrow_ state);
       U.fee_bounds (borrow_ state) population alpha);
-    let input : {s : U.t | U.valid s && U.member x0 s} = refine_ state in
+    let input : {s : U.t | U.valid s && U.member x0 s} = state in
     let amount = ghost_ (U.find_fee (borrow_ input)) in
-    let issuance : {n : Bigint.t | n >= 0Z} = refine_ amount in
-    let refine_ fee = C.Budget.create issuance in
-    let payment : {b : C.token | C.credits b = U.find_fee input} = refine_ fee in
-    let refine_ found = U.find x0 input payment in
+    let issuance : {n : Bigint.t | n >= 0Z} = amount in
+    let fee = C.Budget.create issuance in
+    let payment : {b : C.token | C.credits b = U.find_fee input} = fee in
+    let found = U.find x0 input payment in
     let #{U.value; state} = found in
     assert (Pref.equal value root);
     ghost_ (F.member_same before (U.contents (borrow_ state)) x0;
@@ -500,7 +500,7 @@ module Growing_client = struct
       Q.fee_def alpha Q.Allocate; Q.fee_def alpha Q.Find; Q.fee_def alpha Q.Union;
       Q.find_fee_def alpha; Q.union_fee_def alpha;
       U.account_bounds (borrow_ state);
-      let u = () in let _ : {u : unit | Q.trace alpha 1Z steps0} = refine_ u in
+      let u = () in let _ : {u : unit | Q.trace alpha 1Z steps0} = u in
       Q.final_account_def 1Z steps0;
       Q.count_def Q.Allocate steps0;
       Q.count_def Q.Find steps0;
@@ -576,7 +576,7 @@ module Growing_client = struct
       Q.same_def Q.Union Q.Union;
       Q.sequence alpha steps0 (U.ticks (borrow_ state));
       let u = () in
-      let _ : {u : unit | U.ticks state <= Q.budget alpha 9Z 3Z 3Z} = refine_ u in ());
+      let _ : {u : unit | U.ticks state <= Q.budget alpha 9Z 3Z 3Z} = u in ());
     ())
 end
 

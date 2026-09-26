@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find.mli vox_union_find.ml vox_union_find_complexity.ml vox_union_find_simple.mli vox_union_find_simple.ml vox_union_find_online.mli vox_union_find_online.ml vox_union_find_online_cost.ml";
+ all_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml vox_union_find_potential.ml vox_union_find_levels.ml vox_union_find_path_cost.ml vox_union_find_model.ml vox_union_find_forest.ml vox_union_find_rank.ml vox_union_find_mass.ml vox_union_find_link.ml vox_union_find_worker.ml vox_union_find_amortized.ml vox_union_find_bank.ml vox_union_find_spec.ml vox_union_find_events.mli vox_union_find_events.ml vox_union_find.mli vox_union_find.ml vox_union_find_complexity.ml vox_union_find_simple.mli vox_union_find_simple.ml vox_union_find_online.mli vox_union_find_online.ml vox_union_find_online_cost.ml";
  readonly_files = "union_find_online_rejected.ml";
  compile_only = "true";
  {
@@ -83,9 +83,9 @@ module Reuse_state = struct
   module U = Vox_union_find_online.Make (C)
   let bad : (x : Vox_union_find_model.elem) @ immutable ->
       (state : {s : U.t | U.valid s && U.member x s}) @ unique read_write total ->
-      (fee1 : {b : C.token | let refine_ state = state in C.credits b = U.find_fee state})
+      (fee1 : {b : C.token | let state = state in C.credits b = U.find_fee state})
         @ unique total ghost ->
-      (fee2 : {b : C.token | let refine_ state = state in C.credits b = U.find_fee state})
+      (fee2 : {b : C.token | let state = state in C.credits b = U.find_fee state})
         @ unique total ghost -> U.result @ unique = fun x state fee1 fee2 ->
     let _ = U.find x state fee1 in
     U.find x state fee2
@@ -118,13 +118,13 @@ module Nonmember = struct
   module U = Vox_union_find_online.Make (C)
   let bad (x : Vox_union_find_model.elem @ immutable)
       (state : {s : U.t | U.valid s} @ unique read_write total) =
-    let refine_ state = state in
-    (refine_ state : {s : U.t | U.valid s && U.member x s})
+    let state = state in
+    (state : {s : U.t | U.valid s && U.member x s})
 end;;
 [%%expect{|
-Line 7, characters 5-18:
-7 |     (refine_ state : {s : U.t | U.valid s && U.member x s})
-         ^^^^^^^^^^^^^
+Line 7, characters 5-10:
+7 |     (state : {s : U.t | U.valid s && U.member x s})
+         ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
