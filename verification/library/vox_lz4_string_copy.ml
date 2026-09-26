@@ -9,5 +9,5 @@ external copy_prefix :
       Vox_lz4_spec_storage.initialized (G.own p) block count
       && M.covers (G.own p) block 0 (M.length block)}) @ local read ghost ->
     {s : string | Iarray.length (V.contents s) = count
-      && Vox_lz4_spec_bytes.prefix_matches (V.contents s) (G.own permission) block count}
+      && Vox_lz4_heap_bytes.prefix_matches (V.contents s) (G.own permission) block count}
     = "caml_raw_memory_copy_string_bytecode" "caml_raw_memory_copy_string"

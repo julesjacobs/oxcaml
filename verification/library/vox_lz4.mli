@@ -21,8 +21,8 @@ type decode_error = Vox_lz4_spec.decode_error =
 val compress : (source : string) ->
   {wire : string | Vox_lz4_spec.compresses source wire}
 
-(** The checked decoder with its erased allocation witness. Its status,
-    length, and successful output bytes agree with the total decoder model. *)
+(** The checked decoder. Its result
+    classification, length, and successful bytes agree with the total model. *)
 val decompress_verified : (wire : string) ->
   (capacity : {n : int | 0 <= n && n <= 4194304}) ->
   {decoded : Vox_lz4_spec.decoded |
@@ -47,7 +47,7 @@ val roundtrip : (source : string) -> (wire : string) -> (capacity : int) ->
     && Iarray.length (Vox_string_view.contents source) <= capacity
     && capacity <= 4194304
     && Vox_lz4_spec.matches_model wire capacity decoded)
-    || match decoded.output with
-       | None -> false
-       | Some output -> Vox_string_view.contents source ===
+    || match decoded with
+       | Error _ -> false
+       | Ok output -> Vox_string_view.contents source ===
            Vox_string_view.contents output} @ ghost @@ total

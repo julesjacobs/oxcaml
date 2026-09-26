@@ -12,7 +12,7 @@ let rec (output_matches_get @ total) :
       && 0 <= index && index < count)
       || match Vox_lz4_spec_bytes.source_at source index with
          | Some c -> H.at heap (M.location block index) ===
-                     Some (Some (Vox_lz4_spec_decode.byte_of_char c))
+                     Some (Some (Vox_lz4_spec_parse.byte_of_char c))
          | None -> false} @ ghost =
   fun heap block source count index -> ghost_ (
     R.output_matches_def heap block source count;
@@ -48,10 +48,10 @@ let (output_matches_append @ total) :
     {u : unit | not (R.output_matches heap block source count)
       || R.output_matches
            (H.put heap (M.location block count)
-             (Some (Vox_lz4_spec_decode.byte_of_char (Vox_sequence.iarray_get source count))))
+             (Some (Vox_lz4_spec_parse.byte_of_char (Vox_sequence.iarray_get source count))))
            block source (count + 1)} @ ghost =
   fun heap block source count -> ghost_ (
-    let byte = Vox_lz4_spec_decode.byte_of_char (Vox_sequence.iarray_get source count) in
+    let byte = Vox_lz4_spec_parse.byte_of_char (Vox_sequence.iarray_get source count) in
     output_matches_put_outside heap block source count count byte;
     R.output_matches_def
       (H.put heap (M.location block count) (Some byte))
@@ -92,7 +92,7 @@ let rec (copy_literals_preserves_source @ total) :
     Vox_lz4_spec_decode.literal_heap_def heap block used source used remaining;
     if remaining > 0 && R.output_matches heap block source used then begin
       Vox_lz4_spec_bytes.source_at_def source used;
-      let byte = Vox_lz4_spec_decode.byte_of_char
+      let byte = Vox_lz4_spec_parse.byte_of_char
         (Vox_sequence.iarray_get source used) in
       let next = H.put heap (M.location block used) (Some byte) in
       output_matches_append heap block source used;
@@ -121,7 +121,7 @@ let rec (copy_match_preserves_source @ total) :
       Vox_lz4_spec_match.source_matches_distance_def source used distance remaining;
       output_matches_get heap block source used (used - distance);
       Vox_lz4_spec_bytes.source_at_def source used;
-      let byte = Vox_lz4_spec_decode.byte_of_char
+      let byte = Vox_lz4_spec_parse.byte_of_char
         (Vox_sequence.iarray_get source used) in
       let next = H.put heap (M.location block used) (Some byte) in
       output_matches_append heap block source used;

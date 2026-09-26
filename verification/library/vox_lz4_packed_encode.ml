@@ -61,7 +61,7 @@ let[@def] rec (literal_heap @ total) (h : P.heap @ immutable)
   ghost_ (
     if remaining <= 0 || first < 0 || first >= Iarray.length source then h
     else
-      let value = Vox_lz4_spec_decode.byte_of_char (S.iarray_get source first) in
+      let value = Vox_lz4_spec_parse.byte_of_char (S.iarray_get source first) in
       literal_heap (H.put h (M.location block used) (Some value))
         block (used + 1) source (first + 1) (remaining - 1))
 [@@decreases remaining]
@@ -87,7 +87,7 @@ let rec copy_literals :
       let before = ghost_ (P.own (borrow_ permission)) in
       ghost_ (literal_heap_def before block used source first remaining);
       let buffer : B.t = { B.block; permission; used } in
-      let value = Vox_lz4_spec_decode.byte_of_char (S.iarray_get source first) in
+      let value = Vox_lz4_spec_parse.byte_of_char (S.iarray_get source first) in
       let buffer = B.append buffer value in
       copy_literals source (first + 1) (remaining - 1) buffer
 [@@decreases remaining]

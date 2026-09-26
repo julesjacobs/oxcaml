@@ -140,13 +140,13 @@ let rec (model_preserves_prefix @ total) :
     {u : unit | not (Iarray.length source <= 4194304
       && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used
-      && Vox_lz4_spec_bytes.prefix_matches wire
+      && Vox_lz4_heap_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block count)
-      || Vox_lz4_spec_bytes.prefix_matches wire heap block count} @ ghost =
+      || Vox_lz4_heap_bytes.prefix_matches wire heap block count} @ ghost =
   fun wire source anchor plan block used heap count -> ghost_ (
-    Vox_lz4_spec_bytes.prefix_matches_def wire heap block count;
-    Vox_lz4_spec_bytes.prefix_matches_def wire
+    Vox_lz4_heap_bytes.prefix_matches_def wire heap block count;
+    Vox_lz4_heap_bytes.prefix_matches_def wire
       (E.encode_model source anchor plan block used heap).E.state
       block count;
     if count > 0 then begin
@@ -158,10 +158,10 @@ let rec (model_preserves_prefix @ total) :
     let result : {u : unit | not (Iarray.length source <= 4194304
       && Vox_lz4_spec_plan.valid_plan source anchor plan
       && C.encoded_size source anchor plan <= 4210768 - used
-      && Vox_lz4_spec_bytes.prefix_matches wire
+      && Vox_lz4_heap_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block count)
-      || Vox_lz4_spec_bytes.prefix_matches wire heap block count} = () in
+      || Vox_lz4_heap_bytes.prefix_matches wire heap block count} = () in
     result)
 [@@decreases count]
 
@@ -175,7 +175,7 @@ let (end_model_wire @ total) :
       && C.encoded_size source anchor P.End <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor P.End block used heap).E.count
-      && Vox_lz4_spec_bytes.prefix_matches wire
+      && Vox_lz4_heap_bytes.prefix_matches wire
            (E.encode_model source anchor P.End block used heap).E.state
            block (Iarray.length wire))
       || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used P.End} @ ghost =
@@ -188,7 +188,7 @@ let (end_model_wire @ total) :
        && C.encoded_size source anchor P.End <= 4210768 - used
        && Iarray.length wire =
             (E.encode_model source anchor P.End block used heap).E.count
-       && Vox_lz4_spec_bytes.prefix_matches wire
+       && Vox_lz4_heap_bytes.prefix_matches wire
             (E.encode_model source anchor P.End block used heap).E.state
             block (Iarray.length wire) then begin
       let literals : {n : int | 0 <= n && n <= 4194304} =
@@ -245,7 +245,7 @@ let (end_model_wire @ total) :
       && C.encoded_size source anchor P.End <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor P.End block used heap).E.count
-      && Vox_lz4_spec_bytes.prefix_matches wire
+      && Vox_lz4_heap_bytes.prefix_matches wire
            (E.encode_model source anchor P.End block used heap).E.state
            block (Iarray.length wire))
       || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used P.End} =
@@ -318,7 +318,7 @@ let rec (model_wire @ total) :
       && C.encoded_size source anchor plan <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor plan block used heap).E.count
-      && Vox_lz4_spec_bytes.prefix_matches wire
+      && Vox_lz4_heap_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block (Iarray.length wire))
       || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used plan} @ ghost =
@@ -332,7 +332,7 @@ let rec (model_wire @ total) :
        && C.encoded_size source anchor plan <= 4210768 - used
        && Iarray.length wire =
             (E.encode_model source anchor plan block used heap).E.count
-       && Vox_lz4_spec_bytes.prefix_matches wire
+       && Vox_lz4_heap_bytes.prefix_matches wire
             (E.encode_model source anchor plan block used heap).E.state
             block (Iarray.length wire) then begin
       match plan with
@@ -403,7 +403,7 @@ let rec (model_wire @ total) :
         model_preserves_prefix wire source
           (step.position + step.length) rest block next_used
           after_match_extensions next_used;
-        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_heap_bytes.prefix_matches wire
           after_match_extensions block next_used} = () in
         S.prefix_matches_prefix wire after_match_extensions block
           next_used (distance_pos + 2);
@@ -414,7 +414,7 @@ let rec (model_wire @ total) :
             (distance_pos + 2) (match_code - 15)
             (distance_pos + 2)
         end;
-        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_heap_bytes.prefix_matches wire
           after_high block (distance_pos + 2)} = () in
         S.prefix_matches_prefix wire after_high block
           (distance_pos + 2) (distance_pos + 1);
@@ -424,7 +424,7 @@ let rec (model_wire @ total) :
           (distance_pos + 1) distance_pos;
         R.prefix_matches_put_outside wire after_literals block
           distance_pos distance_pos distance.low;
-        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_heap_bytes.prefix_matches wire
           after_literals block distance_pos} = () in
         R.literal_heap_wire wire after_literal_extensions block
           literal_pos source anchor literals;
@@ -432,7 +432,7 @@ let rec (model_wire @ total) :
           distance_pos literal_pos;
         R.literal_heap_frame_prefix wire after_literal_extensions block
           literal_pos source anchor literals literal_pos;
-        let _ : {u : unit | Vox_lz4_spec_bytes.prefix_matches wire
+        let _ : {u : unit | Vox_lz4_heap_bytes.prefix_matches wire
           after_literal_extensions block literal_pos} = () in
         S.prefix_matches_prefix wire after_literal_extensions block
           literal_pos (used + 1);
@@ -443,7 +443,7 @@ let rec (model_wire @ total) :
             (used + 1) (literals - 15) (used + 1)
         end;
         let _ : {u : unit |
-          Vox_lz4_spec_bytes.prefix_matches wire after_token block (used + 1)} =
+          Vox_lz4_heap_bytes.prefix_matches wire after_token block (used + 1)} =
           () in
         R.heap_put_at heap block used token;
         R.snapshot_at wire after_token block (used + 1) used;
@@ -487,7 +487,7 @@ let rec (model_wire @ total) :
       && C.encoded_size source anchor plan <= 4210768 - used
       && Iarray.length wire =
            (E.encode_model source anchor plan block used heap).E.count
-      && Vox_lz4_spec_bytes.prefix_matches wire
+      && Vox_lz4_heap_bytes.prefix_matches wire
            (E.encode_model source anchor plan block used heap).E.state
            block (Iarray.length wire))
       || Vox_lz4_spec_wire.wire_matches_plan source wire anchor used plan} = () in

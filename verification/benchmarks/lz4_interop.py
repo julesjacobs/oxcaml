@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cross-check raw blocks in both directions against liblz4 1.x.
 
-Usage: python3 verification/benchmarks/lz4_interop.py PATH_TO_OCAMLC
+Usage: python3 verification/benchmarks/lz4_interop.py PATH_TO_OCAMLC_OR_OCAMLOPT
 """
 
 import ctypes
@@ -75,6 +75,7 @@ def corpus():
 def main():
     compiler = pathlib.Path(sys.argv[1]).resolve()
     library_dir = compiler.parent.parent / "lib/ocaml/vox"
+    archive = "vox_borrow.cmxa" if compiler.name.startswith("ocamlopt") else "vox_borrow.cma"
     lib = liblz4()
     with tempfile.TemporaryDirectory() as directory:
         temporary = pathlib.Path(directory)
@@ -82,7 +83,7 @@ def main():
         subprocess.run([
             str(compiler), "-I", str(library_dir),
             "-extension", "refinement_types", "-principal",
-            str(library_dir / "vox_borrow.cma"),
+            str(library_dir / archive),
             str(ROOT / "verification/benchmarks/lz4_interop_cli.ml"),
             "-o", str(codec),
         ], check=True)

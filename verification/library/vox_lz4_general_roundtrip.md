@@ -16,11 +16,12 @@ The API is partial: allocation can fail, and unsupported source sizes raise
   `Vox_lz4_spec.compresses source wire`. This states that its bytes
   are the wire format of `Vox_lz4_forward_model.from_source (contents source)`.
 - `Vox_lz4.decompress_verified` returns a decoded result satisfying
-  `Vox_lz4_spec.matches_model wire capacity decoded`. Its status
-  equals the total decoder's status. On success, its length and every output
-  byte equal the total decoder's result. An erased allocation witness connects
-  the returned string with that model. `Vox_lz4.decompress` adapts this same
-  result to the conventional string/result API.
+  `Vox_lz4_spec.matches_model wire capacity decoded`. Its string/error result
+  classifies success, malformed input, or output limit exactly as the total
+  decoder does. On success, its length and every output
+  byte equal the allocation-independent total decoder's result. The public
+  result has no heap witness. `Vox_lz4.decompress` adds an optional capacity
+  argument and checks unsupported capacities.
 - `Vox_lz4.roundtrip` is a total ghost theorem: if the wire
   satisfies `compresses`, the decoded result satisfies `matches_model`, and
   capacity is at least the source length, decoding succeeds and the output
@@ -28,7 +29,7 @@ The API is partial: allocation can fail, and unsupported source sizes raise
 - `Vox_lz4.compress_decompress` composes the public compressor and verified
   decoder. Its checked return refinement states that equality directly.
 
-Inputs and decoded capacities are bounded by 4,194,304 bytes. The theorem
+Compression sources and decoded capacities are bounded by 4,194,304 bytes. The theorem
 covers empty input, arbitrary byte values, multiple matches, overlapping
 matches, and every supported capacity sufficient for the source.
 
@@ -43,9 +44,11 @@ and proves equality with the total offset model.
 
 `Vox_lz4_string_decode` proves its parser, literal copies, and overlapping match
 copies agree with `Vox_lz4_packed.decode_model`, including the final status,
-byte count, and buffer state. The general wire round-trip theorem connects
-this total decoder to the total encoder. The string theorem then proves
-extensional equality of the source and returned byte arrays.
+byte count, and buffer state. `Vox_lz4_decode_bytes_proof` proves that this
+heap model and the pure decoded-byte model have identical statuses, counts
+and output-byte observations in both directions. The independent pure
+plan/wire proof in `Vox_lz4_decode_bytes_roundtrip` reconstructs the source
+and proves extensional byte equality without an allocation witness.
 
 The model distinguishes malformed input from output-limit failures. Detailed
 error reasons and input positions are checked against the original decoder

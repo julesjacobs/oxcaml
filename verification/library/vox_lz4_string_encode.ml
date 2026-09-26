@@ -30,7 +30,7 @@ let rec copy_literals_into :
       block used model first remaining);
     if remaining = 0 then { B.block; permission; used }
     else
-      let value = Vox_lz4_spec_decode.byte_of_char (V.get source first) in
+      let value = Vox_lz4_spec_parse.byte_of_char (V.get source first) in
       ghost_ (Vox_iarray.at_get model first);
       let buffer = B.append { B.block; permission; used } value in
       let { B.block; permission; used } = buffer in

@@ -8,9 +8,11 @@ import tempfile
 root = Path(__file__).resolve().parents[2]
 prefix = root / '_install'
 library = root / '_build/vox-library'
-public = ['vox_lz4', 'vox_string_view', 'vox_iarray', 'vox_sequence',
-          'raw_memory', 'ghost_pref', 'pref']
-public += [p.stem for p in (root / 'verification/library').glob('vox_lz4_spec*.ml')]
+public = ['vox_lz4', 'vox_string_view', 'vox_iarray', 'vox_sequence']
+public += ['vox_lz4_spec', 'vox_lz4_spec_parse', 'vox_lz4_spec_decode_bytes',
+           'vox_lz4_spec_bytes', 'vox_lz4_spec_match', 'vox_lz4_spec_plan',
+           'vox_lz4_spec_token', 'vox_lz4_spec_wire', 'vox_lz4_spec_hashes',
+           'vox_lz4_spec_scan']
 with tempfile.TemporaryDirectory(prefix='lz4-public-') as name:
     work = Path(name)
     for module in public:
@@ -34,13 +36,16 @@ with tempfile.TemporaryDirectory(prefix='lz4-public-') as name:
         print(compiler + ': public-only client and ghost erasure passed')
         print(dump)
     failures = {
+        'heap_model': ('let f = Vox_lz4_spec_decode.decode_model\n', 'Unbound module'),
         'hidden': ('let f = Vox_lz4.C.compress_string\n', 'Unbound module'),
         'ghost': ('let f (s : string) : int = Iarray.length (Vox_string_view.contents s)\n', 'ghost'),
         'false_claim': ('let f (s : string) : {w : string | Vox_string_view.contents w === Vox_string_view.contents s} = Vox_lz4.compress s\n', 'refinement'),
+        'false_decode_status': ('let f (wire : string) : {d : Vox_lz4_spec.decoded | match d with Ok _ -> true | Error Vox_lz4_spec.Output_limit -> true | Error _ -> false} = Vox_lz4.decompress_verified wire 0\n', 'refinement'),
     }
     for name, (source, diagnostic) in failures.items():
         (work / (name + '.ml')).write_text(source)
-        result = subprocess.run([str(prefix / 'bin/ocamlc'), *flags, '-c', name + '.ml'],
-                                cwd=work, text=True, capture_output=True)
-        assert result.returncode != 0 and diagnostic.lower() in result.stderr.lower(), result.stderr
-        print(name + ': rejected as expected')
+        for compiler in ['ocamlc', 'ocamlopt']:
+            result = subprocess.run([str(prefix / 'bin' / compiler), *flags, '-c', name + '.ml'],
+                                    cwd=work, text=True, capture_output=True)
+            assert result.returncode != 0 and diagnostic.lower() in result.stderr.lower(), result.stderr
+            print(compiler + ': ' + name + ': rejected as expected')

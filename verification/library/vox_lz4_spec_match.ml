@@ -102,10 +102,10 @@ let[@def] (choose_match @ total) :
 
 let (hash_bytes @ total) (c0 : char) (c1 : char) (c2 : char) (c3 : char) :
     {h : int | 0 <= h && h < 65536} =
-  let b0 = int32_of_int (Vox_lz4_spec_decode.byte_of_char c0) in
-  let b1 = int32_of_int (Vox_lz4_spec_decode.byte_of_char c1) in
-  let b2 = int32_of_int (Vox_lz4_spec_decode.byte_of_char c2) in
-  let b3 = int32_of_int (Vox_lz4_spec_decode.byte_of_char c3) in
+  let b0 = int32_of_int (Vox_lz4_spec_parse.byte_of_char c0) in
+  let b1 = int32_of_int (Vox_lz4_spec_parse.byte_of_char c1) in
+  let b2 = int32_of_int (Vox_lz4_spec_parse.byte_of_char c2) in
+  let b3 = int32_of_int (Vox_lz4_spec_parse.byte_of_char c3) in
   let word = int32_or b0
     (int32_or (int32_lsl b1 8)
        (int32_or (int32_lsl b2 16) (int32_lsl b3 24))) in

@@ -8,7 +8,9 @@
                 vox_string_view.mli vox_string_view.ml \
                 borrow_iarray.mli borrow_iarray.ml pref.mli pref.ml \
                 ghost_pref.mli ghost_pref.ml raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml \
-                vox_lz4_spec_decode.ml vox_lz4_spec_bytes.ml \
+                vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml \
+                vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml \
+                vox_lz4_heap_bytes.ml \
                 vox_lz4_spec_match.ml vox_lz4_spec_plan.ml \
                 vox_lz4_spec_token.ml vox_lz4_spec_wire.ml \
                 vox_lz4_spec_hashes.ml vox_lz4_spec_scan.ml \
@@ -21,6 +23,7 @@
                 vox_lz4_general_match.ml vox_lz4_string_match.ml \
                 vox_lz4_general_plan.ml \
                 vox_lz4_general_encode.ml vox_lz4_general_wire.ml \
+                vox_lz4_decode_bytes_proof.ml vox_lz4_decode_bytes_roundtrip.ml \
                 vox_lz4_general_cost.ml vox_lz4_general_bridge.ml \
                 vox_lz4_general_sized.ml vox_lz4_string_encode.ml \
                 vox_lz4_general_roundtrip.ml \
@@ -94,7 +97,7 @@ let check source =
   if capacity <= 4194304 then begin
     let decoded = Vox_lz4_string_decode.decode_string verified capacity in
     ghost_ (Vox_lz4_streaming_roundtrip.roundtrip source verified capacity decoded);
-    assert (decoded.Vox_lz4_string_decode.output = Some source)
+    assert (decoded = Ok source)
   end
 
 let () =
@@ -128,4 +131,4 @@ let () =
   assert (wire = Vox_lz4.compress large);
   let decoded = Vox_lz4_string_decode.decode_string wire 65536 in
   Gc.full_major ();
-  assert (decoded.Vox_lz4_string_decode.output = Some large)
+  assert (decoded = Ok large)

@@ -25,7 +25,7 @@ let compress :
     | Some buffer ->
       let { B.block; permission; used } = buffer in
       let wire : {s : string | Iarray.length (V.contents s) = used
-          && Vox_lz4_spec_bytes.prefix_matches (V.contents s)
+          && Vox_lz4_heap_bytes.prefix_matches (V.contents s)
                (G.own permission) block used} =
         try Copy.copy_prefix block used (borrow_ permission)
         with exn ->

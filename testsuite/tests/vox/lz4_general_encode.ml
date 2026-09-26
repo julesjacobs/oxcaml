@@ -8,7 +8,9 @@
                 borrow_iarray.mli borrow_iarray.ml pref.mli pref.ml \
                 ghost_pref.mli ghost_pref.ml raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml \
                 vox_string_view.mli vox_string_view.ml \
-                vox_lz4_spec_decode.ml vox_lz4_spec_bytes.ml \
+                vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml \
+                vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml \
+                vox_lz4_heap_bytes.ml \
                 vox_lz4_spec_match.ml vox_lz4_spec_plan.ml \
                 vox_lz4_spec_token.ml vox_lz4_spec_wire.ml \
                 vox_lz4_spec_hashes.ml vox_lz4_spec_scan.ml \

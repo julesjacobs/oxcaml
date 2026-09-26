@@ -10,14 +10,14 @@ let (match_token_fields @ total) :
     (literals : {n : int | 0 <= n && n <= 4194304}) ->
     (match_code : {n : int | 0 <= n && n <= 4194304}) ->
     {u : unit |
-      Vox_lz4_spec_decode.high4 (Vox_lz4_spec_token.match_token literals match_code) =
+      Vox_lz4_spec_parse.high4 (Vox_lz4_spec_token.match_token literals match_code) =
         (if literals >= 15 then 15 else literals)
-      && Vox_lz4_spec_decode.low15 (Vox_lz4_spec_token.match_token literals match_code) =
+      && Vox_lz4_spec_parse.low15 (Vox_lz4_spec_token.match_token literals match_code) =
         (if match_code >= 15 then 15 else match_code)} @ ghost =
   fun literals match_code -> ghost_ (
     let token = Vox_lz4_spec_token.match_token literals match_code in
-    let high = Vox_lz4_spec_decode.high4 token in
-    let low = Vox_lz4_spec_decode.low15 token in
+    let high = Vox_lz4_spec_parse.high4 token in
+    let low = Vox_lz4_spec_parse.low15 token in
     let _ = high, low in
     ())
 
@@ -56,9 +56,9 @@ let (decode_end @ total) :
       R.extra_count_def literals;
       R.wire_byte_get wire cursor (Vox_lz4_spec_bytes.literal_token literals);
       R.literal_token_fields literals;
-      let token = Vox_lz4_spec_decode.byte_of_char
+      let token = Vox_lz4_spec_parse.byte_of_char
         (Vox_sequence.iarray_get wire cursor) in
-      let initial = Vox_lz4_spec_decode.high4 token in
+      let initial = Vox_lz4_spec_parse.high4 token in
       R.read_literal_length wire (cursor + 1) literals initial;
       R.literal_heap_substitute heap block anchor wire
         (cursor + 1 + extensions) source anchor literals;
@@ -116,14 +116,14 @@ let (decode_sequence_step @ total) :
       match_token_fields literals match_code;
       R.literal_token_fields literals;
       R.match_token_fields match_code;
-      let token = Vox_lz4_spec_decode.byte_of_char
+      let token = Vox_lz4_spec_parse.byte_of_char
         (Vox_sequence.iarray_get wire cursor) in
       let _ : {u : unit |
         token = Vox_lz4_spec_token.match_token literals match_code} = () in
       let literal_nibble : {n : int | 0 <= n && n <= 15} =
-        Vox_lz4_spec_decode.high4 token in
+        Vox_lz4_spec_parse.high4 token in
       let _ : {u : unit | literal_nibble =
-        Vox_lz4_spec_decode.high4 (Vox_lz4_spec_bytes.literal_token literals)} = () in
+        Vox_lz4_spec_parse.high4 (Vox_lz4_spec_bytes.literal_token literals)} = () in
       let cursor1 : {i : int | 0 <= i && i <= Iarray.length wire} =
         (cursor + 1) in
       let _ : {u : unit | literals < 15 ||
@@ -139,7 +139,7 @@ let (decode_sequence_step @ total) :
         R.extra_count literals <= Iarray.length wire - cursor1} =
         () in
       R.read_literal_length wire cursor1 literals literal_nibble;
-      let _ : {u : unit | Vox_lz4_spec_decode.read_length wire cursor1
+      let _ : {u : unit | Vox_lz4_spec_parse.read_length wire cursor1
         literal_nibble === D.Length (literal_pos, literals)} =
         () in
       let distance = Vox_lz4_spec_token.split_distance step.distance in
@@ -149,19 +149,19 @@ let (decode_sequence_step @ total) :
       Vox_lz4_spec_bytes.source_at_def wire (distance_pos + 1);
       R.wire_byte_get wire distance_pos distance.low;
       R.wire_byte_get wire (distance_pos + 1) distance.high;
-      let low = Vox_lz4_spec_decode.byte_of_char
+      let low = Vox_lz4_spec_parse.byte_of_char
         (Vox_sequence.iarray_get wire distance_pos) in
-      let high = Vox_lz4_spec_decode.byte_of_char
+      let high = Vox_lz4_spec_parse.byte_of_char
         (Vox_sequence.iarray_get wire (distance_pos + 1)) in
       let _ : {u : unit | low + 256 * high = step.distance} =
         () in
       let match_nibble : {n : int | 0 <= n && n <= 15} =
-        Vox_lz4_spec_decode.low15 token in
+        Vox_lz4_spec_parse.low15 token in
       let match_cursor : {i : int | 0 <= i && i <= Iarray.length wire} =
         (distance_pos + 2) in
       R.read_match_length wire match_cursor match_code
         match_nibble;
-      let _ : {u : unit | Vox_lz4_spec_decode.read_length wire match_cursor
+      let _ : {u : unit | Vox_lz4_spec_parse.read_length wire match_cursor
         match_nibble ===
         D.Length (distance_pos + 2 + match_extensions, match_code)} =
         () in

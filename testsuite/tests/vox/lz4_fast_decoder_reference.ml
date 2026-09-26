@@ -8,7 +8,9 @@
                 vox_string_view.mli vox_string_view.ml \
                 borrow_iarray.mli borrow_iarray.ml pref.mli pref.ml \
                 ghost_pref.mli ghost_pref.ml raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml \
-                vox_lz4_spec_decode.ml vox_lz4_spec_bytes.ml \
+                vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml \
+                vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml \
+                vox_lz4_heap_bytes.ml \
                 vox_lz4_spec_match.ml vox_lz4_spec_plan.ml \
                 vox_lz4_spec_token.ml vox_lz4_spec_wire.ml \
                 vox_lz4_spec_hashes.ml vox_lz4_spec_scan.ml \
@@ -21,6 +23,7 @@
                 vox_lz4_general_match.ml vox_lz4_string_match.ml \
                 vox_lz4_general_plan.ml \
                 vox_lz4_general_encode.ml vox_lz4_general_wire.ml \
+                vox_lz4_decode_bytes_proof.ml vox_lz4_decode_bytes_roundtrip.ml \
                 vox_lz4_general_cost.ml vox_lz4_general_bridge.ml \
                 vox_lz4_general_sized.ml vox_lz4_string_encode.ml \
                 vox_lz4_general_roundtrip.ml \
@@ -81,17 +84,18 @@ let check block capacity =
   let public = Vox_lz4.decompress ~capacity block in
   if 0 <= capacity && capacity <= 4194304 then begin
     let decoded = SD.decode_string block capacity in
-    assert (decoded.SD.status = reference);
-    match decoded.SD.output, decoded.SD.error with
-    | Some output, None ->
+    match decoded with
+    | Ok output ->
       assert (reference = D.Done && output = expected);
       assert (fast = Ok output);
       assert (public = Ok output)
-    | None, Some error ->
-      assert (reference <> D.Done);
+    | Error error ->
+      assert (reference = (match error with
+        | SD.Malformed _ -> D.Malformed
+        | SD.Output_limit -> D.Output_limit
+        | SD.Invalid_capacity -> assert false));
       assert (fast = Error (baseline_error error));
       assert (public = Error error)
-    | _ -> assert false
   end;
   match fast with
   | Ok got ->
@@ -100,6 +104,11 @@ let check block capacity =
   | Error _ -> assert (reference <> D.Done)
 
 let () =
+  for byte = 0 to 255 do
+    let token = D.byte_of_char (Char.chr byte) in
+    assert (D.high4 token = byte / 16);
+    assert (D.low15 token = byte mod 16)
+  done;
   let random = Random.State.make [|71; 23; 2026|] in
   for _ = 1 to 5000 do
     let length = Random.State.int random 65 in

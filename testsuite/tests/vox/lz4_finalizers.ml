@@ -32,8 +32,8 @@ let decoder_failure wire =
   match Vox_lz4_string_decode.decode (ghost_ (Vox_string_view.contents wire))
           wire 8192 with
   | None -> failwith "allocation failed before fault injection"
-  | Some { Vox_lz4_string_decode.status; buffer; error = _ } ->
-    assert (status = Vox_lz4_spec_decode.Done);
+  | Some { Vox_lz4_string_decode.buffer; error } ->
+    assert (error = None);
     assert (Vox_lz4_buffer.used (borrow_ buffer) = 8192);
     raise Out_of_memory
 

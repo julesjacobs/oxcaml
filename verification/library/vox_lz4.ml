@@ -32,10 +32,7 @@ let decompress ?(capacity = max_block_size) wire =
   if capacity < 0 || capacity > max_block_size then Error Invalid_capacity
   else
     let decoded = decompress_verified wire capacity in
-    match decoded.D.output, decoded.D.error with
-    | Some output, None -> Ok output
-    | None, Some error -> Error error
-    | _ -> assert false
+    decoded
 
 let compress_decompress : (source : string) ->
     {output : string | V.contents output === V.contents source} =
@@ -46,8 +43,8 @@ let compress_decompress : (source : string) ->
     else
       let decoded = decompress_verified wire capacity in
       ghost_ (R.roundtrip source wire capacity decoded);
-      match decoded.D.output with
-      | Some output -> output
-      | None -> assert false
+      match decoded with
+      | Ok output -> output
+      | Error _ -> assert false
 
 let (roundtrip @ total) = R.roundtrip

@@ -23,6 +23,33 @@ let[@inline always] split_distance :
     let _ = ghost_ (Vox_lz4_spec_token.split_distance distance) in
     { E.low = low; high = high }
 
+let (emit_head_capacity @ total) :
+    (model : {m : char iarray | Iarray.length m <= 4194304}) ->
+    (anchor : {a : int | 0 <= a && a <= Iarray.length model}) ->
+    (step : {s : P.sequence | anchor <= s.position
+      && s.position <= Iarray.length model && 4 <= s.length
+      && s.length <= 4194304}) ->
+    (rest : {p : P.plan |
+      Vox_lz4_spec_plan.valid_plan model anchor (P.Sequence (step, p))}) ->
+    (remaining : {n : int |
+      C.encoded_size model anchor (P.Sequence (step, rest)) <= n}) ->
+    {u : unit |
+      let literals = step.position - anchor in
+      let match_code = step.length - 4 in
+      3 + Vox_lz4_spec_wire.extra_count literals + literals
+        + Vox_lz4_spec_wire.extra_count match_code <= remaining
+      && 0 <= C.encoded_size model (step.position + step.length) rest
+      && C.encoded_size model (step.position + step.length) rest
+        <= 2 * (Iarray.length model - (step.position + step.length)) + 16}
+      @ ghost =
+  fun model anchor step rest remaining -> ghost_ (
+    Vox_lz4_spec_plan.valid_plan_def model anchor (P.Sequence (step, rest));
+    C.encoded_size_def model anchor (P.Sequence (step, rest));
+    Vox_lz4_spec_wire.extra_count_def (step.position - anchor);
+    Vox_lz4_spec_wire.extra_count_def (step.length - 4);
+    C.encoded_size_loose_bound model (step.position + step.length) rest;
+    ())
+
 let[@inline always] emit_head :
     (model : {m : char iarray | Iarray.length m <= 4194304}) @ ghost ->
     (source : {s : string | V.contents s === model}) ->
@@ -46,26 +73,14 @@ let[@inline always] emit_head :
     ghost_ (
       Vox_lz4_spec_plan.valid_plan_def model anchor (P.Sequence (step, rest));
       C.encoded_size_def model anchor (P.Sequence (step, rest));
+      emit_head_capacity model anchor step rest (M.length block - used);
+      Vox_lz4_spec_wire.extra_count_def (step.position - anchor);
+      Vox_lz4_spec_wire.extra_count_def (step.length - 4);
       E.encode_model_def model anchor (P.Sequence (step, rest)) block used
         (G.own (borrow_ permission)));
     let buffer : B.t = { B.block; permission; used } in
       let literals = step.position - anchor in
       let match_code = step.length - 4 in
-      let literal_extensions =
-        if literals >= 15 then Vox_lz4_spec_bytes.extension_count (literals - 15)
-        else 0 in
-      let match_extensions =
-        if match_code >= 15 then Vox_lz4_spec_bytes.extension_count (match_code - 15)
-        else 0 in
-      let needed =
-        1 + literal_extensions + literals + 2 + match_extensions in
-      ghost_ (
-        Vox_lz4_spec_wire.extra_count_def literals;
-        Vox_lz4_spec_wire.extra_count_def match_code;
-        C.encoded_size_loose_bound model
-          (step.position + step.length) rest);
-      let _ : {u : unit | needed <= M.length block - used} =
-        ghost_ (()) in
       let token = Vox_lz4_spec_token.match_token literals match_code in
       let buffer = B.append buffer token in
       let buffer =
@@ -89,7 +104,7 @@ let rec scan :
       && T.agrees (Table.contents t) entries 65536}) @ unique ->
     (position : {p : int | 0 <= p && p <= Iarray.length model}) ->
     (anchor : {a : int | 0 <= a && a <= position}) ->
-    (fuel : {f : int | f = Iarray.length model - position + 1}) ->
+    (fuel : {f : int | f = Iarray.length model - position + 1}) @ ghost ->
     (buffer : {b : B.t |
       C.encoded_size model anchor (Vox_lz4_spec_scan.scan model entries position anchor fuel)
         <= M.length b.block - b.used}) @ unique ->
@@ -117,14 +132,14 @@ let rec scan :
       let limit = V.length source - 5 - position in
       match Match.choose_match source model position limit candidate with
       | None ->
-        scan model source entries table (position + 1) anchor (fuel - 1) buffer
+        scan model source entries table (position + 1) anchor (ghost_ (fuel - 1)) buffer
       | Some choice ->
         let next = position + choice.length in
         let step = { P.position; distance = choice.distance; length = choice.length } in
         let rest = ghost_ (Vox_lz4_spec_scan.scan model entries next next (fuel - choice.length)) in
         ghost_ (Vox_lz4_spec_plan.valid_plan_def model anchor (P.Sequence (step, rest)));
         let buffer = emit_head model source anchor step rest buffer in
-        scan model source entries table next next (fuel - choice.length) buffer
+        scan model source entries table next next (ghost_ (fuel - choice.length)) buffer
 [@@decreases fuel]
 
 let encode :
@@ -150,4 +165,4 @@ let encode :
         C.extension_budget_def length);
       (* Exceptions consume authority; unreachable storage is reclaimed by
          the raw carrier finalizer without restoring the input token. *)
-      Some (scan model source (ghost_ []) table 0 0 (length + 1) buffer)
+      Some (scan model source (ghost_ []) table 0 0 (ghost_ (length + 1)) buffer)

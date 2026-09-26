@@ -1,7 +1,7 @@
 let (match_token @ total) :
     (literals : {n : int | 0 <= n && n <= 4194304}) ->
     (match_code : {n : int | 0 <= n && n <= 4194304}) ->
-    {token : Raw_memory.byte | token =
+    {token : Vox_lz4_spec_parse.byte | token =
       16 * (if literals >= 15 then 15 else literals)
       + (if match_code >= 15 then 15 else match_code)} =
   fun literals match_code ->
@@ -9,7 +9,7 @@ let (match_token @ total) :
     let low = if match_code >= 15 then 15 else match_code in
     (16 * high + low)
 
-type distance_bytes = { low : Raw_memory.byte; high : Raw_memory.byte }
+type distance_bytes = { low : Vox_lz4_spec_parse.byte; high : Vox_lz4_spec_parse.byte }
 
 let (split_distance @ total) :
     (distance : {d : int | 0 <= d && d <= 65535}) ->

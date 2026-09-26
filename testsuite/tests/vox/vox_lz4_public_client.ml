@@ -10,9 +10,9 @@ let roundtrip : (source : {s : string | Iarray.length (V.contents s) <= 4194304}
     let capacity = V.length source in
     let decoded = C.decompress_verified wire capacity in
     ghost_ (C.roundtrip source wire capacity decoded);
-    match decoded.Vox_lz4_spec.output with
-    | Some output -> output
-    | None -> assert false
+    match decoded with
+    | Ok output -> output
+    | Error _ -> assert false
 
 let () =
   let source = "let square x = x * x\nlet square x = x * x\n" in

@@ -56,7 +56,7 @@ let rec copy_literals :
       let before = ghost_ (P.own (borrow_ permission)) in
       ghost_ (Vox_lz4_spec_decode.literal_heap_def before block used source first remaining);
       let buffer : B.t = { B.block; permission; used } in
-      let value = Vox_lz4_spec_decode.byte_of_char (S.iarray_get source first) in
+      let value = Vox_lz4_spec_parse.byte_of_char (S.iarray_get source first) in
       let buffer = B.append buffer value in
       copy_literals source (first + 1) (remaining - 1) buffer
 [@@decreases remaining]
@@ -87,9 +87,9 @@ let rec decode_sequences : (source : char iarray) ->
   if input_pos < 0 || input_pos >= n || fuel <= 0 then
     { status = Malformed; buffer }
   else
-    let token = Vox_lz4_spec_decode.byte_of_char (S.iarray_get source input_pos) in
+    let token = Vox_lz4_spec_parse.byte_of_char (S.iarray_get source input_pos) in
     let after_token = input_pos + 1 in
-    match Vox_lz4_spec_decode.read_length source after_token (Vox_lz4_spec_decode.high4 token) with
+    match Vox_lz4_spec_parse.read_length source after_token (Vox_lz4_spec_parse.high4 token) with
     | Length_truncated -> { status = Malformed; buffer }
     | Length_limit -> { status = Output_limit; buffer }
     | Length (literal_pos, literal_count) ->
@@ -104,7 +104,7 @@ let rec decode_sequences : (source : char iarray) ->
         else
           let after_literals = literal_pos + literal_count in
           if after_literals = n then
-            if Vox_lz4_spec_decode.low15 token <> 0
+            if Vox_lz4_spec_parse.low15 token <> 0
                || (last_match_start >= 0
                    && (literal_count < 5
                        || last_match_start > used + literal_count - 12))
@@ -115,15 +115,15 @@ let rec decode_sequences : (source : char iarray) ->
           else if n - after_literals < 2 then
             { status = Malformed; buffer }
           else
-            let low = Vox_lz4_spec_decode.byte_of_char (S.iarray_get source after_literals) in
+            let low = Vox_lz4_spec_parse.byte_of_char (S.iarray_get source after_literals) in
             let high =
-              Vox_lz4_spec_decode.byte_of_char (S.iarray_get source (after_literals + 1)) in
+              Vox_lz4_spec_parse.byte_of_char (S.iarray_get source (after_literals + 1)) in
             let distance = low + high * 256 in
             if distance <= 0 || distance > used + literal_count then
               { status = Malformed; buffer }
             else
-              match Vox_lz4_spec_decode.read_length source (after_literals + 2)
-                      (Vox_lz4_spec_decode.low15 token) with
+              match Vox_lz4_spec_parse.read_length source (after_literals + 2)
+                      (Vox_lz4_spec_parse.low15 token) with
               | Length_truncated -> { status = Malformed; buffer }
               | Length_limit -> { status = Output_limit; buffer }
               | Length (next_pos, match_code) ->

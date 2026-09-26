@@ -9,34 +9,31 @@ interface is `vox_lz4.mli`. It contains the normal-return compressor and decoder
 contracts, executable byte-identity contract, and total composition theorem.
 It names no streaming implementation or proof module.
 
-The complete semantic definitions are in these files:
+The complete allocation-independent semantic definitions are in these files:
 
-1. `vox_lz4_spec.ml`: compression relation, decoder observation relation, error
-   types, returned observations, and erased allocation witness.
-2. `vox_lz4_spec_decode.ml`: byte conversion, token fields, extended lengths,
-   literal writes, overlapping match writes, terminal-sequence restrictions,
-   status classification, and the total decoder. This is the full parser,
-   including malformed-input and output-limit decisions.
-3. `vox_lz4_spec_bytes.ml`: bounded source access, length extension encoding,
-   literal bytes, individual wire bytes, and output-prefix equality.
-4. `vox_lz4_spec_wire.ml`: exact wire layout of each sequence and terminal run.
-5. `vox_lz4_spec_token.ml`: token and little-endian offset encoding.
-6. `vox_lz4_spec_plan.ml`: sequence/plan types and validity, including the final
+1. `vox_lz4_spec.ml`: compression relation, decoder observation relation,
+   error types and the ordinary string/error result.
+2. `vox_lz4_spec_parse.ml`: byte conversion, token nibbles, extended lengths
+   and parser status classification.
+3. `vox_lz4_spec_decode_bytes.ml`: reverse-order decoded bytes, distance lookup,
+   literal appends, overlapping match appends, exact parser/capacity/terminal
+   decisions, the total decoder and its output-byte observation predicate.
+4. `vox_lz4_spec_bytes.ml`: bounded source access, length-extension encoding,
+   literal bytes and individual wire bytes.
+5. `vox_lz4_spec_wire.ml`: exact wire layout of each sequence and terminal run.
+6. `vox_lz4_spec_token.ml`: token and little-endian offset encoding.
+7. `vox_lz4_spec_plan.ml`: sequence/plan types and validity, including the final
    five literal bytes and twelve-byte last-match restriction.
-7. `vox_lz4_spec_match.ml`: source-distance equality, maximal match search,
-   candidate validation, and the four-byte hash. The exclusion below applies
+8. `vox_lz4_spec_match.ml`: source-distance equality, maximal match search,
+   candidate validation and the four-byte hash. The exclusion below applies
    to its one embedded proof body.
-8. `vox_lz4_spec_hashes.ml`: immutable most-recent-position table lookup.
-9. `vox_lz4_spec_scan.ml`: exact visited positions, hash-table updates, match
-   jumps, and termination measure of the compressor model.
-10. `vox_lz4_spec_storage.ml`: initialized-prefix predicate used by the trusted
-    final-copy contract and both mutable buffer representations.
+9. `vox_lz4_spec_hashes.ml`: immutable most-recent-position table lookup.
+10. `vox_lz4_spec_scan.ml`: exact visited positions, hash-table updates, match
+    jumps and termination measure of the compressor model.
 
-These modules contain the definitions themselves, rather than opaque predicate
-names. The old implementation/proof modules reuse these definitions; they do
-not supply an alternative semantic model. In particular, compressor correctness
-still fixes the actual scanner's wire output, rather than merely asserting the
-existence of some decodable output.
+The definitions fix the actual scanner's wire output and every successful
+output byte. None of these modules uses a raw allocation, location or heap.
+The result has one discriminator and contains no allocation witness.
 
 ## Explicit proof-body exclusion
 
@@ -53,38 +50,52 @@ hidden by this exclusion.
 
 ## Transitive semantic primitives and assumptions
 
-Read the following interfaces as part of the review surface:
+The public semantic dependency closure additionally uses:
 
-- `vox_string_view.mli`: trusted immutable string contents, length, and indexed
+- `vox_string_view.mli`: trusted immutable string contents, length and indexed
   byte observation. No runtime iarray is made by the contents selector.
-- `vox_sequence.mli`: `iarray_get` is the total bounded primitive array read.
-- `vox_iarray.mli`: `get`, `at` characterized by `at_get`/`at_outside`, and extensional
-  array equality; `updated`/`updated_read` for the owned-array access contracts.
+- `vox_sequence.mli`: `iarray_get`, the total bounded primitive array read.
+- `vox_iarray.mli`: `get`, `at` characterized by `at_get`/`at_outside`, and
+  extensional array equality.
+
+Standard integer arithmetic/comparison, iarray length, lists/options/records,
+character primitives and 32-bit word operations retain their language/compiler
+meanings. Byte conversion assumptions are explicit in `vox_lz4_spec_parse.ml`;
+hash word primitives are in `vox_lz4_spec_match.ml`. Refinement, totality and
+proof-erasure checking and the SMT backend are trusted.
+
+## Executable ownership and primitive boundary
+
+The pure public model does not remove any ownership assumption from the
+executable verification. Review these contracts and their complete meanings:
+
 - `pref.mli`: location, heap and affine-token types, finite-map operations and
   laws in `Heap`, and ownership primitives.
-- `ghost_pref.mli`: erased ownership adapters and the heap aliases.
+- `ghost_pref.mli`: erased ownership adapters and heap aliases.
 - `raw_memory.mli`: allocation identity, length, byte range, `location_law`,
-  complete `range_def`/`footprint_def` characterizations, memory access and free
-  contracts. `footprint` initializes the decoder's mathematical heap.
+  complete `range_def`/`footprint_def`/`covers_def` characterizations, memory
+  access and free contracts.
+- `borrow_iarray.mli`: owned-array access, including integer reads/writes and
+  the `vox_iarray.mli` update equations they use.
+- `vox_lz4_string_copy.mli`: final-copy contract, with complete initialized
+  storage and byte-prefix meanings in `vox_lz4_spec_storage.ml` and
+  `vox_lz4_heap_bytes.ml`.
 
-The semantic code also uses standard integer arithmetic/comparison, iarray
-length, lists/options/records, character primitives, and 32-bit word operations.
-Their language/compiler meanings are assumed. Byte conversion assumptions are
-spelled out in `vox_lz4_spec_decode.ml`; hash word primitives are listed in
-`vox_lz4_spec_match.ml`. Refinement, totality and ghost-erasure checking and the
-SMT backend are trusted.
+Trusted implementations remain `runtime/borrow.c`, `runtime/pref.c` and the
+integer-array/raw-byte lowerings in `backend/cmm_builtins.ml`.
 
-For the executable refinement proof, additionally review the primitive contracts
-in `borrow_iarray.mli` and `vox_lz4_string_copy.mli`. The implementation boundary
-includes `runtime/borrow.c`, `runtime/pref.c` and the integer-array/raw-byte
-lowerings in `backend/cmm_builtins.ml`. These are trusted implementations of the
-primitive contracts, not additional codec semantics.
-
-The decoder model currently uses raw-memory locations as mathematical indices.
-Consequently its erased block witness and the finite-map/location semantics are
-explicitly part of this review surface. The witness is returned by the API;
-clients supply no allocation token, heap invariant, match plan, or proof object.
-No mutable permission or intermediate heap is exposed in the decoded result.
+`vox_lz4_spec_decode.ml` is now an internal heap model. The checked
+`vox_lz4_decode_bytes_proof.initial_observations` theorem equates status, count
+and output-byte observations in both directions for every initial heap and
+block at a valid capacity. Its prefix/copy induction and intermediate
+`heap_matches` invariant are proof internals. Mutable decoder contracts still
+preserve exact buffer identity, count and mathematical heap state.
+`vox_lz4_decode_bytes_roundtrip.ml` proves the pure plan/wire composition
+without requiring any allocation to exist. Cursor-progress lemmas justify
+erasing the mutable decoder's fuel counters; the compressor counter is fixed
+by its current position and is also erased. Input and capacity guards remain.
+Neither proof module belongs to
+the public semantic dependency closure.
 
 ## Domain and limitations
 
@@ -94,7 +105,7 @@ requires capacity at least the source length and at most 4 MiB. Ordinary mutable
 entrypoints have normal-return contracts, not totality contracts.
 
 Detailed diagnostic reasons/positions are not specified by the total model;
-its three statuses are specified. Compression need not shrink every source.
+its three statuses and their result classification are specified. Compression need not shrink every source.
 There is one final copy from raw storage into a fresh GC string.
 
 Allocation failure during compressor scanning or decoder sequence processing
@@ -116,7 +127,8 @@ guarantee. No exception-safety theorem is claimed.
   derives byte identity from the two actual calls and exported total theorem,
   and links/runs it in bytecode and native modes. It checks Lambda output for
   erased semantic dependencies and rejects access to hidden implementation
-  modules, runtime use of ghost contents, and a false compression identity.
+  modules, runtime use of ghost contents, a false compression identity and
+  a false decoder-status claim. The isolated client has no heap-model, raw-memory or ownership CMIs.
 - `python3 verification/benchmarks/lz4_finalizers.py` checks live-buffer GC
   safety, explicit release without double reclamation, and GC reclamation after
   simulated synchronous `Out_of_memory` exits following actual compressor and

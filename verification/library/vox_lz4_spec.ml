@@ -12,28 +12,22 @@ type decode_error =
   | Output_limit
   | Invalid_capacity
 
-type decoded = {
-  output : string option;
-  status : Vox_lz4_spec_decode.status;
-  error : decode_error option;
-  block : Raw_memory.t @@ ghost;
-}
+type decoded = (string, decode_error) result
 
 let[@def] (matches_model @ total) (wire : string @ immutable)
     (capacity : int) (result : decoded @ immutable) = ghost_ (
-  let model = Vox_lz4_spec_decode.decode_model (Vox_string_view.contents wire) 0 (-1)
-      (Iarray.length (Vox_string_view.contents wire)) capacity result.block 0
-      (Raw_memory.footprint result.block) in
-  Raw_memory.length result.block = capacity
-  && result.status === model.Vox_lz4_spec_decode.kind
-  && (match result.error with None -> result.status === Vox_lz4_spec_decode.Done
-      | Some _ -> not (result.status === Vox_lz4_spec_decode.Done))
-  && match result.output with
-     | None -> not (result.status === Vox_lz4_spec_decode.Done)
-     | Some output -> result.status === Vox_lz4_spec_decode.Done
-         && Iarray.length (Vox_string_view.contents output) = model.Vox_lz4_spec_decode.count
-         && Vox_lz4_spec_bytes.prefix_matches (Vox_string_view.contents output) model.Vox_lz4_spec_decode.state
-              result.block model.Vox_lz4_spec_decode.count)
+  let model = Vox_lz4_spec_decode_bytes.decode_model
+    (Vox_string_view.contents wire) 0 (-1)
+    (Iarray.length (Vox_string_view.contents wire)) capacity 0 [] in
+  0 <= capacity && capacity <= 4194304
+  && match result with
+     | Error (Malformed _) -> model.kind === Vox_lz4_spec_parse.Malformed
+     | Error Output_limit -> model.kind === Vox_lz4_spec_parse.Output_limit
+     | Error Invalid_capacity -> false
+     | Ok output -> model.kind === Vox_lz4_spec_parse.Done
+         && Iarray.length (Vox_string_view.contents output) = model.count
+         && Vox_lz4_spec_decode_bytes.matches_bytes
+              (Vox_string_view.contents output) model.count model.reversed)
 
 let[@def] (compresses @ total) (source : string @ immutable)
     (wire : string @ immutable) = ghost_ (
