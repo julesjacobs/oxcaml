@@ -3,8 +3,9 @@ open Vox_rsa_spec
 open Vox_rsa_arithmetic
 open Vox_rsa_number_theory
 
-(* Nonlinear integer arithmetic; Z3 needs about 0.2 s (warning 222). *)
-let[@warning "-222"] (inverse_action @ total) (a : t) (inverse : t) (p : t) (x : t) :
+(* Nonlinear integer arithmetic: about 1.6M solver resource units, over the
+   1M slow-refinement threshold. *)
+let[@warning "-slow-refinement"] (inverse_action @ total) (a : t) (inverse : t) (p : t) (x : t) :
     {u : unit | if p > 1Z && (a * inverse) mod p = 1Z then
       (((a * x) mod p) * inverse) mod p = x mod p else true} =
   reduce_left (a * x) inverse p;

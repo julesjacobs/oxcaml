@@ -33,8 +33,9 @@ let (reduce_product @ total) (a : t) (b : t) (n : t) :
   end
 
 (* The squaring steps combine products with [mod] (nonlinear integer
-   arithmetic); Z3 needs about 0.2 s for them (warning 222). *)
-let[@warning "-222"] rec (modexp @ total) : (a : t) ->
+   arithmetic): about 1.9M solver resource units, over the 1M slow-refinement
+   threshold. *)
+let[@warning "-slow-refinement"] rec (modexp @ total) : (a : t) ->
     (exponent : {e : t | e >= 0Z}) ->
     (modulus : {n : t | n > 0Z}) ->
     {r : t | let e = exponent in let n = modulus in

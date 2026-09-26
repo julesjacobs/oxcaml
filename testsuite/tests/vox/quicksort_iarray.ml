@@ -33,8 +33,9 @@ let (sequential_runner @ portable total) : runner =
   let u = () in u
 
 (* Every [int] is a 63-bit bitvector in the solver, so the index arithmetic of
-   the swap case is bit-blasted; Z3 needs about 0.25 s (warning 222). *)
-let[@warning "-222"] rec (partition @ total) : (pivot : int) -> (size : int) ->
+   the swap case is bit-blasted: about 2.4M solver resource units, over the 1M
+   slow-refinement threshold. *)
+let[@warning "-slow-refinement"] rec (partition @ total) : (pivot : int) -> (size : int) ->
     (lower : int) -> (scan : int) ->
     (loan : {s : int Slice.t |
       0 < size && 0 <= lower && lower <= scan && scan < size
