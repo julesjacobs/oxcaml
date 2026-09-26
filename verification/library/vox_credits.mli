@@ -14,20 +14,20 @@ module type S = sig
 
   val tick : (token : {t : token | credits t > 0})
       @ unique total ghost ->
-    {t : token | let refine_ token = token in
+    {t : token | let token = token in
       credits t = credits token - 1} @ unique total ghost @@ total
 
   val split : (amount : int) @ ghost ->
     (token : {t : token | 0 <= amount && amount <= credits t})
       @ unique total ghost ->
-    {p : partition | let refine_ token = token in credits p.left = amount &&
+    {p : partition | let token = token in credits p.left = amount &&
       credits p.right = credits token - amount} @ unique @@ total
 
   val merge : (left : token) @ unique total ghost ->
     (right : {t : token | 0 <= credits left && 0 <= credits t &&
       0 <= credits left + credits t})
       @ unique total ghost ->
-    {t : token | let refine_ right = right in
+    {t : token | let right = right in
       credits t = credits left + credits right} @ unique total ghost @@ total
 
 end
@@ -36,7 +36,7 @@ module Make () : sig
   include S
   module Budget : sig
   val create : (amount : {n : int | n >= 0}) @ ghost ->
-    {t : token | let refine_ amount = amount in credits t = amount}
+    {t : token | let amount = amount in credits t = amount}
       @ unique total ghost @@ total
 end
 end
