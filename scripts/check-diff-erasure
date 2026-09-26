@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Compile the demo and audit calls in the executable diff functions."""
+import pathlib
+import re
+import shutil
+import subprocess
+import tempfile
+
+root = pathlib.Path(__file__).resolve().parent.parent
+compilers = [root / "_install/bin" / name
+             for name in ("ocamlc", "ocamlopt")]
+if not all(compiler.is_file() for compiler in compilers):
+    raise SystemExit("Run ./dev init with a local _install prefix first.")
+
+
+def function_body(dump, name):
+    pattern = r"\b" + re.escape(name) + r"/\d+\s*(?:=\s*)?\(function\b"
+    binding = re.search(pattern, dump)
+    if binding is None:
+        raise AssertionError(f"Missing runtime function {name}")
+    start = dump.index("(function", binding.start())
+    depth = 0
+    quoted = False
+    escaped = False
+    for end in range(start, len(dump)):
+        ch = dump[end]
+        if quoted:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                quoted = False
+        elif ch == '"':
+            quoted = True
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return dump[start:end + 1]
+    raise AssertionError(f"Unterminated Lambda for {name}")
+
+
+expected = {
+    "snake": {"snake"},
+    "step_delete": set(),
+    "step_insert": set(),
+    "choose": {"snake"},
+    "advance": {"step_delete", "step_insert", "choose", "advance"},
+    "finished": {"finished"},
+    "search": {"finished", "advance", "search"},
+    "bounded_length": {"bounded_length"},
+    "diff": {"bounded_length", "snake", "search"},
+}
+
+def audit(compiler):
+    with tempfile.TemporaryDirectory(
+            prefix="diff-erasure-", dir=root / "_build") as tmp:
+        tmp = pathlib.Path(tmp)
+        dumps = {}
+        units = ("vox_diff_spec.mli", "vox_diff_spec.ml",
+                 "vox_diff.mli", "vox_diff.ml")
+        for unit in units:
+            shutil.copyfile(root / "verification/library" / unit, tmp / unit)
+            result = subprocess.run(
+                [str(compiler), "-extension", "refinement_types",
+                 "-drawlambda", *(["-opaque"] if unit.endswith(".mli")
+                                   else []), "-c", unit],
+                cwd=tmp, check=True, text=True, capture_output=True)
+            dumps[unit] = result.stderr
+        implementation = dumps["vox_diff.ml"]
+        exports_start = implementation.index("(makeblock 0 apply_source/")
+        exports_end = implementation.index(")", exports_start)
+        exports = re.findall(
+            r"([\w]+)/\d+", implementation[exports_start:exports_end])
+        reverse_index = exports.index("reverse_into")
+        for name, allowed in expected.items():
+            body = function_body(dumps["vox_diff.ml"], name)
+            direct = re.findall(r"\(apply\s+([\w]+)/\d+", body)
+            assert set(direct) == allowed, (name, direct, allowed)
+            assert "minimum_cost" not in body, name
+            assert "bigint" not in body.lower(), name
+            external_calls = re.findall(
+                r"\(apply\s+\(field_imm\s+(\d+)\s+Proof/\d+\)", body)
+            wanted = [str(reverse_index)] if name == "finished" else []
+            assert external_calls == wanted, (name, external_calls)
+            calls = re.findall(r"\(apply\b", body)
+            assert len(calls) == len(direct) + len(external_calls), name
+        search = function_body(implementation, "search")
+        assert not re.search(r"\((?:%int_\w+|[+*/-]|<=|>=|<|>|==|!=|raise|exit)\s", search), search
+        assert not re.search(r"\b(?:fuel|remaining)/\d+", search), search
+        entry = function_body(implementation, "diff")
+        assert not re.search(r"\((?:%int_add|\+)\s", entry), entry
+        body = function_body(implementation, "reverse_into")
+        calls = re.findall(r"\(apply\s+([\w]+)/\d+", body)
+        assert calls == ["reverse_into"]
+        assert "global" not in body and "bigint" not in body.lower()
+        public = tmp / "public"
+        public.mkdir()
+        for unit in ("vox_diff_spec.cmi", "vox_diff.cmi"):
+            shutil.copyfile(tmp / unit, public / unit)
+        client = root / "testsuite/tests/vox/diff_public_client.ml"
+        client_result = subprocess.run(
+            [str(compiler), "-extension", "refinement_types", "-principal",
+             "-drawlambda",
+             "-c", "-o", "diff_public_client.cmo" if compiler.name == "ocamlc"
+             else "diff_public_client.cmx", str(client)],
+            cwd=public, check=True, text=True, capture_output=True)
+        for name in ("verified_client", "accepted"):
+            body = function_body(client_result.stderr, name)
+            calls = re.findall(
+                r"\(apply\s+\(field_imm\s+0\s+\(global Vox_diff!\)\)",
+                body)
+            assert len(calls) == 1, (name, calls)
+            assert len(re.findall(r"\(apply\b", body)) == 1, name
+            assert "Vox_diff_spec" not in body, name
+    print(f"{compiler.name}: public-only client passes; "
+          "diff calls contain no proof, metric, "
+          "certificate, or bigint computations; search has no runtime fuel operations.")
+
+
+for compiler in compilers:
+    audit(compiler)
