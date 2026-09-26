@@ -358,17 +358,25 @@ ghost writes, and false map claims. `pref_modes.ml` exercises zero-layout
 uniqueness and the payload-kind boundary.
 
 `pref_records.ml` checks recursive and higher-order payloads. `pref_split.ml`
-checks split/write/join and historical observations. `pref_tree.ml` verifies a
-partial binary-tree mirror against a total inductive model, including validity,
-exact heap contents, and preservation of an unrelated frame. Its runtime client
-mirrors an asymmetric tree and checks every link and an unrelated empty node cell.
-`pref_list.ml` verifies in-place linked-list reversal with separate ownership
-for the remaining list and reversed prefix. Its contract gives the exact reversed
-node model and preserves an unrelated frame. A checked traversal compares node
-identities before and after reversal, including empty, singleton, repeated-value,
-and 1,000-node lists; reversing twice restores the original order.
-`pref_list_rejected.ml` rejects a no-op claimed to reverse a list and an attempt
-to drop a node from the owned map. These examples use the existing Pref laws.
+checks split/write/join and historical observations. `pref_tree.ml` (public
+interface `pref_tree.mli`) verifies a partial binary-tree mirror against a total
+inductive model, including validity, exact heap contents, and preservation of an
+unrelated frame. `pref_list.ml` (interface `pref_list.mli`) verifies in-place
+linked-list reversal with separate ownership for the remaining list and reversed
+prefix; its contract gives the exact reversed node model and preserves an
+unrelated frame. Both modules offer borrowed observers and an `Owned` facade
+whose unboxed handle carries the pointer, the ghost model and the token, with
+`adopt`/`release` bridges to the raw API. `pref_list_client.ml` and
+`pref_tree_client.ml` use only the interfaces: the frame passed through
+`reverse`/`mirror_with_frame` is an unrelated `node option` cell, and an
+unrelated `int` cell lives in a separate `int Pref.token`, since a typed token
+owns cells of one payload type. The list client compares node identities before
+and after reversal for empty, singleton, repeated-value and 1,000-node lists;
+reversing twice restores the original order. `pref_owned_client.ml` exercises
+the `Owned` facades. `pref_list_rejected.ml` and `pref_tree_rejected.ml` reject
+false reversal/mirror claims, a dropped node and a shared subtree, lookups of
+private helpers, and reuse of consumed handles or raw tokens.
+`Vox_pref_semantics` states the pointwise map laws used by these proofs.
 
 The `pref_ring_*_demo.ml` tests exercise circular doubly linked lists with a
 sentinel. Both link cells appear in the same ownership map. The examples check
