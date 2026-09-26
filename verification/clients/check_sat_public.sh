@@ -2,8 +2,13 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 prefix=$(cd "${1:?Usage: check_sat_public.sh COMPILER_PREFIX}" && pwd)
-public_dir=$(mktemp -d "${TMPDIR:-/tmp}/vox-sat-public.XXXXXX")
-trap 'rm -rf "$public_dir"' EXIT
+if [[ -n "${2:-}" ]]; then
+  mkdir -p "$2"
+  public_dir=$(cd "$2" && pwd)
+else
+  public_dir=$(mktemp -d "${TMPDIR:-/tmp}/vox-sat-public.XXXXXX")
+  trap 'rm -rf "$public_dir"' EXIT
+fi
 for module in vox_sat_spec vox_sat vox_cdcl vox_cdcl_total; do
   cp "$prefix/lib/ocaml/vox/$module.cmi" "$public_dir/"
 done

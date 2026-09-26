@@ -7,12 +7,14 @@ Read these files in order, all under `verification/library/`:
 1. `vox_sat_spec.mli`: literal/CNF types and complete checked equations for
    assignment lookup, literal/clause/formula satisfaction, assignment length,
    valid variable indices, input limits, assignment concatenation, and UNSAT.
+   The transparent `classify_input` equation fixes the accepted domain and
+   input-error precedence once for all total public entrypoints.
    `vox_sat_spec.ml` implements exactly these equations and can be read instead
    for their compact recursive definitions; interface checking connects them.
 2. `vox_sat.mli`: bounded DPLL's actual executable contract and the theorem
    specializing semantic UNSAT to any Boolean assignment.
 3. `vox_cdcl.mli`: mutable CDCL's actual executable contract, sound on return.
-4. `vox_cdcl_total.mli`: total bounded CDCL and the separate total combined
+4. `vox_cdcl_total.mli`: complete CDCL, bounded CDCL, and the separate combined
    solver, including exact permitted errors and the fallback depth guarantee.
 5. This file: termination/resource conventions and the shared trust boundary.
 
@@ -34,18 +36,17 @@ affect a valid formula. An empty CNF evaluates true; an empty clause false.
 
 The accepted solver domain is `0 <= n <= 256`, at most 4,096 clauses and
 65,536 literal occurrences, with valid indices. DPLL requires nonnegative
-fuel as a caller premise; CDCL entrypoints return `Invalid_fuel` for a negative
-budget. Mutable CDCL's error contract is deliberately unrestricted. The total
+fuel as a caller premise; budgeted CDCL entrypoints return `Invalid_fuel` for
+a negative budget. Complete CDCL has no fuel argument. Mutable CDCL's error contract is deliberately unrestricted. The total
 solver signatures specify each permitted input error and its ordering.
 
 Bounded DPLL and bounded CDCL permit `Unknown` without a semantic claim.
 Combined `solve_with_fallback fuel depth_fuel n formula` additionally proves
 `Unknown -> depth_fuel <= n`; accepted inputs and `depth_fuel >= n + 1`
-therefore force a decision. This is combined-solver completeness. CDCL eventual
-progress remains unproved; the separate fallback has not replaced its API.
-The CDCL contract permits `Unknown` at every nonnegative fuel value: the proof
-does not exclude search exhaustion, analysis exhaustion, or failed
-asserting-clause construction. Fuel monotonicity is not part of the contract.
+therefore force a decision. Independently, `solve_complete n formula` proves
+a CDCL decision for every accepted input, with no budget premise or fallback.
+The bounded CDCL contract permits `Unknown` and proves `statistics.steps = fuel`
+on that result. Fuel monotonicity is not part of the contract.
 The fallback can visit exponentially many nodes. Totality uses Vox's logical
 execution model, without a bound on available memory, stack, or elapsed time.
 Mutable CDCL is only proved sound when it returns.
@@ -62,10 +63,17 @@ supply a solver invariant. Private interfaces are excluded from installation.
 Persistent CDCL preserves strict reason order: every nonpivot variable in a
 stored reason occurs older than its assignment on the unique trail. This
 invariant survives enqueue, backtracking, and learned-clause insertion, and
-applies to the reason selected during conflict analysis. A checked trail-rank
-lemma gives each antecedent a smaller rank than its pivot. Analysis still uses
-fuel; clause-level decrease, asserting-clause success, and global CDCL progress
-remain open.
+applies to the reason selected during conflict analysis. Latest-pivot selection
+and strict reason order prove a whole-clause rank decrease at every resolution.
+Analysis terminates and returns a clause without fuel; its rank is erased.
+A preserved ghost prefix invariant ensures that nonroot analysis retains a
+current-level variable; asserting construction and learned enqueue succeed.
+A stronger prefix invariant proves learned-clause freshness. Resolution
+produces unique literals, bounding learned-clause length by `2 * n`. A finite
+clause universe supplies an erased absent-clause count. Search decreases that
+count times `n + 1`, plus the number of unassigned variables. Direct learned
+references remove machine ordinals; a trail-length proof bounds decision levels
+independently of fuel. Thus complete CDCL terminates throughout the domain.
 
 Learned clauses remain executable solver data. Their derivations erase.
 Semantic enumeration is used only in proofs of returned answers; solvers do
@@ -78,15 +86,15 @@ CDCL retains its length check.
 `verification/clients/check_sat_public.sh _install` copies only the four
 public `.cmi` files to an isolated directory, separately compiles
 `verification/clients/sat_public.ml`, and links/runs bytecode and native clients.
-Its arbitrary-input theorem derives the sufficient-depth decision guarantee,
-SAT satisfaction, and rejection of any proposed assignment on UNSAT.
+Its arbitrary-input theorems derive complete-CDCL and sufficient-fallback-depth
+decisions, SAT satisfaction, and rejection of any proposed assignment on UNSAT.
 The client cannot import a private interface.
 
 `verification/clients/check_sat_erasure.sh _install` checks bytecode/native
 Lambda for surviving public proof bridges or semantic enumeration calls.
 The public `unsat_at` body erases to unit. Native symbol inspection also finds
 no unassigned-count, reason-source, reason-order, trail-rank, trail-coverage,
-or level-bound helpers in
+level-bound, finite-universe, or global-progress helpers in
 `vox_cdcl_total_proof.o`; propagation remains executable.
 
 `testsuite/tests/vox/sat_solver.ml`, `sat_cdcl.ml`, and `sat_cdcl_total.ml`
@@ -94,7 +102,8 @@ exercise the public APIs. `sat_kernel.ml` separately checks private resolution
 operations. Rejection tests retain forged-UNSAT, mutable-totality, loop-totality,
 and mutable-array-bound checks. Public-interface rejection tests also prevent
 claiming CDCL completeness at fuel `n + 1` or combined completeness at fallback
-depth `n`; the positive `sufficient_depth` client proves the latter at `n + 1`.
+depth `n`; positive clients prove complete CDCL without fuel and the fallback
+guarantee at depth `n + 1`.
 The build and native benchmark use the
 installed compiler produced by `make install`.
 

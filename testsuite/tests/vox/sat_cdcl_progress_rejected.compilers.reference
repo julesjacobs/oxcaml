@@ -1,4 +1,4 @@
-File "sat_cdcl_progress_rejected.ml", line 29, characters 19-57:
-29 |   fun n formula -> Vox_cdcl_total.solve (n + 1) n formula
-                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "sat_cdcl_progress_rejected.ml", line 31, characters 2-40:
+31 |   Vox_cdcl_total.solve (n + 1) n formula
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)

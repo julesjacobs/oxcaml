@@ -58,7 +58,7 @@ val empty_proof_at :
   (assignment : bool list) ->
   {u : unit | not (eval_formula assignment formula)} @@ total
 
-type proof_result = private {
+type proof_result : immutable_data mod total = private {
   clause : literal list;
   proof : derivation @@ ghost;
 }
@@ -381,3 +381,147 @@ val scan_formula_conflict_clause : (limit : {n : int | 0 <= n}) @ ghost ->
       (match clause_at formula index with
        | None -> false | Some clause -> false_clause partial clause)
     | Scan_stable | Scan_unit _ -> true} @@ total
+
+val resolve_membership : (index : int) ->
+  (positive : literal list) -> (negative : literal list) ->
+  (query : literal) ->
+  {u : unit | has_literal query (resolve_clause index positive negative) =
+    ((has_literal query positive
+      && not (same_literal query (Positive index)))
+      || (has_literal query negative
+        && not (same_literal query (Negative index))))} @@ total
+
+val false_clause_def : (partial : bool option list) ->
+  (clause : literal list) ->
+  {u : unit | false_clause partial clause ===
+    (match clause with
+     | [] -> true
+     | literal :: rest ->
+       (match partial_literal partial literal with Some false -> true
+        | Some true | None -> false)
+       && false_clause partial rest)} @@ total
+
+val no_conflict : bool option list -> formula -> bool @@ total
+val no_conflict_def : (partial : bool option list) -> (formula : formula) ->
+  {u : unit | no_conflict partial formula ===
+    (match formula with
+     | [] -> true
+     | clause :: rest -> not (false_clause partial clause)
+       && no_conflict partial rest)} @@ total
+val scan_stable_no_conflict : (partial : bool option list) ->
+  (formula : formula) ->
+  {u : unit | if scan_formula partial formula === Scan_stable then
+    no_conflict partial formula else true} @@ total
+val no_conflict_clause : (partial : bool option list) ->
+  (formula : formula) -> (index : int) ->
+  {u : unit | if no_conflict partial formula then
+    match clause_at formula index with
+    | None -> true | Some clause -> not (false_clause partial clause)
+    else true} @@ total
+
+val false_clause_member : (partial : bool option list) ->
+  (clause : literal list) -> (query : literal) ->
+  {u : unit | if false_clause partial clause && has_literal query clause then
+    partial_literal partial query === Some false else true} @@ total
+val stable_clause : bool option list -> literal list -> bool @@ total
+val formula_stable : bool option list -> formula -> bool @@ total
+val formula_stable_def : (partial : bool option list) -> (formula : formula) ->
+  {u : unit | formula_stable partial formula ===
+    (match formula with
+     | [] -> true
+     | clause :: rest -> stable_clause partial clause
+       && formula_stable partial rest)} @@ total
+val scan_stable_formula : (partial : bool option list) -> (formula : formula) ->
+  {u : unit | (scan_formula partial formula === Scan_stable)
+    = formula_stable partial formula} @@ total
+val clause_member : formula -> literal list -> bool @@ total
+val clause_member_def : (formula : formula) -> (query : literal list) ->
+  {u : unit | clause_member formula query ===
+    (match formula with
+     | [] -> false
+     | clause :: rest -> same_clause clause query || clause_member rest query)}
+  @@ total
+val formula_stable_member : (partial : bool option list) ->
+  (formula : formula) -> (clause : literal list) ->
+  {u : unit | if formula_stable partial formula && clause_member formula clause
+    then stable_clause partial clause else true} @@ total
+val two_unassigned_stable : (partial : bool option list) ->
+  (clause : literal list) -> (first : literal) -> (second : literal) ->
+  {u : unit | if has_literal first clause && has_literal second clause
+      && not (same_literal first second)
+      && partial_literal partial first === None
+      && partial_literal partial second === None then
+    stable_clause partial clause else true} @@ total
+val unit_clause_unstable : (partial : bool option list) ->
+  (forced : literal) -> (clause : literal list) ->
+  {u : unit | if partial_literal partial forced === None
+      && false_except partial forced clause && has_literal forced clause then
+    not (stable_clause partial clause) else true} @@ total
+
+val unique_literals : literal list -> bool @@ total
+val unique_literals_def : (clause : literal list) ->
+  {u : unit | unique_literals clause ===
+    (match clause with
+     | [] -> true
+     | literal :: rest -> not (has_literal literal rest) && unique_literals
+       rest)}
+  @@ total
+val resolve_unique : (index : int) -> (positive : literal list) ->
+  (negative : literal list) ->
+  {u : unit | unique_literals (resolve_clause index positive negative)} @@ total
+
+val source_clause_member : (formula : formula) ->
+  (database : proof_result list) -> (source : clause_source) ->
+  {u : unit | match source_clause formula database source with
+    | None -> true
+    | Some clause -> clause_member formula clause
+      || clause_member (database_clauses database) clause} @@ total
+
+val same_clause_equal : (left : literal list) -> (right : literal list) ->
+  {u : unit | if same_clause left right then left === right else true} @@ total
+val same_clause_reflexive : (clause : literal list) ->
+  {u : unit | same_clause clause clause} @@ total
+
+val clause_at_valid : (n : int) -> (formula : formula) -> (index : int) ->
+  {u : unit | if valid_formula n formula then
+    match clause_at formula index with
+    | None -> true | Some clause -> valid_clause n clause else true} @@ total
+
+type stored_result : immutable_data mod total
+val load_result : stored_result -> proof_result @@ total
+val store_result : (entry : proof_result) ->
+  {stored : stored_result | load_result stored === entry} @@ total
+
+type database_scan : immutable_data mod total =
+  | Database_stable
+  | Database_unit of proof_result * literal
+  | Database_conflict of proof_result
+[@@inductive]
+
+val scan_database : (formula : formula) @ ghost ->
+    (partial : bool option list) ->
+    (database : {d : proof_result list | database_valid formula d}) ->
+    {r : database_scan | match r with
+      | Database_stable -> formula_stable partial (database_clauses database)
+      | Database_unit (entry, literal) ->
+        derivation_valid formula entry.proof
+        && same_clause (conclusion formula entry.proof) entry.clause
+        && clause_member (database_clauses database) entry.clause
+        && partial_literal partial literal === None
+        && false_except partial literal entry.clause
+        && has_literal literal entry.clause
+      | Database_conflict entry ->
+        derivation_valid formula entry.proof
+        && same_clause (conclusion formula entry.proof) entry.clause
+        && clause_member (database_clauses database) entry.clause
+        && false_clause partial entry.clause} @@ total
+
+val unit_clause_scan : (partial : bool option list) ->
+  (forced : literal) -> (clause : literal list) ->
+  {u : unit | if partial_literal partial forced === None
+      && false_except partial forced clause && has_literal forced clause then
+    scan_formula partial [clause] === Scan_unit (0, forced) else true} @@ total
+val no_conflict_member : (partial : bool option list) ->
+  (formula : formula) -> (clause : literal list) ->
+  {u : unit | if no_conflict partial formula && clause_member formula clause
+    then not (false_clause partial clause) else true} @@ total

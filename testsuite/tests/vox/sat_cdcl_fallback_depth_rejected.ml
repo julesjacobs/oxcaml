@@ -26,4 +26,6 @@ let (insufficient_fallback_depth @ total) :
       | Ok report -> match report.answer with
         | Vox_cdcl_total.Unknown -> false
         | Vox_cdcl_total.Sat _ | Vox_cdcl_total.Unsat -> true} =
-  fun n formula -> Vox_cdcl_total.solve_with_fallback 0 n n formula
+  fun n formula ->
+  ghost_ (classify_input_def n formula);
+  Vox_cdcl_total.solve_with_fallback 0 n n formula

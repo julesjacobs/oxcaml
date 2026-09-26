@@ -647,6 +647,98 @@ open Vox_sat_spec
       (remove_positive index positive)
       (remove_negative index negative))
 
+  let rec (remove_membership @ total) : (index : int) ->
+      (clause : literal list) -> (query : literal) ->
+      {u : unit |
+        has_literal query (remove_positive index clause) =
+          (has_literal query clause && not (same_literal query (Positive
+            index)))
+        && has_literal query (remove_negative index clause) =
+          (has_literal query clause && not (same_literal query (Negative
+            index)))} =
+    fun index clause query ->
+    remove_positive_def index clause;
+    remove_negative_def index clause;
+    has_literal_def query clause;
+    same_literal_def query (Positive index);
+    same_literal_def query (Negative index);
+    match clause with
+    | [] -> ()
+    | literal :: rest ->
+      same_literal_def query literal;
+      remove_membership index rest query;
+      has_literal_def query (literal :: remove_positive index rest);
+      has_literal_def query (literal :: remove_negative index rest)
+
+  let rec (append_membership @ total) : (left : literal list) ->
+      (right : literal list) -> (query : literal) ->
+      {u : unit | has_literal query (append_clause left right) =
+        (has_literal query left || has_literal query right)} =
+    fun left right query ->
+    append_clause_def left right;
+    has_literal_def query left;
+    match left with
+    | [] -> ()
+    | literal :: rest ->
+      append_membership rest right query;
+      has_literal_def query (literal :: append_clause rest right)
+
+  let rec (dedup_membership @ total) : (clause : literal list) ->
+      (query : literal) ->
+      {u : unit | has_literal query (dedup_clause clause)
+        = has_literal query clause} =
+    fun clause query ->
+    dedup_clause_def clause;
+    has_literal_def query clause;
+    match clause with
+    | [] -> ()
+    | literal :: rest ->
+      same_literal_def query literal;
+      let _ : {u : unit | if same_literal query literal then query === literal
+        else true} = () in
+      dedup_membership rest query;
+      has_literal_def query (literal :: dedup_clause rest)
+
+  let[@def] rec unique_literals clause =
+    match clause with
+    | [] -> true
+    | literal :: rest -> not (has_literal literal rest) && unique_literals rest
+
+  let rec (dedup_unique @ total) : (clause : literal list) ->
+      {u : unit | unique_literals (dedup_clause clause)} =
+    fun clause ->
+    dedup_clause_def clause;
+    match clause with
+    | [] -> unique_literals_def []
+    | literal :: rest ->
+      dedup_unique rest;
+      unique_literals_def (literal :: dedup_clause rest)
+
+  let (resolve_unique @ total) : (index : int) ->
+      (positive : literal list) -> (negative : literal list) ->
+      {u : unit | unique_literals (resolve_clause index positive negative)} =
+    fun index positive negative ->
+    resolve_clause_def index positive negative;
+    dedup_unique (append_clause (remove_positive index positive)
+      (remove_negative index negative))
+
+  let (resolve_membership @ total) : (index : int) ->
+      (positive : literal list) -> (negative : literal list) ->
+      (query : literal) ->
+      {u : unit | has_literal query (resolve_clause index positive negative) =
+        ((has_literal query positive
+          && not (same_literal query (Positive index)))
+          || (has_literal query negative
+            && not (same_literal query (Negative index))))} =
+    fun index positive negative query ->
+    resolve_clause_def index positive negative;
+    dedup_membership (append_clause (remove_positive index positive)
+      (remove_negative index negative)) query;
+    append_membership (remove_positive index positive)
+      (remove_negative index negative) query;
+    remove_membership index positive query;
+    remove_membership index negative query
+
   let rec (append_clause_eval @ total) :
       (left : literal list) -> (right : literal list) ->
       (assignment : bool list) ->
@@ -1024,7 +1116,7 @@ open Vox_sat_spec
       else aligned_at formula rest proof_rest (index - 1)
     | [], [] | [], _ :: _ | _ :: _, [] -> ()
 
-  type proof_result = {
+  type proof_result : immutable_data mod total = {
     clause : literal list;
     proof : derivation @@ ghost;
   }
@@ -1486,7 +1578,10 @@ open Vox_sat_spec
         match scan_clause partial rest with
         | Clause_satisfied -> Clause_satisfied
         | Clause_conflict -> Clause_unit literal
-        | Clause_unit _ | Clause_open -> Clause_open
+        | Clause_unit previous ->
+          if same_literal literal previous then Clause_unit literal
+          else Clause_open
+        | Clause_open -> Clause_open
 
   let[@def] rec scan_formula_from partial index formula =
     match formula with
@@ -1905,6 +2000,12 @@ let rec (scan_clause_unit_reason @ total) : (partial : bool option list) ->
     scan_clause_unit_reason partial rest;
     conflict_false_except partial literal rest;
     same_literal_def literal literal;
+    (match scan_clause partial rest with
+     | Clause_unit previous ->
+       same_literal_def literal previous;
+       let _ : {u : unit | if same_literal literal previous then
+         literal === previous else true} = () in ()
+     | Clause_satisfied | Clause_open | Clause_conflict -> ());
     match scan_clause partial clause with
     | Clause_unit forced ->
       false_except_def partial forced clause;
@@ -2011,6 +2112,219 @@ let (conflict_characterization @ total) : (partial : bool option list) ->
   scan_formula_from_def partial 0 [clause];
   scan_formula_from_def partial 1 [];
   ()
+
+let[@def] rec no_conflict partial formula =
+  match formula with
+  | [] -> true
+  | clause :: rest -> not (false_clause partial clause)
+    && no_conflict partial rest
+
+let rec (scan_stable_no_conflict_from @ total) :
+    (partial : bool option list) -> (start : int) -> (formula : formula) ->
+    {u : unit | if scan_formula_from partial start formula === Scan_stable
+      then no_conflict partial formula else true} =
+  fun partial start formula ->
+  no_conflict_def partial formula;
+  scan_formula_from_def partial start formula;
+  match formula with
+  | [] -> ()
+  | clause :: rest ->
+    scan_clause_false partial clause;
+    scan_stable_no_conflict_from partial (start + 1) rest
+
+let (scan_stable_no_conflict @ total) : (partial : bool option list) ->
+    (formula : formula) ->
+    {u : unit | if scan_formula partial formula === Scan_stable then
+      no_conflict partial formula else true} =
+  fun partial formula ->
+  scan_formula_def partial formula;
+  scan_stable_no_conflict_from partial 0 formula
+
+let rec (no_conflict_clause @ total) : (partial : bool option list) ->
+    (formula : formula) -> (index : int) ->
+    {u : unit | if no_conflict partial formula then
+      match clause_at formula index with
+      | None -> true | Some clause -> not (false_clause partial clause)
+      else true} =
+  fun partial formula index ->
+  no_conflict_def partial formula;
+  clause_at_def formula index;
+  match formula with
+  | [] -> ()
+  | _ :: rest -> if index <> 0 then no_conflict_clause partial rest (index - 1);
+    ()
+
+let rec (false_clause_member @ total) : (partial : bool option list) ->
+    (clause : literal list) -> (query : literal) ->
+    {u : unit | if false_clause partial clause && has_literal query clause then
+      partial_literal partial query === Some false else true} =
+  fun partial clause query ->
+  false_clause_def partial clause;
+  has_literal_def query clause;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    same_literal_def query literal;
+    partial_literal_def partial query;
+    partial_literal_def partial literal;
+    false_clause_member partial rest query
+
+let[@def] stable_clause partial clause =
+  match scan_clause partial clause with
+  | Clause_satisfied | Clause_open -> true
+  | Clause_unit _ | Clause_conflict -> false
+
+let[@def] rec formula_stable partial formula =
+  match formula with
+  | [] -> true
+  | clause :: rest -> stable_clause partial clause && formula_stable partial
+    rest
+
+let rec (scan_stable_formula_from @ total) :
+    (partial : bool option list) -> (start : int) -> (formula : formula) ->
+    {u : unit | (scan_formula_from partial start formula === Scan_stable)
+      = formula_stable partial formula} =
+  fun partial start formula ->
+  scan_formula_from_def partial start formula;
+  formula_stable_def partial formula;
+  match formula with
+  | [] -> ()
+  | clause :: rest ->
+    stable_clause_def partial clause;
+    scan_stable_formula_from partial (start + 1) rest
+
+let (scan_stable_formula @ total) : (partial : bool option list) ->
+    (formula : formula) ->
+    {u : unit | (scan_formula partial formula === Scan_stable)
+      = formula_stable partial formula} =
+  fun partial formula ->
+  scan_formula_def partial formula;
+  scan_stable_formula_from partial 0 formula
+
+let rec (same_clause_equal @ total) : (left : literal list) ->
+    (right : literal list) ->
+    {u : unit | if same_clause left right then left === right else true} =
+  fun left right ->
+  same_clause_def left right;
+  match left, right with
+  | first :: left, second :: right ->
+    same_literal_def first second;
+    same_clause_equal left right
+  | _, _ -> ()
+
+let[@def] rec clause_member formula query =
+  match formula with
+  | [] -> false
+  | clause :: rest -> same_clause clause query || clause_member rest query
+
+let rec (clause_at_member @ total) : (formula : formula) -> (index : int) ->
+    {u : unit | match clause_at formula index with
+      | None -> true | Some clause -> clause_member formula clause} =
+  fun formula index ->
+  clause_at_def formula index;
+  match formula with
+  | [] -> ()
+  | clause :: rest ->
+    clause_at_member rest (index - 1);
+    (match clause_at formula index with
+     | None -> ()
+     | Some selected ->
+       clause_member_def formula selected;
+       same_clause_reflexive clause)
+
+let (source_clause_member @ total) : (formula : formula) ->
+    (database : proof_result list) -> (source : clause_source) ->
+    {u : unit | match source_clause formula database source with
+      | None -> true
+      | Some clause -> clause_member formula clause
+        || clause_member (database_clauses database) clause} =
+  fun formula database source ->
+  source_clause_def formula database source;
+  match source with
+  | Original_clause index -> clause_at_member formula index
+  | Learned_clause index -> clause_at_member (database_clauses database) index
+
+let rec (formula_stable_member @ total) : (partial : bool option list) ->
+    (formula : formula) -> (clause : literal list) ->
+    {u : unit | if formula_stable partial formula && clause_member formula
+      clause
+      then stable_clause partial clause else true} =
+  fun partial formula clause ->
+  formula_stable_def partial formula;
+  clause_member_def formula clause;
+  match formula with
+  | [] -> ()
+  | first :: rest ->
+    same_clause_equal first clause;
+    formula_stable_member partial rest clause
+
+let rec (false_except_member @ total) : (partial : bool option list) ->
+    (forced : literal) -> (clause : literal list) -> (query : literal) ->
+    {u : unit | if false_except partial forced clause
+        && has_literal query clause then
+      same_literal query forced || partial_literal partial query === Some false
+      else true} =
+  fun partial forced clause query ->
+  false_except_def partial forced clause;
+  has_literal_def query clause;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    same_literal_def query literal;
+    let _ : {u : unit | if same_literal query literal then query === literal
+      else true} = () in
+    false_except_member partial forced rest query
+
+let (two_unassigned_stable @ total) : (partial : bool option list) ->
+    (clause : literal list) -> (first : literal) -> (second : literal) ->
+    {u : unit | if has_literal first clause && has_literal second clause
+        && not (same_literal first second)
+        && partial_literal partial first === None
+        && partial_literal partial second === None then
+      stable_clause partial clause else true} =
+  fun partial clause first second ->
+  stable_clause_def partial clause;
+  scan_clause_unit_reason partial clause;
+  scan_clause_false partial clause;
+  match scan_clause partial clause with
+  | Clause_satisfied | Clause_open -> ()
+  | Clause_conflict -> false_clause_member partial clause first
+  | Clause_unit forced ->
+    false_except_member partial forced clause first;
+    false_except_member partial forced clause second;
+    same_literal_def first forced;
+    same_literal_def second forced;
+    same_literal_def first second
+
+let rec (scan_unit_exact @ total) : (partial : bool option list) ->
+    (forced : literal) -> (clause : literal list) ->
+    {u : unit | if partial_literal partial forced === None
+        && false_except partial forced clause then
+      scan_clause partial clause ===
+        (if has_literal forced clause then Clause_unit forced
+         else Clause_conflict) else true} =
+  fun partial forced clause ->
+  scan_clause_def partial clause;
+  false_except_def partial forced clause;
+  has_literal_def forced clause;
+  same_literal_def forced forced;
+  match clause with
+  | [] -> ()
+  | literal :: rest ->
+    same_literal_def literal forced;
+    same_literal_def forced literal;
+    let _ : {u : unit | if same_literal literal forced then literal === forced
+      else true} = () in
+    scan_unit_exact partial forced rest
+
+let (unit_clause_unstable @ total) : (partial : bool option list) ->
+    (forced : literal) -> (clause : literal list) ->
+    {u : unit | if partial_literal partial forced === None
+        && false_except partial forced clause && has_literal forced clause then
+      not (stable_clause partial clause) else true} =
+  fun partial forced clause ->
+  scan_unit_exact partial forced clause;
+  stable_clause_def partial clause
 
 let rec (remove_false @ total) : (partial : bool option list) ->
     (index : int) -> (clause : literal list) ->
@@ -2125,3 +2439,81 @@ let (scan_formula_conflict_clause @ total) :
     scan_formula_def partial formula;
     scan_formula_from_conflict_clause partial limit 0 formula);
   ()
+
+type stored_result : immutable_data mod total = proof_result
+
+let[@def] load_result (entry : stored_result) = entry
+
+let (store_result @ total) : (entry : proof_result) ->
+    {stored : stored_result | load_result stored === entry} =
+  fun entry -> ghost_ (load_result_def entry); entry
+
+type database_scan : immutable_data mod total =
+  | Database_stable
+  | Database_unit of proof_result * literal
+  | Database_conflict of proof_result
+[@@inductive]
+
+let rec (scan_database @ total) : (formula : formula) @ ghost ->
+    (partial : bool option list) ->
+    (database : {d : proof_result list | database_valid formula d}) ->
+    {r : database_scan | match r with
+      | Database_stable -> formula_stable partial (database_clauses database)
+      | Database_unit (entry, literal) ->
+        derivation_valid formula entry.proof
+        && same_clause (conclusion formula entry.proof) entry.clause
+        && clause_member (database_clauses database) entry.clause
+        && partial_literal partial literal === None
+        && false_except partial literal entry.clause
+        && has_literal literal entry.clause
+      | Database_conflict entry ->
+        derivation_valid formula entry.proof
+        && same_clause (conclusion formula entry.proof) entry.clause
+        && clause_member (database_clauses database) entry.clause
+        && false_clause partial entry.clause} =
+  fun formula partial database ->
+  ghost_ (database_valid_def formula database;
+    database_clauses_def database;
+    formula_stable_def partial (database_clauses database));
+  match database with
+  | [] -> Database_stable
+  | entry :: rest ->
+    ghost_ (scan_clause_false partial entry.clause;
+      scan_clause_unit_unassigned partial entry.clause;
+      scan_clause_unit_reason partial entry.clause;
+      stable_clause_def partial entry.clause;
+      same_clause_reflexive entry.clause;
+      clause_member_def (database_clauses database) entry.clause);
+    match scan_clause partial entry.clause with
+    | Clause_conflict -> Database_conflict entry
+    | Clause_unit literal -> Database_unit (entry, literal)
+    | Clause_satisfied | Clause_open ->
+      let result = scan_database (ghost_ formula) partial rest in
+      ghost_ (match result with
+        | Database_stable -> ()
+        | Database_unit (selected, _) | Database_conflict selected ->
+          clause_member_def (database_clauses database) selected.clause);
+      result
+
+let (unit_clause_scan @ total) : (partial : bool option list) ->
+    (forced : literal) -> (clause : literal list) ->
+    {u : unit | if partial_literal partial forced === None
+        && false_except partial forced clause && has_literal forced clause then
+      scan_formula partial [clause] === Scan_unit (0, forced) else true} =
+  fun partial forced clause ->
+  scan_unit_exact partial forced clause;
+  scan_formula_def partial [clause];
+  scan_formula_from_def partial 0 [clause]
+
+let rec (no_conflict_member @ total) : (partial : bool option list) ->
+    (formula : formula) -> (clause : literal list) ->
+    {u : unit | if no_conflict partial formula && clause_member formula clause
+      then not (false_clause partial clause) else true} =
+  fun partial formula clause ->
+  no_conflict_def partial formula;
+  clause_member_def formula clause;
+  match formula with
+  | [] -> ()
+  | first :: rest ->
+    same_clause_equal first clause;
+    no_conflict_member partial rest clause

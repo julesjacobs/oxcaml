@@ -17,8 +17,8 @@ type report = {
 type input_error = Invalid_fuel | Invalid_input of Vox_sat_spec.input_error
 
 (** Bounded CDCL: termination and sound answers. [Unknown] is permitted for
-    every accepted input and fuel value. It can result from search or analysis
-    exhaustion, or failure to construct an asserting clause. No sufficient
+    every accepted input and fuel value, and proves search exhaustion through
+    [statistics.steps = fuel]. No sufficient
     fuel bound, monotonicity in fuel, or eventual CDCL decision is promised. *)
 val solve :
   (fuel : int) -> (n : int) ->
@@ -26,26 +26,15 @@ val solve :
   {r : (report, input_error) result |
     match r with
     | Error Invalid_fuel -> fuel < 0
-    | Error (Invalid_input Vox_sat_spec.Unsupported_variable_count) ->
-      0 <= fuel && (n < 0 || n > 256)
-    | Error (Invalid_input Vox_sat_spec.Too_many_clauses) ->
-      0 <= fuel && 0 <= n && n <= 256
-      && not (Vox_sat_spec.clauses_fit 4096 formula)
-    | Error (Invalid_input Vox_sat_spec.Too_many_literals) ->
-      0 <= fuel && 0 <= n && n <= 256 && Vox_sat_spec.clauses_fit 4096 formula
-      && not (Vox_sat_spec.literals_fit 65536 formula)
-    | Error (Invalid_input Vox_sat_spec.Invalid_formula) ->
-      0 <= fuel && 0 <= n && n <= 256 && Vox_sat_spec.clauses_fit 4096 formula
-      && Vox_sat_spec.literals_fit 65536 formula
-      && not (Vox_sat_spec.valid_formula n formula)
+    | Error (Invalid_input error) ->
+      0 <= fuel
+      && Vox_sat_spec.classify_input n formula === Some error
     | Ok report ->
-      0 <= fuel && 0 <= n && n <= 256 && Vox_sat_spec.clauses_fit 4096 formula
-      && Vox_sat_spec.literals_fit 65536 formula
-      && Vox_sat_spec.valid_formula n formula
+      0 <= fuel && Vox_sat_spec.classify_input n formula === None
       && match report.answer with
       | Sat assignment -> Vox_sat_spec.check n formula assignment
       | Unsat -> Vox_sat_spec.unsatisfiable n formula
-      | Unknown -> true} @@ total
+      | Unknown -> report.statistics.steps = fuel} @@ total
 
 (** Runs bounded CDCL, then a separate DPLL search if CDCL returns [Unknown].
     For accepted inputs and nonnegative CDCL fuel, [depth_fuel >= n + 1]
@@ -57,26 +46,26 @@ val solve_with_fallback :
   {r : (report, input_error) result |
     match r with
     | Error Invalid_fuel -> fuel < 0 || depth_fuel < 0
-    | Error (Invalid_input Vox_sat_spec.Unsupported_variable_count) ->
-      0 <= fuel && 0 <= depth_fuel && (n < 0 || n > 256)
-    | Error (Invalid_input Vox_sat_spec.Too_many_clauses) ->
-      0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-      && not (Vox_sat_spec.clauses_fit 4096 formula)
-    | Error (Invalid_input Vox_sat_spec.Too_many_literals) ->
-      0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-      && Vox_sat_spec.clauses_fit 4096 formula
-      && not (Vox_sat_spec.literals_fit 65536 formula)
-    | Error (Invalid_input Vox_sat_spec.Invalid_formula) ->
-      0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-      && Vox_sat_spec.clauses_fit 4096 formula
-      && Vox_sat_spec.literals_fit 65536 formula
-      && not (Vox_sat_spec.valid_formula n formula)
+    | Error (Invalid_input error) ->
+      0 <= fuel && 0 <= depth_fuel
+      && Vox_sat_spec.classify_input n formula === Some error
     | Ok report ->
-      0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-      && Vox_sat_spec.clauses_fit 4096 formula
-      && Vox_sat_spec.literals_fit 65536 formula
-      && Vox_sat_spec.valid_formula n formula
+      0 <= fuel && 0 <= depth_fuel
+      && Vox_sat_spec.classify_input n formula === None
       && match report.answer with
       | Sat assignment -> Vox_sat_spec.check n formula assignment
       | Unsat -> Vox_sat_spec.unsatisfiable n formula
-      | Unknown -> depth_fuel <= n} @@ total
+      | Unknown -> depth_fuel <= n && report.statistics.steps = fuel} @@ total
+
+(** Complete CDCL on every accepted input, with no fuel argument or DPLL
+  fallback. *)
+val solve_complete : (n : int) -> (formula : Vox_sat_spec.formula) ->
+  {r : (report, input_error) result | match r with
+    | Error Invalid_fuel -> false
+    | Error (Invalid_input error) ->
+      Vox_sat_spec.classify_input n formula === Some error
+    | Ok report -> Vox_sat_spec.classify_input n formula === None
+      && match report.answer with
+      | Sat assignment -> Vox_sat_spec.check n formula assignment
+      | Unsat -> Vox_sat_spec.unsatisfiable n formula
+      | Unknown -> false} @@ total
