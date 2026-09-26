@@ -10423,7 +10423,7 @@ and type_ident env ?(recarg=Rejected) lid =
     match desc.val_kind with
     | Val_prim { prim_name =
         ("%equal" | "%notequal" | "%lessthan" | "%lessequal"
-        | "%greaterthan" | "%greaterequal" | "%compare"); _ } ->
+        | "%greaterthan" | "%greaterequal" | "%compare") as prim_name; _ } ->
         let total_mode =
           mode
           |> Value.meet_const_with Totality Totality.Const.Total
@@ -10449,9 +10449,34 @@ and type_ident env ?(recarg=Rejected) lid =
               end
             | _ -> false
           in
-          Value.submode_err
-            (lid.loc, Ident { category = Value; lid = lid.txt })
-            (if total then total_mode else mode) specialized_mode
+          let pp : Mode.Hint.pinpoint =
+            (lid.loc, Ident { category = Value; lid = lid.txt }) in
+          let submode () =
+            Value.submode_err pp
+              (if total then total_mode else mode) specialized_mode
+          in
+          let logical =
+            !typing_refinement_predicate || Resolved_predicate.active ()
+            || Env.in_ghost_context env
+          in
+          match prim_name, get_desc (expand_head env ty) with
+          | ("%equal" | "%notequal"), Tarrow (_, arg, _, _)
+            when logical && not total ->
+              (match Value.submode ~pp mode specialized_mode with
+               | Ok () -> ()
+               | Error _ ->
+                 let op, logical_op =
+                   if prim_name = "%equal" then "=", "x === y"
+                   else "<>", "not (x === y)"
+                 in
+                 Location.raise_errorf ~loc:lid.loc
+                   "@[In refinements and ghost code,@ %a works only at int,@ \
+                    bool and Bigint.t,@ not at %a.@ \
+                    Use %a for logical equality.@]"
+                   Style.inline_code op
+                   (Style.as_inline_code Printtyp.Doc.type_expr) arg
+                   Style.inline_code logical_op)
+          | _ -> submode ()
         in
         Value.disallow_right specialized_mode, Some check
     | _ -> mode, None
