@@ -1,80 +1,45 @@
 (* TEST
  has-z3;
+ flags = "-extension refinement_types";
+ all_modules = "clamp_api.mli clamp_api.ml";
+ readonly_files = "clamp.ml";
+ compile_only = "true";
  {
-   flags = "-extension refinement_types";
-   { expect; }
-   { expect.opt; }
- }{
-   flags = "-extension refinement_types -principal";
-   { expect; }
-   { expect.opt; }
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "clamp_api";
+   run-expect;
+   check-program-output;
+ }
+ {
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "clamp_api";
+   run-expectnat;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "clamp_api";
+   run-expect;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "clamp_api";
+   run-expectnat;
+   check-program-output;
  }
 *)
 
-module Clamp = struct
-  let[@def] clamp (lo : int) (hi : int) (x : int) = if x < lo then lo else if hi < x then hi else x
-
-  let (bounds @ total) :
-      (lo : int) -> (hi : {hi : int | lo <= hi}) -> (x : int) ->
-      {r : int | lo <= r && r <= (let refine_ h = hi in h)} =
-    fun lo hi x ->
-    let refine_ hi = hi in
-    let result = clamp lo hi x in
-    ghost_ (clamp_def lo hi x);
-    refine_ result
-
-  let (identity @ total) (lo : int) (hi : int) (x : int) :
-      {u : unit |
-        if lo <= x && x <= hi then clamp (lo : int) (hi : int) (x : int) === x else true} =
-    clamp_def lo hi x;
-    let u = () in
-    refine_ u
-
-  let (idempotent @ total) (lo : int) (hi : int) (x : int) :
-      {u : unit |
-        if lo <= hi then
-          clamp lo hi (clamp lo hi x) === clamp lo hi x
-        else true} =
-    let first = clamp lo hi x in
-    clamp_def lo hi x;
-    clamp_def lo hi first;
-    let u = () in
-    refine_ u
-end
+module Clamp = Clamp_api
 ;;
 [%%expect{|
-module Clamp :
-  sig
-    val clamp : int -> int -> int -> int
-    val clamp_def :
-      (lo : int) ->
-      (hi : int) ->
-      (x : int) ->
-      {u : unit
-        | (clamp lo hi x) ===
-            (if x < lo then lo else if hi < x then hi else x)}
-    val bounds :
-      (lo : int) ->
-      ((hi : {hi : int | lo <= hi}) ->
-       int -> {r : int | (lo <= r) && (r <= (let refine_ h = hi in h))}) @ total
-      stateful
-    val identity :
-      (lo : int) ->
-      (hi : int) ->
-      (x : int) ->
-      {u : unit
-        | if (lo <= x) && (x <= hi)
-          then (clamp (lo : int) (hi : int) (x : int)) === x
-          else true}
-    val idempotent :
-      (lo : int) ->
-      (hi : int) ->
-      (x : int) ->
-      {u : unit
-        | if lo <= hi
-          then (clamp lo hi (clamp lo hi x)) === (clamp lo hi x)
-          else true}
-  end
+module Clamp = Clamp_api
 |}]
 
 let () =
@@ -83,8 +48,8 @@ let () =
   List.iter (fun (x : int) ->
     ghost_ (Clamp.identity lo hi x);
     ghost_ (Clamp.idempotent lo hi x);
-    let ordered : {hi : int | lo <= hi} = refine_ hi in
-    let refine_ result = Clamp.bounds lo ordered x in
+    let ordered : {hi : int | lo <= hi} = hi in
+    let result = Clamp.bounds lo ordered x in
     Format.printf "%d -> %d@." x result) [-3; 4; 12]
 ;;
 [%%expect{|
@@ -95,23 +60,23 @@ let () =
 
 let opaque x : {r : int | 0 <= r && r <= 10} =
   let result = Clamp.clamp 0 10 x in
-  refine_ result
+  result
 ;;
 [%%expect{|
-Line 3, characters 2-16:
-3 |   refine_ result
-      ^^^^^^^^^^^^^^
+Line 3, characters 2-8:
+3 |   result
+      ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let unordered (lo : int) (hi : int) (x : int) : {r : int | lo <= r && r <= hi} =
   let result = Clamp.clamp lo hi x in
   Clamp.clamp_def lo hi x;
-  refine_ result
+  result
 ;;
 [%%expect{|
-Line 4, characters 2-16:
-4 |   refine_ result
-      ^^^^^^^^^^^^^^
+Line 4, characters 2-8:
+4 |   result
+      ^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

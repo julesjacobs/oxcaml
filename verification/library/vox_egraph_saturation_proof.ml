@@ -1,4 +1,4 @@
-module C = Vox_egraph_saturation_spec
+module C = Vox_egraph_closure_spec
 module V = Vox_egraph_rule_store
 module B = Vox_egraph_match_subst
 module Q = Vox_egraph_match_spec

@@ -103,3 +103,24 @@ let rec (present_available @ total) : (state : V.t) @ immutable ->
        present_available state a bindings (); present_available state b bindings ()
      | _ -> ());
     ())
+
+let (rhs_admissible @ total) : (state : V.t) @ immutable ->
+    (rule : R.rule) @ immutable -> (bindings : int list) @ immutable ->
+    (subst : R.subst) @ immutable -> (root : int) ->
+    {u : unit | V.valid state && R.rule_valid rule &&
+      B.accepts state rule.vars bindings && R.subst_valid rule.vars subst &&
+      P.agrees state.semantic.origins bindings subst &&
+      Q.matches (P.view state) rule.lhs bindings root} ->
+    {u : unit | bounded state.semantic.union.count bindings &&
+      available state.semantic.union.count rule.rhs bindings &&
+      P.agrees state.semantic.origins bindings subst &&
+      not (L.sort (R.instantiate rule.rhs subst) === None)} @ ghost =
+  fun state rule bindings subst root premise -> ghost_ (
+    Q.matches_def (P.view state) rule.lhs bindings root;
+    P.matched_id state root (Q.classes (P.view state) rule.lhs bindings) ();
+    Vox_egraph_rules.instance_sorted rule subst ();
+    accepted_bound state rule.vars bindings ();
+    MB.matched state rule.lhs bindings root ();
+    R.rule_valid_def rule;
+    MB.transfer (P.view state) rule.lhs rule.rhs bindings ();
+    present_available state rule.rhs bindings ())

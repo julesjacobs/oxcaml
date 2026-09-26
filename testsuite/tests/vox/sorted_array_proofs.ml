@@ -1,53 +1,23 @@
 module Binary = struct
   external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"
 
-  type splitter =
-      (left : int) -> (right : int) ->
-      {u : unit | -1 <= left && left < right && 0 < right - left} @ ghost ->
-      {m : int option | match m with
-        | None -> right = left + 1
-        | Some m -> left < m && m < right}
-
-  let (midpoint @ total) : splitter =
-    fun left right premise ->
-    premise;
-    let distance = right - left in
-    if distance > 1 then
-      let two = 2 in
-      let half = divide distance (refine_ two) in
-      let result = Some (left + half) in
-      refine_ result
-    else
-      let result = None in
-      refine_ result
-
-  let (forward @ total) : splitter = fun left right premise ->
-    premise;
-    let result = if right - left > 1 then Some (left + 1) else None in
-    refine_ result
-
-  let (backward @ total) : splitter = fun left right premise ->
-    premise;
-    let result = if right - left > 1 then Some (right - 1) else None in
-    refine_ result
-
-  let (search @ total) :
-      (split : splitter) @ total -> (p : (int -> bool)) ->
+  let (search_midpoint @ total) :
+      (p : (int -> bool)) ->
       (lower : int) -> (upper : int) ->
       {u : unit | -1 <= lower && lower < upper && 0 < upper - lower
         && not (p lower) && p upper} @ ghost ->
       {result : int * int | match result with left, right ->
         lower <= left && right <= upper && right = left + 1
         && not (p left) && p right} =
-    fun split p lower upper premise ->
+    fun p lower upper premise ->
     premise;
     let (evaluate @ total) :
         (index : {i : int | lower < i && i < upper}) ->
-        {b : bool | let refine_ i = index in b = p i} =
+        {b : bool | let i = index in b = p i} =
       fun index ->
-      let refine_ i = index in
+      let i = index in
       let b = p i in
-      refine_ b
+      b
     in
     let rec (loop @ total) :
         (left : int) -> (right : int) ->
@@ -58,28 +28,30 @@ module Binary = struct
           left <= l && r <= right && r = l + 1
           && not (p l) && p r} =
       fun left right invariant ->
-      let refine_ invariant = invariant in
+      let invariant = invariant in
       let u = () in
-      let refine_ middle = split left right (refine_ u) in
-      match middle with
-      | None ->
+      let distance = right - left in
+      if distance <= 1 then
         let result = left, right in
-        refine_ result
-      | Some middle ->
+        result
+      else
+        let two = 2 in
+        let half = divide distance (two) in
+        let middle = left + half in
         let index : {i : int | lower < i && i < upper} =
-          refine_ middle in
-        let refine_ yes = evaluate index in
+          middle in
+        let yes = evaluate index in
         if yes then
-          let refine_ result = loop left middle (refine_ u) in
-          refine_ result
+          let result = loop left middle (u) in
+          result
         else
-          let refine_ result = loop middle right (refine_ u) in
-          refine_ result
+          let result = loop middle right (u) in
+          result
     [@@decreases right - left]
     in
     let u = () in
-    let refine_ result = loop lower upper (refine_ u) in
-    refine_ result
+    let result = loop lower upper (u) in
+    result
 
 end
 
@@ -118,8 +90,7 @@ module Arrays = struct
       (refine_ u : {u : unit | -1 <= lower && lower < upper
         && 0 < upper - lower && not (p lower) && p upper}))
     in
-    let split = Binary.midpoint in
-    let refine_ result = Binary.search split p lower upper premise in
+    let refine_ result = Binary.search_midpoint p lower upper premise in
     let (left : int), (right : int) = result in
     ghost_ (
       p_def left;

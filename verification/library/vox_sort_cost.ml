@@ -21,26 +21,26 @@ let rec (height_bound @ total) : (size : Bigint.t) ->
   if size > 1Z then (
     let smaller = Bigint.div (Bigint.add size 1Z) 2Z in
     height_bound smaller;
-    let u = () in refine_ u)
-  else let u = () in refine_ u
+    ())
+  else ()
 [@@decreases let size : Bigint.t = size in
   if size > 0Z then size else 0Z]
 
 let rec (bounded_int @ total) : (bound : int) ->
     (amount : {n : Bigint.t | 0Z <= n && n <= Bigint.of_int bound}) ->
-    {n : int | let refine_ amount = amount in
+    {n : int | let amount = amount in
       Bigint.of_int n = amount && 0 <= n && n <= bound} @ ghost =
     fun bound amount -> ghost_ (
-  let refine_ amount = amount in
-  if amount <= 0Z then (let result = 0 in refine_ result)
+  let amount = amount in
+  if amount <= 0Z then (let result = 0 in result)
   else (
     let next_bound = bound - 1 in
     let smaller = Bigint.sub amount 1Z in
     let next : {n : Bigint.t | 0Z <= n &&
-      n <= Bigint.of_int next_bound} = refine_ smaller in
-    let refine_ previous = bounded_int next_bound next in
+      n <= Bigint.of_int next_bound} = smaller in
+    let previous = bounded_int next_bound next in
     let result = previous + 1 in
-    refine_ result))
+    result))
 [@@decreases bound]
 
 let rec (height_minimal @ total) : (size : Bigint.t) ->
@@ -55,7 +55,7 @@ let rec (height_minimal @ total) : (size : Bigint.t) ->
     let depth = height smaller in
     power_def depth;
     if smaller <= 1Z then height_def smaller;
-    let u = () in refine_ u)
-  else let u = () in refine_ u
+    ())
+  else ()
 [@@decreases let size : Bigint.t = size in
   if size > 0Z then size else 0Z]

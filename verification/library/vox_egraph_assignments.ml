@@ -1,4 +1,4 @@
-module C = Vox_egraph_saturation_spec
+module C = Vox_egraph_assignment_spec
 module L = Vox_egraph_language_spec
 
 type result = Done of C.cases * int | Exhausted

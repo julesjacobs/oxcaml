@@ -2502,6 +2502,81 @@ module Validity_proofs : sig
         add_elements_spec tail added added_validity;
         u
 
+    let rec (add_elements_append @ total) :
+        (left : List_set.repr) -> (right : List_set.repr) -> (tree : tree) ->
+        {u : unit | add_elements (List_set.append left right) tree ===
+          add_elements right (add_elements left tree)} @ immutable contended =
+      fun left right tree ->
+      List_set.append_def left right;
+      add_elements_def left tree;
+      add_elements_def (List_set.append left right) tree;
+      match left with
+      | List_set.Nil -> ()
+      | List_set.Cons (head, tail) ->
+        add_elements_append tail right (add_tree head tree);
+        ()
+
+    let[@def] rec (union_tree @ total) source destination =
+      match source with
+      | Empty -> destination
+      | Node (left, value, right, _) ->
+        let destination = union_tree left destination in
+        let destination = add_tree value destination in
+        union_tree right destination
+
+    let rec (union_tree_correct @ total) : (source : tree) -> (destination : tree) ->
+        {u : unit | union_tree source destination ===
+          add_elements (elements source) destination} @ immutable contended =
+      fun source destination ->
+      union_tree_def source destination;
+      elements_def source;
+      match source with
+      | Empty -> add_elements_def List_set.Nil destination; ()
+      | Node (left, value, right, _) ->
+        union_tree_correct left destination;
+        let after_left = union_tree left destination in
+        let added = add_tree value after_left in
+        union_tree_correct right added;
+        let suffix = List_set.Cons (value, elements right) in
+        add_elements_append (elements left) suffix destination;
+        add_elements_def suffix after_left;
+        ()
+
+    let[@def] rec (count_tree @ total) tree =
+      match tree with
+      | Empty -> 0Z
+      | Node (left, _, right, _) ->
+        Bigint.add 1Z (Bigint.add (count_tree left) (count_tree right))
+
+    let rec (size_append @ total) :
+        (left : List_set.repr) -> (right : List_set.repr) ->
+        {u : unit | List_set.size_repr (List_set.append left right) ===
+          Bigint.add (List_set.size_repr left) (List_set.size_repr right)}
+          @ immutable contended =
+      fun left right ->
+      List_set.append_def left right;
+      List_set.size_repr_def left;
+      List_set.size_repr_def (List_set.append left right);
+      match left with
+      | List_set.Nil -> ()
+      | List_set.Cons (_, tail) -> size_append tail right; ()
+
+    let rec (count_tree_correct @ total) : (tree : tree) ->
+        {u : unit | count_tree tree === List_set.size_repr (elements tree)}
+          @ immutable contended =
+      fun tree ->
+      count_tree_def tree;
+      elements_def tree;
+      match tree with
+      | Empty -> List_set.size_repr_def List_set.Nil; ()
+      | Node (left, value, right, _) ->
+        count_tree_correct left;
+        count_tree_correct right;
+        let suffix = List_set.Cons (value, elements right) in
+        size_append (elements left) suffix;
+        List_set.size_repr_def suffix;
+        ()
+
     let (union @ total) :
         (left : tree) ->
         (right : tree) ->
@@ -2512,14 +2587,12 @@ module Validity_proofs : sig
              === List_set.union_repr (elements left) (elements right)}
           @ immutable contended =
       fun left right right_validity ->
-      let left_elements = elements left in
-      let result = add_elements left_elements right in
-      ghost_ (add_elements_spec left_elements right right_validity);
+      let result = union_tree left right in
+      ghost_ (union_tree_correct left right;
+        add_elements_spec (elements left) right right_validity);
       result
 
-    let (size @ total) tree =
-      let tree_elements = elements tree in
-      List_set.size_repr tree_elements
+    let (size @ total) tree = count_tree tree
 
     end
 
@@ -2558,7 +2631,7 @@ module Validity_proofs : sig
 
       let[@def] (size @ total) (set : t) =
         let tree = set in
-        List_set.size_repr (elements tree)
+        Operations.count_tree tree
 
       let[@def] (equal @ total) (left : t) (right : t) =
         let left_tree = left in
@@ -2712,6 +2785,7 @@ module Validity_proofs : sig
         let empty_tree = empty_set in
         let tree_elements = elements tree in
         size_def set;
+        Operations.count_tree_correct tree;
         equal_def set empty_set;
         elements_def empty_tree;
         List_proofs.size_zero_repr tree_elements;

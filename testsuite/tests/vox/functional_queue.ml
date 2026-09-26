@@ -36,71 +36,41 @@ let rec (reverse_append_correct @ total) :
     append_def nil acc;
     u
 
-type ('a : immutable_data) representation = {front : 'a list; rear : 'a list}
-type ('a : immutable_data) t = {q : 'a representation |
-  match q.front with [] -> q.rear === [] | _ :: _ -> true}
+type ('a : immutable_data) t = {front : 'a list; rear : 'a list}
 
 let[@def] contents (q : 'a t @ immutable) : 'a list @ total =
-  let q = q in
-  append q.front (reverse q.rear)
-
-let (normalize @ total) :
-    (front : 'a list) @ immutable -> (rear : 'a list) @ immutable ->
-    {r : 'a t | contents r === append front (reverse rear)} @ immutable total =
-  fun front rear ->
   let nil : 'a list = [] in
-  let q : 'a t =
-    match front with
-    | [] ->
-      let reversed = reverse_append rear nil in
-      let raw = {front = reversed; rear = []} in
-      raw
-    | _ :: _ ->
-      let raw = {front; rear} in
-      raw
-  in
-  ghost_ (
-    reverse_def nil;
-    contents_def q;
-    let proof =
-      match front with
-      | [] ->
-        let reversed = reverse_append rear nil in
-        let model = reverse rear in
-        reverse_append_correct rear nil;
-        append_nil model;
-        append_def nil model;
-        append_nil reversed;
-        ()
-      | _ :: _ -> ()
-    in
-    (proof : {u : unit |
-      contents q === append front (reverse rear)}));
-  q
+  let reversed = reverse_append q.rear nil in
+  ghost_ (reverse_append_correct q.rear nil; append_nil (reverse q.rear));
+  append q.front reversed
+
+let (contents_model @ total) (q : 'a t @ immutable) :
+    {u : unit | contents q === append q.front (reverse q.rear)} =
+  let nil : 'a list = [] in
+  contents_def q;
+  reverse_append_correct q.rear nil;
+  append_nil (reverse q.rear);
+  ()
 
 let (empty @ total) : {q : 'a t | contents q === []} @ immutable =
-  let nil : 'a list = [] in
-  let result = normalize nil nil in
-  ghost_ (reverse_def nil);
-  ghost_ (append_def nil nil);
+  let result : 'a t = {front = []; rear = []} in
+  ghost_ (
+    let nil : 'a list = [] in
+    contents_model result;
+    reverse_def nil;
+    append_def nil nil);
   result
 
 let (enqueue @ total) : (q : 'a t) @ immutable -> (value : 'a) @ immutable ->
     {r : 'a t | contents r === append (contents q) [value]} @ immutable total =
   fun q value ->
-  let raw = q in
-  let front = raw.front in
-  let rear = raw.rear in
-  let next_rear = value :: rear in
-  let result : 'a t = normalize front next_rear in
+  let next_rear = value :: q.rear in
+  let result : 'a t = {front = q.front; rear = next_rear} in
   ghost_ (
-    let singleton = [value] in
-    let reversed = reverse rear in
-    contents_def q;
+    contents_model q;
+    contents_model result;
     reverse_def next_rear;
-    append_associative front reversed singleton;
-    let u = () in
-    (u : {u : unit | contents result === append (contents q) [value]}));
+    append_associative q.front (reverse q.rear) [value]);
   result
 
 let (dequeue @ total) :
@@ -110,21 +80,28 @@ let (dequeue @ total) :
       @ immutable total =
   fun q ->
   let original : 'a t = q in
-  ghost_ (contents_def original);
-  let raw = original in
-  let front = raw.front in
-  let rear = raw.rear in
-  let reversed = ghost_ (reverse rear) in
-  ghost_ (append_def front reversed);
-  match front with
-  | [] ->
-    ghost_ (reverse_def rear);
-    let nonempty : {xs : 'a list | (xs === []) === false} = front in
-    let head = List.Refined.hd nonempty in
-    let rest = empty in
-    let result : 'a * 'a t = head, rest in
-    result
+  ghost_ (contents_model original);
+  let reversed = ghost_ (reverse original.rear) in
+  ghost_ (append_def original.front reversed);
+  match original.front with
   | head :: tail ->
-    let rest = normalize tail rear in
+    let rest : 'a t = {front = tail; rear = original.rear} in
+    ghost_ (contents_model rest);
     let result : 'a * 'a t = head, rest in
     result
+  | [] ->
+    let nil : 'a list = [] in
+    let reversed = reverse_append original.rear nil in
+    ghost_ (
+      reverse_append_correct original.rear nil;
+      append_nil (reverse original.rear));
+    match reversed with
+    | [] -> unreachable_ ()
+    | head :: tail ->
+      let rest : 'a t = {front = tail; rear = []} in
+      ghost_ (
+        contents_model rest;
+        reverse_def nil;
+        append_nil tail);
+      let result : 'a * 'a t = head, rest in
+      result

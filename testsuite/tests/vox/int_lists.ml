@@ -1,132 +1,45 @@
 (* TEST
- flags = "-extension refinement_types";
  has-z3;
- { expect; }
- { expect.opt; }
+ flags = "-extension refinement_types";
+ all_modules = "int_list_laws.mli int_list_laws.ml";
+ readonly_files = "int_lists.ml";
+ compile_only = "true";
+ {
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "int_list_laws";
+   run-expect;
+   check-program-output;
+ }
+ {
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "int_list_laws";
+   run-expectnat;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlc.byte-build-env;
+   ocamlc.byte;
+   binary_modules = "int_list_laws";
+   run-expect;
+   check-program-output;
+ }
+ {
+   flags += " -principal";
+   setup-ocamlopt.byte-build-env;
+   ocamlopt.byte;
+   binary_modules = "int_list_laws";
+   run-expectnat;
+   check-program-output;
+ }
 *)
 
 let () =
-  let module Int_list = struct
-    type t = Nil | Cons of int * t [@@inductive]
-
-    let[@def] rec append xs ys =
-      match xs with
-      | Nil -> ys
-      | Cons (head, tail) -> Cons (head, append tail ys)
-
-    let[@def] rec length xs =
-      match xs with
-      | Nil -> 0
-      | Cons (_, tail) -> 1 + length tail
-
-    let[@def] rec sum xs =
-      match xs with
-      | Nil -> 0
-      | Cons (head, tail) -> head + sum tail
-  end
-  in
+  let module Int_list = Int_list_laws in
   let open Int_list in
-  let module Laws = struct
-    let (append_nil_left @ total) ys :
-        {u : unit | append Nil ys === ys} =
-      let nil = Nil in
-      append_def nil ys;
-      let u = () in
-      refine_ u
-
-    let rec (append_nil_right @ total) :
-        (xs : t) ->
-        {u : unit | append xs Nil === xs} @ immutable contended =
-      fun xs ->
-      let nil = Nil in
-      append_def xs nil;
-      match xs with
-      | Nil ->
-        let u = () in
-        refine_ u
-      | Cons (_, tail) ->
-        let induction : {u : unit | append tail Nil === tail} =
-          append_nil_right tail
-        in
-        induction;
-        let u = () in
-        refine_ u
-
-    let rec (append_associative @ total) :
-        (xs : t) ->
-        (ys : t) ->
-        (zs : t) ->
-        {u : unit |
-          append (append xs ys) zs === append xs (append ys zs)}
-          @ immutable contended =
-      fun xs ys zs ->
-      let xy = append xs ys in
-      let yz = append ys zs in
-      append_def xs ys;
-      append_def xy zs;
-      append_def ys zs;
-      append_def xs yz;
-      match xs with
-      | Nil ->
-        let u = () in
-        refine_ u
-      | Cons (_, tail) ->
-        let induction :
-            {u : unit |
-              append (append tail ys) zs === append tail (append ys zs)} =
-          append_associative tail ys zs
-        in
-        induction;
-        let u = () in
-        refine_ u
-
-    let rec (length_append @ total) :
-        (xs : t) ->
-        (ys : t) ->
-        {u : unit | length (append xs ys) === length xs + length ys}
-          @ immutable contended =
-      fun xs ys ->
-      let xy = append xs ys in
-      append_def xs ys;
-      length_def xy;
-      length_def xs;
-      match xs with
-      | Nil ->
-        let u = () in
-        refine_ u
-      | Cons (_, tail) ->
-        let induction :
-            {u : unit |
-              length (append tail ys) === length tail + length ys} =
-          length_append tail ys
-        in
-        induction;
-        let u = () in
-        refine_ u
-
-    let rec (sum_append @ total) :
-        (xs : t) ->
-        (ys : t) ->
-        {u : unit | sum (append xs ys) === sum xs + sum ys}
-          @ immutable contended =
-      fun xs ys ->
-      let xy = append xs ys in
-      append_def xs ys;
-      sum_def xy;
-      sum_def xs;
-      match xs with
-      | Nil ->
-        let u = () in
-        refine_ u
-      | Cons (_, tail) ->
-        let induction :
-            {u : unit | sum (append tail ys) === sum tail + sum ys} =
-          sum_append tail ys
-        in
-        induction;
-        let u = () in
-        refine_ u
-  end
+  let module Laws = Int_list_laws.Laws
   in
   let xs = Cons (1, Cons (2, Nil)) in
   let ys = Cons (3, Cons (4, Cons (5, Nil))) in

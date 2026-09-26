@@ -40,6 +40,65 @@ let (swap_partition @ total) : (values : int list) -> (pivot : int) ->
     range_grow swapped pivot high_side next_lower scan;
     let u = () in refine_ u)
 
+let (scan_left @ total) (values : int list) (pivot : int)
+    (lower : Bigint.t) (scan : Bigint.t) (last : Bigint.t) :
+    {u : unit | if 0Z <= lower && lower <= scan && scan < last
+      && last < length values && element values last = pivot
+      && range values pivot true 0Z lower
+      && range values pivot false lower scan && element values scan <= pivot then
+      range (swap values lower scan) pivot true 0Z (Bigint.add lower 1Z)
+      && range (swap values lower scan) pivot false
+        (Bigint.add lower 1Z) (Bigint.add scan 1Z)
+      && element (swap values lower scan) last = pivot
+      && permutation values (swap values lower scan) else true} =
+  swap_partition values pivot lower scan;
+  element_swap values lower scan last;
+  permutation_swap values lower scan;
+  ()
+
+let (scan_right @ total) (values : int list) (pivot : int)
+    (lower : Bigint.t) (scan : Bigint.t) :
+    {u : unit | permutation values values
+      && (if 0Z <= lower && lower <= scan && scan < length values
+        && range values pivot false lower scan && pivot <= element values scan then
+        range values pivot false lower (Bigint.add scan 1Z) else true)} =
+  accepts_def (element values scan) pivot false;
+  range_grow values pivot false lower scan;
+  permutation_refl values;
+  ()
+
+let (finish_partition @ total) (values : int list) (pivot : int)
+    (lower : Bigint.t) (last : Bigint.t) :
+    {u : unit | if 0Z <= lower && lower <= last && last < length values
+      && element values last = pivot
+      && range values pivot true 0Z lower
+      && range values pivot false lower last then
+      range (swap values lower last) pivot true 0Z lower
+      && range (swap values lower last) pivot false
+        (Bigint.add lower 1Z) (Bigint.add last 1Z)
+      && element (swap values lower last) lower = pivot
+      && permutation values (swap values lower last) else true} =
+  let after = swap values lower last in
+  swap_partition values pivot lower last;
+  range_shrink after pivot true 0Z (Bigint.add lower 1Z) 0Z lower;
+  element_swap values lower last lower;
+  permutation_swap values lower last;
+  ()
+
+let (initialize_partition @ total) (before : int list) (seeded : int list)
+    (pivot : int) (middle : Bigint.t) (last : Bigint.t) :
+    {u : unit | if 0Z <= middle && middle < length before
+      && 0Z <= last && last < length before
+      && seeded === swap before middle last && at seeded last === Some pivot then
+      permutation before seeded && element seeded last = pivot
+      && range seeded pivot true 0Z 0Z && range seeded pivot false 0Z 0Z
+      else true} =
+  permutation_swap before middle last;
+  element_def seeded last;
+  range_empty seeded pivot true 0Z 0Z;
+  range_empty seeded pivot false 0Z 0Z;
+  ()
+
 let (partition_bounds @ total) : (values : int list) -> (pivot : int) -> (index : Bigint.t) ->
     {u : unit | if 0Z <= index && index < length values
       && range values pivot true 0Z index

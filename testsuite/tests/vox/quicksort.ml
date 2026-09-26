@@ -61,9 +61,6 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
   let blo = ghost_ (Bigint.of_int lower) in
   let bscan = ghost_ (Bigint.of_int scan) in
   let blast = ghost_ (Bigint.of_int (size - 1)) in
-  let zero = ghost_ 0Z in
-  let low_side = true in
-  let high_side = false in
   if scan < size - 1 then (
     let index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
@@ -85,14 +82,10 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
           && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
           scan in
         let s2 = Slice.swap s first second in
-        ghost_ (Quicksort_model.swap_partition before pivot blo bscan);
-        ghost_ (Spec.element_swap before blo bscan blast);
-        ghost_ (Spec.permutation_swap before blo bscan);
+        ghost_ (Quicksort_model.scan_left before pivot blo bscan blast);
         lower + 1, s2)
       else (
-        ghost_ (Spec.accepts_def value pivot high_side);
-        ghost_ (Spec.range_grow before pivot high_side blo bscan);
-        ghost_ (Spec.permutation_refl before);
+        ghost_ (Quicksort_model.scan_right before pivot blo bscan);
         lower, s) in
     let intermediate = ghost_ (Slice.current (borrow_ s2)) in
     let next : {s : int Slice.t |
@@ -116,12 +109,7 @@ let rec (partition @ total) : (pivot : int) -> (size : int) ->
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
       scan in
     let state = Slice.swap s first second in
-    let after = ghost_ (Slice.current (borrow_ state)) in
-    let next_lower = ghost_ (Bigint.add blo 1Z) in
-    ghost_ (Quicksort_model.swap_partition before pivot blo bscan);
-    ghost_ (Spec.range_shrink after pivot low_side zero next_lower zero blo);
-    ghost_ (Spec.element_swap before blo bscan blo);
-    ghost_ (Spec.permutation_swap before blo bscan);
+    ghost_ (Quicksort_model.finish_partition before pivot blo bscan);
     let result = {value = lower; state} in
     result))
 [@@decreases
@@ -158,18 +146,12 @@ let rec (sort_sized @ portable total) : (run : runner) @ portable ->
       last in
     let s = Slice.swap s middle_index last_index in
     let seeded = ghost_ (Slice.current (borrow_ s)) in
-    ghost_ (Spec.permutation_swap before bmiddle blast);
-    let bzero = ghost_ 0Z in
-    let low_side = true in
-    let high_side = false in
     let index : {i : int | 0 <= i
       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
       last in
     let pivot = Slice.get (borrow_ s) index in
     let (pivot : int) = pivot in
-    ghost_ (Spec.element_def seeded blast);
-    ghost_ (Spec.range_empty seeded pivot low_side bzero bzero);
-    ghost_ (Spec.range_empty seeded pivot high_side bzero bzero);
+    ghost_ (Quicksort_model.initialize_partition before seeded pivot bmiddle blast);
     let initial : {s : int Slice.t |
       0 < size && 0 <= zero && zero <= zero && zero < size
       && Model.length (Slice.current s) === Bigint.of_int size

@@ -26,7 +26,7 @@ module Make (O : Vox_ordered_sequence.Order)
     S.append_def nil rest;
     S.append_def nil merged;
     S.append_def before other;
-    let u = () in refine_ u)
+    ())
 
   let (lower @ total) (first : O.elt @ immutable) (second : O.elt @ immutable)
       (tail : O.elt list @ immutable) :
@@ -36,5 +36,50 @@ module Make (O : Vox_ordered_sequence.Order)
     P.sorted_def values;
     P.all_weaken tail second first;
     P.all_def values first;
-    let u = () in refine_ u)
+    ())
+  let (split_step @ total) (x : O.elt @ immutable) (y : O.elt @ immutable)
+      (tail : O.elt list @ immutable) (left : O.elt list @ immutable)
+      (right : O.elt list @ immutable) :
+      {u : unit | if P.permutation tail (S.append left right) then
+        P.permutation (x :: y :: tail) (S.append (x :: left) (y :: right))
+        else true} @ ghost = ghost_ (
+    let rest = S.append left right in
+    if P.permutation tail rest then (
+      let values = x :: y :: tail in
+      let new_left = x :: left in
+      let new_right = y :: right in
+      let joined = S.append new_left new_right in
+      P.count_extensional values joined (fun target ->
+        P.count_def values target;
+        P.count_def (y :: tail) target;
+        P.permutation_count tail rest target;
+        P.count_def new_left target;
+        P.count_def new_right target;
+        P.count_append new_left new_right target;
+        P.count_append left right target;
+        ()));
+    ())
+
+  let (right_head @ total) (x : O.elt @ immutable) (xs : O.elt list @ immutable)
+      (y : O.elt @ immutable) (ys : O.elt list @ immutable)
+      (values : O.elt list @ immutable) :
+      {u : unit | if P.sorted (x :: xs) && P.sorted (y :: ys) && O.le y x &&
+        P.sorted values && P.permutation (S.append (x :: xs) ys) values then
+        P.sorted (y :: values) &&
+        P.permutation (S.append (x :: xs) (y :: ys)) (y :: values)
+        else true} @ ghost = ghost_ (
+    let left = x :: xs in
+    let right = y :: ys in
+    let rest = S.append ys left in
+    let other = S.append left ys in
+    let swapped = S.append right left in
+    let original = S.append left right in
+    P.permutation_rotate ys left;
+    P.permutation_trans rest other values;
+    lower y x xs;
+    head y ys left values;
+    P.permutation_rotate left right;
+    P.permutation_trans original swapped (y :: values);
+    ())
+
 end

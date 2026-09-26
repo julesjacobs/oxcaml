@@ -27,7 +27,7 @@ let rec scan : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
       (match r.#status with
        | Stable -> r.#state.store === state.store &&
          r.#state.owner.count = state.owner.count &&
-         C.closed_rules (P.view r.#state.store) todo
+         S.closed_rules (P.view r.#state.store) todo
        | Node_limit -> r.#state.owner.count = 512
        | Work_limit -> r.#fuel = 0
        | Changed -> true)} @ unique =
@@ -39,7 +39,7 @@ let rec scan : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
     match todo with
     | R.No_rules ->
       let {H.owner; store} = state in
-      ghost_ (C.closed_rules_def (P.view store) todo);
+      ghost_ (S.closed_rules_def (P.view store) todo);
       #{status = Stable; fuel; state = {H.owner; store}}
     | R.Rule_cons (head, tail) ->
       if fuel <= 0 then #{status = Work_limit; fuel = 0; state}
@@ -56,5 +56,5 @@ let rec scan : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
           let budget : {f : int | 0 <= f && f <= 4611686018427387903 - next} = remaining in
           let #{status; fuel; state} = scan state rules (next) tail budget in
           let {H.owner; store} = state in
-          ghost_ (C.closed_rules_def (P.view store) todo);
+          ghost_ (S.closed_rules_def (P.view store) todo);
           #{status; fuel; state = {H.owner; store}})

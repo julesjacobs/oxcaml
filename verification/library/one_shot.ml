@@ -13,6 +13,48 @@ module Invariant = struct
 end
 module A = Verified_atomic.Make (Invariant)
 
+let[@def] (publication_post @ total) (success : bool @ immutable)
+    (h : bool P.heap @ immutable) =
+  ghost_ (success && h === P.Heap.empty ())
+let[@def] (reception_post @ total) (k : Invariant.key @ immutable)
+    (success : bool @ immutable) (h : bool P.heap @ immutable) =
+  ghost_ (if success then Invariant.full k h else h === P.Heap.empty ())
+
+let (publication_transfer @ total) :
+    (k : Invariant.key) @ immutable ghost ->
+    (caller : {h : bool P.heap | Invariant.full k h}) @ immutable ghost ->
+    (before : int) @ immutable ghost ->
+    (inside : {g : bool P.token | Invariant.holds k before (P.own g) &&
+      P.Heap.disjoint (P.own g) caller}) @ unique ghost ->
+    (outside : {g : bool P.token | P.own g === caller}) @ unique ghost ->
+    {r : A.transfer |
+      Invariant.holds k (if before = 0 then 1 else before) (P.own r.restored) &&
+      publication_post (before = 0) (P.own r.outgoing)} @ unique =
+  fun k caller before inside outside ->
+  let hi = ghost_ (P.own (borrow_ inside)) in
+  let ho = ghost_ (P.own (borrow_ outside)) in
+  ghost_ (Invariant.holds_def k before hi);
+  ghost_ (Invariant.full_def k hi; Invariant.full_def k ho);
+  ghost_ (Invariant.holds_def k (if before = 0 then 1 else before) ho);
+  ghost_ (publication_post_def (before = 0) hi);
+  { A.restored = outside; outgoing = inside }
+
+let (reception_transfer @ total) :
+    (k : Invariant.key) @ immutable ghost -> (before : int) @ immutable ghost ->
+    (inside : {g : bool P.token | Invariant.holds k before (P.own g) &&
+      P.Heap.disjoint (P.own g) (P.Heap.empty ())}) @ unique ghost ->
+    (outside : {g : bool P.token | P.own g === P.Heap.empty ()}) @ unique ghost ->
+    {r : A.transfer |
+      Invariant.holds k (if before = 1 then 0 else before) (P.own r.restored) &&
+      reception_post k (before = 1) (P.own r.outgoing)} @ unique =
+  fun k before inside outside ->
+  let hi = ghost_ (P.own (borrow_ inside)) in
+  let ho = ghost_ (P.own (borrow_ outside)) in
+  ghost_ (Invariant.holds_def k before hi);
+  ghost_ (Invariant.holds_def k (if before = 1 then 0 else before) ho);
+  ghost_ (reception_post_def k (before = 1) hi);
+  { A.restored = outside; outgoing = inside }
+
 type ('a : value mod portable contended) sender = {
   cell : 'a Slot.t @@ aliased;
   atomic : A.t @@ aliased;
@@ -49,19 +91,10 @@ let send (type a : value mod portable contended)
   let h = ghost_ (P.own (borrow_ permission)) in
   ghost_ (P.Heap.put_law (P.Heap.empty ()) (Slot.location cell) false true);
   ghost_ (Invariant.full_def k h);
-  let[@def] (post @ total) (success : bool @ immutable)
-      (h : bool P.heap @ immutable) =
-    ghost_ (success && h === P.Heap.empty ()) in
-  let _ = A.compare_and_set atomic 0 1 (ghost_ post) permission
+  let _ = A.compare_and_set atomic 0 1
+    (ghost_ (fun success h -> publication_post success h)) permission
     (ghost_ (fun before inside outside ->
-      let hi = ghost_ (P.own (borrow_ inside)) in
-      let ho = ghost_ (P.own (borrow_ outside)) in
-      ghost_ (Invariant.holds_def k before hi);
-      ghost_ (Invariant.full_def k hi);
-      ghost_ (Invariant.full_def k ho);
-      ghost_ (Invariant.holds_def k 1 ho);
-      ghost_ (post_def (before = 0) hi);
-      { A.restored = outside; outgoing = inside })) in
+      publication_transfer k h before inside outside)) in
   ()
 
 let rec await : ('a : value mod portable contended).
@@ -69,21 +102,14 @@ let rec await : ('a : value mod portable contended).
     {a : A.t | Slot.location cell === (A.key a).Invariant.location} ->
     'a @ unique = fun cell atomic ->
   let k = ghost_ (A.key atomic) in
-  let[@def] (post @ total) (success : bool @ immutable)
-      (h : bool P.heap @ immutable) =
-    ghost_ (if success then Invariant.full k h else h === P.Heap.empty ()) in
-  let result = A.compare_and_set atomic 1 0 (ghost_ post) (P.empty ())
+  let result = A.compare_and_set atomic 1 0
+    (ghost_ (fun success h -> reception_post k success h)) (P.empty ())
     (ghost_ (fun before inside outside ->
-      let hi = ghost_ (P.own (borrow_ inside)) in
-      let ho = ghost_ (P.own (borrow_ outside)) in
-      ghost_ (Invariant.holds_def k before hi);
-      ghost_ (Invariant.holds_def k (if before = 1 then 0 else before) ho);
-      ghost_ (post_def (before = 1) hi);
-      { A.restored = outside; outgoing = inside })) in
+      reception_transfer k before inside outside)) in
   let success = result.#value in
   let permission = result.#state in
   let h = ghost_ (P.own (borrow_ permission)) in
-  ghost_ (post_def success h);
+  ghost_ (reception_post_def k success h);
   if success then begin
     ghost_ (Invariant.full_def k h);
     let result = Slot.take cell permission in
