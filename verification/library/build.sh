@@ -19,6 +19,7 @@ modules=(vox_sequence vox_int_sequence vox_iarray
          vox_table_storage vox_table_search vox_table_mutation
          vox_table_coverage vox_table_occupancy vox_table_vacancy_progress
          vox_table_vacancy vox_table_insert vox_table_migrate vox_table_resize
+         vox_table_implementation vox_table_bindings vox_table_bindings_bridge
          vox_verified_flat_hashtbl)
 mkdir -p "$output"
 for module in "${modules[@]}"; do

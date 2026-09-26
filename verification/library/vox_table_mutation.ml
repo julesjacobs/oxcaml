@@ -64,11 +64,10 @@ module Make (Key : Vox_table_map.Key) = struct
     {table = allocated.value; view; state = allocated.state}
 
   let clear : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some before.model}) @ unique read_write ghost ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model}) @ unique read_write ghost ->
       {r : 'a result | I.valid r.#view &&
         r.#view.model === M.initial before.model.capacity None &&
         P.own r.#state === H.put (P.own token) (T.location table) r.#view.model}
@@ -85,15 +84,14 @@ module Make (Key : Vox_table_map.Key) = struct
     (#{view; state} : 'a result)
 
   let write_byte : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : (Key.t, 'a) T.view |
         16 <= v.model.capacity && v.model.capacity <= 1073741824}) @ immutable
           ->
       (index : {i : int | 0 <= i && i < before.model.capacity}) ->
       (byte : {b : int | 0 <= b && b <= 255}) ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some before.model}) @ unique read_write ghost ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model}) @ unique read_write ghost ->
       {t : (Key.t, 'a) M.state P.token | P.own t === H.put (P.own token)
         (T.location table)
         (M.set_byte before.model index byte)} @ unique ghost =
@@ -115,10 +113,10 @@ module Make (Key : Vox_table_map.Key) = struct
       end else state
 
   let erase_existing : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i < before.model.capacity}) ->
-      (key : Key.t) @ immutable ghost -> (value : 'a) @ immutable ghost ->
+      (key : Key.t) @ ghost -> (value : 'a) @ ghost ->
       (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
         table) ===
         Some before.model && M.slot before.model index === Some (Some (key,
@@ -150,12 +148,11 @@ module Make (Key : Vox_table_map.Key) = struct
     (#{view; state} : 'a result)
 
   let remove : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some before.model}) @ unique read_write ghost ->
+      (query : Key.t) ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model}) @ unique read_write ghost ->
       {r : 'a result | I.valid r.#view &&
         I.Map.same r.#view.model.slots (I.Map.erase before.model.slots query) &&
         P.own r.#state === H.put (P.own token) (T.location table) r.#view.model}
@@ -170,8 +167,9 @@ module Make (Key : Vox_table_map.Key) = struct
       (#{view = before; state = token} : 'a result)
     end else begin
       let entry = ghost_ (M.slot before.model index) in
-      let key = ghost_ (match entry with Some (Some (key, _)) -> key | _ ->
-        query) in
+      let key = ghost_ (match entry with
+        | Some (Some (key, _)) -> key
+        | _ -> unreachable_ ()) in
       let value = ghost_ (match entry with
         | Some (Some (_, value)) -> value
         | _ -> unreachable_ ()) in
@@ -189,16 +187,15 @@ module Make (Key : Vox_table_map.Key) = struct
     end
 
   let write_existing : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i < before.model.capacity}) ->
       (key : {k : Key.t | match M.slot before.model index with
         | Some (Some (stored, _)) -> stored === k | _ -> false})
         @ immutable ghost ->
-      (value : 'a) @ immutable ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some before.model}) @ unique read_write ghost ->
+      (value : 'a) ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model}) @ unique read_write ghost ->
       {r : 'a result | I.valid r.#view &&
         I.Map.same r.#view.model.slots (I.Map.put before.model.slots key
           value) &&

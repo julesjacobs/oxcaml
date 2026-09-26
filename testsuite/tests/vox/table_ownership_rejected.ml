@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml vox_table_model.ml vox_table_model_proofs.ml vox_table_bits.ml vox_table_probe.ml vox_table_wrap.ml vox_table_mask.ml vox_table_map.ml vox_table_invariant.ml vox_table_initial.ml vox_table_update_proofs.ml vox_table_insert_proofs.ml vox_table_migration_proofs.ml vox_table_read_proofs.ml vox_table_search_spec.ml vox_table_stop_proof.ml pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_table_storage.mli vox_table_storage.ml vox_table_search.ml vox_table_mutation.ml vox_table_coverage.ml vox_table_occupancy.ml vox_table_vacancy_progress.ml vox_table_vacancy.ml vox_table_insert.ml vox_table_migrate.ml vox_table_resize.ml vox_verified_flat_hashtbl.mli vox_verified_flat_hashtbl.ml";
+ all_modules = "vox_sequence.mli vox_sequence.ml vox_table_model.ml vox_table_model_proofs.ml vox_table_bits.ml vox_table_probe.ml vox_table_wrap.ml vox_table_mask.ml vox_table_map.ml vox_table_invariant.ml vox_table_initial.ml vox_table_update_proofs.ml vox_table_insert_proofs.ml vox_table_migration_proofs.ml vox_table_read_proofs.ml vox_table_search_spec.ml vox_table_stop_proof.ml pref.mli pref.ml ghost_pref.mli ghost_pref.ml vox_table_storage.mli vox_table_storage.ml vox_table_search.ml vox_table_mutation.ml vox_table_coverage.ml vox_table_occupancy.ml vox_table_vacancy_progress.ml vox_table_vacancy.ml vox_table_insert.ml vox_table_migrate.ml vox_table_resize.ml vox_table_implementation.ml vox_table_bindings.ml vox_table_bindings_bridge.ml vox_verified_flat_hashtbl.mli vox_verified_flat_hashtbl.ml";
  readonly_files = "table_ownership_rejected.ml";
  compile_only = "true";
  { setup-ocamlc.byte-build-env; ocamlc.byte; run-expect; check-program-output; }
@@ -30,33 +30,32 @@ end
 module Key :
   sig
     type t = int
-    val equal : t @ immutable -> t @ immutable -> bool @@ total
-    val hash : t @ immutable -> int @@ total
-    val reflexive : (x : t) @ immutable -> {u : unit | equal x x} @@ total
+    val equal : t -> t -> bool @@ total
+    val hash : t -> int @@ total
+    val reflexive : (x : t) -> {u : unit | equal x x} @@ total
     val symmetric :
-      (x : t) @ immutable ->
-      (y : t) @ immutable -> {u : unit | (equal x y) = (equal y x)} @@ total
+      (x : t) -> (y : t) -> {u : unit | (equal x y) = (equal y x)} @@ total
     val transitive :
-      (x : t) @ immutable ->
-      (y : t) @ immutable ->
-      (z : t) @ immutable ->
+      (x : t) ->
+      (y : t) ->
+      (z : t) ->
       {u : unit | (not ((equal x y) && (equal y z))) || (equal x z)} @@ total
     val hash_equal :
-      (x : t) @ immutable ->
-      (y : t) @ immutable ->
-      {u : unit | (not (equal x y)) || ((hash x) = (hash y))} @@ total
+      (x : t) ->
+      (y : t) -> {u : unit | (not (equal x y)) || ((hash x) = (hash y))} @@
+      total
   end
 |}]
 
 let stale_view () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
-  V.find_opt r.table r.view 1 (borrow_ changed.#state);;
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
+  V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
 [%%expect{|
-Line 5, characters 39-53:
-5 |   V.find_opt r.table r.view 1 (borrow_ changed.#state);;
-                                           ^^^^^^^^^^^^^^
+Line 5, characters 41-55:
+5 |   V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
+                                             ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -64,40 +63,40 @@ let missing_ownership () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
   let empty = Ghost_pref.empty () in
-  V.find_opt r.table r.view 1 (borrow_ empty);;
+  V.find_opt r.#table r.#view 1 (borrow_ empty);;
 [%%expect{|
-Line 5, characters 39-44:
-5 |   V.find_opt r.table r.view 1 (borrow_ empty);;
-                                           ^^^^^
+Line 5, characters 41-46:
+5 |   V.find_opt r.#table r.#view 1 (borrow_ empty);;
+                                             ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let reused_token () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
-  let again = V.replace r.table changed.#view 2 90 r.state in
-  V.length r.table again.#view (borrow_ again.#state);;
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
+  let again = V.replace r.#table changed.#view 2 90 r.#token in
+  V.length r.#table again.#view (borrow_ again.#token);;
 [%%expect{|
-Line 5, characters 51-58:
-5 |   let again = V.replace r.table changed.#view 2 90 r.state in
-                                                       ^^^^^^^
+Line 5, characters 52-60:
+5 |   let again = V.replace r.#table changed.#view 2 90 r.#token in
+                                                        ^^^^^^^^
 Error: This value is used here, but it has already been used as unique at:
-Line 4, characters 46-53:
-4 |   let changed = V.replace r.table r.view 1 84 r.state in
-                                                  ^^^^^^^
+Line 4, characters 48-56:
+4 |   let changed = V.replace r.#table r.#view 1 84 r.#token in
+                                                    ^^^^^^^^
 
 |}]
 
 let wrong_value () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
   let value : {v : int | v = 85} =
-    V.find r.table changed.#view 1 (borrow_ changed.#state) in value;;
+    V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
 [%%expect{|
-Line 6, characters 4-59:
-6 |     V.find r.table changed.#view 1 (borrow_ changed.#state) in value;;
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 6, characters 4-60:
+6 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

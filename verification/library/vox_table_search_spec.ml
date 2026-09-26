@@ -15,7 +15,7 @@ module Make (Key : Vox_table_map.Key) = struct
       (model : (Key.t, 'a) M.state @ immutable)
       (query : Key.t @ immutable) (group : int) (mask : int) =
     if mask <= 0 || mask > 65535 then true else
-      let lane = B.first (refine_ mask) in
+      let lane = B.first mask in
       let index = I.wrap model.capacity (group + lane) in
       let rest = B.clear mask in
       misses model query index &&
@@ -32,11 +32,11 @@ module Make (Key : Vox_table_map.Key) = struct
     fun model query group mask lane -> ghost_ (
       candidates_absent_def model query group mask;
       if mask <> 0 then begin
-        let chosen = B.first (refine_ mask) in
-        B.clear_lane (refine_ mask) lane;
+        let chosen = B.first mask in
+        B.clear_lane mask lane;
         if lane <> chosen then begin
           let rest = B.clear mask in
-          candidate_at model query group (refine_ rest) lane
+          candidate_at model query group rest lane
         end;
         ()
       end else ())

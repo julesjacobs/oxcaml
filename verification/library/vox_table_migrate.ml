@@ -34,7 +34,7 @@ module Make (Key : Vox_table_map.Key) = struct
       (match entry with
        | Some (key, _) ->
          let (_ : {u : unit | 0 <= (Key.hash key land 127) &&
-           (Key.hash key land 127) <= 127}) = refine_ () in ()
+           (Key.hash key land 127) <= 127}) = () in ()
        | None -> ())
     | None -> ())
 
@@ -47,9 +47,9 @@ module Make (Key : Vox_table_map.Key) = struct
     ghost_ ()
 
   let rec copy_loop : ('a : immutable_data).
-      (source : (Key.t, 'a) T.t) @ immutable ->
+      (source : (Key.t, 'a) T.t) ->
       (source_view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (destination : (Key.t, 'a) T.t) @ immutable ->
+      (destination : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i <= source_view.model.capacity}) ->
       (heap : (Key.t, 'a) M.state P.heap) @ immutable ghost ->
@@ -98,7 +98,7 @@ module Make (Key : Vox_table_map.Key) = struct
         ghost_ (Proof.destination_absent source_view.model.slots
           (Bigint.of_int index)
           before.model.slots key value);
-        let inserted = Insert.try_insert destination before (refine_ key)
+        let inserted = Insert.try_insert destination before key
           value token in
         if inserted.#inserted then begin
           ghost_ (
@@ -116,9 +116,9 @@ module Make (Key : Vox_table_map.Key) = struct
     end
 
   let copy : ('a : immutable_data).
-      (source : (Key.t, 'a) T.t) @ immutable ->
+      (source : (Key.t, 'a) T.t) ->
       (source_view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (destination : (Key.t, 'a) T.t) @ immutable ->
+      (destination : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i <= source_view.model.capacity}) ->
       (source_token : {t : (Key.t, 'a) M.state P.token |

@@ -12,17 +12,16 @@ module Make (Key : Vox_table_map.Key) = struct
   module I = R.I
 
   let rec candidates : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable ->
+      (query : Key.t) ->
       (capacity : {c : int | c = view.model.capacity}) ->
       (group : {g : int | 0 <= g && g < view.model.capacity}) ->
       (needle : {n : int | 0 <= n && n <= 127}) ->
       (mask : {m : B.mask | m land M.matching view.model group needle 16 = m})
         ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some view.model}) @ local read ghost ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some view.model}) @ local read ghost ->
       {index : int | if index = -1 then
         Spec.candidates_absent view.model query group mask
         else 0 <= index && index < view.model.capacity &&
@@ -35,30 +34,30 @@ module Make (Key : Vox_table_map.Key) = struct
       R.capacity_bounds view.model;
       Spec.candidates_absent_def view.model query group mask);
     if mask = 0 then -1 else
-      let lane = B.first (refine_ mask) in
+      let lane = B.first mask in
       let index = (group + lane) land (capacity - 1) in
       ghost_ (
         I.wrap_def capacity (group + lane);
         W.wrap_range capacity (group + lane);
         let (_ : {u : unit | M.matching view.model group needle 16 land
-          M.lane_bit lane <> 0}) = refine_ () in
+          M.lane_bit lane <> 0}) = () in
         R.initialized view.model group needle lane;
         let (_ : {u : unit | match M.slot view.model index with
-          | Some (Some _) -> true | _ -> false}) = refine_ () in
+          | Some (Some _) -> true | _ -> false}) = () in
         ());
       let snapshot = {T.model = view.model} in
       let stored = T.read_key table snapshot index token in
       if Key.equal stored query then index else begin
         ghost_ (Spec.misses_def view.model query index);
         let rest = B.clear mask in
-        candidates table view query capacity group needle (refine_ rest) token
+        candidates table view query capacity group needle rest token
       end
-  (* Keep this specialization boundary so small comparators inline in the loop.
-    *)
+  (* Keep this specialization boundary so small comparators inline in the
+     loop. *)
   let[@inline never] rec groups : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable ->
+      (query : Key.t) ->
       (capacity : {c : int | c = view.model.capacity}) ->
       (hash : {h : int | h = Key.hash query}) ->
       (rank : {r : int | 0 <= r && r <= (view.model.capacity lsr 4)}) ->
@@ -89,7 +88,7 @@ module Make (Key : Vox_table_map.Key) = struct
       let scanned = T.match16_empty table snapshot group needle token in
       let mask = scanned land 65535 in
       let found = candidates table view query capacity group needle
-        (refine_ mask) token in
+        mask token in
       if found >= 0 then found else begin
         let empty = scanned land 65536 in
         ghost_ (Spec.prefix_absent_def view.model query (rank + 1));
@@ -107,13 +106,12 @@ module Make (Key : Vox_table_map.Key) = struct
     end
 
   let find_index_hashed : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable ->
+      (query : Key.t) ->
       (hash : {h : int | h = Key.hash query}) ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some view.model}) @ local read ghost ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some view.model}) @ local read ghost ->
       {index : int | if index = -1 then
         I.Map.absent view.model.slots query &&
         I.Map.lookup view.model.slots query === None
@@ -133,7 +131,7 @@ module Make (Key : Vox_table_map.Key) = struct
       let needle = hash land 127 in
       let mask = T.match16 table snapshot group needle token in
       let found = candidates table view query capacity group needle
-        (refine_ mask) token in
+        mask token in
       if found >= 0 then found else begin
         ghost_ (
           Spec.prefix_absent_def view.model query 1;
@@ -145,12 +143,11 @@ module Make (Key : Vox_table_map.Key) = struct
 
 
   let find_index : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some view.model}) @ local read ghost ->
+      (query : Key.t) ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some view.model}) @ local read ghost ->
       {index : int | if index = -1 then
         I.Map.absent view.model.slots query &&
         I.Map.lookup view.model.slots query === None
@@ -161,12 +158,11 @@ module Make (Key : Vox_table_map.Key) = struct
     find_index_hashed table view query (Key.hash query) token
 
   let find_opt : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some view.model}) @ local read ghost ->
+      (query : Key.t) ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some view.model}) @ local read ghost ->
       {value : 'a option | value === I.Map.lookup view.model.slots query}
       @ immutable = fun table view query token ->
     let index = find_index table view query token in

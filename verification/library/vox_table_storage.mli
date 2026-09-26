@@ -169,19 +169,6 @@ external match16_empty : (table : ('k, 'v) t) @ immutable ->
   = "caml_vox_table_match16_empty_bytecode" "caml_vox_table_match16_empty"
     [@@noalloc] [@@builtin] [@@no_effects]
 
-external exchange : (left : ('k, 'v) t) @ immutable ->
-  (before_left : ('k, 'v) view) @ immutable ->
-  (right : ('k, 'v) t) @ immutable ->
-  (before_right : ('k, 'v) view) @ immutable ->
-  (token : {t : ('k, 'v) M.state P.token |
-    H.at (P.own t) (location left) === Some before_left.model &&
-    H.at (P.own t) (location right) === Some before_right.model})
-    @ unique read_write ghost ->
-  {t : ('k, 'v) M.state P.token | P.own t ===
-    H.put (H.put (P.own token) (location left) before_right.model)
-      (location right) before_left.model} @ unique ghost
-  = "caml_vox_table_exchange_bytecode" "caml_vox_table_exchange" [@@noalloc]
-
 (** Bulk initialization of the private storage, with write barriers for
     every scanned word that stops retaining a key or value. *)
 external clear : (table : ('k, 'v) t) @ immutable ->
@@ -196,7 +183,8 @@ external clear : (table : ('k, 'v) t) @ immutable ->
 
 (** Publish private replacement storage and discard its ownership. The source
     token owns exactly the temporary table region; other regions stay owned
-    by the destination token. *)
+    by the destination token. Natively this swaps the two tables' backing
+    blocks, hence the [caml_vox_table_exchange] symbol. *)
 external replace_storage : (destination : ('k, 'v) t) @ immutable ->
   (before : ('k, 'v) view) @ immutable ->
   (source : ('k, 'v) t) @ immutable ->
