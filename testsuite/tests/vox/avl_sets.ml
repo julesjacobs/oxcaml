@@ -2493,7 +2493,7 @@ module Validity_proofs : sig
       | List_set.Nil -> u
       | List_set.Cons (head, tail) ->
         let added = add_tree head tree in
-        let added_validity =
+        let _added_validity =
           Validity_proofs.add_valid_height head tree validity
         in
         Insertion_model_proofs.add_tree_elements head tree;
@@ -2659,7 +2659,7 @@ module Validity_proofs : sig
         let tree = set in
         let proof = () in
         let validity : {u : unit | valid tree} = proof in
-        let model_result_tree =
+        let _model_result_tree =
           Operations.add added_element tree validity
         in
         let result = add added_element set in
@@ -2691,7 +2691,7 @@ module Validity_proofs : sig
         let right_tree = right in
         let proof = () in
         let right_validity : {u : unit | valid right_tree} = proof in
-        let model_result_tree =
+        let _model_result_tree =
           Operations.union left_tree right_tree right_validity
         in
         let result = union left right in

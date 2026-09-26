@@ -257,3 +257,11 @@ val sorted_set : (values : int list) -> (index : Bigint.t) ->
       && (Bigint.add index 1Z = length values ||
         value <= element values (Bigint.add index 1Z)) then
       sorted (set values index value) else true} @@ total
+
+val sorted_adjacent : (values : int list) ->
+  {u : unit | sorted values ===
+    (match values with
+     | [] -> true
+     | head :: tail -> match tail with
+       | [] -> true
+       | next :: _ -> head <= next && sorted tail)} @@ total

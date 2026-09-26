@@ -70,7 +70,7 @@ let[@def] (get @ total) : ('a : value mod separable).
     (index : {i : int | 0 <= i && i < length overlay}) -> 'a @ total =
   fun overlay index ->
   let i = index in
-  let size = length_known overlay in
+  let _size = length_known overlay in
   get_raw overlay (i)
 
 let[@def] (set @ total) : ('a : value mod separable).

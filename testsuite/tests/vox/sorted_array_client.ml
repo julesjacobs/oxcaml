@@ -59,7 +59,7 @@ let () =
   let (position : int), (one : t) = pair in
   let found = mem one value in
   let proof : {u : unit | found && length one = 1} = u in
-  let proof = proof in
+  let _proof = proof in
   let smaller = 3 in
   let pair = insert one smaller (u) in
   let _, two = pair in
@@ -67,7 +67,7 @@ let () =
   let right = 1 in
   ghost_ (ordered two left right (u));
   let proof : {u : unit | at two left <= at two right} = u in
-  let proof = proof in
+  let _proof = proof in
   let result = round_trip one value position (u) in
   let removed = remove_at result position (u) in
   let proof : {u : unit | length removed = 0} = u in

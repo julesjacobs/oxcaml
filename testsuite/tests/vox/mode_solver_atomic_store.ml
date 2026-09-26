@@ -41,13 +41,13 @@ let () =
         changed in
       let restored = Pref.write p observed changed in
       let proof = ghost_ (
-        let law = H.put_law h p after observed in
-        let identity = H.put_law h p observed observed in
+        let _law = H.put_law h p after observed in
+        let _identity = H.put_law h p observed observed in
         let u = () in
         let proof : {u : unit |
           H.put (H.put h p after) p observed === h} = u in
         proof) in
-      let proof = proof in
+      let _proof = proof in
       let restored : {r : state Pref.token | Pref.own r === h} @ unique =
         restored in
       restored

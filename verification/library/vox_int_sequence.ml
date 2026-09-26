@@ -986,3 +986,23 @@ let (sorted_set @ total) : (values : int list) -> (index : Bigint.t) ->
       ());
     ()
   else ()
+
+let (sorted_adjacent @ total) (values : int list) :
+    {u : unit | sorted values ===
+      (match values with
+       | [] -> true
+       | head :: tail -> match tail with
+         | [] -> true
+         | next :: _ -> head <= next && sorted tail)} =
+  sorted_def values;
+  match values with
+  | [] -> ()
+  | head :: tail ->
+    all_def tail head false;
+    sorted_def tail;
+    match tail with
+    | [] -> ()
+    | next :: rest ->
+      accepts_def next head false;
+      all_weaken rest next head false;
+      ()

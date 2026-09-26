@@ -28,7 +28,7 @@ module Binary = struct
           left <= l && r <= right && r = l + 1
           && not (p l) && p r} =
       fun left right invariant ->
-      let invariant = invariant in
+      let _invariant = invariant in
       let u = () in
       let distance = right - left in
       if distance <= 1 then

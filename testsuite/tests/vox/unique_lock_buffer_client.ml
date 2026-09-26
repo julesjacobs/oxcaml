@@ -41,7 +41,7 @@ let restore : (a : L.t) -> Data.t @ unique ->
       H.put (H.empty ()) (L.location a) None} @ unique ghost ->
     {t : L.contents P.token | P.own t === H.empty ()} @ unique ghost =
   fun a value t ->
-  let h = ghost_ (P.own (borrow_ t)) in
+  let _h = ghost_ (P.own (borrow_ t)) in
   ghost_ (Data.snapshot_def (borrow_ value));
   let t = L.put a value t in
   let after = ghost_ (P.own (borrow_ t)) in

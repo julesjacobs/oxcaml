@@ -105,7 +105,7 @@ let remove_at : (source : t) -> (position : int) ->
     {result : t | length result = length source - 1
       && edited source result position 0 false} =
   fun source position bounds ->
-  let bounds = bounds in
+  let _bounds = bounds in
   let raw_source = source in
   ghost_ (length_def source);
   let u = () in
@@ -152,7 +152,7 @@ let (ordered @ total) : (array : t) -> (left : int) -> (right : int) ->
     {u : unit | 0 <= left && left <= right && right < length array} @ ghost ->
     {u : unit | at array left <= at array right} =
   fun array left right bounds ->
-  let bounds = bounds in
+  let _bounds = bounds in
   let raw = array in
   length_def array;
   let u = () in
@@ -262,7 +262,7 @@ let (contents_at @ total) : (array : t) ->
   let i = index in
   ghost_ (length_def array);
   let bounded : {j : int | 0 <= j && j < Iarray.length source} = i in
-  let value = Vox_sequence.Iarray.get source bounded in
+  let _value = Vox_sequence.Iarray.get source bounded in
   ghost_ (contents_def array);
   ghost_ (at_def array i);
   ghost_ (Arrays.at_def source i);
@@ -277,7 +277,7 @@ let[@def] (edit_suffix @ total) (source : t) (result : t)
 let (length_bounds @ total) : (array : t) ->
   {u : unit | 0 <= length array && 0 < length array + 1} =
   fun array ->
-  let raw = array in
+  let _raw = array in
   length_def array;
   let u = () in u
 

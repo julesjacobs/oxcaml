@@ -28,8 +28,8 @@ let (sequential_runner @ portable total) : runner =
     && Slice.final s === Slice.final left} = left in
   let right_arg : {s : int Slice.t | Slice.current s === Slice.current right
     && Slice.final s === Slice.final right} = right in
-  let l = lf left_arg in
-  let r = rf right_arg in
+  let _l = lf left_arg in
+  let _r = rf right_arg in
   let u = () in u
 
 let (goes_left @ total) (value : int) (pivot : int) (scan : int) :
@@ -196,7 +196,7 @@ let rec (sort_sized @ portable total) : (run : runner) @ portable ->
         Spec.sorted after && Spec.permutation right_before after) in
       ghost_ (Model.cut divided bboundary);
       ghost_ (Model.cut divided bpast);
-      let children = run spawn left right left_post right_post
+      let _children = run spawn left right left_post right_post
         (fun child ->
           let child = child in
           let sized : {s : int Slice.t | 0 <= boundary
