@@ -159,4 +159,7 @@ let overflow : unit -> inference @ unique = fun () ->
   let refine_ out = Hm_infer.infer heap_witness depth pool facts_witness trees_witness env e (refine_ state) in
   #{value = out.#value; state = out.#state; pool = out.#pool; execution = out.#execution}
 
-let () = match overflow () with _ -> assert false | exception Assert_failure _ -> ()
+let () = match overflow () with
+  | _ -> assert false
+  | exception Failure message ->
+    assert (String.equal message "type inference level capacity")
