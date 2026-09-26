@@ -1,0 +1,282 @@
+module B = Wasm_u32
+module D = Hm_declarative
+module G = Hmc_cfg_ir
+module H = Hmc_heap_objects
+module F = Hmc_heap_frame
+module V = Hmc_tagged_cell
+module R = Hmc_wasm_relayout
+module Index = Hmc_u32_index
+module Codec = Hmc_pointer_frame_codec
+module Save = Hmc_wasm_call_save
+module Finish = Hmc_wasm_frame_pad_finish
+module Pad = Hmc_wasm_frame_padding
+module Slice = Hmc_frame_call_slices
+module Write = Wasm_mixed_write
+module Wire = Hmc_heap_wire
+module Header = Hmc_wasm_header_update
+module X = Wasm_memory_execution
+module E = Wasm_execution
+module S = Wasm_scalar
+module L = Wasm_locals
+module Bytes = Hmc_linear_bytes
+module Bounds = Hmc_linear_bounds
+module Source = Hmc_wasm_call_save_source
+module K = Hmc_closure_ir
+module Image = Hmc_heap_image
+module Runtime = Hmc_runtime_closures
+module Table = Hmc_runtime_descriptor_table
+module Transport = Hmc_wasm_frame_transport
+module Saved = Hmc_memory_saved_frame
+module Cap = Hmc_frame_capacity
+module Loaded = Hmc_wasm_call_save_loaded
+module Stack = Hmc_memory_stack
+module Q = Hmc_heap_state
+module Extent = Hmc_heap_extent
+module Body = Hmc_wasm_call_save_push
+module Capacity = Hmc_memory_stack_capacity
+module Continue = Wasm_control_branch_continue
+module T = Wasm_control
+module C = Hmc_cfg_program
+module I = Hmc_tail_ir
+module Model = Hmc_frame_call_entry
+module Frame = Hmc_wasm_dynamic_call_frame
+module Layout = Hmc_wasm_call_header_layout
+module Above = Hmc_heap_image_suffix
+module Machine = Hmc_heap_machine
+module Plans = Hmc_wasm_call_plan_table
+module Select = Hmc_wasm_call_plan_select
+module Entry = Hmc_wasm_dynamic_call_entry
+module Code = Wasm_code
+module Fuel = Wasm_control_compose
+module Slots = Hmc_wasm_descriptor_load
+module Separate = Hmc_wasm_selected_call_entry
+module Enter = Hmc_wasm_call_plan_enter
+module Dispatch = Hmc_wasm_call_dispatch
+module Capture = Hmc_wasm_cons_capture
+module Call_Loaded = Hmc_wasm_loaded_call
+module Guarded = Hmc_wasm_call_save_guard
+module Stack_entry = Hmc_wasm_loaded_call_stack
+module Transition = Hmc_heap_call_transition
+module Call = Hmc_wasm_ordinary_call
+module Status = Hmc_wasm_program_status
+module Complete = Hmc_wasm_program_call_finish
+module Emit = Hmc_wasm_program_emit
+module Lower = Hmc_wasm_program_lower
+module Block = Hmc_wasm_program_block
+module Structured = Hmc_wasm_structured_block
+let[@def] (failure @ total) (unit : unit) : B.u32 = 3
+type outcome = Stack_exhausted | Called of Call.result [@@inductive]
+type result = {source : outcome; state : X.state; fuel : Code.count}
+let (correct @ total) : (lowered : Lower.program) @ immutable -> (locals : Emit.locals) @ immutable -> (frames : Q.frames) @ immutable ->
+    (stack_base : B.u32) ->
+    (width : B.u32) ->
+    (stack_capacity : D.index) @ immutable ->
+    (stack_limit : B.u32) ->
+    (limit_local : B.u32) ->
+    (outer : T.labels) @ immutable ->
+    (blocks : G.table) @ immutable ->
+    (block : G.block) @ immutable ->
+    (stored_capacity : R.count) ->
+    (table : K.table) @ immutable ->
+    (heap : H.heap) @ immutable ->
+    (runtime : Runtime.table) @ immutable ->
+    (table_base : B.u32) ->
+    (table_count : Table.count) ->
+    (frame_count : R.count) ->
+    (frame_stop : B.u32) ->
+    (signature : G.signature) @ immutable ->
+    (activation : F.activation) @ immutable ->
+    (cells : H.cells) @ immutable ->
+    (old_padding : H.cells) @ immutable ->
+    (context : D.context) @ immutable ->
+    (ty : D.mono) @ immutable ->
+    (schema : G.temporaries) @ immutable ->
+    (next : D.index) @ immutable ->
+    (env_count : R.count) ->
+    (count : R.count) ->
+    (old_pc : B.u32) ->
+    (fragment : Save.fragment) @ immutable ->
+    (capacity : R.count) ->
+    (padding : Write.writes) @ immutable ->
+    (padding_count : R.count) ->
+    (padding_length : D.index) @ immutable ->
+    (state : X.state) @ immutable ->
+    (source : B.u32) ->
+    (base : B.u32) ->
+    (limit : B.u32) ->
+    (bytes : B.bytes) @ immutable ->
+    (suffix : B.bytes) @ immutable ->
+    (source_local : B.u32) ->
+    (base_local : B.u32) ->
+    (program : I.program) @ immutable ->
+    (entry : K.entry) @ immutable ->
+    (function_ : C.function_entry) @ immutable ->
+    (id : D.index) @ immutable ->
+    (closure : B.u32) ->
+    (captures : H.cells) @ immutable ->
+    (capture : Capture.slots) @ immutable ->
+    (capture_count : Hmc_wasm_relayout.count) ->
+    (plans : Plans.table) @ immutable ->
+    (code_local : B.u32) ->
+    (call_capacity : Hmc_wasm_relayout.count) ->
+    (address_local : B.u32) ->
+    (slots : Slots.slots) @ immutable ->
+    (callee_stop : B.u32) ->
+    (object_local : B.u32) ->
+    (globals : Machine.globals) @ immutable ->
+    {u : unit | source_local = locals.Emit.structured.Structured.frame && base_local = locals.Emit.top && limit_local = locals.Emit.stack_limit
+      && object_local = locals.Emit.structured.Structured.object_ && code_local = locals.Emit.code && address_local = locals.Emit.address
+      && slots === locals.Emit.descriptor && capture === locals.Emit.structured.Structured.scratch
+      && plans === lowered.Lower.calls && call_capacity = lowered.Lower.capacity && stored_capacity = lowered.Lower.capacity && width = lowered.Lower.width
+      && L.can_set state.X.machine.E.locals locals.Emit.status (S.I32 (failure ()))
+      && locals.Emit.status <> source_local && locals.Emit.status <> base_local && locals.Emit.status <> limit_local && locals.Emit.status <> object_local && locals.Emit.status <> code_local && locals.Emit.status <> address_local && locals.Emit.status <> slots.Slots.start && locals.Emit.status <> slots.Slots.captures && locals.Emit.status <> slots.Slots.recursive && locals.Emit.status <> capture.Capture.head_tag && locals.Emit.status <> capture.Capture.head_payload && locals.Emit.status <> capture.Capture.tail_tag && locals.Emit.status <> capture.Capture.tail_payload
+      && blocks === program.I.origin.C.blocks && table === program.I.origin.C.origin.Hmc_closure_program.table
+      && I.lookup program.I.code activation.F.pc === Some (I.Keep (G.Call next))
+      && base_local <> source_local
+      && width > 0 && stack_base <= base && stack_limit <= limit && width = 48 + 16 * count + 16 * padding_count
+      && Extent.span (Saved.slots blocks) (Stack.zero ()) width
+      && Capacity.region width stack_capacity stack_base stack_limit
+      && state.X.machine.E.stack === S.Empty && L.get state.X.machine.E.locals limit_local === Some (S.I32 stack_limit) && Stack.related blocks width state.X.memory stack_base base frames
+      && G.lookup blocks next === Some block && block.G.signature.G.locals === context && block.G.signature.G.temporaries === schema
+      && Index.represents (Cap.capacity blocks) stored_capacity && stored_capacity = 2 + count + padding_count
+      && H.valid table heap && Image.related state.X.memory heap && (H.used heap <= base || Hmc_heap_image_suffix.above heap stack_limit)
+      && Table.related runtime state.X.memory table_base table_count && table_base + 32 * table_count <= base
+      && Index.represents (H.length cells) frame_count && frame_stop = source + 16 + 16 * frame_count && frame_stop <= base
+      && signature.G.temporaries === G.Value (context, ty, schema)
+      && Codec.decode signature activation.F.pc cells === Some (activation, old_padding)
+      && Index.represents activation.F.pc old_pc && Save.matches signature next capacity fragment
+      && Index.represents (Codec.locals_size signature.G.locals) env_count
+      && Index.represents (D.add (Codec.locals_size context) (Codec.temporaries_size schema)) count
+      && 3 + env_count + count <= 268435452 && source + 64 + 16 * env_count + 16 * count <= 4294967296
+      && Index.represents padding_length padding_count && 3 + count + padding_count <= 268435452
+      && Pad.matches padding (3 + count) padding_length
+      && Bounds.covers state.X.memory limit && Bytes.drop state.X.memory source === Some bytes
+      && Wire.decode_cells (D.S (H.length cells)) bytes === Some (H.Cell (V.Word (Header.number old_pc), cells), suffix)
+      && L.get state.X.machine.E.locals source_local === Some (S.I32 source)
+      && L.get state.X.machine.E.locals base_local === Some (S.I32 base)
+      && Call_Loaded.separate capture object_local code_local base_local
+      && Separate.separate slots address_local base_local
+      && callee_stop <= stack_base && Stack.related program.I.origin.C.blocks width state.X.memory stack_base base frames
+      && Runtime.related program.I.origin.C.origin.Hmc_closure_program.table program.I.origin.C.functions runtime
+      && Table.related runtime state.X.memory table_base table_count && table_base + 32 * table_count <= source
+      && (match activation.F.temporaries with F.Value (value, _, _) -> value === V.Closure_pointer closure | _ -> false)
+      && Index.represents activation.F.pc old_pc && Index.represents (Codec.locals_size signature.G.locals) env_count
+      && source + 48 + 16 * env_count <= 4294967280
+      && Bytes.drop state.X.memory source === Some bytes
+      && object_local <> source_local && object_local <> code_local && code_local <> source_local
+      && Capture.distinct capture && Capture.separate capture source_local && Capture.separate capture object_local && Capture.separate capture code_local
+      && Capture.writable capture state.X.machine.E.locals
+      && Call_Loaded.separate capture object_local code_local address_local && Call_Loaded.separate capture object_local code_local slots.Slots.start
+      && Call_Loaded.separate capture object_local code_local slots.Slots.captures && Call_Loaded.separate capture object_local code_local slots.Slots.recursive
+      && (match L.get state.X.machine.E.locals address_local with Some (S.I32 _) -> true | _ -> false)
+      && Slots.distinct slots address_local && Slots.writable slots state.X.machine.E.locals
+      && Separate.separate slots address_local code_local && Separate.separate slots address_local object_local
+      && Separate.separate slots address_local source_local && Separate.separate slots address_local capture.Capture.tail_tag
+      && Separate.separate slots address_local capture.Capture.tail_payload
+      && H.valid program.I.origin.C.origin.Hmc_closure_program.table heap && Image.related state.X.memory heap && Above.above heap callee_stop
+      && Hmc_heap_preservation.lookup_object heap closure === Some (H.Closure (id, captures))
+      && K.lookup program.I.origin.C.origin.Hmc_closure_program.table id === Some entry
+      && C.lookup program.I.origin.C.functions id === Some function_
+      && Codec.environment entry.K.captured captures && Index.represents (H.length captures) capture_count
+      && Plans.related program.I.origin.C.origin.Hmc_closure_program.table call_capacity plans
+      && (match L.get state.X.machine.E.locals code_local with Some (S.I32 _) -> true | _ -> false)
+      && state.X.machine.E.stack === S.Empty
+      && callee_stop = source + Layout.width entry.K.recursive + 16 * capture_count && callee_stop <= limit
+      && Hmc_linear_bounds.covers state.X.memory limit
+      && (match L.get state.X.machine.E.locals object_local with Some (S.I32 _) -> true | _ -> false)} ->
+    {out : result | T.run out.fuel
+        {T.code = Emit.emit lowered (Block.Call {Block.save = fragment; padding; padding_length; saved = count; environment = env_count}) locals table_base stack_base; labels = outer; state}
+        === T.Running {T.code = T.Empty; labels = outer; state = out.state}
+      && out.state.X.machine.E.stack === S.Empty
+      && (match out.source with
+      | Stack_exhausted -> base + width > stack_limit && L.get out.state.X.machine.E.locals base_local === Some (S.I32 base)
+        && Machine.step program globals limit stack_capacity {Machine.heap; state = Q.Running (activation, frames)} === Machine.Exhausted Machine.Stack
+        && out.state.X.memory === state.X.memory && L.get out.state.X.machine.E.locals locals.Emit.status === Some (S.I32 (failure ()))
+      | Called called -> base + width <= stack_limit
+        && called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.entered === Model.activation entry function_.C.start (V.Closure_pointer closure) activation.F.accumulator captures
+        && Bytes.drop called.Call.saved.Body.save.Loaded.saved.Source.written.Finish.memory source === Some called.Call.saved.Body.save.Loaded.active.Transport.bytes
+        && Wire.decode_cells (D.S (H.length cells)) called.Call.saved.Body.save.Loaded.active.Transport.bytes ===
+          Some (H.Cell (V.Word (Header.number old_pc), cells), called.Call.saved.Body.save.Loaded.active.Transport.tail)
+        && Bytes.drop out.state.X.memory callee_stop === Bytes.drop called.Call.saved.Body.save.Loaded.saved.Source.written.Finish.memory callee_stop
+        && L.get out.state.X.machine.E.locals base_local === Some (S.I32 (S.add32 base width))
+        && out.state.X.memory === called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory
+        && L.get out.state.X.machine.E.locals locals.Emit.status === Some (S.I32 (Status.zero ()))
+        && Wasm_empty_labels.related called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.selected.Select.cleanup
+          (Status.scope locals.Emit.status outer) called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.selected.Select.selected.T.labels
+        && Machine.step program globals limit stack_capacity {Machine.heap; state = Q.Running (activation, frames)} ===
+          Machine.Advanced {Machine.heap; state = Q.Running (called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.entered, Q.Frame (called.Call.saved.Body.save.Loaded.saved.Source.view.Slice.saved, frames))}
+        && Stack.related blocks width called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory stack_base (S.add32 base width) (Q.Frame (called.Call.saved.Body.save.Loaded.saved.Source.view.Slice.saved, frames))
+        && L.get called.Call.callee.Call_Loaded.entry.Dispatch.locals base_local === Some (S.I32 (S.add32 base width))
+        && Image.related called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory heap
+        && Table.related runtime called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory table_base table_count
+        && Bounds.covers called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory limit
+        && V.length called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory === V.length state.X.memory
+        && Index.represents function_.C.start called.Call.callee.Call_Loaded.pc
+        && Codec.decode (Model.signature entry) function_.C.start called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.cells ===
+          Some (called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.entered, H.Empty)
+        && Bytes.drop called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory source ===
+          Some called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.bytes
+        && Wire.decode_cells (H.length (H.Cell (V.Word (Header.number called.Call.callee.Call_Loaded.pc), called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.cells)))
+          called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.bytes ===
+          Some (H.Cell (V.Word (Header.number called.Call.callee.Call_Loaded.pc), called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.cells),
+            called.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.suffix)
+)} @ immutable =
+  fun lowered locals frames stack_base width stack_capacity stack_limit limit_local outer blocks block stored_capacity table heap runtime table_base table_count frame_count frame_stop signature activation cells old_padding context ty schema next env_count count old_pc fragment capacity padding padding_count padding_length state source base limit bytes suffix source_local base_local program entry function_ id closure captures capture capture_count plans code_local call_capacity address_local slots callee_stop object_local globals premise ->
+    let local = locals.Emit.status in
+    let fragment_ = Block.Call {Block.save = fragment; padding; padding_length; saved = count; environment = env_count} in
+    let body = Call.emit fragment padding source_local base_local width limit_local 2 env_count capture plans table_base code_local address_local slots object_local in
+    let prepared = Status.prepare local (failure ()) body outer state () in
+    ghost_ (
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals source_local ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals base_local ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals limit_local ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals object_local ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals code_local ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals address_local ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals slots.Slots.start ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals slots.Slots.captures ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals slots.Slots.recursive ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals capture.Capture.head_tag ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals capture.Capture.head_payload ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals capture.Capture.tail_tag ();
+      L.other_local state.X.machine.E.locals local (S.I32 (failure ())) prepared.X.machine.E.locals capture.Capture.tail_payload ();
+      Capture.writable_def capture state.X.machine.E.locals; Capture.writable_def capture prepared.X.machine.E.locals;
+      Capture.word_slot_def state.X.machine.E.locals capture.Capture.head_tag;
+      Capture.word_slot_def state.X.machine.E.locals capture.Capture.head_payload;
+      Capture.word_slot_def state.X.machine.E.locals capture.Capture.tail_tag;
+      Capture.word_slot_def state.X.machine.E.locals capture.Capture.tail_payload;
+      Capture.word_slot_def prepared.X.machine.E.locals capture.Capture.head_tag;
+      Capture.word_slot_def prepared.X.machine.E.locals capture.Capture.head_payload;
+      Capture.word_slot_def prepared.X.machine.E.locals capture.Capture.tail_tag;
+      Capture.word_slot_def prepared.X.machine.E.locals capture.Capture.tail_payload;
+      Slots.writable_def slots state.X.machine.E.locals; Slots.writable_def slots prepared.X.machine.E.locals;
+      Slots.limb_slot_def state.X.machine.E.locals slots.Slots.start;
+      Slots.limb_slot_def state.X.machine.E.locals slots.Slots.captures;
+      Slots.limb_slot_def state.X.machine.E.locals slots.Slots.recursive;
+      Slots.limb_slot_def prepared.X.machine.E.locals slots.Slots.start;
+      Slots.limb_slot_def prepared.X.machine.E.locals slots.Slots.captures;
+      Slots.limb_slot_def prepared.X.machine.E.locals slots.Slots.recursive;
+      failure_def (); Emit.emit_def lowered fragment_ locals table_base stack_base);
+    let result = Call.correct frames stack_base width stack_capacity stack_limit limit_local 2 (Status.scope local outer) blocks block stored_capacity table heap runtime table_base table_count frame_count frame_stop signature activation cells old_padding context ty schema next env_count count old_pc fragment capacity padding padding_count padding_length prepared source base limit bytes suffix source_local base_local program entry function_ id closure captures capture capture_count plans code_local call_capacity address_local slots callee_stop object_local globals () in
+    match result with
+    | Some out ->
+      let after_body = {X.memory = out.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.entry.Entry.frame.Frame.memory;
+        machine = {E.locals = out.Call.callee.Call_Loaded.entry.Dispatch.locals; stack = S.Empty}} in
+      let cleanup = out.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.selected.Select.cleanup in
+      let inner = out.Call.callee.Call_Loaded.entry.Dispatch.call.Enter.selected.Select.selected.T.labels in
+      let after = Complete.correct local (failure ()) body outer state prepared after_body inner out.Call.fuel cleanup () in
+      ghost_ (L.other_local after_body.X.machine.E.locals local (S.I32 (Status.zero ())) after.X.machine.E.locals base_local ());
+      {source = Called out; state = after; fuel = Status.cost (Fuel.add out.Call.fuel cleanup)}
+    | None ->
+      let body_fuel = Guarded.cost fragment padding source_local base_local width limit_local base stack_limit in
+      let tail = Call_Loaded.emit env_count capture plans table_base code_local address_local slots object_local source_local in
+      let after = T.stack prepared S.Empty in
+      ghost_ (Status.scope_def local outer; Status.zero_def ();
+        Continue.labels_def T.Empty outer;
+        Continue.labels_def (Emit.status local (Status.zero ()) T.Empty) (Continue.labels T.Empty outer);
+        Continue.labels_def tail (Status.scope local outer);
+        T.branch_def 2 (Continue.labels tail (Status.scope local outer)) prepared;
+        T.branch_def 1 (Status.scope local outer) prepared;
+        T.branch_def 0 (Continue.labels T.Empty outer) prepared; T.stack_def prepared S.Empty;
+        Fuel.correct (Status.four ()) body_fuel {T.code = Emit.protected local (failure ()) body; labels = outer; state});
+      {source = Stack_exhausted; state = after; fuel = Fuel.add (Status.four ()) body_fuel}
