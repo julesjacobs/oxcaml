@@ -39,4 +39,14 @@ module Regex_language = struct
       : {u : unit | match lower root with None -> true | Some machine ->
         Dfa_semantics.run machine word === matches root word}) in
     let u = () in u
+  let (lower_valid @ total) (root : t) :
+    {u : unit | match lower root with None -> true | Some machine ->
+      Dfa_semantics.valid machine} =
+    let _proof = ghost_ (
+      ghost_ (lower_def root);
+      ghost_ (Regex_dfa_bridge.lower_compiled_valid root);
+      let u = () in u
+      : {u : unit | match lower root with None -> true | Some machine ->
+        Dfa_semantics.valid machine}) in
+    let u = () in u
 end;;

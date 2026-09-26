@@ -11,4 +11,7 @@ module Regex_language : sig
   val lower_matches : (root : t) -> (word : int list) ->
     {u : unit | match lower root with None -> true | Some machine ->
       Dfa_semantics.run machine word === matches root word} @@ total
+  val lower_valid : (root : t) ->
+    {u : unit | match lower root with None -> true | Some machine ->
+      Dfa_semantics.valid machine} @@ total
 end

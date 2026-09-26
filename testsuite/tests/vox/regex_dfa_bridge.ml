@@ -1879,6 +1879,13 @@ module Regex_dfa_bridge :
           | Some machine ->
               (Dfa_semantics.run machine word) === (Regex.matches root word)}
       @@ total
+    val lower_compiled_valid :
+      (root : Regex.t) ->
+      {u : unit
+        | match lower (Regex.Dfa.compile root) with
+          | None -> true
+          | Some machine -> Dfa_semantics.valid machine}
+      @@ total
   end
 |}]
 

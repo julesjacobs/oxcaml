@@ -5,6 +5,10 @@ module Regex_dfa_bridge : sig
       | None -> true
       | Some machine -> Dfa_semantics.run machine word ===
         Regex.matches root word} @@ total
+  val lower_compiled_valid : (root : Regex.t) ->
+    {u : unit | match lower (Regex.Dfa.compile root) with
+      | None -> true
+      | Some machine -> Dfa_semantics.valid machine} @@ total
 end = struct
   open Regex.Dfa
 
@@ -928,4 +932,17 @@ end = struct
        | Some machine ->
          Dfa_proof.of_raw_run raw machine word;
          u)
+
+  let (lower_compiled_valid @ total) (root : Regex.t) :
+      {u : unit | match lower (compile root) with
+        | None -> true
+        | Some machine -> Dfa_semantics.valid machine} =
+    let (dfa @ total) = compile root in
+    lower_def dfa;
+    let u = () in
+    match lower_raw dfa with
+    | None -> u
+    | Some raw ->
+      Dfa_proof.of_raw_valid raw;
+      u
 end;;
