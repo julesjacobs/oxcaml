@@ -11,6 +11,27 @@
 open Register_allocation_spec
 open Register_allocation
 
+let (explicit_adapter_preservation @ total) :
+  (program : program) -> (physical : int) ->
+  (args : int list) -> (fuel : fuel) ->
+  {u : unit |
+    match allocate program physical with
+    | None -> true
+    | Some {code = target_code; physical = out_physical;
+            source_registers; source_inputs; input_slots} ->
+      not (same_shape program.inputs args)
+      || observable_equal
+           (advance program.code fuel (source_initial program args))
+           (advance target_code fuel
+              (target_initial out_physical source_registers
+                 source_inputs input_slots args))}
+  @ ghost =
+  fun program physical args fuel -> ghost_ (
+    preserves program physical args fuel;
+    match allocate program physical with
+    | None -> ()
+    | Some allocation -> initial_of_allocation_def allocation args)
+
 let (verified_run @ total) :
     (program : program) -> (physical : int) -> (args : int list) ->
     (fuel : fuel) ->
@@ -27,7 +48,6 @@ let (verified_run @ total) :
   match allocation with
   | None -> let result = None in result
   | Some allocation ->
-    ghost_ (initial_of_allocation_def allocation args);
     let target = advance allocation.code fuel
       (initial_of_allocation allocation args) in
     let result = Some target in
@@ -114,5 +134,19 @@ let () =
      assert (observable_equal
        (advance forever.code (fuel 10) (source_initial forever []))
        (advance allocation.code (fuel 10) (initial_of_allocation allocation []))));
+  let full_inputs = List.init 32 Fun.id in
+  let maximum = {
+    registers = 32; inputs = full_inputs;
+    code = List.init 31 (fun i -> Binary (0, Add, Reg 0, Reg (i + 1), i + 1))
+      @ List.init 32 (fun i -> Jump (i + 32)) @ [Return (Reg 0)]
+  } in
+  assert (allocate maximum 31 = None);
+  assert (allocate maximum 33 = None);
+  assert (allocate {maximum with code = Jump 0 :: maximum.code} 32 = None);
+  assert (allocate {maximum with registers = 33} 32 = None);
+  assert (allocate {registers = 1; inputs = []; code = [Return (Reg 0)]} 1
+    = None);
+  let result = verified_run maximum 32 full_inputs (fuel 64) in
+  assert (result = Some (Done 496));
   Printf.printf "boundaries=passed\n"
 ;;

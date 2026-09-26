@@ -8,14 +8,11 @@ val preserves :
   {u : unit |
     match allocate program physical with
     | None -> true
-    | Some {code = target_code; physical = out_physical;
-            source_registers; source_inputs; input_slots} ->
+    | Some allocation ->
       not (same_shape program.inputs args)
       || observable_equal
            (advance program.code fuel (source_initial program args))
-           (advance target_code fuel
-              (target_initial out_physical source_registers
-                 source_inputs input_slots args))}
+           (advance allocation.code fuel (initial_of_allocation allocation args))}
   @ ghost @@ total
 
 val allocation_domain :
