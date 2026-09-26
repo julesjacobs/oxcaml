@@ -2,7 +2,8 @@ open Bigint
 open Vox_rsa_spec
 let rec (power_add @ total) : (a : t) -> (e : t) -> (f : t) ->
     {u : unit | if e >= 0Z && f >= 0Z then
-      power a (e + f) = power a e * power a f else true} = fun a e f ->
+      power a (e + f) = power a e * power a f else true}
+    @ ghost = fun a e f -> ghost_ (
   if e < 0Z || f < 0Z then ()
   else if e = 0Z then (power_def a e; ())
   else begin
@@ -10,19 +11,20 @@ let rec (power_add @ total) : (a : t) -> (e : t) -> (f : t) ->
     power_def a e;
     power_def a (e + f);
     ()
-  end
+  end)
 [@@decreases e]
 
 let (remainder_unique @ total) (a : t) (n : t) (q : t) (r : t) :
     {u : unit | if n > 0Z && 0Z <= r && r < n && a = n * q + r
-      then a mod n = r else true} =
+      then a mod n = r else true} @ ghost = ghost_ (
   if q < a / n then ()
   else if q > a / n then ()
-  else ()
+  else ())
 
 let (reduce_product @ total) (a : t) (b : t) (n : t) :
     {u : unit | if n > 0Z then
-      (a * b) mod n = ((a mod n) * (b mod n)) mod n else true} =
+      (a * b) mod n = ((a mod n) * (b mod n)) mod n else true}
+    @ ghost = ghost_ (
   if n <= 0Z then ()
   else begin
     let x = a mod n in
@@ -30,7 +32,7 @@ let (reduce_product @ total) (a : t) (b : t) (n : t) :
     let q = (a / n) * b + x * (b / n) + (x * y) / n in
     remainder_unique (a * b) n q ((x * y) mod n);
     ()
-  end
+  end)
 
 (* The squaring steps combine products with [mod] (nonlinear integer
    arithmetic): about 1.9M solver resource units, over the 1M slow-refinement
@@ -70,7 +72,8 @@ let[@warning "-slow-refinement"] rec (modexp @ total) : (a : t) ->
 
 let rec (power_multiply @ total) : (a : t) -> (e : t) -> (f : t) ->
     {u : unit | if e >= 0Z && f >= 0Z then
-      power (power a e) f = power a (e * f) else true} = fun a e f ->
+      power (power a e) f = power a (e * f) else true}
+    @ ghost = fun a e f -> ghost_ (
   if e < 0Z || f < 0Z then ()
   else if f = 0Z then begin
     power_def (power a e) f;
@@ -81,12 +84,13 @@ let rec (power_multiply @ total) : (a : t) -> (e : t) -> (f : t) ->
     power_def (power a e) f;
     power_add a e (e * (f - 1Z));
     ()
-  end
+  end)
 [@@decreases f]
 
 let rec (reduce_power @ total) : (a : t) -> (e : t) -> (n : t) ->
     {u : unit | if e >= 0Z && n > 0Z then
-      power (a mod n) e mod n = power a e mod n else true} = fun a e n ->
+      power (a mod n) e mod n = power a e mod n else true}
+    @ ghost = fun a e n -> ghost_ (
   if e < 0Z || n <= 0Z then ()
   else begin
     power_def a e;
@@ -98,48 +102,48 @@ let rec (reduce_power @ total) : (a : t) -> (e : t) -> (n : t) ->
       reduce_product (a mod n) (power (a mod n) (e - 1Z)) n;
       ()
     end
-  end
+  end)
 [@@decreases e]
 
 
 let (divides_factor @ total) (n : t) (k : t) :
-    {u : unit | if n > 0Z then (n * k) mod n = 0Z else true} =
+    {u : unit | if n > 0Z then (n * k) mod n = 0Z else true} @ ghost = ghost_ (
   remainder_unique (n * k) n k 0Z;
-  ()
+  ())
 
 let (divides_sum @ total) (n : t) (a : t) (b : t) (x : t) (y : t) :
     {u : unit | if n > 0Z && a mod n = 0Z && b mod n = 0Z then
-      (a * x + b * y) mod n = 0Z else true} =
+      (a * x + b * y) mod n = 0Z else true} @ ghost = ghost_ (
   remainder_unique (a * x + b * y) n ((a / n) * x + (b / n) * y) 0Z;
-  ()
+  ())
 
 let (divides_transitive @ total) (a : t) (b : t) (c : t) :
     {u : unit | if a > 0Z && b > 0Z && b mod a = 0Z && c mod b = 0Z
-      then c mod a = 0Z else true} =
+      then c mod a = 0Z else true} @ ghost = ghost_ (
   remainder_unique c a ((c / b) * (b / a)) 0Z;
-  ()
+  ())
 
 let (reduce_left @ total) (a : t) (b : t) (n : t) :
     {u : unit | if n > 0Z then
-      ((a mod n) * b) mod n = (a * b) mod n else true} =
+      ((a mod n) * b) mod n = (a * b) mod n else true} @ ghost = ghost_ (
   let r = ((a mod n) * b) mod n in
   remainder_unique (a * b) n ((a / n) * b + ((a mod n) * b) / n) r;
-  ()
+  ())
 
 let (multiply_congruent @ total) (factor : t) (x : t) (y : t) (n : t) :
     {u : unit | if n > 0Z && x mod n = y mod n then
-      (factor * x) mod n = (factor * y) mod n else true} =
+      (factor * x) mod n = (factor * y) mod n else true} @ ghost = ghost_ (
   reduce_product factor x n;
   reduce_product factor y n;
-  ()
+  ())
 
 let (multiply_four @ total) (a : t) (b : t) (c : t) (d : t) :
-    {u : unit | (a * b) * (c * d) = (a * c) * (b * d)} =
-  ()
+    {u : unit | (a * b) * (c * d) = (a * c) * (b * d)} @ ghost = ghost_ (
+  ())
 
 let (equal_remainders @ total) (a : t) (b : t) (n : t) :
     {u : unit | if n > 0Z then
-      (a mod n = b mod n) === ((a - b) mod n = 0Z) else true} =
+      (a mod n = b mod n) === ((a - b) mod n = 0Z) else true} @ ghost = ghost_ (
   if n <= 0Z then ()
   else if a mod n = b mod n then begin
     remainder_unique (a - b) n (a / n - b / n) 0Z;
@@ -147,4 +151,4 @@ let (equal_remainders @ total) (a : t) (b : t) (n : t) :
   end else begin
     remainder_unique a n ((a - b) / n + b / n) (b mod n);
     ()
-  end
+  end)

@@ -19,7 +19,7 @@ val decrypt : (a : t) -> (exponent : {e : t | e >= 0Z}) ->
 val roundtrip_correct :
   (p : t) -> (q : t) -> (e : t) -> (d : t) -> (m : t) ->
   {u : unit | if valid_key p q e d && 0Z <= m && m < p * q then
-    power (power m e mod (p * q)) d mod (p * q) = m else true} @@ total
+    power (power m e mod (p * q)) d mod (p * q) = m else true} @ ghost @@ total
 
 val roundtrip : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
   (message : {m : t | valid_key p q e d && 0Z <= m && m < p * q}) ->
