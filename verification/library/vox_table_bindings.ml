@@ -327,4 +327,16 @@ module Make (Key : Vox_table_map.Key) = struct
       erase_def map key; count_def (erase map key); count_def map;
       lookup_def map key; Assoc.count_erase map key)
 
+  let (lookup_equal @ total) : ('a : immutable_data).
+      (map : 'a t) -> (key : Key.t) -> (query : Key.t) ->
+      {u : unit | not (Key.equal key query) ||
+        lookup map key === lookup map query} @ ghost =
+    fun map key query -> ghost_ (
+      lookup_def map key; lookup_def map query;
+      Assoc.lookup_congruent map key query)
+
+  let (count_nonnegative @ total) : ('a : immutable_data).
+      (map : 'a t) -> {u : unit | 0Z <= count map} @ ghost =
+    fun map -> ghost_ (count_def map; Assoc.count_nonnegative map)
+
 end

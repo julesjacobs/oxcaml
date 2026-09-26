@@ -18,6 +18,20 @@ module Exercise (Key : Vox_verified_flat_hashtbl.Key) = struct
     ghost_ (V.Map.lookup_empty (V.bindings r.#view) key);
     V.find_opt r.#table r.#view key (borrow_ r.#token)
 
+  (* Equivalent keys find the same binding in any table, not only in one
+     just updated with the key. *)
+  let find_equivalent :
+      (table : int V.t) ->
+      (view : int V.view) @ immutable ->
+      (key : Key.t) ->
+      (query : {q : Key.t | Key.equal key q}) ->
+      (token : {t : int V.state P.token |
+        H.at (P.own t) (V.location table) === Some (V.version view)}) @ local read ghost ->
+      {v : int option | v === V.Map.lookup (V.bindings view) key} =
+    fun table view key query token ->
+    ghost_ (V.Map.lookup_equal (V.bindings view) key query);
+    V.find_opt table view query token
+
   let replace_lookup :
       (table : int V.t) ->
       (before : int V.view) @ immutable ->

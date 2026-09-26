@@ -97,6 +97,12 @@ module Make (Key : Key) : sig
       (map : 'a t) -> (key : Key.t) ->
       {u : unit | count (erase map key) = (if lookup map key === None
         then count map else Bigint.sub (count map) 1Z)} @ ghost @@ total
+    val lookup_equal : ('a : immutable_data).
+      (map : 'a t) -> (key : Key.t) -> (query : Key.t) ->
+      {u : unit | not (Key.equal key query) ||
+        lookup map key === lookup map query} @ ghost @@ total
+    val count_nonnegative : ('a : immutable_data).
+      (map : 'a t) -> {u : unit | 0Z <= count map} @ ghost @@ total
   end
 
   type ('a : immutable_data) t : immutable_data
