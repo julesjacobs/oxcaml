@@ -13136,8 +13136,16 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 "structural recursion requires a simple function binding")
           rec_mode_var;
       List.iter2
-        (fun (_, pat, _) (exp, _) ->
-          if maybe_expansive exp then lower_contravariant env pat.pat_type)
+        (fun (_, pat, _) (exp, vars) ->
+          if maybe_expansive exp then lower_contravariant env pat.pat_type;
+          (* In ghost code a polymorphic non-function value would give each
+             use its own instance, which the proofs cannot relate. *)
+          match exp.exp_desc, vars with
+          | Texp_function _, _ | _, Some _ -> ()
+          | _, None ->
+              if Env.in_ghost_context env
+              then lower_variables_only env (get_current_level ())
+                     pat.pat_type)
         mode_pat_typ_list exp_list;
       iter_pattern_variables_type_mut
         ~f_immut:(fun pv_lpoly ty ->
