@@ -3352,7 +3352,22 @@ let verify_batch ctx prove code =
       let origin =
         if o.origin.loc_ghost || o.origin = o.loc
         then []
-        else [Location.msg ~loc:o.origin "The refinement is stated here."]
+        else
+          (* A refinement from another unit is named by its file alone; the
+             directory it was compiled in means nothing to the reader. *)
+          let loc =
+            if o.origin.loc_start.pos_fname = o.loc.loc_start.pos_fname
+            then o.origin
+            else
+              let base (p : Lexing.position) =
+                { p with pos_fname = Filename.basename p.pos_fname }
+              in
+              { o.origin with
+                loc_start = base o.origin.loc_start;
+                loc_end = base o.origin.loc_end
+              }
+          in
+          [Location.msg ~loc "The refinement is stated here."]
       in
       raise
         (Location.Error
