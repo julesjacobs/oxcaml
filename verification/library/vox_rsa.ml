@@ -94,6 +94,49 @@ let (prime_inverse @ total) (p : t) (q : t) :
   power_def p (q - 1Z);
   ()
 
+let (recombine_correct @ total)
+    (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
+    {u : unit | let r = rp + p * (((rq - rp) * inverse) mod q) in
+      if p > 0Z && q > 1Z && 0Z <= rp && rp < p
+        && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
+        0Z <= r && r < p * q && r mod p = rp && r mod q = rq
+      else true} =
+  let v = (rq - rp) * inverse in
+  let h = v mod q in
+  let r = rp + p * h in
+  if not (p > 0Z && q > 1Z && 0Z <= rp && rp < p
+    && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z) then ()
+  else begin
+    let quotient = (rq - rp) * ((p * inverse) / q) - p * (v / q) in
+    (() : {u : unit | r = q * quotient + rq});
+    remainder_unique r p h rp;
+    remainder_unique r q quotient rq;
+    ()
+  end
+
+let (computed_inverse_correct @ total) (p : t) (q : t) (inverse : t) :
+    {u : unit | if prime p && prime q && p <> q
+      && inverse = power p (q - 2Z) mod q then
+      (p * inverse) mod q = 1Z else true} =
+  prime_def q;
+  prime_inverse p q;
+  reduce_left (power p (q - 2Z)) p q;
+  ()
+
+let (decrypt_crt_correct @ total)
+    (ciphertext : t) (d : t) (p : t) (q : t) (r : t) :
+    {u : unit | if prime p && prime q && p <> q && d >= 0Z
+      && 0Z <= r && r < p * q
+      && r mod p = power ciphertext d mod p
+      && r mod q = power ciphertext d mod q then
+      r = power ciphertext d mod (p * q) else true} =
+  prime_def p; prime_def q;
+  let a = power ciphertext d in
+  reduce_divisor a p q;
+  reduce_divisor a q p;
+  crt_unique p q r (a mod (p * q));
+  ()
+
 let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
     {r : t | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
       && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
@@ -101,22 +144,7 @@ let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
   let v = (rq - rp) * inverse in
   let h = v mod q in
   let r = rp + p * h in
-  ghost_ begin
-    if not (p > 0Z && q > 1Z && 0Z <= rp && rp < p
-      && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z) then
-      (() : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
-        && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
-        0Z <= r && r < p * q && r mod p = rp && r mod q = rq else true})
-    else begin
-      let quotient = (rq - rp) * ((p * inverse) / q) - p * (v / q) in
-      (() : {u : unit | r = q * quotient + rq});
-      remainder_unique r p h rp;
-      remainder_unique r q quotient rq;
-      (() : {u : unit | if p > 0Z && q > 1Z && 0Z <= rp && rp < p
-        && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
-        0Z <= r && r < p * q && r mod p = rp && r mod q = rq else true})
-    end
-  end;
+  ghost_ (recombine_correct p q rp rq inverse);
   r
 
 let (decrypt_crt @ total) : (ciphertext : t) ->
@@ -133,17 +161,7 @@ let (decrypt_crt @ total) : (ciphertext : t) ->
   let rq = modexp ciphertext exponent q in
   let inverse_exponent = q - 2Z in
   let inverse = modexp p inverse_exponent q in
-  ghost_ begin
-    prime_inverse p q;
-    reduce_left (power p (q - 2Z)) p q;
-    (() : {u : unit | (p * inverse) mod q = 1Z})
-  end;
+  ghost_ (computed_inverse_correct p q inverse);
   let r = recombine p q rp rq inverse in
-  ghost_ begin
-    let a = power ciphertext d in
-    reduce_divisor a p q;
-    reduce_divisor a q p;
-    crt_unique p q r (a mod (p * q));
-    (() : {u : unit | r = power ciphertext d mod (p * q)})
-  end;
+  ghost_ (decrypt_crt_correct ciphertext d p q r);
   r
