@@ -6,7 +6,7 @@ type statistics = {
   work : int;
 }
 
-type answer = Sat of bool list | Unsat of Vox_sat.proof_result | Unknown
+type answer = Sat of bool list | Unsat | Unknown
 [@@inductive]
 
 type report = {
@@ -14,35 +14,15 @@ type report = {
   statistics : statistics;
 }
 
-type input_error = Invalid_fuel | Invalid_input of Vox_sat.input_error
+type input_error = Invalid_fuel | Invalid_input of Vox_sat_spec.input_error
 
 val solve : (fuel : int) -> (n : int) ->
-  (formula : Vox_sat.formula) ->
+  (formula : Vox_sat_spec.formula) ->
   {r : (report, input_error) result |
     match r with
     | Error _ -> true
     | Ok report ->
       match report.answer with
-      | Sat assignment -> Vox_sat.check n formula assignment
-      | Unsat entry ->
-        Vox_sat.derivation_valid formula entry.proof
-        && Vox_sat.same_clause
-          (Vox_sat.conclusion formula entry.proof) entry.clause
-        && entry.clause === []
+      | Sat assignment -> Vox_sat_spec.check n formula assignment
+      | Unsat -> Vox_sat_spec.unsatisfiable n formula
       | Unknown -> true}
-
-val unsat_at :
-  (formula : Vox_sat.formula) ->
-  (report : {r : report |
-    match r.answer with
-    | Unsat entry ->
-      Vox_sat.derivation_valid formula entry.proof
-      && Vox_sat.same_clause
-        (Vox_sat.conclusion formula entry.proof) entry.clause
-      && entry.clause === []
-    | Sat _ | Unknown -> true}) ->
-  (assignment : bool list) ->
-  {u : unit |
-    match report.answer with
-    | Unsat _ -> not (Vox_sat.eval_formula assignment formula)
-    | Sat _ | Unknown -> true} @@ total

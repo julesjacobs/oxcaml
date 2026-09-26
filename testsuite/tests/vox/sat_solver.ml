@@ -2,12 +2,14 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sat.mli vox_sat.ml sat_solver.ml";
+ all_modules = "vox_sat_spec.mli vox_sat_spec.ml vox_sat_proof.mli vox_sat_proof.ml vox_sat.mli vox_sat.ml sat_solver.ml";
  { bytecode; }
  { native; }
  { flags += " -principal"; bytecode; }
  { flags += " -principal"; native; }
 *)
+
+open Vox_sat_spec
 
 let () =
   let open Vox_sat in
@@ -31,9 +33,8 @@ let () =
   (match solve 50 2 impossible with
    | Error _ -> assert false
    | Ok result ->
-     unsat_at 2 impossible result [false; true];
      match result.answer with
-     | Unsat -> ()
+     | Unsat -> ghost_ (unsat_at 2 impossible [false; true])
      | Sat _ | Unknown -> assert false);
   (match solve 0 2 impossible with
    | Error _ -> assert false

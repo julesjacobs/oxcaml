@@ -6,7 +6,7 @@ clauses, unit propagation by scanning clauses, first-UIP conflict analysis,
 learned clauses, and nonchronological backtracking. Learned clauses are
 append-only. There are no watched literals, restarts, or clause deletion.
 
-`Vox_sat.proof_result` is the clause-learning interface. Each result contains a
+Private `Vox_sat_proof.proof_result` is the clause-learning interface. Each result contains a
 runtime clause and a ghost derivation from the original formula.
 `original_result` introduces an input clause. `resolve_result` learns a
 resolvent, and `database_cons` preserves entailment of a learned clause.
@@ -16,9 +16,10 @@ conflict-analysis choice can lead to `Unknown`, but cannot make an unrelated
 clause into a proved learned clause.
 
 At a root conflict, the solver resolves against assignment reasons until it
-derives the empty clause. `Unsat` carries this proof result. The public `solve`
-refinement ties it to the exact input formula; `unsat_at` derives that every
-assignment falsifies the formula. Ghost derivations erase, and the solver does
+derives the empty clause. Public `Unsat` is nullary. The public `solve`
+refinement proves `Vox_sat_spec.unsatisfiable n formula`;
+`Vox_sat.unsat_at n formula assignment` derives that every assignment
+falsifies the formula. Ghost derivations erase, and the solver does
 not record or replay a proof trace at runtime.
 
 Propagation scans input clauses through a total, verified clause scanner. If
@@ -62,3 +63,6 @@ _build/vox_cdcl_bench.exe
 The test checks clause learning, a direct `unsat_at` invocation, budget errors,
 729 formulas against a truth-table oracle, and a fixed 50-variable UNSAT
 instance that makes a nonchronological backjump.
+
+See [the review boundary](vox_sat_boundary.md). Kernel tests are separate
+from ordinary solver clients.

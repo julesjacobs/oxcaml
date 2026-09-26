@@ -1,3 +1,4 @@
+open Vox_sat_spec
 open Vox_sat
 
 let implication_chain n =
