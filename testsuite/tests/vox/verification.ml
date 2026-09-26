@@ -24,7 +24,7 @@ type nonnegative = {n : int | n >= 0}
 let clamp x : nonnegative =
   if x >= 0 then refine_ x else let z = 0 in refine_ z;;
 [%%expect{|
-val clamp : int @ total -> nonnegative = <fun>
+val clamp : int -> nonnegative = <fun>
 |}]
 
 let checked_read read : zero =
@@ -102,6 +102,14 @@ Error: Refinement could not be proved (counterexample)
 let hidden_false (r : {n : int | false}) : zero =
   let x = 1 in refine_ x;;
 [%%expect{|
+val hidden_false : {n : int | false} -> zero = <fun>
+|}]
+
+(* A parameter's predicate is now available implicitly, but a false
+   predicate on a function's result is only available after a call. *)
+let hidden_false_result (f : unit -> {n : int | false}) : zero =
+  let x = 1 in refine_ x;;
+[%%expect{|
 Line 2, characters 15-24:
 2 |   let x = 1 in refine_ x;;
                    ^^^^^^^^^
@@ -148,7 +156,7 @@ let guarded x : nonnegative =
   | n when n >= 0 -> refine_ n
   | _ -> let z = 0 in refine_ z;;
 [%%expect{|
-val guarded : int @ total -> nonnegative = <fun>
+val guarded : int -> nonnegative = <fun>
 |}]
 
 let nested x = ignore (let f () : zero = refine_ x in f);;
@@ -245,10 +253,10 @@ let greater x : {n : int | gt n 0} =
 let greater_equal x : {n : int | ge n 0} =
   if ge x 0 then refine_ x else let n = 0 in refine_ n;;
 [%%expect{|
-val less : int @ total -> {n : int | lt n 0} = <fun>
-val less_equal : int @ total -> {n : int | le n 0} = <fun>
-val greater : int @ total -> {n : int | gt n 0} = <fun>
-val greater_equal : int @ total -> {n : int | ge n 0} = <fun>
+val less : int -> {n : int | lt n 0} = <fun>
+val less_equal : int -> {n : int | le n 0} = <fun>
+val greater : int -> {n : int | gt n 0} = <fun>
+val greater_equal : int -> {n : int | ge n 0} = <fun>
 |}]
 
 external to_int : bool -> int @@ total = "%identity";;

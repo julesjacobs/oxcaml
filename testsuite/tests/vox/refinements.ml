@@ -25,11 +25,18 @@ val payload : int = 42
 
 let implicit_payload = wrapped + 1;;
 [%%expect{|
-Line 1, characters 23-30:
-1 | let implicit_payload = wrapped + 1;;
-                           ^^^^^^^
-Error: The value "wrapped" has type "nonnegative" = "{n : int | n >= 0}"
-       but an expression was expected of type "int"
+val implicit_payload : int = 43
+|}]
+
+(* Implicit elimination only removes the predicate; the base type must still
+   match. *)
+let mismatched_payload = wrapped ^ "!";;
+[%%expect{|
+Line 1, characters 25-32:
+1 | let mismatched_payload = wrapped ^ "!";;
+                             ^^^^^^^
+Error: The value "wrapped" has type "int" but an expression was expected of type
+         "string"
 |}]
 
 let unknown x = refine_ x;;
@@ -45,8 +52,19 @@ let escapes =
   let result : {n : int | n = bound} = refine_ bound in
   result;;
 [%%expect{|
-Line 4, characters 2-8:
-4 |   result;;
-      ^^^^^^
+val escapes : int = 42
+|}]
+
+(* A refinement cannot be dropped from a function type, so a function whose
+   result predicate mentions a local binding still escapes its scope. *)
+let escapes_function =
+  let bound = 42 in
+  let add_bound : (x : int) -> {n : int | n = x + bound} =
+    fun x -> x + bound in
+  add_bound;;
+[%%expect{|
+Line 5, characters 2-11:
+5 |   add_bound;;
+      ^^^^^^^^^
 Error: the refinement type of this expression escapes the scope of binding "bound"
 |}]

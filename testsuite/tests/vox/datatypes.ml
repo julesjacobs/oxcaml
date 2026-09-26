@@ -263,14 +263,10 @@ let wrapper_first (wrapped @ immutable) (tree @ immutable) :
   ();;
 [%%expect{|
 type ordinary_wrapper = Ordinary_wrap of ordinary
-Line 5, characters 25-40:
-5 |       match wrapped with Ordinary_wrap _ -> tree === tree} =
-                             ^^^^^^^^^^^^^^^
-Error: Unsupported refinement predicate in VC generation
-Line 6, characters 2-4:
-6 |   ();;
-      ^^
-  Required by this refinement introduction
+val wrapper_first :
+  (wrapped : ordinary_wrapper) @ immutable ->
+  (tree : 'a) @ immutable ->
+  {u : unit | match wrapped with | Ordinary_wrap _ -> tree === tree} = <fun>
 |}]
 
 let recursive_first (tree @ immutable) (wrapped @ immutable) :
@@ -278,14 +274,23 @@ let recursive_first (tree @ immutable) (wrapped @ immutable) :
       match wrapped with Ordinary_wrap _ -> tree === tree} =
   ();;
 [%%expect{|
-Line 3, characters 25-40:
-3 |       match wrapped with Ordinary_wrap _ -> tree === tree} =
-                             ^^^^^^^^^^^^^^^
-Error: Unsupported refinement predicate in VC generation
+val recursive_first :
+  (tree : 'a) @ immutable ->
+  (wrapped : ordinary_wrapper) @ immutable ->
+  {u : unit | match wrapped with | Ordinary_wrap _ -> tree === tree} = <fun>
+|}]
+
+(* Ordinary wrappers are now encoded with an opaque payload; a false claim
+   about the payload is still rejected. *)
+let wrapper_payload_unknown (wrapped @ immutable) :
+    {u : unit |
+      match wrapped with Ordinary_wrap tree -> tree === Ordinary_stop} =
+  ();;
+[%%expect{|
 Line 4, characters 2-4:
 4 |   ();;
       ^^
-  Required by this refinement introduction
+Error: Refinement could not be proved (counterexample)
 |}]
 
 type mutable_point = {mutable mx : int; my : int}
