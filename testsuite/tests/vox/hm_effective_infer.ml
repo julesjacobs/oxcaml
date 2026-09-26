@@ -63,8 +63,9 @@ let rec work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immut
     source_def execution; result_def execution);
   let out = #{value = Some copied.#value; state = copied.#state; pool = copied.#pool; execution} in use (refine_ out)
   | T.Cons _ | T.CaseList _ | T.If _ | T.Primitive _ ->
-    (* Lists, conditionals and primitives are inferred by the routed driver
-       behind Verified_hm and Hm_inference; this driver predates them. *)
+    (* Cons, list case, conditionals and primitives are inferred by the
+       routed driver behind Verified_hm and Hm_inference; this older driver
+       stops at the constants and the empty list. *)
     raise (Failure "type inference: term form outside the effective-level driver")
   | T.Truth ->
     let desc = Bool in
