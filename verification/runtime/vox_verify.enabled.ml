@@ -120,22 +120,82 @@ type outcome =
   | Exhausted
   | Inconclusive of string option
 
-(* The counterexample restricted to variables named in the source: VC
-   generation labels other symbols by their role. *)
-let counterexample model =
+(* VC generation labels symbols that do not name a source variable by their
+   role. *)
+let source_name label =
   let internal =
     [ "value"; "reachable"; "observation"; "pattern"; "result";
       "refinement_function"; "recursive"; "condition"; "argument" ]
   in
-  let source_name label =
-    label <> ""
-    && (not (List.mem label internal))
-    && String.for_all
-         (function
-           | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '\'' -> true
-           | _ -> false)
-         label
+  label <> ""
+  && (not (List.mem label internal))
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '\'' -> true
+         | _ -> false)
+       label
+
+(* Z3's models often pick extreme integers. A countermodel found under extra
+   assumptions is still a countermodel of the goal, so when a source integer
+   in [model] is large, look once for a model with every source integer in
+   [-100, 100], and keep [model] if there is none. *)
+let smaller_model check ?resource_limit (query : Vox_smt.query) model =
+  let small = 100L in
+  let bound symbol : Vox_smt.term option =
+    let v = Vox_smt.Var symbol in
+    match Vox_smt.Symbol.sort symbol with
+    | Int63 ->
+      Some
+        (App
+           ( And,
+             [ App (Le, [Integer (Int64.neg small); v]);
+               App (Le, [v; Integer small]) ] ))
+    | Int ->
+      let bound = Int64.to_string small in
+      Some
+        (App
+           ( And,
+             [ App (Int_le, [Big_integer ("-" ^ bound); v]);
+               App (Int_le, [v; Big_integer bound]) ] ))
+    | Bool | Opaque _ | Datatype _ -> None
   in
+  let large (symbol, (value : Vox_smt.value)) =
+    source_name (Vox_smt.Symbol.label symbol)
+    &&
+    match value with
+    | Int_value n -> Int64.abs n > small
+    | Bigint_value n -> (
+      match Int64.of_string_opt n with
+      | Some n -> Int64.abs n > small
+      | None -> true)
+    | Bool_value _ -> false
+  in
+  if not (List.exists large model)
+  then model
+  else
+    let bounds =
+      List.filter_map
+        (fun symbol ->
+          if source_name (Vox_smt.Symbol.label symbol) then bound symbol else None)
+        query.symbols
+    in
+    match bounds with
+    | [] -> model
+    | first :: rest -> (
+      let term =
+        List.fold_left (fun a b -> Vox_smt.App (And, [a; b])) first rest
+      in
+      let query =
+        { query with
+          Vox_smt.facts = query.facts @ [{ Vox_smt.label = "small values"; term }]
+        }
+      in
+      match (check ?resource_limit query : Vox_smt_solver.result).validity with
+      | Invalid (Some smaller) -> smaller
+      | _ -> model)
+
+(* The counterexample restricted to variables named in the source. *)
+let counterexample model =
   let show : Vox_smt.value -> string = function
     | Bool_value b -> string_of_bool b
     | Int_value n -> Int64.to_string n
@@ -217,7 +277,7 @@ let prove poll check ~batch loc query =
         (* The version names the entry format: bump it when an outcome
            records more, so older entries are not replayed without it. *)
         Filename.concat directory
-          ("query-2-"
+          ("query-3-"
           ^ Digest.to_hex (Digest.string (!executable ^ "\000" ^ text))))
       (cache_directory ())
   in
@@ -280,6 +340,10 @@ let prove poll check ~batch loc query =
             (Vox_vc.Unproved
                (Location.errorf ~loc "Refinement could not be proved.\n%s"
                   (Vox_smt.explain_invalid query model)))
+        | Invalid (Some model) when not batch ->
+          Refuted
+            (counterexample
+               (Some (smaller_model check ?resource_limit:limit query model)))
         | Invalid model -> Refuted (counterexample model)
         | Unknown reason -> Inconclusive reason
         | Timeout ->
