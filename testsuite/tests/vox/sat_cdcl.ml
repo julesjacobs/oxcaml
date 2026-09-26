@@ -72,3 +72,9 @@ let () =
         clauses)
       clauses)
     clauses
+
+let () =
+  (match Vox_cdcl.solve 100 1 [[Negative 0; Negative 0]] with
+   | Ok {answer = Vox_cdcl.Sat [false]; statistics} ->
+     assert (statistics.decisions = 0)
+   | _ -> assert false)

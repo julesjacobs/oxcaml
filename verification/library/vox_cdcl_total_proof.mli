@@ -45,7 +45,7 @@ val solve :
         && Vox_sat_proof.same_clause
           (Vox_sat_proof.conclusion formula entry.proof) entry.clause
         && entry.clause === []
-      | Unknown -> true} @@ total
+      | Unknown -> report.statistics.steps = fuel} @@ total
 
 val solve_with_fallback :
   (fuel : int) -> (depth_fuel : int) -> (n : int) ->
@@ -79,7 +79,7 @@ val solve_with_fallback :
         && Vox_sat_proof.same_clause
           (Vox_sat_proof.conclusion formula entry.proof) entry.clause
         && entry.clause === []
-      | Unknown -> depth_fuel <= n} @@ total
+      | Unknown -> depth_fuel <= n && report.statistics.steps = fuel} @@ total
 
 val unsat_at :
   (formula : Vox_sat_spec.formula) ->
@@ -96,3 +96,17 @@ val unsat_at :
     match report.answer with
     | Unsat _ -> not (Vox_sat_spec.eval_formula assignment formula)
     | Sat _ | Unknown -> true} @@ total
+
+val solve_complete : (n : int) -> (formula : Vox_sat_spec.formula) ->
+  {r : (report, input_error) result | match r with
+    | Error Invalid_fuel -> false
+    | Error (Invalid_input error) ->
+      Vox_sat_spec.classify_input n formula === Some error
+    | Ok report -> Vox_sat_spec.classify_input n formula === None
+      && match report.answer with
+      | Sat assignment -> Vox_sat_spec.check n formula assignment
+      | Unsat entry -> Vox_sat_proof.derivation_valid formula entry.proof
+        && Vox_sat_proof.same_clause
+          (Vox_sat_proof.conclusion formula entry.proof) entry.clause
+        && entry.clause === []
+      | Unknown -> false} @@ total

@@ -1,142 +1,90 @@
-# Bounded CDCL and complete fallback
+# Complete and bounded CDCL
 
-`Vox_cdcl_total.solve fuel n formula` implements CDCL with a persistent
-assignment, trail, and learned-clause database. Search and conflict analysis
-recurse with decreasing fuel; propagation decreases the number of unassigned
-variables. Vox checks the public
-`solve` function as total. This proves termination and sound answers, but does
-not prove that sufficient fuel guarantees a decision. Exhaustion returns
-`Unknown`. Some internal checks also return `Unknown` and are not yet proved
-unreachable from the initial state. The public contract permits `Unknown` for
-every accepted input and fuel value. It gives no sufficient CDCL fuel bound,
-no monotonicity guarantee when fuel increases, and no eventual CDCL decision
-theorem.
+`Vox_cdcl_total.solve_complete n formula` is a total CDCL solver. For every
+accepted input it returns `Sat` or `Unsat`, with no caller-supplied budget and
+no DPLL fallback. `Sat` carries an assignment proved to satisfy the formula;
+nullary `Unsat` proves `Vox_sat_spec.unsatisfiable n formula`.
 
 Accepted inputs have 0–256 variables, at most 4,096 clauses, and at most
-65,536 literal occurrences. Every literal index must be in `[0, n)`, and fuel
-must be nonnegative. These are input bounds, not a sufficient search budget.
+65,536 literal occurrences. Every literal index must be in `[0, n)`.
+`classify_input` exposes the complete domain and input-error precedence.
+Duplicate literals and tautological clauses remain accepted.
 
-`Sat` carries an assignment proved to satisfy the input formula. Public
-`Unsat` is nullary and proves `Vox_sat_spec.unsatisfiable n formula`.
-`Vox_sat.unsat_at n formula assignment` specializes that semantic claim to
-any assignment. There is no final
-formula check or proof-trace replay at runtime. Learned-clause reasons store
-stable insertion ordinals because the persistent database prepends clauses.
+The public interfaces require no proof objects or internal invariants. There
+is no final formula check, runtime proof trace, or trace replay. Totality uses
+Vox's logical execution model; it does not bound available memory or time.
 
-The fuel bounds recursive search depth and each analysis call. It is not an
-exact count of operations. Both CDCL implementations scan
-clauses for propagation; neither has watched literals, restarts, or clause
-deletion. The total implementation uses list indexing and persistent updates.
-It caches variable occurrence counts once per solve for decision selection.
+## Search and termination
 
-Propagation is proved to reach either a stable state or a conflict. The scanner
-proves that each unit literal is unassigned, and enqueue reduces the unassigned
-count by exactly one. This count is bounded by the assignment length and passed
-as an erased ghost argument for the termination measure. Propagation no longer
-has a fuel-exhaustion result, and both failed unit-enqueue branches are proved
-unreachable. A 256-variable implication chain therefore needs only one search
-step; the boundary regression checks it with search fuel `1`.
+The solver uses persistent bindings, a trail, and a learned-clause database.
+Propagation scans clauses and decreases the number of unassigned variables.
+Conflict analysis selects the latest relevant trail variable and resolves its
+reason. Strict antecedent order proves that each resolution decreases the
+maximum trail rank of the conflicting clause. At the root, analysis produces
+the empty clause; otherwise, it produces an asserting clause and a smaller
+backjump target. Backtracking makes the asserting variable unassigned.
 
-Trail coverage, consistency, uniqueness, and decision-level ordering are proved
-from initialization through enqueue, propagation, decisions, and backtracking.
-Every assigned variable occurs exactly once on the trail, with the stored
-value. Levels decrease weakly from newest to oldest; a decision is the oldest
-assignment at its level, and decision levels are positive.
-The current-variable list contains only assigned variables at the current
-decision level. These facts prove that `find_latest` succeeds on a nonempty
-current-variable list and that its result has a binding.
+Every earlier decision prefix is proved fully propagated. At the backjump
+target, the new learned clause is unit, so it cannot already be in either the
+input formula or the learned database. Resolution removes duplicate literals.
+Consequently every learned clause has at most `2 * n` literals and belongs to
+a finite universe of literal lists. Learning strictly decreases the number of
+clauses in that universe that are absent from the database.
 
-Stored reason sources are also proved valid throughout search. Original reasons
-refer to input clauses; learned reasons have valid insertion ordinals and refer
-to existing learned clauses. Prepending a learned clause preserves all old
-references, and backtracking preserves the references of retained bindings.
-Each stored non-decision reason contains the assigned literal. Every pivot
-literal has that polarity, and every other literal is false at an
-assignment level no higher than the explained binding. Unit propagation
-establishes this property from the scanner; asserting-clause construction and
-backtracking establish it for learned enqueue. Enqueue, backtracking, and
-learned-database insertion preserve it. Scanner-to-source proofs use the
-existing input bound and exact learned-database length to exclude index wrap.
+Search decreases the measure
 
-Resolution is oriented by the selected binding's value. The reason invariant
-proves that the resolvent stays conflicting. Analysis therefore no longer
-reconstructs a partial assignment or rescans the current clause to check the
-conflict at every resolution step.
+```
+absent_clauses * (n + 1) + unassigned_variables
+```
 
-The learned counter equals the database length. An erased bound ties the
-learned counter plus remaining search fuel to the initial fuel, proving that
-counter increments cannot overflow.
+A decision decreases the second term. Learning decreases the first term enough
+to cover any assignments removed by backtracking. The finite universe, counts,
+and measure are ghost values and erase; none is constructed at runtime.
 
-Assignment-length preservation removes the final runtime length check. Failed
-decision selection, decision enqueue, conflict-source lookup, trail lookup,
-selected-variable lookup, and reason fetch are proved unreachable. The remaining
-obligations concern successful asserting-clause construction and global search
-progress. Analysis still uses a fuel budget. Strict antecedent order and the
-smaller trail rank of each antecedent are proved; a decreasing measure for the
-whole conflicting clause remains unproved. Decision levels are nonnegative and
-bounded by the current level. Successful asserting-clause construction proves
-a strictly smaller backjump target and a current-level asserting variable;
-backtracking makes that variable unassigned, so learned enqueue succeeds.
+Learned reasons store direct clause references. The learned-database scanner
+returns entries directly, without an integer ordinal or a second lookup.
+A checked abstract identity representation for stored entries satisfies Vox's
+total-pattern restriction on nested data without allocating a wrapper.
+Original reasons index the input formula, whose clause count is bounded.
 
-Conflict analysis cannot select a decision reason when resolution is required:
-with multiple current-level variables, another occurs earlier than the selected
-variable, contradicting the decision-order invariant. At level zero, positivity
-excludes decisions altogether. Learned clauses retain valid input indices;
-together with conflict scanning and level bounds, this proves a successful
-root analysis returns the empty clause. No eventual-decision theorem is proved
-for CDCL alone.
-Successful conflict analysis does prove that its clause remains conflicting
-and has at most one current-level variable, or none when analyzing at the root.
+The trail records contiguous decision levels. Its length bounds the current
+level; valid, unique trail literals give a bound of 512 over the entire input
+domain. Level increments therefore cannot overflow. Statistics use machine
+integers and do not control complete search or its termination proof.
 
-The remaining proof obligations are distinct:
+Both CDCL implementations scan clauses for propagation. They have no watched
+literals, restarts, or clause deletion. Persistent binding access and updates
+use lists; variable occurrence scores are computed once per solve.
 
-| Obligation | Checked guarantee | Still unproved |
-| --- | --- | --- |
-| Analysis termination | Decreasing fuel; each reason antecedent has smaller trail rank than its pivot | A whole-clause decrease that removes analysis fuel and guarantees a result |
-| Asserting-clause construction | If construction succeeds, its target is smaller and learned enqueue succeeds | Construction always succeeds after nonroot analysis; analysis currently permits zero current-level variables |
-| Global CDCL progress | Search terminates with its supplied fuel and preserves soundness | A global progress measure and sufficient CDCL budget guaranteeing a decision |
+## Other entrypoints
 
-The `Unknown` returns not excluded by the current proof are search
-fuel exhaustion, analysis fuel exhaustion, and failed asserting-clause
-construction. The interface does not expose which caused a particular result.
+`solve fuel n formula` runs the same CDCL search with a nonnegative budget.
+It may return `Unknown`; that result proves `statistics.steps = fuel`.
+The budget counts search steps, including their propagation and analysis,
+and does not count individual operations. Its public contract supplies no
+sufficient machine-integer fuel bound or fuel-monotonicity theorem.
 
-`solve_with_fallback fuel depth_fuel n formula` first calls the bounded CDCL
-solver. If CDCL returns `Unknown`, it calls private `Vox_sat_proof.decide_depth`, a persistent
-DPLL search. Its checked public contract strengthens the `Unknown` case to
-`depth_fuel <= n`. Therefore, for every accepted input and nonnegative CDCL
-fuel, **`depth_fuel >= n + 1` guarantees `Sat` or `Unsat`**. The interface test
-`sufficient_depth` checks this implication for arbitrary accepted formulas.
+`solve_with_fallback fuel depth_fuel n formula` retains its separate behavior:
+a bounded CDCL attempt followed, on `Unknown`, by persistent DPLL. For accepted
+inputs and nonnegative CDCL fuel, `depth_fuel >= n + 1` guarantees a decision.
+Its statistics describe only the CDCL attempt. This guarantee remains distinct
+from the complete CDCL entrypoint.
 
-The fallback decreases both depth fuel and the remaining variable count on
-each recursive edge. It gives each branch the same remaining depth fuel; this
-is a depth bound, not a shared node budget. The worst case is exponential:
-up to `2^(n + 1) - 1` search nodes. The guarantee covers the combined solver;
-it does not establish CDCL progress. `statistics` records only the CDCL attempt.
+## Checks and review surface
 
-The fallback proves its UNSAT result through `refutes`, the DPLL reduction
-predicate, and an erased `Exhaustion` derivation. The new derivation case is
-proved sound for every assignment by padding or truncating it to `n` values;
-valid literal indices make that transformation preserve formula evaluation.
-SAT is proved during recursive reconstruction. There is no runtime certificate,
-refutation replay, or final formula check on either result path.
+`./dev test vox/sat_cdcl_total.ml` checks totality and arbitrary-input public
+completeness, truth-table agreement, learning, backjumping, duplicate-unit
+propagation, input-error precedence, bounded/fallback statistics, and the
+256-variable boundary. The bounded-budget and fallback-depth rejection tests
+retain their original scopes.
 
-On the same seeded random 3-CNF formulas, using the installed native compiler
-on 2026-09-25 (median of five runs):
+`verification/clients/check_sat_public.sh _install` derives semantic SAT and
+UNSAT results and complete-CDCL decisions using only installed public
+interfaces. `check_sat_erasure.sh _install` checks public bytecode/native
+Lambda and private native symbols for surviving proof computations. Both
+scripts accept an optional second argument to retain their evidence directory.
 
-| Formula | Mutable CDCL | Bounded persistent CDCL | Combined solver |
-| --- | ---: | ---: | ---: |
-| 50 variables, 218 clauses (UNSAT) | 0.006 s | 0.009 s | 0.009 s |
-| 100 variables, 430 clauses (SAT) | 0.180 s | 0.280 s | 0.267 s |
-
-The combined solver uses CDCL fuel `1_000_000` and fallback depth `n + 1`.
-CDCL decides both instances, so these timings measure its successful path.
-
-Run `./dev test vox/sat_cdcl_total.ml` for the totality, soundness, learning,
-backjump, and truth-table tests. The matched benchmark is
-`verification/benchmarks/vox_cdcl_compare.ml`.
-`sat_cdcl_progress_rejected.ml` and `sat_cdcl_fallback_depth_rejected.ml`
-reject clients that claim a CDCL decision at fuel `n + 1`, or a combined-solver
-decision at fallback depth `n`, respectively.
-
-See [the review boundary](vox_sat_boundary.md). The fallback remains a separate
-entrypoint pending the architecture choice; it does not replace bounded CDCL.
+See [the review boundary](vox_sat_boundary.md) for the exact semantic interface
+closure and shared language trust assumptions. The benchmark driver remains
+`verification/benchmarks/vox_cdcl_compare.ml`; it must use the compiler produced
+by `make install`.

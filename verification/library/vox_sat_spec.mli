@@ -190,3 +190,13 @@ type input_error =
   | Unsupported_variable_count
   | Too_many_clauses
   | Too_many_literals
+
+val classify_input : int -> formula -> input_error option @@ total
+
+val classify_input_def : (n : int) -> (formula : formula) ->
+  {u : unit | classify_input n formula ===
+    (if n < 0 || n > 256 then Some Unsupported_variable_count
+  else if not (clauses_fit 4096 formula) then Some Too_many_clauses
+  else if not (literals_fit 65536 formula) then Some Too_many_literals
+  else if not (valid_formula n formula) then Some Invalid_formula
+  else None)} @@ total
