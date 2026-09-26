@@ -1,6 +1,13 @@
 @@ portable
 
-(** Affine endpoints. Messages may contain further endpoints. *)
+(** Affine endpoints for one ownership transfer. Messages may contain further
+    endpoints. Payload refinements are preserved by the type parameter; this
+    API does not expose a trace model or prove progress. Trusted cell moves
+    and strong sequentially consistent atomic events are specified in
+    [Unique_cell] and [Verified_atomic]. All contracts concern normal returns.
+    Dropping endpoints or authority, exceptions, and cancellation may prevent
+    delivery and leak manually managed payloads. No recovery or leak-freedom
+    guarantee is supplied. *)
 type ('a : value mod portable contended) send : value mod contended total
 type ('a : value mod portable contended) recv : value mod contended total
 
