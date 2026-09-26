@@ -547,6 +547,7 @@ plan_tests()
   while IFS= read -r test_file; do
     if ! run_locked "$planner" -plan-incremental "$test_file" \
         >> "$raw_plan"; then
+      unsupported_test=$test_file
       return 2
     fi
   done < "$test_files"
@@ -687,15 +688,10 @@ run_test()
   fi
   plan=$temp_dir/plan
   if ! plan_tests "$plan"; then
-    echo "$program: selection is not supported incrementally" >&2
-    for path in "$@"; do
-      if [ -f "$root/testsuite/tests/$path" ] ||
-         [ -f "$root/oxcaml/testsuite/tests/$path" ]; then
-        echo "$program: use 'make -s test-one TEST=$path' for the full path" >&2
-      else
-        echo "$program: use 'make -s test-one DIR=$path' for the full path" >&2
-      fi
-    done
+    relative=${unsupported_test#"$root/testsuite/tests/"}
+    relative=${relative#"$root/oxcaml/testsuite/tests/"}
+    echo "$program: '$relative' is not supported incrementally" >&2
+    echo "$program: use 'make -s test-one TEST=$relative' for the full path" >&2
     exit 2
   fi
 
@@ -776,6 +772,11 @@ run_test()
   export VOX_VERIFY_CACHE
   invocation=$(date +%Y%m%dT%H%M%S).$$
   run_dir=$root/_build/vox-dev-runs/$invocation
+  # Solver resource counts differ between platforms, so slow proofs are
+  # collected and listed at the end instead of appearing as warnings in test
+  # output.
+  VOX_SLOW_PROOFS=$run_dir/slow-proofs
+  export VOX_SLOW_PROOFS
   OCAMLTESTDIR=$run_dir/ocamltest
   export OCAMLTESTDIR
   mkdir -p "$OCAMLTESTDIR"
@@ -785,6 +786,10 @@ run_test()
   run_planned_tests "$log" || test_status=$?
   execution_seconds=$(($(monotonic_seconds) - execution_started_at))
   total_seconds=$(($(monotonic_seconds) - test_started_at))
+  if [ -s "$VOX_SLOW_PROOFS" ]; then
+    echo "Proofs over the solver resource warning threshold:"
+    LC_ALL=C sort -u "$VOX_SLOW_PROOFS" | sed 's/^/  /'
+  fi
   if [ -f "$run_dir/jobs.log" ]; then
     echo "Slowest tests:"
     awk -F '\t' 'NR > 1 {

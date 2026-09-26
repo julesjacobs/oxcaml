@@ -19,9 +19,10 @@ let unavailable structure =
   in
   iterator.structure iterator structure
 
-let verifier = ref unavailable
+let verifier = ref (fun ~whole_unit:_ structure -> unavailable structure)
 let install verify = verifier := verify
-let run structure = !verifier structure
+let run structure = !verifier ~whole_unit:false structure
+let run_unit structure = !verifier ~whole_unit:true structure
 
 let termination = ref (fun ~self:_ ~fn:_ ~measure ->
   Location.raise_errorf ~loc:measure.Typedtree.exp_loc

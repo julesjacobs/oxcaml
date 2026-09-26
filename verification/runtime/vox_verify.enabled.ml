@@ -69,16 +69,14 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
-let unit_cache_file () =
+let unit_cache_file ~whole_unit =
   let arguments = Array.to_list Sys.argv in
   match cache_directory () with
   | None -> None
-  (* Only a unit compiled from a file named on the command line is keyed by its
-     inputs. In a toplevel, verification runs once per phrase, and earlier
-     phrases are part of a phrase's environment but not of this key. *)
-  | Some _
-    when not (List.mem "-c" arguments && List.mem !Location.input_name arguments)
-    ->
+  (* Only a whole unit compiled from a file named on the command line is keyed
+     by its inputs. A toplevel phrase's environment includes earlier phrases,
+     which are not part of this key. *)
+  | Some _ when not (whole_unit && List.mem !Location.input_name arguments) ->
     None
   | Some directory -> (
     match Unix.stat Sys.executable_name, Digest.file !Location.input_name with
@@ -264,9 +262,25 @@ let prove poll check ~batch loc query =
     when (not batch) && !resource_warning > 0 && resources > !resource_warning
     ->
     cacheable := false;
-    Location.prerr_warning loc
-      (Warnings.Slow_refinement
-         { resources; threshold = !resource_warning; limit = !resource_limit })
+    let warning =
+      Warnings.Slow_refinement
+        { resources; threshold = !resource_warning; limit = !resource_limit }
+    in
+    (* Resource counts differ between platforms, so a test harness collects
+       slow proofs in a report rather than in compiler output. *)
+    (match Sys.getenv_opt "VOX_SLOW_PROOFS" with
+    | Some file when file <> "" ->
+      if Warnings.is_active warning
+      then begin
+        try
+          Out_channel.with_open_gen [Open_append; Open_creat; Open_text]
+            0o644 file (fun channel ->
+              Printf.fprintf channel "%s:%d: %d resource units\n"
+                loc.Location.loc_start.Lexing.pos_fname
+                loc.Location.loc_start.Lexing.pos_lnum resources)
+        with Sys_error _ -> ()
+      end
+    | _ -> Location.prerr_warning loc warning)
   | Proved _ -> ()
   | Exhausted ->
     raise
@@ -321,10 +335,10 @@ let install () =
       with Budget_exceeded ->
         Location.raise_errorf "Refinement verification budget exhausted"
     in
-    Verification.install (fun structure ->
+    Verification.install (fun ~whole_unit structure ->
         if not !assume_verified
         then
-          match unit_cache_file () with
+          match unit_cache_file ~whole_unit with
           | Some file when Sys.file_exists file -> ()
           | file ->
             cacheable := true;
