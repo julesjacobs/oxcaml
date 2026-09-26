@@ -44,6 +44,10 @@ Error: Refinement could not be proved (counterexample)
 Line 2, characters 39-40:
 2 |   let rec loop n = loop n [@@decreases n] in loop n;;
                                            ^
+  The refinement is stated here.
+Line 2, characters 39-40:
+2 |   let rec loop n = loop n [@@decreases n] in loop n;;
+                                           ^
   Required by this decreases attribute
 |}]
 
@@ -54,6 +58,10 @@ Line 2, characters 19-31:
 2 |   let rec loop n = loop (n - 1) [@@decreases n] in loop 0;;
                        ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 45-46:
+2 |   let rec loop n = loop (n - 1) [@@decreases n] in loop 0;;
+                                                 ^
+  The refinement is stated here.
 Line 2, characters 45-46:
 2 |   let rec loop n = loop (n - 1) [@@decreases n] in loop 0;;
                                                  ^
@@ -183,6 +191,10 @@ Error: Refinement could not be proved (counterexample)
 Line 4, characters 15-16:
 4 |   [@@decreases n] in
                    ^
+  The refinement is stated here.
+Line 4, characters 15-16:
+4 |   [@@decreases n] in
+                   ^
   Required by this decreases attribute
 |}]
 
@@ -256,6 +268,10 @@ Error: Refinement could not be proved (counterexample)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^
+  The refinement is stated here.
+Line 3, characters 13-14:
+3 | [@@decreases n];;
+                 ^
   Required by this decreases attribute
 |}]
 
@@ -321,6 +337,10 @@ Error: Refinement could not be proved (counterexample)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^
+  The refinement is stated here.
+Line 3, characters 13-14:
+3 | [@@decreases n];;
+                 ^
   Required by this decreases attribute
 |}]
 
@@ -331,6 +351,10 @@ Line 1, characters 40-50:
 1 | let rec nested n = if n > 0 then nested (nested n) else 0
                                             ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 13-14:
+2 | [@@decreases n];;
+                 ^
+  The refinement is stated here.
 Line 2, characters 13-14:
 2 | [@@decreases n];;
                  ^

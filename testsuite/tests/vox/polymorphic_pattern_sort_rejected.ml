@@ -24,4 +24,8 @@ Line 12, characters 38-52:
 12 |     let result : {b : bool | not b} = refine_ result in
                                            ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 12, characters 29-34:
+12 |     let result : {b : bool | not b} = refine_ result in
+                                  ^^^^^
+  The refinement is stated here.
 |}]

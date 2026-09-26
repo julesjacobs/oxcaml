@@ -27,6 +27,10 @@ Line 4, characters 52-61:
 4 |     let d = Start in mapping_def d p; let u = () in refine_ u)
                                                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-44:
+3 |       {u : unit | mapping Start p === Some q} @ ghost = fun p q -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Copy_boundary = struct
@@ -42,6 +46,10 @@ Line 7, characters 42-51:
 7 |     target_for_def h d p q; let u = () in refine_ u)
                                               ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-36:
+5 |       {u : unit | target_for h d p q} @ ghost = fun h d p q premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Reuse_old_target = struct
@@ -59,6 +67,10 @@ Line 9, characters 69-78:
 9 |       heap_def h epoch 0 d; valid_def h epoch 0 event; let u = () in refine_ u)
                                                                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-65:
+5 |       {u : unit | valid h epoch 0 (Fresh (Start, p, q, old, Var))} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Drop_arrow_child = struct
@@ -73,6 +85,10 @@ Line 6, characters 18-27:
 6 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-46:
+4 |       {u : unit | ready h d (Arrow (a, b)) Var} @ ghost = fun h d a b -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Split_parameter = struct
@@ -89,6 +105,10 @@ Line 8, characters 79-88:
 8 |     interpret_def rho choices t; interpret_def rho choices tree; let u = () in refine_ u)
                                                                                    ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 5-6, characters 18-59:
+5 | ..................interpret rho choices (Product (p, Parameter a, Parameter a))
+6 |         === Function (Boolean, Function (Boolean, Boolean))...........................................
+  The refinement is stated here.
 |}]
 
 module Wrong_epoch = struct
@@ -104,4 +124,8 @@ Line 7, characters 75-84:
 7 |       let refine_ premise = premise in mark_def old stale q; let u = () in refine_ u)
                                                                                ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-61:
+5 |       {u : unit | (mark old stale q).memo === Memo (epoch, q)} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

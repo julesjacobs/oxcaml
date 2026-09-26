@@ -40,6 +40,10 @@ Line 7, characters 5-10:
 7 |     (state : {s : U.t | U.valid s && U.member x s})
          ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 24-49:
+7 |     (state : {s : U.t | U.valid s && U.member x s})
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module No_fee = struct
@@ -57,6 +61,8 @@ Line 8, characters 32-38:
 8 |     let result = U.find x state (zero) in
                                     ^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_union_find.mli", lines 147-148, characters 28-46:
+  The refinement is stated here.
 |}]
 
 module Reuse_state = struct
@@ -98,4 +104,6 @@ Line 8, characters 13-23:
 8 |     U.create (capacity) (fee)
                  ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_union_find.mli", line 95, characters 43-80:
+  The refinement is stated here.
 |}]

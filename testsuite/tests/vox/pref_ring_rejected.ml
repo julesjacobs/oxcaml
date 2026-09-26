@@ -39,6 +39,15 @@ Line 19, characters 59-60:
 19 |       && H.at (Pref.own t) right.prev === Some (Some s)} = t in
                                                                 ^
 Error: Refinement could not be proved (counterexample)
+Lines 13-19, characters 42-55:
+13 | ..........................................present (Pref.own t) left
+14 |       && present (Pref.own t) s && present (Pref.own t) right
+15 |       && not (s === s)
+16 |       && H.at (Pref.own t) left.next === Some (Some s)
+17 |       && H.at (Pref.own t) s.prev === Some (Some left)
+18 |       && H.at (Pref.own t) s.next === Some (Some right)
+19 |       && H.at (Pref.own t) right.prev === Some (Some s)........
+  The refinement is stated here.
 |}, Principal{|
 Line 6, characters 59-60:
 6 |       (t : {t : node option Pref.token | present (Pref.own t) left
@@ -75,6 +84,10 @@ Line 12, characters 4-5:
 12 |     t
          ^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 36-84:
+5 |       {r : node option Pref.token | Pref.own r === connected (Pref.own t) left right} @ unique =
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}, Principal{|
 Line 3, characters 57-58:
 3 |       (t : {t : node option Pref.token | H.mem (Pref.own t) left.next
@@ -99,6 +112,10 @@ Line 5, characters 4-5:
 5 |     t
         ^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 36-78:
+4 |       {r : node option Pref.token | Pref.own r === flipped_all (Pref.own t) ns} @ unique =
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}, Principal{|
 Line 3, characters 56-57:
 3 |       (t : {t : node option Pref.token | owns (Pref.own t) ns} @ unique) :

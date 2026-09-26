@@ -24,6 +24,10 @@ Line 3, characters 35-36:
 3 |     let (_ : {v : int | v < 15}) = i in ()
                                        ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 24-30:
+3 |     let (_ : {v : int | v < 15}) = i in ()
+                            ^^^^^^
+  The refinement is stated here.
 |}]
 
 let empty_loop () =
@@ -50,6 +54,10 @@ Line 3, characters 2-4:
 3 |   ();;
       ^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 47-52:
+1 | let body_fact_does_not_escape () : {u : unit | false} =
+                                                   ^^^^^
+  The refinement is stated here.
 |}]
 
 let string_roundtrip () : {s : string | s === "hello"} = "hello";;
@@ -68,6 +76,10 @@ Line 1, characters 53-60:
 1 | let wrong_string () : {s : string | s === "world"} = "hello";;
                                                          ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 36-49:
+1 | let wrong_string () : {s : string | s === "world"} = "hello";;
+                                        ^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let string_pattern (s : {s : string | s === "hello"}) :
@@ -94,6 +106,10 @@ Line 2, characters 21-33:
 2 |     {b : bool | b} = s == "hello";;
                          ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 16-17:
+2 |     {b : bool | b} = s == "hello";;
+                    ^
+  The refinement is stated here.
 |}]
 
 module Invariant (X : sig val p : int -> bool @@ total end) = struct
@@ -157,6 +173,10 @@ Line 3, characters 34-35:
 3 |     let (_ : {v : int | 0 < v}) = i in ()
                                       ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 24-29:
+3 |     let (_ : {v : int | 0 < v}) = i in ()
+                            ^^^^^
+  The refinement is stated here.
 |}]
 
 module Used_alias (X : sig val p : int -> bool @@ total end) = struct

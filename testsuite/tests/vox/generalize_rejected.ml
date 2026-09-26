@@ -32,6 +32,10 @@ Line 7, characters 18-27:
 7 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-37:
+4 |       {u : unit | covered h 0 Empty p} @ ghost = fun h p premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Generalize_equal_level = struct
@@ -43,6 +47,10 @@ Line 3, characters 67-76:
 3 |     let level = Finite 2 in close_level_def 2 level; let u = () in refine_ u)
                                                                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 32-68:
+2 |   let bad : unit -> {u : unit | close_level 2 (Finite 2) === Generic} @ ghost = fun () -> ghost_ (
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Generalize_environment = struct
@@ -54,6 +62,10 @@ Line 3, characters 67-76:
 3 |     let level = Finite 0 in close_level_def 1 level; let u = () in refine_ u)
                                                                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 32-68:
+2 |   let bad : unit -> {u : unit | close_level 1 (Finite 0) === Generic} @ ghost = fun () -> ghost_ (
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Escaping_child = struct
@@ -69,6 +81,10 @@ Line 7, characters 53-62:
 7 |     below_def h q 0; at_level_def h q; let u = () in refine_ u)
                                                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-29:
+4 |       {u : unit | ordered h p} @ ghost = fun h p q premise -> ghost_ (
+                      ^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Invent_pool_ownership = struct
@@ -81,4 +97,8 @@ Line 4, characters 106-115:
 4 |     let refine_ premise = premise in let pool = Entry (p, Empty) in pool_scoped_def h pool; let u = () in refine_ u)
                                                                                                               ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 50-82:
+3 |       {u : unit | not (H.mem h p)} -> {u : unit | pool_scoped h (Entry (p, Empty))} @ ghost = fun h p premise -> ghost_ (
+                                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

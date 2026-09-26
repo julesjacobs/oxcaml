@@ -35,6 +35,8 @@ Line 5, characters 24-25:
 5 |     reverse sentinel ns t
                             ^
 Error: Refinement could not be proved (counterexample)
+File "pref_ring_general.mli", lines 14-15, characters 39-32:
+  The refinement is stated here.
 |}, Principal{|
 Line 3, characters 56-57:
 3 |       (t : {t : node option Pref.token | ring (Pref.own t) sentinel ns}) @ unique ->
@@ -73,6 +75,8 @@ Line 17, characters 35-40:
 17 |     S.splice s t prefix first rest final suffix destination_prefix
                                         ^^^^^
 Error: Refinement could not be proved (counterexample)
+File "pref_ring_splice_general.mli", line 21, characters 25-46:
+  The refinement is stated here.
 |}, Principal{|
 Line 10, characters 23-28:
 10 |         ring (Pref.own state) s (append prefix (append (first :: rest) suffix)) &&
@@ -112,6 +116,8 @@ Line 19, characters 6-22:
 19 |       destination_left destination_suffix state
            ^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "pref_ring_splice_general.mli", line 24, characters 36-67:
+  The refinement is stated here.
 |}, Principal{|
 Line 11, characters 23-28:
 11 |         ring (Pref.own state) s (append prefix (append (first :: rest) suffix)) &&

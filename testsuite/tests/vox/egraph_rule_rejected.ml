@@ -35,6 +35,11 @@ Line 8, characters 2-4:
 8 |   ());;
       ^^
 Error: Refinement could not be proved (counterexample)
+Lines 2-4, characters 16-32:
+2 | ................E.valid R.No_rules
+3 |       (E.Rule (0, {R.vars = []; lhs = R.Int_lit 0;
+4 |         rhs = R.Int_lit 1}, []))....................
+  The refinement is stated here.
 |}]
 
 let (wrong_endpoint @ total) () :
@@ -54,4 +59,8 @@ Line 12, characters 2-4:
 12 |   ());;
        ^^
 Error: Refinement could not be proved (counterexample)
+Lines 2-3, characters 16-60:
+2 | ................E.valid R.No_rules
+3 |       (E.Trans (E.Refl (L.Int_lit 0), E.Refl (L.Int_lit 1))).
+  The refinement is stated here.
 |}]

@@ -27,6 +27,10 @@ Line 8, characters 4-5:
 8 |     t
         ^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 36-71:
+6 |       {t : node option Pref.token | Pref.own t === heap (flipped model)} @ unique =
+                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}, Principal{|
 Line 5, characters 65-66:
 5 |       (t : {t : node option Pref.token | valid model && Pref.own t === heap model}) @ unique ->
@@ -59,6 +63,10 @@ Line 7, characters 44-45:
 7 |     let claim : {u : unit | valid shared} = u in
                                                 ^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 28-40:
+7 |     let claim : {u : unit | valid shared} = u in
+                                ^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 (* The v3 structures gate checked these outside ocamltest: private helpers are

@@ -207,6 +207,8 @@ Line 4, characters 27-34:
 4 |   Iarray.Refined.get array (index)
                                ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "stdlib/iarray.mli", line 59, characters 15-37:
+  The refinement is stated here.
 |}]
 
 let invalid_first () =
@@ -227,4 +229,8 @@ Line 10, characters 42-47:
 10 |     && Search.absent array target lo i} = later in
                                                ^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 9-10, characters 26-38:
+ 9 | ..........................Search.at array i = target
+10 |     && Search.absent array target lo i............
+  The refinement is stated here.
 |}]

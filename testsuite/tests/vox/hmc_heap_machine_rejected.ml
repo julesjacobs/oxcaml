@@ -35,6 +35,10 @@ Line 6, characters 89-99:
 6 |   let proof : {u : unit | B.step op state === Q.Running ({a with F.pc = D.Z}, Q.Halt)} = refine_ () in proof);;
                                                                                              ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-85:
+6 |   let proof : {u : unit | B.step op state === Q.Running ({a with F.pc = D.Z}, Q.Halt)} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let lost_return_value (u : unit) = ghost_ (
@@ -48,6 +52,10 @@ Line 6, characters 81-91:
 6 |   let proof : {u : unit | B.step G.Return state === Q.Running (saved, Q.Halt)} = refine_ () in proof);;
                                                                                      ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-77:
+6 |   let proof : {u : unit | B.step G.Return state === Q.Running (saved, Q.Halt)} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let one_frame_too_many (u : unit) = ghost_ (
@@ -61,4 +69,8 @@ Line 6, characters 66-76:
 6 |   let proof : {u : unit | D.present (D.S D.Z) (Q.depth frames)} = refine_ () in proof);;
                                                                       ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-62:
+6 |   let proof : {u : unit | D.present (D.S D.Z) (Q.depth frames)} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

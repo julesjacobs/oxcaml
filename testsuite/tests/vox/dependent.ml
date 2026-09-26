@@ -43,6 +43,10 @@ Line 1, characters 48-61:
 1 | let nonvariable_wrong : {n : int | n = x + y} = add (x + 1) y;;
                                                     ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 35-44:
+1 | let nonvariable_wrong : {n : int | n = x + y} = add (x + 1) y;;
+                                       ^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module type Recursion = sig
@@ -133,4 +137,8 @@ Line 6, characters 38-44:
 6 |   let (_ : {n : int | n = now + y}) = result in
                                           ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 22-33:
+6 |   let (_ : {n : int | n = now + y}) = result in
+                          ^^^^^^^^^^^
+  The refinement is stated here.
 |}]

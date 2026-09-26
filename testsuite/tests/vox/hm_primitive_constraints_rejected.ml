@@ -28,6 +28,8 @@ Line 4, characters 74-76:
 4 |   C.construct D.Z D.Empty_context D.Truth word D.Constant D.Word_constant ());;
                                                                               ^^
 Error: Refinement could not be proved (counterexample)
+File "hm_primitive_constraints.ml", line 37, characters 16-77:
+  The refinement is stated here.
 |}]
 
 let boolean_list_as_word_arguments () = ghost_ (
@@ -41,4 +43,6 @@ Line 6, characters 70-72:
 6 |   C.invert D.Z D.Empty_context D.Truth word (D.List_type D.Boolean) d ());;
                                                                           ^^
 Error: Refinement could not be proved (counterexample)
+File "hm_primitive_constraints.ml", line 11, characters 16-55:
+  The refinement is stated here.
 |}]

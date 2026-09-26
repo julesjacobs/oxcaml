@@ -33,6 +33,8 @@ Line 4, characters 18-32:
 4 |   let out : B.t = refine_ forged in out);;
                       ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_specialized_body.ml", line 37, characters 24-31:
+  The refinement is stated here.
 |}]
 
 let wrong_reference_index (catalog : T.catalog @ immutable) (origin : I.instance @ immutable) = ghost_ (
@@ -46,6 +48,10 @@ Line 6, characters 75-85:
 6 |   let proof : {u : unit | R.records catalog D.Empty_context term d tree} = refine_ () in proof);;
                                                                                ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-71:
+6 |   let proof : {u : unit | R.records catalog D.Empty_context term d tree} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let omitted_global_reference (catalog : T.catalog @ immutable) = ghost_ (
@@ -58,6 +64,10 @@ Line 5, characters 78-88:
 5 |   let proof : {u : unit | R.records catalog D.Empty_context term d R.Empty} = refine_ () in proof);;
                                                                                   ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 26-74:
+5 |   let proof : {u : unit | R.records catalog D.Empty_context term d R.Empty} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let insufficient_rank (origin : I.instance @ immutable) = ghost_ (
@@ -68,5 +78,7 @@ Line 3, characters 22-24:
 3 |   X.expand D.Z origin ());;
                           ^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_expansion.ml", line 73, characters 16-54:
+  The refinement is stated here.
 |}]
 

@@ -78,6 +78,10 @@ Line 2, characters 50-52:
 2 |   let wrong () : {u : unit | I.id (I.id 0) = 1} = ()
                                                       ^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 29-46:
+2 |   let wrong () : {u : unit | I.id (I.id 0) = 1} = ()
+                                 ^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Wrong_branch (I : Identity) = struct
@@ -89,6 +93,10 @@ Line 3, characters 56-58:
 3 |       {u : unit | (if b then I.id 0 else I.id 1) = 0} = ()
                                                             ^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-52:
+3 |       {u : unit | (if b then I.id 0 else I.id 1) = 0} = ()
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Checked : sig end = struct
@@ -130,6 +138,10 @@ Line 2, characters 68-70:
 2 |     {u : unit | match xs with [] -> true | (x, y) :: _ -> y >= x} = ();;
                                                                         ^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 16-64:
+2 |     {u : unit | match xs with [] -> true | (x, y) :: _ -> y >= x} = ();;
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let constrained_pair (xs : {p : int * int | let x, y = p in x >= y} list) :
@@ -187,6 +199,10 @@ Line 3, characters 72-74:
 3 |     {u : unit | match xs with [] -> true | (x, _) :: _ -> x >= other} = ();;
                                                                             ^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 16-68:
+3 |     {u : unit | match xs with [] -> true | (x, _) :: _ -> x >= other} = ();;
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Refinement_layers = struct

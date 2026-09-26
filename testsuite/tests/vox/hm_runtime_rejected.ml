@@ -28,6 +28,10 @@ Line 4, characters 4-13:
 4 |     refine_ e
         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 24-58:
+2 |   let bad : {e : term | scoped_term Z e && term_let_free e} =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Let_in_let_free_driver = struct
@@ -40,6 +44,10 @@ Line 4, characters 4-13:
 4 |     refine_ e
         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 24-39:
+2 |   let bad : {e : term | term_let_free e} =
+                            ^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Missing_mark_invariant = struct
@@ -52,6 +60,10 @@ Line 4, characters 32-41:
 4 |     safe_def h x; let u = () in refine_ u)
                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-26:
+3 |       {u : unit | safe h x} @ ghost = fun h x -> ghost_ (
+                      ^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unchecked_level_increment = struct
@@ -63,6 +75,10 @@ Line 3, characters 57-69:
 3 |     let refine_ depth = depth in let next = depth + 1 in refine_ next
                                                              ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 55-61:
+2 |   let bad : (depth : {n : int | n >= 0}) -> {n : int | n >= 0} = fun depth ->
+                                                           ^^^^^^
+  The refinement is stated here.
 |}]
 
 module Discard_parent_pool = struct
@@ -78,6 +94,10 @@ Line 7, characters 51-60:
 7 |     Level_spec.at_level_def after p; let u = () in refine_ u)
                                                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-106:
+3 |       {u : unit | Generalize_spec.covered (H.put (H.empty ()) p (cell Var 0)) (-1) Generalize_spec.Empty p} @ ghost = fun p -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Invent_saved_origin = struct
@@ -98,6 +118,11 @@ Line 12, characters 20-29:
 12 |       let u = () in refine_ u)
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 4-6, characters 18-52:
+4 | ..................let saved = H.empty () in
+5 |         let after = H.put saved p (cell Var 0) in
+6 |         Provenance_spec.originates saved after 0 p o...............................
+  The refinement is stated here.
 |}]
 
 module Forget_boundary_agreement = struct
@@ -114,6 +139,10 @@ Line 8, characters 18-27:
 8 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-58:
+5 |       {u : unit | interpret rho eta (Boundary p) === eta p} @ ghost = fun p -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Forged_runtime_index = struct
@@ -129,6 +158,10 @@ Line 7, characters 4-15:
 7 |     refine_ out
         ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 34-51:
+2 |   let bad : {t : Fast_term.term | Fast_term.valid t} @ immutable =
+                                      ^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Forged_tree_weight = struct
@@ -144,6 +177,10 @@ Line 7, characters 4-16:
 7 |     refine_ tree
         ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 35-64:
+3 |       {t : Fast_environment.tree | Fast_environment.valid_tree t} @ immutable = fun p ->
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let _ = Fast_term.compile_work;;

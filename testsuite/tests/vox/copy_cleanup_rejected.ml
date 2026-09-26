@@ -35,6 +35,10 @@ Line 10, characters 20-29:
 10 |       let u = () in refine_ u)
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 18-51:
+6 |       {u : unit | swept_at h h (Entry (p, Empty)) p} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Change_descriptor = struct
@@ -52,4 +56,8 @@ Line 9, characters 20-29:
 9 |       let u = () in refine_ u)
                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-75:
+4 |       {u : unit | swept_at h (H.put h p (cell Bool 0)) (Entry (p, Empty)) p} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

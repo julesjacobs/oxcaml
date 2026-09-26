@@ -2,3 +2,7 @@ File "http_body_rejected.ml", line 25, characters 2-4:
 25 |   ()
        ^^
 Error: Refinement could not be proved (counterexample)
+File "http_body_rejected.ml", lines 22-23, characters 16-59:
+22 | ................match (status (feed (initial ()) input).state) with
+23 |       | Complete request -> request.body === [] | _ -> true...
+  The refinement is stated here.

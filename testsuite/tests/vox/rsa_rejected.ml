@@ -23,6 +23,8 @@ Line 3, characters 20-21:
 3 |   Vox_rsa.modexp 2Z e n;;
                         ^
 Error: Refinement could not be proved (counterexample)
+File "vox_rsa.mli", line 6, characters 45-52:
+  The refinement is stated here.
 |}]
 
 let zero_modulus () =
@@ -33,6 +35,8 @@ Line 3, characters 22-23:
 3 |   Vox_rsa.modexp 2Z e n;;
                           ^
 Error: Refinement could not be proved (counterexample)
+File "vox_rsa.mli", line 7, characters 22-28:
+  The refinement is stated here.
 |}]
 
 let repeated_prime () =
@@ -43,6 +47,8 @@ Line 3, characters 28-29:
 3 |   Vox_rsa.roundtrip p p e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
+File "vox_rsa.mli", line 25, characters 22-63:
+  The refinement is stated here.
 |}]
 
 let invalid_inverse () =
@@ -56,6 +62,8 @@ Line 6, characters 28-29:
 6 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
+File "vox_rsa.mli", line 25, characters 22-63:
+  The refinement is stated here.
 |}]
 
 let message_too_large () =
@@ -69,6 +77,8 @@ Line 6, characters 28-29:
 6 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
+File "vox_rsa.mli", line 25, characters 22-63:
+  The refinement is stated here.
 |}]
 
 let composite_prime () =
@@ -87,6 +97,8 @@ Line 11, characters 28-29:
 11 |   Vox_rsa.roundtrip p q e e m;;
                                  ^
 Error: Refinement could not be proved (counterexample)
+File "vox_rsa.mli", line 25, characters 22-63:
+  The refinement is stated here.
 |}]
 
 module Hidden_proof = Vox_rsa.Proof;;

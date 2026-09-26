@@ -727,6 +727,11 @@ Line 4, characters 2-16:
 4 |   refine_ result;;
       ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 5-7, characters 24-41:
+5 | ........................match m with
+6 |         | None -> right = left + 1
+7 |         | Some m -> left < m && m < right.
+  The refinement is stated here.
 |}]
 
 let invalid_stop : Splitters.splitter = fun left right premise ->
@@ -738,6 +743,11 @@ Line 4, characters 2-16:
 4 |   refine_ result;;
       ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 5-7, characters 24-41:
+5 | ........................match m with
+6 |         | None -> right = left + 1
+7 |         | Some m -> left < m && m < right.
+  The refinement is stated here.
 |}]
 
 (* The premise proved for one interval cannot be reused for another interval
@@ -760,6 +770,8 @@ Line 13, characters 39-46:
 13 |   Binary.search_midpoint p start upper premise;;
                                             ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "sorted_array_proofs.ml", lines 7-8, characters 18-35:
+  The refinement is stated here.
 |}]
 
 let search_result_exact () =
@@ -803,6 +815,10 @@ Line 15, characters 38-51:
 15 |   let wrong : {r : int | r = upper} = refine_ right in
                                            ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 15, characters 25-34:
+15 |   let wrong : {r : int | r = upper} = refine_ right in
+                              ^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let invalid_divisor () =
@@ -813,6 +829,8 @@ Line 3, characters 19-33:
 3 |   Binary.divide 10 (refine_ zero);;
                        ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "sorted_array_proofs.ml", line 2, characters 38-44:
+  The refinement is stated here.
 |}]
 
 let invalid_absence () =
@@ -832,6 +850,10 @@ Line 10, characters 4-13:
 10 |     refine_ u in
          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 9, characters 26-69:
+9 |   let proof : {u : unit | not (Arrays.occurs array target start stop)} =
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let invalid_first_match () =
@@ -851,6 +873,10 @@ Line 10, characters 51-64:
 10 |     && not (Arrays.occurs array target 0 index)} = refine_ later in
                                                         ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 9-10, characters 30-47:
+ 9 | ..............................Arrays.at array index = target
+10 |     && not (Arrays.occurs array target 0 index)....................
+  The refinement is stated here.
 |}]
 
 let invalid_last_match () =
@@ -871,6 +897,10 @@ Line 11, characters 60-73:
 11 |     && not (Arrays.occurs array target (index + 1) stop)} = refine_ first in
                                                                  ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 10-11, characters 30-56:
+10 | ..............................Arrays.at array index = target
+11 |     && not (Arrays.occurs array target (index + 1) stop)....................
+  The refinement is stated here.
 |}]
 
 
@@ -885,4 +915,6 @@ Line 5, characters 56-67:
 5 |   let refine_ result = Arrays.remove_at source position (refine_ u) in
                                                             ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "sorted_array_proofs.ml", lines 440-441, characters 18-39:
+  The refinement is stated here.
 |}]

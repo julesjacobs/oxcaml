@@ -32,6 +32,10 @@ Line 5, characters 71-80:
 5 |     let refine_ premise = premise in linkable_def h a a; let u = () in refine_ u)
                                                                            ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-32:
+4 |       {u : unit | linkable h a a} @ ghost = fun h a b premise -> ghost_ (
+                      ^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unequal_readback = struct
@@ -45,6 +49,10 @@ Line 5, characters 71-80:
 5 |     let refine_ premise = premise in linkable_def h a b; let u = () in refine_ u)
                                                                            ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-32:
+4 |       {u : unit | linkable h a b} @ ghost = fun h a b premise -> ghost_ (
+                      ^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Deeper_target = struct
@@ -58,6 +66,10 @@ Line 5, characters 71-80:
 5 |     let refine_ premise = premise in linkable_def h a b; let u = () in refine_ u)
                                                                            ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-32:
+4 |       {u : unit | linkable h a b} @ ghost = fun h a b premise -> ghost_ (
+                      ^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Generic_source = struct
@@ -71,5 +83,9 @@ Line 5, characters 71-80:
 5 |     let refine_ premise = premise in linkable_def h a b; let u = () in refine_ u)
                                                                            ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-32:
+4 |       {u : unit | linkable h a b} @ ghost = fun h a b premise -> ghost_ (
+                      ^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 

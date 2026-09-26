@@ -301,6 +301,10 @@ Line 7, characters 33-40:
 7 |     let proof : {b : bool | b} = present in
                                      ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 28-29:
+7 |     let proof : {b : bool | b} = present in
+                                ^
+  The refinement is stated here.
 |}]
 
 module Caught_find_does_not_assume_normal_return : sig end = struct
@@ -330,6 +334,10 @@ Line 19, characters 33-40:
 19 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 19, characters 28-29:
+19 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Nested_set_equality_rejected : sig end = struct
@@ -379,6 +387,10 @@ Line 10, characters 33-40:
 10 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 28-29:
+10 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Shadowed_operation_unrecognized : sig end = struct
@@ -420,6 +432,10 @@ Line 31, characters 33-40:
 31 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 31, characters 28-29:
+31 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Ordinary_total_constructors_unrecognized : sig end = struct
@@ -448,6 +464,10 @@ Line 18, characters 33-40:
 18 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 18, characters 28-29:
+18 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Separate_classes : sig end = struct
@@ -491,6 +511,10 @@ Line 35, characters 4-6:
 35 |     ()
          ^^
 Error: Refinement could not be proved (counterexample)
+Line 31, characters 32-73:
+31 |   let rejected () : {u : unit | Second.mem 2 (Second.Refined.singleton 1)} =
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Refined_constructors_preserve_access : sig end = struct

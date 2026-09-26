@@ -113,6 +113,10 @@ Line 4, characters 2-11:
 4 |   refine_ n;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 29-34:
+1 | let unproved () : {n : int | n = 0} =
+                                 ^^^^^
+  The refinement is stated here.
 |}]
 
 type tree = Leaf | Node of tree * tree [@@inductive]

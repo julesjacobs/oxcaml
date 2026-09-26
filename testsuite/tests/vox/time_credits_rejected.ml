@@ -43,6 +43,8 @@ Line 7, characters 11-26:
 7 |     C.tick (refine_ token)
                ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_credits.mli", line 15, characters 35-48:
+  The refinement is stated here.
 |}]
 
 module Oversplit = struct
@@ -57,6 +59,8 @@ Line 6, characters 19-34:
 6 |     C.split amount (refine_ token)
                        ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_credits.mli", line 21, characters 26-60:
+  The refinement is stated here.
 |}]
 
 module Duplicate_merge = struct
@@ -90,6 +94,8 @@ Line 8, characters 38-53:
 8 |     let refine_ result = C.merge left (refine_ right) in
                                           ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_credits.mli", lines 27-28, characters 26-35:
+  The refinement is stated here.
 |}]
 
 module Foreign_budget = struct
@@ -148,6 +154,11 @@ Line 12, characters 4-18:
 12 |     refine_ result
          ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 6-8, characters 20-48:
+6 | ....................let refine_ token = token in
+7 |         r.#before = (left <= right) &&
+8 |         C.credits r.#state = C.credits token - 1............
+  The refinement is stated here.
 |}]
 
 module Duplicate_partition = struct
@@ -203,6 +214,8 @@ Line 11, characters 11-30:
 11 |     C.tick (refine_ after_two)
                 ^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_credits.mli", line 15, characters 35-48:
+  The refinement is stated here.
 |}]
 
 module False_after_tick = struct
@@ -221,4 +234,8 @@ Line 10, characters 5-14:
 10 |     (refine_ u : {u : unit | false})
           ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 29-34:
+10 |     (refine_ u : {u : unit | false})
+                                  ^^^^^
+  The refinement is stated here.
 |}]

@@ -74,4 +74,8 @@ Line 3, characters 2-7:
 3 |   width
       ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 42-52:
+1 | let unchecked start stop : {width : int | 0 <= width} =
+                                              ^^^^^^^^^^
+  The refinement is stated here.
 |}]

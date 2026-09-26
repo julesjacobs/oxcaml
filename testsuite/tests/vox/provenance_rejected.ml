@@ -33,6 +33,10 @@ Line 8, characters 66-75:
 8 |       confined_def edits tree; contains_def tree p; let u = () in refine_ u)
                                                                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-57:
+4 |       {u : unit | confined (Lower (p, old, Keep)) (Tip q)} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Wrong_target = struct
@@ -47,6 +51,10 @@ Line 6, characters 18-27:
 6 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-42:
+4 |       {u : unit | bound_root (Tip p) === q} @ ghost = fun p q premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 open Level_unifier_spec;;
@@ -102,4 +110,8 @@ Line 8, characters 20-29:
 8 |       let u = () in refine_ u)
                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-59:
+4 |       {u : unit | originates saved h 1 p (Origin (p, Stop))} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

@@ -28,6 +28,10 @@ Line 3, characters 77-86:
 3 |     let a = Finite 1 in let b = Finite 2 in decreases_def a b; let u = () in refine_ u)
                                                                                  ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 32-63:
+2 |   let bad : unit -> {u : unit | decreases (Finite 1) (Finite 2)} @ ghost = fun () -> ghost_ (
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Generic_is_active = struct
@@ -41,6 +45,10 @@ Line 5, characters 85-94:
 5 |     let refine_ premise = premise in active_def h p; at_level_def h p; let u = () in refine_ u)
                                                                                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-28:
+4 |       {u : unit | active h p} @ ghost = fun h p premise -> ghost_ (
+                      ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Skip_child = struct
@@ -57,6 +65,10 @@ Line 8, characters 18-27:
 8 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-54:
+4 |       {u : unit | bounded h 0 (Fork (p, Tip q, Tip q))} @ ghost = fun h p q premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Link_without_lowering = struct
@@ -74,6 +86,10 @@ Line 9, characters 18-27:
 9 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-84:
+5 |       {u : unit | unified h p q true (H.put h p (redirect h p q)) (Bind_left search)} @ ghost = fun h p q search premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Equal_level_not_occurs_free = struct
@@ -86,6 +102,10 @@ Line 4, characters 83-92:
 4 |     let d = Leaf in let found = false in searched_def h p p found d; let u = () in refine_ u)
                                                                                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-43:
+3 |       {u : unit | searched h p p false Leaf} @ ghost = fun h p -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Memo_is_not_a_level = struct
@@ -102,4 +122,8 @@ Line 8, characters 45-54:
 8 |     lower_frame_def h after p; let u = () in refine_ u)
                                                  ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-117:
+5 |       {u : unit | lower_frame h (H.put h p {desc = Var; level = Finite 0; memo = Memo (epoch, p); visited = false}) p} @ ghost = fun h p epoch premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

@@ -25,6 +25,10 @@ Line 4, characters 59-69:
 4 |   let proof : {u : unit | M.bounded (M.size M.Nil) refs} = refine_ () in proof);;
                                                                ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-55:
+4 |   let proof : {u : unit | M.bounded (M.size M.Nil) refs} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_body (body : Hmc_specialized_body.t @ immutable) = ghost_ (
@@ -38,6 +42,10 @@ Line 6, characters 43-53:
 6 |   let proof : {u : unit | M.valid table} = refine_ () in proof);;
                                                ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-39:
+6 |   let proof : {u : unit | M.valid table} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let changed_variable (u : unit) = ghost_ (
@@ -48,6 +56,10 @@ Line 3, characters 58-68:
 3 |   let proof : {u : unit | C.erase code === D.Bound D.Z} = refine_ () in proof);;
                                                               ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 26-54:
+3 |   let proof : {u : unit | C.erase code === D.Bound D.Z} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let missing_code_type (u : unit) = ghost_ (
@@ -61,4 +73,8 @@ Line 6, characters 35-45:
 6 |     (D.Variable D.No_arguments)} = refine_ () in proof);;
                                        ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 5-6, characters 26-31:
+5 | ..........................Hmc_monomorphic_typing.typed M.Nil D.Empty_context code D.Word64
+6 |     (D.Variable D.No_arguments)..........................
+  The refinement is stated here.
 |}]

@@ -44,6 +44,10 @@ Line 3, characters 2-8:
 3 |   result
       ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 26-43:
+1 | let opaque x : {r : int | 0 <= r && r <= 10} =
+                              ^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let unordered (lo : int) (hi : int) (x : int) : {r : int | lo <= r && r <= hi} =
@@ -56,4 +60,8 @@ Line 4, characters 2-8:
 4 |   result
       ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 59-77:
+1 | let unordered (lo : int) (hi : int) (x : int) : {r : int | lo <= r && r <= hi} =
+                                                               ^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

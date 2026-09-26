@@ -33,6 +33,10 @@ Line 8, characters 46-55:
 8 |       transfer_def h empty one; let u = () in refine_ u)
                                                   ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 16-61:
+4 |     {u : unit | transfer h (Entry (p, Empty)) Empty === Empty} @ ghost =
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Keep_generic = struct
@@ -49,6 +53,10 @@ Line 8, characters 48-57:
 8 |       transfer_def h empty empty; let u = () in refine_ u)
                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 16-72:
+4 |     {u : unit | transfer h (Entry (p, Empty)) Empty === Entry (p, Empty)} @ ghost =
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Lose_parent = struct
@@ -63,4 +71,8 @@ Line 6, characters 46-55:
 6 |       transfer_def h empty one; let u = () in refine_ u)
                                                   ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 16-61:
+3 |     {u : unit | transfer h Empty (Entry (p, Empty)) === Empty} @ ghost =
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

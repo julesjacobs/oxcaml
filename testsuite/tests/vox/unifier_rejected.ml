@@ -37,6 +37,10 @@ Line 14, characters 48-57:
 14 |     let r = #{ok; state = t; derivation = d} in refine_ r
                                                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 20-82:
+7 |       {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation && r.#ok}
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Missing_occurs = struct
@@ -65,6 +69,10 @@ Line 20, characters 48-57:
 20 |     let r = #{ok; state = t; derivation = d} in refine_ r
                                                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 20-82:
+7 |       {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation && r.#ok}
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module False_rejection = struct
@@ -85,6 +93,10 @@ Line 12, characters 48-57:
 12 |     let r = #{ok; state = t; derivation = d} in refine_ r
                                                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 20-86:
+6 |       {r : result | unified h p p r.#ok (Pref.own r.#state) r.#derivation && not r.#ok}
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Equality = struct
@@ -96,6 +108,10 @@ Line 3, characters 38-47:
 3 |     let refine_ b = Pref.equal p p in refine_ b
                                           ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 56-61:
+2 |   let wrong (p : node Pref.t @ immutable) : {b : bool | not b} =
+                                                            ^^^^^
+  The refinement is stated here.
 |}]
 
 module Missing_second_child = struct
@@ -121,4 +137,8 @@ Line 17, characters 48-57:
 17 |     let r = #{ok; state = t; derivation = d} in refine_ r
                                                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 9, characters 20-82:
+9 |       {r : result | unified h p q r.#ok (Pref.own r.#state) r.#derivation && r.#ok}
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

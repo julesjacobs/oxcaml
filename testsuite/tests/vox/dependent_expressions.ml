@@ -63,6 +63,10 @@ Line 7, characters 36-37:
 7 |     let (_ : {n : int | n = now}) = r in
                                         ^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 24-31:
+7 |     let (_ : {n : int | n = now}) = r in
+                            ^^^^^^^
+  The refinement is stated here.
 |}]
 
 (* An effectful argument is not identified with a second evaluation. *)
@@ -78,6 +82,10 @@ Line 5, characters 38-39:
 5 |     let (_ : {n : int | n = again}) = r in
                                           ^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 24-33:
+5 |     let (_ : {n : int | n = again}) = r in
+                            ^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module More = struct
@@ -110,4 +118,8 @@ Line 3, characters 42-51:
 3 |     let refine_ r = Values.identity 42 in refine_ r
                                               ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 28-34:
+2 |   let wrong () : {r : int | r = 43} =
+                                ^^^^^^
+  The refinement is stated here.
 |}]

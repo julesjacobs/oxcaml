@@ -34,6 +34,10 @@ Line 9, characters 45-54:
 9 |       interpret_def rho eta s; let u = () in refine_ u)
                                                  ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 18-58:
+6 |       {u : unit | interpret rho eta (Boundary x) === eta x} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Generalize_low_variable = struct
@@ -50,6 +54,10 @@ Line 8, characters 56-65:
 8 |       scheme_def h 1 t; bound_root_def t; let u = () in refine_ u)
                                                             ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-52:
+4 |       {u : unit | scheme h 1 (Tip x) === Parameter x} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Forget_model_agreement = struct
@@ -66,4 +74,8 @@ Line 8, characters 62-71:
 8 |     equation_def h rho x; equation_def h eta x; let u = () in refine_ u)
                                                                   ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 18-33:
+6 |       {u : unit | rho x === eta x} @ ghost = fun h x rho eta premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

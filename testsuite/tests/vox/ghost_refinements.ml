@@ -64,6 +64,10 @@ Line 3, characters 2-11:
 3 |   refine_ y;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 33-39:
+1 | let missing_proof x : {y : int | y >= 0} =
+                                     ^^^^^^
+  The refinement is stated here.
 |}]
 
 let (proof_block @ total) x : {y : int | y >= 0} =
@@ -98,6 +102,10 @@ Line 4, characters 2-11:
 4 |   refine_ y;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 38-44:
+1 | let missing_conclusion x : {y : int | y >= 0} =
+                                          ^^^^^^
+  The refinement is stated here.
 |}]
 
 let rejected_effect () = ghost_ (print_endline "erased");;

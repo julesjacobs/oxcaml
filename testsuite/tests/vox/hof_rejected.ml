@@ -47,6 +47,10 @@ Line 3, characters 16-25:
 3 |   let u = () in refine_ u;;
                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 16-57:
+2 |     {u : unit | apply (offset a) x === apply (offset b) x} =
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let false_callback : (x : int) -> {y : int | y > x} = fun x -> refine_ x;;
@@ -55,6 +59,10 @@ Line 1, characters 63-72:
 1 | let false_callback : (x : int) -> {y : int | y > x} = fun x -> refine_ x;;
                                                                    ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 45-50:
+1 | let false_callback : (x : int) -> {y : int | y > x} = fun x -> refine_ x;;
+                                                 ^^^^^
+  The refinement is stated here.
 |}]
 
 let partial_predicate (x : int) = if x = 0 then failwith "partial" else x;;
@@ -82,6 +90,10 @@ Line 6, characters 18-27:
 6 |     let u = () in refine_ u
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-65:
+5 |       {u : unit | F.opaque (offset x) x === F.opaque x (offset x)} =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 type t = { value : int; trace : int list @@ ghost };;
@@ -95,6 +107,10 @@ Line 5, characters 2-11:
 5 |   refine_ r;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 13-27:
+3 |     {r : t | r.trace === []} =
+                 ^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Frequency_probe = struct
@@ -134,4 +150,8 @@ Line 2, characters 52-63:
 2 | let missing_precondition (x : int) = needs_positive (refine_ x);;
                                                         ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 35-40:
+1 | let needs_positive (x : {n : int | n > 0}) = let refine_ n = x in n;;
+                                       ^^^^^
+  The refinement is stated here.
 |}]

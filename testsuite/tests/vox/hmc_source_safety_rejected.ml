@@ -32,6 +32,8 @@ Line 4, characters 50-52:
 4 |   P.advance_preserves D.Z S.Stuck D.Boolean proof ());;
                                                       ^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_source_safety.ml", line 227, characters 46-66:
+  The refinement is stated here.
 |}]
 
 let truth_has_word_type () = ghost_ (
@@ -42,6 +44,8 @@ Line 3, characters 46-48:
 3 |   P.initial_typed D.Truth D.Word64 D.Constant ());;
                                                   ^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_source_safety.ml", line 99, characters 16-53:
+  The refinement is stated here.
 |}]
 
 let zero_fuel_finishes () : {u : unit |
@@ -52,6 +56,10 @@ Line 3, characters 64-66:
 3 |   S.initial_def D.Truth; S.advance_def D.Z (S.initial D.Truth); ());;
                                                                     ^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 4-55:
+2 |     S.advance D.Z (S.initial D.Truth) === S.Done V.True} = ghost_ (
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let halt_changes_type () : {u : unit |
@@ -62,4 +70,8 @@ Line 3, characters 61-63:
 3 |   P.continuation_typed_def S.Halt D.Word64 D.Boolean P.Stop; ());;
                                                                  ^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 4-57:
+2 |     P.continuation_typed S.Halt D.Word64 D.Boolean P.Stop} = ghost_ (
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

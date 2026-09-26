@@ -33,6 +33,10 @@ Line 6, characters 63-73:
 6 |   let proof : {u : unit | E.span (D.S (D.S D.Z)) start stop} = refine_ () in proof);;
                                                                    ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-59:
+6 |   let proof : {u : unit | E.span (D.S (D.S D.Z)) start stop} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let overlapping_allocation (u : unit) = ghost_ (
@@ -46,6 +50,10 @@ Line 6, characters 52-62:
 6 |   let proof : {u : unit | M.valid K.Empty second} = refine_ () in proof);;
                                                         ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-48:
+6 |   let proof : {u : unit | M.valid K.Empty second} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let dangling_reference (u : unit) = ghost_ (
@@ -59,6 +67,10 @@ Line 6, characters 72-82:
 6 |   let proof : {u : unit | M.object_valid K.Empty M.No_values object_} = refine_ () in proof);;
                                                                             ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-68:
+6 |   let proof : {u : unit | M.object_valid K.Empty M.No_values object_} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_object_kind (u : unit) = ghost_ (
@@ -77,4 +89,8 @@ Line 11, characters 111-121:
 11 |   let proof : {u : unit | M.decode heap (C.Closure_pointer address) === Some (R.V.Closure (D.Z, R.V.Empty))} = refine_ () in proof);;
                                                                                                                     ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 11, characters 26-107:
+11 |   let proof : {u : unit | M.decode heap (C.Closure_pointer address) === Some (R.V.Closure (D.Z, R.V.Empty))} = refine_ () in proof);;
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

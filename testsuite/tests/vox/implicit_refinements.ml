@@ -57,6 +57,10 @@ Line 1, characters 33-35:
 1 | let wrong : {n : int | n >= 0} = -1;;
                                      ^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-29:
+1 | let wrong : {n : int | n >= 0} = -1;;
+                           ^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_if_argument = consume (if true then -1 else -1);;
@@ -65,6 +69,10 @@ Line 1, characters 46-48:
 1 | let wrong_if_argument = consume (if true then -1 else -1);;
                                                   ^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 28-34:
+6 | let consume (x : {n : int | n >= 0}) = x + 1
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_match_argument b = consume (match b with true -> -1 | false -> -1);;
@@ -73,6 +81,10 @@ Line 1, characters 59-61:
 1 | let wrong_match_argument b = consume (match b with true -> -1 | false -> -1);;
                                                                ^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 28-34:
+6 | let consume (x : {n : int | n >= 0}) = x + 1
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_let_argument = consume (let x = -1 in x);;
@@ -81,6 +93,10 @@ Line 1, characters 48-49:
 1 | let wrong_let_argument = consume (let x = -1 in x);;
                                                     ^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 28-34:
+6 | let consume (x : {n : int | n >= 0}) = x + 1
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_chain (x : int) : {y : int | y >= 0} = step (step (step x));;
@@ -89,6 +105,10 @@ Line 1, characters 49-69:
 1 | let wrong_chain (x : int) : {y : int | y >= 0} = step (step (step x));;
                                                      ^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 39-45:
+1 | let wrong_chain (x : int) : {y : int | y >= 0} = step (step (step x));;
+                                           ^^^^^^
+  The refinement is stated here.
 |}]
 
 let refined_elements : {n : int | n >= 0} list = [0; 1]
@@ -181,6 +201,10 @@ Line 4, characters 32-36:
 4 |   take (impossible ()) (consume (-1));;
                                     ^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 28-34:
+6 | let consume (x : {n : int | n >= 0}) = x + 1
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let follow : (x : int) -> {y : int | y >= x} -> int = fun x y -> y
@@ -210,6 +234,10 @@ Line 2, characters 52-54:
 2 |   follow (identity 1) (let module M = struct end in -1);;
                                                         ^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 37-43:
+1 | let follow : (x : int) -> {y : int | y >= x} -> int = fun x y -> y
+                                         ^^^^^^
+  The refinement is stated here.
 |}]
 
 let use_premise : (x : int) -> {u : unit | x >= 0} ->
@@ -238,6 +266,10 @@ Line 2, characters 55-57:
 2 |   apply_relation (ghost_ (fun n -> n >= 0)) (fun () -> -1) ();;
                                                            ^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 24-27:
+2 |     (unit -> {n : int | r n}) -> unit -> int =
+                            ^^^
+  The refinement is stated here.
 |}]
 
 type nonnegative = {n : int | n >= 0}
@@ -257,6 +289,10 @@ Line 1, characters 24-26:
 1 | let bad_small : small = -1;;
                             ^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 30-36:
+1 | type nonnegative = {n : int | n >= 0}
+                                  ^^^^^^
+  The refinement is stated here.
 |}]
 
 let local_partial () =
@@ -296,6 +332,10 @@ Line 2, characters 3-4:
 2 |   (0 : {n : int | false});;
        ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 18-23:
+2 |   (0 : {n : int | false});;
+                      ^^^^^
+  The refinement is stated here.
 |}]
 
 module Positive = struct
@@ -326,6 +366,10 @@ Line 1, characters 48-49:
 1 | let bad_nested_inner = nested_take (identity 1) 0;;
                                                     ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 47-53:
+1 | let nested_take : (x : int) -> {n : {m : int | m >= x} | n <= 3} -> int =
+                                                   ^^^^^^
+  The refinement is stated here.
 |}]
 
 let bad_nested_outer = nested_take (identity 1) 4;;
@@ -334,6 +378,10 @@ Line 1, characters 48-49:
 1 | let bad_nested_outer = nested_take (identity 1) 4;;
                                                     ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 57-63:
+1 | let nested_take : (x : int) -> {n : {m : int | m >= x} | n <= 3} -> int =
+                                                             ^^^^^^
+  The refinement is stated here.
 |}]
 
 external total_identity : (x : int) -> {y : int | y = x} @@ total = "%identity";;
@@ -356,6 +404,10 @@ Line 3, characters 3-5:
 3 |   (() : {u : unit | f 0 === f 1});;
        ^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 20-31:
+3 |   (() : {u : unit | f 0 === f 1});;
+                        ^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 type refined_function = {f : unit -> unit | true}
@@ -415,6 +467,10 @@ Line 4, characters 15-16:
 4 |     fun x y -> y
                    ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 53-65:
+3 |       (x : 'a) -> (y : 'a) @ total -> {result : 'a | result === x} =
+                                                         ^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Tuple_intro = struct
@@ -470,4 +526,8 @@ Line 5, characters 27-42:
 5 |     fun box -> get_def box (box.limit + 1)
                                ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 35-48:
+5 |       (box : 'a box) -> {i : int | i = box.limit} -> int =
+                                       ^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

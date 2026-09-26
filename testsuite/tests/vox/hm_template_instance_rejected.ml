@@ -33,4 +33,8 @@ Line 9, characters 68-78:
 9 |     let _wrong : {u : unit | P.boundaries_avoid names rho schema} = refine_ () in
                                                                         ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 9, characters 29-64:
+9 |     let _wrong : {u : unit | P.boundaries_avoid names rho schema} = refine_ () in
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

@@ -35,6 +35,10 @@ Line 8, characters 20-29:
 8 |       let u = () in refine_ u)
                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-57:
+4 |       {u : unit | readback (Free p) === readback (Free q)} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Over_specialized = struct
@@ -50,6 +54,10 @@ Line 7, characters 18-27:
 7 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-47:
+4 |       {u : unit | readback (Free p) === Boolean} @ ghost = fun h p premise -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Omitted_substitution_child = struct
@@ -68,6 +76,10 @@ Line 10, characters 18-27:
 10 |     let u = () in refine_ u)
                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-105:
+5 |       {u : unit | substitute delta (Function (Variable p, Variable q)) === Function (Boolean, Variable q)}
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Missing_operand_equality = struct
@@ -95,4 +107,6 @@ Line 19, characters 65-76:
 19 |       mgu_factor_at h p q after d trees sigma normal rho model x (refine_ u))
                                                                       ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "level_mgu_proofs.ml", line 74, characters 16-61:
+  The refinement is stated here.
 |}]

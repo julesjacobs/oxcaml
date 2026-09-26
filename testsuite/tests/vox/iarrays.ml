@@ -70,6 +70,10 @@ Line 4, characters 2-7:
 4 |   index
       ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 15-49:
+2 |     {i : int | 0 <= i && i < Iarray.length values} =
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let nonnegative_length (values : 'a iarray) : {n : int | 0 <= n} =
@@ -146,6 +150,10 @@ Line 5, characters 4-9:
 5 |     index
         ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 27-61:
+4 |   let bounded : {i : int | 0 <= i && i < Iarray.length values} =
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let refined_get_unboxed () =
@@ -204,6 +212,10 @@ Line 3, characters 2-3:
 3 |   n
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 33-38:
+1 | let wrong_length () : {n : int | n = 2} =
+                                     ^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_element () : {n : int | n = 4} =
@@ -215,6 +227,10 @@ Line 3, characters 2-3:
 3 |   n
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 34-39:
+1 | let wrong_element () : {n : int | n = 4} =
+                                      ^^^^^
+  The refinement is stated here.
 |}]
 
 let mutable_array_stays_opaque () : {n : int | n = 3} =
@@ -226,6 +242,10 @@ Line 3, characters 2-3:
 3 |   n
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 47-52:
+1 | let mutable_array_stays_opaque () : {n : int | n = 3} =
+                                                   ^^^^^
+  The refinement is stated here.
 |}]
 
 module Stdlib__Iarray = struct
@@ -242,6 +262,10 @@ Line 7, characters 2-3:
 7 |   n
       ^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 48-53:
+5 | let shadow_module_is_not_stdlib () : {n : int | n = 3} =
+                                                    ^^^^^
+  The refinement is stated here.
 |}]
 
 let slice_contents (source : int iarray) (position : int) (size : int)
@@ -321,6 +345,10 @@ Line 5, characters 2-10:
 5 |   position
       ^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 20-31:
+2 |     {result : int | 0 <= result} =
+                        ^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_copy () : {value : int | value = 10} =
@@ -333,6 +361,10 @@ Line 4, characters 2-7:
 4 |   value
       ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 35-45:
+1 | let wrong_copy () : {value : int | value = 10} =
+                                       ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 
@@ -470,6 +502,10 @@ Line 11, characters 6-11:
 11 |       index in
            ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 29-61:
+10 |     let bounded : {i : int | 0 <= i && i < Iarray.length data} =
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 
@@ -537,6 +573,10 @@ Line 4, characters 46-51:
 4 |   let (_ : {a : int iarray | a === second}) = first in ();;
                                                   ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 29-41:
+4 |   let (_ : {a : int iarray | a === second}) = first in ();;
+                                 ^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let initialized : (n : int) -> {a : int iarray | Iarray.length a = n} =
@@ -565,6 +605,10 @@ Line 3, characters 11-37:
 3 |   fun n -> Iarray.init n (fun i -> i);;
                ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 22-45:
+2 |     {a : int iarray | Iarray.length a = n + 1} =
+                          ^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let shadowed_initialization : (n : int) ->
@@ -576,4 +620,8 @@ Line 4, characters 2-28:
 4 |   Iarray.init n (fun i -> i);;
       ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 22-41:
+2 |     {a : int iarray | Iarray.length a = n} = fun n ->
+                          ^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

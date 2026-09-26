@@ -2,3 +2,7 @@ File "queue_rejected.ml", line 22, characters 4-17:
 22 |     refine_ empty
          ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "queue_rejected.ml", line 21, characters 8-54:
+21 |         (Functional_queue.contents q === []) === false} =
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.

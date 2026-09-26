@@ -160,6 +160,10 @@ Line 14, characters 2-11:
 14 |   refine_ u
        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 6-61:
+3 | ......Expr.eval (Expr.Lit (a - b)) input
+4 |       === Expr.eval (Expr.Add (Expr.Lit a, Expr.Lit b)) input...
+  The refinement is stated here.
 |}]
 
 module No_descent = struct

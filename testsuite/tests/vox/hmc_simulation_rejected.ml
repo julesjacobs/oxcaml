@@ -37,6 +37,8 @@ Line 4, characters 36-38:
 4 |   W.local M.Nil W.Empty V.Empty D.Z ());;
                                         ^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_monomorphic_values.ml", line 41, characters 16-85:
+  The refinement is stated here.
 |}]
 
 let wrong_catalog_index (table : M.table @ immutable) = ghost_ (
@@ -48,6 +50,10 @@ Line 4, characters 61-71:
 4 |   let proof : {u : unit | L.linked table T.Empty D.Z code} = refine_ () in proof);;
                                                                  ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-57:
+4 |   let proof : {u : unit | L.linked table T.Empty D.Z code} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let missing_capture (table : M.table @ immutable) = ghost_ (
@@ -62,6 +68,10 @@ Line 7, characters 51-61:
 7 |   let proof : {u : unit | W.valid table closure} = refine_ () in proof);;
                                                        ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 26-47:
+7 |   let proof : {u : unit | W.valid table closure} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let changed_result (u : unit) = ghost_ (
@@ -74,4 +84,8 @@ Line 5, characters 68-78:
 5 |   let proof : {u : unit | H.source state === S.Done (V.Word one)} = refine_ () in proof);;
                                                                         ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 26-64:
+5 |   let proof : {u : unit | H.source state === S.Done (V.Word one)} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

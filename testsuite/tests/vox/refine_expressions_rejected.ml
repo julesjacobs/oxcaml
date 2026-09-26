@@ -10,6 +10,10 @@ Line 1, characters 36-45:
 1 | let bad_value : {r : int | r = 0} = refine_ 1;;
                                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 27-32:
+1 | let bad_value : {r : int | r = 0} = refine_ 1;;
+                               ^^^^^
+  The refinement is stated here.
 |}]
 
 module Bad_callback = struct
@@ -23,6 +27,10 @@ Line 5, characters 39-65:
 5 |   let bad : int -> {r : int | r < 0} = refine_ callbacks.callback
                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 30-35:
+5 |   let bad : int -> {r : int | r < 0} = refine_ callbacks.callback
+                                  ^^^^^
+  The refinement is stated here.
 |}]
 
 module Partial_callback = struct

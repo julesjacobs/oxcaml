@@ -37,6 +37,10 @@ Line 10, characters 58-68:
 10 |   let proof : {u : unit | W.continuation_valid table k} = refine_ () in proof);;
                                                                ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 26-54:
+10 |   let proof : {u : unit | W.continuation_valid table k} = refine_ () in proof);;
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let changed_capture (u : unit) = ghost_ (
@@ -50,6 +54,10 @@ Line 6, characters 53-63:
 6 |   let proof : {u : unit | W.current k === changed} = refine_ () in proof);;
                                                          ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-49:
+6 |   let proof : {u : unit | W.current k === changed} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let administrative_step_count (u : unit) = ghost_ (
@@ -62,6 +70,10 @@ Line 5, characters 62-72:
 5 |   let proof : {u : unit | W.source_steps state === D.S D.Z} = refine_ () in proof);;
                                                                   ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 26-58:
+5 |   let proof : {u : unit | W.source_steps state === D.S D.Z} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let dropped_call_frame (u : unit) = ghost_ (
@@ -73,4 +85,8 @@ Line 4, characters 51-61:
 4 |   let proof : {u : unit | W.frames k === S.Halt} = refine_ () in proof);;
                                                        ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-47:
+4 |   let proof : {u : unit | W.frames k === S.Halt} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

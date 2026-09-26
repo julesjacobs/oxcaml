@@ -31,6 +31,10 @@ Line 6, characters 71-81:
 6 |   let proof : {u : unit | G.block_valid M.Nil K.Empty G.Empty block} = refine_ () in proof);;
                                                                            ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-67:
+6 |   let proof : {u : unit | G.block_valid M.Nil K.Empty G.Empty block} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_accumulator (u : unit) = ghost_ (
@@ -48,6 +52,10 @@ Line 10, characters 69-79:
 10 |   let proof : {u : unit | G.block_valid M.Nil K.Empty table block} = refine_ () in proof);;
                                                                           ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 26-65:
+10 |   let proof : {u : unit | G.block_valid M.Nil K.Empty table block} = refine_ () in proof);;
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let missing_temporary (u : unit) = ghost_ (
@@ -60,6 +68,10 @@ Line 5, characters 71-81:
 5 |   let proof : {u : unit | G.block_valid M.Nil K.Empty G.Empty block} = refine_ () in proof);;
                                                                            ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 26-67:
+5 |   let proof : {u : unit | G.block_valid M.Nil K.Empty G.Empty block} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let changed_operation (u : unit) = ghost_ (
@@ -74,4 +86,8 @@ Line 7, characters 80-90:
 7 |   let proof : {u : unit | O.instruction table D.Z (G.Primitive (D.Add, D.Z))} = refine_ () in proof);;
                                                                                     ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 26-76:
+7 |   let proof : {u : unit | O.instruction table D.Z (G.Primitive (D.Add, D.Z))} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

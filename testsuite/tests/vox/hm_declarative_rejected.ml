@@ -32,6 +32,11 @@ Line 10, characters 4-13:
 10 |     refine_ d)
          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 2-4, characters 34-23:
+2 | ..................................typed Z
+3 |     (Binding (Forall (S Z, Parameter Z), Empty_context))
+4 |     (Bound Z) Boolean d........................................
+  The refinement is stated here.
 |}]
 
 module Capture_scheme_parameter = struct
@@ -47,6 +52,10 @@ Line 7, characters 18-27:
 7 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 2-3, characters 32-37:
+2 | ................................weaken_scheme (S Z) (Forall (S Z, Parameter Z))
+3 |     === Forall (S Z, Parameter (S Z))..............................
+  The refinement is stated here.
 |}]
 
 module Polymorphic_recursive_self = struct
@@ -71,4 +80,8 @@ Line 16, characters 4-13:
 16 |     refine_ d)
          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 2-3, characters 34-76:
+2 | ..................................typed Z Empty_context
+3 |     (Recursive (Apply (Bound (S Z), Truth))) (Function (Boolean, Boolean)) d........................................
+  The refinement is stated here.
 |}]

@@ -33,6 +33,10 @@ Line 4, characters 59-69:
 4 |   let proof : {u : unit | Capacity.fits width top limit} = refine_ () in proof);;
                                                                ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-55:
+4 |   let proof : {u : unit | Capacity.fits width top limit} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let partial_frame (u : unit) = ghost_ (
@@ -46,6 +50,10 @@ Line 6, characters 70-80:
 6 |   let proof : {u : unit | Capacity.region width (D.S D.Z) base top} = refine_ () in proof);;
                                                                           ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 26-66:
+6 |   let proof : {u : unit | Capacity.region width (D.S D.Z) base top} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_empty_top (u : unit) = ghost_ (
@@ -57,6 +65,8 @@ Line 4, characters 56-58:
 4 |   Stack.pop_correct G.Empty width B.End base top Q.Halt ());;
                                                             ^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_memory_stack.ml", line 70, characters 16-72:
+  The refinement is stated here.
 |}]
 
 let wrapped_stack (u : unit) = ghost_ (
@@ -68,4 +78,8 @@ Line 4, characters 70-80:
 4 |   let proof : {u : unit | Capacity.region width (D.S D.Z) base top} = refine_ () in proof);;
                                                                           ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-66:
+4 |   let proof : {u : unit | Capacity.region width (D.S D.Z) base top} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

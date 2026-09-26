@@ -41,6 +41,10 @@ Line 2, characters 21-30:
 2 |   let x = read () in refine_ x;;
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-28:
+1 | type zero = {n : int | n = 0}
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let overflow x : {n : int | n > x} =
@@ -50,6 +54,10 @@ Line 2, characters 19-28:
 2 |   let y = x + 1 in refine_ y;;
                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 28-33:
+1 | let overflow x : {n : int | n > x} =
+                                ^^^^^
+  The refinement is stated here.
 |}]
 
 let bad_branch b : nonnegative =
@@ -59,6 +67,10 @@ Line 2, characters 33-42:
 2 |   let x = if b then 1 else -1 in refine_ x;;
                                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 30-36:
+2 | type nonnegative = {n : int | n >= 0};;
+                                  ^^^^^^
+  The refinement is stated here.
 |}]
 
 let eliminate (r : zero) : zero =
@@ -96,6 +108,10 @@ Line 2, characters 15-24:
 2 |   let x = 1 in refine_ x;;
                    ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-28:
+1 | type zero = {n : int | n = 0}
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let hidden_false (r : {n : int | false}) : zero =
@@ -113,6 +129,10 @@ Line 2, characters 15-24:
 2 |   let x = 1 in refine_ x;;
                    ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-28:
+1 | type zero = {n : int | n = 0}
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let eliminated_false (r : {n : int | false}) : zero =
@@ -138,6 +158,10 @@ Line 4, characters 21-30:
 4 |   let y = read () in refine_ y;;
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-28:
+1 | type zero = {n : int | n = 0}
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let caught x : zero =
@@ -148,6 +172,10 @@ Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-28:
+1 | type zero = {n : int | n = 0}
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let guarded x : nonnegative =
@@ -164,6 +192,10 @@ Line 1, characters 41-50:
 1 | let nested x = ignore (let f () : zero = refine_ x in f);;
                                              ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-28:
+1 | type zero = {n : int | n = 0}
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let nonvariable : zero = refine_ 0;;
@@ -186,6 +218,10 @@ Line 4, characters 32-41:
 4 |   let (_ : {n : int | n = x}) = refine_ y in
                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 22-27:
+4 |   let (_ : {n : int | n = x}) = refine_ y in
+                          ^^^^^
+  The refinement is stated here.
 |}]
 
 let unchecked_short_circuit x b : zero =
@@ -196,6 +232,10 @@ Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 23-28:
+1 | type zero = {n : int | n = 0}
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let checked_short_circuit x : zero =
@@ -330,6 +370,10 @@ Line 4, characters 21-30:
 4 |   let n = add 1 1 in refine_ n;;
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 33-38:
+1 | let shadowed_add () : {n : int | n = 2} =
+                                     ^^^^^
+  The refinement is stated here.
 |}]
 
 module Abstract : sig type t end = struct type t = int end;;
@@ -344,4 +388,8 @@ Line 2, characters 32-41:
 2 |   let b = physical_equal x x in refine_ b;;
                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 53-54:
+1 | let abstract_physical (x : Abstract.t) : {b : bool | b} =
+                                                         ^
+  The refinement is stated here.
 |}]

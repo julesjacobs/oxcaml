@@ -33,6 +33,10 @@ Line 8, characters 61-70:
 8 |       let t = Alias (p, leaf) in root_def t; finite_def h t; refine_ t)
                                                                  ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-44:
+4 |       {t : tree | root t === p && finite h t} @ immutable ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Stale_witness = struct
@@ -50,6 +54,10 @@ Line 9, characters 72-81:
 9 |       let t = Free p in root_def t; finite_def h t; finite_def after t; refine_ t)
                                                                             ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-63:
+5 |       {t : tree | root t === p && finite (H.put h p (Link q)) t} @ immutable ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Omitted_arrow_child = struct
@@ -68,6 +76,10 @@ Line 10, characters 68-77:
 10 |       let t = Branch (p, left, left) in root_def t; finite_def h t; refine_ t)
                                                                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 18-44:
+7 |       {t : tree | root t === p && finite h t} @ immutable ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unchecked_binding = struct
@@ -86,4 +98,6 @@ Line 10, characters 34-45:
 10 |       search_finite h p q q trace (refine_ u))
                                        ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "unifier_finite_proofs.ml", line 8, characters 16-42:
+  The refinement is stated here.
 |}]

@@ -64,6 +64,10 @@ Line 4, characters 14-23:
 4 |     | Stop -> refine_ n
                   ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 60-65:
+2 |   let rec (bad @ total) (xs : chain) (n : int) : {m : int | m > n} =
+                                                                ^^^^^
+  The refinement is stated here.
 |}]
 
 module Shadowed_result = struct

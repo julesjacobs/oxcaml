@@ -34,6 +34,10 @@ Line 1, characters 26-27:
 1 | let reversed x = clamp 10 0 x
                               ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 48-55:
+1 | let (clamp @ total) (lo : int) (hi : {h : int | lo <= h}) (x : int) :
+                                                    ^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong (x : int) : {r : int | 0 <= r && r <= 10} = x
@@ -43,6 +47,10 @@ Line 1, characters 54-55:
 1 | let wrong (x : int) : {r : int | 0 <= r && r <= 10} = x
                                                           ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 33-50:
+1 | let wrong (x : int) : {r : int | 0 <= r && r <= 10} = x
+                                     ^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let opaque_clamp lo hi x =
@@ -60,4 +68,8 @@ Line 2, characters 2-21:
 2 |   opaque_clamp 0 10 x
       ^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 41-58:
+1 | let opaque_result (x : int) : {r : int | 0 <= r && r <= 10} =
+                                             ^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

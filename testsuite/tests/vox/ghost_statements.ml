@@ -68,6 +68,10 @@ Line 3, characters 36-45:
 3 |   let result : {y : int | y >= 0} = refine_ y in
                                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 26-32:
+3 |   let result : {y : int | y >= 0} = refine_ y in
+                              ^^^^^^
+  The refinement is stated here.
 |}]
 
 let (ordinary @ total) () : {u : unit | true} =

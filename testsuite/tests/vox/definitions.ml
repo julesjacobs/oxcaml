@@ -48,6 +48,10 @@ Line 4, characters 2-3:
 4 |   y;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 27-32:
+1 | let opaque () : {n : int | n = 5} =
+                               ^^^^^
+  The refinement is stated here.
 |}]
 
 let not_eliminated () : {n : int | n = 5} =
@@ -91,6 +95,10 @@ Line 7, characters 2-3:
 7 |   y;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 30-35:
+1 | let shadowing () : {n : int | n = 1} =
+                                  ^^^^^
+  The refinement is stated here.
 |}]
 
 let multiple () : {n : int | n = 4} =
@@ -113,6 +121,10 @@ Line 4, characters 2-8:
 4 |   result;;
       ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 28-33:
+1 | let wrapping x : {n : int | n > x} =
+                                ^^^^^
+  The refinement is stated here.
 |}]
 
 let shadowed_equality () : {n : int | n = 5} =
@@ -141,6 +153,10 @@ Line 5, characters 2-3:
 5 |   b;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 58-63:
+1 | let partial_calls (f : int -> int) (x : int) : {n : int | n = 0} =
+                                                              ^^^^^
+  The refinement is stated here.
 |}]
 
 let total_calls (f @ total) (x : int) : {n : int | n = 0} =
@@ -167,6 +183,10 @@ Line 8, characters 2-3:
 8 |   n;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 50-55:
+3 | let stateful_total_calls_are_fresh r : {n : int | n = 0} =
+                                                      ^^^^^
+  The refinement is stated here.
 |}]
 
 let closure_instances make : {n : int | n = 1} =
@@ -184,6 +204,10 @@ Line 10, characters 2-8:
 10 |   result;;
        ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 40-45:
+1 | let closure_instances make : {n : int | n = 1} =
+                                            ^^^^^
+  The refinement is stated here.
 |}]
 
 module Module_alias = struct
@@ -230,6 +254,10 @@ Line 5, characters 2-3:
 5 |   n;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 15-20:
+2 |     {n : int | n = x} =
+                   ^^^^^
+  The refinement is stated here.
 |}]
 
 module Datatype_definition = struct
@@ -339,6 +367,10 @@ Line 5, characters 2-8:
 5 |   result;;
       ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 36-41:
+1 | let tuple_let_wrong () : {n : int | n = 8} =
+                                        ^^^^^
+  The refinement is stated here.
 |}]
 
 let[@def] partial_let (values : int list) =
@@ -488,6 +520,10 @@ Line 3, characters 2-27:
 3 |   Captured_function.add 3 4;;
       ^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 44-49:
+1 | let false_captured_function () : {n : int | n = 8} =
+                                                ^^^^^
+  The refinement is stated here.
 |}]
 
 let false_curried_function () : {n : int | n = 4} =
@@ -498,6 +534,10 @@ Line 3, characters 2-26:
 3 |   Function_alias.first 3 4;;
       ^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 43-48:
+1 | let false_curried_function () : {n : int | n = 4} =
+                                               ^^^^^
+  The refinement is stated here.
 |}]
 
 module Partial_function = struct

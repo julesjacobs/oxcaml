@@ -31,6 +31,10 @@ Line 12, characters 4-5:
 12 |     r
          ^
 Error: Refinement could not be proved (counterexample)
+Lines 8-9, characters 20-56:
+8 | ....................r.pointer === root (rev_append xs Nil)
+9 |         && Pref.own r.state === heap (rev_append xs Nil)............
+  The refinement is stated here.
 |}, Principal{|
 Line 7, characters 20-21:
 7 |         && Pref.own t === heap xs}) @ unique ->
@@ -55,6 +59,10 @@ Line 5, characters 4-5:
 5 |     t
         ^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 36-58:
+4 |       {t : node option Pref.token | Pref.own t === heap xs} @ unique = fun n xs t ->
+                                        ^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}, Principal{|
 Line 3, characters 50-51:
 3 |       (t : {t : node option Pref.token | Pref.own t === heap (Cons (n, xs))}) @ unique ->

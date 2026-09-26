@@ -320,4 +320,8 @@ Line 23, characters 6-11:
 23 |       index
            ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 22, characters 23-63:
+22 |         {index : int | 0 <= index && index < Iarray.length base} =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

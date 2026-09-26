@@ -230,6 +230,10 @@ Line 3, characters 2-3:
 3 |   b;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 46-47:
+1 | let float_reflexive (x : float) : {b : bool | b} =
+                                                  ^
+  The refinement is stated here.
 |}]
 
 let float_irreflexive (x : float) : {b : bool | b === false} =
@@ -240,6 +244,10 @@ Line 3, characters 2-3:
 3 |   b;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 48-59:
+1 | let float_irreflexive (x : float) : {b : bool | b === false} =
+                                                    ^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Polymorphic_pair = struct
@@ -273,4 +281,8 @@ Line 6, characters 2-8:
 6 |   result;;
       ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 24-71:
+3 |     {result : 'a * 'a | match result with left, right -> left === right} =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

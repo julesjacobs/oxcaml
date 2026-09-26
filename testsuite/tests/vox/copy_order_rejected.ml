@@ -32,6 +32,10 @@ Line 8, characters 20-29:
 8 |       let u = () in refine_ u)
                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-73:
+4 |       {u : unit | not (H.mem h x) || not (finite_node h x) || below h x 1} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unordered_instance = struct
@@ -50,4 +54,8 @@ Line 10, characters 40-49:
 10 |     at_level_def h child; let u = () in refine_ u)
                                              ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 18-32:
+6 |       {u : unit | ordered h root} @ ghost = fun h root child premise -> ghost_ (
+                      ^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

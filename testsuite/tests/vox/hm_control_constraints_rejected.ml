@@ -32,6 +32,8 @@ Line 6, characters 67-69:
 6 |   C.construct D.Z D.Empty_context word D.Truth D.False D.Boolean d ());;
                                                                        ^^
 Error: Refinement could not be proved (counterexample)
+File "hm_conditional_constraints.ml", line 219, characters 16-52:
+  The refinement is stated here.
 |}]
 
 let unequal_conditional_branches () = ghost_ (
@@ -44,6 +46,8 @@ Line 5, characters 67-69:
 5 |   C.construct D.Z D.Empty_context D.Truth D.Truth word D.Boolean d ());;
                                                                        ^^
 Error: Refinement could not be proved (counterexample)
+File "hm_conditional_constraints.ml", line 219, characters 16-52:
+  The refinement is stated here.
 |}]
 
 let list_head_is_not_a_tail () = ghost_ (
@@ -58,6 +62,8 @@ Line 7, characters 64-66:
 7 |   L.construct D.Z D.Empty_context scrutinee D.Nil nonempty ty d ());;
                                                                     ^^
 Error: Refinement could not be proved (counterexample)
+File "hm_list_case_constraints.ml", line 306, characters 16-74:
+  The refinement is stated here.
 |}]
 
 let non_list_scrutinee () = ghost_ (
@@ -69,4 +75,6 @@ Line 4, characters 70-72:
 4 |   L.construct D.Z D.Empty_context D.Truth D.Truth D.False D.Boolean d ());;
                                                                           ^^
 Error: Refinement could not be proved (counterexample)
+File "hm_list_case_constraints.ml", line 306, characters 16-74:
+  The refinement is stated here.
 |}]

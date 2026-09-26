@@ -31,6 +31,10 @@ Line 8, characters 18-27:
 8 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 16-51:
+3 | ................context_avoids (Name (p, No_names))
+4 |       (Binding (Forall (Z, Free p), Empty_context)).............................
+  The refinement is stated here.
 |}]
 
 module Split_repeated_parameter = struct
@@ -47,6 +51,10 @@ Line 8, characters 18-27:
 8 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 16-49:
+3 | ................abstract_type (Name (p, No_names)) Z (Function (Free p, Free p))
+4 |       === Function (Parameter Z, Parameter (S Z)).............................
+  The refinement is stated here.
 |}]
 
 module Substitute_before_abstraction = struct
@@ -69,4 +77,8 @@ Line 14, characters 71-80:
 14 |     let u = () in let _fresh : {u : unit | avoids names substituted} = refine_ u in refine_ u)
                                                                             ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 14, characters 43-67:
+14 |     let u = () in let _fresh : {u : unit | avoids names substituted} = refine_ u in refine_ u)
+                                                ^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

@@ -34,6 +34,10 @@ Line 7, characters 60-70:
 7 |   let proof : {u : unit | L.overlay payload before after} = refine_ () in proof);;
                                                                 ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 26-56:
+7 |   let proof : {u : unit | L.overlay payload before after} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let overlapping_read (u : unit) = ghost_ (
@@ -48,6 +52,10 @@ Line 7, characters 66-76:
 7 |   let proof : {u : unit | P.equal_prefix boundary before after} = refine_ () in proof);;
                                                                       ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 26-62:
+7 |   let proof : {u : unit | P.equal_prefix boundary before after} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let beyond_endpoint (u : unit) = ghost_ (
@@ -59,6 +67,10 @@ Line 4, characters 59-69:
 4 |   let proof : {u : unit | L.fits_at B.End address B.End} = refine_ () in proof);;
                                                                ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-55:
+4 |   let proof : {u : unit | L.fits_at B.End address B.End} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrapped_extent (u : unit) = ghost_ (
@@ -70,4 +82,8 @@ Line 4, characters 63-73:
 4 |   let proof : {u : unit | Bounds.range (D.S D.Z) start stop} = refine_ () in proof);;
                                                                    ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-59:
+4 |   let proof : {u : unit | Bounds.range (D.S D.Z) start stop} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

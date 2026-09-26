@@ -31,6 +31,10 @@ Line 3, characters 84-93:
 3 |     let base = Empty in let d = Start in registered_def base epoch d; let u = () in refine_ u)
                                                                                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 61-99:
+2 |   let bad : (epoch : node Pref.t) @ immutable -> {u : unit | registered Empty epoch Start === Empty} @ ghost = fun epoch -> ghost_ (
+                                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Omit_copy = struct
@@ -45,6 +49,10 @@ Line 6, characters 80-89:
 6 |     registered_def base epoch start; registered_def base epoch d; let u = () in refine_ u)
                                                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-97:
+4 |       {u : unit | registered Empty epoch (Fresh (Start, p, q, old, Var)) === Entry (epoch, Empty)} @ ghost = fun epoch p q old -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Invent_link_allocation = struct
@@ -59,6 +67,10 @@ Line 6, characters 80-89:
 6 |     registered_def base epoch start; registered_def base epoch d; let u = () in refine_ u)
                                                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-103:
+4 |       {u : unit | registered Empty epoch (Alias (Start, p, q, old)) === Entry (q, Entry (epoch, Empty))} @ ghost = fun epoch p q old -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Stale_variable_tree = struct
@@ -71,6 +83,10 @@ Line 4, characters 102-111:
 4 |     let refine_ premise = premise in let t = Free p in tree_root_def t; finite_def h t; let u = () in refine_ u)
                                                                                                           ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 64-81:
+3 |       {u : unit | observe h p === Some (Link q)} -> {u : unit | finite h (Free p)} @ ghost = fun h p q premise -> ghost_ (
+                                                                    ^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Finite_self_cycle = struct
@@ -84,6 +100,10 @@ Line 5, characters 84-93:
 5 |     tree_root_def t; tree_root_def c; finite_def h t; finite_def h c; let u = () in refine_ u)
                                                                                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 64-97:
+3 |       {u : unit | observe h p === Some (Link p)} -> {u : unit | finite h (Alias_tree (p, Free p))} @ ghost = fun h p premise -> ghost_ (
+                                                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Stale_allocation_coverage = struct
@@ -97,4 +117,8 @@ Line 5, characters 87-96:
 5 |     covered_def after 0 pool p; listed_def pool p; at_level_def after p; let u = () in refine_ u)
                                                                                            ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-60:
+3 |       {u : unit | covered (H.put h p (cell Var 2)) 0 Empty p} @ ghost = fun h p -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

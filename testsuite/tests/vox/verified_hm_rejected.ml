@@ -36,6 +36,10 @@ Line 4, characters 2-15:
 4 |   V.infer input;;
       ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 20-36:
+3 |     {r : V.answer | r.#root === None} @ unique = fun input ->
+                        ^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let unrelated_input : (input : Hm_declarative.term) @ immutable ->
@@ -57,6 +61,8 @@ Line 14, characters 20-26:
 14 |   V.principal input answer target typing () true use);;
                          ^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "verified_hm.mli", line 79, characters 4-52:
+  The refinement is stated here.
 |}]
 
 let unrelated_elaboration (input : Hm_declarative.term @ immutable)
@@ -67,4 +73,6 @@ Line 3, characters 20-26:
 3 |   V.elaborate input answer;;
                         ^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "verified_hm.mli", lines 104-110, characters 4-19:
+  The refinement is stated here.
 |}]

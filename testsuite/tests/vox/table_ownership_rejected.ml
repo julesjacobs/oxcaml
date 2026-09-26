@@ -56,6 +56,8 @@ Line 5, characters 41-55:
 5 |   V.find_opt r.#table r.#view 1 (borrow_ changed.#token);;
                                              ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_verified_flat_hashtbl.mli", line 146, characters 6-61:
+  The refinement is stated here.
 |}]
 
 let missing_ownership () =
@@ -68,6 +70,8 @@ Line 5, characters 41-46:
 5 |   V.find_opt r.#table r.#view 1 (borrow_ empty);;
                                              ^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_verified_flat_hashtbl.mli", line 146, characters 6-61:
+  The refinement is stated here.
 |}]
 
 let reused_token () =
@@ -98,4 +102,8 @@ Line 6, characters 4-60:
 6 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 25-31:
+5 |   let value : {v : int | v = 85} =
+                             ^^^^^^
+  The refinement is stated here.
 |}]

@@ -34,6 +34,10 @@ Line 10, characters 20-29:
 10 |       let u = () in refine_ u)
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-73:
+4 |       {u : unit | marks_valid h p (Marked (No_marks, p, cell Var 0, Hit))} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Leave_mark_set = struct
@@ -50,6 +54,10 @@ Line 8, characters 20-29:
 8 |       let u = () in refine_ u)
                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-81:
+4 |       {u : unit | H.at h p === H.at (H.put h p (set_visited (cell Var 0) true)) p} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Preexisting_mark = struct
@@ -66,4 +74,8 @@ Line 8, characters 20-29:
 8 |       let u = () in refine_ u)
                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 18-76:
+4 |       {u : unit | match H.at h p with None -> true | Some v -> not v.visited} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

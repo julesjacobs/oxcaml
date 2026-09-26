@@ -36,6 +36,10 @@ Line 3, characters 4-13:
 3 |     refine_ f
         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 69-74:
+2 |   let strengthen (f : int -> {r : int | r >= 0}) : int -> {r : int | r > 0} =
+                                                                         ^^^^^
+  The refinement is stated here.
 |}]
 
 module Wrong_domain = struct
@@ -47,6 +51,10 @@ Line 3, characters 34-43:
 3 |       int -> {r : int | r >= 0} = refine_ f
                                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 28-33:
+2 |   let adapt (f : {x : int | x > 0} -> {r : int | r >= 0}) :
+                                ^^^^^
+  The refinement is stated here.
 |}]
 
 module Once_capture = struct

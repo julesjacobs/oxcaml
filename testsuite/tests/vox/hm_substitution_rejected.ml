@@ -28,6 +28,10 @@ Line 5, characters 18-27:
 5 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 16-61:
+3 |     {u : unit | substitute_type rho (Parameter Z) === Boolean} @ ghost = fun rho -> ghost_ (
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Forget_context_substitution = struct
@@ -45,4 +49,8 @@ Line 9, characters 26-35:
 9 |     open_type_def args t; refine_ d)
                               ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 20-27:
+3 | ....................typed Z (Binding (Forall (Z, Free p), Empty_context))
+4 |         (Bound Z) Boolean d.......................................
+  The refinement is stated here.
 |}]

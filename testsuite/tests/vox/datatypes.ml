@@ -106,6 +106,10 @@ Line 6, characters 4-9:
 6 |     empty
         ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 40-51:
+4 |   let wrong_empty () : {r : int maybe | r === Other} =
+                                            ^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let alias (p : pair) : {r : pair | r === p} =
@@ -290,6 +294,10 @@ Line 4, characters 2-4:
 4 |   ();;
       ^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 6-69:
+3 |       match wrapped with Ordinary_wrap tree -> tree === Ordinary_stop} =
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 type mutable_point = {mutable mx : int; my : int}
@@ -315,6 +323,10 @@ Line 3, characters 2-3:
 3 |   r;;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 61-66:
+1 | let mutable_field_not_known (p : mutable_point) : {r : int | r = 0} =
+                                                                 ^^^^^
+  The refinement is stated here.
 |}]
 
 let ordinary_is_not_native () :

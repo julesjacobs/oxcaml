@@ -33,6 +33,10 @@ Line 8, characters 2-3:
 8 |   u);;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 24-52:
+4 |     unit -> {u : unit | observable_equal Stuck Stuck} @ ghost =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let (different_results_are_equivalent @ total) :
@@ -46,4 +50,8 @@ Line 6, characters 2-3:
 6 |   u);;
       ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 24-58:
+2 |     unit -> {u : unit | observable_equal (Done 1) (Done 2)} @ ghost =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

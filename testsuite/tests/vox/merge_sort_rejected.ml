@@ -30,6 +30,8 @@ Line 8, characters 22-29:
 8 |   Compare.compare 1 0 (state);;
                           ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "merge_sort.ml", line 26, characters 30-45:
+  The refinement is stated here.
 |}]
 
 let inserted () = ghost_ (
@@ -43,6 +45,10 @@ Line 6, characters 3-4:
 6 |   (u : {u : unit | Sort.P.permutation left right}));;
        ^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 19-48:
+6 |   (u : {u : unit | Sort.P.permutation left right}));;
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let multiplicity () = ghost_ (
@@ -57,6 +63,10 @@ Line 7, characters 3-4:
 7 |   (u : {u : unit | Sort.P.permutation left right}));;
        ^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 19-48:
+7 |   (u : {u : unit | Sort.P.permutation left right}));;
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let payload () = ghost_ (
@@ -74,6 +84,10 @@ Line 10, characters 3-4:
 10 |   (u : {u : unit | Rank_sort.P.permutation left right}));;
         ^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 19-53:
+10 |   (u : {u : unit | Rank_sort.P.permutation left right}));;
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let false_after_roundtrip () =
@@ -99,6 +113,10 @@ Line 13, characters 17-18:
 13 |   let u = () in (u : {u : unit | false});;
                       ^
 Error: Refinement could not be proved (counterexample)
+Line 13, characters 33-38:
+13 |   let u = () in (u : {u : unit | false});;
+                                      ^^^^^
+  The refinement is stated here.
 |}]
 
 let false_after_height_bound () = ghost_ (
@@ -109,6 +127,10 @@ Line 3, characters 17-18:
 3 |   let u = () in (u : {u : unit | false}));;
                      ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 33-38:
+3 |   let u = () in (u : {u : unit | false}));;
+                                     ^^^^^
+  The refinement is stated here.
 |}]
 
 let false_after_height_minimal () = ghost_ (
@@ -119,6 +141,10 @@ Line 3, characters 17-18:
 3 |   let u = () in (u : {u : unit | false}));;
                      ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 33-38:
+3 |   let u = () in (u : {u : unit | false}));;
+                                     ^^^^^
+  The refinement is stated here.
 |}]
 
 let false_after_sort () =
@@ -146,4 +172,8 @@ Line 15, characters 17-18:
 15 |   let u = () in (u : {u : unit | false});;
                       ^
 Error: Refinement could not be proved (counterexample)
+Line 15, characters 33-38:
+15 |   let u = () in (u : {u : unit | false});;
+                                      ^^^^^
+  The refinement is stated here.
 |}]

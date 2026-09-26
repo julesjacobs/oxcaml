@@ -64,6 +64,10 @@ Line 4, characters 12-16:
 4 |   C.send tx (-1);;
                 ^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 26-32:
+2 |   let (tx, _ : {n : int | n >= 0} C.send * {n : int | n >= 0} C.recv) =
+                              ^^^^^^
+  The refinement is stated here.
 |}]
 
 let forged_result (rx : int C.recv @ unique) : {n : int | n = 42} =
@@ -73,6 +77,10 @@ Line 2, characters 2-11:
 2 |   C.recv rx;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 58-64:
+1 | let forged_result (rx : int C.recv @ unique) : {n : int | n = 42} =
+                                                              ^^^^^^
+  The refinement is stated here.
 |}]
 
 let reuse_transferred () =
@@ -125,6 +133,8 @@ Line 3, characters 32-39:
 3 |   Unique_cell.Slot.take r.value r.state;;
                                     ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "unique_cell.mli", line 77, characters 6-73:
+  The refinement is stated here.
 |}]
 
 let double_put () =
@@ -136,4 +146,6 @@ Line 4, characters 33-34:
 4 |   Unique_cell.Slot.put r.value 2 t;;
                                      ^
 Error: Refinement could not be proved (counterexample)
+File "unique_cell.mli", line 69, characters 6-74:
+  The refinement is stated here.
 |}]

@@ -34,6 +34,10 @@ Line 10, characters 39-48:
 10 |     built_def h env g h; source_def g; refine_ g)
                                             ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 19-86:
+5 |       {g : graph | built h (Bind (p, Bind (q, Empty))) g h && source g === Bound (S Z)}
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Missing_application_constraint = struct
@@ -50,6 +54,10 @@ Line 8, characters 26-36:
 8 |       let cs = Nothing in refine_ cs)
                               ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 24-74:
+5 |       {cs : equations | cs === constraints (GApp (f, a, p, arrow, h1, h2))} @ immutable ghost =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Boolean_function = struct
@@ -65,6 +73,10 @@ Line 7, characters 4-13:
 7 |     refine_ d)
         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 34-83:
+2 |   let bad : unit -> {d : typing | typed No_types (Apply (Boolean, Boolean)) TBool d} @ immutable ghost = fun () -> ghost_ (
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Over_general_identity = struct
@@ -81,6 +93,10 @@ Line 8, characters 4-13:
 8 |     refine_ d)
         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 34-109:
+2 |   let bad : unit -> {d : typing | typed No_types (Lambda (Bound Z)) (TArrow (TBool, TArrow (TBool, TBool))) d}
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Skip_solver = struct
@@ -94,6 +110,10 @@ Line 5, characters 18-27:
 5 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-53:
+3 |       {u : unit | solved h (Equal (p, q)) true h Done} @ ghost = fun h p q -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unbound_variable = struct
@@ -108,6 +128,10 @@ Line 5, characters 43-52:
 5 |     let e : {e : term | scoped_term Z e} = refine_ e in
                                                ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 24-39:
+5 |     let e : {e : term | scoped_term Z e} = refine_ e in
+                            ^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Missing_recursive_constraint = struct
@@ -123,6 +147,10 @@ Line 7, characters 35-45:
 7 |       let cs = constraints body in refine_ cs)
                                        ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 24-75:
+4 |       {cs : equations | cs === constraints (GRec (arg, result, self, body))} @ immutable ghost =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Wrong_recursive_binder = struct
@@ -140,6 +168,10 @@ Line 9, characters 58-67:
 9 |     let d = Recursion (a, a, v) in typed_def empty e t d; refine_ d)
                                                               ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 20-86:
+3 |       {d : typing | typed No_types (Recursive (Bound (S Z))) (TArrow (TBool, TBool)) d}
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Recursive_non_arrow = struct
@@ -153,6 +185,10 @@ Line 5, characters 65-74:
 5 |     let d = Recursion (t, t, Constant) in typed_def empty e t d; refine_ d)
                                                                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 34-76:
+2 |   let bad : unit -> {d : typing | typed No_types (Recursive Boolean) TBool d}
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unbound_recursive_variable = struct
@@ -169,4 +205,8 @@ Line 7, characters 43-52:
 7 |     let e : {e : term | scoped_term Z e} = refine_ e in
                                                ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 24-39:
+7 |     let e : {e : term | scoped_term Z e} = refine_ e in
+                            ^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

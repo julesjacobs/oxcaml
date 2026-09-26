@@ -32,6 +32,10 @@ Line 7, characters 49-58:
 7 |     ran_def h 0 pool env e h pool; let u = () in refine_ u)
                                                      ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 16-50:
+3 | ................ran (H.empty ()) 0 Generalize_spec.Empty Hm_environment_spec.Empty
+4 |       (RBool p) (H.empty ()) Generalize_spec.Empty.............................
+  The refinement is stated here.
 |}]
 
 module Return_result_after_failure = struct
@@ -44,4 +48,8 @@ Line 4, characters 69-78:
 4 |     let e = RApp_left (left, D.Truth) in result_def e; let u = () in refine_ u)
                                                                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 16-61:
+3 |     {u : unit | result (RApp_left (left, D.Truth)) === Some p} @ ghost = fun p left -> ghost_ (
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

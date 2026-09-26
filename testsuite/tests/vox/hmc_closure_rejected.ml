@@ -37,6 +37,10 @@ Line 10, characters 75-85:
 10 |   let proof : {u : unit | K.typed M.Nil table D.Empty_context code ty d} = refine_ () in proof);;
                                                                                 ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 26-71:
+10 |   let proof : {u : unit | K.typed M.Nil table D.Empty_context code ty d} = refine_ () in proof);;
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_recursion (u : unit) = ghost_ (
@@ -52,6 +56,10 @@ Line 8, characters 57-67:
 8 |   let proof : {u : unit | K.related table source code} = refine_ () in proof);;
                                                              ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 8, characters 26-53:
+8 |   let proof : {u : unit | K.related table source code} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let missing_code (u : unit) = ghost_ (
@@ -63,6 +71,10 @@ Line 4, characters 51-61:
 4 |   let proof : {u : unit | W.valid K.Empty value} = refine_ () in proof);;
                                                        ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-47:
+4 |   let proof : {u : unit | W.valid K.Empty value} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_result_type (u : unit) = ghost_ (
@@ -79,4 +91,8 @@ Line 9, characters 75-85:
 9 |   let proof : {u : unit | K.typed M.Nil table D.Empty_context code ty d} = refine_ () in proof);;
                                                                                ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 9, characters 26-71:
+9 |   let proof : {u : unit | K.typed M.Nil table D.Empty_context code ty d} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

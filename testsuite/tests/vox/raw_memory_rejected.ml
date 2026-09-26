@@ -33,6 +33,8 @@ Line 7, characters 24-33:
 7 |     M.read p 0 (borrow_ r.P.state);;
                             ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", lines 74-76, characters 35-40:
+  The refinement is stated here.
 |}]
 
 let premature_free () =
@@ -49,6 +51,8 @@ Line 9, characters 13-25:
 9 |     M.free p halves.right;;
                  ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", lines 93-94, characters 35-38:
+  The refinement is stated here.
 |}]
 
 let no_deallocation_permission () =
@@ -63,6 +67,8 @@ Line 7, characters 13-23:
 7 |     M.free p parts.left;;
                  ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", lines 93-94, characters 35-38:
+  The refinement is stated here.
 |}]
 
 let double_free () =
@@ -79,6 +85,8 @@ Line 9, characters 13-18:
 9 |     M.free p token;;
                  ^^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", lines 93-94, characters 35-38:
+  The refinement is stated here.
 |}]
 
 let use_after_free () =
@@ -95,6 +103,8 @@ Line 9, characters 19-24:
 9 |     M.write p 0 42 token;;
                        ^^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", line 83, characters 35-65:
+  The refinement is stated here.
 |}]
 
 let out_of_bounds (p : M.t) (token : M.contents P.token @ unique ghost) =
@@ -104,6 +114,8 @@ Line 2, characters 12-24:
 2 |   M.write p (M.length p) 0 token;;
                 ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", line 82, characters 18-40:
+  The refinement is stated here.
 |}]
 
 let negative_size () = M.malloc (-1) (P.empty ());;
@@ -112,6 +124,8 @@ Line 1, characters 32-36:
 1 | let negative_size () = M.malloc (-1) (P.empty ());;
                                     ^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", line 64, characters 34-40:
+  The refinement is stated here.
 |}]
 
 let bad_byte () =
@@ -126,6 +140,8 @@ Line 7, characters 16-19:
 7 |     M.write p 0 256 r.P.state;;
                     ^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", line 18, characters 35-53:
+  The refinement is stated here.
 |}]
 
 let zero_size_access () =
@@ -138,6 +154,8 @@ Line 5, characters 24-25:
 5 |   | Some p -> M.write p 0 0 r.P.state;;
                             ^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", line 82, characters 18-40:
+  The refinement is stated here.
 |}]
 
 let duplicate_token () =
@@ -182,6 +200,8 @@ Line 9, characters 13-25:
 9 |     M.free p (P.empty ());;
                  ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "raw_memory.mli", lines 93-94, characters 35-38:
+  The refinement is stated here.
 |}]
 
 let erased_allocation () = ghost_ (M.malloc 0 (P.empty ()));;

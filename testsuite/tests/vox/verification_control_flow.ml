@@ -55,6 +55,10 @@ Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let quotient () : zero =
@@ -86,6 +90,10 @@ Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let predicate_short_circuit x :
@@ -110,6 +118,10 @@ Line 3, characters 45-56:
 3 |   consume (let (_ : zero) = assume_ x in ()) (refine_ x);;
                                                  ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let callee_after_argument x =
@@ -126,6 +138,10 @@ Line 2, characters 55-66:
 2 |   (let (_ : zero) = assume_ x in fun (_ : zero) -> ()) (refine_ x);;
                                                            ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let joined_value b : zero =
@@ -151,6 +167,10 @@ Line 2, characters 19-28:
 2 |   let (_ : zero) = refine_ x in
                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let failing_batch x =
@@ -162,6 +182,10 @@ Line 4, characters 19-28:
 4 |   let (_ : zero) = refine_ x in ();;
                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let captured_fact x : zero =
@@ -179,6 +203,10 @@ Line 2, characters 30-39:
 2 |   if b then (let (_ : zero) = refine_ x in raise Exit) else ();;
                                   ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let joined_divisor b : zero =
@@ -216,6 +244,10 @@ Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 23-28:
+4 | type zero = {n : int | n = 0};;
+                           ^^^^^
+  The refinement is stated here.
 |}]
 
 let joined_exit b : zero =
@@ -233,6 +265,10 @@ Line 3, characters 2-11:
 3 |   refine_ d;;
       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 41-52:
+1 | let conditional_divisor d b : {n : int | not (n = 0)} =
+                                             ^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let multiple_joins b c : zero =

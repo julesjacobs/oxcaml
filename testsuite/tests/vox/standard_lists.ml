@@ -93,6 +93,8 @@ Line 1, characters 67-69:
 1 | let (bad_refined_domain @ total) (xs : int list) = List.Refined.hd xs;;
                                                                        ^^
 Error: Refinement could not be proved (counterexample)
+File "list.mli", line 621, characters 20-40:
+  The refinement is stated here.
 |}]
 
 let (bad_refined_literal @ total) () = List.Refined.tl [];;
@@ -101,6 +103,8 @@ Line 1, characters 55-57:
 1 | let (bad_refined_literal @ total) () = List.Refined.tl [];;
                                                            ^^
 Error: Refinement could not be proved (counterexample)
+File "list.mli", line 625, characters 20-40:
+  The refinement is stated here.
 |}]
 
 type mutable_element = { mutable payload : int }
@@ -138,6 +142,10 @@ Line 7, characters 4-10:
 7 |     result
         ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 41-67:
+4 |   let rejected () : {result : int list | (result === Nil) === false} =
+                                             ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module List : sig end = struct
@@ -153,4 +161,8 @@ Line 7, characters 4-10:
 7 |     result
         ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 38-64:
+4 |   let rejected () : {result : int t | (result === Nil) === false} =
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

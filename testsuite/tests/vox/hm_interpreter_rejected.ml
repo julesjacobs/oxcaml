@@ -29,6 +29,8 @@ Line 5, characters 13-50:
 5 |   I.run term #{I.ty = ty; derivation = D.Constant};;
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "hm_interpreter.mli", line 12, characters 21-73:
+  The refinement is stated here.
 |}]
 
 let unbound () =
@@ -42,6 +44,8 @@ Line 6, characters 13-48:
 6 |   I.run term #{I.ty = D.Boolean; derivation = d};;
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "hm_interpreter.mli", line 12, characters 21-73:
+  The refinement is stated here.
 |}]
 
 let apply_boolean () =
@@ -56,6 +60,8 @@ Line 7, characters 13-48:
 7 |   I.run term #{I.ty = D.Boolean; derivation = d};;
                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "hm_interpreter.mli", line 12, characters 21-73:
+  The refinement is stated here.
 |}]
 
 let bypass = I.eval;;

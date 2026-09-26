@@ -35,6 +35,10 @@ Line 4, characters 55-65:
 4 |   let proof : {u : unit | H.environment g R.V.Empty} = refine_ () in proof);;
                                                            ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-51:
+4 |   let proof : {u : unit | H.environment g R.V.Empty} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_temporary_kind (u : unit) = ghost_ (
@@ -47,6 +51,10 @@ Line 5, characters 64-74:
 5 |   let proof : {u : unit | F.temporaries_shape schema runtime} = refine_ () in proof);;
                                                                     ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 26-60:
+5 |   let proof : {u : unit | F.temporaries_shape schema runtime} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let missing_capture (u : unit) = ghost_ (
@@ -64,6 +72,10 @@ Line 10, characters 51-61:
 10 |   let proof : {u : unit | H.valid table closure} = refine_ () in proof);;
                                                         ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 26-47:
+10 |   let proof : {u : unit | H.valid table closure} = refine_ () in proof);;
+                               ^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let truncated_frame (u : unit) = ghost_ (
@@ -76,4 +88,8 @@ Line 5, characters 82-92:
 5 |   let proof : {u : unit | F.decode signature D.Z F.Empty === Some (a, F.Empty)} = refine_ () in proof);;
                                                                                       ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 26-78:
+5 |   let proof : {u : unit | F.decode signature D.Z F.Empty === Some (a, F.Empty)} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

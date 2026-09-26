@@ -35,6 +35,10 @@ Line 9, characters 20-29:
 9 |       let u = () in refine_ u)
                         ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-88:
+5 |       {u : unit | rewritten h (H.put h p (redirect h p r)) (Write (p, q, r, Here, Done))} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Generic_redirect = struct
@@ -53,4 +57,8 @@ Line 10, characters 20-29:
 10 |       let u = () in refine_ u)
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 18-88:
+6 |       {u : unit | rewritten h (H.put h p (redirect h p r)) (Write (p, q, r, path, Done))} @ ghost =
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

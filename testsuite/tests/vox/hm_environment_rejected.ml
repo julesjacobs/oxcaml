@@ -34,6 +34,10 @@ Line 10, characters 20-29:
 10 |       let u = () in refine_ u)
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 4-5, characters 16-88:
+4 | ................protected_at h
+5 |       (H.put h p {desc = Bool; level = Generic; memo = Empty_memo; visited = false}) 0 p...........
+  The refinement is stated here.
 |}]
 
 module Generalize_protected_boundary = struct
@@ -53,4 +57,8 @@ Line 11, characters 20-29:
 11 |       let u = () in refine_ u)
                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 4-5, characters 16-87:
+4 | ................protected_at h
+5 |       (H.put h p {desc = Var; level = Generic; memo = Empty_memo; visited = false}) 0 p...........
+  The refinement is stated here.
 |}]

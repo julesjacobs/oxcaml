@@ -27,6 +27,10 @@ Line 5, characters 41-50:
 5 |     typed_def z env e t d; let u = () in refine_ u)
                                              ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-68:
+3 |       {u : unit | typed Z Empty_context (Lambda (Bound Z)) Boolean d} @ ghost = fun d -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Specialization_is_principal = struct
@@ -43,6 +47,10 @@ Line 8, characters 18-27:
 8 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 4-5, characters 18-99:
+4 | ..................Copy_spec.Function (Copy_spec.Variable p, Copy_spec.Variable p) ===
+5 |         Level_mgu_spec.substitute delta (Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean))...................................
+  The refinement is stated here.
 |}]
 
 module Reuse_identity_copy = struct
@@ -58,6 +66,10 @@ Line 7, characters 85-94:
 7 |     fun _p _rho assigned -> ghost_ (let refine_ assigned = assigned in let u = () in refine_ u)
                                                                                          ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 5-6, characters 18-126:
+5 | ..................rho p === Copy_spec.Function
+6 |         (Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean), Copy_spec.Function (Copy_spec.Boolean, Copy_spec.Boolean))...........
+  The refinement is stated here.
 |}]
 
 module Generalize_outer_binding = struct
@@ -72,4 +84,8 @@ Line 6, characters 18-27:
 6 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-75:
+3 |       {u : unit | open_scheme (Forall (Z, Free p)) No_arguments === Boolean} @ ghost = fun p -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

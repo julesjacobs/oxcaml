@@ -43,6 +43,10 @@ Line 8, characters 63-73:
 8 |   let proof : {u : unit | T.exit_valid table (T.Return D.Z)} = refine_ () in proof);;
                                                                    ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 8, characters 26-59:
+8 |   let proof : {u : unit | T.exit_valid table (T.Return D.Z)} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let missing_rewrite (u : unit) = ghost_ (
@@ -60,6 +64,10 @@ Line 10, characters 56-66:
 10 |   let proof : {u : unit | I.related table code sites} = refine_ () in proof);;
                                                              ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 26-52:
+10 |   let proof : {u : unit | I.related table code sites} = refine_ () in proof);;
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let ordinary_call_bound (u : unit) = ghost_ (
@@ -71,6 +79,10 @@ Line 4, characters 45-55:
 4 |   let proof : {u : unit | B.no_calls code} = refine_ () in proof);;
                                                  ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 26-41:
+4 |   let proof : {u : unit | B.no_calls code} = refine_ () in proof);;
+                              ^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let dropped_caller (u : unit) = ghost_ (
@@ -91,4 +103,8 @@ Line 13, characters 53-63:
 13 |   let proof : {u : unit | W.frames out === S.Halt} = refine_ () in proof);;
                                                           ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 13, characters 26-49:
+13 |   let proof : {u : unit | W.frames out === S.Halt} = refine_ () in proof);;
+                               ^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

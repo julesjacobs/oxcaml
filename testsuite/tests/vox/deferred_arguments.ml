@@ -40,6 +40,10 @@ Line 1, characters 62-63:
 1 | let wrong_selected b = call (identity 1) (if b then fun () -> 0 else fun () -> 3);;
                                                                   ^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 48-58:
+4 | let call : (lower : int) -> (unit -> {n : int | n >= lower}) -> int =
+                                                    ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_match v = call (identity 1)
@@ -49,6 +53,10 @@ Line 2, characters 49-50:
 2 |   (match v with Some n when n >= 0 -> (fun () -> n) | _ -> (fun () -> 1));;
                                                      ^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 48-58:
+4 | let call : (lower : int) -> (unit -> {n : int | n >= lower}) -> int =
+                                                    ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let pair : (lower : int) -> ({n : int | n >= lower} * unit) -> int =
@@ -85,6 +93,10 @@ Line 1, characters 39-40:
 1 | let wrong_pair () = pair (identity 1) (0, ());;
                                            ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 40-50:
+1 | let pair : (lower : int) -> ({n : int | n >= lower} * unit) -> int =
+                                            ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_list () = list (identity 1) [2; 0];;
@@ -93,6 +105,10 @@ Line 1, characters 42-43:
 1 | let wrong_list () = list (identity 1) [2; 0];;
                                               ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 39-49:
+3 | let list : (lower : int) -> {n : int | n >= lower} list -> int = fun lower _ -> lower
+                                           ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_record () = record (identity 1) {item = 0};;
@@ -101,6 +117,10 @@ Line 1, characters 50-51:
 1 | let wrong_record () = record (identity 1) {item = 0};;
                                                       ^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 41-51:
+5 | let record : (lower : int) -> {n : int | n >= lower} box -> int = fun lower r -> r.item
+                                             ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_array () = array (identity 1) [:2; 0:];;
@@ -109,6 +129,10 @@ Line 1, characters 45-46:
 1 | let wrong_array () = array (identity 1) [:2; 0:];;
                                                  ^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 40-50:
+6 | let array : (lower : int) -> {n : int | n >= lower} iarray -> int = fun lower _ -> lower
+                                            ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let relation : (r : (int -> bool)) @ total ghost ->
@@ -130,6 +154,10 @@ Line 3, characters 43-44:
 3 |   (if b then (fun () -> 1) else (fun () -> 0));;
                                                ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 24-27:
+2 |     (unit -> {n : int | r n}) -> int = fun r f -> f ()
+                            ^^^
+  The refinement is stated here.
 |}]
 
 let events = ref []
@@ -162,6 +190,10 @@ Line 1, characters 50-54:
 1 | let internal_call () = pair (raise Exit) (consume (-1), ());;
                                                       ^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 28-34:
+7 | let consume (n : {n : int | n >= 0}) = n;;
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let condition () = call (raise Exit)
@@ -171,6 +203,10 @@ Line 2, characters 14-18:
 2 |   (if consume (-1) = 0 then (fun () -> 0) else (fun () -> 1));;
                   ^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 28-34:
+7 | let consume (n : {n : int | n >= 0}) = n;;
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let guard (v : int option) = call (raise Exit)
@@ -180,6 +216,10 @@ Line 2, characters 36-40:
 2 |   (match v with Some n when consume (-1) = 0 -> (fun () -> n) | _ -> (fun () -> 1));;
                                         ^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 28-34:
+7 | let consume (n : {n : int | n >= 0}) = n;;
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let local_initializer () = pair (raise Exit) (let n = consume (-1) in (n, ()));;
@@ -188,6 +228,10 @@ Line 1, characters 62-66:
 1 | let local_initializer () = pair (raise Exit) (let n = consume (-1) in (n, ()));;
                                                                   ^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 28-34:
+7 | let consume (n : {n : int | n >= 0}) = n;;
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let module_initializer () = pair (raise Exit)
@@ -197,6 +241,10 @@ Line 2, characters 41-45:
 2 |   (let module M = struct let n = consume (-1) end in (M.n, ()));;
                                              ^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 28-34:
+7 | let consume (n : {n : int | n >= 0}) = n;;
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let invoked_early () = pair (raise Exit)
@@ -206,6 +254,10 @@ Line 2, characters 50-52:
 2 |   (let f : unit -> {n : int | n >= 0} = fun () -> -1 in (f (), ()));;
                                                       ^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 30-36:
+2 |   (let f : unit -> {n : int | n >= 0} = fun () -> -1 in (f (), ()));;
+                                  ^^^^^^
+  The refinement is stated here.
 |}]
 
 let explicit () = take (raise Exit) (refine_ (-1));;
@@ -214,6 +266,10 @@ Line 1, characters 36-50:
 1 | let explicit () = take (raise Exit) (refine_ (-1));;
                                         ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 39-49:
+6 | let take : (lower : int) -> {n : int | n >= lower} -> int = fun lower n -> n
+                                           ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let explicit_component () = pair (raise Exit) (refine_ (-1), ());;
@@ -222,6 +278,10 @@ Line 1, characters 47-59:
 1 | let explicit_component () = pair (raise Exit) (refine_ (-1), ());;
                                                    ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 40-50:
+1 | let pair : (lower : int) -> ({n : int | n >= lower} * unit) -> int =
+                                            ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let runtime_checked n =
@@ -239,6 +299,10 @@ Line 1, characters 63-64:
 1 | let early_dependency () = pair (identity 1) (take (identity 1) 0, ());;
                                                                    ^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 39-49:
+6 | let take : (lower : int) -> {n : int | n >= lower} -> int = fun lower n -> n
+                                           ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let outer_source () = take (identity 1)
@@ -248,6 +312,10 @@ Line 2, characters 17-18:
 2 |   ((if true then 0 else 0) : {n : int | n >= 1});;
                      ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 40-46:
+2 |   ((if true then 0 else 0) : {n : int | n >= 1});;
+                                            ^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_branch_pair b = pair (identity 1) (if b then (0, ()) else (2, ()));;
@@ -256,6 +324,10 @@ Line 1, characters 56-57:
 1 | let wrong_branch_pair b = pair (identity 1) (if b then (0, ()) else (2, ()));;
                                                             ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 40-50:
+1 | let pair : (lower : int) -> ({n : int | n >= lower} * unit) -> int =
+                                            ^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let projected_early () = take (raise Exit)
@@ -265,6 +337,10 @@ Line 2, characters 12-14:
 2 |   ({item = (-1 : {n : int | n >= 0})}).item;;
                 ^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 28-34:
+2 |   ({item = (-1 : {n : int | n >= 0})}).item;;
+                                ^^^^^^
+  The refinement is stated here.
 |}]
 
 let nested_tuple : (lower : int) ->
@@ -284,6 +360,10 @@ Line 1, characters 62-63:
 1 | let wrong_nested_constructed () = nested_tuple (identity 1) ((1, ()), ());;
                                                                   ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 36-42:
+2 |     (({n : {m : int | m >= lower} | n >= 2} * unit) * unit) -> int =
+                                        ^^^^^^
+  The refinement is stated here.
 |}]
 
 type observation = { number : int }
@@ -312,6 +392,10 @@ Line 2, characters 24-36:
 2 |   require_zero r.number (refine_ ());;
                             ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 44-49:
+7 | let require_zero : (n : int) -> {u : unit | n = 0} -> unit =
+                                                ^^^^^
+  The refinement is stated here.
 |}]
 
 let adapt_result : (h : int) -> (k : {n : int | n = h}) ->
@@ -340,6 +424,10 @@ Line 3, characters 54-55:
 3 |     (x : int) -> {y : int | y = x + k} = fun h k f -> f;;
                                                           ^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 28-37:
+3 |     (x : int) -> {y : int | y = x + k} = fun h k f -> f;;
+                                ^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let bad_input_adapter : (h : int) -> (k : int) ->
@@ -350,6 +438,10 @@ Line 3, characters 15-16:
 3 |   fun h k f -> f;;
                    ^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 16-22:
+2 |     ({x : int | x >= h} -> int) -> {x : int | x >= k} -> int =
+                    ^^^^^^
+  The refinement is stated here.
 |}]
 
 module Gadt_callbacks = struct

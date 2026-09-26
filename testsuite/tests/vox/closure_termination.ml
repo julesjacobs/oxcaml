@@ -129,6 +129,10 @@ Error: Refinement could not be proved (counterexample)
 Line 5, characters 15-16:
 5 |   [@@decreases n]
                    ^
+  The refinement is stated here.
+Line 5, characters 15-16:
+5 |   [@@decreases n]
+                   ^
   Required by this decreases attribute
 |}]
 
@@ -143,6 +147,10 @@ Line 3, characters 48-54:
 3 |     let later : (int -> int) @ total = fun m -> loop m in
                                                     ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 15-16:
+5 |   [@@decreases n]
+                   ^
+  The refinement is stated here.
 Line 5, characters 15-16:
 5 |   [@@decreases n]
                    ^

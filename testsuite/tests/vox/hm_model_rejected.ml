@@ -30,6 +30,10 @@ Line 6, characters 62-71:
 6 |     finite_def after t; tree_root_def t; observe_def after p; refine_ t)
                                                                   ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 3, characters 18-77:
+3 |       {t : tree | finite (H.put h p (cell (Link p) 0)) t && tree_root t === p} @ immutable ghost = fun h p -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unconstrained_binding = struct
@@ -46,4 +50,8 @@ Line 8, characters 18-27:
 8 |     let u = () in refine_ u)
                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 18-67:
+5 |       {u : unit | node_equation (H.put h p (cell (Link q) 0)) rho p} @ ghost = fun h p q rho -> ghost_ (
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

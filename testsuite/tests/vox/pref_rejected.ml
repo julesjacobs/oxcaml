@@ -24,6 +24,10 @@ Line 4, characters 66-75:
 4 |     let t : {t : int Pref.token | Pref.Heap.mem (Pref.own t) p} = refine_ t in
                                                                       ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 4, characters 34-62:
+4 |     let t : {t : int Pref.token | Pref.Heap.mem (Pref.own t) p} = refine_ t in
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Ghost_write = struct
@@ -173,6 +177,10 @@ Line 7, characters 6-15:
 7 |       refine_ u in
           ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 28-69:
+6 |     let claim : {u : unit | Pref.Heap.at after p === Pref.Heap.at h p} =
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module False_value = struct
@@ -188,6 +196,10 @@ Line 6, characters 63-72:
 6 |     let claim : {u : unit | Pref.Heap.at after p === Some 1} = refine_ u in
                                                                    ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 28-59:
+6 |     let claim : {u : unit | Pref.Heap.at after p === Some 1} = refine_ u in
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Captured_read = struct
@@ -259,6 +271,10 @@ Line 14, characters 69-81:
 14 |     let left : {t : int Pref.token | Pref.Heap.mem (Pref.own t) q} = refine_ left in
                                                                           ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 14, characters 37-65:
+14 |     let left : {t : int Pref.token | Pref.Heap.mem (Pref.own t) q} = refine_ left in
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Overlapping_maps = struct
@@ -273,6 +289,10 @@ Line 5, characters 54-63:
 5 |     let claim : {u : unit | Pref.Heap.disjoint h h} = refine_ u in
                                                           ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 28-50:
+5 |     let claim : {u : unit | Pref.Heap.disjoint h h} = refine_ u in
+                                ^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Unboxed_ghost_authority = struct

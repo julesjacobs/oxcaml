@@ -41,6 +41,8 @@ Line 5, characters 11-18:
 5 |     C.tick (token)
                ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_big_credits.mli", line 15, characters 35-49:
+  The refinement is stated here.
 |}]
 
 module Oversplit = struct
@@ -55,6 +57,8 @@ Line 6, characters 19-26:
 6 |     C.split amount (token)
                        ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_big_credits.mli", line 21, characters 26-61:
+  The refinement is stated here.
 |}]
 
 module Negative = struct
@@ -68,6 +72,8 @@ Line 5, characters 20-28:
 5 |     C.Budget.create (amount)
                         ^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_big_credits.mli", line 37, characters 41-48:
+  The refinement is stated here.
 |}]
 
 module Mint (C : Vox_big_credits.S) = struct

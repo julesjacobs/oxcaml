@@ -493,6 +493,11 @@ Line 7, characters 2-3:
 7 |   p
       ^
 Error: Refinement could not be proved (counterexample)
+Lines 3-5, characters 6-15:
+3 | ......if Regex.matches r s then
+4 |         Regex.Membership.valid r p && Regex.Membership.word p === s
+5 |       else true...
+  The refinement is stated here.
 |}]
 
 let reversed_completeness r s p :
@@ -508,6 +513,10 @@ Line 7, characters 2-3:
 7 |   u
       ^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 6-48:
+3 | ......if Regex.Membership.valid r p && Regex.Membership.word p === s
+4 |       then Regex.matches r s === false else true...
+  The refinement is stated here.
 |}]
 
 let reversed_dfa_completeness r s p :
@@ -523,4 +532,8 @@ Line 7, characters 2-3:
 7 |   u
       ^
 Error: Refinement could not be proved (counterexample)
+Lines 3-4, characters 6-68:
+3 | ......if Regex.Membership.valid r p && Regex.Membership.word p === s
+4 |       then Regex.Dfa.run (Regex.Dfa.compile r) s === false else true...
+  The refinement is stated here.
 |}]

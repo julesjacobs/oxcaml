@@ -26,6 +26,8 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_connectivity.mli", line 110, characters 28-45:
+  The refinement is stated here.
 |}]
 
 module Overpay_insertion = struct
@@ -41,6 +43,8 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_connectivity.mli", line 110, characters 28-45:
+  The refinement is stated here.
 |}]
 
 module Reuse_state = struct
@@ -91,6 +95,10 @@ Line 7, characters 5-10:
 7 |     (state : {s : U.t | U.contains (U.snapshot s) x})
          ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 24-51:
+7 |     (state : {s : U.t | U.contains (U.snapshot s) x})
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Machine_limit = struct
@@ -106,6 +114,8 @@ Line 7, characters 54-59:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                           ^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_connectivity.mli", line 108, characters 24-54:
+  The refinement is stated here.
 |}]
 
 module Hidden_model = struct
@@ -133,6 +143,10 @@ Line 6, characters 59-61:
 6 |       {u : unit | U.found before after x} @ ghost = ghost_ ()
                                                                ^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 18-40:
+6 |       {u : unit | U.found before after x} @ ghost = ghost_ ()
+                      ^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Insufficient_wallet = struct
@@ -146,4 +160,6 @@ Line 5, characters 16-22:
 5 |     C.split 11Z wallet
                     ^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_big_credits.mli", line 21, characters 26-61:
+  The refinement is stated here.
 |}]

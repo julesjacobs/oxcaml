@@ -31,6 +31,10 @@ Line 1, characters 34-51:
 1 | let wrong x : {n : int | n = 0} = refine_ (x lor 1);;
                                       ^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 25-30:
+1 | let wrong x : {n : int | n = 0} = refine_ (x lor 1);;
+                             ^^^^^
+  The refinement is stated here.
 |}]
 
 let clear_first (m : {m : int | 0 <= m && m <= 65535}) :

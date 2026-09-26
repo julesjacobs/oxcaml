@@ -29,6 +29,10 @@ Line 8, characters 62-69:
 8 |   let (_ : {a : int iarray | Vox_iarray.at a 1 === Some 3}) = changed in
                                                                   ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 8, characters 29-57:
+8 |   let (_ : {a : int iarray | Vox_iarray.at a 1 === Some 3}) = changed in
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_extensional () =
@@ -42,6 +46,8 @@ Line 5, characters 32-33:
 5 |     (fun index -> let u = () in u) in
                                     ^
 Error: Refinement could not be proved (counterexample)
+File "vox_iarray.mli", lines 40-41, characters 16-38:
+  The refinement is stated here.
 |}]
 
 let wrong_length () =
@@ -55,6 +61,8 @@ Line 5, characters 32-33:
 5 |     (fun index -> let u = () in u) in
                                     ^
 Error: Refinement could not be proved (counterexample)
+File "vox_iarray.mli", lines 40-41, characters 16-38:
+  The refinement is stated here.
 |}]
 
 let wrong_predicate_intro () =
@@ -72,6 +80,8 @@ Line 9, characters 32-33:
 9 |     (fun index -> let u = () in u) in
                                     ^
 Error: Refinement could not be proved (counterexample)
+File "vox_iarray.mli", lines 178-180, characters 36-59:
+  The refinement is stated here.
 |}]
 
 let wrong_list_predicate_intro () =
@@ -89,6 +99,8 @@ Line 9, characters 32-33:
 9 |     (fun index -> let u = () in u) in
                                     ^
 Error: Refinement could not be proved (counterexample)
+File "vox_sequence.mli", lines 220-222, characters 41-17:
+  The refinement is stated here.
 |}]
 
 let wrong_map_length (values : int list) =
@@ -108,4 +120,8 @@ Line 11, characters 18-19:
 11 |     let u = () in u in
                        ^
 Error: Refinement could not be proved (counterexample)
+Line 10, characters 23-78:
+10 |   let (_ : {u : unit | Vox_sequence.length result < Vox_sequence.length values}) =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

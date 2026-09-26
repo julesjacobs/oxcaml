@@ -52,6 +52,10 @@ Error: Refinement could not be proved (counterexample)
 Line 3, characters 15-16:
 3 |   [@@decreases n]
                    ^
+  The refinement is stated here.
+Line 3, characters 15-16:
+3 |   [@@decreases n]
+                   ^
   Required by this decreases attribute
 |}]
 
@@ -66,6 +70,10 @@ Line 3, characters 26-38:
 3 |     let later = fun () -> loop (n - 1) in
                               ^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 15-16:
+5 |   [@@decreases n]
+                   ^
+  The refinement is stated here.
 Line 5, characters 15-16:
 5 |   [@@decreases n]
                    ^

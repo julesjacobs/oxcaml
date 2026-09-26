@@ -32,6 +32,8 @@ Line 7, characters 36-50:
 7 |   Args.instantiate (refine_ scheme) (refine_ args));;
                                         ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_ground_arguments.ml", line 74, characters 21-48:
+  The refinement is stated here.
 |}]
 
 let free_template (p : Copy_spec.node Pref.t @ immutable) = ghost_ (
@@ -44,6 +46,8 @@ Line 5, characters 36-56:
 5 |   Args.instantiate (refine_ scheme) (refine_ Args.Empty));;
                                         ^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_ground_arguments.ml", line 74, characters 21-48:
+  The refinement is stated here.
 |}]
 
 let changed_owner (input : I.instance @ immutable) = ghost_ (
@@ -57,5 +61,7 @@ Line 6, characters 25-39:
 6 |   let out : I.instance = refine_ forged in out);;
                              ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "hmc_instance.ml", line 14, characters 34-41:
+  The refinement is stated here.
 |}]
 

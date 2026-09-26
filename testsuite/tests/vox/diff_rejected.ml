@@ -28,6 +28,10 @@ Line 10, characters 4-10:
 10 |     script in
          ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 9, characters 31-62:
+9 |   let computed : {s : script | cost s = minimum_cost [97] [97]} =
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let wrong_target old fresh =
@@ -41,6 +45,10 @@ Line 6, characters 5-7:
 6 |     (() : {u : unit | apply old script === Some old});;
          ^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 22-51:
+6 |     (() : {u : unit | apply old script === Some old});;
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let omit_validity old fresh other =
@@ -57,6 +65,10 @@ Line 9, characters 5-7:
 9 |     (() : {u : unit | cost script <= cost other});;
          ^^
 Error: Refinement could not be proved (counterexample)
+Line 9, characters 22-47:
+9 |     (() : {u : unit | cost script <= cost other});;
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let hidden_reconstruction = Vox_diff.Proof.reverse_into;;

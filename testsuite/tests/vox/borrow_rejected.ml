@@ -82,6 +82,8 @@ Line 8, characters 6-7:
 8 |       u) in
           ^
 Error: Refinement could not be proved (counterexample)
+File "borrow.mli", line 180, characters 18-53:
+  The refinement is stated here.
 |}]
 
 module Out_of_bounds = struct
@@ -99,6 +101,10 @@ Line 7, characters 6-10:
 7 |       size in
           ^^^^
 Error: Refinement could not be proved (counterexample)
+Lines 5-6, characters 27-82:
+5 | ...........................0 <= i
+6 |       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0...
+  The refinement is stated here.
 |}]
 
 module Real_final = struct
@@ -139,6 +145,10 @@ Line 8, characters 18-19:
 8 |     let u = () in u
                       ^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 35-68:
+5 |       (value : int) -> {u : unit | Slice.final s === Slice.current s} = fun s index value ->
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Shared_element = struct
@@ -226,6 +236,10 @@ Error: Refinement could not be proved (counterexample)
 Line 5, characters 15-35:
 5 |   [@@decreases let n : int = n in n]
                    ^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+Line 5, characters 15-35:
+5 |   [@@decreases let n : int = n in n]
+                   ^^^^^^^^^^^^^^^^^^^^
   Required by this decreases attribute
 |}]
 
@@ -261,6 +275,10 @@ Line 26, characters 15-16:
 26 |       let _ = (u : {u : unit | false}) in ()
                     ^
 Error: Refinement could not be proved (counterexample)
+Line 26, characters 31-36:
+26 |       let _ = (u : {u : unit | false}) in ()
+                                    ^^^^^
+  The refinement is stated here.
 |}]
 
 module Frame_child_extent = struct
@@ -287,6 +305,10 @@ Line 18, characters 15-16:
 18 |       let _ = (u : {u : unit | false}) in ())
                     ^
 Error: Refinement could not be proved (counterexample)
+Line 18, characters 31-36:
+18 |       let _ = (u : {u : unit | false}) in ())
+                                    ^^^^^
+  The refinement is stated here.
 |}]
 
 module Mutable_ghost_observation = struct

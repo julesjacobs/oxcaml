@@ -26,6 +26,8 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_union_find_online.mli", line 119, characters 28-45:
+  The refinement is stated here.
 |}]
 
 module Overpay_insertion = struct
@@ -41,6 +43,8 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_union_find_online.mli", line 119, characters 28-45:
+  The refinement is stated here.
 |}]
 
 module Underpay_fixed = struct
@@ -56,6 +60,8 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_union_find_simple.mli", line 49, characters 28-44:
+  The refinement is stated here.
 |}]
 
 module Reuse_state = struct
@@ -106,6 +112,10 @@ Line 7, characters 5-10:
 7 |     (state : {s : U.t | U.valid s && U.member x s})
          ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 24-49:
+7 |     (state : {s : U.t | U.valid s && U.member x s})
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Machine_limit = struct
@@ -121,4 +131,6 @@ Line 7, characters 54-59:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                           ^^^^^
 Error: Refinement could not be proved (counterexample)
+File "vox_union_find_online.mli", line 118, characters 24-65:
+  The refinement is stated here.
 |}]

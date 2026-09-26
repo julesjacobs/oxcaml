@@ -33,6 +33,8 @@ Line 5, characters 59-70:
 5 |   let refine_ result = Sorted_array.remove_at source index (refine_ u) in
                                                                ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+File "sorted_array.mli", line 28, characters 14-55:
+  The refinement is stated here.
 |}]
 
 let invalid_search_result (source : Sorted_array.t) (value : int) =
@@ -49,4 +51,8 @@ Line 6, characters 64-73:
 6 |     let proof : {u : unit | Sorted_array.occurs source value} = refine_ u in
                                                                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 28-60:
+6 |     let proof : {u : unit | Sorted_array.occurs source value} = refine_ u in
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]

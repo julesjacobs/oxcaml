@@ -58,6 +58,10 @@ Line 3, characters 20-21:
 3 |   let b = x == y in b;;
                         ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 46-47:
+1 | let physical_equal (x : number) : {b : bool | b} =
+                                                  ^
+  The refinement is stated here.
 |}]
 
 let signed_min () : {r : number | r = -4611686018427387904Z} =
@@ -105,6 +109,10 @@ Line 2, characters 34-35:
 2 |   let r = Shadow_ops.(1Z + 1Z) in r;;
                                       ^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 37-43:
+1 | let shadowed_open () : {r : number | r = 2Z} =
+                                         ^^^^^^
+  The refinement is stated here.
 |}]
 
 module Definitions = struct
@@ -159,6 +167,10 @@ Error: Refinement could not be proved (counterexample)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^
+  The refinement is stated here.
+Line 3, characters 13-14:
+3 | [@@decreases n];;
+                 ^
   Required by this decreases attribute
 |}]
 
@@ -168,6 +180,10 @@ Line 1, characters 33-44:
 1 | let rec unchanged (n : number) = unchanged n [@@decreases n];;
                                      ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 58-59:
+1 | let rec unchanged (n : number) = unchanged n [@@decreases n];;
+                                                              ^
+  The refinement is stated here.
 Line 1, characters 58-59:
 1 | let rec unchanged (n : number) = unchanged n [@@decreases n];;
                                                               ^

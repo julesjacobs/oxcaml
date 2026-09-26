@@ -351,6 +351,10 @@ Line 19, characters 33-40:
 19 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 19, characters 28-29:
+19 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Ordinary_make_operations_unrecognized : sig end = struct
@@ -380,6 +384,10 @@ Line 19, characters 33-40:
 19 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 19, characters 28-29:
+19 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Caught_find_has_no_normal_return_fact : sig end = struct
@@ -409,6 +417,10 @@ Line 19, characters 33-40:
 19 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 19, characters 28-29:
+19 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Overwrite_old_value_rejected : sig end = struct
@@ -438,6 +450,10 @@ Line 19, characters 36-41:
 19 |     let proof : {n : int | n = 1} = found in
                                          ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 19, characters 27-32:
+19 |     let proof : {n : int | n = 1} = found in
+                                ^^^^^
+  The refinement is stated here.
 |}]
 
 module Different_key_preservation_needs_a_distinct_class : sig end = struct
@@ -467,6 +483,10 @@ Line 19, characters 36-41:
 19 |     let proof : {n : int | n = 1} = found in
                                          ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 19, characters 27-32:
+19 |     let proof : {n : int | n = 1} = found in
+                                ^^^^^
+  The refinement is stated here.
 |}]
 
 module Removed_lookup_rejected : sig end = struct
@@ -493,6 +513,8 @@ Line 18, characters 23-26:
 18 |     M.Refined.find map key
                             ^^^
 Error: Refinement could not be proved (counterexample)
+File "map.mli", line 463, characters 21-32:
+  The refinement is stated here.
 |}]
 
 module Cross_sort_contents_do_not_leak : sig end = struct
@@ -524,6 +546,10 @@ Line 21, characters 33-38:
 21 |     let proof : {b : bool | b} = found in
                                       ^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 21, characters 28-29:
+21 |     let proof : {b : bool | b} = found in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Separate_functor_classes : sig end = struct
@@ -569,6 +595,10 @@ Line 35, characters 33-39:
 35 |     let proof : {b : bool | b} = second in
                                       ^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 35, characters 28-29:
+35 |     let proof : {b : bool | b} = second in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Shadowed_refined_operation_unrecognized : sig end = struct
@@ -613,6 +643,10 @@ Line 34, characters 33-40:
 34 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 34, characters 28-29:
+34 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Shadowed_mem_unrecognized : sig end = struct
@@ -661,6 +695,10 @@ Line 38, characters 33-40:
 38 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 38, characters 28-29:
+38 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Shadowed_find_unrecognized : sig end = struct
@@ -701,6 +739,10 @@ Line 30, characters 33-40:
 30 |     let proof : {b : bool | b} = present in
                                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 30, characters 28-29:
+30 |     let proof : {b : bool | b} = present in
+                                 ^
+  The refinement is stated here.
 |}]
 
 module Refined_key_constructor_preserves_access : sig end = struct

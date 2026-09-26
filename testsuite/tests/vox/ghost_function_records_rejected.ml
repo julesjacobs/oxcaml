@@ -16,6 +16,10 @@ Line 3, characters 16-25:
 3 |   let u = () in refine_ u;;
                     ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 2, characters 16-40:
+2 |     {u : unit | r.first x === r.second x} =
+                    ^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let different () =
@@ -29,6 +33,10 @@ Line 5, characters 76-85:
 5 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === r.second 0} = refine_ u in
                                                                                 ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 5, characters 48-72:
+5 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === r.second 0} = refine_ u in
+                                                    ^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let partial_calls (r : callbacks) (x : int) : {y : int | y === 0} =
@@ -40,6 +48,10 @@ Line 4, characters 28-46:
 4 |   let difference = a - b in refine_ difference;;
                                 ^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 57-64:
+1 | let partial_calls (r : callbacks) (x : int) : {y : int | y === 0} =
+                                                             ^^^^^^^
+  The refinement is stated here.
 |}]
 
 let equal_functions (r : callbacks @ total) : {u : unit | r.first === r.second} =
@@ -67,6 +79,10 @@ Line 6, characters 67-76:
 6 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === 1} = refine_ u in
                                                                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 6, characters 48-63:
+6 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === 1} = refine_ u in
+                                                    ^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 let chosen (pick : bool) =
@@ -82,6 +98,10 @@ Line 7, characters 67-76:
 7 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === 1} = refine_ u in
                                                                        ^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 7, characters 48-63:
+7 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === 1} = refine_ u in
+                                                    ^^^^^^^^^^^^^^^
+  The refinement is stated here.
 |}]
 
 type mutable_callbacks = { mutable call : int -> int };;
@@ -98,4 +118,8 @@ Line 4, characters 28-46:
 4 |   let difference = a - b in refine_ difference;;
                                 ^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 65-72:
+1 | let mutable_field (r : mutable_callbacks) (x : int) : {y : int | y === 0} =
+                                                                     ^^^^^^^
+  The refinement is stated here.
 |}]
