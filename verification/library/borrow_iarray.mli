@@ -131,6 +131,35 @@ module Owned_array : sig @@ portable
     (a : 'a t) @ unique -> {values : 'a iarray | values === contents a}
     @@ total
 
+  val get : ('a : immutable_data).
+    (a : 'a t) @ local immutable ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    {value : 'a | let i = index in
+      Some value === Vox_iarray.at (contents a) i}
+    @@ total
+
+  val set : ('a : immutable_data).
+    (a : 'a t) @ unique ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    (value : 'a) @ immutable ->
+    {r : 'a t | let i = index in
+      contents r === Vox_iarray.updated (contents a) i value}
+    @ unique @@ total
+
+  (** Integer access does not allocate boxed float elements. *)
+  val get_int : (a : int t) @ local immutable ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    {value : int | let i = index in
+      Some value === Vox_iarray.at (contents a) i}
+    @@ total
+
+  val set_int : (a : int t) @ unique ->
+    (index : {i : int | 0 <= i && i < Iarray.length (contents a)}) ->
+    (value : int) @ immutable ->
+    {r : int t | let i = index in
+      contents r === Vox_iarray.updated (contents a) i value}
+    @ unique @@ total
+
   val with_mut : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a iarray @ total immutable -> bool @

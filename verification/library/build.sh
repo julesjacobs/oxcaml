@@ -6,11 +6,11 @@ prefix=${1:?Usage: build.sh COMPILER_PREFIX}
 prefix=$(cd "$prefix" && pwd)
 output="$root/_build/vox-library"
 destination="$prefix/lib/ocaml/vox"
-modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray
+modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_string_view
          vox_sat_spec vox_sat_proof vox_sat
          vox_cdcl_proof vox_cdcl vox_cdcl_total_proof vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
-         vox_merge_sort borrow borrow_iarray
+         vox_merge_sort vox_lz4_model borrow borrow_iarray
          pref vox_pref_semantics ghost_pref vox_big_credits vox_ackermann
          vox_union_find_potential vox_union_find_levels vox_union_find_path_cost
          vox_union_find_model vox_union_find_forest vox_union_find_rank
@@ -19,7 +19,31 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray
          vox_union_find_events vox_union_find vox_union_find_complexity
          vox_union_find_simple vox_union_find_online vox_connectivity
          vox_union_find_online_cost
-         raw_memory verified_atomic unique_cell one_shot
+         raw_memory
+         vox_lz4_spec_storage vox_lz4_spec_parse vox_lz4_spec_decode
+         vox_lz4_spec_decode_bytes vox_lz4_spec_bytes vox_lz4_heap_bytes
+         vox_lz4_spec_match
+         vox_lz4_spec_plan vox_lz4_spec_token vox_lz4_spec_wire
+         vox_lz4_spec_hashes vox_lz4_spec_scan vox_lz4_spec
+         vox_lz4_buffer vox_lz4_packed
+         vox_lz4_encode_buffer vox_lz4_packed_encode vox_lz4_snapshot
+         vox_lz4_string_copy
+         vox_lz4_roundtrip vox_lz4_general_match vox_lz4_string_match
+         vox_lz4_general_plan
+         vox_lz4_general_encode vox_lz4_general_wire
+         vox_lz4_decode_bytes_proof vox_lz4_decode_bytes_roundtrip
+         vox_lz4_general_cost vox_lz4_general_bridge
+         vox_lz4_general_sized vox_lz4_string_encode
+         vox_lz4_general_roundtrip
+         vox_lz4_fast_plan_model vox_lz4_mutable_scan vox_lz4_string_scan
+         vox_lz4_fast_plan_roundtrip
+         vox_lz4_string_decode vox_lz4_string_codec
+         vox_lz4_string_roundtrip
+         vox_lz4_forward_model vox_lz4_streaming
+         vox_lz4_streaming_codec vox_lz4_streaming_roundtrip
+         vox_lz4_fast_hints_reference
+         vox_lz4_checked_api vox_lz4
+         verified_atomic unique_cell one_shot
          channel_buffer unique_lock reference_lock
          vox_control vox_table_model vox_table_model_proofs vox_table_bits
          vox_table_probe vox_table_wrap vox_table_mask vox_table_map
@@ -90,9 +114,14 @@ compilers="$(cd "$prefix/bin" && pwd -P)/ocamlc.opt $(cd "$prefix/bin" && pwd -P
     fi
     printf '%s.cmo: %s.ml %s%s\n' "$module" "$module" "$interface" "$dependencies"
     printf '\t%s/bin/ocamlc %s -c %s.ml\n' "$prefix" "$module_flags" "$module"
+    native_flags=
+    case "$module" in
+      vox_lz4* | vox_string_view | raw_memory | borrow_iarray)
+        native_flags=" -O3" ;;
+    esac
     printf '%s.cmx: %s.cmo%s\n' "$module" "$module" "$dependencies"
-    printf '\t%s/bin/ocamlopt %s -smt-assume-verified -c %s.ml\n' \
-      "$prefix" "$module_flags" "$module"
+    printf '\t%s/bin/ocamlopt %s%s -smt-assume-verified -c %s.ml\n' \
+      "$prefix" "$module_flags" "$native_flags" "$module"
   done
 } > build.mk
 make -s -f build.mk -j "${VOX_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}"

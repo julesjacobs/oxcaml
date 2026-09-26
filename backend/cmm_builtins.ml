@@ -946,6 +946,67 @@ let vox_control_match ~table ~with_empty name args dbg =
 
 let transl_builtin name args dbg typ_res =
   match name with
+  (* Keep these layouts in sync with borrow_handle in runtime/borrow.c and
+     Raw_memory_data in runtime/pref.c. Index bounds and initialization are
+     preconditions of the verified primitive contracts. *)
+  | "caml_borrow_int_get" ->
+    let owner, index = two_args name args in
+    Some
+      (bind "index" index (fun index ->
+           bind "owner" owner (fun owner ->
+               let backing =
+                 load ~dbg Word_val Asttypes.Immutable
+                   ~addr:(field_address owner 0 dbg)
+               in
+               let offset =
+                 load ~dbg Word_int Asttypes.Immutable
+                   ~addr:(field_address owner 1 dbg)
+               in
+               addr_array_ref backing (add_int_caml index offset dbg) dbg)))
+  | "caml_borrow_int_set" ->
+    let owner, index, value = three_args name args in
+    Some
+      (bind "value" value (fun value ->
+           bind "index" index (fun index ->
+               bind "owner" owner (fun owner ->
+                   let backing =
+                     load ~dbg Word_val Asttypes.Immutable
+                       ~addr:(field_address owner 0 dbg)
+                   in
+                   let offset =
+                     load ~dbg Word_int Asttypes.Immutable
+                       ~addr:(field_address owner 1 dbg)
+                   in
+                   Csequence
+                     ( int_array_set backing
+                         (add_int_caml index offset dbg)
+                         value dbg,
+                       owner )))))
+  | "caml_raw_memory_length" ->
+    Some
+      (load ~dbg Word_int Asttypes.Immutable
+         ~addr:(field_address (one_arg name args) 0 dbg))
+  | "caml_raw_memory_read" ->
+    let handle, index = two_args name args in
+    let carrier =
+      load ~dbg Word_val Asttypes.Immutable ~addr:(field_address handle 2 dbg)
+    in
+    let data =
+      load ~dbg Word_int Asttypes.Mutable ~addr:(field_address carrier 1 dbg)
+    in
+    let addr = Cop (Caddi, [data; untag_int index dbg], dbg) in
+    Some (tag_int (load ~dbg Byte_unsigned Asttypes.Mutable ~addr) dbg)
+  | "caml_raw_memory_write" ->
+    let handle, index, byte = three_args name args in
+    let carrier =
+      load ~dbg Word_val Asttypes.Immutable ~addr:(field_address handle 2 dbg)
+    in
+    let data =
+      load ~dbg Word_int Asttypes.Mutable ~addr:(field_address carrier 1 dbg)
+    in
+    let addr = Cop (Caddi, [data; untag_int index dbg], dbg) in
+    Some
+      (store ~dbg Byte_unsigned Assignment ~addr ~new_value:(untag_int byte dbg))
   | "caml_vox_control_match16" ->
     vox_control_match ~table:false ~with_empty:false name args dbg
   | "caml_vox_control_match16_empty" ->
