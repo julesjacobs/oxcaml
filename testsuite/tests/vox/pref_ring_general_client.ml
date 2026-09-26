@@ -4,6 +4,7 @@
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_general.mli pref_ring_general.ml pref_ring_general_client.ml";
  { bytecode; }
+ { native; }
 *)
 open Pref_ring
 module G = Pref_ring_general

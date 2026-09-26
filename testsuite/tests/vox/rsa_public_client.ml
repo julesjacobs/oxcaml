@@ -6,6 +6,7 @@
  all_modules += " vox_rsa_number_theory.ml vox_rsa_fermat.ml";
  all_modules += " vox_rsa.mli vox_rsa.ml rsa_public_client.ml";
  { bytecode; }
+ { native; }
 *)
 
 open Bigint

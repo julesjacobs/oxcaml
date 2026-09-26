@@ -5,6 +5,7 @@
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml vox_int_sequence.mli vox_int_sequence.ml quicksort_model.ml quicksort.mli quicksort.ml quicksort_frame_client.ml";
  { bytecode; }
+ { native; }
 *)
 
 open Borrow

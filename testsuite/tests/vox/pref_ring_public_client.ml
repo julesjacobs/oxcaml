@@ -4,6 +4,7 @@
  source_directories = "${test_source_directory}/../../../verification/library";
  all_modules = "pref.mli pref.ml vox_pref_semantics.mli vox_pref_semantics.ml pref_ring.mli pref_ring.ml pref_ring_public_client.ml";
  { bytecode; }
+ { native; }
 *)
 
 open Pref_ring
