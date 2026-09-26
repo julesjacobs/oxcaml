@@ -214,8 +214,10 @@ let prove poll check ~batch loc query =
           Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
             ~timeout_ms:!timeout_ms query
         in
+        (* The version names the entry format: bump it when an outcome
+           records more, so older entries are not replayed without it. *)
         Filename.concat directory
-          ("query-"
+          ("query-2-"
           ^ Digest.to_hex (Digest.string (!executable ^ "\000" ^ text))))
       (cache_directory ())
   in
