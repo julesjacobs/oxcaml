@@ -346,8 +346,8 @@ let (unsat_at @ total) :
     {u : unit |
       match report.answer with
       | Unsat _ -> not (eval_formula assignment formula)
-      | Sat _ | Unknown -> true} =
-  fun formula report assignment ->
+      | Sat _ | Unknown -> true} @ ghost =
+  fun formula report assignment -> ghost_ (
   match report.answer with
   | Unsat entry -> empty_result_at formula entry assignment
-  | Sat _ | Unknown -> ()
+  | Sat _ | Unknown -> ())

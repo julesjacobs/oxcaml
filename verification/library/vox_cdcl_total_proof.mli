@@ -95,7 +95,7 @@ val unsat_at :
   {u : unit |
     match report.answer with
     | Unsat _ -> not (Vox_sat_spec.eval_formula assignment formula)
-    | Sat _ | Unknown -> true} @@ total
+    | Sat _ | Unknown -> true} @ ghost @@ total
 
 val solve_complete : (n : int) -> (formula : Vox_sat_spec.formula) ->
   {r : (report, input_error) result | match r with
