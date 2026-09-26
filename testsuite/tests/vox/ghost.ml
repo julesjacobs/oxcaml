@@ -22,6 +22,7 @@ Line 3, characters 2-3:
 3 |   x + 1
       ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let ret x = ghost_ (x + 1)
@@ -37,6 +38,7 @@ Line 3, characters 5-6:
 3 |   if b then 1 else 2
          ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let bad () =
@@ -47,6 +49,7 @@ Line 3, characters 15-19:
 3 |   match b with true -> 1 | false -> 2
                    ^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let ok () =
@@ -80,6 +83,7 @@ Line 3, characters 15-16:
 3 |   let (a, b) = p in
                    ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let bad () =
@@ -90,6 +94,7 @@ Line 3, characters 2-3:
 3 |   f 3
       ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let ok () =
@@ -131,6 +136,7 @@ Line 3, characters 11-12:
 3 |   fun y -> x + y
                ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let ok () =
@@ -183,6 +189,7 @@ Line 1, characters 28-29:
 1 | let bad (x : int @ ghost) = x * 2
                                 ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let ok (x : int @ ghost) : int = x
@@ -250,6 +257,7 @@ Line 1, characters 42-43:
 1 | let bad () = let b = ghost_ true in while b do () done
                                               ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let bad () = let lo = ghost_ 0 in for _i = lo to 1 do () done
@@ -258,6 +266,7 @@ Line 1, characters 43-45:
 1 | let bad () = let lo = ghost_ 0 in for _i = lo to 1 do () done
                                                ^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let bad () = let b = ghost_ true in assert b
@@ -266,6 +275,7 @@ Line 1, characters 43-44:
 1 | let bad () = let b = ghost_ true in assert b
                                                ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let bad x = let b = ghost_ true in match x with _ when b -> 0 | _ -> 1
@@ -274,6 +284,7 @@ Line 1, characters 55-56:
 1 | let bad x = let b = ghost_ true in match x with _ when b -> 0 | _ -> 1
                                                            ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let bad () = let hi = ghost_ 3 in [| x for x = 0 to hi |]
@@ -282,6 +293,7 @@ Line 1, characters 52-54:
 1 | let bad () = let hi = ghost_ 3 in [| x for x = 0 to hi |]
                                                         ^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 type m = { mutable v : int }
@@ -343,6 +355,7 @@ Error: This value is "ghost"
        but is expected to be "real"
          because it is an element of the tuple at line 3, characters 32-38
          which is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 module Ok_nested : sig

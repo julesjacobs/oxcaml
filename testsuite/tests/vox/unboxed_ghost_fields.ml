@@ -25,6 +25,7 @@ Line 1, characters 26-34:
 1 | let bad r = String.length r.#proof;;
                               ^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 let bad r = let #{ live = _; proof } = r in String.length proof;;
 [%%expect{|
@@ -32,6 +33,7 @@ Line 1, characters 58-63:
 1 | let bad r = let #{ live = _; proof } = r in String.length proof;;
                                                               ^^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 type singleton = #{ proof : string @@ ghost };;
 type all = #{ a : int @@ ghost; b : string @@ ghost };;
@@ -83,4 +85,5 @@ Line 2, characters 36-39:
 2 |   match r with #{ live = _; proof = "x" } -> true | _ -> false;;
                                         ^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]

@@ -184,6 +184,7 @@ Line 2, characters 10-29:
 2 |   P.write (M.location p (-1)) None token;;
               ^^^^^^^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let snapshot_is_not_ownership () =

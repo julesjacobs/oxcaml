@@ -15095,6 +15095,10 @@ let report_error ~loc env =
              annotation after the arrow constrains the result value.@]"
              Style.inline_code "(f : (int -> int) @ total)"
              Style.inline_code "total"]
+      | Comonadic Ghostliness ->
+          [Location.msg "@[Hint: if this is proof code, wrap the enclosing \
+             expression in %a.@]"
+             Style.inline_code "ghost_ (...)"]
       | _ -> []
     in
     let sub =
