@@ -16,14 +16,14 @@ module Demo : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
 
   module Updates = Map.MakeTotal (Index)
@@ -47,18 +47,18 @@ module Demo : sig end = struct
     fun overlay refined_index ->
     let base = overlay.base in
     let updates = overlay.updates in
-    let refine_ index = refined_index in
+    let index = refined_index in
     if Updates.mem index updates then
-      let member : {key : int | Updates.mem key updates} = refine_ index in
+      let member : {key : int | Updates.mem key updates} = index in
       Updates.Refined.find updates member
-    else Iarray.Refined.get base (refine_ index)
+    else Iarray.Refined.get base index
 
   let[@def] (lookup @ total) : ('a : value mod separable).
       int -> 'a t @ total -> 'a option @ total =
     fun index overlay ->
     if 0 <= index && index < Iarray.length overlay.base then
       let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
-        refine_ index in
+        index in
       Some (get overlay bounded)
     else None
 
@@ -84,14 +84,14 @@ module Demo : sig end = struct
       {result : 'a | result === value} =
     fun overlay index value ->
     let updates = overlay.updates in
-    let refine_ raw_index = index in
+    let raw_index = index in
     let updates = Updates.Refined.add raw_index value updates in
     let updated = {overlay with updates} in
     let bounded : {i : int | 0 <= i && i < Iarray.length updated.base} =
-      refine_ raw_index in
+      raw_index in
     let result = get updated bounded in
     get_def updated bounded;
-    refine_ result
+    result
 
   let (last_write_wins @ total) :
       ('a : value mod separable).
@@ -103,15 +103,15 @@ module Demo : sig end = struct
       {result : 'a | result === last} =
     fun overlay index first last ->
     let updates = overlay.updates in
-    let refine_ raw_index = index in
+    let raw_index = index in
     let once = Updates.Refined.add raw_index first updates in
     let updates = Updates.Refined.add raw_index last once in
     let updated = {overlay with updates} in
     let bounded : {i : int | 0 <= i && i < Iarray.length updated.base} =
-      refine_ raw_index in
+      raw_index in
     let result = get updated bounded in
     get_def updated bounded;
-    refine_ result
+    result
 
   module Laws (Element : sig type t : immutable_data end) = struct
     let (clear_reads_base @ total) :
@@ -131,14 +131,14 @@ module Demo : sig end = struct
       if 0 <= index && index < Iarray.length overlay.base then
         let cleared_index :
             {i : int | 0 <= i && i < Iarray.length cleared.base} =
-          refine_ index in
+          index in
         let base_index :
             {i : int | 0 <= i && i < Iarray.length original.base} =
-          refine_ index in
+          index in
         get_def cleared cleared_index;
         get_def original base_index;
-        refine_ u
-      else refine_ u
+        u
+      else u
 
     let (independent_updates @ total) :
         (overlay : Element.t t) -> (left : int) ->
@@ -147,7 +147,7 @@ module Demo : sig end = struct
         (left_value : Element.t) -> (right_value : Element.t) ->
         (index : int) ->
         {u : unit |
-          let refine_ right = right in
+          let right = right in
           let left_updates =
             Updates.Refined.add left left_value overlay.updates in
           let left_first = {overlay with
@@ -158,7 +158,7 @@ module Demo : sig end = struct
             updates = Updates.Refined.add left left_value right_updates} in
           lookup index left_first === lookup index right_first} =
       fun overlay left right left_value right_value index ->
-      let refine_ right = right in
+      let right = right in
       let left_updates =
         Updates.Refined.add left left_value overlay.updates in
       let left_first = {overlay with
@@ -173,14 +173,14 @@ module Demo : sig end = struct
       if 0 <= index && index < Iarray.length overlay.base then
         let left_index :
             {i : int | 0 <= i && i < Iarray.length left_first.base} =
-          refine_ index in
+          index in
         let right_index :
             {i : int | 0 <= i && i < Iarray.length right_first.base} =
-          refine_ index in
+          index in
         get_def left_first left_index;
         get_def right_first right_index;
-        refine_ u
-      else refine_ u
+        u
+      else u
   end
 
   module Int_laws = Laws (struct type t = int end)
@@ -192,10 +192,10 @@ module Demo : sig end = struct
       { base = [: 10; 20; 30 :]; updates = Updates.Refined.empty () } in
     let index = 1 in
     let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
-      refine_ index in
+      index in
     let result = get overlay bounded in
     ghost_ (get_def overlay bounded);
-    refine_ result
+    result
 
   type mutable_value = {mutable payload : int}
 
@@ -225,7 +225,7 @@ module Demo : sig end = struct
     ghost_ (
       Int_laws.independent_updates overlay left right
         left_value right_value index);
-    let refine_ right = right in
+    let right = right in
     let left_updates = Updates.Refined.add left left_value overlay.updates in
     let left_first = {overlay with
       updates = Updates.Refined.add right right_value left_updates} in
@@ -236,7 +236,7 @@ module Demo : sig end = struct
     match lookup index left_first, lookup index right_first with
     | Some before, Some after ->
       let u = () in
-      let proof : {u : unit | before = after} = refine_ u in
+      let proof : {u : unit | before = after} = u in
       proof;
       Format.printf "independent updates at index 1 = %d,%d@." before after
     | _ -> assert false
@@ -272,7 +272,7 @@ module Demo : sig end = struct
       | Some before, Some after, Some restored, Some base_value ->
         let u = () in
         let proof : {u : unit |
-          before === after && restored === base_value} = refine_ u in
+          before === after && restored === base_value} = u in
         proof;
         Format.printf "record reads at %d = %d,%d; cleared=%d@."
           index before.label after.label restored.label
@@ -299,14 +299,14 @@ module Invalid_index : sig end = struct
     type t = int
     external compare : int -> int -> int @@ total = "%compare"
     let (reflexive @ total) (x : t) :
-        {u : unit | compare x x = 0} @ ghost = ghost_ (refine_ ())
+        {u : unit | compare x x = 0} @ ghost = ghost_ ()
     let (antisymmetric @ total) (x : t) (y : t) :
         {u : unit | (compare x y < 0) = (compare y x > 0)
           && (compare x y = 0) = (compare y x = 0)} @ ghost =
-      ghost_ (refine_ ())
+      ghost_ ()
     let (transitive @ total) (x : t) (y : t) (z : t) :
         {u : unit | not (compare x y <= 0 && compare y z <= 0)
-          || compare x z <= 0} @ ghost = ghost_ (refine_ ())
+          || compare x z <= 0} @ ghost = ghost_ ()
   end
 
   module Updates = Map.MakeTotal (Index)
@@ -316,13 +316,13 @@ module Invalid_index : sig end = struct
     let index = 1 in
     let bounded :
         {index : int | 0 <= index && index < Iarray.length base} =
-      refine_ index
+      index
     in
     Iarray.Refined.get base bounded
 end;;
 [%%expect{|
-Line 23, characters 6-19:
-23 |       refine_ index
-           ^^^^^^^^^^^^^
+Line 23, characters 6-11:
+23 |       index
+           ^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

@@ -28,10 +28,21 @@ val result : int = 42
 
 let nonvariable = add (x + 1) y;;
 [%%expect{|
-Line 1, characters 22-29:
-1 | let nonvariable = add (x + 1) y;;
-                          ^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+val nonvariable : int = 43
+|}]
+
+(* The computed argument is bound once, so the result is still exact. *)
+let nonvariable_exact : {n : int | n = x + 1 + y} = add (x + 1) y;;
+[%%expect{|
+val nonvariable_exact : {n : int | n = ((x + 1) + y)} = 43
+|}]
+
+let nonvariable_wrong : {n : int | n = x + y} = add (x + 1) y;;
+[%%expect{|
+Line 1, characters 48-61:
+1 | let nonvariable_wrong : {n : int | n = x + y} = add (x + 1) y;;
+                                                    ^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]
 
 module type Recursion = sig
@@ -92,10 +103,7 @@ val borrowed_sum :
 
 let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
 [%%expect{|
-Line 1, characters 31-48:
-1 | let borrowed_nonvariable = add (borrow_ (x + 1)) y;;
-                                   ^^^^^^^^^^^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+val borrowed_nonvariable : int = 43
 |}]
 
 let borrowed_mutable () =
@@ -103,8 +111,26 @@ let borrowed_mutable () =
   let refine_ result = add (borrow_ current) y in
   result;;
 [%%expect{|
-Line 3, characters 27-44:
-3 |   let refine_ result = add (borrow_ current) y in
-                               ^^^^^^^^^^^^^^^^^
-Error: A dependent function argument must have a stable binding; bind the current value with [let] first
+Line 2, characters 14-21:
+2 |   let mutable current = 1 in
+                  ^^^^^^^
+Warning 186 [unmutated-mutable]: mutable variable "current" was never mutated.
+
+val borrowed_mutable : unit -> int = <fun>
+|}]
+
+(* The borrowed argument is a snapshot; its fact does not follow later
+   assignments to the mutable variable. *)
+let stale_borrow () =
+  let mutable current = 1 in
+  let result = add (borrow_ current) y in
+  current <- 5;
+  let now = current in
+  let (_ : {n : int | n = now + y}) = result in
+  ();;
+[%%expect{|
+Line 6, characters 38-44:
+6 |   let (_ : {n : int | n = now + y}) = result in
+                                          ^^^^^^
+Error: Refinement could not be proved (counterexample)
 |}]

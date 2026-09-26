@@ -35,22 +35,9 @@
 module Binary :
   sig
     external divide : int -> {d : int | d <> 0} -> int = "%divint"
-    type splitter =
-        (left : int) ->
-        (right : int) ->
-        {u : unit
-          | ((-1) <= left) && ((left < right) && (0 < (right - left)))} @ ghost ->
-        {m' : int option
-          | match m' with
-            | None -> right = (left + 1)
-            | Some m -> (left < m) && (m < right)}
-    val midpoint : splitter
-    val forward : splitter
-    val backward : splitter
-    val search :
-      splitter @ total ->
-      ((p : (int -> bool)) ->
-       (lower : int) ->
+    val search_midpoint :
+      (p : (int -> bool)) ->
+      ((lower : int) ->
        (upper : int) ->
        {u : unit
          | ((-1) <= lower) &&
@@ -367,6 +354,106 @@ module Arrays :
   end
 |}]
 
+(* The collection helper searches with a fixed midpoint. The generic splitter
+   search remains here as a demo: any splitter that returns a strictly interior
+   index, or [None] exactly on adjacent bounds, drives the same search loop. *)
+module Splitters = struct
+  type splitter =
+      (left : int) -> (right : int) ->
+      {u : unit | -1 <= left && left < right && 0 < right - left} @ ghost ->
+      {m : int option | match m with
+        | None -> right = left + 1
+        | Some m -> left < m && m < right}
+
+  let (midpoint @ total) : splitter =
+    fun left right premise ->
+    premise;
+    let distance = right - left in
+    if distance > 1 then
+      let two = 2 in
+      let half = Binary.divide distance two in
+      Some (left + half)
+    else None
+
+  let (forward @ total) : splitter = fun left right premise ->
+    premise;
+    if right - left > 1 then Some (left + 1) else None
+
+  let (backward @ total) : splitter = fun left right premise ->
+    premise;
+    if right - left > 1 then Some (right - 1) else None
+
+  let (search @ total) :
+      (split : splitter) @ total -> (p : (int -> bool)) ->
+      (lower : int) -> (upper : int) ->
+      {u : unit | -1 <= lower && lower < upper && 0 < upper - lower
+        && not (p lower) && p upper} @ ghost ->
+      {result : int * int | match result with left, right ->
+        lower <= left && right <= upper && right = left + 1
+        && not (p left) && p right} =
+    fun split p lower upper premise ->
+    premise;
+    let (evaluate @ total) :
+        (index : {i : int | lower < i && i < upper}) ->
+        {b : bool | let i = index in b = p i} =
+      fun index ->
+      let i = index in
+      p i
+    in
+    let rec (loop @ total) :
+        (left : int) -> (right : int) ->
+        {u : unit | -1 <= left && 0 < right - left
+          && lower <= left && left < right && right <= upper
+          && not (p left) && p right} @ ghost ->
+        {result : int * int | match result with l, r ->
+          left <= l && r <= right && r = l + 1
+          && not (p l) && p r} =
+      fun left right invariant ->
+      invariant;
+      match split left right () with
+      | None -> left, right
+      | Some middle ->
+        let index : {i : int | lower < i && i < upper} = middle in
+        if evaluate index then loop left middle ()
+        else loop middle right ()
+    [@@decreases right - left]
+    in
+    loop lower upper ()
+end;;
+[%%expect{|
+module Splitters :
+  sig
+    type splitter =
+        (left : int) ->
+        (right : int) ->
+        {u : unit
+          | ((-1) <= left) && ((left < right) && (0 < (right - left)))} @ ghost ->
+        {m' : int option
+          | match m' with
+            | None -> right = (left + 1)
+            | Some m -> (left < m) && (m < right)}
+    val midpoint : splitter
+    val forward : splitter
+    val backward : splitter
+    val search :
+      splitter @ total ->
+      ((p : (int -> bool)) ->
+       (lower : int) ->
+       (upper : int) ->
+       {u : unit
+         | ((-1) <= lower) &&
+             ((lower < upper) &&
+                ((0 < (upper - lower)) && ((not (p lower)) && (p upper))))} @ ghost ->
+       {result : int * int
+         | match result with
+           | (left, right) ->
+               (lower <= left) &&
+                 ((right <= upper) &&
+                    ((right = (left + 1)) && ((not (p left)) && (p right))))}) @ total
+      stateful
+  end
+|}]
+
 module Examples : sig end = struct
   let[@def] p (i : int) = i = 2 || i = 4 || i = 6
 
@@ -380,16 +467,19 @@ module Examples : sig end = struct
       (refine_ u : {u : unit | -1 <= lower && lower < upper
         && 0 < upper - lower && not (p lower) && p upper}))
     in
-    let split = Binary.midpoint in
-    let refine_ pair = Binary.search split p lower upper premise in
+    let refine_ pair = Binary.search_midpoint p lower upper premise in
     let l, r = pair in
     Format.printf "binary transition: %d,%d@." l r;
-    let split = Binary.forward in
-    let refine_ pair = Binary.search split p lower upper premise in
+    let split = Splitters.midpoint in
+    let refine_ pair = Splitters.search split p lower upper premise in
+    let l, r = pair in
+    Format.printf "midpoint splitter transition: %d,%d@." l r;
+    let split = Splitters.forward in
+    let refine_ pair = Splitters.search split p lower upper premise in
     let l, r = pair in
     Format.printf "forward transition: %d,%d@." l r;
-    let split = Binary.backward in
-    let refine_ pair = Binary.search split p lower upper premise in
+    let split = Splitters.backward in
+    let refine_ pair = Splitters.search split p lower upper premise in
     let l, r = pair in
     Format.printf "backward transition: %d,%d@." l r
 
@@ -419,8 +509,11 @@ module Examples : sig end = struct
       (refine_ u : {u : unit | -1 <= lower && lower < upper
         && 0 < upper - lower && not (at_limit lower) && at_limit upper}))
     in
-    let split = Binary.midpoint in
-    let refine_ pair = Binary.search split at_limit lower upper premise in
+    let refine_ pair = Binary.search_midpoint at_limit lower upper premise in
+    let left, right = pair in
+    assert (left = 4_611_686_018_427_387_902 && right = upper);
+    let split = Splitters.midpoint in
+    let refine_ pair = Splitters.search split at_limit lower upper premise in
     let left, right = pair in
     assert (left = 4_611_686_018_427_387_902 && right = upper);
     Format.printf "largest positive interval: adjacent endpoints@."
@@ -616,6 +709,7 @@ module Examples : sig end = struct
 end;;
 [%%expect{|
 binary transition: 3,4
+midpoint splitter transition: 3,4
 forward transition: 1,2
 backward transition: 5,6
 0: -1,0,-1,0
@@ -628,7 +722,7 @@ checked search, insertion, and removal on 126 sorted arrays
 module Examples : sig end
 |}]
 
-let invalid_midpoint : Binary.splitter = fun left right premise ->
+let invalid_midpoint : Splitters.splitter = fun left right premise ->
   premise;
   let result = Some left in
   refine_ result;;
@@ -639,7 +733,7 @@ Line 4, characters 2-16:
 Error: Refinement could not be proved (counterexample)
 |}]
 
-let invalid_stop : Binary.splitter = fun left right premise ->
+let invalid_stop : Splitters.splitter = fun left right premise ->
   premise;
   let result = None in
   refine_ result;;
@@ -647,6 +741,71 @@ let invalid_stop : Binary.splitter = fun left right premise ->
 Line 4, characters 2-16:
 4 |   refine_ result;;
       ^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+(* The premise proved for one interval cannot be reused for another interval
+   whose lower end already satisfies the predicate. *)
+let invalid_search_premise () =
+  let[@def] p (i : int) = i >= 2 in
+  let lower = 0 in
+  let upper = 6 in
+  let premise = ghost_ (
+    p_def lower;
+    p_def upper;
+    let u = () in
+    (refine_ u : {u : unit | -1 <= lower && lower < upper
+      && 0 < upper - lower && not (p lower) && p upper}))
+  in
+  let start = 3 in
+  Binary.search_midpoint p start upper premise;;
+[%%expect{|
+Line 13, characters 39-46:
+13 |   Binary.search_midpoint p start upper premise;;
+                                            ^^^^^^^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+let search_result_exact () =
+  let[@def] p (i : int) = i >= 2 in
+  let lower = 0 in
+  let upper = 6 in
+  let premise = ghost_ (
+    p_def lower;
+    p_def upper;
+    let u = () in
+    (refine_ u : {u : unit | -1 <= lower && lower < upper
+      && 0 < upper - lower && not (p lower) && p upper}))
+  in
+  let refine_ pair = Binary.search_midpoint p lower upper premise in
+  let (left : int), (right : int) = pair in
+  ghost_ (p_def left; p_def right);
+  let exact : {r : int | r = 2} = refine_ right in
+  exact;;
+[%%expect{|
+val search_result_exact : unit -> int = <fun>
+|}]
+
+let invalid_search_result () =
+  let[@def] p (i : int) = i >= 2 in
+  let lower = 0 in
+  let upper = 6 in
+  let premise = ghost_ (
+    p_def lower;
+    p_def upper;
+    let u = () in
+    (refine_ u : {u : unit | -1 <= lower && lower < upper
+      && 0 < upper - lower && not (p lower) && p upper}))
+  in
+  let refine_ pair = Binary.search_midpoint p lower upper premise in
+  let (left : int), (right : int) = pair in
+  ghost_ (p_def left; p_def right);
+  let wrong : {r : int | r = upper} = refine_ right in
+  wrong;;
+[%%expect{|
+Line 15, characters 38-51:
+15 |   let wrong : {r : int | r = upper} = refine_ right in
+                                           ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 

@@ -24,7 +24,7 @@ let predicate_cases x :
   refine_ x;;
 [%%expect{|
 val predicate_cases :
-  int @ total ->
+  int ->
   {n : int
     | match n with
       | 0 when false -> false
@@ -76,7 +76,7 @@ let normal_return x : zero =
   if x = 0 then () else raise Exit;
   refine_ x;;
 [%%expect{|
-val normal_return : int @ total -> zero = <fun>
+val normal_return : int -> zero = <fun>
 |}]
 
 let caught_exception x : zero =
@@ -93,7 +93,7 @@ let predicate_short_circuit x :
     {n : int | (n = 0 || not (n = 0)) && true} = refine_ x;;
 [%%expect{|
 val predicate_short_circuit :
-  int @ total -> {n : int | ((n = 0) || (not (n = 0))) && true} = <fun>
+  int -> {n : int | ((n = 0) || (not (n = 0))) && true} = <fun>
 |}]
 
 let right_to_left x =
@@ -199,7 +199,7 @@ val joined_modulus : bool -> zero = <fun>
 let divisor_normal_return d : {n : int | not (n = 0)} =
   let _ = 0 / d in refine_ d;;
 [%%expect{|
-val divisor_normal_return : int @ total -> {n : int | not (n = 0)} = <fun>
+val divisor_normal_return : int -> {n : int | not (n = 0)} = <fun>
 |}]
 
 let joined_assumption b x : zero =

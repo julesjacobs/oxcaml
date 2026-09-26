@@ -22,7 +22,7 @@ let result = let refine_ n = checked in n;;
 [%%expect{|
 val check : int @ total -> nonnegative = <fun>
 val input : int = 42
-val checked : nonnegative = 42
+val checked : int = 42
 val result : int = 42
 |}]
 

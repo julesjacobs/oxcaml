@@ -27,20 +27,57 @@ module Mutable_field = struct
   let get b = Values.identity b.value
 end;;
 [%%expect{|
-Line 3, characters 30-37:
-3 |   let get b = Values.identity b.value
-                                  ^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+module Mutable_field :
+  sig type box = { mutable value : int; } val get : box -> int end
 |}]
 
 module Effectful = struct
   let get () = Values.identity (print_endline "bad"; 42)
 end;;
 [%%expect{|
-Line 2, characters 31-56:
-2 |   let get () = Values.identity (print_endline "bad"; 42)
-                                   ^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: A dependent argument must be a stable variable, literal, or immutable field projection
+module Effectful : sig val get : unit -> int end
+|}]
+
+(* The effectful argument is evaluated exactly once. *)
+let effectful_once =
+  let count = ref 0 in
+  let r = Values.identity (incr count; 42) in
+  r, !count;;
+[%%expect{|
+val effectful_once : int * int = (42, 1)
+|}]
+
+(* The mutable field is read once; the result is not tied to later values of
+   the field. *)
+module Mutable_field_snapshot = struct
+  type box = { mutable value : int }
+  let stale (b : box) =
+    let r = Values.identity b.value in
+    b.value <- r + 1;
+    let now = b.value in
+    let (_ : {n : int | n = now}) = r in
+    ()
+end;;
+[%%expect{|
+Line 7, characters 36-37:
+7 |     let (_ : {n : int | n = now}) = r in
+                                        ^
+Error: Refinement could not be proved (counterexample)
+|}]
+
+(* An effectful argument is not identified with a second evaluation. *)
+module Effectful_not_repeated = struct
+  let twice (f : unit -> int) =
+    let r = Values.identity (f ()) in
+    let again = f () in
+    let (_ : {n : int | n = again}) = r in
+    ()
+end;;
+[%%expect{|
+Line 5, characters 38-39:
+5 |     let (_ : {n : int | n = again}) = r in
+                                          ^
+Error: Refinement could not be proved (counterexample)
 |}]
 
 module More = struct
