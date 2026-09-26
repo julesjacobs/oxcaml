@@ -84,7 +84,7 @@ type ('value, 'state) step = {
 ```
 
 The `value` field is global and shared; the `state` field retains the result's
-local/unique modes. Unpack these results with `let refine_ result = ...` followed
+local/unique modes. Bind these results with `let result = ...` followed
 by `let {value; state} = result in ...`. Reads return their refined result
 directly. Elements read from a slice are shared, including composite elements
 that remain in the array. A borrowed variable can serve as a dependent function
@@ -102,7 +102,7 @@ val with_mut : ('a : immutable_data) ('r : immutable_data).
     @ ghost ->
   ((s : {s : 'a Slice.t | Slice.current s === Owned_array.contents a})
       @ local unique ->
-    {r : 'r | let refine_ s = s in post r (Slice.final s)}) @ local once ->
+    {r : 'r | let s = s in post r (Slice.final s)}) @ local once ->
   {r : ('r, 'a Owned_array.t) step |
     post r.value (Owned_array.contents r.state)
     && Model.length (Owned_array.contents r.state)

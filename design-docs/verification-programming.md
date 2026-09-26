@@ -1,7 +1,7 @@
 # Verification programming in Vox
 
 A verified operation computes its result and exposes its guarantee in a result
-refinement. Its client unwraps that result with `let refine_` and can use the
+refinement. Its client binds the result with ordinary `let` and can use the
 guarantee immediately. Reusable lemmas are total functions returning refined
 unit. Calls made only to establish facts belong inside `ghost_`.
 
@@ -15,7 +15,7 @@ let (eval_folded @ total) (expression @ total) input :
     {result : int | result === eval expression input} =
   let (result @ total) = (eval (fold expression) input : int @ total) in
   ghost_ (fold_correct expression input);
-  refine_ result
+  result
 ```
 
 `fold_correct` is a total function whose result is
@@ -46,10 +46,9 @@ ghost_ (
   contents_def q;
   reverse_def next_rear;
   append_associative front reversed singleton;
-  let u = () in
-  (refine_ u : {u : unit |
+  (() : {u : unit |
     contents result === append (contents q) [value]}));
-refine_ result
+result
 ```
 
 A helper's result refinement carries its conclusion to callers. A helper

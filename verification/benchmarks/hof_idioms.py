@@ -100,13 +100,13 @@ let measure name f =
   let words = ((Gc.quick_stat ()).minor_words -. before) /. 100. in
   Printf.printf "%s %.2f\\n" name words
 let () =
-  measure "ih" (fun xs -> let refine_ n = Collection_functions.count xs in n);
+  measure "ih" (fun xs -> Collection_functions.count xs);
   measure "preservation" (fun xs ->
-    let refine_ n = Collection_functions.count_separate xs in n);
+    Collection_functions.count_separate xs);
   measure "model" (fun xs ->
-    let refine_ n = Collection_functions.count_by_model xs in n);
+    Collection_functions.count_by_model xs);
   measure "trace" (fun xs ->
-    let refine_ n = Collection_functions.count_by_trace xs in n)
+    Collection_functions.count_by_trace xs)
 ''')
     results["minor_words_per_1000_elements"] = {}
     for compiler, suffix in [("ocamlc", "cmo"), ("ocamlopt", "cmx")]:

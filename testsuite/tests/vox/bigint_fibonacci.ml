@@ -21,33 +21,33 @@ end = struct
 
   let rec (tail_loop @ total) : (n : t) ->
       (index : {i : t | 0Z <= i && i <= n}) ->
-      {a : t | let refine_ i = index in a = fib i} ->
-      {b : t | let refine_ i = index in b = fib (i + 1Z)} ->
+      {a : t | let i = index in a = fib i} ->
+      {b : t | let i = index in b = fib (i + 1Z)} ->
       {r : t | r = fib n} = fun n index a b ->
-    let refine_ i = index in
-    let refine_ a = a in
-    let refine_ b = b in
-    if i = n then refine_ a
+    let i = index in
+    let a = a in
+    let b = b in
+    if i = n then a
     else
       let j = i + 1Z in
       let k = j + 1Z in
       let c = a + b in
       ghost_ (fib_def k);
-      let next : {i : t | 0Z <= i && i <= n} = refine_ j in
-      (tail_loop[@tailcall]) n next (refine_ b) (refine_ c)
-  [@@decreases let refine_ i = index in n - i]
+      let next : {i : t | 0Z <= i && i <= n} = j in
+      (tail_loop[@tailcall]) n next (b) (c)
+  [@@decreases let i = index in n - i]
 
   let (tail @ total) (n : t) : {r : t | r = fib n} =
     let zero = 0Z in
     if n <= zero then
       (ghost_ (fib_def n);
-      refine_ zero)
+      zero)
     else
       let one = 1Z in
       ghost_ (fib_def zero);
       ghost_ (fib_def one);
-      let index : {i : t | 0Z <= i && i <= n} = refine_ zero in
-      tail_loop n index (refine_ zero) (refine_ one)
+      let index : {i : t | 0Z <= i && i <= n} = zero in
+      tail_loop n index (zero) (one)
 
   let rec (doubling_identity @ total) : (n : t) ->
       {u : unit |
@@ -56,13 +56,13 @@ end = struct
           && fib (2Z * n + 1Z) = fib n * fib n + fib (n + 1Z) * fib (n + 1Z)
         else true} = fun n ->
     let u = () in
-    if n < 0Z then refine_ u
+    if n < 0Z then u
     else if n = 0Z then
       let zero = 0Z in
       let one = 1Z in
       fib_def zero;
       fib_def one;
-      refine_ u
+      u
     else
       let prev = n - 1Z in
       doubling_identity prev;
@@ -72,45 +72,45 @@ end = struct
       fib_def next;
       fib_def twice;
       fib_def twice_next;
-      refine_ u
+      u
   [@@decreases n]
 
   let rec (doubling_pair @ total) : (index : {n : t | 0Z <= n}) ->
-      {a : t | let refine_ n = index in a = fib n} *
-      {b : t | let refine_ n = index in b = fib (n + 1Z)} = fun index ->
-    let refine_ n = index in
+      {a : t | let n = index in a = fib n} *
+      {b : t | let n = index in b = fib (n + 1Z)} = fun index ->
+    let n = index in
     if n = 0Z then
       let zero = 0Z in
       let one = 1Z in
       ghost_ (fib_def zero);
       ghost_ (fib_def one);
-      (refine_ zero, refine_ one)
+      (zero, one)
     else
       let k = n / 2Z in
-      let smaller : {n : t | 0Z <= n} = refine_ k in
+      let smaller : {n : t | 0Z <= n} = k in
       let a, b = doubling_pair smaller in
-      let refine_ a = a in
-      let refine_ b = b in
+      let a = a in
+      let b = b in
       ghost_ (doubling_identity k);
       let c = a * (2Z * b - a) in
       let d = a * a + b * b in
-      if n mod 2Z = 0Z then (refine_ c, refine_ d)
+      if n mod 2Z = 0Z then (c, d)
       else
         let next = n + 1Z in
         ghost_ (fib_def next);
         let e = c + d in
-        (refine_ d, refine_ e)
-  [@@decreases let refine_ n = index in n]
+        (d, e)
+  [@@decreases let n = index in n]
 
   let (doubling @ total) (n : t) : {r : t | r = fib n} =
     if n <= 0Z then
       (ghost_ (fib_def n);
-      let zero = 0Z in refine_ zero)
+      let zero = 0Z in zero)
     else
-      let index : {n : t | 0Z <= n} = refine_ n in
+      let index : {n : t | 0Z <= n} = n in
       let a, _ = doubling_pair index in
-      let refine_ a = a in
-      refine_ a
+      let a = a in
+      a
 end;;
 [%%expect{|
 module Fibonacci :
@@ -125,13 +125,13 @@ module Fibonacci :
 
 let () =
   List.iter (fun n ->
-    let refine_ tail = Fibonacci.tail n in
-    let refine_ doubling = Fibonacci.doubling n in
+    let tail = Fibonacci.tail n in
+    let doubling = Fibonacci.doubling n in
     assert (tail = Fibonacci.fib n && doubling = tail))
     [-100Z; -1Z; 0Z; 1Z; 2Z; 10Z];
   let hundred = 100Z in
-  let refine_ tail = Fibonacci.tail hundred in
-  let refine_ doubling = Fibonacci.doubling hundred in
+  let tail = Fibonacci.tail hundred in
+  let doubling = Fibonacci.doubling hundred in
   Format.printf "%s@.%s@." (Bigint.to_string tail) (Bigint.to_string doubling);;
 [%%expect{|
 354224848179261915075

@@ -20,7 +20,7 @@ let () =
   List.iter (fun (n, expected) ->
     let capacity = Bigint.of_int n in
     let positive : {n : Bigint.t | n >= 1Z} = assume_ capacity in
-    let refine_ actual = A.inverse positive in
+    let actual = A.inverse positive in
     assert (Bigint.equal actual (Bigint.of_int expected)))
     [1, 1; 2, 1; 3, 1; 4, 2; 7, 2; 8, 3; 2047, 3; 2048, 4]
 
@@ -53,7 +53,7 @@ let () =
   for n = 2 to 20 do
     let cap = Bigint.of_int n in
     let capacity : {n : Bigint.t | n >= 1Z} = assume_ cap in
-    let refine_ alpha = A.inverse capacity in
+    let alpha = A.inverse capacity in
     for r = 0 to n - 2 do
       let rank = Bigint.of_int r in
       for s = r + 1 to n - 1 do

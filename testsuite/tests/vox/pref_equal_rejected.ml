@@ -20,35 +20,35 @@
 *)
 
 let wrong (p : int Pref.t @ immutable) : {b : bool | not b} =
-  let refine_ b = Pref.equal p p in refine_ b;;
+  let b = Pref.equal p p in b;;
 [%%expect{|
-Line 2, characters 36-45:
-2 |   let refine_ b = Pref.equal p p in refine_ b;;
-                                        ^^^^^^^^^
+Line 2, characters 28-29:
+2 |   let b = Pref.equal p p in b;;
+                                ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let wrong_branch (p : int Pref.t @ immutable) (q : int Pref.t @ immutable) =
-  let refine_ equal = Pref.equal p q in
+  let equal = Pref.equal p q in
   if equal then
     let u = () in
-    let refine_ impossible = (refine_ u : {u : unit | not (p === q)}) in ()
+    let _ = (u : {u : unit | not (p === q)}) in ()
   else ();;
 [%%expect{|
-Line 5, characters 30-39:
-5 |     let refine_ impossible = (refine_ u : {u : unit | not (p === q)}) in ()
-                                  ^^^^^^^^^
+Line 5, characters 13-14:
+5 |     let _ = (u : {u : unit | not (p === q)}) in ()
+                 ^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 let wrong_other_branch (p : int Pref.t @ immutable) (q : int Pref.t @ immutable) =
-  let refine_ equal = Pref.equal p q in
+  let equal = Pref.equal p q in
   if equal then () else
     let u = () in
-    let refine_ impossible = (refine_ u : {u : unit | p === q}) in ();;
+    let _ = (u : {u : unit | p === q}) in ();;
 [%%expect{|
-Line 5, characters 30-39:
-5 |     let refine_ impossible = (refine_ u : {u : unit | p === q}) in ();;
-                                  ^^^^^^^^^
+Line 5, characters 13-14:
+5 |     let _ = (u : {u : unit | p === q}) in ();;
+                 ^
 Error: Refinement could not be proved (counterexample)
 |}]

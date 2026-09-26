@@ -53,27 +53,27 @@ Line 4, characters 19-24:
 module Empty = struct
   module C = Vox_big_credits.Make ()
   let bad () =
-    let refine_ token = C.empty () in
-    C.tick (refine_ token)
+    let token = C.empty () in
+    C.tick (token)
 end;;
 [%%expect{|
-Line 5, characters 11-26:
-5 |     C.tick (refine_ token)
-               ^^^^^^^^^^^^^^^
+Line 5, characters 11-18:
+5 |     C.tick (token)
+               ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 module Oversplit = struct
   module C = Vox_big_credits.Make ()
   let bad (token : {t : C.token | C.credits t = 3Z} @ unique total ghost) =
-    let refine_ token = token in
+    let token = token in
     let amount = 4Z in
-    C.split amount (refine_ token)
+    C.split amount (token)
 end;;
 [%%expect{|
-Line 6, characters 19-34:
-6 |     C.split amount (refine_ token)
-                       ^^^^^^^^^^^^^^^
+Line 6, characters 19-26:
+6 |     C.split amount (token)
+                       ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
@@ -81,21 +81,21 @@ module Negative = struct
   module C = Vox_big_credits.Make ()
   let bad () =
     let amount = Bigint.sub 0Z 1Z in
-    C.Budget.create (refine_ amount)
+    C.Budget.create (amount)
 end;;
 [%%expect{|
-Line 5, characters 20-36:
-5 |     C.Budget.create (refine_ amount)
-                        ^^^^^^^^^^^^^^^^
+Line 5, characters 20-28:
+5 |     C.Budget.create (amount)
+                        ^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
 
 module Mint (C : Vox_big_credits.S) = struct
-  let bad () = C.Budget.create (refine_ 1Z)
+  let bad () = C.Budget.create (1Z)
 end;;
 [%%expect{|
 Line 2, characters 15-23:
-2 |   let bad () = C.Budget.create (refine_ 1Z)
+2 |   let bad () = C.Budget.create (1Z)
                    ^^^^^^^^
 Error: Unbound module "C.Budget"
 |}]

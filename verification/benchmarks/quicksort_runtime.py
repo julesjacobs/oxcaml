@@ -11,9 +11,9 @@ PROGRAM = r'''
 open Borrow
 
 let sort values =
-  let refine_ owned = Owned_array.of_iarray values in
-  let refine_ sorted = Quicksort.sort_array owned in
-  let refine_ result = Owned_array.into_iarray sorted in
+  let owned = Owned_array.of_iarray values in
+  let sorted = Quicksort.sort_array owned in
+  let result = Owned_array.into_iarray sorted in
   result
 
 let measure name input =

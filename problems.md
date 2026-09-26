@@ -27,6 +27,8 @@ arguments. This follows argument-relative modes but is easy to miss.
 
 ## Refinement introduction
 
-`refine_ value` requires a known expected refinement type and `value` must be a
-plain local variable. Bind compound expressions before introducing their
-refinement. This is a deliberate initial limitation.
+Refinement introduction is implicit when the expected type is known. Nested
+refinements still need expected types at their construction sites: an
+unannotated tuple binding can infer plain component types that a later tuple
+annotation cannot strengthen. Function adaptation requires a stable local
+function; see [proof ergonomics](design-docs/vox-proof-ergonomics.md).

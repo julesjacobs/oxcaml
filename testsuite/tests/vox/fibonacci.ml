@@ -32,28 +32,28 @@ module Fibonacci = struct
       (a : {a : int | a = fib (n - 1)}) (b : {b : int | b = fib n}) :
       {r : int | r = fib (n + 1)} =
     if n < 1 || n > 90 then raise Overflow;
-    let refine_ a = a in
-    let refine_ b = b in
+    let a = a in
+    let b = b in
     let next = n + 1 in
     ghost_ (fib_def next);
     let r = a + b in
-    refine_ r
+    r
 
   let rec tail_loop : (n : int) -> (i : int) ->
       {a : int | a = fib i} -> {b : int | b = fib (i + 1)} ->
       {r : int | r = fib n} = fun n i a b ->
-    let refine_ a = a in
-    let refine_ b = b in
-    if i = n then refine_ a
+    let a = a in
+    let b = b in
+    if i = n then a
     else if 0 <= i && i < n && n <= 90 then
       let j = i + 1 in
-      if j = n then refine_ b
+      if j = n then b
       else
         let c = a + b in
         let k = j + 1 in
         ghost_ (fib_def k);
-        let a : {v : int | v = fib j} = refine_ b in
-        let b : {v : int | v = fib (j + 1)} = refine_ c in
+        let a : {v : int | v = fib j} = b in
+        let b : {v : int | v = fib (j + 1)} = c in
         (tail_loop[@tailcall]) n j a b
     else raise Overflow
   [@@decreases n - i]
@@ -64,8 +64,8 @@ module Fibonacci = struct
     let one = 1 in
     ghost_ (fib_def zero);
     ghost_ (fib_def one);
-    let a : {a : int | a = fib zero} = refine_ zero in
-    let b : {b : int | b = fib (zero + 1)} = refine_ one in
+    let a : {a : int | a = fib zero} = zero in
+    let b : {b : int | b = fib (zero + 1)} = one in
     tail_loop n zero a b
 
   let rec doubling_identity : (n : int) ->
@@ -84,7 +84,7 @@ module Fibonacci = struct
       mul_identity zero;
       mul_identity one;
       doubling_step zero one;
-      refine_ u
+      u
     else
       let prev = n - 1 in
       double prev;
@@ -97,10 +97,10 @@ module Fibonacci = struct
       ghost_ (fib_def twice_next);
       let p = tail prev in
       let q = tail n in
-      let refine_ p = p in
-      let refine_ q = q in
+      let p = p in
+      let q = q in
       doubling_step p q;
-      refine_ u
+      u
   [@@decreases n]
 
   let rec doubling_pair : (n : int) ->
@@ -111,24 +111,24 @@ module Fibonacci = struct
       let one = 1 in
       ghost_ (fib_def zero);
       ghost_ (fib_def one);
-      (refine_ zero, refine_ one)
+      (zero, one)
     else
       let k = n / 2 in
       double k;
       let a, b = doubling_pair k in
-      let refine_ a = a in
-      let refine_ b = b in
+      let a = a in
+      let b = b in
       doubling_identity k;
       let c = a * (2 * b - a) in
       let d = a * a + b * b in
-      let c : {r : int | r = fib (2 * k)} = refine_ c in
-      let d : {r : int | r = fib (2 * k + 1)} = refine_ d in
-      let refine_ c = c in
-      let refine_ d = d in
-      if n mod 2 = 0 then (refine_ c, refine_ d)
+      let c : {r : int | r = fib (2 * k)} = c in
+      let d : {r : int | r = fib (2 * k + 1)} = d in
+      let c = c in
+      let d = d in
+      if n mod 2 = 0 then (c, d)
       else
-        let lower : {r : int | r = fib (n - 1)} = refine_ c in
-        let upper : {r : int | r = fib n} = refine_ d in
+        let lower : {r : int | r = fib (n - 1)} = c in
+        let upper : {r : int | r = fib n} = d in
         (upper, successor n lower upper)
   [@@decreases n]
 
@@ -186,8 +186,8 @@ module Fibonacci :
   end
 |}]
 
-let tail n = let refine_ r = Fibonacci.tail n in r
-let doubling n = let refine_ r = Fibonacci.doubling n in r;;
+let tail n = let r = Fibonacci.tail n in r
+let doubling n = let r = Fibonacci.doubling n in r;;
 [%%expect{|
 val tail : int -> int = <fun>
 val doubling : int -> int = <fun>

@@ -17,7 +17,7 @@ result predicate. Other parameter patterns can use an explicit function type.
 
 ## Function refinement
 
-`refine_ f`, with an expected function type, elaborates a stable local function
+An expected function type implicitly adapts a stable local function `f`
 into a checked eta wrapper. The wrapper applies `f`, opens its result refinement,
 and proves the expected result refinement. Expected parameter refinements are
 available while checking each pointwise obligation. Captured equal heap
