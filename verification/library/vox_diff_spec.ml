@@ -34,6 +34,22 @@ let[@def] rec apply (old : int list) (script : script) =
   | Insert x :: rest ->
     (match apply old rest with None -> None | Some zs -> Some (x :: zs))
 
+let rec (apply_characterization @ total) : (old : int list) -> (script :
+  script) ->
+    {u : unit | apply old script ===
+      (if old === source script then Some (target script) else None)} =
+    fun old script ->
+  apply_def old script;
+  source_def script;
+  target_def script;
+  (match script with
+   | [] -> ()
+   | Insert _ :: rest -> apply_characterization old rest
+   | Keep _ :: rest | Delete _ :: rest ->
+     match old with [] -> () | _ :: tail -> apply_characterization tail
+       rest);
+  ()
+
 let[@def] rec invert (script : script) =
   match script with
   | [] -> []

@@ -87,6 +87,11 @@ def audit(compiler):
             assert external_calls == wanted, (name, external_calls)
             calls = re.findall(r"\(apply\b", body)
             assert len(calls) == len(direct) + len(external_calls), name
+        search = function_body(implementation, "search")
+        assert not re.search(r"\((?:%int_\w+|[+*/-]|<=|>=|<|>|==|!=|raise|exit)\s", search), search
+        assert not re.search(r"\b(?:fuel|remaining)/\d+", search), search
+        entry = function_body(implementation, "diff")
+        assert not re.search(r"\((?:%int_add|\+)\s", entry), entry
         body = function_body(implementation, "reverse_into")
         calls = re.findall(r"\(apply\s+([\w]+)/\d+", body)
         assert calls == ["reverse_into"]
@@ -112,7 +117,7 @@ def audit(compiler):
             assert "Vox_diff_spec" not in body, name
     print(f"{compiler.name}: public-only client passes; "
           "diff calls contain no proof, metric, "
-          "certificate, or bigint computations.")
+          "certificate, or bigint computations; search has no runtime fuel operations.")
 
 
 for compiler in compilers:

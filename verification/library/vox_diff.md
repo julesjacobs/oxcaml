@@ -35,21 +35,25 @@ integer-literal interpretation. `None`/`Some`, `unit`, Boolean connectives and
 addition and comparisons in these contracts are exact, not wrapping machine
 arithmetic. The compiler's refinement/totality checker, inductive-type rules,
 SMT encoding and solver, and runtime primitive implementations are trusted;
-no new axiom or external declaration is added. The shared totality and
-resource-exhaustion convention is documented in `design-docs/vox-v1.md`.
+no new axiom or external declaration is added. The resource-exhaustion exclusion is explicit in the introductory comment
+of `vox_diff.mli`.
 
 Those primitive meanings and the two public interfaces exhaust the semantic
 review surface. No claim depends on an uninterpreted predicate in a private
 module. Each equation is checked against an implementation; it is not an
-assumed axiom. Since its recursive calls decrease finite inputs, the equation
-completely characterizes the observation. The implementation of an equation
+assumed axiom. The recursive equations decrease finite inputs; `apply_characterization`
+completely determines success, failure and output from `source` and `target`. The implementation of an equation
 can change without changing the claim a reviewer is being asked to accept.
 
 `vox_diff_spec.ml` implements those equations; its private fuel implementation
 and the proof of the distance recurrence are hidden by `vox_diff_spec.mli`.
 `vox_diff.ml` contains private `Proof` and `M` modules for suffix reasoning,
 reconstruction, and optimality induction, together with the executable
-frontier code and erased proof calls. `vox_diff.mli` exposes none of those
+frontier code and erased proof calls. Private `Entry_proof`, `Choice_proof`,
+and `Frontier_proof` modules collect record-preservation, selection and
+frontier-reconstruction lemmas. The executable bodies keep bounds before
+arithmetic and call those lemmas after constructing entries or frontiers.
+`vox_diff.mli` exposes none of those
 modules, helpers, representations, or refinement invariants. There is no
 separate importable metric/proof module and no module-type-of re-export.
 
@@ -85,7 +89,8 @@ The private proof establishes an independent script lower bound, synchronous
 suffix cropping, frontier dominance, preservation of remaining distance by
 snake, and progress of a settled unfinished frontier. `search` returns a
 script costing at most the mathematical distance; the lower bound proves
-universal optimality. The exhausted-search branch is checked unreachable.
+universal optimality. An unfinished frontier has strictly positive ghost
+budget, which decreases at each recursive search call.
 
 All calls from diff to model computations or proofs are inside `ghost_`.
 Neither the distance recurrence nor an output checker runs during diff.
@@ -97,9 +102,10 @@ Ghost arguments may leave dummy ABI arguments, but no proof computation.
 For input lengths `N` and `M`, let `S = N + M` and minimum edit cost `D`.
 Checked internal invariants establish `S <= 2,000,000`, bounded positions,
 nonnegative depth, frontier width `depth + 1`, and
-`depth + remaining_fuel <= S`. Search starts with fuel `S` and decreases it;
-snake decreases its old-input tail length. Other traversals use structural
-recursion. Machine-integer increments and decrements have proved bounds.
+`depth + budget <= S`. Search decreases the ghost budget, initially `D`;
+snake decreases its ghost old-input tail length. Search has no executable
+fuel parameter, arithmetic, or exhausted-fuel branch. Other traversals use
+structural recursion. Machine-integer increments have proved bounds.
 
 The loop structure and checked invariants imply at most `D + 1` levels and
 slots per frontier, at most `(D + 1)(D + 2)/2` snake calls, at most `N` Keep
@@ -115,10 +121,15 @@ worst-case input fits available RAM or stack.
 `testsuite/tests/vox/diff_public_client.ml` imports only `Vox_diff_spec` and
 `Vox_diff`. It derives patch correctness, inversion and arbitrary-script
 optimality, and proves the error case impossible for accepted input sizes.
+It also derives the former complete recursive `apply_def` equation from
+`apply_characterization` and the public source/target equations, preserving
+its semantic consequences (the public theorem name changes).
 `scripts/check-diff-erasure` compiles it in a directory containing only the
 two public `.cmi` files, in bytecode and native principal modes. The same
 script audits executable Lambda call targets, including reconstruction, for
-surviving model, proof, certificate or bigint computations.
+surviving model, proof, certificate or bigint computations. It additionally
+checks that search has no integer arithmetic, comparison, or trap, and that
+`diff` has no integer addition for initial fuel.
 
 `diff_rejected.ml` rejects forged optimality, a wrong patch result, omission
 of competing-script validity, access to private reconstruction, and access

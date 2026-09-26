@@ -30,21 +30,9 @@ val cost_def : (script : script) ->
   @@ total
 
 val apply : int list -> script -> int list option @@ total
-val apply_def : (old : int list) -> (script : script) ->
-  {u : unit | apply old script === (match script with
-    | [] -> (match old with [] -> Some [] | _ :: _ -> None)
-    | Keep x :: rest ->
-      (match old with
-       | y :: ys when x = y ->
-         (match apply ys rest with
-          | None -> None | Some zs -> Some (x :: zs))
-       | _ -> None)
-    | Delete x :: rest ->
-      (match old with
-       | y :: ys when x = y -> apply ys rest | _ -> None)
-    | Insert x :: rest ->
-      (match apply old rest with
-       | None -> None | Some zs -> Some (x :: zs)))} @@ total
+val apply_characterization : (old : int list) -> (script : script) ->
+  {u : unit | apply old script ===
+    (if old === source script then Some (target script) else None)} @@ total
 
 val invert : script -> script @@ total
 val invert_def : (script : script) ->

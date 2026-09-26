@@ -36,3 +36,31 @@ let (accepted @ total) :
     ghost_ (inverse_patch script);
     ghost_ (invert_correct script);
     script
+
+let (apply_equation @ total) : (old : int list) -> (script : script) ->
+  {u : unit | apply old script === (match script with
+    | [] -> (match old with [] -> Some [] | _ :: _ -> None)
+    | Keep x :: rest ->
+      (match old with
+       | y :: ys when x = y ->
+         (match apply ys rest with
+          | None -> None | Some zs -> Some (x :: zs))
+       | _ -> None)
+    | Delete x :: rest ->
+      (match old with
+       | y :: ys when x = y -> apply ys rest | _ -> None)
+    | Insert x :: rest ->
+      (match apply old rest with
+       | None -> None | Some zs -> Some (x :: zs)))} = fun old script ->
+
+  apply_characterization old script;
+  source_def script;
+  target_def script;
+  (match script with
+   | [] -> ()
+   | Insert _ :: rest -> apply_characterization old rest
+   | Keep _ :: rest | Delete _ :: rest ->
+     match old with
+     | [] -> ()
+     | _ :: tail -> apply_characterization tail rest);
+  ()
