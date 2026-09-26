@@ -3603,6 +3603,13 @@ let rec refinement_payload env ty =
   | Some { ref_payload; _ } -> refinement_payload env ref_payload
   | None -> ty
 
+(* Refinements are not checked inside a predicate, so an ascription there
+   only fixes the payload type. *)
+let logical_ascription env ty =
+  if !typing_refinement_predicate || Resolved_predicate.active ()
+  then refinement_payload env ty
+  else ty
+
 (** [type_pat] propagates the expected type, and
     unification may update the typing environment. *)
 let rec type_pat
@@ -7798,6 +7805,12 @@ and type_expect_
       let normalized =
         {normalized with pexp_attributes = sexp.pexp_attributes} in
       type_expect env expected_mode normalized ty_expected_explained
+  | Pexp_refine _ when !typing_refinement_predicate ->
+      (* Checked here because ascriptions in predicates drop refinements, so
+         the expected type below would not say why [refine_] fails. *)
+      raise (Error_forward (Location.errorf ~loc
+        "Refinement introduction is not yet supported in a refinement \
+         predicate"))
   | Pexp_refine operand -> begin
       Language_extension.assert_enabled ~loc Refinement_types ();
       match get_desc (expand_head env ty_expected) with
@@ -9114,6 +9127,7 @@ and type_expect_
       }
   | Pexp_constraint (sarg, Some sty, []) ->
       let (ty, exp_extra) = type_constraint env sty Mode.Alloc.Const.legacy in
+      let ty = logical_ascription env ty in
       let ty' = instance ty in
       let error_message_attr_opt =
         Builtin_attributes.error_message_attr sexp.pexp_attributes in
@@ -9141,6 +9155,7 @@ and type_expect_
         in
         type_constraint env sty alloc_mode
       in
+      let ty = logical_ascription env ty in
       let expected_mode =
         type_expect_mode ~loc ~env ~modes:modes.mode_modes expected_mode
       in
