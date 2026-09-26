@@ -73,8 +73,13 @@ runtime's atomic memory ordering; it does not prove them from a memory model.
 Unique cells move payloads rather than copy usable ownership. Taking empties
 the cell; putting requires emptiness. Managed handles/cells are garbage
 collected, but losing affine authority never promises to reclaim raw payload
-allocations. `Raw_memory` requires explicit free and the deallocation marker.
-Neither library catches exceptions to manufacture replacement authority.
+allocations. `Raw_memory.free` releases a buffer promptly and consumes the
+deallocation marker; a GC finalizer on the descriptor also releases the
+buffer once the descriptor is unreachable, including after exceptional exits.
+Dropping a token alone does not release storage while the descriptor is
+reachable, finalizer timing is unspecified, and reclamation is not part of
+the refinement contracts. Neither library catches exceptions to manufacture
+replacement authority.
 
 No fairness, starvation freedom, delivery, bounded waiting, cancellation
 recovery, exception safety, or general leak freedom is proved. Channel receive

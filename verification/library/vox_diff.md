@@ -137,5 +137,8 @@ to private metric fuel. Runtime tests cover all 3,969 short binary input
 pairs, 200 seeded random pairs, all byte values, extreme integer payloads,
 empty inputs, repeated elements, ties, a 10,000-byte common prefix, malformed
 patches, the exact million-element limit and oversized-input rejection.
-An independent dynamic-programming oracle checks edit cost. The tests run in
-bytecode, native, and both principal variants.
+An independent dynamic-programming oracle checks edit cost. `diff.ml` is a
+proof test and runs as bytecode only, and `diff_rejected.ml` is an expect test
+(the backend policy is in `testsuite/tests/vox/README.md`);
+`scripts/check-diff-erasure` covers bytecode and native `-principal`
+compilation of the public client.

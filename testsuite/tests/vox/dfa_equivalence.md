@@ -31,7 +31,11 @@ Read these files in order; all paths are relative to the repository root:
    equality/order/addition, Boolean operations, and Vox logical equality.
    Vox's refinement checker, checked total recursion, ghost erasure, and its
    solver/runtime primitive correspondence form the existing trusted base.
-   The demo adds no assumptions or external primitives.
+   The demo adds no assumptions (`assume_`). `dfa_equivalence_proof.ml`
+   declares three `total` externals at `int`: `( >= )` as `%greaterequal`,
+   and `equal_int` and `same_int` as `%equal`; they are the machine-integer
+   order and equality listed above, so the checker's meaning for these
+   compiler primitives is part of the trusted base.
 
 For DFA comparison/minimization alone, read items 1 and 3 plus the primitive
 contracts in item 5. Regex matching and lowering additionally require items 2
@@ -81,12 +85,9 @@ stack-space guarantee is claimed.
 
 ## Reproduce the checks
 
-These sources require implicit refinement introduction and elimination. The
-migration was checked with the compiler from commit
-`9d5d8fca7a3261a3b06c293fe7aa30a38b9a2ef0`; the original #133 base is too old.
-PR #200 is stacked on the shared implicit-refinement dependency, PR #207.
-
-From a worktree configured with a compatible compiler, run these sequentially:
+These sources require implicit refinement introduction and elimination,
+which the current trunk provides. From a configured worktree, run these
+sequentially:
 
 ```sh
 ./dev init
