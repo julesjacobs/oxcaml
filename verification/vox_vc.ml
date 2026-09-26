@@ -124,11 +124,21 @@ type command =
   | Choice of command list * command list
   | Check of command list
 
+module Exposed = Set.Make (struct
+  type t = int * term
+
+  let compare = compare
+end)
+
 type state =
   { values : value option Path.Map.t;
     code : command list;
     dead : bool;
-    omitted_premises : (Location.t * Location.error) list
+    omitted_premises : (Location.t * Location.error) list;
+    (* Refinements already assumed on this path, by type node and value. A
+       branch's additions are dropped at the join, which rebuilds the state from
+       the one before the branch. *)
+    exposed : Exposed.t
   }
 
 type deferred_check =
@@ -172,17 +182,24 @@ type context =
       (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
     mutable argument_values : value option Path.Map.t;
-    mutable batches : command list list;
+    (* Each function body's commands, with the warning settings in effect where
+       it was written ([@warning] attributes apply to its proofs). *)
+    mutable batches : (Warnings.state * command list) list;
     named_terms : (Symbol.t, term) Hashtbl.t;
     symbolic : value option Symbolic_keys.t;
-    prove : Location.t -> query -> unit;
+    prove : batch:bool -> Location.t -> query -> unit;
     verify_introductions : bool;
     mutable check_call :
       context -> state -> expression -> value option list -> unit
   }
 
 let empty =
-  { values = Path.Map.empty; code = []; dead = false; omitted_premises = [] }
+  { values = Path.Map.empty;
+    code = [];
+    dead = false;
+    omitted_premises = [];
+    exposed = Exposed.empty
+  }
 
 let bind s id value =
   { s with values = Path.Map.add (Path.Pident id) value s.values }
@@ -2195,9 +2212,21 @@ and expose_fact ctx env s ty value loc =
     with Location.Error error ->
       { s with omitted_premises = (loc, error) :: s.omitted_premises }
   in
-  match get_desc (Ctype.expand_head env ty) with
-  | Trefine r when not (impossible s) ->
-    assume (bind s r.ref_binder value) r.ref_pred, value
+  let ty = Ctype.expand_head env ty in
+  match get_desc ty, scalar value with
+  | Trefine _, Some term when Exposed.mem (get_id ty, term) s.exposed ->
+    (* Uses of a refined value re-expose its type; the facts are already on this
+       path. *)
+    s, value
+  | Trefine r, term when not (impossible s) ->
+    let s = assume (bind s r.ref_binder value) r.ref_pred in
+    let s =
+      match term with
+      | Some term ->
+        { s with exposed = Exposed.add (get_id ty, term) s.exposed }
+      | None -> s
+    in
+    s, value
   | _ -> s, value
 
 and expose_outer ctx env s ty value loc =
@@ -2842,7 +2871,7 @@ and check_function ctx s e params body value =
         value_cases ctx (bind s cases.fc_param value) value cases.fc_cases
       end
   in
-  ctx.batches <- s.code :: ctx.batches;
+  ctx.batches <- (Warnings.backup (), s.code) :: ctx.batches;
   if
     (not s.dead)
     && List.exists
@@ -2882,7 +2911,10 @@ and value_bindings ctx s rec_flag bindings =
     | [] -> s, None
     | _ when impossible s -> s, None
     | vb :: rest ->
-      let s, value = expression ctx s vb.vb_expr in
+      let s, value =
+        Builtin_attributes.warning_scope ~ppwarning:false vb.vb_attributes
+          (fun () -> expression ctx s vb.vb_expr)
+      in
       let value =
         match rec_flag, value with
         | Asttypes.Recursive, Some (Function fn) ->
@@ -2949,10 +2981,16 @@ and structure ctx s str =
         | Tstr_value (rec_flag, bindings) ->
           value_bindings ctx s rec_flag bindings
         | Tstr_eval (e, _, _) -> expression ctx s e
-        | Tstr_module { mb_id = Some id; mb_expr; _ }
+        | Tstr_attribute attribute ->
+          Builtin_attributes.warning_attribute ~ppwarning:false attribute;
+          s, None
+        | Tstr_module { mb_id = Some id; mb_expr; mb_attributes; _ }
           when Option.is_some (module_structure mb_expr) ->
           let str = Option.get (module_structure mb_expr) in
-          let s, _ = structure ctx s str in
+          let s, _ =
+            Builtin_attributes.warning_scope ~ppwarning:false mb_attributes
+              (fun () -> structure ctx s str)
+          in
           export_module ctx id str s, None
         | _ ->
           let state = ref s in
@@ -2981,7 +3019,7 @@ and iterator ctx state =
 (* Keep the SSA definitions needed by the selected obligations. Definitions from
    later branches or postconditions can otherwise dominate a query. Dropping
    facts only weakens the premises; no new equality is introduced. *)
-let slice_goal ctx query term =
+let slice_goal ?(rename = Fun.id) ctx query term =
   let used = Hashtbl.create 32 in
   let pending = Queue.create () in
   let definitions = Hashtbl.create 32 in
@@ -2992,7 +3030,9 @@ let slice_goal ctx query term =
         Hashtbl.add used symbol ();
         Queue.add symbol pending;
         (* Observation expansion can expose additional SSA dependencies. *)
-        Option.iter visit (Hashtbl.find_opt ctx.observation_definitions symbol)
+        Option.iter
+          (fun definition -> visit (rename definition))
+          (Hashtbl.find_opt ctx.observation_definitions symbol)
       end
     | App (_, args) | Call (_, args) | Construct (_, args) ->
       List.iter visit args
@@ -3045,27 +3085,77 @@ let query ctx code =
     | term -> term
   in
   let goals = ref [] in
-  let rec forward code reachable =
-    ctx.poll ();
-    List.fold_left
-      (fun reachable -> function
-        | Assume p -> share (both And reachable p)
-        | Define term ->
-          definitions := { label = "value"; term } :: !definitions;
-          reachable
-        | Assert o ->
-          goals := (o, both Implies reachable o.goal) :: !goals;
-          reachable
-        | Choice (a, b) ->
-          let a = forward a reachable in
-          let b = forward b reachable in
-          share (both Or a b)
-        | Check code ->
-          ignore (forward code reachable);
-          reachable)
-      reachable (List.rev code)
+  (* A refined value's predicate is re-derived, with fresh names, each time the
+     value is used. Definitions are total and unconditional, so a symbol defined
+     like an earlier one is replaced by it; an assumption already on the current
+     path is then recognized and dropped. *)
+  let renamed = Hashtbl.create 64 and defined = Term_table.create 64 in
+  let rec rename = function
+    | Var symbol as term -> (
+      match Hashtbl.find_opt renamed symbol with
+      | Some existing -> existing
+      | None -> term)
+    | term -> map_term_children rename term
   in
-  ignore (forward code (Boolean true));
+  let rename term = if Hashtbl.length renamed = 0 then term else rename term in
+  let assumed = Term_table.create 64 in
+  (* A path is reachable when [prefix] and [reachable] hold. Branches start from
+     [true] under the enclosing path, and a join yields [reachable && (a || b)]
+     rather than [(reachable && a') || (reachable && b')]: facts from before a
+     branch then remain top-level conjuncts of the negated goal, which the
+     solver's preprocessing can substitute instead of rediscovering them in
+     every case split. *)
+  let rec forward ~prefix code reachable =
+    ctx.poll ();
+    let added = ref [] in
+    let reachable =
+      List.fold_left
+        (fun reachable -> function
+          | Assume p ->
+            let p = rename p in
+            if Term_table.mem assumed p
+            then reachable
+            else begin
+              Term_table.add assumed p ();
+              added := p :: !added;
+              share (both And reachable p)
+            end
+          | Define term ->
+            (match rename term with
+            | App (Eq, [Var symbol; value]) as term
+              when not (Hashtbl.mem ctx.observation_definitions symbol) -> (
+              match Term_table.find_opt defined value with
+              | Some existing -> Hashtbl.replace renamed symbol existing
+              | None ->
+                Term_table.add defined value (Var symbol);
+                definitions := { label = "value"; term } :: !definitions)
+            | term -> definitions := { label = "value"; term } :: !definitions);
+            reachable
+          | Assert o ->
+            goals
+              := (o, both Implies (both And prefix reachable) (rename o.goal))
+                 :: !goals;
+            reachable
+          | Choice (a, b) ->
+            let prefix = share (both And prefix reachable) in
+            let a = forward ~prefix a (Boolean true) in
+            let b = forward ~prefix b (Boolean true) in
+            let joined =
+              match a, b with
+              | Boolean true, _ | _, Boolean true -> Boolean true
+              | Boolean false, x | x, Boolean false -> x
+              | _ -> both Or a b
+            in
+            share (both And reachable joined)
+          | Check code ->
+            ignore (forward ~prefix code reachable);
+            reachable)
+        reachable (List.rev code)
+    in
+    List.iter (Term_table.remove assumed) !added;
+    reachable
+  in
+  ignore (forward ~prefix:(Boolean true) code (Boolean true));
   let goals = List.rev !goals in
   let goal =
     { label = "refine_";
@@ -3074,9 +3164,28 @@ let query ctx code =
     }
   in
   let facts = List.rev !definitions in
+  (* Observation equations recorded during VC generation are keyed by terms
+     written before renaming; those added during expansion already use the
+     renamed terms. *)
+  let generated_equations =
+    lazy
+      (let table = Hashtbl.create (Hashtbl.length ctx.observation_equations) in
+       Hashtbl.iter
+         (fun key value -> Hashtbl.replace table (rename key) value)
+         ctx.observation_equations;
+       table)
+  in
+  let observation_equation term =
+    match Hashtbl.find_opt ctx.observation_equations term with
+    | Some _ as equation -> equation
+    | None when Hashtbl.length renamed = 0 -> None
+    | None -> Hashtbl.find_opt (Lazy.force generated_equations) term
+  in
   let expand ~slice goal =
     let raw = { datatypes = []; symbols = []; functions = []; facts; goal } in
-    let facts = if slice then (slice_goal ctx raw goal.term).facts else facts in
+    let facts =
+      if slice then (slice_goal ~rename ctx raw goal.term).facts else facts
+    in
     let definitions = ref (List.rev facts) in
     (* These edges request observations; they do not assert array equality.
        Equality still follows from the original, possibly guarded facts. *)
@@ -3106,7 +3215,7 @@ let query ctx code =
     let relate left right =
       let previous = entries array_equalities left in
       let same_origin =
-        expose_head ctx left = expose_head ctx right
+        rename (expose_head ctx left) = rename (expose_head ctx right)
         && Option.is_some (iarray_origin ctx left)
       in
       if left <> right && (not same_origin) && not (List.mem right previous)
@@ -3196,7 +3305,7 @@ let query ctx code =
           observations;
         Option.iter
           (define "iarray observation" term)
-          (Hashtbl.find_opt ctx.observation_equations term);
+          (observation_equation term);
         match term with
         | Var symbol ->
           symbols := symbol :: !symbols;
@@ -3209,7 +3318,7 @@ let query ctx code =
         | _ -> ()
       end
     and define label term value =
-      let equation = both Eq term value in
+      let equation = both Eq term (rename value) in
       definitions := { label; term = equation } :: !definitions;
       visit equation
     in
@@ -3227,15 +3336,15 @@ let query ctx code =
   in
   (* Preserve explicit observation hints in the initial batch. Early slicing is
      only needed when regenerating smaller individual retry queries. *)
-  ( expand ~slice:false goal,
+  let slice query term = slice_goal ~rename ctx query term in
+  ( slice (expand ~slice:false goal) goal.term,
     goals,
-    fun term -> expand ~slice:true { label = "refine_"; term } )
+    fun term -> slice (expand ~slice:true { label = "refine_"; term }) term )
 
 let verify_batch ctx prove code =
   let query, goals, expand = query ctx code in
-  let query = slice_goal ctx query query.goal.term in
   let prove_one (o : obligation) q =
-    try prove o.loc q
+    try prove ~batch:false o.loc q
     with Unproved error ->
       let s = { empty with omitted_premises = o.omitted_premises } in
       raise
@@ -3246,13 +3355,9 @@ let verify_batch ctx prove code =
   | [] -> ()
   | [(o, _)] -> prove_one o query
   | (first, _) :: _ -> (
-    try prove first.loc query
+    try prove ~batch:true first.loc query
     with Unproved _ ->
-      List.iter
-        (fun (o, term) ->
-          let query = expand term in
-          prove_one o (slice_goal ctx query term))
-        goals)
+      List.iter (fun (o, term) -> prove_one o (expand term)) goals)
 
 let context ~poll ~prove ~verify_introductions =
   { poll;
@@ -3302,9 +3407,21 @@ let generate ?(poll = fun () -> ()) ~prove str =
   | () -> ()
   | exception Has_obligation ->
     let ctx = context ~poll ~prove ~verify_introductions:true in
-    let result, _ = structure ctx empty str in
-    List.iter (verify_batch ctx ctx.prove) (List.rev ctx.batches);
-    verify_batch ctx prove result.code
+    let result, _, warnings =
+      Builtin_attributes.warning_scope [] (fun () ->
+          let result, value = structure ctx empty str in
+          result, value, Warnings.backup ())
+    in
+    let with_warnings state f =
+      let saved = Warnings.backup () in
+      Warnings.restore state;
+      Fun.protect ~finally:(fun () -> Warnings.restore saved) f
+    in
+    List.iter
+      (fun (state, code) ->
+        with_warnings state (fun () -> verify_batch ctx ctx.prove code))
+      (List.rev ctx.batches);
+    with_warnings warnings (fun () -> verify_batch ctx prove result.code)
 
 let check_termination ~poll ~prove ~self ~fn ~measure =
   poll ();

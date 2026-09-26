@@ -100,6 +100,7 @@ let () =
     = "(set-option :print-success false)\n\
        (set-option :produce-models true)\n\
        (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
        (set-logic QF_UFLIA)\n\
        (declare-fun f0 (Int) Int)\n\
        (assert (and (<= (- 4611686018427387904) (f0 0)) (<= (f0 0) \
@@ -166,6 +167,7 @@ let () =
     = "(set-option :print-success false)\n\
        (set-option :produce-models true)\n\
        (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
        (set-logic QF_LIA)\n\
        (declare-fun v0 () Int)\n\
        (declare-fun v1 () Int)\n\
@@ -194,6 +196,7 @@ let () =
     = "(set-option :print-success false)\n\
        (set-option :produce-models true)\n\
        (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
        (set-logic QF_UFLIA)\n\
        (declare-fun int63_mul (Int Int) Int)\n\
        (declare-fun v0 () Int)\n\
@@ -216,6 +219,7 @@ let () =
     = "(set-option :print-success false)\n\
        (set-option :produce-models true)\n\
        (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
        (set-logic ALL)\n\
        (declare-sort s0 0)\n\
        (declare-fun v0 () s0)\n\
@@ -254,6 +258,7 @@ let () =
     "(set-option :print-success false)\n\
      (set-option :produce-models true)\n\
      (set-option :timeout 5000)\n\
+     (set-option :rlimit 0)\n\
      (set-logic ALL)\n\
      (declare-datatypes ((d0 0)) (((c0 (p0 Int)) (c1 (p1 d0) (p2 d0)))))\n\
      (assert (and (<= (- 4611686018427387904) (p0 (c0 1))) (<= (p0 (c0 1)) \
@@ -318,14 +323,19 @@ let () =
         = Valid);
       assert (
         Buffer.contents dump
-        = "(set-logic ALL)\n(push 1)\n"
+        = "(reset)\n"
           ^ String.concat "\n"
-              (List.filter
+              (List.map
                  (fun line ->
-                   not (String.starts_with ~prefix:"(set-logic " line))
+                   if String.starts_with ~prefix:"(set-logic " line
+                   then "(set-logic ALL)"
+                   else line)
                  (String.split_on_char '\n'
                     (to_smtlib ~int_width:63 ~timeout_ms:2000 q)))
-          ^ "(pop 1)\n(echo \"vox-query-done\")\n");
+          ^ "(get-info :rlimit)\n(echo \"vox-query-done\")\n");
+      let unsat = run "unsat" q in
+      assert (unsat.resources = Some 42);
+      assert ((run "no-resources" q).resources = None);
       let x = Symbol.create ~label:"x" Int63 in
       let sat = query ~symbols:[x] (app Eq [Var x; integer 0]) in
       List.iter
@@ -409,7 +419,8 @@ let () =
       (match
          run
            ~dump:(fun s ->
-             if String.starts_with ~prefix:"(pop 1)" s then raise Exit)
+             if String.starts_with ~prefix:"(get-info :rlimit)" s
+             then raise Exit)
            "unsat" q
        with
       | _ -> failwith "Expected dump exception"
@@ -417,7 +428,7 @@ let () =
       (match
          run
            ~dump:(fun s ->
-             if String.starts_with ~prefix:"(pop 1)" s
+             if String.starts_with ~prefix:"(get-info :rlimit)" s
              then raise (Unix.Unix_error (Unix.EPIPE, "callback", "")))
            "unsat" q
        with
@@ -454,7 +465,8 @@ let () =
         (fun check ->
           assert ((check q).validity = Valid);
           let pid = read_pid () in
-          assert ((check q).validity = Valid);
+          let second = check q in
+          assert (second.validity = Valid && second.resources = Some 42);
           assert (read_pid () = pid));
       reaped ();
       List.iter

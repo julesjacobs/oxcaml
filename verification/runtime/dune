@@ -20,5 +20,5 @@
  (libraries
   ocamlfrontend
   (select vox_verify.ml from
-   (vox_smt_solver vox_vc -> vox_verify.enabled.ml)
+   (vox_smt_solver vox_vc unix -> vox_verify.enabled.ml)
    (-> vox_verify.disabled.ml))))

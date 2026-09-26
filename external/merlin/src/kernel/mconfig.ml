@@ -440,6 +440,8 @@ let ocaml_ignored_flags =
   [ "-a";
     "-dvc";
     "-dsmtlib";
+    "-dsmt-resources";
+    "-smt-assume-verified";
     "-absname";
     "-alias-deps";
     "-annot";
@@ -794,6 +796,8 @@ let ocaml_ignored_parametrized_flags =
     "-smt-solver";
     "-smt-budget";
     "-smt-timeout";
+    "-smt-resource-warning";
+    "-smt-resource-limit";
     "-cclib";
     "-ccopt";
     "-color";

@@ -173,6 +173,8 @@ type t =
   | Useless_valpoly                         (* 219 *)
   | Redundant_modality                      (* 220 *)
   | Unused_alert_disable of string          (* 221 *)
+  | Slow_refinement of { resources : int; threshold : int; limit : int }
+                                            (* 222 *)
 
 type alert = {kind:string; message:string; def:loc; use:loc}
 

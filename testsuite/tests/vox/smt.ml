@@ -1,12 +1,12 @@
 (* TEST
- setup-ocamlc.byte-build-env;
+ setup-ocamlc.opt-build-env;
  src = "${test_source_directory}/../../../verification/vox_smt.mli ${test_source_directory}/../../../verification/vox_smt.ml";
  dst = "./";
  copy;
  module = "vox_smt.mli";
- ocamlc.byte;
+ ocamlc.opt;
  module = "vox_smt.ml";
- ocamlc.byte;
+ ocamlc.opt;
  binary_modules = "vox_smt";
  run-expect;
  check-program-output;
@@ -36,6 +36,7 @@ let () =
 (set-option :print-success false)
 (set-option :produce-models true)
 (set-option :timeout 5000)
+(set-option :rlimit 0)
 (set-logic QF_LIA)
 (define-fun int63_sub ((x Int) (y Int)) Int
   (ite (> (- x y) 4611686018427387903) (- (- x y) 9223372036854775808)

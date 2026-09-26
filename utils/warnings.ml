@@ -170,6 +170,8 @@ type t =
   | Useless_valpoly                         (* 219 *)
   | Redundant_modality                      (* 220 *)
   | Unused_alert_disable of string          (* 221 *)
+  | Slow_refinement of { resources : int; threshold : int; limit : int }
+                                            (* 222 *)
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
    the numbers of existing warnings.
@@ -273,6 +275,7 @@ let number = function
   | Useless_valpoly -> 219
   | Redundant_modality -> 220
   | Unused_alert_disable _ -> 221
+  | Slow_refinement _ -> 222
 ;;
 (* DO NOT REMOVE the ;; above: it is used by
    the testsuite/ests/warnings/mnemonics.mll test to determine where
@@ -714,6 +717,11 @@ let descriptions = [
     names = ["unused-alert-disable"];
     description = "An attribute disabling an alert did not suppress any\n\
     \    occurrence of that alert.";
+    since = since 5 4 };
+  { number = 222;
+    names = ["slow-refinement"];
+    description = "A refinement proof used more solver resources than the\n\
+    \    warning threshold (see -smt-resource-warning).";
     since = since 5 4 };
 ]
 
@@ -1618,6 +1626,11 @@ let message = function
       msg "This attribute disables alert %a,@ \
            but it did not suppress any occurrence of the alert."
         Style.inline_code name
+  | Slow_refinement { resources; threshold; limit } ->
+      msg "Proving this refinement used %d solver resource units,@ \
+           over the warning threshold of %d (the limit is %d).@ \
+           Split the proof with intermediate assertions or lemmas."
+        resources threshold limit
 ;;
 
 let nerrors = ref 0

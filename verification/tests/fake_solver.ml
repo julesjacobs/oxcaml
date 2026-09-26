@@ -16,9 +16,11 @@ let () =
   then (
     output_string stderr (String.make 100000 'e');
     flush stderr);
+  let resources = ref 0 in
   let rec commands () =
     match read_line () with
     | "(check-sat)" | "(check-sat-using (then simplify solve-eqs smt))" ->
+      resources := !resources + 42;
       (match mode with
       | "hang" -> hang ()
       | "crash" ->
@@ -47,6 +49,12 @@ let () =
         (if mode = "solver-timeout"
          then "(:reason-unknown \"timeout\")"
          else "(:reason-unknown \"incomplete\")");
+      commands ()
+    | "(reset)" ->
+      resources := 0;
+      commands ()
+    | "(get-info :rlimit)" ->
+      if mode <> "no-resources" then Printf.printf "(:rlimit %d)\n%!" !resources;
       commands ()
     | "(echo \"vox-query-done\")" ->
       print_endline "vox-query-done";

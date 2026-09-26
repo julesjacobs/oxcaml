@@ -154,9 +154,16 @@ val check : ?poll:(unit -> unit) -> int_width:int -> query -> unit
     opaque sorts, datatypes, or general machine division use ALL; other queries
     use QF_LIA or QF_UFLIA. Callers must exclude zero divisors when modeling
     OCaml normal returns. [Int_div]/[Int_mod] use Euclidean semantics; callers
-    must supply the zero-divisor behavior. *)
+    must supply the zero-divisor behavior. [resource_limit] sets Z3's
+    deterministic [rlimit] for the query; it must be positive, and omitting it
+    makes the query unlimited. *)
 val to_smtlib :
-  ?poll:(unit -> unit) -> int_width:int -> timeout_ms:int -> query -> string
+  ?poll:(unit -> unit) ->
+  ?resource_limit:int ->
+  int_width:int ->
+  timeout_ms:int ->
+  query ->
+  string
 
 (** Integer model values are signed, including on a narrower host. *)
 type value =

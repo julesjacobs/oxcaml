@@ -442,9 +442,13 @@ let check ?(poll = fun () -> ()) ~int_width q =
   List.iter fact q.facts;
   fact q.goal
 
-let to_smtlib ?(poll = fun () -> ()) ~int_width ~timeout_ms q =
+let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
   check ~poll ~int_width q;
   if timeout_ms <= 0 then invalid_arg "Vox_smt.to_smtlib: timeout_ms";
+  (match resource_limit with
+  | Some limit when limit <= 0 ->
+    invalid_arg "Vox_smt.to_smtlib: resource_limit"
+  | _ -> ());
   let names = Hashtbl.create 16 in
   List.iteri
     (fun i s -> Hashtbl.add names s.Symbol.id ("v" ^ string_of_int i))
@@ -709,6 +713,11 @@ let to_smtlib ?(poll = fun () -> ()) ~int_width ~timeout_ms q =
   add "(set-option :print-success false)\n";
   add "(set-option :produce-models true)\n";
   add (Printf.sprintf "(set-option :timeout %d)\n" timeout_ms);
+  (* Z3 options persist across queries in a session, so every query sets its own
+     limit (0: unlimited). *)
+  add
+    (Printf.sprintf "(set-option :rlimit %d)\n"
+       (Option.value resource_limit ~default:0));
   let rec uses_int t =
     term_sort t = Int
     ||

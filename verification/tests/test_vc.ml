@@ -11,7 +11,7 @@ let queries ?(retry = false) ?(poll = fun () -> ())
   Typecore.force_delayed_checks ();
   let result = ref [] in
   let first = ref true in
-  Vox_vc.generate ~poll tree ~prove:(fun loc query ->
+  Vox_vc.generate ~poll tree ~prove:(fun ~batch:_ loc query ->
       before_query loc query;
       check ~int_width:63 query;
       if retry && !first

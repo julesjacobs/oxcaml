@@ -11,7 +11,10 @@ external monotonic_time : unit -> float = "caml_vox_smt_monotonic_time"
 
 type result =
   { validity : validity;
-    stderr : string
+    stderr : string;
+    resources : int option;
+    encoding_seconds : float;
+    solving_seconds : float
   }
 
 exception Cancelled
@@ -163,7 +166,7 @@ let model symbols response =
   | _ -> None
 
 let interpret symbols status response =
-  match status, parse response with
+  match status, response with
   | "unsat", [] -> Valid
   | "sat", [] -> Invalid (if symbols = [] then Some [] else None)
   | "sat", [List [Atom "error"; String _]] -> Invalid None
@@ -198,10 +201,12 @@ let dispose connection =
     [connection.input; connection.output; connection.errors]
 
 let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
-    ?(cancelled = fun () -> false) ~int_width q =
+    ?(cancelled = fun () -> false) ?resource_limit ~int_width q =
   if config.timeout_ms <= 0 then invalid_arg "Vox_smt_solver: timeout_ms";
   let keep = ref false in
-  let deadline = monotonic_time () +. (float config.timeout_ms /. 1000.) in
+  let started = monotonic_time () in
+  let deadline = started +. (float config.timeout_ms /. 1000.) in
+  let encoded = ref started and resources = ref None in
   let stderr = Buffer.create 128 in
   let descriptors = ref [] and child = ref None and exit_status = ref None in
   let stderr_fd = ref None in
@@ -261,22 +266,29 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
     let input =
       to_smtlib
         ~poll:(fun () -> ignore (poll ()))
-        ~int_width ~timeout_ms:config.timeout_ms q
+        ?resource_limit ~int_width ~timeout_ms:config.timeout_ms q
     in
+    encoded := monotonic_time ();
+    (* Each query starts from a reset solver, so its result and resource count
+       do not depend on the queries before it. The session keeps the logic it
+       has always used. *)
     let input =
-      "(push 1)\n"
+      "(reset)\n"
       ^ String.concat "\n"
-          (List.filter
-             (fun line -> not (String.starts_with ~prefix:"(set-logic " line))
+          (List.map
+             (fun line ->
+               if String.starts_with ~prefix:"(set-logic " line
+               then "(set-logic ALL)"
+               else line)
              (String.split_on_char '\n' input))
     in
     ignore (poll ());
-    let connection, started =
+    let connection =
       match session.connection with
       | Some connection ->
         session.connection <- None;
         descriptors := [connection.input; connection.output; connection.errors];
-        connection, false
+        connection
       | None ->
         let stdin_r, stdin_w = pipe () in
         let stdout_r, stdout_w = pipe () in
@@ -289,14 +301,13 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
         child := Some pid;
         List.iter close [stdin_r; stdout_w; stderr_w];
         List.iter Unix.set_nonblock [stdin_w; stdout_r; stderr_r];
-        { pid; input = stdin_w; output = stdout_r; errors = stderr_r }, true
+        { pid; input = stdin_w; output = stdout_r; errors = stderr_r }
     in
     let { pid; input = stdin_w; output = stdout_r; errors = stderr_r } =
       connection
     in
     child := Some pid;
     stderr_fd := Some stderr_r;
-    let input = if started then "(set-logic ALL)\n" ^ input else input in
     let pending = ref input and offset = ref 0 in
     let status = ref None and first_line = Buffer.create 16 in
     let response = Buffer.create 128 in
@@ -352,7 +363,8 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
             in
             status := Some answer;
             pending
-              := !pending ^ followup ^ "(pop 1)\n(echo \"vox-query-done\")\n";
+              := !pending ^ followup
+                 ^ "(get-info :rlimit)\n(echo \"vox-query-done\")\n";
             response_output tail
           end)
     in
@@ -425,7 +437,19 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
       if !offset <> String.length !pending
       then protocol "Incomplete query write";
       ignore (poll ());
-      let result = interpret q.symbols answer (Buffer.contents response) in
+      (* The resource count restarts at each reset. *)
+      let response =
+        match List.rev (parse (Buffer.contents response)) with
+        | List [Atom ":rlimit"; Atom count] :: rest -> (
+          match int_of_string_opt count with
+          | Some count when count >= 0 ->
+            resources := Some count;
+            List.rev rest
+          | _ -> protocol "Unexpected solver resource count")
+        | Atom "unsupported" :: rest -> List.rev rest
+        | response -> List.rev response
+      in
+      let result = interpret q.symbols answer response in
       ignore (poll ());
       (match result with
       | Timeout | Failure _ -> ()
@@ -466,7 +490,13 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
     | exception Callback_error (exn, backtrace) ->
       Printexc.raise_with_backtrace exn backtrace
   in
-  { validity; stderr = Buffer.contents stderr }
+  let finished = monotonic_time () in
+  { validity;
+    stderr = Buffer.contents stderr;
+    resources = !resources;
+    encoding_seconds = !encoded -. started;
+    solving_seconds = finished -. !encoded
+  }
 
 let with_session ?config ?dump ?cancelled ~int_width f =
   let session = { connection = None } in
@@ -477,14 +507,16 @@ let with_session ?config ?dump ?cancelled ~int_width f =
       Option.iter dispose session.connection;
       session.connection <- None)
     (fun () ->
-      f (fun query ->
+      f (fun ?resource_limit query ->
           if !closed then invalid_arg "Vox_smt_solver: closed session";
           if !busy then invalid_arg "Vox_smt_solver: recursive session query";
           busy := true;
           Fun.protect
             ~finally:(fun () -> busy := false)
             (fun () ->
-              check_impl session ?config ?dump ?cancelled ~int_width query)))
+              check_impl session ?config ?dump ?cancelled ?resource_limit
+                ~int_width query)))
 
-let check ?config ?dump ?cancelled ~int_width query =
-  with_session ?config ?dump ?cancelled ~int_width (fun check -> check query)
+let check ?config ?dump ?cancelled ?resource_limit ~int_width query =
+  with_session ?config ?dump ?cancelled ~int_width (fun check ->
+      check ?resource_limit query)

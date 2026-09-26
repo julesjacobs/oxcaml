@@ -165,8 +165,22 @@ result is not a reason to erase the operation producing it.
 
 ## Verification budgets and arithmetic
 
-`-smt-timeout MS` bounds each query, including serialization and solver I/O.
-`-smt-budget MS` adds a shared, cooperative budget for each verification pass,
+Proofs are bounded by Z3's resource count (`rlimit`), which is deterministic
+and independent of machine load, so a proof that passes on a quiet machine
+also passes under a parallel test run. `-smt-resource-limit N` fails an
+obligation that needs more than N units; `-smt-resource-warning N` reports one
+that needs more than N units as warning 222 (`slow-refinement`). Z3 4.16
+spends about 8 million units per second on an Apple M4 Max core. The
+defaults, 1,000,000 and 40,000,000 units, are about 0.1 s and 5 s; almost
+every library obligation needs under 0.1 s, and one that needs more usually
+points to an encoding problem. A function's obligations are first tried as one batch
+limited to the warning threshold; if that does not succeed, each obligation is
+proved alone under the full limit, so slow obligations are reported at their
+own locations. `-dsmt-resources` prints the resources and time used by each
+query.
+
+`-smt-timeout MS` is a wall-clock backstop for each query (default 60000),
+including serialization and solver I/O. `-smt-budget MS` adds a shared, cooperative budget for each verification pass,
 including VC construction and individual-obligation retries; zero leaves this
 budget unlimited. Solver startup/protocol failures propagate without retrying
 all obligations. Invalid or inconclusive logical batches can be retried to
