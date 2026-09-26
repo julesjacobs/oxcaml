@@ -20,6 +20,8 @@ end
     equal_def x y; hash_def x; hash_def y; ()
 end
 ''', 'Refinement could not be proved'),
+    'physical_holes': ('let f : int V.Map.t = [None]', 'expected'),
+    'hidden_compaction': ('let f = V.Bridge.compact', 'Unbound module'),
     'hidden_invariant': ('module Hidden = V.Spec', 'Unbound module'),
     'hidden_implementation': ('module Hidden = V.Impl', 'Unbound module'),
     'hidden_proof': ('let f = V.Map.same_intro', 'Unbound value'),

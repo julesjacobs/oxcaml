@@ -1,10 +1,11 @@
 # Flat hash table review boundary
 
 Baseline: `d143961f17`, the inspected remote head of PR #193. This boundary
-change does not alter the typed-heap migration or the table algorithm.
-`vox_table_implementation.ml` retains the previous executable driver. Obsolete
-explicit refinement introductions in the table modules now use implicit checking;
-the contracts, ghost proof boundaries and executable algorithm are unchanged.
+change does not alter the typed-heap migration or trusted storage contracts.
+`vox_table_implementation.ml` skips redundant lookup after rebuilding, and the
+vacancy scanner erases its proved-impossible exhaustion check. The combined
+insertion experiment was rejected; see `vox_flat_hashtbl_simplification.md`. Explicit refinement introductions use
+implicit checking; ownership and normal-return guarantees remain unchanged.
 
 ## Ordered review files
 
@@ -38,18 +39,21 @@ other collection operations are unused by this contract.
 
 This document supplies the trust and resource conventions accompanying that
 list. The semantic surface contains no probe invariant or opaque correctness
-predicate. `Map.agrees`, `same`, `absent`, `distinct`, `lookup`, `put`, `erase`
+predicate. `Map.agrees`, `same`, `distinct`, `lookup`, `put`, `erase`
 and `count` all have complete checked equations. The elimination lemmas are
 conveniences derived from those equations, not additional assumptions.
 
 `view` and `state` are abstract observations, not caller obligations. A view
 contains an internally checked representation invariant. Its `bindings` are
-distinct modulo `Key.equal`; `length` counts those bindings using `Bigint`.
+a finite list of key/value bindings, distinct modulo `Key.equal`; `length`
+counts those bindings using `Bigint`. Physical empty slots are absent from
+the public model. Checked ghost compaction bridges preserve lookup, key
+equivalence, distinctness, map updates and cardinality.
 `model` identifies the exact owned storage version associated with a snapshot.
 The snapshot has void layout and is immutable. A saved snapshot grants no
 access without the matching current ownership token.
 
-Creation establishes an empty map. Replacement specifies `Map.put`, removal
+Creation and clearing establish the exact empty binding list. Replacement specifies `Map.put`, removal
 specifies `Map.erase`, and reads specify actual returned values. Every mutation
 updates precisely the original handle's location in the owned heap; all other
 locations retain their values. Rebuilding can change backing blocks without
@@ -128,22 +132,24 @@ CMIs into its public include directory. The independently compiled generic
 client derives empty lookup, arbitrary-query replacement/removal/clearing and
 an unrelated owned table's unchanged lookup. It supplies no invariant or
 probe certificate. Runtime cases exercise 300 colliding keys, resizing,
-aliased handles, compaction and subsequent lookup.
+aliased handles, GC compaction and subsequent lookup. Additional cases update
+a key beyond a tombstone without duplication and replace/remove logically
+different keys in the same `Key.equal` equivalence class.
 
-Both bytecode and native clients pass. Ten rejection cases pass in both modes:
+Both bytecode and native clients pass. Twelve rejection cases pass in both modes:
 false reflexivity, inconsistent hashing, hidden invariant/implementation/proof/
-representation access, stale views, missing ownership, token reuse and a false
-lookup result. The erasure check inspects both emitted Lambda files: generic
+representation/compaction access, physical holes, stale views, missing ownership,
+token reuse and a false lookup result. The erasure check inspects both emitted Lambda files: generic
 execution contains no calls to the map/ownership observations or semantic
 lemmas. Native snapshots and tokens have zero layout, and mutation results
 contain only zero-layout fields. There is no runtime certificate accumulation
 or final semantic checker. Runtime asserts in regression clients are tests.
 `_build/flat-hashtbl-public/erasure.json` records the checked properties.
 
-The unchanged algorithm also passed `table_model.ml` in bytecode and native:
+The implementation also passed `table_model.ml` in bytecode and native:
 10,000 differential operations, 65,536-entry growth, GC/pointer payload and
 rebuild regressions. The existing `table_ownership_rejected.ml` passed both
 expect engines, including the principal-mode follow-up, with byte-identical
 expected output (exit 3 is the expect harness convention, not a test failure). The migrated benchmark
-client compiles with the installed native compiler; no fresh benchmark result
-is claimed. All checks used this worktree's compiler built by `make install`.
+client compiles with the installed native compiler. The simplification report
+records the limited benchmark comparisons and rejected combined traversal. All checks used this worktree's compiler built by `make install`.

@@ -80,7 +80,86 @@ module Make (Key : Vox_table_map.Key) = struct
         | _ -> ());
     index <> -1
 
-  let rec replace_hashed : ('a : immutable_data).
+  module Proof = struct
+    let (absent_after_rebuild @ total) : ('a : immutable_data).
+        (before : 'a I.view) @ immutable ->
+        (rebuilt : 'a I.view) @ immutable -> (key : Key.t) @ immutable ->
+        {u : unit | not (I.Map.absent before.model.slots key &&
+          I.Map.same rebuilt.model.slots before.model.slots) ||
+          I.Map.absent rebuilt.model.slots key} @ ghost =
+      fun before rebuilt key -> ghost_ (
+        I.Map.absent_lookup before.model.slots key;
+        I.Map.same_get rebuilt.model.slots before.model.slots key;
+        I.Map.absent_lookup rebuilt.model.slots key)
+
+    let (put_after_rebuild @ total) : ('a : immutable_data).
+        (before : 'a I.view) @ immutable ->
+        (rebuilt : 'a I.view) @ immutable ->
+        (after : 'a I.view) @ immutable ->
+        (key : Key.t) @ immutable -> (value : 'a) @ immutable ->
+        {u : unit | not (I.valid before && I.valid rebuilt && I.valid after &&
+          I.Map.same rebuilt.model.slots before.model.slots &&
+          I.Map.same after.model.slots (I.Map.put rebuilt.model.slots key value)) ||
+          I.Map.same after.model.slots (I.Map.put before.model.slots key value)}
+        @ ghost = fun before rebuilt after key value -> ghost_ (
+      I.valid_def before; I.valid_def rebuilt; I.valid_def after;
+      I.Map.put_same rebuilt.model.slots before.model.slots key value;
+      I.Map.put_distinct before.model.slots key value;
+      I.Map.same_transitive after.model.slots
+        (I.Map.put rebuilt.model.slots key value)
+        (I.Map.put before.model.slots key value))
+
+    let (put_equal_key @ total) : ('a : immutable_data).
+        (before : 'a I.view) @ immutable -> (after : 'a I.view) @ immutable ->
+        (stored : Key.t) @ immutable -> (key : Key.t) @ immutable ->
+        (value : 'a) @ immutable ->
+        {u : unit | not (I.valid before && I.valid after && Key.equal stored key &&
+          I.Map.same after.model.slots (I.Map.put before.model.slots stored value)) ||
+          I.Map.same after.model.slots (I.Map.put before.model.slots key value)}
+        @ ghost = fun before after stored key value -> ghost_ (
+      I.valid_def before; I.valid_def after;
+      I.Map.put_congruent before.model.slots stored key value;
+      I.Map.put_distinct before.model.slots key value;
+      I.Map.same_transitive after.model.slots
+        (I.Map.put before.model.slots stored value)
+        (I.Map.put before.model.slots key value))
+  end
+
+  let rec insert_absent_hashed : ('a : immutable_data).
+      (table : (Key.t, 'a) T.t) @ immutable ->
+      (before : {v : 'a I.view | I.valid v}) @ immutable ->
+      (key : {k : Key.t | I.Map.absent before.model.slots k}) @ immutable ->
+      (value : 'a) @ immutable ->
+      (hash : {h : int | h = Key.hash key}) ->
+      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
+        table) === Some
+        before.model})
+        @ unique read_write ghost ->
+      {r : 'a Mutation.result | I.valid r.#view &&
+        I.Map.same r.#view.model.slots (I.Map.put before.model.slots key
+          value) &&
+        P.own r.#state === H.put (P.own token) (T.location table) r.#view.model}
+      @ unique = fun table before key value hash token ->
+      let old_heap = ghost_ (P.own (borrow_ token)) in
+      let attempted = Insert.try_insert_hashed table before key value
+        hash token in
+      if attempted.#inserted then
+        (#{Mutation.view = attempted.#view; state = attempted.#state} : 'a
+          Mutation.result)
+      else begin
+        let rebuilt = Resize.rebuild table before attempted.#state in
+        ghost_ (Proof.absent_after_rebuild before rebuilt.#view key);
+        let result = insert_absent_hashed table rebuilt.#view key value hash
+          rebuilt.#state in
+        ghost_ (
+          Proof.put_after_rebuild before rebuilt.#view result.#view key value;
+          H.put_law old_heap (T.location table) rebuilt.#view.model
+            result.#view.model);
+        (#{Mutation.view = result.#view; state = result.#state} : 'a
+          Mutation.result)
+      end
+
+  let replace_hashed : ('a : immutable_data).
       (table : (Key.t, 'a) T.t) @ immutable ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (key : Key.t) @ immutable -> (value : 'a) @ immutable ->
@@ -102,40 +181,12 @@ module Make (Key : Vox_table_map.Key) = struct
         | _ -> unreachable_ ()) in
       let result = Mutation.write_existing table before index stored value
         token in
-      ghost_ (
-        I.valid_def before; I.valid_def result.#view;
-        I.Map.put_congruent before.model.slots stored key value;
-        I.Map.put_distinct before.model.slots key value;
-        I.Map.same_transitive result.#view.model.slots
-          (I.Map.put before.model.slots stored value) (I.Map.put
-            before.model.slots key value));
+      ghost_ (Proof.put_equal_key before result.#view stored key value);
       (#{Mutation.view = result.#view; state = result.#state} : 'a
         Mutation.result)
-    end else begin
-      let old_heap = ghost_ (P.own (borrow_ token)) in
-      let attempted = Insert.try_insert_hashed table before key value
-        hash token in
-      if attempted.#inserted then
-        (#{Mutation.view = attempted.#view; state = attempted.#state} : 'a
-          Mutation.result)
-      else begin
-        let rebuilt = Resize.rebuild table before attempted.#state in
-        let result = replace_hashed table rebuilt.#view key value hash
-          rebuilt.#state in
-        ghost_ (
-          I.valid_def before; I.valid_def rebuilt.#view; I.valid_def
-            result.#view;
-          I.Map.put_same rebuilt.#view.model.slots before.model.slots key value;
-          I.Map.put_distinct before.model.slots key value;
-          I.Map.same_transitive result.#view.model.slots
-            (I.Map.put rebuilt.#view.model.slots key value) (I.Map.put
-              before.model.slots key value);
-          H.put_law old_heap (T.location table) rebuilt.#view.model
-            result.#view.model);
-        (#{Mutation.view = result.#view; state = result.#state} : 'a
-          Mutation.result)
-      end
-    end
+    end else
+      insert_absent_hashed table before key value hash token
+
   let replace : ('a : immutable_data).
       (table : (Key.t, 'a) T.t) @ immutable ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
