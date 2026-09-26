@@ -32,33 +32,70 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray
          vox_table_implementation vox_table_bindings vox_table_bindings_bridge
          vox_verified_flat_hashtbl)
 mkdir -p "$output"
+# Units already verified with identical inputs are not verified again.
+export VOX_VERIFY_CACHE=${VOX_VERIFY_CACHE-$root/_build/vox-verify-cache}
+# Copy only changed sources, so that make rebuilds only what they affect.
 for module in "${modules[@]}"; do
-  cp "$root/verification/library/$module.ml" "$output/"
-  if [[ -f "$root/verification/library/$module.mli" ]]; then
-    cp "$root/verification/library/$module.mli" "$output/"
-  else
-    rm -f "$output/$module.mli"
-  fi
+  for source in "$module.ml" "$module.mli"; do
+    if [[ -f "$root/verification/library/$source" ]]; then
+      cmp -s "$root/verification/library/$source" "$output/$source" ||
+        cp "$root/verification/library/$source" "$output/$source"
+    else
+      rm -f "$output/$source"
+    fi
+  done
 done
 cd "$output"
-flags=(-nostdlib -I "$prefix/lib/ocaml" -I . -extension refinement_types)
+flags="-nostdlib -I $prefix/lib/ocaml -I . -extension refinement_types"
+sources=()
 for module in "${modules[@]}"; do
-  module_flags=("${flags[@]}" -principal)
-  # OxCaml -principal rejects even int option at an immutable_data parameter.
-  # These modules still undergo all refinement and termination checks.
-  case "$module" in
-    vox_http | vox_cdcl_total | vox_cdcl_total_proof | vox_table_* | \
-    vox_verified_flat_hashtbl)
-      module_flags=("${flags[@]}") ;;
-  esac
-  if [[ -f "$module.mli" ]]; then
-    "$prefix/bin/ocamlc" "${module_flags[@]}" -c "$module.mli"
-  fi
-  "$prefix/bin/ocamlc" "${module_flags[@]}" -c "$module.ml"
-  "$prefix/bin/ocamlopt" "${module_flags[@]}" -c "$module.ml"
+  sources+=("$module.ml")
+  [[ -f "$module.mli" ]] && sources+=("$module.mli")
 done
-"$prefix/bin/ocamlc" "${flags[@]}" -a -o vox_borrow.cma "${modules[@]/%/.cmo}"
-"$prefix/bin/ocamlopt" "${flags[@]}" -a -o vox_borrow.cmxa "${modules[@]/%/.cmx}"
+dependency_lines=$("$prefix/bin/ocamldep" -modules "${sources[@]}")
+# Each unit is verified by ocamlc and then compiled natively without
+# verifying it again. A unit's dependents wait for its native compilation, so
+# no compilation reads a .cmi that ocamlopt is rewriting. Every object also
+# depends on the compilers, so installing a new compiler rebuilds the library.
+compilers="$(cd "$prefix/bin" && pwd -P)/ocamlc.opt $(cd "$prefix/bin" && pwd -P)/ocamlopt.opt"
+{
+  printf 'all: vox_borrow.cma vox_borrow.cmxa\n'
+  printf 'vox_borrow.cma: %s\n' "${modules[*]/%/.cmo}"
+  printf '\t%s/bin/ocamlc %s -a -o $@ $^\n' "$prefix" "$flags"
+  printf 'vox_borrow.cmxa: %s\n' "${modules[*]/%/.cmx}"
+  printf '\t%s/bin/ocamlopt %s -a -o $@ $^\n' "$prefix" "$flags"
+  for module in "${modules[@]}"; do
+    module_flags="$flags -principal"
+    # OxCaml -principal rejects even int option at an immutable_data
+    # parameter. These modules still undergo all refinement and termination
+    # checks.
+    case "$module" in
+      vox_http | vox_cdcl_total | vox_cdcl_total_proof | vox_table_* | \
+      vox_verified_flat_hashtbl)
+        module_flags=$flags ;;
+    esac
+    dependencies=" $compilers"
+    for dependency in $(printf '%s\n' "$dependency_lines" |
+        grep -E "^$module\.mli?:" | cut -d: -f2); do
+      dependency=$(printf '%s' "${dependency:0:1}" | tr '[:upper:]' '[:lower:]')${dependency:1}
+      if [[ " ${modules[*]} " == *" $dependency "* ]]; then
+        dependencies="$dependencies $dependency.cmx"
+      fi
+    done
+    interface=
+    if [[ -f "$module.mli" ]]; then
+      interface=$module.cmi
+      printf '%s.cmi: %s.mli%s\n' "$module" "$module" "$dependencies"
+      printf '\t%s/bin/ocamlc %s -c %s.mli\n' "$prefix" "$module_flags" "$module"
+    fi
+    printf '%s.cmo: %s.ml %s%s\n' "$module" "$module" "$interface" "$dependencies"
+    printf '\t%s/bin/ocamlc %s -c %s.ml\n' "$prefix" "$module_flags" "$module"
+    printf '%s.cmx: %s.cmo%s\n' "$module" "$module" "$dependencies"
+    printf '\t%s/bin/ocamlopt %s -smt-assume-verified -c %s.ml\n' \
+      "$prefix" "$module_flags" "$module"
+  done
+} > build.mk
+make -s -f build.mk -j "${VOX_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 mkdir -p "$destination"
 for module in "${modules[@]}"; do
   case "$module" in

@@ -43,6 +43,7 @@ After compiler or test edits, run one command; paths are relative to
 ```bash
 ./dev test typing-modes/modes.ml
 ./dev test typing-modes/
+./dev test vox/rsa.ml vox/rsa_rejected.ml
 ./dev test --promote typing-modes/modes.ml
 ```
 
@@ -53,13 +54,20 @@ before building and prints the full-build command to use. It also detects stale
 or interrupted initialization and asks for `./dev init`; do not bypass these
 checks or manually copy build artifacts.
 
-By default, `.opt` test actions use the real compiler built with the bytecode
-host, avoiding the optimized-compiler rebuild. Use the native host only when a
-test depends on the compiler host backend:
+By default, `.opt` test actions use the native compiler. It is 4–14 times
+faster than the bytecode host on refinement-heavy tests, which outweighs its
+slower rebuild. After a small compiler edit, a single test can be faster with
+the bytecode host:
 
 ```bash
-./dev test --compiler-host=native path/to/test.ml
+./dev test --compiler-host=bytecode path/to/test.ml
 ```
+
+Several paths can be given; more than one selected test runs in parallel,
+and the ten slowest are listed at the end. Refinement verification results
+are cached in `_build/vox-verify-cache`, keyed by the compiler binary, the
+source, the imported interfaces, the flags and the solver; set
+`VOX_VERIFY_CACHE=` to disable the cache.
 
 The incremental workflow does not cover changes to bootstrap-language support,
 the runtime, the standard library, the compiler-libs installation, or test

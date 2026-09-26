@@ -15,9 +15,10 @@ usage()
 {
   cat >&2 <<EOF
 usage: ./$program init
-       ./$program test [--promote] [--compiler-host=bytecode|native] PATH
+       ./$program test [--promote] [--compiler-host=native|bytecode] PATH...
 
-PATH is relative to testsuite/tests.
+Each PATH is a test file or directory relative to testsuite/tests. Several
+tests run in parallel. The compiler host defaults to native.
 EOF
   exit 2
 }
@@ -569,6 +570,7 @@ run_planned_tests()
     # Concurrent ocamltest processes need disjoint roots: its recursive
     # directory creation is not race tolerant.
     if run_locked parallel --gnu --no-notice --keep-order \
+      --joblog "$run_dir/jobs.log" \
       "echo Running tests from \'{//}\' ...; \
        OCAMLTESTDIR=$OCAMLTESTDIR/{#} $planner $planner_flags {} 2>&1" \
       :::: "$test_files" > "$log"; then
@@ -608,7 +610,7 @@ run_test()
 {
   test_started_at=$(monotonic_seconds)
   promote=false
-  compiler_host=bytecode
+  compiler_host=native
   unset OCAMLTEST_EXPECT OCAMLTEST_EXPECTNAT OCAMLTEST_OCAML \
     OCAMLTEST_OCAMLC_BYTE OCAMLTEST_OCAMLC_OPT \
     OCAMLTEST_OCAMLOPT_BYTE OCAMLTEST_OCAMLOPT_OPT
@@ -622,13 +624,7 @@ run_test()
       *) break ;;
     esac
   done
-  [ "$#" -eq 1 ] || usage
-  path=$1
-  case "$path" in
-    ''|/*|.|..|../*|*/../*|*/..|*"'"*|*[[:space:]]*)
-      die "test path must stay below testsuite/tests"
-      ;;
-  esac
+  [ "$#" -ge 1 ] || usage
   reject_symlinks_below()
   {
     base=$1
@@ -650,44 +646,56 @@ run_test()
         die "test directory contains symbolic link '$symlink'"
     fi
   }
-  upstream_path=$root/testsuite/tests/$path
-  overlay_path=$root/oxcaml/testsuite/tests/$path
-  case "$path" in
-    asmcomp|asmcomp/*|asmgen|asmgen/*|lib-extensions|lib-extensions/*)
-      upstream_path=
-      reject_symlinks_below "$root/oxcaml/testsuite/tests" "$path"
-      ;;
-    *)
-      overlay_path=
-      reject_symlinks_below "$root/testsuite/tests" "$path"
-      ;;
-  esac
-  if [ -f "$overlay_path" ]; then
-    selection_kind=file
-    selected_file=$overlay_path
-  elif [ -f "$upstream_path" ]; then
-    selection_kind=file
-    selected_file=$upstream_path
-  elif [ -d "$overlay_path" ] || [ -d "$upstream_path" ]; then
-    selection_kind=directory
-  else
-    die "no test file or directory at 'testsuite/tests/$path'"
-  fi
   validate_state
   test_files=$temp_dir/test-files
-  if [ "$selection_kind" = directory ]; then
-    list_directory_tests "$path" "$test_files"
-  else
-    printf '%s\n' "$selected_file" > "$test_files"
+  : > "$test_files"
+  selection_kind=file
+  for path in "$@"; do
+    case "$path" in
+      ''|/*|.|..|../*|*/../*|*/..|*"'"*|*[[:space:]]*)
+        die "test path must stay below testsuite/tests"
+        ;;
+    esac
+    upstream_path=$root/testsuite/tests/$path
+    overlay_path=$root/oxcaml/testsuite/tests/$path
+    case "$path" in
+      asmcomp|asmcomp/*|asmgen|asmgen/*|lib-extensions|lib-extensions/*)
+        upstream_path=
+        reject_symlinks_below "$root/oxcaml/testsuite/tests" "$path"
+        ;;
+      *)
+        overlay_path=
+        reject_symlinks_below "$root/testsuite/tests" "$path"
+        ;;
+    esac
+    if [ -f "$overlay_path" ]; then
+      printf '%s\n' "$overlay_path" >> "$test_files"
+    elif [ -f "$upstream_path" ]; then
+      printf '%s\n' "$upstream_path" >> "$test_files"
+    elif [ -d "$overlay_path" ] || [ -d "$upstream_path" ]; then
+      selection_kind=directory
+      list_directory_tests "$path" "$temp_dir/directory-tests"
+      cat "$temp_dir/directory-tests" >> "$test_files"
+    else
+      die "no test file or directory at 'testsuite/tests/$path'"
+    fi
+  done
+  LC_ALL=C sort -u "$test_files" -o "$test_files"
+  # Any selection of more than one test runs in parallel.
+  if [ "$(wc -l < "$test_files")" -gt 1 ]; then
+    selection_kind=directory
   fi
   plan=$temp_dir/plan
   if ! plan_tests "$plan"; then
     echo "$program: selection is not supported incrementally" >&2
-    if [ "$selection_kind" = file ]; then
-      echo "$program: use 'make -s test-one TEST=$path' for the full path" >&2
-    else
-      echo "$program: use 'make -s test-one DIR=$path' for the full path" >&2
-    fi
+    for path in "$@"; do
+      if [ -f "$root/testsuite/tests/$path" ] ||
+         [ -f "$root/oxcaml/testsuite/tests/$path" ]; then
+        echo "$program: use 'make -s test-one TEST=$path' for the full path" >&2
+      else
+        echo "$program: use 'make -s test-one DIR=$path' for the full path" >&2
+      fi
+    done
     exit 2
   fi
 
@@ -762,6 +770,10 @@ run_test()
   TERM=dumb
   unset ROWS COLUMNS USE_RUNTIME
   export OCAMLSRCDIR CAML_LD_LIBRARY_PATH OCAMLTESTDIR MAKE SORT TERM
+  # Units whose refinements were already verified with identical inputs are
+  # not verified again; set VOX_VERIFY_CACHE= to disable.
+  VOX_VERIFY_CACHE=${VOX_VERIFY_CACHE-$root/_build/vox-verify-cache}
+  export VOX_VERIFY_CACHE
   invocation=$(date +%Y%m%dT%H%M%S).$$
   run_dir=$root/_build/vox-dev-runs/$invocation
   OCAMLTESTDIR=$run_dir/ocamltest
@@ -773,6 +785,16 @@ run_test()
   run_planned_tests "$log" || test_status=$?
   execution_seconds=$(($(monotonic_seconds) - execution_started_at))
   total_seconds=$(($(monotonic_seconds) - test_started_at))
+  if [ -f "$run_dir/jobs.log" ]; then
+    echo "Slowest tests:"
+    awk -F '\t' 'NR > 1 {
+        test = $9
+        sub(/ 2>&1$/, "", test)
+        sub(/.* /, "", test)
+        sub(/.*\/testsuite\/tests\//, "", test)
+        printf "%8.1fs  %s\n", $4, test
+      }' "$run_dir/jobs.log" | sort -rn | head -n 10
+  fi
   echo "Time: build ${build_seconds}s, test ${execution_seconds}s, total ${total_seconds}s"
   echo "Test log: $log"
   return "$test_status"
