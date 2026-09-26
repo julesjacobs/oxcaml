@@ -7,6 +7,8 @@ prefix=$(cd "$prefix" && pwd)
 output="$root/_build/vox-library"
 destination="$prefix/lib/ocaml/vox"
 modules=(vox_sequence vox_int_sequence vox_iarray
+         vox_sat_spec vox_sat_proof vox_sat
+         vox_cdcl_proof vox_cdcl vox_cdcl_total_proof vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
          vox_merge_sort borrow borrow_iarray
          pref ghost_pref raw_memory verified_atomic unique_cell one_shot
@@ -35,7 +37,8 @@ for module in "${modules[@]}"; do
   # OxCaml -principal rejects even int option at an immutable_data parameter.
   # These modules still undergo all refinement and termination checks.
   case "$module" in
-    vox_table_* | vox_verified_flat_hashtbl) module_flags=("${flags[@]}") ;;
+    vox_cdcl_total | vox_cdcl_total_proof | vox_table_* | vox_verified_flat_hashtbl)
+      module_flags=("${flags[@]}") ;;
   esac
   if [[ -f "$module.mli" ]]; then
     "$prefix/bin/ocamlc" "${module_flags[@]}" -c "$module.mli"
@@ -47,6 +50,9 @@ done
 "$prefix/bin/ocamlopt" "${flags[@]}" -a -o vox_borrow.cmxa "${modules[@]/%/.cmx}"
 mkdir -p "$destination"
 for module in "${modules[@]}"; do
+  case "$module" in
+    vox_sat_proof | vox_cdcl_proof | vox_cdcl_total_proof) continue ;;
+  esac
   cp "$module".{cmi,cmx} "$destination/"
   if [[ -f "$module.mli" ]]; then
     cp "$module.mli" "$destination/"
@@ -54,4 +60,4 @@ for module in "${modules[@]}"; do
 done
 cp vox_borrow.{cma,cmxa,a} "$destination/"
 cp "$root/verification/library/META" "$destination/"
-printf 'Verified borrow library installed in %s\n' "$destination"
+printf 'Verified Vox library installed in %s\n' "$destination"

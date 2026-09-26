@@ -1,0 +1,7 @@
+File "sat_cdcl_totality_rejected.ml", line 13, characters 13-16:
+13 |   let cell = ref value in
+                  ^^^
+Error: The value ref is partial
+       but is expected to be total
+         because it is used inside the function at file "sat_cdcl_totality_rejected.ml", lines 12-15, characters 2-7
+         which is expected to be total.
