@@ -49,14 +49,21 @@ end
     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value
 ''', 'Refinement could not be proved'),
 }
+# Misuses that callers who do not enable the extension must still be stopped
+# from making: these cases are also compiled without it.
+without_extension = {'stale', 'missing_ownership', 'reused_token'}
 for compiler in ('ocamlc', 'ocamlopt'):
     for name, (body, diagnostic) in cases.items():
         source = output / (name + '.ml')
         source.write_text('module V = Flat_hashtbl_public.V\n' + body + '\n')
-        result = subprocess.run([str(prefix / 'bin' / compiler), '-nostdlib',
-            '-I', str(prefix / 'lib/ocaml'), '-I', str(output / 'public'),
-            '-I', str(output), '-extension', 'refinement_types', '-c', str(source)],
-            text=True, capture_output=True)
-        (output / (compiler + '-' + name + '.log')).write_text(result.stdout + result.stderr)
-        assert result.returncode != 0 and diagnostic in result.stderr, (compiler, name, result.stderr)
-        print(compiler, name, 'rejected')
+        for extension in ([True, False] if name in without_extension else [True]):
+            result = subprocess.run([str(prefix / 'bin' / compiler), '-nostdlib',
+                '-I', str(prefix / 'lib/ocaml'), '-I', str(output / 'public'),
+                '-I', str(output)]
+                + (['-extension', 'refinement_types'] if extension else [])
+                + ['-c', str(source)],
+                text=True, capture_output=True)
+            log = compiler + '-' + name + ('' if extension else '-no-extension')
+            (output / (log + '.log')).write_text(result.stdout + result.stderr)
+            assert result.returncode != 0 and diagnostic in result.stderr, (log, result.stderr)
+            print(log, 'rejected')
