@@ -1,4 +1,4 @@
-# Verified borrow library
+# Verified Vox library
 
 From a configured Vox checkout with Z3 on `PATH`:
 
@@ -7,14 +7,25 @@ make vox-library
 ```
 
 This builds and installs the final compiler and verifies the library in
-bytecode and native modes. Checking uses `-principal` except for `vox_table_*`
-and `vox_verified_flat_hashtbl`: an upstream `immutable_data` inference issue
+bytecode and native modes. Checking uses `-principal` except for
+`vox_cdcl_total`, `vox_table_*`, and `vox_verified_flat_hashtbl`: an upstream
+`immutable_data` inference issue
 prevents those modules from compiling in principal mode. All modules undergo
 refinement and termination checking. The build installs `Vox_sequence`,
-`Vox_int_sequence`, `Vox_iarray`, `Borrow`, `Borrow_iarray`, the permission,
-raw-memory, atomic and verified-table modules, and the `vox_borrow` archive
+`Vox_int_sequence`, `Vox_iarray`, `Vox_sat`, `Vox_cdcl`, `Vox_cdcl_total`, `Borrow`,
+`Borrow_iarray`, the permission, raw-memory, atomic and verified-table
+modules, and the `vox_borrow` archive
 under the configured prefix's `lib/ocaml/vox`. The archive name is historical;
 its modules include the ownership primitives and derived collections.
+
+[`Vox_sat`](vox_sat.md) is a bounded DPLL solver for in-memory CNFs. Its SAT
+and UNSAT guarantees are checked in Vox.
+
+[`Vox_cdcl`](vox_cdcl.md) adds first-UIP clause learning and backjumping. Its
+learned clauses carry ghost derivations; UNSAT needs no runtime trace check.
+[`Vox_cdcl_total`](vox_cdcl_total.md) provides the same sound answers with
+Vox-checked termination and a recursion budget that returns `Unknown` when
+exhausted.
 
 With the worktree-local prefix from the agent guide, compile a client with:
 
