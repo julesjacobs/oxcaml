@@ -116,9 +116,48 @@ let unit_cache_file ~whole_unit =
 
 type outcome =
   | Proved of int option  (** with the resources used, when known *)
-  | Refuted
+  | Refuted of string option  (** with the counterexample's source values *)
   | Exhausted
   | Inconclusive of string option
+
+(* The counterexample restricted to variables named in the source: VC
+   generation labels other symbols by their role. *)
+let counterexample model =
+  let internal =
+    [ "value"; "reachable"; "observation"; "pattern"; "result";
+      "refinement_function"; "recursive"; "condition"; "argument" ]
+  in
+  let source_name label =
+    label <> ""
+    && (not (List.mem label internal))
+    && String.for_all
+         (function
+           | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '\'' -> true
+           | _ -> false)
+         label
+  in
+  let show : Vox_smt.value -> string = function
+    | Bool_value b -> string_of_bool b
+    | Int_value n -> Int64.to_string n
+    | Bigint_value n -> n ^ "Z"
+  in
+  match model with
+  | None -> None
+  | Some model -> (
+    let bindings =
+      List.filter_map
+        (fun (symbol, value) ->
+          let label = Vox_smt.Symbol.label symbol in
+          if source_name label then Some (label ^ " = " ^ show value) else None)
+        model
+    in
+    let bindings =
+      List.rev
+        (List.fold_left
+           (fun shown b -> if List.mem b shown then shown else b :: shown)
+           [] bindings)
+    in
+    match bindings with [] -> None | _ -> Some (String.concat ", " bindings))
 
 let validity_name : Vox_smt.validity -> string = function
   | Valid -> "valid"
@@ -187,7 +226,7 @@ let prove poll check ~batch loc query =
     | Some file when Sys.file_exists file -> (
       match In_channel.with_open_bin file In_channel.input_all with
       | "proved" -> Some (Proved None)
-      | "refuted" -> Some Refuted
+      | "refuted" -> Some (Refuted None)
       | "exhausted" -> Some Exhausted
       | "unknown" -> Some (Inconclusive None)
       | entry -> (
@@ -197,6 +236,10 @@ let prove poll check ~batch loc query =
             (fun n -> Proved (Some n))
             (int_of_string_opt
                (String.sub entry (i + 1) (String.length entry - i - 1)))
+        | Some i when String.sub entry 0 i = "refuted" ->
+          Some
+            (Refuted
+               (Some (String.sub entry (i + 1) (String.length entry - i - 1))))
         | Some i when String.sub entry 0 i = "unknown" ->
           Some
             (Inconclusive
@@ -235,7 +278,7 @@ let prove poll check ~batch loc query =
             (Vox_vc.Unproved
                (Location.errorf ~loc "Refinement could not be proved.\n%s"
                   (Vox_smt.explain_invalid query model)))
-        | Invalid _ -> Refuted
+        | Invalid model -> Refuted (counterexample model)
         | Unknown reason -> Inconclusive reason
         | Timeout ->
           raise
@@ -250,7 +293,8 @@ let prove poll check ~batch loc query =
             (match outcome with
             | Proved None -> "proved"
             | Proved (Some n) -> "proved " ^ string_of_int n
-            | Refuted -> "refuted"
+            | Refuted None -> "refuted"
+            | Refuted (Some values) -> "refuted " ^ values
             | Exhausted -> "exhausted"
             | Inconclusive None -> "unknown"
             | Inconclusive (Some reason) -> "unknown " ^ reason))
@@ -288,13 +332,14 @@ let prove poll check ~batch loc query =
          (Location.errorf ~loc
             "Refinement solver exceeded its resource limit (%d units)"
             (Option.value limit ~default:0)))
-  | Refuted ->
+  | Refuted values ->
     raise
       (Vox_vc.Unproved
-         (Location.errorf ~loc "Refinement could not be proved (%s)"
+         (Location.errorf ~loc "Refinement could not be proved (%s%s)"
             (if abstract_multiplication query
              then "countermodel for abstract multiplication"
-             else "counterexample")))
+             else "counterexample")
+            (match values with None -> "" | Some values -> ": " ^ values)))
   | Inconclusive reason ->
     raise
       (Vox_vc.Unproved

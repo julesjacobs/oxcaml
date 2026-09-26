@@ -110,6 +110,7 @@ let rec join_value condition a b =
 
 type obligation =
   { loc : Location.t;
+    origin : Location.t;  (** where the required refinement is written *)
     goal : term;
     omitted_premises : (Location.t * Location.error) list
   }
@@ -2500,6 +2501,7 @@ and introduce ctx env s ty value loc =
     let assertion =
       Assert
         { loc;
+          origin = r.ref_pred.rexp_loc;
           goal =
             (if goals.dead
              then Boolean true
@@ -3347,9 +3349,14 @@ let verify_batch ctx prove code =
     try prove ~batch:false o.loc q
     with Unproved error ->
       let s = { empty with omitted_premises = o.omitted_premises } in
+      let origin =
+        if o.origin.loc_ghost || o.origin = o.loc
+        then []
+        else [Location.msg ~loc:o.origin "The refinement is stated here."]
+      in
       raise
         (Location.Error
-           { error with sub = error.sub @ omitted_premise_messages s })
+           { error with sub = error.sub @ origin @ omitted_premise_messages s })
   in
   match goals with
   | [] -> ()
@@ -3523,6 +3530,7 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
           verify_batch ctx prove
             (Assert
                { loc = call.exp_loc;
+                 origin = measure.exp_loc;
                  goal =
                    (let value = required measure.exp_loc value in
                     match term_sort entry_measure with
