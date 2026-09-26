@@ -132,9 +132,9 @@ let rec (boundary_raise @ total) : (h : node Pref.heap) @ immutable -> (lo : int
     {u : unit | boundary_bound h hi s} @ ghost = fun h lo hi s premise -> ghost_ (
     let refine_ premise = premise in boundary_bound_def h lo s; boundary_bound_def h hi s;
     let u = () in match s with Boundary p -> below_def h p lo; below_def h p hi; refine_ u
-    | Parameter _ | Constant _ -> refine_ u
+    | Parameter _ | Constant _ | Word_constant _ -> refine_ u
     | Product (_, a, b) -> boundary_raise h lo hi a (refine_ u); boundary_raise h lo hi b (refine_ u); refine_ u
-    | Indirect (_, child) -> boundary_raise h lo hi child (refine_ u); refine_ u)
+    | Indirect (_, child) | List_template (_, child) -> boundary_raise h lo hi child (refine_ u); refine_ u)
 
 let rec (environment_raise @ total) : (h : node Pref.heap) @ immutable -> (lo : int) -> (hi : int) ->
     (env : env) @ immutable -> (ts : templates) @ immutable -> {u : unit | lo <= hi && env_at h lo env ts} ->

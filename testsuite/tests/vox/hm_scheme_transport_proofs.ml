@@ -13,7 +13,7 @@ let rec (embed_substitute @ total) :
     {u : unit | S.substitute_type delta (D.embed t) === D.embed (M.substitute delta t)} @ ghost = fun delta t -> ghost_ (
     D.embed_def t; let mono = D.embed t in S.substitute_type_def delta mono;
     M.substitute_def delta t; let next = M.substitute delta t in D.embed_def next;
-    (match t with Variable _ | Boolean -> () | Function (a, b) -> embed_substitute delta a; embed_substitute delta b; ());
+    (match t with Variable _ | Boolean | Word64 -> () | List_type a -> embed_substitute delta a; () | Function (a, b) -> embed_substitute delta a; embed_substitute delta b; ());
     ())
 
 let rec (substitute_body @ total) : (names : A.names) @ immutable ->
@@ -34,8 +34,8 @@ let rec (substitute_body @ total) : (names : A.names) @ immutable ->
     | Parameter p -> let z = D.Z in A.abstract_free_def names z p;
       (match A.position names p with None -> () | Some i ->
         D.add_def z i; let parameter = D.Parameter i in S.substitute_type_def delta parameter; ())
-    | Constant _ -> ()
-    | Indirect (_, child) ->
+    | Constant _ | Word_constant _ -> ()
+    | Indirect (_, child) | List_template (_, child) ->
       let next : ((p : node Pref.t) @ immutable ->
         {u : unit | not (E.boundary_member child p) || M.substitute delta (rho p) === tau p}) @ total = fun p ->
         equal p; E.boundary_member_def schema p; () in

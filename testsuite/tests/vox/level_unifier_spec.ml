@@ -10,14 +10,14 @@ let[@def] (redirect @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @
     (q : node Pref.t @ immutable) = ghost_ (match H.at h p with
   | None -> cell (Link q) 0 | Some v -> {v with desc = Link q})
 
-type ty = Copy_spec.ty = Variable of node Pref.t | Boolean | Function of ty * ty [@@inductive]
+type ty = Copy_spec.ty = Variable of node Pref.t | Boolean | Word64 | List_type of ty | Function of ty * ty [@@inductive]
 
 let[@def] (scoped @ total) (h : node Pref.heap @ immutable)
     (p : node Pref.t @ immutable) =
   ghost_ (match observe h p with
   | None -> false
-  | Some (Var | Bool) -> true
-  | Some (Link q) -> H.mem h q
+  | Some (Var | Bool | Word) -> true
+  | Some (Link q | List q) -> H.mem h q
   | Some (Arrow (a, b)) -> H.mem h a && H.mem h b)
 
 let[@def] (node_equation @ total) (h : node Pref.heap @ immutable)
@@ -26,6 +26,8 @@ let[@def] (node_equation @ total) (h : node Pref.heap @ immutable)
   ghost_ (match observe h p with
   | None | Some Var -> true
   | Some Bool -> rho p === Boolean
+  | Some Word -> rho p === Word64
+  | Some (List a) -> rho p === List_type (rho a)
   | Some (Link q) -> rho p === rho q
   | Some (Arrow (a, b)) -> rho p === Function (rho a, rho b))
 
@@ -34,7 +36,7 @@ type resolution = Here | Via of node Pref.t * resolution [@@inductive]
 let[@def] (terminal @ total) (h : node Pref.heap @ immutable)
     (p : node Pref.t @ immutable) =
   ghost_ (match observe h p with
-  | Some (Var | Bool | Arrow _) -> true
+  | Some (Var | Bool | Word | List _ | Arrow _) -> true
   | None | Some (Link _) -> false)
 
 let[@def] rec (resolves @ total) (h : node Pref.heap @ immutable)
@@ -64,8 +66,9 @@ let[@def] rec (searched @ total) (h : node Pref.heap @ immutable)
   ghost_ (H.mem h p && match trace with
   | Hit -> p === needle && found
   | Leaf -> not (p === needle) && not found
-    && (observe h p === Some Var || observe h p === Some Bool)
-  | Follow (q, rest) -> not (p === needle) && observe h p === Some (Link q)
+    && (observe h p === Some Var || observe h p === Some Bool || observe h p === Some Word)
+  | Follow (q, rest) -> not (p === needle)
+    && (observe h p === Some (Link q) || observe h p === Some (List q))
     && searched h needle q found rest
   | Left (a, b, left) -> not (p === needle)
     && observe h p === Some (Arrow (a, b)) && found
@@ -150,6 +153,7 @@ type derivation =
   | Occurs_right of search
   | Clash
   | Resolve of node Pref.t * node Pref.t * resolution * resolution * derivation
+  | List_children of node Pref.t * node Pref.t * derivation
   | Children of node Pref.t * node Pref.t * node Pref.t * node Pref.t
       * node Pref.heap * bool * derivation * derivation
   [@@inductive]
@@ -168,7 +172,8 @@ let[@def] rec (unified @ total) (h : node Pref.heap @ immutable)
     && unified (lower_heap h bound edits) p q ok after rest
   | Swap rest -> unified h q p ok after rest
   | Same -> p === q && ok && after === h
-  | Constants -> observe h p === Some Bool && observe h q === Some Bool
+  | Constants -> (observe h p === Some Bool || observe h p === Some Word)
+    && observe h q === observe h p
     && ok && after === h
   | Bind_left search -> observe h p === Some Var && not (p === q)
     && (match at_level h p with Generic -> false | Finite n -> below h q n)
@@ -182,10 +187,16 @@ let[@def] rec (unified @ total) (h : node Pref.heap @ immutable)
     && terminal h p && searched h q p true search && not ok && after === h
   | Clash -> not ok && after === h &&
     (match observe h p, observe h q with
-     | Some Bool, Some (Arrow _) | Some (Arrow _), Some Bool -> true
+     | Some Bool, Some (Word | Arrow _ | List _)
+     | Some Word, Some (Bool | Arrow _ | List _)
+     | Some (Arrow _), Some (Bool | Word | List _)
+     | Some (List _), Some (Bool | Word | Arrow _) -> true
      | _ -> false)
   | Resolve (r, s, rp, sq, rest) -> resolves h p r rp && resolves h q s sq
     && unified h r s ok after rest
+  | List_children (a, b, child) ->
+    observe h p === Some (List a) && observe h q === Some (List b)
+    && unified h a b ok after child
   | Children (a, b, c, e, middle, left_ok, left, right) ->
     observe h p === Some (Arrow (a, b)) && observe h q === Some (Arrow (c, e))
     && unified h a c left_ok middle left
@@ -227,11 +238,13 @@ let[@def] rec (writes @ total) (p : node Pref.t @ immutable)
   | Bind_right _ -> Set (q, p)
   | Swap rest -> writes q p rest
   | Resolve (r, s, _, _, rest) -> writes r s rest
+  | List_children (a, b, child) -> writes a b child
   | Children (a, b, c, e, _, ok, left, right) ->
     if ok then Then (writes a c left, writes b e right) else writes a c left
   | Same | Constants | Occurs_left _ | Occurs_right _ | Clash -> Unchanged
 
 let[@def] rec (weight @ total) (t : ty @ immutable) =
   match t with
-  | Variable _ | Boolean -> Bigint.one
+  | Variable _ | Boolean | Word64 -> Bigint.one
+  | List_type a -> Bigint.add Bigint.one (weight a)
   | Function (a, b) -> Bigint.add Bigint.one (Bigint.add (weight a) (weight b))

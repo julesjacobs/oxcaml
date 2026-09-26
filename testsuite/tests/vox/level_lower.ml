@@ -38,7 +38,7 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
     ghost_ (active_def h p; scope p; finite_scope_def h p; source_ok_def h p);
     let old = Pref.read p (borrow_ t) in let t : {t : node Pref.token | Pref.own t === h && bound >= 0 && active h p} = t in
     match old.desc with
-    | Var | Bool ->
+    | Var | Bool | Word ->
       ghost_ (children_below_def h old.desc bound);
       let t : {t : node Pref.token | Pref.own t === h && bound >= 0 && active h p
         && match H.at h p with None -> false | Some v -> children_below h v.desc bound} = t in
@@ -50,7 +50,7 @@ let rec lower : (h : node Pref.heap) @ immutable ghost ->
       ghost_ (lowering_at h bound edits p ();
         lower_frame_def h after p; bound_root_def tree; bounded_def after bound tree);
       let r = #{state = r.#state; edits; tree} in r
-    | Link q ->
+    | Link q | List q ->
       let t : {t : node Pref.token | Pref.own t === h && bound >= 0 && active h q} = t in
       let child = lower h scope bound q t in
       let d = ghost_ child.#edits in let tree_child = ghost_ child.#tree in

@@ -49,7 +49,8 @@ let finish : (before : (node Pref.heap) Ghost.t) @ immutable ->
       let qv : {v : node | H.at h.Ghost.ghost q === Some v} =
         let borrowed = borrow_ state in let refine_ v = Pref.read q borrowed in refine_ v in
       match pv.desc, qv.desc, pv.level, qv.level with
-      | Arrow _, Arrow _, Finite pn, Finite qn ->
+      | Arrow _, Arrow _, Finite pn, Finite qn
+      | List _, List _, Finite pn, Finite qn ->
         let source = if pn >= qn then p else q in
         let target = if pn >= qn then q else p in
         let source_tree : {t : tree | finite h.Ghost.ghost t && tree_root t === source} @ immutable ghost = ghost_ (

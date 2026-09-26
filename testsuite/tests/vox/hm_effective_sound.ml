@@ -40,7 +40,7 @@ let rec (run_sound @ total) : (h : node Pref.heap) @ immutable -> (heads : E.hea
       facts x; runtime_at_def h heads depth pool x; safe_def h heads x; () in
     let g = P.context rho schemas in let term = source e in let ty = rho p in let t = D.embed ty in
     let z = D.Z in T.embed_wf z ty; match e with
-    | RApp_left _ | RApp_right _ | RLet_left _ ->
+    | RApp_left _ | RCons_left _ | RApp_right _ | RCons_right _ | RLet_left _ ->
       let d = D.Constant in refine_ d
     | RLet (rhs, body, middle, child_pool) ->
       let child_depth = depth + 1 in let empty : pool = Empty in
@@ -153,7 +153,7 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       E.effective_below_def h heads p depth; E.level_def h heads p;
       active_def h rep.root; at_level_def h rep.root;
       Effective_template.valid_template_def h heads schema; root_def schema;
-      (match schema with Boundary _ -> () | Parameter q | Constant q | Product (q, _, _) | Indirect (q, _) ->
+      (match schema with Boundary _ -> () | Parameter q | Constant q | Word_constant q | List_template (q, _) | Product (q, _, _) | Indirect (q, _) ->
         Effective_template.generic_def h heads q; ());
       P.lookup_context rho schemas i schema (); boundary_scheme rho p;
       let args = D.No_arguments in let d = D.Variable args in let sigma = D.Forall (z, t) in
@@ -163,9 +163,39 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       | Some original -> copy_heap_def h epoch depth history; Hm_execution_spec.copy_heap_def h epoch depth history;
         let refine_ d = Hm_effective_variable.variable_typing h heads valid certificate depth env schemas i original p epoch history rho
           (refine_ model) () in refine_ d)
-    | RBool _ -> model p; node_equation_def after rho p; observe_def after p;
+    | RBool _ | RFalse _ -> model p; node_equation_def after rho p; observe_def after p;
       let desc : desc = Bool in cell_def desc depth; D.embed_def ty;
       let d = D.Constant in D.typed_def z g term t d; refine_ d
+    | RWord (_, _) -> model p; node_equation_def after rho p; observe_def after p;
+      let desc : desc = Word in cell_def desc depth; D.embed_def ty;
+      let d = D.Word_constant in D.typed_def z g term t d; refine_ d
+    | RNil (arg, _) ->
+      model p; node_equation_def after rho p; observe_def after p;
+      let desc = List arg in cell_def desc depth; D.embed_def ty;
+      let a = D.embed (rho arg) in T.embed_wf z (rho arg);
+      let d = D.Empty_list a in D.typed_def z g term t d; refine_ d
+    | RCaseList (c, yes, no, body) ->
+      let db = run_sound h heads trees depth pool facts env schemas body after final_pool rho model p () in
+      let d = Hm_list_case_constraints.invert z g c yes no t db () in refine_ d
+    | RIf (c, yes, no, body) ->
+      let db = run_sound h heads trees depth pool facts env schemas body after final_pool rho model p () in
+      let d = Hm_conditional_constraints.invert z g c yes no t db () in refine_ d
+    | RPrimitive (op, left, right, body, middle, body_pool, out) ->
+      (match result body with None -> unreachable_ () | Some b ->
+      let desc = primitive_desc op in allocated_def middle depth p desc;
+      let ts : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+        (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h trees depth pool env body middle body_pool x () in refine_ t in
+      let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
+        let refine_ _t = ts x in model x;
+        Hm_effective_model.allocation_restrict middle p (cell desc depth) rho x (); () in
+      let db = run_sound h heads trees depth pool facts env schemas body middle body_pool rho mid_model b () in
+      let operands = Hm_primitive_constraints.invert z g left right (D.embed (rho b)) db () in
+      model p; node_equation_def after rho p; observe_def after p;
+      cell_def desc depth; primitive_desc_def op; D.operation_type_def op; D.embed_def ty;
+      let d = D.Word_primitive (operands.Hm_primitive_constraints.left_typing,
+        operands.Hm_primitive_constraints.right_typing) in
+      D.typed_def z g term t d; refine_ d)
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
       allocated_def h depth arg var; cell_def var depth; allocatable_def h v;
@@ -195,6 +225,37 @@ let closed = Representative_pool_spec.close_heap middle depth child_pool in let 
       let refine_ body_typing = run_sound h1 heads1 ts1 depth pool1 (refine_ facts1) env1 schemas1 body middle body_pool rho mid_model b () in
       model p; node_equation_def after rho p; observe_def after p; cell_def desc depth;
       D.embed_def ty; let a = D.embed (rho arg) in let d = D.Abstraction (a, body_typing) in
+      D.typed_def z g term t d; refine_ d)
+    | RCons (left, right, h1, pool1, h2, pool2, _, ok, derivation) ->
+      let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+      (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in refine_ t in
+      let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 ts1 x in r in
+      let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
+        heads1_def x; let refine_ r = Forest_heads.select h1 ts1 x in
+        E.valid_head_def h1 heads1 x; () in
+            let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+      (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in refine_ t in
+            (match result left with None -> let d = D.Constant in refine_ d | Some f ->
+      match result right with None -> let d = D.Constant in refine_ d | Some a ->
+      let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
+      allocated_def h2 depth p desc;
+      let model3 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x}) @ total = fun x ->
+        Effective_unifier_model.success_forward_at h3 rho a p after derivation model x (); () in
+      let model2 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h2 rho x}) @ total = fun x ->
+        let refine_ _t = ts2 x in model3 x; Hm_effective_model.allocation_restrict h2 p v rho x (); () in
+      let model1 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h1 rho x}) @ total = fun x ->
+        Hm_effective_model.run_restrict h1 ts1 depth pool1 env right h2 pool2 rho model2 x (); () in
+      let refine_ left_typing = run_sound h heads trees depth pool facts env schemas left h1 pool1 rho model1 f () in
+      C.run_environment h heads heads1 valid depth pool env schemas left h1 pool1 valid1 depth ();
+      let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 heads1 depth pool1 x}) @ total = fun x ->
+        Hm_effective_invariant.run_invariant h heads trees depth pool facts env left h1 heads1 valid1 pool1 x (); () in
+      let refine_ right_typing = run_sound h1 heads1 ts1 depth pool1 facts1 env schemas right h2 pool2 rho model2 a () in
+      Effective_unifier_model.success_forward_at h3 rho a p after derivation model p ();
+      node_equation_def h3 rho p; observe_def h3 p; cell_def desc depth;
+      D.embed_def ty;
+      let at = D.embed (rho f) in let d = D.List_cons (at, left_typing, right_typing) in
       D.typed_def z g term t d; refine_ d)
     | RApp (left, right, h1, pool1, h2, pool2, _, arrow, ok, derivation) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&

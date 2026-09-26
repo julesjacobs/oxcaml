@@ -47,7 +47,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
       ghost_ (lower_valid_def h.Ghost.ghost bound edits; lower_heap_def h.Ghost.ghost bound edits; confined_def edits tree);
       let r = #{state = t; edits; tree} in use (refine_ r)
     ) else match old.desc with
-    | Var | Bool ->
+    | Var | Bool | Word ->
       ghost_ (children_below_def h.Ghost.ghost old.desc bound);
       let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && active h.Ghost.ghost p
         && match H.at h.Ghost.ghost p with None -> false | Some v -> children_below h.Ghost.ghost v.desc bound} = refine_ t in
@@ -59,7 +59,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
       ghost_ (let u = () in lowering_at h.Ghost.ghost bound edits p (refine_ u);
         lower_frame_def h.Ghost.ghost after p; bound_root_def tree; bounded_def after bound tree);
       let r = #{state = r.#state; edits; tree} in use (refine_ r)
-    | Link q ->
+    | Link q | List q ->
       let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && active h.Ghost.ghost q} = refine_ t in
       let lower_heap_witness : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
       let lower_scope_witness : (((x : node Pref.t) @ immutable ->

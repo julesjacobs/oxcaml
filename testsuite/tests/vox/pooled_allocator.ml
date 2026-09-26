@@ -13,7 +13,7 @@ let allocate : (h : node Pref.heap Ghost.t) @ immutable -> (depth : int) -> (des
       && r.#pool === Entry (r.#value, pool) && pool_scoped (Pref.own r.#state) r.#pool} @ unique = fun h depth desc pool t ->
   let refine_ t = t in let v = cell desc depth in
   ghost_ (cell_def desc depth; children_below_def h.Ghost.ghost desc depth; payload_scoped_def h.Ghost.ghost v;
-    (match desc with Var | Bool -> () | Link q -> below_def h.Ghost.ghost q depth; ()
+    (match desc with Var | Bool | Word -> () | Link q | List q -> below_def h.Ghost.ghost q depth; ()
     | Arrow (a, b) -> below_def h.Ghost.ghost a depth; below_def h.Ghost.ghost b depth; ()));
   let refine_ step = Pref.alloc v t in let p = step.value in let pool_next = Entry (p, pool) in
   ghost_ (let u = () in allocation_pool h.Ghost.ghost p v pool (refine_ u);

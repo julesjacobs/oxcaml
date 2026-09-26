@@ -129,9 +129,25 @@ let rec (run_unlisted @ total) : (h : node Pref.heap) @ immutable -> (depth : in
     | RVar (i, target, epoch, d, certificate) -> (match lookup env i with None -> () | Some original ->
       Copy_certificate_spec.certifies_def h certificate epoch depth d original target;
       copy_unlisted h pool certificate epoch depth d x (); ())
-    | RBool p -> let desc : desc = Bool in let v = cell desc depth in
+    | RBool p | RFalse p -> let desc : desc = Bool in let v = cell desc depth in
       allocation_unlisted h pool p v x (); ()
-    | RApp_left _ | RApp_right _ | RLet_left _ -> ()
+    | RWord (_, p) -> let desc : desc = Word in let v = cell desc depth in
+      allocation_unlisted h pool p v x (); ()
+    | RApp_left _ | RCons_left _ | RApp_right _ | RCons_right _ | RLet_left _ -> ()
+    | RNil (arg, p) ->
+      let var = Var in let v = cell var depth in let middle = H.put h arg v in
+      let desc = List arg in let w = cell desc depth in let pool1 = Entry (arg, pool) in
+      allocation_unlisted middle pool1 p w x ();
+      allocation_unlisted h pool arg v x (); ()
+    | RCaseList (_, _, _, body) ->
+      run_unlisted h depth pool env body after final_pool x ()
+    | RIf (_, _, _, body) ->
+      run_unlisted h depth pool env body after final_pool x ()
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      (match result body with None -> () | Some _ -> match out with None -> () | Some p ->
+        let desc = primitive_desc op in let v = cell desc depth in
+        allocation_unlisted middle body_pool p v x ();
+        run_unlisted h depth pool env body middle body_pool x (); ())
     | RLam (arg, body, middle, body_pool, out) ->
       (match result body with None -> () | Some b -> match out with None -> () | Some p ->
       let desc = Arrow (arg, b) in let w = cell desc depth in allocation_unlisted middle body_pool p w x ();
@@ -139,6 +155,13 @@ let rec (run_unlisted @ total) : (h : node Pref.heap) @ immutable -> (depth : in
       let pool1 = Entry (arg, pool) in let env1 = Bind (arg, env) in
       run_unlisted h1 depth pool1 env1 body middle body_pool x ();
       allocation_unlisted h pool arg v x (); ())
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
+      (match result left with None -> () | Some f -> match result right with None -> () | Some a ->
+        let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
+        unify_finite_before h3 a p ok after d x ();
+        allocation_unlisted h2 pool2 p v x ();
+        run_unlisted h1 depth pool1 env right h2 pool2 x ();
+        run_unlisted h depth pool env left h1 pool1 x (); ())
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       (match result left with None -> () | Some f -> match result right with None -> () | Some a ->
         let var : desc = Var in let v = cell var depth in let h3 = H.put h2 p v in let pool3 = Entry (p, pool2) in

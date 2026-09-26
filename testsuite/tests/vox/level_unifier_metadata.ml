@@ -23,7 +23,7 @@ let (redirect_scope @ total) : (h : node Pref.heap) @ immutable -> (p : node Pre
     redirect_active h p q x (); redirect_active h p q q ();
     (match H.at h x with None -> () | Some old ->
       (match old.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> ());
-      (match old.desc with Var | Bool -> () | Link a -> redirect_active h p q a (); ()
+      (match old.desc with Var | Bool | Word -> () | Link a | List a -> redirect_active h p q a (); ()
       | Arrow (a, b) -> redirect_active h p q a (); redirect_active h p q b ();
         ())); ())
 let rec (unified_active @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
@@ -36,7 +36,7 @@ let rec (unified_active @ total) : (h : node Pref.heap) @ immutable -> (p : node
   | Bind_left _ -> redirect_active h p q x (); ()
   | Bind_right _ -> redirect_active h q p x (); ()
   | Swap rest -> unified_active h q p ok after rest x (); ()
-  | Resolve (a, b, _, _, rest) -> unified_active h a b ok after rest x (); ()
+  | Resolve (a, b, _, _, rest) | List_children (a, b, rest) -> unified_active h a b ok after rest x (); ()
   | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
     scan_observe h needle marks x ();
     unified_active mid p q ok after rest x (); ()
@@ -56,7 +56,7 @@ let rec (unified_scope @ total) : (h : node Pref.heap) @ immutable ->
   | Bind_left _ -> redirect_scope h p q x (); ()
   | Bind_right _ -> redirect_scope h q p x (); ()
   | Swap rest -> unified_scope h scope q p ok after rest x (); ()
-  | Resolve (a, b, _, _, rest) -> unified_scope h scope a b ok after rest x (); ()
+  | Resolve (a, b, _, _, rest) | List_children (a, b, rest) -> unified_scope h scope a b ok after rest x (); ()
   | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
     let mid_scope : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem mid x) || finite_scope mid x}) @ total =
       fun x -> let () = scan_scope h scope needle marks x () in () in
@@ -108,7 +108,7 @@ let (redirect_children @ total) : (h : node Pref.heap) @ immutable -> (p : node 
   fun h p q desc bound premise -> ghost_ (
     let after = H.put h p (redirect h p q) in
     children_below_def h desc bound; children_below_def after desc bound; match desc with
-    | Var | Bool -> () | Link a -> redirect_below h p q a bound (); ()
+    | Var | Bool | Word -> () | Link a | List a -> redirect_below h p q a bound (); ()
     | Arrow (a, b) -> redirect_below h p q a bound (); redirect_below h p q b bound (); ())
 let (redirect_ordered @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (q : node Pref.t) @ immutable -> (x : node Pref.t) @ immutable ->
@@ -130,7 +130,7 @@ let rec (unified_ordered @ total) : (h : node Pref.heap) @ immutable -> (p : nod
   | Bind_left _ -> redirect_ordered h p q x (); ()
   | Bind_right _ -> redirect_ordered h q p x (); ()
   | Swap rest -> unified_ordered h q p ok after rest x (); ()
-  | Resolve (a, b, _, _, rest) -> unified_ordered h a b ok after rest x (); ()
+  | Resolve (a, b, _, _, rest) | List_children (a, b, rest) -> unified_ordered h a b ok after rest x (); ()
   | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
     scan_ordered h needle marks x ();
     unified_ordered mid p q ok after rest x (); ()
@@ -179,7 +179,7 @@ let rec (unified_scratch @ total) : (h : node Pref.heap) @ immutable -> (p : nod
   | Bind_left _ -> redirect_scratch h p q x (); ()
   | Bind_right _ -> redirect_scratch h q p x (); ()
   | Swap rest -> unified_scratch h q p ok after rest x (); ()
-  | Resolve (a, b, _, _, rest) -> unified_scratch h a b ok after rest x (); ()
+  | Resolve (a, b, _, _, rest) | List_children (a, b, rest) -> unified_scratch h a b ok after rest x (); ()
   | Scanned (needle, marks, rest) -> let mid = scan_heap h marks in
     unified_scratch mid p q ok after rest x ();
     scan_at h needle marks x ();

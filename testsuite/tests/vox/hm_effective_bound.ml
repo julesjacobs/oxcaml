@@ -81,12 +81,31 @@ let rec (run_member @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
     | RVar (i, target, epoch, d, certificate) -> (match lookup env i with None -> () | Some original ->
       Copy_certificate_spec.certifies_def h certificate epoch depth d original target;
       copy_member h certificate epoch depth d bound x (); ())
-    | RBool p -> let desc : desc = Bool in let v = cell desc depth in allocated_def h depth p desc;
+    | RBool p | RFalse p -> let desc : desc = Bool in let v = cell desc depth in allocated_def h depth p desc;
       allocation_member h p v bound x (); ()
-    | RApp_left (left, _) -> run_member h depth pool env left after final_pool bound x (); ()
+    | RWord (_, p) -> let desc : desc = Word in let v = cell desc depth in allocated_def h depth p desc;
+      allocation_member h p v bound x (); ()
+    | RApp_left (left, _) | RCons_left (left, _) -> run_member h depth pool env left after final_pool bound x (); ()
     | RLet_left (rhs, _) -> let child_depth = depth + 1 in let empty : pool = Empty in
       ran_def h child_depth empty env rhs after final_pool;
       run_member h child_depth empty env rhs after final_pool bound x (); ()
+    | RNil (arg, p) ->
+      let var = Var in let v = cell var depth in let middle = H.put h arg v in
+      let desc = List arg in let w = cell desc depth in
+      allocated_def h depth arg var; allocated_def middle depth p desc;
+      allocation_member h arg v bound x (); preserved_bound_def h middle bound x;
+      allocation_member middle p w bound x (); bound_trans h middle after bound x (); ()
+    | RCaseList (_, _, _, body) ->
+      run_member h depth pool env body after final_pool bound x ()
+    | RIf (_, _, _, body) ->
+      run_member h depth pool env body after final_pool bound x ()
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      run_member h depth pool env body middle body_pool bound x ();
+      preserved_bound_def h middle bound x;
+      (match result body with None -> () | Some _ -> match out with None -> () | Some p ->
+        let desc = primitive_desc op in let v = cell desc depth in
+        allocated_def middle depth p desc; allocation_member middle p v bound x ();
+        bound_trans h middle after bound x (); ())
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
       let pool1 = Entry (arg, pool) in let env1 = Bind (arg, env) in
@@ -98,10 +117,20 @@ let rec (run_member @ total) : (h : node Pref.heap) @ immutable -> (depth : int)
         let desc = Arrow (arg, b) in let w = cell desc depth in allocated_def middle depth p desc;
         allocation_member middle p w bound x ();
         bound_trans h middle after bound x (); ())
-    | RApp_right (left, right, h1, pool1) ->
+    | RApp_right (left, right, h1, pool1) | RCons_right (left, right, h1, pool1) ->
       run_member h depth pool env left h1 pool1 bound x (); preserved_bound_def h h1 bound x;
       run_member h1 depth pool1 env right after final_pool bound x ();
       bound_trans h h1 after bound x (); ()
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
+      run_member h depth pool env left h1 pool1 bound x (); preserved_bound_def h h1 bound x;
+      run_member h1 depth pool1 env right h2 pool2 bound x ();
+      bound_trans h h1 h2 bound x (); preserved_bound_def h h2 bound x;
+      (match result left with None -> () | Some f -> match result right with None -> () | Some a ->
+        let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
+        allocated_def h2 depth p desc;
+        allocation_member h2 p v bound x (); bound_trans h h2 h3 bound x ();
+        unify_bound h3 a p ok after d bound x ();
+        bound_trans h h3 after bound x (); ())
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       run_member h depth pool env left h1 pool1 bound x (); preserved_bound_def h h1 bound x;
       run_member h1 depth pool1 env right h2 pool2 bound x ();

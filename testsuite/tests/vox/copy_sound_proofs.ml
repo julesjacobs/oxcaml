@@ -43,6 +43,9 @@ let rec (mapped_instance @ total) : (saved : node Pref.heap) @ immutable ->
           extends_def rest d; extends_def rest rest;
           extension_trans rest d final (); () in
         match old.desc, desc with
+        | List a, List c ->
+          target_preserved saved epoch depth rest final a c ();
+          target_image saved final rho a c (); images a; ()
         | Arrow (a, b), Arrow (c, e) ->
           target_preserved saved epoch depth rest final a c ();
           target_preserved saved epoch depth rest final b e ();
@@ -84,7 +87,10 @@ let rec (template_sound @ total) : (saved : node Pref.heap) @ immutable ->
       extends_def d d; mapped_instance saved epoch depth d d rho model p q want images (); ());
     instance_at_def saved rho want p;
     match t with
-    | Boundary _ | Parameter _ | Constant _ -> ()
+    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> ()
+    | List_template (_, a) ->
+      let desc = List (root a) in children_available_def saved d desc;
+      template_sound saved epoch depth d rho model want images a (); ()
     | Product (_, a, b) ->
       let desc = Arrow (root a, root b) in children_available_def saved d desc;
       template_sound saved epoch depth d rho model want images a ();

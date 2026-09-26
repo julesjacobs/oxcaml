@@ -20,11 +20,14 @@ let rec (search_finite @ total) :
     | Leaf ->
       if observe h x === Some Var then (
         let t = Free x in tree_root_def t; finite_def after t; t)
-      else (
+      else if observe h x === Some Bool then (
         let t = Constant_tree x in tree_root_def t; finite_def after t; t)
+      else (let t = Word_tree x in tree_root_def t; finite_def after t; t)
     | Follow (y, rest) ->
       let child = search_finite h p q y rest () in
-      let t = Alias_tree (x, child) in tree_root_def t; finite_def after t; t
+      let t = if observe h x === Some (List y)
+        then List_tree (x, child) else Alias_tree (x, child) in
+      tree_root_def t; finite_def after t; t
     | Both (a, b, left, right) ->
       let ta = search_finite h p q a left () in
       let tb = search_finite h p q b right () in
@@ -46,7 +49,10 @@ let rec (replace_free @ total) :
       if x === p then (
         let t = Alias_tree (x, target) in tree_root_def t; finite_def after t; t)
       else (finite_def after old; old)
-    | Constant_tree _ -> finite_def after old; old
+    | Constant_tree _ | Word_tree _ -> finite_def after old; old
+    | List_tree (x, child) ->
+      let child = replace_free h p q target child () in
+      let t = List_tree (x, child) in tree_root_def t; finite_def after t; t
     | Alias_tree (x, child) ->
       let child = replace_free h p q target child () in
       let t = Alias_tree (x, child) in tree_root_def t; finite_def after t; t
@@ -62,8 +68,8 @@ let rec (lower_finite @ total) : (h : node Pref.heap) @ immutable -> (bound : in
   finite_def h t; tree_root_def t;
   let after = lower_heap h bound edits in finite_def after t; let x = tree_root t in
   lower_observe h bound edits x (); match t with
-  | Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, c) -> lower_finite h bound edits c (); ()
+  | Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, c) | List_tree (_, c) -> lower_finite h bound edits c (); ()
   | Branch (_, a, b) -> lower_finite h bound edits a (); lower_finite h bound edits b (); ())
 
 let rec (scan_finite @ total) : (h : node Pref.heap) @ immutable ->
@@ -73,8 +79,8 @@ let rec (scan_finite @ total) : (h : node Pref.heap) @ immutable ->
   finite_def h t; tree_root_def t;
   let after = scan_heap h d in finite_def after t; let x = tree_root t in
   scan_observe h needle d x (); match t with
-  | Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, c) -> scan_finite h needle d c (); ()
+  | Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, c) | List_tree (_, c) -> scan_finite h needle d c (); ()
   | Branch (_, a, b) -> scan_finite h needle d a ();
     scan_finite h needle d b (); ())
 
@@ -119,7 +125,7 @@ let rec (unified_finite_at @ total) :
           if H.mem h x then (lower_finite h bound edits t (); t) else t in
       unified_finite_at mid middle_trees p q ok after rest x ()
     | Swap rest -> unified_finite_at h trees q p ok after rest x ()
-    | Resolve (r, s, _, _, rest) ->
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) ->
       unified_finite_at h trees r s ok after rest x ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let middle_trees : (x : node Pref.t) @ immutable ->
@@ -135,8 +141,8 @@ let rec (size_positive @ total) : (t : tree) @ immutable ->
     {u : unit | size t > Bigint.zero} @ ghost = fun t -> ghost_ (
   size_def t;
   match t with
-  | Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, child) -> size_positive child; ()
+  | Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, child) | List_tree (_, child) -> size_positive child; ()
   | Branch (_, a, b) -> size_positive a; size_positive b; ())
 
 let rec (finite_unique @ total) :
@@ -145,7 +151,8 @@ let rec (finite_unique @ total) :
     {u : unit | a === b} @ ghost = fun h a b premise -> ghost_ (
   finite_def h a; finite_def h b; tree_root_def a; tree_root_def b;
   match a, b with
-  | Alias_tree (_, child), Alias_tree (_, other) ->
+  | Alias_tree (_, child), Alias_tree (_, other)
+  | List_tree (_, child), List_tree (_, other) ->
     finite_unique h child other (); ()
   | Branch (_, left, right), Branch (_, other_left, other_right) ->
     finite_unique h left other_left ();
@@ -159,8 +166,8 @@ let (edge_smaller @ total) :
   finite_def h a; tree_root_def a;
   let ra = tree_root a in let rb = tree_root b in edge_def h ra rb; size_def a;
   match a with
-  | Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, child) -> finite_unique h child b (); ()
+  | Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, child) | List_tree (_, child) -> finite_unique h child b (); ()
   | Branch (_, left, right) ->
     size_positive left; size_positive right;
     if tree_root left === tree_root b then (
@@ -185,8 +192,8 @@ let rec (walk_bound @ total) :
     | Step (next, rest) ->
       edge_def h p next;
       (match tp with
-       | Free _ | Constant_tree _ -> ()
-       | Alias_tree (_, child) -> finite_def h child; ()
+       | Free _ | Constant_tree _ | Word_tree _ -> ()
+       | Alias_tree (_, child) | List_tree (_, child) -> finite_def h child; ()
        | Branch (_, a, b) -> finite_def h a; finite_def h b; ());
       let tn = trees next in
       edge_smaller h tp tn ();
@@ -216,8 +223,8 @@ let (readback_model_at @ total) :
   agrees x; readback_def t;
   if H.mem h x then (
     match t with
-    | Free _ | Constant_tree _ -> ()
-    | Alias_tree (_, child) ->
+    | Free _ | Constant_tree _ | Word_tree _ -> ()
+    | Alias_tree (_, child) | List_tree (_, child) ->
       finite_def h child;
       let y = tree_root child in let ty = trees y in
       finite_unique h child ty (); agrees y; ()
@@ -238,8 +245,8 @@ let rec (allocation_frame @ total) :
   finite_def h t; tree_root_def t;
   let after = H.put h p v in let x = tree_root t in observe_write h p v x; finite_def after t;
   match t with
-  | Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, child) -> allocation_frame h p v child (); ()
+  | Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, child) | List_tree (_, child) -> allocation_frame h p v child (); ()
   | Branch (_, a, b) ->
     allocation_frame h p v a ();
     allocation_frame h p v b (); ())
@@ -261,6 +268,10 @@ let (allocation_finite_at @ total) :
       match v.desc with
       | Var -> let t = Free p in tree_root_def t; finite_def after t; t
       | Bool -> let t = Constant_tree p in tree_root_def t; finite_def after t; t
+      | Word -> let t = Word_tree p in tree_root_def t; finite_def after t; t
+      | List q ->
+        let child = trees q in allocation_frame h p v child ();
+        let t = List_tree (p, child) in tree_root_def t; finite_def after t; t
       | Link q ->
         let child = trees q in allocation_frame h p v child ();
         let t = Alias_tree (p, child) in tree_root_def t; finite_def after t; t
@@ -280,8 +291,8 @@ let (finite_scope_at @ total) :
   finite_def h t; tree_root_def t;
   let x = tree_root t in scoped_def h x;
   match t with
-  | Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, child) -> finite_def h child; ()
+  | Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, child) | List_tree (_, child) -> finite_def h child; ()
   | Branch (_, a, b) -> finite_def h a; finite_def h b; ())
 
 let (with_finite_model @ total) :

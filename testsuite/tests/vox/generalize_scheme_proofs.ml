@@ -18,9 +18,11 @@ let rec (scheme_valid @ total) : (h : node Pref.heap) @ immutable -> (cut : int)
   scheme_root h cut t; template_def after s; root_def s; finite_node_def after p;
   let level = at_level h p in close_level_def cut level;
   match t with
-  | Tip _ -> let desc = Var in generic_desc_def after p desc; let desc = Bool in generic_desc_def after p desc; ()
+  | Tip _ -> let desc = Var in generic_desc_def after p desc; let desc = Bool in generic_desc_def after p desc;
+    let desc = Word in generic_desc_def after p desc; ()
   | Through (_, c) -> scheme_valid h cut pool coverage c (); scheme_root h cut c;
-    let desc = Link (bound_root c) in generic_desc_def after p desc; ()
+    let desc = Link (bound_root c) in generic_desc_def after p desc;
+    let desc = List (bound_root c) in generic_desc_def after p desc; ()
   | Fork (_, a, b) -> scheme_valid h cut pool coverage a (); scheme_valid h cut pool coverage b ();
     scheme_root h cut a; scheme_root h cut b;
     let desc = Arrow (bound_root a, bound_root b) in generic_desc_def after p desc; ())

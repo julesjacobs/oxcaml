@@ -96,13 +96,47 @@ let refine_ result = result in
         let d = ghost_ (Base old) in
         ghost_ (unified_def h.Ghost.ghost r s ok after d);
         finish_roots (refine_ #{ok; state = t; derivation = d})
-      | Bool, Bool ->
+      | Bool, Bool | Word, Word ->
         let ok = true in
         let old = ghost_ Level_unifier_spec.Constants in
       ghost_ (let ok = true in Level_unifier_spec.unified_def h.Ghost.ghost r s ok h.Ghost.ghost old; ());
       let d = ghost_ (Base old) in
         ghost_ (unified_def h.Ghost.ghost r s ok h.Ghost.ghost d);
         finish_roots (refine_ #{ok; state = t; derivation = d})
+      | List a, List b ->
+        ghost_ (scope.Ghost.ghost r; scope.Ghost.ghost s;
+          finite_scope_def h.Ghost.ghost r; source_ok_def h.Ghost.ghost r; observe_def h.Ghost.ghost r;
+          finite_scope_def h.Ghost.ghost s; source_ok_def h.Ghost.ghost s; observe_def h.Ghost.ghost s);
+        let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost
+          && H.mem h.Ghost.ghost a && H.mem h.Ghost.ghost b
+          && active h.Ghost.ghost a && active h.Ghost.ghost b} = refine_ t in
+        let resume_child : (child : {out : result |
+          unified h.Ghost.ghost a b out.#ok (Pref.own out.#state) out.#derivation}) @ unique ->
+          {answer : result | unified goal.heap goal.left goal.right answer.#ok
+            (Pref.own answer.#state) answer.#derivation} @ unique = fun child ->
+          let refine_ child = child in let ok = child.#ok in let t = child.#state in
+          let after = ghost_ (Pref.own (borrow_ t)) in
+          let d = ghost_ (List_children (a, b, child.#derivation)) in
+          ghost_ (unified_def h.Ghost.ghost r s ok after d);
+          if not ok then finish_roots (refine_ #{ok; state = t; derivation = d}) else (
+            let trees_after : ((x : node Pref.t) @ immutable ->
+              {t : tree | tree_root t === x && (if H.mem after x then finite after t else observe after x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
+                let u = () in let refine_ tree = Optimized_finite_proofs.unified_finite_at h.Ghost.ghost trees.Ghost.ghost r s ok after d x (refine_ u) in refine_ tree) in
+            let scope_after : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem after x) || finite_scope after x}) @ total ghost = ghost_ (fun x ->
+              let u = () in let refine_ u = unified_scope h.Ghost.ghost scope.Ghost.ghost r s ok after d x (refine_ u) in refine_ u) in
+            ghost_ (let u = () in unified_frame h.Ghost.ghost r s ok after d r (refine_ u); unified_frame h.Ghost.ghost r s ok after d s (refine_ u);
+              unified_active h.Ghost.ghost r s ok after d r (refine_ u); unified_active h.Ghost.ghost r s ok after d s (refine_ u); ());
+            let t : {t : node Pref.token | Pref.own t === after && unified h.Ghost.ghost r s true after d
+              && H.mem after r && H.mem after s && active after r && active after s} = refine_ t in
+            let before_witness7 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
+            let h_witness8 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (after)} in
+            let d_witness9 : (derivation) Ghost.t = {Ghost.ghost = ghost_ (d)} in
+            let trees_witness10 : (((x : node Pref.t) @ immutable ->
+      {t : tree | tree_root t === x && (if H.mem h_witness8.Ghost.ghost x then finite h_witness8.Ghost.ghost t else observe h_witness8.Ghost.ghost x === None)} @ immutable)) Ghost.t = {Ghost.ghost = ghost_ (refine_ trees_after)} in
+            let scope_witness11 : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h_witness8.Ghost.ghost x) || finite_scope h_witness8.Ghost.ghost x})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope_after)} in
+            let refine_ state_argument12 = t in
+            let refine_ linked = Optimized_link.finish before_witness7 r s h_witness8 d_witness9 trees_witness10 scope_witness11 (refine_ state_argument12) in finish_roots (refine_ linked)) in
+        unify_work goal h scope unmarked order trees a b (refine_ t) resume_child
       | Arrow (a, b), Arrow (c, e) ->
         ghost_ (scope.Ghost.ghost r);
         ghost_ (scope.Ghost.ghost s);
@@ -187,7 +221,10 @@ let refine_ result = result in
           ghost_ (unified_def h.Ghost.ghost r s ok middle d);
           finish_roots (refine_ #{ok; state = t; derivation = d}) in
         unify_work goal h_witness25 scope_witness26 unmarked_witness27 order_witness28 trees_witness29 a c (refine_ state_argument30) resume_left
-      | Bool, Arrow _ | Arrow _, Bool ->
+      | Bool, (Word | Arrow _ | List _)
+      | Word, (Bool | Arrow _ | List _)
+      | Arrow _, (Bool | Word | List _)
+      | List _, (Bool | Word | Arrow _) ->
         let ok = false in
         let old = ghost_ Level_unifier_spec.Clash in
       ghost_ (let ok = false in Level_unifier_spec.unified_def h.Ghost.ghost r s ok h.Ghost.ghost old; ());

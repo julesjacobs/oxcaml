@@ -7,7 +7,8 @@ open Provenance_spec
 open Leaf_provenance_spec
 
 let[@def] rec (mentions @ total) (t : ty @ immutable) (x : node Pref.t @ immutable) =
-  ghost_ (match t with Variable y -> x === y | Boolean -> false
+  ghost_ (match t with Variable y -> x === y | Boolean | Word64 -> false
+    | List_type a -> mentions a x
     | Function (a, b) -> mentions a x || mentions b x)
 
 let rec (path_mentions @ total) : (h : node Pref.heap) @ immutable -> (t : tree) @ immutable ->
@@ -16,10 +17,10 @@ let rec (path_mentions @ total) : (h : node Pref.heap) @ immutable -> (t : tree)
     {u : unit | mentions (readback t) x} @ ghost = fun h t x path premise -> ghost_ (
     finite_def h t; tree_root_def t; readback_def t;
     let p = tree_root t in let ty = readback t in mentions_def ty x;
-    reaches_def h p x path; observe_def h p; match path with Stop -> (match t with Free _ | Constant_tree _ | Alias_tree _ | Branch _ -> ())
+    reaches_def h p x path; observe_def h p; match path with Stop -> (match t with Free _ | Constant_tree _ | Word_tree _ | Alias_tree _ | List_tree _ | Branch _ -> ())
     | Step (next, rest) -> edge_def h p next;
-      match t with Free _ | Constant_tree _ -> ()
-      | Alias_tree (_, child) -> path_mentions h child x rest (); ()
+      match t with Free _ | Constant_tree _ | Word_tree _ -> ()
+      | Alias_tree (_, child) | List_tree (_, child) -> path_mentions h child x rest (); ()
       | Branch (_, a, b) -> if next === tree_root a then (path_mentions h a x rest (); ())
         else (path_mentions h b x rest (); ()))
 
@@ -28,9 +29,9 @@ let rec (path_of_mention @ total) : (h : node Pref.heap) @ immutable -> (t : tre
     {path : path | reaches h (tree_root t) x path} @ immutable ghost = fun h t x premise -> ghost_ (
     finite_def h t; tree_root_def t; readback_def t;
     let p = tree_root t in let ty = readback t in mentions_def ty x; observe_def h p;
-    match t with Free _ | Constant_tree _ ->
+    match t with Free _ | Constant_tree _ | Word_tree _ ->
       let path = Stop in reaches_def h p x path; path
-    | Alias_tree (_, child) -> let tail = path_of_mention h child x () in
+    | Alias_tree (_, child) | List_tree (_, child) -> let tail = path_of_mention h child x () in
       let q = tree_root child in let path = Step (q, tail) in edge_def h p q; reaches_def h p x path; path
     | Branch (_, a, b) ->
       if mentions (readback a) x then (

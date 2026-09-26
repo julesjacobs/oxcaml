@@ -22,6 +22,9 @@ let (order @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ to
     (match H.at h x with Some {desc = Arrow (a, b); level = Finite n; _} ->
       let desc = Arrow (a, b) in children_below_def h desc n;
       valid a; valid b; let u = () in below h heads order a n (refine_ u); below h heads order b n (refine_ u); ()
+    | Some {desc = List a; level = Finite n; _} ->
+      let desc = List a in children_below_def h desc n;
+      valid a; let u = () in below h heads order a n (refine_ u); ()
     | _ -> ()); let u = () in refine_ u)
 
 let (active @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ total ->

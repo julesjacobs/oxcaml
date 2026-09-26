@@ -7,6 +7,13 @@ type index = { number : int; original : D.index @@ ghost; }
 type term =
     Bound of index
   | Truth
+  | False
+  | Word of Hmc_word64.t
+  | Nil
+  | Cons of term * term
+  | CaseList of term * term * term
+  | If of term * term * term
+  | Primitive of D.word_operation * term * term
   | Lambda of term
   | Recursive of term
   | Apply of term * term
@@ -23,7 +30,11 @@ val source_def :
         (ghost_
            (match term with
             | Bound i -> D.Bound (i.original)
-            | Truth -> D.Truth
+            | Truth -> D.Truth | False -> D.False | Word w -> D.Word w | Nil -> D.Nil
+            | Cons (a, b) -> D.Cons (source a, source b)
+            | CaseList (s, a, b) -> D.CaseList (source s, source a, source b)
+            | If (c, a, b) -> D.If (source c, source a, source b)
+            | Primitive (op, a, b) -> D.Primitive (op, source a, source b)
             | Lambda b' -> D.Lambda (source b')
             | Recursive b'' -> D.Recursive (source b'')
             | Apply (a', b''') -> D.Apply ((source a'), (source b'''))
@@ -40,9 +51,10 @@ val valid_def :
         (ghost_
            (match term with
             | Bound i -> (i.number >= 0) && (F.encoded i.original i.number)
-            | Truth -> true
+            | Truth | False | Word _ | Nil -> true
+            | CaseList (s, a, b) | If (s, a, b) -> valid s && valid a && valid b
             | Lambda b' | Recursive b' -> valid b'
-            | Apply (a, b) | Let (a, b) -> (valid a) && (valid b)))}
+            | Apply (a, b) | Let (a, b) | Cons (a, b) | Primitive (_, a, b) -> (valid a) && (valid b)))}
   @@ total
 
 val encode :

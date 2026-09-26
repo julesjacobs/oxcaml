@@ -16,8 +16,8 @@ let rec (readback_factor @ total) :
     let x = tree_root t in model x; node_equation_def h rho x;
     let v = readback t in substitute_def rho v;
     match t with
-    | Free _ | Constant_tree _ -> ()
-    | Alias_tree (_, child) -> readback_factor h rho model child (); ()
+    | Free _ | Constant_tree _ | Word_tree _ -> ()
+    | Alias_tree (_, child) | List_tree (_, child) -> readback_factor h rho model child (); ()
     | Branch (_, a, b) ->
       readback_factor h rho model a ();
       readback_factor h rho model b (); ())
@@ -113,6 +113,8 @@ let (instance_solution_at @ total) :
     match observe h x with
     | None | Some Var -> ()
     | Some Bool -> let v = Boolean in substitute_def delta v; ()
+    | Some Word -> let v = Word64 in substitute_def delta v; ()
+    | Some (List a) -> instance a; let v = List_type (sigma a) in substitute_def delta v; ()
     | Some (Link y) -> instance y; ()
     | Some (Arrow (a, b)) ->
       instance a; instance b;

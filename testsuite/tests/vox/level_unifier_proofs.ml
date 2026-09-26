@@ -27,7 +27,7 @@ let (lower_scoped @ total) : (h : node Pref.heap) @ immutable -> (bound : int) -
     {u : unit | scoped h x === scoped (lower_heap h bound d) x} @ ghost = fun h bound d x premise -> ghost_ (
   let after = lower_heap h bound d in
   lower_observe h bound d x (); scoped_def h x; scoped_def after x;
-  (match observe h x with Some (Link q) -> lower_observe h bound d q (); ()
+  (match observe h x with Some (Link q | List q) -> lower_observe h bound d q (); ()
     | Some (Arrow (a, b)) -> lower_observe h bound d a (); lower_observe h bound d b (); () | _ -> ()); ())
 let (lower_equation @ total) : (h : node Pref.heap) @ immutable -> (bound : int) ->
     (d : lowering) @ immutable ->
@@ -128,6 +128,7 @@ let rec (unified_frame @ total) :
     | Resolve (r, s, rp, sq, rest) ->
       unified_frame h r s ok after rest x ();
       ()
+    | List_children (a, b, child) -> unified_frame h a b ok after child x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       unified_frame h a c left_ok middle left x ();
       if left_ok then (
@@ -165,6 +166,7 @@ let rec (unified_edits @ total) :
       unified_edits h q p ok after rest (); ()
     | Resolve (r, s, _, _, rest) ->
       unified_edits h r s ok after rest (); ()
+    | List_children (a, b, child) -> unified_edits h a b ok after child (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       unified_edits h a c left_ok middle left ();
       if left_ok then (
@@ -207,6 +209,9 @@ let rec (success_backward_at @ total) :
       resolution_model h rho model p r rp ();
       resolution_model h rho model q s sq ();
       success_backward_at h rho model r s after rest x (); ()
+    | List_children (a, b, child) ->
+      model p; model q; node_equation_def h rho p; node_equation_def h rho q;
+      success_backward_at h rho model a b after child x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       model p; model q;
       node_equation_def h rho p; node_equation_def h rho q;
@@ -269,6 +274,11 @@ let rec (success_forward_at @ total) :
       resolution_model h rho before_model q s sq ();
       success_forward_at h rho r s after rest model x ();
       ()
+    | List_children (a, b, child) ->
+      success_forward_at h rho a b after child model p ();
+      success_forward_at h rho a b after child model q ();
+      node_equation_def h rho p; node_equation_def h rho q;
+      success_forward_at h rho a b after child model x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let middle_model : (x : node Pref.t) @ immutable ->
           {u : unit | node_equation middle rho x} @ total = fun x ->
@@ -286,7 +296,8 @@ let rec (weight_positive @ total) : (t : ty) @ immutable ->
     {u : unit | weight t > Bigint.zero} @ ghost = fun t -> ghost_ (
   weight_def t;
   match t with
-  | Variable _ | Boolean -> ()
+  | Variable _ | Boolean | Word64 -> ()
+  | List_type a -> weight_positive a; ()
   | Function (a, b) ->
     let _ = weight_positive a in
     let _ = weight_positive b in
@@ -313,7 +324,7 @@ let rec (search_bound @ total) :
     | Hit | Leaf -> ()
     | Follow (q, rest) ->
       search_bound h rho model needle q rest ();
-      ()
+      let list = List_type (rho q) in weight_def list; ()
     | Left (a, b, left) ->
       search_bound h rho model needle a left ();
       let ta = rho a in let tb = rho b in
@@ -367,6 +378,9 @@ let rec (failure_refutes @ total) :
       resolution_model h rho model p r rp ();
       resolution_model h rho model q s sq ();
       failure_refutes h rho model r s after rest (); ()
+    | List_children (a, b, child) ->
+      model p; model q; node_equation_def h rho p; node_equation_def h rho q;
+      failure_refutes h rho model a b after child (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       model p; model q;
       node_equation_def h rho p; node_equation_def h rho q;

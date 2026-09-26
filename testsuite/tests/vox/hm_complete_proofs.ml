@@ -17,8 +17,9 @@ let rec (embed_eval @ total) : (t : D.mono) @ immutable ->
   fun t premise -> ghost_ (
     let refine_ premise = premise in let z = D.Z in D.mono_wf_def z t;
     T.eval_def default_value t; let value = T.eval default_value t in D.embed_def value;
-    let u = () in match t with D.Free _ | D.Boolean -> refine_ u
+    let u = () in match t with D.Free _ | D.Boolean | D.Word64 -> refine_ u
     | D.Parameter i -> D.present_def z i; refine_ u
+    | D.List_type a -> embed_eval a (refine_ u); refine_ u
     | D.Function (a, b) -> embed_eval a (refine_ u); embed_eval b (refine_ u); refine_ u)
 let (embed_injective @ total) : (a : ty) @ immutable -> (b : ty) @ immutable ->
     {u : unit | D.embed a === D.embed b} -> {u : unit | a === b} @ ghost = fun a b premise -> ghost_ (
@@ -47,7 +48,7 @@ let (with_alloc @ total) : (h : node Pref.heap) @ immutable -> (depth : int) -> 
   fun h depth pool facts rho model p desc value after premise claim use -> ghost_ (
     let refine_ premise = premise in allocated_def h depth p desc; children_below_def h desc depth;
     let v = cell desc depth in cell_def desc depth; payload_scoped_def h v;
-    (match desc with Var | Bool -> () | Link q -> below_def h q depth; ()
+    (match desc with Var | Bool | Word -> () | Link q | List q -> below_def h q depth; ()
       | Arrow (a, b) -> below_def h a depth; below_def h b depth; ());
     let scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h x then source_ok h x else H.at h x === None}) @ total = fun x ->
       facts x; runtime_at_def h depth pool x; safe_def h x; let u = () in refine_ u in
@@ -176,7 +177,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (depth : 
       let refine_ u = with_alloc h depth pool facts rho model p desc target after (refine_ u) claim (refine_ consume) in refine_ u
       | _ -> refine_ u)
     | RLam (arg, body, middle, body_pool, out) -> (match d with D.Abstraction (_, db) ->
-      (match target with Variable _ | Boolean -> refine_ u | Function (a, b) ->
+      (match target with Variable _ | Boolean | Word64 | List_type _ -> refine_ u | Function (a, b) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in let pool1 = Entry (arg, pool) in
       let env1 = Bind (arg, env) in
       let facts1 = allocation_facts h depth pool facts arg var (refine_ u) in
@@ -282,7 +283,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (depth : 
       let refine_ u = with_run_model h depth pool facts env left h1 pool1 rho model function_type df (refine_ u) claim consume1 in refine_ u
       | _ -> refine_ u)
     | RRec (arg, res, self, body, middle, body_pool, finish) -> (match d with D.Recursion (_, _, db) ->
-      (match target with Variable _ | Boolean -> refine_ u | Function (a, b) ->
+      (match target with Variable _ | Boolean | Word64 | List_type _ -> refine_ u | Function (a, b) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in let pool1 = Entry (arg, pool) in
       let h2 = H.put h1 res v in let pool2 = Entry (res, pool1) in
       let desc = Arrow (arg, res) in let w = cell desc depth in let h3 = H.put h2 self w in

@@ -94,7 +94,7 @@ let rec (unified_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
       link_origin saved h cut q p x o (); o
     | Swap rest ->
       let o = unified_leaf_origin saved h cut prior q p ok after rest x () in o
-    | Resolve (r, s, _, _, rest) ->
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) ->
       let o = unified_leaf_origin saved h cut prior r s ok after rest x () in o
     | Scanned (needle, marks, rest) ->
       let mid = Level_unifier_spec.scan_heap h marks in

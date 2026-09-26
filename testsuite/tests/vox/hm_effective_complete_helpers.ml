@@ -16,8 +16,9 @@ let rec (embed_eval @ total) : (t : D.mono) @ immutable ->
   fun t premise -> ghost_ (
     let z = D.Z in D.mono_wf_def z t;
     T.eval_def default_value t; let value = T.eval default_value t in D.embed_def value;
-    match t with D.Free _ | D.Boolean -> ()
+    match t with D.Free _ | D.Boolean | D.Word64 -> ()
     | D.Parameter i -> D.present_def z i; ()
+    | D.List_type a -> embed_eval a (); ()
     | D.Function (a, b) -> embed_eval a (); embed_eval b (); ())
 let (embed_injective @ total) : (a : ty) @ immutable -> (b : ty) @ immutable ->
     {u : unit | D.embed a === D.embed b} -> {u : unit | a === b} @ ghost = fun a b premise -> ghost_ (
@@ -112,6 +113,9 @@ let rec (snapshot @ total) : (h : node Pref.heap) @ immutable ->
       let s = match tree with
         | Level_finite_spec.Free _ -> Parameter p
         | Level_finite_spec.Constant_tree _ -> Constant p
+        | Level_finite_spec.Word_tree _ -> Word_constant p
+        | Level_finite_spec.List_tree (_, child) ->
+          let refine_ t = snapshot h heads child () in List_template (p, t)
         | Level_finite_spec.Alias_tree (_, child) ->
           let refine_ t = snapshot h heads child () in Indirect (p, t)
         | Level_finite_spec.Branch (_, a, b) ->
@@ -175,6 +179,85 @@ let (with_variable_model @ total) : (h : node Pref.heap) @ immutable -> (heads :
       let () = Effective_copy_template.with_clean_scheme_instance h heads scope trees rho model choices epoch depth d schema q () claim (refine_ consume) in () in
     let () = realize i sigma schema values () claim consume_choices in ())
 
+
+let (with_list_model @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ total ->
+    (forest : ((x : node Pref.t) @ immutable ->
+      {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
+        (if H.mem h x then Level_finite_spec.finite h t else observe h x === None)} @ immutable)) @ total ->
+    (depth : int) -> (pool : pool) @ immutable ->
+    (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h heads depth pool x})) @ total ->
+    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+    (model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation h rho x})) @ total ->
+    (arg : node Pref.t) @ immutable -> (p : node Pref.t) @ immutable ->
+    (after : node Pref.heap) @ immutable -> (element : ty) @ immutable ->
+    {u : unit | allocated h depth arg Var
+      && allocated (H.put h arg (cell Var depth)) depth p (List arg)
+      && after === H.put (H.put h arg (cell Var depth)) p (cell (List arg) depth)} ->
+    (claim : bool) ->
+    (use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+      (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
+      (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+      {u : unit | tau p === List_type element} -> {u : unit | claim})) @ total ->
+    {u : unit | claim} @ ghost = fun h heads forest depth pool facts rho model arg p after element premise claim use -> ghost_ (
+    let var = Var in let v = cell var depth in let h1 = H.put h arg v in
+    let pool1 = Entry (arg, pool) in let desc = List arg in let value = List_type element in
+    allocated_def h depth arg var;
+    let trees1 = Hm_effective_forest.allocated_forest h forest depth arg var () in
+    let trees1 : ((x : node Pref.t) @ immutable ->
+      {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
+        (if H.mem h1 x then Level_finite_spec.finite h1 t else observe h1 x === None)} @ immutable) @ total = refine_ trees1 in
+    let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 trees1 x in r in
+    let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
+      heads1_def x; let refine_ r = Forest_heads.select h1 trees1 x in E.valid_head_def h1 heads1 x; () in
+    let valid : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h heads x}) @ total = fun x ->
+      facts x; runtime_at_def h heads depth pool x; safe_def h heads x; () in
+    let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 heads1 depth pool1 x}) @ total = fun x ->
+      facts x; Hm_effective_allocation.allocate_runtime h heads heads1 depth pool arg var valid (refine_ valid1) x (); () in
+    let consume1 : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+      (model1 : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation h1 rho1 x})) @ total ->
+      (equal1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho1 x === rho x})) @ total ->
+      {u : unit | rho1 arg === element} -> {u : unit | claim}) @ total = fun rho1 model1 equal1 assigned ->
+      Copy_model_proofs.describes_def rho1 desc value;
+      let consume2 : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
+        (equal2 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1 x) || tau x === rho1 x})) @ total ->
+        {u : unit | tau p === value} -> {u : unit | claim}) @ total = fun tau next equal2 assigned ->
+          let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x}) @ total = fun x ->
+            equal1 x; equal2 x; () in
+          let () = use tau next equal () in () in
+      let () = with_alloc h1 heads1 depth pool1 facts1 rho1 model1 p desc value after () claim consume2 in () in
+    Copy_model_proofs.describes_def rho var element;
+    let () = with_alloc h heads depth pool facts rho model arg var element h1 () claim consume1 in ())
+
+let (with_cons_model @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ total ->
+    (depth : int) -> (pool : pool) @ immutable ->
+    (facts : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h heads depth pool x})) @ total ->
+    (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+    (model : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation h rho x})) @ total ->
+    (head : node Pref.t) @ immutable -> (tail : node Pref.t) @ immutable ->
+    (p : node Pref.t) @ immutable -> (ok : bool) -> (after : node Pref.heap) @ immutable ->
+    (d : Effective_unifier_spec.derivation) @ immutable -> (value : ty) @ immutable ->
+    {u : unit | H.mem h tail && rho tail === value && value === List_type (rho head)
+      && allocated h depth p (List head)
+      && Effective_unifier_spec.unified (H.put h p (cell (List head) depth)) tail p ok after d} ->
+    (claim : bool) ->
+    (use : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+      (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
+      (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+      {u : unit | ok && tau p === value} -> {u : unit | claim})) @ total ->
+    {u : unit | claim} @ ghost = fun h heads depth pool facts rho model head tail p ok after d value premise claim use -> ghost_ (
+    let desc = List head in let middle = H.put h p (cell desc depth) in
+    Copy_model_proofs.describes_def rho desc value;
+    let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+      (nodes : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation middle tau x})) @ total ->
+      (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+      {u : unit | tau p === value} -> {u : unit | claim}) @ total = fun tau nodes equal assigned ->
+      equal tail;
+      let next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x}) @ total = fun x ->
+        unify_complete middle tau nodes tail p ok after d x (); () in
+      unify_complete middle tau nodes tail p ok after d p ();
+      let () = use tau next equal () in () in
+    let () = with_alloc h heads depth pool facts rho model p desc value middle () claim consume in ())
 
 let (with_application_model @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ total ->
     (forest : ((x : node Pref.t) @ immutable ->

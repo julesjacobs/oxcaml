@@ -83,8 +83,8 @@ let (frame_scope @ total) : (h : node Pref.heap) @ immutable -> (after : node Pr
     frame_active h after heads frame x;
     (match H.at h x with None -> () | Some v ->
       (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> frame stamp; lower_frame_def h after stamp; ());
-      match v.desc with Var | Bool -> ()
-      | Link q -> frame q; lower_frame_def h after q; frame_active h after heads frame q; ()
+      match v.desc with Var | Bool | Word -> ()
+      | Link q | List q -> frame q; lower_frame_def h after q; frame_active h after heads frame q; ()
       | Arrow (a, b) -> frame a; frame b; lower_frame_def h after a; lower_frame_def h after b; frame_active h after heads frame a; frame_active h after heads frame b; ());
     ())
 
@@ -111,8 +111,8 @@ let (children_frame @ total) : (h : node Pref.heap) @ immutable -> (after : node
     {u : unit | effective_children_below after heads desc bound} @ ghost =
   fun h after heads frame desc bound premise -> ghost_ (
     effective_children_below_def h heads desc bound;
-    effective_children_below_def after heads desc bound; match desc with Var | Bool -> ()
-    | Link q -> frame_below h after heads frame q bound (); ()
+    effective_children_below_def after heads desc bound; match desc with Var | Bool | Word -> ()
+    | Link q | List q -> frame_below h after heads frame q bound (); ()
     | Arrow (a, b) -> frame_below h after heads frame a bound ();
       frame_below h after heads frame b bound (); ())
 
@@ -134,7 +134,7 @@ let (write_ordered @ total) : (h : node Pref.heap) @ immutable -> (heads : E.hea
     children_frame h after heads frame old.desc bound ();
     effective_children_below_def after heads old.desc bound;
     (match H.at h x with None -> () | Some before -> match before.desc, before.level with
-      | Arrow (a, b), Finite n ->
+      | (Arrow _ | List _), Finite n ->
         effective_children_below_def h heads before.desc n;
         children_frame h after heads frame before.desc n ();
         effective_children_below_def after heads before.desc n; ()

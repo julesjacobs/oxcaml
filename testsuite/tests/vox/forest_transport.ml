@@ -17,8 +17,8 @@ let rec (finite_frame @ total) : (h : node Pref.heap) @ immutable -> (after : no
     (frame : ((x : node Pref.t) @ immutable -> {u : unit | H.mem h x === H.mem after x && observe h x === observe after x})) @ total ->
     (t : tree) @ immutable -> {u : unit | finite h t} -> {u : unit | finite after t} @ ghost = fun h after frame t premise -> ghost_ (
   finite_def h t; finite_def after t; tree_root_def t;
-  let x = tree_root t in frame x; match t with Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, c) -> finite_frame h after frame c (); ()
+  let x = tree_root t in frame x; match t with Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, c) | List_tree (_, c) -> finite_frame h after frame c (); ()
   | Branch (_, a, b) -> finite_frame h after frame a (); finite_frame h after frame b (); ())
 let (mark_forest @ total) : (d : history) @ immutable -> (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (old : node) @ immutable -> (epoch : node Pref.t) @ immutable -> (q : node Pref.t) @ immutable ->
@@ -71,8 +71,8 @@ let (closed_forest_at @ total) : (h : node Pref.heap) @ immutable ->
   let t = trees x in frame x; if H.mem h x then (finite_frame h after frame t (); t) else t)
 
 let[@def] rec (unfolding @ total) (t : tree @ immutable) = match t with
-  | Free p | Constant_tree p -> Level_spec.Tip p
-  | Alias_tree (p, c) -> Level_spec.Through (p, unfolding c)
+  | Free p | Constant_tree p | Word_tree p -> Level_spec.Tip p
+  | Alias_tree (p, c) | List_tree (p, c) -> Level_spec.Through (p, unfolding c)
   | Branch (p, a, b) -> Level_spec.Fork (p, unfolding a, unfolding b)
 let (unfolding_root @ total) : (t : tree) @ immutable ->
     {u : unit | Level_spec.bound_root (unfolding t) === tree_root t} @ ghost = fun t -> ghost_ (
@@ -81,8 +81,8 @@ let rec (unfolding_valid @ total) : (h : node Pref.heap) @ immutable -> (t : tre
     {u : unit | finite h t} -> {u : unit | Generalize_spec.unfolded h (unfolding t)} @ ghost = fun h t premise -> ghost_ (
   finite_def h t; tree_root_def t; unfolding_def t; unfolding_root t;
   let out = unfolding t in Level_spec.bound_root_def out; Generalize_spec.unfolded_def h out;
-  let p = tree_root t in observe_def h p; match t with Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, c) -> unfolding_root c; unfolding_valid h c (); ()
+  let p = tree_root t in observe_def h p; match t with Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, c) | List_tree (_, c) -> unfolding_root c; unfolding_valid h c (); ()
   | Branch (_, a, b) -> unfolding_root a; unfolding_root b; unfolding_valid h a (); unfolding_valid h b (); ())
 
 let (allocation_forest @ total) : (h : node Pref.heap) @ immutable ->

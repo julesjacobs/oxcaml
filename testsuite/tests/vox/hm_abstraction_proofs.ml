@@ -50,7 +50,8 @@ let rec (abstract_wf @ total) : (ps : names) @ immutable ->
     match t with
     | Parameter i -> shift_index_wf cut n base i (); ()
     | Free p -> abstract_free_wf ps cut base p; ()
-    | Boolean -> ()
+    | Boolean | Word64 -> ()
+    | List_type a -> abstract_wf ps cut base a (); ()
     | Function (a, b) -> abstract_wf ps cut base a ();
       abstract_wf ps cut base b (); ())
 
@@ -135,7 +136,8 @@ let rec (abstract_open @ total) : (ps : names) @ immutable ->
     (match t with
     | Parameter i -> abstract_open_index ps cut args i; ()
     | Free p -> abstract_open_free ps cut args p; ()
-    | Boolean -> ()
+    | Boolean | Word64 -> ()
+    | List_type a -> abstract_open ps cut args a; ()
     | Function (a, b) -> abstract_open ps cut args a; abstract_open ps cut args b; ());
     ())
 
@@ -187,7 +189,8 @@ let rec (abstract_shift @ total) : (ps : names) @ immutable ->
     | Free p -> abstract_free_def ps big p; abstract_free_def ps small p;
       let v = abstract_free ps small p in shift_def local k v;
       (match position ps p with None -> () | Some i -> shift_free_index local cut k i; ())
-    | Boolean -> ()
+    | Boolean | Word64 -> ()
+    | List_type a -> abstract_shift ps local cut k a; ()
     | Function (a, b) -> abstract_shift ps local cut k a; abstract_shift ps local cut k b; ());
     ())
 
@@ -259,7 +262,32 @@ let rec (abstraction_typed @ total) : (ps : names) @ immutable ->
         open_scheme_def changed_s changed_args;
         (match s with Forall (_, body) -> abstract_open ps cut args body; ()); ())
       | _ -> ())
-    | Constant -> ()
+    | Constant | Word_constant -> ()
+    | Empty_list a -> abstract_wf ps cut base a (); ()
+    | List_cons (a, head, tail) -> (match e with Cons (h, r) ->
+      abstraction_typed ps cut base g h a head ();
+      abstraction_typed ps cut base g r t tail (); () | _ -> ())
+    | List_case (a, scrutinee, empty, nonempty) -> (match e with CaseList (s, l, r) ->
+      abstract_wf ps cut base a ();
+      let list = List_type a in abstract_type_def ps cut list;
+      abstraction_typed ps cut base g s list scrutinee ();
+      abstraction_typed ps cut base g l t empty ();
+      let z = Z in add_def z cut;
+      let hs = Forall (z, a) in let ts = Forall (z, list) in
+      let tail = Binding (ts, g) in let both = Binding (hs, tail) in
+      abstract_scheme_def ps cut hs; abstract_scheme_def ps cut ts;
+      abstract_context_def ps cut tail; abstract_context_def ps cut both;
+      abstraction_typed ps cut base both r t nonempty (); () | _ -> ())
+    | Conditional (condition, yes, no) -> (match e with If (c, a, b) ->
+      let bool = Boolean in abstract_type_def ps cut bool;
+      abstraction_typed ps cut base g c bool condition ();
+      abstraction_typed ps cut base g a t yes ();
+      abstraction_typed ps cut base g b t no (); () | _ -> ())
+    | Word_primitive (left, right) -> (match e with Primitive (op, a, b) ->
+      let word = Word64 in abstract_type_def ps cut word;
+      operation_type_def op; (match op with Add | Subtract -> () | Equal_word | Unsigned_less -> ());
+      abstraction_typed ps cut base g a word left ();
+      abstraction_typed ps cut base g b word right (); () | _ -> ())
     | Abstraction (a, body) -> (match e, t with
       | Lambda e, Function (_, b) ->
         let z = Z in add_def z cut; let arg_scheme = Forall (z, a) in
@@ -295,8 +323,9 @@ let rec (abstract_avoids @ total) : (ps : names) @ immutable ->
   fun ps cut t premise -> ghost_ (
     avoids_def ps t; abstract_type_def ps cut t;
     let n = count ps in shift_def cut n t;
-    match t with Parameter _ | Boolean -> ()
+    match t with Parameter _ | Boolean | Word64 -> ()
     | Free p -> abstract_free_def ps cut p; ()
+    | List_type a -> abstract_avoids ps cut a (); ()
     | Function (a, b) -> abstract_avoids ps cut a ();
       abstract_avoids ps cut b (); ())
 

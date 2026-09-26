@@ -23,7 +23,7 @@ let rec (low_unfolded_agreement @ total) : (saved : node Pref.heap) @ immutable 
     finite_def h tree; tree_root_def tree;
     let p = tree_root tree in rho_model p; eta_model p;
     equation_def h rho p; equation_def h eta p; Level_unifier_spec.observe_def h p; match tree with
-    | Free _ | Constant_tree _ -> low_var_def h p cut; Level_unifier_spec.observe_def h p;
+    | Free _ | Constant_tree _ | Word_tree _ -> low_var_def h p cut; Level_unifier_spec.observe_def h p;
       order p; Level_unifier_spec.terminal_def h p;
       E.terminal_level h heads p (); E.effective_below_def h heads p cut;
       below_def h p cut;
@@ -31,7 +31,7 @@ let rec (low_unfolded_agreement @ total) : (saved : node Pref.heap) @ immutable 
         let origin = prior p in
         Relative_generalization.origin_agreement saved h cut rho rho_model eta eta_model equal p origin (); ())
       else ()
-    | Alias_tree (_, child) -> let q = tree_root child in Level_finite_spec.edge_def h p q;
+    | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in Level_finite_spec.edge_def h p q;
       order p; order q; finite_def h child; Hm_effective_freshness.below_child h heads cut p q ();
       low_unfolded_agreement saved h heads cut prior order rho rho_model eta eta_model equal child (); ()
     | Branch (_, a, b) -> let q = tree_root a in let r = tree_root b in
@@ -61,7 +61,7 @@ let rec (relative_interpret @ total) : (saved : node Pref.heap) @ immutable ->
       low_unfolded_agreement saved h heads cut prior order rho rho_model eta eta_model equal tree (); ())
     else (
       eta_model p; equation_def h eta p; Level_unifier_spec.observe_def h p;
-      match tree with Free _ | Constant_tree _ -> ()
-      | Alias_tree (_, child) -> relative_interpret saved h heads cut prior order rho rho_model eta eta_model equal child (); ()
+      match tree with Free _ | Constant_tree _ | Word_tree _ -> ()
+      | Alias_tree (_, child) | List_tree (_, child) -> relative_interpret saved h heads cut prior order rho rho_model eta eta_model equal child (); ()
       | Branch (_, a, b) -> relative_interpret saved h heads cut prior order rho rho_model eta eta_model equal a ();
         relative_interpret saved h heads cut prior order rho rho_model eta eta_model equal b (); ()))

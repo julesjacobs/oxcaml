@@ -84,11 +84,30 @@ let rec (run_forest @ total) : (h : node Pref.heap) @ immutable ->
           () in
         Copy_certificate_proofs.replay h certificate heads witness epoch depth d original p ();
         let refine_ t = clean_copy_forest h heads trees epoch depth d x () in refine_ t)
-    | RBool p -> let desc : desc = Bool in
+    | RBool p | RFalse p -> let desc : desc = Bool in
       let ts = allocated_forest h trees depth p desc () in let refine_ t = ts x in refine_ t
-    | RApp_left (left, _) -> let refine_ t = run_forest h trees depth pool env left after final_pool x () in refine_ t
+    | RWord (_, p) -> let desc : desc = Word in
+      let ts = allocated_forest h trees depth p desc () in let refine_ t = ts x in refine_ t
+    | RApp_left (left, _) | RCons_left (left, _) -> let refine_ t = run_forest h trees depth pool env left after final_pool x () in refine_ t
     | RLet_left (rhs, _) -> let empty : pool = Empty in let child_depth = depth + 1 in
       let refine_ t = run_forest h trees child_depth empty env rhs after final_pool x () in refine_ t
+    | RNil (arg, p) ->
+      let var = Var in let middle = H.put h arg (cell var depth) in
+      let ts1 = allocated_forest h trees depth arg var () in
+      let desc = List arg in let ts2 = allocated_forest middle (refine_ ts1) depth p desc () in
+      let refine_ t = ts2 x in refine_ t
+    | RCaseList (_, _, _, body) ->
+      let refine_ t = run_forest h trees depth pool env body after final_pool x () in refine_ t
+    | RIf (_, _, _, body) ->
+      let refine_ t = run_forest h trees depth pool env body after final_pool x () in refine_ t
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      let ts : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+        (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = run_forest h trees depth pool env body middle body_pool x () in refine_ t in
+      (match result body with None -> let refine_ t = ts x in refine_ t
+      | Some _ -> match out with None -> unreachable_ () | Some p ->
+        let desc = primitive_desc op in let next = allocated_forest middle ts depth p desc () in
+        let refine_ t = next x in refine_ t)
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let h1 = H.put h arg (cell var depth) in
       let ts1 = allocated_forest h trees depth arg var () in
@@ -100,11 +119,23 @@ let rec (run_forest @ total) : (h : node Pref.heap) @ immutable ->
       | None -> let _impossible : {u : unit | false} = () in let refine_ t = trees x in refine_ t
       | Some p -> let desc = Arrow (arg, b) in
         let ts3 = allocated_forest middle (refine_ ts2) depth p desc () in let refine_ t = ts3 x in refine_ t)
-    | RApp_right (left, right, middle, left_pool) ->
+    | RApp_right (left, right, middle, left_pool) | RCons_right (left, right, middle, left_pool) ->
     let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
       let refine_ t = run_forest h trees depth pool env left middle left_pool x () in refine_ t in
       let refine_ t = run_forest middle (refine_ ts1) depth left_pool env right after final_pool x () in refine_ t
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
+    let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+      (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
+      let refine_ t = run_forest h trees depth pool env left h1 pool1 x () in refine_ t in
+    let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+      (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
+      let refine_ t = run_forest h1 (refine_ ts1) depth pool1 env right h2 pool2 x () in refine_ t in
+      (match result left with None -> let _impossible : {u : unit | false} = () in let refine_ t = trees x in refine_ t
+      | Some f -> match result right with None -> let _impossible : {u : unit | false} = () in let refine_ t = trees x in refine_ t
+      | Some a -> let desc = List f in let h3 = H.put h2 p (cell desc depth) in
+        let ts3 = allocated_forest h2 (refine_ ts2) depth p desc () in
+        let refine_ t = Effective_unifier_finite.unified_finite_at h3 (refine_ ts3) a p ok after d x () in refine_ t)
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
     let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->

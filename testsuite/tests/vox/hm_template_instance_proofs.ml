@@ -60,17 +60,17 @@ let (open_boundary @ total) : (names : A.names) @ immutable ->
     let args = arguments names choices in Hm_substitution_proofs.open_embed args t; ())
 
 let[@def] rec (parameters_in @ total) (names : A.names @ immutable) (schema : template @ immutable) = ghost_ (
-  match schema with Boundary _ | Constant _ -> true
+  match schema with Boundary _ | Constant _ | Word_constant _ -> true
   | Parameter p -> not (A.position names p === None)
-  | Indirect (_, child) -> parameters_in names child
+  | Indirect (_, child) | List_template (_, child) -> parameters_in names child
   | Product (_, a, b) -> parameters_in names a && parameters_in names b)
 
 let[@def] rec (boundaries_avoid @ total) (names : A.names @ immutable)
     (rho : (node Pref.t @ immutable total -> ty @ immutable total) @ total)
     (schema : template @ immutable) = ghost_ (match schema with
   | Boundary p -> A.avoids names (D.embed (rho p))
-  | Parameter _ | Constant _ -> true
-  | Indirect (_, child) -> boundaries_avoid names rho child
+  | Parameter _ | Constant _ | Word_constant _ -> true
+  | Indirect (_, child) | List_template (_, child) -> boundaries_avoid names rho child
   | Product (_, a, b) -> boundaries_avoid names rho a && boundaries_avoid names rho b)
 
 let rec (open_template @ total) : (names : A.names) @ immutable ->
@@ -86,9 +86,17 @@ let rec (open_template @ total) : (names : A.names) @ immutable ->
     match schema with
     | Boundary p -> let t = rho p in open_boundary names choices t (); ()
     | Parameter p -> F.variable_choice_def p; open_parameter names choices p (); ()
+    | Word_constant _ -> let t = Word64 in let mono = D.embed t in D.embed_def t;
+      A.avoids_def names mono; open_boundary names choices t (); ()
     | Constant _ -> let t = Boolean in let mono = D.embed t in D.embed_def t;
       A.avoids_def names mono; open_boundary names choices t (); ()
     | Indirect (_, child) -> open_template names rho choices child (); ()
+    | List_template (_, child) ->
+      let old = interpret rho F.variable_choice schema in let next = interpret rho choices schema in
+      D.embed_def old; D.embed_def next; let mono = D.embed old in let z = D.Z in
+      A.abstract_type_def names z mono; let body = A.abstract_type names z mono in
+      let args = arguments names choices in D.open_type_def args body;
+      open_template names rho choices child (); ()
     | Product (_, a, b) ->
       let old = interpret rho F.variable_choice schema in let next = interpret rho choices schema in
       D.embed_def old; D.embed_def next; let mono = D.embed old in let z = D.Z in
@@ -101,9 +109,9 @@ let rec (parameters_subset @ total) : (schema : template) @ immutable -> (names 
       {u : unit | A.position (F.template_names schema) p === None || not (A.position names p === None)})) @ total ->
     {u : unit | parameters_in names schema} @ ghost = fun schema names included -> ghost_ (
     F.template_names_def schema; parameters_in_def names schema; match schema with
-    | Boundary _ | Constant _ -> ()
+    | Boundary _ | Constant _ | Word_constant _ -> ()
     | Parameter p -> included p; let ps = F.template_names schema in A.position_def ps p; ()
-    | Indirect (_, child) -> let () = parameters_subset child names (refine_ included) in ()
+    | Indirect (_, child) | List_template (_, child) -> let () = parameters_subset child names (refine_ included) in ()
     | Product (_, a, b) ->
       let left : ((p : node Pref.t) @ immutable ->
         {u : unit | A.position (F.template_names a) p === None || not (A.position names p === None)}) @ total = fun p ->
@@ -138,11 +146,11 @@ let rec (selected_generic @ total) : (h : node Pref.heap) @ immutable -> (schema
   fun h schema p premise -> ghost_ (
     template_def h schema; F.template_names_def schema;
     let names = F.template_names schema in match schema with
-    | Boundary _ | Constant _ -> A.position_def names p; ()
+    | Boundary _ | Constant _ | Word_constant _ -> A.position_def names p; ()
     | Parameter q -> A.position_def names p;
       let empty = A.No_names in A.position_def empty p;
       let var : desc = Var in generic_desc_def h q var; at_level_def h q; ()
-    | Indirect (_, child) -> selected_generic h child p (); ()
+    | Indirect (_, child) | List_template (_, child) -> selected_generic h child p (); ()
     | Product (_, a, b) -> let aa = F.template_names a in let bb = F.template_names b in
       F.join_position aa bb p; selected_generic h a p (); selected_generic h b p (); ())
 
@@ -163,13 +171,13 @@ let rec (canonical_boundaries @ total) : (h : node Pref.heap) @ immutable -> (cu
   fun h cut order trees rho values names generic schema premise -> ghost_ (
     template_def h schema; Hm_environment_spec.boundary_bound_def h cut schema;
     boundaries_avoid_def names rho schema; match schema with
-    | Parameter _ | Constant _ -> ()
+    | Parameter _ | Constant _ | Word_constant _ -> ()
     | Boundary p -> root_def schema; below_def h p cut; let refine_ tree = trees p in values p;
       let high : ((q : node Pref.t) @ immutable ->
         {u : unit | A.position names q === None || not (Level_spec.below h q cut)}) @ total = fun q ->
         generic q; Level_spec.below_def h q cut; () in
       F.readback_avoids h cut order names high tree (); ()
-    | Indirect (_, child) -> canonical_boundaries h cut order trees rho values names generic child (); ()
+    | Indirect (_, child) | List_template (_, child) -> canonical_boundaries h cut order trees rho values names generic child (); ()
     | Product (_, a, b) -> canonical_boundaries h cut order trees rho values names generic a ();
       canonical_boundaries h cut order trees rho values names generic b (); ())
 
@@ -201,6 +209,8 @@ let[@def] rec (body @ total) (names : A.names @ immutable)
   | Boundary p -> D.embed (rho p)
   | Parameter p -> A.abstract_free names D.Z p
   | Constant _ -> D.Boolean
+  | Word_constant _ -> D.Word64
+  | List_template (_, child) -> D.List_type (body names rho child)
   | Indirect (_, child) -> body names rho child
   | Product (_, a, b) -> D.Function (body names rho a, body names rho b))
 
@@ -229,8 +239,8 @@ let rec (abstract_body @ total) : (names : A.names) @ immutable ->
       let k = A.count names in Hm_substitution_proofs.shift_embed z k t; ()
     | Parameter p -> F.variable_choice_def p; let var = Variable p in D.embed_def var;
       let free = D.Free p in A.abstract_type_def names z free; ()
-    | Constant _ -> ()
-    | Indirect (_, child) -> abstract_body names rho child (); ()
+    | Constant _ | Word_constant _ -> ()
+    | Indirect (_, child) | List_template (_, child) -> abstract_body names rho child (); ()
     | Product (_, a, b) -> abstract_body names rho a (); abstract_body names rho b (); ())
 
 let (scheme_reification @ total) :
@@ -254,8 +264,8 @@ let rec (body_instance @ total) : (names : A.names) @ immutable ->
     | Parameter p -> let z = D.Z in A.abstract_free_def names z p;
       (match A.position names p with None -> () | Some i ->
         D.add_def z i; open_position names choices p i (); ())
-    | Constant _ -> ()
-    | Indirect (_, child) -> body_instance names rho choices child (); ()
+    | Constant _ | Word_constant _ -> ()
+    | Indirect (_, child) | List_template (_, child) -> body_instance names rho choices child (); ()
     | Product (_, a, b) -> body_instance names rho choices a ();
       body_instance names rho choices b (); ())
 
@@ -286,8 +296,8 @@ let rec (body_wf @ total) : (names : A.names) @ immutable ->
     | Parameter p -> let z = D.Z in A.abstract_free_def names z p;
       (match A.position names p with None -> () | Some i ->
         D.add_def z i; Hm_abstraction_proofs.position_bound names p i (); ())
-    | Constant _ -> ()
-    | Indirect (_, child) -> body_wf names rho child (); ()
+    | Constant _ | Word_constant _ -> ()
+    | Indirect (_, child) | List_template (_, child) -> body_wf names rho child (); ()
     | Product (_, a, b) -> body_wf names rho a (); body_wf names rho b (); ())
 
 let (scheme_wf @ total) :
@@ -330,9 +340,9 @@ let rec (body_model_transport @ total) : (names : A.names) @ immutable ->
       {u : unit | not (Hm_environment_spec.boundary_member schema p) || rho p === tau p})) @ total ->
     {u : unit | body names rho schema === body names tau schema} @ ghost = fun names rho tau schema equal -> ghost_ (
     body_def names rho schema; body_def names tau schema; match schema with
-    | Parameter _ | Constant _ -> ()
+    | Parameter _ | Constant _ | Word_constant _ -> ()
     | Boundary p -> equal p; Hm_environment_spec.boundary_member_def schema p; ()
-    | Indirect (_, child) ->
+    | Indirect (_, child) | List_template (_, child) ->
       let next : ((p : node Pref.t) @ immutable ->
         {u : unit | not (Hm_environment_spec.boundary_member child p) || rho p === tau p}) @ total = fun p ->
         equal p; Hm_environment_spec.boundary_member_def schema p; () in

@@ -90,6 +90,10 @@ let rec infer_work : (goal : infer_goal) @ immutable -> (h : (node Pref.heap) Gh
         ran_def h.Ghost.ghost depth pool env execution after out.#pool;
         let_free_def execution; source_def execution; result_def execution);
       let r = #{value = Some out.#value; state = out.#state; pool = out.#pool; execution} in use (refine_ r))
+    | T.False | T.Word _ | T.Nil | T.Cons _ | T.CaseList _ | T.If _ | T.Primitive _ ->
+      (* This older driver covers the original lambda/let fragment only; the
+         routed driver behind Verified_hm and Hm_inference covers the rest. *)
+      raise_any (Failure "type inference: term form outside the let-polymorphic core")
     | T.Truth ->
       let desc : desc = Bool in ghost_ (children_below_def h.Ghost.ghost desc depth);
       let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost && pool_scoped h.Ghost.ghost pool && depth >= 0 && children_below h.Ghost.ghost desc depth} = refine_ state in

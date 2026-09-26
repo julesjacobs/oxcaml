@@ -15,7 +15,7 @@ let (allocated_forest @ total) : (h : node Pref.heap) @ immutable ->
       (if H.mem (H.put h p (cell desc depth)) x then finite (H.put h p (cell desc depth)) t else observe (H.put h p (cell desc depth)) x === None)} @ immutable) @ total ghost = fun h trees depth p desc premise -> ghost_ (
   let refine_ premise = premise in allocated_def h depth p desc;
   children_below_def h desc depth;
-  (match desc with Var | Bool -> () | Link q -> below_def h q depth; ()
+  (match desc with Var | Bool | Word -> () | Link q | List q -> below_def h q depth; ()
   | Arrow (a, b) -> below_def h a depth; below_def h b depth; ());
   let v = cell desc depth in cell_def desc depth; allocatable_def h v;
   let out : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&

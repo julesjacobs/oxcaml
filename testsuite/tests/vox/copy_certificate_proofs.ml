@@ -25,6 +25,7 @@ let (ready_agrees @ total) : (h : node Pref.heap) @ immutable ->
     certified_ready_def h c d source dest; K.effective_ready_def h heads d source dest;
     covered_desc_def c source;
     match source, dest with
+    | List a, List x -> witness a; target_agrees h c heads d a x (); ()
     | Arrow (a, b), Arrow (x, y) -> witness a; witness b;
       target_agrees h c heads d a x ();
       target_agrees h c heads d b y (); ()

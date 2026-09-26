@@ -61,7 +61,7 @@ let (frame_scope @ total) : (h : node Pref.heap) @ immutable -> (after : node Pr
   match H.at h x, H.at after x with
   | Some a, Some b -> decreases_def a.level b.level;
     (match a.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> frame stamp; lower_frame_def h after stamp; ());
-    (match a.desc with Var | Bool -> () | Link q -> frame q; lower_frame_def h after q; frame_active h after q (); ()
+    (match a.desc with Var | Bool | Word -> () | Link q | List q -> frame q; lower_frame_def h after q; frame_active h after q (); ()
     | Arrow (a, b) -> frame a; frame b; lower_frame_def h after a; lower_frame_def h after b;
       frame_active h after a (); frame_active h after b (); ()); ()
   | _ -> ())
@@ -105,8 +105,8 @@ let (children_frame @ total) : (h : node Pref.heap) @ immutable -> (after : node
     (desc : desc) @ immutable -> (bound : int) -> {u : unit | children_below h desc bound} ->
     {u : unit | children_below after desc bound} @ ghost = fun h after frame desc bound premise -> ghost_ (
   children_below_def h desc bound; children_below_def after desc bound;
-  match desc with Var | Bool -> ()
-  | Link q -> frame q; frame_below h after q bound (); ()
+  match desc with Var | Bool | Word -> ()
+  | Link q | List q -> frame q; frame_below h after q bound (); ()
   | Arrow (a, b) -> frame a; frame b; frame_below h after a bound ();
     frame_below h after b bound (); ())
 let (write_ordered @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->

@@ -8,7 +8,24 @@ let rec (erase_typing @ total) :
     {u : unit | typed g e t d} @ ghost = fun n g e t d premise -> ghost_ (
   D.typed_def n g e t d; typed_def g e t d;
   (match d with
-  | D.Variable _ | D.Constant -> ()
+  | D.Variable _ | D.Constant | D.Word_constant | D.Empty_list _ -> ()
+  | D.List_cons (a, head, tail) -> (match e with
+    | D.Cons (h, r) -> erase_typing n g h a head (); erase_typing n g r t tail ()
+    | _ -> ())
+  | D.List_case (a, scrutinee, empty, nonempty) -> (match e with
+    | D.CaseList (s, l, r) -> erase_typing n g s (D.List_type a) scrutinee ();
+      erase_typing n g l t empty ();
+      erase_typing n (D.Binding (D.Forall (D.Z, a),
+        D.Binding (D.Forall (D.Z, D.List_type a), g))) r t nonempty ()
+    | _ -> ())
+  | D.Conditional (condition, yes, no) -> (match e with
+    | D.If (c, a, b) -> erase_typing n g c D.Boolean condition ();
+      erase_typing n g a t yes (); erase_typing n g b t no ()
+    | _ -> ())
+  | D.Word_primitive (left, right) -> (match e with
+    | D.Primitive (_, a, b) -> erase_typing n g a D.Word64 left ();
+      erase_typing n g b D.Word64 right ()
+    | _ -> ())
   | D.Abstraction (a, body) -> (match e, t with
     | D.Lambda e, D.Function (_, b) ->
       erase_typing n (D.Binding (D.Forall (D.Z, a), g)) e b body ()

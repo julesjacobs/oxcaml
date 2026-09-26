@@ -62,6 +62,10 @@ let rec work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immut
   ghost_ (copy_heap_def h.Ghost.ghost copied.#epoch depth copied.#history; ran_def h.Ghost.ghost depth pool env execution after copied.#pool;
     source_def execution; result_def execution);
   let out = #{value = Some copied.#value; state = copied.#state; pool = copied.#pool; execution} in use (refine_ out)
+  | T.Cons _ | T.CaseList _ | T.If _ | T.Primitive _ ->
+    (* Lists, conditionals and primitives are inferred by the routed driver
+       behind Verified_hm and Hm_inference; this driver predates them. *)
+    raise (Failure "type inference: term form outside the effective-level driver")
   | T.Truth ->
     let desc = Bool in
     ghost_ (cell_def desc depth; let v = cell desc depth in payload_scoped_def h.Ghost.ghost v; ());
@@ -72,6 +76,40 @@ let rec work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immut
   ghost_ ( ran_def h.Ghost.ghost depth pool env execution after allocated.#pool;
     source_def execution; result_def execution);
   let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated.#pool; execution} in use (refine_ out)
+  | T.False ->
+    let desc = Bool in
+    ghost_ (cell_def desc depth; let v = cell desc depth in payload_scoped_def h.Ghost.ghost v; ());
+    let refine_ allocated = Effective_allocator.allocate h depth desc pool (refine_ state) in
+  ghost_ (allocated_def h.Ghost.ghost depth allocated.#value desc);
+  let execution = ghost_ (RFalse allocated.#value) in
+  let after = ghost_ (Pref.own (borrow_ allocated.#state)) in
+  ghost_ ( ran_def h.Ghost.ghost depth pool env execution after allocated.#pool;
+    source_def execution; result_def execution);
+  let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated.#pool; execution} in use (refine_ out)
+  | T.Word word ->
+    let desc = Word in
+    ghost_ (cell_def desc depth; let v = cell desc depth in payload_scoped_def h.Ghost.ghost v; ());
+    let refine_ allocated = Effective_allocator.allocate h depth desc pool (refine_ state) in
+  ghost_ (allocated_def h.Ghost.ghost depth allocated.#value desc);
+  let execution = ghost_ (RWord (word, allocated.#value)) in
+  let after = ghost_ (Pref.own (borrow_ allocated.#state)) in
+  ghost_ ( ran_def h.Ghost.ghost depth pool env execution after allocated.#pool;
+    source_def execution; result_def execution);
+  let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated.#pool; execution} in use (refine_ out)
+  | T.Nil ->
+    let var = Var in
+    ghost_ (cell_def var depth; payload_scoped_def h.Ghost.ghost (cell var depth));
+    let refine_ element = Effective_allocator.allocate h depth var pool (refine_ state) in
+    let arg = element.#value in
+    let middle : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (Pref.own (borrow_ element.#state))} in
+    let desc = List arg in
+    ghost_ (cell_def desc depth; payload_scoped_def middle.Ghost.ghost (cell desc depth));
+    let refine_ allocated = Effective_allocator.allocate middle depth desc element.#pool (refine_ element.#state) in
+    let execution = ghost_ (RNil (arg, allocated.#value)) in
+    let after = ghost_ (Pref.own (borrow_ allocated.#state)) in
+    ghost_ (ran_def h.Ghost.ghost depth pool env execution after allocated.#pool;
+      source_def execution; result_def execution);
+    let out = #{value = Some allocated.#value; state = allocated.#state; pool = allocated.#pool; execution} in use (refine_ out)
   | T.Lambda runtime_body ->
     let var = Var in
   ghost_ (cell_def var depth; let v = cell var depth in payload_scoped_def h.Ghost.ghost v; ());
@@ -437,7 +475,7 @@ let rec work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immut
   work goal self_heap self_heads self_trees depth self_pool self_facts next_runtime_env runtime_body (refine_ state) resume
   | T.Let (runtime_rhs, runtime_body) ->
     let child_depth = depth + 1 in
-    if child_depth < 0 then raise (Failure "type inference level capacity");
+    if child_depth < 0 then raise (Failure "type inference level capacity") else (
     let child_pool : pool = Empty in
     ghost_ (pool_scoped_def h.Ghost.ghost child_pool);
     let child_facts : (((x : node Pref.t) @ immutable -> {u : unit | runtime_at h.Ghost.ghost heads.Ghost.ghost child_depth child_pool x})) Ghost.t =
@@ -510,6 +548,7 @@ let rec work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ immut
   work goal start rhs_heads parent_trees depth parent_pool parent_facts next_runtime_env runtime_body (refine_ state) resume_body
   in
   work goal h heads trees child_depth child_pool child_facts runtime_env runtime_rhs (refine_ state) resume_rhs
+  )
 
 let closed_compiled :
     (input : {e : T.term | T.valid e && D.scoped_term D.Z (T.source e)}) @ immutable ->

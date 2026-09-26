@@ -8,7 +8,7 @@ let[@def] (below @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @ im
   ghost_ (H.mem h p && match at_level h p with Generic -> false | Finite n -> n >= 0 && n <= bound)
 let[@def] (finite_scope @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @ immutable) =
   ghost_ (source_ok h p && match H.at h p with None -> false | Some v ->
-    if active h p then match v.desc with Var | Bool -> true | Link q -> active h q
+    if active h p then match v.desc with Var | Bool | Word -> true | Link q | List q -> active h q
       | Arrow (a, b) -> active h a && active h b else true)
 let[@def] (lower_cell @ total) (v : node @ immutable) (bound : int) =
   match v.level with Generic -> v | Finite n -> {v with level = Finite (if n < bound then n else bound)}
@@ -21,7 +21,7 @@ let[@def] (lower_frame @ total) (h : node Pref.heap @ immutable) (after : node P
     | _ -> false)
 
 let[@def] (children_below @ total) (h : node Pref.heap @ immutable) (desc : desc @ immutable) (bound : int) = ghost_ (
-  match desc with Var | Bool -> true | Link q -> below h q bound
+  match desc with Var | Bool | Word -> true | Link q | List q -> below h q bound
   | Arrow (a, b) -> below h a bound && below h b bound)
 let[@def] (ordered @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @ immutable) = ghost_ (
   match H.at h p with None -> true | Some v -> match v.level with
@@ -49,8 +49,8 @@ let[@def] (bound_root @ total) (t : bounded @ immutable) = match t with
   | Tip p | Through (p, _) | Fork (p, _, _) -> p
 let[@def] rec (bounded @ total) (h : node Pref.heap @ immutable) (limit : int) (t : bounded @ immutable) =
   ghost_ (below h (bound_root t) limit && match t with
-  | Tip p -> (match H.at h p with Some {desc = (Var | Bool); _} -> true | _ -> false)
-  | Through (p, child) -> (match H.at h p with Some {desc = Link q; _} -> q === bound_root child | _ -> false)
+  | Tip p -> (match H.at h p with Some {desc = (Var | Bool | Word); _} -> true | _ -> false)
+  | Through (p, child) -> (match H.at h p with Some {desc = (Link q | List q); _} -> q === bound_root child | _ -> false)
     && bounded h limit child
   | Fork (p, a, b) -> (match H.at h p with Some {desc = Arrow (x, y); _} -> x === bound_root a && y === bound_root b | _ -> false)
     && bounded h limit a && bounded h limit b)

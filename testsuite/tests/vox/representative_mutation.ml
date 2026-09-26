@@ -26,7 +26,7 @@ let rec (base_terminal @ total) : (h : node Pref.heap) @ immutable ->
       | Bind_left _ -> redirect_terminal h p q x (); ()
       | Bind_right _ -> redirect_terminal h q p x (); ()
       | Swap rest -> base_terminal h q p ok after rest x (); ()
-      | Resolve (a, b, _, _, rest) ->
+      | List_children (a, b, rest) | Resolve (a, b, _, _, rest) ->
         base_terminal h a b ok after rest x (); ()
       | Scanned (needle, marks, rest) ->
         let mid = scan_heap h marks in
@@ -67,6 +67,7 @@ let rec (unified_terminal @ total) : (h : node Pref.heap) @ immutable ->
       Optimized_unifier_spec.unified_def h p q ok after d;
       match d with
       | Optimized_unifier_spec.Base old -> base_terminal h p q ok after old x (); ()
+      | Optimized_unifier_spec.List_children (r, s, rest)
       | Optimized_unifier_spec.Resolve (r, s, _, _, rest) ->
         unified_terminal h r s ok after rest x (); ()
       | Optimized_unifier_spec.Children (a, b, c, e, mid, left_ok, left, right) ->

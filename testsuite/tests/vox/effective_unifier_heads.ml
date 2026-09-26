@@ -78,7 +78,7 @@ let rec (unified_head @ total) : (h : node Pref.heap) @ immutable ->
         progress_refl h root; let out = {R.root; path} in out
       | _ -> let out = {R.root; path} in out)
     | Swap rest -> let out = unified_head h q p ok after rest x root path () in out
-    | Resolve (r, s, _, _, rest) -> let out = unified_head h r s ok after rest x root path () in out
+    | List_children (r, s, rest) | Resolve (r, s, _, _, rest) -> let out = unified_head h r s ok after rest x root path () in out
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let first = unified_head h a c left_ok middle left x root path () in
       if left_ok then (

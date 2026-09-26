@@ -24,7 +24,7 @@ let rec (legacy_restrict @ total) : (h : node Pref.heap) @ immutable ->
       legacy_restrict mid rho p q ok after rest model x ();
       lower_equation h bound edits rho x (); ()
     | Swap rest -> legacy_restrict h rho q p ok after rest model x (); ()
-    | Resolve (r, s, _, _, rest) -> legacy_restrict h rho r s ok after rest model x (); ()
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> legacy_restrict h rho r s ok after rest model x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       if left_ok then (
         let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
@@ -52,6 +52,9 @@ let rec (success_backward_at @ total) :
       resolution_model h rho model p r rp ();
       resolution_model h rho model q s sq ();
       success_backward_at h rho model r s after rest x (); ()
+    | List_children (a, b, child) ->
+      model p; model q; node_equation_def h rho p; node_equation_def h rho q;
+      success_backward_at h rho model a b after child x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       model p; model q;
       node_equation_def h rho p; node_equation_def h rho q;
@@ -97,6 +100,11 @@ let rec (success_forward_at @ total) :
       resolution_model h rho before_model q s sq ();
       success_forward_at h rho r s after rest model x ();
       ()
+    | List_children (a, b, child) ->
+      success_forward_at h rho a b after child model p ();
+      success_forward_at h rho a b after child model q ();
+      node_equation_def h rho p; node_equation_def h rho q;
+      success_forward_at h rho a b after child model x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let middle_model : (x : node Pref.t) @ immutable ->
           {u : unit | node_equation middle rho x} @ total = fun x ->
@@ -138,6 +146,9 @@ let rec (failure_refutes @ total) :
       resolution_model h rho model p r rp ();
       resolution_model h rho model q s sq ();
       failure_refutes h rho model r s after rest (); ()
+    | List_children (a, b, child) ->
+      model p; model q; node_equation_def h rho p; node_equation_def h rho q;
+      failure_refutes h rho model a b after child (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       model p; model q;
       node_equation_def h rho p; node_equation_def h rho q;
@@ -170,7 +181,7 @@ let rec (unify_restrict @ total) : (h : node Pref.heap) @ immutable ->
     unified_def h p q ok after d;
     match d with
     | Base old -> legacy_restrict h rho p q ok after old model x (); ()
-    | Resolve (r, s, _, _, rest) -> unify_restrict h rho r s ok after rest model x (); ()
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> unify_restrict h rho r s ok after rest model x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       if left_ok then (
         let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->

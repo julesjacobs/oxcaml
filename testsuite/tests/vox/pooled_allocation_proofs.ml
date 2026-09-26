@@ -10,10 +10,10 @@ let (allocation_source @ total) : (h : node Pref.heap) @ immutable -> (p : node 
     {u : unit | not (H.mem (H.put h p v) x) || source_ok (H.put h p v) x} @ ghost = fun h p v x premise -> ghost_ (
   let after = H.put h p v in
   payload_scoped_def h v; source_ok_def h x; source_ok_def after x; (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> ());
-  (match v.desc with Var | Bool -> () | Link q -> () | Arrow (a, b) -> ());
+  (match v.desc with Var | Bool | Word -> () | Link q | List q -> () | Arrow (a, b) -> ());
   (match H.at h x with None -> () | Some old ->
     (match old.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> ());
-    (match old.desc with Var | Bool -> () | Link q -> () | Arrow (a, b) -> ())); ())
+    (match old.desc with Var | Bool | Word -> () | Link q | List q -> () | Arrow (a, b) -> ())); ())
 let rec (allocation_pool @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (v : node) @ immutable -> (pool : pool) @ immutable ->
     {u : unit | not (H.mem h p) && payload_scoped h v && pool_scoped h pool} ->
@@ -49,7 +49,7 @@ let (allocation_children @ total) : (h : node Pref.heap) @ immutable -> (p : nod
     {u : unit | not (H.mem h p) && children_below h desc bound} ->
     {u : unit | children_below (H.put h p v) desc bound} @ ghost = fun h p v desc bound premise -> ghost_ (
   let after = H.put h p v in children_below_def h desc bound; children_below_def after desc bound;
-  match desc with Var | Bool -> () | Link q -> allocation_below h p v q bound (); ()
+  match desc with Var | Bool | Word -> () | Link q | List q -> allocation_below h p v q bound (); ()
   | Arrow (a, b) -> allocation_below h p v a bound (); allocation_below h p v b bound (); ())
 let (allocation_ordered @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (desc : desc) @ immutable -> (depth : int) -> (x : node Pref.t) @ immutable ->

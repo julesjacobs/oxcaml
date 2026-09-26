@@ -3,9 +3,11 @@ module T = Fast_term
 let[@def] rec (fits @ total) (term : T.term @ immutable)
     (depth : int) (limit : int) = ghost_ (
   0 <= depth && depth <= limit && match term with
-  | T.Bound _ | T.Truth -> true
+  | T.Bound _ | T.Truth | T.False | T.Word _ | T.Nil -> true
   | T.Lambda body | T.Recursive body -> fits body depth limit
-  | T.Apply (a, b) -> fits a depth limit && fits b depth limit
+  | T.Apply (a, b) | T.Cons (a, b) | T.Primitive (_, a, b) -> fits a depth limit && fits b depth limit
+  | T.If (a, b, c) | T.CaseList (a, b, c) ->
+    fits a depth limit && fits b depth limit && fits c depth limit
   | T.Let (a, b) -> depth + 1 > depth
     && fits a (depth + 1) limit && fits b depth limit)
 
@@ -16,12 +18,16 @@ let rec (weaken @ total) : (term : T.term) @ immutable ->
   fun term depth before after premise -> ghost_ (
     fits_def term depth before; fits_def term depth after;
     match term with
-    | T.Bound _ | T.Truth -> ()
+    | T.Bound _ | T.Truth | T.False | T.Word _ | T.Nil -> ()
     | T.Lambda body | T.Recursive body ->
       weaken body depth before after (); ()
-    | T.Apply (a, b) ->
+    | T.Apply (a, b) | T.Cons (a, b) | T.Primitive (_, a, b) ->
       weaken a depth before after ();
       weaken b depth before after (); ()
+    | T.If (a, b, c) | T.CaseList (a, b, c) ->
+      weaken a depth before after ();
+      weaken b depth before after ();
+      weaken c depth before after (); ()
     | T.Let (a, b) -> let next = depth + 1 in
       weaken a next before after ();
       weaken b depth before after (); ())
@@ -36,7 +42,7 @@ let rec work : (goal : goal) @ immutable -> (term : T.term) @ immutable ->
     {n : int | fits goal.term goal.depth n} = fun goal term depth proof use ->
   ghost_ (let () = proof.Ghost.ghost in ());
   match term with
-  | T.Bound _ | T.Truth ->
+  | T.Bound _ | T.Truth | T.False | T.Word _ | T.Nil ->
     ghost_ (fits_def term depth depth); use (depth)
   | T.Lambda body | T.Recursive body ->
     let resume : (n : {n : int | fits body depth n}) ->
@@ -44,7 +50,7 @@ let rec work : (goal : goal) @ immutable -> (term : T.term) @ immutable ->
       ghost_ (fits_def body depth n; fits_def term depth n);
       use (n) in
     work goal body depth {Ghost.ghost = ghost_ ()} resume
-  | T.Apply (a, b) ->
+  | T.Apply (a, b) | T.Cons (a, b) | T.Primitive (_, a, b) ->
     let resume_left : (left : {n : int | fits a depth n}) ->
         {n : int | fits goal.term goal.depth n} = fun left ->
       let resume_right : (right : {n : int | fits b depth n}) ->
@@ -56,6 +62,22 @@ let rec work : (goal : goal) @ immutable -> (term : T.term) @ immutable ->
         use (limit) in
       work goal b depth {Ghost.ghost = ghost_ ()} resume_right in
     work goal a depth {Ghost.ghost = ghost_ ()} resume_left
+  | T.If (a, b, c) | T.CaseList (a, b, c) ->
+    let resume_a : (na : {n : int | fits a depth n}) ->
+        {n : int | fits goal.term goal.depth n} = fun na ->
+      let resume_b : (nb : {n : int | fits b depth n}) ->
+          {n : int | fits goal.term goal.depth n} = fun nb ->
+        let resume_c : (nc : {n : int | fits c depth n}) ->
+            {n : int | fits goal.term goal.depth n} = fun nc ->
+          let ab = if na > nb then na else nb in
+          let limit = if ab > nc then ab else nc in
+          ghost_ (weaken a depth na limit (); weaken b depth nb limit ();
+            weaken c depth nc limit ();
+            fits_def a depth limit; fits_def term depth limit);
+          use limit in
+        work goal c depth {Ghost.ghost = ghost_ ()} resume_c in
+      work goal b depth {Ghost.ghost = ghost_ ()} resume_b in
+    work goal a depth {Ghost.ghost = ghost_ ()} resume_a
   | T.Let (a, b) ->
     let child_depth = depth + 1 in
     if child_depth <= depth then failwith "type inference level capacity" else

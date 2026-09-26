@@ -83,7 +83,7 @@ let rec copy_work : (goal : copy_goal) @ immutable -> (saved : (node Pref.heap) 
         ghost_ (source_ok_def saved.Ghost.ghost p; payload_scoped_def saved.Ghost.ghost old);
         let p : {p : node Pref.t | H.mem saved.Ghost.ghost p && source_ok saved.Ghost.ghost p} = refine_ p in
         match old.desc with
-        | Var | Bool ->
+        | Var | Bool | Word ->
           let dest = Allocate old.desc in
           ghost_ (prepared_def saved.Ghost.ghost d.Ghost.ghost old.desc dest; ready_def saved.Ghost.ghost d.Ghost.ghost old.desc old.desc);
           let t : {t : node Pref.token | let refine_ p = p in valid saved.Ghost.ghost epoch.Ghost.ghost depth d.Ghost.ghost && (clean_session d.Ghost.ghost) && Pref.own t === heap saved.Ghost.ghost epoch.Ghost.ghost depth d.Ghost.ghost && pool === registered base.Ghost.ghost epoch.Ghost.ghost d.Ghost.ghost && trail === touched d.Ghost.ghost
@@ -118,6 +118,42 @@ let rec copy_work : (goal : copy_goal) @ immutable -> (saved : (node Pref.heap) 
       && extends goal.initial r.#history && target_for goal.heap r.#history goal.root r.#value} @ unique = fun r ->
             let pool = r.#pool in let trail = r.#trail in let history = ghost_ r.#history in let dest = Share r.#value in
           ghost_ (prepared_def saved.Ghost.ghost history old.desc dest);
+          let t = r.#state in
+          let t : {t : node Pref.token | let refine_ p = p in valid saved.Ghost.ghost epoch.Ghost.ghost depth history && (clean_session history) && Pref.own t === heap saved.Ghost.ghost epoch.Ghost.ghost depth history && pool === registered base.Ghost.ghost epoch.Ghost.ghost history && trail === touched history
+            && match H.at saved.Ghost.ghost p with None -> false | Some v ->
+              v.level === Generic && prepared saved.Ghost.ghost history v.desc dest} = refine_ t in
+          let saved_witness30 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (saved.Ghost.ghost)} in
+          let clean_witness31 : (((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at saved_witness30.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t = {Ghost.ghost = ghost_ (refine_ clean.Ghost.ghost)} in
+          let epoch_witness32 : (node Pref.t) Ghost.t = {Ghost.ghost = ghost_ (epoch.Ghost.ghost)} in
+          let d_witness33 : (history) Ghost.t = {Ghost.ghost = ghost_ (history)} in
+          let base_witness34 : (pool) Ghost.t = {Ghost.ghost = ghost_ (base.Ghost.ghost)} in
+          let copy_source3 : {p : node Pref.t | H.mem saved_witness30.Ghost.ghost p && source_ok saved_witness30.Ghost.ghost p} =
+            refine_ p in
+          let refine_ out = finish saved_witness30 clean_witness31 epoch_witness32 depth d_witness33 base_witness34 pool trail copy_source3 dest (refine_ t) in
+          ghost_ (extension_trans d.Ghost.ghost history out.#history ());
+          let r = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in use (refine_ r) in
+          copy_work goal saved_witness1 scope_witness2 clean_witness3 epoch_witness4 depth d_witness5 base_witness6 pool trail copy_source2 (refine_ t) resume_r
+        | List child ->
+          let child : {p : node Pref.t | H.mem saved.Ghost.ghost p} = refine_ child in
+          let t : {t : node Pref.token | let refine_ p = child in valid saved.Ghost.ghost epoch.Ghost.ghost depth d.Ghost.ghost && (clean_session d.Ghost.ghost) && Pref.own t === heap saved.Ghost.ghost epoch.Ghost.ghost depth d.Ghost.ghost && pool === registered base.Ghost.ghost epoch.Ghost.ghost d.Ghost.ghost && trail === touched d.Ghost.ghost} = refine_ t in
+          let saved_witness1 : (node Pref.heap) Ghost.t = {Ghost.ghost = ghost_ (saved.Ghost.ghost)} in
+          let scope_witness2 : (((p : node Pref.t) @ immutable -> {u : unit | if H.mem saved_witness1.Ghost.ghost p then source_ok saved_witness1.Ghost.ghost p else H.at saved_witness1.Ghost.ghost p === None})) Ghost.t = {Ghost.ghost = ghost_ (refine_ scope.Ghost.ghost)} in
+          let clean_witness3 : (((x : node Pref.t) @ immutable ->
+      {u : unit | match H.at saved_witness1.Ghost.ghost x with None -> true | Some v -> v.memo === Empty_memo})) Ghost.t = {Ghost.ghost = ghost_ (refine_ clean.Ghost.ghost)} in
+          let epoch_witness4 : (node Pref.t) Ghost.t = {Ghost.ghost = ghost_ (epoch.Ghost.ghost)} in
+          let d_witness5 : (history) Ghost.t = {Ghost.ghost = ghost_ (d.Ghost.ghost)} in
+          let base_witness6 : (pool) Ghost.t = {Ghost.ghost = ghost_ (base.Ghost.ghost)} in
+          let copy_source2 : {p : node Pref.t | H.mem saved_witness1.Ghost.ghost p} =
+            let refine_ p = child in refine_ p in
+          let resume_r : (r : {r : copied | let refine_ copy_source2 = copy_source2 in valid saved_witness1.Ghost.ghost epoch_witness4.Ghost.ghost depth r.#history && (clean_session r.#history)
+      && Pref.own r.#state === heap saved_witness1.Ghost.ghost epoch_witness4.Ghost.ghost depth r.#history && r.#pool === registered base_witness6.Ghost.ghost epoch_witness4.Ghost.ghost r.#history && r.#trail === touched r.#history
+      && extends d_witness5.Ghost.ghost r.#history && target_for saved_witness1.Ghost.ghost r.#history copy_source2 r.#value}) @ unique ->
+            {r : copied | valid goal.heap goal.identity goal.depth r.#history && (clean_session r.#history)
+      && Pref.own r.#state === heap goal.heap goal.identity goal.depth r.#history && r.#pool === registered goal.base goal.identity r.#history && r.#trail === touched r.#history
+      && extends goal.initial r.#history && target_for goal.heap r.#history goal.root r.#value} @ unique = fun r ->
+            let pool = r.#pool in let trail = r.#trail in let history = ghost_ r.#history in let desc = List r.#value in let dest = Allocate desc in
+          ghost_ (ready_def saved.Ghost.ghost history old.desc desc; prepared_def saved.Ghost.ghost history old.desc dest);
           let t = r.#state in
           let t : {t : node Pref.token | let refine_ p = p in valid saved.Ghost.ghost epoch.Ghost.ghost depth history && (clean_session history) && Pref.own t === heap saved.Ghost.ghost epoch.Ghost.ghost depth history && pool === registered base.Ghost.ghost epoch.Ghost.ghost history && trail === touched history
             && match H.at saved.Ghost.ghost p with None -> false | Some v ->

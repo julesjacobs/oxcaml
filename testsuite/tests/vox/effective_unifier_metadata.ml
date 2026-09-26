@@ -35,7 +35,7 @@ let rec (cells @ total) : (h : node Pref.heap) @ immutable ->
     | Base old -> M.unified_scratch h p q ok after old x ();
       M.scratch_frame_def h after x; cell_frame_def h after x; ()
     | Swap rest -> cells h q p ok after rest x (); ()
-    | Resolve (r, s, _, _, rest) -> cells h r s ok after rest x (); ()
+    | List_children (r, s, rest) | Resolve (r, s, _, _, rest) -> cells h r s ok after rest x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       cells h a c left_ok middle left x ();
       if left_ok then (cells middle b e ok after right x (); frame_trans h middle after x (); ()) else ();

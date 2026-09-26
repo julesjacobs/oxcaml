@@ -33,7 +33,7 @@ let rec (generic @ total) : (h : node Pref.heap) @ immutable ->
       | U.Bind_right _ -> redirect_generic h q p x root path (); ()
       | _ -> ())
     | Swap rest -> generic h q p ok after rest x root path (); ()
-    | Resolve (r, s, _, _, rest) -> generic h r s ok after rest x root path (); ()
+    | List_children (r, s, rest) | Resolve (r, s, _, _, rest) -> generic h r s ok after rest x root path (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       generic h a c left_ok middle left x root path ();
       if left_ok then (

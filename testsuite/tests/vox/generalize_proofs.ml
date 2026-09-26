@@ -15,7 +15,7 @@ let (close_source @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.
   let after = H.put h p v in source_ok_def h x; source_ok_def after x;
   (match H.at h x with None -> () | Some a ->
     (match a.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> ());
-    (match a.desc with Var | Bool -> () | Link q -> ()
+    (match a.desc with Var | Bool | Word -> () | Link q | List q -> ()
     | Arrow (a, b) -> ())); ())
 let rec (pool_write @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->
     (old : node) @ immutable -> (cut : int) -> (pool : pool) @ immutable ->
@@ -72,7 +72,7 @@ let (closed_source @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
   (match H.at h x with None -> () | Some v ->
     (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) ->
       closed_observe h cut pool stamp (); closed_at_def h after cut pool stamp; ());
-    (match v.desc with Var | Bool -> () | Link q ->
+    (match v.desc with Var | Bool | Word -> () | Link q | List q ->
       closed_observe h cut pool q (); closed_at_def h after cut pool q; ()
     | Arrow (a, b) -> closed_observe h cut pool a (); closed_observe h cut pool b ();
       closed_at_def h after cut pool a; closed_at_def h after cut pool b; ())); ())
@@ -84,7 +84,7 @@ let rec (environment_bound @ total) : (h : node Pref.heap) @ immutable ->
   | Step (x, rest) -> order p; ordered_def h p; below_def h p cut; at_level_def h p; edge_def h p x;
     (match H.at h p with None -> () | Some v -> match v.level with Generic -> () | Finite n ->
       children_below_def h v.desc n;
-      (match v.desc with Var | Bool -> () | Link a -> below_def h a n; at_level_def h a; ()
+      (match v.desc with Var | Bool | Word -> () | Link a | List a -> below_def h a n; at_level_def h a; ()
       | Arrow (a, b) -> below_def h a n; at_level_def h a; below_def h b n; at_level_def h b; ()); ());
     below_def h x cut; at_level_def h x;
     environment_bound h order cut x q rest (); ())
@@ -113,14 +113,14 @@ let (closed_ordered @ total) : (h : node Pref.heap) @ immutable -> (cut : int) -
     match v.level with Generic -> () | Finite n ->
       if n > cut then () else (
         children_below_def h v.desc n; children_below_def after v.desc n;
-        (match v.desc with Var | Bool -> () | Link q -> closed_below h cut pool q n (); ()
+        (match v.desc with Var | Bool | Word -> () | Link q | List q -> closed_below h cut pool q n (); ()
         | Arrow (a, b) -> closed_below h cut pool a n (); closed_below h cut pool b n (); ()); ()))
 let (ordered_scope @ total) : (h : node Pref.heap) @ immutable -> (x : node Pref.t) @ immutable ->
     {u : unit | source_ok h x && ordered h x} -> {u : unit | finite_scope h x} @ ghost = fun h x premise -> ghost_ (
   finite_scope_def h x; source_ok_def h x; ordered_def h x; match H.at h x with None -> () | Some v -> match v.level with Generic ->
     active_def h x; at_level_def h x; ()
   | Finite n -> children_below_def h v.desc n;
-    (match v.desc with Var | Bool -> () | Link q -> below_def h q n; active_def h q; ()
+    (match v.desc with Var | Bool | Word -> () | Link q | List q -> below_def h q n; active_def h q; ()
     | Arrow (a, b) -> below_def h a n; active_def h a; below_def h b n; active_def h b; ()); ())
 
 let (coverage_after_unify @ total) : (h : node Pref.heap) @ immutable -> (p : node Pref.t) @ immutable ->

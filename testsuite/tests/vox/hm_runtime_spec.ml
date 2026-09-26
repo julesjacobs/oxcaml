@@ -21,8 +21,12 @@ let[@def] rec (let_free @ total) (e : Hm_execution_spec.execution @ immutable) =
   | Hm_execution_spec.RLet_left _ | Hm_execution_spec.RLet _ -> false
 
 let[@def] rec (term_let_free @ total) (e : Hm_declarative.term @ immutable) =
-  match e with Hm_declarative.Bound _ | Hm_declarative.Truth -> true
+  match e with Hm_declarative.Bound _ | Hm_declarative.Truth
+  | Hm_declarative.False | Hm_declarative.Word _ | Hm_declarative.Nil -> true
   | Hm_declarative.Lambda b | Hm_declarative.Recursive b -> term_let_free b
+  | Hm_declarative.CaseList (a, b, c) | Hm_declarative.If (a, b, c) ->
+    term_let_free a && term_let_free b && term_let_free c
+  | Hm_declarative.Cons (a, b) | Hm_declarative.Primitive (_, a, b)
   | Hm_declarative.Apply (a, b) -> term_let_free a && term_let_free b
   | Hm_declarative.Let _ -> false
 let[@def] rec (env_depth @ total) (env : Hm_environment_spec.env @ immutable) =

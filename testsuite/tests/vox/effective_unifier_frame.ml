@@ -20,7 +20,7 @@ let rec (unified_frame @ total) : (h : node Pref.heap) @ immutable -> (p : node 
       Effective_unifier_finite.lower_observe h bound edits x ();
       unified_frame middle p q ok after rest x (); ()
     | Base old -> P.unified_frame h p q ok after old x (); ()
-    | Resolve (r, s, _, _, rest) -> unified_frame h r s ok after rest x (); ()
+    | List_children (r, s, rest) | Resolve (r, s, _, _, rest) -> unified_frame h r s ok after rest x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       unified_frame h a c left_ok middle left x ();
       if left_ok then (unified_frame middle b e ok after right x (); ()) else ()

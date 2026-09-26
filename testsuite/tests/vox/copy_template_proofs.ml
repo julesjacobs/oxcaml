@@ -16,6 +16,8 @@ let rec (template_unique @ total) : (saved : node Pref.heap) @ immutable ->
     template_head saved a pa (); template_head saved b pb ();
     head_desc_def a; head_desc_def b; head_generic_def a; head_generic_def b;
     match a with
+    | List_template (_, a) -> (match b with List_template (_, b) ->
+      template_unique saved rho choices a b (); () | _ -> ())
     | Product (_, a1, a2) -> (match b with Product (_, b1, b2) ->
       template_unique saved rho choices a1 b1 (); template_unique saved rho choices a2 b2 (); ()
       | _ -> ())
@@ -53,7 +55,8 @@ let (forest_instance @ total) : (saved : node Pref.heap) @ immutable ->
       let t = trees x in values x; template_def saved t; root_def t; interpret_def rho choices t;
       template_head saved t x (); head_desc_def t; head_generic_def t;
       match t with
-      | Boundary _ | Parameter _ | Constant _ -> ()
+      | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> ()
+      | List_template (_, a) -> forest_eval saved trees rho choices want values a (); ()
       | Product (_, a, b) -> forest_eval saved trees rho choices want values a ();
         forest_eval saved trees rho choices want values b (); ()
       | Indirect (_, child) -> forest_eval saved trees rho choices want values child (); ())

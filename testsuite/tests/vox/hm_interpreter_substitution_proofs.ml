@@ -65,7 +65,8 @@ let rec (action_open @ total) : (args : arguments) @ immutable ->
     act_def {front = args; tail = Z} t; open_type_def args t;
     (match t with
      | Parameter i -> at_open args i
-     | Free _ | Boolean -> ()
+     | Free _ | Boolean | Word64 -> ()
+     | List_type a -> action_open args a
      | Function (a, b) -> action_open args a; action_open args b);
     ())
 
@@ -76,7 +77,8 @@ let rec (action_weaken @ total) : (k : index) @ immutable ->
     act_def {front = No_arguments; tail = k} t; shift_def Z k t;
     (match t with
      | Parameter i -> at_def No_arguments k i; shift_index_def Z k i
-     | Free _ | Boolean -> ()
+     | Free _ | Boolean | Word64 -> ()
+     | List_type a -> action_weaken k a
      | Function (a, b) -> action_weaken k a; action_weaken k b);
     ())
 
@@ -90,7 +92,8 @@ let rec (shift_successor @ total) : (k : index) @ immutable ->
      | Parameter i -> shift_index_def Z k i; shift_index_def Z (S k) i;
        let j = add k i in shift_index_def Z (S Z) j;
        add_def (S Z) j; add_def Z j; add_def (S k) i
-     | Free _ | Boolean -> ()
+     | Free _ | Boolean | Word64 -> ()
+     | List_type a -> shift_successor k a
      | Function (a, b) -> shift_successor k a; shift_successor k b);
     ())
 
@@ -115,8 +118,9 @@ let rec (shift_zero @ total) : (t : mono) @ immutable ->
   shift_def Z Z t;
   (match t with
    | Parameter i -> shift_index_def Z Z i; add_def Z i
-   | Free _ | Boolean -> ()
-   | Function (a, b) -> shift_zero a; shift_zero b);
+   | Free _ | Boolean | Word64 -> ()
+   | List_type a -> shift_zero a
+     | Function (a, b) -> shift_zero a; shift_zero b);
   ())
 
 let rec (at_lift_high @ total) : (k : index) @ immutable ->
@@ -151,8 +155,9 @@ let rec (open_shift_one @ total) : (head : mono) @ immutable ->
   (match t with
    | Parameter i -> shift_index_def Z (S Z) i;
      add_def (S Z) i; add_def Z i; open_index_def all (S i)
-   | Free _ | Boolean -> ()
-   | Function (a, b) -> open_shift_one head args a; open_shift_one head args b);
+   | Free _ | Boolean | Word64 -> ()
+   | List_type a -> open_shift_one head args a
+     | Function (a, b) -> open_shift_one head args a; open_shift_one head args b);
   ())
 
 let rec (action_open_index @ total) : (s : substitution) @ immutable ->
@@ -190,7 +195,8 @@ let rec (action_open_type @ total) : (s : substitution) @ immutable ->
     open_type_def actuals changed;
     (match t with
      | Parameter i -> action_open_index s args i
-     | Free _ | Boolean -> ()
+     | Free _ | Boolean | Word64 -> ()
+     | List_type a -> action_open_type s args a
      | Function (a, b) -> action_open_type s args a; action_open_type s args b);
     ())
 
@@ -244,7 +250,8 @@ let rec (shift_under @ total) : (cut : index) @ immutable ->
     (match t with
      | Parameter i -> shift_index_def Z cut i; shift_index_def Z total i;
        shift_high cut k i
-     | Free _ | Boolean -> ()
+     | Free _ | Boolean | Word64 -> ()
+     | List_type a -> shift_under cut k a
      | Function (a, b) -> shift_under cut k a; shift_under cut k b);
     ())
 
@@ -266,8 +273,9 @@ let rec (action_shift @ total) : (s : substitution) @ immutable ->
       | Some j -> shift_high cut k j; at_lift_high cut s j;
         at_lift_high total s j;
         let base = at s.front s.tail j in shift_under cut k base)
-   | Free _ | Boolean -> ()
-   | Function (a, b) -> action_shift s cut k a; action_shift s cut k b);
+   | Free _ | Boolean | Word64 -> ()
+   | List_type a -> action_shift s cut k a
+     | Function (a, b) -> action_shift s cut k a; action_shift s cut k b);
   ())
 
 let rec (context_lift_weaken @ total) : (k : index) @ immutable ->
@@ -318,6 +326,34 @@ let rec (typing_action @ total) : (s : substitution) @ immutable ->
          let changed = act_scheme s scheme in arity_def changed)
        | _ -> ())
      | Constant -> act_def s Boolean
+     | Word_constant -> act_def s Word64
+     | Empty_list a -> act_def s (List_type a)
+     | List_cons (a, head, tail) -> (match e with
+       | Cons (h, r) -> typing_action s g h a head ();
+         typing_action s g r t tail (); act_def s (List_type a)
+       | _ -> ())
+     | List_case (a, scrutinee, empty, nonempty) -> (match e with
+       | CaseList (v, l, r) ->
+         typing_action s g v (List_type a) scrutinee ();
+         typing_action s g l t empty ();
+         let tail = Forall (Z, List_type a) in let head = Forall (Z, a) in
+         let tg = Binding (tail, g) in let bg = Binding (head, tg) in
+         typing_action s bg r t nonempty ();
+         act_context_def s bg; act_context_def s tg;
+         act_scheme_def s head; act_scheme_def s tail; lift_def Z s;
+         act_def s (List_type a)
+       | _ -> ())
+     | Conditional (condition, yes, no) -> (match e with
+       | If (c, a, b) -> typing_action s g c Boolean condition ();
+         typing_action s g a t yes (); typing_action s g b t no ();
+         act_def s Boolean
+       | _ -> ())
+     | Word_primitive (left, right) -> (match e with
+       | Primitive (op, a, b) -> typing_action s g a Word64 left ();
+         typing_action s g b Word64 right (); act_def s Word64;
+         operation_type_def op;
+         (match op with Add | Subtract -> () | Equal_word | Unsigned_less -> act_def s Boolean)
+       | _ -> ())
      | Abstraction (a, body) -> (match e, t with
        | Lambda e, Function (_, b) ->
          let scheme = Forall (Z, a) in let bg = Binding (scheme, g) in
@@ -358,8 +394,18 @@ let rec (transport @ total) : (s : substitution) @ immutable ->
   fun s j p premise -> ghost_ (
     R.valid_def p j; act_judgement_def s j;
     match p, j with
-    | R.Leaf, R.Value (R.True, Boolean) ->
-      act_def s Boolean; R.valid_def R.Leaf (R.Value (R.True, Boolean)); R.Leaf
+    | R.Leaf, R.Value ((R.True | R.False), Boolean) ->
+      act_def s Boolean; R.valid_def R.Leaf (act_judgement s j); R.Leaf
+    | R.Leaf, R.Value (R.Word _, Word64) ->
+      act_def s Word64; R.valid_def R.Leaf (act_judgement s j); R.Leaf
+    | R.Leaf, R.Value (R.Nil, List_type a) ->
+      act_def s (List_type a); R.valid_def R.Leaf (act_judgement s j); R.Leaf
+    | R.Elements (head, tail), R.Value (R.Cons (h, r), List_type a) ->
+      let hp = transport s (R.Value (h, a)) head () in
+      let rp = transport s (R.Value (r, List_type a)) tail () in
+      act_judgement_def s (R.Value (h, a));
+      act_judgement_def s (R.Value (r, List_type a)); act_def s (List_type a);
+      let q = R.Elements (hp, rp) in R.valid_def q (act_judgement s j); q
     | R.Leaf, R.Environment (R.Empty, Empty_context) ->
       act_context_def s Empty_context;
       R.valid_def R.Leaf (R.Environment (R.Empty, Empty_context)); R.Leaf
@@ -410,8 +456,9 @@ let rec (weakening_under @ total) : (cut : index) @ immutable ->
        at_def No_arguments k j;
        let total = add k j in shift_def Z cut (Parameter total);
        shift_index_def Z cut total; Hm_abstraction_proofs.add_assoc cut k j)
-   | Free _ | Boolean -> ()
-   | Function (a, b) -> weakening_under cut k a; weakening_under cut k b);
+   | Free _ | Boolean | Word64 -> ()
+   | List_type a -> weakening_under cut k a
+     | Function (a, b) -> weakening_under cut k a; weakening_under cut k b);
   ())
 
 let rec (weakening_context @ total) : (k : index) @ immutable ->

@@ -71,7 +71,7 @@ let rec walk_loop : (goal : walk_goal) @ immutable -> (h : (node Pref.heap) Ghos
         let refine_ out = walk_loop goal h_witness5 scope_witness6 q root path_witness7 (refine_ state_argument8) next_lift in refine_ out
 
       )
-      | Var | Bool | Arrow _ ->
+      | Var | Bool | Word | List _ | Arrow _ ->
         ghost_ (let impossible : {u : unit | false} = refine_ () in let refine_ impossible = impossible in ()); assert false)
 
 let walk : (h : (node Pref.heap) Ghost.t) @ immutable  ->(scope : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h.Ghost.ghost x) || finite_scope h.Ghost.ghost x})) Ghost.t) @ total  ->

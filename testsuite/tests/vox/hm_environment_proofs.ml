@@ -14,7 +14,7 @@ let rec (interpret_boundary_agreement @ total) : (s : template) @ immutable ->
     interpret_def rho choices s; interpret_def tau choices s;
     (match s with
     | Boundary p -> boundary_member_def s p; equal p; ()
-    | Parameter _ | Constant _ -> ()
+    | Parameter _ | Constant _ | Word_constant _ -> ()
     | Product (_, a, b) ->
       let left : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member a x) || rho x === tau x}) @ total = fun x ->
@@ -24,7 +24,7 @@ let rec (interpret_boundary_agreement @ total) : (s : template) @ immutable ->
         boundary_member_def s x; equal x; let u = () in refine_ u in
       interpret_boundary_agreement a rho tau left choices;
       interpret_boundary_agreement b rho tau right choices; ()
-    | Indirect (_, child) ->
+    | Indirect (_, child) | List_template (_, child) ->
       let next : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member child x) || rho x === tau x}) @ total = fun x ->
         boundary_member_def s x; equal x; let u = () in refine_ u in
@@ -37,11 +37,11 @@ let rec (boundary_below @ total) : (h : node Pref.heap) @ immutable -> (depth : 
     {u : unit | below h p depth} @ ghost = fun h depth s p premise -> ghost_ (
     let refine_ premise = premise in boundary_bound_def h depth s;
     boundary_member_def s p; let u = () in match s with
-    | Boundary _ | Parameter _ | Constant _ -> refine_ u
+    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> refine_ u
     | Product (_, a, b) -> if boundary_member a p then
       (boundary_below h depth a p (refine_ u); refine_ u)
       else (boundary_below h depth b p (refine_ u); refine_ u)
-    | Indirect (_, child) -> boundary_below h depth child p (refine_ u); refine_ u)
+    | Indirect (_, child) | List_template (_, child) -> boundary_below h depth child p (refine_ u); refine_ u)
 
 let rec (aligned_lookup @ total) : (g : D.context) @ immutable ->
     (ts : templates) @ immutable -> (i : D.index) @ immutable ->
@@ -87,10 +87,10 @@ let rec (template_transport @ total) : (h : node Pref.heap) @ immutable ->
     generic_desc_def h p desc; generic_desc_def after p desc;
     finite_node_def after p; below_def after p depth; at_level_def after p;
     let u = () in match s with
-    | Boundary _ | Parameter _ | Constant _ -> refine_ u
+    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> refine_ u
     | Product (_, a, b) -> template_transport h after depth frame a (refine_ u);
       template_transport h after depth frame b (refine_ u); refine_ u
-    | Indirect (_, child) -> template_transport h after depth frame child (refine_ u); refine_ u)
+    | Indirect (_, child) | List_template (_, child) -> template_transport h after depth frame child (refine_ u); refine_ u)
 
 let rec (env_transport @ total) : (h : node Pref.heap) @ immutable ->
     (after : node Pref.heap) @ immutable -> (depth : int) ->
@@ -198,7 +198,8 @@ let rec (eval_empty @ total) : (args : T.values) @ immutable ->
     let refine_ premise = premise in T.eval_prefixed_def args xi a; T.eval_def xi a;
     let u = () in match a with
     | D.Parameter i -> T.prefix_def args xi i; refine_ u
-    | D.Free _ | D.Boolean -> refine_ u
+    | D.Free _ | D.Boolean | D.Word64 -> refine_ u
+    | D.List_type a -> eval_empty args xi a (refine_ u); refine_ u
     | D.Function (a, b) -> eval_empty args xi a (refine_ u);
       eval_empty args xi b (refine_ u); refine_ u)
 

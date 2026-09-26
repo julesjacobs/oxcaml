@@ -4,8 +4,8 @@ open Level_finite_spec
 
 let[@def] rec (avoids @ total) (p : node Pref.t @ immutable) (t : tree @ immutable) =
   ghost_ (not (tree_root t === p) && match t with
-    | Free _ | Constant_tree _ -> true
-    | Alias_tree (_, child) -> avoids p child
+    | Free _ | Constant_tree _ | Word_tree _ -> true
+    | Alias_tree (_, child) | List_tree (_, child) -> avoids p child
     | Branch (_, a, b) -> avoids p a && avoids p b)
 
 let rec (smaller_avoids @ total) : (h : node Pref.heap) @ immutable -> (source : tree) @ immutable ->
@@ -14,8 +14,10 @@ let rec (smaller_avoids @ total) : (h : node Pref.heap) @ immutable -> (source :
     {u : unit | avoids (tree_root source) t} @ ghost = fun h source t premise -> ghost_ (
     if tree_root t === tree_root source then (Level_finite_proofs.finite_unique h t source (); ());
     let p = tree_root source in avoids_def p t; finite_def h t; readback_def t;
-    match t with Free _ | Constant_tree _ -> ()
+    match t with Free _ | Constant_tree _ | Word_tree _ -> ()
     | Alias_tree (_, child) -> smaller_avoids h source child (); ()
+    | List_tree (_, a) -> let ty = List_type (readback a) in
+      weight_def ty; smaller_avoids h source a (); ()
     | Branch (_, a, b) -> let ta = readback a in let tb = readback b in let ty = Function (ta, tb) in
       weight_def ty; let _ = Level_unifier_proofs.weight_positive ta in
       let _ = Level_unifier_proofs.weight_positive tb in
@@ -28,7 +30,9 @@ let (equivalent_avoids @ total) : (h : node Pref.heap) @ immutable -> (source : 
     {u : unit | avoids (tree_root source) target} @ ghost = fun h source target premise -> ghost_ (
     let p = tree_root source in
     avoids_def p target; finite_def h target; tree_root_def target;
-    let q = tree_root target in terminal_def h q; readback_def target; match target with Free _ | Constant_tree _ | Alias_tree _ -> ()
+    let q = tree_root target in terminal_def h q; readback_def target; match target with Free _ | Constant_tree _ | Word_tree _ | Alias_tree _ -> ()
+    | List_tree (_, a) -> let ty = List_type (readback a) in
+      weight_def ty; smaller_avoids h source a (); ()
     | Branch (_, a, b) -> let ta = readback a in let tb = readback b in let ty = Function (ta, tb) in
       weight_def ty; let _ = Level_unifier_proofs.weight_positive ta in
       let _ = Level_unifier_proofs.weight_positive tb in
@@ -41,8 +45,8 @@ let rec (frame_avoids @ total) : (h : node Pref.heap) @ immutable -> (p : node P
     let after = H.put h p (redirect h p q) in
     finite_def h t; finite_def after t; avoids_def p t; tree_root_def t;
     let x = tree_root t in let v = redirect h p q in Level_unifier_proofs.observe_write h p v x;
-    match t with Free _ | Constant_tree _ -> ()
-    | Alias_tree (_, child) -> frame_avoids h p q child (); ()
+    match t with Free _ | Constant_tree _ | Word_tree _ -> ()
+    | Alias_tree (_, child) | List_tree (_, child) -> frame_avoids h p q child (); ()
     | Branch (_, a, b) -> frame_avoids h p q a (); frame_avoids h p q b (); ())
 
 let rec (replace @ total) : (h : node Pref.heap) @ immutable -> (source : tree) @ immutable ->
@@ -61,7 +65,9 @@ let rec (replace @ total) : (h : node Pref.heap) @ immutable -> (source : tree) 
     else (
       finite_def h old; tree_root_def old; readback_def old;
       let v = redirect h p q in Level_unifier_proofs.observe_write h p v x;
-      match old with Free _ | Constant_tree _ -> finite_def after old; old
+      match old with Free _ | Constant_tree _ | Word_tree _ -> finite_def after old; old
+      | List_tree (x, child) -> let child = replace h source target child () in
+        let t = List_tree (x, child) in tree_root_def t; readback_def t; finite_def after t; t
       | Alias_tree (x, child) -> let child = replace h source target child () in
         let t = Alias_tree (x, child) in tree_root_def t; readback_def t; finite_def after t; t
       | Branch (x, a, b) -> let a = replace h source target a () in

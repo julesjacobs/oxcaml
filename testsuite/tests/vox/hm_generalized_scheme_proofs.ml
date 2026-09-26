@@ -15,8 +15,8 @@ let rec (low_names @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     {u : unit | F.generalized_names h cut tree === A.No_names} @ ghost = fun h cut order tree premise -> ghost_ (
     let refine_ premise = premise in finite_def h tree; tree_root_def tree; F.generalized_names_def h cut tree;
     let p = tree_root tree in order p; let u = () in match tree with
-    | Free _ | Constant_tree _ -> refine_ u
-    | Alias_tree (_, child) -> let q = tree_root child in edge_def h p q;
+    | Free _ | Constant_tree _ | Word_tree _ -> refine_ u
+    | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;
       F.below_child h cut p q (refine_ u); low_names h cut order child (refine_ u); refine_ u
     | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in edge_def h p pa; edge_def h p pb;
       F.below_child h cut p pa (refine_ u); F.below_child h cut p pb (refine_ u);
@@ -36,8 +36,8 @@ let rec (scheme_names @ total) : (h : node Pref.heap) @ immutable -> (cut : int)
     let u = () in if below h p cut then (low_names h cut order tree (refine_ u); refine_ u) else (
       F.generalized_names_def h cut tree; at_level_def h p; Level_unifier_spec.observe_def h p;
       match tree with
-      | Free _ | Constant_tree _ -> refine_ u
-      | Alias_tree (_, child) -> let q = tree_root child in edge_def h p q;
+      | Free _ | Constant_tree _ | Word_tree _ -> refine_ u
+      | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;
         F.below_child h depth p q (refine_ u); scheme_names h cut depth order child (refine_ u); refine_ u
       | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in edge_def h p pa; edge_def h p pb;
         F.below_child h depth p pa (refine_ u); F.below_child h depth p pb (refine_ u);
@@ -73,8 +73,8 @@ let rec (scheme_readback @ total) : (h : node Pref.heap) @ immutable -> (cut : i
     else (finite_def h tree; tree_root_def tree; readback_def tree; Level_unifier_spec.observe_def h p;
       match tree with
       | Free q -> F.variable_choice_def q; refine_ u
-      | Constant_tree _ -> refine_ u
-      | Alias_tree (_, child) -> scheme_readback h cut trees rho values child (refine_ u); refine_ u
+      | Constant_tree _ | Word_tree _ -> refine_ u
+      | Alias_tree (_, child) | List_tree (_, child) -> scheme_readback h cut trees rho values child (refine_ u); refine_ u
       | Branch (_, a, b) -> scheme_readback h cut trees rho values a (refine_ u);
         scheme_readback h cut trees rho values b (refine_ u); refine_ u))
 
@@ -101,8 +101,8 @@ let rec (scheme_boundaries @ total) : (h : node Pref.heap) @ immutable -> (cut :
       F.readback_avoids h cut order names high tree (refine_ u); refine_ u)
     else (at_level_def h p; Level_unifier_spec.observe_def h p;
       match tree with
-      | Free _ | Constant_tree _ -> refine_ u
-      | Alias_tree (_, child) -> let q = tree_root child in edge_def h p q;
+      | Free _ | Constant_tree _ | Word_tree _ -> refine_ u
+      | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;
         F.below_child h depth p q (refine_ u);
         scheme_boundaries h cut depth order trees rho values names high child (refine_ u); refine_ u
       | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in edge_def h p pa; edge_def h p pb;

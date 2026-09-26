@@ -11,7 +11,8 @@ let[@def] rec (at @ total) (front : arguments @ immutable)
 let[@def] rec (act @ total) (s : substitution @ immutable)
     (t : mono @ immutable) = match t with
   | Parameter i -> at s.front s.tail i
-  | Free _ | Boolean -> t
+  | Free _ | Boolean | Word64 -> t
+  | List_type a -> List_type (act s a)
   | Function (a, b) -> Function (act s a, act s b)
 
 let[@def] rec (shift_arguments @ total) (k : index @ immutable)
@@ -45,6 +46,13 @@ let[@def] rec (act_typing @ total) (s : substitution @ immutable)
     (d : typing @ immutable) = match d with
   | Variable args -> Variable (act_arguments s args)
   | Constant -> Constant
+  | Word_constant -> Word_constant
+  | Empty_list a -> Empty_list (act s a)
+  | List_cons (a, h, r) -> List_cons (act s a, act_typing s h, act_typing s r)
+  | List_case (a, scrutinee, empty, nonempty) ->
+    List_case (act s a, act_typing s scrutinee, act_typing s empty, act_typing s nonempty)
+  | Conditional (c, a, b) -> Conditional (act_typing s c, act_typing s a, act_typing s b)
+  | Word_primitive (a, b) -> Word_primitive (act_typing s a, act_typing s b)
   | Abstraction (a, d) -> Abstraction (act s a, act_typing s d)
   | Application (a, f, x) -> Application (act s a, act_typing s f, act_typing s x)
   | Recursion (a, b, d) -> Recursion (act s a, act s b, act_typing s d)

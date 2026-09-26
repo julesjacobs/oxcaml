@@ -18,7 +18,7 @@ let (allocate_runtime @ total) : (h : node Pref.heap) @ immutable -> (depth : in
     let refine_ premise = premise in runtime_at_def h depth pool x; safe_def h x;
     depth_bound_def h depth x; let v = cell desc depth in cell_def desc depth;
     children_below_def h desc depth; payload_scoped_def h v;
-    (match desc with Var | Bool -> () | Link q -> below_def h q depth; ()
+    (match desc with Var | Bool | Word -> () | Link q | List q -> below_def h q depth; ()
     | Arrow (a, b) -> below_def h a depth; below_def h b depth; ());
     let u = () in Pooled_allocation_proofs.allocation_source h p v x (refine_ u);
     Pooled_allocation_proofs.allocation_ordered h p desc depth x (refine_ u);
