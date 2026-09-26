@@ -105,6 +105,17 @@ let (false_equality @ total) (left : Dfa_semantics.machine)
 ''')
 compile_file(false_claim, public / ('false_equality' + object_suffix), [public],
              reject='Refinement could not be proved')
+lowering_success = output / 'lowering_success.ml'
+lowering_success.write_text('''open Dfa_semantics
+open Regex_semantics
+open Regex_language
+let (lowering_success @ total) (root : Regex_semantics.t) :
+    {u : unit | match Regex_language.lower root with
+      None -> false | Some _ -> true} =
+  let u = () in u
+''')
+compile_file(lowering_success, public / ('lowering_success' + object_suffix), [public],
+             reject='Refinement could not be proved')
 
 
 def function_bodies(dump):
@@ -146,7 +157,7 @@ for entry in ['compare', 'reduce']:
 for unit, names in [
     ('dfa_equivalence_core', ['compare_complete', 'compare_equal', 'comparison_witness',
                               'reduce_complete', 'reduce_preserves', 'reduce_minimum']),
-    ('regex_language', ['sound', 'complete', 'lower_matches']),
+    ('regex_language', ['sound', 'complete', 'lower_matches', 'lower_valid']),
 ]:
     functions = function_bodies(dumps[unit])
     for name in names:

@@ -20,6 +20,51 @@ let (minimized_regex @ total) (root : Regex_semantics.t) (limit : int)
           Dfa_semantics.run reduced word === Regex_language.matches root word}) in
   let u = () in u
 
+let (lowered_reduction_finishes @ total) (root : Regex_semantics.t)
+    (limit : int) :
+    {u : unit | match Regex_language.lower root with None -> true | Some source ->
+      if Dfa_semantics.labels_bounded source && 0 < limit && limit <= 64 &&
+        Bigint.compare (Dfa_semantics.state_size source)
+          (Bigint.of_int limit) <= 0 then
+        match Dfa_equivalence.reduce source limit with
+        | None -> false | Some reduced -> Dfa_semantics.valid reduced
+      else true} =
+  let _proof = ghost_ (
+    ghost_ (Regex_language.lower_valid root);
+    let u = () in
+    (match Regex_language.lower root with None -> u | Some source ->
+      ghost_ (Dfa_equivalence.reduce_complete source limit);
+      u)
+    : {u : unit | match Regex_language.lower root with None -> true | Some source ->
+        if Dfa_semantics.labels_bounded source && 0 < limit && limit <= 64 &&
+          Bigint.compare (Dfa_semantics.state_size source)
+            (Bigint.of_int limit) <= 0 then
+          match Dfa_equivalence.reduce source limit with
+          | None -> false | Some reduced -> Dfa_semantics.valid reduced
+        else true}) in
+  let u = () in u
+
+let (minimized_no_larger @ total) (root : Regex_semantics.t) (limit : int) :
+    {u : unit | match Regex_language.lower root with None -> true | Some source ->
+      match Dfa_equivalence.reduce source limit with None -> true | Some reduced ->
+        Bigint.compare (Dfa_semantics.state_size reduced)
+          (Dfa_semantics.state_size source) <= 0} =
+  let _proof = ghost_ (
+    ghost_ (Regex_language.lower_valid root);
+    let u = () in
+    (match Regex_language.lower root with None -> u | Some source ->
+      let (agreement @ total) (word : int list) :
+          {u : unit | Dfa_semantics.run source word ===
+            Dfa_semantics.run source word} =
+        let u = () in u in
+      ghost_ (Dfa_equivalence.reduce_minimum source limit source agreement);
+      u)
+    : {u : unit | match Regex_language.lower root with None -> true | Some source ->
+        match Dfa_equivalence.reduce source limit with None -> true | Some reduced ->
+          Bigint.compare (Dfa_semantics.state_size reduced)
+            (Dfa_semantics.state_size source) <= 0}) in
+  let u = () in u
+
 let (membership_implies_matching @ total) (root : Regex_semantics.t)
     (proof : Regex_semantics.Membership.evidence) (word : int list) :
     {u : unit | if Regex_semantics.Membership.valid root proof &&

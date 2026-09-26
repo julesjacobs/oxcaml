@@ -23,8 +23,9 @@ Read these files in order; all paths are relative to the repository root:
 4. `testsuite/tests/vox/regex_language.mli`, module `Regex_language`:
    executable matching and lowering. `sound` and `complete` completely
    characterize `matches` using the visible membership relation. `lower_matches`
-   connects successful lowering to that language. Lowering may return `None`;
-   no unconditional lowering-completeness claim is made.
+   connects successful lowering to that language, and `lower_valid` proves that
+   a successful result is `valid`. Lowering may return `None`; no
+   lowering-completeness claim is made.
 5. `stdlib/bigint.mli`: unbounded integer semantics for `add`, `mul`, `of_int`,
    and numeric `compare`; `stdlib/ghost.mli`: the erased `Ghost.t` field.
    Other semantic primitives are ordinary finite lists/tuples, machine-integer
@@ -142,9 +143,9 @@ the semantic modules. Expected ordinary paths:
   `copy_table`, or `copy_machine`.
 - `comparison_witness` and regex `sound` have empty product results.
   `compare_complete`, `compare_equal`, `reduce_complete`, `reduce_preserves`,
-  `reduce_minimum`, regex `complete`, and `lower_matches` contain no runtime
-  function calls. Ghost record fields have empty product layout; ghost histories
-  and fuel are constant placeholders.
+  `reduce_minimum`, regex `complete`, `lower_matches` and `lower_valid` contain
+  no runtime function calls. Ghost record fields have empty product layout;
+  ghost histories and fuel are constant placeholders.
 
 The diagnostic APIs intentionally retain their certificate-producing paths.
 
