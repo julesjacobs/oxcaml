@@ -98,6 +98,19 @@ CAMLprim value caml_borrow_set(value loan, value index, value element)
   CAMLreturn(loan);
 }
 
+CAMLprim value caml_borrow_int_get(value loan, value index)
+{
+  intnat i = borrow_index(loan, index);
+  return Field(Field(loan, 0), i);
+}
+
+CAMLprim value caml_borrow_int_set(value loan, value index, value element)
+{
+  intnat i = borrow_index(loan, index);
+  Field(Field(loan, 0), i) = element;
+  return loan;
+}
+
 CAMLprim value caml_borrow_snapshot(value loan)
 {
   CAMLparam1(loan);
