@@ -5365,6 +5365,10 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
   in
   loop ty_fun0 mode_fun rev_args sargs
 
+(* The parameter name and location of each argument that a refinement had to
+   name with a fresh identifier, for escape errors. *)
+let argument_origins : (string * Location.t) Ident.Tbl.t = Ident.Tbl.create 16
+
 (* See Note [Type-checking applications] for an overview *)
 let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
       ret_tvar =
@@ -5492,6 +5496,8 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                     | Some path, None -> path, None
                     | None, None ->
                         let id = Ident.create_local "*argument*" in
+                        Ident.Tbl.replace argument_origins id
+                          (Ident.name binder, sarg.pexp_loc);
                         Ctype.register_refinement_value_scope
                           ~level:(Option.value !refinement_argument_scope
                             ~default:(get_current_level ())) [id];
@@ -7357,12 +7363,28 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
                type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
                  expected_mode sexp ty_expected_explained)
     with Ctype.Refinement_scope_escape id ->
-      raise
-        (Error_forward
-           (Location.errorf ~loc:sexp.pexp_loc
+      let error =
+        match Ident.Tbl.find_opt argument_origins id with
+        | Some (parameter, argument_loc) ->
+            Location.errorf ~loc:sexp.pexp_loc
+              ~sub:[Location.msg ~loc:argument_loc
+                      "This is the argument.";
+                    Location.msg
+                      "@[Hint: bind the argument to a variable with a let@ \
+                       outside this expression.@]"]
+              "@[the refinement type of this expression mentions the \
+               argument@ for parameter %a, which is not a variable@]"
+              Style.inline_code parameter
+        | None ->
+            Location.errorf ~loc:sexp.pexp_loc
+              ~sub:[Location.msg
+                      "@[Hint: bind %a outside this expression.@]"
+                      Style.inline_code (Ident.name id)]
               "the refinement type of this expression escapes the scope of \
                binding %a"
-              Style.inline_code (Ident.name id)))
+              Style.inline_code (Ident.name id)
+      in
+      raise (Error_forward error)
   in
   Cmt_format.set_saved_types
     (Cmt_format.Partial_expression exp :: previous_saved_types);

@@ -230,6 +230,7 @@ Line 4, characters 2-9:
 4 |   wrapped;;
       ^^^^^^^
 Error: the refinement type of this expression escapes the scope of binding "n"
+Hint: bind "n" outside this expression.
 |}]
 
 let escape_list =
@@ -278,6 +279,7 @@ Lines 3-5, characters 2-7:
 4 |     let refine_ raw = value in
 5 |     raw..
 Error: the refinement type of this expression escapes the scope of binding "n"
+Hint: bind "n" outside this expression.
 |}]
 
 let escape_through_local_slot =
@@ -437,6 +439,7 @@ Line 3, characters 2-15:
 3 |   add_refined x;;
       ^^^^^^^^^^^^^
 Error: the refinement type of this expression escapes the scope of binding "x"
+Hint: bind "x" outside this expression.
 |}]
 
 let escape_definition_argument () =
@@ -455,6 +458,7 @@ Line 3, characters 10-23:
 3 |   slot := increment_def;;
               ^^^^^^^^^^^^^
 Error: the refinement type of this expression escapes the scope of binding "increment"
+Hint: bind "increment" outside this expression.
 |}]
 
 class virtual escape_class_let =

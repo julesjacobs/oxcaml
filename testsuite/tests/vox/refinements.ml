@@ -67,4 +67,5 @@ Line 5, characters 2-11:
 5 |   add_bound;;
       ^^^^^^^^^
 Error: the refinement type of this expression escapes the scope of binding "bound"
+Hint: bind "bound" outside this expression.
 |}]
