@@ -68,14 +68,18 @@ let (equal_range @ total) : (array : t) -> (value : int) ->
   result
 
 let insert : (source : t) -> (value : int) ->
-    {u : unit | 0 < length source + 2} @ ghost ->
     {pair : int * t | match pair with position, result ->
       0 <= position && position <= length source
       && length result = length source + 1
       && occurs result value && edited source result position value true} =
-  fun source value capacity ->
-  capacity;
+  fun source value ->
   let raw_source = source in
+  (* [Iarray.append] raises [Invalid_argument] long before a length gets
+     near [max_int]. The checker does not know the runtime's size limit, so
+     this test establishes that the result's length plus one does not wrap,
+     as the representation invariant requires. *)
+  if Iarray.length raw_source + 2 <= 0 then
+    raise (Invalid_argument "Sorted_array.insert");
   ghost_ (length_def source);
   let u = () in
   let pair = Arrays.insert raw_source value (u) in

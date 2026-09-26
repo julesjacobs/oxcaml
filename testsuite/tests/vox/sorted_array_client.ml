@@ -27,15 +27,15 @@ let (empty_observations @ total) (value : int) :
   let u = () in u
 
 let round_trip : (source : t) -> (value : int) -> (index : int) ->
-    {u : unit | 0 < length source + 2
-      && 0 <= index && index < length source} @ ghost ->
+    {u : unit | 0 <= index && index < length source} @ ghost ->
     {result : t | length result = length source
       && at result index = at source index} =
   fun source value index premise ->
   premise;
   let u = () in
-  let pair = insert source value (u) in
+  let pair = insert source value in
   let (position : int), (inserted : t) = pair in
+  ghost_ (length_bounds source);
   let result = remove_at inserted position (u) in
   ghost_ (
     let zero = 0 in
@@ -53,13 +53,13 @@ let () =
   let initial = empty in
   let u = () in
   let value = 7 in
-  let pair = insert initial value (u) in
+  let pair = insert initial value in
   let (position : int), (one : t) = pair in
   let found = mem one value in
   let proof : {u : unit | found && length one = 1} = u in
   let _proof = proof in
   let smaller = 3 in
-  let pair = insert one smaller (u) in
+  let pair = insert one smaller in
   let _, two = pair in
   let left = 0 in
   let right = 1 in
@@ -73,12 +73,31 @@ let () =
   Format.printf "abstract sorted array: found=%b; restored length=%d@."
     found (length removed)
 
+let insert_twice : (source : t) -> (first : int) -> (second : int) ->
+    {result : t | length result = length source + 2
+      && occurs result second} =
+  fun source first second ->
+  let pair = insert source first in
+  let _, middle = pair in
+  let pair = insert middle second in
+  let _, result = pair in
+  result
+
+let () =
+  let initial = empty in
+  let pair = insert initial 5 in
+  let _, source = pair in
+  let result = insert_twice source 1 9 in
+  let found = mem result 9 in
+  let proof : {u : unit | found && length result = 3} = () in
+  proof;
+  Format.printf "abstract sorted array: inserted twice; found=%b; length=%d@."
+    found (length result)
+
 let check values =
   let initial = empty in
   let (array : t) = List.fold_left (fun (source : t) (value : int) ->
-    let u = () in
-    let capacity : {u : unit | 0 < length source + 2} = assume_ u in
-    let pair = insert source value capacity in
+    let pair = insert source value in
     let _, result = pair in result) initial values in
   let expected = List.sort Int.compare values in
   let actual = List.init (length array) (at array) in
@@ -104,11 +123,12 @@ let check values =
       assert (List.init (length result) (at result) = remaining))
     [-1; 0; 1; 2; 3];
   List.iteri (fun index _ ->
-    let u = () in
-    let bounds : {u : unit | 0 <= index && index < length array} = assume_ u in
-    let result = remove_at array index bounds in
-    let remaining = List.filteri (fun i _ -> i <> index) expected in
-    assert (List.init (length result) (at result) = remaining)) expected
+    if 0 <= index && index < length array then (
+      let u = () in
+      let result = remove_at array index (u) in
+      let remaining = List.filteri (fun i _ -> i <> index) expected in
+      assert (List.init (length result) (at result) = remaining))
+    else assert false) expected
 
 let () =
   let rec sequences length =

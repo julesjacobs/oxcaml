@@ -33,7 +33,7 @@ Line 5, characters 59-70:
 5 |   let refine_ result = Sorted_array.remove_at source index (refine_ u) in
                                                                ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array.mli", line 28, characters 14-55:
+File "sorted_array.mli", line 29, characters 14-55:
   The refinement is stated here.
 |}]
 
@@ -54,5 +54,23 @@ Error: Refinement could not be proved (counterexample)
 Line 6, characters 28-60:
 6 |     let proof : {u : unit | Sorted_array.occurs source value} = refine_ u in
                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+let invalid_insert_position (source : Sorted_array.t) (value : int) =
+  let refine_ pair = Sorted_array.insert source value in
+  let (position : int), (_ : Sorted_array.t) = pair in
+  let u = () in
+  let proof : {u : unit | position = 0} = refine_ u in
+  let refine_ proof = proof in
+  ();;
+[%%expect{|
+Line 5, characters 42-51:
+5 |   let proof : {u : unit | position = 0} = refine_ u in
+                                              ^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 5, characters 26-38:
+5 |   let proof : {u : unit | position = 0} = refine_ u in
+                              ^^^^^^^^^^^^
   The refinement is stated here.
 |}]
