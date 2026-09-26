@@ -16,27 +16,27 @@ let (lambda_lcm @ total) (p : t) (q : t) (multiple : t) :
             && multiple mod (q - 1Z) = 0Z
           then multiple mod lambda p q = 0Z && multiple >= lambda p q
           else true)
-      else true} =
+      else true} @ ghost = ghost_ (
   prime_def p; prime_def q; lambda_def p q;
   lcm_properties (p - 1Z) (q - 1Z) multiple;
-  ()
+  ())
 
 let (reduce_divisor @ total) (a : t) (p : t) (q : t) :
     {u : unit | if p > 0Z && q > 0Z then
-      (a mod (p * q)) mod p = a mod p else true} =
+      (a mod (p * q)) mod p = a mod p else true} @ ghost = ghost_ (
   if p <= 0Z || q <= 0Z then ()
   else begin
     let r = a mod (p * q) in
     remainder_unique a p (q * (a / (p * q)) + r / p) (r mod p);
     ()
-  end
+  end)
 
 
 let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
     {u : unit | if prime p && prime q && p <> q
       && e > 0Z && d > 0Z && (e * d - 1Z) mod lambda p q = 0Z
       && 0Z <= m && m < p * q
-      then power m (e * d) mod (p * q) = m else true} =
+      then power m (e * d) mod (p * q) = m else true} @ ghost = ghost_ (
   prime_def p; prime_def q; lambda_def p q;
   let u = () in
   if not (prime p && prime q && p <> q
@@ -56,21 +56,22 @@ let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
     reduce_divisor a q p;
     crt_unique p q (a mod (p * q)) m;
     u
-  end
+  end)
 
 let encrypt = modexp
 let decrypt = modexp
 
 let (roundtrip_correct @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
     {u : unit | if valid_key p q e d && 0Z <= m && m < p * q then
-      power (power m e mod (p * q)) d mod (p * q) = m else true} =
+      power (power m e mod (p * q)) d mod (p * q) = m else true}
+    @ ghost = ghost_ (
   valid_key_def p q e d;
   prime_def p; prime_def q;
   let n = p * q in
   reduce_power (power m e) d n;
   power_multiply m e d;
   rsa_power p q e d m;
-  ()
+  ())
 
 let (roundtrip @ total) : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
     (message : {m : t | valid_key p q e d && 0Z <= m && m < p * q}) ->
@@ -88,11 +89,11 @@ let (roundtrip @ total) : (p : t) -> (q : t) -> (e : t) -> (d : t) ->
 
 let (prime_inverse @ total) (p : t) (q : t) :
     {u : unit | if prime p && prime q && p <> q then
-      (p * power p (q - 2Z)) mod q = 1Z else true} =
+      (p * power p (q - 2Z)) mod q = 1Z else true} @ ghost = ghost_ (
   distinct_prime_nondivisor p q;
   fermat_little p q;
   power_def p (q - 1Z);
-  ()
+  ())
 
 (* Nonlinear integer arithmetic (the CRT recombination): about 5.6M solver
    resource units, over the 1M slow-refinement threshold. *)
@@ -102,7 +103,7 @@ let[@warning "-slow-refinement"] (recombine_correct @ total)
       if p > 0Z && q > 1Z && 0Z <= rp && rp < p
         && 0Z <= rq && rq < q && (p * inverse) mod q = 1Z then
         0Z <= r && r < p * q && r mod p = rp && r mod q = rq
-      else true} =
+      else true} @ ghost = ghost_ (
   let v = (rq - rp) * inverse in
   let h = v mod q in
   let r = rp + p * h in
@@ -114,16 +115,16 @@ let[@warning "-slow-refinement"] (recombine_correct @ total)
     remainder_unique r p h rp;
     remainder_unique r q quotient rq;
     ()
-  end
+  end)
 
 let (computed_inverse_correct @ total) (p : t) (q : t) (inverse : t) :
     {u : unit | if prime p && prime q && p <> q
       && inverse = power p (q - 2Z) mod q then
-      (p * inverse) mod q = 1Z else true} =
+      (p * inverse) mod q = 1Z else true} @ ghost = ghost_ (
   prime_def q;
   prime_inverse p q;
   reduce_left (power p (q - 2Z)) p q;
-  ()
+  ())
 
 let (decrypt_crt_correct @ total)
     (ciphertext : t) (d : t) (p : t) (q : t) (r : t) :
@@ -131,13 +132,13 @@ let (decrypt_crt_correct @ total)
       && 0Z <= r && r < p * q
       && r mod p = power ciphertext d mod p
       && r mod q = power ciphertext d mod q then
-      r = power ciphertext d mod (p * q) else true} =
+      r = power ciphertext d mod (p * q) else true} @ ghost = ghost_ (
   prime_def p; prime_def q;
   let a = power ciphertext d in
   reduce_divisor a p q;
   reduce_divisor a q p;
   crt_unique p q r (a mod (p * q));
-  ()
+  ())
 
 let (recombine @ total) (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
     {r : t | if p > 0Z && q > 1Z && 0Z <= rp && rp < p

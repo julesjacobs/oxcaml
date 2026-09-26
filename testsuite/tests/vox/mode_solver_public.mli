@@ -6,7 +6,7 @@ val regionality_adjunction :
           b)
          =
          (Mode_solver_semantics.le a
-            (Mode_solver_semantics.regional_to_global b))}) @ total
+            (Mode_solver_semantics.regional_to_global b))} @ ghost) @ total
   stateful @@ total
 
 val eliminate : Mode_solver_semantics.formula -> Mode_solver_semantics.qf @@ total
@@ -16,14 +16,14 @@ val eliminate_exact :
   ((f : Mode_solver_semantics.formula) ->
    {u : unit
      | (Mode_solver_semantics.eval_qf env (eliminate f)) =
-         (Mode_solver_semantics.eval env f)}) @ total
+         (Mode_solver_semantics.eval env f)} @ ghost) @ total
   stateful @@ total
 
 val eliminate_scoped :
   (depth : int) ->
   ((f : {f : Mode_solver_semantics.formula
           | Mode_solver_semantics.scoped depth f}) ->
-   {u : unit | Mode_solver_semantics.scoped_qf depth (eliminate f)}) @ total
+   {u : unit | Mode_solver_semantics.scoped_qf depth (eliminate f)} @ ghost) @ total
   stateful @@ total
 
 val decide_checked :
@@ -45,7 +45,7 @@ val project_graph_exact :
    (graph : Mode_solver_graph_semantics.graph) ->
    {u : unit
      | (Mode_solver_semantics.eval_qf env (project_graph count graph)) =
-         (Mode_solver_graph_semantics.models_exists count env graph)}) @ total
+         (Mode_solver_graph_semantics.models_exists count env graph)} @ ghost) @ total
   stateful @@ total
 
 val project_graph_scoped :
@@ -54,7 +54,7 @@ val project_graph_scoped :
    (graph : {graph : Mode_solver_graph_semantics.graph
               | Mode_solver_graph_semantics.scoped_exists count depth graph}) ->
    {u : unit
-     | Mode_solver_semantics.scoped_qf depth (project_graph count graph)}) @ total
+     | Mode_solver_semantics.scoped_qf depth (project_graph count graph)} @ ghost) @ total
   stateful @@ total
 
 val decide_graph_checked :
@@ -81,7 +81,7 @@ val subsumption_residual_exact :
           (subsumption_residual guard obligation))
          =
          (Mode_solver_semantics.eval env
-            (Mode_solver_semantics.subsumption_formula guard obligation))}) @ total
+            (Mode_solver_semantics.subsumption_formula guard obligation))} @ ghost) @ total
   stateful @@ total
 
 val subsumption_residual_scoped :
@@ -92,7 +92,7 @@ val subsumption_residual_scoped :
                    | Mode_solver_semantics.scoped_qf (depth + 2) w}) ->
    {u : unit
      | Mode_solver_semantics.scoped_qf depth
-         (subsumption_residual guard obligation)}) @ total
+         (subsumption_residual guard obligation)} @ ghost) @ total
   stateful @@ total
 
 val assert_subsumption :
@@ -111,7 +111,7 @@ val assert_subsumption_exact :
          =
          ((Mode_solver_semantics.eval_qf env gamma) &&
             (Mode_solver_semantics.eval env
-               (Mode_solver_semantics.subsumption_formula guard obligation)))}) @ total
+               (Mode_solver_semantics.subsumption_formula guard obligation)))} @ ghost) @ total
   stateful @@ total
 
 type projected : immutable_data = {
@@ -134,7 +134,7 @@ val project_guarded_exact :
          &&
          ((Mode_solver_semantics.eval_qf env
              (project_guarded prefix guard witness).winning)
-            = (Mode_solver_guarded_semantics.game prefix env guard witness))}) @ total
+            = (Mode_solver_guarded_semantics.game prefix env guard witness))} @ ghost) @ total
   stateful @@ total
 
 val project_admissible :
@@ -152,7 +152,7 @@ val project_admissible_exact :
           (project_admissible prefix guard witness))
          =
          (Mode_solver_guarded_semantics.normalized_game prefix env guard
-            witness)}) @ total
+            witness)} @ ghost) @ total
   stateful @@ total
 
 val project_scopes_compose :
@@ -166,7 +166,7 @@ val project_scopes_compose :
           witness)
          ===
          (project_guarded outer (project_guarded inner guard witness).domain
-            (project_guarded inner guard witness).winning)}) @ total
+            (project_guarded inner guard witness).winning)} @ ghost) @ total
   stateful @@ total
 
 val project_admissible_scoped :
@@ -178,7 +178,7 @@ val project_admissible_scoped :
                 | Mode_solver_guarded_semantics.scoped_prefix prefix depth w}) ->
    {u : unit
      | Mode_solver_semantics.scoped_qf depth
-         (project_admissible prefix guard witness)}) @ total
+         (project_admissible prefix guard witness)} @ ghost) @ total
   stateful @@ total
 
 val assert_graph_subsumption :
@@ -243,7 +243,7 @@ val assert_graph_subsumption_exact :
                            ||
                            (Mode_solver_graph_semantics.models
                               (Mode_solver_semantics.Local ::
-                              Mode_solver_semantics.Local :: env) obligations)))))))}) @ total
+                              Mode_solver_semantics.Local :: env) obligations)))))))} @ ghost) @ total
   stateful @@ total
 
 val assert_graph_subsumption_scoped :
@@ -257,5 +257,5 @@ val assert_graph_subsumption_scoped :
                         obligations}) ->
    {u : unit
      | Mode_solver_semantics.scoped_qf depth
-         (assert_graph_subsumption gamma guard obligations)}) @ total
+         (assert_graph_subsumption gamma guard obligations)} @ ghost) @ total
   stateful @@ total

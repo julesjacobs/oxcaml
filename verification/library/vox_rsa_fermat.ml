@@ -7,10 +7,10 @@ open Vox_rsa_number_theory
    1M slow-refinement threshold. *)
 let[@warning "-slow-refinement"] (inverse_action @ total) (a : t) (inverse : t) (p : t) (x : t) :
     {u : unit | if p > 1Z && (a * inverse) mod p = 1Z then
-      (((a * x) mod p) * inverse) mod p = x mod p else true} =
+      (((a * x) mod p) * inverse) mod p = x mod p else true} @ ghost = ghost_ (
   reduce_left (a * x) inverse p;
   reduce_left (a * inverse) x p;
-  ()
+  ())
 
 let (inverse_index @ total) (a : t) (inverse : t) (p : t) (i : t) (x : t) :
     {u : unit | if p > 1Z && (a * inverse) mod p = 1Z
@@ -18,10 +18,10 @@ let (inverse_index @ total) (a : t) (inverse : t) (p : t) (i : t) (x : t) :
       1Z <= (a * i) mod p && (a * i) mod p < p
       && ((a * i) mod p = x) ===
         (1Z <= x && x < p && i = (inverse * x) mod p)
-      else true} =
+      else true} @ ghost = ghost_ (
   inverse_action a inverse p i;
   inverse_action inverse a p x;
-  ()
+  ())
 
 let[@def] rec count x xs = match xs with
   | [] -> 0Z
@@ -36,14 +36,15 @@ let[@def] rec remove x xs = match xs with
   | h :: tail -> if x = h then tail else h :: remove x tail
 
 let rec (count_nonnegative @ total) : (x : t) -> (xs : t list) ->
-    {u : unit | count x xs >= 0Z} = fun x xs ->
+    {u : unit | count x xs >= 0Z} @ ghost = fun x xs -> ghost_ (
   count_def x xs;
   (match xs with [] -> () | _ :: tail -> count_nonnegative x tail);
-  ()
+  ())
 
 let rec (remove_count @ total) : (x : t) -> (y : t) -> (xs : t list) ->
     {u : unit | count x (remove y xs) = count x xs -
-      (if x = y && count y xs > 0Z then 1Z else 0Z)} = fun x y xs ->
+      (if x = y && count y xs > 0Z then 1Z else 0Z)}
+    @ ghost = fun x y xs -> ghost_ (
   count_def x xs; count_def y xs; remove_def y xs;
   match xs with
   | [] -> count_def x []; ()
@@ -54,11 +55,12 @@ let rec (remove_count @ total) : (x : t) -> (y : t) -> (xs : t list) ->
       remove_count x y tail;
       count_def x (h :: remove y tail);
       ()
-    end
+    end)
 
 let rec (remove_product @ total) : (x : t) -> (xs : t list) ->
     {u : unit | if count x xs > 0Z then
-      product xs = x * product (remove x xs) else true} = fun x xs ->
+      product xs = x * product (remove x xs) else true}
+    @ ghost = fun x xs -> ghost_ (
   count_def x xs; product_def xs; remove_def x xs;
   match xs with
   | [] -> ()
@@ -68,12 +70,13 @@ let rec (remove_product @ total) : (x : t) -> (xs : t list) ->
       remove_product x tail;
       product_def (h :: remove x tail);
       ()
-    end
+    end)
 
 let rec (product_extensional @ total) :
     (xs : t list) @ immutable -> (ys : t list) @ immutable ->
     ((x : t) -> {u : unit | count x xs = count x ys}) @ total ->
-    {u : unit | product xs = product ys} = fun xs ys equal_counts ->
+    {u : unit | product xs = product ys}
+    @ ghost = fun xs ys equal_counts -> ghost_ (
   product_def xs;
   match xs with
   | [] ->
@@ -95,7 +98,7 @@ let rec (product_extensional @ total) :
       ()
     in
     product_extensional tail remaining same;
-    ()
+    ())
 
 let[@def] rec interval k =
   if k <= 0Z then [] else k :: interval (k - 1Z)
@@ -107,14 +110,14 @@ let[@def] rec multiples a p k =
 
 let rec (interval_count @ total) : (x : t) -> (k : t) ->
     {u : unit | count x (interval k) =
-      (if 1Z <= x && x <= k then 1Z else 0Z)} = fun x k ->
+      (if 1Z <= x && x <= k then 1Z else 0Z)} @ ghost = fun x k -> ghost_ (
   interval_def k;
   if k <= 0Z then begin count_def x []; () end
   else begin
     interval_count x (k - 1Z);
     count_def x (k :: interval (k - 1Z));
     ()
-  end
+  end)
 [@@decreases k]
 
 let rec (multiples_count @ total) :
@@ -123,7 +126,7 @@ let rec (multiples_count @ total) :
       count x (multiples a p k) =
         (if 1Z <= x && x < p && 1Z <= (inverse * x) mod p
             && (inverse * x) mod p <= k then 1Z else 0Z)
-      else true} = fun a inverse p k x ->
+      else true} @ ghost = fun a inverse p k x -> ghost_ (
   if not (p > 1Z && (a * inverse) mod p = 1Z && 0Z <= k && k < p) then
     ()
   else begin
@@ -135,13 +138,13 @@ let rec (multiples_count @ total) :
       count_def x (((a * k) mod p) :: multiples a p (k - 1Z));
       ()
     end
-  end
+  end)
 [@@decreases k]
 
 let (multiples_permute @ total) (a : t) (inverse : t) (p : t) :
     {u : unit | if p > 1Z && (a * inverse) mod p = 1Z then
       product (multiples a p (p - 1Z)) = product (interval (p - 1Z))
-      else true} =
+      else true} @ ghost = ghost_ (
   if not (p > 1Z && (a * inverse) mod p = 1Z) then ()
   else begin
     let xs = multiples a p (p - 1Z) in
@@ -154,22 +157,22 @@ let (multiples_permute @ total) (a : t) (inverse : t) (p : t) :
     in
     product_extensional xs ys same;
     ()
-  end
+  end)
 
 let rec (interval_product_positive @ total) : (k : t) ->
-    {u : unit | product (interval k) > 0Z} = fun k ->
+    {u : unit | product (interval k) > 0Z} @ ghost = fun k -> ghost_ (
   interval_def k;
   if k <= 0Z then begin product_def []; () end
   else begin
     interval_product_positive (k - 1Z);
     product_def (k :: interval (k - 1Z));
     ()
-  end
+  end)
 [@@decreases k]
 
 let rec (interval_product_nonzero @ total) : (p : t) -> (k : t) ->
     {u : unit | if prime p && 0Z <= k && k < p then
-      product (interval k) mod p <> 0Z else true} = fun p k ->
+      product (interval k) mod p <> 0Z else true} @ ghost = fun p k -> ghost_ (
   prime_def p;
   if not (prime p && 0Z <= k && k < p) then ()
   else begin
@@ -181,13 +184,14 @@ let rec (interval_product_nonzero @ total) : (p : t) -> (k : t) ->
       prime_cancel p k (product (interval (k - 1Z)));
       ()
     end
-  end
+  end)
 [@@decreases k]
 
 let rec (multiples_product @ total) : (a : t) -> (p : t) -> (k : t) ->
     {u : unit | if p > 0Z && k >= 0Z then
       product (multiples a p k) mod p =
-        (power a k * product (interval k)) mod p else true} = fun a p k ->
+        (power a k * product (interval k)) mod p else true}
+    @ ghost = fun a p k -> ghost_ (
   if p <= 0Z || k < 0Z then ()
   else begin
     multiples_def a p k; interval_def k; power_def a k;
@@ -202,12 +206,12 @@ let rec (multiples_product @ total) : (a : t) -> (p : t) -> (k : t) ->
       multiply_four a (power a (k - 1Z)) k (product (interval (k - 1Z)));
       ()
     end
-  end
+  end)
 [@@decreases k]
 
 let (fermat_little @ total) (a : t) (p : t) :
     {u : unit | if prime p && a >= 0Z && a mod p <> 0Z then
-      power a (p - 1Z) mod p = 1Z else true} =
+      power a (p - 1Z) mod p = 1Z else true} @ ghost = ghost_ (
   prime_def p;
   if not (prime p && a >= 0Z && a mod p <> 0Z) then ()
   else begin
@@ -223,10 +227,11 @@ let (fermat_little @ total) (a : t) (p : t) :
     prime_cancel p f (b - 1Z);
     equal_remainders b 1Z p;
     ()
-  end
+  end)
 
 let (fermat @ total) (a : t) (p : t) :
-    {u : unit | if prime p then power a p mod p = a mod p else true} =
+    {u : unit | if prime p then power a p mod p = a mod p else true}
+    @ ghost = ghost_ (
   prime_def p;
   if not (prime p) then ()
   else begin
@@ -236,25 +241,27 @@ let (fermat @ total) (a : t) (p : t) :
     reduce_product r (power r (p - 1Z)) p;
     if r = 0Z then ()
     else begin fermat_little r p; () end
-  end
+  end)
 
-let (power_one @ total) (a : t) : {u : unit | power a 1Z = a} =
+let (power_one @ total) (a : t) : {u : unit | power a 1Z = a} @ ghost = ghost_ (
   power_def a 0Z; power_def a 1Z;
-  ()
+  ())
 
 let (period_step @ total) (a : t) (p : t) (t : t) :
     {u : unit | if p > 0Z && t >= 0Z && power a p mod p = a mod p then
-      power a (t + p) mod p = power a (t + 1Z) mod p else true} =
+      power a (t + p) mod p = power a (t + 1Z) mod p else true}
+    @ ghost = ghost_ (
   power_add a t p;
   power_add a t 1Z;
   power_one a;
   reduce_product (power a t) (power a p) p;
   reduce_product (power a t) a p;
-  ()
+  ())
 
 let rec (fermat_period @ total) : (a : t) -> (p : t) -> (k : t) ->
     {u : unit | if prime p && k >= 0Z then
-      power a (1Z + k * (p - 1Z)) mod p = a mod p else true} = fun a p k ->
+      power a (1Z + k * (p - 1Z)) mod p = a mod p else true}
+    @ ghost = fun a p k -> ghost_ (
   prime_def p;
   if not (prime p) || k < 0Z then ()
   else if k = 0Z then begin power_one a; () end
@@ -264,5 +271,5 @@ let rec (fermat_period @ total) : (a : t) -> (p : t) -> (k : t) ->
     let t = (k - 1Z) * (p - 1Z) in
     period_step a p t;
     ()
-  end
+  end)
 [@@decreases k]

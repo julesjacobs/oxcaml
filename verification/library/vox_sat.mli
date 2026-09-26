@@ -25,4 +25,4 @@ val solve :
 val unsat_at : (n : int) ->
   (formula : {f : formula | unsatisfiable n f}) ->
   (assignment : bool list) ->
-  {u : unit | not (eval_formula assignment formula)} @@ total
+  {u : unit | not (eval_formula assignment formula)} @ ghost @@ total

@@ -18,4 +18,4 @@ open Vox_sat_spec
 open Vox_sat
 
 let forged_unsat () =
-  unsat_at 1 [[Positive 0]] [true]
+  ghost_ (unsat_at 1 [[Positive 0]] [true])

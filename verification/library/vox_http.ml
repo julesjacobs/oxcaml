@@ -67,16 +67,16 @@ let[@def] rec drain (core : core @ immutable total) (input : bytes @ immutable
   else match input with [] -> (core, []) | b :: bs -> drain (step core b) bs
 
 let (drain_empty @ total) (core : core @ immutable total) :
-    {u : unit | drain core [] === (core, [])} =
-  drain_def core []; ()
+    {u : unit | drain core [] === (core, [])} @ ghost = ghost_ (
+  drain_def core []; ())
 
 let rec (drain_append @ total) : (core : core) @ immutable total -> (left :
   bytes) -> (right : bytes) ->
     {u : unit | drain core (S.append left right) ===
       (let (next, rest) = drain core left in
        if terminal next then (next, S.append rest right) else drain next right)}
-         =
-  fun core left right ->
+    @ ghost =
+  fun core left right -> ghost_ (
   S.append_def left right;
   drain_def core left;
   drain_def core (S.append left right);
@@ -87,14 +87,14 @@ let rec (drain_append @ total) : (core : core) @ immutable total -> (left :
     let joined = S.append left right in
     drain_def core joined;
     drain_append (step core b) bs right;
-    ()
+    ())
 
 let rec (drain_line @ total) : (phase : phase) @ immutable total -> (prefix :
   bytes) -> (line : bytes) @ immutable total ->
     {u : unit | if safe_line line then
       drain (Line (phase, prefix, false)) (S.append line [13;10]) ===
-      (finish_line phase (S.append prefix line), []) else true} =
-  fun phase prefix line ->
+      (finish_line phase (S.append prefix line), []) else true} @ ghost =
+  fun phase prefix line -> ghost_ (
   safe_line_def line;
   S.append_def line [13;10];
   let start = Line (phase, prefix, false) in
@@ -117,7 +117,7 @@ let rec (drain_line @ total) : (phase : phase) @ immutable total -> (prefix :
       S.append_def [b] bs;
       S.append_def [] bs;
       ())
-    else ()
+    else ())
 
 let rec (drain_headers @ total) : (request_line : bytes) -> (prefix : int list
   list) ->
@@ -127,8 +127,8 @@ let rec (drain_headers @ total) : (request_line : bytes) -> (prefix : int list
         headers body) ===
       drain (finish_line (Headers (request_line, S.append prefix headers)) [])
         body
-      else true} =
-  fun request_line prefix headers body ->
+      else true} @ ghost =
+  fun request_line prefix headers body -> ghost_ (
   header_lines_def headers;
   wire_headers_def headers body;
   let phase = Headers (request_line, prefix) in
@@ -158,7 +158,7 @@ let rec (drain_headers @ total) : (request_line : bytes) -> (prefix : int list
       S.append_associative prefix [line] rest;
       S.append_def [line] rest; S.append_def [] rest;
       ())
-    else ()
+    else ())
 
 let rec (drain_body @ total) : (request_line : bytes) -> (headers : int list
   list) ->
@@ -166,8 +166,8 @@ let rec (drain_body @ total) : (request_line : bytes) -> (headers : int list
     {u : unit | if n > 0 && sized n body then
       drain (Body (request_line, headers, n, prefix)) body ===
       (Complete {request_line; headers; body = S.append prefix body}, []) else
-        true} =
-  fun request_line headers n prefix body ->
+        true} @ ghost =
+  fun request_line headers n prefix body -> ghost_ (
   sized_def n body;
   match body with
   | [] -> ()
@@ -189,13 +189,13 @@ let rec (drain_body @ total) : (request_line : bytes) -> (headers : int list
         S.append_associative prefix [b] bs;
         S.append_def [b] bs; S.append_def [] bs;
         ()))
-    else ()
+    else ())
 
 let (serializer_core_roundtrip @ total) (request : request) :
     {u : unit | if well_formed request then
       drain (Line (Request_line, [], false)) (serialize request) === (Complete
         request, [])
-      else true} =
+      else true} @ ghost = ghost_ (
   well_formed_def request;
   if well_formed request then (
     serialize_def request;
@@ -226,14 +226,14 @@ let (serializer_core_roundtrip @ total) (request : request) :
         drain_body line request.headers n [] request.body;
         S.append_def [] request.body;
         ()))
-  else ()
+  else ())
 
 let rec (chunking_invariance @ total) : (state : state) @ immutable total ->
   (left : bytes) -> (right : bytes) ->
     {u : unit | feed state (S.append left right) ===
       (let first = feed state left in feed first.state (S.append first.rest
-        right))} =
-  fun state left right ->
+        right))} @ ghost =
+  fun state left right -> ghost_ (
   S.append_def left right;
   feed_def state left;
   feed_def state (S.append left right);
@@ -250,7 +250,7 @@ let rec (chunking_invariance @ total) : (state : state) @ immutable total ->
       ())
     else (
       chunking_invariance (advance state b) bs right;
-      ())
+      ()))
 
 let (request_separation @ total) (state : state @ immutable total)
     (prefix : bytes) (suffix : bytes) :
@@ -258,7 +258,7 @@ let (request_separation @ total) (state : state @ immutable total)
       match first.state.core with
       | Complete _ -> feed state (S.append prefix suffix) ===
           {state = first.state; rest = S.append first.rest suffix}
-      | _ -> true} =
+      | _ -> true} @ ghost = ghost_ (
   chunking_invariance state prefix suffix;
   let first = feed state prefix in
   match first.state.core with
@@ -266,14 +266,15 @@ let (request_separation @ total) (state : state @ immutable total)
     terminal_def first.state.core;
     feed_def first.state (S.append first.rest suffix);
     ()
-  | _ -> ()
+  | _ -> ())
 
 let rec (feed_matches_drain @ total) : (state : state) @ immutable total ->
   (input : bytes) @ immutable total ->
     {u : unit | if fits state.budget input then
       let result = feed state input in
-      (result.state.core, result.rest) === drain state.core input else true} =
-  fun state input ->
+      (result.state.core, result.rest) === drain state.core input else true}
+    @ ghost =
+  fun state input -> ghost_ (
   fits_def state.budget input;
   feed_def state input; drain_def state.core input;
   if terminal state.core then ()
@@ -284,7 +285,7 @@ let rec (feed_matches_drain @ total) : (state : state) @ immutable total ->
       advance_def state b;
       feed_matches_drain (advance state b) bs;
       ())
-    else ()
+    else ())
 
 let rec (accounting @ total) : (state : state) @ immutable total -> (input :
   bytes) @ immutable total ->
@@ -295,8 +296,8 @@ let rec (accounting @ total) : (state : state) @ immutable total -> (input :
         (Bigint.of_int (consumed state result.state)) (S.length result.rest)
       && S.drop (Bigint.of_int (consumed state result.state)) input ===
         result.rest
-      else true} =
-  fun state input ->
+      else true} @ ghost =
+  fun state input -> ghost_ (
   feed_def state input;
   if 0 <= state.budget && state.budget <= 16384 then (
     if terminal state.core then (
@@ -323,7 +324,7 @@ let rec (accounting @ total) : (state : state) @ immutable total -> (input :
         S.length_def input;
         S.drop_def (Bigint.of_int (consumed state result.state)) input;
         ()))
-  else ()
+  else ())
 
 let (suffix_preservation @ total) (state : state @ immutable total) (input :
   bytes @ immutable total) :
@@ -331,12 +332,12 @@ let (suffix_preservation @ total) (state : state @ immutable total) (input :
       let result = feed state input in
       S.append (S.take (Bigint.of_int (consumed state result.state)) input)
         result.rest === input
-      else true} =
+      else true} @ ghost = ghost_ (
   accounting state input;
   let result = feed state input in
   consumed_def state result.state;
   S.cut input (Bigint.of_int (consumed state result.state));
-  ()
+  ())
 
 let (roundtrip @ total) (request : request) (suffix : bytes) :
     {u : unit | if well_formed request then
@@ -344,7 +345,7 @@ let (roundtrip @ total) (request : request) (suffix : bytes) :
       result.state.core === Complete request && result.rest === suffix
       && Bigint.of_int (consumed (initial ()) result.state) === S.length
         (serialize request)
-      else true} =
+      else true} @ ghost = ghost_ (
   well_formed_def request;
   if well_formed request then (
     let start = initial () in initial_def ();
@@ -359,7 +360,7 @@ let (roundtrip @ total) (request : request) (suffix : bytes) :
     terminal_def first.state.core;
     feed_def first.state suffix;
     ())
-  else ()
+  else ())
 
 let[@def] semantic_request request =
   valid_request_line request.request_line && safe_line request.request_line
@@ -414,31 +415,31 @@ let[@def] reachable state prefix = ghost_ (
 
 let rec (safe_append @ total) : (xs : bytes) -> (ys : bytes) ->
     {u : unit | safe_line (S.append xs ys) =
-      (safe_line xs && safe_line ys)} =
-  fun xs ys ->
+      (safe_line xs && safe_line ys)} @ ghost =
+  fun xs ys -> ghost_ (
   safe_line_def xs; S.append_def xs ys;
   match xs with
   | [] -> ()
   | b :: bs ->
     safe_line_def (S.append xs ys); safe_append bs ys;
-    ()
+    ())
 
 let rec (headers_append @ total) : (xs : int list list) ->
     (ys : int list list) ->
     {u : unit | header_lines (S.append xs ys) =
-      (header_lines xs && header_lines ys)} =
-  fun xs ys ->
+      (header_lines xs && header_lines ys)} @ ghost =
+  fun xs ys -> ghost_ (
   header_lines_def xs; S.append_def xs ys;
   match xs with
   | [] -> ()
   | line :: rest ->
     header_lines_def (S.append xs ys); headers_append rest ys;
-    ()
+    ())
 
 let rec (sized_snoc @ total) : (n : int) -> (xs : bytes) -> (b : int) ->
     {u : unit | if 0 <= n && n < 8192 && sized n xs && byte b then
-      sized (n + 1) (S.append xs [b]) else true} =
-  fun n xs b ->
+      sized (n + 1) (S.append xs [b]) else true} @ ghost =
+  fun n xs b -> ghost_ (
   sized_def n xs; S.append_def xs [b];
   match xs with
   | [] -> sized_def (n + 1) [b]; sized_def n [];
@@ -448,14 +449,14 @@ let rec (sized_snoc @ total) : (n : int) -> (xs : bytes) -> (b : int) ->
       sized_snoc (n - 1) rest b;
       sized_def (n + 1) (S.append xs [b]);
       ())
-    else ()
+    else ())
 
 let rec (decimal_bounds @ total) : (value : int) -> (digits : bytes) ->
     {u : unit | if 0 <= value && value <= 8192 then
       match decimal value digits with
       | Length n -> 0 <= n && n <= 8192 | _ -> true
-      else true} =
-  fun value digits ->
+      else true} @ ghost =
+  fun value digits -> ghost_ (
   decimal_def value digits;
   match digits with
   | [] -> ()
@@ -464,7 +465,7 @@ let rec (decimal_bounds @ total) : (value : int) -> (digits : bytes) ->
        && not (value > 819 || (value = 819 && b > 50)) then (
       decimal_bounds (value * 10 + b - 48) bs;
       ())
-    else ()
+    else ())
 
 let[@def] previous_bounded previous =
   match previous with None -> true | Some n -> 0 <= n && n <= 8192
@@ -474,8 +475,8 @@ let rec (frame_bounds @ total) : (headers : int list list) ->
     {u : unit | if previous_bounded previous then
       match frame_fields headers previous hosts with
       | Length n -> 0 <= n && n <= 8192 | _ -> true
-      else true} =
-  fun headers previous hosts ->
+      else true} @ ghost =
+  fun headers previous hosts -> ghost_ (
   previous_bounded_def previous;
   frame_fields_def headers previous hosts;
   match headers with
@@ -494,18 +495,18 @@ let rec (frame_bounds @ total) : (headers : int list list) ->
           | Length n -> previous_bounded_def (Some n);
             frame_bounds rest (Some n) hosts; ())
         else (frame_bounds rest previous hosts; ()))
-    else ()
+    else ())
 
 let (framing_bounds @ total) (headers : int list list) :
     {u : unit | match framing headers with
-      | Length n -> 0 <= n && n <= 8192 | _ -> true} =
+      | Length n -> 0 <= n && n <= 8192 | _ -> true} @ ghost = ghost_ (
   framing_def headers;
   previous_bounded_def None; frame_bounds headers None 0;
-  ()
+  ())
 
 let (finish_valid @ total) (phase : phase) (line : bytes) :
     {u : unit | if valid_core (Line (phase, line, true)) then
-      valid_core (finish_line phase line) else true} =
+      valid_core (finish_line phase line) else true} @ ghost = ghost_ (
   valid_core_def (Line (phase, line, true));
   finish_line_def phase line;
   match phase with
@@ -534,11 +535,11 @@ let (finish_valid @ total) (phase : phase) (line : bytes) :
           sized_def n []; ())
         else (
           valid_core_def (Body (request_line, headers, n, []));
-          sized_def (n - n) []; ()))
+          sized_def (n - n) []; ())))
 
 let (step_valid @ total) (core : core) (b : int) :
     {u : unit | if valid_core core && not (terminal core) then
-      valid_core (step core b) else true} =
+      valid_core (step core b) else true} @ ghost = ghost_ (
   valid_core_def core; terminal_def core; step_def core b;
   if not (byte b) then (
     valid_core_def (Malformed Invalid_byte); ())
@@ -569,20 +570,20 @@ let (step_valid @ total) (core : core) (b : int) :
       else (
         valid_core_def (Body
           (request_line, headers, remaining - 1, next));
-        ())
+        ()))
 
 let (crlf_append @ total) (xs : bytes) (ys : bytes) :
     {u : unit | S.append (13 :: 10 :: xs) ys ===
-      13 :: 10 :: S.append xs ys} =
+      13 :: 10 :: S.append xs ys} @ ghost = ghost_ (
   S.append_def (13 :: 10 :: xs) ys;
   S.append_def (10 :: xs) ys;
-  ()
+  ())
 
 let rec (header_prefix_append @ total) : (headers : int list list) ->
     (xs : bytes) -> (ys : bytes) ->
     {u : unit | S.append (header_prefix headers xs) ys ===
-      header_prefix headers (S.append xs ys)} =
-  fun headers xs ys ->
+      header_prefix headers (S.append xs ys)} @ ghost =
+  fun headers xs ys -> ghost_ (
   header_prefix_def headers xs;
   header_prefix_def headers (S.append xs ys);
   match headers with
@@ -592,13 +593,13 @@ let rec (header_prefix_append @ total) : (headers : int list list) ->
     let tail = 13 :: 10 :: header_prefix rest xs in
     S.append_associative line tail ys;
     crlf_append (header_prefix rest xs) ys;
-    ()
+    ())
 
 let rec (header_prefix_concat @ total) : (left : int list list) ->
     (right : int list list) -> (tail : bytes) ->
     {u : unit | header_prefix (S.append left right) tail ===
-      header_prefix left (header_prefix right tail)} =
-  fun left right tail ->
+      header_prefix left (header_prefix right tail)} @ ghost =
+  fun left right tail -> ghost_ (
   S.append_def left right;
   header_prefix_def left (header_prefix right tail);
   match left with
@@ -606,19 +607,19 @@ let rec (header_prefix_concat @ total) : (left : int list list) ->
   | line :: rest ->
     header_prefix_def (S.append left right) tail;
     header_prefix_concat rest right tail;
-    ()
+    ())
 
 let rec (wire_headers_prefix @ total) : (headers : int list list) ->
     (body : bytes) ->
     {u : unit | wire_headers headers body ===
-      header_prefix headers (13 :: 10 :: body)} =
-  fun headers body ->
+      header_prefix headers (13 :: 10 :: body)} @ ghost =
+  fun headers body -> ghost_ (
   wire_headers_def headers body;
   header_prefix_def headers (13 :: 10 :: body);
   match headers with
   | [] -> ()
   | _ :: rest -> wire_headers_prefix rest body;
-    ()
+    ())
 
 let[@def] request_prefix request_line headers tail =
   S.append request_line (13 :: 10 :: header_prefix headers tail)
@@ -626,53 +627,57 @@ let[@def] request_prefix request_line headers tail =
 let (request_prefix_append @ total) (line : bytes)
     (headers : int list list) (xs : bytes) (ys : bytes) :
     {u : unit | S.append (request_prefix line headers xs) ys ===
-      request_prefix line headers (S.append xs ys)} =
+      request_prefix line headers (S.append xs ys)} @ ghost = ghost_ (
   request_prefix_def line headers xs;
   request_prefix_def line headers (S.append xs ys);
   S.append_associative line (13 :: 10 :: header_prefix headers xs) ys;
   crlf_append (header_prefix headers xs) ys;
   header_prefix_append headers xs ys;
-  ()
+  ())
 
 let (serialize_prefix @ total) (request : request) :
     {u : unit | serialize request === request_prefix
-      request.request_line request.headers (13 :: 10 :: request.body)} =
+      request.request_line request.headers (13 :: 10 :: request.body)}
+    @ ghost = ghost_ (
   serialize_def request;
   wire_headers_prefix request.headers request.body;
   request_prefix_def request.request_line request.headers
     (13 :: 10 :: request.body);
-  ()
+  ())
 
 let (serialize_append @ total) (line : bytes) (headers : int list list)
     (body : bytes) (tail : bytes) :
     {u : unit | S.append (serialize {request_line = line; headers; body})
       tail === serialize
-        {request_line = line; headers; body = S.append body tail}} =
+        {request_line = line; headers; body = S.append body tail}}
+    @ ghost = ghost_ (
   serialize_prefix {request_line = line; headers; body};
   serialize_prefix
     {request_line = line; headers; body = S.append body tail};
   request_prefix_append line headers (13 :: 10 :: body) tail;
   crlf_append body tail;
-  ()
+  ())
 
 let (line_wire @ total) (phase : phase) (line : bytes) (cr : bool) :
     {u : unit | core_wire (Line (phase, line, cr)) ===
       (match phase with
        | Request_line -> S.append line (if cr then [13] else [])
        | Headers (request_line, headers) -> request_prefix request_line
-           headers (S.append line (if cr then [13] else [])))} =
+           headers (S.append line (if cr then [13] else [])))}
+    @ ghost = ghost_ (
   core_wire_def (Line (phase, line, cr));
   match phase with
   | Request_line -> ()
   | Headers (request_line, headers) ->
     request_prefix_def request_line headers
       (S.append line (if cr then [13] else []));
-    ()
+    ())
 
 let (finish_wire @ total) (phase : phase) (line : bytes) :
     {u : unit | if observed (finish_line phase line) then
       core_wire (finish_line phase line) ===
-      S.append (core_wire (Line (phase, line, true))) [10] else true} =
+      S.append (core_wire (Line (phase, line, true))) [10] else true}
+    @ ghost = ghost_ (
   finish_line_def phase line;
   line_wire phase line true;
   S.append_associative line [13] [10]; S.append_def [13] [10];
@@ -708,12 +713,12 @@ let (finish_wire @ total) (phase : phase) (line : bytes) :
           core_wire_def (Complete request); ())
         else (
           core_wire_def (Body (request_line, headers, n, []));
-          ()))
+          ())))
 
 let (step_wire @ total) (core : core) (b : int) :
     {u : unit | if not (terminal core) && observed (step core b) then
       core_wire (step core b) === S.append (core_wire core) [b]
-      else true} =
+      else true} @ ghost = ghost_ (
   terminal_def core; step_def core b;
   if not (byte b) then (
     observed_def (Malformed Invalid_byte); ())
@@ -742,27 +747,28 @@ let (step_wire @ total) (core : core) (b : int) :
         | Request_line -> ()
         | Headers (request_line, headers) ->
           request_prefix_append request_line headers line [b];
-          ()))
+          ())))
 
 let (initial_reachable @ total) (_unit : unit) :
-    {u : unit | reachable (initial ()) []} =
+    {u : unit | reachable (initial ()) []} @ ghost = ghost_ (
   initial_def (); reachable_def (initial ()) [];
   valid_core_def (Line (Request_line, [], false)); safe_line_def [];
   observed_def (Line (Request_line, [], false));
   core_wire_def (Line (Request_line, [], false));
   S.append_def ([] : bytes) []; S.length_def ([] : bytes);
-  ()
+  ())
 
 let (advance_reachable @ total) (state : state) (prefix : bytes) (b : int) :
     {u : unit | if reachable state prefix && not (terminal state.core)
       && state.budget > 0 then
-      reachable (advance state b) (S.append prefix [b]) else true} =
+      reachable (advance state b) (S.append prefix [b]) else true}
+    @ ghost = ghost_ (
   reachable_def state prefix; advance_def state b;
   reachable_def (advance state b) (S.append prefix [b]);
   step_valid state.core b; step_wire state.core b;
   S.append_length prefix [b]; S.length_def [b]; S.length_def ([] : bytes);
   observed_def state.core; terminal_def state.core;
-  ()
+  ())
 
 let rec (feed_reachable @ total) : (state : state) -> (prefix : bytes) ->
     (input : bytes) ->
@@ -770,8 +776,8 @@ let rec (feed_reachable @ total) : (state : state) -> (prefix : bytes) ->
       let result = feed state input in
       reachable result.state (S.append prefix
         (S.take (Bigint.of_int (consumed state result.state)) input))
-      else true} =
-  fun state prefix input ->
+      else true} @ ghost =
+  fun state prefix input -> ghost_ (
   reachable_def state prefix; feed_def state input;
   if terminal state.core then (
     consumed_def state state; S.take_def 0Z input; S.append_nil prefix;
@@ -800,33 +806,34 @@ let rec (feed_reachable @ total) : (state : state) -> (prefix : bytes) ->
       S.append_associative prefix [b] (S.take tail_count bs);
       S.append_def [b] (S.take tail_count bs);
       S.append_def [] (S.take tail_count bs);
-      ())
+      ()))
 
 let rec (length_nonnegative @ total) : (xs : bytes) ->
-    {u : unit | 0Z <= S.length xs} =
-  fun xs -> S.length_def xs;
+    {u : unit | 0Z <= S.length xs} @ ghost =
+  fun xs -> ghost_ (S.length_def xs;
   match xs with
   | [] -> ()
-  | _ :: rest -> length_nonnegative rest; ()
+  | _ :: rest -> length_nonnegative rest; ())
 
 let rec (fits_length @ total) : (budget : int) -> (xs : bytes) ->
     {u : unit | if 0 <= budget && budget <= 16384 then
-      fits budget xs = (S.length xs <= Bigint.of_int budget) else true} =
-  fun budget xs ->
+      fits budget xs = (S.length xs <= Bigint.of_int budget) else true}
+    @ ghost =
+  fun budget xs -> ghost_ (
   fits_def budget xs; S.length_def xs;
   match xs with
   | [] -> ()
   | _ :: rest ->
     if budget > 0 && budget <= 16384 then (
       fits_length (budget - 1) rest; ())
-    else (length_nonnegative rest; ())
+    else (length_nonnegative rest; ()))
 
 let (reachable_completion @ total) (state : state) (prefix : bytes) :
     {u : unit | if reachable state prefix then
       match state.core with
       | Complete request -> well_formed request
         && serialize request === prefix
-      | _ -> true else true} =
+      | _ -> true else true} @ ghost = ghost_ (
   reachable_def state prefix;
   match state.core with
   | Complete request ->
@@ -835,7 +842,7 @@ let (reachable_completion @ total) (state : state) (prefix : bytes) :
     semantic_request_def request; well_formed_def request;
     fits_length 16384 (serialize request);
     ()
-  | _ -> ()
+  | _ -> ())
 
 let (accepted_input @ total) (input : bytes) :
     {u : unit | let result = feed (initial ()) input in
@@ -847,7 +854,7 @@ let (accepted_input @ total) (input : bytes) :
                 (consumed (initial ()) result.state)) input ===
               serialize request
             && input === S.append (serialize request) result.rest
-          | _ -> true)} =
+          | _ -> true)} @ ghost = ghost_ (
   initial_reachable ();
   let start = initial () in
   feed_reachable start [] input;
@@ -856,33 +863,33 @@ let (accepted_input @ total) (input : bytes) :
   S.append_def [] prefix;
   reachable_completion result.state prefix;
   initial_def (); suffix_preservation start input;
-  ()
+  ())
 
 let (framing_rejection @ total) (headers : int list list) :
     {u : unit | if has_transfer_encoding headers then
       framing headers ===
         (if has_content_length headers then Bad Transfer_encoding_content_length
          else Bad Unsupported_transfer_encoding)
-      else true} =
+      else true} @ ghost = ghost_ (
   has_transfer_encoding_def headers; has_content_length_def headers;
-  framing_def headers; ()
+  framing_def headers; ())
 
 let rec (equal_bytes_sound @ total) : (xs : bytes) -> (ys : bytes) ->
-    {u : unit | if equal_bytes xs ys then xs === ys else true} =
-  fun xs ys ->
+    {u : unit | if equal_bytes xs ys then xs === ys else true} @ ghost =
+  fun xs ys -> ghost_ (
   equal_bytes_def xs ys;
   match xs, ys with
   | x :: rest, y :: tail ->
     equal_bytes_sound rest tail; ()
-  | _ -> ()
+  | _ -> ())
 
 let (host_not_cl @ total) (name : bytes) :
-    {u : unit | not (is_host name && is_cl name)} =
+    {u : unit | not (is_host name && is_cl name)} @ ghost = ghost_ (
   is_host_def name; is_cl_def name;
   equal_bytes_sound name [104;111;115;116];
   equal_bytes_sound name
     [99;111;110;116;101;110;116;45;108;101;110;103;116;104];
-  ()
+  ())
 
 let[@def] previous_matches (previous : int option) (n : int) =
   match previous with None -> true | Some old -> old = n
@@ -892,8 +899,8 @@ let rec (frame_agreement @ total) : (headers : int list list) ->
     {u : unit | match frame_fields headers previous hosts with
       | Length n -> content_lengths_match headers n
         && previous_matches previous n
-      | _ -> true} =
-  fun headers previous hosts ->
+      | _ -> true} @ ghost =
+  fun headers previous hosts -> ghost_ (
   frame_fields_def headers previous hosts;
   match frame_fields headers previous hosts with
   | Bad _ | Too_large _ -> ()
@@ -920,7 +927,7 @@ let rec (frame_agreement @ total) : (headers : int list list) ->
             ())
         else (
           frame_agreement rest previous hosts;
-          ())
+          ()))
 
 let (well_formed_framing @ total) (request : request) :
     {u : unit | if well_formed request then
@@ -929,24 +936,24 @@ let (well_formed_framing @ total) (request : request) :
           | Length n -> 0 <= n && n <= 8192 && sized n request.body
             && content_lengths_match request.headers n
           | _ -> false)
-      else true} =
+      else true} @ ghost = ghost_ (
   well_formed_def request;
   framing_def request.headers; has_transfer_encoding_def request.headers;
   frame_agreement request.headers None 0;
   framing_bounds request.headers;
-  ()
+  ())
 
 let rec (sized_length @ total) : (n : int) -> (xs : bytes) ->
     {u : unit | if 0 <= n && n <= 8192 && sized n xs then
-      S.length xs === Bigint.of_int n else true} =
-  fun n xs ->
+      S.length xs === Bigint.of_int n else true} @ ghost =
+  fun n xs -> ghost_ (
   sized_def n xs; S.length_def xs;
   match xs with
   | [] -> ()
   | _ :: rest ->
     if 0 <= n && n <= 8192 && sized n xs then (
       sized_length (n - 1) rest; ())
-    else ()
+    else ())
 
 let[@def] previous_value previous =
   match previous with None -> 0 | Some n -> n
@@ -956,8 +963,8 @@ let rec (frame_default @ total) : (headers : int list list) ->
     {u : unit | if not (has_content_length headers) then
       match frame_fields headers previous hosts with
       | Length n -> n = previous_value previous | _ -> true
-      else true} =
-  fun headers previous hosts ->
+      else true} @ ghost =
+  fun headers previous hosts -> ghost_ (
   frame_fields_def headers previous hosts;
   has_content_length_def headers;
   previous_value_def previous;
@@ -975,17 +982,17 @@ let rec (frame_default @ total) : (headers : int list list) ->
       if is_host name then (
         frame_default rest previous 1; ())
       else (
-        frame_default rest previous hosts; ())
+        frame_default rest previous hosts; ()))
 
 let (no_content_length_body @ total) (request : request) :
     {u : unit | if well_formed request
         && not (has_content_length request.headers) then
-      request.body === [] else true} =
+      request.body === [] else true} @ ghost = ghost_ (
   well_formed_def request; well_formed_framing request;
   framing_def request.headers; has_transfer_encoding_def request.headers;
   frame_default request.headers None 0; previous_value_def None;
   sized_def 0 request.body;
-  ()
+  ())
 
 let (body_agreement @ total) (request : request) :
     {u : unit | if well_formed request then
@@ -995,11 +1002,11 @@ let (body_agreement @ total) (request : request) :
             && S.length request.body === Bigint.of_int n
             && content_lengths_match request.headers n
           | _ -> false)
-      else true} =
+      else true} @ ghost = ghost_ (
   well_formed_framing request;
   match framing request.headers with
   | Bad _ | Too_large _ -> ()
-  | Length n -> sized_length n request.body; ()
+  | Length n -> sized_length n request.body; ())
 
 let (header_outcome @ total) (line : bytes) (headers : int list list) :
     {u : unit | let request = {request_line = line; headers; body = []} in
@@ -1012,7 +1019,7 @@ let (header_outcome @ total) (line : bytes) (headers : int list list) :
          | Too_large r -> Limit r
          | Length n -> if n = 0 then Complete request
              else Body (line, headers, n, []))
-      else true} =
+      else true} @ ghost = ghost_ (
   let request = {request_line = line; headers; body = []} in
   let wire = serialize request in
   serialize_def request;
@@ -1031,12 +1038,13 @@ let (header_outcome @ total) (line : bytes) (headers : int list list) :
   drain_empty ending;
   finish_line_def (Headers (line, headers)) []; nonempty_def [];
   initial_def (); feed_matches_drain (initial ()) wire;
-  ()
+  ())
 
 let rec (incomplete_suffix @ total) : (state : state) -> (input : bytes) ->
     {u : unit | let result = feed state input in
-      if not (terminal result.state.core) then result.rest === [] else true} =
-  fun state input ->
+      if not (terminal result.state.core) then result.rest === [] else true}
+    @ ghost =
+  fun state input -> ghost_ (
   feed_def state input;
   if terminal state.core then ()
   else match input with
@@ -1046,7 +1054,7 @@ let rec (incomplete_suffix @ total) : (state : state) -> (input : bytes) ->
       terminal_def (Limit Message_bytes); ())
     else (
       incomplete_suffix (advance state b) rest;
-      ())
+      ()))
 
 end
 
@@ -1060,42 +1068,42 @@ let[@def] rev (xs : ('a : immutable_data) list @ immutable total) :
 let rec (onto_append @ total) :
     (xs : ('a : immutable_data) list) @ immutable total ->
     (tail : 'a list) @ immutable total ->
-    {u : unit | onto xs tail === S.append (rev xs) tail} =
-  fun xs tail ->
+    {u : unit | onto xs tail === S.append (rev xs) tail} @ ghost =
+  fun xs tail -> ghost_ (
   onto_def xs tail; onto_def xs []; rev_def xs;
   match xs with
   | [] -> S.append_def [] tail; ()
   | x :: rest ->
     onto_append rest [x]; onto_append rest (x :: tail);
     S.append_associative (rev rest) [x] tail;
-    S.append_def [x] tail; S.append_def [] tail; ()
+    S.append_def [x] tail; S.append_def [] tail; ())
 let (cons @ total) :
     (x : ('a : immutable_data)) @ immutable total ->
     (xs : 'a list) @ immutable total ->
-    {u : unit | rev (x :: xs) === S.append (rev xs) [x]} =
-  fun x xs ->
-  rev_def (x :: xs); onto_def (x :: xs) []; onto_append xs [x]; ()
+    {u : unit | rev (x :: xs) === S.append (rev xs) [x]} @ ghost =
+  fun x xs -> ghost_ (
+  rev_def (x :: xs); onto_def (x :: xs) []; onto_append xs [x]; ())
 let rec (append @ total) :
     (xs : ('a : immutable_data) list) @ immutable total ->
     (ys : 'a list) @ immutable total ->
-    {u : unit | rev (S.append xs ys) === S.append (rev ys) (rev xs)} =
-  fun xs ys ->
+    {u : unit | rev (S.append xs ys) === S.append (rev ys) (rev xs)} @ ghost =
+  fun xs ys -> ghost_ (
   S.append_def xs ys;
   match xs with
   | [] -> rev_def xs; onto_def xs []; S.append_nil (rev ys); ()
   | x :: rest ->
     cons x rest; cons x (S.append rest ys); append rest ys;
-    S.append_associative (rev ys) (rev rest) [x]; ()
+    S.append_associative (rev ys) (rev rest) [x]; ())
 let rec (involution @ total) :
     (xs : ('a : immutable_data) list) @ immutable total ->
-    {u : unit | rev (rev xs) === xs} =
-  fun xs ->
+    {u : unit | rev (rev xs) === xs} @ ghost =
+  fun xs -> ghost_ (
   match xs with
   | [] -> rev_def xs; onto_def xs []; ()
   | x :: rest ->
     cons x rest; append (rev rest) [x]; involution rest;
     rev_def [x]; onto_def [x] []; onto_def [] [x];
-    S.append_def [x] rest; S.append_def [] rest; ()
+    S.append_def [x] rest; S.append_def [] rest; ())
 end
 
 module Driver = struct
@@ -1151,12 +1159,12 @@ let[@def] rec consume (state : state @ immutable total)
     else consume {core = push state.core b; budget = state.budget - 1} bs
 
 let (core_terminal @ total) (c : core @ immutable total) :
-    {u : unit | terminal (core c) === terminal c} =
-  core_def c; terminal_def c; terminal_def (core c); ()
+    {u : unit | terminal (core c) === terminal c} @ ghost = ghost_ (
+  core_def c; terminal_def c; terminal_def (core c); ())
 let (finish_simulation @ total) (p : phase @ immutable total)
     (line : bytes @ immutable total) :
     {u : unit | core (finish p line) ===
-      Internal.finish_line (phase p) line} =
+      Internal.finish_line (phase p) line} @ ghost = ghost_ (
   finish_def p line; phase_def p;
   Internal.finish_line_def (phase p) line;
   Reverse.rev_def ([] : bytes); Reverse.onto_def ([] : bytes) [];
@@ -1167,9 +1175,9 @@ let (finish_simulation @ total) (p : phase @ immutable total)
   | Headers (request_line, headers) ->
     Reverse.cons line headers;
     core_def (finish p line);
-    phase_def (Headers (request_line, line :: headers)); ()
+    phase_def (Headers (request_line, line :: headers)); ())
 let (step_simulation @ total) (c : core @ immutable total) (b : int) :
-    {u : unit | core (push c b) === Internal.step (core c) b} =
+    {u : unit | core (push c b) === Internal.step (core c) b} @ ghost = ghost_ (
   push_def c b; core_def c; Internal.step_def (core c) b;
   core_def (push c b);
   match c with
@@ -1177,13 +1185,14 @@ let (step_simulation @ total) (c : core @ immutable total) (b : int) :
     Reverse.cons b line;
     finish_simulation p (Reverse.rev line); ()
   | Body (_, _, _, body) -> Reverse.cons b body; ()
-  | Complete _ | Malformed _ | Limit _ -> ()
+  | Complete _ | Malformed _ | Limit _ -> ())
 let rec (simulation @ total) : (s : state) @ immutable total ->
     (input : bytes) @ immutable total ->
     {u : unit | let actual = consume s input in
       let expected = Internal.feed (model s) input in
-      model actual.state === expected.state && actual.rest === expected.rest} =
-  fun s input ->
+      model actual.state === expected.state && actual.rest === expected.rest}
+    @ ghost =
+  fun s input -> ghost_ (
   consume_def s input; model_def s; Internal.feed_def (model s) input;
   core_terminal s.core;
   if terminal s.core then () else
@@ -1197,9 +1206,9 @@ let rec (simulation @ total) : (s : state) @ immutable total ->
       step_simulation s.core b;
       let next = {core = push s.core b; budget = s.budget - 1} in
       model_def next; Internal.advance_def (model s) b;
-      simulation next bs; ())
+      simulation next bs; ()))
 let (involution @ total) (s : state @ immutable total) :
-    {u : unit | model (model s) === s} =
+    {u : unit | model (model s) === s} @ ghost = ghost_ (
   model_def s; model_def (model s); core_def s.core;
   core_def (core s.core);
   match s.core with
@@ -1208,7 +1217,7 @@ let (involution @ total) (s : state @ immutable total) :
     (match p with Request_line -> ()
      | Headers (_, headers) -> Reverse.involution headers); ()
   | Body (_, _, _, body) -> Reverse.involution body; ()
-  | Complete _ | Malformed _ | Limit _ -> ()
+  | Complete _ | Malformed _ | Limit _ -> ())
 end
 
 module S = Vox_sequence
@@ -1249,34 +1258,35 @@ let (status_model @ total) (state : state) :
        | Internal.Line _ | Internal.Body _ -> Incomplete
        | Internal.Complete request -> Complete request
        | Internal.Malformed error -> Malformed error
-       | Internal.Limit resource -> Limit resource)} =
+       | Internal.Limit resource -> Limit resource)} @ ghost = ghost_ (
   status_def state; machine_of_def state;
-  Driver.model_def state; Driver.core_def state.core; ()
+  Driver.model_def state; Driver.core_def state.core; ())
 
 let (initial_model @ total) (_unit : unit) :
-    {u : unit | Driver.model (Internal.initial ()) === Internal.initial ()} =
+    {u : unit | Driver.model (Internal.initial ()) === Internal.initial ()}
+    @ ghost = ghost_ (
   Internal.initial_def (); Driver.model_def (Internal.initial ());
   Driver.core_def (Internal.initial ()).core;
   Driver.phase_def Internal.Request_line;
-  Reverse.rev_def ([] : bytes); Reverse.onto_def ([] : bytes) []; ()
+  Reverse.rev_def ([] : bytes); Reverse.onto_def ([] : bytes) []; ())
 
 let (reachable_good @ total) (machine : Internal.state) (prefix : bytes) :
     {u : unit | if Internal.reachable machine prefix then good machine
-      else true} =
+      else true} @ ghost = ghost_ (
   Internal.reachable_def machine prefix; good_def machine;
-  ()
+  ())
 
 let (good_reachable @ total) (machine : Internal.state) :
     {u : unit | if good machine && Internal.observed machine.core then
       Internal.reachable machine (Internal.core_wire machine.core)
-      else true} =
+      else true} @ ghost = ghost_ (
   good_def machine;
   Internal.reachable_def machine (Internal.core_wire machine.core);
-  ()
+  ())
 
 let (feed_good @ total) (machine : Internal.state) (input : bytes) :
     {u : unit | if good machine then
-      good (Internal.feed machine input).state else true} =
+      good (Internal.feed machine input).state else true} @ ghost = ghost_ (
   good_reachable machine;
   if Internal.observed machine.core then (
     Internal.feed_reachable machine (Internal.core_wire machine.core) input;
@@ -1289,7 +1299,7 @@ let (feed_good @ total) (machine : Internal.state) (input : bytes) :
     Internal.observed_def machine.core;
     Internal.terminal_def machine.core;
     Internal.feed_def machine input;
-    ())
+    ()))
 
 let (state_sound @ total) (state : state) :
     {u : unit | 0 <= total_consumed state && total_consumed state <= 16384
@@ -1300,7 +1310,7 @@ let (state_sound @ total) (state : state) :
             && serialize request === processed state
             && S.length (processed state) ===
               Bigint.of_int (total_consumed state)
-          | Malformed _ | Limit _ -> processed state === [])} =
+          | Malformed _ | Limit _ -> processed state === [])} @ ghost = ghost_ (
   let machine = Driver.model state in
   good_def machine; status_model state; machine_of_def state;
   Driver.model_def state; processed_def state;
@@ -1313,7 +1323,7 @@ let (state_sound @ total) (state : state) :
     ()
   | Internal.Malformed _ | Internal.Limit _ ->
     Internal.core_wire_def machine.core;
-    ()
+    ())
 
 let[@def] transition (state : state) (input : bytes) (result : result) =
   ghost_ (total_consumed state <= total_consumed result.state
@@ -1360,7 +1370,7 @@ let (driver_result_facts @ total) (state : state) (input : bytes)
       machine_of result.state ===
         (Internal.feed (machine_of state) input).state
       && result.rest === (Internal.feed (machine_of state) input).rest
-      && transition state input result} =
+      && transition state input result} @ ghost = ghost_ (
   Driver.simulation state input;
   let next = result.state in
   let machine = Driver.model state in
@@ -1386,7 +1396,7 @@ let (driver_result_facts @ total) (state : state) (input : bytes)
   Internal.terminal_def machine.core;
   Internal.feed_def machine input;
   state_sound next; transition_def state input result;
-  ()
+  ())
 
 let (run @ total) (state : state) (input : bytes) :
     {result : result |
@@ -1411,41 +1421,43 @@ let[@def] feed (state : state) (input : bytes) :
   run state input
 
 let (initial_machine @ total) (_unit : unit) :
-    {u : unit | machine_of (initial ()) === Internal.initial ()} =
+    {u : unit | machine_of (initial ()) === Internal.initial ()}
+    @ ghost = ghost_ (
   initial_def ();
   let _ = make_initial () in
-  ()
+  ())
 
 let (feed_machine @ total) (state : state) (input : bytes) :
     {u : unit | let answer = Internal.feed (machine_of state) input in
       let result = feed state input in
-      machine_of result.state === answer.state && result.rest === answer.rest} =
+      machine_of result.state === answer.state && result.rest === answer.rest}
+    @ ghost = ghost_ (
   feed_def state input;
   let _ = run state input in
-  ()
+  ())
 
 let (machine_injective @ total) (left : state) (right : state) :
     {u : unit | if machine_of left === machine_of right then left === right
-      else true} =
+      else true} @ ghost = ghost_ (
   machine_of_def left; Driver.model_def left;
   machine_of_def right; Driver.model_def right;
-  Driver.involution left; Driver.involution right; ()
+  Driver.involution left; Driver.involution right; ())
 
 let (consumed_machine @ total) (left : state) (right : state) :
     {u : unit | consumed left right =
-      Internal.consumed (machine_of left) (machine_of right)} =
+      Internal.consumed (machine_of left) (machine_of right)} @ ghost = ghost_ (
   consumed_def left right;
   total_consumed_def left; total_consumed_def right;
   machine_of_def left; Driver.model_def left;
   machine_of_def right; Driver.model_def right;
   Internal.consumed_def (machine_of left) (machine_of right);
-  ()
+  ())
 
 let (chunking_invariance @ total) (state : state)
     (left : bytes) (right : bytes) :
     {u : unit | feed state (S.append left right) ===
       (let first = feed state left in
-       feed first.state (S.append first.rest right))} =
+       feed first.state (S.append first.rest right))} @ ghost = ghost_ (
   let first = feed state left in
   let last = feed first.state (S.append first.rest right) in
   let whole = feed state (S.append left right) in
@@ -1454,7 +1466,7 @@ let (chunking_invariance @ total) (state : state)
   feed_machine state (S.append left right);
   Internal.chunking_invariance (machine_of state) left right;
   machine_injective last.state whole.state;
-  ()
+  ())
 
 let (request_separation @ total) (state : state)
     (prefix : bytes) (suffix : bytes) :
@@ -1462,7 +1474,7 @@ let (request_separation @ total) (state : state)
       match status first.state with
       | Complete _ -> feed state (S.append prefix suffix) ===
           {state = first.state; rest = S.append first.rest suffix}
-      | _ -> true} =
+      | _ -> true} @ ghost = ghost_ (
   let first = feed state prefix in
   let whole = feed state (S.append prefix suffix) in
   feed_machine state prefix; feed_machine state (S.append prefix suffix);
@@ -1470,11 +1482,11 @@ let (request_separation @ total) (state : state)
   Driver.model_def first.state;
   Internal.request_separation (machine_of state) prefix suffix;
   machine_injective first.state whole.state;
-  ()
+  ())
 
 let (terminal_preservation @ total) (state : state) (input : bytes) :
     {u : unit | if is_terminal (status state) then
-      feed state input === {state; rest = input} else true} =
+      feed state input === {state; rest = input} else true} @ ghost = ghost_ (
   let result = feed state input in
   feed_machine state input;
   machine_of_def state; Driver.model_def state; status_model state;
@@ -1482,7 +1494,7 @@ let (terminal_preservation @ total) (state : state) (input : bytes) :
   Internal.terminal_def (machine_of state).core;
   Internal.feed_def (machine_of state) input;
   machine_injective state result.state;
-  ()
+  ())
 
 let (roundtrip @ total) (request : request) (suffix : bytes) :
     {u : unit | if well_formed request then
@@ -1490,7 +1502,7 @@ let (roundtrip @ total) (request : request) (suffix : bytes) :
       status result.state === Complete request && result.rest === suffix
       && Bigint.of_int (consumed (initial ()) result.state) ===
         S.length (serialize request)
-      else true} =
+      else true} @ ghost = ghost_ (
   let start = initial () in
   let input = S.append (serialize request) suffix in
   let result = feed start input in
@@ -1499,7 +1511,7 @@ let (roundtrip @ total) (request : request) (suffix : bytes) :
   consumed_machine start result.state;
   status_model result.state; machine_of_def result.state;
   Driver.model_def result.state;
-  ()
+  ())
 
 let (header_outcome @ total) (line : bytes) (headers : int list list) :
     {u : unit | let request = {request_line = line; headers; body = []} in
@@ -1511,14 +1523,14 @@ let (header_outcome @ total) (line : bytes) (headers : int list list) :
          | Bad e -> Malformed e
          | Too_large r -> Limit r
          | Length n -> if n = 0 then Complete request else Incomplete)
-      else true} =
+      else true} @ ghost = ghost_ (
   let request = {request_line = line; headers; body = []} in
   let result = feed (initial ()) (serialize request) in
   initial_machine (); feed_machine (initial ()) (serialize request);
   Internal.header_outcome line headers;
   status_model result.state; machine_of_def result.state;
   Driver.model_def result.state;
-  ()
+  ())
 
 let (framing_rejection @ total) (headers : int list list) :
     {u : unit | if has_transfer_encoding headers then
@@ -1526,8 +1538,8 @@ let (framing_rejection @ total) (headers : int list list) :
         (if has_content_length headers then
            Bad Transfer_encoding_content_length
          else Bad Unsupported_transfer_encoding)
-      else true} =
-  Internal.framing_rejection headers
+      else true} @ ghost = ghost_ (
+  Internal.framing_rejection headers)
 
 let (body_agreement @ total) (request : request) :
     {u : unit | if well_formed request then
@@ -1537,14 +1549,14 @@ let (body_agreement @ total) (request : request) :
             && S.length request.body === Bigint.of_int n
             && content_lengths_match request.headers n
           | _ -> false)
-      else true} =
-  Internal.body_agreement request
+      else true} @ ghost = ghost_ (
+  Internal.body_agreement request)
 
 let (no_content_length_body @ total) (request : request) :
     {u : unit | if well_formed request
         && not (has_content_length request.headers) then
-      request.body === [] else true} =
-  Internal.no_content_length_body request
+      request.body === [] else true} @ ghost = ghost_ (
+  Internal.no_content_length_body request)
 
 let (parse @ total) (input : bytes) :
     {result : result |
