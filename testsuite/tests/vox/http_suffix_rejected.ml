@@ -21,5 +21,5 @@ open Vox_http
 let (discard_pipeline @ total) (request : request) (suffix : bytes) :
     {u : unit | if well_formed request then
       (feed (initial ()) (Vox_sequence.append (serialize request) suffix)).rest === [] else true} =
-  roundtrip request suffix;
+  ghost_ (roundtrip request suffix);
   ()

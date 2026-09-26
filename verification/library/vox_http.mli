@@ -19,7 +19,7 @@ val state_sound : (state : state) ->
           && serialize request === processed state
           && Vox_sequence.length (processed state) ===
             Bigint.of_int (total_consumed state)
-        | Malformed _ | Limit _ -> processed state === [])} @@ total
+        | Malformed _ | Limit _ -> processed state === [])} @ ghost @@ total
 
 val initial : unit ->
   {state : state | status state === Incomplete
@@ -68,17 +68,17 @@ val chunking_invariance : (state : state) ->
   (left : bytes) -> (right : bytes) ->
   {u : unit | feed state (Vox_sequence.append left right) ===
     (let first = feed state left in
-     feed first.state (Vox_sequence.append first.rest right))} @@ total
+     feed first.state (Vox_sequence.append first.rest right))} @ ghost @@ total
 val request_separation : (state : state) ->
   (prefix : bytes) -> (suffix : bytes) ->
   {u : unit | let first = feed state prefix in
     match status first.state with
     | Complete _ -> feed state (Vox_sequence.append prefix suffix) ===
         {state = first.state; rest = Vox_sequence.append first.rest suffix}
-    | _ -> true} @@ total
+    | _ -> true} @ ghost @@ total
 val terminal_preservation : (state : state) -> (input : bytes) ->
   {u : unit | if is_terminal (status state) then
-    feed state input === {state; rest = input} else true} @@ total
+    feed state input === {state; rest = input} else true} @ ghost @@ total
 val roundtrip : (request : request) -> (suffix : bytes) ->
   {u : unit | if well_formed request then
     let result = feed (initial ())
@@ -86,14 +86,14 @@ val roundtrip : (request : request) -> (suffix : bytes) ->
     status result.state === Complete request && result.rest === suffix
     && Bigint.of_int (consumed (initial ()) result.state) ===
       Vox_sequence.length (serialize request)
-    else true} @@ total
+    else true} @ ghost @@ total
 
 val framing_rejection : (headers : int list list) ->
   {u : unit | if has_transfer_encoding headers then
     framing headers ===
       (if has_content_length headers then Bad Transfer_encoding_content_length
        else Bad Unsupported_transfer_encoding)
-    else true} @@ total
+    else true} @ ghost @@ total
 val body_agreement : (request : request) ->
   {u : unit | if well_formed request then
     not (has_transfer_encoding request.headers)
@@ -102,11 +102,11 @@ val body_agreement : (request : request) ->
           && Vox_sequence.length request.body === Bigint.of_int n
           && content_lengths_match request.headers n
         | _ -> false)
-    else true} @@ total
+    else true} @ ghost @@ total
 val no_content_length_body : (request : request) ->
   {u : unit | if well_formed request
       && not (has_content_length request.headers) then
-    request.body === [] else true} @@ total
+    request.body === [] else true} @ ghost @@ total
 val header_outcome : (line : bytes) -> (headers : int list list) ->
   {u : unit | let request = {request_line = line; headers; body = []} in
     if valid_request_line line && safe_line line && header_lines headers
@@ -117,4 +117,4 @@ val header_outcome : (line : bytes) -> (headers : int list list) ->
        | Bad e -> Malformed e
        | Too_large r -> Limit r
        | Length n -> if n = 0 then Complete request else Incomplete)
-    else true} @@ total
+    else true} @ ghost @@ total
