@@ -32,8 +32,8 @@ module Make (Key : Vox_table_map.Key)
     | None -> ())
 
   let (route_here @ total) : ('a : immutable_data).
-      (model : (Key.t, 'a) M.state) @ immutable -> (key : Key.t) @ immutable ->
-      (value : 'a) @ immutable -> (rank : int) -> (group : int) ->
+      (model : (Key.t, 'a) M.state) @ immutable -> (key : Key.t) ->
+      (value : 'a) -> (rank : int) -> (group : int) ->
       (lane : int) -> (index : int) ->
       {u : unit | not (0 <= rank && rank < (model.capacity lsr 4) &&
         0 <= lane && lane < 16 && Read.I.group model.capacity (Key.hash key)
@@ -51,9 +51,9 @@ module Make (Key : Vox_table_map.Key)
     ())
 
   let rec scan : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
+      (query : Key.t) -> (value : 'a) @ ghost ->
       (capacity : {c : int | c = view.model.capacity}) ->
       (hash : {h : int | h = Key.hash query}) ->
       (rank : {r : int | 0 <= r && r <= (view.model.capacity lsr 4)}) @ ghost ->
@@ -100,13 +100,12 @@ module Make (Key : Vox_table_map.Key)
       end
 
   let find_hashed : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
+      (query : Key.t) -> (value : 'a) @ ghost ->
       (hash : {h : int | h = Key.hash query}) ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) === Some
-        view.model})
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some view.model})
         @ local read ghost ->
       {r : found | 0 <= r.#index && r.#index < view.model.capacity &&
          (r.#byte = 128 || r.#byte = 254) &&
@@ -122,20 +121,5 @@ module Make (Key : Vox_table_map.Key)
       Read.I.empty_free_def view.model hash 0;
       Read.I.probe_def capacity hash 0; Read.I.wrap_def capacity (hash lsr 7));
     scan table view query value capacity hash 0 group 16 token
-  let find : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
-      (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) === Some
-        view.model})
-        @ local read ghost ->
-      {r : found | 0 <= r.#index && r.#index < view.model.capacity &&
-         (r.#byte = 128 || r.#byte = 254) &&
-         M.control view.model r.#index === Some r.#byte &&
-         M.slot view.model r.#index === Some None &&
-         Read.I.route view.model (Bigint.of_int r.#index)
-           (Some (query, value)) r.#path} = fun table view query value token ->
-    find_hashed table view query value (Key.hash query) token
 
 end

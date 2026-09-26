@@ -20,16 +20,17 @@ end
     equal_def x y; hash_def x; hash_def y; ()
 end
 ''', 'Refinement could not be proved'),
-    'physical_holes': ('let f : int V.Map.t = [None]', 'expected'),
+    'abstract_map': ('let f : int V.Map.t = []', 'expected'),
+    'hidden_list_model': ('let f = V.Map.Assoc.lookup', 'Unbound module'),
     'hidden_compaction': ('let f = V.Bridge.compact', 'Unbound module'),
     'hidden_invariant': ('module Hidden = V.Spec', 'Unbound module'),
     'hidden_implementation': ('module Hidden = V.Impl', 'Unbound module'),
-    'hidden_proof': ('let f = V.Map.same_intro', 'Unbound value'),
-    'hidden_representation': ('let f (v : int V.view) = v.model', 'Unbound record field'),
+    'hidden_proof': ('let f = V.Map.empty_same', 'Unbound value'),
+    'hidden_representation': ('let f (v : int V.view) = v.storage', 'Unbound record field'),
     'stale': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
-  V.find_opt r.table r.view 1 (borrow_ changed.#state)
+  let changed = V.replace r.table r.view 1 84 r.token in
+  V.find_opt r.table r.view 1 (borrow_ changed.#token)
 ''', 'Refinement could not be proved'),
     'missing_ownership': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
@@ -38,14 +39,14 @@ end
 ''', 'Refinement could not be proved'),
     'reused_token': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
-  V.replace r.table changed.#view 2 90 r.state
+  let changed = V.replace r.table r.view 1 84 r.token in
+  V.replace r.table changed.#view 2 90 r.token
 ''', 'already been used as unique'),
     'false_lookup': ('''let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
+  let changed = V.replace r.table r.view 1 84 r.token in
   let value : {v : int | v = 85} =
-    V.find r.table changed.#view 1 (borrow_ changed.#state) in value
+    V.find r.table changed.#view 1 (borrow_ changed.#token) in value
 ''', 'Refinement could not be proved'),
 }
 for compiler in ('ocamlc', 'ocamlopt'):

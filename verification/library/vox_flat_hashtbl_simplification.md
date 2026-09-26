@@ -25,6 +25,14 @@ count equals storage live count. Compaction is ghost-only. The public CMI hides
 these bridges and storage invariants. See `vox_flat_hashtbl_review.md` for the
 ordered transitive semantic review surface and all resource/trust conventions.
 
+Superseded on 26 September 2026: `Map.t` is now abstract, and the interface
+exports `empty`, `lookup`, `put`, `erase`, `same` and `count` with their laws
+instead of the list equations. The list model moved to
+`Vox_table_bindings.Make(Key).Assoc`; the public type carries the
+distinct-list invariant, which proves `count_put`, `count_erase` and
+`same_count`. Without those laws a client could not relate `length` before
+and after an update.
+
 ## Executable implementation and source readability
 
 `vox_table_implementation.ml` separates existing-key replacement from

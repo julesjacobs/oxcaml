@@ -11,6 +11,8 @@ module Make (Key : Vox_table_map.Key) = struct
   module Mutation = Migrate.Mutation
   module I = Migrate.I
 
+  (* Capacities are powers of two up to 2^30 = 1073741824 slots, so only a
+     capacity of at most 2^29 = 536870912 can double. *)
   let (double_capacity @ total) (capacity : W.capacity) :
       {u : unit | not (capacity <= 536870912) ||
         16 <= capacity + capacity && capacity + capacity <= 1073741824 &&
@@ -27,18 +29,16 @@ module Make (Key : Vox_table_map.Key) = struct
     Probe.groups_range plan;
     W.scale16_def (Probe.groups plan);
     Probe.valid_def (Probe.Twice plan); Probe.groups_def (Probe.Twice plan);
-    W.scale16_def (Probe.groups (Probe.Twice plan));
-    ())
+    W.scale16_def (Probe.groups (Probe.Twice plan)))
 
   let rec rebuild_into : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (capacity : W.capacity) ->
       (plan : {p : Probe.plan | Probe.valid p &&
         capacity = W.scale16 (Probe.groups p)}) @ immutable ghost ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) === Some
-        before.model})
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model})
         @ unique read_write ghost ->
       {r : 'a Mutation.result | I.valid r.#view &&
         I.Map.same r.#view.model.slots before.model.slots &&
@@ -60,7 +60,7 @@ module Make (Key : Vox_table_map.Key) = struct
         {T.model = copied.#view.model} copied.#state token in
       (#{Mutation.view = copied.#view; state} : 'a Mutation.result)
     end else if capacity > 536870912 then raise (Invalid_argument
-      "Vox_flat_hashtbl: capacity exhausted")
+      "Vox_verified_flat_hashtbl: capacity exhausted")
     else begin
       ghost_ (double_capacity capacity; double_plan capacity plan);
       let next_capacity = capacity + capacity in
@@ -69,11 +69,10 @@ module Make (Key : Vox_table_map.Key) = struct
     end
 
   let rebuild : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) === Some
-        before.model})
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model})
         @ unique read_write ghost ->
       {r : 'a Mutation.result | I.valid r.#view &&
         I.Map.same r.#view.model.slots before.model.slots &&
@@ -86,7 +85,7 @@ module Make (Key : Vox_table_map.Key) = struct
     if deleted >= capacity lsr 3 then
       rebuild_into table before capacity before.plan token
     else if capacity > 536870912 then raise (Invalid_argument
-      "Vox_flat_hashtbl: capacity exhausted")
+      "Vox_verified_flat_hashtbl: capacity exhausted")
     else begin
       ghost_ (double_capacity capacity; double_plan capacity
         before.plan);

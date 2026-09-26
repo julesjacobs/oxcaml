@@ -34,26 +34,33 @@ other collection operations are unused by this contract.
 7. `verification/library/vox_table_storage.mli`: the entire trusted allocation,
    storage, SIMD, clearing and backing-storage replacement interface.
 8. `verification/library/vox_verified_flat_hashtbl.mli`: the entire public
-   interface. `Key` gives the equality/hash assumptions; `Map` gives complete
-   finite-map equations; the remaining declarations specify actual execution.
+   interface. `Key` gives the equality/hash assumptions; `Map` gives an
+   abstract finite map and its laws; the remaining declarations specify
+   actual execution.
 
 This document supplies the trust and resource conventions accompanying that
 list. The semantic surface contains no probe invariant or opaque correctness
-predicate. `Map.agrees`, `same`, `distinct`, `lookup`, `put`, `erase`
-and `count` all have complete checked equations. The elimination lemmas are
-conveniences derived from those equations, not additional assumptions.
+predicate. `Map.t` is abstract; clients reason only with its laws
+(`lookup_empty`, `put_get`, `erase_get`, `count_put`, `count_erase`) and
+the type of `empty`, which has count zero.
+Each law is proved in `vox_table_bindings.ml`, where the map is an
+association list with at most one binding per `Key.equal` class. That
+invariant is what makes `count` the number of bindings.
 
 `view` and `state` are abstract observations, not caller obligations. A view
-contains an internally checked representation invariant. Its `bindings` are
-a finite list of key/value bindings, distinct modulo `Key.equal`; `length`
-counts those bindings using `Bigint`. Physical empty slots are absent from
-the public model. Checked ghost compaction bridges preserve lookup, key
-equivalence, distinctness, map updates and cardinality.
+pairs a valid storage snapshot with a ghost `Map.t`, its `bindings`; the
+view's invariant says that map has the same bindings as the live slots, in
+any order. Mutations therefore state exact equations
+(`bindings r.#view === Map.put (bindings before) key value`), and a client
+computes the length after any update from `count_put` or `count_erase`.
+Physical empty slots are absent from the public model. Checked ghost
+compaction bridges preserve lookup, key equivalence, distinctness, map
+updates and cardinality.
 `model` identifies the exact owned storage version associated with a snapshot.
 The snapshot has void layout and is immutable. A saved snapshot grants no
 access without the matching current ownership token.
 
-Creation and clearing establish the exact empty binding list. Replacement specifies `Map.put`, removal
+Creation and clearing return exactly `Map.empty`. Replacement specifies `Map.put`, removal
 specifies `Map.erase`, and reads specify actual returned values. Every mutation
 updates precisely the original handle's location in the owned heap; all other
 locations retain their values. Rebuilding can change backing blocks without
@@ -96,7 +103,7 @@ equivalence relation and equal keys have equal hashes; hashes may collide and
 may be any signed machine integer. The four law functions must verify.
 The public table starts at capacity 16; capacity is bounded above by 2^30.
 An insertion that needs growth beyond that limit can raise `Invalid_argument
-"Vox_flat_hashtbl: capacity exhausted"`. `find` raises `Not_found` for an absent
+"Vox_verified_flat_hashtbl: capacity exhausted"`. `find` raises `Not_found` for an absent
 key. Allocation, runtime identity exhaustion, stack/resource failures and
 runtime implementation correctness are not proved away.
 
@@ -129,17 +136,18 @@ verification/clients/check_flat_hashtbl_public.sh
 
 The script copies only `Pref`, `Ghost_pref` and `Vox_verified_flat_hashtbl`
 CMIs into its public include directory. The independently compiled generic
-client derives empty lookup, arbitrary-query replacement/removal/clearing and
-an unrelated owned table's unchanged lookup. It supplies no invariant or
+client derives empty lookup, arbitrary-query replacement/removal/clearing,
+the length after replacement and removal, and an unrelated owned table's
+unchanged lookup. It supplies no invariant or
 probe certificate. Runtime cases exercise 300 colliding keys, resizing,
 aliased handles, GC compaction and subsequent lookup. Additional cases update
 a key beyond a tombstone without duplication and replace/remove logically
 different keys in the same `Key.equal` equivalence class.
 
-Both bytecode and native clients pass. Twelve rejection cases pass in both modes:
+Both bytecode and native clients pass. Thirteen rejection cases pass in both modes:
 false reflexivity, inconsistent hashing, hidden invariant/implementation/proof/
-representation/compaction access, physical holes, stale views, missing ownership,
-token reuse and a false lookup result. The erasure check inspects both emitted Lambda files: generic
+representation/compaction/list-model access, constructing a `Map.t` from a
+list, stale views, missing ownership, token reuse and a false lookup result. The erasure check inspects both emitted Lambda files: generic
 execution contains no calls to the map/ownership observations or semantic
 lemmas. Native snapshots and tokens have zero layout, and mutation results
 contain only zero-layout fields. There is no runtime certificate accumulation

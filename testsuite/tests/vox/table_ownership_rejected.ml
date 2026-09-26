@@ -30,32 +30,31 @@ end
 module Key :
   sig
     type t = int
-    val equal : t @ immutable -> t @ immutable -> bool @@ total
-    val hash : t @ immutable -> int @@ total
-    val reflexive : (x : t) @ immutable -> {u : unit | equal x x} @@ total
+    val equal : t -> t -> bool @@ total
+    val hash : t -> int @@ total
+    val reflexive : (x : t) -> {u : unit | equal x x} @@ total
     val symmetric :
-      (x : t) @ immutable ->
-      (y : t) @ immutable -> {u : unit | (equal x y) = (equal y x)} @@ total
+      (x : t) -> (y : t) -> {u : unit | (equal x y) = (equal y x)} @@ total
     val transitive :
-      (x : t) @ immutable ->
-      (y : t) @ immutable ->
-      (z : t) @ immutable ->
+      (x : t) ->
+      (y : t) ->
+      (z : t) ->
       {u : unit | (not ((equal x y) && (equal y z))) || (equal x z)} @@ total
     val hash_equal :
-      (x : t) @ immutable ->
-      (y : t) @ immutable ->
-      {u : unit | (not (equal x y)) || ((hash x) = (hash y))} @@ total
+      (x : t) ->
+      (y : t) -> {u : unit | (not (equal x y)) || ((hash x) = (hash y))} @@
+      total
   end
 |}]
 
 let stale_view () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
-  V.find_opt r.table r.view 1 (borrow_ changed.#state);;
+  let changed = V.replace r.table r.view 1 84 r.token in
+  V.find_opt r.table r.view 1 (borrow_ changed.#token);;
 [%%expect{|
 Line 5, characters 39-53:
-5 |   V.find_opt r.table r.view 1 (borrow_ changed.#state);;
+5 |   V.find_opt r.table r.view 1 (borrow_ changed.#token);;
                                            ^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]
@@ -75,16 +74,16 @@ Error: Refinement could not be proved (counterexample)
 let reused_token () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
-  let again = V.replace r.table changed.#view 2 90 r.state in
-  V.length r.table again.#view (borrow_ again.#state);;
+  let changed = V.replace r.table r.view 1 84 r.token in
+  let again = V.replace r.table changed.#view 2 90 r.token in
+  V.length r.table again.#view (borrow_ again.#token);;
 [%%expect{|
 Line 5, characters 51-58:
-5 |   let again = V.replace r.table changed.#view 2 90 r.state in
+5 |   let again = V.replace r.table changed.#view 2 90 r.token in
                                                        ^^^^^^^
 Error: This value is used here, but it has already been used as unique at:
 Line 4, characters 46-53:
-4 |   let changed = V.replace r.table r.view 1 84 r.state in
+4 |   let changed = V.replace r.table r.view 1 84 r.token in
                                                   ^^^^^^^
 
 |}]
@@ -92,12 +91,12 @@ Line 4, characters 46-53:
 let wrong_value () =
   let module V = Vox_verified_flat_hashtbl.Make (Key) in
   let r : int V.created = V.create (Ghost_pref.empty ()) in
-  let changed = V.replace r.table r.view 1 84 r.state in
+  let changed = V.replace r.table r.view 1 84 r.token in
   let value : {v : int | v = 85} =
-    V.find r.table changed.#view 1 (borrow_ changed.#state) in value;;
+    V.find r.table changed.#view 1 (borrow_ changed.#token) in value;;
 [%%expect{|
 Line 6, characters 4-59:
-6 |     V.find r.table changed.#view 1 (borrow_ changed.#state) in value;;
+6 |     V.find r.table changed.#view 1 (borrow_ changed.#token) in value;;
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
 |}]

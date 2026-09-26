@@ -2,15 +2,14 @@ module S = Vox_sequence
 
 module type Key = sig
   type t : immutable_data
-  val equal : t @ immutable -> t @ immutable -> bool @@ total
-  val hash : t @ immutable -> int @@ total
-  val reflexive : (x : t) @ immutable -> {u : unit | equal x x} @@ total
-  val symmetric : (x : t) @ immutable -> (y : t) @ immutable ->
-    {u : unit | equal x y = equal y x} @@ total
-  val transitive : (x : t) @ immutable -> (y : t) @ immutable ->
-    (z : t) @ immutable ->
+  val equal : t -> t -> bool @@ total
+  val hash : t -> int @@ total
+  val reflexive : (x : t) -> {u : unit | equal x x} @@ total
+  val symmetric : (x : t) -> (y : t) -> {u : unit | equal x y = equal y x}
+    @@ total
+  val transitive : (x : t) -> (y : t) -> (z : t) ->
     {u : unit | not (equal x y && equal y z) || equal x z} @@ total
-  val hash_equal : (x : t) @ immutable -> (y : t) @ immutable ->
+  val hash_equal : (x : t) -> (y : t) ->
     {u : unit | not (equal x y) || hash x = hash y} @@ total
 end
 

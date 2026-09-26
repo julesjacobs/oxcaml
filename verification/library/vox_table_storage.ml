@@ -171,20 +171,6 @@ external match16_empty : (table : ('k, 'v) t) @ immutable ->
     "caml_vox_table_match16_empty"
     [@@noalloc] [@@builtin] [@@no_effects]
 
-external exchange : (left : ('k, 'v) t) @ immutable ->
-  (before_left : ('k, 'v) view) @ immutable ->
-  (right : ('k, 'v) t) @ immutable ->
-  (before_right : ('k, 'v) view) @ immutable ->
-  (token : {t : ('k, 'v) M.state P.token |
-    H.at (P.own t) (location left) === Some before_left.model &&
-    H.at (P.own t) (location right) === Some before_right.model})
-    @ unique read_write ghost ->
-  {t : ('k, 'v) M.state P.token | P.own t ===
-    H.put (H.put (P.own token) (location left) before_right.model)
-      (location right) before_left.model} @ unique ghost
-  @@ portable = "caml_vox_table_exchange_bytecode" "caml_vox_table_exchange"
-    [@@noalloc]
-
 (** Bulk initialization of the private storage, with write barriers for
     every scanned word that stops retaining a key or value. *)
 external clear : (table : ('k, 'v) t) @ immutable ->

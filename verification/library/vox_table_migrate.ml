@@ -47,9 +47,9 @@ module Make (Key : Vox_table_map.Key) = struct
     ghost_ ()
 
   let rec copy_loop : ('a : immutable_data).
-      (source : (Key.t, 'a) T.t) @ immutable ->
+      (source : (Key.t, 'a) T.t) ->
       (source_view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (destination : (Key.t, 'a) T.t) @ immutable ->
+      (destination : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i <= source_view.model.capacity}) ->
       (heap : (Key.t, 'a) M.state P.heap) @ immutable ghost ->
@@ -116,9 +116,9 @@ module Make (Key : Vox_table_map.Key) = struct
     end
 
   let copy : ('a : immutable_data).
-      (source : (Key.t, 'a) T.t) @ immutable ->
+      (source : (Key.t, 'a) T.t) ->
       (source_view : {v : 'a I.view | I.valid v}) @ immutable ->
-      (destination : (Key.t, 'a) T.t) @ immutable ->
+      (destination : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i <= source_view.model.capacity}) ->
       (source_token : {t : (Key.t, 'a) M.state P.token |

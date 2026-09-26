@@ -1,174 +1,181 @@
+(** A flat hash table verified against a finite-map model.
+
+    [Make (Key)] is a mutable open-addressing hash table that probes in
+    groups of sixteen slots with SIMD control-byte matching. Each operation's
+    contract states its result in terms of [Map], an abstract finite map
+    from keys (up to [Key.equal]) to values. Keys and values must be
+    [immutable_data].
+
+    {2 Ghost state}
+
+    A table is a runtime handle [table : 'a t] together with ghost state,
+    which the compiler checks and then erases:
+
+    - [location table] is the heap location owned by the handle. It stays
+      the same for the table's lifetime, including when storage is rebuilt.
+      The handle is immutable and may be aliased; all access to the storage
+      goes through a token.
+    - A view ['a view] is an immutable snapshot of one version of the table.
+      [bindings view] is its contents, [capacity view] its slot count and
+      [model view] the exact storage version.
+    - A token ['a state P.token] is affine ownership of a heap. Reads borrow
+      a token whose heap holds [model view] at [location table]. Mutations
+      consume the token and return a new view and a token whose heap
+      differs only at [location table].
+
+    A view grants no access by itself: an operation accepts it only with a
+    token whose heap holds its [model]. After a mutation, use the returned
+    view. Views and tokens carry no runtime data.
+
+    {2 Normal return and exceptions}
+
+    Each postcondition describes a normal return. The possible exceptions
+    are:
+
+    - [find] raises [Not_found] if the key has no binding.
+    - [replace] raises [Invalid_argument] if the table would need more than
+      2{^30} slots.
+    - Any operation can raise [Out_of_memory] or [Stack_overflow].
+
+    A mutation that raises loses the token it consumed, together with any
+    other ownership that token carried. Split off ownership that must
+    survive before the call. Termination, running time, memory reclamation
+    and concurrent use are not specified. *)
+
 module P = Ghost_pref
 module H = P.Heap
 
+(** Keys: [equal] must be an equivalence and equal keys must hash equally.
+    Both functions are [total], so they terminate without raising or
+    touching mutable state. *)
 module type Key = sig
   type t : immutable_data
-  val equal : t @ immutable -> t @ immutable -> bool @@ total
-  val hash : t @ immutable -> int @@ total
-  val reflexive : (x : t) @ immutable -> {u : unit | equal x x} @@ total
-  val symmetric : (x : t) @ immutable -> (y : t) @ immutable ->
-    {u : unit | equal x y = equal y x} @@ total
-  val transitive : (x : t) @ immutable -> (y : t) @ immutable ->
-    (z : t) @ immutable ->
+  val equal : t -> t -> bool @@ total
+  val hash : t -> int @@ total
+  val reflexive : (x : t) -> {u : unit | equal x x} @@ total
+  val symmetric : (x : t) -> (y : t) -> {u : unit | equal x y = equal y x}
+    @@ total
+  val transitive : (x : t) -> (y : t) -> (z : t) ->
     {u : unit | not (equal x y && equal y z) || equal x z} @@ total
-  val hash_equal : (x : t) @ immutable -> (y : t) @ immutable ->
+  val hash_equal : (x : t) -> (y : t) ->
     {u : unit | not (equal x y) || hash x = hash y} @@ total
 end
 
-(** Pure, total, stable hash/equality on immutable keys are required.
-    All executable contracts describe normal return. Allocation can fail;
-    mutation exceptions consume the passed authority after possible mutation.
-    Split unrelated ownership before fallible operations to retain that frame.
-    There is no time-cost or exception-safe reclamation theorem. *)
 module Make (Key : Key) : sig
+  (** Finite maps from keys to values, specified only by the laws below.
+      [count] is the number of bindings. [===] compares maps as values:
+      maps with the same bindings built by different updates need not be
+      equal, so compare them through [lookup] and [count]. *)
   module Map : sig
-    type ('a : immutable_data) t = (Key.t * 'a) list
-    val lookup : ('a : immutable_data).
-      'a t @ immutable -> Key.t @ immutable -> 'a option @ immutable @@ total
-    val lookup_def : ('a : immutable_data).
-      (entries : 'a t) @ immutable -> (key : Key.t) @ immutable ->
-      {u : unit | lookup entries key === (match entries with
-        | [] -> None
-        | (k, value) :: tail ->
-          if Key.equal k key then Some value else lookup tail key)} @ ghost @@ total
-    val distinct : ('a : immutable_data). 'a t @ immutable -> bool @ ghost @@ total
-    val distinct_def : ('a : immutable_data). (bindings : 'a t) @ immutable ->
-      {u : unit | distinct bindings === (ghost_ (match bindings with
-        | [] -> true | (key, _) :: tail -> lookup tail key === None && distinct tail))} @ ghost @@ total
-    val agrees : ('a : immutable_data).
-      'a t @ immutable -> 'a t @ immutable -> bool @ ghost @@ total
-    val agrees_def : ('a : immutable_data).
-      (left : 'a t) @ immutable -> (right : 'a t) @ immutable ->
-      {u : unit | agrees left right === (ghost_ (match left with
-        | [] -> true
-        | (key, value) :: tail ->
-          lookup right key === Some value && agrees tail right))} @ ghost @@ total
-    val same : ('a : immutable_data).
-      'a t @ immutable -> 'a t @ immutable -> bool @ ghost @@ total
-    val same_def : ('a : immutable_data).
-      (left : 'a t) @ immutable -> (right : 'a t) @ immutable ->
-      {u : unit | same left right === (ghost_ (agrees left right && agrees right left))} @ ghost @@ total
-    val erase : ('a : immutable_data).
-      'a t @ immutable -> Key.t @ immutable -> 'a t @ immutable @@ total
-    val erase_def : ('a : immutable_data).
-      (entries : 'a t) @ immutable -> (key : Key.t) @ immutable ->
-      {u : unit | erase entries key === (match entries with
-        | [] -> []
-        | (stored, value) :: tail ->
-          if Key.equal stored key then erase tail key
-          else (stored, value) :: erase tail key)} @ ghost @@ total
-    val put : ('a : immutable_data).
-      'a t @ immutable -> Key.t @ immutable -> 'a @ immutable -> 'a t @ immutable @@ total
-    val put_def : ('a : immutable_data).
-      (entries : 'a t) @ immutable -> (key : Key.t) @ immutable ->
-      (value : 'a) @ immutable ->
-      {u : unit | put entries key value === (key, value) :: erase entries key} @ ghost @@ total
-    val same_get : ('a : immutable_data).
-      (left : 'a t) @ immutable -> (right : 'a t) @ immutable ->
-      (key : Key.t) @ immutable ->
-      {u : unit | not (same left right) || lookup left key === lookup right key} @ ghost @@ total
-    val erase_get : ('a : immutable_data).
-      (entries : 'a t) @ immutable -> (key : Key.t) @ immutable ->
-      (query : Key.t) @ immutable ->
-      {u : unit | lookup (erase entries key) query ===
-        (if Key.equal key query then None else lookup entries query)} @ ghost @@ total
-    val put_get : ('a : immutable_data).
-      (entries : 'a t) @ immutable -> (key : Key.t) @ immutable ->
-      (value : 'a) @ immutable -> (query : Key.t) @ immutable ->
-      {u : unit | lookup (put entries key value) query ===
-        (if Key.equal key query then Some value else lookup entries query)} @ ghost @@ total
-  end
+    type ('a : immutable_data) t : immutable_data
+    val count : ('a : immutable_data). 'a t -> Bigint.t @@ total
+    val empty : ('a : immutable_data). {map : 'a t | count map = 0Z} @@ total
+    val lookup : ('a : immutable_data). 'a t -> Key.t -> 'a option @@ total
+    val put : ('a : immutable_data). 'a t -> Key.t -> 'a -> 'a t @@ total
+    val erase : ('a : immutable_data). 'a t -> Key.t -> 'a t @@ total
 
-  val count : ('a : immutable_data). 'a Map.t @ immutable -> Bigint.t @@ total
-  val count_def : ('a : immutable_data). (entries : 'a Map.t) @ immutable ->
-    {u : unit | count entries === (match entries with | [] -> 0Z
-      | _ :: tail -> Bigint.add 1Z (count tail))} @ ghost @@ total
+    val lookup_empty : ('a : immutable_data). (map : 'a t) -> (key : Key.t) ->
+      {u : unit | not (map === empty) || lookup map key === None} @ ghost
+      @@ total
+    val put_get : ('a : immutable_data).
+      (map : 'a t) -> (key : Key.t) -> (value : 'a) -> (query : Key.t) ->
+      {u : unit | lookup (put map key value) query ===
+        (if Key.equal key query then Some value else lookup map query)} @ ghost
+      @@ total
+    val erase_get : ('a : immutable_data).
+      (map : 'a t) -> (key : Key.t) -> (query : Key.t) ->
+      {u : unit | lookup (erase map key) query ===
+        (if Key.equal key query then None else lookup map query)} @ ghost
+      @@ total
+    val count_put : ('a : immutable_data).
+      (map : 'a t) -> (key : Key.t) -> (value : 'a) ->
+      {u : unit | count (put map key value) = (if lookup map key === None
+        then Bigint.add (count map) 1Z else count map)} @ ghost @@ total
+    val count_erase : ('a : immutable_data).
+      (map : 'a t) -> (key : Key.t) ->
+      {u : unit | count (erase map key) = (if lookup map key === None
+        then count map else Bigint.sub (count map) 1Z)} @ ghost @@ total
+  end
 
   type ('a : immutable_data) t : immutable_data
   type ('a : immutable_data) state : immutable_data
   type ('a : immutable_data) view : void mod total
 
-  (** A view is an immutable snapshot. Its abstract state identifies the exact
-      owned storage version; bindings are its finite-map observation. No view
-      or saved observation grants ownership. *)
-  val location : ('a : immutable_data).
-    'a t @ immutable -> 'a state P.t @ immutable ghost @@ total
+  val location : ('a : immutable_data). 'a t -> 'a state P.t @ ghost @@ total
   val model : ('a : immutable_data).
-    'a view @ immutable -> 'a state @ immutable ghost @@ total
+    'a view @ immutable -> 'a state @ ghost @@ total
   val bindings : ('a : immutable_data).
-    'a view @ immutable -> {entries : 'a Map.t | Map.distinct entries} @ immutable ghost @@ total
+    'a view @ immutable -> 'a Map.t @ ghost @@ total
   val capacity : ('a : immutable_data).
     'a view @ immutable -> {n : int | 16 <= n && n <= 1073741824} @ ghost @@ total
 
   type ('a : immutable_data) created = {
     table : 'a t @@ aliased;
     view : 'a view @@ aliased immutable;
-    state : 'a state P.token @@ ghost;
+    token : 'a state P.token @@ ghost;
   }
-  type ('a : immutable_data) result = #{
+  type ('a : immutable_data) updated = #{
     view : 'a view @@ aliased immutable;
-    state : 'a state P.token @@ ghost;
+    token : 'a state P.token @@ ghost;
   }
 
+  (** A new empty table of capacity 16 at a fresh location. *)
   val create : ('a : immutable_data).
     (token : 'a state P.token) @ unique ghost ->
-    {r : 'a created | bindings r.view === [] && capacity r.view = 16 &&
+    {r : 'a created | bindings r.view === Map.empty && capacity r.view = 16 &&
       not (H.mem (P.own token) (location r.table)) &&
-      P.own r.state === H.put (P.own token) (location r.table) (model r.view)} @ unique
+      P.own r.token === H.put (P.own token) (location r.table) (model r.view)} @ unique
 
   val length : ('a : immutable_data).
-    (table : 'a t) @ immutable -> (view : 'a view) @ immutable ->
+    (table : 'a t) -> (view : 'a view) @ immutable ->
     (token : {t : 'a state P.token |
       H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
-    {n : int | 0 <= n && Bigint.of_int n = count (bindings view)}
+    {n : int | 0 <= n && Bigint.of_int n = Map.count (bindings view)}
 
   val find_opt : ('a : immutable_data).
-    (table : 'a t) @ immutable -> (view : 'a view) @ immutable ->
-    (key : Key.t) @ immutable ->
+    (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
       H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
-    {value : 'a option | value === Map.lookup (bindings view) key} @ immutable
+    {value : 'a option | value === Map.lookup (bindings view) key}
 
-  (** Raises [Not_found] for an absent key. *)
+  (** Raises [Not_found] if [key] has no binding. *)
   val find : ('a : immutable_data).
-    (table : 'a t) @ immutable -> (view : 'a view) @ immutable ->
-    (key : Key.t) @ immutable ->
+    (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
       H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
-    {value : 'a | Map.lookup (bindings view) key === Some value} @ immutable
+    {value : 'a | Map.lookup (bindings view) key === Some value}
 
   val mem : ('a : immutable_data).
-    (table : 'a t) @ immutable -> (view : 'a view) @ immutable ->
-    (key : Key.t) @ immutable ->
+    (table : 'a t) -> (view : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
       H.at (P.own t) (location table) === Some (model view)}) @ local read ghost ->
     {present : bool | present = (match Map.lookup (bindings view) key with
       | None -> false | Some _ -> true)}
 
-  (** Mutations preserve the same handle location and every other owned region.
-      Rebuilding may replace backing blocks, preserving all other bindings. *)
+  (** Raises [Invalid_argument] if the table would need more than 2{^30}
+      slots. *)
   val replace : ('a : immutable_data).
-    (table : 'a t) @ immutable -> (before : 'a view) @ immutable ->
-    (key : Key.t) @ immutable -> (value : 'a) @ immutable ->
+    (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
+    (value : 'a) ->
     (token : {t : 'a state P.token |
       H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
-    {r : 'a result | Map.same (bindings r.#view) (Map.put (bindings before) key value) &&
-      P.own r.#state === H.put (P.own token) (location table) (model r.#view)} @ unique
+    {r : 'a updated | bindings r.#view === Map.put (bindings before) key value &&
+      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique
 
   val remove : ('a : immutable_data).
-    (table : 'a t) @ immutable -> (before : 'a view) @ immutable ->
-    (key : Key.t) @ immutable ->
+    (table : 'a t) -> (before : 'a view) @ immutable -> (key : Key.t) ->
     (token : {t : 'a state P.token |
       H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
-    {r : 'a result | Map.same (bindings r.#view) (Map.erase (bindings before) key) &&
-      P.own r.#state === H.put (P.own token) (location table) (model r.#view)} @ unique
+    {r : 'a updated | bindings r.#view === Map.erase (bindings before) key &&
+      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique
 
-  (** Clear bindings and retained payloads, preserving allocated capacity. *)
+  (** Removes every binding and drops the table's references to their
+      values. The capacity is unchanged. *)
   val clear : ('a : immutable_data).
-    (table : 'a t) @ immutable -> (before : 'a view) @ immutable ->
+    (table : 'a t) -> (before : 'a view) @ immutable ->
     (token : {t : 'a state P.token |
       H.at (P.own t) (location table) === Some (model before)}) @ unique read_write ghost ->
-    {r : 'a result | bindings r.#view === [] &&
+    {r : 'a updated | bindings r.#view === Map.empty &&
       capacity r.#view = capacity before &&
-      P.own r.#state === H.put (P.own token) (location table) (model r.#view)} @ unique
+      P.own r.#token === H.put (P.own token) (location table) (model r.#view)} @ unique
 end

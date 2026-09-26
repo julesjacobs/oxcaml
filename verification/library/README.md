@@ -156,7 +156,7 @@ rejections, and integer and ranked-record clients.
 
 ## Flat hash table
 
-`Vox_verified_flat_hashtbl.Make` exposes finite-map equations, abstract snapshots
+`Vox_verified_flat_hashtbl.Make` exposes an abstract finite map with its laws, abstract snapshots
 and normal-return ownership contracts. Start with the
 [ordered review surface](vox_flat_hashtbl_review.md); the public-only client
 check is `verification/clients/check_flat_hashtbl_public.sh`.
