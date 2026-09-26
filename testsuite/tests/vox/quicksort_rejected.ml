@@ -66,3 +66,58 @@ Error: This value is "aliased"
          because it is used in an expression (at line 6, characters 16-55).
        However, the highlighted expression is expected to be "unique".
 |}]
+
+(* A sort that leaves its slice unchanged keeps the elements (the
+   permutation half of [sort]'s contract is proved) but cannot claim the
+   sorted half. *)
+let (unchanged @ total) : (s : int Borrow.Slice.t) @ local unique ->
+    {u : unit | Quicksort.Spec.sorted (Borrow.Slice.final s)} =
+    fun s ->
+  let before = ghost_ (Borrow.Slice.current (borrow_ s)) in
+  let after = ghost_ (Borrow.Slice.final (borrow_ s)) in
+  Borrow.Slice.finish s;
+  ghost_ (Quicksort.Spec.permutation_refl before);
+  ghost_ (
+    let u = () in
+    (u : {u : unit | Quicksort.Spec.permutation before after}));
+  let u = () in u;;
+[%%expect{|
+Line 11, characters 16-17:
+11 |   let u = () in u;;
+                     ^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 16-60:
+2 |     {u : unit | Quicksort.Spec.sorted (Borrow.Slice.final s)} =
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Overwriting the first element before sorting keeps the result sorted (the
+   annotation on [sorted] is proved) but loses the permutation. *)
+let (overwrite_then_sort @ total) : (s : int Borrow.Slice.t) @ local unique ->
+    {u : unit | Quicksort.Spec.sorted (Borrow.Slice.final s)
+      && Quicksort.Spec.permutation (Borrow.Slice.current s)
+        (Borrow.Slice.final s)} =
+    fun s ->
+  let after = ghost_ (Borrow.Slice.final (borrow_ s)) in
+  if Borrow.Slice.length (borrow_ s) > 0 then begin
+    let first : {i : int | 0 <= i && Bigint.compare (Bigint.of_int i)
+      (Vox_sequence.length (Borrow.Slice.current s)) < 0} = 0 in
+    let written = Borrow.Slice.set s first 0 in
+    let sorted = Quicksort.sort written in
+    ghost_ (
+      let u = () in
+      (u : {u : unit | Quicksort.Spec.sorted after}));
+    sorted
+  end else Quicksort.sort s;;
+[%%expect{|
+Line 15, characters 4-10:
+15 |     sorted
+         ^^^^^^
+Error: Refinement could not be proved (counterexample)
+Lines 2-4, characters 16-30:
+2 | ................Quicksort.Spec.sorted (Borrow.Slice.final s)
+3 |       && Quicksort.Spec.permutation (Borrow.Slice.current s)
+4 |         (Borrow.Slice.final s)...
+  The refinement is stated here.
+|}]

@@ -6,13 +6,14 @@ abstract verified data structures. `clamp.ml` remains a separate regression
 fixture for explicit equations, opacity, and additional laws.
 
 `connectivity.ml` is a client of the sealed `Vox_connectivity` interface. It
-inserts five elements, merges components, and performs finds across several
-capacity epochs. Its ghost snapshots support membership and connectivity
-proofs without exposing forests or heaps, including that an isolated vertex
-stays disconnected after repeated unions and finds. One caller-owned wallet
-pays for all operations, and conservation proves the charged-prefix bound. This
-client uses a finite budget; the online data structure requires no advance
-population limit. The lower-level accounting regressions remain in
+inserts five elements, which crosses several capacity epochs (the ghost
+capacity doubles from 1 to 8), then merges components and performs finds. Its
+ghost snapshots support membership and connectivity proofs without exposing
+forests or heaps, including that an isolated vertex stays disconnected after
+repeated unions and finds. One caller-owned wallet pays for all operations,
+and conservation proves the charged-prefix bound. This client uses a finite
+budget; the online data structure requires no advance population limit. The
+lower-level accounting regressions remain in
 `union_find_online.ml`.
 
 Each proof test compiles once, as bytecode: refinement checking does not
@@ -75,7 +76,7 @@ legacy-mode defaults.
 | Standard maps | `maps.ml` | Total comparators enable total operations; refined updates and lookup expose membership and value facts while preserving key and value access. |
 | Persistent environments | `environments.ml` | Binding shadows its comparator class and preserves observations in a distinct class; retaining the outer environment restores scope. |
 | Standard-set model | `avl_stdlib_set.ml` | Pointwise refinement relates the verified AVL implementation to `Set.MakeTotal`, with comparator compatibility explicit. |
-| Sparse immutable arrays | `sparse_iarrays.ml` | A polymorphic record API proves read-after-write, overwrite, removal fallback, and safe base-array reads; a total optional observer states relational laws. |
+| Sparse arrays | `sparse_overlay.mli`, `sparse_overlay_client.ml` | An abstract overlay of updates over an immutable base array proves read-after-write, last write wins, commutation of updates at distinct indices, and that `clear` restores the base value; `get` takes an index refined against the base length. `sparse_iarrays.ml` is an older, separate fixture over `Map.MakeTotal`. |
 | Regex matching | `regex.ml` | Derivative matching and a total DFA construction are sound and complete for an independent membership-derivation spec. |
 | Scoped borrows | `borrow_demo.ml`, `borrow_ranges.ml`, `borrow_rejected.ml` | Exact updates, split/reborrow reconstruction, preserved frames, snapshots, and ownership/proof rejections. |
 | Runtime slice validation | `borrow_validation.ml` | `assume_` checks a real snapshot and exports its sortedness through the borrow. |
@@ -232,17 +233,19 @@ then statically proves preservation of optional lookup results. It restores
 scope using the saved outer map; removing an inner binding does not restore a
 shadowed value.
 
-The sparse-array `get` accepts an overlay record and an index refined against
-`Iarray.length overlay.base`, preserving writable access to mutable elements.
-A read from an updated overlay explicitly reintroduces the corresponding bound.
-The total `lookup` observer returns an option for every integer index, so
-relational laws can compare overlays without constructing refined arguments
-inside predicates. Removal fallback and independent-update commutation are
-proved for every index, including out-of-range ones. A proof functor accepts
-an abstract `immutable_data` element type; integer and record clients instantiate
-it and erase proof calls with `ghost_`. The record client derives equality of
-reads and restoration of base values from these contracts. The examples check
-bounds and comparator-class distinction at runtime.
+`Sparse_overlay.get` accepts an overlay and an index refined against its
+`length` (the length of the base array) and returns the element itself, so
+mutable elements stay writable; `sparse_overlay_client.ml` writes through one.
+The total `lookup` observer returns an option for every integer index (`None`
+outside the base), so the laws in `Sparse_overlay.Laws` compare overlays
+without constructing refined arguments inside predicates. The client functor
+proves last write wins, commutation of updates at distinct indices and
+restoration of the base value by `clear` for every index, including
+out-of-range ones, and read-after-write for in-range indices; it is
+instantiated at `int` and at a record type, and its proof calls are erased
+with `ghost_`. `sparse_iarrays.ml` is an older fixture with a public record
+type over `Map.MakeTotal`; it also checks bounds and comparator-class
+distinction at runtime.
 
 `regex.ml` specifies membership by finite derivations: `Membership.valid r p`
 checks the regex rules, and `Membership.word p` gives the derived word. Thus

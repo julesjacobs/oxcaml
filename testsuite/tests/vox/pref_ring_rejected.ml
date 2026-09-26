@@ -13,8 +13,16 @@
  }
 *)
 
+(* Load the implementation so that the accepted phrase below can be
+   evaluated. *)
+#load "pref.cmo";;
+#load "pref_ring.cmo";;
+
 open Pref_ring
 
+(* [remove] refuses to unlink the sentinel: the token below has every
+   other fact [remove] requires, so the call fails only on
+   [not (n === sentinel)]. *)
 module Remove_sentinel = struct
   let bad : (s : node) @ immutable -> (left : node) @ immutable ->
       (right : node) @ immutable ->
@@ -25,32 +33,72 @@ module Remove_sentinel = struct
         && H.at (Pref.own t) s.next === Some (Some right)
         && H.at (Pref.own t) right.prev === Some (Some s)}) @ unique ->
       node option Pref.token @ unique = fun s left right t ->
-    let t : {t : node option Pref.token | present (Pref.own t) left
-      && present (Pref.own t) s && present (Pref.own t) right
-      && not (s === s)
-      && H.at (Pref.own t) left.next === Some (Some s)
-      && H.at (Pref.own t) s.prev === Some (Some left)
-      && H.at (Pref.own t) s.next === Some (Some right)
-      && H.at (Pref.own t) right.prev === Some (Some s)} = t in
     let t = remove s left s right t in t
 end;;
 [%%expect{|
-Line 19, characters 59-60:
-19 |       && H.at (Pref.own t) right.prev === Some (Some s)} = t in
-                                                                ^
+Line 16, characters 34-35:
+16 |     let t = remove s left s right t in t
+                                       ^
 Error: Refinement could not be proved (counterexample)
-Lines 13-19, characters 42-55:
-13 | ..........................................present (Pref.own t) left
-14 |       && present (Pref.own t) s && present (Pref.own t) right
-15 |       && not (s === s)
-16 |       && H.at (Pref.own t) left.next === Some (Some s)
-17 |       && H.at (Pref.own t) s.prev === Some (Some left)
-18 |       && H.at (Pref.own t) s.next === Some (Some right)
-19 |       && H.at (Pref.own t) right.prev === Some (Some s)........
+File "pref_ring.mli", lines 167-173, characters 37-55:
   The refinement is stated here.
 |}, Principal{|
-Line 6, characters 59-60:
-6 |       (t : {t : node option Pref.token | present (Pref.own t) left
+Line 9, characters 59-60:
+9 |       (t : {t : node option Pref.token | present (Pref.own t) left
+                                                               ^
+Error: The value "t" has type "Pref_ring.node option Pref.token"
+       but an expression was expected of type "'a Pref.token"
+       The kind of Pref_ring.node option is
+           immutable_data with Pref_ring.node
+         because it's a boxed variant type.
+       But the kind of Pref_ring.node option must be a subkind of
+           immutable_data.
+|}]
+
+(* The same call with a sentinel other than the removed node is accepted. *)
+module Remove_other = struct
+  let good : (sentinel : node) @ immutable -> (s : node) @ immutable ->
+      (left : node) @ immutable -> (right : node) @ immutable ->
+      (t : {t : node option Pref.token | present (Pref.own t) left
+        && present (Pref.own t) s && present (Pref.own t) right
+        && not (s === sentinel)
+        && H.at (Pref.own t) left.next === Some (Some s)
+        && H.at (Pref.own t) s.prev === Some (Some left)
+        && H.at (Pref.own t) s.next === Some (Some right)
+        && H.at (Pref.own t) right.prev === Some (Some s)}) @ unique ->
+      node option Pref.token @ unique = fun sentinel s left right t ->
+    let t = remove sentinel left s right t in t
+end;;
+[%%expect{|
+module Remove_other :
+  sig
+    val good :
+      (sentinel : Pref_ring.node) @ immutable ->
+      (s : Pref_ring.node) @ immutable ->
+      (left : Pref_ring.node) @ immutable ->
+      (right : Pref_ring.node) @ immutable ->
+      {t : Pref_ring.node option Pref.token
+        | (Pref_ring.present (Pref.own t) left) &&
+            ((Pref_ring.present (Pref.own t) s) &&
+               ((Pref_ring.present (Pref.own t) right) &&
+                  ((not (s === sentinel)) &&
+                     (((Pref_ring.H.at (Pref.own t) left.Pref_ring.next) ===
+                         (Some (Some s)))
+                        &&
+                        (((Pref_ring.H.at (Pref.own t) s.Pref_ring.prev) ===
+                            (Some (Some left)))
+                           &&
+                           (((Pref_ring.H.at (Pref.own t) s.Pref_ring.next)
+                               === (Some (Some right)))
+                              &&
+                              ((Pref_ring.H.at (Pref.own t)
+                                  right.Pref_ring.prev)
+                                 === (Some (Some s)))))))))} @ unique ->
+      Pref_ring.node option Pref.token @ unique
+  end
+|}, Principal{|
+Line 4, characters 59-60:
+4 |       (t : {t : node option Pref.token | present (Pref.own t) left
                                                                ^
 Error: The value "t" has type "Pref_ring.node option Pref.token"
        but an expression was expected of type "'a Pref.token"
