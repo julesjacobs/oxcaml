@@ -342,8 +342,15 @@ heap, rank, or reserve model.
 
 Connectivity states are valid by construction, so its contracts state
 membership through `contains (snapshot s) x` and results through `root`.
+`root_law` states that a member's root is a member and its own root, and that
+a member has depth zero exactly when it is its own root.
 `Vox_union_find_events` records completed operations newest first: `Initialize`
-(1), `Allocate` (3), `Find depth` (`4 * depth + 2`, depth nonnegative), `Link`
-(7) and `Union` (1). `event_cost` proves that the ticks equal the total weight
-of `events state`; together with `account_bounds` this bounds the event cost by
-the account.
+(1), `Allocate` (3), `Find depth` (`4 * depth + 2`), `Link` (7) and `Union` (1).
+`event_cost` proves that the ticks equal the total weight of `events state`,
+and each operation states the events it appends: `create` starts from
+`[Initialize]`, `make_set` appends `Allocate`, `find x` appends
+`Find (depth p x)` and leaves the snapshot `compressed p x`, and `union x y`
+appends its two finds, a `Link` and `Union`. A client can therefore compute the
+ticks of any sequence of operations from the interface, and `account_bounds`
+bounds them by the credits paid. `depth` and `compressed` are abstract: the
+interface does not say how the forest determines them.

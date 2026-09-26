@@ -10,6 +10,7 @@ module C = Vox_big_credits.Make ()
 module U = Vox_connectivity.Make (C)
 module K = Vox_ackermann
 module Q = Vox_union_find_online_cost
+module E = Vox_union_find_events
 
 let (charged_work @ total)
     (state : U.t @ local immutable total ghost forkable unyielding) :
@@ -35,10 +36,13 @@ let (fee_bounds @ total) :
 
 let create : (fee : {b : C.token | C.credits b >= 1Z}) @ unique total ghost ->
     {s : funded | let fee = fee in U.size s.#state = 0Z && budget s = C.credits fee &&
-      available s = Bigint.sub (C.credits fee) 1Z} @ unique = fun fee ->
+      available s = Bigint.sub (C.credits fee) 1Z && U.ticks s.#state = 1Z} @ unique =
+    fun fee ->
   let fee = fee in
   let split = C.split 1Z fee in
   let state = U.create split.C.left in
+  ghost_ (U.event_cost (borrow_ state);
+    E.total_def [E.Initialize]; E.total_def []; E.weight_def E.Initialize);
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   owned
@@ -49,16 +53,21 @@ let allocate :
     {r : result | let owned = owned in U.size r.#owned.#state = Bigint.add (U.size owned.#state) 1Z && U.contains (U.snapshot r.#owned.#state) r.#value &&
       U.added (U.snapshot owned.#state) (U.snapshot r.#owned.#state) r.#value &&
       budget r.#owned = budget owned &&
-      available r.#owned >= Bigint.sub (available owned) 11Z} @ unique =
+      available r.#owned >= Bigint.sub (available owned) 11Z &&
+      U.ticks r.#owned.#state = Bigint.add (U.ticks owned.#state) 3Z} @ unique =
     fun owned ->
   let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state));
+    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
+    U.event_cost (borrow_ owned.#state));
+  let history = ghost_ (U.events (borrow_ owned.#state)) in
   let amount = ghost_ (11Z) in
   let wallet = owned.#wallet in let state = owned.#state in
   let split = C.split amount wallet in
   let r = U.make_set state split.C.left in
   let #{U.value; state} = r in
+  ghost_ (U.event_cost (borrow_ state);
+    E.total_def (E.Allocate :: history); E.weight_def E.Allocate);
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let r = #{value; owned} in r
@@ -69,16 +78,32 @@ let join : (x : U.elem) @ immutable -> (y : U.elem) @ immutable ->
     {r : result | let owned = owned in U.size r.#owned.#state = U.size owned.#state &&
       U.joined (U.snapshot owned.#state) (U.snapshot r.#owned.#state) x y r.#value &&
       budget r.#owned = budget owned &&
-      available r.#owned >= Bigint.sub (available owned) 132Z} @ unique =
+      available r.#owned >= Bigint.sub (available owned) 132Z &&
+      (let p = U.snapshot owned.#state in
+        U.ticks r.#owned.#state = Bigint.add (U.ticks owned.#state)
+          (Bigint.add 12Z (Bigint.mul 4Z
+            (Bigint.add (U.depth p x) (U.depth (U.compressed p x) y)))))} @ unique =
     fun x y owned ->
   let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state));
+    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
+    U.event_cost (borrow_ owned.#state));
+  let history = ghost_ (U.events (borrow_ owned.#state)) in
+  let p = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let amount = ghost_ (U.union_fee (borrow_ owned.#state)) in
   let wallet = owned.#wallet in let state = owned.#state in
   let split = C.split amount wallet in
   let r = U.union x y state split.C.left in
   let #{U.value; state} = r in
+  ghost_ (U.event_cost (borrow_ state);
+    let first = E.Find (U.depth p x) in
+    let second = E.Find (U.depth (U.compressed p x) y) in
+    E.total_def (E.Union :: E.Link :: second :: first :: history);
+    E.total_def (E.Link :: second :: first :: history);
+    E.total_def (second :: first :: history);
+    E.total_def (first :: history);
+    E.weight_def E.Union; E.weight_def E.Link;
+    E.weight_def second; E.weight_def first);
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let r = #{value; owned} in r
@@ -89,16 +114,24 @@ let find : (x : U.elem) @ immutable ->
     {r : result | let owned = owned in U.size r.#owned.#state = U.size owned.#state && r.#value === U.root (U.snapshot owned.#state) x &&
       U.found (U.snapshot owned.#state) (U.snapshot r.#owned.#state) x &&
       budget r.#owned = budget owned &&
-      available r.#owned >= Bigint.sub (available owned) 44Z} @ unique =
+      available r.#owned >= Bigint.sub (available owned) 44Z &&
+      U.ticks r.#owned.#state = Bigint.add (U.ticks owned.#state)
+        (Bigint.add 2Z (Bigint.mul 4Z (U.depth (U.snapshot owned.#state) x)))}
+      @ unique =
     fun x owned ->
   let owned = owned in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
-    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state));
+    U.observations (borrow_ owned.#state); fee_bounds (borrow_ owned.#state);
+    U.event_cost (borrow_ owned.#state));
+  let history = ghost_ (U.events (borrow_ owned.#state)) in
+  let p = ghost_ (U.snapshot (borrow_ owned.#state)) in
   let amount = ghost_ (U.find_fee (borrow_ owned.#state)) in
   let wallet = owned.#wallet in let state = owned.#state in
   let split = C.split amount wallet in
   let r = U.find x state split.C.left in
   let #{U.value; state} = r in
+  ghost_ (U.event_cost (borrow_ state);
+    E.total_def (E.Find (U.depth p x) :: history); E.weight_def (E.Find (U.depth p x)));
   let owned = #{state; wallet = split.C.right} in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
   let r = #{value; owned} in r
@@ -173,6 +206,9 @@ let run () =
     U.added_law before after x4 x4;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let work6 = ghost_ (Bigint.add (U.depth before x0)
+    (U.depth (U.compressed before x0) x1)) in
+  ghost_ (U.depth_law before x0; U.depth_law (U.compressed before x0) x1);
   let r = join x0 x1 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
@@ -186,6 +222,9 @@ let run () =
     U.joined_law before after x0 x1 merged x4;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let work7 = ghost_ (Bigint.add (U.depth before x2)
+    (U.depth (U.compressed before x2) x3)) in
+  ghost_ (U.depth_law before x2; U.depth_law (U.compressed before x2) x3);
   let r = join x2 x3 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
@@ -199,6 +238,9 @@ let run () =
     U.joined_law before after x2 x3 merged x4;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let work8 = ghost_ (Bigint.add (U.depth before x1)
+    (U.depth (U.compressed before x1) x2)) in
+  ghost_ (U.depth_law before x1; U.depth_law (U.compressed before x1) x2);
   let r = join x1 x2 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
@@ -212,6 +254,9 @@ let run () =
     U.joined_law before after x1 x2 merged x4;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let work9 = ghost_ (Bigint.add (U.depth before x0)
+    (U.depth (U.compressed before x0) x3)) in
+  ghost_ (U.depth_law before x0; U.depth_law (U.compressed before x0) x3);
   let r = join x0 x3 owned in
   let #{value = merged; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
@@ -230,6 +275,8 @@ let run () =
     not (U.connected (U.snapshot owned.#state) x0 x4)} = () in
   let _ = proof in
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let work10 = ghost_ (U.depth before x0) in
+  ghost_ (U.depth_law before x0);
   let r = find x0 owned in
   let #{value = root0; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
@@ -241,6 +288,8 @@ let run () =
     U.found_law before after x0 x4;
     ());
   let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let work11 = ghost_ (U.depth before x3) in
+  ghost_ (U.depth_law before x3);
   let r = find x3 owned in
   let #{value = root3; owned} = r in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
@@ -251,6 +300,34 @@ let run () =
     U.found_law before after x3 x3;
     U.found_law before after x3 x4;
     ());
+  (* A returned representative is a member and its own root, so a find of it
+     follows no links. *)
+  ghost_ (U.root_law (borrow_ owned.#state) x0;
+    U.root_law (borrow_ owned.#state) root0);
+  let before = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  let ticks11 = ghost_ (U.ticks (borrow_ owned.#state)) in
+  let r = find root0 owned in
+  let #{value = again; owned} = r in
+  ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned));
+  let account12 = ghost_ (U.account (borrow_ owned.#state)) in
+  let after = ghost_ (U.snapshot (borrow_ owned.#state)) in
+  ghost_ (
+    U.found_law before after root0 x0;
+    U.found_law before after root0 x3;
+    U.found_law before after root0 x4;
+    ());
+  let proof : {u : unit | again === root0 &&
+    U.ticks owned.#state = Bigint.add ticks11 2Z} = () in
+  let _ = proof in
+  (* The whole run: one creation, five allocations, four unions (each two
+     finds, a link and its own step) and three finds cost 70 ticks plus four
+     per parent link followed. *)
+  let work = ghost_ (Bigint.add (Bigint.add (Bigint.add work6 work7)
+    (Bigint.add work8 work9)) (Bigint.add work10 work11)) in
+  let proof : {u : unit |
+    U.ticks owned.#state = Bigint.add 70Z (Bigint.mul 4Z work) &&
+    work >= 0Z} = () in
+  let _ = proof in
   ghost_ (budget_def (borrow_ owned); available_def (borrow_ owned);
     C.nonnegative (borrow_ owned.#wallet); U.account_bounds (borrow_ owned.#state);
     U.connected_def (U.snapshot (borrow_ owned.#state)) x0 x3;
@@ -261,7 +338,8 @@ let run () =
     U.ticks owned.#state <= initial} = () in
   let _ = proof in
   ghost_ (
-    let trace11 : Q.step list = [] in
+    let trace12 : Q.step list = [] in
+    let trace11 = {Q.operation = Q.Find; account = account12} :: trace12 in
     let trace10 = {Q.operation = Q.Find; account = account11} :: trace11 in
     let trace9 = {Q.operation = Q.Find; account = account10} :: trace10 in
     let trace8 = {Q.operation = Q.Union; account = account9} :: trace9 in
@@ -333,6 +411,11 @@ let run () =
     Q.count_def Q.Allocate trace11;
     Q.count_def Q.Find trace11;
     Q.count_def Q.Union trace11;
+    Q.trace_def 8Z account12 trace12;
+    Q.final_account_def account12 trace12;
+    Q.count_def Q.Allocate trace12;
+    Q.count_def Q.Find trace12;
+    Q.count_def Q.Union trace12;
     Q.fee_def 8Z Q.Allocate; Q.fee_def 8Z Q.Find; Q.fee_def 8Z Q.Union;
     Q.find_fee_def 8Z; Q.union_fee_def 8Z;
     Q.same_def Q.Allocate Q.Allocate;
@@ -349,6 +432,6 @@ let run () =
     Q.sequence 8Z trace0 (U.ticks (borrow_ owned.#state));
     let u = () in
     let _proof = (u : {u : unit |
-      U.ticks owned.#state <= Q.budget 8Z 5Z 2Z 4Z}) in ());
+      Bigint.add 70Z (Bigint.mul 4Z work) <= Q.budget 8Z 5Z 3Z 4Z}) in ());
   print_endline "connectivity and paid-prefix bound: ok")
 let () = run ()

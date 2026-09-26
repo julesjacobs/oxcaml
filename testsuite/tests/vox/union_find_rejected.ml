@@ -61,7 +61,7 @@ Line 8, characters 32-38:
 8 |     let result = U.find x state (zero) in
                                     ^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find.mli", lines 147-148, characters 28-46:
+File "vox_union_find.mli", lines 151-152, characters 28-46:
   The refinement is stated here.
 |}]
 
@@ -104,6 +104,6 @@ Line 8, characters 13-23:
 8 |     U.create (capacity) (fee)
                  ^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find.mli", line 95, characters 43-80:
+File "vox_union_find.mli", line 97, characters 43-80:
   The refinement is stated here.
 |}]
