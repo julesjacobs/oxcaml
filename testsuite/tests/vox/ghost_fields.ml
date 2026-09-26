@@ -20,6 +20,7 @@ Line 1, characters 26-29:
 1 | let bad r = String.length r.p
                               ^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let ok r = ghost_ r.p
@@ -33,6 +34,7 @@ Line 1, characters 46-47:
 1 | let bad r = let { p; _ } = r in String.length p
                                                   ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let ok r = let { a; p = _; b } = r in a + b

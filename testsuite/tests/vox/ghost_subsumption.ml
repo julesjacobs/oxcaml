@@ -164,6 +164,7 @@ Line 1, characters 23-38:
 1 | let rejected_default ?(a : int @ ghost = 0) () = 1;;
                            ^^^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let defaulted ?(a = 0) () = 1;;
@@ -177,4 +178,5 @@ Line 1, characters 38-51:
 1 | let rejected_option () = defaulted ?a:(ghost_ None) ();;
                                           ^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]

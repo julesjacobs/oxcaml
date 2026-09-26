@@ -2,3 +2,4 @@ File "consumer.ml", line 13, characters 2-10:
 13 |   M.values
        ^^^^^^^^
 Error: the refinement type of this expression escapes the scope of binding Local
+Hint: bind Local outside this expression.

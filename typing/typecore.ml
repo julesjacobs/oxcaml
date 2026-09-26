@@ -3603,6 +3603,13 @@ let rec refinement_payload env ty =
   | Some { ref_payload; _ } -> refinement_payload env ref_payload
   | None -> ty
 
+(* Refinements are not checked inside a predicate, so an ascription there
+   only fixes the payload type. *)
+let logical_ascription env ty =
+  if !typing_refinement_predicate || Resolved_predicate.active ()
+  then refinement_payload env ty
+  else ty
+
 (** [type_pat] propagates the expected type, and
     unification may update the typing environment. *)
 let rec type_pat
@@ -5358,6 +5365,10 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
   in
   loop ty_fun0 mode_fun rev_args sargs
 
+(* The parameter name and location of each argument that a refinement had to
+   name with a fresh identifier, for escape errors. *)
+let argument_origins : (string * Location.t) Ident.Tbl.t = Ident.Tbl.create 16
+
 (* See Note [Type-checking applications] for an overview *)
 let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
       ret_tvar =
@@ -5485,6 +5496,8 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                     | Some path, None -> path, None
                     | None, None ->
                         let id = Ident.create_local "*argument*" in
+                        Ident.Tbl.replace argument_origins id
+                          (Ident.name binder, sarg.pexp_loc);
                         Ctype.register_refinement_value_scope
                           ~level:(Option.value !refinement_argument_scope
                             ~default:(get_current_level ())) [id];
@@ -7350,12 +7363,28 @@ and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
                type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
                  expected_mode sexp ty_expected_explained)
     with Ctype.Refinement_scope_escape id ->
-      raise
-        (Error_forward
-           (Location.errorf ~loc:sexp.pexp_loc
+      let error =
+        match Ident.Tbl.find_opt argument_origins id with
+        | Some (parameter, argument_loc) ->
+            Location.errorf ~loc:sexp.pexp_loc
+              ~sub:[Location.msg ~loc:argument_loc
+                      "This is the argument.";
+                    Location.msg
+                      "@[Hint: bind the argument to a variable with a let@ \
+                       outside this expression.@]"]
+              "@[the refinement type of this expression mentions the \
+               argument@ for parameter %a, which is not a variable@]"
+              Style.inline_code parameter
+        | None ->
+            Location.errorf ~loc:sexp.pexp_loc
+              ~sub:[Location.msg
+                      "@[Hint: bind %a outside this expression.@]"
+                      Style.inline_code (Ident.name id)]
               "the refinement type of this expression escapes the scope of \
                binding %a"
-              Style.inline_code (Ident.name id)))
+              Style.inline_code (Ident.name id)
+      in
+      raise (Error_forward error)
   in
   Cmt_format.set_saved_types
     (Cmt_format.Partial_expression exp :: previous_saved_types);
@@ -7798,6 +7827,12 @@ and type_expect_
       let normalized =
         {normalized with pexp_attributes = sexp.pexp_attributes} in
       type_expect env expected_mode normalized ty_expected_explained
+  | Pexp_refine _ when !typing_refinement_predicate ->
+      (* Checked here because ascriptions in predicates drop refinements, so
+         the expected type below would not say why [refine_] fails. *)
+      raise (Error_forward (Location.errorf ~loc
+        "Refinement introduction is not yet supported in a refinement \
+         predicate"))
   | Pexp_refine operand -> begin
       Language_extension.assert_enabled ~loc Refinement_types ();
       match get_desc (expand_head env ty_expected) with
@@ -9114,6 +9149,7 @@ and type_expect_
       }
   | Pexp_constraint (sarg, Some sty, []) ->
       let (ty, exp_extra) = type_constraint env sty Mode.Alloc.Const.legacy in
+      let ty = logical_ascription env ty in
       let ty' = instance ty in
       let error_message_attr_opt =
         Builtin_attributes.error_message_attr sexp.pexp_attributes in
@@ -9141,6 +9177,7 @@ and type_expect_
         in
         type_constraint env sty alloc_mode
       in
+      let ty = logical_ascription env ty in
       let expected_mode =
         type_expect_mode ~loc ~env ~modes:modes.mode_modes expected_mode
       in
@@ -10297,11 +10334,18 @@ and type_coerce
        instance ty', Texp_coerce (Some cty, cty'))
 
 and type_constraint env sty type_mode =
+  (* Inside a refinement predicate, the univars of the enclosing type stay in
+     scope. *)
+  let univars =
+    if !typing_refinement_predicate
+    then Some (Typetexp.TyVarEnv.current_univars ())
+    else None
+  in
   (* Pretend separate = true, 1% slowdown for lablgtk *)
   let cty =
     with_local_level_generalize_structure begin fun () ->
-      Typetexp.transl_simple_type ~new_var_jkind:Any env ~closed:false type_mode
-        sty
+      Typetexp.transl_simple_type ~new_var_jkind:Any env ?univars
+        ~closed:false type_mode sty
     end
   in
   cty.ctyp_type, Texp_constraint cty
@@ -10385,6 +10429,10 @@ and type_newtype
         Hashtbl.add seen (get_id t) ();
         match get_desc t with
         | Tconstr (Path.Pident id', _, _) when id == id' -> link_type t ty
+        | Trefine { ref_pred; _ } ->
+            Refinement_predicate.fold_types (fun () t -> replace t) ()
+              ref_pred;
+            Btype.iter_type_expr replace t
         | _ -> Btype.iter_type_expr replace t
       end
     in
@@ -10408,7 +10456,7 @@ and type_ident env ?(recarg=Rejected) lid =
     match desc.val_kind with
     | Val_prim { prim_name =
         ("%equal" | "%notequal" | "%lessthan" | "%lessequal"
-        | "%greaterthan" | "%greaterequal" | "%compare"); _ } ->
+        | "%greaterthan" | "%greaterequal" | "%compare") as prim_name; _ } ->
         let total_mode =
           mode
           |> Value.meet_const_with Totality Totality.Const.Total
@@ -10434,9 +10482,34 @@ and type_ident env ?(recarg=Rejected) lid =
               end
             | _ -> false
           in
-          Value.submode_err
-            (lid.loc, Ident { category = Value; lid = lid.txt })
-            (if total then total_mode else mode) specialized_mode
+          let pp : Mode.Hint.pinpoint =
+            (lid.loc, Ident { category = Value; lid = lid.txt }) in
+          let submode () =
+            Value.submode_err pp
+              (if total then total_mode else mode) specialized_mode
+          in
+          let logical =
+            !typing_refinement_predicate || Resolved_predicate.active ()
+            || Env.in_ghost_context env
+          in
+          match prim_name, get_desc (expand_head env ty) with
+          | ("%equal" | "%notequal"), Tarrow (_, arg, _, _)
+            when logical && not total ->
+              (match Value.submode ~pp mode specialized_mode with
+               | Ok () -> ()
+               | Error _ ->
+                 let op, logical_op =
+                   if prim_name = "%equal" then "=", "x === y"
+                   else "<>", "not (x === y)"
+                 in
+                 Location.raise_errorf ~loc:lid.loc
+                   "@[In refinements and ghost code,@ %a works only at int,@ \
+                    bool and Bigint.t,@ not at %a.@ \
+                    Use %a for logical equality.@]"
+                   Style.inline_code op
+                   (Style.as_inline_code Printtyp.Doc.type_expr) arg
+                   Style.inline_code logical_op)
+          | _ -> submode ()
         in
         Value.disallow_right specialized_mode, Some check
     | _ -> mode, None
@@ -13136,8 +13209,16 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 "structural recursion requires a simple function binding")
           rec_mode_var;
       List.iter2
-        (fun (_, pat, _) (exp, _) ->
-          if maybe_expansive exp then lower_contravariant env pat.pat_type)
+        (fun (_, pat, _) (exp, vars) ->
+          if maybe_expansive exp then lower_contravariant env pat.pat_type;
+          (* In ghost code a polymorphic non-function value would give each
+             use its own instance, which the proofs cannot relate. *)
+          match exp.exp_desc, vars with
+          | Texp_function _, _ | _, Some _ -> ()
+          | _, None ->
+              if Env.in_ghost_context env
+              then lower_variables_only env (get_current_level ())
+                     pat.pat_type)
         mode_pat_typ_list exp_list;
       iter_pattern_variables_type_mut
         ~f_immut:(fun pv_lpoly ty ->
@@ -15025,6 +15106,10 @@ let report_error ~loc env =
              annotation after the arrow constrains the result value.@]"
              Style.inline_code "(f : (int -> int) @ total)"
              Style.inline_code "total"]
+      | Comonadic Ghostliness ->
+          [Location.msg "@[Hint: if this is proof code, wrap the enclosing \
+             expression in %a.@]"
+             Style.inline_code "ghost_ (...)"]
       | _ -> []
     in
     let sub =

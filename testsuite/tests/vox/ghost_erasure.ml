@@ -51,7 +51,7 @@ end;;
                   (consts (0))
                    (non_consts ([0: ?,
                                  value<(consts (0)) (non_consts ([0: ?, *]))>]))>]
-            : int (let (proof/1 =[value<int>] (opaque 24029)) 7)))
+            : int (let (proof/1 =[value<int>] (obj_magic 24029)) 7)))
        (makeblock 0 run/0)))
   (makeblock 0 Client/0))
 module Client : sig val run : int list -> int end

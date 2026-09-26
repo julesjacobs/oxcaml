@@ -311,7 +311,13 @@ let escaped_partial = follow (identity 1);;
 Line 1, characters 22-41:
 1 | let escaped_partial = follow (identity 1);;
                           ^^^^^^^^^^^^^^^^^^^
-Error: the refinement type of this expression escapes the scope of binding "*argument*"
+Error: the refinement type of this expression mentions the argument
+       for parameter "x", which is not a variable
+Line 1, characters 29-41:
+1 | let escaped_partial = follow (identity 1);;
+                                 ^^^^^^^^^^^^
+  This is the argument.
+Hint: bind the argument to a variable with a let outside this expression.
 |}]
 
 let annotated_pair ((x, y) : {p : int * int | let x, y = p in x <= y}) =

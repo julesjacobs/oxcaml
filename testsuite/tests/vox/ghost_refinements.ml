@@ -146,6 +146,7 @@ Line 3, characters 32-38:
 3 |   (assume_ x : {y : int | y === hidden});;
                                     ^^^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let rejected_runtime_operand () =
@@ -156,6 +157,7 @@ Line 3, characters 11-17:
 3 |   (assume_ hidden : {y : int | y === 42});;
                ^^^^^^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 let rejected_ghost_field () =
@@ -233,6 +235,7 @@ Line 1, characters 54-55:
 1 | let runtime_ghost (x : int) : {y : int | y === ghost_ x} = assume_ x;;
                                                           ^
 Error: This value is "ghost" but is expected to be "real".
+Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 type ghost_elimination =
