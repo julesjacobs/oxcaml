@@ -26,7 +26,7 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find_online.mli", line 119, characters 28-45:
+File "vox_union_find_online.mli", line 134, characters 28-45:
   The refinement is stated here.
 |}]
 
@@ -43,7 +43,7 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find_online.mli", line 119, characters 28-45:
+File "vox_union_find_online.mli", line 134, characters 28-45:
   The refinement is stated here.
 |}]
 
@@ -131,6 +131,6 @@ Line 7, characters 54-59:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                           ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_union_find_online.mli", line 118, characters 24-65:
+File "vox_union_find_online.mli", line 133, characters 24-65:
   The refinement is stated here.
 |}]

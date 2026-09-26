@@ -7,13 +7,15 @@ fixture for explicit equations, opacity, and additional laws.
 
 `connectivity.ml` is a client of the sealed `Vox_connectivity` interface. It
 inserts five elements, which crosses several capacity epochs (the ghost
-capacity doubles from 1 to 8), then merges components and performs finds. Its
-ghost snapshots support membership and connectivity proofs without exposing
-forests or heaps, including that an isolated vertex stays disconnected after
-repeated unions and finds. One caller-owned wallet pays for all operations,
-and conservation proves the charged-prefix bound. This client uses a finite
-budget; the online data structure requires no advance population limit. The
-lower-level accounting regressions remain in
+capacity doubles from 1 to 8), then merges components and performs finds,
+including a find of a returned representative. Its ghost snapshots support
+membership and connectivity proofs without exposing forests or heaps,
+including that an isolated vertex stays disconnected after repeated unions
+and finds. From the event each operation appends, it proves that the run
+costs 70 ticks plus four per parent link followed. One caller-owned wallet
+pays for all operations, and conservation proves the charged-prefix bound.
+This client uses a finite budget; the online data structure requires no
+advance population limit. The lower-level accounting regressions remain in
 `union_find_online.ml`.
 
 Each proof test compiles once, as bytecode: refinement checking does not

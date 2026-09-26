@@ -26,7 +26,7 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_connectivity.mli", line 110, characters 28-45:
+File "vox_connectivity.mli", line 131, characters 28-45:
   The refinement is stated here.
 |}]
 
@@ -43,7 +43,7 @@ Line 7, characters 60-63:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                                 ^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_connectivity.mli", line 110, characters 28-45:
+File "vox_connectivity.mli", line 131, characters 28-45:
   The refinement is stated here.
 |}]
 
@@ -114,7 +114,7 @@ Line 7, characters 54-59:
 7 |       U.result @ unique = fun state fee -> U.make_set state fee
                                                           ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_connectivity.mli", line 108, characters 24-54:
+File "vox_connectivity.mli", line 129, characters 24-54:
   The refinement is stated here.
 |}]
 
@@ -146,6 +146,60 @@ Error: Refinement could not be proved (counterexample)
 Line 6, characters 18-40:
 6 |       {u : unit | U.found before after x} @ ghost = ghost_ ()
                       ^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+module Unrecorded_find = struct
+  module C = Vox_big_credits.Make ()
+  module U = Vox_connectivity.Make (C)
+  (* A find that skips its work cannot claim the event a find records. *)
+  let bad : (x : U.elem) @ immutable ->
+      (state : {s : U.t | U.contains (U.snapshot s) x}) @ unique read_write total ->
+      {s : U.t | let state = state in
+        U.events s === Vox_union_find_events.Find (U.depth (U.snapshot state) x) ::
+          U.events state} @ unique = fun x state -> state
+end;;
+[%%expect{|
+Line 9, characters 52-57:
+9 |           U.events state} @ unique = fun x state -> state
+                                                        ^^^^^
+Error: Refinement could not be proved (counterexample)
+Lines 7-9, characters 17-24:
+7 | .................let state = state in
+8 |         U.events s === Vox_union_find_events.Find (U.depth (U.snapshot state) x) ::
+9 |           U.events state.................................
+  The refinement is stated here.
+|}]
+
+module Find_costs_two = struct
+  module C = Vox_big_credits.Make ()
+  module U = Vox_connectivity.Make (C)
+  module E = Vox_union_find_events
+  (* A find costs 4 * depth + 2 ticks, so two ticks holds only at a root. *)
+  let bad : (x : U.elem) @ immutable ->
+      (state : {s : U.t | U.contains (U.snapshot s) x}) @ unique read_write total ->
+      (fee : {b : C.token | let state = state in C.credits b = U.find_fee state})
+        @ unique total ghost ->
+      {r : U.result | let state = state in
+        U.ticks r.#state = Bigint.add (U.ticks state) 2Z} @ unique =
+    fun x state fee ->
+    ghost_ (U.event_cost (borrow_ state));
+    let history = ghost_ (U.events (borrow_ state)) in
+    let depth = ghost_ (U.depth (U.snapshot (borrow_ state)) x) in
+    let r = U.find x state fee in
+    let #{U.value; state} = r in
+    ghost_ (U.event_cost (borrow_ state);
+      E.total_def (E.Find depth :: history); E.weight_def (E.Find depth));
+    #{U.value; state}
+end;;
+[%%expect{|
+Line 20, characters 4-21:
+20 |     #{U.value; state}
+         ^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Lines 10-11, characters 22-56:
+10 | ......................let state = state in
+11 |         U.ticks r.#state = Bigint.add (U.ticks state) 2Z............
   The refinement is stated here.
 |}]
 

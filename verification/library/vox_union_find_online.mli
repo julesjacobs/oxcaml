@@ -5,6 +5,7 @@ module A = Vox_union_find_amortized
 module K = Vox_ackermann
 module P = Ghost_pref
 module H = P.Heap
+module E = Vox_union_find_events
 
 module Make (C : Vox_big_credits.S) : sig
   type elem = M.elem
@@ -57,6 +58,12 @@ module Make (C : Vox_big_credits.S) : sig
     (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
     {u : unit | connected p x y ===
       (ghost_ (contains p x && contains p y && root p x === root p y))} @@ total
+  val depth : snapshot @ immutable -> M.elem @ immutable -> Bigint.t @ ghost @@
+    total
+  val compressed : snapshot @ immutable -> M.elem @ immutable ->
+    snapshot @ immutable ghost @@ total
+  val depth_law : (p : snapshot) @ immutable -> (x : M.elem) @ immutable ->
+    {u : unit | depth p x >= 0Z} @ ghost @@ total
 
   val contents : t @ local immutable total ghost forkable unyielding -> M.path list @ immutable ghost @@ total
   val heap : t @ local immutable total ghost forkable unyielding -> Vox_union_find_model.node P.heap @ immutable ghost @@ total
@@ -110,9 +117,17 @@ module Make (C : Vox_big_credits.S) : sig
   val event_cost : (s : t) @ local immutable total ghost forkable unyielding ->
     {u : unit | if valid s then
       ticks s = Vox_union_find_events.total (events s) else true} @ ghost @@ total
+  val root_law : (state : t) @ local immutable total ghost forkable unyielding ->
+      (x : M.elem) @ immutable ->
+      {u : unit | if valid state && contains (snapshot state) x then
+        contains (snapshot state) (root (snapshot state) x) &&
+        root (snapshot state) (root (snapshot state) x) === root (snapshot state) x &&
+        (depth (snapshot state) x = 0Z) = (root (snapshot state) x === x)
+        else true} @ ghost @@ total
 
   val create : (fee : {b : C.token | C.credits b = 1Z}) @ unique total ghost ->
-      {s : t | valid s && size s = 0Z && contents s === [] && account s = 1Z} @ unique
+      {s : t | valid s && size s = 0Z && contents s === [] && account s = 1Z &&
+        events s === [E.Initialize]} @ unique
 
   val make_set :
       (state : {s : t | valid s && size s < Bigint.of_int max_int}) @ unique read_write total ->
@@ -123,7 +138,8 @@ module Make (C : Vox_big_credits.S) : sig
         size r.#state = Bigint.add (size state) 1Z && member r.#value r.#state &&
         not (H.mem (heap state) r.#value) &&
         heap r.#state === H.put (heap state) r.#value (M.Root 0) &&
-        account r.#state = Bigint.add (account state) 11Z} @ unique
+        account r.#state = Bigint.add (account state) 11Z &&
+        events r.#state === E.Allocate :: events state} @ unique
 
   val find : (x : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s}) @ unique read_write total ->
@@ -134,7 +150,9 @@ module Make (C : Vox_big_credits.S) : sig
         contents r.#state === F.refresh (F.lookup x (contents state)) (contents state) &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
         size r.#state = size state && r.#value === representative x state &&
-        account r.#state = Bigint.add (account state) (find_fee state)} @ unique
+        account r.#state = Bigint.add (account state) (find_fee state) &&
+        snapshot r.#state === compressed (snapshot state) x &&
+        events r.#state === E.Find (depth (snapshot state) x) :: events state} @ unique
 
   val union : (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
       (state : {s : t | valid s && member x s && member y s}) @ unique read_write total ->
@@ -145,7 +163,10 @@ module Make (C : Vox_big_credits.S) : sig
         contents r.#state === S.union_paths (heap state) (contents state) x y &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
         size r.#state = size state && r.#value === S.union_root (heap state) (contents state) x y &&
-        account r.#state = Bigint.add (account state) (union_fee state)} @ unique
+        account r.#state = Bigint.add (account state) (union_fee state) &&
+        events r.#state === E.Union :: E.Link ::
+          E.Find (depth (compressed (snapshot state) x) y) ::
+          E.Find (depth (snapshot state) x) :: events state} @ unique
 
   val find_semantics : (x : M.elem) @ immutable ->
       (q : M.elem) @ immutable ->
@@ -166,7 +187,8 @@ module Make (C : Vox_big_credits.S) : sig
 
   val create_connectivity : (fee : {b : C.token | C.credits b = 1Z}) @ unique
     total ghost ->
-      {s : t | valid s && size s = 0Z && account s = 1Z} @ unique
+      {s : t | valid s && size s = 0Z && account s = 1Z &&
+        events s === [E.Initialize]} @ unique
 
   val make_set_connectivity :
       (state : {s : t | valid s && size s < Bigint.of_int max_int}) @ unique
@@ -176,7 +198,8 @@ module Make (C : Vox_big_credits.S) : sig
         added (snapshot state) (snapshot r.#state) r.#value &&
         size r.#state = Bigint.add (size state) 1Z &&
         contains (snapshot r.#state) r.#value &&
-        account r.#state = Bigint.add (account state) 11Z} @ unique
+        account r.#state = Bigint.add (account state) 11Z &&
+        events r.#state === E.Allocate :: events state} @ unique
 
   val find_connectivity : (x : elem) @ immutable ->
       (state : {s : t | valid s && contains (snapshot s) x}) @ unique read_write total ->
@@ -186,7 +209,9 @@ module Make (C : Vox_big_credits.S) : sig
       {r : result | let state = state in valid r.#state &&
         found (snapshot state) (snapshot r.#state) x &&
         size r.#state = size state && r.#value === root (snapshot state) x &&
-        account r.#state = Bigint.add (account state) (find_fee state)} @ unique
+        account r.#state = Bigint.add (account state) (find_fee state) &&
+        snapshot r.#state === compressed (snapshot state) x &&
+        events r.#state === E.Find (depth (snapshot state) x) :: events state} @ unique
 
   val union_connectivity : (x : elem) @ immutable -> (y : elem) @ immutable ->
       (state : {s : t | valid s && contains (snapshot s) x && contains (snapshot s) y}) @ unique
@@ -197,7 +222,10 @@ module Make (C : Vox_big_credits.S) : sig
       {r : result | let state = state in valid r.#state &&
         joined (snapshot state) (snapshot r.#state) x y r.#value &&
         size r.#state = size state &&
-        account r.#state = Bigint.add (account state) (union_fee state)}
+        account r.#state = Bigint.add (account state) (union_fee state) &&
+        events r.#state === E.Union :: E.Link ::
+          E.Find (depth (compressed (snapshot state) x) y) ::
+          E.Find (depth (snapshot state) x) :: events state}
       @ unique
 
 end

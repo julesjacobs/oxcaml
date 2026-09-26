@@ -1,3 +1,5 @@
+module E = Vox_union_find_events
+
 module Make (C : Vox_big_credits.S) = struct
   module U = Vox_union_find_online.Make (C)
   type elem = U.elem
@@ -29,6 +31,18 @@ module Make (C : Vox_big_credits.S) = struct
     elem @ immutable -> elem @ immutable -> elem @ immutable ->
     bool @ ghost =
     fun before after x y r -> ghost_ (U.joined before after x y r)
+
+  let[@def] (depth @ total) : snapshot @ immutable -> elem @ immutable ->
+    Bigint.t @ ghost =
+    fun p x -> ghost_ (U.depth p x)
+
+  let[@def] (compressed @ total) : snapshot @ immutable -> elem @ immutable ->
+    snapshot @ immutable ghost =
+    fun p x -> ghost_ (U.compressed p x)
+
+  let (depth_law @ total) : (p : snapshot) @ immutable ->
+      (x : elem) @ immutable -> {u : unit | depth p x >= 0Z} @ ghost =
+    fun p x -> ghost_ (depth_def p x; U.depth_law p x; ())
 
   let (added_law @ total) : (before : snapshot) @ immutable ->
       (after : snapshot) @ immutable -> (x : elem) @ immutable ->
@@ -148,6 +162,21 @@ module Make (C : Vox_big_credits.S) = struct
       contains_def (snapshot state) x;
       ())
 
+  let (root_law @ total) :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      (x : elem) @ immutable ->
+      {u : unit | let p = snapshot state in if contains p x then
+        contains p (root p x) && root p (root p x) === root p x &&
+        (depth p x = 0Z) = (root p x === x) else true}
+      @ ghost =
+    fun state x ->
+    ghost_ (snapshot_def state;
+      let p = snapshot state in
+      contains_def p x; root_def p x;
+      contains_def p (root p x); root_def p (root p x); depth_def p x;
+      U.root_law state.#inner x;
+      ())
+
   let (account_bounds @ total) : (state : t) @ local immutable total ghost forkable unyielding ->
       {u : unit | ticks state <= account state} @ ghost =
     fun state ->
@@ -181,16 +210,18 @@ module Make (C : Vox_big_credits.S) = struct
       ())
 
   let (event_cost @ total) : (s : t) @ local immutable total ghost forkable unyielding ->
-    {u : unit | ticks s = Vox_union_find_events.total (events s)} @ ghost =
+    {u : unit | ticks s = E.total (events s)} @ ghost =
     fun state ->
     ghost_ (ticks_def state; events_def state; U.event_cost state.#inner; ())
 
   let create : (fee : {b : C.token | C.credits b = 1Z}) @ unique total ghost ->
-      {s : t | size s = 0Z && account s = 1Z} @ unique =
+      {s : t | size s = 0Z && account s = 1Z && events s === [E.Initialize]}
+      @ unique =
     fun fee ->
     let state = U.create_connectivity fee in
     let state : t = #{inner = state} in
-    ghost_ (size_def (borrow_ state); account_def (borrow_ state));
+    ghost_ (size_def (borrow_ state); account_def (borrow_ state);
+      events_def (borrow_ state));
     state
 
   let make_set : (state : {s : t | size s < Bigint.of_int max_int}) @ unique
@@ -199,15 +230,17 @@ module Make (C : Vox_big_credits.S) = struct
       {r : result | let state = state in added (snapshot state) (snapshot r.#state) r.#value &&
         size r.#state = Bigint.add (size state) 1Z &&
         contains (snapshot r.#state) r.#value &&
-        account r.#state = Bigint.add (account state) 11Z} @ unique =
+        account r.#state = Bigint.add (account state) 11Z &&
+        events r.#state === E.Allocate :: events state} @ unique =
     fun state fee ->
-    ghost_ (size_def (borrow_ state); account_def (borrow_ state); snapshot_def (borrow_ state));
+    ghost_ (size_def (borrow_ state); account_def (borrow_ state); snapshot_def (borrow_ state);
+      events_def (borrow_ state));
     let before = ghost_ (snapshot (borrow_ state)) in
     let result = U.make_set_connectivity state.#inner fee in
     let #{U.value; state = next} = result in
     let next : t = #{inner = next} in
     ghost_ (size_def (borrow_ next); account_def (borrow_ next);
-      snapshot_def (borrow_ next);
+      snapshot_def (borrow_ next); events_def (borrow_ next);
       added_def before (snapshot (borrow_ next)) value;
       contains_def (snapshot (borrow_ next)) value);
     #{value; state = next}
@@ -219,9 +252,12 @@ module Make (C : Vox_big_credits.S) = struct
         @ unique total ghost ->
       {r : result | let state = state in found (snapshot state) (snapshot r.#state) x &&
         size r.#state = size state && r.#value === root (snapshot state) x &&
-        account r.#state = Bigint.add (account state) (find_fee state)} @ unique =
+        account r.#state = Bigint.add (account state) (find_fee state) &&
+        snapshot r.#state === compressed (snapshot state) x &&
+        events r.#state === E.Find (depth (snapshot state) x) :: events state}
+      @ unique =
     fun x state fee ->
-    ghost_ (size_def (borrow_ state);
+    ghost_ (size_def (borrow_ state); events_def (borrow_ state);
       account_def (borrow_ state);
       snapshot_def (borrow_ state);
       find_fee_def (borrow_ state));
@@ -231,7 +267,8 @@ module Make (C : Vox_big_credits.S) = struct
     let #{U.value; state = next} = result in
     let next : t = #{inner = next} in
     ghost_ (size_def (borrow_ next); account_def (borrow_ next);
-      snapshot_def (borrow_ next); found_def before (snapshot (borrow_ next)) x; root_def before x);
+      snapshot_def (borrow_ next); found_def before (snapshot (borrow_ next)) x; root_def before x;
+      events_def (borrow_ next); depth_def before x; compressed_def before x);
     #{value; state = next}
 
   let union : (x : elem) @ immutable -> (y : elem) @ immutable ->
@@ -242,10 +279,13 @@ module Make (C : Vox_big_credits.S) = struct
         @ unique total ghost ->
       {r : result | let state = state in joined (snapshot state) (snapshot r.#state) x y r.#value &&
         size r.#state = size state &&
-        account r.#state = Bigint.add (account state) (union_fee state)}
+        account r.#state = Bigint.add (account state) (union_fee state) &&
+        events r.#state === E.Union :: E.Link ::
+          E.Find (depth (compressed (snapshot state) x) y) ::
+          E.Find (depth (snapshot state) x) :: events state}
       @ unique =
     fun x y state fee ->
-    ghost_ (size_def (borrow_ state);
+    ghost_ (size_def (borrow_ state); events_def (borrow_ state);
       account_def (borrow_ state);
       snapshot_def (borrow_ state);
       union_fee_def (borrow_ state));
@@ -255,6 +295,8 @@ module Make (C : Vox_big_credits.S) = struct
     let #{U.value; state = next} = result in
     let next : t = #{inner = next} in
     ghost_ (size_def (borrow_ next); account_def (borrow_ next);
-      snapshot_def (borrow_ next); joined_def before (snapshot (borrow_ next)) x y value);
+      snapshot_def (borrow_ next); joined_def before (snapshot (borrow_ next)) x y value;
+      events_def (borrow_ next); depth_def before x; compressed_def before x;
+      depth_def (compressed before x) y);
     #{value; state = next}
 end

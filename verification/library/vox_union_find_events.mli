@@ -1,4 +1,4 @@
-type event = Initialize | Allocate | Find of {depth : Bigint.t | depth >= 0Z} | Link | Union
+type event = Initialize | Allocate | Find of Bigint.t | Link | Union
 [@@inductive]
 val weight : event -> Bigint.t @@ total
 val weight_def : (event : event) ->

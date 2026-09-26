@@ -45,6 +45,8 @@ module Make (C : Vox_big_credits.S) : sig
     {u : unit | alpha s === (ghost_ s.#alpha)} @@ total
   val ticks_def : (s : t) @ local immutable total forkable unyielding ->
     {u : unit | ticks s === (ghost_ s.#spent)} @@ total
+  val events_def : (s : t) @ local immutable total forkable unyielding ->
+    {u : unit | events s === (ghost_ s.#events)} @@ total
   val member_def : (x : M.elem) @ immutable ->
     (s : t) @ local immutable total forkable unyielding ->
     {u : unit | member x s === (ghost_ (F.member x s.#paths))} @@ total
@@ -96,6 +98,7 @@ module Make (C : Vox_big_credits.S) : sig
       @ ghost -> (fee : {b : C.token | C.credits b >= 1Z}) @ unique total ghost ->
       {r : initialized | let capacity = capacity in
         valid r.#state && r.#state.#spent = 1Z && account r.#state = 1Z &&
+        r.#state.#events === [E.Initialize] &&
         1Z <= r.#state.#alpha && r.#state.#alpha <= r.#state.#capacity &&
         r.#state.#capacity = capacity && r.#state.#paths === [] &&
         K.below capacity r.#state.#alpha &&
@@ -115,7 +118,7 @@ module Make (C : Vox_big_credits.S) : sig
         valid r.#state && r.#state.#capacity = capacity &&
         state.#alpha <= r.#state.#alpha && r.#state.#alpha <= Bigint.add state.#alpha 1Z &&
         r.#state.#paths === state.#paths && heap r.#state === heap state &&
-        r.#state.#spent = state.#spent &&
+        r.#state.#spent = state.#spent && r.#state.#events === state.#events &&
         (let fee = fee in
           C.credits r.#refund = Bigint.sub (C.credits fee)
             (Bigint.mul 4Z (Bigint.mul (Bigint.sub r.#state.#alpha state.#alpha)
@@ -133,6 +136,7 @@ module Make (C : Vox_big_credits.S) : sig
         valid r.#state && r.#state.#capacity = state.#capacity &&
         r.#state.#alpha = state.#alpha &&
         r.#state.#paths === M.Stop r.#value :: state.#paths &&
+        r.#state.#events === E.Allocate :: state.#events &&
         not (H.mem (heap state) r.#value) &&
         heap r.#state === H.put (heap state) r.#value (M.Root 0) &&
         (let fee = fee in
@@ -154,6 +158,8 @@ module Make (C : Vox_big_credits.S) : sig
         r.#state.#capacity = state.#capacity && r.#state.#alpha = state.#alpha &&
         r.#value === representative x state &&
         heap r.#state === M.compressed (heap state) (F.lookup x state.#paths) &&
+        r.#state.#events ===
+          E.Find (M.depth (F.lookup x state.#paths)) :: state.#events &&
         (let fee = fee in
           Bigint.add (account r.#state) (C.credits r.#refund) =
             Bigint.add (account state) (C.credits fee) && C.credits r.#refund >=
@@ -173,6 +179,9 @@ module Make (C : Vox_big_credits.S) : sig
         F.size r.#state.#paths = F.size state.#paths &&
         heap r.#state === S.union_heap (heap state) state.#paths x y &&
         r.#value === S.union_root (heap state) state.#paths x y &&
+        r.#state.#events === E.Union :: E.Link ::
+          E.Find (M.depth (F.lookup y (S.find_paths state.#paths x))) ::
+          E.Find (M.depth (F.lookup x state.#paths)) :: state.#events &&
         (let fee = fee in
           Bigint.add (account r.#state) (C.credits r.#refund) =
             Bigint.add (account state) (C.credits fee) && C.credits r.#refund >=

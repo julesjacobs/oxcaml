@@ -5,6 +5,7 @@ module A = Vox_union_find_amortized
 module K = Vox_ackermann
 module P = Ghost_pref
 module H = P.Heap
+module E = Vox_union_find_events
 
 module Make (C : Vox_big_credits.S) = struct
   type elem = M.elem
@@ -52,6 +53,15 @@ module Make (C : Vox_big_credits.S) = struct
   let[@def] connected (p : snapshot @ immutable)
       (x : M.elem @ immutable) (y : M.elem @ immutable) =
     ghost_ (contains p x && contains p y && root p x === root p y)
+  let[@def] depth (p : snapshot @ immutable) (x : M.elem @ immutable) =
+    ghost_ (M.depth (F.lookup x p.paths))
+  let[@def] compressed (p : snapshot @ immutable) (x : M.elem @ immutable) =
+    ghost_ { paths = S.find_paths p.paths x;
+      memory = S.find_heap p.memory p.paths x; capacity = p.capacity }
+  let (depth_law @ total) : (p : snapshot) @ immutable ->
+      (x : M.elem) @ immutable -> {u : unit | depth p x >= 0Z} @ ghost =
+      fun p x -> ghost_ (
+    depth_def p x; M.depth_nonnegative (F.lookup x p.paths); ())
   let[@def] sound (p : snapshot @ immutable) = ghost_ (
     F.valid p.memory p.paths && F.complete p.paths p.paths &&
     R.all_ordered p.capacity p.memory p.paths &&
@@ -63,6 +73,29 @@ module Make (C : Vox_big_credits.S) = struct
     valid_def (borrow_ state); snapshot_def (borrow_ state);
     contents_def (borrow_ state); heap_def (borrow_ state);
     sound_def (snapshot state); U.model_valid (borrow_ state.#core);
+    ())
+  let (root_law @ total) :
+      (state : t) @ local immutable total ghost forkable unyielding ->
+      (x : M.elem) @ immutable ->
+      {u : unit | if valid state && contains (snapshot state) x then
+        contains (snapshot state) (root (snapshot state) x) &&
+        root (snapshot state) (root (snapshot state) x) === root (snapshot state) x &&
+        (depth (snapshot state) x = 0Z) = (root (snapshot state) x === x)
+        else true} @ ghost = fun state x -> ghost_ (
+    snapshot_valid (borrow_ state);
+    let p = snapshot state in
+    let h = p.memory in let paths = p.paths in
+    let path = F.lookup x paths in let r = M.root path in
+    sound_def p; contains_def p x; root_def p x; F.representative_def x paths;
+    F.lookup_valid h x paths; F.lookup_closed paths paths x;
+    F.closed_root paths path; M.terminal h path; M.is_root_def h r;
+    contains_def p r; root_def p r; F.representative_def r paths;
+    F.lookup_valid h r paths;
+    M.valid_def h (M.Stop r); M.head_def (M.Stop r); M.root_def (M.Stop r);
+    M.unique_root h (F.lookup r paths) (M.Stop r);
+    depth_def p x; M.depth_def path; M.root_def path; M.head_def path;
+    M.valid_def h path; M.tail_def path;
+    M.depth_nonnegative (M.tail path);
     ())
   let[@def] added (before : snapshot @ immutable) (after : snapshot @ immutable)
       (x : M.elem @ immutable) = ghost_ (
@@ -205,7 +238,8 @@ module Make (C : Vox_big_credits.S) = struct
     A.find_fee_def (U.alpha state.#core); A.union_fee_def (U.alpha state.#core);
     ())
   let create : (fee : {b : C.token | C.credits b = 1Z}) @ unique total ghost ->
-      {s : t | valid s && size s = 0Z && contents s === [] && account s = 1Z} @ unique =
+      {s : t | valid s && size s = 0Z && contents s === [] && account s = 1Z &&
+        events s === [E.Initialize]} @ unique =
       fun fee ->
     (* The imported max_int has no refinement; check it once at creation. *)
     let checked : {u : unit | 1Z <= Bigint.of_int max_int} =
@@ -223,7 +257,8 @@ module Make (C : Vox_big_credits.S) = struct
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
-      F.size_def []; K.minimum_def 1Z (Bigint.of_int max_int));
+      F.size_def []; K.minimum_def 1Z (Bigint.of_int max_int);
+      events_def (borrow_ state); U.events_def (borrow_ state.#core));
     state
 
   let make_set :
@@ -235,7 +270,8 @@ module Make (C : Vox_big_credits.S) = struct
         size r.#state = Bigint.add (size state) 1Z && member r.#value r.#state &&
         not (H.mem (heap state) r.#value) &&
         heap r.#state === H.put (heap state) r.#value (M.Root 0) &&
-        account r.#state = Bigint.add (account state) 11Z} @ unique =
+        account r.#state = Bigint.add (account state) 11Z &&
+        events r.#state === E.Allocate :: events state} @ unique =
       fun state fee ->
     let state = state in
     let previous = ghost_ (snapshot (borrow_ state)) in
@@ -244,7 +280,8 @@ module Make (C : Vox_big_credits.S) = struct
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
-      U.alpha_def (borrow_ state.#core));
+      U.alpha_def (borrow_ state.#core);
+      events_def (borrow_ state); U.events_def (borrow_ state.#core));
     let n = ghost_ (size (borrow_ state)) in
     let old_epoch = ghost_ state.#epoch in
     let old_cap = ghost_ (U.capacity (borrow_ state.#core)) in
@@ -286,7 +323,8 @@ module Make (C : Vox_big_credits.S) = struct
     let state = #{core; savings; epoch} in
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
-      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
+      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
+      events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (size_def (borrow_ state); contents_def (borrow_ state);
       F.size_def (contents (borrow_ state));
       member_def value (borrow_ state); F.member_def value (contents (borrow_ state)); M.head_def (M.Stop value));
@@ -303,7 +341,9 @@ module Make (C : Vox_big_credits.S) = struct
         contents r.#state === F.refresh (F.lookup x (contents state)) (contents state) &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
         size r.#state = size state && r.#value === representative x state &&
-        account r.#state = Bigint.add (account state) (find_fee state)}
+        account r.#state = Bigint.add (account state) (find_fee state) &&
+        snapshot r.#state === compressed (snapshot state) x &&
+        events r.#state === E.Find (depth (snapshot state) x) :: events state}
       @ unique = fun x state fee ->
     let state = state in
     let previous = ghost_ (snapshot (borrow_ state)) in
@@ -312,7 +352,8 @@ module Make (C : Vox_big_credits.S) = struct
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
-      U.alpha_def (borrow_ state.#core));
+      U.alpha_def (borrow_ state.#core);
+      events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (member_def x (borrow_ state); U.member_def x (borrow_ state.#core);
       find_fee_def (borrow_ state); representative_def x (borrow_ state);
       U.representative_def x (borrow_ state.#core));
@@ -332,9 +373,13 @@ module Make (C : Vox_big_credits.S) = struct
     let state = #{core; savings; epoch} in
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
-      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
+      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
+      events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (snapshot_def (borrow_ state);
-      found_def previous (snapshot (borrow_ state)) x);
+      found_def previous (snapshot (borrow_ state)) x;
+      compressed_def previous x; depth_def previous x;
+      S.find_paths_def previous.paths x;
+      S.find_heap_def previous.memory previous.paths x);
     let result = #{value; state} in result
 
   let union : (x : M.elem) @ immutable -> (y : M.elem) @ immutable ->
@@ -346,7 +391,10 @@ module Make (C : Vox_big_credits.S) = struct
         contents r.#state === S.union_paths (heap state) (contents state) x y &&
         F.addresses (contents r.#state) === F.addresses (contents state) &&
         size r.#state = size state && r.#value === S.union_root (heap state) (contents state) x y &&
-        account r.#state = Bigint.add (account state) (union_fee state)} @ unique =
+        account r.#state = Bigint.add (account state) (union_fee state) &&
+        events r.#state === E.Union :: E.Link ::
+          E.Find (depth (compressed (snapshot state) x) y) ::
+          E.Find (depth (snapshot state) x) :: events state} @ unique =
       fun x y state fee ->
     let state = state in
     let previous = ghost_ (snapshot (borrow_ state)) in
@@ -355,7 +403,8 @@ module Make (C : Vox_big_credits.S) = struct
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
       U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
-      U.alpha_def (borrow_ state.#core));
+      U.alpha_def (borrow_ state.#core);
+      events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (member_def x (borrow_ state); U.member_def x (borrow_ state.#core);
       union_fee_def (borrow_ state); representative_def x (borrow_ state);
       U.representative_def x (borrow_ state.#core);
@@ -376,9 +425,12 @@ module Make (C : Vox_big_credits.S) = struct
     let state = #{core; savings; epoch} in
     ghost_ (valid_def (borrow_ state); contents_def (borrow_ state);
       heap_def (borrow_ state); size_def (borrow_ state); account_def (borrow_ state);
-      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core));
+      U.contents_def (borrow_ state.#core); U.capacity_def (borrow_ state.#core);
+      events_def (borrow_ state); U.events_def (borrow_ state.#core));
     ghost_ (snapshot_def (borrow_ state);
-      joined_def previous (snapshot (borrow_ state)) x y value);
+      joined_def previous (snapshot (borrow_ state)) x y value;
+      compressed_def previous x; depth_def previous x;
+      depth_def (compressed previous x) y);
     let result = #{value; state} in result
 
   let (fee_bounds @ total) :
@@ -442,7 +494,8 @@ module Make (C : Vox_big_credits.S) = struct
 
   let create_connectivity : (fee : {b : C.token | C.credits b = 1Z}) @ unique
     total ghost ->
-      {s : t | valid s && size s = 0Z && account s = 1Z} @ unique = fun fee ->
+      {s : t | valid s && size s = 0Z && account s = 1Z &&
+        events s === [E.Initialize]} @ unique = fun fee ->
     let result = create fee in
     result
 
@@ -454,7 +507,8 @@ module Make (C : Vox_big_credits.S) = struct
         added (snapshot state) (snapshot r.#state) r.#value &&
         size r.#state = Bigint.add (size state) 1Z &&
         contains (snapshot r.#state) r.#value &&
-        account r.#state = Bigint.add (account state) 11Z} @ unique =
+        account r.#state = Bigint.add (account state) 11Z &&
+        events r.#state === E.Allocate :: events state} @ unique =
       fun state fee ->
     let state = state in
     let fee = fee in
@@ -471,7 +525,9 @@ module Make (C : Vox_big_credits.S) = struct
       {r : result | let state = state in valid r.#state &&
         found (snapshot state) (snapshot r.#state) x &&
         size r.#state = size state && r.#value === root (snapshot state) x &&
-        account r.#state = Bigint.add (account state) (find_fee state)}
+        account r.#state = Bigint.add (account state) (find_fee state) &&
+        snapshot r.#state === compressed (snapshot state) x &&
+        events r.#state === E.Find (depth (snapshot state) x) :: events state}
       @ unique = fun x state fee ->
     ghost_ (observe x (borrow_ state));
     let state = state in
@@ -491,7 +547,10 @@ module Make (C : Vox_big_credits.S) = struct
       {r : result | let state = state in valid r.#state &&
         joined (snapshot state) (snapshot r.#state) x y r.#value &&
         size r.#state = size state &&
-        account r.#state = Bigint.add (account state) (union_fee state)}
+        account r.#state = Bigint.add (account state) (union_fee state) &&
+        events r.#state === E.Union :: E.Link ::
+          E.Find (depth (compressed (snapshot state) x) y) ::
+          E.Find (depth (snapshot state) x) :: events state}
       @ unique = fun x y state fee ->
     ghost_ (observe x (borrow_ state); observe y (borrow_ state));
     let state = state in
