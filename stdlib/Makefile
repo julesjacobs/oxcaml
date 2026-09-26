@@ -40,7 +40,8 @@ else
 CAMLC = $(BOOT_OCAMLC)
 endif
 COMPFLAGS = -strict-sequence -absname -w +a-4-9-41-42-44-45-48 \
-            -g -warn-error +A -bin-annot -nostdlib -principal
+            -g -warn-error +A -bin-annot -nostdlib -principal \
+            -extension refinement_types
 ifeq "$(FLAMBDA)" "true"
 OPTCOMPFLAGS += -O3
 endif

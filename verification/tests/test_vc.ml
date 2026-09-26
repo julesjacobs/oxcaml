@@ -1,0 +1,426 @@
+open Vox_smt
+
+let queries ?(retry = false) ?(poll = fun () -> ())
+    ?(before_query = fun _ _ -> ()) source =
+  Language_extension.enable Refinement_types ();
+  Typecore.reset_delayed_checks ();
+  let parsed = Parse.implementation (Lexing.from_string source) in
+  let tree, _, _, _, _, _ =
+    Typemod.type_structure (Lazy.force Env.initial) parsed
+  in
+  Typecore.force_delayed_checks ();
+  let result = ref [] in
+  let first = ref true in
+  Vox_vc.generate ~poll tree ~prove:(fun ~batch:_ loc query ->
+      before_query loc query;
+      check ~int_width:63 query;
+      if retry && !first
+      then begin
+        first := false;
+        raise
+          (Vox_vc.Unproved
+             (Location.errorf ~loc "Exercise individual-obligation retry"))
+      end;
+      result := query :: !result);
+  List.rev !result
+
+let prelude =
+  "external ge : int -> int -> bool @@ total = \"%greaterequal\"\n\
+   external add : int -> int -> int @@ total = \"%addint\"\n\
+   type nonnegative = {n : int | ge n 0}\n"
+
+let () =
+  let source wanted =
+    "external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n\
+     external unknown : (int -> int) @ immutable total -> bool\n\
+     @@ total = \"unknown_callback_fact\"\n\
+     external choose : (f : (int -> int)) @ immutable total ->\n\
+     {n : int | n === 7 && unknown f} = \"choose_with_callback\"\n\
+     let test (f : (int -> int) @ immutable total) =\n\
+     let refine_ n = choose f in\n\
+     let (_ : {n : int | n === " ^ string_of_int wanted
+    ^ "}) = refine_ n in ()\n"
+  in
+  let solve wanted =
+    match queries (source wanted) with
+    | [q] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    | _ -> failwith "Expected one callback-conjunction query"
+  in
+  assert (solve 7 = Valid);
+  assert (match solve 8 with Invalid _ -> true | _ -> false)
+
+let () =
+  let source =
+    prelude ^ "let f (x : int) =\n" ^ "let (_ : nonnegative) = refine_ x in\n"
+    ^ String.concat "" (List.init 40 (fun _ -> "let x = add x x in\n"))
+    ^ "let (_ : {n : int | n === x}) = refine_ x in ()"
+  in
+  let batch = queries source in
+  let separate = queries ~retry:true source in
+  match batch, separate with
+  | [batch], [first; second] ->
+    assert (List.length first.facts < List.length batch.facts / 2);
+    let solve q =
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    in
+    assert (match solve first with Invalid _ -> true | _ -> false);
+    assert (solve second = Valid)
+  | _ -> failwith "Expected a batch and two individual obligations"
+
+let size count body =
+  let steps = String.concat "" (List.init count (fun _ -> body)) in
+  match
+    queries
+      (prelude ^ "let f (b : bool) : nonnegative = let x = 0 in\n" ^ steps
+     ^ "refine_ x")
+  with
+  | [q] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+  | qs ->
+    failwith (Printf.sprintf "Expected one query, got %d" (List.length qs))
+
+let () =
+  List.iter
+    (fun body ->
+      let small = size 20 body in
+      let large = size 80 body in
+      assert (large < 5 * small))
+    [ "(if b then () else ());\n";
+      "let x = if b then add x 1 else add x 2 in\n";
+      "(match b with true when b -> () | false -> () | _ -> ());\n" ];
+  let source =
+    prelude
+    ^ "let f () =\n\
+       let x = 0 in\n\
+       let (_ : nonnegative) = refine_ x in\n\
+       let (_ : nonnegative) = refine_ x in ()\n"
+  in
+  assert (List.length (queries source) = 1);
+  assert (
+    List.length
+      (queries (source ^ "let g () : nonnegative = let x = 1 in refine_ x"))
+    = 2);
+  let independent count =
+    let parameters =
+      String.concat " "
+        (List.init count (fun i -> Printf.sprintf "(b%d : bool)" i))
+    in
+    let steps =
+      String.concat ""
+        (List.init count (fun i ->
+             Printf.sprintf "let x = if b%d then add x 1 else add x 2 in\n" i))
+    in
+    match
+      queries
+        (prelude ^ "let f " ^ parameters ^ " : nonnegative = let x = 0 in\n"
+       ^ steps ^ "refine_ x")
+    with
+    | [q] -> q
+    | _ -> failwith "Expected one query for independent joins"
+  in
+  let q = independent 20 in
+  let rec count_ites = function
+    | App (op, args) ->
+      (if op = Ite then 1 else 0)
+      + List.fold_left (fun n t -> n + count_ites t) 0 args
+    | _ -> 0
+  in
+  assert (List.fold_left (fun n f -> n + count_ites f.term) 0 q.facts = 20);
+  let result =
+    Vox_smt_solver.check
+      ~config:{ Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+      ~int_width:63 q
+  in
+  assert (result.validity = Valid);
+  print_endline "VC sharing and batching tests passed"
+
+let () =
+  let solve source =
+    match queries (prelude ^ source) with
+    | [q] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    | _ -> failwith "Expected one function-join query"
+  in
+  assert (
+    solve
+      "let f (b : bool) = let g x = x in let h x = add x 1 in let chosen = if \
+       b then g else h in let a = chosen 0 in let c = chosen 0 in let (_ : {r \
+       : int | r === c}) = refine_ a in ()"
+    = Valid);
+  assert (
+    match
+      solve
+        "let f (b : bool) = let g x = x in let h x = add x 1 in let chosen = \
+         if b then g else h in let a = chosen 0 in let c = g 0 in let (_ : {r \
+         : int | r === c}) = refine_ a in ()"
+    with
+    | Invalid _ -> true
+    | _ -> false)
+
+let () =
+  let copy_query_size count =
+    let source =
+      "external append : int iarray -> int iarray -> int iarray = \
+       \"caml_array_append\"\n"
+      ^ "external get : int iarray -> int -> int = \"%array_safe_get\"\n"
+      ^ "external eq : int -> int -> bool @@ total = \"%equal\"\n"
+      ^ "let f (index : int) : {value : int | eq value value} =\n"
+      ^ "let array = [: 7 :] in\n"
+      ^ String.concat ""
+          (List.init count (fun _ ->
+               "let copy = append array [: :] in\n"
+               ^ "let array = append array copy in\n"))
+      ^ "let value = get array index in refine_ value"
+    in
+    match queries source with
+    | [query] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 query)
+    | _ -> failwith "Expected one array-copy query"
+  in
+  let small = copy_query_size 12 in
+  let large = copy_query_size 24 in
+  assert (large < 3 * small);
+  assert (large < 500_000);
+  print_endline "Array-copy query expansion is bounded"
+
+let () =
+  let solve source =
+    match queries (prelude ^ source) with
+    | [q] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 q)
+        .validity
+    | _ -> failwith "Expected one ghost-lambda query"
+  in
+  let application value =
+    "let f () = let p = ghost_ (fun (x : int) -> ge x 0) in\n" ^ "let value = "
+    ^ value ^ " in let u = () in\n"
+    ^ "let (_ : {u : unit | p value}) = refine_ u in ()"
+  in
+  assert (solve (application "1") = Valid);
+  let opaque_alias =
+    "let f () = let p (x : int) = ge x 0 in let q = ghost_ p in\n"
+    ^ "let value = 1 in let u = () in\n"
+    ^ "let (_ : {u : unit | q value}) = refine_ u in ()"
+  in
+  assert (match solve opaque_alias with Invalid _ -> true | _ -> false);
+  assert (match solve (application "-1") with Invalid _ -> true | _ -> false);
+  let checked_body =
+    "let f () = let _p = ghost_ (fun (x : int) ->\n"
+    ^ "let negative = -1 in let (_ : nonnegative) = refine_ negative in\n"
+    ^ "ge x 0) in ()"
+  in
+  assert (match solve checked_body with Invalid _ -> true | _ -> false);
+  let array_observation operation expected =
+    "external length : int iarray @ immutable total -> int @@ total = "
+    ^ "\"%array_length\"\n"
+    ^ "external get : int iarray @ immutable total -> int -> int @@ total = "
+    ^ "\"%array_safe_get\"\n" ^ "let f () = let p = ghost_ (fun (x : int) -> "
+    ^ operation ^ ") in let input = 7 in let u = () in\n"
+    ^ "let (_ : {u : unit | p input === " ^ string_of_int expected
+    ^ "}) = refine_ u in ()"
+  in
+  assert (solve (array_observation "length [: x; 20 :]" 2) = Valid);
+  assert (solve (array_observation "get [: x; 20 :] 0" 7) = Valid);
+  assert (
+    match solve (array_observation "get [: x; 20 :] 0" 20) with
+    | Invalid _ -> true
+    | _ -> false);
+  let lambda_size count =
+    let source =
+      prelude ^ "let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init count (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n"
+      ^ "let (_ : {u : unit | ge (p x) 0}) = refine_ u in ()"
+    in
+    match queries source with
+    | [q] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+    | _ -> failwith "Expected one shared ghost-lambda query"
+  in
+  let small = lambda_size 20 in
+  let large = lambda_size 80 in
+  assert (large < 5 * small);
+  let repeated_size count =
+    let predicate =
+      String.concat " && " (List.init count (fun _ -> "ge (p x) 0"))
+    in
+    let source =
+      prelude
+      ^ "external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n"
+      ^ "let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init 20 (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n" ^ "let (_ : {u : unit | " ^ predicate
+      ^ "}) = refine_ u in ()"
+    in
+    match queries source with
+    | [q] -> String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+    | _ -> failwith "Expected one repeated ghost-lambda query"
+  in
+  assert (repeated_size 20 < 3 * repeated_size 1);
+  assert (
+    solve
+      ("let f (x : int) = let p = ghost_ (fun (y : int) ->\n"
+      ^ String.concat "" (List.init 20 (fun _ -> "let y = add y y in\n"))
+      ^ "y) in let u = () in\n"
+      ^ "let (_ : {u : unit | ge (p x) (p x)}) = refine_ u in ()")
+    = Valid);
+  assert (
+    match
+      solve
+        "let f () = let p = ghost_ (fun (x : int) -> add x 1) in\n\
+         let u = () in let (_ : {u : unit | p 1 === p 2}) = refine_ u in ()"
+    with
+    | Invalid _ -> true
+    | _ -> false);
+  print_endline "Ghost lambdas preserve obligations and share substitutions"
+
+let () =
+  let nested_copy expected =
+    "external copy : (a : int iarray iarray) -> "
+    ^ "{b : int iarray iarray | b === a} @ total = \"%obj_dup\"\n"
+    ^ "external row : int iarray iarray -> int -> int iarray @ total = "
+    ^ "\"%array_safe_get\"\n"
+    ^ "external get : int iarray -> int -> int @ total = "
+    ^ "\"%array_safe_get\"\n" ^ "let f () : {n : int | n === "
+    ^ string_of_int expected ^ "} =\n" ^ "let source = [: [: 10; 20 :] :] in\n"
+    ^ "let refine_ values = copy source in\n"
+    ^ "let selected = row values 0 in\n"
+    ^ "let value = get selected 1 in refine_ value"
+  in
+  let solve expected =
+    match queries (nested_copy expected) with
+    | [query] ->
+      (Vox_smt_solver.check
+         ~config:
+           { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+         ~int_width:63 query)
+        .validity
+    | _ -> failwith "Expected one nested-array query"
+  in
+  assert (solve 20 = Valid);
+  assert (match solve 10 with Invalid _ -> true | _ -> false);
+  print_endline "Iarray equality transports nested observations"
+
+let () =
+  let prelude =
+    "type pointer : immutable_data\n\
+     type heap : immutable_data\n\
+     external empty : unit -> heap @@ total = \"caml_pref_heap_empty\"\n\
+     external mem : heap -> pointer -> bool @@ total = \"caml_pref_heap_mem\"\n\
+     external put : heap -> pointer -> int -> heap @@ total = \
+     \"caml_pref_heap_put\"\n\
+     external ( && ) : bool -> bool -> bool @@ total = \"%sequand\"\n"
+  in
+  let query source =
+    match queries (prelude ^ source) with
+    | [q] -> q
+    | _ -> failwith "Expected one Pref identity query"
+  in
+  let identity_size count =
+    let parameters =
+      String.concat " "
+        (List.init count (fun i -> Printf.sprintf "(p%d : pointer)" i))
+    in
+    let observations =
+      String.concat " && "
+        (List.init count (fun i -> Printf.sprintf "mem h p%d === mem h p%d" i i))
+    in
+    let q =
+      query
+        ("let f (h : heap) " ^ parameters
+       ^ " = let u = () in let (_ : {u : unit | " ^ observations
+       ^ "}) = refine_ u in ()")
+    in
+    String.length (to_smtlib ~int_width:63 ~timeout_ms:5000 q)
+  in
+  assert (identity_size 80 < 5 * identity_size 20);
+  let solve predicate =
+    let q =
+      query
+        ("let f (p : pointer) (q : pointer) = let u = () in\n"
+       ^ "let (_ : {u : unit | " ^ predicate ^ "}) = refine_ u in ()")
+    in
+    (Vox_smt_solver.check
+       ~config:{ Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+       ~int_width:63 q)
+      .validity
+  in
+  assert (solve "mem (put (empty ()) p 0) q === (p === q)" = Valid);
+  assert (match solve "p === q" with Invalid _ -> true | _ -> false);
+  assert (
+    match solve "(p === q) === false" with Invalid _ -> true | _ -> false);
+  print_endline "Pref identity equations scale linearly"
+
+let () =
+  let source =
+    "type pointer : immutable_data\n\
+     type heap : immutable_data\n\
+     type 'a option = None | Some of 'a\n\
+     external put : heap -> pointer -> int -> heap @@ total = \
+     \"caml_pref_heap_put\"\n\
+     external at : heap -> pointer -> int option @@ total = \
+     \"caml_pref_heap_at\"\n\
+     external write : (h : heap) -> (p : pointer) -> (v : int) ->\n\
+     {r : heap | r === put h p v} = \"test_heap_write\"\n\
+     let f (h : heap) "
+    ^ String.concat " "
+        (List.init 48 (fun i -> Printf.sprintf "(p%d : pointer)" i))
+    ^ " =\n"
+    ^ String.concat ""
+        (List.init 48 (fun i ->
+             Printf.sprintf
+               "let h = write h p%d %d in\n\
+                let u = () in\n\
+                let (_ : {u : unit | at h p%d === Some %d}) = refine_ u in\n"
+               i i i i))
+    ^ "let u = () in\n\
+       let (_ : {u : unit | at h p47 === Some 999}) = refine_ u in ()"
+  in
+  let qs = queries ~retry:true source in
+  assert (List.length qs = 49);
+  List.iteri
+    (fun index query ->
+      let validity =
+        (Vox_smt_solver.check
+           ~config:
+             { Vox_smt_solver.default_config with executable = Sys.argv.(1) }
+           ~int_width:63 query)
+          .validity
+      in
+      if index < 48
+      then assert (validity = Valid)
+      else assert (match validity with Invalid _ -> true | _ -> false))
+    qs;
+  print_endline "Heap observations are regenerated for individual obligations"
+
+let () =
+  match queries ~poll:(fun () -> raise Exit) (prelude ^ "let x = 0") with
+  | _ -> failwith "Expected VC construction cancellation"
+  | exception Exit -> ()
+
+let () =
+  let calls = ref 0 in
+  let before_query loc _ =
+    incr calls;
+    Location.raise_errorf ~loc "Infrastructure failure"
+  in
+  let source =
+    prelude ^ "let f (x : int) = let a : nonnegative = refine_ x in "
+    ^ "let b : nonnegative = refine_ x in a, b"
+  in
+  match queries ~before_query source with
+  | _ -> failwith "Expected infrastructure failure"
+  | exception Location.Error _ -> assert (!calls = 1)

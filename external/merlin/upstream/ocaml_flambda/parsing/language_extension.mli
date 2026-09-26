@@ -32,6 +32,7 @@ type 'a t = 'a Language_extension_kernel.t =
   | Let_mutable : unit t
   | Layout_poly : maturity t
   | Runtime_metaprogramming : unit t
+  | Refinement_types : unit t
 
 (** Require that an extension is enabled for at least the provided level, or
     else throw an exception at the provided location saying otherwise. *)
@@ -143,7 +144,7 @@ val is_at_least : 'a t -> 'a -> bool
     instead. *)
 val with_set : unit t -> enabled:bool -> (unit -> unit) -> unit
 
-val with_enabled : 'a t -> 'a -> (unit -> unit) -> unit
+val with_enabled : 'a t -> 'a -> (unit -> 'b) -> 'b
 
 val with_disabled : 'a t -> (unit -> unit) -> unit
 

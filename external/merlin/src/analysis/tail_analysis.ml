@@ -46,7 +46,7 @@ let tail_operator = function
   | _ -> false
 
 let expr_tail_positions = function
-  | Texp_apply (callee, args, _, _, _) when tail_operator callee ->
+  | Texp_apply (callee, args, _, _, _, _) when tail_operator callee ->
     begin match List.last args with
     | None | Some (_, Omitted _) -> []
     | Some (_, Arg (expr, _)) -> [ Expression expr ]
@@ -55,6 +55,7 @@ let expr_tail_positions = function
   | Texp_setinstvar _
   | Texp_override _
   | Texp_assert _
+  | Texp_logical_equal _
   | Texp_lazy _
   | Texp_object _
   | Texp_pack _
@@ -91,8 +92,8 @@ let expr_tail_positions = function
   | Texp_idx _
   | Texp_atomic_loc _
   | Texp_hole _
-  | Texp_quotation _
-  | Texp_antiquotation _
+  | Texp_quote _
+  | Texp_splice _
   | Texp_unboxed_unit
   | Texp_unboxed_bool _ -> []
   | Texp_match (_, _, cs, _, _) -> List.map cs ~f:(fun c -> Case c)
@@ -100,6 +101,7 @@ let expr_tail_positions = function
   | Texp_letmodule (_, _, _, _, e)
   | Texp_letexception (_, e)
   | Texp_let (_, _, e)
+  | Texp_assume (_, _, e)
   | Texp_letmutable (_, e)
   | Texp_sequence (_, _, e)
   | Texp_ifthenelse (_, e, None)

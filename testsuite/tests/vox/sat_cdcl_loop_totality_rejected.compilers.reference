@@ -1,0 +1,7 @@
+File "sat_cdcl_loop_totality_rejected.ml", line 12, characters 12-34:
+12 |   fun () -> while false do () done
+                 ^^^^^^^^^^^^^^^^^^^^^^
+Error: The loop is partial
+       but is expected to be total
+         because it is used inside the function at file "sat_cdcl_loop_totality_rejected.ml", line 12, characters 2-34
+         which is expected to be total.

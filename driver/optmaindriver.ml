@@ -21,6 +21,7 @@ module Options = Oxcaml_args.Make_optcomp_options
         (Oxcaml_args.Default.Optmain)
 
 let main unix argv ppf ~flambda2 =
+  Vox_verify.install ();
   native_code := true;
   let columns =
     match Sys.getenv "COLUMNS" with
@@ -60,7 +61,7 @@ let main unix argv ppf ~flambda2 =
         (use 'ocamlopt -depend -help' for details)"];
     Clflags.Opt_flag_handler.set Oxcaml_flags.opt_flag_handler;
     Compenv.parse_arguments (ref argv) Compenv.anonymous "ocamlopt";
-    Compmisc.read_clflags_from_env ();
+    Location.read_clflags_from_env ();
     (* Set platform-appropriate DWARF fission default when oxcaml-dwarf is
        enabled *)
     if Config.oxcaml_dwarf &&
@@ -103,6 +104,7 @@ let main unix argv ppf ~flambda2 =
     if
       List.length (List.filter (fun x -> !x)
                      [make_package; make_archive; shared; instantiate;
+                      functorize;
                       Compenv.stop_early; output_c_object]) > 1
     then
     begin
@@ -110,7 +112,7 @@ let main unix argv ppf ~flambda2 =
       match !stop_after with
       | None ->
           Compenv.fatal "Please specify at most one of -pack, -a, -shared, -c, \
-                         -output-obj, -instantiate";
+                         -output-obj, -instantiate, -functorize";
       | Some ((P.Parsing | P.Typing | P.Lambda | P.Middle_end | P.Linearization
               | P.Simplify_cfg | P.Emit | P.Selection
               | P.Register_allocation | P.Llvmize) as p) ->
@@ -152,6 +154,16 @@ let main unix argv ppf ~flambda2 =
           src, args
       in
       Compiler.instantiate ~src ~args target;
+      Warnings.check_fatal ();
+    end
+    else if !functorize then begin
+      Compmisc.init_path ();
+      let target = Compenv.extract_output !output_name in
+      let input_module_names =
+        Compenv.get_objfiles ~with_ocamlparam:false
+        |> Functorizer.validate_inputs
+      in
+      Compiler.functorize input_module_names target;
       Warnings.check_fatal ();
     end
     else if !shared then begin

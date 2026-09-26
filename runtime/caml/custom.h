@@ -109,6 +109,7 @@ extern const struct custom_operations caml_int32_ops;
 extern const struct custom_operations caml_int64_ops;
 extern const struct custom_operations caml_ba_ops;
 extern const struct custom_operations caml_float32_ops;
+extern const struct custom_operations caml_bigint_ops;
 #endif /* CAML_INTERNALS */
 
 #endif /* CAML_CUSTOM_H */

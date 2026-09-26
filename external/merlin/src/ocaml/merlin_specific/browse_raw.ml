@@ -334,14 +334,25 @@ let of_exp_extra (exp, _, _) =
   | Texp_poly cto -> option_fold of_core_type cto
   | Texp_newtype (_, _, jkind, _) -> of_jkind_annotation_opt jkind
   | Texp_mode modes -> of_modes modes
-  | Texp_stack | Texp_inspected_type _ | Texp_borrowed | Texp_ghost_region ->
-    id_fold
+  | Texp_stack
+  | Texp_inspected_type _
+  | Texp_borrowed
+  | Texp_ghost_region
+  | Texp_ghost
+  | Texp_refine
+  | Texp_refinement _
+  | Texp_value_name _
+  | Texp_let_refine _ -> id_fold
 let of_expression e = app (Expression e) ** list_fold of_exp_extra e.exp_extra
 
 let of_pat_extra (pat, _, _) =
   match pat with
-  | Tpat_constraint (ct, modes) -> of_core_type ct ** of_modes modes
-  | Tpat_type _ | Tpat_unpack | Tpat_open _ | Tpat_inspected_type _ -> id_fold
+  | Tpat_constraint (ct, modes) -> option_fold of_core_type ct ** of_modes modes
+  | Tpat_type _
+  | Tpat_unpack
+  | Tpat_open _
+  | Tpat_inspected_type _
+  | Tpat_refinement _ -> id_fold
 
 let of_pattern (type k) (p : k general_pattern) =
   app (Pattern p) ** list_fold of_pat_extra p.pat_extra
@@ -404,12 +415,12 @@ let of_pattern_desc (type k) (desc : k pattern_desc) =
            ** list_fold (fun (_, jkind) -> of_jkind_annotation_opt jkind) jkinds)
          t
   | Tpat_array (_, _, ps) -> list_fold of_pattern ps
-  | Tpat_record (ls, _, _, _) ->
+  | Tpat_record (ls, _, _) ->
     list_fold
       (fun (lid_loc, desc, p) ->
         of_pat_record_field p lid_loc desc Legacy ** of_pattern p)
       ls
-  | Tpat_record_unboxed_product (ls, _, _, _) ->
+  | Tpat_record_unboxed_product (ls, _, _) ->
     list_fold
       (fun (lid_loc, desc, p) ->
         of_pat_record_field p lid_loc desc Unboxed_product ** of_pattern p)
@@ -439,10 +450,13 @@ let rec of_expression_desc loc = function
   | Texp_typed_hole -> id_fold
   | Texp_let (_, vbs, e) -> of_expression e ** list_fold of_value_binding vbs
   | Texp_letmutable (vb, e) -> of_expression e ** of_value_binding vb
+  | Texp_assume (binding, _, _) -> of_expression binding.vb_expr
+  | Texp_logical_equal (left, right) ->
+    of_expression left ** of_expression right
   | Texp_function { params; body; ret_mode; _ } ->
     list_fold of_function_param params
     ** of_function_body body ** of_modes ret_mode
-  | Texp_apply (e, ls, _, _, _) ->
+  | Texp_apply (e, ls, _, _, _, _) ->
     of_expression e
     ** list_fold
          (function
@@ -505,7 +519,6 @@ let rec of_expression_desc loc = function
         label = lbl;
         newval = e2;
         record_repres = _;
-        record_sorts = _;
         modality = _
       } ->
     of_expression e1 ** of_expression e2
@@ -561,10 +574,17 @@ let rec of_expression_desc loc = function
   | Texp_exclave e -> of_expression e
   | Texp_idx (block_access, unboxed_access) ->
     of_block_access block_access ** list_fold of_unboxed_access unboxed_access
-  | Texp_atomic_loc (exp, _, _, _, _) -> of_expression exp
+  | Texp_atomic_loc
+      { record;
+        record_sort = _;
+        record_repres = _;
+        lid = _;
+        label = _;
+        alloc_mode = _
+      } -> of_expression record
   | Texp_hole _ -> id_fold
-  | Texp_quotation exp -> of_expression exp
-  | Texp_antiquotation exp -> of_expression exp
+  | Texp_quote exp -> of_expression exp
+  | Texp_splice exp -> of_expression exp
   | Texp_apply_layout (exp, _) -> of_expression exp
 
 (* We should consider taking into account param.fp_loc at some point, as it
@@ -621,11 +641,11 @@ and of_class_field_desc = function
 and of_module_expr_desc = function
   | Tmod_ident _ -> id_fold
   | Tmod_structure str -> app (Structure str)
-  | Tmod_functor (Unit, me) -> of_module_expr me
-  | Tmod_functor (Named (_, _, mt, modes), me) ->
+  | Tmod_functor (Unit, me, _) -> of_module_expr me
+  | Tmod_functor (Named (_, _, mt, modes), me, _) ->
     of_module_type mt ** of_module_expr me ** of_modes modes
-  | Tmod_apply (me1, me2, _) -> of_module_expr me1 ** of_module_expr me2
-  | Tmod_apply_unit me1 -> of_module_expr me1
+  | Tmod_apply (me1, me2, _, _, _) -> of_module_expr me1 ** of_module_expr me2
+  | Tmod_apply_unit (me1, _) -> of_module_expr me1
   | Tmod_constraint (me, _, mtc, _) ->
     of_module_expr me ** app (Module_type_constraint mtc)
   | Tmod_unpack (e, _) -> of_expression e
@@ -694,7 +714,7 @@ and of_core_type_desc = function
   | Ttyp_call_pos -> id_fold
   | Ttyp_of_kind jkind -> of_jkind_annotation jkind
   | Ttyp_open (_, _, ct) -> of_core_type ct
-  | Ttyp_arrow (_, ct1, modes1, ct2, modes2) ->
+  | Ttyp_arrow (_, ct1, modes1, ct2, modes2, _) ->
     of_core_type ct1 ** of_core_type ct2 ** of_modes modes1 ** of_modes modes2
   | Ttyp_tuple cts -> list_fold (fun (_, ty) -> of_core_type ty) cts
   | Ttyp_unboxed_tuple cts -> list_fold (fun (_, ty) -> of_core_type ty) cts
@@ -713,6 +733,8 @@ and of_core_type_desc = function
     of_core_type ct ** of_jkind_annotation_opt jkind
   | Ttyp_variant (rfs, _, _) -> list_fold (fun rf -> app (Row_field rf)) rfs
   | Ttyp_package pt -> app (Package_type pt)
+  | Ttyp_refine (_, _, payload, predicate) ->
+    of_core_type payload ** of_expression predicate
   | Ttyp_quote ct | Ttyp_splice ct | Ttyp_repr (_, ct) | Ttyp_newlayout (_, ct)
     -> of_core_type ct
 
@@ -738,8 +760,10 @@ let of_jkind_annotation_desc : Parsetree.jkind_annotation_desc -> _ =
   in
   function
   | Pjk_default -> id_fold
-  | Pjk_abbreviation (_, scannable_axis_annotations) ->
-    list_fold of_scannable_axis_annotation scannable_axis_annotations
+  | Pjk_abbreviation _ -> id_fold
+  | Pjk_operator (jkind, scannable_axis_annotations) ->
+    of_jkind_annotation jkind
+    ** list_fold of_scannable_axis_annotation scannable_axis_annotations
   | Pjk_mod (jkind, mod_bounds) ->
     of_jkind_annotation jkind ** list_fold of_mod_bound mod_bounds
   | Pjk_with (jkind, ct, modalities) ->
@@ -1020,7 +1044,7 @@ let pattern_paths (type k) { Typedtree.pat_desc; pat_extra; _ } =
 let module_expr_paths { Typedtree.mod_desc } =
   match mod_desc with
   | Tmod_ident (path, loc) -> [ (reloc path loc, Some loc.txt) ]
-  | Tmod_functor (Named (Some id, loc, _, _), _) ->
+  | Tmod_functor (Named (Some id, loc, _, _), _, _) ->
     [ (reloc (Path.Pident id) loc, Option.map ~f:mk_lident loc.txt) ]
   | _ -> []
 

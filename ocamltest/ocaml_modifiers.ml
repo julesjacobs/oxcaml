@@ -122,11 +122,18 @@ let compilerlibs_subdirs =
   "utils";
 ]
 
-let add_compiler_subdir subdir =
-  append Ocaml_variables.directories [compiler_subdir [subdir]]
+let compilerlibs_directory = Sys.getenv_opt "OCAMLTEST_COMPILERLIBS_DIR"
 
-let compilerlibs_archive archive =
-  append Ocaml_variables.libraries [archive] ::
+let add_compiler_subdir subdir =
+  let directory =
+    match compilerlibs_directory with
+    | Some directory -> directory
+    | None -> compiler_subdir [subdir]
+  in
+  append Ocaml_variables.directories [directory]
+
+let compilerlibs_archives archives =
+  append Ocaml_variables.libraries archives ::
   List.map add_compiler_subdir compilerlibs_subdirs
 
 let debugger = [add_compiler_subdir "debugger"]
@@ -136,7 +143,6 @@ let extension_universe_lib name =
 
 let make_fexpr_dump pass = [
   append Ocaml_variables.fexpr_dump_files [pass ^ ".fl"];
-  append Ocaml_variables.ocamlopt_flags ["-dcanonical-ids"];
   append Ocaml_variables.ocamlopt_flags ["-dfexpr-annot-after="^pass];
 ]
 
@@ -161,13 +167,28 @@ let init () =
       "stdlib_alpha";
     ];
   List.iter
-    (fun archive -> register_modifiers archive (compilerlibs_archive archive))
+    (fun (name, archives) ->
+      let modifiers = compilerlibs_archives archives in
+      let modifiers = if name = "ocamlbytecomp" || name = "ocamloptcomp"
+        then append Ocaml_variables.directories
+          [compiler_subdir ["otherlibs"; "unix"]] :: modifiers
+        else modifiers
+      in
+      register_modifiers name modifiers)
     [
-      "ocamlcommon";
-      "ocamlbytecomp";
-      "ocamlmiddleend";
-      "ocamloptcomp";
-      "ocamltoplevel";
+      (* The compilerlibs split of ocamlcommon into ocamlcommon and
+         ocamlfrontend is specific to this repo.  To avoid updating every
+         test, the "ocamlcommon" modifier links both archives (there is
+         deliberately no "ocamlfrontend" modifier).  If the split is ever
+         upstreamed, this hack should go, with the tests then updated to
+         use the appropriate archives. *)
+      "ocamlcommon", ["ocamlcommon"; "ocamlfrontend"];
+      "ocamlbytecomp", ["unix"; "vox_smt"; "vox_vc"; "vox_smt_solver";
+                        "vox_verify"; "ocamlbytecomp"];
+      "ocamlmiddleend", ["ocamlmiddleend"];
+      "ocamloptcomp", ["unix"; "vox_smt"; "vox_vc"; "vox_smt_solver";
+                       "vox_verify"; "ocamloptcomp"];
+      "ocamltoplevel", ["ocamltoplevel"];
     ];
   register_modifiers "runtime_events" runtime_events;
   register_modifiers "systhreads" systhreads;

@@ -58,6 +58,7 @@ Error: The kind of type "t" is immutable_data with 'a @@ portable
          yielding: mod unyielding with 'a ≰ mod unyielding
          statefulness: mod stateless with 'a ≰ mod stateless
          visibility: mod immutable with 'a ≰ mod immutable
+         totality: mod total with 'a ≰ mod total
 |}]
 
 module M : sig
@@ -112,6 +113,7 @@ Error: Signature mismatch:
          yielding: mod unyielding with 'a ≰ mod unyielding
          statefulness: mod stateless with 'a ≰ mod stateless
          visibility: mod immutable with 'a ≰ mod immutable
+         totality: mod total with 'a ≰ mod total
 |}]
 
 module M : sig
@@ -195,6 +197,7 @@ Error: This type "a" = "int ref" should be an instance of type
          portability: mod portable with int ≰ mod portable
          statefulness: mod stateless with int ≰ mod stateless
          visibility: mod read_write ≰ mod immutable
+         totality: mod total with int ≰ mod total
 |}]
 
 type 'a u = Foo of 'a @@ portable
@@ -208,7 +211,7 @@ Line 3, characters 11-25:
                ^^^^^^^^^^^^^^
 Error: This type "(int -> int) u" should be an instance of type
          "('a : immutable_data)"
-       The kind of (int -> int) u is value non_float mod portable immutable
+       The kind of (int -> int) u is value non_float mod immutable portable
          because of the definition of u at line 1, characters 0-33.
        But the kind of (int -> int) u must be a subkind of immutable_data
          because of the definition of t at line 2, characters 0-28.
@@ -233,6 +236,7 @@ Error: This type "(int -> int) u" should be an instance of type
          yielding: mod unyielding with int -> int ≰ mod unyielding
          statefulness: mod stateless with int -> int ≰ mod stateless
          visibility: mod immutable with int -> int ≰ mod immutable
+         totality: mod total with int -> int ≰ mod total
 |}]
 
 module M : sig

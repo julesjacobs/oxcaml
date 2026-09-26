@@ -2,4 +2,5 @@
 
 let rec x = let _y = [| |] in ();;
 
-let rec x = let y = [| |] in y :: x;;
+type 'a recursive_list = Nil | Cons of 'a * 'a recursive_list
+let rec x = let y = [| |] in Cons (y, x);;

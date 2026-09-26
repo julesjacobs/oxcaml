@@ -87,14 +87,18 @@ let compute_variance env visited vari ty =
           with Not_found ->
             List.iter (compute_variance_rec env unknown) tl
         end
+    | Tmod _ ->
+        Misc.fatal_error "compute_variance_rec: unexpected Tmod"
     | Tobject (ty, _) ->
         compute_same ty
     | Tquote ty ->
-        compute_variance_rec (Env.enter_quotation env) vari ty
+        compute_variance_rec (Env.enter_quote env) vari ty
     | Tsplice ty ->
         compute_variance_rec (Env.enter_splice ~loc:Location.none env) vari ty
     | Tquote_eval ty ->
-        compute_variance_rec (Env.enter_quotation env) vari ty
+        compute_variance_rec (Env.enter_quote env) vari ty
+    | Tbox ty ->
+        compute_same ty
     | Tfield (_, _, ty1, ty2) ->
         compute_same ty1;
         compute_same ty2
@@ -114,6 +118,12 @@ let compute_variance env visited vari ty =
         compute_same (row_more row)
     | Tpoly (ty, _) | Trepr (ty, _) ->
         compute_same ty
+    | Trefine { ref_payload; _ } ->
+        (* Refinements are rigid — they only ever equal alpha-equivalent
+           refinements — so occurrences under them are treated like package
+           constraints, i.e. invariantly. *)
+        let v = Variance.(compose vari full) in
+        compute_variance_rec env v ref_payload
     | Tvar _ | Tnil | Tlink _ | Tunivar _ | Tof_kind _ -> ()
     | Tpackage pack ->
         let v = Variance.(compose vari full) in

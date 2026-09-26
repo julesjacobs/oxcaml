@@ -148,10 +148,12 @@ let rec immediate_subtypes : type_expr -> type_expr list = fun ty ->
          but "better safe than sorry" *)
       immediate_subtypes_object_row [] ty
   | Tquote ty | Tsplice ty | Tquote_eval ty | Tbox ty -> [ty]
+  | Tmod _ -> Misc.fatal_error "immediate_subtypes: Tmod"
   | Tlink _ | Tsubst _ -> assert false (* impossible due to Ctype.repr *)
   | Tvar _ | Tunivar _ -> []
   | Tof_kind _ -> []
   | Tpoly (pty, _) -> [pty]
+  | Trefine { ref_payload; _ } -> [ref_payload]
   | Trepr (_, _) -> Misc.fatal_error "immediate_subtypes: Trepr"
   | Tconstr (_path, tys, _) -> tys
 
@@ -468,10 +470,15 @@ let check_type
        under a separating type constructor. *)
     | (Tpoly(pty,_)       , m      ) ->
         check_type hyps pty m
+    (* The payload determines the memory representation. *)
+    | (Trefine r          , m      ) ->
+        check_type hyps r.ref_payload m
     | (Trepr(_pty,_)       , _m    ) ->
         assert false
     | (Tunivar(_)         , _      ) -> empty
     | (Tof_kind(_)         , _      ) -> empty
+    | (Tmod(_, _)          , _      ) ->
+        Misc.fatal_error "check_type: unexpected Tmod"
     (* Type constructor case. *)
     | (Tconstr(path,tys,_), m      ) ->
         let msig = (Env.find_type path env).type_separability in

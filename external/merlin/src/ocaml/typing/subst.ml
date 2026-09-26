@@ -41,7 +41,8 @@ type additional_action =
   | Prepare_for_saving of
       { prepare_jkind : 'l 'r. Location.t -> ('l * 'r) jkind -> ('l * 'r) jkind;
         prepare_mode : Mode.Alloc.lr -> Mode.Alloc.lr;
-        prepare_modality : Mode.Modality.t -> Mode.Modality.t
+        prepare_modality : Mode.Modality.t -> Mode.Modality.t;
+        prepare_ident : Ident.t -> Ident.t
       }
     (* The [prepare_jkind] function should be applied to all jkinds when
        saving; this commons them up, truncates their histories, and runs
@@ -49,7 +50,10 @@ type additional_action =
 
        The [prepare_mode]/[prepare_modality] functions should be applied to all
        modes/modalities when saving; this ensures the saved file doesn't contain
-       mode variables. *)
+       mode variables.
+
+       The [prepare_ident] function is applied to bound identifiers when saving,
+       giving them deterministic stamps so the saved [.cmi] is reproducible. *)
   | Duplicate_variables
   | No_action
 
@@ -69,6 +73,13 @@ type s =
     modules: Path.t Path.Map.t;
     modtypes: module_type Path.Map.t;
     jkinds: kind_replacement Path.Map.t;
+    values: Path.t Path.Map.t;
+    (* Value paths only occur in types inside refinement predicates
+       ([Rexp_ident]); this map is what keeps them meaningful across
+       signature prefixing and binder renaming. *)
+
+    bound_values: Ident.t Ident.Map.t;
+    (* Term identifiers bound by type formers. *)
 
     additional_action: additional_action;
     sort_var_mapping: sort_map;
@@ -83,6 +94,13 @@ type safe = [`Safe]
 type unsafe = [`Unsafe]
 type t = safe subst
 exception Module_type_path_substituted_away of Path.t * Types.module_type
+
+let rename_bound_ident ?scope s id =
+  match s.additional_action with
+  | Prepare_for_saving { prepare_ident; _ } -> prepare_ident id
+  | Duplicate_variables | No_action ->
+      Ident.create_scoped
+        ~scope:(Option.value scope ~default:(Ident.scope id)) (Ident.name id)
 
 module Ikind_substitution = struct
   type type_lookup_result =
@@ -107,6 +125,8 @@ let identity =
     modules = Path.Map.empty;
     modtypes = Path.Map.empty;
     jkinds = Path.Map.empty;
+    values = Path.Map.empty;
+    bound_values = Ident.Map.empty;
     additional_action = No_action;
     sort_var_mapping = Nothing;
     loc = None;
@@ -150,6 +170,16 @@ let add_type id p s =
 
 let add_module id p s =
   { s with modules = Path.Map.add (Pident id) p s.modules; last_compose = None }
+
+let add_value id p s =
+  { s with values = Path.Map.add (Pident id) p s.values; last_compose = None }
+
+let add_bound_value id id' s =
+  { s with
+    bound_values = Ident.Map.add id id' s.bound_values;
+    values = Path.Map.add (Pident id) (Pident id') s.values;
+    last_compose = None
+  }
 
 let add_modtype_gen p ty s =
   { s with modtypes = Path.Map.add p ty s.modtypes; last_compose = None }
@@ -208,8 +238,8 @@ end = struct
         ~ran_out_of_fuel_during_normalize
         ~annotation:
           (Some { pjka_loc = Location.none;
-                  pjka_desc = Pjk_abbreviation ({ loc = Location.none;
-                                                  txt = name }, []) })
+                  pjka_desc = Pjk_abbreviation { loc = Location.none;
+                                                 txt = name } })
         ~why:Jkind_intf.History.Imported)
       (const_builtins @ const_predefs)
 
@@ -270,9 +300,6 @@ let with_additional_action =
      attempt to do this based on filename caused spurious "inconsistent
      assumption" errors that couldn't immediately be solved. Revisit
      with a better approach.
-
-     We'll need to revisit the Note [Preparing_for_saving always the same]
-     once we do this tailoring.
   *)
   let (additional_action, sort_var_mapping) : additional_action * sort_map =
     match config with
@@ -309,7 +336,13 @@ let with_additional_action =
         let prepare_modality modality =
           Mode.Modality.(modality |> to_const_exn|> of_const)
         in
-        Prepare_for_saving { prepare_jkind; prepare_mode; prepare_modality },
+        let bound_ident_stamp = ref 0 in
+        let prepare_ident id =
+          incr bound_ident_stamp;
+          Ident.rename_preserving_scope_with_stamp !bound_ident_stamp id
+        in
+        Prepare_for_saving
+          { prepare_jkind; prepare_mode; prepare_modality; prepare_ident },
         Saving (Hashtbl.create 17)
   in
   { s with
@@ -406,10 +439,13 @@ let jkind_path s path =
 
 (* For values, extension constructors, classes and class types *)
 let value_path s path =
-  match path with
-  | Pident _ -> path
-  | Pdot(p, n) -> Pdot(module_path s p, n)
-  | Papply _ | Pextra_ty _ -> fatal_error "Subst.value_path"
+  match Path.Map.find path s.values with
+  | p -> p
+  | exception Not_found ->
+      match path with
+      | Pident _ -> path
+      | Pdot(p, n) -> Pdot(module_path s p, n)
+      | Papply _ | Pextra_ty _ -> fatal_error "Subst.value_path"
 
 let rec type_path s path =
   match Path.Map.find path s.types with
@@ -427,6 +463,11 @@ let rec type_path s path =
          | Pcstr_ty _ | Punboxed_ty ->
            Pextra_ty (type_path s p, extra)
          | Pext_ty -> Pextra_ty (value_path s p, extra)
+
+let constructor_path s = function
+  | Pextra_ty _ as path -> type_path s path
+  | (Pident _ | Pdot _) as path -> value_path s path
+  | Papply _ -> fatal_error "Subst.constructor_path"
 
 let to_subst_by_type_function s p =
   match Path.Map.find p s.types with
@@ -488,7 +529,7 @@ let apply_type_function params args body =
                     Tsubst (ty, None) -> ty
                     (* TODO: is this case possible?
                        possibly an interaction with (copy more) below? *)
-                  | Tconstr _ | Tnil ->
+                  | Tconstr _ | Tnil | Tof_kind _ ->
                       copy more
                   | Tvar _ | Tunivar _ ->
                       newgenty mored
@@ -579,16 +620,16 @@ let rec layout s l =
 
 let jkind_desc s jkind =
   match jkind.base with
-  | Kconstr p ->
+  | Kconstr (p, sa) ->
     begin match Path.Map.find p s.jkinds with
     | exception Not_found ->
       let p' = jkind_path s p in
       if Path.compare p' p = 0 then jkind else
-        { jkind with base = Kconstr p' }
-    | Jkind_path p -> { jkind with base = Kconstr p }
+        { jkind with base = Kconstr (p', sa) }
+    | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
     | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
       let const =
-        { base;
+        { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
           mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
           with_bounds = jkind.with_bounds }
       in
@@ -602,15 +643,15 @@ let jkind_desc s jkind =
 let jkind_const_desc s
       ({ with_bounds = No_with_bounds } as jkind : jkind_const_desc_lr) =
   match jkind.base with
-  | Kconstr p ->
+  | Kconstr (p, sa) ->
     begin match Path.Map.find p s.jkinds with
     | exception Not_found ->
       let p' = jkind_path s p in
       if Path.compare p' p = 0 then jkind else
-        { jkind with base = Kconstr p' }
-    | Jkind_path p -> { jkind with base = Kconstr p }
+        { jkind with base = Kconstr (p', sa) }
+    | Jkind_path p' -> { jkind with base = Kconstr (p', sa) }
     | Jkind_const { base; mod_bounds; with_bounds = No_with_bounds } ->
-      { base;
+      { base = Jkind.Base_and_axes.meet_scannable_axes base sa;
         mod_bounds = Jkind.Mod_bounds.meet mod_bounds jkind.mod_bounds;
         with_bounds = jkind.with_bounds }
     end
@@ -661,10 +702,11 @@ let rec typexp copy_scope s ty =
     let has_fixed_row =
       not (is_Tconstr ty) && is_constr_row ~allow_ident:false tm in
     (* Make a stub *)
-    let jkind = Jkind.Builtin.any ~why:Dummy_jkind in
+    let stub_jkind = Jkind.Builtin.any ~why:Dummy_jkind in
     let ty' =
-      if should_duplicate_vars then newpersty (Tvar {name = None; jkind})
-      else newgenstub ~scope:(get_scope ty) jkind
+      if should_duplicate_vars
+      then newpersty (Tvar {name = None; jkind = stub_jkind})
+      else newgenstub ~scope:(get_scope ty) stub_jkind
     in
     For_copy.redirect_desc copy_scope ty (Tsubst (ty', None));
     let desc =
@@ -687,7 +729,9 @@ let rec typexp copy_scope s ty =
           Tpackage {
             pack_path = modtype_path s pack_path;
             pack_cstrs =
-              List.map (fun (n, ty) -> (n, typexp copy_scope s ty)) pack_cstrs;
+              List.map
+                (fun (n, ty) -> n, typexp copy_scope s ty)
+                pack_cstrs;
           }
       | Tobject (t1, name) ->
           let t1' = typexp copy_scope s t1 in
@@ -697,7 +741,10 @@ let rec typexp copy_scope s ty =
             | Some (p, tl) ->
                 if to_subst_by_type_function s p
                 then None
-                else Some (type_path s p, List.map (typexp copy_scope s) tl)
+                else
+                  Some
+                    (type_path s p,
+                     List.map (typexp copy_scope s) tl)
           in
           Tobject (t1', ref name')
       | Tvariant row ->
@@ -733,7 +780,9 @@ let rec typexp copy_scope s ty =
               (* TODO: check if more' can be eliminated *)
               (* Return a new copy *)
               let row =
-                copy_row (typexp copy_scope s) true row (not dup) more' in
+                copy_row (typexp copy_scope s) true row (not dup)
+                  more'
+              in
               match row_name row with
               | Some (p, tl) ->
                   let name =
@@ -746,7 +795,7 @@ let rec typexp copy_scope s ty =
           end
       | Tfield(_label, kind, _t1, t2) when field_kind_repr kind = Fabsent ->
           Tlink (typexp copy_scope s t2)
-      | Tarrow ((label, marg, mret), arg, ret, comm) ->
+      | Tarrow ((label, marg, mret, binder), arg, ret, comm) ->
           let marg, mret =
             match s.additional_action with
             | Prepare_for_saving { prepare_mode; _ } ->
@@ -754,9 +803,56 @@ let rec typexp copy_scope s ty =
             | _ -> marg, mret
           in
           let arg = typexp copy_scope s arg in
-          let ret = typexp copy_scope s ret in
+          let binder, ret =
+            match binder with
+            | None -> None, typexp copy_scope s ret
+            | Some binder ->
+                let binder' =
+                  rename_bound_ident ~scope:Ident.lowest_scope s binder in
+                let ret =
+                  typexp copy_scope (add_bound_value binder binder' s) ret
+                in
+                Some binder', ret
+          in
           let comm = copy_commu comm in
-          Tarrow ((label, marg, mret), arg, ret, comm)
+          Tarrow ((label, marg, mret, binder), arg, ret, comm)
+      | Trefine
+          { ref_structural_scope; ref_binder; ref_payload; ref_pred } ->
+          let ref_payload = typexp copy_scope s ref_payload in
+          let ref_binder' =
+            rename_bound_ident ~scope:Ident.lowest_scope s ref_binder in
+          (* Retained types and predicate nodes must share the same fresh
+             identities, including binders introduced inside the predicate.
+             These binders have no free-term scope, including while the
+             retained types are copied before the enclosing refinement. *)
+          let s =
+            Ident.Set.fold
+              (fun id s -> add_bound_value id
+                (rename_bound_ident ~scope:Ident.lowest_scope s id) s)
+              (Refinement_predicate.bound_idents ref_pred)
+              (add_bound_value ref_binder ref_binder' s)
+          in
+          Trefine
+            { ref_structural_scope;
+              ref_binder = ref_binder';
+              ref_payload;
+              ref_pred =
+                Refinement_predicate.map ~rename:s.bound_values
+                  ~rename_bound:(fun id -> Ident.Map.find id s.bound_values)
+                  ~bind_value:(fun path ->
+                    match path with
+                    | Pident id -> Ident.Map.find_opt id s.bound_values
+                    | _ -> None)
+                  ~free_var_path:(fun id ->
+                    Path.Map.find_opt (Pident id) s.values)
+                  ~value_path:(value_path s)
+                  ~constructor_path:(constructor_path s)
+                  ~type_path:(type_path s)
+                  ~type_expr:(typexp copy_scope s)
+                  ~location:(loc s) ref_pred }
+      | Tof_kind jk -> Tof_kind (jkind copy_scope s jk)
+      | Tmod (ty, mod_bounds) ->
+          Tmod (typexp copy_scope s ty, mod_bounds)
       | _ -> copy_type_desc (typexp copy_scope s) desc
     in
     Transient_expr.set_stub_desc ty' desc;
@@ -798,11 +894,24 @@ let type_expr s ty =
   let loc = Option.value s.loc ~default:Location.none in
   For_copy.with_scope (fun copy_scope -> typexp copy_scope s loc ty)
 
+(* For idents that are guaranteed to be local/scoped, such as bound
+   signature items and functor parameters. *)
+let rename_ident s id =
+  rename_bound_ident s id
+
+(* For constructor/label idents, which may be predef (e.g. the constructors
+   of [bool] or [or_null], whose declarations can appear in a substituted
+   signature). Predef and global idents are kept: they cannot be renamed,
+   and they carry no volatile stamp. *)
+let rename_decl_ident s id =
+  if Ident.is_global_or_predef id then id else rename_ident s id
+
 let label_declaration copy_scope s l =
   {
-    ld_id = l.ld_id;
+    ld_id = rename_decl_ident s l.ld_id;
     ld_mutable = l.ld_mutable;
     ld_modalities = l.ld_modalities;
+    ld_ghost = l.ld_ghost;
     ld_sort = l.ld_sort;
     ld_type = typexp copy_scope s l.ld_loc l.ld_type;
     ld_loc = loc s l.ld_loc;
@@ -826,7 +935,7 @@ let constructor_arguments copy_scope s = function
 
 let constructor_declaration copy_scope s c =
   {
-    cd_id = c.cd_id;
+    cd_id = rename_decl_ident s c.cd_id;
     cd_args = constructor_arguments copy_scope s c.cd_args;
     cd_res = Option.map (typexp copy_scope s c.cd_loc) c.cd_res;
     cd_loc = loc s c.cd_loc;
@@ -919,6 +1028,8 @@ let rec type_declaration' copy_scope s decl =
     type_loc = loc s decl.type_loc;
     type_attributes = attrs s decl.type_attributes;
     type_unboxed_default = decl.type_unboxed_default;
+    type_inductive = decl.type_inductive;
+    type_phantom_parameters = decl.type_phantom_parameters;
     type_uid = decl.type_uid;
     type_unboxed_version =
       Option.map (type_declaration' copy_scope s) decl.type_unboxed_version;
@@ -1100,7 +1211,7 @@ let rename_bound_idents scoping s sg =
     let open Ident in
     match scoping with
     | Keep -> (fun id -> create_scoped ~scope:(scope id) (name id))
-    | Make_local -> Ident.rename
+    | Make_local -> rename_ident s
     | Rescope scope -> (fun id -> create_scoped ~scope (name id))
   in
   let rec rename_bound_idents s sg = function
@@ -1139,11 +1250,17 @@ let rename_bound_idents scoping s sg =
           rest
     | Sig_value(id, vd, vis) :: rest ->
         (* scope doesn't matter for value identifiers. *)
-        let id' = Ident.rename id in
-        rename_bound_idents s (Sig_value(id', vd, vis) :: sg) rest
+        let id' = rename_ident s id in
+        rename_bound_idents
+          (add_value id (Pident id') s)
+          (Sig_value(id', vd, vis) :: sg)
+          rest
     | Sig_typext(id, ec, es, vis) :: rest ->
         let id' = rename id in
-        rename_bound_idents s (Sig_typext(id',ec,es,vis) :: sg) rest
+        rename_bound_idents
+          (add_value id (Pident id') s)
+          (Sig_typext(id',ec,es,vis) :: sg)
+          rest
     | Sig_jkind (id, jkd, vis) :: rest ->
         let id' = rename id in
         rename_bound_idents
@@ -1255,7 +1372,7 @@ and subst_lazy_modtype scoping s = function
       Mty_functor(Named (None, (subst_lazy_modtype scoping s) arg, marg),
                    subst_lazy_modtype scoping s res, mres)
   | Mty_functor(Named (Some id, arg, marg), res, mres) ->
-      let id' = Ident.rename id in
+      let id' = rename_ident s id in
       Mty_functor(Named (Some id', (subst_lazy_modtype scoping s) arg, marg),
                   subst_lazy_modtype scoping (add_module id (Pident id') s)
                     res,
@@ -1324,6 +1441,17 @@ and compose s1 s2 =
           modules = merge_path_maps (module_path s2) s1.modules s2.modules;
           modtypes = merge_path_maps (modtype Keep s2) s1.modtypes s2.modtypes;
           jkinds = merge_path_maps (jkind_replacement s2) s1.jkinds s2.jkinds;
+          values = merge_path_maps (value_path s2) s1.values s2.values;
+          bound_values =
+            Ident.Map.fold
+              (fun id id' bound_values ->
+                 let id' =
+                   match Ident.Map.find_opt id' s2.bound_values with
+                   | Some id'' -> id''
+                   | None -> id'
+                 in
+                 Ident.Map.add id id' bound_values)
+              s1.bound_values s2.bound_values;
           additional_action = begin
             match s1.additional_action, s2.additional_action with
             | action, No_action | No_action, action -> action
@@ -1336,13 +1464,9 @@ and compose s1 s2 =
             | Duplicate_variables, (Prepare_for_saving _ as prepare)
                 -> prepare
 
-            (* Note [Preparing_for_saving always the same]
-               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-               The function we put in [Prepare_for_saving] is always the same,
-               so we can take either.
-            *)
-            | (Prepare_for_saving _ as prepare1), Prepare_for_saving _
-                -> prepare1
+            | Prepare_for_saving _, Prepare_for_saving _ ->
+              fatal_error
+                "compose: composing Prepare_for_saving and Prepare_for_saving"
           end;
           sort_var_mapping = begin
             match s1.sort_var_mapping, s2.sort_var_mapping with

@@ -1,0 +1,212 @@
+(* TEST
+ has-z3;
+ flags = "-extension refinement_types";
+ { expect; }
+*)
+
+module Fibonacci = struct
+  let[@def] rec fib n =
+    if n <= 0 then 0
+    else if n = 1 then 1
+    else fib (n - 1) + fib (n - 2)
+  [@@decreases n]
+
+  exception Overflow
+
+  let doubling_step : (p : int) -> (q : int) ->
+      {u : unit |
+        (p * p + q * q) + p * (2 * q - p) = q * (2 * (p + q) - q)
+        && ((p * p + q * q) + p * (2 * q - p)) + (p * p + q * q)
+           = q * q + (p + q) * (p + q)}
+    = fun p q -> let u = () in assume_ u
+
+  let double : (n : int) -> {u : unit | 2 * n = n + n} =
+    fun n -> let u = () in assume_ u
+
+  let mul_identity : (n : int) ->
+      {u : unit | 0 * n = 0 && n * 0 = 0 && 1 * n = n && n * 1 = n} =
+    fun n -> let u = () in assume_ u
+
+  let successor (n : int)
+      (a : {a : int | a = fib (n - 1)}) (b : {b : int | b = fib n}) :
+      {r : int | r = fib (n + 1)} =
+    if n < 1 || n > 90 then raise Overflow;
+    let a = a in
+    let b = b in
+    let next = n + 1 in
+    ghost_ (fib_def next);
+    let r = a + b in
+    r
+
+  let rec tail_loop : (n : int) -> (i : int) ->
+      {a : int | a = fib i} -> {b : int | b = fib (i + 1)} ->
+      {r : int | r = fib n} = fun n i a b ->
+    let a = a in
+    let b = b in
+    if i = n then a
+    else if 0 <= i && i < n && n <= 90 then
+      let j = i + 1 in
+      if j = n then b
+      else
+        let c = a + b in
+        let k = j + 1 in
+        ghost_ (fib_def k);
+        let a : {v : int | v = fib j} = b in
+        let b : {v : int | v = fib (j + 1)} = c in
+        (tail_loop[@tailcall]) n j a b
+    else raise Overflow
+  [@@decreases n - i]
+
+  let tail (n : int) : {r : int | r = fib n} =
+    if n < 0 || n > 90 then raise Overflow;
+    let zero = 0 in
+    let one = 1 in
+    ghost_ (fib_def zero);
+    ghost_ (fib_def one);
+    let a : {a : int | a = fib zero} = zero in
+    let b : {b : int | b = fib (zero + 1)} = one in
+    tail_loop n zero a b
+
+  let rec doubling_identity : (n : int) ->
+      {u : unit |
+        fib (2 * n) = fib n * (2 * fib (n + 1) - fib n)
+        && fib (2 * n + 1) = fib n * fib n + fib (n + 1) * fib (n + 1)} =
+    fun n ->
+    if n < 0 || n > 45 then raise Overflow;
+    let u = () in
+    double n;
+    if n = 0 then
+      let zero = 0 in
+      let one = 1 in
+      ghost_ (fib_def zero);
+      ghost_ (fib_def one);
+      mul_identity zero;
+      mul_identity one;
+      doubling_step zero one;
+      u
+    else
+      let prev = n - 1 in
+      double prev;
+      doubling_identity prev;
+      let next = n + 1 in
+      let twice = 2 * n in
+      let twice_next = twice + 1 in
+      ghost_ (fib_def next);
+      ghost_ (fib_def twice);
+      ghost_ (fib_def twice_next);
+      let p = tail prev in
+      let q = tail n in
+      let p = p in
+      let q = q in
+      doubling_step p q;
+      u
+  [@@decreases n]
+
+  let rec doubling_pair : (n : int) ->
+      {a : int | a = fib n} * {b : int | b = fib (n + 1)} = fun n ->
+    if n < 0 || n > 90 then raise Overflow;
+    if n = 0 then
+      let zero = 0 in
+      let one = 1 in
+      ghost_ (fib_def zero);
+      ghost_ (fib_def one);
+      (zero, one)
+    else
+      let k = n / 2 in
+      double k;
+      let a, b = doubling_pair k in
+      let a = a in
+      let b = b in
+      doubling_identity k;
+      let c = a * (2 * b - a) in
+      let d = a * a + b * b in
+      let c : {r : int | r = fib (2 * k)} = c in
+      let d : {r : int | r = fib (2 * k + 1)} = d in
+      let c = c in
+      let d = d in
+      if n mod 2 = 0 then (c, d)
+      else
+        let lower : {r : int | r = fib (n - 1)} = c in
+        let upper : {r : int | r = fib n} = d in
+        (upper, successor n lower upper)
+  [@@decreases n]
+
+  let doubling (n : int) : {r : int | r = fib n} =
+    let result, _ = doubling_pair n in result
+
+end;;
+[%%expect{|
+module Fibonacci :
+  sig
+    val fib : int -> int
+    val fib_def :
+      (n : int) ->
+      {u : unit
+        | (fib n) ===
+            (if n <= 0
+             then 0
+             else if n = 1 then 1 else (fib (n - 1)) + (fib (n - 2)))}
+    exception Overflow
+    val doubling_step :
+      (p : int) ->
+      (q : int) ->
+      {u : unit
+        | ((((p * p) + (q * q)) + (p * ((2 * q) - p))) =
+             (q * ((2 * (p + q)) - q)))
+            &&
+            (((((p * p) + (q * q)) + (p * ((2 * q) - p))) +
+                ((p * p) + (q * q)))
+               = ((q * q) + ((p + q) * (p + q))))}
+    val double : (n : int) -> {u : unit | (2 * n) = (n + n)}
+    val mul_identity :
+      (n : int) ->
+      {u : unit
+        | ((0 * n) = 0) &&
+            (((n * 0) = 0) && (((1 * n) = n) && ((n * 1) = n)))}
+    val successor :
+      (n : int) ->
+      {a : int | a = (fib (n - 1))} ->
+      {b : int | b = (fib n)} -> {r : int | r = (fib (n + 1))}
+    val tail_loop :
+      (n : int) ->
+      (i : int) ->
+      {a : int | a = (fib i)} ->
+      {b : int | b = (fib (i + 1))} -> {r : int | r = (fib n)}
+    val tail : (n : int) -> {r : int | r = (fib n)}
+    val doubling_identity :
+      (n : int) ->
+      {u : unit
+        | ((fib (2 * n)) = ((fib n) * ((2 * (fib (n + 1))) - (fib n)))) &&
+            ((fib ((2 * n) + 1)) =
+               (((fib n) * (fib n)) + ((fib (n + 1)) * (fib (n + 1)))))}
+    val doubling_pair :
+      (n : int) -> {a : int | a = (fib n)} * {b : int | b = (fib (n + 1))}
+    val doubling : (n : int) -> {r : int | r = (fib n)}
+  end
+|}]
+
+let tail n = let r = Fibonacci.tail n in r
+let doubling n = let r = Fibonacci.doubling n in r;;
+[%%expect{|
+val tail : int -> int = <fun>
+val doubling : int -> int = <fun>
+|}]
+
+let examples = List.init 12 (fun n -> n, Fibonacci.fib n, tail n, doubling n);;
+[%%expect{|
+val examples : (int * int * int * int) list =
+  [(0, 0, 0, 0); (1, 1, 1, 1); (2, 1, 1, 1); (3, 2, 2, 2); (4, 3, 3, 3);
+   (5, 5, 5, 5); (6, 8, 8, 8); (7, 13, 13, 13); (8, 21, 21, 21);
+   (9, 34, 34, 34); (10, 55, 55, 55); (11, 89, 89, 89)]
+|}]
+
+let boundaries = tail 90, doubling 90;;
+[%%expect{|
+val boundaries : int * int = (2880067194370816120, 2880067194370816120)
+|}]
+
+let overflow = (try ignore (tail 91); false with Fibonacci.Overflow -> true),
+(try ignore (doubling 91); false with Fibonacci.Overflow -> true);;
+[%%expect{|
+val overflow : bool * bool = (true, true)
+|}]

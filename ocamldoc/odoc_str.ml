@@ -39,6 +39,7 @@ let rec is_arrow_type t =
   match Types.get_desc t with
     Types.Tarrow _ -> true
   | Types.Tlink t2 -> is_arrow_type t2
+  | Types.Tmod _ -> Misc.fatal_error "Odoc_str.is_arrow_type: unexpected Tmod"
   | Types.Ttuple _
   | Types.Tunboxed_tuple _
   | Types.Tconstr _
@@ -46,7 +47,7 @@ let rec is_arrow_type t =
   | Types.Tquote _ | Types.Tsplice _ | Types.Tquote_eval _ | Types.Tbox _
   | Types.Trepr _
   | Types.Tfield _ | Types.Tnil | Types.Tvariant _ | Types.Tpackage _
-  | Types.Tof_kind _ -> false
+  | Types.Tof_kind _ | Types.Trefine _ -> false
   | Types.Tsubst _ -> assert false
 
 
@@ -54,12 +55,13 @@ let rec need_parent t =
   match Types.get_desc t with
     Types.Tarrow _ | Types.Ttuple _ | Tunboxed_tuple _ -> true
   | Types.Tlink t2 -> need_parent t2
+  | Types.Tmod _ -> Misc.fatal_error "Odoc_str.need_parent: unexpected Tmod"
   | Types.Tconstr _
   | Types.Tvar _ | Types.Tunivar _ | Types.Tobject _ | Types.Tpoly _
   | Types.Tquote _ | Types.Tsplice _ | Types.Tquote_eval _ | Types.Trepr _
   | Types.Tbox _
   | Types.Tfield _ | Types.Tnil | Types.Tvariant _ | Types.Tpackage _
-  | Types.Tof_kind _ -> false
+  | Types.Tof_kind _ | Types.Trefine _ -> false
   | Types.Tsubst _ -> assert false
 
 let print_type_scheme ppf t =

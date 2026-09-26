@@ -43,7 +43,7 @@ and core_type type_expr =
     (* CR modes: do something better here with the jkind *)
     Typ.var s None
   | Tarrow
-      ( (label, arg_alloc_mode, ret_alloc_mode),
+      ( (label, arg_alloc_mode, ret_alloc_mode, binder),
         type_expr,
         type_expr_out,
         _commutable ) ->
@@ -53,11 +53,22 @@ and core_type type_expr =
         (Labelled l, Typ.extension (mkloc "call_pos" !default_loc, PStr []))
       | Nolabel -> (Nolabel, core_type type_expr)
       | Labelled l -> (Labelled l, core_type type_expr)
-      | Optional l -> (Optional l, core_type type_expr)
+      | Optional l ->
+        let argument =
+          match get_desc (Btype.tpoly_get_mono type_expr) with
+          | Tconstr (path, [ argument ], _)
+            when Path.same path Predef.path_option -> argument
+          | _ -> type_expr
+        in
+        (Optional l, core_type argument)
     in
     let arg_modes = modes arg_alloc_mode in
     let ret_modes = modes ret_alloc_mode in
-    Typ.arrow label type_expr (core_type type_expr_out) arg_modes ret_modes
+    let binder =
+      Option.map binder ~f:(fun binder -> Location.mknoloc (Ident.name binder))
+    in
+    Typ.arrow ?binder label type_expr (core_type type_expr_out) arg_modes
+      ret_modes
   | Ttuple type_exprs ->
     let labeled_type_exprs =
       List.map ~f:(fun (lbl, ty) -> (lbl, core_type ty)) type_exprs
@@ -71,9 +82,47 @@ and core_type type_expr =
   | Tconstr (path, type_exprs, _abbrev) ->
     let loc = Untypeast.lident_of_path path |> Location.mknoloc in
     Typ.constr loc @@ List.map ~f:core_type type_exprs
+  | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+    let path_loc path = Location.mknoloc (Untypeast.lident_of_path path) in
+    let constructor_ident path =
+      match (path : Path.t) with
+      | Pextra_ty (type_path, Pcstr_ty name) ->
+        let lid =
+          match type_path with
+          | Pdot (module_path, _) | Pextra_ty (Pdot (module_path, _), _) ->
+            Longident.Ldot (path_loc module_path, Location.mknoloc name)
+          | _ -> Longident.Lident name
+        in
+        Location.mknoloc lid
+      | path -> path_loc path
+    in
+    let label_ident type_path name =
+      let rec defining_module = function
+        | Path.Pdot (module_path, _) -> Some module_path
+        | Pextra_ty (path, _) -> defining_module path
+        | Pident _ | Papply _ -> None
+      in
+      match defining_module type_path with
+      | Some module_path ->
+        Location.mknoloc
+          (Longident.Ldot (path_loc module_path, Location.mknoloc name))
+      | None -> Location.mknoloc (Longident.Lident name)
+    in
+    let predicate =
+      Refinement_predicate.untype
+        ~type_constraint:(fun ty -> Some (core_type ty))
+        ~var_name:Ident.name ~value_ident:path_loc ~constructor_ident
+        ~label_ident ref_pred
+    in
+    Typ.refine
+      (Location.mknoloc (Ident.name ref_binder))
+      (core_type ref_payload) predicate
   | Tquote_eval ty ->
     let loc = Untypeast.lident_of_path Predef.path_eval |> Location.mknoloc in
     Typ.constr loc [ Typ.quote (core_type ty) ]
+  | Tbox ty ->
+    let loc = Untypeast.lident_of_path Predef.path_box |> Location.mknoloc in
+    Typ.constr loc [ core_type ty ]
   | Tobject (type_expr, _class_) ->
     let rec aux acc type_expr =
       match get_desc type_expr with
@@ -143,6 +192,9 @@ and core_type type_expr =
           (mknoloc (Longident.unflatten id |> Option.get), core_type t))
     in
     Typ.package (Typ.package_type loc args)
+  | Tmod (ty, _) ->
+    (* At the moment, there's no user syntax to represent Tmod *)
+    core_type ty
 
 and modtype_declaration id { mtd_type; mtd_attributes; _ } =
   Ast_helper.Mtd.mk ~attrs:mtd_attributes
@@ -160,7 +212,7 @@ and jkind_declaration id { jkind_manifest; jkind_attributes; _ } :
       Option.map jkind_manifest ~f:(fun _ : Parsetree.jkind_annotation ->
           (* CR modes: this is terrible. Internal ticket 6599 *)
           { pjka_desc =
-              Pjk_abbreviation ({ txt = Lident "any"; loc = Location.none }, []);
+              Pjk_abbreviation { txt = Lident "any"; loc = Location.none };
             pjka_loc = Location.none
           });
     pjkind_attributes = jkind_attributes;

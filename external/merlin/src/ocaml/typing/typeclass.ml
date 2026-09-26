@@ -197,7 +197,7 @@ let rec constructor_type constr cty =
   | Cty_signature _ ->
       constr
   | Cty_arrow (l, ty, cty) ->
-      let arrow_desc = l, Mode.Alloc.legacy, Mode.Alloc.legacy in
+      let arrow_desc = l, Mode.Alloc.legacy, Mode.Alloc.legacy, None in
       let ty = Ctype.newmono ty in
       Ctype.newty
         (Tarrow (arrow_desc, ty, constructor_type constr cty, commu_ok))
@@ -963,7 +963,9 @@ and class_field_second_pass cl_num sign met_env field =
         (fun () ->
            let ty = Btype.method_type label.txt sign in
            let self_type = sign.Types.csig_self in
-           let arrow_desc = Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy in
+           let arrow_desc =
+             Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None
+           in
            let self_param_type = Btype.newgenty (Tpoly(self_type, [])) in
            let meth_type =
              Typecore.mk_expected (Btype.newgenty
@@ -983,7 +985,9 @@ and class_field_second_pass cl_num sign met_env field =
         (fun () ->
            let unit_type = Ctype.instance Predef.type_unit in
            let self_param_type = Ctype.newmono sign.Types.csig_self in
-           let arrow_desc = Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy in
+           let arrow_desc =
+             Nolabel, Mode.Alloc.legacy, Mode.Alloc.legacy, None
+           in
            let meth_type =
              Typecore.mk_expected (Ctype.newty
                (Tarrow (arrow_desc, self_param_type, unit_type, commu_ok)))
@@ -1058,6 +1062,8 @@ and class_structure cl_num virt self_scope final val_env met_env loc
 
   (* Self binder *)
   let (self_pat, self_pat_vars) = Typecore.type_self_pattern val_env spat in
+  Ctype.register_refinement_value_scope ~level:(Ctype.get_current_level ())
+    (List.map (fun pv -> pv.Typecore.pv_id) self_pat_vars);
   let val_env, par_env =
     List.fold_right
       (fun {Typecore.pv_id; _} (val_env, par_env) ->
@@ -1080,6 +1086,8 @@ and class_structure cl_num virt self_scope final val_env met_env loc
     class_fields_first_pass self_loc cl_num sign self_scope
            val_env par_env str
   in
+  Ctype.register_refinement_value_scope ~level:(Ctype.get_current_level ())
+    (Vars.fold (fun _ id ids -> id :: ids) vars []);
   let kind = kind_of_final final in
 
   (* Check for unexpected virtual methods *)
@@ -1130,14 +1138,26 @@ and class_structure cl_num virt self_scope final val_env met_env loc
     | Self_virtual meths_ref -> !meths_ref
     | Self_concrete meths -> meths
   in
-  { cstr_self = self_pat;
-    cstr_fields = fields;
-    cstr_type = sign;
-    cstr_meths = meths; }
+  let result =
+    { cstr_self = self_pat;
+      cstr_fields = fields;
+      cstr_type = sign;
+      cstr_meths = meths
+    }
+  in
+  result
 
 and class_expr cl_num val_env met_env virt self_scope scl =
-  Builtin_attributes.warning_scope scl.pcl_attributes
-    (fun () -> class_expr_aux cl_num val_env met_env virt self_scope scl)
+  try
+    Builtin_attributes.warning_scope scl.pcl_attributes
+      (fun () -> class_expr_aux cl_num val_env met_env virt self_scope scl)
+  with Ctype.Refinement_scope_escape id ->
+    raise
+      (Error_forward
+         (Location.errorf ~loc:scl.pcl_loc
+            "the refinement type of this class expression escapes the scope \
+             of binding %a"
+            Misc.Style.inline_code (Ident.name id)))
 
 and class_expr_aux cl_num val_env met_env virt self_scope scl =
   match scl.pcl_desc with
@@ -1188,16 +1208,25 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
           cl_attributes = []; (* attributes are kept on the inner cl node *)
          }
   | Pcl_structure cl_str ->
-      let desc =
-        class_structure cl_num virt self_scope Not_final
-          val_env met_env scl.pcl_loc cl_str
-      in
-      rc {cl_desc = Tcl_structure desc;
-          cl_loc = scl.pcl_loc;
-          cl_type = Cty_signature desc.cstr_type;
-          cl_env = val_env;
-          cl_attributes = scl.pcl_attributes;
-         }
+      let outer_level = Ctype.get_current_level () in
+      Ctype.with_local_level_generalize_if
+        (Ctype.may_track_refinement_scopes ())
+        (fun () ->
+           let desc =
+             class_structure cl_num virt self_scope Not_final
+               val_env met_env scl.pcl_loc cl_str
+           in
+           let result =
+             rc {cl_desc = Tcl_structure desc;
+                 cl_loc = scl.pcl_loc;
+                 cl_type = Cty_signature desc.cstr_type;
+                 cl_env = val_env;
+                 cl_attributes = scl.pcl_attributes;
+                }
+           in
+           Ctype.check_refinement_class_level_escape outer_level result.cl_type;
+           result)
+        ~before_generalize:ignore
   | Pcl_fun (l, Some default, spat, sbody) ->
       if Typecore.has_poly_constraint spat then
         raise(Error(spat.ppat_loc, val_env, Polymorphic_class_parameter));
@@ -1241,6 +1270,7 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
       in
       class_expr cl_num val_env met_env virt self_scope sfun
   | Pcl_fun (l, None, spat, scl') ->
+      let outer_level = Ctype.get_current_level () in
       let l, spat = Typetexp.transl_label_from_pat l spat in
       if Typecore.has_poly_constraint spat then
         raise(Error(spat.ppat_loc, val_env, Polymorphic_class_parameter));
@@ -1263,6 +1293,7 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
                            lid = mknoloc (Longident.Lident (Ident.name id));
                            desc = vd; kind = Id_value;
                            unique_use = aliased_many_use;
+                           staticity = Mode.Staticity.(disallow_left legacy);
                            mode = Mode.Value.(disallow_right legacy) };
               exp_loc = Location.none; exp_extra = [];
               exp_type = Ctype.instance vd.val_type;
@@ -1286,9 +1317,29 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
         |> Env.add_const_closure_lock (scl.pcl_loc, Class)
             Value.Comonadic.Const.legacy
       in
+      let ids =
+        Typedtree.pat_bound_idents pat
+      in
+      let ids =
+        List.fold_left
+          (fun ids (_, exp) ->
+             match exp.exp_desc with
+             | Texp_ident { path = Pident id; _ } -> id :: ids
+             | _ -> ids)
+          ids pv
+      in
       let cl =
-        Ctype.with_raised_nongen_level
-          (fun () -> class_expr cl_num val_env' met_env virt self_scope scl') in
+        Ctype.with_local_level_generalize_if
+          (Ctype.may_track_refinement_scopes ())
+          (fun () ->
+             Ctype.register_refinement_value_scope
+               ~level:(Ctype.get_current_level ()) ids;
+             Ctype.with_raised_nongen_level
+               (fun () ->
+                  class_expr cl_num val_env' met_env virt self_scope scl'))
+          ~before_generalize:(fun cl ->
+            Ctype.check_refinement_class_level_escape outer_level cl.cl_type)
+      in
       if not_nolabel_function cl.cl_type then begin
         match l with
         | Nolabel | Labelled _ -> ()
@@ -1444,6 +1495,10 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
           cl_attributes = scl.pcl_attributes;
          }
   | Pcl_let (rec_flag, sdefs, scl') ->
+      let outer_level = Ctype.get_current_level () in
+      Ctype.with_local_level_generalize_if
+        (Ctype.may_track_refinement_scopes ())
+        (fun () ->
       let (defs, val_env) =
         Typecore.type_let In_class_def val_env Immutable rec_flag sdefs in
       let (vals, met_env) =
@@ -1474,6 +1529,8 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
                              lid = mknoloc (Longident.Lident (Ident.name id));
                              desc = vd; kind = Id_value;
                              unique_use = aliased_many_use;
+                             staticity =
+                               Mode.Staticity.(disallow_left legacy);
                              mode = Mode.Value.(disallow_right legacy) };
                 exp_loc = Location.none; exp_extra = [];
                 exp_type = ty;
@@ -1499,17 +1556,25 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
           (let_bound_idents_with_modes_sorts_and_checks defs)
           ([], met_env)
       in
+      Ctype.register_refinement_value_scope
+        ~level:(Ctype.get_current_level ())
+        (List.map fst vals);
       let cl = class_expr cl_num val_env met_env virt self_scope scl' in
       let defs = match rec_flag with
         | Recursive -> Typecore.annotate_recursive_bindings val_env defs
         | Nonrecursive -> defs
       in
-      rc {cl_desc = Tcl_let (rec_flag, defs, vals, cl);
-          cl_loc = scl.pcl_loc;
-          cl_type = cl.cl_type;
-          cl_env = val_env;
-          cl_attributes = scl.pcl_attributes;
-         }
+      let result =
+        rc {cl_desc = Tcl_let (rec_flag, defs, vals, cl);
+            cl_loc = scl.pcl_loc;
+            cl_type = cl.cl_type;
+            cl_env = val_env;
+            cl_attributes = scl.pcl_attributes;
+           }
+      in
+      Ctype.check_refinement_class_level_escape outer_level result.cl_type;
+      result)
+        ~before_generalize:ignore
   | Pcl_constraint (scl', scty) ->
       let cl, clty =
         Ctype.with_local_level_for_class begin fun () ->
@@ -1555,16 +1620,30 @@ and class_expr_aux cl_num val_env met_env virt self_scope scl =
           cl_attributes = scl.pcl_attributes;
          }
   | Pcl_open (pod, e) ->
-      let used_slot = ref false in
-      let (od, new_val_env) = !type_open_descr ~used_slot val_env pod in
-      let ( _, new_met_env) = !type_open_descr ~used_slot met_env pod in
-      let cl = class_expr cl_num new_val_env new_met_env virt self_scope e in
-      rc {cl_desc = Tcl_open (od, cl);
-          cl_loc = scl.pcl_loc;
-          cl_type = cl.cl_type;
-          cl_env = val_env;
-          cl_attributes = scl.pcl_attributes;
-         }
+      let outer_level = Ctype.get_current_level () in
+      Ctype.with_local_level_generalize_if
+        (Ctype.may_track_refinement_scopes ())
+        (fun () ->
+           let used_slot = ref false in
+           let od, new_val_env = !type_open_descr ~used_slot val_env pod in
+           let _, new_met_env = !type_open_descr ~used_slot met_env pod in
+           Ctype.register_refinement_value_scope
+             ~level:(Ctype.get_current_level ())
+             (List.map Types.signature_item_id od.open_bound_items);
+           let cl =
+             class_expr cl_num new_val_env new_met_env virt self_scope e
+           in
+           let result =
+             rc {cl_desc = Tcl_open (od, cl);
+                 cl_loc = scl.pcl_loc;
+                 cl_type = cl.cl_type;
+                 cl_env = val_env;
+                 cl_attributes = scl.pcl_attributes;
+                }
+           in
+           Ctype.check_refinement_class_level_escape outer_level result.cl_type;
+           result)
+        ~before_generalize:ignore
   | Pcl_extension ext ->
       raise (Error_forward (Builtin_attributes.error_of_extension ext))
 
@@ -1590,7 +1669,7 @@ let rec approx_declaration cl =
            classes to work with jkinds *)
       in
       let arg = Ctype.newmono arg in
-      let arrow_desc = l, Mode.Alloc.legacy, Mode.Alloc.legacy in
+      let arrow_desc = l, Mode.Alloc.legacy, Mode.Alloc.legacy, None in
       Ctype.newty
         (Tarrow (arrow_desc, arg, approx_declaration cl, commu_ok))
   | Pcl_let (_, _, cl) ->
@@ -1610,7 +1689,7 @@ let rec approx_description ct =
            relax jkinds in classes *)
       in
       let arg = Ctype.newmono arg in
-      let arrow_desc = l, Mode.Alloc.legacy, Mode.Alloc.legacy in
+      let arrow_desc = l, Mode.Alloc.legacy, Mode.Alloc.legacy, None in
       Ctype.newty
         (Tarrow (arrow_desc, arg, approx_description ct, commu_ok))
   | _ -> Ctype.newvar (Jkind.Builtin.value ~why:Object)
@@ -1640,6 +1719,8 @@ let temp_abbrev loc id arity uid =
        type_loc = loc;
        type_attributes = []; (* or keep attrs from the class decl? *)
        type_unboxed_default = false;
+       type_inductive = false;
+       type_phantom_parameters = false;
        type_uid = uid;
        type_unboxed_version = None;
       }
@@ -1716,7 +1797,7 @@ let class_infos define_class kind
         let make_param (sty, v) =
           try
             let jkind = Jkind.Builtin.value ~why:Class_type_argument in
-            let param = transl_type_param env (Pident ty_id) jkind sty in
+            let param, _ = transl_type_param env (Pident ty_id) jkind sty in
             (* CR layouts: we require class type parameters to be values, but
                we should lift this restriction. Doing so causes bad error messages
                today, so we wait for tomorrow. *)
@@ -1874,6 +1955,8 @@ let class_infos define_class kind
      type_loc = cl.pci_loc;
      type_attributes = []; (* or keep attrs from cl? *)
      type_unboxed_default = false;
+     type_inductive = false;
+     type_phantom_parameters = false;
      type_uid = dummy_class.cty_uid;
      type_unboxed_version = None;
     }

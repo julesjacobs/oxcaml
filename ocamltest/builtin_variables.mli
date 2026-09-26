@@ -33,6 +33,8 @@ val file : Variables.t
 
 val readonly_files : Variables.t
 
+val source_directories : Variables.t
+
 val make : Variables.t
 
 val ocamltest_response : Variables.t

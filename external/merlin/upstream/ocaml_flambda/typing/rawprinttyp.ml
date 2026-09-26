@@ -58,6 +58,10 @@ let string_of_label : Types.arg_label -> string = function
   | Labelled s | Position s -> s
   | Optional s -> "?"^s
 
+let out_modalities_of_mod_bounds mod_bounds =
+  Typemode.untransl_mod_bounds mod_bounds
+  |> List.map (fun { Location.txt = Parsetree.Mode s; _ } -> s)
+
 let visited = ref []
 let rec raw_type ppf ty =
   let ty = safe_repr [] ty in
@@ -103,13 +107,18 @@ and raw_type_desc ppf ty =
     Tvar { name; jkind } ->
       fprintf ppf "Tvar (@,%a,@,%a)"
         print_name name (Format_doc.compat (Jkind.format env)) jkind
-  | Tarrow((l,arg,ret),t1,t2,c) ->
-      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a),@,%a,@,%a,@,%s)@]"
+  | Tarrow((l,arg,ret,binder),t1,t2,c) ->
+      fprintf ppf "@[<hov1>Tarrow((\"%s\",%a,%a,%s),@,%a,@,%a,@,%s)@]"
         (string_of_label l)
         (Format_doc.compat (Alloc.print ~verbose:true ())) arg
         (Format_doc.compat (Alloc.print ~verbose:true ())) ret
+        (match binder with
+         | None -> "None"
+         | Some binder -> "Some " ^ Ident.unique_name binder)
         raw_type t1 raw_type t2
         (if is_commu_ok c then "Cok" else "Cunknown")
+  | Trefine { ref_payload; ref_pred = _; _ } ->
+      fprintf ppf "@[<1>Trefine@,%a@]" raw_type ref_payload
   | Ttuple tl ->
       fprintf ppf "@[<1>Ttuple@,%a@]" labeled_type_list tl
   | Tunboxed_tuple tl ->
@@ -118,6 +127,10 @@ and raw_type_desc ppf ty =
       fprintf ppf "@[<hov1>Tconstr(@,%a,@,%a,@,%a)@]" path p
         raw_type_list tl
         (raw_list path) (list_of_memo !abbrev)
+  | Tmod (t, mod_bounds) ->
+      fprintf ppf "@[<hov1>Tmod(@,(%a @@ %s))@]"
+        raw_type t
+        (String.concat " " (out_modalities_of_mod_bounds mod_bounds))
   | Tobject (t, nm) ->
       fprintf ppf "@[<hov1>Tobject(@,%a,@,@[<1>ref%t@])@]" raw_type t
         (fun ppf ->
@@ -162,6 +175,9 @@ and raw_type_desc ppf ty =
       raw_lid_type_list pack.pack_cstrs
   | Tof_kind jkind ->
     fprintf ppf "Tof_kind@ %a" (Format_doc.compat (Jkind.format env)) jkind
+  | Tbox t ->
+    fprintf ppf "@[Tbox@ %a@]" raw_type t
+
 and raw_row_fixed ppf = function
 | None -> fprintf ppf "None"
 | Some Types.Fixed_private -> fprintf ppf "Some Fixed_private"

@@ -65,7 +65,7 @@ type summary =
   (* CR zqian: track [add_lock] as well *)
 
 type address = Persistent_env.address =
-  | Aunit of Compilation_unit.t
+  | Aunit of Compilation_unit.t * Mode.Value.l
   | Alocal of Ident.t
   | Adot of address * Jkind_types.Sort.t array * int
 
@@ -233,10 +233,6 @@ val locks_empty : locks
 
 val locks_is_empty : locks -> bool
 
-(* CR-soon zqian: all persistent modules should always be [Static], at which
-   point the [staticity] parameter can be removed. *)
-val mode_unit : staticity:Mode.Staticity.Const.t -> Mode.Value.lr
-
 type structure_components_reason =
   | Project
   | Open
@@ -326,9 +322,22 @@ val walk_locks : env:t -> loc:Location.t -> Longident.t ->
     stateful. *)
 val walk_locks_for_legacy_construct : env:t -> Mode.Hint.pinpoint -> unit
 
+(** Constrains every enclosing closure to be partial without affecting any
+    other mode axis. *)
+val walk_locks_for_partial_construct : env:t -> Mode.Hint.pinpoint -> unit
+
 val lookup_value:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * value_description * mode_with_locks
+
+(** Resolved-input counterparts used when elaborating persistent predicates.
+    These never resolve a path by its printed name. *)
+val lookup_value_path :
+  ?use:bool -> loc:Location.t -> Path.t -> t ->
+  Path.t * value_description * mode_with_locks
+val lookup_constructor_path :
+  loc:Location.t -> constructor_usage -> Path.t -> t ->
+  constructor_description * locks
 val lookup_type:
   ?use:bool -> loc:Location.t -> Longident.t -> t ->
   Path.t * type_declaration
@@ -477,6 +486,17 @@ val add_modtype_lazy: update_summary:bool ->
 val add_class: Ident.t -> class_declaration -> t -> t
 val add_cltype: Ident.t -> class_type_declaration -> t -> t
 val add_local_constraint: stage:stage -> Path.t -> type_declaration -> t -> t
+
+(** Assumes the environment was built by adding to [since] *)
+val local_constraints_have_been_added : since:t -> t -> bool
+
+(** Assumes the environment was built by adding to [since].
+    [revert_local_constraints ~since env] is [env] with its local (GADT)
+    constraints replaced by [since]'s.
+
+    Arbitrary uses of this function may create ill-formed environments *)
+val revert_local_constraints : since:t -> t -> t
+
 val add_implicit_jkind: loc:Location.t -> string -> jkind_lr -> t -> t
 val clear_implicit_jkinds : t -> t
 val add_jkind:
@@ -587,10 +607,20 @@ a loop) *)
 val add_const_closure_lock : ?ghost:bool -> Mode.Hint.pinpoint ->
   Mode.Value.Comonadic.Const.t -> t -> t
 
+(** Restrict lexical captures to values usable by a total, stateless and
+    portable computation. *)
+val add_total_closure_lock : Mode.Hint.pinpoint -> t -> t
+
 val add_region_lock : t -> t
+
+(** Mark the environment as a ghost context: the context is deleted from
+    compilation, so nothing is checked on the ghostliness axis inside it. *)
+val enter_ghost_context : t -> t
+
+val in_ghost_context : t -> bool
 val add_exclave_lock : t -> t
 val add_unboxed_lock : t -> t
-val enter_quotation : t -> t
+val enter_quote : t -> t
 val enter_splice : loc:Location.t -> t -> t
 
 (** Set the environment's stage to a fixed one in the far future.
@@ -601,8 +631,8 @@ val check_no_open_quotations :
   Location.t -> t -> no_open_quotations_context -> unit
 val stage : t -> stage
 
-val mark_toplevel_in_quotations : scope:int -> t -> t
-val path_is_toplevel_in_quotations : t -> Path.t -> bool
+val mark_persistent_in_quotations : scope:int -> t -> t
+val path_is_persistent_in_quotations : t -> Path.t -> bool
 
 (* Initialize the cache of in-core module interfaces. *)
 val reset_cache: preserve_persistent_env:bool -> unit
@@ -618,21 +648,29 @@ val get_current_unit_name: unit -> string
 (* Read, save a signature to/from a file. *)
 val read_signature:
   Global_module.Name.t -> Unit_info.Artifact.t
-  -> persistent_signature
+  -> signature * Mode.Staticity.Const.t
         (* Arguments: module name, file name, [add_binding] flag.
            Results: signature. If [add_binding] is true, creates an entry for
            the module in the environment. *)
 val save_signature:
-  alerts:alerts -> persistent_signature
+  alerts:alerts -> signature * Mode.Staticity.Const.t
   -> Compilation_unit.Name.t -> Cmi_format.kind
   -> Unit_info.Artifact.t -> Cmi_format.cmi_infos_lazy
         (* Arguments: signature, module name, module kind, file name. *)
 val save_signature_with_imports:
-  alerts:alerts -> persistent_signature
+  alerts:alerts -> signature * Mode.Staticity.Const.t
   -> Compilation_unit.Name.t -> Cmi_format.kind
   -> Unit_info.Artifact.t -> Import_info.t array -> Cmi_format.cmi_infos_lazy
         (* Arguments: signature, module name, module kind,
            file name, imported units with their CRCs. *)
+
+(** See [Persistent_env.find_import]. *)
+val find_import:
+  chain:Compilation_unit.Name.t list ->
+  Compilation_unit.Name.t ->
+  Compilation_unit.t option
+  * Global_module.Parameter_name.t list
+  * Signature_with_global_bindings.t
 
 (* Register a module as a parameter to this unit. *)
 val register_parameter: Global_module.Parameter_name.t -> unit
@@ -695,8 +733,14 @@ type error =
   | Illegal_value_name of Location.t * string
   | Lookup_error of Location.t * t * lookup_error
   | Incomplete_instantiation of { unset_param : Global_module.Parameter_name.t; }
-  | Toplevel_splice of Location.t
+  | Initial_stage_splice of Location.t
   | Unsupported_inside_quotation of Location.t * no_open_quotations_context
+  | Cmi_not_found of
+      { modname : Compilation_unit.Name.t;
+        chain : Compilation_unit.Name.t list;
+            (** Dependency chain leading to [modname], in reversed order
+                (most-recent loader first). *)
+      }
 
 exception Error of error
 

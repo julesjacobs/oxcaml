@@ -50,7 +50,7 @@ Test that hovering over jkind annotations shows their full expansion.
   $ hover 1 14 1
   type t1 : immutable_data
                 ^
-  "immutable_data" : "value non_float mod forkable unyielding many stateless immutable"
+  "immutable_data" : "value non_float mod forkable unyielding many total immutable"
 
   $ hover 2 11 2
   type t2 : value mod portable
@@ -61,7 +61,7 @@ Test that hovering over jkind annotations shows their full expansion.
   $ hover 3 16 1
   type ('a : immediate) t3 : value
                   ^
-  "immediate)" : "value non_pointer mod global many stateless immutable external_"
+  "immediate)" : "value non_pointer mod global many total immutable external_"
 
   $ hover 3 28 2
   type ('a : immediate) t3 : value
@@ -73,15 +73,15 @@ Test that hovering over jkind annotations shows their full expansion.
   $ hover 4 20 3
   type 'a t4 : immutable_data mod global with 'a
                       ^
-  "immutable_data " : "value non_float mod forkable unyielding many stateless immutable"
-  "immutable_data mod global " : "value non_float mod global many stateless immutable"
+  "immutable_data " : "value non_float mod forkable unyielding many total immutable"
+  "immutable_data mod global " : "value non_float mod global many total immutable"
   "type 'a t4 : immutable_data mod global with 'a" : "type 'a t4 : immutable_data mod global unforkable yielding with 'a"
 
   $ hover 5 11 2
   type t5 : value mod everything
              ^
   "value " : "value"
-  "value mod everything" : "value mod global many stateless immutable external_"
+  "value mod everything" : "value mod global many total immutable external_"
 
   $ hover 6 11 1
   type t6 : bits32
@@ -102,7 +102,7 @@ Test that hovering over jkind annotations shows their full expansion.
   $ hover 10 18 1
     val f : ('a : immediate). 'a -> 'a
                     ^
-  "immediate)" : "value non_pointer mod global many stateless immutable external_"
+  "immediate)" : "value non_pointer mod global many total immutable external_"
 
   $ hover 11 18 1
     val g : ('b : bits32) -> ('b : value mod portable)

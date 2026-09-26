@@ -1,0 +1,3 @@
+pointer-machine differential execution passed
+pointer tail loop, exact stack capacity, and honest heap exhaustion passed
+verified initialization, exact static capacity, and source composition passed

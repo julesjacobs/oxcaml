@@ -16,6 +16,12 @@
 let has_symlink = Unix.has_symlink
 let gettimeofday = Unix.gettimeofday
 
+let is_executable file =
+  try
+    Unix.access file [if Sys.win32 then Unix.F_OK else Unix.X_OK];
+    true
+  with Unix.Unix_error _ -> false
+
 (* Convert Unix_error to Sys_error *)
 let wrap f x =
   try f x

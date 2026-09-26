@@ -1,0 +1,4 @@
+File "sat_cdcl_progress_rejected.ml", line 31, characters 2-40:
+31 |   Vox_cdcl_total.solve (n + 1) n formula
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)

@@ -25,6 +25,7 @@ exception Moregen  of Errortrace.moregen_error
 exception Subtype  of Errortrace.Subtype.error
 
 exception Escape of type_expr Errortrace.escape
+exception Refinement_scope_escape of Ident.t
 
 exception Tags of label * label
 exception Cannot_expand
@@ -84,7 +85,15 @@ val restore_global_level: int -> unit
 
 val create_scope : unit -> int
 
-val mark_toplevel_in_quotations : Env.t -> Env.t
+(** Register term identifiers whose refinement dependencies are valid down to
+    the given type-inference level. *)
+val register_refinement_value_scope : level:int -> Ident.t list -> unit
+val with_refinement_predicate_scope : (unit -> 'a) -> 'a
+val may_track_refinement_scopes : unit -> bool
+
+val check_refinement_class_level_escape : int -> class_type -> unit
+
+val mark_persistent_in_quotations : Env.t -> Env.t
 
 val newty: type_desc -> type_expr
 val new_scoped_ty: int -> type_desc -> type_expr
@@ -148,7 +157,7 @@ val merge_row_fields:
 val filter_row_fields:
         bool -> (label * row_field) list -> (label * row_field) list
 
-val contains_toplevel_splice: int -> type_expr -> bool
+val contains_initial_stage_splice: int -> type_expr -> bool
 val iter_type_expr_with_stages:
         (Env.t -> type_expr -> unit) -> Env.t -> type_expr -> unit
 
@@ -273,6 +282,11 @@ val instance_prim:
         Mode.Locality.lr option * (Mode.Forkable.lr * Mode.Yielding.lr) option *
         Jkind.Sort.t option
 
+(** The join of the yielding modes of the first [arity] parameters of a
+    primitive of type [ty]; [Yielding.max] if [ty] has fewer arrows. *)
+val prim_params_yielding:
+        Env.t -> type_expr -> arity:int -> Mode.Yielding.l
+
 (** Given (a @ m1 -> b -> c) @ m0, where [m0] and [m1] are modes expressed by
     user-syntax, [curry_mode m0 m1] gives the mode we implicitly interpret b->c
     to have. *)
@@ -299,6 +313,8 @@ val try_expand_safe_opt: Env.t -> type_expr -> type_expr
 
 val expand_head_once: Env.t -> type_expr -> type_expr
 val expand_head: Env.t -> type_expr -> type_expr
+val is_inductive: Env.t -> type_expr -> bool
+val can_pattern_match_total: Env.t -> type_expr -> bool
 val expand_head_opt: Env.t -> type_expr -> type_expr
 (** The compiler's own version of [expand_head] necessary for type-based
     optimisations. *)
@@ -358,7 +374,8 @@ type filtered_arrow =
   { ty_arg : type_expr;
     arg_mode : Mode.Alloc.lr;
     ty_ret : type_expr;
-    ret_mode : Mode.Alloc.lr
+    ret_mode : Mode.Alloc.lr;
+    binder : Ident.t option
   }
 
 val filter_arrow: Env.t -> type_expr -> arg_label -> force_tpoly:bool ->
@@ -554,6 +571,13 @@ val close_class_signature : Env.t -> class_signature -> bool
 exception Nondep_cannot_erase of Ident.t
 
 val nondep_type: Env.t -> Ident.t list -> type_expr -> type_expr
+val refinement_ident_occurs : Ident.t -> type_expr -> bool
+val substitute_refinement_expression :
+  Ident.t -> Types.refinement_expression -> type_expr -> type_expr
+val apply_dependent_type :
+  Ident.t -> Ident.t -> type_expr -> type_expr
+val substitute_refinement_ident :
+  Ident.t -> Ident.t -> type_expr -> type_expr
         (* Return a type equivalent to the given type but without
            references to any of the given identifiers.
            Raise [Nondep_cannot_erase id] if no such type exists because [id],
@@ -739,9 +763,9 @@ val type_jkind_and_sort :
    but correct: they are used to implement the module inclusion check, where
    we can be sure that the l-jkind has no undetermined variables. *)
 val check_decl_jkind :
-  Env.t -> type_declaration -> jkind_l -> (unit, Jkind.Violation.t) result
+  Env.t -> type_declaration -> jkind_l -> (unit, Ikind.subjkind_error) result
 val constrain_decl_jkind :
-  Env.t -> type_declaration -> jkind_l -> (unit, Jkind.Violation.t) result
+  Env.t -> type_declaration -> jkind_l -> (unit, Ikind.subjkind_error) result
 
 (* Compare two types for equality, with no renaming. This is useful for
    the [type_equal] function that must be passed to certain jkind functions. *)

@@ -1,0 +1,4 @@
+File "numerical_misplaced.ml", line 9, characters 31-40:
+9 | let misplaced = (fun n -> n) [@decreases 0]
+                                   ^^^^^^^^^
+Error: The decreases attribute is only supported on recursive function bindings

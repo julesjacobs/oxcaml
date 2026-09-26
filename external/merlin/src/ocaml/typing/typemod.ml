@@ -85,6 +85,9 @@ type error =
   | Cannot_scrape_alias of Path.t
   | Cannot_scrape_package_type of Path.t
   | Badly_formed_signature of string * Typedecl.error
+  | Inductive_type_in_recursive_module of string
+  | Exposed_total_value_in_recursive_module of string
+  | Dependent_item_in_recursive_module of string
   | Cannot_hide_id of hiding_error
   | Invalid_type_subst_rhs
   | Non_packable_local_modtype_subst of Path.t
@@ -115,14 +118,19 @@ let new_mode_var_from_annots (m : Alloc.Const.Option.t) =
   Value.submode_exn mode (max |> Alloc.of_const |> alloc_as_value);
   mode
 
-let register_allocation () : Alloc.lr * Value.lr =
+let register_allocation loc : Alloc.lr * Value.lr =
   let upper_bound =
+    (* A module is a runtime block, so it is always real: a ghost item
+       cannot be stored in it. This makes [infer_modalities] reject a ghost
+       structure item, for local modules as well as compilation units. *)
     Alloc.of_const
       ~hint_comonadic:Module_allocated_on_heap
-      { Alloc.Const.max with areality = Global }
+      { Alloc.Const.max with areality = Global; ghostliness = Real }
   in
   let alloc_mode, _ = Alloc.newvar_below upper_bound in
-  let closed_over_mode = alloc_as_value ~hint:Skip alloc_mode in
+  let closed_over_mode =
+    alloc_as_value ~allocation:({loc; txt = Unknown}) alloc_mode
+  in
   alloc_mode, closed_over_mode
 
 open Typedtree
@@ -242,9 +250,20 @@ let check_for_generated_type_or_jkind ~funct_body env loc mty exn =
       Msupport.raise_error (Error (loc, env, exn tj))
 
 (* Extract the signature and the mode of a functor's return, given the signature
-   [sig_acc] and mode [md_mode] of the functor argument. *)
-let extract_sig_functor_open funct_body env loc mty sig_acc md_mode =
+   [sig_acc] and mode [md_mode] of the functor argument. [funct_mode] is the
+   mode of the functor expression itself. *)
+let extract_sig_functor_open funct_body env loc mty sig_acc md_mode
+      ~funct_mode =
   let sig_acc = List.rev sig_acc in
+  (* Applying the functor runs its body, which can perform a free effect if the
+     functor closes over a yielding value (its own mode) or if the enclosing
+     structure it is applied to is yielding (the argument's mode). *)
+  let yielding =
+    let yielding m =
+      Yielding.disallow_right (Value.proj_comonadic Yielding m)
+    in
+    Yielding.join [yielding funct_mode; yielding md_mode]
+  in
   match Mtype.scrape_alias env mty with
   | Mty_functor (Named (param, mty_param, mm_param),mty_result,mm_result)
     as mty_func ->
@@ -283,14 +302,15 @@ let extract_sig_functor_open funct_body env loc mty sig_acc md_mode =
               sig..end -> () -> sig..end *)
         match Mtype.scrape extended_env mty_result with
         | Mty_signature sg_result ->
-            Tincl_functor { input_coercion; input_repr }, sg_result, mm_result
+            Tincl_functor { input_coercion; input_repr; yielding }, sg_result,
+            mm_result
         | Mty_functor (Unit, mty_result, mm_result) -> begin
             check_for_generated_type_or_jkind ~funct_body env loc mty
               (fun tj -> Not_includable_in_functor_body tj);
             match Mtype.scrape extended_env mty_result with
             | Mty_signature sg_result ->
-              Tincl_gen_functor { input_coercion; input_repr }, sg_result,
-              mm_result
+              Tincl_gen_functor { input_coercion; input_repr; yielding },
+              sg_result, mm_result
             | sg -> raise (Error (loc,env,Signature_result_expected
                                             (Mty_functor (Unit,sg, mm_result))))
           end
@@ -319,8 +339,7 @@ let extract_sig_functor_open funct_body env loc mty sig_acc md_mode =
 let type_open_ ?(used_slot=ref false) ?(toplevel=false) ovf env loc lid =
   Env.open_signature ~loc ~used_slot ~toplevel ovf lid env
 
-let initial_env ~loc ~initially_opened_module
-    ~open_implicit_modules =
+let initial_env ~loc ~initially_opened_module ~open_implicit_args =
   let env = Lazy.force Env.initial in
   let open_module env m =
     let open Asttypes in
@@ -337,6 +356,13 @@ let initial_env ~loc ~initially_opened_module
         "Uncaught exception %s in initial_env.open_module: %s"
         Obj.Extension_constructor.(name (of_val exn))
         (Printexc.to_string exn)
+  in
+  let process_open_arg env (arg : Clflags.open_arg) =
+    match arg with
+    | Open m -> open_module env m
+    | Open_cmi cmi ->
+        let _, env = Env.open_pers_signature_cmi cmi env in
+        env
   in
   let add_units env units =
     String.Set.fold
@@ -381,7 +407,10 @@ let initial_env ~loc ~initially_opened_module
   let units_from_filenames =
     Env.persistent_structures_of_basenames basenames in
   let env = add_units env units_from_filenames in
-  List.fold_left open_module env open_implicit_modules
+  (* Process [-open] and [-open-cmi] in command-line order, so an [-open]
+     can refer to a module brought into scope by an earlier [-open-cmi]
+     (and vice-versa: a later [-open-cmi] shadows an earlier [-open]). *)
+  List.fold_left process_open_arg env open_implicit_args
 
 let type_open_descr ?used_slot ?toplevel env sod =
   let (path, _, newenv) =
@@ -713,11 +742,11 @@ let type_decl_is_alias sdecl = (* assuming no explicit constraint *)
 
 let kind_decl_is_alias sdecl =
   match sdecl.pjkind_manifest with
-  | Some { pjka_desc = Pjk_abbreviation (lid, []); _ } -> Some lid
+  | Some { pjka_desc = Pjk_abbreviation lid; _ } -> Some lid
   | None
   | Some { pjka_desc =
-             ( Pjk_abbreviation (_, _ :: _) | Pjk_default | Pjk_mod _
-             | Pjk_with _ | Pjk_kind_of _ | Pjk_product _ ); _ }
+             ( Pjk_operator _ | Pjk_default | Pjk_mod _ | Pjk_with _
+             | Pjk_kind_of _ | Pjk_product _ ); _ }
     -> None
 
 let params_are_constrained =
@@ -785,6 +814,43 @@ and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
       in
       Mty_strengthen (mty, path, alias)
   | Mty_for_hole -> mty
+
+let partial_recursive_module_modality modality =
+  let modality = Mode.Modality.to_const_exn modality in
+  Mode.Modality.Const.set
+    (Mode.Modality.Axis.Comonadic Mode.Axis.Totality)
+    (Mode.Modality.Comonadic.Atom.Meet_const Mode.Totality.Const.Partial)
+    modality
+
+let rec partial_recursive_module_type env mty =
+  match Mtype.scrape env mty with
+  | Mty_ident _ | Mty_alias _ as mty -> mty
+  | Mty_signature sg ->
+      Mty_signature (List.map (partial_recursive_module_item env) sg)
+  | Mty_functor (param, result, mode) ->
+      Mty_functor (param, partial_recursive_module_type env result, mode)
+  | Mty_strengthen (mty, path, alias) ->
+      Mty_strengthen (partial_recursive_module_type env mty, path, alias)
+  | Mty_for_hole -> mty
+
+and partial_recursive_module_item env = function
+  | Sig_value (id, desc, visibility) ->
+      let val_modalities =
+        desc.val_modalities
+        |> partial_recursive_module_modality
+        |> Mode.Modality.of_const
+      in
+      Sig_value (id, { desc with val_modalities }, visibility)
+  | Sig_module (id, presence, desc, rec_status, visibility) ->
+      let md_type = partial_recursive_module_type env desc.md_type in
+      let md_modalities =
+        desc.md_modalities
+        |> partial_recursive_module_modality
+        |> Mode.Modality.of_const
+      in
+      let desc = { desc with md_type; md_modalities } in
+      Sig_module (id, presence, desc, rec_status, visibility)
+  | item -> item
 
 
 module Merge = struct
@@ -995,6 +1061,8 @@ module Merge = struct
               type_expansion_scope = Btype.lowest_level;
               type_attributes = [];
               type_unboxed_default = false;
+              type_inductive = false;
+              type_phantom_parameters = false;
               type_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
               type_unboxed_version = None;
             }
@@ -1401,11 +1469,12 @@ and apply_modalities_module_type env modalities = function
   | (Mty_functor _ | Mty_alias _ | Mty_for_hole) as mty -> mty
 
 let transl_modalities ?(default_modalities = Mode.Modality.Const.id)
-  modalities =
+    ?(allow_redundant_staticity = false) modalities =
   match modalities with
   | [] -> { moda_modalities = default_modalities; moda_desc = [] }
   | _ :: _ ->
     Typemode.transl_modalities_with_default
+      ~allow_redundant_staticity
       ~default:default_modalities ~maturity:Stable modalities
 
 let apply_pmd_modalities env ~default_modalities pmd_modalities mty =
@@ -2182,6 +2251,15 @@ and transl_with ~loc env remove_aliases (rev_tcstrs, sg) constr =
   in
   ((path, lid, constr) :: rev_tcstrs, sg)
 
+and add_implicit_jkinds env attrs =
+  let register_default env (var_name, jkind_annot) =
+    let context = Jkind.History.Implicit_jkind var_name in
+    Env.add_implicit_jkind
+      ~loc:jkind_annot.pjka_loc var_name
+      (Jkind.of_annotation ~context env jkind_annot) env
+  in
+  List.fold_left register_default env attrs
+
 (* In the real compiler, there is no notion of incrementally checking a signature,
    as there is for structures when using the toplevel.  So this function doesn't
    take a ~toplevel argument like its cousin type_structure.  But in merlin,
@@ -2189,7 +2267,8 @@ and transl_with ~loc env remove_aliases (rev_tcstrs, sg) constr =
    so we need this to take the signature of the previously checked portion
    to support include functor. *)
 
-and transl_signature ?(keep_warnings = false) env sig_acc {psg_items; psg_modalities; psg_loc} =
+and transl_signature ?(keep_warnings = false) ?(interface_toplevel = false) env sig_acc
+      {psg_items; psg_modalities; psg_loc} =
   let names = Signature_names.create () in
 
   (* We assume the structure (described by the signature) to be at legacy mode,
@@ -2197,7 +2276,10 @@ and transl_signature ?(keep_warnings = false) env sig_acc {psg_items; psg_modali
   (* CR-soon zqian: make it a parameter instead *)
   let md_mode = Value.legacy in
 
-  let sig_modalities = transl_modalities psg_modalities in
+  let sig_modalities =
+    transl_modalities ~allow_redundant_staticity:interface_toplevel
+      psg_modalities
+  in
 
   let transl_include ~loc env sig_acc sincl modalities =
     let smty = sincl.pincl_mod in
@@ -2211,8 +2293,10 @@ and transl_signature ?(keep_warnings = false) env sig_acc {psg_items; psg_modali
       match sincl.pincl_kind with
       | Functor ->
         Language_extension.assert_enabled ~loc Include_functor ();
+        let funct_mode = Value.disallow_right Value.max in
         let sg, mode, incl_kind =
           extract_sig_functor_open false env smty.pmty_loc mty sig_acc md_mode
+            ~funct_mode
         in
         let zap_modality =
           Ctype.zap_modalities_to_floor_if_modes_enabled_at Stable
@@ -2269,6 +2353,8 @@ and transl_signature ?(keep_warnings = false) env sig_acc {psg_items; psg_modali
               (Value.disallow_right md_mode, sig_modalities.moda_modalities))
             ~why:Signature_item
         in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [tdesc.val_id];
         Signature_names.check_value names tdesc.val_loc tdesc.val_id;
         mksig (Tsig_value tdesc) env loc,
         [Sig_value(tdesc.val_id, tdesc.val_val, Exported)],
@@ -2546,15 +2632,7 @@ and transl_signature ?(keep_warnings = false) env sig_acc {psg_items; psg_modali
     | Psig_attribute attr ->
         Builtin_attributes.parse_standard_interface_attributes attr;
         let newenv =
-          let register_default env (var_name, jkind_annot) =
-            let context =
-              Jkind.History.Implicit_jkind var_name
-            in
-            Env.add_implicit_jkind
-              ~loc:jkind_annot.pjka_loc var_name
-              (Jkind.of_annotation ~context env jkind_annot) env
-          in
-          List.fold_left register_default env
+          add_implicit_jkinds env
             (Builtin_attributes.get_implicit_jkind_attr attr)
         in
         mksig (Tsig_attribute attr) env loc, [], newenv
@@ -2624,6 +2702,410 @@ and transl_modtype_decl_aux env
   newenv, mtd, decl
 
 and transl_recmodule_modtypes env ~sig_modalities sdecls =
+  let scope = Ctype.create_scope () in
+  let ids =
+    List.map (fun (x, _) -> Option.map (Ident.create_scoped ~scope)
+      x.pmd_name.txt)
+      sdecls
+  in
+  let group_ids = List.filter_map Fun.id ids in
+  let modality_is_total modality =
+    match
+      Mode.Modality.Const.proj
+        (Mode.Modality.Axis.Comonadic Mode.Axis.Totality)
+        modality
+    with
+    | Mode.Modality.Comonadic.Atom.Meet_const Totality.Const.Total -> true
+    | Mode.Modality.Comonadic.Atom.Meet_const Totality.Const.Partial -> false
+  in
+  let type_depends_on env dependent_ids ty =
+    match Ctype.nondep_type env dependent_ids ty with
+    | _ -> false
+    | exception Ctype.Nondep_cannot_erase _ -> true
+  in
+  let has_obtainable_dependency env dependent_ids ty =
+    let exception Found in
+    try
+      with_type_mark begin fun mark ->
+        let super = Btype.type_iterators mark in
+        let iterator =
+          { super with
+            Btype.it_do_type_expr = (fun self ty ->
+              match get_desc ty with
+              | Tarrow (_, _, ret, _) ->
+                self.Btype.it_type_expr self ret
+              | Tconstr _ ->
+                let expanded = Ctype.expand_head env ty in
+                if eq_type expanded ty
+                then begin
+                  if type_depends_on env dependent_ids ty
+                  then raise_notrace Found
+                end
+                else self.Btype.it_type_expr self expanded
+              | Tmod _ | Tpackage _ ->
+                if type_depends_on env dependent_ids ty
+                then raise_notrace Found
+              | _ -> super.Btype.it_do_type_expr self ty)
+          }
+        in
+        iterator.Btype.it_type_expr iterator ty
+      end;
+      false
+    with Found -> true
+  in
+  let type_exposes_total_dependency
+      ?(dependent_container = false) env dependent_ids ty =
+    (* A partial value can reveal a total capability through a returned
+       closure or through projections from its result. *)
+    let rec exposes active_types active_declarations dependent_container ty =
+      let visited =
+        match Btype.TypeMap.find ty active_types with
+        | was_dependent -> was_dependent || not dependent_container
+        | exception Not_found -> false
+      in
+      if visited then false else
+      let active_types =
+        match get_desc ty with
+        | Tconstr _ -> active_types
+        | _ -> Btype.TypeMap.add ty dependent_container active_types
+      in
+      let exposes = exposes active_types in
+      let check_obtainable dependent_container modalities ty =
+        (modality_is_total modalities
+         && (dependent_container
+             || has_obtainable_dependency env dependent_ids ty))
+        || exposes active_declarations dependent_container ty
+      in
+      match get_desc ty with
+      | Tarrow ((_, _, ret_mode, _), _, ret, _) ->
+        let totality =
+          Mode.Alloc.proj_comonadic Mode.Axis.Totality ret_mode
+        in
+        (Totality.is_total totality
+         && (dependent_container
+             || has_obtainable_dependency env dependent_ids ret))
+        || exposes active_declarations dependent_container ret
+      | Ttuple fields | Tunboxed_tuple fields ->
+        let dependent_container =
+          dependent_container
+          || has_obtainable_dependency env dependent_ids ty
+        in
+        List.exists
+          (fun (_, field) ->
+            check_obtainable
+              dependent_container Mode.Modality.Const.id field)
+          fields
+      | Tconstr (path, args, _) ->
+        let expanded = Ctype.expand_head env ty in
+        if not (eq_type expanded ty)
+        then exposes active_declarations dependent_container expanded
+        else
+          (* Equality evidence can relate any fields of a dependent GADT. *)
+          let dependent_container =
+            dependent_container || type_depends_on env dependent_ids ty
+          in
+          begin match Path.Map.find_opt path active_declarations with
+        | Some active_args ->
+          not (Ctype.is_equal env false args active_args)
+          && type_depends_on env dependent_ids ty
+        | None ->
+          begin match Env.find_type path env with
+          | ({ type_params; type_kind; type_manifest; _ } as declaration) ->
+            let active_declarations =
+              Path.Map.add path args active_declarations
+            in
+            let check modalities field =
+              match Ctype.apply env type_params field args with
+              | field ->
+                (modality_is_total modalities
+                 && (dependent_container
+                     || has_obtainable_dependency
+                          env dependent_ids field))
+                || exposes active_declarations dependent_container field
+              | exception Ctype.Cannot_apply -> true
+            in
+            begin match type_kind with
+            | Type_record (labels, _, _)
+            | Type_record_unboxed_product (labels, _, _) ->
+              List.exists
+                (fun (label : Types.label_declaration) ->
+                  check label.ld_modalities label.ld_type)
+                labels
+            | Type_variant _ ->
+              Datarepr.constructors_of_type
+                ~current_unit:(Env.get_current_unit ()) path declaration
+              |> List.exists (fun (_, constructor) ->
+                let snapshot = Btype.snapshot () in
+                Misc.try_finally
+                  (fun () ->
+                    let arguments, result, _ =
+                      Ctype.instance_constructor
+                        Keep_existentials_flexible constructor
+                    in
+                    match Ctype.unify env result ty with
+                    | () ->
+                      List.exists
+                        (fun (argument : Types.constructor_argument) ->
+                          check argument.ca_modalities argument.ca_type)
+                        arguments
+                    | exception Ctype.Unify _ -> false)
+                  ~always:(fun () -> Btype.backtrack snapshot))
+            | Type_open -> type_depends_on env dependent_ids ty
+            | Type_abstract _ ->
+              begin match type_manifest with
+              | Some manifest ->
+                begin match Ctype.apply env type_params manifest args with
+                | manifest ->
+                  exposes active_declarations dependent_container manifest
+                | exception Ctype.Cannot_apply -> true
+                end
+              | None ->
+                let direct_carrier =
+                  args = []
+                && (match Path.flatten path with
+                    | `Ok _ -> true
+                    | `Contains_apply -> false)
+                && Path.exists_free dependent_ids path
+                in
+                not direct_carrier
+                && (Path.exists_free dependent_ids path
+                    || List.exists (type_depends_on env dependent_ids) args)
+              end
+            end
+          | exception Not_found -> false
+          end
+        end
+      | Tvariant row ->
+        let dependent_container =
+          dependent_container
+          || has_obtainable_dependency env dependent_ids ty
+        in
+        Btype.fold_row
+          (fun found field ->
+            found
+            || check_obtainable
+                 dependent_container Mode.Modality.Const.id field)
+          false row
+      | Tmod (inner, _) ->
+        type_depends_on env dependent_ids inner
+        || exposes active_declarations dependent_container inner
+      | Tpoly (inner, _) | Trepr (inner, _)
+      | Tquote inner | Tsplice inner | Tquote_eval inner | Tbox inner
+      | Trefine { ref_payload = inner; _ } ->
+        exposes active_declarations dependent_container inner
+      | Tobject (fields, _) ->
+        let dependent_container =
+          dependent_container
+          || has_obtainable_dependency env dependent_ids ty
+        in
+        exposes active_declarations dependent_container fields
+      | Tfield (_, _, method_type, rest) ->
+        exposes active_declarations dependent_container method_type
+        || exposes active_declarations dependent_container rest
+      | Tpackage _ -> type_depends_on env dependent_ids ty
+      | Tvar _ | Tunivar _ | Tnil | Tlink _
+      | Tsubst _ | Tof_kind _ -> false
+    in
+    exposes Btype.TypeMap.empty Path.Map.empty dependent_container ty
+  in
+  let find_dependent_inductive_type env dependent_ids item =
+    let exception Found of string in
+    try
+      with_type_mark begin fun mark ->
+        let super = Btype.type_iterators mark in
+        let iterator =
+          { super with
+            Btype.it_type_expr = (fun self ty ->
+              match get_desc ty with
+              | Tconstr (path, _, _) ->
+                begin match Env.find_type path env with
+                | { type_inductive = true; _ } ->
+                  begin match Ctype.nondep_type env dependent_ids ty with
+                  | _ -> ()
+                  | exception Ctype.Nondep_cannot_erase _ ->
+                    raise_notrace (Found (Path.name path))
+                  end
+                | _ | exception Not_found ->
+                  let expanded = Ctype.expand_head env ty in
+                  if eq_type expanded ty
+                  then super.Btype.it_type_expr self ty
+                  else self.Btype.it_type_expr self expanded
+                end
+              | _ -> super.Btype.it_type_expr self ty)
+          }
+        in
+        iterator.Btype.it_signature_item iterator item
+      end;
+      None
+    with Found name -> Some name
+  in
+  let structure_depends_on env dependent_ids visit =
+    let exception Found in
+    try
+      with_type_mark begin fun mark ->
+        let super = Btype.type_iterators mark in
+        let iterator =
+          { super with
+            Btype.it_type_expr = (fun self ty ->
+              if type_depends_on env dependent_ids ty then raise_notrace Found;
+              super.Btype.it_type_expr self ty);
+            it_path = (fun path ->
+              if Path.exists_free dependent_ids path
+              then raise_notrace Found)
+          }
+        in
+        visit iterator
+      end;
+      false
+    with Found -> true
+  in
+  let module_type_depends_on env dependent_ids mty =
+    structure_depends_on env dependent_ids (fun iterator ->
+      iterator.Btype.it_module_type iterator mty)
+  in
+  let rec class_type_exposes_total_dependency
+      env dependent_ids = function
+    | Cty_constr (_, _, class_type) ->
+      class_type_exposes_total_dependency
+        env dependent_ids class_type
+    | Cty_signature signature ->
+      let member_exists predicate =
+        Vars.exists
+          (fun _ (_, _, ty) -> predicate ty)
+          signature.csig_vars
+        || Meths.exists
+             (fun _ (_, _, ty) -> predicate ty)
+             signature.csig_meths
+      in
+      let dependent_container =
+        member_exists
+          (has_obtainable_dependency env dependent_ids)
+      in
+      member_exists
+        (fun member_type ->
+          type_exposes_total_dependency
+            ~dependent_container env dependent_ids member_type)
+    | Cty_arrow (_, _, result) ->
+      class_type_exposes_total_dependency
+        env dependent_ids result
+  in
+  let extension_exposes_total_dependency
+      env dependent_ids extension =
+    let fields =
+      match extension.ext_args with
+      | Cstr_tuple arguments ->
+        List.map
+          (fun (argument : Types.constructor_argument) ->
+            argument.ca_modalities, argument.ca_type)
+          arguments
+      | Cstr_record labels ->
+        List.map
+          (fun (label : Types.label_declaration) ->
+            label.ld_modalities, label.ld_type)
+          labels
+    in
+    let result_depends =
+      match extension.ext_ret_type with
+      | None -> false
+      | Some ty -> has_obtainable_dependency env dependent_ids ty
+    in
+    let dependent_container =
+      result_depends
+      || List.exists
+           (fun (_, ty) ->
+             has_obtainable_dependency env dependent_ids ty)
+           fields
+    in
+    result_depends
+    || List.exists
+         (fun (modalities, ty) ->
+           (modality_is_total modalities
+            && (dependent_container
+                || has_obtainable_dependency env dependent_ids ty))
+           || type_exposes_total_dependency
+                ~dependent_container env dependent_ids ty)
+         fields
+  in
+  let rec find_forbidden_recursive_signature
+      env dependent_ids mty =
+    match mty with
+    | Mty_strengthen (_, path, _) when Path.exists_free dependent_ids path ->
+      Some (`Unsupported (Path.name path, None))
+    | _ ->
+      match Mtype.scrape env mty with
+      | Mty_ident _ | Mty_alias _ | Mty_for_hole -> None
+      | Mty_functor (param, result, _) ->
+        begin match param with
+        | Unit | Named (None, _, _) ->
+          find_forbidden_recursive_signature env dependent_ids result
+        | Named (Some id, param, mode) ->
+          if module_type_depends_on env dependent_ids param
+          then Some (`Unsupported (Ident.name id, None))
+          else
+              let mode =
+                Mode.(mode |> alloc_as_value |> Value.disallow_right)
+              in
+              let env =
+                Env.add_module ~arg:true id Mp_present param ~mode env
+              in
+              find_forbidden_recursive_signature env dependent_ids result
+        end
+      | Mty_strengthen (result, _, _) ->
+        find_forbidden_recursive_signature env dependent_ids result
+      | Mty_signature signature ->
+        let env = Env.add_signature signature env in
+        let dependent_ids =
+          List.rev_append
+            (List.map Types.signature_item_id signature)
+            dependent_ids
+        in
+        List.find_map
+          (find_forbidden_recursive_signature_item
+             env dependent_ids)
+          signature
+  and find_forbidden_recursive_signature_item env dependent_ids = function
+    | Sig_type (_, decl, _, _) when decl.type_phantom_parameters ->
+        Location.raise_errorf ~loc:decl.type_loc
+          "Recursive module signatures cannot assert phantom parameter \
+           guarantees."
+    | Sig_type (id, decl, _, _) when decl.type_inductive ->
+        Some (`Inductive (Ident.name id))
+    | Sig_module (_, _, decl, _, _) ->
+        find_forbidden_recursive_signature
+          env dependent_ids decl.md_type
+    | Sig_modtype (_, { mtd_type = Some mty; _ }, _) ->
+        find_forbidden_recursive_signature
+          env dependent_ids mty
+    | Sig_value (id, desc, _) ->
+        let modality = Mode.Modality.to_const_exn desc.val_modalities in
+        let forbidden =
+          if modality_is_total modality
+          then type_depends_on env dependent_ids desc.val_type
+          else
+            type_exposes_total_dependency
+              env dependent_ids desc.val_type
+        in
+        if forbidden
+        then Some (`Total_value (Ident.name id, desc.val_loc))
+        else None
+    | (Sig_type _ as item) ->
+        Option.map
+          (fun name -> `Inductive name)
+          (find_dependent_inductive_type env dependent_ids item)
+    | Sig_typext (id, extension, _, _) ->
+      if
+        extension_exposes_total_dependency
+          env dependent_ids extension
+      then Some (`Unsupported (Ident.name id, Some extension.ext_loc))
+      else None
+    | Sig_class (id, declaration, _, _) ->
+      if
+        class_type_exposes_total_dependency
+          env dependent_ids declaration.cty_type
+      then Some (`Unsupported (Ident.name id, Some declaration.cty_loc))
+      else None
+    | Sig_class_type _ | Sig_modtype _ | Sig_jkind _ -> None
+  in
   let make_env curr =
     List.fold_left (fun env (id_shape, _, md, mode, _, _) ->
       let mode = Option.map (fun m -> m.mode_modes) mode in
@@ -2658,12 +3140,6 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
       (fun (id_shape, _, md, _, _, _) ->
          Option.map (fun (id, _) -> (id, md)) id_shape)
       curr
-  in
-  let scope = Ctype.create_scope () in
-  let ids =
-    List.map (fun (x, _) -> Option.map (Ident.create_scoped ~scope)
-      x.pmd_name.txt)
-      sdecls
   in
   let approx_env container =
     List.fold_left
@@ -2729,6 +3205,32 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
 *)
   let env2 = make_env dcl2 in
   check_recmod_decls env2 (map_mtys dcl2);
+  List.iter2
+    (fun (pmd, _) (_, _, (md : Types.module_declaration), _, _, _) ->
+       match
+         find_forbidden_recursive_signature
+           env2 group_ids md.md_type
+       with
+       | None -> ()
+       | Some (`Inductive name) ->
+           raise
+             (Error
+                ( pmd.pmd_type.pmty_loc,
+                  env2,
+                  Inductive_type_in_recursive_module name ))
+       | Some (`Total_value (name, loc)) ->
+           raise
+             (Error
+                ( loc,
+                  env2,
+                  Exposed_total_value_in_recursive_module name ))
+       | Some (`Unsupported (name, loc)) ->
+           raise
+             (Error
+                ( Option.value loc ~default:pmd.pmd_type.pmty_loc,
+                  env2,
+                  Dependent_item_in_recursive_module name )))
+    sdecls dcl2;
   let dcl2 =
     List.map2 (fun (pmd, _) (id_shape, id_loc, md, mmode, md_modalities, mty) ->
       let tmd =
@@ -2750,7 +3252,8 @@ exception Not_a_path
 let rec path_of_module mexp =
   match mexp.mod_desc with
   | Tmod_ident (p,_) -> p
-  | Tmod_apply(funct, arg, _coercion) when !Clflags.applicative_functors ->
+  | Tmod_apply (funct, arg, _coercion, _, _)
+    when !Clflags.applicative_functors ->
       Papply(path_of_module funct, path_of_module arg)
   | Tmod_constraint (mexp, _, _, _) ->
       path_of_module mexp
@@ -2989,7 +3492,30 @@ let check_recmodule_inclusion env bindings =
       in
       List.map check_inclusion bindings
     end
-  in check_incl true (List.length bindings) env Subst.identity
+  in
+  (* [n_max = List.length bindings] is taken from the upstream compiler.
+     It's still insufficient to check some cases, but we stop there. *)
+  let n_max = List.length bindings in
+  let check depth = check_incl true depth env Subst.identity in
+  let attempt depth =
+    if depth >= n_max
+    then None
+    else
+      match check depth with
+      | result -> Some result
+      | exception (Out_of_memory | Stack_overflow | Sys.Break as exn) ->
+        raise exn
+      (* Fall back to a more exhaustive check on compiler errors. *)
+      | exception _ -> None
+  in
+  (* Attempt depths 1 and 2 first to save on compilation time
+     in the successful case. *)
+  match attempt 1 with
+  | Some result -> result
+  | None ->
+  match attempt 2 with
+  | Some result -> result
+  | None -> check n_max
 
 (* Helper for unpack *)
 
@@ -3217,21 +3743,32 @@ and type_module_aux ~alias ~hold_locks ~strengthen ~funct_body anchor env
       md, shape
   | Pmod_functor(arg_opt, sbody) ->
       let alloc_mode, closed_over_mode =
-        register_allocation ()
+        register_allocation sbody.pmod_loc
       in
       let newenv =
         Env.add_closure_lock
           (smod.pmod_loc, Functor)
           closed_over_mode.comonadic env
       in
+      let staticity = Value.proj_monadic Staticity closed_over_mode in
       let t_arg, ty_arg, newenv, funct_shape_param, funct_body =
         match arg_opt with
         | Unit ->
+          Staticity.submode_err (smod.pmod_loc, Functor)
+            (Staticity.of_const ~hint:(Always_dynamic Generative_functor)
+               Dynamic)
+            staticity;
           Unit, Types.Unit, newenv, Shape.for_unnamed_functor_param, false
         | Named (param, smty, smode) ->
           (* unspecified mode axes defaults to legacy *)
           let tmode = Typemode.transl_alloc_mode smode in
           let mode = Alloc.of_const tmode.mode_modes in
+          let param_st =
+            Staticity.apply_hint (Parameter_to_functor param.loc)
+              (Alloc.proj_monadic Staticity mode)
+          in
+          (* See Note [Staticity of functors] in [typedtree.mli] *)
+          Staticity.equate_err (smod.pmod_loc, Functor) staticity param_st;
           let mty = transl_modtype_functor_arg env smty in
           let scope = Ctype.create_scope () in
           let (id, newenv, var) =
@@ -3275,7 +3812,8 @@ and type_module_aux ~alias ~hold_locks ~strengthen ~funct_body anchor env
             Alloc.submode_exn (Alloc.close_over param_mode) ret_mode);
          Alloc.submode_exn (Alloc.partial_apply alloc_mode) ret_mode
        | _ -> ());
-      { mod_desc = Tmod_functor(t_arg, body);
+      { mod_desc =
+          Tmod_functor (t_arg, body, Staticity.disallow_left staticity);
         mod_type = Mty_functor(ty_arg, body.mod_type, ret_mode);
         mod_mode = Value.disallow_right closed_over_mode, None;
         mod_env = env;
@@ -3480,6 +4018,14 @@ and type_application loc ~strengthen ~funct_body env smod =
 
 and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
     funct_body env (funct, funct_shape) app_view =
+  (* Applying a functor runs its body, which can perform a free effect if the
+     functor closes over a yielding value (its own mode) or is given a yielding
+     argument (the argument's mode). *)
+  let functor_application_yielding ~funct ~arg_mode =
+    let yielding m = Value.proj_comonadic Yielding m in
+    Yielding.join
+      [yielding (mode_without_locks_exn funct.mod_mode); yielding arg_mode]
+  in
   (* CR modes: Apply currying constraints if the application is partial
      and returns a functor, similar to constraints for functions.
 
@@ -3521,7 +4067,11 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
       check_curried_application_complete
         ~loc:app_view.loc ~mty_res ~mode_res:(alloc_as_value mm_res)
         ~mode_arg:None;
-      { mod_desc = Tmod_apply_unit funct;
+      { mod_desc =
+          Tmod_apply_unit
+            (funct,
+             functor_application_yielding ~funct
+               ~arg_mode:(Value.disallow_right Value.legacy));
         mod_type = mty_res;
         mod_mode = alloc_as_value (Alloc.disallow_right mm_res), None;
         mod_env = env;
@@ -3544,7 +4094,7 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
       begin match app_view with
       | { arg = None; loc = app_loc; attributes = app_attributes; _ } ->
           Msupport.raise_error (apply_error ());
-          { mod_desc = Tmod_apply_unit(funct);
+          { mod_desc = Tmod_apply_unit(funct, Mode.Yielding.newvar ());
             mod_type = mty_res;
             mod_mode = Value.(disallow_right min), None;
             mod_env = env;
@@ -3625,9 +4175,30 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
       check_curried_application_complete
         ~loc:app_loc ~mty_res:mty_appl ~mode_res:mm_res
         ~mode_arg:(Some mm_param);
-      { mod_desc = Tmod_apply(funct, arg, coercion);
+      let mode_funct = mode_without_locks_exn funct.mod_mode in
+      let funct_staticity = Value.proj_monadic Staticity mode_funct in
+      (* The following [submode] recovers the functor's original staticity [m].
+         See Note [Staticity of functors] in [typedtree.mli] *)
+      let staticity =
+        Staticity.apply_hint (Parameter_to_functor Location.none)
+          (Value.proj_monadic Staticity mm_param)
+      in
+      Staticity.submode_err (funct.mod_loc, Functor) funct_staticity staticity;
+      let mm_res =
+        Value.join
+          [ Value.disallow_right mm_res;
+            Value.min_with_monadic Staticity
+              (Staticity.apply_hint (Functor_to_application funct.mod_loc)
+                 funct_staticity) ]
+      in
+      { mod_desc =
+          Tmod_apply
+            (funct, arg, coercion,
+             functor_application_yielding ~funct
+               ~arg_mode:(fst arg.mod_mode),
+             Staticity.disallow_left staticity);
         mod_type = mty_appl;
-        mod_mode = Value.disallow_right mm_res, None;
+        mod_mode = mm_res, None;
         mod_env = env;
         mod_attributes = app_attributes;
         mod_loc = app_loc },
@@ -3725,11 +4296,9 @@ and type_open_decl_aux ?used_slot ?toplevel ~funct_body names env od =
    extra argument (sig_acc), but leave `toplevel` alone to minimize the diff *)
 and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
     anchor env sig_acc sstr =
-  (* CR implicit-types: implement implicit variable jkinds in structures. *)
-  let env = Env.clear_implicit_jkinds env in
   let names = Signature_names.create () in
-  let _, md_mode = register_allocation () in
   let loc_md = location_of_structure sstr in
+  let _, md_mode = register_allocation loc_md in
 
   let type_str_include ~loc env shape_map sincl sig_acc =
     let smodl = sincl.pincl_mod in
@@ -3742,9 +4311,10 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
       match sincl.pincl_kind with
       | Functor ->
         Language_extension.assert_enabled ~loc Include_functor ();
+        let funct_mode = Typedtree.mode_without_locks_exn modl.mod_mode in
         let sg, mode, incl_kind =
           extract_sig_functor_open funct_body env smodl.pmod_loc
-            modl.mod_type sig_acc md_mode
+            modl.mod_type sig_acc md_mode ~funct_mode
         in
         incl_kind, sg, Value.disallow_right mode
       | Structure ->
@@ -3859,6 +4429,8 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
         in
         let val_val = {desc.val_val with val_modalities} in
         let desc = {desc with val_val} in
+        Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
+          [desc.val_id];
         Signature_names.check_value names desc.val_loc desc.val_id;
         Tstr_primitive desc,
         [Sig_value(desc.val_id, desc.val_val, Exported)],
@@ -4003,6 +4575,35 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
                    pmd_attributes=attrs; pmd_loc=loc; pmd_modalities=[]}
                   , Some smode)) sbind
             ) in
+        (* A recursive signature must not justify its own claimed totality. *)
+        let body_env =
+          List.fold_left
+            (fun env (mty, mode, _uid, shape) ->
+               match mty.md_id, mode, shape with
+               | Some id, Some mode, Some shape ->
+                   let md_type =
+                     partial_recursive_module_type newenv mty.md_type.mty_type
+                   in
+                   let mdecl =
+                     { Types.md_type;
+                       md_modalities = Modality.undefined;
+                       md_attributes = mty.md_attributes;
+                       md_loc = mty.md_loc;
+                       md_uid = mty.md_uid;
+                     }
+                   in
+                   let partial =
+                     Value.of_const
+                       { Value.Const.min with
+                         totality = Totality.Const.Partial }
+                   in
+                   let mode = Value.join [mode.mode_modes; partial] in
+                   Env.add_module_declaration ~check:true ~shape ~arg:true
+                     id Mp_present mdecl ~mode env
+               | None, _, _ -> env
+               | Some _, None, _ | Some _, Some _, None -> assert false)
+            env decls
+        in
         List.iter
           (fun (md, _, _, _) ->
              Option.iter Signature_names.(check_module names md.md_loc) md.md_id
@@ -4016,7 +4617,7 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
                  Builtin_attributes.warning_scope attrs
                    (fun () ->
                       type_module ~strengthen:true ~funct_body
-                        (anchor_recmodule id) newenv smodl
+                        (anchor_recmodule id) body_env smodl
                    )
                in
                let mty' =
@@ -4171,7 +4772,11 @@ and type_structure ?(toplevel = None) ?(keep_warnings = false) ~funct_body
         raise (Error_forward (Builtin_attributes.error_of_extension ext))
     | Pstr_attribute x ->
         Builtin_attributes.parse_standard_implementation_attributes x;
-        Tstr_attribute x, [], shape_map, env
+        let new_env =
+          add_implicit_jkinds env
+            (Builtin_attributes.get_implicit_jkind_attr x)
+        in
+        Tstr_attribute x, [], shape_map, new_env
     | Pstr_jkind x ->
         let id, env, decl = Typedecl.transl_jkind_decl env x in
         Signature_names.check_jkind names decl.jkind_loc decl.jkind_id;
@@ -4227,7 +4832,15 @@ let remove_mode_and_jkind_variables_for_toplevel str =
      Ctype.remove_mode_and_jkind_variables exp.exp_type
   | _ -> ()
 
+let check_refinement_types_options () =
+  if !Clflags.recursive_types
+     && Language_extension.is_enabled Language_extension.Refinement_types
+  then
+    Location.raise_errorf ~loc:Location.none
+      "The -rectypes option cannot be used with the refinement_types extension"
+
 let type_toplevel_phrase env sig_acc s =
+  check_refinement_types_options ();
   Env.reset_required_globals ();
   Env.reset_probes ();
   Typecore.reset_allocations ();
@@ -4245,19 +4858,24 @@ let type_module_alias env smod =
   type_module_maybe_hold_locks ~alias:true ~hold_locks:true ~strengthen:true
     ~funct_body:false None env smod
 
-let type_module =
-  type_module ~strengthen:true ~funct_body:false None
+let type_module env smod =
+  check_refinement_types_options ();
+  type_module ~strengthen:true ~funct_body:false None env smod
 let type_module_maybe_hold_locks =
   type_module_maybe_hold_locks ~strengthen:true ~funct_body:false None
-
 let merlin_type_structure env sig_acc str =
+  check_refinement_types_options ();
   let (str, sg, _mode, _sg_names, _shape, env) =
     type_structure ~keep_warnings:true ~funct_body:false None env sig_acc str
   in
   str, sg, env
-let type_structure env = type_structure ~funct_body:false None env []
-let merlin_transl_signature env sig_acc sg = transl_signature ~keep_warnings:true env sig_acc sg
-let transl_signature env sg = transl_signature env [] sg
+let type_structure env sstr =
+  check_refinement_types_options ();
+  type_structure ~funct_body:false None env [] sstr
+let merlin_transl_signature ?interface_toplevel env sig_acc sg =
+  transl_signature ?interface_toplevel ~keep_warnings:true env sig_acc sg
+let transl_signature ?interface_toplevel env sg =
+  transl_signature ?interface_toplevel env [] sg
 
 (* Normalize types in a signature *)
 
@@ -4280,25 +4898,29 @@ and normalize_signature_item = function
 
 let type_module_type_of env smod =
   let remove_aliases = has_remove_aliases_attribute smod.pmod_attributes in
-  let tmty =
+  let tmty, skip_nongen_check =
     match smod.pmod_desc with
     | Pmod_ident lid -> (* turn off strengthening in this case *)
         let path, md, (mode, locks) =
           Env.lookup_module ~loc:smod.pmod_loc lid.txt env
+        in
+        let skip_nongen_check =
+          List.for_all Ident.is_global (Path.heads path)
         in
           { mod_desc = Tmod_ident (path, lid);
             mod_type = md.md_type;
             mod_mode = mode, Some (locks, lid.txt, lid.loc);
             mod_env = env;
             mod_attributes = smod.pmod_attributes;
-            mod_loc = smod.pmod_loc }
+            mod_loc = smod.pmod_loc },
+          skip_nongen_check
     | _ ->
         let me, _shape = type_module env smod in
-        me
+        me, false
   in
   let mty = Mtype.scrape_for_type_of ~remove_aliases env tmty.mod_type in
   (* PR#5036: must not contain non-generalized type variables *)
-  check_nongen_modtype env smod.pmod_loc mty;
+  if not skip_nongen_check then check_nongen_modtype env smod.pmod_loc mty;
   let zap_modality = Ctype.zap_modalities_to_floor_if_modes_enabled_at Stable in
   let mty =
     remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty
@@ -4412,7 +5034,7 @@ let type_package env m pack =
         let lid = Longident.unflatten n |> Option.get in
         raise (Error(modl.mod_loc, env, Scoping_pack (lid,ty))))
     fl';
-  let _, mode = register_allocation () in
+  let _, mode = register_allocation modl.mod_loc in
   let modl =
     wrap_constraint_package env true modl mty mode Tmodtype_implicit
   in
@@ -4521,8 +5143,8 @@ let check_argument_type_if_given env sourcefile ~actual_staticity actual_sig
                       Argument_for_non_parameter (arg_module, arg_filename)));
       let modes =
         Includecore.Specific
-          ((Env.mode_unit ~staticity:actual_staticity, None),
-           Env.mode_unit ~staticity:arg_staticity)
+          ((Persistent_env.mode_pers_mod actual_staticity, None),
+           Persistent_env.mode_pers_mod arg_staticity)
       in
       let coercion =
         Includemod.compunit_as_argument
@@ -4562,7 +5184,7 @@ let type_implementation target modulename initial_env ast =
         type_structure initial_env ast
       in
       Value.submode_err (Location.in_file sourcefile, Structure)
-        mode (Env.mode_unit ~staticity:Staticity.Dynamic);
+        mode (Persistent_env.mode_pers_mod Dynamic);
       let uid = Uid.of_compilation_unit_id modulename in
       let shape = Shape.set_uid_if_none shape uid in
       if !Clflags.binary_annotations_cms then
@@ -4580,6 +5202,7 @@ let type_implementation target modulename initial_env ast =
             simple_sg
         in
         Typecore.force_delayed_checks ();
+        Verification.run str;
         Mode.erase_hints ();
         Typecore.optimise_allocations ();
         let shape = Shape_reduce.local_reduce Env.empty shape in
@@ -4644,7 +5267,8 @@ let type_implementation target modulename initial_env ast =
               Includemod.compunit
                 initial_env ~mark:true sourcefile
                 ~modes:(Includecore.Specific
-                  ((mode, None), Env.mode_unit ~staticity))
+                  ((mode, None),
+                   Persistent_env.mode_pers_mod staticity))
                 sg compiled_intf_file_name dclsig shape)
           in
           (* Check the _mli_ against the argument type, since the mli determines
@@ -4661,6 +5285,7 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:staticity dclsig arg_type
           in
           Typecore.force_delayed_checks ();
+          Verification.run str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* It is important to run these checks after the inclusion test above,
@@ -4683,7 +5308,9 @@ let type_implementation target modulename initial_env ast =
             (* No [.mli], so the inferred signature has no file-level [@@]
                and is at [Dynamic] on both sides. *)
             let modes =
-              let mode = Env.mode_unit ~staticity:Staticity.Dynamic in
+              let mode =
+                Persistent_env.mode_pers_mod Dynamic
+              in
               Includecore.Specific ((mode, None), mode)
             in
             Profile.record_call "check_sig" (fun () ->
@@ -4707,6 +5334,7 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:Staticity.Dynamic simple_sg arg_type
           in
           Typecore.force_delayed_checks ();
+          Verification.run str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* See comment above. Here the target signature contains all
@@ -4763,6 +5391,7 @@ let cms_register_toplevel_signature_attributes ~sourcefile ~uid ast =
         | _ -> None)
 
 let type_interface ~sourcefile modulename env ast =
+  check_refinement_types_options ();
   let error e =
     raise (Error (Location.none, Env.empty, e))
   in
@@ -4776,7 +5405,7 @@ let type_interface ~sourcefile modulename env ast =
     let uid = Shape.Uid.of_compilation_unit_id modulename in
     cms_register_toplevel_signature_attributes ~uid ~sourcefile ast
   end;
-  let sg = transl_signature env ast in
+  let sg = transl_signature ~interface_toplevel:true env ast in
   let arg_type =
     !Clflags.as_argument_for
     |> Option.map Global_module.Parameter_name.of_string
@@ -4789,6 +5418,173 @@ let type_interface ~sourcefile modulename env ast =
 
 (* "Packaging" of several compilation units into one unit
    having them as sub-modules.  *)
+
+(* Build the signature exposed by a [-functorize] bundle. Roughly:
+
+   {[
+     module Intf : functor (P1) ... (Pn) -> sig
+       module type S = sig
+         module M1 : <sig of M1>
+         ...
+         module Mk : <sig of Mk>
+       end
+     end
+     module Make : functor (P1) ... (Pn) (_ : unit) -> Intf(P1)...(Pn).S
+   ]}
+
+   where [P1..Pn] are the bundle's parameters and [M1..Mk] are the bundled
+   modules. *)
+let functorize_signature ~params ~modules : Types.signature =
+  let make_md md_type : Types.module_declaration =
+    { md_type;
+      md_modalities = Modality.(Const.id |> of_const);
+      md_attributes = [];
+      md_loc = Location.none;
+      md_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
+    }
+  in
+  let wrap_in_named_functor_layers params (body : Types.module_type)
+        : Types.module_type =
+    List.fold_right
+      (fun (p_name, param_id) body ->
+        let impl, param_params, (swg : Signature_with_global_bindings.t) =
+          Env.find_import ~chain:[]
+            (Compilation_unit.Name.of_parameter_name p_name)
+        in
+        assert (Option.is_none impl);
+        assert (List.is_empty param_params);
+        assert (Array.length swg.bound_globals = 0);
+        let sign, _ = swg.sign in
+        let param_type = Mty_signature (Subst.Lazy.force_signature sign) in
+        Mty_functor
+          (Named (Some param_id, param_type, Alloc.legacy), body, Alloc.legacy))
+      params body
+  in
+  let body =
+    List.map
+      (fun (id, sign) ->
+        Sig_module
+          (id, Mp_present, make_md (Mty_signature sign), Trec_not, Exported))
+      modules
+  in
+  let intf_id = Ident.create_local "Intf" in
+  let make_id = Ident.create_local "Make" in
+  let s_id = Ident.create_local "S" in
+  let s_decl : Types.modtype_declaration =
+    { mtd_type = Some (Mty_signature body);
+      mtd_attributes = [];
+      mtd_loc = Location.none;
+      mtd_uid = Uid.mk ~current_unit:(Env.get_current_unit ());
+    }
+  in
+  let intf_result = [ Sig_modtype (s_id, s_decl, Exported) ] in
+  let intf_mty =
+    wrap_in_named_functor_layers params (Mty_signature intf_result)
+  in
+  (* Fresh idents so [Make]'s binders are distinct from [Intf]'s. *)
+  let make_params =
+    List.map (fun (p_name, id) -> (p_name, Ident.rename id)) params
+  in
+  let intf_applied_path =
+    List.fold_left
+      (fun p (_p_name, arg_id) -> Path.Papply (p, Path.Pident arg_id))
+      (Path.Pident intf_id) make_params
+  in
+  let make_result = Mty_ident (Path.Pdot (intf_applied_path, "S")) in
+  let make_with_unit = Mty_functor (Unit, make_result, Alloc.legacy) in
+  let make_mty = wrap_in_named_functor_layers make_params make_with_unit in
+  [
+    Sig_module (intf_id, Mp_present, make_md intf_mty, Trec_not, Exported);
+    Sig_module (make_id, Mp_present, make_md make_mty, Trec_not, Exported);
+  ]
+
+let functorize_interface initial_env ~params ~module_sigs unit_info
+      modulename =
+  let sg = functorize_signature ~params ~modules:module_sigs in
+  Ident.reinit ();
+  if not !Clflags.dont_write_files then begin
+    let name = Compilation_unit.name modulename in
+    let kind =
+      Cmi_format.Normal { cmi_impl = modulename; cmi_arg_for = None }
+    in
+    let cmi =
+      Env.save_signature ~alerts:Misc.Stdlib.String.Map.empty
+        (sg, Staticity.Dynamic) name kind (Unit_info.cmi unit_info)
+    in
+    let decl_deps = Cmt_format.get_declaration_dependencies () in
+    Cmt_format.save_cmt (Unit_info.cmti unit_info) modulename
+      Cmt_format.Functorize initial_env (Some cmi) None;
+    Cms_format.save_cms (Unit_info.cmsi unit_info) modulename
+      Cmt_format.Functorize initial_env None decl_deps
+  end
+
+let functorize_implementation initial_env ~params ~modules ~module_sigs
+      unit_info modulename =
+  let sg = functorize_signature ~params ~modules:module_sigs in
+  Ident.reinit ();
+  if !Clflags.dont_write_files then Tcoerce_none
+  else begin
+    (* Build cmt/cms artifacts directly via [Artifact.from_filename] so they
+       get [raw_source_file = None].  The bundle has no source [.ml]; passing
+       the output (the [source_file] [unit_info] was built with) would make
+       [save_cmt]/[save_cms] [Digest.file] it, which doesn't exist yet at
+       type-check time.  The cmt's [Functorize] binary_annots variant already
+       records that this was a functorize output. *)
+    let for_pack_prefix = Compilation_unit.for_pack_prefix modulename in
+    let target_artifact ext =
+      let filename = Unit_info.prefix unit_info ^ ext in
+      Unit_info.Artifact.from_filename ~for_pack_prefix filename
+    in
+    let save_cmt_cms cmi_opt =
+      let decl_deps = Cmt_format.get_declaration_dependencies () in
+      Cmt_format.save_cmt (target_artifact ".cmt") modulename
+        Cmt_format.Functorize initial_env cmi_opt None;
+      Cms_format.save_cms (target_artifact ".cms") modulename
+        Cmt_format.Functorize initial_env None decl_deps
+    in
+    match !Clflags.cmi_file with
+    | Some cmi_file ->
+        let shape =
+          let uid = Uid.of_compilation_unit_id modulename in
+          List.fold_left
+            (fun map gm ->
+              let name =
+                Global_module.Name.to_string (Global_module.to_name gm)
+              in
+              let id = Ident.create_persistent name in
+              Shape.Map.add_module map id (Shape.for_persistent_unit name))
+            Shape.Map.empty modules
+          |> Shape.str ~uid
+        in
+        let cmi_artifact =
+          Unit_info.Artifact.from_filename ~for_pack_prefix cmi_file
+        in
+        let name = Compilation_unit.to_global_name_without_prefix modulename in
+        let dclsig, staticity = Env.read_signature name cmi_artifact in
+        let cc, _shape =
+          let modes =
+            Includecore.Specific
+              ((Persistent_env.mode_pers_mod Staticity.Dynamic, None),
+               Persistent_env.mode_pers_mod staticity)
+          in
+          Includemod.compunit initial_env ~mark:true
+            "(obtained by functorizing)" ~modes sg cmi_file dclsig shape
+        in
+        save_cmt_cms None;
+        cc
+    | None ->
+        let name = Compilation_unit.name modulename in
+        let kind =
+          Cmi_format.Normal { cmi_impl = modulename; cmi_arg_for = None }
+        in
+        let cmi =
+          Env.save_signature_with_imports ~alerts:Misc.Stdlib.String.Map.empty
+            (sg, Staticity.Dynamic) name kind (Unit_info.cmi unit_info)
+            (Array.of_list (Env.imports ()))
+        in
+        save_cmt_cms (Some cmi);
+        Tcoerce_none
+  end
 
 let package_signatures units =
   let units_with_ids =
@@ -4872,7 +5668,7 @@ let package_units initial_env objfiles target_cmi modulename =
       (Staticity.of_const Staticity.Dynamic);
     let cc, _shape =
       let modes =
-        let mode = Env.mode_unit ~staticity:Staticity.Dynamic in
+        let mode = Persistent_env.mode_pers_mod Dynamic in
         Includecore.Specific ((mode, None), mode)
       in
       Includemod.compunit initial_env ~mark:true
@@ -5134,6 +5930,21 @@ let report_error ~loc _env = function
          Format_doc.pp_doc report.main.txt
      in
      { report with main = { report.main with txt} }
+  | Inductive_type_in_recursive_module name ->
+      Location.errorf ~loc
+        "Type %a has an [@@@@inductive] guarantee, which is not allowed in a \
+         recursive module signature."
+        Style.inline_code name
+  | Exposed_total_value_in_recursive_module name ->
+      Location.errorf ~loc
+        "The value %a exposes a total value whose type depends on the \
+         current recursive module group."
+        Style.inline_code name
+  | Dependent_item_in_recursive_module name ->
+      Location.errorf ~loc
+        "The signature item %a depends on the current recursive module group \
+         in a form that is not allowed in a recursive module signature."
+        Style.inline_code name
   | Cannot_hide_id Illegal_shadowing
       { shadowed_item_kind; shadowed_item_id; shadowed_item_loc;
         shadower_id; user_id; user_kind; user_loc } ->

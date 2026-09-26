@@ -111,6 +111,20 @@ module Rigid_name : sig
         (** [Param id] only occurs in formulas for type constructors. Refers to
             a type-parameter of the constructor, where [id] is the
             [Types.get_id] of the type variable representing the parameter. *)
+    | Provenance of
+        { id : int;
+          (** Identifies this provenance occurrence. *)
+
+          ty : Format_doc.doc;
+          (** The type expression or descriptive noun phrase, retained as a
+              formatting document so its line-breaking instructions survive
+              until the diagnostic is printed. *)
+
+          plural : bool
+          (** Whether [ty] is a plural noun phrase rather than a type. *)
+        }
+        (** A diagnostic-only provenance variable. These variables must not
+            appear in stored [type_ikind]s. *)
     | Unknown of unknown_id
         (** An unknown quantity with a given id. Used to model not-best in
             ikinds. This is used when we couldn't compute a precise ikind,
@@ -127,6 +141,8 @@ module Rigid_name : sig
   val katom : Path.t -> t
 
   val param : int -> t
+
+  val provenance : id:int -> ty:Format_doc.doc -> plural:bool -> t
 
   val unknown : Shape.Uid.t -> t
 
@@ -160,9 +176,10 @@ and type_desc =
       [Tvar None]       ==> [_] *)
 
   | Tarrow of arrow_desc * type_expr * type_expr * commutable
-  (** [Tarrow (Nolabel,      e1, e2, c)] ==> [e1    -> e2]
-      [Tarrow (Labelled "l", e1, e2, c)] ==> [l:e1  -> e2]
-      [Tarrow (Optional "l", e1, e2, c)] ==> [?l:e1 -> e2]
+  (** [Tarrow ((Nolabel, _, _, None), e1, e2, c)] ==> [e1 -> e2]
+      [Tarrow ((Nolabel, _, _, Some x), e1, e2, c)] ==> [(x : e1) -> e2]
+      [Tarrow ((Labelled "l", _, _, None), e1, e2, c)] ==> [l:e1 -> e2]
+      [Tarrow ((Optional "l", _, _, None), e1, e2, c)] ==> [?l:e1 -> e2]
 
       See [commutable] for the last argument. The argument
       type must be a [Tpoly] node *)
@@ -188,6 +205,15 @@ and type_desc =
   | Tconstr of Path.t * type_expr list * abbrev_memo ref
   (** [Tconstr (`A.B.t', [t1;...;tn], _)] ==> [(t1,...,tn) A.B.t]
       The last parameter keep tracks of known expansions, see [abbrev_memo]. *)
+
+  | Tmod of type_expr * mod_bounds
+  (** [Tmod (t, bounds)] ==> [t @@ bounds]
+      The type [t] with its mode crossing bounded by [bounds]. This is a
+      transparent wrapper: it constrains mode crossing only, and erases at
+      runtime. The unboxing and kind-computation paths look through it to [t],
+      as they do for [Tpoly]; generic structural traversals rebuild it; the
+      leaf consumers that classify a type's runtime representation raise,
+      since a [Tmod] is not expected to reach them. *)
 
   | Tobject of type_expr * (Path.t * type_expr list) option ref
   (** [Tobject (`f1:t1;...;fn: tn', `None')] ==> [< f1: t1; ...; fn: tn >]
@@ -274,6 +300,122 @@ and type_desc =
       They are only used to represent the kinds of existentially-quantified types
       mentioned in with-bounds. See test typing-jkind-bounds/gadt.ml *)
 
+  | Tbox of type_expr
+  (** [Tbox ty] ==> [ty box] *)
+
+  | Trefine of refinement_desc
+  (** [Trefine { ref_binder; ref_payload; ref_pred; _ }] ==>
+      [{ref_binder : ref_payload | ref_pred}]
+
+      A refinement type.  The payload determines the layout and runtime
+      representation and supplies unrelated jkind bounds; refinements never
+      reach lambda.  Refinements are rigid: they are never inferred and never
+      solved for, [{x:t | p}] and [t] do not unify, and two refined types are
+      equal iff their payloads are equal and their predicates are syntactically
+      alpha-equivalent. *)
+
+(** A refinement type: the payload type and the predicate over the refined
+    value. *)
+and refinement_desc =
+  { ref_structural_scope : int;
+    (** The monotone contribution from ordinary type/GADT scope checks.
+        [type_expr.scope] is the maximum of this field and the recomputable
+        free term-dependency scope. *)
+    ref_binder : Ident.t;
+    ref_payload : type_expr;
+    ref_pred : refinement_expression }
+
+(** A refinement predicate.  This is a second expression representation for
+    the type language.  Predicates are first checked as ordinary expressions
+    under a total closure lock.  Value names are resolved: bound names
+    ([Rexp_var]) are the refinement binder and predicate-local binders, while
+    free names ([Rexp_ident]) carry paths that are rewritten by module
+    substitution. *)
+and refinement_expression =
+  { rexp_desc : refinement_expression_desc;
+    rexp_type : type_expr;
+    (** The instantiated type at this occurrence. *)
+    rexp_type_constraint : bool;
+    (** Whether this occurrence has an explicit source type constraint. *)
+    rexp_loc : Location.t }
+
+and refinement_expression_desc =
+  | Rexp_var of Ident.t
+  (** A bound name: the refinement binder, or a binder introduced inside
+      the predicate by [Rexp_let], [Rexp_fun] or [Rexp_match]. *)
+  | Rexp_ident of Path.t
+  (** A free name, resolved when the type was translated. *)
+  | Rexp_constant of Parsetree.constant
+  | Rexp_apply of
+      refinement_expression * (Asttypes.arg_label * refinement_expression) list
+  | Rexp_logical_equal of refinement_expression * refinement_expression
+  | Rexp_refinement of type_expr * refinement_expression
+  | Rexp_ghost of refinement_expression
+  | Rexp_tuple of (string option * refinement_expression) list
+  | Rexp_construct of Path.t * refinement_expression list
+  (** The path is [Pextra_ty (type_path, Pcstr_ty name)] for an ordinary
+      constructor and the constructor's own path for an extension
+      constructor, so that substitution keeps it meaningful. *)
+  | Rexp_record of
+      (Path.t * string * refinement_expression) list
+      * refinement_expression option
+  | Rexp_record_unboxed_product of
+      (Path.t * string * refinement_expression) list
+      * refinement_expression option
+  | Rexp_array of Asttypes.mutable_flag * refinement_expression list
+  | Rexp_field of refinement_expression * Path.t * string
+  | Rexp_unboxed_field of refinement_expression * Path.t * string
+  | Rexp_ifthenelse of
+      refinement_expression * refinement_expression
+      * refinement_expression option
+  | Rexp_sequence of refinement_expression * refinement_expression
+  | Rexp_let of refinement_binding * refinement_expression
+  (** A single, non-recursive variable binding. *)
+  | Rexp_fun of Ident.t * type_expr * bool * refinement_expression
+  (** [fun x -> e]; only single, unlabelled variable parameters.
+      The boolean records an explicit parameter type constraint. *)
+  | Rexp_match of refinement_expression * refinement_case list
+
+and refinement_binding =
+  { rb_kind : refinement_binding_kind;
+    rb_ident : Ident.t;
+    rb_type : type_expr;
+    rb_type_constraint : bool;
+    rb_expr : refinement_expression }
+
+and refinement_binding_kind =
+  | Rbind_value
+  (** [let x = e1 in e2]. *)
+  | Rbind_refine
+  (** [let refine_ x = e1 in e2].  The bound identifier has the payload type
+      of the refinement-typed [e1]. *)
+
+and refinement_case =
+  { rc_lhs : refinement_pattern;
+    rc_guard : refinement_expression option;
+    rc_rhs : refinement_expression }
+
+and refinement_pattern =
+  { rpat_desc : refinement_pattern_desc;
+    rpat_type : type_expr;
+    (** The instantiated type at this pattern node. *)
+    rpat_refinements : type_expr list;
+    (** Source types retained by implicit refinement elimination. *)
+    rpat_type_constraint : bool;
+    (** Whether this pattern has an explicit source type constraint. *)
+    rpat_loc : Location.t }
+
+and refinement_pattern_desc =
+  | Rpat_any
+  | Rpat_var of Ident.t
+  | Rpat_constant of Parsetree.constant
+  | Rpat_tuple of (string option * refinement_pattern) list
+  | Rpat_construct of Path.t * refinement_pattern list
+  | Rpat_record of
+      Asttypes.closed_flag * (Path.t * string * refinement_pattern) list
+  | Rpat_alias of refinement_pattern * Ident.t
+  | Rpat_or of refinement_pattern * refinement_pattern
+
 (** This is used in the Typedtree. It is distinct from
     {{!Asttypes.arg_label}[arg_label]} because Position argument labels are
     discovered through typechecking. *)
@@ -284,7 +426,7 @@ and arg_label =
   | Position of string (** [label:[%call_pos] -> ...] *)
 
 and arrow_desc =
-  arg_label * Mode.Alloc.lr * Mode.Alloc.lr
+  arg_label * Mode.Alloc.lr * Mode.Alloc.lr * Ident.t option
 
 (** [package] corresponds to the type of a first-class module *)
 and package =
@@ -386,7 +528,7 @@ and 'd with_bounds =
 
 and 'layout jkind_base =
   | Layout of 'layout
-  | Kconstr of Path.t
+  | Kconstr of Path.t * Jkind_types.Scannable_axes.t
 
 and ('layout, 'd) base_and_axes =
   { base : 'layout jkind_base;
@@ -535,6 +677,7 @@ module Transient_expr : sig
   (** Operations on [transient_expr] *)
 
   val create: type_desc -> level: int -> scope: int -> id: int -> transient_expr
+  val get_desc : transient_expr -> type_desc
   val get_scope: transient_expr -> int
   val get_marks: transient_expr -> int
   val set_desc: transient_expr -> type_desc -> unit
@@ -553,6 +696,12 @@ module Transient_expr : sig
 end
 
 val create_expr: type_desc -> level: int -> scope: int -> id: int -> type_expr
+
+(** Install the observer called after a type description is initialized or
+    replaced. *)
+val set_type_desc_observer : (transient_expr -> unit) -> unit
+
+val may_have_refinement_types : unit -> bool
 
 (** Functions and definitions moved from Btype *)
 
@@ -849,6 +998,9 @@ type type_declaration =
     (* true if the user did not specify an explicit representation attribute
        ([@@unboxed] or [@@represent_as_float_array]), so the representation may
        have been chosen by a compiler flag. *)
+    type_inductive: bool;
+    type_phantom_parameters: bool;
+    (* Whether the declaration has a checked [@@inductive] guarantee. *)
     type_uid: Uid.t;
     type_unboxed_version : type_declaration option;
     (* stores the unboxed version of that this type introduces: this is [Some]
@@ -856,10 +1008,8 @@ type type_declaration =
        records (besides records that flattens floats or have with atomic
        fields), but [None] for aliases of these types
 
-       invariants:
-       1. there are no "twice-unboxed" types: the [type_declaration] stored here
-          itself has [type_unboxed_version = None].
-       2. the Uid of the unboxed version is [Uid.unboxed_version <uid of boxed>]
+       invariant:
+       the Uid of the unboxed version is [Uid.unboxed_version <uid of boxed>]
     *)
   }
 
@@ -916,6 +1066,7 @@ and mixed_block_element =
   | Vec128
   | Vec256
   | Vec512
+  | Mask
   | Word
   | Product of mixed_product_shape
   (* Invariant: the array has at least two things in it. *)
@@ -959,16 +1110,21 @@ and record_representation =
      until we know the kinds of the fields.
 
      After [update_decls_jkind], no record should have this representation. *)
-  | Record_variable
-  (* Used after [update_decls_jkind] for records whose representation cannot be
-     determined because at least one field has layout [any]. The actual
-     representation is decided at construction sites. *)
+  | Record_undetermined
+  (* Used after [update_decls_jkind] for non-inlined records whose
+     representation cannot be determined because at least one field has layout
+     [any]. When typing uses, this is replaced by [Record_variable]. *)
+  | Record_variable of (Jkind_types.Sort.t * type_expr) array
+  (* What [Record_undetermined] becomes after typechecking a use of the record.
+     In translation, this refines to [Record_{boxed,mixed}]. *)
 
 and record_unboxed_product_representation =
   | Record_unboxed_product
-  | Record_unboxed_product_variable
-  (* Counterpart of [Record_variable] for unboxed product records that have at
-     least one field of layout [any]. *)
+  | Record_unboxed_product_undetermined
+  (* Counterpart of [Record_undetermined] for unboxed records. When typing uses,
+     this is replaced by [Record_unboxed_product_variable].*)
+  | Record_unboxed_product_variable of Jkind_types.Sort.t array
+  (* Counterpart of [Record_variable] for unboxed records. *)
 
 and variant_representation =
   | Variant_unboxed
@@ -992,10 +1148,10 @@ and cstr_layout =
            [Constructor_mixed] if the inlined record has any unboxed fields.
         *)
       }
-  | Cstr_layout_variable
+  | Cstr_layout_undetermined
   (* The constructor's payload contains a field of layout [any], so neither
      its [shape] nor the [sorts] of its arguments can be determined at
-     typedecl time. Counterpart of [Record_variable] for variants. *)
+     typedecl time. Counterpart of [Record_undetermined] for variants. *)
   (* CR layouts v3.5: A custom variant representation for ['a or_null].
      Eventually, it should likely be merged into [Variant_unboxed], with
      [Variant_unboxed] allowing either one ordinary constructor, or one
@@ -1009,12 +1165,22 @@ and constructor_representation =
   *)
   | Constructor_mixed of mixed_product_shape
   (* A constructor that has some non-value fields. *)
+  | Constructor_undetermined
+  (* The constructor has an inlined record argument with a field of layout
+     [any], so its shape cannot be determined at typedecl time. *)
+  | Constructor_variable of (Jkind_types.Sort.t * type_expr) array
+  (* What [Constructor_undetermined] becomes after typechecking a use of the
+     constructor. Like [Record_variable], only ever appears in the typedtree,
+     never in a type declaration. *)
 
 and label_declaration =
   {
     ld_id: Ident.t;
     ld_mutable: mutability;
     ld_modalities: Mode.Modality.Const.t;
+    ld_ghost: bool;
+    (* The field is ghost: it occupies no slot in the record, and reading
+       it fabricates a placeholder at mode ghost. Written [@@ ghost]. *)
     ld_type: type_expr;
     ld_sort: Jkind_types.Sort.Const.t option;
     ld_loc: Location.t;
@@ -1211,7 +1377,9 @@ module type Wrapped = sig
 
   and signature = signature_item list wrapped
 
-  and persistent_signature = signature * Mode.Staticity.Const.t
+  (** A left mode instead of a constant mode, in order to encode mode hints.
+      Note that cmi record constant modes anyway. *)
+  and persistent_signature = signature * Mode.Value.l
 
   and signature_item =
     Sig_value of Ident.t * value_description * visibility

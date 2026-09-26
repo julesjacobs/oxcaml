@@ -1,0 +1,13 @@
+(* CHILDTEST
+ set compiler_library = "ocamloptcomp";
+ libraries = "${compiler_library}";
+ ocamlc.byte;
+ libraries = "";
+ split [
+ | libraries += "ocamltoplevel";
+   ocamlc.byte;
+ | ocamlc.byte with ocamlcommon;
+ | libraries = "ocamlbytecomp";
+   ocamlopt.byte;
+ ]
+*)

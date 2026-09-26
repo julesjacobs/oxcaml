@@ -38,7 +38,7 @@ Simple module construction
       | A 
     type v = [ `A of t_ext ]
     type t_function =
-      (int) -> foo:(string) -> ?bar:(bool option) -> here:[%call_pos ] -> char
+      (int) -> foo:(string) -> ?bar:bool -> here:[%call_pos ] -> char
     let i = _
     let f = _
     module Sub = struct let y = _ end

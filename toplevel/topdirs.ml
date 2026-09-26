@@ -184,9 +184,9 @@ let _ = add_directive "mod_use" (Directive_string (with_error_fmt dir_mod_use))
              wraps the contents in a module.";
     }
 
-let _ = add_directive "mark_toplevel_in_quotations"
+let _ = add_directive "mark_persistent_in_quotations"
     (Directive_none (fun () ->
-      toplevel_env := Ctype.mark_toplevel_in_quotations !toplevel_env))
+      toplevel_env := Ctype.mark_persistent_in_quotations !toplevel_env))
     {
       section = section_meta;
       doc = "Mark all names in the current environment as available \
@@ -582,7 +582,13 @@ let _ = add_directive "principal"
     }
 
 let _ = add_directive "rectypes"
-    (Directive_none(fun () -> Clflags.recursive_types := true))
+    (Directive_none(fun () ->
+       if Language_extension.is_enabled Language_extension.Refinement_types
+       then
+         Location.raise_errorf ~loc:Location.none
+           "The #rectypes directive cannot be used with the refinement_types \
+            extension";
+       Clflags.recursive_types := true))
     {
       section = section_options;
       doc = "Allow arbitrary recursive types during type-checking.";

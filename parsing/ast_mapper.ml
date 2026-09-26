@@ -182,8 +182,10 @@ module T = struct
     | Ptyp_var (s, jkind) ->
         let jkind = map_opt (sub.jkind_annotation sub) jkind in
         var ~loc ~attrs s jkind
-    | Ptyp_arrow (lab, t1, t2, m1, m2) ->
-        arrow ~loc ~attrs lab (sub.typ sub t1) (sub.typ sub t2) (sub.modes sub m1) (sub.modes sub m2)
+    | Ptyp_arrow (lab, t1, t2, m1, m2, binder) ->
+        let binder = map_opt (map_loc sub) binder in
+        arrow ~loc ~attrs ?binder lab (sub.typ sub t1) (sub.typ sub t2)
+          (sub.modes sub m1) (sub.modes sub m2)
     | Ptyp_tuple tyl ->
         tuple ~loc ~attrs (List.map (fun (l, t) -> l, sub.typ sub t) tyl)
     | Ptyp_unboxed_tuple tyl ->
@@ -224,6 +226,9 @@ module T = struct
         repr ~loc ~attrs (List.map (map_loc sub) lvars) (sub.typ sub t)
     | Ptyp_newlayout (lvars, t) ->
         newlayout ~loc ~attrs (List.map (map_loc sub) lvars) (sub.typ sub t)
+    | Ptyp_refine (binder, t, predicate) ->
+        refine ~loc ~attrs (map_loc sub binder) (sub.typ sub t)
+          (sub.expr sub predicate)
     | Ptyp_extension x -> extension ~loc ~attrs (sub.extension sub x)
 
   let map_type_declaration sub
@@ -662,12 +667,18 @@ module E = struct
     | Pexp_extension x -> extension ~loc ~attrs (sub.extension sub x)
     | Pexp_unreachable -> unreachable ~loc ~attrs ()
     | Pexp_stack e -> stack ~loc ~attrs (sub.expr sub e)
+    | Pexp_ghost e -> ghost ~loc ~attrs (sub.expr sub e)
     | Pexp_comprehension c -> comprehension ~loc ~attrs (map_cexp sub c)
     | Pexp_overwrite (e1, e2) -> overwrite ~loc ~attrs (sub.expr sub e1) (sub.expr sub e2)
     | Pexp_quote e -> quote ~loc ~attrs (sub.expr sub e)
     | Pexp_splice e -> splice ~loc ~attrs (sub.expr sub e)
     | Pexp_hole -> hole ~loc ~attrs ()
     | Pexp_borrow e -> borrow ~loc ~attrs (sub.expr sub e)
+    | Pexp_refine e -> refine ~loc ~attrs (sub.expr sub e)
+    | Pexp_assume e -> assume ~loc ~attrs (sub.expr sub e)
+    | Pexp_let_refine (name, bound, body) ->
+        let_refine ~loc ~attrs (map_loc sub name) (sub.expr sub bound)
+          (sub.expr sub body)
 
   let map_binding_op sub {pbop_op; pbop_pat; pbop_exp; pbop_loc} =
     let open Exp in

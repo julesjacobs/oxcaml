@@ -433,7 +433,7 @@ let rec print_coercion ppf c =
       pr "@[<2>struct@ %a@ %a@]"
         (print_list print_coercion2) pos_cc_list
         (print_list print_coercion3) id_pos_list
-  | Tcoerce_functor (inp, out) ->
+  | Tcoerce_functor (inp, out, _) ->
       pr "@[<2>functor@ (%a)@ (%a)@]"
         print_coercion inp
         print_coercion out
@@ -533,7 +533,8 @@ let pair_components subst sig1_comps sig2 =
               Subst.add_modtype id2 (Path.Pident id1) subst
           | Sig_jkind _ ->
               Subst.add_jkind id2 (Path.Pident id1) subst
-          | Sig_value _ | Sig_typext _
+          | Sig_value _ | Sig_typext _ ->
+              Subst.add_value id2 (Path.Pident id1) subst
           | Sig_class _ | Sig_class_type _ ->
               subst
         in
@@ -779,7 +780,25 @@ and try_modtypes ~core ~direction ~loc env subst ~modes
             then orig_shape
             else Shape.abs var final_res_shape
           in
-          Ok (Tcoerce_functor(cc_arg, cc_res), final_shape)
+          let application_yielding =
+            let open Mode in
+            let param_yielding =
+              match (param2 : Subst.Lazy.functor_parameter) with
+              | Named (_, _, mm) ->
+                [Yielding.disallow_right (Alloc.proj_comonadic Yielding mm)]
+              | Unit -> []
+            in
+            let funct_yielding =
+              match modes with
+              | All -> Yielding.disallow_right Yielding.max
+              | Specific ((m, _locks), _) ->
+                Yielding.disallow_right (Value.proj_comonadic Yielding m)
+            in
+            Yielding.join (funct_yielding :: param_yielding)
+          in
+          Ok
+            (Tcoerce_functor(cc_arg, cc_res, application_yielding),
+             final_shape)
       | _, Error {Error.symptom = Error.Functor Error.Params res; _} ->
           let got = Error.cons_arg (force_functor_parameter param1) res.got in
           let expected =
@@ -887,6 +906,10 @@ and equate_one_functor_param subst env arg2' name1 name2  =
 and strengthened_modtypes ~core ~direction ~loc ~aliasable env
     subst mty1 path1 mty2 shape =
   let mty1 = Mtype.strengthen_lazy ~aliasable mty1 path1 in
+  let mty1 =
+    Mtype.prefix_refinement_paths_lazy env Subst.identity mty1 path1
+  in
+  let mty2 = Mtype.prefix_refinement_paths_lazy env subst mty2 path1 in
   modtypes ~core ~direction ~loc env subst mty1 mty2 shape
 
 and strengthened_module_decl ~loc ~aliasable ~core ~direction env

@@ -170,7 +170,11 @@ module type Common = sig
   val submode_err :
     Mode_hint.pinpoint -> (allowed * 'r) t -> ('l * allowed) t -> unit
 
-  val equate : lr -> lr -> (unit, equate_error) result
+  (** Similar to [submode_err], but checks the two modes are equal by submoding
+      in both directions. *)
+  val equate_err : Mode_hint.pinpoint -> lr -> lr -> unit
+
+  val equate : ?pp:Mode_hint.pinpoint -> lr -> lr -> (unit, equate_error) result
 
   (** Similiar to [submode], but crashes the compiler if errors. Use this
       function if the submode is guaranteed to succeed. *)
@@ -205,6 +209,10 @@ module type Common_axis = sig
   type 'd hint_const constraint 'd = 'l * 'r
 
   val of_const : ?hint:'d hint_const -> Const.t -> 'd t
+
+  type 'd hint_morph constraint 'd = 'l * 'r
+
+  val apply_hint : 'd hint_morph -> 'd t -> 'd t
 end
 
 module type Axis = sig
@@ -212,7 +220,7 @@ module type Axis = sig
   type 'a t
 
   (** Compare two axes in implication order. If A implies B, then A is before B.
-  *)
+      This is also observed by [printtyp]. *)
   val compare : 'a t -> 'b t -> int
 
   type packed = P : 'a t -> packed
@@ -360,6 +368,7 @@ module type S = sig
         with module Const := Const
          and type 'd t = (Const.t, 'd pos) mode
          and type 'd hint_const := 'd pos_hint_const
+         and type 'd hint_morph := 'd pos_hint_morph
   end
 
   module type Common_axis_neg = sig
@@ -370,6 +379,7 @@ module type S = sig
         with module Const := Const
          and type 'd t = (Const.t, 'd neg) mode
          and type 'd hint_const := 'd neg_hint_const
+         and type 'd hint_morph := 'd neg_hint_morph
   end
 
   module Locality : sig
@@ -515,6 +525,25 @@ module type S = sig
     val unyielding : lr
   end
 
+  module Totality : sig
+    module Const : sig
+      type t =
+        | Total
+        | Partial
+
+      include Const with type t := t
+    end
+
+    include Common_axis_pos with module Const := Const
+
+    val total : lr
+
+    val partial : lr
+
+    (** Inspect the inferred mode without committing solver changes. *)
+    val is_total : (allowed * 'r) t -> bool
+  end
+
   module Statefulness : sig
     module Const : sig
       type t =
@@ -535,6 +564,25 @@ module type S = sig
     val reading : lr
 
     val stateful : lr
+
+    (** Inspect the inferred mode without committing solver changes. *)
+    val is_stateless : (allowed * 'r) t -> bool
+  end
+
+  module Ghostliness : sig
+    module Const : sig
+      type t =
+        | Real
+        | Ghost
+
+      include Const with type t := t
+    end
+
+    include Common_axis_pos with module Const := Const
+
+    val real : lr
+
+    val ghost : lr
   end
 
   module Visibility : sig
@@ -574,7 +622,9 @@ module type S = sig
       portability : Portability.Const.t;
       forkable : Forkable.Const.t;
       yielding : Yielding.Const.t;
-      statefulness : Statefulness.Const.t
+      totality : Totality.Const.t;
+      statefulness : Statefulness.Const.t;
+      ghostliness : Ghostliness.Const.t
     }
 
   type monadic =
@@ -594,8 +644,10 @@ module type S = sig
       | Forkable : ('areality comonadic_with, Forkable.Const.t) t
       | Yielding : ('areality comonadic_with, Yielding.Const.t) t
       | Linearity : ('areality comonadic_with, Linearity.Const.t) t
+      | Totality : ('areality comonadic_with, Totality.Const.t) t
       | Statefulness : ('areality comonadic_with, Statefulness.Const.t) t
       | Portability : ('areality comonadic_with, Portability.Const.t) t
+      | Ghostliness : ('areality comonadic_with, Ghostliness.Const.t) t
       | Uniqueness : (monadic, Uniqueness.Const.t) t
       | Visibility : (monadic, Visibility.Const.t) t
       | Contention : (monadic, Contention.Const.t) t
@@ -659,7 +711,7 @@ module type S = sig
       include Axis with type 'a t := 'a t
     end
 
-    type ('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j) modes =
+    type ('a, 'b, 'c, 'd, 'e, 'f, 'g, 'h, 'i, 'j, 'k, 'l) modes =
       { areality : 'a;
         linearity : 'b;
         uniqueness : 'c;
@@ -667,9 +719,11 @@ module type S = sig
         contention : 'e;
         forkable : 'f;
         yielding : 'g;
-        statefulness : 'h;
-        visibility : 'i;
-        staticity : 'j
+        totality : 'h;
+        statefulness : 'i;
+        visibility : 'j;
+        staticity : 'k;
+        ghostliness : 'l
       }
 
     module Const : sig
@@ -683,9 +737,11 @@ module type S = sig
               Contention.Const.t,
               Forkable.Const.t,
               Yielding.Const.t,
+              Totality.Const.t,
               Statefulness.Const.t,
               Visibility.Const.t,
-              Staticity.Const.t )
+              Staticity.Const.t,
+              Ghostliness.Const.t )
             modes
 
       module Option : sig
@@ -699,9 +755,11 @@ module type S = sig
             Contention.Const.t option,
             Forkable.Const.t option,
             Yielding.Const.t option,
+            Totality.Const.t option,
             Statefulness.Const.t option,
             Visibility.Const.t option,
-            Staticity.Const.t option )
+            Staticity.Const.t option,
+            Ghostliness.Const.t option )
           modes
 
         val none : t
@@ -1135,7 +1193,9 @@ module type S = sig
         portability:Portability.Const.t Atom.t ->
         forkable:Forkable.Const.t Atom.t ->
         yielding:Yielding.Const.t Atom.t ->
+        totality:Totality.Const.t Atom.t ->
         statefulness:Statefulness.Const.t Atom.t ->
+        ghostliness:Ghostliness.Const.t Atom.t ->
         t
 
       (** Create the mode crossing for a type whose values are always
@@ -1177,9 +1237,11 @@ module type S = sig
       contention:bool ->
       forkable:bool ->
       yielding:bool ->
+      totality:bool ->
       statefulness:bool ->
       visibility:bool ->
       staticity:bool ->
+      ghostliness:bool ->
       t
 
     (** Project a mode crossing (of all axes) onto the specified axis. *)

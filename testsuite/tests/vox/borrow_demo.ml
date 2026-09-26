@@ -1,0 +1,70 @@
+(* TEST
+ has-z3;
+ flags = "-extension refinement_types";
+ source_directories = "${test_source_directory}/../../../verification/library";
+ all_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml borrow_demo.ml";
+ { bytecode; }
+*)
+
+open Borrow
+
+let swap_ends : ('a : immutable_data). (a : 'a Owned_array.t) @ unique ->
+    {r : 'a Owned_array.t |
+      Owned_array.contents r ===
+        (if Bigint.compare (Model.length (Owned_array.contents a)) 0Z > 0 then
+          Model.swap (Owned_array.contents a) 0Z
+            (Bigint.sub (Model.length (Owned_array.contents a)) 1Z)
+        else Owned_array.contents a)} @ unique = fun a ->
+  let before = ghost_ (Owned_array.contents (borrow_ a)) in
+  let post = ghost_ (fun (_ : unit @ immutable)
+      (after : 'a Model.t @ immutable) -> after ===
+      (if Bigint.compare (Model.length before) 0Z > 0 then
+        Model.swap before 0Z (Bigint.sub (Model.length before) 1Z)
+       else before)) in
+  let result = Owned_array.with_mut a post (fun loan ->
+    let s = loan in
+    let n = Slice.length (borrow_ s) in
+    let s2 =
+      if n > 0 then
+        let zero = 0 in
+        let last = n - 1 in
+        let first : {i : int | 0 <= i
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
+          zero in
+        let second : {i : int | 0 <= i
+          && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current s)) < 0} =
+          last in
+        let swapped = Slice.swap s first second in
+        swapped
+      else s in
+    Slice.finish s2;
+    ()) in
+  let {state; _} = result in
+  state
+
+let check (values : int list) (expected : int list) =
+  let source = Iarray.of_list values in
+  let a = Owned_array.of_iarray source in
+  let a = swap_ends a in
+  let result = Owned_array.into_iarray a in
+  assert (Iarray.to_list result = expected);
+  assert (Iarray.to_list source = values)
+
+let () =
+  check [] [];
+  check [1] [1];
+  check [1; 2; 3; 4] [4; 2; 3; 1];
+  print_endline "verified end swap: empty, singleton, and shared source"
+
+
+type items : immutable_data = int list
+
+let () =
+  let shared : items = [1; 2] in
+  let input : items iarray = [: shared; [3] :] in
+  let a = Owned_array.of_iarray input in
+  let a = swap_ends a in
+  let output = Owned_array.into_iarray a in
+  assert (Iarray.to_list output = [[3]; [1; 2]]);
+  assert (Iarray.to_list input = [[1; 2]; [3]]);
+  assert (shared = [1; 2])

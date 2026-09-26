@@ -232,10 +232,10 @@ let classify_expression : Typedtree.expression -> sd =
         Static
 
     | Texp_apply ({exp_desc = Texp_ident { desc = vd; kind = Id_prim _; _ }},
-        _, _, _, _)
+        _, _, _, _, _)
       when is_ref vd ->
         Static
-    | Texp_apply (_, args, _, _, _)
+    | Texp_apply (_, args, _, _, _, _)
       when List.exists is_abstracted_arg args ->
         Static
     | Texp_apply _ ->
@@ -277,12 +277,13 @@ let classify_expression : Typedtree.expression -> sd =
     | Texp_field _
     | Texp_unboxed_field _
     | Texp_assert _
+    | Texp_assume _
+    | Texp_logical_equal _
     | Texp_try _
     | Texp_override _
     | Texp_letop _
-    (* CR metaprogramming aivaskovic: verify for quotations and splices *)
-    | Texp_quotation _
-    | Texp_antiquotation _ ->
+    | Texp_quote _
+    | Texp_splice _ ->
         Dynamic
   and classify_value_bindings rec_flag env bindings =
     (* We use a non-recursive classification, classifying each
@@ -368,6 +369,8 @@ let classify_expression : Typedtree.expression -> sd =
 
 (** {1 Usage of recursive variables} *)
 
+module Value_mode = Mode
+
 module Mode = struct
   (** For an expression in a program, its "usage mode" represents
       static information about how the value produced by the expression
@@ -411,12 +414,16 @@ module Mode = struct
         in arbitrary ways. Such a value must be fully defined at the point
         of usage, it cannot be defined mutually-recursively with its context. *)
 
+    | Require_initialized
+    (** A total closure or payload must not depend on its unfinished recursive
+        group, even through delayed or guarded aliases. *)
+
   let equal = ((=) : t -> t -> bool)
 
   (* Lower-ranked modes demand/use less of the variable/expression they qualify
      -- so they allow more recursive definitions.
 
-     Ignore < Delay < Guard < Return < Dereference
+     Ignore < Delay < Guard < Return < Dereference < Require_initialized
   *)
   let rank = function
     | Ignore -> 0
@@ -424,6 +431,7 @@ module Mode = struct
     | Guard -> 2
     | Return -> 3
     | Dereference -> 4
+    | Require_initialized -> 5
 
   (* Returns the more conservative (highest-ranking) mode of the two
      arguments.
@@ -443,6 +451,7 @@ module Mode = struct
      it: (compose Ignore m) and (compose m Ignore) are both Ignore. *)
   let compose m' m = match m', m with
     | Ignore, _ | _, Ignore -> Ignore
+    | Require_initialized, _ | _, Require_initialized -> Require_initialized
     | Dereference, _ -> Dereference
     | Delay, _ -> Delay
     | Guard, Return -> Guard
@@ -451,7 +460,8 @@ module Mode = struct
     | Return, ((Dereference | Guard | Delay) as m) -> m
 end
 
-type mode = Mode.t = Ignore | Delay | Guard | Return | Dereference
+type mode = Mode.t =
+  Ignore | Delay | Guard | Return | Dereference | Require_initialized
 
 module Env :
 sig
@@ -637,11 +647,33 @@ let array_mode exp =
     (* non-generic, non-float arrays act as constructors *)
     Guard
   | Lambda.Punboxedfloatarray _ | Lambda.Punboxedoruntaggedintarray _
-  | Lambda.Punboxedvectorarray _
+  | Lambda.Punboxedvectorarray _ | Lambda.Punboxedmaskarray
   | Lambda.Pgcscannableproductarray _ | Lambda.Pgcignorableproductarray _ ->
     Dereference
   | Lambda.Punspecializedarray ->
     Misc.fatal_error "Value_rec_check.array_mode: Punspecializedarray"
+
+let has_total_modality modalities =
+  let open Value_mode in
+  let mode = Value.min_with_comonadic Totality Totality.partial in
+  let mode = Modality.Const.apply_left modalities mode in
+  Totality.is_total (Value.proj_comonadic Totality mode)
+
+let has_total_kind env ty =
+  let open Value_mode in
+  let kind = Ctype.type_jkind env ty in
+  let crossing = Ctype.crossing_of_jkind env kind in
+  let mode = Value.min_with_comonadic Totality Totality.partial in
+  let mode = Crossing.apply_left crossing mode in
+  Totality.is_total (Value.proj_comonadic Totality mode)
+
+let closure_demand alloc_mode =
+  let open Value_mode in
+  (* Commit the choice so later constraints cannot certify a delayed
+     recursive dependency as total after this check. *)
+  match Totality.zap_to_ceil (Alloc.proj_comonadic Totality alloc_mode) with
+  | Totality.Const.Total -> Require_initialized
+  | Totality.Const.Partial -> Delay
 
 (* Expression judgment:
      G |- e : m
@@ -719,7 +751,7 @@ let rec expression : Typedtree.expression -> term_judg =
         single id.txt << Dereference
     | Texp_apply
         ({exp_desc = Texp_ident { desc = vd; kind = Id_prim _; _ }},
-         [_, Arg (arg, _)], _, _, _)
+         [_, Arg (arg, _)], _, _, _, _)
       when is_ref vd ->
       (*
         G |- e: m[Guard]
@@ -727,7 +759,7 @@ let rec expression : Typedtree.expression -> term_judg =
         G |- ref e: m
       *)
       expression arg << Guard
-    | Texp_apply (e, args, _, _, _)  ->
+    | Texp_apply (e, args, _, _, _, _)  ->
         (* [args] may contain omitted arguments, corresponding to labels in
            the function's type that were not passed in the actual application.
            The arguments before the first omitted argument are passed to the
@@ -752,14 +784,25 @@ let rec expression : Typedtree.expression -> term_judg =
           | [] -> Guard
           | _ :: _ -> Dereference
         in
-        join [expression e << function_mode;
-              list expression applied << Dereference;
-              list expression delayed << Guard]
+        let closure_demands =
+          List.filter_map (function
+            | _, Arg _ -> None
+            | _, Omitted omitted -> Some (closure_demand omitted.mode_closure))
+            args
+        in
+        let application =
+          join [expression e << function_mode;
+                list expression applied << Dereference;
+                list expression delayed << Guard]
+        in
+        if List.exists (Mode.equal Require_initialized) closure_demands
+        then application << Require_initialized
+        else application
     | Texp_tuple (exprs, _) ->
       list expression (List.map snd exprs) << Guard
     | Texp_unboxed_tuple exprs ->
       list expression (List.map (fun (_, e, _) -> e) exprs) << Return
-    | Texp_atomic_loc (expr, _, _, _, _) ->
+    | Texp_atomic_loc { record = expr; _ } ->
       expression expr << Guard
     | Texp_array (_, _, exprs, _) ->
       list expression exprs << array_mode exp
@@ -786,7 +829,13 @@ let rec expression : Typedtree.expression -> term_judg =
           path pth << Dereference
         | _ -> empty
       in
-      let arg_mode i = match desc.cstr_repr with
+      let arg_mode i =
+        let arg = List.nth desc.cstr_args i in
+        if has_total_modality arg.ca_modalities
+           || (desc.cstr_generalized && has_total_kind exp.exp_env arg.ca_type)
+        then Require_initialized
+        else if Ctype.is_inductive exp.exp_env desc.cstr_res then Dereference
+        else match desc.cstr_repr with
         | Variant_unboxed | Variant_with_null ->
           Return
         | Variant_boxed _ | Variant_extensible ->
@@ -796,12 +845,18 @@ let rec expression : Typedtree.expression -> term_judg =
                 (match mixed_shape.(i) with
                  | Scannable _ | Float_boxed -> Guard
                  | Float64 | Float32 | Bits8 | Bits16 | Bits32 | Bits64
-                 | Vec128 | Vec256 | Vec512 | Word | Untagged_immediate
+                 | Vec128 | Vec256 | Vec512 | Mask | Word | Untagged_immediate
                  | Void | Product _ ->
                    Dereference)
-            | Constructor_variable ->
+            | Constructor_undetermined ->
                 Misc.fatal_error
-                  "value_rec_check: variable constructor representation")
+                  "value_rec_check: unexpected undetermined representation"
+            | Constructor_variable _ ->
+                if Misc.Stdlib.Option.exists
+                     Jkind.Sort.Const.(equal scannable)
+                     (List.nth desc.cstr_args i).ca_sort
+                then Guard
+                else Dereference)
       in
       let arg i (_sort, e) = expression e << arg_mode i in
       join [
@@ -817,25 +872,33 @@ let rec expression : Typedtree.expression -> term_judg =
       option (fun (e, _) -> expression e) eo << Guard
     | Texp_record { fields = es; extended_expression = eo;
                     representation = rep } ->
-        let field_mode i = match rep with
+        let field_mode (label : Data_types.label_description) =
+          if has_total_modality label.lbl_modalities then Require_initialized
+          else match rep with
           | Record_float | Record_ufloat -> Dereference
           | Record_unboxed | Record_inlined (_, _, Variant_unboxed) -> Return
           | Record_boxed | Record_inlined (_, Constructor_uniform_value, _) ->
               Guard
           | Record_inlined (_, Constructor_mixed mixed_shape, _)
           | Record_mixed mixed_shape ->
-            (match mixed_shape.(i) with
+            (match mixed_shape.(label.lbl_pos) with
              | Scannable _ | Float_boxed -> Guard
              | Float64 | Float32 | Bits8 | Bits16 | Bits32 | Bits64
-             | Vec128 | Vec256 | Vec512 | Word | Untagged_immediate
+             | Vec128 | Vec256 | Vec512 | Mask | Word | Untagged_immediate
              | Void | Product _ ->
                Dereference)
           | Record_dummy _ ->
             Misc.fatal_error "value_rec_check: unexpected dummy representation"
-          | Record_inlined (_, Constructor_variable, _)
-          | Record_variable ->
+          | Record_inlined (_, Constructor_undetermined, _)
+          | Record_undetermined ->
             Misc.fatal_error
-              "value_rec_check: unexpected unknown representation"
+              "value_rec_check: unexpected undetermined representation"
+          | Record_inlined (_, Constructor_variable _, _)
+          | Record_variable _ ->
+            if Misc.Stdlib.Option.exists
+                 Jkind.Sort.Const.(equal scannable) label.lbl_sort
+            then Guard
+            else Dereference
         in
         let field ((label : Data_types.label_description), _sort, field_def) =
           let env =
@@ -843,7 +906,7 @@ let rec expression : Typedtree.expression -> term_judg =
             | Kept _ -> empty
             | Overridden (_, e) -> expression e
           in
-          env << field_mode label.lbl_pos
+          env << field_mode label
         in
         join [
           array field es;
@@ -852,22 +915,23 @@ let rec expression : Typedtree.expression -> term_judg =
     | Texp_record_unboxed_product { fields = es; extended_expression = eo;
                                     representation = rep } ->
       begin match rep with
-      | Record_unboxed_product ->
-        let field (_, _, field_def) =
+      | Record_unboxed_product
+      | Record_unboxed_product_undetermined
+      | Record_unboxed_product_variable _ ->
+        let field
+            ((label : Data_types.unboxed_label_description), _, field_def) =
           let env =
             match field_def with
             | Kept _ -> empty
             | Overridden (_, e) -> expression e
           in
-          env << Return
+          env << (if has_total_modality label.lbl_modalities
+                  then Require_initialized else Return)
         in
         join [
           array field es;
           option expression (Option.map fst eo) << Dereference
         ]
-      | Record_unboxed_product_variable ->
-        Misc.fatal_error
-          "value_rec_check: unexpected unknown unboxed-product representation"
       end
     | Texp_ifthenelse (cond, ifso, ifnot) ->
       (*
@@ -974,6 +1038,11 @@ let rec expression : Typedtree.expression -> term_judg =
         Note: `assert e` is treated just as if `assert` was a function.
       *)
       expression e << Dereference
+    | Texp_assume (binding, predicate, body) ->
+      value_bindings Nonrecursive [binding] >>
+        join [expression predicate << Dereference; expression body]
+    | Texp_logical_equal (left, right) ->
+      join [expression left << Dereference; expression right << Dereference]
     | Texp_pack mexp ->
       (*
         G |- M: m
@@ -1015,7 +1084,7 @@ let rec expression : Typedtree.expression -> term_judg =
         path pth << Dereference;
         list field fields << Dereference;
       ]
-    | Texp_function { params; body } ->
+    | Texp_function { params; body; alloc_mode } ->
       (*
          G      |-{body} b  : m[Delay]
          (Hj    |-{def}  Pj : m[Delay])^j
@@ -1059,7 +1128,7 @@ let rec expression : Typedtree.expression -> term_judg =
         let patterns = List.map param_pat params in
         let defaults = List.map param_default params in
         let body = function_body body in
-        let f = join (body :: defaults) << Delay in
+        let f = join (body :: defaults) << closure_demand alloc_mode in
         (fun m ->
           let env = f m in
           remove_patlist patterns env)
@@ -1112,10 +1181,10 @@ let rec expression : Typedtree.expression -> term_judg =
         expression exp2
       ]
     | Texp_hole _ -> empty
-    | Texp_quotation e ->
+    | Texp_quote e ->
         (* The quoted code may be spliced into a dereferencing context. *)
         expression e << Dereference
-    | Texp_antiquotation e ->
+    | Texp_splice e ->
         expression e << Dereference
 
 (* Function bodies.
@@ -1197,14 +1266,14 @@ and modexp : Typedtree.module_expr -> term_judg =
       path pth
     | Tmod_structure s ->
       structure s
-    | Tmod_functor (_, e) ->
+    | Tmod_functor (_, e, _) ->
       modexp e << Delay
-    | Tmod_apply (f, p, _) ->
+    | Tmod_apply (f, p, _, _, _) ->
       join [
         modexp f << Dereference;
         modexp p << Dereference;
       ]
-    | Tmod_apply_unit f ->
+    | Tmod_apply_unit (f, _) ->
       modexp f << Dereference
     | Tmod_constraint (mexp, _, _, coe) ->
       let rec coercion coe k = match coe with
@@ -1565,7 +1634,8 @@ and is_destructuring_pattern : type k . k general_pattern -> bool =
 let is_valid_recursive_expression idlist expr : sd option =
   match expr.exp_desc with
   | Texp_function _ ->
-     (* Fast path: functions can never have invalid recursive references *)
+     (* Typecore separately checks totality of recursive functions. This
+        fast path only checks safe runtime initialization. *)
      Some Static
   | _ ->
      let rkind = classify_expression expr in

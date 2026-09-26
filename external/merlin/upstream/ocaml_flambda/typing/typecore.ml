@@ -128,23 +128,36 @@ type existential_binding =
   | Bind_non_locally_abstract
 
 type submode_reason =
+  | Function_value
   | Application of type_expr
   | Constructor of Longident.t
   | Other
 
-type unsupported_stack_allocation =
+type always_heap_allocation =
   | Lazy
   | Module
   | Object
   | List_comprehension
   | Array_comprehension
 
-let print_unsupported_stack_allocation ppf = function
+let print_always_heap_allocation ppf = function
   | Lazy -> Format_doc.fprintf ppf "lazy expressions"
   | Module -> Format_doc.fprintf ppf "modules"
   | Object -> Format_doc.fprintf ppf "objects"
   | List_comprehension -> Format_doc.fprintf ppf "list comprehensions"
   | Array_comprehension -> Format_doc.fprintf ppf "array comprehensions"
+
+type always_static_allocation =
+  | Constant
+  | Src_pos
+  | Unboxed_unit
+  | Unboxed_bool
+
+let print_always_static_allocation ppf = function
+  | Constant -> Format_doc.fprintf ppf "literals"
+  | Src_pos -> Format_doc.fprintf ppf "source position literals"
+  | Unboxed_unit -> Format_doc.fprintf ppf "unboxed unit literals"
+  | Unboxed_bool -> Format_doc.fprintf ppf "unboxed boolean literals"
 
 type mutable_restriction =
   | In_group
@@ -246,6 +259,9 @@ type error =
   | Invalid_atomic_loc_payload
   | Label_not_atomic of Longident.t
   | Atomic_in_pattern of Longident.t
+  | Atomic_in_functional_update of label
+  | Mixed_record_atomic_loc of Longident.t
+  | Polymorphic_atomic_loc of Longident.t
   | Probe_format
   | Probe_name_format of string
   | Probe_name_undefined of string
@@ -286,7 +302,7 @@ type error =
   | Block_access_bad_record of string
   | Block_index_modality_mismatch of
       { mut : bool; err : Modality.equate_error }
-  | Block_index_atomic_unsupported
+  | Mutable_block_index_polymorphic_field of Longident.t
   | Submode_failed of Value.error * submode_reason
   | Curried_application_complete of
       arg_label * Mode.Alloc.error * [`Prefix|`Single_arg|`Entire_apply]
@@ -300,17 +316,22 @@ type error =
   | Exclave_returns_not_local
   | Unboxed_int_literals_not_supported
   | Function_type_not_rep of type_expr * Jkind.Violation.t
+  | Function_type_escapes_partial_match of
+      { ty : type_expr;
+        match_loc : Location.t;
+        kind : [`Argument | `Result];
+        why : [`Partial_match | `Optional_argument];
+      }
   | Record_projection_not_rep of type_expr * Jkind.Violation.t
   | Record_not_rep of type_expr * Jkind.Violation.t
   | Mutable_var_not_rep of type_expr * Jkind.Violation.t
   | Field_value_not_rep of type_expr * Jkind.Violation.t
   | Constructor_arg_projection_not_rep of type_expr * Jkind.Violation.t
   | Constructor_arg_value_not_rep of type_expr * Jkind.Violation.t
-  | Indeterminate_record_layout of type_expr * string
-  | Indeterminate_constructor_layout of type_expr * string * int
   | Invalid_label_for_src_pos of arg_label
   | Nonoptional_call_pos_label of string
-  | Unsupported_stack_allocation of unsupported_stack_allocation
+  | Always_heap_allocation of always_heap_allocation
+  | Always_static_allocation of always_static_allocation
   | Not_allocation
   | Impossible_function_jkind of
       { some_args_ok : bool; ty_fun : type_expr; jkind : jkind_lr }
@@ -319,6 +340,7 @@ type error =
   | Let_poly_not_yet_implemented
   | Let_poly_not_syntactic_value
   | Layout_poly_inst_not_yet_supported of invalid_layout_poly_inst_context
+  | Useless_lpoly
 
 and invalid_layout_poly_inst_context =
   | Binding_op
@@ -531,6 +553,43 @@ let mode_default mode =
 
 let mode_legacy = mode_default Value.legacy
 
+let total_mode () =
+  Value.of_const
+    { Value.Const.legacy with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable
+    }
+
+let total_immutable_mode () =
+  Value.of_const
+    { Value.Const.legacy with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable;
+      visibility = Visibility.Const.Immutable
+    }
+
+let enter_total_ghost_context loc env =
+  Env.add_const_closure_lock (loc, Mode.Hint.Expression)
+    {Value.Comonadic.Const.legacy with
+      areality = Regionality.Const.Local;
+      forkable = Forkable.Const.Unforkable;
+      yielding = Yielding.Const.Yielding;
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable}
+    env
+  |> Env.enter_ghost_context
+
+let refinement_operand_mode () =
+  Value.of_const
+    { Value.Const.max with
+      totality = Totality.Const.Total;
+      statefulness = Statefulness.Const.Stateless;
+      portability = Portability.Const.Portable
+    }
+
 let mode_default_opt mode_opt =
   match mode_opt with
   | None -> mode_legacy
@@ -568,6 +627,9 @@ let as_single_mode {mode; tuple_modes; _} =
       Value.meet (mode :: l)
   | None -> mode
 
+let proj_staticity mode =
+  Staticity.disallow_left (Value.proj_monadic Staticity mode)
+
 let mode_morph f expected_mode =
   let mode = as_single_mode expected_mode in
   let mode = f mode |> Mode.Value.disallow_left in
@@ -597,7 +659,13 @@ let mode_return mode =
     inside the region. *)
 let mode_region ?region mode =
   let hint = Option.map (fun x -> Hint.Escape_region x) region in
-  { (mode_default (mode |> value_r2g |> meet_regional ?hint)) with
+  let body_mode =
+    mode
+    |> value_to_alloc_r2g
+    |> alloc_as_value
+    |> meet_regional ?hint
+  in
+  { (mode_default body_mode) with
     position =
       RTail (Regionality.disallow_left
         (Value.proj_comonadic Areality mode), FNontail);
@@ -611,14 +679,33 @@ let enter_region_if cond ?region env expected_mode =
   else
     env, expected_mode, []
 
+(* The most permissive expected mode. It still requires the value to be
+   real on the ghostliness axis: a ghost value's content may be a fabricated
+   placeholder, so the positions that accept one are spelled out explicitly
+   (ghost contexts, and statement position, which discards the value). *)
+let value_max_real =
+  Value.of_const { Value.Const.max with ghostliness = Real }
+
 let mode_max =
-  mode_default Value.max
+  mode_default value_max_real
+
+(* Ghost fields contain total logical values but have no runtime slot.
+   Construction checks totality; projection fabricates a ghost placeholder. *)
+let ghost_field_read_mode () =
+  Value.disallow_right
+    (Value.of_const { Value.Const.min with ghostliness = Ghost })
+
+let mode_ghost_field_write () =
+  mode_default
+    (Value.of_const {Value.Const.max with totality = Totality.Const.Total})
 
 let mode_with_position mode position =
   { (mode_default mode) with position }
 
-let mode_max_with_position position =
-  { mode_max with position }
+(* Statement position discards the value, so even a ghost one is
+   admissible: nothing of it survives compilation. *)
+let mode_statement_with_position position =
+  { (mode_default Value.max) with position }
 
 (** Take the expected mode of [exclave_ exp], return the expected mode of [exp].
     [expected_mode] must be higher than [regional]. *)
@@ -657,7 +744,8 @@ let mode_lazy expected_mode =
   let mode_crossing =
     Crossing.create ~linearity:true ~portability:true
       ~regionality:false ~uniqueness:false ~contention:false ~statefulness:false
-      ~visibility:false ~forkable:false ~yielding:false ~staticity:false
+      ~visibility:false ~forkable:false ~yielding:false ~totality:false
+      ~staticity:false ~ghostliness:false
   in
   let closure_mode =
     expected_mode |> as_single_mode |> Crossing.apply_right mode_crossing
@@ -665,7 +753,15 @@ let mode_lazy expected_mode =
   expected_mode, closure_mode
 
 let mode_partial_application expected_mode =
-  mode_morph (value_r2g ~hint:Captured_by_partial_application) expected_mode
+  let allocation : Hint.allocation =
+    {loc = Location.none; txt = Captured_by_partial_application}
+  in
+  mode_morph
+    (fun mode ->
+       mode
+       |> value_to_alloc_r2g ~allocation
+       |> alloc_as_value ~allocation)
+    expected_mode
 
 let mode_trywith expected_mode =
   { expected_mode with position = RNontail }
@@ -724,6 +820,14 @@ let mode_argument ~funct ~index ~position_and_mode ~partial_app marg =
 (* expected_mode.locality_context explains why expected_mode.mode is low;
    shared_context explains why mode.uniqueness is high *)
 let submode ~loc ~env ?(reason = Other) mode expected_mode =
+  let mode =
+    (* Inside a ghost context nothing is checked on the ghostliness axis: the
+       context is deleted from compilation, so a value's absence at run time
+       cannot be observed. This is the ambient rule. *)
+    if Env.in_ghost_context env
+    then Value.meet_const_with Ghostliness Ghostliness.Const.Real mode
+    else Value.disallow_right mode
+  in
   let res =
     Value.submode ~pp:(loc, Expression) mode (as_single_mode expected_mode)
   in
@@ -753,9 +857,10 @@ let tuple_pat_mode mode tuple_modes =
   let tuple_modes = Some (Value.List.disallow_right tuple_modes) in
   { mode; tuple_modes }
 
-let effect_handler_modes loc pinpoint env expected_mode =
+let effect_handler_modes pinpoint env expected_mode =
+  Env.walk_locks_for_legacy_construct ~env pinpoint;
   let env =
-    Env.add_const_closure_lock (loc, pinpoint) Value.Comonadic.Const.legacy env
+    Env.add_const_closure_lock pinpoint Value.Comonadic.Const.legacy env
   in
   env, simple_pat_mode Value.legacy, mode_effect_handler_body mode_legacy,
   mode_effect_handler_body expected_mode
@@ -790,10 +895,13 @@ let register_allocation_value_mode ~loc
     ?(desc  = (Unknown : Mode.Hint.allocation_desc)) mode =
   let alloc_mode = value_to_alloc_r2g mode in
   register_allocation_mode alloc_mode;
+  (* We must apply each morphism separately so that their hints correspond to
+     the correct morphism *)
   let mode =
-    value_r2g ~hint:(Allocation_r {loc; txt = desc})
+    value_to_alloc_r2g ~allocation:({loc; txt = desc})
       (Mode.Value.disallow_left mode)
   in
+  let mode = alloc_as_value ~allocation:({loc; txt = desc}) mode in
   alloc_mode, mode
 
 (* Unlike most allocations, which can be the highest mode allowed by
@@ -802,13 +910,13 @@ let register_allocation_value_mode ~loc
    to one argument must be global. As a result, a function gets an
    [Alloc.lr] allocation mode that can be further constrained. *)
 let register_closure_allocation (mode : Value.r) ~loc : Alloc.lr * Value.r =
-  let hint = Hint.Allocation_r {loc; txt = Unknown} in
+  let allocation : Hint.allocation = {loc; txt = Unknown} in
   let (alloc_mode : Alloc.lr), _ =
-    Alloc.newvar_below (value_to_alloc_r2g ~hint mode)
+    Alloc.newvar_below (value_to_alloc_r2g ~allocation mode)
   in
   register_allocation_mode (Alloc.disallow_left alloc_mode);
   let closed_over_mode =
-    alloc_as_value ~hint:Skip (Alloc.disallow_left alloc_mode)
+    alloc_as_value ~allocation (Alloc.disallow_left alloc_mode)
   in
   alloc_mode, closed_over_mode
 
@@ -984,7 +1092,9 @@ let constant_desc
   | Pconst_char c -> Ok (Const_char c)
   | Pconst_untagged_char c ->
       if Language_extension.is_enabled Small_numbers
-      then Ok (Const_untagged_char c)
+      then
+        let extra_bits = Sys.int_size - 8 in
+        Ok (Const_untagged_char ((Char.code c lsl extra_bits) asr extra_bits))
       else Error (Untagged_char_literal c)
   | Pconst_string (s,loc,d) -> Ok (Const_string (s,loc,d))
   | Pconst_float (f,None)-> Ok (Const_float f)
@@ -1279,14 +1389,70 @@ let mode_spliced =
   let hint_monadic = Spliced Monadic
   and hint_comonadic = Spliced Comonadic in
   let mode =
-    Value.Const.max
+    (* A splice reads its operand at program-generation time, so it must be
+       real, like any other read position. *)
+    { Value.Const.max with ghostliness = Real }
     |> Value.of_const ~hint_monadic ~hint_comonadic
   in
   mode_default mode
 
 let check_project_mutability ~loc ~env mut_name mutability mode =
-  if Types.is_mutable mutability then
+  if Types.is_mutable mutability then begin
+    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
     submode ~loc ~env mode (mode_project_mutable mut_name)
+  end
+
+let mark_partial_if_needed ~loc ~env : Typedtree.partial -> unit = function
+  | Total -> ()
+  | Partial ->
+    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
+
+let mark_partial_if_not_total_pattern_type ~loc ~env ty =
+  if not (Ctype.can_pattern_match_total env ty) then
+    Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression)
+
+let check_atomic_loc_of_finalized_repr ~loc ~env label record_repres lid =
+  if not (Types.is_atomic label.lbl_mut) then
+    raise (Error (loc, env, Label_not_atomic lid));
+  if is_poly_Tpoly label.lbl_arg then
+    raise (Error (loc, env, Polymorphic_atomic_loc lid));
+  (match
+     Mode.Modality.Const.equate label.lbl_modalities
+       (Typemode.atomic_mutable_modalities)
+   with
+   | Ok () -> ()
+   | Error _ -> raise (Error (loc, env, Modalities_on_atomic_field lid)));
+  match record_repres with
+  | Record_boxed | Record_inlined (_, Constructor_uniform_value, _) -> ()
+  | Record_mixed _ | Record_inlined (_, Constructor_mixed _, _) ->
+      raise (Error (loc, env, Mixed_record_atomic_loc lid))
+  | Record_undetermined | Record_variable _
+  | Record_inlined
+      (_, (Constructor_undetermined | Constructor_variable _), _)
+  (* [@@unboxed] prohibits mutable (and therefore atomic) fields. *)
+  | Record_unboxed
+  (* [@atomic] fields disable float record optimization. *)
+  | Record_float | Record_ufloat
+  (* Only exists as an intermediate step of typechecking the decl itself *)
+  | Record_dummy _ ->
+      Misc.fatal_error
+        "check_atomic_loc_of_finalized_repr: unexpected record representation"
+
+(* Mutable indices to polymorphic fields cannot be taken, as they would allow
+   writing non-polymorphic values. *)
+let check_index_not_to_poly_field ~env ba uas =
+  let check lid lbl_arg =
+    if is_poly_Tpoly lbl_arg then
+      raise
+        (Error (lid.loc, env, Mutable_block_index_polymorphic_field lid.txt))
+  in
+  begin match ba with
+  | Baccess_field (lid, label, _) -> check lid label.lbl_arg
+  | Baccess_block _ -> ()
+  end;
+  List.iter
+    (fun (Uaccess_unboxed_field (lid, label, _)) -> check lid label.lbl_arg)
+    uas
 
 (* Represents information about an array type inferred using type-directed
    disambiguation. *)
@@ -1526,9 +1692,16 @@ type module_variables =
   | Modvars_rejected
   | Modvars_ignored
 
+type total_pattern_check =
+  { tpc_loc : Location.t;
+    tpc_env : Env.t;
+    tpc_type : type_expr;
+  }
+
 type type_pat_state =
   { mutable tps_pattern_variables: pattern_variable list;
     mutable tps_pattern_force: (unit -> unit) list;
+    mutable tps_total_pattern_checks: total_pattern_check list;
     mutable tps_module_variables: module_variables;
     (* Mutation will not change the constructor of [tps_module_variables], just
        the contained [module_variables] list. [module_variables] could be made
@@ -1561,24 +1734,55 @@ let create_type_pat_state ?cont allow_modules =
   { tps_pattern_variables = continuation_variable cont;
     tps_module_variables;
     tps_pattern_force = [];
+    tps_total_pattern_checks = [];
   }
+
+let defer_partial_if_not_total_pattern_type tps ~loc ~env ty =
+  tps.tps_total_pattern_checks <-
+    { tpc_loc = loc; tpc_env = env; tpc_type = ty }
+    :: tps.tps_total_pattern_checks
+
+let run_total_pattern_checks checks =
+  let memo = ref [] in
+  List.iter
+    (fun { tpc_loc; tpc_env; tpc_type } ->
+      let total =
+        match
+          List.find_opt
+            (fun (env', ty', _) ->
+              tpc_env == env' && eq_type tpc_type ty')
+            !memo
+        with
+        | Some (_, _, total) -> total
+        | None ->
+          let total = Ctype.can_pattern_match_total tpc_env tpc_type in
+          memo := (tpc_env, tpc_type, total) :: !memo;
+          total
+      in
+      if not total then
+        Env.walk_locks_for_partial_construct ~env:tpc_env
+          (tpc_loc, Mode.Hint.Expression))
+    checks
 
 (* Copy mutable fields. Used in typechecking or-patterns. *)
 let copy_type_pat_state
       { tps_pattern_variables;
         tps_module_variables;
         tps_pattern_force;
+        tps_total_pattern_checks;
       }
   =
   { tps_pattern_variables;
     tps_module_variables;
     tps_pattern_force;
+    tps_total_pattern_checks;
   }
 
 let blit_type_pat_state ~src ~dst =
   dst.tps_pattern_variables <- src.tps_pattern_variables;
   dst.tps_module_variables <- src.tps_module_variables;
   dst.tps_pattern_force <- src.tps_pattern_force;
+  dst.tps_total_pattern_checks <- src.tps_total_pattern_checks;
 ;;
 
 let maybe_add_pattern_variables_ghost loc_let env pv =
@@ -1751,10 +1955,10 @@ let rec build_as_type_and_mode (env : Env.t) p ~mode =
 
 and build_as_type_and_mode_extra env p ~mode : _ -> _ * _ = function
   | [] -> build_as_type_aux env p ~mode
-  | ((Tpat_type _ | Tpat_open _ | Tpat_unpack |
-      Tpat_inspected_type _), _, _) :: rest ->
+  | ((Tpat_type _ | Tpat_open _ | Tpat_unpack | Tpat_constraint (None, _) |
+      Tpat_inspected_type _ | Tpat_refinement _), _, _) :: rest ->
       build_as_type_and_mode_extra env p rest ~mode
-  | (Tpat_constraint ({ctyp_type = ty; _}, _), _, _) :: rest ->
+  | (Tpat_constraint (Some {ctyp_type = ty; _}, _), _, _) :: rest ->
       (* If the type constraint is ground, then this is the best type
          we can return, so just return an instance (cf. #12313) *)
       if closed_type_expr ty then instance ty, mode else
@@ -1850,8 +2054,8 @@ and build_as_type_aux (env : Env.t) p ~mode =
                          ~name:None ~fixed:None ~closed:false))
       in
       ty, mode
-  | Tpat_record (lpl,_,_,_) -> build_record_as_type lpl
-  | Tpat_record_unboxed_product (lpl,_,_,_) -> build_record_as_type lpl
+  | Tpat_record (lpl,_,_) -> build_record_as_type lpl
+  | Tpat_record_unboxed_product (lpl,_,_) -> build_record_as_type lpl
   | Tpat_or(p1, p2, row) ->
       begin match row with
         None ->
@@ -1885,23 +2089,22 @@ and build_as_type_aux (env : Env.t) p ~mode =
   | Tpat_array _ | Tpat_lazy _ ->
       p.pat_type, mode
 
-let is_variable_repres : type rep. rep record_form -> rep -> bool =
-  fun form rep ->
-    match form, rep with
-    | Legacy, Record_variable -> true
-    | Unboxed_product, Record_unboxed_product_variable -> true
-    | _ -> false
-
 (* Returns [None] when the representation cannot be determined from the
-   declaration alone (i.e. [Record_variable] /
-   [Record_unboxed_product_variable]); otherwise [Some rep]. *)
+   declaration alone (i.e. [Record_undetermined] /
+   [Record_unboxed_product_undetermined]); otherwise [Some rep]. *)
 let determined_lbl_repres (type rep) (form : rep record_form)
       (rep : rep) : rep option =
-  if is_variable_repres form rep then None else Some rep
+  match form, rep with
+  | Legacy,
+    (Record_undetermined | Record_inlined (_, Constructor_undetermined, _))
+    ->
+    None
+  | Unboxed_product, Record_unboxed_product_undetermined -> None
+  | _ -> Some rep
 
 let update_labels (type rep) env (form : rep record_form) ~representative_label
       ~why ~loc ~containing_type
-    : record_sorts * rep =
+    : rep =
   (* Might be good to short-circuit this. Possible we could do so by noticing
      that [containing_type] has no arguments (or only variables as
      arguments). *)
@@ -1909,30 +2112,20 @@ let update_labels (type rep) env (form : rep record_form) ~representative_label
     Ctype.instance_labels ~fixed:false representative_label.lbl_all
   in
   unify_exp_types loc env containing_type ty_res;
-  let sorts, rep =
-    match determined_lbl_repres form representative_label.lbl_repres with
-    | Some rep -> Fixed, rep
-    | None ->
-      let lbls_and_ty_args =
-        Array.map2
-          (fun lbl (_vars, ty_arg) ->
-             (lbl |> Data_types.label_declaration_of_label_description),
-             ty_arg)
-          representative_label.lbl_all
-          vars_and_ty_args
-      in
-      match
-        Typedecl.update_record_representation ~why env loc form
-          (lbls_and_ty_args |> Array.to_list)
-      with
-      | Ok (sorts, rep) ->
-          let sorts = sorts |> Array.of_list in
-          Variable sorts, rep
-      | Error (Unrepresentable_field name) ->
-          raise (Error (loc, env,
-                        Indeterminate_record_layout(containing_type, name)))
-  in
-  sorts, rep
+  match determined_lbl_repres form representative_label.lbl_repres with
+  | Some rep -> rep
+  | None ->
+    let lbls_and_ty_args =
+      Array.map2
+        (fun lbl (_vars, ty_arg) ->
+           (lbl |> Data_types.label_declaration_of_label_description),
+           ty_arg)
+        representative_label.lbl_all
+        vars_and_ty_args
+    in
+    Typedecl.instance_record_representation ~why env loc form
+      ~old_repres:representative_label.lbl_repres
+      (lbls_and_ty_args |> Array.to_list)
 
 (* Constraint solving during typing of patterns *)
 
@@ -2538,6 +2731,164 @@ let rec expand_path env p =
 let compare_type_path env tpath1 tpath2 =
   Path.same (expand_path env tpath1) (expand_path env tpath2)
 
+(* Resolved predicate elaboration *)
+module Resolved_predicate = struct
+  (* Only compiler-created syntax can carry resolved evidence. These keys are
+     physical nodes, not names or forgeable source attributes. *)
+  type input =
+    { expressions : (Parsetree.expression * type_expr) list;
+      values : (Longident.t * Path.t) list;
+      constructors : (Longident.t * Path.t) list;
+      labels : (Longident.t * (Path.t * string)) list;
+      locals : (Ident.t * string) list }
+
+  let current = ref None
+
+  let with_values values f =
+    let input = match !current with
+      | None -> { expressions = []; values; constructors = []; labels = [];
+                  locals = [] }
+      | Some input -> { input with values = values @ input.values }
+    in
+    Misc.protect_refs [Misc.R (current, Some input)] f
+
+  let with_input input f =
+    let warnings = Warnings.backup () in
+    Misc.try_finally ~always:(fun () -> Warnings.restore warnings) (fun () ->
+      (* Source policy was checked at formation; replay and generated syntax
+         must not reapply it. Delayed warnings must capture this state too. *)
+      ignore (Warnings.parse_options false "-a");
+      Warnings.parse_alert_option "-all";
+      Language_extension.with_enabled Immutable_arrays () (fun () ->
+      Language_extension.with_enabled Layouts
+        Language_extension.Alpha (fun () ->
+      Language_extension.with_enabled Small_numbers
+        Language_extension.Alpha (fun () ->
+      Misc.protect_refs
+        [Misc.R (current, Some input);
+         Misc.R (Clflags.strict_sequence, false);
+         (* Reconstructed labels are explicit; partial applications commute. *)
+         Misc.R (Clflags.classic, false)]
+        f))))
+
+  let active () = Option.is_some !current
+
+  let find key entries =
+    List.find_map (fun (k, value) -> if k == key then Some value else None)
+      entries
+
+  let find_input key field =
+    Option.bind !current (fun input -> find key (field input))
+
+  let unavailable loc path =
+    raise (Error_forward
+      (Location.errorf ~loc
+         "Cannot recover runtime evidence for refinement reference %a"
+         Style.inline_code (Path.name path)))
+
+  let lookup_value ?(use = true) ~loc lid env =
+    match find_input lid (fun input -> input.values) with
+    | None -> Env.lookup_value ~use ~loc lid env
+    | Some path -> begin
+        try
+          let _, desc, _ as result = Env.lookup_value_path ~use ~loc path env in
+          begin match desc.val_kind with
+          | Val_prim _ -> ()
+          | _ -> ignore (Env.find_value_address path env : Env.address)
+          end;
+          result
+        with Not_found -> unavailable loc path
+      end
+
+  let lookup_all_constructors ~loc usage lid env =
+    match find_input lid (fun input -> input.constructors) with
+    | None -> Env.lookup_all_constructors ~loc usage lid env
+    | Some path -> begin
+        try
+          let cstr, _ as result =
+            Env.lookup_constructor_path ~loc usage path env in
+          begin match cstr.cstr_tag with
+          | Extension path ->
+              ignore (Env.find_constructor_address path env : Env.address)
+          | Ordinary _ | Null -> ()
+          end;
+          Ok [result, ignore]
+        with Not_found -> unavailable loc path
+      end
+
+  let lookup_all_labels : type rep.
+      record_form:rep record_form -> loc:Location.t -> Env.label_usage ->
+      Longident.t -> Env.t ->
+      ((rep gen_label_description * (unit -> unit)) list,
+       Location.t * Env.t * Env.lookup_error) result =
+    fun ~record_form ~loc usage lid env ->
+      match find_input lid (fun input -> input.labels) with
+      | None -> Env.lookup_all_labels ~record_form ~loc usage lid env
+      | Some (path, name) -> begin
+          try
+            let labels = Env.lookup_all_labels_from_type
+                ~record_form ~loc usage path env in
+            Ok [List.find (fun (label, _) -> label.lbl_name = name) labels]
+          with Not_found -> unavailable loc path
+        end
+
+  let expected_type env sexp =
+    Option.map
+      (fun ty ->
+         let ty =
+           match !current with
+           | None -> ty
+           | Some input ->
+               let subst = List.fold_left (fun subst (id, name) ->
+                 match Env.find_value_by_name (Longident.Lident name) env with
+                 | Path.Pident replacement, _ ->
+                     Subst.add_bound_value id replacement subst
+                 | _ | exception Not_found -> subst)
+                   Subst.identity input.locals
+               in
+               Subst.type_expr subst ty
+         in
+         (* Synthesized optional arguments can retain their [Tpoly] wrapper;
+            the ordinary argument checker expects an instance of its body. *)
+         match get_desc ty with
+         | Tpoly (body, vars) -> instance_poly vars body
+         | _ -> instance ty)
+      (find_input sexp (fun input -> input.expressions))
+end
+
+let type_assume = ref
+    (fun (_ : Env.t) (_ : expected_mode) (_ : Location.t) (_ : expression)
+         (_ : refinement_desc) ->
+       Misc.fatal_error "Typecore.assume: elaborator not installed")
+
+let typing_refinement_predicate = ref false
+
+let definition_lemma : (Env.t -> value_binding -> value_binding * Env.t) ref =
+  ref (fun _ _ -> Misc.fatal_error "Typecore.def: elaborator not installed")
+
+let definition_attribute attrs =
+  match Builtin_attributes.select_attributes ["def", Return] attrs with
+  | [] -> None
+  | [{attr_payload = PStr []; attr_loc; _}] -> Some attr_loc
+  | [attr] ->
+      Location.raise_errorf ~loc:attr.attr_loc
+        "The def attribute takes no payload"
+  | _ :: attr :: _ ->
+      Location.raise_errorf ~loc:attr.attr_loc "Duplicate def attribute"
+
+let decreases_attribute attrs =
+  match Builtin_attributes.select_attributes ["decreases", Return] attrs with
+  | [] -> None
+  | [{attr_payload = PStr [{pstr_desc = Pstr_eval (e, []); _}]; _}] -> Some e
+  | [attr] -> Location.raise_errorf ~loc:attr.attr_loc
+      "The decreases attribute requires one expression"
+  | _ :: attr :: _ -> Location.raise_errorf ~loc:attr.attr_loc
+      "Duplicate decreases attribute"
+
+let type_decreases :
+    (Ident.t -> expression -> Parsetree.expression -> expression) ref =
+  ref (fun _ _ _ -> Misc.fatal_error "Typecore.decreases: typer not installed")
+
 (* Records *)
 exception Wrong_name_disambiguation of Env.t * wrong_name
 
@@ -2798,7 +3149,8 @@ module Label = NameChoice (struct
   let in_env lbl =
     match lbl.lbl_repres with
     | Record_boxed | Record_float | Record_ufloat | Record_unboxed
-    | Record_mixed _ | Record_dummy _ | Record_variable -> true
+    | Record_mixed _ | Record_dummy _ | Record_undetermined
+    | Record_variable _ -> true
     | Record_inlined _ -> false
 end)
 
@@ -2813,7 +3165,8 @@ module Unboxed_label = NameChoice (struct
       env
   let in_env (lbl : t) =
     match lbl.lbl_repres with
-    | Record_unboxed_product | Record_unboxed_product_variable -> true
+    | Record_unboxed_product | Record_unboxed_product_undetermined
+    | Record_unboxed_product_variable _ -> true
 end)
 
 let label_get_type_path
@@ -2882,7 +3235,8 @@ let disambiguate_sort_lid_a_list
   in
   let process_label lid =
     let scope =
-      Env.lookup_all_labels ~record_form  ~loc:lid.loc usage lid.txt env in
+      Resolved_predicate.lookup_all_labels ~record_form ~loc:lid.loc
+        usage lid.txt env in
     let filter = disambiguate_label_by_ids closed ids in
     label_disambiguate ~warn ~filter record_form usage lid env expected_type
       scope
@@ -3050,10 +3404,10 @@ end)
 type unrepresentable_arg =
   Unrepresentable_arg of Warnings.loc * type_expr * Jkind.Violation.t
 
-let representation_for_tuple_constructor env constr ty_args ~loc ~types
-      ~containing_type ~why : _ Result.t =
+let instance_constructor_representation env constr ~types ~why
+    : _ Result.t =
   match constr.cstr_shape with
-  | Some shape ->
+  | (Constructor_uniform_value | Constructor_mixed _) as shape ->
       begin match
         Misc.Stdlib.List.map_option
           (fun arg -> arg.ca_sort |> Option.map Jkind.Sort.of_const)
@@ -3062,34 +3416,31 @@ let representation_for_tuple_constructor env constr ty_args ~loc ~types
       | Some sorts -> Ok (shape, sorts)
       | None -> Misc.fatal_error "representable constructor missing a sort"
       end
-  | None ->
-      begin match
+  | Constructor_undetermined ->
+      let sorts_result =
         Misc.Stdlib.List.mapi_result
-          (fun _ (ty, loc) ->
-             type_jkind_and_sort env ty ~why ~fixed:false
-             |> Result.map_error
-                  (fun err -> Unrepresentable_arg (loc, ty, err)))
+          (fun i (ty, loc) ->
+             match (List.nth constr.cstr_args i).ca_sort with
+             | Some sort -> Ok (Jkind.Sort.of_const sort)
+             | None ->
+                 type_sort env ty ~why ~fixed:false
+                 |> Result.map_error
+                      (fun err -> Unrepresentable_arg (loc, ty, err)))
           types
-        with
-        | Ok jkinds_and_sorts ->
-            let jkinds, sorts = List.split jkinds_and_sorts in
-            begin match
-              Typedecl.update_constructor_representation env
-                (Cstr_tuple ty_args) jkinds ~loc ~is_extension_constructor:false
-            with
-            | Ok shape -> Ok (shape, sorts)
-            | Error (Unrepresentable_argument i) ->
-                (* lmaurer: Impossible? *)
-                raise (Error (loc, env,
-                              Indeterminate_constructor_layout(
-                                containing_type, constr.cstr_name, i)))
-            | Error (Unrepresentable_argument_field _) ->
-                (* Should be impossible because we passed [Cstr_tuple] *)
-                Misc.fatal_error
-                  "Unrepresentable_argument_field with Cstr_tuple"
-            end
-        | Error err -> Error err
+      in
+      begin match sorts_result with
+      | Ok sorts ->
+          let sorts_and_types =
+            List.map2 (fun sort (ty, _loc) -> sort, ty) sorts types
+            |> Array.of_list
+          in
+          Ok (Constructor_variable sorts_and_types, sorts)
+      | Error err -> Error err
       end
+  | Constructor_variable _ ->
+      Misc.fatal_error
+        "instance_constructor_representation: unexpected variable \
+         representation in a constructor description"
 
 (* Typing of patterns *)
 
@@ -3231,6 +3582,27 @@ let forbid_atomic_field_patterns loc penv (label_lid, label, pat) =
   if Types.is_atomic label.lbl_mut && not (wildcard pat) then
     raise (Error (loc, !!penv, Atomic_in_pattern label_lid.txt))
 
+let forbid_atomic_in_record_update loc env lbl =
+  if Types.is_atomic lbl.lbl_mut then
+    raise (Error (loc, env, Atomic_in_functional_update lbl.lbl_name))
+
+let outer_refinement env ty =
+  match get_desc ty with
+  | Trefine r -> Some r
+  | Tconstr _ when may_have_refinement_types () ->
+      (* Ordinary expansions may depend on pattern-local GADT equations;
+         do not cache them during this inspection. *)
+      let snapshot = Btype.snapshot () in
+      (match get_desc (expand_head env ty) with
+       | Trefine r -> Some r
+       | _ -> Btype.backtrack snapshot; None)
+  | _ -> None
+
+let rec refinement_payload env ty =
+  match outer_refinement env ty with
+  | Some { ref_payload; _ } -> refinement_payload env ref_payload
+  | None -> ty
+
 (** [type_pat] propagates the expected type, and
     unification may update the typing environment. *)
 let rec type_pat
@@ -3243,8 +3615,17 @@ let rec type_pat
       expected_ty sort ->
   Builtin_attributes.warning_scope sp.ppat_attributes
     (fun () ->
-       type_pat_aux tps category ~no_existentials
-         ~alloc_mode ~mutable_flag ~penv sp expected_ty sort
+       let payload = match sp.ppat_desc with
+         | Ppat_any | Ppat_var _ | Ppat_alias _ | Ppat_or _
+         | Ppat_constraint _ | Ppat_open _ | Ppat_exception _
+         | Ppat_effect _ -> expected_ty
+         | _ -> refinement_payload !!penv expected_ty
+       in
+       let pat = type_pat_aux tps category ~no_existentials
+           ~alloc_mode ~mutable_flag ~penv sp payload sort in
+       if payload == expected_ty then pat
+       else { pat with pat_extra =
+         (Tpat_refinement expected_ty, sp.ppat_loc, []) :: pat.pat_extra }
     )
 
 and type_pat_aux
@@ -3365,8 +3746,8 @@ and type_pat_aux
           let error = Wrong_expected_kind(wks, Pattern, expected_ty) in
           raise (Error (loc, !!penv, error))
       in
-      let type_label_pat sorts (label_lid, (label : rep gen_label_description),
-                                sarg) =
+      let type_label_pat rep (label_lid, (label : rep gen_label_description),
+                              sarg) =
         let ty_arg =
           solve_Ppat_record_field loc penv label label_lid
             record_ty record_form in
@@ -3381,23 +3762,32 @@ and type_pat_aux
           apply_left_is_contained_by is_contained_by
             ~modalities:label.lbl_modalities alloc_mode.mode
         in
+        let mode =
+          if label.lbl_ghost then ghost_field_read_mode () else mode
+        in
         let alloc_mode = simple_pat_mode mode in
         let ty_sort =
-          match label_sort record_form label sorts with
-          | `Sort s -> Jkind.Sort.of_const s
-          | `Same_as_record_sort -> record_sort
+          if label.lbl_ghost then
+            (* The slot sort is Void; the pattern sees a placeholder at the
+               sort of the field's type. *)
+            match Ctype.type_sort ~why:Match ~fixed:false !!penv ty_arg with
+            | Ok s -> s
+            | Error err ->
+                raise (Error (label_lid.loc, !!penv,
+                              Field_value_not_rep (ty_arg, err)))
+          else label_sort record_form label rep ~record_sort
         in
         (label_lid, label, type_pat tps Value ~alloc_mode sarg ty_arg ty_sort)
       in
       let make_record_pat
-            sorts (rep : rep)
+            (rep : rep)
             (lbl_pat_list : (_ * rep gen_label_description * _) list) amb =
         check_recordpat_labels loc lbl_pat_list closed record_form;
         List.iter (forbid_atomic_field_patterns loc penv) lbl_pat_list;
         let pat_desc = match record_form with
-          | Legacy -> Tpat_record (lbl_pat_list, sorts, rep, closed)
+          | Legacy -> Tpat_record (lbl_pat_list, rep, closed)
           | Unboxed_product ->
-            Tpat_record_unboxed_product (lbl_pat_list, sorts, rep, closed)
+            Tpat_record_unboxed_product (lbl_pat_list, rep, closed)
         in
         {
           pat_desc;
@@ -3423,14 +3813,31 @@ and type_pat_aux
         | [] -> assert false
         | (_, label, _) :: _ -> label
       in
-      let sorts, rep =
+      let rep =
         update_labels !!penv record_form ~representative_label ~loc
           ~why:Field_projection
           ~containing_type:(instance record_ty)
       in
-      let lbl_a_list = List.map (type_label_pat sorts) lbl_a_list in
-      rvp @@ solve_expected (make_record_pat sorts rep lbl_a_list ambiguity)
+      let lbl_a_list = List.map (type_label_pat rep) lbl_a_list in
+      let pattern = solve_expected (make_record_pat rep lbl_a_list ambiguity) in
+      defer_partial_if_not_total_pattern_type
+        tps ~loc ~env:!!penv pattern.pat_type;
+      rvp pattern
   in
+  (* Destructuring reads the matched value at run time, so it must be
+     real: a ghost value's content may be a fabricated placeholder. Patterns
+     that bind
+     without reading (wildcards, variables, aliases) leave ghostliness alone, so
+     [let x = ghost_ e in ...] works. Or-patterns, constraints and other
+     wrappers recurse with the same mode, so their sub-patterns decide. *)
+  (match sp.ppat_desc with
+   | Ppat_any | Ppat_var _ | Ppat_alias _ | Ppat_or _ | Ppat_constraint _
+   | Ppat_open _ | Ppat_exception _ | Ppat_extension _ | Ppat_effect _ -> ()
+   | Ppat_constant _ | Ppat_interval _ | Ppat_tuple _ | Ppat_construct _
+   | Ppat_variant _ | Ppat_record _ | Ppat_record_unboxed_product _
+   | Ppat_array _ | Ppat_lazy _ | Ppat_unpack _ | Ppat_type _
+   | Ppat_unboxed_tuple _ | Ppat_unboxed_unit | Ppat_unboxed_bool _ ->
+     submode ~loc ~env:!!penv alloc_mode.mode mode_max);
   match sp.ppat_desc with
     Ppat_any ->
       rvp {
@@ -3481,12 +3888,21 @@ and type_pat_aux
         pat_unique_barrier = Unique_barrier.not_computed () }
   | Ppat_unpack name ->
       let t = instance expected_ty in
+      let pat_extra = [
+        Tpat_unpack, name.loc, sp.ppat_attributes;
+        (* [t] is intentionally not instantiated here, as it is still refined
+           e.g. in [map_half_typed_cases]. Ideally, we'd copy it after that.
+           However, at that point it is required to be closed, and hence
+           hopefully nothing surprising happens to it. *)
+        Tpat_inspected_type (Module_pack t), loc, []
+        ]
+      in
       begin match name.txt with
       | None ->
           rvp {
             pat_desc = Tpat_any;
             pat_loc = sp.ppat_loc;
-            pat_extra=[Tpat_unpack, name.loc, sp.ppat_attributes];
+            pat_extra;
             pat_type = t;
             pat_attributes = [];
             pat_env = !!penv;
@@ -3505,7 +3921,7 @@ and type_pat_aux
             pat_desc = Tpat_var { id; name = v; uid; sort;
                                   mode = alloc_mode.mode };
             pat_loc = sp.ppat_loc;
-            pat_extra=[Tpat_unpack, loc, sp.ppat_attributes];
+            pat_extra;
             pat_type = t;
             pat_attributes = [];
             pat_env = !!penv;
@@ -3545,6 +3961,8 @@ and type_pat_aux
         pat_attributes = sp.ppat_attributes;
         pat_env = !!penv;
         pat_unique_barrier = Unique_barrier.not_computed () }
+  | Ppat_constant {pconst_desc = Pconst_integer (_, Some 'Z'); _} ->
+      Location.raise_errorf ~loc "Bigint literal patterns are not supported"
   | Ppat_constant cst ->
       let cst = constant_or_raise !!penv loc cst in
       rvp @@ solve_expected {
@@ -3578,7 +3996,8 @@ and type_pat_aux
         expand_interval (Char.code c1) (Char.code c2)
           ~make:(fun loc i -> Const.char ~loc (Char.chr i))
       | Const_untagged_char c1, Const_untagged_char c2 ->
-        expand_interval (Char.code c1) (Char.code c2)
+        (* Intervals are specified by character code, as for [char]. *)
+        expand_interval (c1 land 0xff) (c2 land 0xff)
           ~make:(fun loc i -> Const.untagged_char ~loc (Char.chr i))
       | _ ->
         raise (Error (loc, !!penv, Invalid_interval))
@@ -3600,7 +4019,8 @@ and type_pat_aux
       in
       let (constr, locks), ambiguity =
         let candidates =
-          Env.lookup_all_constructors Env.Pattern ~loc:lid.loc lid.txt !!penv in
+          Resolved_predicate.lookup_all_constructors Env.Pattern
+            ~loc:lid.loc lid.txt !!penv in
         wrap_disambiguate "This variant pattern is expected to have"
           (mk_expected expected_ty)
           (Constructor.disambiguate Env.Pattern lid !!penv expected_type)
@@ -3658,6 +4078,8 @@ and type_pat_aux
         solve_Ppat_construct tps penv loc constr no_existentials
           existential_styp expected_ty
       in
+      defer_partial_if_not_total_pattern_type
+        tps ~loc ~env:!!penv expected_ty;
 
       let rec check_non_escaping p =
         match p.ppat_desc with
@@ -3732,11 +4154,11 @@ and type_pat_aux
             jkind_to_check)
           ctor_args jkinds_to_check;
         (* CR rtjoa: The enforcement above that the constructor argument is
-           representable, and the call to [representation_for_tuple_constructor]
+           representable, and the call to [instance_constructor_representation]
            below, are quite redundant. We should refactor. *)
         match
-          representation_for_tuple_constructor !!penv constr args ~loc ~types
-            ~containing_type:expected_ty ~why:Constructor_arg_projection
+          instance_constructor_representation !!penv constr ~types
+            ~why:Constructor_arg_projection
         with
         | Ok (repr, sorts) -> repr, sorts
         | Error (Unrepresentable_arg (loc, ty, err)) ->
@@ -3758,6 +4180,7 @@ and type_pat_aux
       let constant = (sarg = None) in
       let arg_type, row, pat_type =
         solve_Ppat_variant loc penv tag constant expected_ty in
+      defer_partial_if_not_total_pattern_type tps ~loc ~env:!!penv pat_type;
       let arg =
         (* PR#6235: propagate type information *)
         match sarg, arg_type with
@@ -3822,7 +4245,12 @@ and type_pat_aux
          [tps2]'s pattern forces, and we don't want to duplicate [tps]'s pattern
          forces. *)
       let tps1 = copy_type_pat_state tps in
-      let tps2 = {(copy_type_pat_state tps) with tps_pattern_force = []} in
+      let tps2 =
+        { (copy_type_pat_state tps) with
+          tps_pattern_force = [];
+          tps_total_pattern_checks = [];
+        }
+      in
       (* Introduce a new level to avoid keeping nodes at intermediate levels *)
       let pat_desc, _ = with_local_level_generalize
         ~before_generalize:(fun (_, tys) -> List.iter generalize tys)
@@ -3866,6 +4294,9 @@ and type_pat_aux
             *)
             tps_pattern_force =
               tps2.tps_pattern_force @ tps1.tps_pattern_force;
+            tps_total_pattern_checks =
+              tps2.tps_total_pattern_checks
+              @ tps1.tps_total_pattern_checks;
             tps_module_variables = tps1.tps_module_variables;
           }
         ~dst:tps;
@@ -3880,6 +4311,8 @@ and type_pat_aux
            pat_env = !!penv;
            pat_unique_barrier = Unique_barrier.not_computed () }
   | Ppat_lazy sp1 ->
+      Env.walk_locks_for_partial_construct ~env:!!penv
+        (loc, Mode.Hint.Expression);
       submode ~loc ~env:!!penv alloc_mode.mode mode_force_lazy;
       let nv = solve_Ppat_lazy loc penv expected_ty in
       let alloc_mode = global_pat_mode alloc_mode in
@@ -3896,25 +4329,26 @@ and type_pat_aux
         pat_unique_barrier = Unique_barrier.not_computed () }
   | Ppat_constraint(sp_constrained, sty, ms) ->
       (* Pretend separate = true *)
-      begin match sty with
-      | Some sty ->
-        let type_modes = Typemode.transl_alloc_mode ms in
-        let cty, ty, expected_ty' =
-          solve_Ppat_constraint tps loc !!penv type_modes.mode_modes sty
-            expected_ty
-        in
-        let p =
-          type_pat ~alloc_mode tps category sp_constrained expected_ty' sort
-        in
-        let extra =
-          Tpat_constraint (cty, type_modes),
-          loc,
-          sp_constrained.ppat_attributes
-        in
-        { p with pat_type = ty; pat_extra = extra::p.pat_extra }
-      | None ->
+      let type_modes = Typemode.transl_alloc_mode ms in
+      let cty, ty, expected_ty =
+        match sty with
+        | Some sty ->
+          let cty, ty, expected_ty' =
+            solve_Ppat_constraint tps loc !!penv type_modes.mode_modes sty
+              expected_ty
+          in
+          Some cty, Some ty, expected_ty'
+        | None ->
+          None, None, expected_ty
+      in
+      let p =
         type_pat ~alloc_mode tps category sp_constrained expected_ty sort
-      end
+      in
+      let pat_type = match ty with Some ty -> ty | None -> p.pat_type in
+      let extra =
+        Tpat_constraint (cty, type_modes), loc, sp_constrained.ppat_attributes
+      in
+      { p with pat_type; pat_extra = extra :: p.pat_extra }
   | Ppat_type lid ->
       Env.check_no_open_quotations sp.ppat_loc !!penv
         (Env.Tconst_pat_qt lid.txt);
@@ -3935,6 +4369,8 @@ and type_pat_aux
       { p with pat_extra = (Tpat_open (path,lid,new_env),
                                 loc, sp.ppat_attributes) :: p.pat_extra }
   | Ppat_exception p ->
+      Env.walk_locks_for_partial_construct ~env:!!penv
+        (loc, Mode.Hint.Expression);
       let alloc_mode = simple_pat_mode Value.legacy in
       let p_exn =
         type_pat tps Value ~alloc_mode p Predef.type_exn
@@ -3970,8 +4406,9 @@ let type_pattern
   let { tps_pattern_variables = pvs;
         tps_module_variables = mvs;
         tps_pattern_force = forces;
+        tps_total_pattern_checks = total_pattern_checks;
       } = tps in
-  (pat, !!new_penv, forces, pvs, mvs)
+  (pat, !!new_penv, forces, total_pattern_checks, pvs, mvs)
 
 let type_pattern_list
     category no_existentials env mutable_flag spatl expected_tys expected_sorts
@@ -3995,8 +4432,9 @@ let type_pattern_list
   let { tps_pattern_variables = pvs;
         tps_module_variables = mvs;
         tps_pattern_force = forces;
+        tps_total_pattern_checks = total_pattern_checks;
       } = tps in
-  (patl, !!new_penv, forces, pvs, mvs)
+  (patl, !!new_penv, forces, total_pattern_checks, pvs, mvs)
 
 let type_class_arg_pattern cl_num val_env met_env l spat =
   let pvs, pat =
@@ -4017,6 +4455,7 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
         finalize_variants pat;
       end;
       List.iter (fun f -> f()) tps.tps_pattern_force;
+      run_total_pattern_checks tps.tps_total_pattern_checks;
       (* CR layouts v5: value restriction here to be relaxed *)
       if is_optional l then
         unify_pat val_env pat
@@ -4079,6 +4518,7 @@ let type_self_pattern env spat =
       Jkind.Sort.(of_const Const.for_object)
   in
   List.iter (fun f -> f()) tps.tps_pattern_force;
+  run_total_pattern_checks tps.tps_total_pattern_checks;
   pat, tps.tps_pattern_variables
 
 type pat_tuple_arity =
@@ -4281,6 +4721,7 @@ let enter_nonsplit_or info =
 let rec check_counter_example_pat
     ~info ~(penv : Pattern_env.t) type_pat_state tp expected_ty k =
   assert (penv.in_counterexample = true);
+  let expected_ty = refinement_payload !!penv expected_ty in
   let check_rec ?(info=info) ?(penv=penv) =
     check_counter_example_pat ~info ~penv type_pat_state in
   let loc = tp.pat_loc in
@@ -4302,7 +4743,7 @@ let rec check_counter_example_pat
     | Refine_or {inside_nonsplit_or} -> inside_nonsplit_or
   in
   let type_label_pats (type rep)
-        (fields : (_ * rep gen_label_description * _) list) sorts (rep : rep)
+        (fields : (_ * rep gen_label_description * _) list) (rep : rep)
         closed (record_form : rep record_form) =
     let record_ty = generic_instance expected_ty in
     let type_label_pat (label_lid, label, targ) k =
@@ -4315,11 +4756,11 @@ let rec check_counter_example_pat
     | Legacy ->
       map_fold_cont type_label_pat fields
         (fun fields ->
-           mkp k (Tpat_record (fields, sorts, rep, closed)))
+           mkp k (Tpat_record (fields, rep, closed)))
     | Unboxed_product ->
       map_fold_cont type_label_pat fields
         (fun fields ->
-           mkp k (Tpat_record_unboxed_product (fields, sorts, rep, closed)))
+           mkp k (Tpat_record_unboxed_product (fields, rep, closed)))
   in
   match tp.pat_desc with
     Tpat_any | Tpat_var _ | Tpat_fun_layout _ ->
@@ -4411,10 +4852,10 @@ let rec check_counter_example_pat
           Some p, [ty] -> check_rec p ty (fun p -> k (Some p))
         | _            -> k None
       end
-  | Tpat_record(fields, sorts, repr, closed) ->
-      type_label_pats fields sorts repr closed Legacy
-  | Tpat_record_unboxed_product(fields, sorts, repr, closed) ->
-      type_label_pats fields sorts repr closed Unboxed_product
+  | Tpat_record(fields, repr, closed) ->
+      type_label_pats fields repr closed Legacy
+  | Tpat_record_unboxed_product(fields, repr, closed) ->
+      type_label_pats fields repr closed Unboxed_product
   | Tpat_array (mutability, original_arg_sort, tpl) ->
       let mut : mutable_flag =
         match mutability with
@@ -4475,8 +4916,8 @@ let rec check_counter_example_pat
 
 let check_counter_example_pat ~counter_example_args penv tp expected_ty =
   (* [check_counter_example_pat] doesn't use [type_pat_state] in an interesting
-     way -- one of the functions it calls writes an entry into
-     [tps_pattern_forces] -- so we can just ignore module patterns. *)
+     way. Its deferred checks are intentionally ignored, as this pattern is not
+     part of the source program. *)
   let type_pat_state = create_type_pat_state Modules_ignored in
   wrap_trace_gadt_instances ~force:true !!penv
     (check_counter_example_pat ~info:counter_example_args ~penv
@@ -4572,7 +5013,7 @@ let rec list_labels_aux env visited ls ty_fun =
   if TypeSet.mem ty visited then
     List.rev ls, false
   else match get_desc ty with
-    | Tarrow ((l,_,_), _, ty_res, _) ->
+    | Tarrow ((l,_,_,_), _, ty_res, _) ->
         list_labels_aux env (TypeSet.add ty visited) (l::ls) ty_res
     | _ ->
         List.rev ls, is_Tvar ty
@@ -4586,6 +5027,17 @@ let list_labels env ty =
   result
 
 
+let stable_dependent_argument :
+    (Env.t -> Parsetree.expression -> type_expr ->
+      refinement_expression option) ref =
+  ref (fun _ _ _ ->
+    Misc.fatal_error "Typecore: dependent argument typer not installed")
+
+let refinement_argument_scope = ref None
+
+let with_refinement_argument_scope level f =
+  Misc.protect_refs [Misc.R (refinement_argument_scope, Some level)] f
+
 (* Collecting arguments for function applications. *)
 
 (* See also Note [Type-checking applications] *)
@@ -4598,7 +5050,8 @@ type untyped_apply_arg =
         commuted : bool;
         mode_fun : Alloc.lr;
         mode_arg : Alloc.lr;
-        wrapped_in_some : bool; }
+        wrapped_in_some : bool;
+        logical_name : Ident.t option; }
     (* [arg] is a [Known_arg] in:
        - [f arg] when is known to be a function (f : _ -> _)
        - [f ~lab:arg] when (f : lab:_ -> _)
@@ -4640,6 +5093,7 @@ type untyped_omitted_param =
   { mode_fun: Alloc.lr;
     ty_arg : type_expr;
     mode_arg : Alloc.lr;
+    binder : Ident.t option;
     level: int;
     sort_arg : Jkind.sort }
 
@@ -4773,10 +5227,19 @@ let remaining_function_type_for_error ty_ret mode_ret rev_args =
          | Arg (Unknown_arg { mode_arg; _ } | Known_arg { mode_arg; _ }) ->
              let closed_args = mode_arg :: closed_args in
              (ty_ret, mode_ret, closed_args)
-         | Arg (Eliminated_optional_arg
-                  { mode_fun; ty_arg; mode_arg; level; _ })
-         | Omitted { mode_fun; ty_arg; mode_arg; level } ->
-             let arrow_desc = lbl, mode_arg, mode_ret in
+         | (Arg (Eliminated_optional_arg _) | Omitted _) ->
+             let mode_fun, ty_arg, mode_arg, binder, level =
+               match arg with
+               | Arg
+                   (Eliminated_optional_arg
+                     { mode_fun; ty_arg; mode_arg; level; _ }) ->
+                   mode_fun, ty_arg, mode_arg, None, level
+               | Omitted
+                   { mode_fun; ty_arg; mode_arg; binder; level; _ } ->
+                   mode_fun, ty_arg, mode_arg, binder, level
+               | Arg (Known_arg _ | Unknown_arg _) -> assert false
+             in
+             let arrow_desc = lbl, mode_arg, mode_ret, binder in
              let ty_ret =
                newty2 ~level
                  (Tarrow (arrow_desc, ty_arg, ty_ret, commu_ok))
@@ -4838,7 +5301,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                   Warnings.Ignored_extra_argument;
               let mode_arg = Alloc.newvar () in
               let mode_ret = Alloc.newvar () in
-              let kind = (lbl, mode_arg, mode_ret) in
+              let kind = (lbl, mode_arg, mode_ret, None) in
               begin try
                 unify env ty_fun
                   (newty (Tarrow(kind,ty_arg,ty_res,commu_var ())));
@@ -4857,7 +5320,7 @@ let collect_unknown_apply_args env funct ty_fun0 mode_fun rev_args sargs
                               { some_args_ok; ty_fun; jkind }))
               end;
               (sort_arg, mode_arg, ty_arg_mono, mode_ret, ty_res)
-        | Tarrow ((l, mode_arg, mode_ret), ty_arg, ty_res, _)
+        | Tarrow ((l, mode_arg, mode_ret, _), ty_arg, ty_res, _)
           when labels_match ~param:l ~arg:lbl ->
             let sort_arg =
               match
@@ -4916,9 +5379,9 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
     let lopt =
       match get_desc ty_fun', get_desc (expand_head env ty_fun0) with
       | Tarrow (ad, ty_arg, ty_ret, com),
-        Tarrow (_, ty_arg0, ty_ret0, _)
+        Tarrow ((_, _, _, binder0), ty_arg0, ty_ret0, _)
         when is_commu_ok com ->
-          Some (ad, `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0))
+          Some (ad, `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0, binder0))
       | _ -> None
     in
     let first_arg_loc =
@@ -4933,7 +5396,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
         ret_tvar
     | Some (ad, arrow_kind) ->
       begin
-        let (l, mode_arg, mode_ret) = ad in
+        let (l, mode_arg, mode_ret, binder) = ad in
         let name = label_name l
         and optional = is_optional l
         and omittable = is_omittable l in
@@ -4983,7 +5446,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                 sargs, None
         in
         match arrow_kind with
-        | `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0) ->
+        | `Arrow (ty_arg, ty_ret, ty_arg0, ty_ret0, binder0) ->
             let sort_arg =
               match
                 type_sort ~why:Function_argument ~fixed:false env ty_arg
@@ -4992,6 +5455,61 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
               | Error err ->
                 raise(Error(first_arg_loc, env,
                             Function_type_not_rep(ty_arg, err)))
+            in
+            let ty_ret, ty_ret0, logical_name =
+              match binder, arg_opt with
+              | None, _ -> ty_ret, ty_ret0, None
+              | Some binder, Some (sarg, _, ~commuted:_) ->
+                  let existing_path =
+                    match sarg.pexp_desc with
+                    | Pexp_ident lid
+                    | Pexp_borrow { pexp_desc = Pexp_ident lid; _ } ->
+                        let path, desc, _ =
+                          Resolved_predicate.lookup_value ~use:false
+                            ~loc:lid.loc lid.txt env
+                        in
+                        (match desc.val_kind with
+                         | Val_mut _ | Val_ivar _ -> None
+                         | Val_prim { prim_arity = 0; _ } -> None
+                         | _ -> Some path)
+                    | _ -> None
+                  in
+                  let stable = match existing_path with
+                    | Some _ -> None
+                    | None ->
+                        !stable_dependent_argument env sarg
+                          (tpoly_get_mono ty_arg)
+                  in
+                  let path, logical_name = match existing_path, stable with
+                    | _, Some _ -> Path.Pident binder, None
+                    | Some path, None -> path, None
+                    | None, None ->
+                        let id = Ident.create_local "*argument*" in
+                        Ctype.register_refinement_value_scope
+                          ~level:(Option.value !refinement_argument_scope
+                            ~default:(get_current_level ())) [id];
+                        Path.Pident id, Some id
+                  in
+                  let substitute binder ty =
+                    match stable with
+                    | Some argument ->
+                        Ctype.substitute_refinement_expression
+                          binder argument ty
+                    | None ->
+                        Subst.type_expr
+                          (Subst.add_value binder path Subst.identity) ty
+                  in
+                  let ty_ret =
+                    substitute binder ty_ret
+                  in
+                  let ty_ret0 =
+                    match binder0 with
+                    | Some binder0 ->
+                        substitute binder0 ty_ret0
+                    | None -> assert false
+                  in
+                  ty_ret, ty_ret0, logical_name
+              | Some _, None -> ty_ret, ty_ret0, None
             in
             let arg =
               match arg_opt with
@@ -5002,7 +5520,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                       (not_principal "using an optional argument here");
                   Arg (Known_arg
                     { sarg; ty_arg; ty_arg0; commuted; sort_arg;
-                      mode_fun; mode_arg; wrapped_in_some })
+                      mode_fun; mode_arg; wrapped_in_some; logical_name })
               | None ->
                 if omittable && List.mem_assoc Nolabel sargs then begin
                   may_warn funct.exp_loc (Warnings.Non_principal_labels
@@ -5015,7 +5533,14 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                      over it. *)
                   may_warn funct.exp_loc
                     (Warnings.Non_principal_labels "commuted an argument");
-                  Omitted { mode_fun; ty_arg; mode_arg; level = lv; sort_arg }
+                  Omitted
+                    { mode_fun;
+                      ty_arg;
+                      mode_arg;
+                      binder;
+                      level = lv;
+                      sort_arg
+                    }
                 end
             in
             loop ty_ret ty_ret0 mode_ret ((l, arg) :: rev_args) remaining_sargs
@@ -5034,8 +5559,9 @@ let type_omitted_parameters_and_build_result_type expected_mode env loc ty_ret
              let open_args = (exp, marg) :: open_args in
              let args = (lbl, Arg (exp, sort), sch) :: args in
              (ty_ret, mode_ret, open_args, closed_args, args)
-         | Omitted { mode_fun; ty_arg; mode_arg; level; sort_arg } ->
-             let arrow_desc = (lbl, mode_arg, mode_ret) in
+         | Omitted
+             { mode_fun; ty_arg; mode_arg; binder; level; sort_arg } ->
+             let arrow_desc = (lbl, mode_arg, mode_ret, binder) in
              let sort_ret =
                match type_sort ~why:Function_result ~fixed:false env ty_ret with
                | Ok sort -> sort
@@ -5090,14 +5616,16 @@ let rec is_nonexpansive exp =
   | Texp_function _
   | Texp_probe_is_enabled _
   | Texp_src_pos
-  | Texp_quotation _
+  | Texp_quote _
   | Texp_array (_, _, [], _) -> true
   | Texp_let(_rec_flag, pat_exp_list, body) ->
       List.for_all (fun vb -> is_nonexpansive vb.vb_expr) pat_exp_list &&
       is_nonexpansive body
   | Texp_letmutable(pat_exp, body) ->
       is_nonexpansive pat_exp.vb_expr && is_nonexpansive body
-  | Texp_apply(e, (_,Omitted _)::el, _, _, _) ->
+  | Texp_assume (binding, _, body) ->
+      is_nonexpansive binding.vb_expr && is_nonexpansive body
+  | Texp_apply(e, (_,Omitted _)::el, _, _, _, _) ->
       is_nonexpansive e && List.for_all is_nonexpansive_arg (List.map snd el)
   | Texp_match(e, _, cases, _, _) ->
      (* Not sure this is necessary, if [e] is nonexpansive then we shouldn't
@@ -5141,7 +5669,7 @@ let rec is_nonexpansive exp =
            | Kept _ -> true)
         fields
       && is_nonexpansive_opt (Option.map fst extended_expression)
-  | Texp_atomic_loc(exp, _, _, _, _) -> is_nonexpansive exp
+  | Texp_atomic_loc { record = exp; _ } -> is_nonexpansive exp
   | Texp_field { record = exp; _ } -> is_nonexpansive exp
   | Texp_unboxed_field { record = exp; _ } -> is_nonexpansive exp
   | Texp_idx (ba, _uas) ->
@@ -5190,7 +5718,7 @@ let rec is_nonexpansive exp =
   | Texp_apply (
       { exp_desc =
         Texp_ident { desc = {val_kind = Val_prim prim}; kind = Id_prim _; _ } },
-        args, _, _, _) ->
+        args, _, _, _, _) ->
      is_nonexpansive_prim prim args
   | Texp_array (_, _, _ :: _, _)
   | Texp_apply _
@@ -5207,8 +5735,9 @@ let rec is_nonexpansive exp =
   | Texp_setmutvar _
   | Texp_override _
   | Texp_letexception _
+  | Texp_logical_equal _
   | Texp_letop _
-  | Texp_antiquotation _
+  | Texp_splice _
   | Texp_extension_constructor _ ->
     false
   | Texp_exclave e -> is_nonexpansive e
@@ -5329,7 +5858,7 @@ let rec maybe_computation exp =
     List.exists maybe_computation exps
   | Texp_hole _ ->
     false
-  | Texp_quotation exp ->
+  | Texp_quote exp ->
     (* Approximate quote values as quotes of values.
        Note that splices are always considered computations. *)
     maybe_computation exp
@@ -5357,7 +5886,7 @@ let rec maybe_computation exp =
   | Texp_override _
   | Texp_letmodule _
   | Texp_letexception _
-  | Texp_assert _
+  | Texp_assert _ | Texp_assume _ | Texp_logical_equal _
   | Texp_lazy _
   | Texp_object _
   | Texp_pack _
@@ -5370,7 +5899,7 @@ let rec maybe_computation exp =
   | Texp_exclave _
   | Texp_src_pos
   | Texp_overwrite _
-  | Texp_antiquotation _
+  | Texp_splice _
   | Texp_apply_layout _
     -> true
 
@@ -5451,7 +5980,22 @@ let approx_type_default () = newvar (Jkind.Builtin.any ~why:Dummy_jkind)
 
 let rec approx_type env sty =
   match sty.ptyp_desc with
-  | Ptyp_arrow (p, ({ ptyp_desc = Ptyp_poly _ } as arg_sty), sty, arg_mode, _) ->
+  | Ptyp_arrow (_, _, _, _, _, Some _) ->
+      let inferred_ty =
+        Typetexp.transl_simple_type ~new_var_jkind:Any env ~closed:false
+          Alloc.Const.legacy sty
+      in
+      let rec approximate_returns ty =
+        match get_desc ty with
+        | Tarrow ((label, mode_arg, _, binder), arg, ret, commu) ->
+            newty (Tarrow
+              ((label, mode_arg, Alloc.newvar (), binder), arg,
+               approximate_returns ret, commu))
+        | _ -> ty
+      in
+      approximate_returns inferred_ty.ctyp_type
+  | Ptyp_arrow
+      (p, ({ ptyp_desc = Ptyp_poly _ } as arg_sty), sty, arg_mode, _, _) ->
       let p = Typetexp.transl_label p (Some arg_sty) in
       (* CR layouts v5: value requirement here to be relaxed *)
       if is_optional p then newvar Predef.option_argument_jkind
@@ -5467,9 +6011,9 @@ let rec approx_type env sty =
         let ret = approx_type env sty in
         let marg = Alloc.of_const arg_mode.mode_modes in
         let mret = Alloc.newvar () in
-        newty (Tarrow ((p,marg,mret), arg_ty.ctyp_type, ret, commu_ok))
+        newty (Tarrow ((p,marg,mret,None), arg_ty.ctyp_type, ret, commu_ok))
       end
-  | Ptyp_arrow (p, arg_sty, sty, arg_mode, _) ->
+  | Ptyp_arrow (p, arg_sty, sty, arg_mode, _, _) ->
       let arg_mode = Typemode.transl_alloc_mode arg_mode in
       let p = Typetexp.transl_label p (Some arg_sty) in
       let arg =
@@ -5480,7 +6024,7 @@ let rec approx_type env sty =
       let ret = approx_type env sty in
       let marg = Alloc.of_const arg_mode.mode_modes in
       let mret = Alloc.newvar () in
-      newty (Tarrow ((p,marg,mret), newmono arg, ret, commu_ok))
+      newty (Tarrow ((p,marg,mret,None), newmono arg, ret, commu_ok))
   | Ptyp_tuple args ->
       newty (Ttuple (List.map (fun (l, t) -> l, approx_type env t) args))
   | Ptyp_constr (lid, ctl) ->
@@ -5567,6 +6111,7 @@ let type_approx_fun_one_param
   ty_ret
 
 let rec type_approx env sexp ty_expected =
+  let ty_expected = refinement_payload env ty_expected in
   let loc = sexp.pexp_loc in
   match sexp.pexp_desc with
     Pexp_let (_, _, _, e) -> type_approx env e ty_expected
@@ -5578,6 +6123,7 @@ let rec type_approx env sexp ty_expected =
       type_tuple_approx env sexp.pexp_loc ty_expected l
   | Pexp_ifthenelse (_,e,_) -> type_approx env e ty_expected
   | Pexp_sequence (_,e) -> type_approx env e ty_expected
+  | Pexp_constraint (e, None, _) -> type_approx env e ty_expected
   | Pexp_constraint (e, Some sty, _) ->
       let ty_expected =
         type_approx_constraint env (Pconstraint sty) ty_expected ~loc
@@ -5626,7 +6172,10 @@ and type_approx_function =
            gets passed to the approximating of the rest of the type.
         *)
         let ty_expected =
-          type_approx_constraint_opt env c ty_expected ~loc
+          match get_desc ty_expected, c.ret_type_constraint with
+          | Trefine _, Some (Pconstraint {ptyp_desc = Ptyp_refine _; _}) ->
+              ty_expected
+          | _ -> type_approx_constraint_opt env c ty_expected ~loc
         in
         match body with
         | Pfunction_body body ->
@@ -5640,6 +6189,25 @@ and type_approx_function =
         | Pfunction_cases ([], _, _) -> ()
   in
   fun ~loc env params c body ty_expected : unit ->
+    let rec signature params result =
+      match params with
+      | [] -> Some result
+      | {pparam_desc = Pparam_val (label, None,
+          {ppat_desc = Ppat_constraint
+            ({ppat_desc = Ppat_var name; _}, Some arg, modes); _}); _} :: rest
+          when label = Asttypes.Nolabel ->
+          Option.map (fun ret -> Ast_helper.Typ.arrow ~loc ~binder:name label
+            arg ret modes (if rest = [] then c.ret_mode_annotations else []))
+            (signature rest result)
+      | _ -> None
+    in
+    begin match c.ret_type_constraint with
+    | Some (Pconstraint ({ptyp_desc = Ptyp_refine _; _} as result)) ->
+        Option.iter (fun sty ->
+          let ty = approx_type env sty in
+          unify_exp_types loc env ty ty_expected) (signature params result)
+    | _ -> ()
+    end;
     loop env params c body ty_expected
       ~in_function:(loc, ty_expected) ~first:true
 
@@ -5789,11 +6357,12 @@ let check_partial_application ~statement exp =
             | Texp_list_comprehension _ | Texp_array_comprehension _
             | Texp_while _ | Texp_for _ | Texp_instvar _
             | Texp_mutvar _ | Texp_setmutvar _
-            | Texp_setinstvar _ | Texp_override _ | Texp_assert _
+            | Texp_setinstvar _ | Texp_override _
+            | Texp_assert _ | Texp_assume _ | Texp_logical_equal _
             | Texp_lazy _ | Texp_object _ | Texp_pack _ | Texp_unreachable
             | Texp_extension_constructor _ | Texp_ifthenelse (_, _, None)
             | Texp_probe _ | Texp_probe_is_enabled _ | Texp_src_pos
-            | Texp_function _ | Texp_quotation _ | Texp_antiquotation _ ->
+            | Texp_function _ | Texp_quote _ | Texp_splice _ ->
                 check_statement ()
             | Texp_match (_, _, cases, eff_cases, _) ->
                 List.iter (fun {c_rhs; _} -> check c_rhs) cases;
@@ -5832,7 +6401,7 @@ let check_partial_application ~statement exp =
 let pattern_needs_partial_application_check p =
   let rec check : type a. a general_pattern -> bool = fun p ->
     not (List.exists
-          (function (Tpat_constraint (_, _), _, _) -> true | _ -> false)
+          (function (Tpat_constraint (Some _, _), _, _) -> true | _ -> false)
           p.pat_extra) &&
     match p.pat_desc with
     | Tpat_any -> true
@@ -5988,17 +6557,36 @@ let check_absent_variant env =
 
 (* To find reasonable names for let-bound and lambda-bound idents *)
 
-let rec name_pattern default = function
-    [] -> Ident.create_local default,
-          Shape.Uid.internal_not_actually_unique
+type binder_pattern_kind =
+  | Synthetic_eta_expansion
+  | Value_pattern_in_argument
+  | Value_pattern_in_match
+  | Exception_pattern
+  | Effect_pattern
+
+(* Only patterns for function arguments are interesting for the debugger, since
+   they show up in backtraces. The rest can usually be reconstructed from the
+   local variables or is explicitly ignored. Hence, we only create UIDs for
+   argument patterns. *)
+let create_uid_for_pattern_kind = function
+  | Value_pattern_in_argument ->
+      if Type_shape.enabled ()
+      then Uid.mk ~current_unit:(Env.get_current_unit ())
+      else Shape.Uid.internal_not_actually_unique
+  | Synthetic_eta_expansion | Value_pattern_in_match | Exception_pattern
+  | Effect_pattern -> Shape.Uid.internal_not_actually_unique
+
+let rec name_pattern ~pattern_kind default = function
+    [] ->
+      Ident.create_local default, create_uid_for_pattern_kind pattern_kind
   | p :: rem ->
     match p.pat_desc with
       Tpat_var { id; uid; _ } -> id, uid
     | Tpat_alias { id; uid; _ } -> id, uid
-    | _ -> name_pattern default rem
+    | _ -> name_pattern ~pattern_kind default rem
 
-let name_cases default lst =
-  name_pattern default (List.map (fun c -> c.c_lhs) lst)
+let name_cases ~pattern_kind default lst =
+  name_pattern ~pattern_kind default (List.map (fun c -> c.c_lhs) lst)
 
 (* Typing of expressions *)
 
@@ -6030,10 +6618,10 @@ type apply_prim =
   | Revapply
 let check_apply_prim_type prim typ =
   match get_desc typ with
-  | Tarrow ((Nolabel,_,_),a,b,_) when tpoly_is_mono a ->
+  | Tarrow ((Nolabel,_,_,_),a,b,_) when tpoly_is_mono a ->
       let a = tpoly_get_mono a in
       begin match get_desc b with
-      | Tarrow((Nolabel,_,_),c,d,_) when tpoly_is_mono c ->
+      | Tarrow((Nolabel,_,_,_),c,d,_) when tpoly_is_mono c ->
           let c = tpoly_get_mono c in
           let f, x, res =
             match prim with
@@ -6041,7 +6629,7 @@ let check_apply_prim_type prim typ =
             | Revapply -> c, a, d
           in
           begin match get_desc f with
-          | Tarrow((Nolabel,_,_),fl,fr,_) ->
+          | Tarrow((Nolabel,_,_,_),fl,fr,_) ->
               let fl = tpoly_get_mono fl in
               is_Tvar fl && is_Tvar fr && is_Tvar x && is_Tvar res
               && Types.eq_type fl x && Types.eq_type fr res
@@ -6188,7 +6776,7 @@ let split_function_ty
       (Alloc.proj_comonadic Areality alloc_mode);
   let { ty = ty_fun; explanation }, loc_fun = in_function in
   let separate = !Clflags.principal || Env.has_local_constraints env in
-  let { ty_arg; ty_ret; arg_mode; ret_mode } as filtered_arrow =
+  let { ty_arg; ty_ret; arg_mode; ret_mode; binder = _ } as filtered_arrow =
     with_local_level_generalize_structure_if separate begin fun () ->
       let force_tpoly =
         (* If [has_poly] is true then we rely on the later call to
@@ -6269,6 +6857,84 @@ type type_function_result_param =
     has_poly : bool;
   }
 
+module Calling_convention_sort : sig
+  (* A sort reflected in the function's calling convention.
+
+     We can't allow constraints from parameters which partially match on GADTs
+     to justify the function's argument/return sorts, as a caller can still pass
+     a constructor missing from the partial match. See oxcaml/oxcaml#6689. *)
+  type t =
+    { ccs_ty : type_expr;
+      ccs_sort : Jkind.sort;
+      (* The environment the sort was derived in. *)
+      ccs_env : Env.t;
+      ccs_loc : Location.t;
+      ccs_kind : [`Argument | `Result];
+    }
+
+  val check_doesn't_rely_on_partial_match :
+    partial:partial -> has_default:bool -> match_loc:Location.t ->
+    outer_env:Env.t -> branch_env:Env.t -> t list -> unit
+end = struct
+  type t =
+    { ccs_ty : type_expr;
+      ccs_sort : Jkind.sort;
+      ccs_env : Env.t;
+      ccs_loc : Location.t;
+      ccs_kind : [`Argument | `Result];
+    }
+
+  let added_constraints_from_partial_match
+        ~partial ~has_default ~outer_env ~branch_env =
+    if not (Env.local_constraints_have_been_added ~since:outer_env branch_env)
+    then None
+    else
+      match partial, has_default with
+      | Total, false -> None
+      | Partial, _ -> Some `Partial_match
+      (* Optional arguments can be omitted, so they are effectively partial *)
+      | Total, true -> Some `Optional_argument
+
+  let check_doesn't_rely_on_partial_match
+        ~partial ~has_default ~match_loc ~outer_env ~branch_env ts =
+    match
+      added_constraints_from_partial_match ~partial ~has_default ~outer_env
+        ~branch_env
+    with
+    | None -> ()
+    | Some why ->
+      List.iter
+        (fun { ccs_ty; ccs_sort; ccs_env; ccs_loc; ccs_kind } ->
+          (* Try to re-derive the same sort using an environment without local
+             constraints added since [outer_env].
+
+             This is an approximate check of whether the sort relies on a
+             partial match, as it also disallows depending on parameters which
+             totally match on a GADT. *)
+          let weak_env =
+            Env.revert_local_constraints ccs_env ~since:outer_env
+          in
+          let sort_why =
+            match ccs_kind with
+            | `Argument -> Jkind.History.Function_argument
+            | `Result -> Jkind.History.Function_result
+          in
+          let ok =
+            match
+              Ctype.type_sort ~why:sort_why ~fixed:true weak_env ccs_ty
+            with
+            | Ok sort -> Jkind.Sort.equate sort ccs_sort
+            | Error _ -> false
+          in
+          if not ok then
+            raise
+              (Error
+                 (ccs_loc, ccs_env,
+                  Function_type_escapes_partial_match
+                    { ty = ccs_ty; match_loc; kind = ccs_kind; why })))
+        ts
+end
+
 (* The result of calling [type_function]. For the outer call to
    [type_function], it's the result of typechecking the entire function;
    for recursive calls to [type_function], it's the result of typechecking
@@ -6293,6 +6959,8 @@ type type_function_result =
        left.
     *)
     ret_info: type_function_ret_info option;
+    (* The argument/result sorts of this parameter suffix. *)
+    calling_convention_sorts: Calling_convention_sort.t list;
   }
 
 and type_function_ret_info =
@@ -6365,8 +7033,27 @@ let vb_pat_constraint
 
 let pat_modes ~force_toplevel rec_mode_var ~is_lpoly (attrs, spat) =
   let pat_mode, exp_mode =
-    if force_toplevel
-    then simple_pat_mode Value.legacy, mode_legacy
+    if force_toplevel then
+      let mode = match rec_mode_var with
+        | None -> Value.legacy
+        | Some recursive_mode ->
+            let mode = Value.newvar () in
+            Value.submode_exn
+              (Value.of_const {Value.Const.legacy with
+                totality = Totality.Const.Total;
+                statefulness = Statefulness.Const.Stateless;
+                portability = Portability.Const.Portable})
+              mode;
+            Value.submode_exn mode Value.legacy;
+            Totality.equate_exn (Value.proj_comonadic Totality mode)
+              (Value.proj_comonadic Totality recursive_mode);
+            Statefulness.equate_exn (Value.proj_comonadic Statefulness mode)
+              (Value.proj_comonadic Statefulness recursive_mode);
+            Portability.equate_exn (Value.proj_comonadic Portability mode)
+              (Value.proj_comonadic Portability recursive_mode);
+            mode
+      in
+      simple_pat_mode mode, mode_default mode
     else match rec_mode_var with
     | None -> begin
         match pat_tuple_arity spat with
@@ -6438,9 +7125,133 @@ let add_zero_alloc_attribute expr attributes =
     end
   | _ -> expr
 
-let rec type_exp ?recarg ?(overwrite=No_overwrite) env expected_mode sexp =
+let with_primitive_mode_checks ?defer f =
+  let checks = ref [] in
+  let result = f (fun check -> checks := check :: !checks) in
+  List.iter
+    (fun check -> match defer with None -> check () | Some defer -> defer check)
+    (List.rev !checks);
+  result
+
+type dependent_opening =
+  { binder : Ident.t;
+    parameter : Ident.t
+  }
+
+let refinement_type_closing = ref Ident.Map.empty
+
+let with_refinement_type_closing openings f =
+  let previous = !refinement_type_closing in
+  let closing =
+    List.fold_left
+      (fun closing { binder; parameter } ->
+         Ident.Map.add parameter binder closing)
+      previous openings
+  in
+  refinement_type_closing := closing;
+  Fun.protect f ~finally:(fun () -> refinement_type_closing := previous)
+
+let open_dependent_type openings ty =
+  match openings with
+  | [] -> ty
+  | _ :: _ ->
+      let subst =
+        List.fold_left
+          (fun subst { binder; parameter } ->
+             Subst.add_bound_value binder parameter subst)
+          Subst.identity openings
+      in
+      Subst.type_expr subst ty
+
+let close_dependent_type openings ty =
+  match openings with
+  | [] -> ty
+  | _ :: _ ->
+      let subst =
+        List.fold_left
+          (fun subst { binder; parameter } ->
+             Subst.add_bound_value parameter binder subst)
+          Subst.identity openings
+      in
+      Subst.type_expr subst ty
+
+let eliminate_refinement exp =
+  let target = refinement_payload exp.exp_env exp.exp_type in
+  if target == exp.exp_type then exp
+  else
+    { exp with
+      exp_type = target;
+      exp_extra =
+        (Texp_refinement { source = exp.exp_type; target }, exp.exp_loc, [])
+        :: exp.exp_extra }
+
+let rec eliminate_refinement_to env target exp =
+  let snapshot = Btype.snapshot () in
+  match Ctype.unify env exp.exp_type (instance target) with
+  | () -> exp
+  | exception Ctype.Unify _ ->
+      Btype.backtrack snapshot;
+      match outer_refinement env exp.exp_type with
+      | None -> exp
+      | Some { ref_payload; _ } ->
+          eliminate_refinement_to env target
+            { exp with
+              exp_type = ref_payload;
+              exp_extra =
+                (Texp_refinement
+                   { source = exp.exp_type; target = ref_payload },
+                 exp.exp_loc, []) :: exp.exp_extra }
+
+let introduce_refinement env target loc exp =
+  let rec cancel prefix = function
+    | (Texp_refinement { source; _ }, _, _) :: rest
+      when Ctype.is_equal env true [source] [target] ->
+        Some (List.rev_append prefix rest)
+    | (Texp_refinement _, _, _) :: _ -> None
+    | extra :: rest -> cancel (extra :: prefix) rest
+    | [] -> None
+  in
+  let exp_extra = match cancel [] exp.exp_extra with
+    | Some extras -> extras
+    | None ->
+        (Texp_refinement { source = exp.exp_type; target }, loc, [])
+        :: exp.exp_extra
+  in
+  { exp with exp_type = instance target; exp_extra }
+
+let restore_refinement exp =
+  let source = List.find_map (function
+    | Texp_refinement { source; _ }, _, _
+      when Option.is_some (outer_refinement exp.exp_env source) -> Some source
+    | _ -> None) exp.exp_extra in
+  match source with
+  | Some source -> introduce_refinement exp.exp_env source exp.exp_loc exp
+  | None -> exp
+
+let rec module_expression_is_alias module_expr =
+  match module_expr.pmod_desc with
+  | Pmod_ident _ -> true
+  | Pmod_constraint (module_expr, _, _) ->
+    module_expression_is_alias module_expr
+  | _ -> false
+
+let arrow_has_refinement env ty =
+  let rec visit seen ty =
+    let ty = Ctype.expand_head env ty in
+    if TypeSet.mem ty seen then false else
+    let seen = TypeSet.add ty seen in
+    match get_desc ty with
+    | Trefine _ -> true
+    | Tarrow (_, arg, result, _) ->
+        visit seen (tpoly_get_mono arg) || visit seen result
+    | _ -> false
+  in
+  visit TypeSet.empty ty
+
+let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
+    env expected_mode sexp =
   (* We now delegate everything to type_expect *)
-  type_expect ?recarg ~overwrite env expected_mode sexp
+  type_expect ?recarg ?defer_primitive_mode ~overwrite env expected_mode sexp
     (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
 
 (* Typing of an expression with an expected type.
@@ -6454,28 +7265,124 @@ and check_layout_args_empty ~loc ~env layout_args ctx =
   if not (List.is_empty layout_args) then
     raise (Error (loc, env, Layout_poly_inst_not_yet_supported ctx))
 
-and type_expect ?recarg ?(overwrite=No_overwrite) env
+and type_expect ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite) env
       (expected_mode : expected_mode) sexp ty_expected_explained =
+  let ty_expected_explained =
+    match Resolved_predicate.expected_type env sexp with
+    | None -> ty_expected_explained
+    | Some ty ->
+        unify_exp_types sexp.pexp_loc env ty ty_expected_explained.ty;
+        { ty_expected_explained with ty }
+  in
+  let sexp =
+    match sexp.pexp_desc with
+    | Pexp_ident lid
+      when may_have_refinement_types ()
+           && not (!typing_refinement_predicate
+                   || Resolved_predicate.active ()) ->
+        let snapshot = Btype.snapshot () in
+        let adapt =
+          Fun.protect ~finally:(fun () -> Btype.backtrack snapshot) (fun () ->
+            match get_desc (Ctype.expand_head env ty_expected_explained.ty) with
+            | Tarrow _ when arrow_has_refinement env ty_expected_explained.ty ->
+                let _, desc, _ = Resolved_predicate.lookup_value ~use:false
+                    ~loc:lid.loc lid.txt env in
+                (match get_desc (Ctype.expand_head env desc.val_type) with
+                 | Tarrow _ -> not (Ctype.is_equal env false
+                     [desc.val_type] [ty_expected_explained.ty])
+                 | _ -> false)
+            | _ -> false)
+        in
+        if adapt then { sexp with pexp_desc = Pexp_refine sexp } else sexp
+    | _ -> sexp
+  in
   let previous_saved_types = Cmt_format.get_saved_types () in
+  let expected_mode =
+    (* Refinements guarantee these modes even when their payload does not. *)
+    match outer_refinement env ty_expected_explained.ty with
+    | None -> expected_mode
+    | Some _ ->
+        let payload = refinement_payload env ty_expected_explained.ty in
+        let required = expect_mode_cross env payload
+            (mode_default (refinement_operand_mode ())) in
+        mode_coerce required.mode expected_mode
+  in
   let exp =
-    Builtin_attributes.warning_scope sexp.pexp_attributes
-      (fun () ->
-         type_expect_ ?recarg ~overwrite env expected_mode sexp ty_expected_explained
-      )
+    try
+      Builtin_attributes.warning_scope sexp.pexp_attributes
+        (fun () ->
+           match outer_refinement env ty_expected_explained.ty,
+                 sexp.pexp_desc with
+           | Some _, _ when !typing_refinement_predicate
+                            || Resolved_predicate.active () ->
+               type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
+                 expected_mode sexp ty_expected_explained
+           | Some _,
+             (Pexp_assume _ | Pexp_refine _ | Pexp_ifthenelse _
+             | Pexp_match _ | Pexp_try _ | Pexp_let _ | Pexp_let_refine _
+             | Pexp_sequence _ | Pexp_open _ | Pexp_letmodule _
+             | Pexp_letexception _ | Pexp_ghost _ | Pexp_borrow _
+             | Pexp_stack _ | Pexp_constraint (_, None, _)) ->
+               type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
+                 expected_mode sexp ty_expected_explained
+           | Some _, Pexp_apply
+               ({ pexp_desc = Pexp_extension ({ txt }, PStr []); _ }, [_])
+             when is_exclave_extension_node txt ->
+               type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
+                 expected_mode sexp ty_expected_explained
+           | Some { ref_payload; _ }, _ ->
+               let ref_payload = generic_instance ref_payload in
+               let exp =
+                 match outer_refinement env ref_payload with
+                 | Some _ ->
+                     type_expect ?recarg ?defer_primitive_mode ~overwrite env
+                       expected_mode sexp
+                       { ty_expected_explained with ty = ref_payload }
+                 | None ->
+                     type_expect_ ?recarg ?defer_primitive_mode ~overwrite
+                       ~refined_expected:ty_expected_explained.ty env
+                       expected_mode sexp
+                       { ty_expected_explained with ty = ref_payload }
+               in
+               introduce_refinement env ty_expected_explained.ty
+                 sexp.pexp_loc exp
+           | _ ->
+               type_expect_ ?recarg ?defer_primitive_mode ~overwrite env
+                 expected_mode sexp ty_expected_explained)
+    with Ctype.Refinement_scope_escape id ->
+      raise
+        (Error_forward
+           (Location.errorf ~loc:sexp.pexp_loc
+              "the refinement type of this expression escapes the scope of \
+               binding %a"
+              Style.inline_code (Ident.name id)))
   in
   Cmt_format.set_saved_types
     (Cmt_format.Partial_expression exp :: previous_saved_types);
   exp
 
 and type_expect_
-    ?(recarg=Rejected) ?(overwrite=No_overwrite)
-    env (expected_mode : expected_mode) sexp ty_expected_explained =
+    ?(recarg=Rejected) ?defer_primitive_mode ?(overwrite=No_overwrite)
+    ?refined_expected env (expected_mode : expected_mode) sexp
+    ty_expected_explained =
   let { ty = ty_expected; explanation } = ty_expected_explained in
   let loc = sexp.pexp_loc in
   (* Record the expression type before unifying it with the expected type *)
   let with_explanation = with_explanation explanation in
   (* Unify the result with [ty_expected], enforcing the current level *)
   let rue exp =
+    (match refined_expected, get_desc exp.exp_type with
+     | Some expected, Tvar _
+       when not
+         (Ctype.deep_occur exp.exp_type (Ctype.expand_head env expected)) ->
+         unify_exp ~sexp env exp (instance expected)
+     | _ -> ());
+    let exp =
+      if (!typing_refinement_predicate || Resolved_predicate.active ())
+         && Option.is_some (outer_refinement env ty_expected)
+      then eliminate_refinement_to env ty_expected exp
+      else eliminate_refinement exp
+    in
     with_explanation (fun () ->
       unify_exp ~sexp env (re exp) (instance ty_expected));
     exp
@@ -6556,6 +7463,16 @@ and type_expect_
              expected_type)
           lid_sexp_list
       in
+      if
+        List.exists
+          (fun (_, label, _) ->
+            Array.exists
+              (fun label -> Types.is_mutable label.lbl_mut)
+              label.lbl_all)
+          lbl_a_list
+      then
+        Env.walk_locks_for_partial_construct ~env
+          (loc, Mode.Hint.Expression);
       let repres_might_allocate (type rep) (record_form : rep record_form)
             (rep : rep) =
         match record_form with
@@ -6565,13 +7482,15 @@ and type_expect_
             -> false
           | Record_boxed | Record_float | Record_ufloat | Record_mixed _
           | Record_inlined (_, _, (Variant_boxed _ | Variant_extensible))
-          | Record_variable
+          | Record_undetermined | Record_variable _
             -> true
           | Record_dummy _ ->
             Misc.fatal_error "type_expect: dummy record representation"
         end
         | Unboxed_product -> begin match rep with
-          | Record_unboxed_product | Record_unboxed_product_variable -> false
+          | Record_unboxed_product
+          | Record_unboxed_product_undetermined
+          | Record_unboxed_product_variable _ -> false
         end
       in
       let is_boxed =
@@ -6603,8 +7522,10 @@ and type_expect_
             container = (loc, Expression) }
         in
         let argument_mode =
-          mode_is_contained_by is_contained_by ~modalities:label.lbl_modalities
-            record_mode
+          if label.lbl_ghost then mode_ghost_field_write ()
+          else
+            mode_is_contained_by is_contained_by
+              ~modalities:label.lbl_modalities record_mode
         in
         type_label_exp ~overwrite true env argument_mode loc ty_record x record_form
       in
@@ -6656,6 +7577,7 @@ and type_expect_
                 unify_exp_types record_loc env (instance ty_expected) ty_res2);
               check_project_mutability ~loc:extended_expr_loc ~env
                 (Record_field lbl.lbl_name) lbl.lbl_mut mode;
+              forbid_atomic_in_record_update extended_expr_loc env lbl;
               let is_contained_by : Mode.Hint.is_contained_by =
                 { containing = Record (lbl.lbl_name, Modality);
                   container = (extended_expr_loc, Expression) }
@@ -6663,6 +7585,9 @@ and type_expect_
               let mode =
                 apply_left_is_contained_by is_contained_by
                   ~modalities:lbl.lbl_modalities mode
+              in
+              let mode =
+                if lbl.lbl_ghost then ghost_field_read_mode () else mode
               in
               let mode = cross_left env lbl.lbl_arg mode in
               check_construct_mutability ~loc:record_loc ~env lbl.lbl_mut
@@ -6672,8 +7597,10 @@ and type_expect_
                   container = (record_loc, Expression) }
               in
               let argument_mode =
-                mode_is_contained_by is_contained_by
-                  ~modalities:lbl.lbl_modalities record_mode
+                if lbl.lbl_ghost then mode_ghost_field_write ()
+                else
+                  mode_is_contained_by is_contained_by
+                    ~modalities:lbl.lbl_modalities record_mode
               in
               submode ~loc:extended_expr_loc ~env mode argument_mode;
               Kept (ty_arg1, lbl.lbl_mut,
@@ -6789,21 +7716,12 @@ and type_expect_
               then Field_assignment
               else Field_functional_update
             in
-            begin match
-              (* XXX This is redundantly going to get the sort and jkind for
-                 each label all over again. Possibly we're doing things in the
-                 wrong order. *)
-              Typedecl.update_record_representation ~why env
-                sexp.pexp_loc record_form labels_with_updated_types
-            with
-            | Ok (_, rep) -> rep
-            | Error _ ->
-                (* This should be impossible since we already ran everything
-                   through [jkind_and_sort_for_label_definition] *)
-                Misc.fatal_errorf
-                  "No representation for record whose fields have sorts: %a"
-                    Printtyp.type_expr ty_expected
-            end
+            (* XXX This is redundantly going to get the sort and jkind for
+               each label all over again. Possibly we're doing things in the
+               wrong order. *)
+            Typedecl.instance_record_representation ~why env
+              sexp.pexp_loc record_form ~old_repres:representation
+              labels_with_updated_types
       in
       let fields =
         Array.map2 (fun descr (_arg, _jkind, sort, def) -> descr, sort, def)
@@ -6836,13 +7754,218 @@ and type_expect_
         exp_env = env }
   in
   match sexp.pexp_desc with
+  | Pexp_assume operand -> begin
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      match get_desc (expand_head env ty_expected) with
+      | Trefine refinement ->
+          let operand =
+            type_expect env
+              (mode_coerce value_max_real
+                 (mode_coerce (refinement_operand_mode ()) expected_mode))
+              operand
+              (mk_expected (generic_instance refinement.ref_payload))
+          in
+          begin match operand.exp_desc, operand.exp_extra with
+          | Texp_ident { path = Pident _; _ }, extras
+            when List.for_all (function
+              | Texp_refinement _, _, _ -> true | _ -> false) extras -> ()
+          | _ -> raise (Error_forward (Location.errorf ~loc:operand.exp_loc
+              "%a requires a plain local variable"
+              Style.inline_code "assume_"))
+          end;
+          Env.walk_locks_for_partial_construct ~env
+            (loc, Mode.Hint.Expression);
+          let exp = !type_assume env expected_mode loc operand refinement in
+          re { exp with
+               exp_type = instance ty_expected;
+               exp_extra = [];
+               exp_attributes = sexp.pexp_attributes }
+      | _ -> raise (Error_forward (Location.errorf ~loc
+          "%a requires a known refinement type from its context"
+          Style.inline_code "assume_"))
+    end
+  | Pexp_refine operand
+    when (match operand.pexp_desc with
+          | Pexp_ident {txt = Longident.Lident _; _} -> false
+          | _ -> true) ->
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let name = Location.mkloc "*refine_value*" loc in
+      let value = Ast_helper.Exp.ident ~loc
+          (Location.mkloc (Longident.Lident name.txt) loc) in
+      let body = Ast_helper.Exp.mk ~loc (Pexp_refine value) in
+      let normalized = Ast_helper.Exp.let_ ~loc Immutable Nonrecursive
+          [Ast_helper.Vb.mk ~loc (Ast_helper.Pat.var ~loc name) operand] body in
+      let normalized =
+        {normalized with pexp_attributes = sexp.pexp_attributes} in
+      type_expect env expected_mode normalized ty_expected_explained
+  | Pexp_refine operand -> begin
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      match get_desc (expand_head env ty_expected) with
+      | Trefine { ref_payload; _ } ->
+          let exp = type_expect env expected_mode operand
+              (mk_expected (generic_instance ref_payload)) in
+          { exp with exp_type = instance ty_expected; exp_extra =
+              (Texp_refine, loc, sexp.pexp_attributes) ::
+              (Texp_refinement { source = exp.exp_type; target = ty_expected },
+                loc, []) :: exp.exp_extra }
+      | Tarrow _ ->
+          let source_type = match operand.pexp_desc with
+            | Pexp_ident lid ->
+                let path, desc, _ = Resolved_predicate.lookup_value ~use:false
+                    ~loc:lid.loc lid.txt env in
+                begin match path, desc.val_kind with
+                | Path.Pident _, Val_reg _ -> desc.val_type
+                | _ -> raise (Error_forward (Location.errorf ~loc
+                    "Function refinement requires a stable local function"))
+                end
+            | _ -> raise (Error_forward (Location.errorf ~loc
+                "Function refinement requires a stable local function"))
+          in
+          let ident name = Ast_helper.Exp.ident ~loc
+              (Location.mkloc (Longident.Lident name) loc) in
+          let binding name value body =
+            Ast_helper.Exp.let_ ~loc Immutable Nonrecursive
+              [Ast_helper.Vb.mk ~loc (Ast_helper.Pat.var ~loc name) value] body
+          in
+          let rec adapter index expected source operand =
+            match get_desc (expand_head env expected) with
+            | Tarrow ((Nolabel, _, _, _), _, ret, _) ->
+                let name = "*refine_arg_" ^ string_of_int index ^ "*" in
+                let param = {pparam_loc = loc;
+                  pparam_desc = Pparam_val (Nolabel, None,
+                    Ast_helper.Pat.var ~loc (Location.mkloc name loc))} in
+                let call = Ast_helper.Exp.apply ~loc operand
+                    [Asttypes.Nolabel, ident name] in
+                let source_ret =
+                  match get_desc (expand_head env source) with
+                  | Tarrow (_, _, ret, _) -> ret
+                  | _ -> source
+                in
+                let result = Location.mkloc
+                    ("*refine_result_" ^ string_of_int index ^ "*") loc in
+                let body =
+                  match get_desc (expand_head env ret) with
+                  | Tarrow _ ->
+                      binding result call
+                        (adapter (index + 1) ret source_ret (ident result.txt))
+                  | _ ->
+                      let body =
+                        if Option.is_some (outer_refinement env ret) then
+                          Ast_helper.Exp.mk ~loc
+                            (Pexp_refine (ident result.txt))
+                        else ident result.txt
+                      in
+                      match get_desc (expand_head env source_ret) with
+                      | Trefine _ -> Ast_helper.Exp.mk ~loc
+                          (Pexp_let_refine (result, call, body))
+                      | _ -> binding result call body
+                in
+                Ast_helper.Exp.function_ ~loc [param]
+                  {mode_annotations = []; ret_mode_annotations = [];
+                   ret_type_constraint = None} (Pfunction_body body)
+            | Tarrow _ -> raise (Error_forward (Location.errorf ~loc
+                "Function refinement currently requires unlabelled parameters"))
+            | _ -> assert false
+          in
+          let fn = adapter 0 ty_expected source_type operand in
+          type_expect env expected_mode fn ty_expected_explained
+      | _ ->
+          raise (Error_forward (Location.errorf ~loc
+            "%a requires a known refinement type from its context"
+            Style.inline_code "refine_"))
+    end
+  | Pexp_let_refine (name, bound, body) ->
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let bound_mode = Value.newvar () in
+      let bound = type_exp env (mode_default bound_mode) bound in
+      let bound = restore_refinement bound in
+      let payload = match outer_refinement env bound.exp_type with
+        | Some r -> r.ref_payload
+        | None -> bound.exp_type
+      in
+      let sort =
+        match
+          Ctype.type_sort ~why:Jkind.History.Let_binding ~fixed:false env
+            payload
+        with
+        | Ok sort -> sort
+        | Error violation ->
+            raise (Error (loc, env,
+              Function_type_not_rep (payload, violation)))
+      in
+      let id = Ident.create_local name.txt in
+      let uid = Uid.mk ~current_unit:(Env.get_current_unit ()) in
+      let mode = bound_mode in
+      let desc =
+        { val_type = payload;
+          val_kind = Val_reg sort;
+          val_lpoly = Lpoly.determined [];
+          val_attributes = [];
+          val_zero_alloc = Zero_alloc.default;
+          val_modalities = Modality.undefined;
+          val_loc = name.loc;
+          val_uid = uid
+        }
+      in
+      let body_env = Env.add_value ~mode id desc env in
+      let body =
+        with_local_level_generalize_if (Ctype.may_track_refinement_scopes ())
+          (fun () ->
+             Ctype.register_refinement_value_scope
+               ~level:(get_current_level ()) [id];
+             type_expect body_env expected_mode body ty_expected_explained)
+          ~before_generalize:ignore
+      in
+      let pat =
+        { pat_desc =
+            Tpat_var
+              { id; name; uid; sort;
+                mode = Value.disallow_right mode };
+          pat_loc = name.loc;
+          pat_extra = [];
+          pat_type = payload;
+          pat_env = env;
+          pat_attributes = [];
+          pat_unique_barrier = Unique_barrier.not_computed ()
+        }
+      in
+      let vb =
+        { vb_pat = pat;
+          vb_expr = bound;
+          vb_rec_kind = Value_rec_types.Dynamic;
+          vb_sort = sort;
+          vb_attributes = [];
+          vb_loc = loc
+        }
+      in
+      re
+        { exp_desc = Texp_let (Nonrecursive, [vb], body);
+          exp_loc = loc;
+          exp_extra =
+            [Texp_let_refine (id, name), loc, sexp.pexp_attributes];
+          exp_type = body.exp_type;
+          exp_attributes = sexp.pexp_attributes;
+          exp_env = env
+        }
+  | Pexp_ident lid
+    when Language_extension.is_enabled Refinement_types
+         && String.equal (Longident.last lid.txt) "===" ->
+      raise
+        (Error_forward
+           (Location.errorf ~loc
+              "%a must be used as an unqualified binary operator in a \
+               refinement predicate or ghost code"
+              Style.inline_code "==="))
   | Pexp_ident lid ->
-      let path, actual_mode, layout_args, desc, kind =
+      let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
         type_ident env ~recarg lid
       in
       let exp_desc =
         match desc.val_kind with
-        | Val_ivar (_, cl_num) ->
+        | Val_ivar (mutability, cl_num) ->
+            if mutability = Asttypes.Mutable then
+              Env.walk_locks_for_partial_construct ~env
+                (loc, Mode.Hint.Expression);
             if not (List.is_empty layout_args) then
               Misc.fatal_error "type_expect_: Val_ivar with layout args";
             let (self_path, _) =
@@ -6854,6 +7977,8 @@ and type_expect_
                              Longident.Lident txt -> { txt; loc = lid.loc }
                            | _ -> assert false)
         | Val_mut (_m0, _) -> begin
+            Env.walk_locks_for_partial_construct ~env
+              (loc, Mode.Hint.Expression);
             if not (List.is_empty layout_args) then
               Misc.fatal_error "type_expect_: Val_mut with layout args";
             match path with
@@ -6876,11 +8001,15 @@ and type_expect_
             in
             Texp_ident { path; lid; desc; kind;
               unique_use = unique_use ~loc ~env actual_mode
-                (as_single_mode expected_mode); mode = actual_mode }
+                (as_single_mode expected_mode);
+              staticity = proj_staticity (as_single_mode expected_mode);
+              mode = actual_mode }
         | _ ->
             Texp_ident { path; lid; desc; kind;
               unique_use = unique_use ~loc ~env actual_mode
-                (as_single_mode expected_mode); mode = actual_mode }
+                (as_single_mode expected_mode);
+              staticity = proj_staticity (as_single_mode expected_mode);
+              mode = actual_mode }
       in
       let exp = rue {
         exp_desc; exp_loc = loc; exp_extra = [];
@@ -6888,7 +8017,19 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
       in
-      submode ~loc ~env actual_mode expected_mode;
+      Option.iter
+        (fun check ->
+          match defer_primitive_mode with
+          | None -> check ()
+          | Some defer -> defer check)
+        primitive_mode_check;
+      let reason = match get_desc (expand_head env desc.val_type) with
+        | Tarrow ((_, _, ret_mode, _), _, _, _)
+          when Totality.is_total (Alloc.proj_comonadic Totality ret_mode) ->
+            Function_value
+        | _ -> Other
+      in
+      submode ~loc ~env ~reason actual_mode expected_mode;
       if List.is_empty layout_args then exp
       else { exp with exp_desc = Texp_apply_layout (exp, layout_args) }
   | Pexp_constant({pconst_desc = Pconst_string (str, _, _); _} as cst) -> (
@@ -6936,6 +8077,48 @@ and type_expect_
         exp_type = instance Predef.type_unboxed_bool;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
+  | Pexp_constant {pconst_desc = Pconst_integer (text, Some 'Z'); _} ->
+      let len = String.length text in
+      let negative = len > 0 && text.[0] = '-' in
+      let start = if negative || (len > 0 && text.[0] = '+') then 1 else 0 in
+      let digits = Buffer.create len in
+      for i = start to len - 1 do
+        match text.[i] with
+        | '0' .. '9' as c -> Buffer.add_char digits c
+        | '_' -> ()
+        | _ ->
+            Location.raise_errorf ~loc "Bigint literals require decimal digits"
+      done;
+      let digits = Buffer.contents digits in
+      if digits = "" then
+        Location.raise_errorf ~loc "Bigint literals require decimal digits";
+      let values = ref [] in
+      let call name args =
+        let lid = Longident.Ldot
+          (Location.mkloc (Longident.Lident "Bigint") loc,
+           Location.mkloc name loc) in
+        values := (lid, Vox_type.bigint_path name) :: !values;
+        Ast_helper.Exp.apply ~loc
+          (Ast_helper.Exp.ident ~loc (Location.mkloc lid loc))
+          (List.map (fun arg -> Asttypes.Nolabel, arg) args)
+      in
+      let of_int digits =
+        call "of_int" [Ast_helper.Exp.constant ~loc
+          {pconst_desc = Pconst_integer (digits, None); pconst_loc = loc}]
+      in
+      let count = String.length digits in
+      let first = (count - 1) mod 9 + 1 in
+      let result = ref (of_int (String.sub digits 0 first)) in
+      for chunk = 0 to (count - first) / 9 - 1 do
+        let digits = String.sub digits (first + chunk * 9) 9 in
+        result := call "add"
+            [call "mul" [!result; of_int "1000000000"]; of_int digits]
+      done;
+      let result = if negative then call "neg" [!result] else !result in
+      Resolved_predicate.with_values !values (fun () ->
+        type_expect env expected_mode
+          {result with pexp_attributes = sexp.pexp_attributes}
+          ty_expected_explained)
   | Pexp_constant cst ->
       let cst = constant_or_raise env loc cst in
       rue {
@@ -6978,13 +8161,22 @@ and type_expect_
         List.exists (fun pvb -> may_contain_modules pvb.pvb_pat) spat_sexp_list
       in
       let outer_level = get_current_level () in
+      let with_binding_scope f ~before_generalize =
+        let f () = with_refinement_argument_scope (get_current_level ()) f in
+        if may_contain_modules then
+          with_local_level_generalize ~before_generalize f
+        else
+          with_local_level_if (Ctype.may_track_refinement_scopes ()) f
+            ~post:before_generalize
+      in
       let (pat_exp_list, body, _new_env) =
         (* If the patterns contain module unpacks, there is a possibility that
            the types of the let body or bound expressions mention types
            introduced by those unpacks. The below code checks for scope escape
            via both of these pathways (body, bound expressions).
         *)
-        with_local_level_generalize_if may_contain_modules begin fun () ->
+        with_binding_scope begin fun () ->
+          let refinement_level = get_current_level () in
           let allow_modules =
             if may_contain_modules
             then
@@ -6996,6 +8188,10 @@ and type_expect_
             type_let existential_context env mutable_flag rec_flag
               spat_sexp_list allow_modules
           in
+          Ctype.register_refinement_value_scope ~level:refinement_level
+            (List.concat_map
+               (fun binding -> Typedtree.pat_bound_idents binding.vb_pat)
+               pat_exp_list);
           let body =
             type_expect
               new_env expected_mode sbody ty_expected_explained
@@ -7056,6 +8252,40 @@ and type_expect_
   | Pexp_function (params, body_constraint, body) ->
       type_n_ary_function ~loc ~env ~expected_mode ~ty_expected ~explanation
         ~attributes:sexp.pexp_attributes (params, body_constraint, body)
+  | Pexp_apply
+      ({ pexp_desc = Pexp_ident { txt = Longident.Lident "==="; _ } },
+       [Nolabel, left; Nolabel, right])
+    when Language_extension.is_enabled Refinement_types ->
+      if not (Env.in_ghost_context env || Resolved_predicate.active ())
+      then
+        raise
+          (Error_forward
+             (Location.errorf ~loc
+                "%a is available only in refinement predicates or ghost code"
+                Style.inline_code "==="));
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let operand_type =
+        newvar
+          (if Env.in_ghost_context env
+           then Jkind.Builtin.any ~why:Dummy_jkind
+           else Jkind.Builtin.value ~why:(Unknown "logical equality operand"))
+      in
+      let left =
+        type_expect env mode_max left
+          (mk_expected operand_type)
+      in
+      let right =
+        type_expect env mode_max right
+          (mk_expected operand_type)
+      in
+      rue
+        { exp_desc = Texp_logical_equal (left, right);
+          exp_loc = loc;
+          exp_extra = [];
+          exp_type = instance Predef.type_bool;
+          exp_attributes = sexp.pexp_attributes;
+          exp_env = env
+        }
   | Pexp_apply
       ({ pexp_desc = Pexp_extension({ txt }, PStr []) },
        [Nolabel, sbody]) when is_exclave_extension_node txt ->
@@ -7122,6 +8352,9 @@ and type_expect_
       check_dynamic (loc, Expression) (Always_dynamic Application)
         expected_mode;
       let pm = position_and_mode env expected_mode sexp in
+      (* The function position requires a real function: a ghost
+         function has no closure to jump to. (Inside a ghost context
+         [submode] does not check the ghostliness axis.) *)
       let funct_mode =
         match pm.apply_position with
         | Tail ->
@@ -7130,8 +8363,13 @@ and type_expect_
               (of_const ~hint_comonadic:Tailcall_function
                 { Const.max with areality = Regional }))
           in
+          (* Separate and unhinted, so the error reads the same in tail and
+             non-tail positions. *)
+          Value.submode_exn mode value_max_real;
           mode
-        | Nontail | Default -> Value.newvar ()
+        | Nontail | Default ->
+          let mode, _ = Value.newvar_below value_max_real in
+          mode
       in
       let funct_expected_mode = mode_default funct_mode in
       let outer_level = get_current_level () in
@@ -7157,10 +8395,16 @@ and type_expect_
       in
       (* one more level for warning on non-returning functions *)
       with_local_level_generalize ~before_generalize:ignore begin fun () ->
+      (* Comparison totality needs the argument types, but must be resolved
+         before the application can be generalized. *)
+      let primitive_mode_checks = ref [] in
       let type_sfunct sfunct =
         let funct =
           with_local_level_generalize_structure_if_principal
-            (fun () -> type_exp env funct_expected_mode sfunct)
+            (fun () ->
+              type_exp env funct_expected_mode sfunct
+                ~defer_primitive_mode:(fun check ->
+                  primitive_mode_checks := check :: !primitive_mode_checks))
         in
         let ty = instance funct.exp_type in
         let rt = wrap_trace_gadt_instances env (ret_tvar TypeSet.empty) ty in
@@ -7192,9 +8436,10 @@ and type_expect_
         | _ ->
             (rt, funct), sargs
       in
-      let (args, ty_ret, mode_ret, pm) =
+      let (args, ty_ret, mode_ret, pm, ap_yielding) =
         type_application env loc expected_mode pm funct funct_mode sargs rt
       in
+      List.iter (fun check -> check ()) (List.rev !primitive_mode_checks);
       let mode_ret = Alloc.disallow_right mode_ret in
       let ap_mode = Alloc.proj_comonadic Areality mode_ret in
       let mode_ret = cross_left env ty_ret (alloc_as_value mode_ret) in
@@ -7216,7 +8461,7 @@ and type_expect_
       let args = List.map (fun (lbl, arg, _) -> (lbl, arg)) args in
       let exp = rue {
         exp_desc = Texp_apply(funct, args, pm.apply_position, ap_mode,
-                              zero_alloc);
+                              ap_yielding, zero_alloc);
         exp_loc = loc; exp_extra;
         exp_type = ty_ret;
         exp_attributes = sexp.pexp_attributes;
@@ -7260,7 +8505,7 @@ and type_expect_
           in
           env, arg_pat_mode, arg_expected_mode, expected_mode
         | _ :: _ ->
-          effect_handler_modes loc Effect_match env expected_mode
+          effect_handler_modes (loc, Effect_match) env expected_mode
       in
       let arg, sort =
         with_local_level_generalize begin fun () ->
@@ -7277,6 +8522,7 @@ and type_expect_
         type_cases Computation env arg_pat_mode expected_mode arg.exp_type
           sort ty_expected_explained ~check_if_total:true loc val_caselist
       in
+      mark_partial_if_needed ~loc ~env partial;
       let eff_cases =
         match eff_caselist with
         | [] -> []
@@ -7295,6 +8541,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_try(sbody, caselist) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       check_dynamic (loc, Expression) (Always_dynamic Try_with) expected_mode;
       let rec split_cases exnc effc conts = function
         | [] -> List.rev exnc, List.rev effc, List.rev conts
@@ -7314,7 +8561,7 @@ and type_expect_
           expected_mode
         | _ :: _ ->
           let env, arg_mode, _, expected_mode =
-            effect_handler_modes loc Effect_try env expected_mode
+            effect_handler_modes (loc, Effect_try) env expected_mode
           in
           env, arg_mode, expected_mode, expected_mode
       in
@@ -7414,11 +8661,12 @@ and type_expect_
       Language_extension.assert_enabled ~loc Layouts Language_extension.Stable;
       type_expect_record ~overwrite Unboxed_product lid_sexp_list opt_sexp
   | Pexp_field(srecord, lid) ->
-      let record, record_sort, _record_sorts, mode, label, ambiguity,
+      let record, record_sort, mode, label, ambiguity,
           ty_arg, record_repres =
         solve_Pexp_field ~label_usage:Env.Projection loc env sexp srecord Legacy
           lid
       in
+      mark_partial_if_not_total_pattern_type ~loc ~env record.exp_type;
       check_project_mutability ~loc:record.exp_loc ~env
         (Record_field label.lbl_name) label.lbl_mut mode;
       let is_contained_by : Mode.Hint.is_contained_by =
@@ -7429,6 +8677,9 @@ and type_expect_
         apply_left_is_contained_by is_contained_by
           ~modalities:label.lbl_modalities mode
       in
+      let mode =
+        if label.lbl_ghost then ghost_field_read_mode () else mode
+      in
       let boxing : texp_field_boxing =
         let is_float_boxing =
           match record_repres with
@@ -7437,7 +8688,7 @@ and type_expect_
             match mixed.(label.lbl_pos) with
             | Float_boxed -> true
             | Float64 | Float32 | Scannable _ | Bits8 | Bits16 | Bits32 | Bits64
-            | Vec128 | Vec256 | Vec512 | Word | Untagged_immediate | Void
+            | Vec128 | Vec256 | Vec512 | Mask | Word | Untagged_immediate | Void
             | Product _ ->
               false
             end
@@ -7482,11 +8733,12 @@ and type_expect_
         exp_env = env }
   | Pexp_unboxed_field(srecord, lid) ->
       Language_extension.assert_enabled ~loc Layouts Language_extension.Stable;
-      let record, record_sort, record_sorts, mode, label, ambiguity,
+      let record, record_sort, mode, label, ambiguity,
           ty_arg, record_repres =
         solve_Pexp_field ~label_usage:Env.Projection loc env sexp srecord
           Unboxed_product lid
       in
+      mark_partial_if_not_total_pattern_type ~loc ~env record.exp_type;
       if Types.is_mutable label.lbl_mut then
         fatal_error
           "Typecore.type_expect_: unboxed record labels are never mutable";
@@ -7497,6 +8749,9 @@ and type_expect_
       let mode =
         apply_left_is_contained_by is_contained_by
           ~modalities:label.lbl_modalities mode
+      in
+      let mode =
+        if label.lbl_ghost then ghost_field_read_mode () else mode
       in
       let mode = cross_left env ty_arg mode in
       submode ~loc ~env mode expected_mode;
@@ -7509,13 +8764,14 @@ and type_expect_
       rue {
         exp_desc =
           Texp_unboxed_field
-            { record; record_sort; record_sorts; record_repres; lid;
+            { record; record_sort; record_repres; lid;
               label; unique_use = uu };
         exp_loc = loc; exp_extra = [];
         exp_type = ty_arg;
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_setfield(srecord, lid, snewval) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let (record, _, rmode, label, expected_type, ambiguity) =
         type_label_access Legacy env srecord Env.Mutation lid in
       let ty_record =
@@ -7545,7 +8801,7 @@ and type_expect_
             :: record.exp_extra }
       in
       unify_exp ~sexp env record ty_record;
-      let record_sorts, record_repres =
+      let record_repres =
         update_labels env Legacy ~representative_label:label ~loc
           ~why:Field_assignment
           ~containing_type:ty_record
@@ -7554,7 +8810,6 @@ and type_expect_
         exp_desc = Texp_setfield {
           record;
           record_repres;
-          record_sorts;
           modality =
             Locality.disallow_right
               (Alloc.proj_comonadic Areality
@@ -7611,6 +8866,11 @@ and type_expect_
         }
         | Immutable -> Immutable
       in
+      (match mutability with
+       | Mutable _ ->
+         Env.walk_locks_for_partial_construct ~env
+           (loc, Mode.Hint.Expression)
+       | Immutable -> ());
       let alloc_mode, array_mode = register_allocation ~loc expected_mode in
       let modalities = Typemode.mutable_modalities mutability in
       let is_contained_by : Mode.Hint.is_contained_by =
@@ -7668,15 +8928,16 @@ and type_expect_
     let mut =
       match ba with
       | Baccess_field (_, { lbl_mut = Immutable; _ }, _)
-      | Baccess_block (Immutable, _) ->
-        false
+      | Baccess_block (Immutable_access, _) ->
+        Immutable
       | Baccess_field
           (_, { lbl_mut = Mutable { mode = _; atomic = Nonatomic }; _ }, _)
-      | Baccess_block (Mutable, _) ->
-        true
+      | Baccess_block (Mutable_access, _) ->
+        Mutable { mode = Mode.Value.Comonadic.legacy; atomic = Nonatomic }
       | Baccess_field
-          (_, { lbl_mut = Mutable { mode = _; atomic = Atomic }; _ }, _) ->
-        raise (Error(loc, env, Block_index_atomic_unsupported))
+          (_, { lbl_mut = Mutable { mode = _; atomic = Atomic }; _ }, _)
+      | Baccess_block (Atomic_access, _) ->
+        Mutable { mode = Mode.Value.Comonadic.legacy; atomic = Atomic }
     in
     let (el_ty, modality), uas =
       List.fold_left_map
@@ -7695,18 +8956,26 @@ and type_expect_
         (el_ty, modality)
         uas
     in
-    let expected_modality = Typemode.idx_expected_modalities ~mut in
+    let is_mutable = Types.is_mutable mut in
+    if is_mutable then check_index_not_to_poly_field ~env ba uas;
+    let expected_modality =
+      Typemode.idx_expected_modalities ~mut:is_mutable
+    in
     begin
       match Modality.Const.equate modality expected_modality with
       | Ok () -> ()
       | Error err ->
-        raise (Error(loc, env, Block_index_modality_mismatch { mut; err }))
+        raise (Error(
+          loc, env,
+          Block_index_modality_mismatch { mut = is_mutable; err }
+        ))
     end;
-    let ty =
-      if mut then
+    let ty = match mut with
+      | Immutable -> Predef.type_idx_imm base_ty el_ty
+      | Mutable { atomic = Nonatomic; mode = _ } ->
         Predef.type_idx_mut base_ty el_ty
-      else
-        Predef.type_idx_imm base_ty el_ty
+      | Mutable { atomic = Atomic; mode = _ } ->
+        Predef.type_idx_atomic base_ty el_ty
     in
     with_explanation (fun () ->
       unify_exp_types loc env ty (generic_instance ty_expected));
@@ -7761,12 +9030,14 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_while(scond, sbody) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Loop);
       let env =
         Env.add_const_closure_lock ~ghost:true (loc, Loop)
           {Value.Comonadic.Const.max with linearity = Many} env
       in
       let cond_env = Env.add_region_lock env in
-      let mode = mode_region Value.max in
+      (* The condition is read at run time, so it must be real. *)
+      let mode = mode_region value_max_real in
       let wh_cond =
         type_expect cond_env mode scond
           (mk_expected ~explanation:While_loop_conditional Predef.type_bool)
@@ -7790,25 +9061,36 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_for(param, slow, shigh, dir, sbody) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Loop);
       let for_from =
-        type_expect env (mode_region Value.max) slow
+        type_expect env (mode_region value_max_real) slow
           (mk_expected ~explanation:For_loop_start_index Predef.type_int)
       in
       let for_to =
-        type_expect env (mode_region Value.max) shigh
+        type_expect env (mode_region value_max_real) shigh
           (mk_expected ~explanation:For_loop_stop_index Predef.type_int)
       in
       let env =
         Env.add_const_closure_lock ~ghost:true (loc, Loop)
           {Value.Comonadic.Const.max with linearity = Many} env
       in
-      let (for_id, for_uid), new_env =
-        type_for_loop_index ~loc ~env ~param
-      in
-      let new_env = Env.add_region_lock new_env in
-      let position = RTail (Regionality.disallow_left Regionality.local, FNontail) in
-      let for_body, for_body_sort =
-        type_statement ~explanation:For_loop_body ~position new_env sbody
+      let (for_id, for_uid), for_body, for_body_sort =
+        with_local_level_generalize_if (Ctype.may_track_refinement_scopes ())
+          (fun () ->
+             let (for_id, for_uid), new_env =
+               type_for_loop_index ~loc ~env ~param
+             in
+             Ctype.register_refinement_value_scope
+               ~level:(get_current_level ()) [for_id];
+             let new_env = Env.add_region_lock new_env in
+             let position =
+               RTail (Regionality.disallow_left Regionality.local, FNontail)
+             in
+             let for_body, for_body_sort =
+               type_statement ~explanation:For_loop_body ~position new_env sbody
+             in
+             (for_id, for_uid), for_body, for_body_sort)
+          ~before_generalize:ignore
       in
       rue {
         exp_desc = Texp_for {for_id; for_debug_uid = for_uid; for_pat = param;
@@ -7823,7 +9105,10 @@ and type_expect_
       let expected_mode =
         type_expect_mode ~loc ~env ~modes:modes.mode_modes expected_mode
       in
-      let exp = type_expect env expected_mode sarg (mk_expected ty_expected ?explanation) in
+      let exp =
+        type_expect ?defer_primitive_mode env expected_mode sarg
+          (mk_expected ty_expected ?explanation)
+      in
       { exp with exp_loc = loc
       ; exp_extra = (Texp_mode modes, loc, []) :: exp.exp_extra
       }
@@ -7835,8 +9120,8 @@ and type_expect_
       let explanation = Option.map (fun msg -> Error_message_attr msg)
                           error_message_attr_opt in
       let arg =
-        type_argument ~overwrite ?explanation env expected_mode sarg ty
-          (instance ty)
+        type_argument ~overwrite ?explanation ?defer_primitive_mode env
+          expected_mode sarg ty (instance ty)
       in
       rue {
         exp_desc = arg.exp_desc;
@@ -7864,7 +9149,10 @@ and type_expect_
         Builtin_attributes.error_message_attr sexp.pexp_attributes in
       let explanation = Option.map (fun msg -> Error_message_attr msg)
                           error_message_attr_opt in
-      let arg = type_argument ~overwrite ?explanation env expected_mode sarg ty (instance ty) in
+      let arg =
+        type_argument ~overwrite ?explanation ?defer_primitive_mode env
+          expected_mode sarg ty (instance ty)
+      in
       rue {
         exp_desc = arg.exp_desc;
         exp_loc = arg.exp_loc;
@@ -7894,6 +9182,7 @@ and type_expect_
         exp_extra = (exp_extra, loc, sexp.pexp_attributes) :: arg.exp_extra;
       }
   | Pexp_send (e, met) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       submode ~loc ~env Mode.Value.legacy expected_mode;
       let pm = position_and_mode env expected_mode sexp in
       let (obj,meth,typ) =
@@ -7932,6 +9221,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_new cl ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       submode ~loc ~env Value.legacy expected_mode;
       let (cl_path, cl_decl, cl_mode) =
         Env.lookup_class ~loc:cl.loc cl.txt env
@@ -7952,6 +9242,7 @@ and type_expect_
               exp_env = env }
         end
   | Pexp_setvar (lab, snewval) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let desc =
         match Env.lookup_settable_variable ~loc lab.txt env with
         | Instance_variable (path, Mutable, cl_num,ty) ->
@@ -7981,6 +9272,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_override lst ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       submode ~loc ~env Value.legacy expected_mode;
       let _ =
        List.fold_right
@@ -8023,6 +9315,9 @@ and type_expect_
           assert false
       end
   | Pexp_letmodule(name, smodl, sbody) ->
+      if not (module_expression_is_alias smodl) then
+        Env.walk_locks_for_partial_construct ~env
+          (smodl.pmod_loc, Mode.Hint.Expression);
       let lv = get_current_level () in
       let (id, pres, modl, _, body) =
         with_local_level_generalize begin fun () ->
@@ -8080,6 +9375,7 @@ and type_expect_
         exp_attributes = sexp.pexp_attributes;
         exp_env = env }
   | Pexp_letexception(cd, sbody) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let (cd, newenv, _shape) = Typedecl.transl_exception env cd in
       let body =
         type_expect newenv expected_mode sbody ty_expected_explained
@@ -8092,6 +9388,7 @@ and type_expect_
         exp_env = env }
 
   | Pexp_assert (e) ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let cond =
         type_expect env mode_max e
           (mk_expected ~explanation:Assert_condition Predef.type_bool)
@@ -8117,6 +9414,7 @@ and type_expect_
         exp_env = env;
       }
   | Pexp_lazy e ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let expected_mode, closure_mode = mode_lazy expected_mode in
       let ty = newgenvar (Jkind.Builtin.value ~why:Lazy_expression) in
       let to_unify = Predef.type_lazy_t ty in
@@ -8132,6 +9430,7 @@ and type_expect_
         exp_env = env;
       }
   | Pexp_object s ->
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Object);
       Env.check_no_open_quotations loc env Object_qt;
       submode ~loc ~env Value.legacy expected_mode;
       let desc, meths = !type_object env loc s in
@@ -8204,6 +9503,9 @@ and type_expect_
              loc, sexp.pexp_attributes) :: body.exp_extra
           }
   | Pexp_pack (m, optyp) ->
+      if not (module_expression_is_alias m) then
+        Env.walk_locks_for_partial_construct ~env
+          (m.pmod_loc, Mode.Hint.Expression);
       begin match optyp with
       | Some ptyp ->
         let t = Ast_helper.Typ.package ~loc:ptyp.ppt_loc ptyp in
@@ -8242,26 +9544,47 @@ and type_expect_
               raise (Error (loc, env, Not_a_packed_module ty_expected))
           in
           let (modl, pack') = !type_package env m pack in
+          let exp_type = newty (Tpackage pack') in
+          let exp_extra =
+            Texp_inspected_type (Module_pack (Ctype.instance exp_type))
+          in
           let mode = Typedtree.mode_without_locks_exn modl.mod_mode in
           submode ~loc ~env mode expected_mode;
           rue {
             exp_desc = Texp_pack modl;
-            exp_loc = loc; exp_extra = [];
-            exp_type = newty (Tpackage pack');
+            exp_loc = loc;
+            exp_extra = [exp_extra, loc, []];
+            exp_type;
             exp_attributes = sexp.pexp_attributes;
             exp_env = env }
       end
   | Pexp_open (od, e) ->
-      begin match od with
-      | { popen_expr = { pmod_desc = Pmod_ident _ } } -> ()
-      | _ -> Env.check_no_open_quotations loc env Open_qt
+      begin match module_expression_is_alias od.popen_expr with
+      | true -> ()
+      | false ->
+        Env.walk_locks_for_partial_construct ~env
+          (od.popen_expr.pmod_loc, Mode.Hint.Expression);
+        Env.check_no_open_quotations loc env Open_qt
       end;
       let tv = newvar (Jkind.Builtin.any ~why:Dummy_jkind) in
-      let (od, newenv) = !type_open_decl env od in
-      let exp = type_expect newenv expected_mode e ty_expected_explained in
-      (* Force the return type to be well-formed in the original
-         environment. *)
-      unify_var newenv tv exp.exp_type;
+      let od, _newenv, exp =
+        with_local_level_generalize_if (Ctype.may_track_refinement_scopes ())
+          begin fun () ->
+          let level = get_current_level () in
+          let od, newenv = !type_open_decl env od in
+          Ctype.register_refinement_value_scope ~level
+            (List.map Types.signature_item_id od.open_bound_items);
+          let exp =
+            type_expect ?defer_primitive_mode newenv expected_mode e
+              ty_expected_explained
+          in
+          od, newenv, exp
+        end
+        ~before_generalize:(fun (_, newenv, exp) ->
+          (* Force the return type to be well-formed in the original
+             environment. *)
+          unify_var newenv tv exp.exp_type)
+      in
       re {
         exp_desc = Texp_open (od, exp);
         exp_type = exp.exp_type;
@@ -8304,7 +9627,7 @@ and type_expect_
             loop slet.pbop_pat (newvar initial_jkind) initial_sort sands
           in
           let ty_func_result, body_sort = new_rep_var ~why:Function_result () in
-          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy in
+          let arrow_desc = Nolabel, Alloc.legacy, Alloc.legacy, None in
           let ty_func =
             newty (Tarrow(arrow_desc, newmono ty_params, ty_func_result,
                           commu_ok))
@@ -8340,12 +9663,15 @@ and type_expect_
           ty_params param_sort (mk_expected ty_func_result)
           ~check_if_total:true loc [scase]
       in
+      mark_partial_if_needed ~loc ~env partial;
       let body =
         match cases with
         | [case] -> case
         | _ -> assert false
       in
-      let param, param_debug_uid = name_cases "param" cases in
+      let param, param_debug_uid =
+        name_cases ~pattern_kind:Value_pattern_in_argument "param" cases
+      in
       let let_ =
         { bop_op_name = slet.pbop_op;
           bop_op_path = op_path;
@@ -8397,6 +9723,8 @@ and type_expect_
     begin match Builtin_attributes.get_tracing_probe_payload payload with
     | Error () -> raise (Error (loc, env, Probe_format))
     | Ok { name; name_loc; enabled_at_init; arg; } ->
+        Env.walk_locks_for_partial_construct ~env
+          (loc, Mode.Hint.Expression);
         check_probe_name name name_loc env;
         Env.add_probe name;
         let exp = type_expect env mode_legacy arg
@@ -8417,8 +9745,10 @@ and type_expect_
                          (Pexp_constant
                             { pconst_desc = Pconst_string(name,_,None); _});
                        pexp_loc = name_loc;
-                       _ } ,
+                      _ } ,
                       _)}]) ->
+        Env.walk_locks_for_partial_construct ~env
+          (loc, Mode.Hint.Expression);
         check_probe_name name name_loc env;
         add_delayed_check
           (fun () ->
@@ -8443,40 +9773,79 @@ and type_expect_
                     { pexp_desc = Pexp_field (srecord, lid); _ } as sexp, _
                   )
                } ] ->
-          let record, record_sort, _, rmode, label, ambiguity, ty_arg, _ =
+          let record, record_sort, rmode, label, ambiguity, ty_arg,
+              record_repres =
             solve_Pexp_field ~label_usage:Env.Mutation loc env sexp srecord
               Legacy lid
           in
           Env.mark_label_used Env.Projection label.lbl_uid;
-          if (not (Types.is_atomic label.lbl_mut))
-          then raise (Error (loc, env, Label_not_atomic lid.txt));
+          (* A variable representation is not determined until the end of
+             typechecking. *)
+          add_delayed_check (fun () ->
+            let record_repres =
+              Typedecl.finalize_record_representation env loc record_repres
+            in
+            check_atomic_loc_of_finalized_repr ~loc ~env label record_repres
+              lid.txt);
           let alloc_mode, argument_mode =
             register_allocation ~loc expected_mode
           in
-          begin match Mode.Modality.Const.equate label.lbl_modalities
-                        (Typemode.atomic_mutable_modalities)
-          with
-          | Ok () -> ()
-          | Error _ ->
-            raise (Error (loc, env, Modalities_on_atomic_field lid.txt))
-          end;
           submode ~loc ~env rmode argument_mode;
           let record =
             { record with exp_extra =
               (Texp_inspected_type (Label_disambiguation ambiguity), loc, [])
                 :: record.exp_extra }
           in
-          rue {
-            exp_desc =
-              Texp_atomic_loc
-                (record, record_sort, lid, label, alloc_mode);
-            exp_loc = loc; exp_extra = [];
-            exp_type = instance (Predef.type_atomic_loc ty_arg);
-            exp_attributes = sexp.pexp_attributes;
-            exp_env = env }
+          rue
+            {
+              exp_desc =
+                Texp_atomic_loc {
+                  record;
+                  record_sort;
+                  record_repres;
+                  lid;
+                  label;
+                  alloc_mode
+                };
+              exp_loc = loc;
+              exp_extra = [];
+              exp_type = instance (Predef.type_atomic_loc ty_arg);
+              exp_attributes = sexp.pexp_attributes;
+              exp_env = env;
+            }
       | _ ->
           raise (Error (loc, env, Invalid_atomic_loc_payload))
       end
+  | Pexp_extension ({txt = "vox.unreachable"; _}, PStr []) ->
+      Language_extension.assert_enabled ~loc Refinement_types ();
+      let lid name = Location.mkloc (Longident.Lident name) loc in
+      let false_ = Ast_helper.Exp.construct ~loc (lid "false") None in
+      let unit_ = Ast_helper.Exp.construct ~loc (lid "()") None in
+      let false_unit = newty (Trefine {
+        ref_structural_scope = Ident.lowest_scope;
+        ref_binder = Ident.create_scoped ~scope:Ident.lowest_scope "u";
+        ref_payload = Predef.type_unit;
+        ref_pred = {
+          rexp_desc = Rexp_construct (Path.Pident Predef.ident_false, []);
+          rexp_type = Predef.type_bool;
+          rexp_type_constraint = false;
+          rexp_loc = loc } }) in
+      let check = Ast_helper.Exp.mk ~loc (Pexp_ghost unit_) in
+      let check, sort = type_statement env check in
+      let check = introduce_refinement env false_unit loc check in
+      let check = {check with exp_extra =
+        (Texp_refine, loc, []) :: check.exp_extra} in
+      let cond = type_expect env mode_max false_
+          (mk_expected Predef.type_bool) in
+      (* The refinement check proves this trap unreachable, including in
+         total code. Keep the trap as a defensive runtime fallback. *)
+      let trap = re {
+        exp_desc = Texp_assert (cond, loc);
+        exp_loc = loc; exp_extra = [];
+        exp_type = instance ty_expected;
+        exp_attributes = sexp.pexp_attributes;
+        exp_env = env } in
+      re { trap with exp_desc = Texp_sequence (check, sort, trap) }
   | Pexp_extension ext ->
     raise (Error_forward (Builtin_attributes.error_of_extension ext))
 
@@ -8488,8 +9857,11 @@ and type_expect_
            exp_env = env }
   | Pexp_stack e ->
       let exp = type_expect env expected_mode e ty_expected_explained in
-      let unsupported category =
-        raise (Error (exp.exp_loc, env, Unsupported_stack_allocation category))
+      let always_heap category =
+        raise (Error (exp.exp_loc, env, Always_heap_allocation category))
+      in
+      let always_static category =
+        raise (Error (exp.exp_loc, env, Always_static_allocation category))
       in
       begin match exp.exp_desc with
       | Texp_function { alloc_mode; _} | Texp_tuple (_, alloc_mode)
@@ -8509,15 +9881,19 @@ and type_expect_
           in
           Alloc.submode_err (exp.exp_loc, Allocation) local alloc_mode
         end
-      | Texp_list_comprehension _ -> unsupported List_comprehension
-      | Texp_array_comprehension _ -> unsupported Array_comprehension
-      | Texp_new _ -> unsupported Object
-      | Texp_override _ -> unsupported Object
-      | Texp_lazy _ -> unsupported Lazy
-      | Texp_object _ -> unsupported Object
-      | Texp_pack _ -> unsupported Module
+      | Texp_list_comprehension _ -> always_heap List_comprehension
+      | Texp_array_comprehension _ -> always_heap Array_comprehension
+      | Texp_new _ -> always_heap Object
+      | Texp_override _ -> always_heap Object
+      | Texp_lazy _ -> always_heap Lazy
+      | Texp_object _ -> always_heap Object
+      | Texp_pack _ -> always_heap Module
+      | Texp_constant _ -> always_static Constant
+      | Texp_src_pos -> always_static Src_pos
+      | Texp_unboxed_unit -> always_static Unboxed_unit
+      | Texp_unboxed_bool _ -> always_static Unboxed_bool
       | Texp_apply({ exp_desc =
-          Texp_ident { desc = {val_kind = Val_prim _}; _ }}, _, _, _, _)
+          Texp_ident { desc = {val_kind = Val_prim _}; _ }}, _, _, _, _, _)
           (* [stack_ (prim foo)] will be checked by [transl_primitive_application]. *)
           (* CR zqian: Move/Copy [Lambda.primitive_may_allocate] to [typing], then we can
           check primitive allocation here, and also improve the logic in [type_ident]. *)
@@ -8530,8 +9906,28 @@ and type_expect_
       end;
       let exp_extra = (Texp_stack, loc, []) :: exp.exp_extra in
       {exp with exp_extra}
+  | Pexp_ghost e ->
+      (* [ghost_ e] deletes [e] from compilation. The expression itself is
+         ghost, so the context must expect a ghost value: only the ghostliness
+         axis is constrained here. Inside, every value appears real (the
+         ambient rule), implemented by [Env.enter_ghost_context] and the
+         ghostliness carve-out in [submode]. *)
+      submode ~loc ~env
+        (Value.of_const { Value.Const.min with ghostliness = Ghost })
+        expected_mode;
+      let env = enter_total_ghost_context loc env in
+      let mode =
+        Value.meet
+          [as_single_mode expected_mode;
+           Value.of_const
+             {Value.Const.max with totality = Totality.Const.Total}]
+      in
+      let exp = type_expect env (mode_default mode) e ty_expected_explained in
+      let exp_extra = (Texp_ghost, loc, []) :: exp.exp_extra in
+      {exp with exp_extra}
   | Pexp_comprehension comp ->
       Language_extension.assert_enabled ~loc Comprehensions ();
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Loop);
       type_comprehension_expr
         ~loc
         ~env
@@ -8543,12 +9939,15 @@ and type_expect_
         raise (Typetexp.Error (loc, env, Unsupported_extension Overwriting));
       if not (can_be_overwritten exp2.pexp_desc) then
         raise (Error (exp2.pexp_loc, env, Overwrite_of_invalid_term));
+      Env.walk_locks_for_partial_construct ~env (loc, Mode.Hint.Expression);
       let cell_mode, _ =
         (* The overwritten cell has to be unique
-           and should have the areality expected here: *)
+           and should have the areality expected here. It is written through
+           at run time, so it must be real. *)
         Value.newvar_below
           (Value.meet [
-            Value.of_const {Value.Const.max with uniqueness = Unique};
+            Value.of_const
+              {Value.Const.max with uniqueness = Unique; ghostliness = Real};
             Value.max_with_comonadic Areality
               (Value.proj_comonadic Areality expected_mode.mode)])
       in
@@ -8605,11 +10004,11 @@ and type_expect_
       let expected_comonadic_mode = (as_single_mode expected_mode).comonadic in
       let new_env =
         env
-        |> Env.enter_quotation
+        |> Env.enter_quote
         |> Env.add_closure_lock (loc, Quote) expected_comonadic_mode
       in
       let ty = newgenvar (Jkind.Builtin.any ~why:Inside_quote) in
-      let expr_ty = Predef.type_code (newgenty (Tquote ty)) in
+      let expr_ty = Predef.type_expr (newgenty (Tquote ty)) in
       with_explanation (fun () ->
         unify_exp_types loc env expr_ty (generic_instance ty_expected));
       (* If we are checking staged modes in the metaprogram,
@@ -8618,14 +10017,14 @@ and type_expect_
          (with magic_staged_modes), and we do not constrain the mode. *)
       let mode_quoted =
         if Builtin_attributes.has_magic_staged_modes sexp.pexp_attributes
-        then mode_default Value.max
+        then mode_default value_max_real
         else mode_quoted
       in
       let arg = type_expect new_env mode_quoted exp (mk_expected ty) in
       if maybe_computation arg then
         submode ~loc ~env ~reason:Other mode_computation_quoted expected_mode;
       re {
-        exp_desc = Texp_quotation arg;
+        exp_desc = Texp_quote arg;
         exp_loc = loc; exp_extra = [];
         exp_type = instance ty_expected;
         exp_attributes = sexp.pexp_attributes;
@@ -8644,10 +10043,10 @@ and type_expect_
       if not magic_staged_modes then
         submode ~loc ~env ~reason:Other mode_splice expected_mode;
       let new_env = Env.enter_splice ~loc env in
-      let ty = Predef.type_code (newgenty (Tquote ty_expected)) in
+      let ty = Predef.type_expr (newgenty (Tquote ty_expected)) in
       let arg = type_expect new_env mode_spliced exp (mk_expected ty) in
       re {
-        exp_desc = Texp_antiquotation arg;
+        exp_desc = Texp_splice arg;
         exp_loc = loc; exp_extra = [];
         exp_type = instance ty_expected;
         exp_attributes = sexp.pexp_attributes;
@@ -8678,7 +10077,8 @@ and type_block_access env expected_base_ty principal
       | _ -> None
     in
     let labels =
-      Env.lookup_all_labels ~record_form:Legacy ~loc:lid.loc Projection
+      Resolved_predicate.lookup_all_labels ~record_form:Legacy
+        ~loc:lid.loc Projection
         lid.txt env
     in
     let label, _ambiguity =
@@ -8690,7 +10090,7 @@ and type_block_access env expected_base_ty principal
     let mut = is_mutable label.lbl_mut in
     let (_, ty_arg, ty_res) = instance_label ~fixed:false label in
     if mut then Env.mark_label_used Mutation label.lbl_uid;
-    let _sorts, rep =
+    let rep =
       update_labels env Legacy ~representative_label:label ~loc:lid.loc
         ~why:Field_in_indexed_record
         ~containing_type:expected_base_ty
@@ -8699,8 +10099,13 @@ and type_block_access env expected_base_ty principal
     let bad_record_error reason =
       raise (Error (lid.loc, env, Block_access_bad_record reason))
     in
+    (* A ghost field has no slot, so there is no block index for it; and a
+       fabricated index would also bypass [ghost_field_read_mode], handing
+       the field's value to real code. Reject like the other unsupported
+       representations. *)
+    if label.lbl_ghost then bad_record_error "ghost fields in";
     (match label.lbl_repres with
-     | Record_boxed | Record_variable -> ()
+     | Record_boxed | Record_undetermined | Record_variable _ -> ()
      | Record_mixed shape ->
        if Array.exists (function Float_boxed -> true | _ -> false) shape then
          bad_record_error "[@@flatten_floats]"
@@ -8727,13 +10132,18 @@ and type_block_access env expected_base_ty principal
     in
     let idx_type_expected =
       match mut with
-      | Immutable -> Predef.type_idx_imm base_ty el_ty
-      | Mutable -> Predef.type_idx_mut base_ty el_ty
+      | Immutable_access -> Predef.type_idx_imm base_ty el_ty
+      | Mutable_access -> Predef.type_idx_mut base_ty el_ty
+      | Atomic_access -> Predef.type_idx_atomic base_ty el_ty
     in
     let idx =
       type_expect env mode_legacy idx (mk_expected idx_type_expected) in
     let ba = Baccess_block (mut, idx) in
-    let mut = match mut with Immutable -> false | Mutable -> true in
+    let mut =
+      match mut with
+      | Immutable_access -> false
+      | Mutable_access | Atomic_access -> true
+    in
     let modality = Typemode.idx_expected_modalities ~mut in
     { ba; base_ty; el_ty; modality }
 
@@ -8747,7 +10157,8 @@ and type_unboxed_access env loc el_ty ua =
       | _ -> None
     in
     let labels =
-      Env.lookup_all_labels ~record_form:Unboxed_product ~loc:lid.loc
+      Resolved_predicate.lookup_all_labels ~record_form:Unboxed_product
+        ~loc:lid.loc
         Projection lid.txt env
     in
     let label, _ambiguity =
@@ -8757,6 +10168,8 @@ and type_unboxed_access env loc el_ty ua =
             expected_record_type)
         labels
     in
+    if label.lbl_ghost then
+      raise (Error (lid.loc, env, Block_access_bad_record "ghost fields in"));
     let (_, ty_arg, ty_res) = instance_label ~fixed:false label in
     begin
       (* The previous element ty must be the base ty of this component *)
@@ -8765,16 +10178,16 @@ and type_unboxed_access env loc el_ty ua =
         let err = Invalid_unboxed_access { prev_el_type = el_ty; ua } in
         raise (Error (lid.loc, env, err))
     end;
-    let sorts, _rep =
+    let rep =
       update_labels env Unboxed_product ~representative_label:label ~loc:lid.loc
         ~why:Field_in_indexed_record
         ~containing_type:el_ty
     in
-    (ty_arg, label.lbl_modalities), Uaccess_unboxed_field (lid, label, sorts)
+    (ty_arg, label.lbl_modalities), Uaccess_unboxed_field (lid, label, rep)
 
 and expression_constraint pexp =
   { type_without_constraint = (fun env expected_mode ->
-        let expr = type_exp env expected_mode pexp in
+        let expr = restore_refinement (type_exp env expected_mode pexp) in
         expr, expr.exp_type);
     type_with_constraint =
       (fun env expected_mode ty ->
@@ -8791,9 +10204,11 @@ and expression_constraint pexp =
     an explanation of how this typechecking is polymorphic in the body.
 *)
 and type_coerce
-  : type a. a constraint_arg -> _ -> _ -> _ -> _ -> _ -> _ -> loc_arg:_
+  : type a. ?dependent_openings:dependent_opening list ->
+         a constraint_arg -> _ -> _ -> _ -> _ -> _ -> _ -> loc_arg:_
          -> a * type_expr * exp_extra =
-  fun constraint_arg env expected_mode loc sty sty' type_mode ~loc_arg ->
+  fun ?(dependent_openings = []) constraint_arg env expected_mode loc sty sty'
+      type_mode ~loc_arg ->
   (* Pretend separate = true, 1% slowdown for lablgtk *)
   (* Also see PR#7199 for a problem with the following:
       let separate = !Clflags.principal || Env.has_local_constraints env in*)
@@ -8803,10 +10218,12 @@ and type_coerce
   match sty with
   | None ->
     let (cty', ty', force) =
-      with_local_level_generalize_structure begin fun () ->
-        Typetexp.transl_simple_type_delayed env type_mode sty'
-      end
+      with_refinement_type_closing dependent_openings (fun () ->
+        with_local_level_generalize_structure begin fun () ->
+          Typetexp.transl_simple_type_delayed env type_mode sty'
+        end)
     in
+    let opened_ty' = open_dependent_type dependent_openings ty' in
     let arg, arg_type, gen =
       let lv = get_current_level () in
       with_local_level_generalize begin fun () ->
@@ -8816,24 +10233,24 @@ and type_coerce
         ~before_generalize:
          (fun (_, arg_type, _) -> enforce_current_level env arg_type)
     in
-    begin match !self_coercion, get_desc ty' with
+    begin match !self_coercion, get_desc opened_ty' with
       | ((path, r) :: _, Tconstr (path', _, _))
         when is_self arg && Path.same path path' ->
           (* prerr_endline "self coercion"; *)
           r := loc :: !r;
           force ()
       | _ when closed_type_expr ~env arg_type
-            && closed_type_expr ~env ty' ->
+            && closed_type_expr ~env opened_ty' ->
           if not gen && (* first try a single coercion *)
             let snap = snapshot () in
-            let ty, _b = enlarge_type env (generic_instance ty') in
+            let ty, _b = enlarge_type env (generic_instance opened_ty') in
             try
               force (); Ctype.unify env arg_type ty; true
             with Unify _ ->
               backtrack snap; false
           then ()
           else begin try
-            let force' = subtype env arg_type (generic_instance ty') in
+            let force' = subtype env arg_type (generic_instance opened_ty') in
             force (); force' ();
             if not gen && !Clflags.principal then
               Location.prerr_warning loc
@@ -8843,35 +10260,40 @@ and type_coerce
             raise (Error (loc, env, Not_subtype err))
           end;
       | _ ->
-          let ty, b = enlarge_type env (generic_instance ty') in
+          let ty, b = enlarge_type env (generic_instance opened_ty') in
           force ();
           begin try Ctype.unify env arg_type ty with Unify err ->
-            let expanded = full_expand ~may_forget_scope:true env ty' in
+            let expanded = full_expand ~may_forget_scope:true env opened_ty' in
             raise(Error(loc_arg, env,
-                        Coercion_failure ({ ty = ty'; expanded }, err, b)))
+                        Coercion_failure
+                          ({ ty = opened_ty'; expanded }, err, b)))
           end
       end;
       (arg, ty', Texp_coerce (None, cty'))
   | Some sty ->
       let cty, ty, force, cty', ty', force' =
-        with_local_level_generalize_structure begin fun () ->
-          let (cty, ty, force) =
-            Typetexp.transl_simple_type_delayed env type_mode sty
-          and (cty', ty', force') =
-            Typetexp.transl_simple_type_delayed env type_mode sty'
-          in
-          (cty, ty, force, cty', ty', force')
-        end
+        with_refinement_type_closing dependent_openings (fun () ->
+          with_local_level_generalize_structure begin fun () ->
+            let (cty, ty, force) =
+              Typetexp.transl_simple_type_delayed env type_mode sty
+            and (cty', ty', force') =
+              Typetexp.transl_simple_type_delayed env type_mode sty'
+            in
+            (cty, ty, force, cty', ty', force')
+          end)
       in
+      let opened_ty = open_dependent_type dependent_openings ty in
+      let opened_ty' = open_dependent_type dependent_openings ty' in
       begin try
         let force'' =
-          subtype env (generic_instance ty) (generic_instance ty')
+          subtype env (generic_instance opened_ty)
+            (generic_instance opened_ty')
         in
         force (); force' (); force'' ()
       with Subtype err ->
         raise (Error (loc, env, Not_subtype err))
       end;
-      (type_with_constraint env expected_mode ty,
+      (type_with_constraint env expected_mode opened_ty,
        instance ty', Texp_coerce (Some cty, cty'))
 
 and type_constraint env sty type_mode =
@@ -8890,22 +10312,33 @@ and type_constraint env sty type_mode =
     @param loc_arg the location of the thing being constrained
 *)
 and type_constraint_expect
-  : type a. a constraint_arg -> _ -> _ -> _ -> loc_arg:_ -> _ -> _ -> _ -> a * _ * _
+  : type a. ?dependent_openings:dependent_opening list ->
+         a constraint_arg -> _ -> _ -> _ -> loc_arg:_ -> _ -> _ -> _ ->
+         a * _ * _
   =
-  fun constraint_arg env expected_mode loc ~loc_arg type_mode constraint_ ty_expected ->
-  let ret, ty, exp_extra =
+  fun ?(dependent_openings = []) constraint_arg env expected_mode loc ~loc_arg
+      type_mode constraint_ ty_expected ->
+  let ret, ty, opened_ty, exp_extra =
     let type_mode = Alloc.Const.Option.value ~default:Alloc.Const.legacy type_mode in
     match constraint_ with
     | Pcoerce (ty_constrain, ty_coerce) ->
-        type_coerce constraint_arg env expected_mode loc ty_constrain ty_coerce
-          type_mode ~loc_arg
+        let ret, ty, exp_extra =
+          type_coerce ~dependent_openings constraint_arg env expected_mode loc
+            ty_constrain ty_coerce type_mode ~loc_arg
+        in
+        ret, ty, open_dependent_type dependent_openings ty, exp_extra
     | Pconstraint ty_constrain ->
-        let ty, exp_extra = type_constraint env ty_constrain type_mode in
-        constraint_arg.type_with_constraint env expected_mode ty,
-        ty,
-        exp_extra
+        let ty, exp_extra =
+          with_refinement_type_closing dependent_openings (fun () ->
+            type_constraint env ty_constrain type_mode)
+        in
+        let opened_ty = open_dependent_type dependent_openings ty in
+        ( constraint_arg.type_with_constraint env expected_mode opened_ty,
+          ty,
+          opened_ty,
+          exp_extra )
   in
-  unify_exp_types loc env ty (instance ty_expected);
+  unify_exp_types loc env opened_ty (instance ty_expected);
   ret, ty, exp_extra
 
 (** Typecheck the body of a newtype. The "body" of a newtype may be:
@@ -8920,9 +10353,11 @@ and type_constraint_expect
       by the user.
 *)
 and type_newtype
-  : type a. _ -> _ -> _ -> (Env.t -> a * type_expr)
+  : type a. ?dependent_openings:dependent_opening list -> _ -> _ -> _
+    -> (Env.t -> a * type_expr)
     -> a * type_expr * Ident.t * Uid.t =
-  fun env { txt = name; loc = name_loc } jkind_annot_opt type_body  ->
+  fun ?(dependent_openings = []) env
+      { txt = name; loc = name_loc } jkind_annot_opt type_body ->
   let jkind =
     Jkind.of_annotation_option_default env ~context:(Newtype_declaration name)
       ~default:(Jkind.Builtin.value ~why:Univar) jkind_annot_opt
@@ -8953,17 +10388,59 @@ and type_newtype
         | _ -> Btype.iter_type_expr replace t
       end
     in
-    let ety = Subst.type_expr Subst.identity exp_type in
+    let ety =
+      close_dependent_type dependent_openings
+        (Subst.type_expr Subst.identity exp_type)
+    in
     replace ety;
     let uid = decl.type_uid in
     (result, ety, id, uid)
   end
-   ~before_generalize:(fun (_,ety,_,_) -> enforce_current_level env ety)
+   ~before_generalize:(fun (_, ety, _, _) -> enforce_current_level env ety)
 
 and type_ident env ?(recarg=Rejected) lid =
   (* CR zqian: [lookup_value] should close over the memaddr of all prefix
   modules.  *)
-  let path, desc, (mode, locks) = Env.lookup_value ~loc:lid.loc lid.txt env in
+  let path, desc, (mode, locks) =
+    Resolved_predicate.lookup_value ~loc:lid.loc lid.txt env
+  in
+  let mode, check_primitive_mode =
+    match desc.val_kind with
+    | Val_prim { prim_name =
+        ("%equal" | "%notequal" | "%lessthan" | "%lessequal"
+        | "%greaterthan" | "%greaterequal" | "%compare"); _ } ->
+        let total_mode =
+          mode
+          |> Value.meet_const_with Totality Totality.Const.Total
+          |> Value.meet_const_with Statefulness Statefulness.Const.Stateless
+          |> Value.meet_const_with Portability Portability.Const.Portable
+        in
+        let specialized_mode, _ = Value.newvar_above total_mode in
+        let check ty =
+          let rec is_scalar ty =
+            match get_desc (expand_head env ty) with
+            | Tpoly (ty, []) -> is_scalar ty
+            | _ -> begin match Vox_type.classify env ty with
+                | Some (Int | Bool | Bigint) -> true
+                | None -> false
+              end
+          in
+          let total =
+            match get_desc (expand_head env ty) with
+            | Tarrow (_, arg, rest, _) -> begin
+                match get_desc (expand_head env rest) with
+                | Tarrow (_, arg', _, _) -> is_scalar arg && is_scalar arg'
+                | _ -> false
+              end
+            | _ -> false
+          in
+          Value.submode_err
+            (lid.loc, Ident { category = Value; lid = lid.txt })
+            (if total then total_mode else mode) specialized_mode
+        in
+        Value.disallow_right specialized_mode, Some check
+    | _ -> mode, None
+  in
   (* We cross modes when typing [Ppat_ident], before adding new variables into
   the environment. Therefore, one might think all values in the environment are
   already mode-crossed. That is not true for several reasons:
@@ -9038,7 +10515,11 @@ and type_ident env ?(recarg=Rejected) lid =
            register_allocation_mode (Alloc.max_with_comonadic Areality mode)
        | _ -> ()
        end;
-       [], ty, Id_prim (Option.map Locality.disallow_right mode, sort)
+       let yielding =
+         prim_params_yielding env ty ~arity:prim.prim_arity
+       in
+       [], ty,
+       Id_prim (Option.map Locality.disallow_right mode, sort, yielding)
     | _ ->
        let lvars = Lpoly.get_exn desc.val_lpoly in
        begin match lvars with
@@ -9058,13 +10539,19 @@ and type_ident env ?(recarg=Rejected) lid =
   in
   (* after layout instantiation, the value loses layout polymorphism. *)
   let val_lpoly = Lpoly.determined [] in
+  let check_primitive_mode =
+    Option.map (fun check () -> check val_type) check_primitive_mode
+  in
   path, actual_mode, layout_args,
-  { desc with val_type; val_lpoly }, kind
+  { desc with val_type; val_lpoly }, kind, check_primitive_mode
 
 and type_binding_op_ident env s =
   let loc = s.loc in
   let lid = Location.mkloc (Longident.Lident s.txt) loc in
-  let path, actual_mode, layout_args, desc, kind = type_ident env lid in
+  let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
+    type_ident env lid
+  in
+  Option.iter (fun check -> check ()) primitive_mode_check;
   check_layout_args_empty ~loc ~env layout_args Binding_op;
   submode ~env ~loc:lid.loc ~reason:Other actual_mode mode_legacy;
   let path =
@@ -9096,10 +10583,36 @@ and type_binding_op_ident env s =
    See [type_function_result] for the meaning of the returned type.
 *)
 and type_function
-      env (expected_mode : expected_mode) ty_expected
-      params_suffix body_constraint body ~first ~in_function
+      ?(dependent_openings = []) ?return_constraint_has_refinement env
+      (expected_mode : expected_mode) ty_expected params_suffix body_constraint
+      body ~first ~in_function
   : type_function_result
   =
+  let return_constraint_has_refinement =
+    match return_constraint_has_refinement with
+    | Some has_refinement -> has_refinement
+    | None ->
+        let contains_refinement ty =
+          let found = ref false in
+          let iterator = Ast_iterator.default_iterator in
+          let iterator =
+            { iterator with
+              typ =
+                (fun self ty ->
+                   match ty.ptyp_desc with
+                   | Ptyp_refine _ -> found := true
+                   | _ -> iterator.typ self ty) }
+          in
+          iterator.typ iterator ty;
+          !found
+        in
+        match body_constraint.ret_type_constraint with
+        | None -> false
+        | Some (Pconstraint ty) -> contains_refinement ty
+        | Some (Pcoerce (source, target)) ->
+            Option.fold ~none:false ~some:contains_refinement source
+            || contains_refinement target
+  in
   let ty_fun, (loc_fun : Location.t) = in_function in
   let loc =
     loc_rest_of_function ~first ~loc_function:loc_fun params_suffix body
@@ -9107,22 +10620,25 @@ and type_function
   match params_suffix with
   | { pparam_desc = Pparam_newtype (newtype_var, jkind_annot) } :: rest ->
       (* Check everything else in the scope of (type a). *)
-      let (params, body, newtypes, contains_gadt, fun_alloc_mode, ret_info),
+      let (params, body, newtypes, contains_gadt, fun_alloc_mode, ret_info,
+           calling_convention_sorts),
           exp_type, id, uid =
-        type_newtype env newtype_var jkind_annot (fun env ->
+        type_newtype ~dependent_openings env newtype_var jkind_annot (fun env ->
           let { function_ = exp_type, params, body;
                 newtypes; params_contain_gadt = contains_gadt;
-                fun_alloc_mode; ret_info;
+                fun_alloc_mode; ret_info; calling_convention_sorts;
               }
             =
             (* mimic the typing of Pexp_newtype by minting a new type var,
                 like [type_exp].
             *)
-            type_function env expected_mode
+            type_function ~dependent_openings
+              ~return_constraint_has_refinement env expected_mode
               (newvar (Jkind.Builtin.any ~why:Dummy_jkind))
               rest body_constraint body ~in_function ~first
           in
-          (params, body, newtypes, contains_gadt, fun_alloc_mode, ret_info),
+          (params, body, newtypes, contains_gadt, fun_alloc_mode, ret_info,
+           calling_convention_sorts),
           exp_type)
       in
       let newtype = id, newtype_var, jkind_annot, uid in
@@ -9130,7 +10646,7 @@ and type_function
           unify_exp_types loc env exp_type (instance ty_expected));
       { function_ = exp_type, params, body;
         params_contain_gadt = contains_gadt; newtypes = newtype :: newtypes;
-        fun_alloc_mode; ret_info;
+        fun_alloc_mode; ret_info; calling_convention_sorts;
       }
   | { pparam_desc = Pparam_val (arg_label, default_arg, pat); pparam_loc }
       :: rest
@@ -9173,7 +10689,7 @@ and type_function
           { mode_modes = Alloc.Const.Option.none; mode_desc = [] }
       in
       let env,
-          { filtered_arrow = { ty_arg; arg_mode; ty_ret; ret_mode };
+          { filtered_arrow = { ty_arg; arg_mode; ty_ret; ret_mode; binder };
             arg_sort; ret_sort;
             ty_arg_mono; expected_pat_mode; expected_inner_mode;
             alloc_mode; really_poly
@@ -9184,6 +10700,7 @@ and type_function
           ~mode_annots:mode_annots.mode_modes
           ~ret_mode_annots:ret_mode_annots.mode_modes
       in
+      let introduced_dependency = ref None in
       (* [ty_arg_internal] is the type of the parameter viewed internally
          to the function. This is different than [ty_arg_mono] exactly for
          optional arguments with defaults, where the external [ty_arg_mono]
@@ -9193,6 +10710,10 @@ and type_function
         match default_arg with
         | None -> ty_arg_mono, None, arg_sort
         | Some default ->
+            (* Default selection inspects the option even for a variable
+               pattern that would otherwise accept a ghost value. *)
+            submode ~loc:pat.ppat_loc ~env
+              (alloc_as_value arg_mode) mode_max;
             let arg_label =
               match arg_label with
               | Optional arg_label -> arg_label
@@ -9226,7 +10747,8 @@ and type_function
             ty_default_arg, Some (default_arg, arg_label, default_arg_sort),
               default_arg_sort
       in
-      let (pat, params, body, ret_info, newtypes, contains_gadt, curry), partial =
+      let (pat, params, body, ret_info, newtypes, contains_gadt, curry,
+           ext_env, inner_calling_convention_sorts), partial =
         (* Check everything else in the scope of the parameter. *)
         map_half_typed_cases Value env expected_pat_mode
           ty_arg_internal sort_arg_internal ty_ret pat.ppat_loc
@@ -9236,15 +10758,60 @@ and type_function
           ~type_body:begin
             fun () pat ~when_env:_ ~ext_env ~cont:_ ~ty_expected ~ty_infer:_
               ~contains_gadt:param_contains_gadt ->
-              let { function_ = _, params_suffix, body;
-                    newtypes; params_contain_gadt = suffix_contains_gadt;
-                    fun_alloc_mode; ret_info;
-                  }
-                =
-                type_function ext_env expected_inner_mode ty_expected
-                  rest body_constraint body
-                  ~in_function ~first:false
+              let opening =
+                match binder, pat.pat_desc with
+                | Some binder, Tpat_var { id = parameter; _ } ->
+                    Some { binder; parameter }
+                | Some _, _ ->
+                    raise
+                      (Error_forward
+                         (Location.errorf ~loc:pat.pat_loc
+                            "A function checked against a dependent arrow \
+                             must have a simple variable parameter"))
+                | None, Tpat_var { id = parameter; _ }
+                  when return_constraint_has_refinement ->
+                    let binder =
+                      Ident.create_scoped ~scope:Ident.lowest_scope
+                        (Ident.name parameter)
+                    in
+                    Some { binder; parameter }
+                | None, _ -> None
               in
+              let body_ty_expected =
+                match opening, binder with
+                | Some opening, Some _ ->
+                    open_dependent_type [opening] ty_expected
+                | Some _, None ->
+                    newvar (Jkind.Builtin.any ~why:Dummy_jkind)
+                | None, _ -> ty_expected
+              in
+              let type_body () =
+                let dependent_openings =
+                  match opening with
+                  | None -> dependent_openings
+                  | Some opening -> opening :: dependent_openings
+                in
+                type_function ~dependent_openings
+                  ~return_constraint_has_refinement ext_env expected_inner_mode
+                  body_ty_expected rest body_constraint body ~in_function
+                  ~first:false
+              in
+              let { function_ = body_type, params_suffix, body;
+                    newtypes; params_contain_gadt = suffix_contains_gadt;
+                    fun_alloc_mode; ret_info; calling_convention_sorts;
+                  } = type_body () in
+              begin match opening, binder,
+                  body_constraint.ret_type_constraint with
+              | Some ({ binder = opened_binder; _ } as opening), None, Some _ ->
+                  if Ctype.refinement_ident_occurs opened_binder body_type then
+                    introduced_dependency :=
+                      Some (opening, close_dependent_type [opening] body_type)
+                  else
+                    unify_exp_types loc ext_env body_type ty_ret
+              | Some _, Some _, Some _ ->
+                  unify_exp_types loc ext_env body_type ty_ret
+              | None, _, _ | Some _, _, None -> ()
+              end;
               let contains_gadt =
                 if param_contains_gadt then
                   Contains_gadt
@@ -9281,7 +10848,8 @@ and type_function
                   end;
                   More_args {partial_mode = Alloc.disallow_right fun_alloc_mode}
               in
-              pat, params_suffix, body, ret_info, newtypes, contains_gadt, curry
+              pat, params_suffix, body, ret_info, newtypes, contains_gadt,
+              curry, ext_env, calling_convention_sorts
           end
         |> function
           (* The result must be a singleton because we passed a singleton
@@ -9289,18 +10857,10 @@ and type_function
         | [ result ], partial -> result, partial
         | ([] | _ :: _ :: _), _ -> assert false
       in
-      let exp_type =
-        instance
-          (newgenty
-             (Tarrow
-                ((typed_arg_label, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
-      in
-      (* This is quadratic, as it operates over the entire tail of the
-         type for each new parameter. Now that functions are n-ary, we
-         could possibly run this once.
-      *)
-      with_explanation ty_fun.explanation (fun () ->
-          unify_exp_types loc env exp_type (instance ty_expected));
+      mark_partial_if_needed ~loc:pat.pat_loc ~env partial;
+      Calling_convention_sort.check_doesn't_rely_on_partial_match ~partial
+        ~has_default:(Option.is_some default_arg) ~match_loc:pat.pat_loc
+        ~outer_env:env ~branch_env:ext_env inner_calling_convention_sorts;
       (* This is quadratic, as it extracts all of the parameters from an arrow
          type for each parameter that's added. Now that functions are n-ary,
          there might be an opportunity to improve this.
@@ -9330,7 +10890,10 @@ and type_function
       let fp_kind, fp_param, fp_param_debug_uid =
         match default_arg with
         | None ->
-            let param, param_uid = name_pattern "param" [ pat ] in
+            let param, param_uid =
+              name_pattern ~pattern_kind:Value_pattern_in_argument "param"
+                [ pat ]
+            in
             Tparam_pat pat, param, param_uid
         | Some (default_arg, arg_label, default_arg_sort) ->
             let param = Ident.create_local ("*opt*" ^ arg_label) in
@@ -9339,6 +10902,64 @@ and type_function
             param,
             param_uid
       in
+      let expected_binder = binder in
+      let binder =
+        match expected_binder, !introduced_dependency with
+        | (Some _ as binder), _ -> binder
+        | None, Some (opening, closed_body_type) ->
+            if typed_arg_label <> Nolabel then
+              raise
+                (Error_forward
+                   (Location.errorf ~loc:pparam_loc
+                       "Dependent binders are supported only on unlabelled \
+                       parameters"));
+            unify_exp_types loc env closed_body_type ty_ret;
+            Some opening.binder
+        | None, None -> None
+      in
+      begin match expected_binder, binder with
+      | None, Some binder ->
+          let expected = expand_head env ty_expected in
+          begin match get_desc expected with
+          | Tarrow ((label, arg_mode, ret_mode, None), arg, _, commu) ->
+              set_type_desc expected
+                (Tarrow
+                   ((label, arg_mode, ret_mode, Some binder),
+                    arg, ty_ret, commu))
+          | Tarrow ((_, _, _, Some _), _, _, _) -> ()
+          | _ -> assert false
+          end
+      | _ -> ()
+      end;
+      let arg_mode =
+        match expected_binder, binder with
+        | None, Some _ ->
+            if Result.is_error
+                 (Totality.equate (Alloc.proj_comonadic Totality arg_mode)
+                    Totality.total)
+               || Result.is_error
+                    (Statefulness.equate
+                       (Alloc.proj_comonadic Statefulness arg_mode)
+                       Statefulness.stateless)
+               || Result.is_error
+                    (Portability.equate
+                       (Alloc.proj_comonadic Portability arg_mode)
+                       (Portability.of_const Portability.Const.Portable))
+            then
+              Location.raise_errorf ~loc:pparam_loc
+                "Dependent arguments must be total, stateless, portable";
+            arg_mode
+        | _ -> arg_mode
+      in
+      let exp_type =
+        instance
+          (newgenty
+             (Tarrow
+                ((typed_arg_label, arg_mode, ret_mode, binder),
+                 ty_arg, ty_ret, commu_ok)))
+      in
+      with_explanation ty_fun.explanation (fun () ->
+          unify_exp_types loc env exp_type (instance ty_expected));
       let param =
         { has_poly;
           param =
@@ -9356,6 +10977,30 @@ and type_function
             };
         }
       in
+      let calling_convention_sorts =
+        (* These sorts are added after the call to
+           [Calling_convention_sort.check_doesn't_rely_on_partial_match]
+           above, so they aren't checked against this parameter's own pattern.
+
+           This is sound as:
+           1. A parameter pattern cannot refine its own sort
+           2. The result type is created outside of the scope of the last
+              parameter's pattern *)
+        let arg_ccs =
+          { Calling_convention_sort.ccs_ty = ty_arg; ccs_sort = arg_sort;
+            ccs_env = env; ccs_loc = pparam_loc; ccs_kind = `Argument }
+        in
+        (* [ret_info] is [None] only in the innermost recursive call to
+           [type_function], when it is initially computed. In the other calls,
+           the result sort is already in [inner_calling_convention_sorts]. *)
+        let ret_ccs =
+          if Option.is_some ret_info then []
+          else
+            [ { Calling_convention_sort.ccs_ty = ty_ret; ccs_sort = ret_sort;
+                ccs_env = env; ccs_loc = loc; ccs_kind = `Result } ]
+        in
+        arg_ccs :: ret_ccs @ inner_calling_convention_sorts
+      in
       let ret_info =
         match ret_info with
         | Some _ as x -> x
@@ -9368,9 +11013,10 @@ and type_function
       { function_ = exp_type, param :: params, body;
         newtypes = []; params_contain_gadt = contains_gadt;
         ret_info; fun_alloc_mode = Some alloc_mode;
+        calling_convention_sorts;
       }
   | [] ->
-    let exp_type, body, fun_alloc_mode, ret_info =
+    let exp_type, body, fun_alloc_mode, ret_info, calling_convention_sorts =
       let { ret_type_constraint; mode_annotations; ret_mode_annotations } =
         body_constraint
       in
@@ -9390,36 +11036,37 @@ and type_function
       in
       match body with
       | Pfunction_body body ->
+          let body_loc = body.pexp_loc in
           let body =
             match ret_type_constraint with
             | None -> type_expect env expected_mode body (mk_expected ty_expected)
             | Some constraint_ ->
-            let body_loc = body.pexp_loc in
-            let body, exp_type, exp_extra =
-              type_constraint_expect (expression_constraint body)
-                env expected_mode body_loc ~loc_arg:body_loc
-                type_mode.mode_modes constraint_ ty_expected
-            in
-            let texp_mode =
-              match type_mode.mode_desc with
-              | [] -> []
-              | _ :: _ ->
-                [ (Texp_mode type_mode, body_loc, []) ]
-            in
-            { body with
-                exp_extra =
-                  texp_mode @ (exp_extra, body_loc, []) :: body.exp_extra;
-                exp_type;
-            }
+              let body, exp_type, exp_extra =
+                type_constraint_expect ~dependent_openings
+                  (expression_constraint body) env expected_mode body_loc
+                  ~loc_arg:body_loc type_mode.mode_modes constraint_ ty_expected
+              in
+              { body with
+                  exp_extra = (exp_extra, body_loc, []) :: body.exp_extra;
+                  exp_type;
+              }
           in
-          body.exp_type, Tfunction_body body, None, None
+          let body =
+            match type_mode.mode_desc with
+            | [] -> body
+            | _ :: _ ->
+              let extra = Texp_mode type_mode, body_loc, [] in
+              { body with exp_extra = extra :: body.exp_extra }
+          in
+          body.exp_type, Tfunction_body body, None, None, []
       | Pfunction_cases (cases, _, attributes) ->
           let type_cases_expect env expected_mode ty_expected =
             type_function_cases_expect
               env expected_mode ty_expected loc cases attributes ~in_function
               ~first
           in
-          let (cases, exp_type, fun_alloc_mode, ret_info), exp_extra =
+          let (cases, exp_type, fun_alloc_mode, ret_info,
+               calling_convention_sorts), exp_extra =
             match ret_type_constraint with
             | None -> type_cases_expect env expected_mode ty_expected, []
             | Some constraint_ ->
@@ -9437,23 +11084,27 @@ and type_function
               let function_cases_constraint_arg =
                 { is_self = (fun _ -> false);
                   type_with_constraint = (fun env expected_mode ty ->
-                    let cases, _, fun_alloc_mode, ret_info =
+                    let cases, _, fun_alloc_mode, ret_info,
+                        calling_convention_sorts =
                       type_cases_expect env expected_mode ty
                     in
-                    cases, fun_alloc_mode, ret_info);
+                    cases, fun_alloc_mode, ret_info, calling_convention_sorts);
                   type_without_constraint = (fun env expected_mode ->
-                    let cases, ty_fun, fun_alloc_mode, ret_info =
+                    let cases, ty_fun, fun_alloc_mode, ret_info,
+                        calling_convention_sorts =
                       (* The analogy to [type_exp] for expressions. *)
                       type_cases_expect env expected_mode
                         (newvar (Jkind.Builtin.any ~why:Dummy_jkind))
                     in
-                    (cases, fun_alloc_mode, ret_info), ty_fun);
+                    (cases, fun_alloc_mode, ret_info, calling_convention_sorts),
+                    ty_fun);
                 }
               in
-              let (body, fun_alloc_mode, ret_info), exp_type, exp_extra =
-                type_constraint_expect function_cases_constraint_arg
-                  env expected_mode loc type_mode.mode_modes constraint_
-                  ty_expected ~loc_arg:loc
+              let (body, fun_alloc_mode, ret_info, calling_convention_sorts),
+                  exp_type, exp_extra =
+                type_constraint_expect ~dependent_openings
+                  function_cases_constraint_arg env expected_mode loc
+                  type_mode.mode_modes constraint_ ty_expected ~loc_arg:loc
               in
               let exp_extra =
                 match type_mode.mode_desc with
@@ -9461,14 +11112,17 @@ and type_function
                 | _ :: _ ->
                   [ Texp_mode type_mode ; exp_extra ]
               in
-              (body, exp_type, fun_alloc_mode, ret_info), exp_extra
+              (body, exp_type, fun_alloc_mode, ret_info,
+               calling_convention_sorts),
+              exp_extra
           in
           let cases =
             match exp_extra with
             | [] -> cases
             | _ :: _ as fc_exp_extra -> { cases with fc_exp_extra }
           in
-          exp_type, Tfunction_cases cases, Some fun_alloc_mode, Some ret_info
+          exp_type, Tfunction_cases cases, Some fun_alloc_mode, Some ret_info,
+          calling_convention_sorts
      in
      { function_ = exp_type, [], body; newtypes = [];
      (* [No_gadt] is fine because this return value is only meant to indicate
@@ -9476,7 +11130,7 @@ and type_function
         the body is a [Tfunction_cases] whose patterns include a GADT.
      *)
        params_contain_gadt = No_gadt;
-       ret_info; fun_alloc_mode;
+       ret_info; fun_alloc_mode; calling_convention_sorts;
      }
 
 and type_label_access
@@ -9484,6 +11138,10 @@ and type_label_access
     _ * _ * _ * 'rep gen_label_description * _ * _
   = fun record_form env srecord usage lid ->
   let mode = Value.newvar () in
+  (* Reading or writing a field is a runtime access of the record, so it
+     must be real. (Inside a ghost context [submode] does not check
+     the ghostliness axis.) *)
+  Value.submode_exn mode value_max_real;
   let record_jkind, record_sort =
     Jkind.of_new_sort_var ~why:Record_projection
       ~level:(Ctype.get_current_level ())
@@ -9508,7 +11166,8 @@ and type_label_access
         raise (Error (record.exp_loc, env, error))
   in
   let labels =
-    Env.lookup_all_labels ~record_form ~loc:lid.loc usage lid.txt env in
+    Resolved_predicate.lookup_all_labels ~record_form ~loc:lid.loc
+      usage lid.txt env in
   let label, ambiguity =
     wrap_disambiguate "This expression has" (mk_expected ty_exp)
       (label_disambiguate record_form usage lid env expected_type) labels in
@@ -9517,12 +11176,12 @@ and type_label_access
 
 and solve_Pexp_field
   : 'rep . label_usage:_ -> _ -> _ -> _ -> _ -> 'rep record_form -> _ ->
-    _ * _ * _ * _ * 'rep gen_label_description * _ * _ * 'rep =
+    _ * _ * _ * 'rep gen_label_description * _ * _ * 'rep =
   fun ~label_usage loc env sexp srecord record_form lid ->
   let (record, record_sort, rmode, label, _expected_type, ambiguity) =
     type_label_access record_form env srecord label_usage lid
   in
-  let ty_arg, record_sorts, record_repres =
+  let ty_arg, record_repres =
     (* XXX Not clear to me why this can't be done in [type_label_access] so that
        the [Texp_setfield] case wouldn't have to have its own call to
        [update_label], but doing it that way causes principality issues.
@@ -9534,7 +11193,7 @@ and solve_Pexp_field
       let (_, ty_arg, ty_res) = instance_label ~fixed:false label in
       (* we now link the two record types *)
       unify_exp ~sexp env record ty_res;
-      let record_sorts, record_repres =
+      let record_repres =
         (* This redundantly calculates the sort again. But calling
            [type_sort] above let us infer that the type is representable,
            and it also gives a nicer error message *)
@@ -9545,11 +11204,10 @@ and solve_Pexp_field
         update_labels env record_form ~representative_label:label ~loc
           ~why:Field_projection ~containing_type:record.exp_type
       in
-      ty_arg, record_sorts, record_repres
+      ty_arg, record_repres
     end
   in
-  (record, record_sort, record_sorts, rmode, label,
-   ambiguity, ty_arg, record_repres)
+  (record, record_sort, rmode, label, ambiguity, ty_arg, record_repres)
 
 (* Typing format strings for printing or reading.
    These formats are used by functions in modules Printf, Format, and Scanf.
@@ -9875,8 +11533,10 @@ and type_label_exp
   if is_poly then check_univars env "field value" arg label.lbl_arg vars;
   (lid, label, {arg with exp_type = instance arg.exp_type})
 
-and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sarg
-      ty_expected' ty_expected =
+and type_argument ?explanation ?recarg ?defer_primitive_mode ~overwrite env
+      (mode : expected_mode) sarg ty_expected' ty_expected =
+  with_primitive_mode_checks ?defer:defer_primitive_mode
+    begin fun defer_primitive_mode ->
   (* ty_expected' may be generic *)
   let no_labels ty =
     let ls, tvar = list_labels env ty in
@@ -9889,19 +11549,29 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     let lv = get_level expty in
     let lv' = get_level expty' in
     match get_desc expty', get_desc expty with
-    | Tarrow((l, marg, mret), ty_arg', ty_res', _),
-      Tarrow(_, ty_arg,  ty_res,  _)
+    | Tarrow((l, marg, mret, binder'), ty_arg', ty_res', _),
+      Tarrow((_, _, _, binder), ty_arg, ty_res, _)
       when lv' = generic_level || not !Clflags.principal ->
+      let binder, ty_res =
+        match binder', binder with
+        | None, None -> None, ty_res
+        | Some binder', Some binder ->
+            ( Some binder',
+              Ctype.substitute_refinement_ident binder binder' ty_res )
+        | None, Some _ | Some _, None -> raise Exit
+      in
       let ty_res', ty_res, changed = loosen_arrow_modes ty_res' ty_res in
       let mret, changed' = Alloc.newvar_below mret in
       let marg, changed'' = Alloc.newvar_above marg in
       if changed || changed' || changed'' then
-        newty2 ~level:lv' (Tarrow((l, marg, mret), ty_arg', ty_res', commu_ok)),
-        newty2 ~level:lv  (Tarrow((l, marg, mret), ty_arg,  ty_res,  commu_ok)),
+        newty2 ~level:lv'
+          (Tarrow((l, marg, mret, binder), ty_arg', ty_res', commu_ok)),
+        newty2 ~level:lv
+          (Tarrow((l, marg, mret, binder), ty_arg, ty_res, commu_ok)),
         true
       else
         ty', ty, false
-    | _ ->
+    | _ | exception Exit ->
       ty', ty, false
   in
   let ty_expected', ty_expected =
@@ -9923,7 +11593,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
     let work () =
       let te = expand_head env ty_expected' in
       match get_desc te with
-        Tarrow((Nolabel,_,_),_,ty_res0,_) ->
+        Tarrow((Nolabel,_,_,_),_,ty_res0,_) ->
           Some (no_labels ty_res0, get_level te)
       | _ -> None
     in
@@ -9947,11 +11617,11 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
               |> expect_mode_cross env ty_expected'
             in
             let expected_mode = {expected_mode with position = RNontail} in
-            type_exp ~overwrite env expected_mode sarg)
+            type_exp ~overwrite ~defer_primitive_mode env expected_mode sarg)
       in
       let rec make_args args ty_fun =
         match get_desc (expand_head env ty_fun) with
-        | Tarrow ((l,_marg,_mret),ty_arg,ty_fun,_) when is_optional l ->
+        | Tarrow ((l,_marg,_mret,_),ty_arg,ty_fun,_) when is_optional l ->
             let ty =
               type_option_none env (instance (tpoly_get_mono ty_arg))
                 sarg.pexp_loc
@@ -9959,10 +11629,10 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
             (* CR layouts v5: change value assumption below when we allow
                non-values in structures. *)
             make_args ((l, Arg (ty, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_marg,_mret),_,ty_fun,_) when is_position l ->
+        | Tarrow ((l,_marg,_mret,_),_,ty_fun,_) when is_position l ->
             let arg = src_pos (Location.ghostify sarg.pexp_loc) [] env in
             make_args ((l, Arg (arg, Jkind.Sort.scannable)) :: args) ty_fun
-        | Tarrow ((l,_,_),_,ty_res',_) when l = Nolabel || !Clflags.classic ->
+        | Tarrow ((l,_,_,_),_,ty_res',_) when l = Nolabel || !Clflags.classic ->
             List.rev args, ty_fun, no_labels ty_res'
         | Tvar _ ->  List.rev args, ty_fun, false
         |  _ -> [], texp.exp_type, false
@@ -9979,7 +11649,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       and ty_fun = instance ty_fun' in
       let marg, ty_arg, mret, ty_res =
         match get_desc (expand_head env ty_expected) with
-          Tarrow((Nolabel,marg,mret),ty_arg,ty_res,_) ->
+          Tarrow((Nolabel,marg,mret,_),ty_arg,ty_res,_) ->
            marg, ty_arg, mret, ty_res
         | _ -> assert false
       in
@@ -10019,6 +11689,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
          Texp_ident { path = Path.Pident id;
                       lid = mknoloc (Longident.Lident name);
                       desc; kind = Id_value; unique_use = uu;
+                      staticity = proj_staticity mode;
                       mode = Value.disallow_right mode }}
       in
       let eta_mode, _ = Value.newvar_below (alloc_as_value marg) in
@@ -10045,12 +11716,15 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
               args @ [Nolabel, Arg (eta_var, arg_sort)],
               Nontail,
               Alloc.proj_comonadic Areality (Alloc.disallow_right mret),
+              Yielding.disallow_right Yielding.yielding,
               None)}
         in
         let e = {texp with exp_type = ty_res; exp_desc = Texp_exclave e} in
         let cases = [ case eta_pat e ] in
         let cases_loc = { texp.exp_loc with loc_ghost = true } in
-        let param, param_uid = name_cases "param" cases in
+        let param, param_uid =
+          name_cases ~pattern_kind:Synthetic_eta_expansion "param" cases
+        in
         { texp with exp_type = ty_fun; exp_desc =
           Texp_function
             { params = [];
@@ -10067,6 +11741,7 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
                 { mode_modes = Alloc.disallow_right mret; mode_desc = [] };
               ret_sort;
               alloc_mode;
+              yielding = Yielding.disallow_right Yielding.yielding;
               zero_alloc = Zero_alloc.default
             }
         }
@@ -10098,16 +11773,19 @@ and type_argument ?explanation ?recarg ~overwrite env (mode : expected_mode) sar
       end
   | None ->
       let mode = expect_mode_cross env ty_expected' mode in
-      let texp = type_expect ?recarg ~overwrite env mode sarg
-        (mk_expected ?explanation ty_expected') in
+      let texp =
+        type_expect ?recarg ~overwrite ~defer_primitive_mode env mode sarg
+          (mk_expected ?explanation ty_expected')
+      in
       unify_exp ~sexp:sarg env texp ty_expected;
       texp
+    end
 
 (* See Note [Type-checking applications] for an overview *)
 and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
       (lbl, arg) =
   match arg with
-  | Arg (Unknown_arg { sarg; ty_arg_mono; mode_arg; sort_arg }) ->
+  | Arg (Unknown_arg { sarg; ty_arg_mono; mode_fun; mode_arg; sort_arg }) ->
       let expected_mode, mode_arg =
         mode_argument ~funct ~index ~position_and_mode ~partial_app mode_arg in
       let arg = type_expect env expected_mode sarg (mk_expected ty_arg_mono) in
@@ -10119,9 +11797,11 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
              (type_option(newvar Predef.option_argument_jkind))
        | Position _ ->
            unify_exp ~sexp:sarg env arg (instance Predef.type_lexing_position));
-      (lbl, Arg (arg, mode_arg, sort_arg), None)
+      (lbl, Arg (arg, mode_arg, sort_arg), None,
+       ~mode_fun:(Mode.alloc_as_value mode_fun))
   | Arg (Known_arg { sarg; ty_arg; ty_arg0;
-                     mode_arg; wrapped_in_some; sort_arg }) ->
+                     mode_fun; mode_arg; wrapped_in_some; sort_arg;
+                     logical_name }) ->
       let expected_mode, mode_arg =
         mode_argument ~funct ~index ~position_and_mode ~partial_app mode_arg in
       let ty_arg', vars = tpoly_get_poly ty_arg in
@@ -10176,17 +11856,29 @@ and type_apply_arg env ~app_loc ~funct ~index ~position_and_mode ~partial_app
           {arg with exp_type = instance arg.exp_type}, sch
         end
       in
-      (lbl, Arg (arg, mode_arg, sort_arg), sch)
-  | Arg (Eliminated_optional_arg { ty_arg; sort_arg; expected_label; _ }) ->
+      let arg = match logical_name with
+        | None -> arg
+        | Some id ->
+            { arg with exp_extra =
+                (Texp_value_name id, arg.exp_loc, []) :: arg.exp_extra }
+      in
+      ( lbl, Arg (arg, mode_arg, sort_arg), sch,
+        ~mode_fun:(Mode.alloc_as_value mode_fun))
+  | Arg (Eliminated_optional_arg { ty_arg; sort_arg; expected_label;
+                                   mode_fun; _ }) ->
       (match expected_label with
       | Optional _ ->
           let arg = type_option_none env (instance ty_arg) Location.none in
-          (lbl, Arg (arg, Mode.Value.legacy, sort_arg), None)
+          (lbl,
+           Arg (arg, Mode.Value.legacy, sort_arg),
+           None, ~mode_fun:(Mode.alloc_as_value mode_fun))
       | Position _ ->
           let arg = src_pos (Location.ghostify funct.exp_loc) [] env in
-          (lbl, Arg (arg, Mode.Value.legacy, sort_arg), None)
+          (lbl, Arg (arg, Mode.Value.legacy, sort_arg), None,
+           ~mode_fun:(Mode.alloc_as_value mode_fun))
       | Labelled _ | Nolabel -> assert false)
-  | Omitted _ as arg -> (lbl, arg, None)
+  | Omitted { mode_fun; _ } as arg ->
+      (lbl, arg, None, ~mode_fun:(Mode.alloc_as_value mode_fun))
 
 and type_application env app_loc expected_mode position_and_mode
       funct funct_mode sargs ret_tvar =
@@ -10216,7 +11908,8 @@ and type_application env app_loc expected_mode position_and_mode
       let exp = type_expect env arg_mode sarg (mk_expected ty_arg) in
       check_partial_application ~statement:false exp;
       ([Nolabel, Arg (exp, arg_sort), None],
-       ty_ret, ret_mode, position_and_mode)
+       ty_ret, ret_mode, position_and_mode,
+       Yielding.disallow_right Yielding.yielding)
   | _ ->
     (* See Note [Type-checking applications] for an overview *)
       let ty = funct.exp_type in
@@ -10237,7 +11930,7 @@ and type_application env app_loc expected_mode position_and_mode
            true)
         end
       in
-      let ty_ret, mode_ret, args, position_and_mode =
+      let ty_ret, mode_ret, args, position_and_mode, ap_yielding =
         with_local_level_generalize_structure_if_principal begin fun () ->
           (* Consider for example the application
                [f n]
@@ -10255,6 +11948,22 @@ and type_application env app_loc expected_mode position_and_mode
              [args = [(Label "a", Omitted bar);
                       (Optional "opt", Arg (Eliminated_optional_arg baz));
                       (Nolabel, Arg (Known_arg n))]] *)
+          let env =
+            List.fold_left (fun env (_, arg) -> match arg with
+              | Arg (Known_arg { logical_name = Some id; ty_arg0;
+                                 sort_arg; mode_arg; sarg; _ }) ->
+                  let desc =
+                    { val_type = ty_arg0; val_kind = Val_reg sort_arg;
+                      val_lpoly = Lpoly.determined [];
+                      val_attributes = [];
+                      val_zero_alloc = Zero_alloc.default;
+                      val_modalities = Modality.undefined;
+                      val_loc = sarg.pexp_loc;
+                      val_uid = Uid.mk ~current_unit:(Env.get_current_unit ()) }
+                  in
+                  Env.add_value ~mode:(alloc_as_value mode_arg) id desc env
+              | _ -> env) env untyped_args
+          in
           let partial_app = is_partial_apply untyped_args in
           let position_and_mode =
             if partial_app then position_and_mode_default else position_and_mode
@@ -10264,6 +11973,25 @@ and type_application env app_loc expected_mode position_and_mode
                 type_apply_arg env ~app_loc ~funct ~index
                   ~position_and_mode ~partial_app arg)
               untyped_args
+          in
+          (* The application can never perform a free effect if the function and
+             all of its arguments are unyielding. *)
+          let ap_yielding =
+            Mode.Value.proj_comonadic Yielding
+              (Mode.Value.join
+                 (funct_mode
+                  :: List.concat_map
+                       (fun (_, arg, _, ~mode_fun) ->
+                          mode_fun ::
+                          (match arg with
+                            | Arg (_, mode_arg, _) -> [mode_arg]
+                            | Omitted _ -> [] ))
+                       args))
+          in
+          let args =
+            List.map (fun (lbl, arg, sch, ~mode_fun:_) ->
+              (lbl, arg, sch))
+              args
           in
           (* example: type-check [n] and generate [None] for [?opt].
              [args] becomes [(Label "a", Omitted bar);
@@ -10279,10 +12007,10 @@ and type_application env app_loc expected_mode position_and_mode
              [args] becomes [(Label "a", Omitted ());
                              (Optional "opt", Arg None);
                              (Nolabel, Arg n)] *)
-          ty_ret, mode_ret, args, position_and_mode
+          ty_ret, mode_ret, args, position_and_mode, ap_yielding
         end
       in
-      args, ty_ret, mode_ret, position_and_mode
+      args, ty_ret, mode_ret, position_and_mode, ap_yielding
 
 and type_tuple ~overwrite ~loc ~env ~(expected_mode : expected_mode) ~ty_expected
     ~explanation ~attributes sexpl =
@@ -10439,7 +12167,8 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
         raise (Error (sexp.pexp_loc, env, error))
   in
   let constrs =
-    Env.lookup_all_constructors ~loc:lid.loc Env.Positive lid.txt env
+    Resolved_predicate.lookup_all_constructors ~loc:lid.loc
+      Env.Positive lid.txt env
   in
   let (constr, locks), ambiguity =
     wrap_disambiguate "This variant expression is expected to have"
@@ -10590,9 +12319,8 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
   let shape, sorts =
     let types = List.map (fun arg -> arg.exp_type, arg.exp_loc) args in
     match
-      representation_for_tuple_constructor env constr ty_args
-        ~loc:sexp.pexp_loc ~types
-        ~containing_type:ty_res ~why:Constructor_arg_assignment
+      instance_constructor_representation env constr
+        ~types ~why:Constructor_arg_assignment
     with
     | Ok (shape, sorts) -> shape, sorts
     | Error (Unrepresentable_arg (loc, ty, err)) ->
@@ -10636,8 +12364,16 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
   in
   (* Raise the current level to detect non-returning functions *)
   with_local_level_generalize
-    (fun () -> type_exp env (mode_max_with_position position) sexp, sort)
+    (fun () -> type_exp env (mode_statement_with_position position) sexp, sort)
   ~before_generalize: begin fun (exp, _sort) ->
+    let rec statement_type ty =
+      let ty = expand_head env ty in
+      match get_desc ty with
+      | Trefine { ref_payload; _ } -> statement_type ref_payload
+      | _ -> ty
+    in
+    (* Only the statement checks discard the refinement wrappers. *)
+    let exp = { exp with exp_type = statement_type exp.exp_type } in
     let subexp = final_subexpression exp in
     let ty = expand_head env exp.exp_type in
     if is_Tvar ty
@@ -10697,7 +12433,10 @@ and map_half_typed_cases
   let erase_either = contains_polyvars && contains_variant_either ty_arg in
   let may_contain_gadts = List.exists may_contain_gadts patterns in
   let may_contain_modules = List.exists may_contain_modules patterns in
-  let create_inner_level = may_contain_gadts || may_contain_modules in
+  let create_inner_level =
+    may_contain_gadts || may_contain_modules
+    || Ctype.may_track_refinement_scopes ()
+  in
   let ty_arg =
     if (may_contain_gadts || erase_either) && not !Clflags.principal
     then duplicate_type ty_arg else ty_arg
@@ -10738,6 +12477,7 @@ and map_half_typed_cases
    (* propagation of the argument *)
     with_local_level_generalize begin fun () ->
       let pattern_force = ref [] in
+      let total_pattern_checks = ref [] in
       (*  Format.printf "@[%i %i@ %a@]@." lev (get_current_level())
           Printtyp.raw_type_expr ty_arg; *)
       let half_typed_cases =
@@ -10750,11 +12490,12 @@ and map_half_typed_cases
                 with_local_level_generalize_structure
                   (fun () -> instance ?partial:take_partial_instance ty_arg)
               in
-              let (pat, ext_env, force, pvs, mvs) =
+              let (pat, ext_env, force, checks, pvs, mvs) =
                 type_pattern ?cont category ~lev ~alloc_mode:pat_mode env
                   pattern ty_arg sort_arg allow_modules
               in
               pattern_force := force @ !pattern_force;
+              total_pattern_checks := checks @ !total_pattern_checks;
               { typed_pat = pat;
                 pat_type_for_unif = ty_arg;
                 untyped_case;
@@ -10799,6 +12540,7 @@ and map_half_typed_cases
       end;
       (* `Contaminating' unifications start here *)
       List.iter (fun f -> f()) !pattern_force;
+      run_total_pattern_checks !total_pattern_checks;
       (* Post-processing and generalization *)
       if take_partial_instance <> None then unify_pats (instance ty_arg);
       List.iter (fun { pat_vars; _ } ->
@@ -10843,14 +12585,17 @@ and map_half_typed_cases
         let when_env = add_pattern_vars ext_env pvs in
         let when_env = add_module_variables when_env mvs in
         let ext_env = add_pattern_vars when_env cont_vars in
+        Ctype.register_refinement_value_scope ~level:lev
+          (List.map (fun pv -> pv.pv_id) (cont_vars @ pvs));
         let ty_expected =
           if contains_gadt && not !Clflags.principal then
             (* Take a generic copy of [ty_res] again to allow propagation of
                 type information from preceding branches *)
             duplicate_type ty_res
           else ty_res in
-        type_body case_data pat ~when_env ~ext_env ~cont ~ty_expected
-          ~ty_infer:ty_res' ~contains_gadt)
+        with_refinement_argument_scope lev (fun () ->
+          type_body case_data pat ~when_env ~ext_env ~cont ~ty_expected
+            ~ty_infer:ty_res' ~contains_gadt))
     conts half_typed_cases
   end in
   let do_init = may_contain_gadts || needs_exhaust_check in
@@ -11007,7 +12752,7 @@ and type_function_cases_expect
     env expected_mode ty_expected loc cases attrs ~first ~in_function =
   Builtin_attributes.warning_scope attrs begin fun () ->
     let env,
-        { filtered_arrow = { ty_arg; ty_ret; arg_mode; ret_mode };
+        { filtered_arrow = { ty_arg; ty_ret; arg_mode; ret_mode; binder };
           arg_sort; ret_sort;
           ty_arg_mono; expected_pat_mode; expected_inner_mode; alloc_mode;
         } =
@@ -11016,18 +12761,30 @@ and type_function_cases_expect
         ~ret_mode_annots:Mode.Alloc.Const.Option.none
         ~is_first_val_param:first ~is_final_val_param:true
     in
+    Option.iter
+      (fun _ ->
+         raise
+           (Error_forward
+              (Location.errorf ~loc
+                 "A function checked against a dependent arrow must have a \
+                  simple variable parameter")))
+      binder;
     let cases, partial =
       type_cases Value env
         expected_pat_mode expected_inner_mode ty_arg_mono arg_sort
         (mk_expected ty_ret) ~check_if_total:true loc cases
     in
+    mark_partial_if_needed ~loc ~env partial;
     let ty_fun =
       instance
         (newgenty
-           (Tarrow ((Nolabel, arg_mode, ret_mode), ty_arg, ty_ret, commu_ok)))
+           (Tarrow ((Nolabel, arg_mode, ret_mode, None),
+             ty_arg, ty_ret, commu_ok)))
     in
     unify_exp_types loc env ty_fun (instance ty_expected);
-    let param , param_uid = name_cases "param" cases in
+    let param , param_uid =
+      name_cases ~pattern_kind:Value_pattern_in_argument "param" cases
+    in
     let cases =
       { fc_cases = cases;
         fc_partial = partial;
@@ -11042,10 +12799,17 @@ and type_function_cases_expect
         fc_arg_sort = arg_sort;
       }
     in
+    let calling_convention_sorts =
+      [ { Calling_convention_sort.ccs_ty = ty_arg; ccs_sort = arg_sort;
+          ccs_env = env; ccs_loc = loc; ccs_kind = `Argument };
+        { Calling_convention_sort.ccs_ty = ty_ret; ccs_sort = ret_sort;
+          ccs_env = env; ccs_loc = loc; ccs_kind = `Result } ]
+    in
     cases, ty_fun, alloc_mode,
       { ret_sort;
         ret_mode =
-          {mode_modes = Alloc.disallow_right ret_mode; mode_desc = []} }
+          {mode_modes = Alloc.disallow_right ret_mode; mode_desc = []} },
+      calling_convention_sorts
   end
 
 and type_effect_cases
@@ -11083,6 +12847,45 @@ and type_effect_cases
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
+  let refinement_binding_level = get_current_level () in
+  let decreases =
+    List.filter_map (fun vb -> decreases_attribute vb.pvb_attributes)
+      spat_sexp_list
+  in
+  let decreases = match decreases, spat_sexp_list, rec_flag, mutable_flag with
+    | [], _, _, _ -> None
+    | [measure], [_], Recursive, Asttypes.Immutable ->
+        Language_extension.assert_enabled ~loc:measure.pexp_loc
+          Refinement_types ();
+        Some measure
+    | measure :: _, _, _, _ -> Location.raise_errorf ~loc:measure.pexp_loc
+        "The decreases attribute requires a single recursive function binding"
+  in
+  let definitions =
+    List.filter_map (fun vb -> definition_attribute vb.pvb_attributes)
+      spat_sexp_list
+  in
+  let spat_sexp_list = match definitions, spat_sexp_list with
+    | [], _ -> spat_sexp_list
+    | [loc], [vb]
+      when mutable_flag = Asttypes.Immutable ->
+        Language_extension.assert_enabled ~loc Refinement_types ();
+        let has_total =
+          List.exists
+            (fun {Location.txt; _} ->
+              match txt with
+              | Parsetree.Mode "total" -> true
+              | _ -> false)
+            vb.pvb_modes
+        in
+        if has_total then [vb]
+        else
+          [{vb with pvb_modes =
+             Location.mkloc (Parsetree.Mode "total") loc :: vb.pvb_modes}]
+    | loc :: _, _ ->
+        Location.raise_errorf ~loc
+          "The def attribute requires a single function binding"
+  in
   (* Check that all bindings are either all poly or all non-poly *)
   let is_lpoly =
     match spat_sexp_list with
@@ -11108,6 +12911,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   in
   let vb_is_fun { pvb_expr = sexp; _ } = sexp_is_fun sexp in
   let entirely_functions = List.for_all vb_is_fun spat_sexp_list in
+  if not entirely_functions then
+    Option.iter (fun measure -> Location.raise_errorf ~loc:measure.pexp_loc
+      "The decreases attribute requires a function binding") decreases;
   let rec_mode_var =
     match rec_flag with
     | Recursive when entirely_functions -> Some (Value.newvar ())
@@ -11124,6 +12930,15 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         Some m
     | Nonrecursive -> None
   in
+  let provisional_recursion =
+    rec_flag = Recursive && entirely_functions
+    && List.length spat_sexp_list = 1
+  in
+  if not provisional_recursion then Option.iter
+    (fun mode ->
+      Totality.submode_exn Totality.partial
+        (Value.proj_comonadic Axis.Totality mode))
+    rec_mode_var;
   let spatl = List.map vb_pat_constraint spat_sexp_list in
   let spatl =
     List.map (pat_modes ~force_toplevel rec_mode_var ~is_lpoly) spatl
@@ -11134,17 +12949,17 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   let (pat_list, exp_list, new_env, mvs, sorts, pvs) =
     with_local_level_generalize begin fun () ->
       if existential_context = At_toplevel then Typetexp.TyVarEnv.reset ();
-      let (pat_list, new_env, force, pvs, mvs), sorts =
+      let (pat_list, new_env, force, total_pattern_checks, pvs, mvs), sorts =
         with_local_level_generalize_structure_if_principal begin fun () ->
           let nvs, sorts =
             List.split (List.map (fun _ -> new_rep_var ~why:Let_binding ())
                           spatl)
           in
-          let (pat_list, _new_env, _force, pvs, _mvs as res) =
+          let (pat_list, _new_env, _force, _checks, pvs, _mvs as res) =
             with_local_level_generalize_if is_recursive (fun () ->
               type_pattern_list Value existential_context env mutable_flag spatl
                 nvs sorts allow_modules
-            ) ~before_generalize:(fun (_, _, _, pvs, _) ->
+            ) ~before_generalize:(fun (_, _, _, _, pvs, _) ->
                                     iter_pattern_variables_type generalize pvs)
           in
           (* If recursive, first unify with an approximation of the
@@ -11211,6 +13026,8 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
          [add_module_variables] here.
       *)
       let new_env = add_pattern_variables new_env pvs in
+      Ctype.register_refinement_value_scope ~level:refinement_binding_level
+        (List.map (fun pv -> pv.pv_id) pvs);
       let mode_pat_typ_list =
         List.map
           (fun (m, pat) ->
@@ -11219,6 +13036,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
       in
       (* Only bind pattern variables after generalizing *)
       List.iter (fun f -> f()) force;
+      run_total_pattern_checks total_pattern_checks;
 
       let exp_list =
         (* See Note [add_module_variables after checking expressions]
@@ -11233,6 +13051,10 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
           ~entirely_functions
           ~exp_env ~new_env ~spat_sexp_list ~attrs_list ~mode_pat_typ_list ~pvs
           (fun exp_env ({pvb_attributes; _} as vb) mode expected_ty ->
+            let mode =
+              if definitions = [] then mode
+              else mode_coerce (refinement_operand_mode ()) mode
+            in
             let sexp = vb_exp_constraint vb in
             match get_desc expected_ty with
             | Tpoly (ty, tl) ->
@@ -11257,8 +13079,10 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
           Builtin_attributes.warning_scope ~ppwarning:false attrs
             (fun () ->
               let case = Parmatch.typed_case (case pat exp) in
-              ignore(check_partial env pat.pat_type pat.pat_loc
-                       [case] : Typedtree.partial)
+              let partial =
+                check_partial env pat.pat_type pat.pat_loc [case]
+              in
+              mark_partial_if_needed ~loc:pat.pat_loc ~env partial
             )
         )
         mode_pat_typ_list
@@ -11271,6 +13095,46 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
        List.map (fun pv -> { pv with pv_type = instance pv.pv_type}) pvs)
     end
     ~before_generalize: begin fun (mode_pat_typ_list, exp_list, _, _, _, pvs) ->
+      if provisional_recursion then
+        Option.iter (fun mode ->
+          let partial loc reason =
+            match Totality.submode Totality.partial
+              (Value.proj_comonadic Axis.Totality mode) with
+            | Ok () -> ()
+            | Error _ ->
+                Location.raise_errorf ~loc
+                  "This recursive function cannot be total: %s." reason
+          in
+          match mode_pat_typ_list, exp_list with
+          | [(_, { pat_desc = Tpat_var { id; _ }; _ }, _)], [(exp, _)] ->
+              begin match decreases with
+              | Some measure ->
+                  begin try
+                    let measure = !type_decreases id exp measure in
+                    Recursive_function.check_uses id exp;
+                    Verification.check_termination ~self:id ~fn:exp ~measure
+                  with
+                  | Recursive_function.Invalid (loc, reason) ->
+                      Location.raise_errorf ~loc "%s" reason
+                  | Location.Error error ->
+                      raise (Location.Error {error with sub = error.sub @
+                        [Location.msg ~loc:measure.pexp_loc
+                           "Required by this decreases attribute"]})
+                  end
+              | None ->
+                  begin match Structural_recursion.check id exp with
+                  | Ok () -> ()
+                  | Error (loc, reason) -> partial loc reason
+                  end
+              end
+          | _ ->
+              Option.iter (fun measure ->
+                Location.raise_errorf ~loc:measure.pexp_loc
+                  "The decreases attribute requires a simple function binding")
+                decreases;
+              partial (List.hd spat_sexp_list).pvb_loc
+                "structural recursion requires a simple function binding")
+          rec_mode_var;
       List.iter2
         (fun (_, pat, _) (exp, _) ->
           if maybe_expansive exp then lower_contravariant env pat.pat_type)
@@ -11284,7 +13148,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
                 Jkind_types.Sort.generalize_with (fun () -> generalize ty)
               in
               if List.is_empty univars then
-                Location.prerr_warning loc Warnings.Useless_lpoly;
+                raise (Error (loc, env, Useless_lpoly));
               univars)
             pv_lpoly)
         ~f_mut:(unify_var env (newvar (Jkind.Builtin.any ~why:Dummy_jkind)))
@@ -11356,7 +13220,12 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ) l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
-  (l, new_env)
+  match definitions, l with
+  | [], _ -> l, new_env
+  | [_], [binding] ->
+      let lemma, new_env = !definition_lemma new_env binding in
+      [binding; lemma], new_env
+  | _ -> assert false
 
 and type_let_def_wrap_warnings
     ?(check = fun name mutated -> Warnings.Unused_var { name; mutated })
@@ -11524,7 +13393,7 @@ and type_andops env sarg sands expected_sort expected_ty =
             let ty_result, op_result_sort =
               new_rep_var ~why:Function_result ()
             in
-            let arrow_desc = (Nolabel, Alloc.legacy, Alloc.legacy) in
+            let arrow_desc = (Nolabel, Alloc.legacy, Alloc.legacy, None) in
             let ty_rest_fun =
               newty (Tarrow(arrow_desc, newmono ty_arg, ty_result, commu_ok)) in
             let ty_op =
@@ -11584,7 +13453,7 @@ and type_n_ary_function
     let in_function = mk_expected (instance ty_expected) ?explanation, loc in
     let { function_ = exp_type, result_params, body;
           newtypes; params_contain_gadt = contains_gadt;
-          ret_info; fun_alloc_mode;
+          ret_info; fun_alloc_mode; calling_convention_sorts = _;
         } =
       type_function env expected_mode ty_expected params constraint_ body
         ~in_function ~first:true
@@ -11631,7 +13500,10 @@ and type_n_ary_function
                       let new_mode_var () = Mode.Alloc.newvar () in
                       (newty
                          (Tarrow
-                            ( (arg_label, new_mode_var (), new_mode_var ())
+                            ( ( arg_label,
+                                new_mode_var (),
+                                new_mode_var (),
+                                None )
                             , new_ty_var Function_argument
                             , new_ty_var Function_result
                             , commu_ok )));
@@ -11687,11 +13559,30 @@ and type_n_ary_function
         Zero_alloc.create_const zero_alloc
     in
     let alloc_mode = Mode.Alloc.disallow_left fun_alloc_mode in
+    (* [yielding] records whether *fully applying* this function can perform a
+       free effect: the closure may yield if it closes over a yielding value
+       (its own mode), or if any argument it is given is yielding (the
+       parameter modes). [Value_rec_compiler]'s eta-expanding wrapper uses
+       this, since the wrapper is exactly a full application. *)
+    let param_alloc_modes =
+      List.map (fun (p : function_param) -> p.fp_mode.mode_modes) params
+    in
+    (* A [function | ...] body takes an extra implicit parameter that is not in
+       [params]; if that argument is yielding then the closure is yielding. *)
+    let param_alloc_modes =
+      match body with
+      | Tfunction_body _ -> param_alloc_modes
+      | Tfunction_cases fc -> fc.fc_arg_mode :: param_alloc_modes
+    in
+    let yielding =
+      Alloc.proj_comonadic Yielding
+        (Alloc.join (Alloc.disallow_right fun_alloc_mode :: param_alloc_modes))
+    in
     re
       { exp_desc =
           Texp_function
             { params; body; ret_sort;
-              alloc_mode; ret_mode;
+              alloc_mode; ret_mode; yielding;
               zero_alloc
             };
         exp_loc = loc;
@@ -11837,16 +13728,23 @@ and type_comprehension_expr ~loc ~env ~ty_expected ~attributes cexpr =
       element_ty
     end
   in
-  let new_env, comp_clauses =
-    (* To understand why we don't provide modes here, see "What modes should
-       comprehensions use?", above *)
-    type_comprehension_clauses
-      ~loc ~env ~comprehension_type ~container_type pcomp_clauses
-  in
-  let comp_body =
-    (* To understand why comprehension bodies are checked at [mode_global], see
-       "What modes should comprehensions use?", above *)
-    type_expect new_env mode_legacy sbody (mk_expected element_ty)
+  let comp_clauses, comp_body =
+    with_local_level_generalize_if (Ctype.may_track_refinement_scopes ())
+      (fun () ->
+         let new_env, comp_clauses =
+           (* To understand why we don't provide modes here, see "What modes
+              should comprehensions use?", above *)
+           type_comprehension_clauses
+             ~loc ~env ~comprehension_type ~container_type pcomp_clauses
+         in
+         let comp_body =
+           (* To understand why comprehension bodies are checked at
+              [mode_global], see "What modes should comprehensions use?",
+              above. *)
+           type_expect new_env mode_legacy sbody (mk_expected element_ty)
+         in
+         comp_clauses, comp_body)
+      ~before_generalize:ignore
   in
   re { exp_desc       = make_texp { comp_body ; comp_clauses }
      ; exp_loc        = loc
@@ -11874,9 +13772,13 @@ and type_comprehension_clause ~loc ~comprehension_type ~container_type env
              ~loc ~comprehension_type ~container_type ~env tps)
           bindings
       in
+      List.iter (fun f -> f()) tps.tps_pattern_force;
+      run_total_pattern_checks tps.tps_total_pattern_checks;
       let env =
         let check s = Warnings.Unused_var { name = s; mutated = false } in
         let pvs = tps.tps_pattern_variables in
+        Ctype.register_refinement_value_scope ~level:(get_current_level ())
+          (List.map (fun pv -> pv.pv_id) pvs);
         add_pattern_variables ~check ~check_as:check env pvs
       in
       env, Texp_comp_for tbindings
@@ -12322,7 +14224,7 @@ let escaping_submode_reason_hint =
     let get_non_local_arity ty =
       let rec loop sureness n ty =
         match get_desc ty with
-        | Tarrow ((_, _, res_mode), _, res_ty, _) ->
+        | Tarrow ((_, _, res_mode, _), _, res_ty, _) ->
           begin match
             Locality.Guts.check_const (Alloc.proj_comonadic Areality res_mode)
           with
@@ -12349,7 +14251,7 @@ let escaping_submode_reason_hint =
           n args qualifier ]
     | None -> []
     end
-  | Constructor _ | Other -> []
+  | Constructor _ | Function_value | Other -> []
 
 let report_type_expected_explanation_opt expl =
   match expl with
@@ -12904,6 +14806,23 @@ let report_error ~loc env =
          will happen during pattern matching:@ the field may be read@ \
          zero, one or several times depending on the patterns around it."
         quoted_longident lid
+  | Atomic_in_functional_update l ->
+      Location.errorf ~loc
+        "Functional updates that implicitly read atomic fields (here %a)@ \
+         are forbidden. @{<hint>Hint@}: if you intend to copy the value@ \
+         of an atomic field, do so explicitly:@ %a"
+        Style.inline_code l
+        Style.inline_code ("{ t with " ^ l ^ " = t." ^ l ^ " }")
+  | Mixed_record_atomic_loc lid ->
+      Location.errorf ~loc
+        "Use of %a with mixed record fields (here %a) is forbidden."
+        Style.inline_code "[%atomic.loc]"
+        quoted_longident lid
+  | Polymorphic_atomic_loc lid ->
+      Location.errorf ~loc
+        "Use of %a with polymorphic record fields@ (here %a) is forbidden."
+        Style.inline_code "[%atomic.loc]"
+        quoted_longident lid
   | Literal_overflow ty ->
       Location.errorf ~loc
         "Integer literal exceeds the range of representable integers of type %a"
@@ -13088,9 +15007,11 @@ let report_error ~loc env =
       (if mut then "mutable" else "immutable")
       what_element_must_do
       (print_modality_doc "not") actual
-  | Block_index_atomic_unsupported ->
-    Location.error ~loc
-      "Block indices do not yet support [@atomic] record fields."
+  | Mutable_block_index_polymorphic_field lid ->
+    Location.errorf ~loc
+      "Mutable block indices to polymorphic record fields@ (here %a) are \
+       forbidden."
+      quoted_longident lid
   | Submode_failed(e, submode_reason) ->
     let Mode.Value.Error (ax, _) = Mode.Value.to_simple_error e in
     (* CR-soon zqian: move the following hints into the new hint system, then
@@ -13099,6 +15020,11 @@ let report_error ~loc env =
     let sub =
       match ax with
       | Comonadic Areality -> escaping_submode_reason_hint submode_reason
+      | Comonadic Totality when submode_reason = Function_value ->
+          [Location.msg "@[Annotate the callback itself with %a.@ A %a \
+             annotation after the arrow constrains the result value.@]"
+             Style.inline_code "(f : (int -> int) @ total)"
+             Style.inline_code "total"]
       | _ -> []
     in
     let sub =
@@ -13108,7 +15034,7 @@ let report_error ~loc env =
         [ Location.msg "@[Hint: All arguments of the constructor %a@\n\
           must cross this axis to use it in this position.@]"
           quoted_longident name ]
-      | Application _ | Other -> sub
+      | Application _ | Function_value | Other -> sub
     in
     Location.error_of_printer ~loc ~sub (fun ppf e ->
       let open Format_doc in
@@ -13213,6 +15139,29 @@ let report_error ~loc env =
         (Jkind.Violation.report_with_offender
            ~offender:(fun ppf -> Printtyp.type_expr ppf ty)
            env) violation
+  | Function_type_escapes_partial_match { ty; match_loc; kind; why } ->
+      let what =
+        match kind with `Argument -> "argument" | `Result -> "result"
+      in
+      let how, requirement =
+        match why with
+        | `Partial_match ->
+            "That match is not exhaustive",
+            "independently of any non-exhaustive match"
+        | `Optional_argument ->
+            "That pattern matches an optional argument that a caller could \
+             omit",
+            "independently of the patterns of optional arguments"
+      in
+      Location.errorf ~loc
+        "@[This function's %s has type %a,@ whose layout is known only from \
+         the GADT pattern match at %a.@ %s, so a caller could reach this %s \
+         at a different layout.@ Function arguments and results must be \
+         representable %s.@]"
+        what
+        Printtyp.type_expr ty
+        (Location.Doc.loc ~capitalize_first:false) match_loc
+        how what requirement
   | Record_projection_not_rep (ty,violation) ->
       Location.errorf ~loc
         "@[Records being projected from must be representable.@]@ %a"
@@ -13249,20 +15198,6 @@ let report_error ~loc env =
         (Jkind.Violation.report_with_offender
            ~offender:(fun ppf -> Printtyp.type_expr ppf ty)
            env) violation
-  | Indeterminate_record_layout (ty,field_name) ->
-      Location.errorf ~loc
-        "@[Cannot access record with unrepresentable field.@]@ \
-         The record has type %a,@ whose field %s is not representable."
-        Printtyp.type_expr ty
-        field_name
-  | Indeterminate_constructor_layout (ty,cstr_name,i) ->
-      Location.errorf ~loc
-        "@[Cannot access variant with unrepresentable argument.@] \
-         The variant has type %a,@ whose constructor %s@ has an \
-         unrepresentable argument at index %d."
-        Printtyp.type_expr ty
-        cstr_name
-        i
   | Invalid_label_for_src_pos arg_label ->
       Location.errorf ~loc
         "A position argument must not be %s."
@@ -13276,9 +15211,16 @@ let report_error ~loc env =
          automatically if omitted. It cannot be passed with '?'.@]"
       Style.inline_code label
       Style.inline_code "[%call_pos]"
-  | Unsupported_stack_allocation category ->
-    Location.errorf ~loc "@[Stack allocating %a is unsupported yet.@]"
-      print_unsupported_stack_allocation category
+  | Always_heap_allocation category ->
+    Location.errorf ~loc
+      "@[Stack allocating %a is not yet supported;@ \
+         they are currently always heap allocated.@]"
+      print_always_heap_allocation category
+  | Always_static_allocation category ->
+    Location.errorf ~loc
+      "@[Stack allocating %a is not supported;@ \
+         they are not allocated at runtime. @]"
+      print_always_static_allocation category
   | Not_allocation ->
       Location.errorf ~loc "This expression is not an allocation site."
   | Impossible_function_jkind { some_args_ok; ty_fun; jkind } ->
@@ -13319,6 +15261,12 @@ let report_error ~loc env =
       Location.errorf ~loc
         "Instantiation of layout-polymorphic values is not yet supported \
          for %s." ctx_str
+  | Useless_lpoly ->
+      Location.errorf ~loc
+        "This binding has no layout variables, so %a has no effect.@ \
+         Consider using a regular %a instead."
+        Style.inline_code "poly_"
+        Style.inline_code "let"
 
 let report_error ~loc env err =
   Printtyp.wrap_printing_env ~error:true env
@@ -13344,6 +15292,10 @@ let () =
 let check_partial ?lev a b c cases =
   check_partial ?lev a b c (List.map Parmatch.typed_case cases)
 
+(* Reconstructed children participate in the enclosing uniqueness pass. *)
+let type_expect_in_expression env ?(mode = mode_legacy) e ty =
+  type_expect env mode e ty
+
 (* drop unnecessary arguments from the external API
    and check for uniqueness *)
 let type_expect env ?mode e ty =
@@ -13363,3 +15315,883 @@ let type_argument env e t1 t2 =
 let type_option_some env e t1 t2 =
   let exp = type_option_some env mode_legacy e t1 t2 in
   maybe_check_uniqueness_exp exp; exp
+
+let refinement_constructor_path (cstr : Data_types.constructor_description) =
+  match cstr.cstr_tag with
+  | Extension path -> path
+  | Ordinary _ | Null -> begin
+      match get_desc cstr.cstr_res with
+      | Tconstr (path, _, _) ->
+          Path.Pextra_ty (path, Pcstr_ty cstr.cstr_name)
+      | _ ->
+          Misc.fatal_error
+            "Typecore.refinement_constructor_path: malformed constructor"
+    end
+
+let unsupported_refinement_syntax loc what =
+  raise
+    (Error_forward
+       (Location.errorf ~loc
+          "%s is not yet supported in a refinement predicate" what))
+
+let check_refinement_pattern_extras pat =
+  List.iter
+    (fun (extra, loc, _) ->
+       match extra with
+       | Tpat_inspected_type _ | Tpat_refinement _ | Tpat_constraint _ -> ()
+       | Tpat_type _ | Tpat_open _ | Tpat_unpack ->
+           unsupported_refinement_syntax loc "This pattern annotation")
+    pat.pat_extra
+
+let refinement_pattern_has_type_constraint pat =
+  List.exists
+    (fun (extra, _, _) ->
+       match extra with
+       | Tpat_constraint (Some _, _) -> true
+       | _ -> false)
+    pat.pat_extra
+
+let rec refinement_pattern_of_typed :
+  type k.
+  Ident.Set.t -> k general_pattern -> Ident.Set.t * refinement_pattern =
+  fun locals pat ->
+    check_refinement_pattern_extras pat;
+    let mk rpat_desc =
+      { rpat_desc;
+        rpat_type = pat.pat_type;
+        rpat_refinements = List.filter_map (function
+          | Tpat_refinement source, _, _ -> Some source
+          | _ -> None) pat.pat_extra;
+        rpat_type_constraint = refinement_pattern_has_type_constraint pat;
+        rpat_loc = pat.pat_loc }
+    in
+    match pat.pat_desc with
+    | Tpat_any -> locals, mk Rpat_any
+    | Tpat_var { id; _ } ->
+        Ident.Set.add id locals, mk (Rpat_var id)
+    | Tpat_constant constant ->
+        locals, mk (Rpat_constant (Untypeast.constant constant))
+    | Tpat_tuple components ->
+        let locals, components =
+          List.fold_left_map
+            (fun locals (label, pat) ->
+               let locals, pat = refinement_pattern_of_typed locals pat in
+               locals, (label, pat))
+            locals components
+        in
+        locals, mk (Rpat_tuple components)
+    | Tpat_construct (_, cstr, _, _, _) when cstr.cstr_generalized ->
+        unsupported_refinement_syntax pat.pat_loc
+          "A GADT constructor pattern"
+    | Tpat_construct (_, cstr, _, args, None) ->
+        let locals, args =
+          List.fold_left_map
+            (fun locals (_, pat) ->
+               refinement_pattern_of_typed locals pat)
+            locals args
+        in
+        locals,
+        mk (Rpat_construct (refinement_constructor_path cstr, args))
+    | Tpat_record (fields, _, closed) ->
+        let locals, fields =
+          List.fold_left_map
+            (fun locals (_, label, pat) ->
+               let locals, pat = refinement_pattern_of_typed locals pat in
+               locals,
+               (Data_types.lbl_res_type_path label, label.lbl_name, pat))
+            locals fields
+        in
+        locals, mk (Rpat_record (closed, fields))
+    | Tpat_alias { pattern; id; _ } ->
+        let locals, pattern = refinement_pattern_of_typed locals pattern in
+        Ident.Set.add id locals, mk (Rpat_alias (pattern, id))
+    | Tpat_or (left, right, None) ->
+        let left_locals, left = refinement_pattern_of_typed locals left in
+        let right_locals, right = refinement_pattern_of_typed locals right in
+        Ident.Set.union left_locals right_locals, mk (Rpat_or (left, right))
+    | Tpat_value pat ->
+        refinement_pattern_of_typed locals (pat :> value general_pattern)
+    | Tpat_unboxed_unit | Tpat_unboxed_bool _ | Tpat_unboxed_tuple _
+    | Tpat_fun_layout _
+    | Tpat_construct (_, _, _, _, Some _)
+    | Tpat_variant _ | Tpat_record_unboxed_product _
+    | Tpat_array _ | Tpat_lazy _ | Tpat_exception _ | Tpat_or (_, _, Some _) ->
+        unsupported_refinement_syntax pat.pat_loc "This pattern"
+
+let refinement_argument_label : Typedtree.arg_label -> Asttypes.arg_label =
+  function
+    | Nolabel -> Nolabel
+    | Labelled label | Position label -> Labelled label
+    | Optional label -> Optional label
+
+let refinement_expression_of_typed ?(definition_body = false) bound_values
+    binder predicate =
+  let wrap_bindings bindings body =
+    List.fold_left (fun body binding ->
+      { body with rexp_desc = Rexp_let (binding, body);
+        rexp_type_constraint = false }) body bindings
+  in
+  let rec scoped locals exp =
+    let bindings, result = expression locals exp in
+    wrap_bindings bindings result
+  and expression locals exp =
+    let bindings = ref [] in
+    let value locals exp =
+      let prefix, result = expression locals exp in
+      bindings := prefix @ !bindings;
+      result
+    in
+    let bind rb_kind id rb_type rb_expr =
+      bindings :=
+        { rb_kind; rb_ident = id; rb_type; rb_type_constraint = false;
+          rb_expr } :: !bindings;
+      { rb_expr with rexp_desc = Rexp_var id; rexp_type = rb_type;
+        rexp_type_constraint = false }
+    in
+    let mk_at rexp_type rexp_desc =
+      { rexp_desc; rexp_type; rexp_type_constraint = false;
+        rexp_loc = exp.exp_loc }
+    in
+    let mk rexp_desc = mk_at exp.exp_type rexp_desc in
+    let result =
+      match exp.exp_desc with
+      | Texp_ident { path = Pident id; _ }
+        when Ident.Set.mem id locals || Ident.Set.mem id bound_values ->
+          mk (Rexp_var id)
+      | Texp_ident { path; _ } -> mk (Rexp_ident path)
+      | Texp_instvar (_, path, _) -> mk (Rexp_ident path)
+      | Texp_constant constant ->
+          mk (Rexp_constant (Untypeast.constant constant))
+      | Texp_apply (fn, args, _, _, _, _) ->
+          let argument = match fn.exp_desc with
+            | Texp_ident { desc = { val_kind = Val_prim
+                { prim_name = ("%sequand" | "%sequor"); _ }; _ }; _ } ->
+                scoped locals
+            | _ -> value locals
+          in
+          let fn = value locals fn in
+          let args =
+            List.filter_map
+              (fun (label, arg) ->
+                 match arg with
+                 | Arg (arg, _) ->
+                     Some
+                       (refinement_argument_label label, argument arg)
+                 | Omitted _ -> None)
+              args
+          in
+          mk (Rexp_apply (fn, args))
+      | Texp_logical_equal (left, right) ->
+          mk
+            (Rexp_logical_equal
+               (value locals left, value locals right))
+      | Texp_tuple (components, _) ->
+          mk
+            (Rexp_tuple
+               (List.map
+                  (fun (label, exp) -> label, value locals exp)
+                  components))
+      | Texp_construct (_, cstr, _, args, _) ->
+          let args = List.map (fun (_, arg) -> value locals arg) args in
+          mk (Rexp_construct (refinement_constructor_path cstr, args))
+      | Texp_record { fields; extended_expression; _ } ->
+          let fields =
+            Array.fold_right
+              (fun (label, _, field) fields ->
+                 match field with
+                 | Kept _ -> fields
+                 | Overridden (lid, exp) ->
+                     ( Data_types.lbl_res_type_path label,
+                       Longident.last lid.txt,
+                       value locals exp )
+                     :: fields)
+              fields []
+          in
+          let extended =
+            Option.map
+              (fun (exp, _, _) -> value locals exp)
+              extended_expression
+          in
+          mk (Rexp_record (fields, extended))
+      | Texp_record_unboxed_product { fields; extended_expression; _ } ->
+          let fields =
+            Array.fold_right
+              (fun (label, _, field) fields ->
+                 match field with
+                 | Kept _ -> fields
+                 | Overridden (lid, exp) ->
+                     ( Data_types.gen_lbl_res_type_path label,
+                       Longident.last lid.txt,
+                       value locals exp )
+                     :: fields)
+              fields []
+          in
+          let extended =
+            Option.map (fun (exp, _) -> value locals exp)
+              extended_expression
+          in
+          mk (Rexp_record_unboxed_product (fields, extended))
+      | Texp_array (mutability, _, elements, _) ->
+          let mutability =
+            match mutability with
+            | Types.Immutable -> Asttypes.Immutable
+            | Types.Mutable _ -> Asttypes.Mutable
+          in
+          mk (Rexp_array (mutability, List.map (value locals) elements))
+      | Texp_field { record; lid; label; _ } ->
+          mk
+            (Rexp_field
+               ( value locals record,
+                 Data_types.lbl_res_type_path label,
+                 Longident.last lid.txt ))
+      | Texp_unboxed_field { record; lid; label; _ } ->
+          mk
+            (Rexp_unboxed_field
+               ( value locals record,
+                 Data_types.gen_lbl_res_type_path label,
+                 Longident.last lid.txt ))
+      | Texp_ifthenelse (condition, ifso, ifnot) ->
+          mk
+            (Rexp_ifthenelse
+               ( value locals condition,
+                 scoped locals ifso,
+                 Option.map (scoped locals) ifnot ))
+      | Texp_sequence (first, _, second) ->
+          mk (Rexp_sequence (value locals first, value locals second))
+      | Texp_let (Nonrecursive, [binding], body) -> begin
+          check_refinement_pattern_extras binding.vb_pat;
+          match binding.vb_pat.pat_desc with
+          | Tpat_var { id; _ } ->
+              let rb_kind =
+                if List.exists
+                    (fun (extra, _, _) ->
+                       match extra with
+                       | Texp_let_refine (refine_id, _) ->
+                           Ident.same id refine_id
+                       | _ -> false)
+                    exp.exp_extra
+                then Rbind_refine
+                else Rbind_value
+              in
+              let rb_expr = value locals binding.vb_expr in
+              let locals = Ident.Set.add id locals in
+              mk
+                (Rexp_let
+                   ( { rb_kind;
+                       rb_ident = id;
+                       rb_type = binding.vb_pat.pat_type;
+                       rb_type_constraint =
+                         refinement_pattern_has_type_constraint binding.vb_pat;
+                       rb_expr },
+                     scoped locals body ))
+          | _ ->
+              let scrutinee = value locals binding.vb_expr in
+              let locals, rc_lhs =
+                refinement_pattern_of_typed locals binding.vb_pat
+              in
+              let rc_rhs = scoped locals body in
+              mk (Rexp_match (scrutinee, [{ rc_lhs; rc_guard = None; rc_rhs }]))
+        end
+      | Texp_function { params; body = Tfunction_body body; _ } ->
+          let locals, params =
+            List.fold_left_map
+              (fun locals param ->
+                 match param.fp_arg_label, param.fp_kind with
+                 | Nolabel, Tparam_pat { pat_desc = Tpat_var { id; _ }; _ } ->
+                     begin match param.fp_kind with
+                     | Tparam_pat pat -> check_refinement_pattern_extras pat
+                     | Tparam_optional_default _ -> assert false
+                     end;
+                     let param_type =
+                       match param.fp_kind with
+                       | Tparam_pat pat -> pat.pat_type
+                       | Tparam_optional_default _ -> assert false
+                     in
+                     let constrained =
+                       match param.fp_kind with
+                       | Tparam_pat pat ->
+                           refinement_pattern_has_type_constraint pat
+                       | Tparam_optional_default _ -> assert false
+                     in
+                     Ident.Set.add id locals, (id, param_type, constrained)
+                 | _ ->
+                     unsupported_refinement_syntax param.fp_loc
+                       "This function parameter")
+              locals params
+          in
+          let body = scoped locals body in
+          let rec functions fn_type params =
+            match params with
+            | [] -> body
+            | (id, param_type, constrained) :: params ->
+                let result_type =
+                  match get_desc (expand_head exp.exp_env fn_type) with
+                  | Tarrow (_, _, result_type, _) -> result_type
+                  | _ -> assert false
+                in
+                mk_at fn_type
+                  (Rexp_fun
+                     (id, param_type, constrained,
+                      functions result_type params))
+          in
+          functions exp.exp_type params
+      | Texp_match (scrutinee, _, cases, [], _) ->
+          mk
+            (Rexp_match
+               (value locals scrutinee,
+                List.map (case locals) cases))
+      | Texp_apply_layout (exp, _) -> value locals exp
+      | Texp_unboxed_unit | Texp_unboxed_bool _ | Texp_let _
+      | Texp_letmutable _ | Texp_function _ | Texp_match _ | Texp_try _
+      | Texp_unboxed_tuple _ | Texp_variant _ | Texp_atomic_loc _
+      | Texp_setfield _ | Texp_idx _
+      | Texp_list_comprehension _ | Texp_array_comprehension _
+      | Texp_while _ | Texp_for _ | Texp_send _ | Texp_new _
+      | Texp_mutvar _ | Texp_setinstvar _
+      | Texp_setmutvar _ | Texp_override _ | Texp_letmodule _
+      | Texp_letexception _ | Texp_assert _ | Texp_assume _
+      | Texp_lazy _ | Texp_object _
+      | Texp_pack _ | Texp_letop _ | Texp_unreachable
+      | Texp_extension_constructor _ | Texp_open _ | Texp_probe _
+      | Texp_probe_is_enabled _ | Texp_exclave _ | Texp_src_pos
+      | Texp_overwrite _ | Texp_hole _ | Texp_quote _ | Texp_splice _ ->
+          unsupported_refinement_syntax exp.exp_loc "This expression form"
+    in
+    let result = List.fold_right
+      (fun (extra, loc, _) result ->
+         match extra with
+         | Texp_inspected_type _ | Texp_mode _ -> result
+         | Texp_value_name id ->
+             bind Rbind_value id result.rexp_type result
+         | Texp_refinement { source; target } ->
+             if definition_body then result else
+             let () = match outer_refinement exp.exp_env target with
+               | None -> ()
+               | Some _ when
+                   (match outer_refinement exp.exp_env source with
+                    | Some { ref_payload; _ } ->
+                        Ctype.is_equal exp.exp_env false [ref_payload] [target]
+                    | None -> false) -> ()
+               | Some _ ->
+                   unsupported_refinement_syntax loc "Refinement introduction"
+             in
+             { result with rexp_desc = Rexp_refinement (source, result);
+               rexp_type = target; rexp_type_constraint = false }
+         | Texp_ghost ->
+             bindings := List.map (fun binding ->
+               { binding with rb_expr =
+                   { binding.rb_expr with rexp_desc =
+                       Rexp_ghost binding.rb_expr } }) !bindings;
+             { result with rexp_desc = Rexp_ghost result }
+         | Texp_constraint _ -> { result with rexp_type_constraint = true }
+         | Texp_refine when definition_body -> result
+         | Texp_refine ->
+             unsupported_refinement_syntax loc "This expression annotation"
+         | Texp_coerce _ | Texp_poly _ | Texp_newtype _
+         | Texp_stack
+         | Texp_borrowed | Texp_ghost_region ->
+             unsupported_refinement_syntax loc "This expression annotation"
+         | Texp_let_refine (id, _) -> begin
+             match result.rexp_desc with
+             | Rexp_let ({ rb_kind = Rbind_refine; rb_ident; _ }, _)
+               when Ident.same id rb_ident -> result
+             | _ -> assert false
+           end)
+      exp.exp_extra result in
+    !bindings, result
+  and case locals case =
+    let locals, rc_lhs = refinement_pattern_of_typed locals case.c_lhs in
+    { rc_lhs;
+      rc_guard = Option.map (scoped locals) case.c_guard;
+      rc_rhs = scoped locals case.c_rhs
+    }
+  in
+  scoped (Ident.Set.singleton binder) predicate
+
+let () = stable_dependent_argument := (fun env syntax expected ->
+  let rec stable_syntax e = match e.pexp_desc with
+    | Pexp_ident lid ->
+        let _, desc, _ = Resolved_predicate.lookup_value ~use:false
+            ~loc:lid.loc lid.txt env in
+        (match desc.val_kind with Val_reg _ -> true | _ -> false)
+    | Pexp_constant _ -> true
+    | Pexp_construct
+        ({txt = Longident.Lident ("true" | "false" | "()"); _}, None) -> true
+    | Pexp_field (base, _) | Pexp_unboxed_field (base, _) -> stable_syntax base
+    | _ -> false in
+  if not (stable_syntax syntax) then None else
+  let typed = type_expect_in_expression env
+      ~mode:(mode_default (Value.newvar ())) syntax
+      (mk_expected (refinement_payload env expected)) in
+  let rec stable_typed e = match e.exp_desc with
+    | Texp_field {record; label; _} ->
+        not (Types.is_mutable label.lbl_mut) && stable_typed record
+    | Texp_unboxed_field {record; _} -> stable_typed record
+    | Texp_ident _ | Texp_constant _ | Texp_construct (_, _, _, [], _) -> true
+    | _ -> false in
+  if not (stable_typed typed) then None else
+  Some (refinement_expression_of_typed Ident.Set.empty
+    (Ident.create_local "*dependent_argument*") typed))
+
+let default_refinement_predicate_types payload predicate =
+  let rec traverse add ty =
+    if not (TypeSet.mem ty !add) then begin
+      add := TypeSet.add ty !add;
+      begin match get_desc ty with
+      | Trefine { ref_pred; _ } ->
+          ignore
+            (Refinement_predicate.fold_types
+               (fun () ty -> traverse add ty) () ref_pred
+             : unit)
+      | _ -> ()
+      end;
+      Btype.iter_type_expr (traverse add) ty
+    end
+  in
+  let payload_types = ref TypeSet.empty in
+  traverse payload_types payload;
+  let visited = ref TypeSet.empty in
+  let rec default ty =
+    if not (TypeSet.mem ty !payload_types || TypeSet.mem ty !visited) then begin
+      visited := TypeSet.add ty !visited;
+      begin match get_desc ty with
+      | Tvar { jkind } | Tunivar { jkind } ->
+          Jkind.default_to_scannable jkind
+      | Tarrow ((_, arg_mode, ret_mode, _), arg, ret, _) ->
+          ignore (Alloc.zap_to_legacy arg_mode : Alloc.Const.t);
+          ignore (Alloc.zap_to_legacy ret_mode : Alloc.Const.t);
+          default arg;
+          default ret
+      | Trefine { ref_pred; _ } ->
+          ignore
+            (Refinement_predicate.fold_types
+               (fun () ty -> default ty) () ref_pred
+             : unit);
+          Btype.iter_type_expr default ty
+      | _ -> Btype.iter_type_expr default ty
+      end
+    end
+  in
+  ignore
+    (Refinement_predicate.fold_types
+       (fun () ty -> default ty) () predicate
+     : unit)
+
+let add_total_immutable_value env binder payload loc =
+  let sort =
+    match
+      Ctype.type_sort ~why:Jkind.History.Let_binding ~fixed:false env payload
+    with
+    | Ok sort -> sort
+    | Error violation ->
+        raise (Error (loc, env, Function_type_not_rep (payload, violation)))
+  in
+  let value_description =
+    { val_type = payload;
+      val_kind = Val_reg sort;
+      val_lpoly = Lpoly.determined [];
+      val_attributes = [];
+      val_zero_alloc = Zero_alloc.default;
+      val_modalities = Modality.undefined;
+      val_loc = loc;
+      val_uid = Uid.mk ~current_unit:(Env.get_current_unit ())
+    }
+  in
+  Env.add_value ~mode:(total_immutable_mode ()) binder value_description env
+
+let () = type_decreases := (fun self fn measure ->
+  let params, body = Recursive_function.parameters fn in
+  let env = Env.add_total_closure_lock
+      (measure.pexp_loc, Mode.Hint.Expression) body.exp_env in
+  let env = List.fold_left (fun env (id, pat) ->
+      add_total_immutable_value env id pat.pat_type pat.pat_loc) env params in
+  let sexp = measure in
+  let measure =
+    Ctype.with_refinement_predicate_scope (fun () ->
+      type_expect env ~mode:(total_immutable_mode ()) measure
+        (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind))))
+  in
+  begin match Vox_type.classify env measure.exp_type with
+  | Some Bigint -> ()
+  | Some (Int | Bool) | None ->
+      unify_exp ~sexp env measure (instance Predef.type_int)
+  end;
+  Recursive_function.check_predicates self measure;
+  let default = Tast_iterator.default_iterator in
+  let it = {default with expr = (fun it exp ->
+    match exp.exp_desc with
+    | Texp_ident {path = Path.Pident id; _} when Ident.same id self ->
+        Location.raise_errorf ~loc:exp.exp_loc
+          "The recursive function occurs in its own measure"
+    | _ -> default.expr it exp)} in
+  it.expr it measure;
+  measure)
+
+let with_resolved_refinement predicate_env loc predicate f =
+  let expressions = ref [] and values = ref [] in
+  let constructors = ref [] and labels = ref [] in
+  let locals = Refinement_predicate.bound_idents predicate in
+  let var_name id =
+    "_assume_" ^ String.map (function '*' -> '_' | c -> c)
+      (Ident.unique_name id)
+  in
+  let resolved entries path name =
+    let lid = Longident.Lident name in
+    entries := (lid, path) :: !entries;
+    Location.mkloc lid loc
+  in
+  let value_ident path = resolved values path (Path.last path) in
+  let syntax = Refinement_predicate.untype predicate
+      ~var_name
+      ~value_ident
+      ~function_label:(fun rexp ->
+        (* [-nolabels] formation can check an unlabelled lambda against
+           a labelled arrow. Recover its label from the retained type. *)
+        let rec label ty =
+          match get_desc (expand_head predicate_env ty) with
+          | Tarrow ((label, _, _, _), _, _, _) ->
+              refinement_argument_label label
+          | Tpoly (body, _) -> label body
+          | _ -> Misc.fatal_error
+              "Typecore.refinement: invalid function evidence"
+        in
+        label rexp.rexp_type)
+      ~constructor_ident:(fun path ->
+        let name = match path with
+          | Pextra_ty (_, Pcstr_ty name) -> name
+          | _ -> Path.last path
+        in
+        resolved constructors path name)
+      ~label_ident:(fun path name -> resolved labels (path, name) name)
+      ~expression:(fun rexp sexp ->
+        let sexp = match rexp.rexp_desc with
+          | Rexp_var id when not (Ident.Set.mem id locals) ->
+              Ast_helper.Exp.ident ~loc:rexp.rexp_loc
+                (value_ident (Path.Pident id))
+          | _ -> sexp
+        in
+        expressions := (sexp, rexp.rexp_type) :: !expressions;
+        sexp)
+  in
+  let input : Resolved_predicate.input =
+    { expressions = !expressions; values = !values;
+      constructors = !constructors; labels = !labels;
+      locals = List.map (fun id -> id, var_name id)
+          (Ident.Set.elements locals) }
+  in
+  Resolved_predicate.with_input input (fun () -> f syntax)
+
+let make_definition_lemma_at_level env binding =
+  let loc = binding.vb_loc in
+  let reject loc =
+    Location.raise_errorf ~loc
+      "Definition lemmas require a function with simple unlabelled parameters"
+  in
+  let id = match binding.vb_pat.pat_desc with
+    | Tpat_var {id; _} -> id
+    | _ -> reject binding.vb_pat.pat_loc
+  in
+  let name = Ident.name id ^ "_def" in
+  if not (Misc.Utf8_lexeme.is_valid_identifier name) then
+    Location.raise_errorf ~loc
+      "Definition lemmas require an identifier function name";
+  begin match Env.find_value_by_name (Longident.Lident name) env with
+  | _ -> Location.raise_errorf ~loc
+      "The generated name %s is already bound" name
+  | exception Not_found -> ()
+  end;
+  let params, body = match binding.vb_expr.exp_desc with
+    | Texp_function {params; body = Tfunction_body body; _} when params <> [] ->
+        let params = List.map (fun param ->
+          match param.fp_arg_label, param.fp_kind, param.fp_newtypes with
+          | Nolabel, Tparam_pat ({pat_desc = Tpat_var {id; _}; _} as pat), [] ->
+              id, pat.pat_type
+          | _ -> reject param.fp_loc) params in
+        params, body
+    | _ -> reject binding.vb_expr.exp_loc
+  in
+  let binder = Ident.create_scoped ~scope:Ident.lowest_scope "u" in
+  let bound = Ident.Set.of_list (List.map fst params) in
+  let body_ir =
+    refinement_expression_of_typed ~definition_body:true bound binder body
+  in
+  begin match Refinement_predicate.find_dependency_path
+      (fun path ->
+         match (Env.find_value path body.exp_env).val_kind with
+         | Val_prim {prim_arity = 0; _} -> Some path
+         | _ -> None
+         | exception Not_found -> None)
+      body_ir
+  with
+  | Some _ ->
+      Location.raise_errorf ~loc:body.exp_loc
+        "Definition lemmas cannot preserve zero-argument primitive values"
+  | None -> ()
+  end;
+  let type_params, rename, subst =
+    List.fold_left
+      (fun (type_params, rename, subst) (id, ty) ->
+         let fresh =
+           Ident.create_scoped ~scope:Ident.lowest_scope (Ident.name id)
+         in
+         ( (fresh, Subst.type_expr subst ty) :: type_params,
+           Ident.Map.add id fresh rename,
+           Subst.add_bound_value id fresh subst ))
+      ([], Ident.Map.empty, Subst.identity) params
+  in
+  let type_params = List.rev type_params in
+  let body_ir =
+    Refinement_predicate.map ~rename
+      ~type_expr:(Subst.type_expr subst) body_ir
+  in
+  let definition_description = Subst.Lazy.force_value_description
+      (Env.find_value (Path.Pident id) env) in
+  Env.mark_value_used definition_description.val_uid;
+  let mk rexp_type rexp_desc =
+    {rexp_type; rexp_desc; rexp_type_constraint = false; rexp_loc = loc}
+  in
+  let call = mk (Subst.type_expr subst body.exp_type) (Rexp_apply
+      (mk (Subst.type_expr subst binding.vb_expr.exp_type)
+         (Rexp_ident (Path.Pident id)),
+       List.map (fun (id, ty) -> Asttypes.Nolabel, mk ty (Rexp_var id))
+         type_params)) in
+  (* The RHS was checked at total, stateless, portable modes. Rechecking its
+     application under the predicate lock would reject access-preserving
+     observers whose runtime arguments require ordinary access. *)
+  let rec argument_modes ty params =
+    match params, get_desc (expand_head env ty) with
+    | [], _ -> []
+    | (id, _) :: params, Tarrow ((_, mode, _, _), _, ret, _) ->
+        let source = Alloc.zap_to_legacy mode in
+        (id, {Typemode.dependent_argument_mode with
+          visibility = source.visibility; contention = source.contention;
+          areality = source.areality})
+        :: argument_modes ret params
+    | _ -> assert false
+  in
+  let argument_modes = argument_modes binding.vb_expr.exp_type type_params in
+  let arrow id arg ret =
+    let binder =
+      if Ctype.refinement_ident_occurs id ret then Some id else None
+    in
+    newty (Tarrow ((Nolabel, Alloc.of_const (List.assoc id argument_modes),
+                Alloc.legacy, binder),
+               newmono arg, ret, commu_ok)) in
+  let body_ir = Refinement_predicate.logical_definition_body body_ir in
+  let predicate =
+    mk Predef.type_bool (Rexp_logical_equal (call, body_ir))
+  in
+  let types = ref [] in
+  ignore
+    (Refinement_predicate.map
+       ~type_expr:(fun ty -> types := ty :: !types; ty) predicate);
+  let types = List.rev !types in
+  let copy_types subst types =
+    let carrier = newty (Ttuple (List.map (fun ty -> None, ty) types)) in
+    match get_desc (Subst.type_expr subst carrier) with
+    | Ttuple components -> List.map snd components
+    | _ -> assert false
+  in
+  let copied_types = instance_list (List.map snd type_params @ types) in
+  let rec split_params params types =
+    match params, types with
+    | [], types -> [], types
+    | (id, _) :: params, ty :: types ->
+        let params, types = split_params params types in
+        (id, ty) :: params, types
+    | _ -> assert false
+  in
+  let type_params, copied_types = split_params type_params copied_types in
+  (* Share variables with the arguments, but keep their runtime modes separate
+     from the normalized logical types. *)
+  let copied_types = copy_types Subst.identity copied_types in
+  let visited = ref TypeSet.empty in
+  let rec normalize_logical_type ty =
+    if not (TypeSet.mem ty !visited) then begin
+      visited := TypeSet.add ty !visited;
+      begin match get_desc ty with
+      | Tarrow ((label, _, _, binder), arg, result, commu) ->
+          set_type_desc ty
+            (Tarrow
+               ( (label, Alloc.legacy, Alloc.legacy, binder),
+                 arg,
+                 result,
+                 commu ));
+          normalize_logical_type arg;
+          normalize_logical_type result
+      | Trefine { ref_payload; _ } ->
+          set_type_desc ty (Tlink ref_payload);
+          normalize_logical_type ref_payload
+      | _ -> iter_type_expr normalize_logical_type ty
+      end
+    end
+  in
+  List.iter normalize_logical_type copied_types;
+  let copied_types = ref copied_types in
+  let predicate =
+    Refinement_predicate.map
+      ~type_expr:(fun _ ->
+        match !copied_types with
+        | ty :: rest -> copied_types := rest; ty
+        | [] -> assert false)
+      predicate
+  in
+  assert (!copied_types = []);
+  let result = newty (Trefine
+      {ref_structural_scope = Ident.lowest_scope;
+       ref_binder = binder; ref_payload = Predef.type_unit;
+       ref_pred = predicate}) in
+  let syntax_params = List.map (fun (id, _) ->
+      {pparam_loc = loc;
+       pparam_desc = Pparam_val (Asttypes.Nolabel, None,
+           Ast_helper.Pat.var ~loc
+             (Location.mkloc (Ident.name id) loc))}) params in
+  let syntax = Ast_helper.Exp.function_ ~loc syntax_params
+      {mode_annotations = []; ret_mode_annotations = [];
+       ret_type_constraint = None}
+      (Pfunction_body (Ast_helper.Exp.construct ~loc
+          (Location.mkloc (Longident.Lident "()") loc) None)) in
+  let stub_type = List.fold_right (fun (id, ty) ret -> arrow id ty ret)
+      type_params Predef.type_unit in
+  let stub = Resolved_predicate.with_input
+      {expressions = []; values = []; constructors = [];
+       labels = []; locals = []}
+      (fun () -> type_expect_in_expression env
+          ~mode:(mode_default (total_mode ())) syntax
+          (mk_expected stub_type)) in
+  let stub = match stub.exp_desc with
+    | Texp_function
+        ({params = runtime_params; body = Tfunction_body unit; _} as fn) ->
+        let result_in_body = List.fold_left2 (fun ty (binder, _) param ->
+            let id = match param.fp_kind with
+              | Tparam_pat {pat_desc = Tpat_var {id; _}; _} -> id
+              | _ -> assert false in
+            substitute_refinement_ident binder id ty)
+            result type_params runtime_params in
+        let rec contract ty params = match get_desc ty, params with
+          | Tarrow ((label, arg_mode, ret_mode, _), arg, ret, commu),
+            (id, _) :: rest ->
+              newty (Tarrow ((label, arg_mode, ret_mode, Some id),
+                             arg, contract ret rest, commu))
+          | _, [] -> result
+          | _ -> assert false in
+        {stub with
+         exp_desc = Texp_function
+           {fn with body = Tfunction_body
+               {unit with exp_type = result_in_body}};
+         exp_type = contract stub.exp_type type_params}
+    | _ -> assert false in
+  let lemma_id = Ident.create_local name in
+  let description = {definition_description with
+      val_type = stub.exp_type; val_attributes = [];
+      val_zero_alloc = Zero_alloc.default;
+      val_modalities = Modality.undefined;
+      val_uid = Uid.mk ~current_unit:(Env.get_current_unit ())} in
+  let pat_desc = match binding.vb_pat.pat_desc with
+    | Tpat_var variable -> Tpat_var {variable with id = lemma_id;
+        name = Location.mkloc name loc; uid = description.val_uid;
+        mode = Value.disallow_right (total_mode ())}
+    | _ -> assert false in
+  let pat = {binding.vb_pat with
+      pat_desc;
+      pat_type = stub.exp_type; pat_env = env;
+      pat_extra = []; pat_attributes = [];
+      pat_unique_barrier = Unique_barrier.not_computed ()} in
+  {binding with vb_pat = pat; vb_expr = stub; vb_attributes = []},
+  Env.add_value ~mode:(total_mode ()) lemma_id description env
+
+let make_definition_lemma env binding =
+  with_local_level
+    ~post:(fun (lemma, _) -> generalize lemma.vb_expr.exp_type)
+    (fun () -> make_definition_lemma_at_level env binding)
+
+let () =
+  definition_lemma := make_definition_lemma;
+  type_assume :=
+    (fun env expected_mode loc operand
+         { ref_binder; ref_payload; ref_pred; _ } ->
+       let binder =
+         Ident.create_scoped ~scope:Ident.lowest_scope "assume_value"
+       in
+       let predicate = Refinement_predicate.map
+           ~rename:(Ident.Map.singleton ref_binder binder)
+           ~type_expr:(substitute_refinement_ident ref_binder binder)
+           ref_pred in
+       let predicate_env =
+         add_total_immutable_value env binder ref_payload loc in
+       let desc = Subst.Lazy.force_value_description
+           (Env.find_value (Path.Pident binder) predicate_env) in
+       let return_env = Env.add_value ~mode:(total_mode ()) binder desc env in
+       let predicate, return =
+         with_resolved_refinement predicate_env loc predicate (fun syntax ->
+             let predicate = type_expect_in_expression predicate_env syntax
+                 (mk_expected Predef.type_bool) in
+             let return = type_expect_in_expression return_env
+                 ~mode:expected_mode
+                 (Ast_helper.Exp.ident ~loc
+                    (Location.mkloc (Longident.Lident (Ident.name binder)) loc))
+                 (mk_expected ref_payload) in
+             predicate, return) in
+       let sort = match desc.val_kind with
+         | Val_reg sort -> sort
+         | _ -> Misc.fatal_error "Typecore.assume: invalid binder"
+       in
+       let pat =
+         { pat_desc = Tpat_var
+             { id = binder; name = Location.mkloc (Ident.name binder) loc;
+               uid = desc.val_uid; sort;
+               mode = Value.disallow_right (total_mode ()) };
+           pat_loc = loc; pat_extra = []; pat_type = ref_payload;
+           pat_env = env; pat_attributes = [];
+           pat_unique_barrier = Unique_barrier.not_computed () }
+       in
+       let binding =
+         { vb_pat = pat; vb_expr = operand;
+           vb_rec_kind = Value_rec_types.Dynamic; vb_sort = sort;
+           vb_attributes = []; vb_loc = loc }
+       in
+       { return with exp_desc = Texp_assume (binding, predicate, return);
+                   exp_env = env; exp_loc = loc });
+  Typetexp.add_dependent_binder :=
+    (fun env binder payload loc ->
+       add_total_immutable_value env binder payload loc);
+  Typetexp.type_refinement_predicate :=
+    (fun env bound_values binder payload predicate ->
+       let loc = predicate.pexp_loc in
+       let env =
+         enter_total_ghost_context loc env
+       in
+       let env = add_total_immutable_value env binder payload loc in
+       let typed_predicate =
+         Misc.protect_refs [Misc.R (typing_refinement_predicate, true)]
+           (fun () ->
+              Ctype.with_refinement_predicate_scope (fun () ->
+                type_expect env ~mode:(total_immutable_mode ()) predicate
+                  (mk_expected Predef.type_bool)))
+       in
+       let predicate =
+         refinement_expression_of_typed
+           bound_values binder typed_predicate
+       in
+       let predicate =
+         if Ident.Map.is_empty !refinement_type_closing then predicate
+         else
+           let closing = !refinement_type_closing in
+           let subst =
+             Ident.Map.fold
+               (fun parameter binder subst ->
+                  Subst.add_bound_value parameter binder subst)
+               closing Subst.identity
+           in
+           Refinement_predicate.map
+             ~rename:closing
+             ~bind_value:(fun path ->
+               match path with
+               | Path.Pident parameter ->
+                   Ident.Map.find_opt parameter closing
+               | _ -> None)
+             ~type_expr:(Subst.type_expr subst)
+             predicate
+       in
+       default_refinement_predicate_types payload predicate;
+       typed_predicate, predicate)

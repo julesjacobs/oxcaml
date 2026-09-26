@@ -62,19 +62,52 @@ let compiler_stops_before_attributes_consumed () =
   in
   stops_before_lambda || !Clflags.print_types
 
-let warn_unused () =
+let warn_misplaced_attributes () =
   let keys = List.of_seq (Attribute_table.to_seq_keys unused_attrs) in
   Attribute_table.clear unused_attrs;
+  if !Clflags.stop_after <> Some Clflags.Compiler_pass.Parsing then
+    List.iter (fun sloc ->
+      if sloc.txt = "def" || sloc.txt = "ocaml.def" then
+        Location.raise_errorf ~loc:sloc.loc
+          "The def attribute is only supported on function bindings";
+      if sloc.txt = "decreases" || sloc.txt = "ocaml.decreases" then
+        Location.raise_errorf ~loc:sloc.loc
+          "The decreases attribute is only supported on recursive function \
+           bindings") keys;
   if not (compiler_stops_before_attributes_consumed ()) then
     let keys = List.sort attr_order keys in
     List.iter (fun sloc ->
       Location.prerr_warning sloc.loc (Warnings.Misplaced_attribute sloc.txt))
       keys
 
+let warn_unused_alert_disables () =
+  let entries = Warnings.flush_unused_alert_disables () in
+  if not (compiler_stops_before_attributes_consumed ()) then begin
+    let entries =
+      List.sort
+        (fun (loc1, _, _) (loc2, _, _) -> Location.compare loc1 loc2)
+        entries
+    in
+    (* Treatment of warnings is similar to
+       [warn_unchecked_zero_alloc_attribute]. *)
+    let w_old = Warnings.backup () in
+    List.iter (fun (loc, name, state) ->
+      Warnings.restore state;
+      Location.prerr_warning loc (Warnings.Unused_alert_disable name))
+      entries;
+    Warnings.restore w_old
+  end
+
+let warn_unused () =
+  warn_misplaced_attributes ();
+  warn_unused_alert_disables ()
+
 (* These are the attributes that are tracked in the builtin_attrs table for
    misplaced attribute warnings. *)
 let builtin_attrs =
   [ "inline"
+  ; "def"
+  ; "decreases"
   ; "atomic"
   ; "inlined"
   ; "specialise"
@@ -92,6 +125,8 @@ let builtin_attrs =
   ; "warn_on_literal_pattern"
   ; "immediate"
   ; "immediate64"
+  ; "inductive"
+  ; "phantom_parameters"
   ; "boxed"
   ; "unboxed"
   ; "principal"
@@ -132,6 +167,7 @@ let builtin_attrs =
   ; "implicit_kind"
   ; "flatten_floats"
   ; "represent_as_float_array"
+  ; "immediate_all_void_constructor"
   ]
 
 let builtin_attrs =
@@ -389,7 +425,7 @@ let warning_attribute ?(ppwarning = true) =
            }] ->
         begin
           mark_used name;
-          try Warnings.parse_alert_option s
+          try Warnings.parse_alert_option ~disable_loc:loc s
           with Arg.Bad msg -> warn_payload loc name.txt msg
         end
     | k ->
@@ -529,6 +565,9 @@ let has_flatten_floats attrs = has_attribute "flatten_floats" attrs
 
 let has_represent_as_float_array attrs =
   has_attribute "represent_as_float_array" attrs
+
+let has_immediate_all_void_constructor attrs =
+  has_attribute "immediate_all_void_constructor" attrs
 
 let has_unsafe_allow_any_mode_crossing attrs =
   has_attribute "unsafe_allow_any_mode_crossing" attrs

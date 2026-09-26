@@ -45,6 +45,9 @@ let file = Variables.make ("file",
 let readonly_files = Variables.make ("readonly_files",
   "Files which are only read by the tests")
 
+let source_directories = Variables.make ("source_directories",
+  "Additional directories searched for test source files")
+
 let make = Variables.make ("MAKE",
   "Command used to invoke make")
 
@@ -128,6 +131,7 @@ let init () =
     exit_status;
     file;
     readonly_files;
+    source_directories;
     make;
     ocamltest_response;
     ocamltest_log;

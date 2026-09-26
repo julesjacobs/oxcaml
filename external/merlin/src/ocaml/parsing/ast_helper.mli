@@ -77,8 +77,9 @@ module Typ :
     val any: ?loc:loc -> ?attrs:attrs -> jkind_annotation option -> core_type
     val var: ?loc:loc -> ?attrs:attrs -> string -> jkind_annotation option
       -> core_type
-    val arrow: ?loc:loc -> ?attrs:attrs -> arg_label -> core_type -> core_type ->
-      mode with_loc list -> mode with_loc list -> core_type
+    val arrow: ?loc:loc -> ?attrs:attrs -> ?binder:str -> arg_label ->
+      core_type -> core_type -> mode with_loc list -> mode with_loc list ->
+      core_type
     val tuple: ?loc:loc -> ?attrs:attrs -> (string option * core_type) list
                -> core_type
     val unboxed_tuple: ?loc:loc -> ?attrs:attrs
@@ -100,6 +101,8 @@ module Typ :
     val splice : ?loc:loc -> ?attrs:attrs -> core_type -> core_type
     val of_kind : ?loc:loc -> ?attrs:attrs -> jkind_annotation -> core_type
     val repr: ?loc:loc -> ?attrs:attrs -> str list -> core_type -> core_type
+    val refine:
+      ?loc:loc -> ?attrs:attrs -> str -> core_type -> expression -> core_type
     val newlayout:
       ?loc:loc -> ?attrs:attrs -> str list -> core_type -> core_type
     val extension: ?loc:loc -> ?attrs:attrs -> extension -> core_type
@@ -240,6 +243,7 @@ module Exp:
     val extension: ?loc:loc -> ?attrs:attrs -> extension -> expression
     val unreachable: ?loc:loc -> ?attrs:attrs -> unit -> expression
     val stack : ?loc:loc -> ?attrs:attrs -> expression -> expression
+    val ghost : ?loc:loc -> ?attrs:attrs -> expression -> expression
     val comprehension :
       ?loc:loc -> ?attrs:attrs -> comprehension_expression -> expression
     val quote : ?loc:loc -> ?attrs:attrs -> expression -> expression
@@ -250,6 +254,10 @@ module Exp:
     val case: pattern -> ?guard:expression -> expression -> case
     val binding_op: str -> pattern -> expression -> loc -> binding_op
     val borrow : ?loc:loc -> ?attrs:attrs -> expression -> expression
+    val refine : ?loc:loc -> ?attrs:attrs -> expression -> expression
+    val assume : ?loc:loc -> ?attrs:attrs -> expression -> expression
+    val let_refine :
+      ?loc:loc -> ?attrs:attrs -> str -> expression -> expression -> expression
   end
 
 (** Value declarations *)

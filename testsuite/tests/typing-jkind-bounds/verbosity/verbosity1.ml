@@ -10,12 +10,12 @@ type t
 
 type t : immutable_data
 [%%expect {|
-type t : value non_float mod forkable unyielding many stateless immutable
+type t : value non_float mod forkable unyielding many total immutable
 |}]
 
 type t : immediate
 [%%expect {|
-type t : value non_pointer mod global many stateless immutable external_
+type t : value non_pointer mod global many total immutable external_
 |}]
 
 type t : float64
@@ -41,13 +41,12 @@ type t : value mod stateless
 type 'a t : immutable_data with 'a
 [%%expect {|
 type 'a t
-  : value non_float mod forkable unyielding many stateless immutable with 'a
+  : value non_float mod forkable unyielding many total immutable with 'a
 |}]
 
 type ('a : immutable_data) t
 [%%expect {|
-type ('a : value non_float mod forkable unyielding many stateless immutable)
-     t
+type ('a : value non_float mod forkable unyielding many total immutable) t
 |}]
 
 type ('a : value mod stateless) t
@@ -68,5 +67,5 @@ type 'a t : value mod external_
 type 'a t : immutable_data with 'a @@ external_
 [%%expect {|
 type 'a t
-  : value non_float mod forkable unyielding many stateless immutable with 'a
+  : value non_float mod forkable unyielding many total immutable with 'a
 |}]

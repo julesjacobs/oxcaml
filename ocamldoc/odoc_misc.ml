@@ -495,6 +495,7 @@ let remove_option typ =
     match t with
     | Tconstr(path, [ty], _)
       when Path.same path Predef.path_option -> get_desc ty
+    | Tmod _ -> Misc.fatal_error "Odoc_misc: unexpected Tmod"
     | Tconstr _
     | Tvar _
     | Tunivar _
@@ -512,7 +513,8 @@ let remove_option typ =
     | Tvariant _
     | Tpackage _
     | Tof_kind _
-    | Tbox _ -> t
+    | Tbox _
+    | Trefine _ -> t
     | Tlink t2 -> trim (get_desc t2)
     | Tsubst _ -> assert false
   in

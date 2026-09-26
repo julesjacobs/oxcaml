@@ -81,10 +81,10 @@ module Style = Misc.Style
    (* CR layouts reisenberg: update when the default changes *)
    This is a challenge, though, because the type in a [val] does not
    explicitly quantify its free variables. So we must collect the free
-   variables, look to see whether any have interesting jkinds, and
-   print the whole set of variables if any of them do. This is all
-   implemented in [extract_qtvs], used also in a number of other places
-   we do quantification (e.g. gadt-syntax constructors).
+   variables ([extract_qtvs], used also in a number of other places we do
+   quantification, e.g. gadt-syntax constructors), look to see whether any
+   have interesting jkinds ([tree_of_qtvs]), and print the whole set of
+   variables if any of them do ([zap_qtvs_if_boring]).
 
    Exception (X1). When we are still in the process of inferring a type,
    there may be an unfilled sort variable. Here is an example:
@@ -862,12 +862,12 @@ let proxy ty = Transient_expr.repr (proxy ty)
 
 (* When printing a type scheme, we print weak names.  When printing a plain
    type, we do not.  This type controls that behavior *)
-type type_or_scheme = Type | Type_scheme
+type type_or_scheme = Type | Type_scheme | Type_constraint
 
 let is_non_gen mode ty =
   match mode with
   | Type_scheme -> is_Tvar ty && get_level ty <> generic_level
-  | Type        -> false
+  | Type | Type_constraint -> false
 
 let nameable_row row =
   row_name row <> None &&
@@ -910,6 +910,11 @@ let printer_iter_type_expr f ty =
       if field_kind_repr kind = Fpublic then
         f ty1;
       f ty2
+  | Tmod (ty, _) ->
+      f ty
+  | Trefine { ref_payload; ref_pred; _ } ->
+      f ref_payload;
+      Refinement_predicate.fold_type_constraints (fun () ty -> f ty) () ref_pred
   | _ ->
       Btype.iter_type_expr f ty
 
@@ -1242,10 +1247,10 @@ let add_type_to_preparation = prepare_type
 let print_labels = ref true
 let with_labels b f = Misc.protect_refs [R (print_labels,b)] f
 
-(* Whether to expand [eval] in types for reductions before printing.
+(* Whether to expand [eval] and [box] in types for reductions before printing.
    Disabled when printing errors, as they usually contain an expansion trace. *)
-let print_reduced_evals = ref true
-let with_reduced_evals b f = Misc.protect_refs [R (print_reduced_evals,b)] f
+let print_reduced_abbrevs = ref true
+let with_reduced_abbrevs b f = Misc.protect_refs [R (print_reduced_abbrevs,b)] f
 
 let out_jkind_of_const_jkind env jkind =
   Ojkind_const (Jkind.Const.to_out_jkind_const env jkind)
@@ -1270,6 +1275,8 @@ let rec out_jkind_of_desc env (desc : 'd Jkind.Desc.t) =
   | _ -> match Jkind.Desc.get_const desc with
     | Some c -> out_jkind_of_const_jkind env c
     | None -> assert false (* handled above *)
+
+let out_jkind_of_jkind env jkind = out_jkind_of_desc env (Jkind.get jkind)
 
 (* returns None for [value], according to (C2.1) from
    Note [When to print jkind annotations] *)
@@ -1309,6 +1316,10 @@ let tree_of_modalities mut t =
   |> List.map (fun (Atom (ax, m) : Modality.atom) ->
       Fmt.asprintf "%a" (Modality.Per_axis.print ax) m)
 
+let out_modalities_of_mod_bounds mod_bounds =
+  Typemode.untransl_mod_bounds mod_bounds
+  |> List.map (fun { Location.txt = Parsetree.Mode s; _ } -> s)
+
 let tree_of_modes (modes : Mode.Alloc.Const.t) =
   (* Step 1: Compute the modes to print *)
   let diff =
@@ -1337,6 +1348,14 @@ let tree_of_modes (modes : Mode.Alloc.Const.t) =
       | _, _ -> Some modes.contention
     in
 
+    (* [statefulness] has an implied default based on [totality]: *)
+    let statefulness =
+      match modes.totality, modes.statefulness with
+      | Total, Stateless -> None
+      | Partial, Stateful -> None
+      | _, _ -> Some modes.statefulness
+    in
+
     (* [portability] has implied defaults based on [statefulness]: *)
     let portability =
       match modes.statefulness, modes.portability with
@@ -1348,22 +1367,15 @@ let tree_of_modes (modes : Mode.Alloc.Const.t) =
     in
 
     let diff = Mode.Alloc.Const.diff modes Mode.Alloc.Const.legacy in
-    { diff with forkable; yielding; contention; portability }
+    { diff with forkable; yielding; statefulness; contention; portability }
   in
   (* Step 2: Print the modes *)
-  let print_to_string_opt print a = Option.map (Fmt.asprintf "%a" print) a in
-  let modes =
-    [ print_to_string_opt Mode.Locality.Const.print diff.areality
-    ; print_to_string_opt Mode.Uniqueness.Const.print diff.uniqueness
-    ; print_to_string_opt Mode.Linearity.Const.print diff.linearity
-    ; print_to_string_opt Mode.Portability.Const.print diff.portability
-    ; print_to_string_opt Mode.Contention.Const.print diff.contention
-    ; print_to_string_opt Mode.Forkable.Const.print diff.forkable
-    ; print_to_string_opt Mode.Yielding.Const.print diff.yielding
-    ; print_to_string_opt Mode.Statefulness.Const.print diff.statefulness
-    ; print_to_string_opt Mode.Visibility.Const.print diff.visibility ]
-  in
-  List.filter_map (fun x -> x) modes
+  List.filter_map
+    (fun (Mode.Alloc.Axis.P ax) ->
+      diff
+      |> Mode.Alloc.Const.Option.proj ax
+      |> Option.map (Fmt.asprintf "%a" (Mode.Alloc.Const.print_axis ax)))
+    Mode.Alloc.Axis.all
 
 (** The modal context on a type when printing it. This is to reproduce the mode
     currying logic in [typetexp.ml], so that parsing and printing roundtrip. *)
@@ -1402,6 +1414,65 @@ type typvariant_repr = {
   tags : string list option
 }
 
+let refinement_names = ref Ident.Map.empty
+
+let refinement_name id =
+  match Ident.Map.find_opt id !refinement_names with
+  | Some name -> name
+  | None -> Ident.name id
+
+let with_refinement_names binders ty f =
+  if Ident.Set.is_empty binders then f () else
+  let ids = ref Ident.Set.empty in
+  let add id = ids := Ident.Set.add id !ids in
+  let visited = TypeHash.create 17 in
+  let rec visit ty =
+    if not (TypeHash.mem visited ty) then begin
+      TypeHash.add visited ty ();
+      match get_desc ty with
+      | Tarrow ((_, _, _, binder), arg, ret, _) ->
+          Option.iter add binder;
+          visit arg;
+          visit ret
+      | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+          add ref_binder;
+          Ident.Set.iter add (Refinement_predicate.bound_idents ref_pred);
+          visit ref_payload;
+          Refinement_predicate.iter_value_idents add ref_pred;
+          ignore (Refinement_predicate.fold_type_constraints
+            (fun () ty -> visit ty) () ref_pred : unit)
+      | _ -> Btype.iter_type_expr visit ty
+    end
+  in
+  visit ty;
+  let names =
+    Ident.Set.fold
+      (fun binder names ->
+        let name id =
+          match Ident.Map.find_opt id names with
+          | Some name -> name
+          | None -> Ident.name id
+        in
+        let used =
+          Ident.Set.fold
+            (fun id used ->
+              if Ident.same binder id then used
+              else String.Set.add (name id) used)
+            !ids String.Set.empty
+        in
+        let rec fresh candidate =
+          if String.Set.mem candidate used then fresh (candidate ^ "'")
+          else candidate
+        in
+        let seed = match Ident.name binder with
+          | "*argument*" -> "argument"
+          | name -> name
+        in
+        Ident.Map.add binder (fresh seed) names)
+      binders !refinement_names
+  in
+  Misc.protect_refs [Misc.R (refinement_names, names)] f
+
 let rec tree_of_modal_typexp mode modal ty =
   let not_arrow tree =
     match modal with
@@ -1411,7 +1482,8 @@ let rec tree_of_modal_typexp mode modal ty =
     | Other _ -> tree
   in
   let ty =
-    Ctype.reduce_head ~expand_eval:!print_reduced_evals !printing_env ty
+    Ctype.reduce_head ~expand_reducible_abbrevs:!print_reduced_abbrevs
+      !printing_env ty
   in
   let px = proxy ty in
   if Aliases.is_printed_proxy px && not (Aliases.is_delayed px) then
@@ -1422,11 +1494,16 @@ let rec tree_of_modal_typexp mode modal ty =
   let pr_typ alloc_mode =
     let tty = Transient_expr.repr ty in
     match tty.desc with
+    | Tvar { name = None }
+      when mode = Type_constraint && get_level ty = generic_level ->
+        (* Naming an anonymous generalized variable would make a local
+           annotation monomorphic when the predicate is checked again. *)
+        Otyp_stuff "_"
     | Tvar _ ->
         let non_gen = is_non_gen mode ty in
         let name_gen = Variable_names.new_var_name ~non_gen ty in
         Otyp_var (non_gen, Variable_names.name_of_type name_gen tty)
-    | Tarrow ((l, marg, mret), ty1, ty2, _) ->
+    | Tarrow ((l, marg, mret, binder), ty1, ty2, _) ->
         let lab =
           if !print_labels || is_omittable l then outcome_label l
           else Nolabel
@@ -1450,8 +1527,92 @@ let rec tree_of_modal_typexp mode modal ty =
         in
         let acc_mode = curry_mode alloc_mode arg_mode in
         let modal = Arrow_return {acc = acc_mode; mode = mret} in
-        let t2 = tree_of_modal_typexp mode modal ty2 in
-        Otyp_arrow (lab, tree_of_modes arg_mode, t1, t2)
+        let binders =
+          Option.fold ~none:Ident.Set.empty ~some:Ident.Set.singleton binder
+        in
+        with_refinement_names binders ty2 (fun () ->
+          let t2 = tree_of_modal_typexp mode modal ty2 in
+          Otyp_arrow
+            (lab, tree_of_modes arg_mode, t1, t2,
+             Option.map refinement_name binder))
+    | Trefine { ref_binder; ref_payload; ref_pred; _ } ->
+        let payload = tree_of_typexp mode Alloc.Const.legacy ref_payload in
+        with_refinement_names
+          (Ident.Set.add ref_binder
+             (Refinement_predicate.bound_idents ref_pred)) ty (fun () ->
+        let bound_names =
+          Ident.Map.fold
+            (fun _ name names -> String.Set.add name names)
+            !refinement_names String.Set.empty
+        in
+        (* Names render through the printer's path machinery, so that
+           shortening and substitution are reflected. *)
+        let rec longident : Outcometree.out_ident -> Longident.t = function
+          | Oide_ident { printed_name } -> Lident printed_name
+          | Oide_dot (id, s) ->
+              Ldot (Location.mknoloc (longident id), Location.mknoloc s)
+          | Oide_apply (a, b) ->
+              Lapply
+                (Location.mknoloc (longident a),
+                 Location.mknoloc (longident b))
+          | Oide_hash id -> longident id
+        in
+        let value_ident path =
+          match path with
+          | Pdot (module_path, name) when String.Set.mem name bound_names ->
+              Location.mknoloc
+                (Longident.Ldot
+                   ( Location.mknoloc
+                       (longident (tree_of_path (Some Module) module_path)),
+                     Location.mknoloc name ))
+          | path ->
+              Location.mknoloc (longident (tree_of_path (Some Value) path))
+        in
+        let constructor_ident path =
+          (* A constructor is qualified by the module of its type. *)
+          match (path : Path.t) with
+          | Pextra_ty (tp, Pcstr_ty name) -> (
+              match tp with
+              | Pdot (m, _) | Pextra_ty (Pdot (m, _), _) ->
+                  Location.mknoloc
+                    (Longident.Ldot
+                       (Location.mknoloc
+                          (longident (tree_of_path (Some Module) m)),
+                        Location.mknoloc name))
+              | _ -> Location.mknoloc (Longident.Lident name))
+          | path ->
+              (* extension constructor *)
+              Location.mknoloc (longident (tree_of_path None path))
+        in
+        let label_ident type_path name =
+          let rec defining_module = function
+            | Pdot (module_path, _) -> Some module_path
+            | Pextra_ty (path, _) -> defining_module path
+            | Pident _ | Papply _ -> None
+          in
+          match defining_module type_path with
+          | Some module_path ->
+              Location.mknoloc
+                (Longident.Ldot
+                   ( Location.mknoloc
+                       (longident (tree_of_path (Some Module) module_path)),
+                     Location.mknoloc name ))
+          | None -> Location.mknoloc (Longident.Lident name)
+        in
+        let type_overrides = ref [] in
+        let type_constraint ty =
+          let placeholder = Ast_helper.Typ.any None in
+          let printed = tree_of_typexp Type_constraint Alloc.Const.legacy ty in
+          type_overrides := (placeholder, printed) :: !type_overrides;
+          Some placeholder
+        in
+        let predicate =
+          Refinement_predicate.untype ~type_constraint
+            ~var_name:refinement_name ~value_ident
+            ~constructor_ident ~label_ident ref_pred
+        in
+        Otyp_refine
+          (refinement_name ref_binder, payload, predicate, !type_overrides))
     | Ttuple labeled_tyl ->
         Otyp_tuple (tree_of_labeled_typlist mode labeled_tyl)
     | Tunboxed_tuple labeled_tyl ->
@@ -1491,9 +1652,13 @@ let rec tree_of_modal_typexp mode modal ty =
         end
     | Tobject (fi, nm) ->
         tree_of_typobject mode fi !nm
+    | Tmod (ty, mod_bounds) ->
+        Otyp_mod
+          ( tree_of_typexp mode alloc_mode ty,
+            out_modalities_of_mod_bounds mod_bounds )
     | Tquote ty ->
         wrap_printing_env_unguarded
-          (Env.enter_quotation !printing_env)
+          (Env.enter_quote !printing_env)
           (fun () -> Otyp_quote (tree_of_typexp mode alloc_mode ty))
     | Tsplice ty ->
         wrap_printing_env_unguarded
@@ -1507,7 +1672,7 @@ let rec tree_of_modal_typexp mode modal ty =
         Internal_names.add p';
         let tyl =
           wrap_printing_env_unguarded
-            (Env.enter_quotation !printing_env)
+            (Env.enter_quote !printing_env)
             (fun () -> tree_of_typlist mode tyl)
         in
         Otyp_constr (tree_of_path (Some Type) p', tyl)
@@ -1529,7 +1694,7 @@ let rec tree_of_modal_typexp mode modal ty =
         (* Make the names delayed, so that the real type is
            printed once when used as proxy *)
         List.iter Aliases.add_delayed tyl;
-        let tl = tree_of_qtvs tyl in
+        let tl = tree_of_univars tyl in
         let tr = Otyp_poly (tl, tree_of_typexp mode alloc_mode ty) in
         (* Forget names when we leave scope *)
         Variable_names.remove_names tyl;
@@ -1583,6 +1748,13 @@ let rec tree_of_modal_typexp mode modal ty =
         Otyp_module pack
     | Tof_kind jkind ->
       Otyp_of_kind (out_jkind_of_desc !printing_env (Jkind.get jkind))
+    | Tbox ty ->
+      (* Render as if a regular Tconstr application of Predef.path_box,
+         so path shortening and shadowing (e.g. [box/2]) work uniformly. *)
+      let p', s = best_type_path Predef.path_box in
+      let tyl' = apply_subst s [ty] in
+      Internal_names.add p';
+      Otyp_constr (tree_of_path (Some Type) p', tree_of_typlist mode tyl')
   in
   Aliases.remove_delay px;
   alias_nongen_row mode px ty;
@@ -1607,24 +1779,23 @@ let rec tree_of_modal_typexp mode modal ty =
 and tree_of_typexp mode alloc_mode ty =
   tree_of_modal_typexp mode (Other alloc_mode) ty
 
-(* qtvs = quantified type variables *)
-(* this silently drops any arguments that are not generic Tvar or Tunivar *)
-and tree_of_qtvs qtvs =
-  let tree_of_qtv v : (string * out_jkind option) option =
+and tree_of_qtv v jkind =
     (* CR layouts: We ignore nullability here to avoid needlessly printing
        ['a : value_or_null] when it's not relevant (most cases).
        Unfortunately, this makes error messages really confusing, because
        we don't consider jkind annotations. *)
-    let tree jkind =
-      Some (Variable_names.name_of_type Variable_names.new_name v,
-            out_jkind_option_of_jkind ~ignore_null:true !printing_env jkind)
-    in
-    match v.desc with
-    | Tvar { jkind } when v.level = generic_level -> tree jkind
-    | Tunivar { jkind } -> tree jkind
-    | _ -> None
-  in
-  List.filter_map tree_of_qtv qtvs
+  Variable_names.name_of_type Variable_names.new_name v,
+  out_jkind_option_of_jkind ~ignore_null:true !printing_env jkind
+
+and tree_of_qtvs qtvs =
+  List.map (fun (v, jkind) -> tree_of_qtv v jkind) qtvs
+
+and tree_of_univars vars =
+  List.filter_map
+    (fun v -> match v.desc with
+       | Tunivar { jkind } -> Some (tree_of_qtv v jkind)
+       | _ -> None)
+    vars
 
 (* qsvs = quantified sort variables (for Trepr) *)
 (* Extract names from type variables corresponding to sort variables *)
@@ -1632,8 +1803,6 @@ and tree_of_qsvs qtvs =
   List.filter_map
     (fun v ->
       match v.desc with
-      | Tvar _ when v.level = generic_level ->
-        Some (Variable_names.name_of_type Variable_names.new_name v)
       | Tunivar _ ->
         Some (Variable_names.name_of_type Variable_names.new_name v)
       | _ -> None)
@@ -1762,7 +1931,7 @@ let tree_of_typexp mode ty =
   (* CR metaprogramming jbachurski: Remove this [Env.enter_future] hack once
      errors track their stage, as we should usually print at stage 0.
      See ticket 6726. *)
-  if Ctype.contains_toplevel_splice (Env.stage !printing_env :> int) ty
+  if Ctype.contains_initial_stage_splice (Env.stage !printing_env :> int) ty
   then
     wrap_printing_env_unguarded
       (Env.enter_future !printing_env)
@@ -1823,9 +1992,8 @@ let zap_qtvs_if_boring qtvs =
   then qtvs
   else []
 
-(* get the free variables with their jkinds; do this *after* converting the
-   type itself, so that the type names are available.
-   This implements Case (C3) from Note [When to print jkind annotations]. *)
+(* Extract the generalized free type variables of [tyl] with their jkinds, as
+   [(var, jkind)], in order of appearance. *)
 let extract_qtvs tyl =
   let fvs = Ctype.free_non_row_variables_of_list tyl in
   (* The [Ctype.free*variables] family of functions returns the free
@@ -1833,8 +2001,11 @@ let extract_qtvs tyl =
   *)
   let fvs = List.rev fvs in
   let tfvs = List.map Transient_expr.repr fvs in
-  let vars_jkinds = tree_of_qtvs tfvs in
-  zap_qtvs_if_boring vars_jkinds
+  List.filter_map (fun v ->
+       match v.desc with
+       | Tvar { jkind } when v.level = generic_level -> Some (v, jkind)
+       | _ -> None)
+    tfvs
 
 let param_jkind ty =
   match get_desc ty with
@@ -1861,6 +2032,9 @@ let tree_of_label l =
     | Immutable -> Om_immutable
   in
   let ld_modalities = tree_of_modalities l.ld_mutable l.ld_modalities in
+  let ld_modalities =
+    if l.ld_ghost then "ghost" :: ld_modalities else ld_modalities
+  in
   {
     olab_name = Ident.name l.ld_id;
     olab_mut = mut;
@@ -1878,10 +2052,14 @@ let extension_constructor_args_and_ret_type_subtree args ret_type =
   | Some res ->
       let out_ret = tree_of_typexp Type res in
       let out_args = tree_of_constructor_arguments args in
-      let qtvs = extract_qtvs (res :: tys_of_constr_args args) in
+      let qtvs =
+        (res :: tys_of_constr_args args)
+        |> extract_qtvs
+        |> tree_of_qtvs |> zap_qtvs_if_boring
+      in
       (out_args, Some (qtvs, out_ret))
 
-let tree_of_single_constructor cd =
+let tree_of_single_constructor ~all_void cd =
   let name = Ident.name cd.cd_id in
   let args, ret =
     extension_constructor_args_and_ret_type_subtree cd.cd_args cd.cd_res
@@ -1890,7 +2068,25 @@ let tree_of_single_constructor cd =
       ocstr_name = name;
       ocstr_args = args;
       ocstr_return_type = ret;
+      ocstr_all_void = all_void;
   }
+
+(* A constructor takes [@immediate_all_void_constructor] iff it belongs to a
+   boxed variant and has at least one argument, all of which are void. *)
+let constructor_is_all_void rep cd =
+  match (rep : Types.variant_representation) with
+  | Variant_boxed _ -> begin
+      match cd.cd_args with
+      | Cstr_tuple ((_ :: _) as args) ->
+          List.for_all
+            (fun (ca : Types.constructor_argument) ->
+               match ca.ca_sort with
+               | Some s -> Jkind.Sort.Const.all_void s
+               | None -> false)
+            args
+      | Cstr_tuple [] | Cstr_record _ -> false
+    end
+  | Variant_unboxed | Variant_extensible | Variant_with_null -> false
 
 (* When printing GADT constructor, we need to forget the naming decision we took
   for the type parameters and constraints. Indeed, in
@@ -1900,11 +2096,12 @@ let tree_of_single_constructor cd =
   It is fine to print both the type parameter ['a] and the existentially
   quantified ['a] in the definition of the constructor X as ['a]
  *)
-let tree_of_constructor_in_decl cd =
+let tree_of_constructor_in_decl ~all_void cd =
   match cd.cd_res with
-  | None -> tree_of_single_constructor cd
+  | None -> tree_of_single_constructor ~all_void cd
   | Some _ ->
-      Variable_names.with_local_names (fun () -> tree_of_single_constructor cd)
+      Variable_names.with_local_names
+        (fun () -> tree_of_single_constructor ~all_void cd)
 
 let prepare_decl id decl =
   let params = filter_params decl.type_params in
@@ -2040,7 +2237,12 @@ let tree_of_type_decl id decl =
           else None
         in
         tree_of_manifest
-          (Otyp_sum (List.map tree_of_constructor_in_decl cstrs)),
+          (Otyp_sum
+             (List.map
+                (fun cd ->
+                   tree_of_constructor_in_decl
+                     ~all_void:(constructor_is_all_void rep cd) cd)
+                cstrs)),
         decl.type_private,
         unboxed,
         or_null_attribute,
@@ -2053,7 +2255,8 @@ let tree_of_type_decl id decl =
         (Option.is_some umc)
     | Type_record_unboxed_product(lbls,
                                   (Record_unboxed_product
-                                  | Record_unboxed_product_variable),
+                                  | Record_unboxed_product_undetermined
+                                  | Record_unboxed_product_variable _),
                                   umc) ->
         tree_of_manifest
           (Otyp_record_unboxed_product (List.map tree_of_label lbls)),
@@ -2088,6 +2291,16 @@ let tree_of_type_decl id decl =
     then [{ oattr_name = "unsafe_allow_any_mode_crossing" }]
     else []
   in
+  let otype_attributes =
+    if decl.type_inductive then
+      { oattr_name = "inductive" } :: otype_attributes
+    else otype_attributes
+  in
+  let otype_attributes =
+    if decl.type_phantom_parameters then
+      { oattr_name = "phantom_parameters" } :: otype_attributes
+    else otype_attributes
+  in
   { otype_name = name;
     otype_params = args;
     otype_type = ty;
@@ -2113,7 +2326,7 @@ let add_constructor_to_preparation c =
   Option.iter prepare_type c.cd_res
 
 let prepared_constructor ppf c =
-  !Oprint.out_constr ppf (tree_of_single_constructor c)
+  !Oprint.out_constr ppf (tree_of_single_constructor ~all_void:false c)
 
 
 let tree_of_type_declaration id decl rs =
@@ -2212,6 +2425,35 @@ let prepared_extension_constructor id ppf ext =
   !Oprint.out_sig_item ppf
     (prepared_tree_of_extension_constructor id ext Text_first)
 
+let maybe_val_poly_shorthand lpoly_vars qtvs =
+  let module Sort_const = Jkind.Sort.Const in
+  let same_genvar a b =
+    Sort_const.equal (Sort_const.Genvar a) (Sort_const.Genvar b)
+  in
+  let top_genvar (_, jkind) =
+    match Jkind.get_layout !printing_env jkind with
+    | Some layout ->
+      (match Jkind.Layout.Const.get_sort layout with
+       | Some (Sort_const.Genvar v) -> Some v
+       | _ -> None)
+    | None -> None
+  in
+  let matched_genvars, unmatched =
+    List.partition_map
+      (fun q -> match top_genvar q with Some v -> Left v | None -> Right q)
+      qtvs
+  in
+  let no_genvar (_, jkind) =
+    match Jkind.get_layout !printing_env jkind with
+    | Some layout -> not (Jkind.Layout.Const.has_genvar layout)
+    | None -> true
+  in
+  if (not (List.is_empty lpoly_vars))
+     && List.equal same_genvar matched_genvars lpoly_vars
+     && List.for_all no_genvar unmatched
+  then Some unmatched
+  else None
+
 (* Print a value declaration *)
 
 let tree_of_value_description id decl =
@@ -2229,12 +2471,16 @@ let tree_of_value_description id decl =
       Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha
         decl.val_modalities
   in
-  let qsvs, qtvs =
-    (* Important: process the fvs *after* the type; tree_of_type_scheme
-       resets the naming context. Both must be inside print_with_genvars
-       so that sort poly var names are registered when jkinds are printed. *)
-    Jkind_types.Sort.print_with_genvars (Lpoly.get_exn decl.val_lpoly)
-      (fun names -> names, extract_qtvs [decl.val_type])
+  let oval_poly, qsvs, qtvs =
+    let lpoly_vars = Lpoly.get_exn decl.val_lpoly in
+    let qtvs = extract_qtvs [decl.val_type] in
+    match maybe_val_poly_shorthand lpoly_vars qtvs with
+    | Some unmatched ->
+      true, [], tree_of_qtvs unmatched
+    | None ->
+      Jkind_types.Sort.print_with_genvars lpoly_vars
+        (fun names ->
+           false, names, zap_qtvs_if_boring (tree_of_qtvs qtvs))
   in
   let apparent_arity =
     let rec count n typ =
@@ -2273,6 +2519,7 @@ let tree_of_value_description id decl =
   let vd =
     { oval_name = id;
       oval_type = Otyp_newlayout(qsvs, Otyp_poly(qtvs, ty));
+      oval_poly;
       oval_modalities = tree_of_modalities Immutable moda;
       oval_prims = [];
       oval_attributes = attrs
@@ -2300,7 +2547,7 @@ let tree_of_method mode (lab, priv, virt, ty) =
   let (ty, tyl) = method_type priv ty in
   let tty = tree_of_typexp mode ty in
   let tyl = List.map Transient_expr.repr tyl in
-  let qtvs = tree_of_qtvs tyl in
+  let qtvs = tree_of_univars tyl in
   let qtvs = zap_qtvs_if_boring qtvs in
   Variable_names.remove_names tyl;
   let priv = priv <> Mpublic in
@@ -2516,6 +2763,8 @@ let dummy =
     type_loc = Location.none;
     type_attributes = [];
     type_unboxed_default = false;
+    type_inductive = false;
+    type_phantom_parameters = false;
     type_uid = Uid.internal_not_actually_unique;
     type_unboxed_version = None;
   }
@@ -2821,8 +3070,8 @@ let trees_of_type_expansion'
     (* beware order matter due to side effect,
        e.g. when printing object types *)
     let first =
-      (* preserve unreduced eval in types *)
-      with_reduced_evals false (fun () -> tree_of_typexp' t)
+      (* preserve unreduced abbrevs in types *)
+      with_reduced_abbrevs false (fun () -> tree_of_typexp' t)
     in
     let second = tree_of_typexp' t' in
     if first = second then Same first

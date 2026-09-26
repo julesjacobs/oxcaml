@@ -332,8 +332,9 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
     let print_sort : Jkind.Sort.Const.t -> _ = function
       | Base Scannable -> Print_as_value
       | Base Void -> Print_as "<void>"
-      | Base (Float64 | Float32 | Bits8 | Bits16 | Bits32 | Bits64 |
-              Vec128 | Vec256 | Vec512 | Word | Untagged_immediate) ->
+      | Base
+          ( Float64 | Float32 | Bits8 | Bits16 | Bits32 | Bits64 | Vec128
+          | Vec256 | Vec512 | Mask | Word | Untagged_immediate ) ->
         Print_as "<abstr>"
       | Product _ -> Print_as "<unboxed product>"
       | Univar _ -> Print_as "<univar>"
@@ -392,6 +393,9 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
               Oval_stuff "<poly>"
           | Tarrow _ ->
               Oval_stuff "<fun>"
+          | Trefine { ref_payload; _ } ->
+              (* The payload determines the runtime representation. *)
+              tree_of_val depth obj ref_payload
           | Ttuple(labeled_tys) ->
               Oval_tuple (tree_of_labeled_val_list 0 depth obj labeled_tys)
           | Tunboxed_tuple(labeled_tys) ->
@@ -429,8 +433,8 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                 tree_of_lazy depth obj ty_arg
 
               | Tconstr (path, [_], _)
-                when Path.same path Predef.path_code ->
-                Oval_code (O.obj obj : CamlinternalQuote.Code.t)
+                when Path.same path Predef.path_expr ->
+                Oval_quote (O.obj obj : CamlinternalQuote.Code.t)
 
               | _ ->
                 match Env.find_type path env with
@@ -490,7 +494,8 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                 Oval_stuff "<box>"
               | ty -> tree_of_val depth obj ty
               end
-          | Tsubst _ | Tfield(_, _, _, _) | Tnil | Tlink _ | Tof_kind _ ->
+          | Tsubst _ | Tfield(_, _, _, _) | Tnil | Tlink _ | Tof_kind _
+          | Tmod _ ->
               fatal_error "Printval.outval_of_value"
           | Tpoly (ty, _) ->
               tree_of_val (depth - 1) obj ty
@@ -715,28 +720,43 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
         match check_depth depth obj ty with
         | Some x -> x
         | None ->
+            let sorts_and_types () =
+              let label_params_and_types, record_params =
+                Ctype.instance_label_declarations ~fixed:false
+                  (lbl_list |> Array.of_list) ~params:type_params
+              in
+              List.iter2 (Ctype.unify env) record_params
+                (Ctype.instance_list ty_list);
+              let try_map_all a f =
+                Misc.Stdlib.Array.all_somes (Array.map f a)
+              in
+              let with_sort ty =
+                Option.map (fun s -> s, ty)
+                  (Jkind.sort_option_of_jkind env (Ctype.type_jkind env ty))
+              in
+              try_map_all label_params_and_types (fun (_, ty) -> with_sort ty)
+            in
+            (* Finalize the representation just to be able to print it *)
+            let finalize rep =
+              Typedecl.finalize_record_representation env Location.none rep
+            in
             let rep =
               match rep with
-              | (Record_variable | Record_inlined (_, Constructor_variable, _))
-                as old_repres ->
-                  let label_params_and_types, record_params =
-                    Ctype.instance_label_declarations ~fixed:false
-                      (lbl_list |> Array.of_list) ~params:type_params
-                  in
-                  List.iter2 (Ctype.unify env) record_params
-                    (Ctype.instance_list ty_list);
-                  let lds_and_types =
-                    List.map2 (fun lbl (_params, ty) -> lbl, ty)
-                      lbl_list (label_params_and_types |> Array.to_list)
-                  in
-                  (match
-                     Typedecl.update_record_representation env Location.none
-                       Legacy ~old_repres lds_and_types ~why:Field_projection
-                   with
-                   | Ok (_sorts, rep) -> rep
-                   | Error _ -> Misc.fatal_error "unrepresentable record")
-              | rep -> rep
+              | Record_undetermined ->
+                Option.map
+                  (fun l -> finalize (Record_variable l))
+                  (sorts_and_types ())
+              | Record_inlined (tag, Constructor_undetermined, vrep) ->
+                Option.map
+                  (fun l ->
+                     finalize
+                       (Record_inlined (tag, Constructor_variable l, vrep)))
+                  (sorts_and_types ())
+              | _ -> Some rep
             in
+            match rep with
+            | None -> Oval_stuff "<abstr>"
+            | Some rep ->
             let pos =
               match rep with
               | Record_inlined (_, _, Variant_extensible) -> 1
@@ -765,7 +785,9 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                     else Outval_record_boxed
               | Record_dummy _ ->
                   Misc.fatal_error "dummy record representation"
-              | Record_variable | Record_inlined (_, Constructor_variable, _) ->
+              | Record_undetermined | Record_variable _
+              | Record_inlined (_, (Constructor_undetermined
+                                   | Constructor_variable _), _) ->
                   Misc.fatal_error "variable record representation"
             in
             tree_of_record_fields depth
@@ -776,7 +798,7 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
           lbl_list pos obj rep =
         let rec tree_of_fields first pos = function
           | [] -> []
-          | {ld_id; ld_type; ld_sort} :: remainder ->
+          | {ld_id; ld_type; ld_sort; ld_ghost} :: remainder ->
               let ty_arg = instantiate_type env type_params ty_list ld_type in
               let name = Ident.name ld_id in
               (* PR#5722: print full module path only
@@ -790,7 +812,9 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                 if first then tree_of_label env path name
                 else tree_of_name name
               and v =
-                if is_void then Oval_stuff "<void>"
+                (* A ghost field has no slot to read. *)
+                if ld_ghost then Oval_stuff "<ghost>"
+                else if is_void then Oval_stuff "<void>"
                 else match rep with
                   | Outval_record_unboxed -> tree_of_val (depth - 1) obj ty_arg
                   | Outval_record_boxed ->
@@ -808,8 +832,8 @@ module Make(O : OBJ)(EVP : EVALPATH with type valu = O.t) = struct
                         | Float_boxed | Float64 ->
                             `Continue (O.repr (O.double_field obj pos))
                         | Float32 | Bits8 | Bits16 | Untagged_immediate
-                        | Bits32 | Bits64 | Vec128 | Vec256 | Vec512 | Word
-                        | Product _ ->
+                        | Bits32 | Bits64 | Vec128 | Vec256 | Vec512 | Mask
+                        | Word | Product _ ->
                             `Stop (Oval_stuff "<abstr>")
                         | Void ->
                             `Stop (Oval_stuff "<void>")

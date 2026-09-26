@@ -43,6 +43,8 @@ val tsl_ast_of_test_trees :
 
 val tests_in_tree : Tsl_ast.t -> Tests.TestSet.t
 
+val tests_in_tree_strict : Tsl_ast.t -> Tests.TestSet.t
+
 val actions_in_test : Tests.t -> Actions.ActionSet.t
 
 val actions_in_tests : Tests.TestSet.t -> Actions.ActionSet.t

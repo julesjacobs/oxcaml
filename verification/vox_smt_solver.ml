@@ -1,0 +1,522 @@
+open Vox_smt
+
+type config =
+  { executable : string;
+    timeout_ms : int
+  }
+
+let default_config = { executable = "z3"; timeout_ms = 5000 }
+
+external monotonic_time : unit -> float = "caml_vox_smt_monotonic_time"
+
+type result =
+  { validity : validity;
+    stderr : string;
+    resources : int option;
+    encoding_seconds : float;
+    solving_seconds : float
+  }
+
+exception Cancelled
+
+exception Deadline
+
+exception Protocol_error of string
+
+exception Callback_error of exn * Printexc.raw_backtrace
+
+let callback f x =
+  try f x
+  with exn -> raise (Callback_error (exn, Printexc.get_raw_backtrace ()))
+
+let protocol message = raise (Protocol_error message)
+
+type sexp =
+  | Atom of string
+  | String of string
+  | List of sexp list
+
+let parse text =
+  let pos = ref 0 and len = String.length text in
+  let rec space () =
+    if !pos < len
+    then
+      match text.[!pos] with
+      | ' ' | '\t' | '\r' | '\n' ->
+        incr pos;
+        space ()
+      | ';' ->
+        while !pos < len && text.[!pos] <> '\n' do
+          incr pos
+        done;
+        space ()
+      | _ -> ()
+  in
+  let rec value depth =
+    if depth > 256 then protocol "Solver response is nested too deeply";
+    space ();
+    if !pos = len then protocol "Incomplete solver response";
+    match text.[!pos] with
+    | '(' ->
+      incr pos;
+      List (items (depth + 1) [])
+    | ')' -> protocol "Unexpected ')' in solver response"
+    | '"' ->
+      incr pos;
+      let b = Buffer.create 32 in
+      let rec quoted () =
+        if !pos = len then protocol "Unterminated solver string";
+        let c = text.[!pos] in
+        incr pos;
+        if c = '"'
+        then
+          if !pos < len && text.[!pos] = '"'
+          then (
+            incr pos;
+            Buffer.add_char b c;
+            quoted ())
+          else String (Buffer.contents b)
+        else (
+          Buffer.add_char b c;
+          quoted ())
+      in
+      quoted ()
+    | _ ->
+      let start = !pos in
+      while
+        !pos < len
+        && not
+             (List.mem text.[!pos] [' '; '\t'; '\r'; '\n'; '('; ')'; ';'; '"'])
+      do
+        incr pos
+      done;
+      Atom (String.sub text start (!pos - start))
+  and items depth acc =
+    space ();
+    if !pos = len then protocol "Unterminated solver list";
+    if text.[!pos] = ')'
+    then (
+      incr pos;
+      List.rev acc)
+    else
+      let x = value depth in
+      items depth (x :: acc)
+  in
+  let rec all acc =
+    space ();
+    if !pos = len
+    then List.rev acc
+    else
+      let x = value 0 in
+      all (x :: acc)
+  in
+  all []
+
+let model symbols response =
+  let integer = function
+    | Atom digits -> Int64.of_string_opt digits
+    | List [Atom "-"; Atom digits] ->
+      Option.map Int64.neg (Int64.of_string_opt digits)
+    | _ -> None
+  in
+  let machine_integer = function
+    | Atom bits when String.starts_with ~prefix:"#b" bits ->
+      if String.length bits <> 65
+      then None
+      else
+        Option.map
+          (fun n -> Int64.shift_right (Int64.shift_left n 1) 1)
+          (Int64.of_string_opt ("0b" ^ String.sub bits 2 63))
+    | List [Atom "_"; Atom bits; Atom "63"]
+      when String.starts_with ~prefix:"bv" bits ->
+      Option.bind
+        (Int64.of_string_opt (String.sub bits 2 (String.length bits - 2)))
+        (fun n ->
+          if n < 0L
+          then None
+          else Some (Int64.shift_right (Int64.shift_left n 1) 1))
+    | value -> integer value
+  in
+  let value symbol sexp =
+    match Symbol.sort symbol, sexp with
+    | Bool, Atom "true" -> Some (Bool_value true)
+    | Bool, Atom "false" -> Some (Bool_value false)
+    | Int, Atom digits when decimal_integer digits && digits.[0] <> '-' ->
+      Some (Bigint_value digits)
+    | Int, List [Atom "-"; Atom digits]
+      when decimal_integer digits && digits.[0] <> '-' ->
+      Some (Bigint_value (if digits = "0" then "0" else "-" ^ digits))
+    | Int63, sexp ->
+      Option.bind (machine_integer sexp) (fun n ->
+          if n < -4611686018427387904L || n > 4611686018427387903L
+          then None
+          else Some (Int_value n))
+    | (Opaque _ | Datatype _), _ -> None
+    | _ -> None
+  in
+  let rec bindings i acc symbols entries =
+    match symbols, entries with
+    | [], [] -> Some (List.rev acc)
+    | s :: ss, List [Atom name; v] :: vs when name = "v" ^ string_of_int i ->
+      Option.bind (value s v) (fun v -> bindings (i + 1) ((s, v) :: acc) ss vs)
+    | _ -> None
+  in
+  match response with
+  | List entries -> bindings 0 [] symbols entries
+  | _ -> None
+
+let interpret symbols status response =
+  match status, response with
+  | "unsat", [] -> Valid
+  | "sat", [] -> Invalid (if symbols = [] then Some [] else None)
+  | "sat", [List [Atom "error"; String _]] -> Invalid None
+  | "sat", [(List entries as values)]
+    when List.for_all (function List [Atom _; _] -> true | _ -> false) entries
+    ->
+    Invalid (model symbols values)
+  | "unknown", [] -> Unknown None
+  | "unknown", [List [Atom ":reason-unknown"; String reason]] ->
+    if reason = "timeout" then Timeout else Unknown (Some reason)
+  | "unknown", [List [Atom "error"; String _]] -> Unknown None
+  | _ -> protocol "Unexpected solver response"
+
+let rec waitpid flags pid =
+  try Unix.waitpid flags pid
+  with Unix.Unix_error (Unix.EINTR, _, _) -> waitpid flags pid
+
+type connection =
+  { pid : int;
+    input : Unix.file_descr;
+    output : Unix.file_descr;
+    errors : Unix.file_descr
+  }
+
+type session = { mutable connection : connection option }
+
+let dispose connection =
+  (try Unix.kill connection.pid Sys.sigkill with Unix.Unix_error _ -> ());
+  ignore (waitpid [] connection.pid);
+  List.iter
+    (fun fd -> try Unix.close fd with Unix.Unix_error _ -> ())
+    [connection.input; connection.output; connection.errors]
+
+let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
+    ?(cancelled = fun () -> false) ?resource_limit ~int_width q =
+  if config.timeout_ms <= 0 then invalid_arg "Vox_smt_solver: timeout_ms";
+  let keep = ref false in
+  let started = monotonic_time () in
+  let deadline = started +. (float config.timeout_ms /. 1000.) in
+  let encoded = ref started and resources = ref None in
+  let stderr = Buffer.create 128 in
+  let descriptors = ref [] and child = ref None and exit_status = ref None in
+  let stderr_fd = ref None in
+  let output_limit = 4 * 1024 * 1024 in
+  let close fd =
+    descriptors := List.filter (( <> ) fd) !descriptors;
+    try Unix.close fd with Unix.Unix_error _ -> ()
+  in
+  let pipe () =
+    let r, w = Unix.pipe ~cloexec:true () in
+    descriptors := r :: w :: !descriptors;
+    r, w
+  in
+  let cleanup () =
+    if not !keep
+    then begin
+      Option.iter dispose session.connection;
+      session.connection <- None;
+      (match !child, !exit_status with
+      | Some pid, None ->
+        (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+        ignore (waitpid [] pid)
+      | _ -> ());
+      (match !stderr_fd with
+      | Some fd when List.mem fd !descriptors ->
+        let bytes = Bytes.create 4096 in
+        let rec drain () =
+          let remaining = output_limit - Buffer.length stderr in
+          if remaining > 0
+          then
+            match Unix.read fd bytes 0 (min remaining (Bytes.length bytes)) with
+            | 0 -> ()
+            | n ->
+              Buffer.add_subbytes stderr bytes 0 n;
+              drain ()
+            | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain ()
+            | exception Unix.Unix_error _ -> ()
+        in
+        drain ()
+      | _ -> ());
+      List.iter close !descriptors
+    end
+  in
+  let poll () =
+    if callback cancelled () then raise Cancelled;
+    let remaining = deadline -. monotonic_time () in
+    if remaining <= 0. then raise Deadline;
+    min remaining 0.02
+  in
+  let bounded_add b s =
+    let remaining = output_limit - Buffer.length b in
+    Buffer.add_substring b s 0 (min remaining (String.length s));
+    if String.length s > remaining then protocol "Solver output exceeds 4 MiB"
+  in
+  let run () =
+    ignore (poll ());
+    let input =
+      to_smtlib
+        ~poll:(fun () -> ignore (poll ()))
+        ?resource_limit ~int_width ~timeout_ms:config.timeout_ms q
+    in
+    encoded := monotonic_time ();
+    (* Each query starts from a reset solver, so its result and resource count
+       do not depend on the queries before it. The session keeps the logic it
+       has always used. *)
+    let input =
+      "(reset)\n"
+      ^ String.concat "\n"
+          (List.map
+             (fun line ->
+               if String.starts_with ~prefix:"(set-logic " line
+               then "(set-logic ALL)"
+               else line)
+             (String.split_on_char '\n' input))
+    in
+    ignore (poll ());
+    let connection =
+      match session.connection with
+      | Some connection ->
+        session.connection <- None;
+        descriptors := [connection.input; connection.output; connection.errors];
+        connection
+      | None ->
+        let stdin_r, stdin_w = pipe () in
+        let stdout_r, stdout_w = pipe () in
+        let stderr_r, stderr_w = pipe () in
+        let pid =
+          Unix.create_process config.executable
+            [| config.executable; "-in"; "-smt2" |]
+            stdin_r stdout_w stderr_w
+        in
+        child := Some pid;
+        List.iter close [stdin_r; stdout_w; stderr_w];
+        List.iter Unix.set_nonblock [stdin_w; stdout_r; stderr_r];
+        { pid; input = stdin_w; output = stdout_r; errors = stderr_r }
+    in
+    let { pid; input = stdin_w; output = stdout_r; errors = stderr_r } =
+      connection
+    in
+    child := Some pid;
+    stderr_fd := Some stderr_r;
+    let pending = ref input and offset = ref 0 in
+    let status = ref None and first_line = Buffer.create 16 in
+    let response = Buffer.create 128 in
+    let complete = ref false and response_line = Buffer.create 128 in
+    let rec response_output s =
+      match String.index_opt s '\n' with
+      | None -> bounded_add response_line s
+      | Some end_line ->
+        bounded_add response_line (String.sub s 0 end_line);
+        let line = Buffer.contents response_line in
+        Buffer.clear response_line;
+        if line = "vox-query-done"
+        then complete := true
+        else bounded_add response (line ^ "\n");
+        let tail =
+          String.sub s (end_line + 1) (String.length s - end_line - 1)
+        in
+        if !complete && tail <> "" then protocol "Output after query terminator";
+        if tail <> "" then response_output tail
+    in
+    let rec output s =
+      match !status with
+      | Some _ -> response_output s
+      | None -> (
+        match String.index_opt s '\n' with
+        | None -> bounded_add first_line s
+        | Some end_line ->
+          bounded_add first_line (String.sub s 0 end_line);
+          let answer = String.trim (Buffer.contents first_line) in
+          let tail =
+            String.sub s (end_line + 1) (String.length s - end_line - 1)
+          in
+          Buffer.clear first_line;
+          if answer = ""
+          then output tail
+          else begin
+            let followup =
+              match answer with
+              | "unsat" -> ""
+              | "sat" ->
+                if q.symbols = []
+                then ""
+                else
+                  "(get-value ("
+                  ^ String.concat " "
+                      (List.mapi (fun i _ -> "v" ^ string_of_int i) q.symbols)
+                  ^ "))\n"
+              | "unknown" -> "(get-info :reason-unknown)\n"
+              | _ ->
+                protocol
+                  (Printf.sprintf "Expected sat, unsat or unknown; got %S"
+                     (String.sub answer 0 (min 200 (String.length answer))))
+            in
+            status := Some answer;
+            pending
+              := !pending ^ followup
+                 ^ "(get-info :rlimit)\n(echo \"vox-query-done\")\n";
+            response_output tail
+          end)
+    in
+    let readers = ref [stdout_r; stderr_r] and stdin_open = ref true in
+    let bytes = Bytes.create 4096 in
+    let read fd =
+      match Unix.read fd bytes 0 (Bytes.length bytes) with
+      | 0 ->
+        readers := List.filter (( <> ) fd) !readers;
+        close fd;
+        if fd = stdout_r && !status = None && Buffer.length first_line > 0
+        then output "\n"
+      | n ->
+        let s = Bytes.sub_string bytes 0 n in
+        if fd = stdout_r then output s else bounded_add stderr s
+      | exception
+          Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _)
+        ->
+        ()
+    in
+    while (not !complete) && (!exit_status = None || !readers <> []) do
+      let timeout = poll () in
+      let writes =
+        if !stdin_open && !offset < String.length !pending
+        then [stdin_w]
+        else []
+      in
+      let ready, writable, _ =
+        try Unix.select !readers writes [] timeout
+        with Unix.Unix_error (Unix.EINTR, _, _) -> [], [], []
+      in
+      List.iter read ready;
+      List.iter
+        (fun fd ->
+          try
+            let n =
+              Unix.write_substring fd !pending !offset
+                (min 4096 (String.length !pending - !offset))
+            in
+            let sent = String.sub !pending !offset n in
+            offset := !offset + n;
+            callback dump sent
+          with
+          | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _)
+            ->
+            ()
+          | Unix.Unix_error (Unix.EPIPE, _, _) ->
+            close stdin_w;
+            stdin_open := false)
+        writable;
+      if !exit_status = None
+      then
+        match waitpid [Unix.WNOHANG] pid with
+        | 0, _ -> ()
+        | _, status -> exit_status := Some status
+    done;
+    match !exit_status, !status with
+    | None, Some answer when !complete ->
+      let rec drain_errors () =
+        match Unix.read stderr_r bytes 0 (Bytes.length bytes) with
+        | 0 -> ()
+        | n ->
+          bounded_add stderr (Bytes.sub_string bytes 0 n);
+          drain_errors ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> drain_errors ()
+        | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+          ()
+      in
+      drain_errors ();
+      if !offset <> String.length !pending
+      then protocol "Incomplete query write";
+      ignore (poll ());
+      (* The resource count restarts at each reset. *)
+      let response =
+        match List.rev (parse (Buffer.contents response)) with
+        | List [Atom ":rlimit"; Atom count] :: rest -> (
+          match int_of_string_opt count with
+          | Some count when count >= 0 ->
+            resources := Some count;
+            List.rev rest
+          | _ -> protocol "Unexpected solver resource count")
+        | Atom "unsupported" :: rest -> List.rev rest
+        | response -> List.rev response
+      in
+      let result = interpret q.symbols answer response in
+      ignore (poll ());
+      (match result with
+      | Timeout | Failure _ -> ()
+      | Valid | Invalid _ | Unknown _ ->
+        session.connection <- Some connection;
+        keep := true);
+      result
+    | Some (Unix.WEXITED 0), _ ->
+      protocol "Solver exited without completing the query"
+    | Some (Unix.WEXITED code), _ ->
+      protocol (Printf.sprintf "Solver exited with status %d" code)
+    | Some (Unix.WSIGNALED signal | Unix.WSTOPPED signal), _ ->
+      protocol (Printf.sprintf "Solver terminated by signal %d" signal)
+    | None, _ -> protocol "Solver was not reaped"
+  in
+  let previous_sigpipe = Sys.signal Sys.sigpipe Sys.Signal_ignore in
+  let validity =
+    match
+      Fun.protect
+        ~finally:(fun () ->
+          Fun.protect
+            ~finally:(fun () -> Sys.set_signal Sys.sigpipe previous_sigpipe)
+            cleanup)
+        (fun () ->
+          try run () with
+          | Deadline -> Timeout
+          | Protocol_error message -> Failure message
+          | Unix.Unix_error (Unix.ENOENT, "create_process", _) ->
+            Failure
+              (Printf.sprintf
+                 "Cannot execute %S: install Z3 4.16.0 or set the solver \
+                  executable"
+                 config.executable)
+          | Unix.Unix_error (error, call, _) ->
+            Failure (Printf.sprintf "%s: %s" call (Unix.error_message error)))
+    with
+    | validity -> validity
+    | exception Callback_error (exn, backtrace) ->
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  let finished = monotonic_time () in
+  { validity;
+    stderr = Buffer.contents stderr;
+    resources = !resources;
+    encoding_seconds = !encoded -. started;
+    solving_seconds = finished -. !encoded
+  }
+
+let with_session ?config ?dump ?cancelled ~int_width f =
+  let session = { connection = None } in
+  let closed = ref false and busy = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      closed := true;
+      Option.iter dispose session.connection;
+      session.connection <- None)
+    (fun () ->
+      f (fun ?resource_limit query ->
+          if !closed then invalid_arg "Vox_smt_solver: closed session";
+          if !busy then invalid_arg "Vox_smt_solver: recursive session query";
+          busy := true;
+          Fun.protect
+            ~finally:(fun () -> busy := false)
+            (fun () ->
+              check_impl session ?config ?dump ?cancelled ?resource_limit
+                ~int_width query)))
+
+let check ?config ?dump ?cancelled ?resource_limit ~int_width query =
+  with_session ?config ?dump ?cancelled ~int_width (fun check ->
+      check ?resource_limit query)

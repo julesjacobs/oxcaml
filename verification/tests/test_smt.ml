@@ -1,0 +1,573 @@
+open Vox_smt
+
+let query ?(datatypes = []) ?(symbols = []) ?(functions = []) ?(facts = []) term
+    =
+  { datatypes; symbols; functions; facts; goal = { label = "goal"; term } }
+
+let app op args = App (op, args)
+
+let integer n = Integer (Int64.of_int n)
+
+let serialize q = to_smtlib ~int_width:63 ~timeout_ms:5000 q
+
+let sort_error q =
+  match serialize q with
+  | _ -> failwith "Expected sort error"
+  | exception Sort_error _ -> ()
+
+let () =
+  let x = Symbol.create ~label:"x" Int63 in
+  let b = Symbol.create ~label:"b" Bool in
+  let f = Function.create ~label:"f" ~arguments:[Int63] ~result:Bool in
+  let n = integer 0 and p = Boolean true in
+  List.iter
+    (fun (term, expected) ->
+      assert (term_sort term = expected);
+      let witness =
+        match expected with
+        | Bool -> p
+        | Int63 -> n
+        | Int -> Big_integer "0"
+        | Opaque _ -> assert false
+        | Datatype _ -> assert false
+      in
+      check ~int_width:63
+        (query ~symbols:[x; b] ~functions:[f] (app Eq [term; witness])))
+    [ p, Bool;
+      n, Int63;
+      Var x, Int63;
+      Var b, Bool;
+      Call (f, [n]), Bool;
+      app Add [n; n], Int63;
+      app Sub [n; n], Int63;
+      app Mul [n; n], Int63;
+      app Div [n; n], Int63;
+      app Rem [n; n], Int63;
+      app Neg [n], Int63;
+      app Bit_and [n; n], Int63;
+      app Bit_or [n; n], Int63;
+      app Bit_xor [n; n], Int63;
+      app Shift_right_logical [n; n], Int63;
+      app Eq [n; n], Bool;
+      app Ne [p; p], Bool;
+      app Lt [n; n], Bool;
+      app Le [n; n], Bool;
+      app Gt [n; n], Bool;
+      app Ge [n; n], Bool;
+      app Not [p], Bool;
+      app And [p; p], Bool;
+      app Or [p; p], Bool;
+      app Implies [p; p], Bool;
+      app Ite [p; app Ite [p; n; n]; n], Int63;
+      app Ite [p; p; p], Bool ];
+  sort_error (query (app Eq [Var x; n]));
+  sort_error (query (Call (f, [n])))
+
+let () =
+  let z = Big_integer "123456789012345678901234567890" in
+  List.iter
+    (fun op -> check ~int_width:63 (query (app Eq [app op [z; z]; z])))
+    [Int_add; Int_sub; Int_mul; Int_div; Int_mod];
+  List.iter
+    (fun op -> check ~int_width:63 (query (app op [z; z])))
+    [Int_lt; Int_le; Int_gt; Int_ge];
+  check ~int_width:63 (query (app Eq [app Int_neg [z]; z]));
+  check ~int_width:63
+    (query (app Eq [app Int_of_int63 [integer (-1)]; Big_integer "-1"]));
+  List.iter
+    (fun text -> sort_error (query (app Eq [Big_integer text; z])))
+    [""; "-"; "+1"; "00"; "-0"; "1_000"; "1) (assert false)"];
+  sort_error (query (app Eq [app Int_add [z; integer 1]; z]));
+  sort_error (query (app Eq [app Add [z; z]; integer 0]));
+  sort_error (query (app Eq [app Int_of_int63 [z]; z]));
+  assert (
+    List.mem "(set-logic ALL)"
+      (String.split_on_char '\n' (serialize (query (app Eq [z; z])))))
+
+let () =
+  let x = Symbol.create ~label:"x" Int63 in
+  let b = Symbol.create ~label:"x" Bool in
+  let f =
+    Function.create ~label:"v0) (assert false)" ~arguments:[Int63] ~result:Int63
+  in
+  let call = Call (f, [integer 0]) in
+  sort_error (query (app Eq [call; call]));
+  sort_error (query ~functions:[f; f] (Boolean true));
+  sort_error (query ~functions:[f] (app Eq [Call (f, []); call]));
+  sort_error (query ~functions:[f] (app Eq [Call (f, [Boolean true]); call]));
+  assert (
+    serialize (query ~functions:[f] (app Eq [call; call]))
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
+       (set-logic QF_UFLIA)\n\
+       (declare-fun f0 (Int) Int)\n\
+       (assert (and (<= (- 4611686018427387904) (f0 0)) (<= (f0 0) \
+       4611686018427387903)))\n\
+       (assert (not (= (f0 0) (f0 0))))\n\
+       (check-sat)\n");
+  let bad_arity =
+    [ Add;
+      Sub;
+      Mul;
+      Div;
+      Rem;
+      Bit_and;
+      Bit_or;
+      Bit_xor;
+      Shift_right_logical;
+      Neg;
+      Eq;
+      Ne;
+      Lt;
+      Le;
+      Gt;
+      Ge;
+      Not;
+      And;
+      Or;
+      Implies;
+      Ite ]
+  in
+  List.iter (fun op -> sort_error (query (app op []))) bad_arity;
+  List.iter sort_error
+    [ query (Var x);
+      query ~symbols:[x; x] (Boolean true);
+      query (integer 0);
+      query ~facts:[{ label = "bad fact"; term = integer 0 }] (Boolean true);
+      query (app Eq [Boolean false; integer 0]);
+      query (app Lt [Boolean false; Boolean true]);
+      query (app And [integer 0; integer 1]);
+      query (app Eq [Integer Int64.min_int; integer 0]);
+      query (app Eq [Integer Int64.max_int; integer 0]);
+      query (app Ite [integer 0; Boolean false; Boolean true]);
+      query (app Ite [Boolean true; integer 0; Boolean true]) ];
+  (match to_smtlib ~int_width:31 ~timeout_ms:1 (query (Boolean true)) with
+  | _ -> failwith "Expected unsupported target"
+  | exception Unsupported_target 31 -> ());
+  (match
+     serialize
+       (query
+          ~facts:[{ label = "source fact"; term = integer 0 }]
+          (Boolean true))
+   with
+  | _ -> failwith "Expected labelled sort error"
+  | exception Sort_error message ->
+    assert (String.starts_with ~prefix:"source fact:" message));
+  let collision_query () =
+    let a = Symbol.create ~label:"v0) (assert false) ;" Int63 in
+    let b = Symbol.create ~label:"v0) (assert false) ;" Int63 in
+    query ~symbols:[a; b] (app Eq [Var a; Var b])
+  in
+  let serialized = serialize (collision_query ()) in
+  assert (serialized = serialize (collision_query ()));
+  assert (
+    serialized
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
+       (set-logic QF_LIA)\n\
+       (declare-fun v0 () Int)\n\
+       (declare-fun v1 () Int)\n\
+       (assert (and (<= (- 4611686018427387904) v0) (<= v0 \
+       4611686018427387903)))\n\
+       (assert (and (<= (- 4611686018427387904) v1) (<= v1 \
+       4611686018427387903)))\n\
+       (assert (not (= v0 v1)))\n\
+       (check-sat)\n");
+  ignore
+    (serialize
+       (query ~symbols:[x; b]
+          (app Eq [Var x; app Ite [Var b; integer 0; integer (-1)]])))
+
+let () =
+  let x = Symbol.create ~label:"x" Int63 in
+  let product = app Mul [Var x; integer 2] in
+  let serialized =
+    serialize
+      (query ~symbols:[x]
+         ~facts:[{ label = "same product"; term = app Eq [product; product] }]
+         (app Eq [product; product]))
+  in
+  assert (
+    serialized
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
+       (set-logic QF_UFLIA)\n\
+       (declare-fun int63_mul (Int Int) Int)\n\
+       (declare-fun v0 () Int)\n\
+       (assert (and (<= (- 4611686018427387904) v0) (<= v0 \
+       4611686018427387903)))\n\
+       (assert (and (<= (- 4611686018427387904) (int63_mul v0 2)) (<= \
+       (int63_mul v0 2) 4611686018427387903)))\n\
+       (assert (= (int63_mul v0 2) (- (mod (+ (* 2 v0) 4611686018427387904) \
+       9223372036854775808) 4611686018427387904)))\n\
+       (assert (= (int63_mul v0 2) (int63_mul v0 2)))\n\
+       (assert (not (= (int63_mul v0 2) (int63_mul v0 2))))\n\
+       (check-sat)\n")
+
+let () =
+  let a = Symbol.create ~label:"a" (Opaque 41) in
+  let b = Symbol.create ~label:"b" (Opaque 41) in
+  let other = Symbol.create ~label:"other" (Opaque 42) in
+  assert (
+    serialize (query ~symbols:[a; b] (app Eq [Var a; Var b]))
+    = "(set-option :print-success false)\n\
+       (set-option :produce-models true)\n\
+       (set-option :timeout 5000)\n\
+       (set-option :rlimit 0)\n\
+       (set-logic ALL)\n\
+       (declare-sort s0 0)\n\
+       (declare-fun v0 () s0)\n\
+       (declare-fun v1 () s0)\n\
+       (assert (not (= v0 v1)))\n\
+       (check-sat)\n");
+  sort_error (query ~symbols:[a; other] (app Eq [Var a; Var other]))
+
+let () =
+  let tree = Datatype.create ~label:"tree" in
+  let leaf = Constructor.create ~datatype:tree ~label:"Leaf" ["value", Int63] in
+  let node =
+    Constructor.create ~datatype:tree ~label:"Node"
+      ["left", Datatype tree; "right", Datatype tree]
+  in
+  let declaration = { datatype = tree; constructors = [leaf; node] } in
+  let one = Construct (leaf, [integer 1]) in
+  let two = Construct (leaf, [integer 2]) in
+  let pair = Construct (node, [one; two]) in
+  check ~int_width:63
+    (query ~datatypes:[declaration]
+       (app And [Is (node, pair); app Eq [Select (node, 0, pair); one]]));
+  sort_error (query (app Eq [one; one]));
+  sort_error
+    (query ~datatypes:[declaration] (app Eq [Construct (leaf, []); one]));
+  (match term_sort (Select (leaf, -1, one)) with
+  | _ -> failwith "Expected sort error"
+  | exception Sort_error _ -> ());
+  sort_error (query ~datatypes:[declaration] (Select (leaf, -1, one)));
+  let actual =
+    serialize
+      (query ~datatypes:[declaration]
+         (app Eq [Select (leaf, 0, one); integer 1]))
+  in
+  let expected =
+    "(set-option :print-success false)\n\
+     (set-option :produce-models true)\n\
+     (set-option :timeout 5000)\n\
+     (set-option :rlimit 0)\n\
+     (set-logic ALL)\n\
+     (declare-datatypes ((d0 0)) (((c0 (p0 Int)) (c1 (p1 d0) (p2 d0)))))\n\
+     (assert (and (<= (- 4611686018427387904) (p0 (c0 1))) (<= (p0 (c0 1)) \
+     4611686018427387903)))\n\
+     (assert (not (= (p0 (c0 1)) 1)))\n\
+     (check-sat)\n"
+  in
+  if actual <> expected then failwith actual
+
+let () =
+  let loop = Datatype.create ~label:"loop" in
+  let loop_constructor =
+    Constructor.create ~datatype:loop ~label:"Loop" ["rest", Datatype loop]
+  in
+  sort_error
+    (query
+       ~datatypes:[{ datatype = loop; constructors = [loop_constructor] }]
+       (Boolean true))
+
+let fake =
+  if Filename.is_relative Sys.argv.(1)
+  then Filename.concat (Sys.getcwd ()) Sys.argv.(1)
+  else Sys.argv.(1)
+
+let pid_file = Filename.temp_file "vox-smt-pid" ".txt"
+
+let reaped () =
+  let input = open_in pid_file in
+  let pid = int_of_string (input_line input) in
+  close_in input;
+  (match Unix.waitpid [Unix.WNOHANG] pid with
+  | _ -> failwith "Solver was not reaped"
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ());
+  match Unix.kill pid 0 with
+  | () -> failwith "Solver is still running"
+  | exception Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+
+let config timeout_ms = { Vox_smt_solver.executable = fake; timeout_ms }
+
+let run ?(timeout_ms = 2000) ?dump mode q =
+  Unix.putenv "VOX_FAKE_MODE" mode;
+  let r =
+    Vox_smt_solver.check ~config:(config timeout_ms) ?dump ~int_width:63 q
+  in
+  reaped ();
+  assert (String.starts_with ~prefix:"fake solver started\n" r.stderr);
+  r
+
+let validity r = r.Vox_smt_solver.validity
+
+let is_failure = function Failure _ -> true | _ -> false
+
+let () =
+  Fun.protect
+    ~finally:(fun () -> Sys.remove pid_file)
+    (fun () ->
+      Unix.putenv "VOX_FAKE_PID" pid_file;
+      let q = query (Boolean true) in
+      let dump = Buffer.create 128 in
+      assert (
+        validity (run ~dump:(fun s -> Buffer.add_string dump s) "unsat" q)
+        = Valid);
+      assert (
+        Buffer.contents dump
+        = "(reset)\n"
+          ^ String.concat "\n"
+              (List.map
+                 (fun line ->
+                   if String.starts_with ~prefix:"(set-logic " line
+                   then "(set-logic ALL)"
+                   else line)
+                 (String.split_on_char '\n'
+                    (to_smtlib ~int_width:63 ~timeout_ms:2000 q)))
+          ^ "(get-info :rlimit)\n(echo \"vox-query-done\")\n");
+      let unsat = run "unsat" q in
+      assert (unsat.resources = Some 42);
+      assert ((run "no-resources" q).resources = None);
+      let x = Symbol.create ~label:"x" Int63 in
+      let sat = query ~symbols:[x] (app Eq [Var x; integer 0]) in
+      List.iter
+        (fun mode ->
+          assert (validity (run mode sat) = Invalid (Some [x, Int_value (-1L)])))
+        ["sat"; "decimal-model"];
+      List.iter
+        (fun mode -> assert (validity (run mode sat) = Invalid None))
+        [ "model-error";
+          "positive-out-of-range";
+          "negative-out-of-range";
+          "unparsed-model" ];
+      assert (validity (run "unknown" q) = Unknown (Some "incomplete"));
+      assert (validity (run "solver-timeout" q) = Timeout);
+      List.iter
+        (fun mode ->
+          if not (is_failure (validity (run mode sat)))
+          then failwith ("Expected protocol failure: " ^ mode))
+        [ "bad-status";
+          "bad-model";
+          "wrong-model-shape";
+          "deep-model";
+          "flat-model";
+          "unsat-junk";
+          "duplicate-status";
+          "early-exit";
+          "stdout-flood";
+          "signal" ];
+      let crash = run "crash" q in
+      assert (is_failure crash.validity);
+      assert (crash.stderr = "fake solver started\nsolver crashed\n");
+      let flood = run "stderr-flood" q in
+      assert (flood.validity = Valid && String.length flood.stderr = 100020);
+      List.iter
+        (fun mode ->
+          let start = Unix.gettimeofday () in
+          assert (validity (run ~timeout_ms:100 mode q) = Timeout);
+          assert (Unix.gettimeofday () -. start < 2.))
+        ["startup-hang"; "hang"; "unsat-hang"];
+      let large =
+        query
+          ~symbols:(List.init 10000 (fun _ -> Symbol.create ~label:"x" Int63))
+          (Boolean true)
+      in
+      assert (validity (run ~timeout_ms:100 "startup-hang" large) = Timeout);
+      assert (is_failure (validity (run "early-exit" large)));
+      Unix.putenv "VOX_FAKE_MODE" "hang";
+      let start = Unix.gettimeofday () in
+      (match
+         Vox_smt_solver.check ~config:(config 2000) ~int_width:63
+           ~cancelled:(fun () -> Unix.gettimeofday () -. start > 0.1)
+           q
+       with
+      | _ -> failwith "Expected cancellation"
+      | exception Vox_smt_solver.Cancelled -> reaped ());
+      let start = Unix.gettimeofday () in
+      (match
+         Vox_smt_solver.check ~config:(config 2000) ~int_width:63
+           ~cancelled:(fun () ->
+             if Unix.gettimeofday () -. start > 0.1 then raise Sys.Break;
+             false)
+           q
+       with
+      | _ -> failwith "Expected Sys.Break"
+      | exception Sys.Break -> reaped ());
+      let interrupted = ref false in
+      let previous =
+        Sys.signal Sys.sigint (Sys.Signal_handle (fun _ -> interrupted := true))
+      in
+      Fun.protect
+        ~finally:(fun () -> Sys.set_signal Sys.sigint previous)
+        (fun () ->
+          Unix.putenv "VOX_FAKE_MODE" "interrupt";
+          match
+            Vox_smt_solver.check ~config:(config 2000) ~int_width:63
+              ~cancelled:(fun () -> !interrupted)
+              q
+          with
+          | _ -> failwith "Expected interrupt"
+          | exception Vox_smt_solver.Cancelled -> reaped ());
+      (match
+         run
+           ~dump:(fun s ->
+             if String.starts_with ~prefix:"(get-info :rlimit)" s
+             then raise Exit)
+           "unsat" q
+       with
+      | _ -> failwith "Expected dump exception"
+      | exception Exit -> reaped ());
+      (match
+         run
+           ~dump:(fun s ->
+             if String.starts_with ~prefix:"(get-info :rlimit)" s
+             then raise (Unix.Unix_error (Unix.EPIPE, "callback", "")))
+           "unsat" q
+       with
+      | _ -> failwith "Expected callback Unix error"
+      | exception Unix.Unix_error (Unix.EPIPE, "callback", "") -> reaped ());
+      let available_fd () =
+        let fd = Unix.dup Unix.stdin in
+        Unix.close fd;
+        fd
+      in
+      let before = available_fd () in
+      for _ = 1 to 20 do
+        assert (validity (run "unsat" q) = Valid)
+      done;
+      assert (before = available_fd ());
+      let executable = Filename.temp_file "vox solver ;" ".exe" in
+      Sys.remove executable;
+      Unix.symlink fake executable;
+      Fun.protect
+        ~finally:(fun () -> Sys.remove executable)
+        (fun () ->
+          let config = { Vox_smt_solver.executable; timeout_ms = 2000 } in
+          assert (
+            validity (Vox_smt_solver.check ~config ~int_width:63 q) = Valid);
+          reaped ());
+      let read_pid () =
+        let input = open_in pid_file in
+        Fun.protect
+          ~finally:(fun () -> close_in input)
+          (fun () -> int_of_string (input_line input))
+      in
+      Unix.putenv "VOX_FAKE_MODE" "unsat";
+      Vox_smt_solver.with_session ~config:(config 2000) ~int_width:63
+        (fun check ->
+          assert ((check q).validity = Valid);
+          let pid = read_pid () in
+          let second = check q in
+          assert (second.validity = Valid && second.resources = Some 42);
+          assert (read_pid () = pid));
+      reaped ();
+      List.iter
+        (fun mode ->
+          Unix.putenv "VOX_FAKE_MODE" mode;
+          Vox_smt_solver.with_session ~config:(config 100) ~int_width:63
+            (fun check ->
+              let failed = check q in
+              assert (failed.validity = Timeout || is_failure failed.validity);
+              reaped ();
+              Unix.putenv "VOX_FAKE_MODE" "unsat";
+              assert ((check q).validity = Valid));
+          reaped ())
+        ["unsat-hang"; "unsat-junk"];
+      let cancelled = ref false in
+      Vox_smt_solver.with_session ~config:(config 2000) ~int_width:63
+        ~cancelled:(fun () -> !cancelled)
+        (fun check ->
+          assert ((check q).validity = Valid);
+          cancelled := true;
+          (match check q with
+          | _ -> failwith "Expected cancellation of an idle session"
+          | exception Vox_smt_solver.Cancelled -> reaped ());
+          cancelled := false;
+          assert ((check q).validity = Valid));
+      reaped ();
+      let missing =
+        { Vox_smt_solver.executable = pid_file ^ ".missing"; timeout_ms = 100 }
+      in
+      assert (
+        is_failure
+          (validity (Vox_smt_solver.check ~config:missing ~int_width:63 q)));
+      (match
+         Vox_smt_solver.check ~config:missing ~int_width:63 (query (integer 0))
+       with
+      | _ -> failwith "Sort checking must precede process startup"
+      | exception Sort_error _ -> ());
+      print_endline "SMT interface tests passed")
+
+let () =
+  let calls = ref 0 in
+  let q = query (app And [Boolean true; Boolean true]) in
+  let poll () =
+    incr calls;
+    if !calls = 3 then raise Exit
+  in
+  match to_smtlib ~poll ~int_width:63 ~timeout_ms:5000 q with
+  | _ -> failwith "Expected construction cancellation"
+  | exception Exit -> assert (!calls = 3)
+
+let () =
+  let calls = ref 0 in
+  let cancelled () =
+    incr calls;
+    if !calls = 3 then raise Exit;
+    false
+  in
+  let config =
+    { Vox_smt_solver.executable = "/no-such-vox-solver"; timeout_ms = 5000 }
+  in
+  match
+    Vox_smt_solver.check ~config ~cancelled ~int_width:63
+      (query (app And [Boolean true; Boolean true]))
+  with
+  | _ -> failwith "Expected cancellation before solver startup"
+  | exception Exit -> assert (!calls = 3)
+
+let () =
+  let x = Symbol.create ~label:"x" Int63 in
+  let q =
+    query ~symbols:[x]
+      ~facts:[{ label = "branch"; term = app Lt [Var x; integer 0] }]
+      (app Ge [Var x; integer 0])
+  in
+  assert (
+    explain_invalid q (Some [x, Int_value (-1L)])
+    = "Goal (goal): (x >= 0)\n\
+       Assumption (branch): (x < 0)\n\
+       Model: x = -1\n\
+       The solver found a model satisfying the assumptions and falsifying the \
+       goal.");
+  let f = Function.create ~label:"clamp" ~arguments:[Int63] ~result:Int63 in
+  let q = query ~functions:[f] (app Ge [Call (f, [integer 0]); integer 0]) in
+  assert (
+    explain_invalid q None
+    = "Goal (goal): (clamp(0) >= 0)\n\
+       The solver did not return printable model values.\n\
+       Opaque functions: clamp\n\
+       A model of opaque calls may indicate missing facts, not a runtime \
+       counterexample.\n\
+       The solver found a model satisfying the assumptions and falsifying the \
+       goal.")
+
+let () =
+  let left = Symbol.create ~label:"value" Int63 in
+  let right = Symbol.create ~label:"value" Int63 in
+  let q = query ~symbols:[left; right] (app Eq [Var left; Var right]) in
+  assert (
+    explain_invalid q (Some [left, Int_value 0L; right, Int_value 1L])
+    = "Goal (goal): (value[v0] = value[v1])\n\
+       Model: value[v0] = 0\n\
+       Model: value[v1] = 1\n\
+       The solver found a model satisfying the assumptions and falsifying the \
+       goal.")

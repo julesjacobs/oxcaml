@@ -276,7 +276,7 @@ let print_out_value ppf tree =
        fprintf ppf "@[<2>[|%a|]@]"
          (pp_print_seq ~pp_sep:semicolon pp_print_float)
          (Float.Array.to_seq arr)
-    | Oval_code e ->
+    | Oval_quote e ->
         deprecated_printer (fun fmt -> CamlinternalQuote.Code.print fmt e) ppf
     | tree -> fprintf ppf "@[<1>(%a)@]" (cautious print_tree_1) tree
   and print_fields first ppf =
@@ -389,9 +389,22 @@ and print_out_type_mode ~arg mode ppf ty =
 
 and print_out_type_1 ppf =
   function
-  | Otyp_arrow (lab, am, ty1, ty2) ->
+  | Otyp_arrow (lab, am, ty1, ty2, binder) ->
       pp_open_box ppf 0;
-      print_arg_label_and_out_type ppf lab ty1 ~print_type:(print_out_arg am);
+      begin match binder with
+      | None ->
+          print_arg_label_and_out_type ppf lab ty1
+            ~print_type:(print_out_arg am)
+      | Some binder ->
+          let modes =
+            List.filter
+              (fun mode ->
+                not (List.mem mode ["total"; "stateless"; "portable"]))
+              am
+          in
+          fprintf ppf "(%s : %a)%a" binder print_simple_out_type ty1
+            print_out_modes modes
+      end;
       pp_print_string ppf " ->";
       pp_print_space ppf ();
       print_out_ret ppf ty2;
@@ -440,6 +453,17 @@ and print_simple_out_type ppf =
   function
     Otyp_class (id, tyl) ->
       fprintf ppf "@[%a#%a@]" print_typargs tyl print_ident id
+  | Otyp_refine (binder, payload, predicate, type_overrides) ->
+      let type_overrides =
+        List.map
+          (fun (ty, printed) ->
+            ty, (fun ppf -> Format_doc.compat print_out_type ppf printed))
+          type_overrides
+      in
+      fprintf ppf "@[<hov 2>{%s : %a@ | %a}@]" binder
+        print_out_type payload
+        (Format_doc.deprecated
+           (Pprintast.expression_with_type_overrides type_overrides)) predicate
   | Otyp_constr (id, tyl) ->
       pp_open_box ppf 0;
       print_typargs ppf tyl;
@@ -494,6 +518,10 @@ and print_simple_out_type ppf =
   | Otyp_attribute (t, attr) ->
       fprintf ppf "@[<1>(%a [@@%s])@]"
         print_out_type_0 t attr.oattr_name
+  | Otyp_mod (t, []) -> print_simple_out_type ppf t
+  | Otyp_mod (t, modalities) ->
+      fprintf ppf "@[<1>(%a%a)@]"
+        print_out_type_0 t print_out_modalities modalities
   | Otyp_jkind_annot (t, jk) ->
     fprintf ppf "@[<1>(%a@ :@ %a)@]"
       print_out_type_0 t
@@ -944,8 +972,9 @@ and print_out_sig_item ppf =
            | Orec_next  -> "and")
           ppf td
   | Osig_value { oval_name; oval_type; oval_modalities;
-                 oval_prims; oval_attributes } ->
+                 oval_prims; oval_attributes; oval_poly } ->
       let kwd = if oval_prims = [] then "val" else "external" in
+      let poly = if oval_poly then "poly_ " else "" in
       let pr_prims ppf =
         function
           [] -> ()
@@ -953,7 +982,7 @@ and print_out_sig_item ppf =
             fprintf ppf "@ = \"%s\"" s;
             List.iter (fun s -> fprintf ppf "@ \"%s\"" s) sl
       in
-      fprintf ppf "@[<2>%s %a :@ %a%a%a%a@]" kwd value_ident oval_name
+      fprintf ppf "@[<2>%s %s%a :@ %a%a%a%a@]" kwd poly value_ident oval_name
         !out_type oval_type
         print_out_modalities oval_modalities
         pr_prims oval_prims
