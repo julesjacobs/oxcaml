@@ -18,8 +18,9 @@ val equal_range : (array : t) -> (value : int) ->
     && occurs array value = (first < past)
     && range_spec array value first past} @@ total
 
+(* Raises [Invalid_argument] if the result would be longer than an array
+   can be. *)
 val insert : (source : t) -> (value : int) ->
-  {u : unit | 0 < length source + 2} @ ghost ->
   {pair : int * t | match pair with position, result ->
     0 <= position && position <= length source
     && length result = length source + 1

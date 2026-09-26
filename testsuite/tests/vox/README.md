@@ -189,8 +189,9 @@ midpoints at an endpoint, premature termination, and division by zero.
 The algorithms and internal proofs are shared in `sorted_array_proofs.ml`.
 `sorted_array.mli` exposes an abstract sorted-array type implemented by
 `sorted_array.ml`. Construction starts from `empty`; insertion and removal
-preserve the hidden sortedness invariant. Callers supply bounds and capacity
-proofs where required, but never a sortedness proof. The interface exposes
+preserve the hidden sortedness invariant. `insert` raises `Invalid_argument`
+if the result would be longer than an array can be; `remove_at` takes a
+bounds proof. Callers never supply a sortedness proof. The interface exposes
 membership, range, and element-edit observations with lemmas for individual
 indices. Its total `at` observer returns zero outside the array.
 
