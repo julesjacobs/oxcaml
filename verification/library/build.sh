@@ -11,7 +11,7 @@ modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray
          vox_cdcl_proof vox_cdcl vox_cdcl_total_proof vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
          vox_merge_sort borrow borrow_iarray
-         pref ghost_pref vox_big_credits vox_ackermann
+         pref vox_pref_semantics ghost_pref vox_big_credits vox_ackermann
          vox_union_find_potential vox_union_find_levels vox_union_find_path_cost
          vox_union_find_model vox_union_find_forest vox_union_find_rank
          vox_union_find_mass vox_union_find_link vox_union_find_worker

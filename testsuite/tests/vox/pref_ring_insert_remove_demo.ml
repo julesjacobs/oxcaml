@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml pref_ring.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_heap.ml pref_ring_insert_remove.ml pref_ring_insert_remove_demo.ml";
+ all_modules = "pref.mli pref.ml pref_ring.mli pref_ring.ml pref_ring_proofs.ml pref_ring_checks.ml pref_ring_alloc.ml pref_ring_heap.ml pref_ring_insert_remove.ml pref_ring_insert_remove_demo.ml";
  { bytecode; }
  { native; }
 *)
@@ -11,17 +11,16 @@ open Pref_ring
 open Pref_ring_insert_remove
 
 let run_insert_remove_demo () =
-  let refine_ frame = Pref_ring_alloc.make_frame () in
+  let frame = Pref_ring_alloc.make_frame () in
   let unrelated = frame.value in
   let frame_token = frame.state in
   let u = () in
-  let frame_contents : {u : unit | H.mem (Pref.own frame_token) unrelated
-    && H.at (Pref.own frame_token) unrelated === Some None} = refine_ u in
-  let refine_ frame_contents = frame_contents in
-  let refine_ t = Pref.empty () in
+  let _frame_contents : {u : unit | H.mem (Pref.own frame_token) unrelated
+    && H.at (Pref.own frame_token) unrelated === Some 42} = u in
+  let t = Pref.empty () in
   let flag = true in
   let data = 0 in
-  let refine_ r = make_node flag data t in
+  let r = make_node flag data t in
   let s = r.node in
   let t = r.state in
   let flag = false in
@@ -31,8 +30,8 @@ let run_insert_remove_demo () =
     && H.mem (Pref.own t) s.prev
     && H.mem (Pref.own t) s.next
     && H.mem (Pref.own t) s.prev
-    && H.mem (Pref.own t) s.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s s s flag data t in
+    && H.mem (Pref.own t) s.next} = t in
+  let r = Pref_ring_alloc.extend s s s flag data t in
   let a = r.node in
   let t = r.state in
   let flag = false in
@@ -42,8 +41,8 @@ let run_insert_remove_demo () =
     && H.mem (Pref.own t) a.prev
     && H.mem (Pref.own t) a.next
     && H.mem (Pref.own t) s.prev
-    && H.mem (Pref.own t) s.next} = refine_ t in
-  let refine_ r = Pref_ring_alloc.extend s a s flag data t in
+    && H.mem (Pref.own t) s.next} = t in
+  let r = Pref_ring_alloc.extend s a s flag data t in
   let b = r.node in
   let t = r.state in
   let t : {t : node option Pref.token | true
@@ -79,15 +78,13 @@ let run_insert_remove_demo () =
       && not (a.prev === b.prev)
       && not (a.prev === b.next)
       && not (a.next === b.prev)
-      && not (a.next === b.next)} = refine_ t in
+      && not (a.next === b.next)} = t in
   insert_remove_demo s a b t;
 
-  let actual : {v : node option | v === None} =
+  let actual : {v : int | v = 42} =
     let borrowed = borrow_ frame_token in
-    let borrowed : {t : node option Pref.token | H.mem (Pref.own t) unrelated} = refine_
-        borrowed in
-    let refine_ actual = Pref.read unrelated borrowed in refine_ actual in
-  let refine_ actual = actual in
-  assert (actual = None)
+    let borrowed : {t : int Pref.token | H.mem (Pref.own t) unrelated} = borrowed in
+    let actual = Pref.read unrelated borrowed in actual in
+  assert (actual = 42)
 
 let () = run_insert_remove_demo ()

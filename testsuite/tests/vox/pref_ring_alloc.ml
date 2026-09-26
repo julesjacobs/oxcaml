@@ -1,4 +1,5 @@
 open Pref_ring
+open Pref_ring_proofs
 
 let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
     immutable ->
@@ -9,7 +10,7 @@ let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
     && H.mem (Pref.own t) y.next
     && H.mem (Pref.own t) z.prev
     && H.mem (Pref.own t) z.next}) @ unique ->
-  {r : created | let refine_ t = t in r.node.value = data
+  {r : created | let t = t in r.node.value = data
     && r.node.sentinel = flag
     && not (r.node.prev === r.node.next)
     && H.mem (Pref.own r.state) r.node.prev
@@ -41,15 +42,15 @@ let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
     && not (r.node.prev === z.next)
     && not (r.node.next === z.next)} @ unique =
   fun x y z flag data t ->
-  let refine_ t = t in
+  let t = t in
   let before = ghost_ (Pref.own (borrow_ t)) in
-  let refine_ r = make_node flag data t in
+  let r = make_node flag data t in
   let n = r.node in
   let state = r.state in
   let proof = ghost_ (
     let h : {h : node option Pref.heap | H.mem h x.prev && H.mem h x.next
-      && not (H.mem h n.prev) && not (H.mem h n.next)} = refine_ before in
-    let refine_ proof = allocation_frame n x h in
+      && not (H.mem h n.prev) && not (H.mem h n.next)} = before in
+    let proof = allocation_frame n x h in
     let result : {u : unit |
       H.mem (H.put (H.put (H.put (H.put before n.prev None) n.next None) n.prev
           (Some n)) n.next (Some n)) x.prev
@@ -61,12 +62,12 @@ let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
           n.prev (Some n)) n.next (Some n)) x.next === H.at before x.next
       && not (n.prev === x.prev) && not (n.prev === x.next)
       && not (n.next === x.prev)
-        && not (n.next === x.next)} = refine_ proof in result) in
-  let refine_ proof = proof in
+        && not (n.next === x.next)} = proof in result) in
+  let _proof = proof in
   let proof = ghost_ (
     let h : {h : node option Pref.heap | H.mem h y.prev && H.mem h y.next
-      && not (H.mem h n.prev) && not (H.mem h n.next)} = refine_ before in
-    let refine_ proof = allocation_frame n y h in
+      && not (H.mem h n.prev) && not (H.mem h n.next)} = before in
+    let proof = allocation_frame n y h in
     let result : {u : unit |
       H.mem (H.put (H.put (H.put (H.put before n.prev None) n.next None) n.prev
           (Some n)) n.next (Some n)) y.prev
@@ -78,12 +79,12 @@ let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
           n.prev (Some n)) n.next (Some n)) y.next === H.at before y.next
       && not (n.prev === y.prev) && not (n.prev === y.next)
       && not (n.next === y.prev)
-        && not (n.next === y.next)} = refine_ proof in result) in
-  let refine_ proof = proof in
+        && not (n.next === y.next)} = proof in result) in
+  let _proof = proof in
   let proof = ghost_ (
     let h : {h : node option Pref.heap | H.mem h z.prev && H.mem h z.next
-      && not (H.mem h n.prev) && not (H.mem h n.next)} = refine_ before in
-    let refine_ proof = allocation_frame n z h in
+      && not (H.mem h n.prev) && not (H.mem h n.next)} = before in
+    let proof = allocation_frame n z h in
     let result : {u : unit |
       H.mem (H.put (H.put (H.put (H.put before n.prev None) n.next None) n.prev
           (Some n)) n.next (Some n)) z.prev
@@ -95,15 +96,15 @@ let extend : (x : node) @ immutable -> (y : node) @ immutable -> (z : node) @
           n.prev (Some n)) n.next (Some n)) z.next === H.at before z.next
       && not (n.prev === z.prev) && not (n.prev === z.next)
       && not (n.next === z.prev)
-        && not (n.next === z.next)} = refine_ proof in result) in
-  let refine_ proof = proof in
+        && not (n.next === z.next)} = proof in result) in
+  let _proof = proof in
   let r = {node = n; state} in
-  refine_ r
+  r
 
-let make_frame () : {r : (node option Pref.t, node option) Pref.step |
+let make_frame () : {r : (int Pref.t, int) Pref.step |
     H.mem (Pref.own r.state) r.value
-    && H.at (Pref.own r.state) r.value === Some None} @ unique =
-  let refine_ t = Pref.empty () in
-  let v : node option = None in
-  let refine_ r = Pref.alloc v t in
-  refine_ r
+    && H.at (Pref.own r.state) r.value === Some 42} @ unique =
+  let t = Pref.empty () in
+  let v = 42 in
+  let r = Pref.alloc v t in
+  r
