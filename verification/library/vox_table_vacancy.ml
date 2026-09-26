@@ -27,13 +27,13 @@ module Make (Key : Vox_table_map.Key)
       (match entry with
        | Some (key, _) ->
          let (_ : {u : unit | 0 <= (Key.hash key land 127) &&
-           (Key.hash key land 127) <= 127}) = refine_ () in ()
+           (Key.hash key land 127) <= 127}) = () in ()
        | None -> ())
     | None -> ())
 
   let (route_here @ total) : ('a : immutable_data).
-      (model : (Key.t, 'a) M.state) @ immutable -> (key : Key.t) @ immutable ->
-      (value : 'a) @ immutable -> (rank : int) -> (group : int) ->
+      (model : (Key.t, 'a) M.state) @ immutable -> (key : Key.t) ->
+      (value : 'a) -> (rank : int) -> (group : int) ->
       (lane : int) -> (index : int) ->
       {u : unit | not (0 <= rank && rank < (model.capacity lsr 4) &&
         0 <= lane && lane < 16 && Read.I.group model.capacity (Key.hash key)
@@ -51,12 +51,12 @@ module Make (Key : Vox_table_map.Key)
     ())
 
   let rec scan : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
+      (query : Key.t) -> (value : 'a) @ ghost ->
       (capacity : {c : int | c = view.model.capacity}) ->
       (hash : {h : int | h = Key.hash query}) ->
-      (rank : {r : int | 0 <= r && r <= (view.model.capacity lsr 4)}) ->
+      (rank : {r : int | 0 <= r && r <= (view.model.capacity lsr 4)}) @ ghost ->
       (group : int) -> (step : int) ->
       (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
         table) === Some
@@ -71,46 +71,41 @@ module Make (Key : Vox_table_map.Key)
          Read.I.route view.model (Bigint.of_int r.#index)
            (Some (query, value)) r.#path} =
     fun table view query value capacity hash rank group step token ->
-      ghost_ (Read.I.valid_def view; Read.capacity_bounds view.model);
-      if rank = capacity lsr 4 then begin
-        ghost_ (Progress.not_exhausted view hash);
-        unreachable_ ()
+      ghost_ (Read.I.valid_def view; Read.capacity_bounds view.model;
+        Progress.not_exhausted view hash);
+      ghost_ (
+        Read.I.group_def capacity hash rank;
+        Read.group_in_shape view.model hash rank);
+      let snapshot = {T.model = view.model} in
+      let deleted = T.match16 table snapshot group 254 token in
+      let empty = T.match16 table snapshot group 128 token in
+      if deleted <> 0 || empty <> 0 then begin
+        let mask = if deleted <> 0 then deleted else empty in
+        let byte = if deleted <> 0 then 254 else 128 in
+        let lane = B.first mask in
+        let index = (group + lane) land (capacity - 1) in
+        ghost_ (
+          Read.I.wrap_def capacity (group + lane);
+          W.wrap_range capacity (group + lane);
+          Read.matching_control view.model group byte lane;
+          vacant view.model index byte;
+          route_here view.model query value rank group lane index);
+        #{index; byte; path = (rank, lane)}
       end else begin
         ghost_ (
-          Read.I.group_def capacity hash rank;
-          Read.group_in_shape view.model hash rank);
-        let snapshot = {T.model = view.model} in
-        let deleted = T.match16 table snapshot group 254 token in
-        let empty = T.match16 table snapshot group 128 token in
-        if deleted <> 0 || empty <> 0 then begin
-          let mask = if deleted <> 0 then deleted else empty in
-          let byte = if deleted <> 0 then 254 else 128 in
-          let lane = B.first (refine_ mask) in
-          let index = (group + lane) land (capacity - 1) in
-          ghost_ (
-            Read.I.wrap_def capacity (group + lane);
-            W.wrap_range capacity (group + lane);
-            Read.matching_control view.model group byte lane;
-            vacant view.model index byte;
-            route_here view.model query value rank group lane index);
-          #{index; byte; path = (rank, lane)}
-        end else begin
-          ghost_ (
-            Read.I.empty_free_def view.model hash (rank + 1);
-            Read.next_probe capacity hash rank group step);
-          scan table view query value capacity hash (rank + 1)
-            ((group + step) land (capacity - 1)) (step + 16) token
-        end
+          Read.I.empty_free_def view.model hash (rank + 1);
+          Read.next_probe capacity hash rank group step);
+        scan table view query value capacity hash (ghost_ (rank + 1))
+          ((group + step) land (capacity - 1)) (step + 16) token
       end
 
   let find_hashed : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
+      (query : Key.t) -> (value : 'a) @ ghost ->
       (hash : {h : int | h = Key.hash query}) ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) === Some
-        view.model})
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some view.model})
         @ local read ghost ->
       {r : found | 0 <= r.#index && r.#index < view.model.capacity &&
          (r.#byte = 128 || r.#byte = 254) &&
@@ -126,20 +121,5 @@ module Make (Key : Vox_table_map.Key)
       Read.I.empty_free_def view.model hash 0;
       Read.I.probe_def capacity hash 0; Read.I.wrap_def capacity (hash lsr 7));
     scan table view query value capacity hash 0 group 16 token
-  let find : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
-      (view : {v : 'a Read.I.view | Read.I.valid v}) @ immutable ->
-      (query : Key.t) @ immutable -> (value : 'a) @ immutable ghost ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) === Some
-        view.model})
-        @ local read ghost ->
-      {r : found | 0 <= r.#index && r.#index < view.model.capacity &&
-         (r.#byte = 128 || r.#byte = 254) &&
-         M.control view.model r.#index === Some r.#byte &&
-         M.slot view.model r.#index === Some None &&
-         Read.I.route view.model (Bigint.of_int r.#index)
-           (Some (query, value)) r.#path} = fun table view query value token ->
-    find_hashed table view query value (Key.hash query) token
 
 end

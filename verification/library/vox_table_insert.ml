@@ -10,10 +10,10 @@ module Make (Key : Vox_table_map.Key) = struct
   module Proof = Vox_table_insert_proofs.Make (Key) (I)
 
   let write_new_hashed : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i < before.model.capacity}) ->
-      (key : Key.t) @ immutable -> (value : 'a) @ immutable ->
+      (key : Key.t) -> (value : 'a) ->
       (hash : {h : int | h = Key.hash key}) ->
       (old_byte : int) -> (path : (int * int)) @ ghost ->
       (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
@@ -59,10 +59,10 @@ module Make (Key : Vox_table_map.Key) = struct
     (#{Mutation.view; state} : 'a Mutation.result)
 
   let write_new : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
       (index : {i : int | 0 <= i && i < before.model.capacity}) ->
-      (key : Key.t) @ immutable -> (value : 'a) @ immutable ->
+      (key : Key.t) -> (value : 'a) ->
       (old_byte : int) -> (path : (int * int)) @ ghost ->
       (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
         table) ===
@@ -91,14 +91,13 @@ module Make (Key : Vox_table_map.Key) = struct
   }
 
   let try_insert_hashed : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
-      (key : {k : Key.t | I.Map.absent before.model.slots k}) @ immutable ->
-      (value : 'a) @ immutable ->
+      (key : {k : Key.t | I.Map.absent before.model.slots k}) ->
+      (value : 'a) ->
       (hash : {h : int | h = Key.hash key}) ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some before.model}) @ unique read_write ghost ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model}) @ unique read_write ghost ->
       {r : 'a attempt | I.valid r.#view &&
         (if r.#inserted then
           I.Map.same r.#view.model.slots (I.Map.put before.model.slots key
@@ -109,30 +108,29 @@ module Make (Key : Vox_table_map.Key) = struct
       @ unique = fun table before key value hash token ->
     let found = Vacancy.find_hashed table before key (ghost_ value) hash
       (borrow_ token) in
-    begin
-      let snapshot = {T.model = before.model} in
-      let size = T.size table snapshot (borrow_ token) in
-      let deleted = T.deleted table snapshot (borrow_ token) in
-      let capacity = T.capacity table snapshot (borrow_ token) in
-      ghost_ (I.reserve_def capacity);
-      if size + deleted + (if found.#byte = 254 then 0 else 1) >
-          capacity - (capacity lsr 3) then
-        #{inserted = false; view = before; state = token}
-      else begin
-        let result = write_new_hashed table before found.#index key value hash
-          found.#byte found.#path token in
-        #{inserted = true; view = result.#view; state = result.#state}
-      end
+    let snapshot = {T.model = before.model} in
+    let size = T.size table snapshot (borrow_ token) in
+    let deleted = T.deleted table snapshot (borrow_ token) in
+    let capacity = T.capacity table snapshot (borrow_ token) in
+    ghost_ (I.reserve_def capacity);
+    (* Reusing a deleted slot (control byte 254) leaves the number of used
+       slots unchanged; filling an empty one (128) adds one. *)
+    if size + deleted + (if found.#byte = 254 then 0 else 1) >
+        capacity - I.reserve capacity then
+      #{inserted = false; view = before; state = token}
+    else begin
+      let result = write_new_hashed table before found.#index key value hash
+        found.#byte found.#path token in
+      #{inserted = true; view = result.#view; state = result.#state}
     end
 
   let try_insert : ('a : immutable_data).
-      (table : (Key.t, 'a) T.t) @ immutable ->
+      (table : (Key.t, 'a) T.t) ->
       (before : {v : 'a I.view | I.valid v}) @ immutable ->
-      (key : {k : Key.t | I.Map.absent before.model.slots k}) @ immutable ->
-      (value : 'a) @ immutable ->
-      (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
-        table) ===
-        Some before.model}) @ unique read_write ghost ->
+      (key : {k : Key.t | I.Map.absent before.model.slots k}) ->
+      (value : 'a) ->
+      (token : {t : (Key.t, 'a) M.state P.token |
+        H.at (P.own t) (T.location table) === Some before.model}) @ unique read_write ghost ->
       {r : 'a attempt | I.valid r.#view &&
         (if r.#inserted then
           I.Map.same r.#view.model.slots (I.Map.put before.model.slots key
