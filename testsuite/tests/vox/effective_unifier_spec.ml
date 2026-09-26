@@ -9,6 +9,7 @@ type derivation =
   | Terminal_lower of int * lowering * bounded * derivation
   | Base of Level_unifier_spec.derivation
   | Resolve of node Pref.t * node Pref.t * U.resolution * U.resolution * derivation
+  | List_children of node Pref.t * node Pref.t * derivation
   | Children of node Pref.t * node Pref.t * node Pref.t * node Pref.t
       * node Pref.heap * bool * derivation * derivation
   | Post_link of node Pref.heap * derivation * tree * tree
@@ -33,6 +34,9 @@ let[@def] rec (unified @ total) (h : node Pref.heap @ immutable)
     && Level_unifier_spec.unified h p q ok after old
   | Resolve (r, s, rp, sq, rest) -> U.resolves h p r rp && U.resolves h q s sq
     && unified h r s ok after rest
+  | List_children (a, b, child) ->
+    U.observe h p === Some (List a) && U.observe h q === Some (List b)
+    && unified h a b ok after child
   | Children (a, b, c, e, middle, left_ok, left, right) ->
     U.observe h p === Some (Arrow (a, b)) && U.observe h q === Some (Arrow (c, e))
     && unified h a c left_ok middle left

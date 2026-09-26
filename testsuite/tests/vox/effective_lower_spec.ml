@@ -4,7 +4,7 @@ module E = Effective_level
 
 let[@def] (effective_children_below @ total) (h : node Pref.heap @ immutable)
     (heads : E.heads @ total) (desc : desc @ immutable) (bound : int) = ghost_ (
-  match desc with Var | Bool -> true | Link q -> E.effective_below h heads q bound
+  match desc with Var | Bool | Word -> true | Link q | List q -> E.effective_below h heads q bound
   | Arrow (a, b) -> E.effective_below h heads a bound && E.effective_below h heads b bound)
 
 let[@def] rec (effective_lower_valid @ total) (h : node Pref.heap @ immutable)
@@ -22,8 +22,8 @@ let[@def] rec (effective_lower_valid @ total) (h : node Pref.heap @ immutable)
 let[@def] rec (effective_bounded @ total) (h : node Pref.heap @ immutable)
     (heads : E.heads @ total) (limit : int) (t : bounded @ immutable) = ghost_ (
   E.effective_below h heads (bound_root t) limit && match t with
-  | Tip p -> (match H.at h p with Some {desc = (Var | Bool); _} -> true | _ -> false)
-  | Through (p, child) -> (match H.at h p with Some {desc = Link q; _} -> q === bound_root child | _ -> false)
+  | Tip p -> (match H.at h p with Some {desc = (Var | Bool | Word); _} -> true | _ -> false)
+  | Through (p, child) -> (match H.at h p with Some {desc = (Link q | List q); _} -> q === bound_root child | _ -> false)
     && effective_bounded h heads limit child
   | Fork (p, a, b) -> (match H.at h p with Some {desc = Arrow (x, y); _} -> x === bound_root a && y === bound_root b | _ -> false)
     && effective_bounded h heads limit a && effective_bounded h heads limit b)

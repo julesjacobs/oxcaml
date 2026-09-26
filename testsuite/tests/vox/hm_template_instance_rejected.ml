@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml level_finite_spec.ml hm_declarative.ml hm_type_proofs.ml hm_environment_spec.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_freshness_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_template_instance_proofs.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml level_finite_spec.ml hmc_word64.ml hm_declarative.ml hm_type_proofs.ml hm_environment_spec.ml hm_abstraction.ml hm_abstraction_proofs.ml hm_freshness_proofs.ml hm_substitution.ml hm_substitution_proofs.ml hm_template_instance_proofs.ml";
  readonly_files = "hm_template_instance_rejected.ml";
  compile_only = "true";
  { setup-ocamlc.opt-build-env; ocamlc.opt; run-expect; check-program-output; }

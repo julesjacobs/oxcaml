@@ -81,6 +81,8 @@ let (saved_ordered @ total) : (saved : node Pref.heap) @ immutable ->
     E.effective_ordered_def saved heads x; E.effective_ordered_def after next x;
     match H.at saved x with None -> () | Some v ->
       match v.desc, v.level with
+      | List a, Finite n -> witness a; valid_next a;
+        saved_below saved heads next epoch depth d a n (); ()
       | Arrow (a, b), Finite n -> witness a; witness b; valid_next a; valid_next b;
         saved_below saved heads next epoch depth d a n ();
         saved_below saved heads next epoch depth d b n (); ()
@@ -115,6 +117,9 @@ let rec (fresh_ordered @ total) : (saved : node Pref.heap) @ immutable ->
       if x === q then (
         effective_ready_def saved heads rest old.desc desc;
         match old.desc, desc with
+        | List a, List c -> bounds a;
+          effective_target_for_def saved heads rest a c;
+          target_below saved heads next witness epoch depth rest final valid_next a c (); ()
         | Arrow (a, b), Arrow (c, e) -> bounds a; bounds b;
           effective_target_for_def saved heads rest a c; effective_target_for_def saved heads rest b e;
           target_below saved heads next witness epoch depth rest final valid_next a c ();
@@ -207,6 +212,7 @@ let (sweep_ordered @ total) : (h : node Pref.heap) @ immutable -> (after : node 
     match H.at h x with
     | None -> ()
     | Some v -> match v.desc, v.level with
+      | List a, Finite n -> sweep_below h after heads trail frame a n; ()
       | Arrow (a, b), Finite n -> sweep_below h after heads trail frame a n;
         sweep_below h after heads trail frame b n; ()
       | _ -> ())

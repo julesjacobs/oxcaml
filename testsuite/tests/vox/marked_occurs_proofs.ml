@@ -180,7 +180,7 @@ let (scan_scoped @ total) : (h : node Pref.heap) @ immutable ->
   fun h needle d x premise -> ghost_ (
     scan_observe h needle d x ();
     let after = scan_heap h d in scoped_def h x; scoped_def after x;
-    (match observe h x with Some (Link q) -> scan_at h needle d q (); ()
+    (match observe h x with Some (Link q | List q) -> scan_at h needle d q (); ()
     | Some (Arrow (a, b)) -> scan_at h needle d a ();
       scan_at h needle d b (); () | _ -> ()); ())
 
@@ -206,7 +206,7 @@ let (scan_ordered @ total) : (h : node Pref.heap) @ immutable ->
     (match H.at h x with None -> () | Some v -> match v.level with Generic -> ()
     | Finite depth -> Level_spec.children_below_def h v.desc depth;
       Level_spec.children_below_def after v.desc depth;
-      match v.desc with Var | Bool -> ()
-      | Link q -> scan_below h needle d q depth (); ()
+      match v.desc with Var | Bool | Word -> ()
+      | Link q | List q -> scan_below h needle d q depth (); ()
       | Arrow (a, b) -> scan_below h needle d a depth ();
         scan_below h needle d b depth (); ()); ())

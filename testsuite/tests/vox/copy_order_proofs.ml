@@ -58,8 +58,8 @@ let (mark_ordered @ total) : (session : history) @ immutable -> (h : node Pref.h
     match H.at h x with None -> refine_ u | Some v ->
     match v.level with Generic -> refine_ u | Finite n ->
     children_below_def h v.desc n; children_below_def after v.desc n;
-    match v.desc with Var | Bool -> refine_ u
-    | Link y -> mark_below session h p old epoch q y n (refine_ u); refine_ u
+    match v.desc with Var | Bool | Word -> refine_ u
+    | Link y | List y -> mark_below session h p old epoch q y n (refine_ u); refine_ u
     | Arrow (a, b) -> mark_below session h p old epoch q a n (refine_ u);
       mark_below session h p old epoch q b n (refine_ u); refine_ u)
 
@@ -87,7 +87,9 @@ let rec (copy_ordered @ total) : (saved : node Pref.heap) @ immutable ->
       extends_def rest rest;
       (match old.desc, desc with Arrow (a, b), Arrow (c, e) ->
         target_below_at saved depth bounds epoch rest rest a c (refine_ u);
-        target_below_at saved depth bounds epoch rest rest b e (refine_ u); () | _ -> ());
+        target_below_at saved depth bounds epoch rest rest b e (refine_ u); ()
+      | List a, List c -> target_below_at saved depth bounds epoch rest rest a c (refine_ u); ()
+      | _ -> ());
       allocation_ordered mid q desc depth x (refine_ u);
       let v = cell desc depth in let h1 = H.put mid q v in
       history_grows saved epoch depth rest p (refine_ u); put_frame mid q v p;

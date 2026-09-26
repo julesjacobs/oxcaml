@@ -42,6 +42,8 @@ let (order @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ to
     let after = scan_heap h marks in M.scan_at h needle marks x ();
     E.effective_ordered_def h heads x; E.effective_ordered_def after heads x;
     (match H.at h x with None -> () | Some v -> match v.desc, v.level with
+      | List a, Finite n -> M.scan_at h needle marks a (); level h heads needle marks a ();
+        E.effective_below_def h heads a n; E.effective_below_def after heads a n; ()
       | Arrow (a, b), Finite n ->
         M.scan_at h needle marks a (); M.scan_at h needle marks b ();
         level h heads needle marks a (); level h heads needle marks b ();

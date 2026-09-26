@@ -11,6 +11,7 @@ let rec (unified_terminal @ total) : (h : node Pref.heap) @ immutable ->
       Effective_unifier_spec.unified_def h p q ok after d;
       match d with
       | Effective_unifier_spec.Base old -> Representative_mutation.base_terminal h p q ok after old x (); ()
+      | Effective_unifier_spec.List_children (r, s, rest)
       | Effective_unifier_spec.Resolve (r, s, _, _, rest) ->
         unified_terminal h r s ok after rest x (); ()
       | Effective_unifier_spec.Children (a, b, c, e, mid, left_ok, left, right) ->

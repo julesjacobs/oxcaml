@@ -46,7 +46,7 @@ let run reject =
   let a = step.#value in let pool1 = step.#pool in let state = step.#state in
   let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = cell desc1 1 in
   ghost_ (cell_def desc1 1; payload_scoped_def h0 v1; allocatable_def h0 v1;
-    (match desc1 with Var | Bool -> () | Link q -> below_def h0 q 2; ()
+    (match desc1 with Var | Bool | Word -> () | Link q | List q -> below_def h0 q 2; ()
     | Arrow (a, b) -> below_def h0 a 2; below_def h0 b 2; ()));
   let trees1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
@@ -66,7 +66,7 @@ let run reject =
   let b = step.#value in let pool2 = step.#pool in let state = step.#state in
   let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = cell desc2 2 in
   ghost_ (cell_def desc2 2; payload_scoped_def h1 v2; allocatable_def h1 v2;
-    (match desc2 with Var | Bool -> () | Link q -> below_def h1 q 2; ()
+    (match desc2 with Var | Bool | Word -> () | Link q | List q -> below_def h1 q 2; ()
     | Arrow (a, b) -> below_def h1 a 2; below_def h1 b 2; ()));
   let trees2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->
@@ -87,7 +87,7 @@ let run reject =
   let root = step.#value in let pool3 = step.#pool in let state = step.#state in
   let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = cell desc3 2 in
   ghost_ (cell_def desc3 2; payload_scoped_def h2 v3; allocatable_def h2 v3;
-    (match desc3 with Var | Bool -> () | Link q -> below_def h2 q 2; ()
+    (match desc3 with Var | Bool | Word -> () | Link q | List q -> below_def h2 q 2; ()
     | Arrow (a, b) -> below_def h2 a 2; below_def h2 b 2; ()));
   let trees3 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h3 x then finite h3 t else observe h3 x === None)} @ immutable) @ total ghost = ghost_ (fun x ->

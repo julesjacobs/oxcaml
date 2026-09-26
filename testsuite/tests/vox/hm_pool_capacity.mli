@@ -13,10 +13,12 @@ val fits_def :
            ((0 <= depth) &&
               ((depth <= limit) &&
                  (match term with
-                  | T.Bound _ | T.Truth -> true
+                  | T.Bound _ | T.Truth | T.False | T.Word _ | T.Nil -> true
                   | T.Lambda body | T.Recursive body -> fits body depth limit
-                  | T.Apply (a', b') ->
+                  | T.Apply (a', b') | T.Cons (a', b') | T.Primitive (_, a', b') ->
                       (fits a' depth limit) && (fits b' depth limit)
+                  | T.If (a, b, c) | T.CaseList (a, b, c) ->
+                      fits a depth limit && fits b depth limit && fits c depth limit
                   | T.Let (a, b) ->
                       ((depth + 1) > depth) &&
                         ((fits a (depth + 1) limit) && (fits b depth limit))))))}

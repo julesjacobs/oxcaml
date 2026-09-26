@@ -35,7 +35,10 @@ let (backward @ total) : (h : node Pref.heap) @ immutable -> (source : tree) @ i
       Level_mgu_proofs.readback_factor after rho (refine_ model) target ();
       finite_def h source; tree_root_def source; readback_def source; terminal_def h p;
       let ty = readback source in Level_mgu_spec.substitute_def rho ty;
-      match source with Free _ | Constant_tree _ | Alias_tree _ -> ()
+      match source with Free _ | Constant_tree _ | Word_tree _ | Alias_tree _ -> ()
+      | List_tree (_, a) -> let ty = List_type (readback a) in
+        weight_def ty; smaller_avoids h source a (); frame_avoids h p q a ();
+        Level_mgu_proofs.readback_factor after rho (refine_ model) a (); ()
       | Branch (_, a, b) -> let ta = readback a in let tb = readback b in let ty = Function (ta, tb) in
         weight_def ty; let refine_ pa = Level_unifier_proofs.weight_positive ta in
         let refine_ pb = Level_unifier_proofs.weight_positive tb in

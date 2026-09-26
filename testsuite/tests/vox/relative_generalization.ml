@@ -109,8 +109,8 @@ let (instance_model @ total) : (h : node Pref.heap) @ immutable ->
     match H.at h x with None -> () | Some v ->
       match v.level with Generic -> () | Finite n ->
       children_below_def h v.desc n;
-      match v.desc with Var | Bool -> ()
-      | Link q -> wanted q; finite_assignment h rho want q n (); ()
+      match v.desc with Var | Bool | Word -> ()
+      | Link q | List q -> wanted q; finite_assignment h rho want q n (); ()
       | Arrow (a, b) -> wanted a; wanted b;
         finite_assignment h rho want a n ();
         finite_assignment h rho want b n (); ())

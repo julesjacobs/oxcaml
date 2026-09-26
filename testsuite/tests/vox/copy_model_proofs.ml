@@ -11,11 +11,11 @@ let (put_scope @ total) : (h : node Pref.heap) @ immutable ->
   scope x; payload_scoped_def h v;
   let after = H.put h p v in source_ok_def after x; source_ok_def h x;
   if x === p then (
-    (match v.desc with Var | Bool -> () | Link q -> ()
+    (match v.desc with Var | Bool | Word -> () | Link q | List q -> ()
       | Arrow (a, b) -> ());
     (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> ()); ())
   else (match H.at h x with None -> () | Some old ->
-    (match old.desc with Var | Bool -> () | Link q -> ()
+    (match old.desc with Var | Bool | Word -> () | Link q | List q -> ()
       | Arrow (a, b) -> ());
     (match old.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) -> ()); ()))
 
@@ -40,6 +40,7 @@ let (ready_scoped @ total) : (saved : node Pref.heap) @ immutable -> (epoch : no
     ready_def saved d source dest;
     let h = heap saved epoch depth d in let v = cell dest depth in cell_def dest depth; payload_scoped_def h v;
     match source, dest with
+    | List a, List x -> target_allocated saved epoch depth d a x (); ()
     | Arrow (a, b), Arrow (x, y) -> target_allocated saved epoch depth d a x ();
       target_allocated saved epoch depth d b y (); ()
     | _ -> ())
@@ -80,7 +81,8 @@ let rec (history_scope @ total) : (saved : node Pref.heap) @ immutable ->
 let[@def] (describes @ total)
     (rho : (node Pref.t @ immutable total -> ty @ immutable total) @ total)
     (desc : desc @ immutable) (value : ty @ immutable) = ghost_ (match desc with
-  | Var -> true | Bool -> value === Boolean | Arrow (a, b) -> value === Function (rho a, rho b)
+  | Var -> true | Bool -> value === Boolean | Word -> value === Word64
+  | List a -> value === List_type (rho a) | Arrow (a, b) -> value === Function (rho a, rho b)
   | Link q -> value === rho q)
 let (allocation_model @ total) : (h : node Pref.heap) @ immutable ->
     (scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h x then source_ok h x else H.at h x === None})) @ total ->
@@ -95,11 +97,11 @@ let (allocation_model @ total) : (h : node Pref.heap) @ immutable ->
   payload_scoped_def h v; describes_def rho v.desc value;
   let after = H.put h p v in equation_def after tau x; update x;
   if x === p then (
-    match v.desc with Var | Bool -> () | Link q -> update q; ()
+    match v.desc with Var | Bool | Word -> () | Link q | List q -> update q; ()
     | Arrow (a, b) -> update a; update b; ())
   else (scope x; source_ok_def h x; model x; equation_def h rho x;
     match H.at h x with None -> () | Some old -> match old.desc with
-    | Var | Bool -> () | Link q -> update q; () | Arrow (a, b) -> update a; update b; ()))
+    | Var | Bool | Word -> () | Link q | List q -> update q; () | Arrow (a, b) -> update a; update b; ()))
 let (with_allocation_model @ total) : (h : node Pref.heap) @ immutable ->
     (scope : ((x : node Pref.t) @ immutable -> {u : unit | if H.mem h x then source_ok h x else H.at h x === None})) @ total ->
     (rho : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->

@@ -13,7 +13,7 @@ let rec (unified_finite_at @ total) : (h : node Pref.heap) @ immutable ->
   fun h trees p q ok after d x premise -> ghost_ (
     let refine_ premise = premise in unified_def h p q ok after d; let u = () in match d with
     | Base old -> let refine_ t = Level_finite_proofs.unified_finite_at h trees p q ok after old x (refine_ u) in refine_ t
-    | Resolve (r, s, _, _, rest) -> let refine_ t = unified_finite_at h trees r s ok after rest x (refine_ u) in refine_ t
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> let refine_ t = unified_finite_at h trees r s ok after rest x (refine_ u) in refine_ t
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let next : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem middle y then finite middle t else U.observe middle y === None)} @ immutable) @ total = fun y ->

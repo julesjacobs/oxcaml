@@ -7,8 +7,8 @@ let (desc_preserves @ total) : (heads : E.heads) @ total ->
     (desc : desc) @ immutable -> (c : C.certificate) @ immutable -> (x : node Pref.t) @ immutable ->
     {u : unit | C.listed c x} -> {u : unit | C.listed (capture_desc heads desc c) x} @ ghost =
   fun heads desc c x premise -> ghost_ (
-    capture_desc_def heads desc c; match desc with Var | Bool -> ()
-    | Link p -> let out = C.Entry (p, heads p, c) in C.listed_def out x; ()
+    capture_desc_def heads desc c; match desc with Var | Bool | Word -> ()
+    | Link p | List p -> let out = C.Entry (p, heads p, c) in C.listed_def out x; ()
     | Arrow (a, b) -> let tail = C.Entry (b, heads b, c) in
       let out = C.Entry (a, heads a, tail) in C.listed_def tail x; C.listed_def out x; ())
 
@@ -29,8 +29,8 @@ let (desc_valid @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads)
     {u : unit | C.certificate_valid h (capture_desc heads desc c) && covered_desc (capture_desc heads desc c) desc} @ ghost =
   fun h heads witness desc c premise -> ghost_ (
     capture_desc_def heads desc c;
-    let out = capture_desc heads desc c in covered_desc_def out desc; match desc with Var | Bool -> ()
-    | Link p -> witness p; E.valid_head_def h heads p;
+    let out = capture_desc heads desc c in covered_desc_def out desc; match desc with Var | Bool | Word -> ()
+    | Link p | List p -> witness p; E.valid_head_def h heads p;
       C.certificate_valid_def h out; C.listed_def out p; ()
     | Arrow (a, b) -> witness a; witness b; E.valid_head_def h heads a; E.valid_head_def h heads b;
       let tail = C.Entry (b, heads b, c) in
@@ -43,8 +43,8 @@ let (desc_transport @ total) : (heads : E.heads) @ total ->
     {u : unit | covered_desc (capture heads d c) desc} @ ghost =
   fun heads d c desc premise -> ghost_ (
     covered_desc_def c desc;
-    let out = capture heads d c in covered_desc_def out desc; match desc with Var | Bool -> ()
-    | Link p -> capture_preserves heads d c p (); ()
+    let out = capture heads d c in covered_desc_def out desc; match desc with Var | Bool | Word -> ()
+    | Link p | List p -> capture_preserves heads d c p (); ()
     | Arrow (a, b) -> capture_preserves heads d c a ();
       capture_preserves heads d c b (); ())
 
@@ -64,7 +64,7 @@ let rec (capture_valid @ total) : (h : node Pref.heap) @ immutable -> (heads : E
       capture_valid h heads witness rest next ();
       C.listed_def next p; capture_preserves heads rest next p ();
       covered_desc_def tail old.desc; covered_desc_def next old.desc;
-      (match old.desc with Var | Bool -> ()
-      | Link x -> C.listed_def next x; ()
+      (match old.desc with Var | Bool | Word -> ()
+      | Link x | List x -> C.listed_def next x; ()
       | Arrow (a, b) -> C.listed_def next a; C.listed_def next b; ());
       desc_transport heads rest next old.desc (); ())

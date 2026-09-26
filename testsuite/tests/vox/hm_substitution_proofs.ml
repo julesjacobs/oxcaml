@@ -6,7 +6,8 @@ let rec (shift_embed @ total) : (cut : index) @ immutable -> (k : index) @ immut
     (t : Copy_spec.ty) @ immutable ->
     {u : unit | shift cut k (embed t) === embed t} @ ghost = fun cut k t -> ghost_ (
     embed_def t; let e = embed t in shift_def cut k e;
-    (match t with Copy_spec.Variable _ | Copy_spec.Boolean -> ()
+    (match t with Copy_spec.Variable _ | Copy_spec.Boolean | Copy_spec.Word64 -> ()
+    | Copy_spec.List_type a -> shift_embed cut k a; ()
     | Copy_spec.Function (a, b) -> shift_embed cut k a; shift_embed cut k b; ());
     ())
 
@@ -14,7 +15,8 @@ let rec (open_embed @ total) : (args : arguments) @ immutable ->
     (t : Copy_spec.ty) @ immutable ->
     {u : unit | open_type args (embed t) === embed t} @ ghost = fun args t -> ghost_ (
     embed_def t; let e = embed t in open_type_def args e;
-    (match t with Copy_spec.Variable _ | Copy_spec.Boolean -> ()
+    (match t with Copy_spec.Variable _ | Copy_spec.Boolean | Copy_spec.Word64 -> ()
+    | Copy_spec.List_type a -> open_embed args a; ()
     | Copy_spec.Function (a, b) -> open_embed args a; open_embed args b; ());
     ())
 
@@ -25,8 +27,9 @@ let rec (substitute_wf @ total) : (n : index) @ immutable ->
     mono_wf_def n t; substitute_type_def rho t;
     let changed = substitute_type rho t in mono_wf_def n changed;
     match t with
-    | Parameter _ | Boolean -> ()
+    | Parameter _ | Boolean | Word64 -> ()
     | Free p -> let v = rho p in embed_wf n v; ()
+    | List_type a -> substitute_wf n rho a (); ()
     | Function (a, b) -> substitute_wf n rho a ();
       substitute_wf n rho b (); ())
 
@@ -81,8 +84,9 @@ let rec (substitute_shift @ total) :
     let shifted = shift cut k t in substitute_type_def rho shifted;
     let changed = substitute_type rho t in shift_def cut k changed;
     (match t with
-    | Parameter _ | Boolean -> ()
+    | Parameter _ | Boolean | Word64 -> ()
     | Free p -> let v = rho p in shift_embed cut k v; ()
+    | List_type a -> substitute_shift rho cut k a; ()
     | Function (a, b) -> substitute_shift rho cut k a; substitute_shift rho cut k b; ());
     ())
 
@@ -130,7 +134,8 @@ let rec (substitute_open @ total) :
     let changed = substitute_type rho t in let parameters = substitute_arguments rho args in
     open_type_def parameters changed;
     (match t with Parameter i -> substitute_open_index rho args i; ()
-    | Boolean -> () | Free p -> let v = rho p in open_embed parameters v; ()
+    | Boolean | Word64 -> () | Free p -> let v = rho p in open_embed parameters v; ()
+    | List_type a -> substitute_open rho args a; ()
     | Function (a, b) -> substitute_open rho args a; substitute_open rho args b; ());
     ())
 
@@ -158,7 +163,32 @@ let rec (substitution_typed @ total) :
         open_scheme_def changed_s changed_args;
         (match s with Forall (_, body) -> substitute_open rho args body; ()); ())
       | _ -> ())
-    | Constant -> ()
+    | Constant | Word_constant -> ()
+    | Empty_list a -> substitute_wf n rho a (); ()
+    | List_cons (a, head, tail) -> (match e with Cons (h, r) ->
+      substitution_typed rho n g h a head ();
+      substitution_typed rho n g r t tail (); () | _ -> ())
+    | List_case (a, scrutinee, empty, nonempty) -> (match e with CaseList (s, l, r) ->
+      substitute_wf n rho a ();
+      let list = List_type a in substitute_type_def rho list;
+      substitution_typed rho n g s list scrutinee ();
+      substitution_typed rho n g l t empty ();
+      let z = Z in
+      let hs = Forall (z, a) in let ts = Forall (z, list) in
+      let tail = Binding (ts, g) in let both = Binding (hs, tail) in
+      substitute_scheme_def rho hs; substitute_scheme_def rho ts;
+      substitute_context_def rho tail; substitute_context_def rho both;
+      substitution_typed rho n both r t nonempty (); () | _ -> ())
+    | Conditional (condition, yes, no) -> (match e with If (c, a, b) ->
+      let bool = Boolean in substitute_type_def rho bool;
+      substitution_typed rho n g c bool condition ();
+      substitution_typed rho n g a t yes ();
+      substitution_typed rho n g b t no (); () | _ -> ())
+    | Word_primitive (left, right) -> (match e with Primitive (op, a, b) ->
+      let word = Word64 in substitute_type_def rho word;
+      operation_type_def op; (match op with Add | Subtract -> () | Equal_word | Unsigned_less -> ());
+      substitution_typed rho n g a word left ();
+      substitution_typed rho n g b word right (); () | _ -> ())
     | Abstraction (a, body) -> (match e, t with
       | Lambda e, Function (_, b) ->
         let z = Z in let arg_scheme = Forall (z, a) in

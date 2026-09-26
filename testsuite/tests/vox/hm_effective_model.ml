@@ -58,11 +58,36 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
         Copy_certificate_proofs.replay h certificate heads witness epoch depth d original p ();
         model x; copy_restrict h heads epoch depth d rho x (); () in
       let () = Forest_heads.with_heads h trees claim use in ())
-    | RBool p -> let desc : desc = Bool in let v = cell desc depth in
+    | RBool p | RFalse p -> let desc : desc = Bool in let v = cell desc depth in
       allocated_def h depth p desc; model x; allocation_restrict h p v rho x (); ()
-    | RApp_left (left, _) -> run_restrict h trees depth pool env left after final_pool rho model x (); ()
+    | RWord (_, p) -> let desc : desc = Word in let v = cell desc depth in
+      allocated_def h depth p desc; model x; allocation_restrict h p v rho x (); ()
+    | RApp_left (left, _) | RCons_left (left, _) -> run_restrict h trees depth pool env left after final_pool rho model x (); ()
     | RLet_left (rhs, _) -> let empty : pool = Empty in let child_depth = depth + 1 in
       run_restrict h trees child_depth empty env rhs after final_pool rho model x (); ()
+    | RNil (arg, p) ->
+      let var = Var in let v = cell var depth in let middle = H.put h arg v in
+      let desc = List arg in let w = cell desc depth in
+      allocated_def h depth arg var; allocated_def middle depth p desc;
+      let trees1 = Hm_effective_forest.allocated_forest h trees depth arg var () in
+      let refine_ _tree = trees1 x in
+      model x; allocation_restrict middle p w rho x ();
+      allocation_restrict h arg v rho x (); ()
+    | RCaseList (_, _, _, body) ->
+      run_restrict h trees depth pool env body after final_pool rho model x ()
+    | RIf (_, _, _, body) ->
+      run_restrict h trees depth pool env body after final_pool rho model x ()
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      let ts : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+        (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h trees depth pool env body middle body_pool x () in refine_ t in
+      let mid_model : ((x : node Pref.t) @ immutable -> {u : unit | node_equation middle rho x}) @ total = fun x ->
+        model x;
+        (match result body with None -> () | Some _ -> match out with None -> () | Some p ->
+          let desc = primitive_desc op in let v = cell desc depth in
+          allocated_def middle depth p desc; let refine_ _t = ts x in
+          allocation_restrict middle p v rho x ()); () in
+      run_restrict h trees depth pool env body middle body_pool rho mid_model x (); ()
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let v = cell var depth in let h1 = H.put h arg v in
       let pool1 = Entry (arg, pool) in let env1 = Bind (arg, env) in
@@ -80,13 +105,30 @@ let rec (run_restrict @ total) : (h : node Pref.heap) @ immutable ->
             allocation_restrict middle p w rho x (); ()); () in
       run_restrict h1 ts1 depth pool1 env1 body middle body_pool rho mid_model x ();
       allocation_restrict h arg v rho x (); ()
-    | RApp_right (left, right, h1, pool1) ->
+    | RApp_right (left, right, h1, pool1) | RCons_right (left, right, h1, pool1) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
         let t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in t in
       let model1 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h1 rho x}) @ total = fun x ->
         run_restrict h1 ts1 depth pool1 env right after final_pool rho model x (); () in
       run_restrict h trees depth pool env left h1 pool1 rho model1 x (); ()
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
+      let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+      (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->
+        let t = Hm_effective_forest.run_forest h trees depth pool env left h1 pool1 x () in t in
+      let ts2 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
+      (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
+        let t = Hm_effective_forest.run_forest h1 ts1 depth pool1 env right h2 pool2 x () in t in
+      (match result left with None -> () | Some f -> match result right with None -> ()
+      | Some a -> let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
+        allocated_def h2 depth p desc;
+      let model3 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h3 rho x}) @ total = fun x ->
+        unify_restrict h3 rho a p ok after d model x (); () in
+      let model2 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h2 rho x}) @ total = fun x ->
+        let _ = ts2 x in model3 x; allocation_restrict h2 p v rho x (); () in
+      let model1 : ((x : node Pref.t) @ immutable -> {u : unit | node_equation h1 rho x}) @ total = fun x ->
+        run_restrict h1 ts1 depth pool1 env right h2 pool2 rho model2 x (); () in
+        run_restrict h trees depth pool env left h1 pool1 rho model1 x (); ())
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       let ts1 : ((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x &&
       (if H.mem h1 x then finite h1 t else observe h1 x === None)} @ immutable) @ total = fun x ->

@@ -6,7 +6,8 @@ let[@def] rec (substitute @ total)
     (delta : (node Pref.t @ immutable total -> ty @ immutable total) @ total)
     (t : ty @ immutable) = match t with
   | Variable p -> delta p
-  | Boolean -> Boolean
+  | Boolean -> Boolean | Word64 -> Word64
+  | List_type a -> List_type (substitute delta a)
   | Function (a, b) -> Function (substitute delta a, substitute delta b)
 
 let[@def] (normalizes @ total) (h : node Pref.heap @ immutable)

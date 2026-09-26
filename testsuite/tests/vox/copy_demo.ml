@@ -154,6 +154,6 @@ let constant level =
   | Generic -> assert (not same && copied.level = Finite 7 && copied.memo = Empty_memo);
     (match source.memo with Memo (_, target) ->
       let refine_ equal = Pref.equal target q in assert equal
-    | Empty_memo -> assert false)
+    | Empty_memo | Forward _ -> assert false)
 
 let () = constant Generic; constant (Finite 2)

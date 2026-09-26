@@ -50,16 +50,61 @@ let rec raw_work : (goal : goal) @ immutable -> (h : node Pref.heap Ghost.t) @ i
       let ok = out.#ok in let after = ghost_ (Pref.own (borrow_ out.#state)) in let derivation = ghost_ (Swap out.#derivation) in
       ghost_ (unified_def h.Ghost.ghost r s ok after derivation);
       finish (#{ok; state = out.#state; derivation})
-    | Bool, Bool ->
+    | Bool, Bool | Word, Word ->
       let old = ghost_ U.Constants in let d = ghost_ (Base old) in let ok = true in
       ghost_ (U.unified_def h.Ghost.ghost r s ok h.Ghost.ghost old; unified_def h.Ghost.ghost r s ok h.Ghost.ghost d);
       finish (#{ok; state; derivation = d})
-    | Bool, Arrow _ | Arrow _, Bool ->
+    | Bool, (Word | Arrow _ | List _) | Word, (Bool | Arrow _ | List _)
+    | Arrow _, (Bool | Word | List _) | List _, (Bool | Word | Arrow _) ->
       let old = ghost_ U.Clash in let d = ghost_ (Base old) in let ok = false in
       ghost_ (U.unified_def h.Ghost.ghost r s ok h.Ghost.ghost old; unified_def h.Ghost.ghost r s ok h.Ghost.ghost d);
       finish (#{ok; state; derivation = d})
     | Link _, _ | _, Link _ ->
       ghost_ (terminal_def h.Ghost.ghost r; terminal_def h.Ghost.ghost s; let _ : {u : unit | false} = () in ()); assert false
+    | List a, List b ->
+      ghost_ (scope.Ghost.ghost r; scope.Ghost.ghost s;
+        E.effective_scope_def h.Ghost.ghost heads.Ghost.ghost r;
+        E.effective_scope_def h.Ghost.ghost heads.Ghost.ghost s;
+        valid.Ghost.ghost r; valid.Ghost.ghost s;
+        E.terminal_level h.Ghost.ghost heads.Ghost.ghost r ();
+        E.terminal_level h.Ghost.ghost heads.Ghost.ghost s ();
+        E.effective_active_def h.Ghost.ghost heads.Ghost.ghost r;
+        E.effective_active_def h.Ghost.ghost heads.Ghost.ghost s;
+        active_def h.Ghost.ghost r; active_def h.Ghost.ghost s);
+      let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost && E.effective_active h.Ghost.ghost heads.Ghost.ghost a && E.effective_active h.Ghost.ghost heads.Ghost.ghost b} = state in
+      let resume : (answer : {out : result | unified h.Ghost.ghost a b out.#ok (Pref.own out.#state) out.#derivation}) @ unique -> {out : result | unified goal.heap goal.left goal.right out.#ok (Pref.own out.#state) out.#derivation} @ unique = fun answer ->
+        let ok = answer.#ok in let after = ghost_ (Pref.own (borrow_ answer.#state)) in
+        let d = ghost_ (List_children (a, b, answer.#derivation)) in
+        ghost_ (unified_def h.Ghost.ghost r s ok after d);
+        if not ok then finish (#{ok; state = answer.#state; derivation = d})
+        else (
+          let ah : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ after} in
+          let final_raw : (((x : node Pref.t) @ immutable total -> {v : R.representative | not (H.mem ah.Ghost.ghost x) || resolves ah.Ghost.ghost x v.root v.path} @ immutable total)) @ ghost =
+            ghost_ (fun x -> valid.Ghost.ghost x; let out = M.head h.Ghost.ghost r s ok ah.Ghost.ghost d heads.Ghost.ghost x () in out) in
+          let[@def] final_fn : E.heads @ ghost = ghost_ (fun x -> let out = final_raw x in out) in
+          let final_heads : E.heads Ghost.t = {Ghost.ghost = ghost_ final_fn} in
+          let final_valid : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head ah.Ghost.ghost final_heads.Ghost.ghost x})) Ghost.t =
+            {Ghost.ghost = ghost_ (fun x -> final_fn_def x; let _ = final_raw x in
+              E.valid_head_def ah.Ghost.ghost final_heads.Ghost.ghost x; ())} in
+          let final_order : (((x : node Pref.t) @ immutable -> {u : unit | E.effective_ordered ah.Ghost.ghost final_heads.Ghost.ghost x})) Ghost.t =
+            {Ghost.ghost = ghost_ (fun x -> Effective_unifier_order.ordered h.Ghost.ghost r s ok ah.Ghost.ghost d heads.Ghost.ghost final_heads.Ghost.ghost valid.Ghost.ghost final_valid.Ghost.ghost order.Ghost.ghost x (); ())} in
+          let final_scope : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem ah.Ghost.ghost x) || E.effective_scope ah.Ghost.ghost final_heads.Ghost.ghost x})) Ghost.t =
+            {Ghost.ghost = ghost_ (fun x -> scope.Ghost.ghost x; E.effective_scope_def h.Ghost.ghost heads.Ghost.ghost x;
+              M.source h.Ghost.ghost r s ok ah.Ghost.ghost d trees.Ghost.ghost x ();
+              final_order.Ghost.ghost x; if H.mem ah.Ghost.ghost x then (E.ordered_scope ah.Ghost.ghost final_heads.Ghost.ghost final_valid.Ghost.ghost x (); ()) else (); ())} in
+          let final_trees : (((x : node Pref.t) @ immutable -> {t : tree | tree_root t === x && (if H.mem ah.Ghost.ghost x then finite ah.Ghost.ghost t else observe ah.Ghost.ghost x === None)} @ immutable)) Ghost.t =
+            {Ghost.ghost = ghost_ (fun x -> let out = Effective_unifier_finite.unified_finite_at h.Ghost.ghost trees.Ghost.ghost r s ok ah.Ghost.ghost d x () in out)} in
+              ghost_ (valid.Ghost.ghost r; valid.Ghost.ghost s; final_valid.Ghost.ghost r; final_valid.Ghost.ghost s; M.active h.Ghost.ghost r s ok ah.Ghost.ghost d heads.Ghost.ghost final_heads.Ghost.ghost r ();
+                M.active h.Ghost.ghost r s ok ah.Ghost.ghost d heads.Ghost.ghost final_heads.Ghost.ghost s ());
+              let source : (((x : node Pref.t) @ immutable -> {u : unit | not (H.mem ah.Ghost.ghost x) || source_ok ah.Ghost.ghost x})) Ghost.t =
+                {Ghost.ghost = ghost_ (fun x -> final_scope.Ghost.ghost x; E.effective_scope_def ah.Ghost.ghost final_heads.Ghost.ghost x; ())} in
+              ghost_ (E.effective_active_def ah.Ghost.ghost final_heads.Ghost.ghost r;
+                E.effective_active_def ah.Ghost.ghost final_heads.Ghost.ghost s);
+              let state : {t : node Pref.token | Pref.own t === ah.Ghost.ghost && unified h.Ghost.ghost r s true ah.Ghost.ghost d
+                && H.mem ah.Ghost.ghost r && H.mem ah.Ghost.ghost s && E.effective_active ah.Ghost.ghost final_heads.Ghost.ghost r && E.effective_active ah.Ghost.ghost final_heads.Ghost.ghost s} = answer.#state in
+              let dh : derivation Ghost.t = {Ghost.ghost = ghost_ d} in
+              let linked = Effective_link.finish h r s ah final_heads final_valid dh final_trees source (state) in finish (linked)) in
+      work goal h heads valid scope unmarked order trees a b state resume
     | Arrow (a, b), Arrow (c, e) ->
       ghost_ (
         valid.Ghost.ghost r; valid.Ghost.ghost s;

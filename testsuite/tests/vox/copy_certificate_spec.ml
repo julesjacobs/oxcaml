@@ -11,7 +11,8 @@ let[@def] (certified_target @ total) (saved : node Pref.heap @ immutable) (c : C
   | Finite _ -> q === p | Generic -> mapping d p === Some q)
 let[@def] (certified_ready @ total) (saved : node Pref.heap @ immutable) (c : C.certificate @ immutable) (d : history @ immutable)
     (source : desc @ immutable) (dest : desc @ immutable) = ghost_ (match source, dest with
-  | Var, Var | Bool, Bool -> true
+  | Var, Var | Bool, Bool | Word, Word -> true
+  | List a, List x -> certified_target saved c d a x
   | Arrow (a, b), Arrow (x, y) -> certified_target saved c d a x && certified_target saved c d b y
   | _ -> false)
 let[@def] rec (certified_valid @ total) (saved : node Pref.heap @ immutable) (c : C.certificate @ immutable)
@@ -30,7 +31,7 @@ let[@def] rec (certified_valid @ total) (saved : node Pref.heap @ immutable) (c 
 
 
 let[@def] (covered_desc @ total) (c : C.certificate @ immutable) (desc : desc @ immutable) = ghost_ (
-  match desc with Var | Bool -> true | Link p -> C.listed c p
+  match desc with Var | Bool | Word -> true | Link p | List p -> C.listed c p
   | Arrow (a, b) -> C.listed c a && C.listed c b)
 
 let[@def] rec (covered @ total) (c : C.certificate @ immutable) (d : history @ immutable) = ghost_ (
@@ -47,8 +48,8 @@ let[@def] (certifies @ total) (h : node Pref.heap @ immutable)
 
 let[@def] (capture_desc @ total) (heads : Effective_level.heads @ total)
     (desc : desc @ immutable) (c : C.certificate @ immutable) = ghost_ (
-  match desc with Var | Bool -> c
-  | Link p -> C.Entry (p, heads p, c)
+  match desc with Var | Bool | Word -> c
+  | Link p | List p -> C.Entry (p, heads p, c)
   | Arrow (a, b) -> C.Entry (a, heads a, C.Entry (b, heads b, c)))
 
 let[@def] rec (capture @ total) (heads : Effective_level.heads @ total)

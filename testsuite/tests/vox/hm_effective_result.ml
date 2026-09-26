@@ -110,14 +110,38 @@ let rec (run @ total) : (h : node Pref.heap) @ immutable ->
     | RVar (i, q, epoch, d, certificate) ->
       (match lookup env i with None -> let r = {R.root = p; path = Here} in r
       | Some original -> let r = copied_forest h trees certificate epoch depth d original q () in r)
-    | RBool q -> let desc = Bool in let r = fresh h depth q desc () in
+    | RBool q | RFalse q -> let desc = Bool in let r = fresh h depth q desc () in
       bounded_finite after q r depth (); r
+    | RWord (_, q) -> let desc = Word in let r = fresh h depth q desc () in
+      bounded_finite after q r depth (); r
+    | RNil (arg, q) ->
+      let var = Var in let middle = H.put h arg (cell var depth) in
+      let desc = List arg in let r = fresh middle depth q desc () in
+      bounded_finite after q r depth (); r
+    | RCaseList (_, _, _, body) ->
+      run h trees depth pool env body after final_pool p ()
+    | RIf (_, _, _, body) ->
+      run h trees depth pool env body after final_pool p ()
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      (match result body with None -> unreachable_ () | Some _ ->
+        match out with None -> unreachable_ () | Some q ->
+        let desc = primitive_desc op in
+        primitive_desc_def op;
+        let r = fresh middle depth q desc () in bounded_finite after q r depth (); r)
     | RLam (arg, body, middle, _, out) ->
       (match result body with None -> let r = {R.root = p; path = Here} in r
       | Some b -> match out with None -> let r = {R.root = p; path = Here} in r
       | Some q -> let desc = Arrow (arg, b) in let r = fresh middle depth q desc () in
         bounded_finite after q r depth (); r)
-    | RApp_left _ | RApp_right _ | RLet_left _ -> let r = {R.root = p; path = Here} in r
+    | RApp_left _ | RCons_left _ | RApp_right _ | RCons_right _ | RLet_left _ -> let r = {R.root = p; path = Here} in r
+    | RCons (left, right, _, _, h2, _, q, ok, d) ->
+      (match result left with None -> let r = {R.root = p; path = Here} in r
+      | Some f -> match result right with None -> let r = {R.root = p; path = Here} in r
+      | Some a ->
+        let desc = List f in let h3 = H.put h2 q (cell desc depth) in
+        let r = fresh h2 depth q desc () in
+        let s = P.unify h3 a q ok after d q r depth () in
+        bounded_finite after q s depth (); s)
     | RApp (left, right, _, _, h2, _, q, arrow, ok, d) ->
       (match result left with None -> let r = {R.root = p; path = Here} in r
       | Some f -> match result right with None -> let r = {R.root = p; path = Here} in r

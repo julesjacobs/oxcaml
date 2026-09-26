@@ -27,6 +27,9 @@ let (rebase @ total) : (h : node Pref.heap) @ immutable ->
         va left; vb left; va right; vb right; same_level h a b left (); same_level h a b right ();
         E.effective_below_def h a left n; E.effective_below_def h b left n;
         E.effective_below_def h a right n; E.effective_below_def h b right n; ()
+      | Some {desc = List left; level = Finite n; _} ->
+        va left; vb left; same_level h a b left ();
+        E.effective_below_def h a left n; E.effective_below_def h b left n; ()
       | _ -> ()); ())
 
 let (redirect_below @ total) : (h : node Pref.heap) @ immutable ->
@@ -71,6 +74,8 @@ let (redirect_order @ total) : (h : node Pref.heap) @ immutable ->
     (match H.at h x with Some {desc = Arrow (left, right); level = Finite n; _} ->
       va left; vb left; va right; vb right; redirect_below h source target a b left n ();
       redirect_below h source target a b right n (); ()
+    | Some {desc = List left; level = Finite n; _} ->
+      va left; vb left; redirect_below h source target a b left n (); ()
     | _ -> ()); ())
 
 let rec (ordered @ total) : (h : node Pref.heap) @ immutable ->
@@ -91,7 +96,7 @@ let rec (ordered @ total) : (h : node Pref.heap) @ immutable ->
       | U.Same | U.Constants | U.Occurs_left _ | U.Occurs_right _ | U.Clash -> rebase h a b va (refine_ vb) x (); ()
       | _ -> ())
     | Swap rest -> ordered h q p ok after rest a b va vb order x (); ()
-    | Resolve (r, s, _, _, rest) -> ordered h r s ok after rest a b va vb order x (); ()
+    | List_children (r, s, rest) | Resolve (r, s, _, _, rest) -> ordered h r s ok after rest a b va vb order x (); ()
     | Children (left, right, other_left, other_right, middle, left_ok, first, second) ->
       let raw_heads : ((y : node Pref.t) @ immutable total -> {r : R.representative | not (H.mem middle y) || resolves middle y r.root r.path} @ immutable total) @ total = fun y -> va y; let refine_ out = M.head h left other_left left_ok middle first a y () in refine_ out in
       let[@def] mid_heads : E.heads = fun y -> let refine_ r = raw_heads y in r in

@@ -13,7 +13,7 @@ let rec (from_forest @ total) : (h : node Pref.heap) @ immutable ->
     finite_def h tree; tree_root_def tree;
     let p = tree_root tree in
     match tree with
-    | Free _ | Constant_tree _ | Branch _ ->
+    | Free _ | Constant_tree _ | Word_tree _ | List_tree _ | Branch _ ->
       terminal_def h p; let path = Here in resolves_def h p p path;
       let out = {root = p; path} in out
     | Alias_tree (_, child) ->
@@ -258,8 +258,8 @@ let rec (close_forest @ total) : (h : node Pref.heap) @ immutable ->
     Generalize_spec.closed_at_def h after cut filtered p;
     observe_def h p; observe_def after p;
     finite_def h tree; finite_def after tree;
-    (match tree with Free _ | Constant_tree _ -> ()
-      | Alias_tree (_, child) -> close_forest h cut pool child (); ()
+    (match tree with Free _ | Constant_tree _ | Word_tree _ -> ()
+      | Alias_tree (_, child) | List_tree (_, child) -> close_forest h cut pool child (); ()
       | Branch (_, a, b) -> close_forest h cut pool a ();
         close_forest h cut pool b (); ());
     ())

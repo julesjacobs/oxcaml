@@ -12,7 +12,7 @@ let rec (unified_frame @ total) : (h : node Pref.heap) @ immutable -> (p : node 
     {u : unit | H.mem h x === H.mem after x} @ ghost = fun h p q ok after d x premise -> ghost_ (
     unified_def h p q ok after d; match d with
     | Base old -> P.unified_frame h p q ok after old x (); ()
-    | Resolve (r, s, _, _, rest) -> unified_frame h r s ok after rest x (); ()
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> unified_frame h r s ok after rest x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       unified_frame h a c left_ok middle left x ();
       if left_ok then (unified_frame middle b e ok after right x (); ()) else ()
@@ -29,7 +29,7 @@ let rec (unified_scratch @ total) : (h : node Pref.heap) @ immutable -> (p : nod
     {u : unit | M.scratch_frame h after x} @ ghost = fun h p q ok after d x premise -> ghost_ (
     unified_def h p q ok after d; match d with
     | Base old -> M.unified_scratch h p q ok after old x (); ()
-    | Resolve (r, s, _, _, rest) -> unified_scratch h r s ok after rest x (); ()
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> unified_scratch h r s ok after rest x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       unified_scratch h a c left_ok middle left x ();
       if left_ok then (unified_scratch middle b e ok after right x ();
@@ -59,7 +59,7 @@ let rec (unified_scope @ total) : (h : node Pref.heap) @ immutable ->
   fun h scope p q ok after d x premise -> ghost_ (
     unified_def h p q ok after d; match d with
     | Base old -> M.unified_scope h scope p q ok after old x (); ()
-    | Resolve (r, s, _, _, rest) -> unified_scope h scope r s ok after rest x (); ()
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> unified_scope h scope r s ok after rest x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let next : ((y : node Pref.t) @ immutable -> {u : unit | not (H.mem middle y) || finite_scope middle y}) @ total = fun y ->
         let () = unified_scope h scope a c left_ok middle left y () in () in
@@ -81,7 +81,7 @@ let rec (unified_ordered @ total) : (h : node Pref.heap) @ immutable ->
   fun h order p q ok after d x premise -> ghost_ (
     unified_def h p q ok after d; match d with
     | Base old -> order x; M.unified_ordered h p q ok after old x (); ()
-    | Resolve (r, s, _, _, rest) -> unified_ordered h order r s ok after rest x (); ()
+    | Resolve (r, s, _, _, rest) | List_children (r, s, rest) -> unified_ordered h order r s ok after rest x (); ()
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let next : ((y : node Pref.t) @ immutable -> {u : unit | ordered middle y}) @ total = fun y ->
         let () = unified_ordered h order a c left_ok middle left y () in () in

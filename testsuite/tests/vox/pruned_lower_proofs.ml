@@ -16,9 +16,14 @@ let rec (bounded_tree @ total) : (h : node Pref.heap) @ immutable ->
     let level = match at_level h p with Generic -> 0 | Finite n -> n in
     let u = () in
     let b = match t with
-    | Free p | Constant_tree p -> Tip p
+    | Free p | Constant_tree p | Word_tree p -> Tip p
     | Alias_tree (p, child) ->
       let q = tree_root child in let desc = Link q in
+      children_below_def h desc level;
+      below_def h q level; below_def h q bound; at_level_def h q;
+      let refine_ c = bounded_tree h order bound child (refine_ u) in Through (p, c)
+    | List_tree (p, child) ->
+      let q = tree_root child in let desc = List q in
       children_below_def h desc level;
       below_def h q level; below_def h q bound; at_level_def h q;
       let refine_ c = bounded_tree h order bound child (refine_ u) in Through (p, c)

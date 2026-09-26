@@ -35,7 +35,7 @@ let rec close_and_transfer : (h : node Pref.heap Ghost.t) @ immutable -> (cut : 
         let state : {t : node Pref.token | Pref.own t === h.Ghost.ghost &&
           pool_scoped h.Ghost.ghost rest && pool_scoped h.Ghost.ghost parent} = state in
         let out = close_and_transfer h cut rest parent state in out
-      | Var | Bool | Arrow _ ->
+      | Var | Bool | Word | List _ | Arrow _ ->
         ghost_ (let filtered = representatives h.Ghost.ghost rest in
           let entry = Entry (p, filtered) in closed_heap_def h.Ghost.ghost cut entry; ());
         let change = needs_close cut old.level in

@@ -27,7 +27,9 @@ let rec (bounded @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads
     match tree with
     | Tip _ -> witness p; U.terminal_def h p; U.observe_def h p;
       E.terminal_level h heads p (); ()
-    | Through (_, child) -> bounded h heads witness bound child (); ()
+    | Through (_, child) -> bounded h heads witness bound child ();
+      (match H.at h p with Some {desc = List _; _} -> witness p;
+        U.terminal_def h p; U.observe_def h p; E.terminal_level h heads p (); () | _ -> ()); ()
     | Fork (_, a, b) -> witness p; U.terminal_def h p; U.observe_def h p;
       E.terminal_level h heads p ();
       bounded h heads witness bound a (); bounded h heads witness bound b (); ())
@@ -46,7 +48,9 @@ let rec (effective_bounded @ total) : (h : node Pref.heap) @ immutable -> (heads
     | Through (_, child) -> effective_bounded h heads witness bound child ();
       let q = bound_root child in witness q;
       Effective_lower_spec.effective_bounded_def h heads bound child; E.effective_below_def h heads q bound;
-      U.observe_def h p; E.link_level h heads p q (); ()
+      U.observe_def h p;
+      (match H.at h p with Some {desc = Link _; _} -> E.link_level h heads p q (); ()
+      | _ -> U.terminal_def h p; E.terminal_level h heads p (); ()); ()
     | Fork (_, a, b) -> U.terminal_def h p; U.observe_def h p;
       E.terminal_level h heads p ();
       effective_bounded h heads witness bound a (); effective_bounded h heads witness bound b (); ())
@@ -116,7 +120,8 @@ let rec (bounded_node @ total) : (h : node Pref.heap) @ immutable -> (heads : E.
       | Tip _ -> (match H.at h x with None -> () | Some v -> Effective_lower_spec.effective_children_below_def h heads v.desc bound; ())
       | Through (_, child) ->
         Effective_lower_spec.effective_bounded_def h heads bound child;
-        let desc = Link (bound_root child) in Effective_lower_spec.effective_children_below_def h heads desc bound; ()
+        let desc = Link (bound_root child) in Effective_lower_spec.effective_children_below_def h heads desc bound;
+        let desc = List (bound_root child) in Effective_lower_spec.effective_children_below_def h heads desc bound; ()
       | Fork (_, a, b) ->
         Effective_lower_spec.effective_bounded_def h heads bound a;
         Effective_lower_spec.effective_bounded_def h heads bound b;
@@ -149,7 +154,7 @@ let (completed_ordered @ total) : (h : node Pref.heap) @ immutable -> (heads : E
     match H.at h x with None -> () | Some old ->
       lower_cell_def old bound;
       match old.desc, old.level with
-      | Arrow (a, b), Finite n ->
+      | (Arrow _ | List _), Finite n ->
         Effective_lower_spec.effective_children_below_def h heads old.desc n;
         Effective_lower_proofs.children_frame h after heads frame old.desc n ();
         Effective_lower_spec.effective_children_below_def after heads old.desc n;

@@ -13,7 +13,7 @@ let (below_child @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
     at_level_def h p; Level_finite_spec.edge_def h p q; Level_unifier_spec.observe_def h p;
     match H.at h p with None -> () | Some v -> match v.level with
     | Generic -> () | Finite n -> children_below_def h v.desc n;
-      (match v.desc with Var | Bool -> () | Link a -> below_def h a n; at_level_def h a; ()
+      (match v.desc with Var | Bool | Word -> () | Link a | List a -> below_def h a n; at_level_def h a; ()
       | Arrow (a, b) -> below_def h a n; below_def h b n; at_level_def h a; at_level_def h b; ());
       below_def h q cut; at_level_def h q; ())
 
@@ -30,8 +30,8 @@ let rec (readback_avoids @ total) : (h : node Pref.heap) @ immutable -> (cut : i
     let t = readback tree in D.embed_def t; let mono = D.embed t in A.avoids_def names mono;
     match tree with
     | Free p -> high p; ()
-    | Constant_tree _ -> ()
-    | Alias_tree (_, child) -> let q = tree_root child in Level_finite_spec.edge_def h p q;
+    | Constant_tree _ | Word_tree _ -> ()
+    | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in Level_finite_spec.edge_def h p q;
       below_child h cut p q (); readback_avoids h cut order names high child (); ()
     | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in
       Level_finite_spec.edge_def h p pa; Level_finite_spec.edge_def h p pb;
@@ -53,8 +53,8 @@ let rec (join_position @ total) : (a : A.names) @ immutable -> (b : A.names) @ i
 let[@def] rec (generalized_names @ total) (h : node Pref.heap @ immutable) (cut : int) (tree : tree @ immutable) =
   ghost_ (match tree with
   | Free p -> if below h p cut then A.No_names else A.Name (p, A.No_names)
-  | Constant_tree _ -> A.No_names
-  | Alias_tree (_, child) -> generalized_names h cut child
+  | Constant_tree _ | Word_tree _ -> A.No_names
+  | Alias_tree (_, child) | List_tree (_, child) -> generalized_names h cut child
   | Branch (_, a, b) -> join (generalized_names h cut a) (generalized_names h cut b))
 
 let rec (generalized_names_high @ total) : (h : node Pref.heap) @ immutable -> (cut : int) ->
@@ -65,8 +65,8 @@ let rec (generalized_names_high @ total) : (h : node Pref.heap) @ immutable -> (
     let empty = A.No_names in A.position_def empty p;
     match tree with
     | Free q -> if below h q cut then () else (A.position_def names p; ())
-    | Constant_tree _ -> ()
-    | Alias_tree (_, child) -> generalized_names_high h cut child p; ()
+    | Constant_tree _ | Word_tree _ -> ()
+    | Alias_tree (_, child) | List_tree (_, child) -> generalized_names_high h cut child p; ()
     | Branch (_, a, b) -> generalized_names_high h cut a p; generalized_names_high h cut b p;
       let na = generalized_names h cut a in let nb = generalized_names h cut b in
       join_position na nb p; ())
@@ -95,8 +95,8 @@ let rec (generalized_names_below @ total) : (h : node Pref.heap) @ immutable -> 
     let empty = A.No_names in A.position_def empty p;
     match tree with
     | Free q -> if below h q cut then () else (A.position_def names p; ())
-    | Constant_tree _ -> ()
-    | Alias_tree (_, child) -> let q = tree_root child in Level_finite_spec.edge_def h root q;
+    | Constant_tree _ | Word_tree _ -> ()
+    | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in Level_finite_spec.edge_def h root q;
       below_child h depth root q ();
       generalized_names_below h cut depth order child p (); ()
     | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in
@@ -131,6 +131,12 @@ let rec (template_avoids @ total) : (h : node Pref.heap) @ immutable -> (cut : i
       let var : desc = Var in generic_desc_def h p var; below_def h p depth; at_level_def h p;
       variable_choice_def p; let t = Variable p in D.embed_def t;
       let mono = D.Free p in A.avoids_def names mono; ()
+    | Word_constant _ -> let t = Word64 in D.embed_def t;
+      let mono = D.Word64 in A.avoids_def names mono; ()
+    | List_template (_, child) ->
+      let t = List_type (interpret rho variable_choice child) in D.embed_def t;
+      let mono = D.embed t in A.avoids_def names mono;
+      template_avoids h cut depth order trees rho values rhs child (); ()
     | Constant _ -> let t = Boolean in D.embed_def t;
       let mono = D.Boolean in A.avoids_def names mono; ()
     | Indirect (_, child) -> template_avoids h cut depth order trees rho values rhs child (); ()
@@ -147,17 +153,18 @@ let rec (abstract_avoids @ total) : (names : A.names) @ immutable -> (binders : 
     A.avoids_def names t; A.abstract_type_def binders cut t;
     let out = A.abstract_type binders cut t in A.avoids_def names out;
     match t with
-    | D.Parameter _ | D.Boolean -> ()
+    | D.Parameter _ | D.Boolean | D.Word64 -> ()
     | D.Free p -> A.abstract_free_def binders cut p;
       (match A.position binders p with None -> () | Some _ ->
         A.avoids_def names out; ())
+    | D.List_type a -> abstract_avoids names binders cut a (); ()
     | D.Function (a, b) -> abstract_avoids names binders cut a ();
       abstract_avoids names binders cut b (); ())
 
 let[@def] rec (template_names @ total) (schema : template @ immutable) = ghost_ (match schema with
-  | Boundary _ | Constant _ -> A.No_names
+  | Boundary _ | Constant _ | Word_constant _ -> A.No_names
   | Parameter p -> A.Name (p, A.No_names)
-  | Indirect (_, child) -> template_names child
+  | Indirect (_, child) | List_template (_, child) -> template_names child
   | Product (_, a, b) -> join (template_names a) (template_names b))
 
 let[@def] (template_scheme @ total)

@@ -47,6 +47,9 @@ let rec (mapped_instance @ total) : (saved : node Pref.heap) @ immutable ->
           extends_def rest d; extends_def rest rest;
           extension_trans rest d final (); () in
         match old.desc, desc with
+        | List a, List c ->
+          target_preserved saved heads epoch depth rest final a c ();
+          target_image saved heads final rho a c (); images a; ()
         | Arrow (a, b), Arrow (c, e) ->
           target_preserved saved heads epoch depth rest final a c ();
           target_preserved saved heads epoch depth rest final b e ();
@@ -91,11 +94,14 @@ let rec (template_sound @ total) : (saved : node Pref.heap) @ immutable ->
       extends_def d d; mapped_instance saved heads epoch depth d d rho model p q want images (); ());
     effective_instance_at_def saved heads rho want p;
     match t with
-    | Boundary _ | Parameter _ | Constant _ -> ()
+    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> ()
     | Product (_, a, b) ->
       let desc = Arrow (root a, root b) in effective_children_available_def saved heads d desc;
       template_sound saved heads epoch depth d rho model want images a ();
       template_sound saved heads epoch depth d rho model want images b (); ()
+    | List_template (_, child) ->
+      let desc = List (root child) in effective_children_available_def saved heads d desc;
+      template_sound saved heads epoch depth d rho model want images child (); ()
     | Indirect (_, child) ->
       let desc = Link (root child) in effective_children_available_def saved heads d desc;
       template_sound saved heads epoch depth d rho model want images child (); ())

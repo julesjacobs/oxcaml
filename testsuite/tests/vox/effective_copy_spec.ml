@@ -6,7 +6,8 @@ let[@def] (effective_target_for @ total) (saved : node Pref.heap @ immutable) (h
   | Finite _ -> q === p | Generic -> mapping d p === Some q)
 let[@def] (effective_ready @ total) (saved : node Pref.heap @ immutable) (heads : Effective_level.heads @ total) (d : history @ immutable)
     (source : desc @ immutable) (dest : desc @ immutable) = ghost_ (match source, dest with
-  | Var, Var | Bool, Bool -> true
+  | Var, Var | Bool, Bool | Word, Word -> true
+  | List a, List x -> effective_target_for saved heads d a x
   | Arrow (a, b), Arrow (x, y) -> effective_target_for saved heads d a x && effective_target_for saved heads d b y
   | _ -> false)
 let[@def] rec (effective_valid @ total) (saved : node Pref.heap @ immutable) (heads : Effective_level.heads @ total)
@@ -31,6 +32,8 @@ let[@def] (effective_instance_at @ total) (saved : node Pref.heap @ immutable)
   | None -> true | Some v -> match Effective_level.level saved heads p with
   | Finite _ -> want p === rho p
   | Generic -> match v.desc with Var -> true | Bool -> want p === Boolean
+    | Word -> want p === Word64
+    | List a -> want p === List_type (want a)
     | Arrow (a, b) -> want p === Function (want a, want b) | Link q -> want p === want q)
 
 let[@def] (effective_available @ total) (saved : node Pref.heap @ immutable)
@@ -47,8 +50,8 @@ let[@def] (effective_image @ total) (saved : node Pref.heap @ immutable)
 
 let[@def] (effective_children_available @ total) (saved : node Pref.heap @ immutable)
     (heads : Effective_level.heads @ total) (d : history @ immutable)
-    (desc : desc @ immutable) = ghost_ (match desc with Var | Bool -> true
-  | Link q -> effective_available saved heads d q
+    (desc : desc @ immutable) = ghost_ (match desc with Var | Bool | Word -> true
+  | Link q | List q -> effective_available saved heads d q
   | Arrow (a, b) -> effective_available saved heads d a && effective_available saved heads d b)
 
 type context = { saved : node Pref.heap @@ ghost;

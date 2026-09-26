@@ -11,14 +11,14 @@ let[@def] rec (template_lookup @ total) (env : templates @ immutable) (i : D.ind
   match env with No_templates -> None | Template_binding (s, rest) ->
   match i with D.Z -> Some s | D.S i -> template_lookup rest i
 let[@def] rec (boundary_member @ total) (s : template @ immutable) (p : node Pref.t @ immutable) =
-  ghost_ (match s with Boundary q -> p === q | Parameter _ | Constant _ -> false
+  ghost_ (match s with Boundary q -> p === q | Parameter _ | Constant _ | Word_constant _ -> false
   | Product (_, a, b) -> boundary_member a p || boundary_member b p
-  | Indirect (_, child) -> boundary_member child p)
+  | Indirect (_, child) | List_template (_, child) -> boundary_member child p)
 let[@def] rec (boundary_bound @ total) (h : node Pref.heap @ immutable)
     (depth : int) (s : template @ immutable) = ghost_ (match s with
-  | Boundary p -> below h p depth | Parameter _ | Constant _ -> true
+  | Boundary p -> below h p depth | Parameter _ | Constant _ | Word_constant _ -> true
   | Product (_, a, b) -> boundary_bound h depth a && boundary_bound h depth b
-  | Indirect (_, child) -> boundary_bound h depth child)
+  | Indirect (_, child) | List_template (_, child) -> boundary_bound h depth child)
 let[@def] rec (env_at @ total) (h : node Pref.heap @ immutable) (depth : int)
     (env : env @ immutable) (ts : templates @ immutable) = ghost_ (match env with
   | Empty -> (match ts with No_templates -> true | _ -> false)

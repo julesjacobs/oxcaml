@@ -17,8 +17,8 @@ let rec (low_names @ total) : (h : node Pref.heap) @ immutable -> (heads : E.hea
     {u : unit | EF.generalized_names h heads cut tree === A.No_names} @ ghost = fun h heads cut order tree premise -> ghost_ (
     finite_def h tree; tree_root_def tree; EF.generalized_names_def h heads cut tree;
     let p = tree_root tree in order p; match tree with
-    | Free _ | Constant_tree _ -> ()
-    | Alias_tree (_, child) -> let q = tree_root child in edge_def h p q;
+    | Free _ | Constant_tree _ | Word_tree _ -> ()
+    | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;
       finite_def h child; order q; EF.below_child h heads cut p q (); low_names h heads cut order child (); ()
     | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in edge_def h p pa; edge_def h p pb;
       finite_def h a; order pa; EF.below_child h heads cut p pa (); finite_def h b; order pb; EF.below_child h heads cut p pb ();
@@ -37,8 +37,8 @@ let rec (scheme_names @ total) : (h : node Pref.heap) @ immutable -> (heads : E.
     if E.effective_below h heads p cut then (low_names h heads cut order tree (); ()) else (
       EF.generalized_names_def h heads cut tree; E.level_def h heads p; Level_unifier_spec.observe_def h p;
       match tree with
-      | Free _ | Constant_tree _ -> ()
-      | Alias_tree (_, child) -> let q = tree_root child in edge_def h p q;
+      | Free _ | Constant_tree _ | Word_tree _ -> ()
+      | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;
         finite_def h child; order q; EF.below_child h heads depth p q (); scheme_names h heads cut depth order child (); ()
       | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in edge_def h p pa; edge_def h p pb;
         finite_def h a; order pa; EF.below_child h heads depth p pa (); finite_def h b; order pb; EF.below_child h heads depth p pb ();
@@ -73,8 +73,8 @@ let rec (scheme_readback @ total) : (h : node Pref.heap) @ immutable -> (heads :
     else (finite_def h tree; tree_root_def tree; readback_def tree; Level_unifier_spec.observe_def h p;
       match tree with
       | Free q -> F.variable_choice_def q; ()
-      | Constant_tree _ -> ()
-      | Alias_tree (_, child) -> scheme_readback h heads cut trees rho values child (); ()
+      | Constant_tree _ | Word_tree _ -> ()
+      | Alias_tree (_, child) | List_tree (_, child) -> scheme_readback h heads cut trees rho values child (); ()
       | Branch (_, a, b) -> scheme_readback h heads cut trees rho values a ();
         scheme_readback h heads cut trees rho values b (); ()))
 
@@ -100,8 +100,8 @@ let rec (scheme_boundaries @ total) : (h : node Pref.heap) @ immutable -> (heads
       EF.readback_avoids h heads cut order names high tree (); ())
     else (E.level_def h heads p; Level_unifier_spec.observe_def h p;
       match tree with
-      | Free _ | Constant_tree _ -> ()
-      | Alias_tree (_, child) -> let q = tree_root child in edge_def h p q;
+      | Free _ | Constant_tree _ | Word_tree _ -> ()
+      | Alias_tree (_, child) | List_tree (_, child) -> let q = tree_root child in edge_def h p q;
         finite_def h child; order q; EF.below_child h heads depth p q ();
         scheme_boundaries h heads cut depth order trees rho values names high child (); ()
       | Branch (_, a, b) -> let pa = tree_root a in let pb = tree_root b in edge_def h p pa; edge_def h p pb;
@@ -137,11 +137,11 @@ let rec (selected_generic @ total) : (h : node Pref.heap) @ immutable -> (heads 
   fun h heads schema p premise -> ghost_ (
     Effective_template.valid_template_def h heads schema; F.template_names_def schema;
     let names = F.template_names schema in match schema with
-    | Boundary _ | Constant _ -> A.position_def names p; ()
+    | Boundary _ | Constant _ | Word_constant _ -> A.position_def names p; ()
     | Parameter q -> A.position_def names p;
       let empty = A.No_names in A.position_def empty p;
       Effective_template.generic_def h heads q; ()
-    | Indirect (_, child) -> selected_generic h heads child p (); ()
+    | Indirect (_, child) | List_template (_, child) -> selected_generic h heads child p (); ()
     | Product (_, a, b) -> let aa = F.template_names a in let bb = F.template_names b in
       F.join_position aa bb p; selected_generic h heads a p (); selected_generic h heads b p (); ())
 
@@ -162,13 +162,13 @@ let rec (canonical_boundaries @ total) : (h : node Pref.heap) @ immutable -> (he
   fun h heads cut order trees rho values names generic schema premise -> ghost_ (
     Effective_template.valid_template_def h heads schema; Effective_template.boundary_bound_def h heads cut schema;
     P.boundaries_avoid_def names rho schema; match schema with
-    | Parameter _ | Constant _ -> ()
+    | Parameter _ | Constant _ | Word_constant _ -> ()
     | Boundary p -> root_def schema; E.effective_below_def h heads p cut; let tree = trees p in values p;
       let high : ((q : node Pref.t) @ immutable ->
         {u : unit | A.position names q === None || not (E.effective_below h heads q cut)}) @ total = fun q ->
         generic q; E.effective_below_def h heads q cut; () in
       EF.readback_avoids h heads cut order names high tree (); ()
-    | Indirect (_, child) -> canonical_boundaries h heads cut order trees rho values names generic child (); ()
+    | Indirect (_, child) | List_template (_, child) -> canonical_boundaries h heads cut order trees rho values names generic child (); ()
     | Product (_, a, b) -> canonical_boundaries h heads cut order trees rho values names generic a ();
       canonical_boundaries h heads cut order trees rho values names generic b (); ())
 

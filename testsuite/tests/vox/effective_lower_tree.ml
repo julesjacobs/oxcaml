@@ -18,11 +18,16 @@ let rec (bounded_tree @ total) : (h : node Pref.heap) @ immutable -> (heads : E.
     U.observe_def h p; at_level_def h p;
     let level = match at_level h p with Generic -> 0 | Finite n -> n in
     let b = match t with
-    | Free p | Constant_tree p -> Tip p
+    | Free p | Constant_tree p | Word_tree p -> Tip p
     | Alias_tree (p, child) ->
       let q = tree_root child in witness q; finite_def h child;
       E.link_level h heads p q (); E.effective_below_def h heads q bound;
       let c = bounded_tree h heads witness order bound child () in Through (p, c)
+    | List_tree (p, child) ->
+      U.terminal_def h p; E.terminal_level h heads p ();
+      let a = tree_root child in
+      E.effective_below_def h heads a level; E.effective_below_def h heads a bound;
+      let a = bounded_tree h heads witness order bound child () in Through (p, a)
     | Branch (p, left, right) ->
       U.terminal_def h p; E.terminal_level h heads p ();
       let a = tree_root left in let b = tree_root right in

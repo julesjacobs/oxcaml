@@ -5,7 +5,7 @@ module A = Vox_iarray
 let[@def] (destination @ total) (h : node Pref.heap @ immutable)
     (p : node Pref.t @ immutable) = ghost_ (
   match H.at h p with
-  | Some {desc = (Var | Bool | Arrow _); level = Finite n; _} -> Some (if n < 0 then 0 else n)
+  | Some {desc = (Var | Bool | Word | List _ | Arrow _); level = Finite n; _} -> Some (if n < 0 then 0 else n)
   | _ -> None)
 
 let[@def] (bucket @ total) (pools : pool iarray @ immutable) (i : int) =

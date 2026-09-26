@@ -17,8 +17,8 @@ let rec (lower_finite @ total) : (h : node Pref.heap) @ immutable -> (bound : in
   finite_def h t; tree_root_def t;
   let after = lower_heap h bound edits in finite_def after t; let x = tree_root t in
   lower_observe h bound edits x (); match t with
-  | Free _ | Constant_tree _ -> ()
-  | Alias_tree (_, c) -> lower_finite h bound edits c (); ()
+  | Free _ | Constant_tree _ | Word_tree _ -> ()
+  | Alias_tree (_, c) | List_tree (_, c) -> lower_finite h bound edits c (); ()
   | Branch (_, a, b) -> lower_finite h bound edits a (); lower_finite h bound edits b (); ())
 
 open Copy_spec
@@ -49,7 +49,7 @@ let rec (unified_finite_at @ total) : (h : node Pref.heap) @ immutable ->
         if H.mem h y then (lower_finite h bound edits old (); old) else old in
       let t = unified_finite_at middle next p q ok after rest x () in t
     | Base old -> let t = Level_finite_proofs.unified_finite_at h trees p q ok after old x () in t
-    | Resolve (r, s, _, _, rest) -> let t = unified_finite_at h trees r s ok after rest x () in t
+    | List_children (r, s, rest) | Resolve (r, s, _, _, rest) -> let t = unified_finite_at h trees r s ok after rest x () in t
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let next : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem middle y then finite middle t else U.observe middle y === None)} @ immutable) @ total = fun y ->

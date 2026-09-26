@@ -79,7 +79,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
       let lower_witness : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head lower_heap_witness.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
         {Ghost.ghost = ghost_ (refine_ witness.Ghost.ghost)} in
       run_lower goal lower_heap_witness heads lower_witness lower_scope_witness lower_order_witness lower_trees_witness bound q (refine_ t) resume_child
-    | Var | Bool | Arrow _ ->
+    | Var | Bool | Word | List _ | Arrow _ ->
       ghost_ (witness.Ghost.ghost p; U.terminal_def h.Ghost.ghost p; U.observe_def h.Ghost.ghost p; E.terminal_level h.Ghost.ghost heads.Ghost.ghost p ());
     if (match old.level with Generic -> false | Finite n -> n <= bound) then (
       let tree : {b : bounded | bound_root b === p && effective_bounded h.Ghost.ghost heads.Ghost.ghost bound b} @ immutable ghost = ghost_ (
@@ -90,7 +90,7 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
       ghost_ (effective_lower_valid_def h.Ghost.ghost heads.Ghost.ghost bound edits; lower_heap_def h.Ghost.ghost bound edits; confined_def edits tree);
       let r = #{state = t; edits; tree} in use (refine_ r)
     ) else match old.desc with
-    | Var | Bool ->
+    | Var | Bool | Word ->
       ghost_ (effective_children_below_def h.Ghost.ghost heads.Ghost.ghost old.desc bound; witness.Ghost.ghost p; U.terminal_def h.Ghost.ghost p; U.observe_def h.Ghost.ghost p);
       let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && E.effective_active h.Ghost.ghost heads.Ghost.ghost p
         && match H.at h.Ghost.ghost p with None -> false | Some v -> effective_children_below h.Ghost.ghost heads.Ghost.ghost v.desc bound} = refine_ t in
@@ -102,6 +102,54 @@ let rec run_lower : (goal : lower_goal) @ immutable -> (h : node Pref.heap Ghost
         lower_frame_def h.Ghost.ghost after p; bound_root_def tree; effective_bounded_def after heads.Ghost.ghost bound tree);
       let r = #{state = r.#state; edits; tree} in use (refine_ r)
     | Link _ -> assert false
+    | List q ->
+      let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && E.effective_active h.Ghost.ghost heads.Ghost.ghost q} = refine_ t in
+      let lower_heap_witness : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in
+      let lower_scope_witness : (((x : node Pref.t) @ immutable ->
+        {u : unit | not (H.mem lower_heap_witness.Ghost.ghost x) || E.effective_scope lower_heap_witness.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
+        {Ghost.ghost = ghost_ (refine_ scope)} in
+      let lower_order_witness : (((x : node Pref.t) @ immutable ->
+        {u : unit | E.effective_ordered lower_heap_witness.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
+        {Ghost.ghost = ghost_ (refine_ order)} in
+      let lower_trees_witness : (((x : node Pref.t) @ immutable ->
+        {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
+          (if H.mem lower_heap_witness.Ghost.ghost x then Level_finite_spec.finite lower_heap_witness.Ghost.ghost t else Level_unifier_spec.observe lower_heap_witness.Ghost.ghost x === None)} @ immutable)) Ghost.t =
+        {Ghost.ghost = ghost_ (refine_ trees)} in
+      let resume_child : (child : {r : lowered | effective_lower_valid lower_heap_witness.Ghost.ghost heads.Ghost.ghost bound r.#edits
+      && Pref.own r.#state === lower_heap lower_heap_witness.Ghost.ghost bound r.#edits
+      && bound_root r.#tree === q && effective_bounded (Pref.own r.#state) heads.Ghost.ghost bound r.#tree
+      && confined r.#edits r.#tree}) @ unique ->
+        {r : lowered | effective_lower_valid goal.heap heads.Ghost.ghost goal.bound r.#edits
+      && Pref.own r.#state === lower_heap goal.heap goal.bound r.#edits
+      && bound_root r.#tree === goal.root && effective_bounded (Pref.own r.#state) heads.Ghost.ghost goal.bound r.#tree
+      && confined r.#edits r.#tree} @ unique = fun child ->
+        let d = ghost_ child.#edits in let tree_child = ghost_ child.#tree in
+      let mid = ghost_ (Pref.own (borrow_ child.#state)) in
+      ghost_ (lowering_at h.Ghost.ghost heads.Ghost.ghost bound d p ();
+        lower_active h.Ghost.ghost heads.Ghost.ghost bound d p ();
+        lower_bounded_at mid heads.Ghost.ghost bound tree_child q ();
+        lower_frame_def h.Ghost.ghost mid p;
+        effective_children_below_def mid heads.Ghost.ghost old.desc bound;
+        witness.Ghost.ghost p; lower_head h.Ghost.ghost heads.Ghost.ghost bound d p ();
+        U.terminal_def mid p; U.observe_def mid p);
+      let t = child.#state in
+      let t : {t : node Pref.token | Pref.own t === mid && bound >= 0 && E.effective_active mid heads.Ghost.ghost p
+        && match H.at mid p with None -> false | Some v -> effective_children_below mid heads.Ghost.ghost v.desc bound} = refine_ t in
+      let write_heap : node Pref.heap Ghost.t = {Ghost.ghost = mid} in
+      let refine_ result = write_level write_heap heads bound p (refine_ t) in
+      let w = ghost_ result.#edits in let after = ghost_ (Pref.own (borrow_ result.#state)) in
+      let edits = ghost_ (Sequence (d, w)) in let tree = ghost_ (Through (p, tree_child)) in
+      let frame : ((x : node Pref.t) @ immutable -> {u : unit | lower_frame mid after x}) @ total ghost = ghost_ (fun x ->
+        lowering_at mid heads.Ghost.ghost bound w x (); ()) in
+      ghost_ (bounded_frame mid after heads.Ghost.ghost frame bound tree_child ();
+        frame p; lower_frame_def h.Ghost.ghost mid p; lower_frame_def mid after p;
+        lower_heap_def h.Ghost.ghost bound edits; effective_lower_valid_def h.Ghost.ghost heads.Ghost.ghost bound edits;
+        bound_root_def tree; effective_bounded_def after heads.Ghost.ghost bound tree;
+        confined_through d p tree_child (); confined_root w tree p (); confined_def edits tree);
+      let r = #{state = result.#state; edits; tree} in use (refine_ r) in
+      let lower_witness : (((x : node Pref.t) @ immutable -> {u : unit | E.valid_head lower_heap_witness.Ghost.ghost heads.Ghost.ghost x})) Ghost.t =
+        {Ghost.ghost = ghost_ (refine_ witness.Ghost.ghost)} in
+      run_lower goal lower_heap_witness heads lower_witness lower_scope_witness lower_order_witness lower_trees_witness bound q (refine_ t) resume_child
     | Arrow (a, b) ->
       let t : {t : node Pref.token | Pref.own t === h.Ghost.ghost && bound >= 0 && E.effective_active h.Ghost.ghost heads.Ghost.ghost a} = refine_ t in
       let lower_heap_witness : node Pref.heap Ghost.t = {Ghost.ghost = ghost_ (h.Ghost.ghost)} in

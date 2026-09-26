@@ -32,7 +32,7 @@ let rec into_slice : (h : node Pref.heap Ghost.t) @ immutable ->
           routable h.Ghost.ghost (Iarray.length (Slice.current s)) rest} =
           s in
         let () = into_slice h rest state next in ()
-      | (Var | Bool | Arrow _), Finite level ->
+      | (Var | Bool | Word | List _ | Arrow _), Finite level ->
         let i = if level < 0 then 0 else level in
         let index : {i : int | 0 <= i
           && i < Iarray.length (Slice.current s)} = i in

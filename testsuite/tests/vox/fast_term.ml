@@ -2,17 +2,26 @@ module D = Hm_declarative
 module F = Fast_environment
 
 type index = {number : int; original : D.index @@ ghost}
-type term = Bound of index | Truth | Lambda of term | Recursive of term
+type term = Bound of index | Truth | False | Word of Hmc_word64.t | Nil
+  | Cons of term * term | CaseList of term * term * term
+  | If of term * term * term | Primitive of D.word_operation * term * term
+  | Lambda of term | Recursive of term
   | Apply of term * term | Let of term * term [@@inductive]
 let[@def] rec (source @ total) (term : term @ immutable) = ghost_ (
-  match term with Bound i -> D.Bound i.original | Truth -> D.Truth
+  match term with Bound i -> D.Bound i.original | Truth -> D.Truth | False -> D.False | Word w -> D.Word w | Nil -> D.Nil
+  | Cons (a, b) -> D.Cons (source a, source b)
+  | CaseList (s, a, b) -> D.CaseList (source s, source a, source b)
+  | If (c, a, b) -> D.If (source c, source a, source b)
+  | Primitive (op, a, b) -> D.Primitive (op, source a, source b)
   | Lambda b -> D.Lambda (source b) | Recursive b -> D.Recursive (source b)
   | Apply (a, b) -> D.Apply (source a, source b)
   | Let (a, b) -> D.Let (source a, source b))
 let[@def] rec (valid @ total) (term : term @ immutable) = ghost_ (
   match term with Bound i -> i.number >= 0 && F.encoded i.original i.number
-  | Truth -> true | Lambda b | Recursive b -> valid b
-  | Apply (a, b) | Let (a, b) -> valid a && valid b)
+  | Truth | False | Word _ | Nil -> true
+  | CaseList (s, a, b) | If (s, a, b) -> valid s && valid a && valid b
+  | Lambda b | Recursive b -> valid b
+  | Apply (a, b) | Let (a, b) | Cons (a, b) | Primitive (_, a, b) -> valid a && valid b)
 
 let rec encode_work : (goal : D.index Ghost.t) @ immutable ->
     (index : D.index) @ immutable ->
@@ -51,6 +60,54 @@ let rec compile_work : (goal : D.term Ghost.t) @ immutable ->
     ghost_ (valid_def out; source_def out); use (out)
   | D.Truth -> let out = Truth in
     ghost_ (valid_def out; source_def out); use (out)
+  | D.False -> let out = False in
+    ghost_ (valid_def out; source_def out); use out
+  | D.Word w -> let out = Word w in
+    ghost_ (valid_def out; source_def out); use out
+  | D.Nil -> let out = Nil in
+    ghost_ (valid_def out; source_def out); use out
+  | D.Cons (a, b) ->
+    let left : (left : {t : term | valid t && source t === a}) @ immutable ->
+        {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun left ->
+      let right : (right : {t : term | valid t && source t === b}) @ immutable ->
+          {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun right ->
+        let out = Cons (left, right) in
+        ghost_ (valid_def out; source_def out); use (out) in
+      compile_work goal b right in
+    compile_work goal a left
+  | D.Primitive (op, a, b) ->
+    let left : (left : {t : term | valid t && source t === a}) @ immutable ->
+        {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun left ->
+      let right : (right : {t : term | valid t && source t === b}) @ immutable ->
+          {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun right ->
+        let out = Primitive (op, left, right) in
+        ghost_ (valid_def out; source_def out); use (out) in
+      compile_work goal b right in
+    compile_work goal a left
+  | D.CaseList (a, b, c) ->
+    let first : (first : {t : term | valid t && source t === a}) @ immutable ->
+        {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun first ->
+      let second : (second : {t : term | valid t && source t === b}) @ immutable ->
+          {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun second ->
+        let third : (third : {t : term | valid t && source t === c}) @ immutable ->
+            {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun third ->
+          let out = CaseList (first, second, third) in
+          ghost_ (valid_def out; source_def out); use out in
+        compile_work goal c third in
+      compile_work goal b second in
+    compile_work goal a first
+  | D.If (a, b, c) ->
+    let first : (first : {t : term | valid t && source t === a}) @ immutable ->
+        {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun first ->
+      let second : (second : {t : term | valid t && source t === b}) @ immutable ->
+          {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun second ->
+        let third : (third : {t : term | valid t && source t === c}) @ immutable ->
+            {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun third ->
+          let out = If (first, second, third) in
+          ghost_ (valid_def out; source_def out); use out in
+        compile_work goal c third in
+      compile_work goal b second in
+    compile_work goal a first
   | D.Lambda b ->
     let resume : (body : {t : term | valid t && source t === b}) @ immutable ->
         {t : term | valid t && source t === goal.Ghost.ghost} @ immutable = fun body ->

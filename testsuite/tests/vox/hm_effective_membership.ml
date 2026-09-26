@@ -28,8 +28,19 @@ let rec (run_extends @ total) : (h : node Pref.heap) @ immutable -> (depth : int
     | RShared _ -> ()
     | RVar (i, target, epoch, d, certificate) -> (match lookup env i with
       None -> () | Some original -> Copy_certificate_spec.certifies_def h certificate epoch depth d original target; copy_extends h certificate epoch depth d x (); ())
-    | RBool p -> let desc : desc = Bool in let _ = cell desc depth in
+    | RBool p | RFalse p -> let desc : desc = Bool in let _ = cell desc depth in
       ()
+    | RWord (_, p) -> let desc : desc = Word in let _ = cell desc depth in
+      ()
+    | RNil (arg, p) ->
+      let var = Var in let desc = List arg in
+      let _ = cell var depth in let _ = cell desc depth in ()
+    | RCaseList (_, _, _, body) -> run_extends h depth pool env body after final_pool x ()
+    | RIf (_, _, _, body) -> run_extends h depth pool env body after final_pool x ()
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      run_extends h depth pool env body middle body_pool x ();
+      (match result body with None -> () | Some _ -> match out with None -> () | Some p ->
+        let desc = primitive_desc op in let _ = cell desc depth in ())
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let v = cell var depth in let start = H.put h arg v in
       let next_pool = Entry (arg, pool) in let next_env = Bind (arg, env) in
@@ -37,10 +48,17 @@ let rec (run_extends @ total) : (h : node Pref.heap) @ immutable -> (depth : int
       (match result body with None -> () | Some b -> match out with None -> ()
       | Some p -> let desc = Arrow (arg, b) in let _ = cell desc depth in
         ())
-    | RApp_left (left, _) -> run_extends h depth pool env left after final_pool x (); ()
-    | RApp_right (left, right, middle, left_pool) ->
+    | RApp_left (left, _) | RCons_left (left, _) -> run_extends h depth pool env left after final_pool x (); ()
+    | RApp_right (left, right, middle, left_pool) | RCons_right (left, right, middle, left_pool) ->
       run_extends h depth pool env left middle left_pool x ();
       run_extends middle depth left_pool env right after final_pool x (); ()
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
+      run_extends h depth pool env left h1 pool1 x ();
+      run_extends h1 depth pool1 env right h2 pool2 x ();
+      (match result left with None -> () | Some f ->
+        match result right with None -> () | Some a ->
+        let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
+        Effective_unifier_frame.unified_frame h3 a p ok after d x (); ())
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       run_extends h depth pool env left h1 pool1 x ();
       run_extends h1 depth pool1 env right h2 pool2 x ();
@@ -88,8 +106,24 @@ let rec (run_pool_member @ total) : (h : node Pref.heap) @ immutable -> (depth :
         Hm_effective_registration.result_at h certificate epoch depth d x ();
         let raw = heap h epoch depth d in let trail = Pooled_spec.touched d in let after = Copy_cleanup_spec.swept raw trail in
         Copy_cleanup_spec.swept_at_def raw after trail x; copy_heap_def h epoch depth d; ()))
-    | RBool p -> let next = Entry (p, pool) in listed_def next x;
+    | RBool p | RFalse p -> let next = Entry (p, pool) in listed_def next x;
       let desc : desc = Bool in let _ = cell desc depth in if x === p then () else (Pooled_proofs.pool_member h pool x (); ())
+    | RWord (_, p) -> let next = Entry (p, pool) in listed_def next x;
+      let desc : desc = Word in let _ = cell desc depth in if x === p then () else (Pooled_proofs.pool_member h pool x (); ())
+    | RNil (arg, p) ->
+      let first = Entry (arg, pool) in let next = Entry (p, first) in
+      listed_def next x; listed_def first x;
+      let var = Var in let desc = List arg in
+      let _ = cell var depth in let _ = cell desc depth in
+      if x === p || x === arg then () else (Pooled_proofs.pool_member h pool x (); ())
+    | RCaseList (_, _, _, body) -> run_pool_member h depth pool env body after final_pool x ()
+    | RIf (_, _, _, body) -> run_pool_member h depth pool env body after final_pool x ()
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      (match result body with None -> run_pool_member h depth pool env body middle body_pool x ()
+      | Some _ -> match out with None -> () | Some p ->
+        let next = Entry (p, body_pool) in listed_def next x;
+        let desc = primitive_desc op in let _ = cell desc depth in
+        if x === p then () else run_pool_member h depth pool env body middle body_pool x ())
     | RLam (arg, body, middle, body_pool, out) ->
       let var : desc = Var in let start = H.put h arg (cell var depth) in
       let next_pool = Entry (arg, pool) in let next_env = Bind (arg, env) in
@@ -98,9 +132,15 @@ let rec (run_pool_member @ total) : (h : node Pref.heap) @ immutable -> (depth :
         let next = Entry (p, body_pool) in listed_def next x;
         let desc = Arrow (arg, b) in let _ = cell desc depth in if x === p then () else (
           run_pool_member start depth next_pool next_env body middle body_pool x (); ()))
-    | RApp_left (left, _) -> run_pool_member h depth pool env left after final_pool x (); ()
-    | RApp_right (_, right, middle, left_pool) ->
+    | RApp_left (left, _) | RCons_left (left, _) -> run_pool_member h depth pool env left after final_pool x (); ()
+    | RApp_right (_, right, middle, left_pool) | RCons_right (_, right, middle, left_pool) ->
       run_pool_member middle depth left_pool env right after final_pool x (); ()
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
+      (match result left with None -> () | Some f -> match result right with None -> () | Some a ->
+        let desc = List f in let v = cell desc depth in let h3 = H.put h2 p v in
+        let next = Entry (p, pool2) in listed_def next x;
+        if x === p then () else (run_pool_member h1 depth pool1 env right h2 pool2 x (); ());
+        Effective_unifier_frame.unified_frame h3 a p ok after d x (); ())
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       (match result left with None -> () | Some f -> match result right with None -> () | Some a ->
         let var : desc = Var in let v = cell var depth in let h3 = H.put h2 p v in

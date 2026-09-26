@@ -15,8 +15,9 @@ let[@def] rec (terminal_bounded @ total) (h : node Pref.heap @ immutable)
     (limit : int) (tree : bounded @ immutable) = ghost_ (
   H.mem h (bound_root tree) && match tree with
   | Tip p -> below h p limit
-    && (match H.at h p with Some {desc = (Var | Bool); _} -> true | _ -> false)
-  | Through (p, child) -> (match H.at h p with Some {desc = Link q; _} -> q === bound_root child | _ -> false)
+    && (match H.at h p with Some {desc = (Var | Bool | Word); _} -> true | _ -> false)
+  | Through (p, child) -> (match H.at h p with Some {desc = Link q; _} -> q === bound_root child
+    | Some {desc = List q; _} -> q === bound_root child && below h p limit | _ -> false)
     && terminal_bounded h limit child
   | Fork (p, a, b) -> below h p limit
     && (match H.at h p with Some {desc = Arrow (x, y); _} -> x === bound_root a && y === bound_root b | _ -> false)

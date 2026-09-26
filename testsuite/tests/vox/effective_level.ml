@@ -26,7 +26,8 @@ let[@def] (effective_ordered @ total) (h : node Pref.heap @ immutable)
   | Some v -> match v.level with
     | Generic -> true
     | Finite n -> n >= 0 && match v.desc with
-      | Var | Bool | Link _ -> true
+      | Var | Bool | Word | Link _ -> true
+      | List a -> effective_below h heads a n
       | Arrow (a, b) -> effective_below h heads a n && effective_below h heads b n)
 
 let (head_terminal @ total) : (h : node Pref.heap) @ immutable ->
@@ -130,7 +131,7 @@ let (closed_ordered @ total) : (h : node Pref.heap) @ immutable ->
     terminal_def h p; observe_def h p; G.covered_def h cut pool p;
     at_level_def h p;
     match H.at h p with None -> () | Some v ->
-      match v.desc with Link _ -> () | Var | Bool | Arrow _ ->
+      match v.desc with Link _ -> () | Var | Bool | Word | List _ | Arrow _ ->
         representatives_covered h cut pool p;
         representative_covered_def h cut filtered p;
         Generalize_proofs.closed_level h cut filtered p ();
@@ -138,7 +139,9 @@ let (closed_ordered @ total) : (h : node Pref.heap) @ immutable ->
         G.close_level_def cut v.level;
         match v.level with Generic -> () | Finite n ->
           if n > cut then () else (
-            (match v.desc with Var | Bool | Link _ -> () | Arrow (a, b) ->
+            (match v.desc with Var | Bool | Word | Link _ -> ()
+            | List a -> valid a; closed_boundary h heads cut pool a n (); ()
+            | Arrow (a, b) ->
               valid a; valid b;
               closed_boundary h heads cut pool a n ();
               closed_boundary h heads cut pool b n (); ());
@@ -165,8 +168,8 @@ let[@def] (effective_active @ total) (h : node Pref.heap @ immutable)
 let[@def] (effective_scope @ total) (h : node Pref.heap @ immutable)
     (heads : heads @ total) (p : node Pref.t @ immutable) = ghost_ (
   source_ok h p && (not (effective_active h heads p) || match observe h p with
-    | None -> false | Some (Var | Bool) -> true
-    | Some (Link q) -> effective_active h heads q
+    | None -> false | Some (Var | Bool | Word) -> true
+    | Some (Link q | List q) -> effective_active h heads q
     | Some (Arrow (a, b)) -> effective_active h heads a && effective_active h heads b))
 
 let (ordered_scope @ total) : (h : node Pref.heap) @ immutable ->
@@ -183,7 +186,11 @@ let (ordered_scope @ total) : (h : node Pref.heap) @ immutable ->
       match v.desc with
       | Link q -> valid q; link_level h heads p q ();
         effective_active_def h heads q; ()
-      | Var | Bool -> ()
+      | Var | Bool | Word -> ()
+      | List a ->
+        terminal_def h p; terminal_level h heads p ();
+        at_level_def h p; effective_active_def h heads a;
+        (match v.level with Generic -> () | Finite n -> effective_below_def h heads a n; ()); ()
       | Arrow (a, b) ->
         terminal_def h p; terminal_level h heads p ();
         at_level_def h p;

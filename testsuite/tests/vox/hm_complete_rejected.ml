@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml level_finite_spec.ml level_mgu_spec.ml hm_declarative.ml";
+ all_modules = "pref.mli pref.ml copy_spec.ml level_spec.ml lower_locality_spec.ml level_unifier_spec.ml level_finite_spec.ml level_mgu_spec.ml hmc_word64.ml hm_declarative.ml";
  readonly_files = "hm_complete_rejected.ml";
  compile_only = "true";
  {

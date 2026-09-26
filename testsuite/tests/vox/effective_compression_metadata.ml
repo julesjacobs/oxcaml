@@ -53,7 +53,11 @@ let (ordered @ total) : (h : node Pref.heap) @ immutable ->
     (match H.at h p with
     | None -> ()
     | Some old -> match old.desc with
-      | Var | Bool | Link _ -> ()
+      | Var | Bool | Word | Link _ -> ()
+      | List a -> (match old.level with Generic -> () | Finite n ->
+          before_valid a; after_valid a; level h after edits before_heads after_heads a ();
+          P.frame h after edits a ();
+          E.effective_below_def h before_heads a n; E.effective_below_def after after_heads a n; ())
       | Arrow (a, b) -> match old.level with
         | Generic -> ()
         | Finite n ->

@@ -63,7 +63,8 @@ let rec (with_copy_model @ total) : (saved : node Pref.heap) @ immutable ->
       let value = want p in let v = cell desc depth in cell_def desc depth;
       ready_scoped saved heads epoch depth rest old.desc desc ();
       describes_def tau0 desc value;
-      (match old.desc, desc with Arrow (a, b), Arrow (x, y) -> assigned0 a x; assigned0 b y; () | _ -> ());
+      (match old.desc, desc with List a, List x -> assigned0 a x; ()
+      | Arrow (a, b), Arrow (x, y) -> assigned0 a x; assigned0 b y; () | _ -> ());
       let consume1 : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
           (model1 : ((x : node Pref.t) @ immutable -> {u : unit | equation (H.put h q v) tau x})) @ total ->
           (equal1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === tau0 x})) @ total ->

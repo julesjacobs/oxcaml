@@ -51,9 +51,9 @@ let (redirect_source @ total) : (h : node Pref.heap) @ immutable ->
     let v = redirect h p root in let after = H.put h p v in
     scope p; scope x; source_ok_def h p; source_ok_def h x; source_ok_def after x; redirect_def h p root;
     (match H.at h x with None -> () | Some old ->
-      (match old.desc with Var | Bool -> ()
+      (match old.desc with Var | Bool | Word -> ()
        | Link q -> ()
-       | Arrow (a, b) -> ());
+       | Arrow _ | List _ -> ());
       match old.memo with Empty_memo | Forward _ -> ()
       | Memo (stamp, _) -> ());
     (match H.at h p with None -> () | Some old -> match old.memo with Empty_memo | Forward _ -> ()

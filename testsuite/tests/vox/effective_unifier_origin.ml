@@ -39,7 +39,7 @@ let rec (unified_leaf_origin @ total) : (saved : node Pref.heap) @ immutable ->
         | _ -> let o = Origin (x, Stop) in o)
       | _ -> let o = Origin (x, Stop) in o)
     | Base old -> let o = Leaf_provenance_proofs.unified_leaf_origin saved h cut prior p q ok after old x () in o
-    | Resolve (r, s, _, _, rest) -> let o = unified_leaf_origin saved h cut prior r s ok after rest x () in o
+    | List_children (r, s, rest) | Resolve (r, s, _, _, rest) -> let o = unified_leaf_origin saved h cut prior r s ok after rest x () in o
     | Children (a, b, c, e, middle, left_ok, left, right) ->
       let next : ((y : node Pref.t) @ immutable ->
         {o : origin | not (low_var middle y cut) || originates saved middle cut y o} @ immutable) @ total = fun y ->

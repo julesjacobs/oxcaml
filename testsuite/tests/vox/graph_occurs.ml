@@ -64,7 +64,7 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (node Pref.heap) Ghos
         let r = #{state; found = false; trail; marks = d.Ghost.ghost; search} in use (refine_ r)
       else
         match old.desc with
-        | Var | Bool ->
+        | Var | Bool | Word ->
           let search = ghost_ Leaf in
           ghost_ (searched_def h.Ghost.ghost needle p false search);
           let state : {t : node Pref.token | marks_valid h.Ghost.ghost needle d.Ghost.ghost
@@ -76,7 +76,7 @@ let rec scan_work : (goal : scan_goal) @ immutable -> (h : (node Pref.heap) Ghos
           let search_witness30 : (search) Ghost.t = {Ghost.ghost = ghost_ (search)} in
           let refine_ state_argument31 = state in
           let refine_ r = remember h_witness27 needle_witness28 d_witness29 trail p search_witness30 (refine_ state_argument31) in use (refine_ r)
-        | Link q ->
+        | Link q | List q ->
           let state : {t : node Pref.token | marks_valid h.Ghost.ghost needle d.Ghost.ghost
             && trail === mark_trail d.Ghost.ghost && Pref.own t === marked_heap h.Ghost.ghost d.Ghost.ghost
             && H.mem h.Ghost.ghost q} = refine_ state in

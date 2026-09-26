@@ -13,7 +13,7 @@ let rec (interpret_boundary_agreement @ total) : (s : template) @ immutable ->
     interpret_def rho choices s; interpret_def tau choices s;
     (match s with
     | Boundary p -> boundary_member_def s p; equal p; ()
-    | Parameter _ | Constant _ -> ()
+    | Parameter _ | Constant _ | Word_constant _ -> ()
     | Product (_, a, b) ->
       let left : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member a x) || rho x === tau x}) @ total = fun x ->
@@ -23,7 +23,7 @@ let rec (interpret_boundary_agreement @ total) : (s : template) @ immutable ->
         boundary_member_def s x; equal x; () in
       interpret_boundary_agreement a rho tau left choices;
       interpret_boundary_agreement b rho tau right choices; ()
-    | Indirect (_, child) ->
+    | Indirect (_, child) | List_template (_, child) ->
       let next : ((x : node Pref.t) @ immutable ->
         {u : unit | not (boundary_member child x) || rho x === tau x}) @ total = fun x ->
         boundary_member_def s x; equal x; () in
@@ -65,7 +65,8 @@ let rec (eval_empty @ total) : (args : T.values) @ immutable ->
     T.eval_prefixed_def args xi a; T.eval_def xi a;
     match a with
     | D.Parameter i -> T.prefix_def args xi i; ()
-    | D.Free _ | D.Boolean -> ()
+    | D.Free _ | D.Boolean | D.Word64 -> ()
+    | D.List_type a -> eval_empty args xi a (); ()
     | D.Function (a, b) -> eval_empty args xi a ();
       eval_empty args xi b (); ())
 

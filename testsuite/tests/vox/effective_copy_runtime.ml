@@ -125,7 +125,7 @@ let rec copy_work : (c : context) @ immutable -> (heads : E.heads Ghost.t) @ tot
                 out.#history out.#pool out.#trail ());
             let out = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in use (out)) in
         copy_work c heads scope clean witness goal depth d pool trail child (state) resume
-      | Var | Bool | Arrow _ ->
+      | Var | Bool | Word | List _ | Arrow _ ->
         ghost_ (U.terminal_def c.saved p; E.terminal_level c.saved heads.Ghost.ghost p (); Level_spec.at_level_def c.saved p);
         match old.level with
         | Finite _ ->
@@ -135,11 +135,28 @@ let rec copy_work : (c : context) @ immutable -> (heads : E.heads Ghost.t) @ tot
           let r = #{value = p; state; pool; trail; history = d.Ghost.ghost} in use (r)
         | Generic ->
           match old.desc with
-          | Var | Bool ->
+          | Var | Bool | Word ->
             ghost_ (effective_ready_def c.saved heads.Ghost.ghost d.Ghost.ghost old.desc old.desc);
             let dest = Allocate old.desc in
             let out = finish c heads depth d pool trail p dest clean (state) in let out = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in use (out)
           | Link _ -> assert false
+          | List child ->
+            let resume : (r : {r : copied | result c heads.Ghost.ghost d.Ghost.ghost child r.#value
+                (Pref.own r.#state) r.#history r.#pool r.#trail}) @ unique ->
+                {r : copied | result c heads.Ghost.ghost goal.initial goal.root r.#value
+                  (Pref.own r.#state) r.#history r.#pool r.#trail} @ unique = fun r ->
+              let next = ghost_ r.#history in
+              let desc = List r.#value in let dest = Allocate desc in
+              ghost_ (let h = Pref.own (borrow_ r.#state) in
+                result_def c heads.Ghost.ghost d.Ghost.ghost child r.#value h next r.#pool r.#trail;
+                effective_ready_def c.saved heads.Ghost.ghost next old.desc desc);
+              let current = {Ghost.ghost = next} in let state = r.#state in
+              let out = finish c heads depth current r.#pool r.#trail p dest clean state in
+              ghost_ (let h = Pref.own (borrow_ out.#state) in
+                compose_result c heads.Ghost.ghost d.Ghost.ghost next p
+                  out.#value h out.#history out.#pool out.#trail ());
+              let out = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in use out in
+            copy_work c heads scope clean witness goal depth d pool trail child state resume
           | Arrow (a, b) ->
             let left : (left : {r : copied | result c heads.Ghost.ghost d.Ghost.ghost a r.#value
                 (Pref.own r.#state) r.#history r.#pool r.#trail}) @ unique ->

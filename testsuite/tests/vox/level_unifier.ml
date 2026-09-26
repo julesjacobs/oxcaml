@@ -43,7 +43,7 @@ let rec representative_loop :
           let refine_ result = lift.Ghost.ghost value joined in refine_ result)} in
       let refine_ out = representative_loop start h_witness5 scope_witness6 q (refine_ state_argument8) next_lift in refine_ out
 
-    | Var | Bool | Arrow _ ->
+    | Var | Bool | Word | List _ | Arrow _ ->
       let path = ghost_ Here in
       ghost_ (terminal_def h.Ghost.ghost p);
       ghost_ (resolves_def h.Ghost.ghost p p path);
@@ -236,10 +236,22 @@ let rec unify :
         let d = ghost_ (Swap answer.#derivation) in
         ghost_ (unified_def h r s ok after d);
         #{ok; state = t; derivation = d}
-      | Bool, Bool ->
+      | Bool, Bool | Word, Word ->
         let ok = true in
         let d = ghost_ Constants in
         ghost_ (unified_def h r s ok h d);
+        #{ok; state = t; derivation = d}
+      | List a, List b ->
+        ghost_ (scope r; scope s;
+          finite_scope_def h r; source_ok_def h r; observe_def h r;
+          finite_scope_def h s; source_ok_def h s; observe_def h s);
+        let t : {t : node Pref.token | Pref.own t === h && H.mem h a && H.mem h b
+          && active h a && active h b} = refine_ t in
+        let refine_ child = unify h scope unmarked a b t in
+        let ok = child.#ok in let t = child.#state in
+        let after = ghost_ (Pref.own (borrow_ t)) in
+        let d = ghost_ (List_children (a, b, child.#derivation)) in
+        ghost_ (unified_def h r s ok after d);
         #{ok; state = t; derivation = d}
       | Arrow (a, b), Arrow (c, e) ->
         ghost_ (scope r);
@@ -285,7 +297,10 @@ let rec unify :
           let d = ghost_ (Children (a, b, c, e, middle, left_ok, ld, Same)) in
           ghost_ (unified_def h r s ok middle d);
           #{ok; state = t; derivation = d}
-      | Bool, Arrow _ | Arrow _, Bool ->
+      | Bool, (Word | Arrow _ | List _)
+      | Word, (Bool | Arrow _ | List _)
+      | Arrow _, (Bool | Word | List _)
+      | List _, (Bool | Word | Arrow _) ->
         let ok = false in
         let d = ghost_ Clash in
         ghost_ (unified_def h r s ok h d);

@@ -52,8 +52,8 @@ let rec (boundary_raise @ total) : (h : node Pref.heap) @ immutable ->
     T.boundary_bound_def h heads hi s; match s with
     | Boundary p -> E.effective_below_def h heads p lo;
       E.effective_below_def h heads p hi; ()
-    | Parameter _ | Constant _ -> ()
-    | Indirect (_, child) -> boundary_raise h heads lo hi child (); ()
+    | Parameter _ | Constant _ | Word_constant _ -> ()
+    | Indirect (_, child) | List_template (_, child) -> boundary_raise h heads lo hi child (); ()
     | Product (_, a, b) -> boundary_raise h heads lo hi a ();
       boundary_raise h heads lo hi b (); ())
 
@@ -76,11 +76,11 @@ let rec (boundary_below @ total) : (h : node Pref.heap) @ immutable -> (heads : 
     {u : unit | E.effective_below h heads p depth} @ ghost = fun h heads depth s p premise -> ghost_ (
     T.boundary_bound_def h heads depth s;
     boundary_member_def s p; match s with
-    | Boundary _ | Parameter _ | Constant _ -> ()
+    | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> ()
     | Product (_, a, b) -> if boundary_member a p then
       (boundary_below h heads depth a p (); ())
       else (boundary_below h heads depth b p (); ())
-    | Indirect (_, child) -> boundary_below h heads depth child p (); ())
+    | Indirect (_, child) | List_template (_, child) -> boundary_below h heads depth child p (); ())
 
 let rec (environment_boundary_owned @ total) : (h : node Pref.heap) @ immutable -> (heads : E.heads) @ total ->
     (depth : int) -> (env : env) @ immutable -> (ts : templates) @ immutable ->

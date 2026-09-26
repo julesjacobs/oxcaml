@@ -12,7 +12,8 @@ let[@def] (abstract_free @ total) (ps : names @ immutable) (cut : index @ immuta
 let[@def] rec (abstract_type @ total) (ps : names @ immutable) (cut : index @ immutable)
     (t : mono @ immutable) = ghost_ (match t with
   | Parameter i -> Parameter (shift_index cut (count ps) i)
-  | Free p -> abstract_free ps cut p | Boolean -> Boolean
+  | Free p -> abstract_free ps cut p | Boolean -> Boolean | Word64 -> Word64
+  | List_type a -> List_type (abstract_type ps cut a)
   | Function (a, b) -> Function (abstract_type ps cut a, abstract_type ps cut b))
 let[@def] (abstract_scheme @ total) (ps : names @ immutable) (cut : index @ immutable)
     (s : scheme @ immutable) = ghost_ (match s with
@@ -29,6 +30,12 @@ let[@def] rec (abstract_typing @ total) (ps : names @ immutable) (cut : index @ 
     (d : typing @ immutable) = ghost_ (match d with
   | Variable args -> Variable (abstract_arguments ps cut args)
   | Constant -> Constant
+  | Word_constant -> Word_constant
+  | Empty_list a -> Empty_list (abstract_type ps cut a)
+  | List_cons (a, h, t) -> List_cons (abstract_type ps cut a, abstract_typing ps cut h, abstract_typing ps cut t)
+  | List_case (a, s, l, r) -> List_case (abstract_type ps cut a, abstract_typing ps cut s, abstract_typing ps cut l, abstract_typing ps cut r)
+  | Conditional (c, a, b) -> Conditional (abstract_typing ps cut c, abstract_typing ps cut a, abstract_typing ps cut b)
+  | Word_primitive (a, b) -> Word_primitive (abstract_typing ps cut a, abstract_typing ps cut b)
   | Abstraction (a, body) -> Abstraction (abstract_type ps cut a, abstract_typing ps cut body)
   | Application (a, left, right) -> Application (abstract_type ps cut a,
       abstract_typing ps cut left, abstract_typing ps cut right)
@@ -39,7 +46,8 @@ let[@def] rec (abstract_typing @ total) (ps : names @ immutable) (cut : index @ 
       abstract_typing ps cut body))
 
 let[@def] rec (avoids @ total) (ps : names @ immutable) (t : mono @ immutable) = ghost_ (
-  match t with Parameter _ | Boolean -> true | Free p -> position ps p === None
+  match t with Parameter _ | Boolean | Word64 -> true | Free p -> position ps p === None
+  | List_type a -> avoids ps a
   | Function (a, b) -> avoids ps a && avoids ps b)
 let[@def] (scheme_avoids @ total) (ps : names @ immutable) (s : scheme @ immutable) = ghost_ (
   match s with Forall (_, t) -> avoids ps t)

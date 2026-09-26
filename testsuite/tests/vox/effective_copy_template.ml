@@ -38,10 +38,10 @@ let (forest_instance @ total) : (saved : node Pref.heap) @ immutable ->
       Effective_template.finite_def saved heads x; Effective_template.generic_def saved heads x;
       Level_unifier_spec.observe_def saved x; head_desc_def t; head_generic_def t;
       match t with
-      | Boundary _ | Parameter _ | Constant _ -> ()
+      | Boundary _ | Parameter _ | Constant _ | Word_constant _ -> ()
       | Product (_, a, b) -> forest_eval saved heads trees rho choices want values a ();
         forest_eval saved heads trees rho choices want values b (); ()
-      | Indirect (_, child) -> forest_eval saved heads trees rho choices want values child (); ())
+      | Indirect (_, child) | List_template (_, child) -> forest_eval saved heads trees rho choices want values child (); ())
     else ())
 
 let (with_scheme_instance @ total) : (saved : node Pref.heap) @ immutable ->

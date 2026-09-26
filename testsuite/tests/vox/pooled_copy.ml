@@ -88,7 +88,7 @@ let rec copy : (saved : node Pref.heap) @ immutable ghost ->
         ghost_ (source_ok_def saved p; payload_scoped_def saved old);
         let p : {p : node Pref.t | H.mem saved p && source_ok saved p} = refine_ p in
         match old.desc with
-        | Var | Bool ->
+        | Var | Bool | Word ->
           let dest = Allocate old.desc in
           ghost_ (prepared_def saved d old.desc dest; ready_def saved d old.desc old.desc);
           let t : {t : node Pref.token | let refine_ p = p in valid saved epoch depth d && not (clean_session d) && Pref.own t === heap saved epoch depth d && pool === registered base epoch d && trail === touched d
@@ -101,6 +101,19 @@ let rec copy : (saved : node Pref.heap) @ immutable ghost ->
           let refine_ r = copy saved scope epoch depth d base pool trail child t in
           let pool = r.#pool in let trail = r.#trail in let history = ghost_ r.#history in let dest = Share r.#value in
           ghost_ (prepared_def saved history old.desc dest);
+          let t = r.#state in
+          let t : {t : node Pref.token | let refine_ p = p in valid saved epoch depth history && not (clean_session history) && Pref.own t === heap saved epoch depth history && pool === registered base epoch history && trail === touched history
+            && match H.at saved p with None -> false | Some v ->
+              v.level === Generic && prepared saved history v.desc dest} = refine_ t in
+          let refine_ out = finish saved epoch depth history base pool trail p dest t in
+          ghost_ (let u = () in extension_trans d history out.#history (refine_ u));
+          let r = #{value = out.#value; state = out.#state; pool = out.#pool; trail = out.#trail; history = out.#history} in refine_ r
+        | List child ->
+          let child : {p : node Pref.t | H.mem saved p} = refine_ child in
+          let t : {t : node Pref.token | let refine_ p = child in valid saved epoch depth d && not (clean_session d) && Pref.own t === heap saved epoch depth d && pool === registered base epoch d && trail === touched d} = refine_ t in
+          let refine_ r = copy saved scope epoch depth d base pool trail child t in
+          let pool = r.#pool in let trail = r.#trail in let history = ghost_ r.#history in let desc = List r.#value in let dest = Allocate desc in
+          ghost_ (ready_def saved history old.desc desc; prepared_def saved history old.desc dest);
           let t = r.#state in
           let t : {t : node Pref.token | let refine_ p = p in valid saved epoch depth history && not (clean_session history) && Pref.own t === heap saved epoch depth history && pool === registered base epoch history && trail === touched history
             && match H.at saved p with None -> false | Some v ->

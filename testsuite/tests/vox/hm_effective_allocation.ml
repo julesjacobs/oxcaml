@@ -51,7 +51,8 @@ let (allocate_runtime @ total) : (h : node Pref.heap) @ immutable ->
       {u : unit | E.valid_head (H.put h p (cell desc depth)) b x})) @ total ->
     (x : node Pref.t) @ immutable ->
     {u : unit | not (H.mem h p) && depth >= 0
-      && (match desc with Var | Bool -> true | Link _ -> false
+      && (match desc with Var | Bool | Word -> true | Link _ -> false
+        | List l -> E.effective_below h a l depth
         | Arrow (l, r) -> E.effective_below h a l depth
           && E.effective_below h a r depth)
       && runtime_at h a depth pool x} ->
@@ -63,7 +64,9 @@ let (allocate_runtime @ total) : (h : node Pref.heap) @ immutable ->
     let after = H.put h p v in let next = Entry (p, pool) in
     runtime_at_def h a depth pool x; safe_def h a x;
     depth_bound_def h a depth x;
-    (match desc with Var | Bool | Link _ -> () | Arrow (l, r) ->
+    (match desc with Var | Bool | Word | Link _ -> ()
+    | List l -> E.effective_below_def h a l depth; va l; vb l; saved_below h a b p v l depth (); ()
+    | Arrow (l, r) ->
       E.effective_below_def h a l depth;
       E.effective_below_def h a r depth;
       va l; va r; vb l; vb r;
@@ -75,6 +78,7 @@ let (allocate_runtime @ total) : (h : node Pref.heap) @ immutable ->
     if H.mem h x then (
       saved_level h a b p v x ();
       (match H.at h x with
+      | Some {desc = List l; level = Finite n; _} -> va l; vb l; saved_below h a b p v l n (); ()
       | Some {desc = Arrow (l, r); level = Finite n; _} ->
         va l; va r; vb l; vb r;
         saved_below h a b p v l n ();

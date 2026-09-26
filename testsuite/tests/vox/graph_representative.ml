@@ -39,7 +39,7 @@ let rec representative_loop :
           let refine_ result = lift.Ghost.ghost value joined in refine_ result)} in
       let refine_ out = representative_loop start h_witness5 scope_witness6 q (refine_ state_argument8) next_lift in refine_ out
 
-    | Var | Bool | Arrow _ ->
+    | Var | Bool | Word | List _ | Arrow _ ->
       let path = ghost_ Here in
       ghost_ (terminal_def h.Ghost.ghost p);
       ghost_ (resolves_def h.Ghost.ghost p p path);

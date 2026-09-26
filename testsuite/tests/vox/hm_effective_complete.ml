@@ -233,7 +233,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
         Representative_level.unique h q rep.root rep.path actual.root actual.path ();
         E.level_def h heads q; active_def h rep.root; at_level_def h rep.root;
         Effective_template.valid_template_def h heads schema; root_def schema;
-        (match schema with Boundary _ -> () | Parameter p | Constant p | Product (p, _, _) | Indirect (p, _) ->
+        (match schema with Boundary _ -> () | Parameter p | Constant p | Word_constant p | List_template (p, _) | Product (p, _, _) | Indirect (p, _) ->
           Effective_template.generic_def h heads p; ());
         T.eval_arguments_length xi args; T.eval_open_scheme xi sigma args;
         let values = T.eval_arguments xi args in
@@ -259,7 +259,7 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
         let () = with_variable_model h heads certificate depth pool facts (refine_ forest) env ts g rho model xi realize
           i sigma args epoch history q () claim consume in ())
       | _ -> ())
-    | RBool p -> (match d with D.Constant ->
+    | RBool p | RFalse p -> (match d with D.Constant ->
       let desc : desc = Bool in Copy_model_proofs.describes_def rho desc value;
       let nodes = node_model h rho model in
       let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -270,6 +270,81 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
           Hm_effective_complete_helpers.matches_def tau e value;
           let () = use tau converted equal () in () in
       let () = Hm_effective_complete_helpers.with_alloc h heads depth pool facts rho nodes p desc value after () claim consume in ()
+      | _ -> ())
+    | RWord (_, p) -> (match d with D.Word_constant ->
+      let desc : desc = Word in Copy_model_proofs.describes_def rho desc value;
+      let nodes = node_model h rho model in
+      let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
+        (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+        {u : unit | tau p === value} -> {u : unit | claim}) @ total = fun tau next equal assigned ->
+          let converted = copy_model after tau next in
+          Hm_effective_complete_helpers.matches_def tau e value;
+          let () = use tau converted equal () in () in
+      let () = Hm_effective_complete_helpers.with_alloc h heads depth pool facts rho nodes p desc value after () claim consume in ()
+      | _ -> ())
+    | RNil (arg, p) -> (match d with D.Empty_list a ->
+      let element = T.eval xi a in T.eval_def xi target;
+      let nodes = node_model h rho model in
+      let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
+        (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+        {u : unit | tau p === List_type element} -> {u : unit | claim}) @ total = fun tau next equal assigned ->
+          let converted = copy_model after tau next in
+          Hm_effective_complete_helpers.matches_def tau e value;
+          let () = use tau converted equal () in () in
+      let () = Hm_effective_complete_helpers.with_list_model h heads forest depth pool facts
+        rho nodes arg p after element () claim consume in ()
+      | _ -> ())
+    | RCaseList (c, yes, no, body) ->
+      let db = Hm_list_case_constraints.construct n g c yes no target d () in
+      let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (next : ((x : node Pref.t) @ immutable -> {u : unit | equation after tau x})) @ total ->
+        (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+        {u : unit | matches tau body (T.eval xi target)} -> {u : unit | claim}) @ total = fun tau next equal assigned ->
+          matches_def tau body value; matches_def tau e value; let () = use tau next equal () in () in
+      let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n body after final_pool target db () claim consume in ()
+    | RIf (c, yes, no, body) ->
+      let db = Hm_conditional_constraints.construct n g c yes no target d () in
+      let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (next : ((x : node Pref.t) @ immutable -> {u : unit | equation after tau x})) @ total ->
+        (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+        {u : unit | matches tau body (T.eval xi target)} -> {u : unit | claim}) @ total = fun tau next equal assigned ->
+          matches_def tau body value; matches_def tau e value; let () = use tau next equal () in () in
+      let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n body after final_pool target db () claim consume in ()
+    | RPrimitive (op, left, right, body, middle, body_pool, out) ->
+      (match d with D.Word_primitive (dl, dr) ->
+      let args_ty = D.List_type D.Word64 in
+      let body_d = Hm_primitive_constraints.construct n g left right dl dr () in
+      let forest1 : ((x : node Pref.t) @ immutable ->
+        {t : tree | tree_root t === x && (if H.mem middle x then finite middle t else observe middle x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env body middle body_pool x () in refine_ t in
+      let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select middle forest1 x in r in
+      let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head middle heads1 x}) @ total = fun x ->
+        heads1_def x; let refine_ r = Forest_heads.select middle forest1 x in E.valid_head_def middle heads1 x; () in
+      let consume_body : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (model1 : ((x : node Pref.t) @ immutable -> {u : unit | equation middle rho1 x})) @ total ->
+        (equal1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho1 x === rho x})) @ total ->
+        {u : unit | matches rho1 body (T.eval xi args_ty)} -> {u : unit | claim}) @ total = fun rho1 model1 equal1 assigned ->
+        matches_def rho1 body (T.eval xi args_ty);
+        match result body with None -> () | Some _ -> match out with None -> () | Some p ->
+        let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at middle heads1 depth body_pool x}) @ total = fun x ->
+          Hm_effective_invariant.run_invariant h heads forest depth pool facts env body middle heads1 valid1 body_pool x (); () in
+        let desc = primitive_desc op in
+        primitive_desc_def op; D.operation_type_def op; T.eval_def xi target;
+        Copy_model_proofs.describes_def rho1 desc value;
+        let nodes1 = node_model middle rho1 model1 in
+        let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+          (next : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after tau x})) @ total ->
+          (equal2 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem middle x) || tau x === rho1 x})) @ total ->
+          {u : unit | tau p === value} -> {u : unit | claim}) @ total = fun tau next equal2 assigned ->
+          let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x}) @ total = fun x ->
+            Hm_effective_membership.run_extends h depth pool env body middle body_pool x ();
+            equal1 x; equal2 x; () in
+          let converted = copy_model after tau next in matches_def tau e value;
+          let () = use tau converted equal () in () in
+        let () = with_alloc middle heads1 depth body_pool facts1 rho1 nodes1 p desc value after () claim consume in () in
+      let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n body middle body_pool args_ty body_d () claim consume_body in ()
       | _ -> ())
     | RLam (arg, body, middle, body_pool, out) -> (match d with D.Abstraction (at, db) ->
       (match target with D.Function (a, b) ->
@@ -349,6 +424,15 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
       let () = Hm_effective_complete_helpers.with_alloc h heads depth pool facts rho nodes arg var av h1 () claim consume_arg in ()
       | _ -> ())
       | _ -> ())
+    | RCons_left (left, _) -> (match d with D.List_cons (at, dl, _) ->
+      let ft = at in
+      let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (next : ((x : node Pref.t) @ immutable -> {u : unit | equation after tau x})) @ total ->
+        (equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || tau x === rho x})) @ total ->
+        {u : unit | Hm_effective_complete_helpers.matches tau left (T.eval xi ft)} -> {u : unit | claim}) @ total = fun tau _next _equal fit ->
+          let fv = T.eval xi ft in Hm_effective_complete_helpers.matches_def tau left fv; () in
+      let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n left after final_pool ft dl () claim consume in ()
+      | _ -> ())
     | RApp_left (left, _) -> (match d with D.Application (at, dl, _) ->
       let ft = D.Function (at, target) in
       let consume : ((tau : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
@@ -357,6 +441,43 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
         {u : unit | Hm_effective_complete_helpers.matches tau left (T.eval xi ft)} -> {u : unit | claim}) @ total = fun tau _next _equal fit ->
           let fv = T.eval xi ft in Hm_effective_complete_helpers.matches_def tau left fv; () in
       let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n left after final_pool ft dl () claim consume in ()
+      | _ -> ())
+    | RCons_right (left, right, h1, pool1) -> (match d with D.List_cons (at, dl, dr) ->
+      let ft = at in let fv = T.eval xi ft in let av = T.eval xi target in T.eval_def xi target;
+      let forest1 : ((x : node Pref.t) @ immutable ->
+        {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
+          (if H.mem h1 x then Level_finite_spec.finite h1 t else Level_unifier_spec.observe h1 x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in refine_ t in
+      let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
+      let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
+        heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
+        () in
+            C.run_environment h heads heads1 valid depth pool env ts left h1 pool1 valid1 depth ();
+      let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 heads1 depth pool1 x}) @ total = fun x ->
+        Hm_effective_invariant.run_invariant h heads forest depth pool facts env left h1 heads1 valid1 pool1 x (); () in
+      let consume_left : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (model1 : ((x : node Pref.t) @ immutable -> {u : unit | equation h1 rho1 x})) @ total ->
+        (equal1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho1 x === rho x})) @ total ->
+        {u : unit | Hm_effective_complete_helpers.matches rho1 left (T.eval xi ft)} -> {u : unit | claim}) @ total = fun rho1 model1 equal1 fit1 ->
+        Hm_effective_complete_helpers.matches_def rho1 left fv;
+        let boundaries : ((x : node Pref.t) @ immutable -> {u : unit | not (environment_boundary ts x) || rho x === rho1 x}) @ total = fun x ->
+          let () = preserved_boundary h heads depth env ts rho rho1 equal1 x () in () in
+        let realize1 : ((i : D.index) @ immutable -> (sigma : D.scheme) @ immutable ->
+      (schema : template) @ immutable -> (args : T.values) @ immutable ->
+      {u : unit | D.lookup g i === Some sigma && template_lookup ts i === Some schema
+        && T.values_length args === D.arity sigma} -> (claim : bool) ->
+      (use : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        {u : unit | interpret rho1 choices schema === T.meaning xi sigma args} ->
+        {u : unit | claim})) @ total -> {u : unit | claim}) @ total = fun i sigma schema args fit claim use ->
+          let () = Hm_environment_models.realize_transport g ts rho rho1 xi realize boundaries i sigma schema args () claim use in () in
+        let consume_right : ((rho2 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+          (model2 : ((x : node Pref.t) @ immutable -> {u : unit | equation after rho2 x})) @ total ->
+          (equal2 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1 x) || rho2 x === rho1 x})) @ total ->
+          {u : unit | Hm_effective_complete_helpers.matches rho2 right (T.eval xi target)} -> {u : unit | claim}) @ total = fun rho2 _model2 _equal2 fit2 ->
+          Hm_effective_complete_helpers.matches_def rho2 right av;
+          () in
+        let () = with_run_model h1 heads1 depth pool1 facts1 forest1 env ts g rho1 model1 xi realize1 n right after final_pool target dr () claim consume_right in () in
+      let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n left h1 pool1 ft dl () claim consume_left in ()
       | _ -> ())
     | RApp_right (left, right, h1, pool1) -> (match d with D.Application (at, dl, dr) ->
       let ft = D.Function (at, target) in let fv = T.eval xi ft in let av = T.eval xi at in T.eval_def xi ft;
@@ -393,6 +514,68 @@ let rec (with_run_model @ total) : (h : node Pref.heap) @ immutable -> (heads : 
           Hm_effective_complete_helpers.matches_def rho2 right av;
           () in
         let () = with_run_model h1 heads1 depth pool1 facts1 forest1 env ts g rho1 model1 xi realize1 n right after final_pool at dr () claim consume_right in () in
+      let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n left h1 pool1 ft dl () claim consume_left in ()
+      | _ -> ())
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, derivation) -> (match d with D.List_cons (at, dl, dr) ->
+      let ft = at in let fv = T.eval xi ft in let av = T.eval xi target in T.eval_def xi target;
+      let forest1 : ((x : node Pref.t) @ immutable ->
+        {t : Level_finite_spec.tree | Level_finite_spec.tree_root t === x &&
+          (if H.mem h1 x then Level_finite_spec.finite h1 t else Level_unifier_spec.observe h1 x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h forest depth pool env left h1 pool1 x () in refine_ t in
+      let[@def] heads1 : E.heads = fun x -> let refine_ r = Forest_heads.select h1 forest1 x in r in
+      let valid1 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 heads1 x}) @ total = fun x ->
+        heads1_def x; let refine_ r = Forest_heads.select h1 forest1 x in E.valid_head_def h1 heads1 x;
+        () in
+            C.run_environment h heads heads1 valid depth pool env ts left h1 pool1 valid1 depth ();
+      let facts1 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h1 heads1 depth pool1 x}) @ total = fun x ->
+        Hm_effective_invariant.run_invariant h heads forest depth pool facts env left h1 heads1 valid1 pool1 x (); () in
+      let consume_left : ((rho1 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        (model1 : ((x : node Pref.t) @ immutable -> {u : unit | equation h1 rho1 x})) @ total ->
+        (equal1 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho1 x === rho x})) @ total ->
+        {u : unit | Hm_effective_complete_helpers.matches rho1 left (T.eval xi ft)} -> {u : unit | claim}) @ total = fun rho1 model1 equal1 fit1 ->
+        Hm_effective_complete_helpers.matches_def rho1 left fv;
+        let boundaries : ((x : node Pref.t) @ immutable -> {u : unit | not (environment_boundary ts x) || rho x === rho1 x}) @ total = fun x ->
+          let () = preserved_boundary h heads depth env ts rho rho1 equal1 x () in () in
+        let realize1 : ((i : D.index) @ immutable -> (sigma : D.scheme) @ immutable ->
+      (schema : template) @ immutable -> (args : T.values) @ immutable ->
+      {u : unit | D.lookup g i === Some sigma && template_lookup ts i === Some schema
+        && T.values_length args === D.arity sigma} -> (claim : bool) ->
+      (use : ((choices : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+        {u : unit | interpret rho1 choices schema === T.meaning xi sigma args} ->
+        {u : unit | claim})) @ total -> {u : unit | claim}) @ total = fun i sigma schema args fit claim use ->
+          let () = Hm_environment_models.realize_transport g ts rho rho1 xi realize boundaries i sigma schema args () claim use in () in
+        let consume_right : ((rho2 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+          (model2 : ((x : node Pref.t) @ immutable -> {u : unit | equation h2 rho2 x})) @ total ->
+          (equal2 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h1 x) || rho2 x === rho1 x})) @ total ->
+          {u : unit | Hm_effective_complete_helpers.matches rho2 right (T.eval xi target)} -> {u : unit | claim}) @ total = fun rho2 model2 equal2 fit2 ->
+          Hm_effective_complete_helpers.matches_def rho2 right av;
+          match result left with None -> () | Some f -> match result right with None -> () | Some a ->
+          Hm_effective_driver_proofs.run_result h forest depth pool env left h1 pool1 f ();
+          Hm_effective_membership.run_extends h1 depth pool1 env right h2 pool2 f ();
+          Hm_effective_driver_proofs.run_result h1 forest1 depth pool1 env right h2 pool2 a (); equal2 f;
+
+      let forest2 : ((x : node Pref.t) @ immutable ->
+        {t : tree | tree_root t === x && (if H.mem h2 x then finite h2 t else observe h2 x === None)} @ immutable) @ total = fun x ->
+        let refine_ t = Hm_effective_forest.run_forest h1 forest1 depth pool1 env right h2 pool2 x () in refine_ t in
+      let[@def] heads2 : E.heads = fun x -> let refine_ r = Forest_heads.select h2 forest2 x in r in
+      let valid2 : ((x : node Pref.t) @ immutable -> {u : unit | E.valid_head h2 heads2 x}) @ total = fun x ->
+        heads2_def x; let refine_ r = Forest_heads.select h2 forest2 x in E.valid_head_def h2 heads2 x;
+        () in
+                let facts2 : ((x : node Pref.t) @ immutable -> {u : unit | runtime_at h2 heads2 depth pool2 x}) @ total = fun x ->
+            Hm_effective_invariant.run_invariant h1 heads1 forest1 depth pool1 facts1 env right h2 heads2 valid2 pool2 x (); () in
+          let nodes2 = node_model h2 rho2 model2 in
+          let consume_application : ((rho3 : (node Pref.t @ immutable total -> ty @ immutable total)) @ total ->
+            (model3 : ((x : node Pref.t) @ immutable -> {u : unit | Level_unifier_spec.node_equation after rho3 x})) @ total ->
+            (equal3 : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h2 x) || rho3 x === rho2 x})) @ total ->
+            {u : unit | ok && rho3 p === value} -> {u : unit | claim}) @ total = fun rho3 model3 equal3 assigned ->
+              let equal : ((x : node Pref.t) @ immutable -> {u : unit | not (H.mem h x) || rho3 x === rho x}) @ total = fun x ->
+                Hm_effective_membership.run_extends h depth pool env left h1 pool1 x ();
+                Hm_effective_membership.run_extends h1 depth pool1 env right h2 pool2 x ();
+                equal1 x; equal2 x; equal3 x; () in
+              let converted = copy_model after rho3 model3 in Hm_effective_complete_helpers.matches_def rho3 e value;
+              let () = use rho3 converted equal () in () in
+          let () = Hm_effective_complete_helpers.with_cons_model h2 heads2 depth pool2 facts2 rho2 nodes2 f a p ok after derivation value () claim consume_application in () in
+        let () = with_run_model h1 heads1 depth pool1 facts1 forest1 env ts g rho1 model1 xi realize1 n right h2 pool2 target dr () claim consume_right in () in
       let () = with_run_model h heads depth pool facts forest env ts g rho model xi realize n left h1 pool1 ft dl () claim consume_left in ()
       | _ -> ())
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, derivation) -> (match d with D.Application (at, dl, dr) ->

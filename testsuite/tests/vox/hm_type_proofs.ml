@@ -13,6 +13,8 @@ let[@def] rec (eval @ total)
     (t : mono @ immutable) = match t with
   | Parameter i -> xi i | Free p -> Copy_spec.Variable p
   | Boolean -> Copy_spec.Boolean
+  | Word64 -> Copy_spec.Word64
+  | List_type a -> Copy_spec.List_type (eval xi a)
   | Function (a, b) -> Copy_spec.Function (eval xi a, eval xi b)
 let[@def] rec (eval_arguments @ total)
     (xi : (index @ immutable total -> Copy_spec.ty @ immutable total) @ total)
@@ -24,6 +26,8 @@ let[@def] rec (eval_prefixed @ total) (vs : values @ immutable)
     (t : mono @ immutable) = match t with
   | Parameter i -> prefix vs xi i | Free p -> Copy_spec.Variable p
   | Boolean -> Copy_spec.Boolean
+  | Word64 -> Copy_spec.Word64
+  | List_type a -> Copy_spec.List_type (eval_prefixed vs xi a)
   | Function (a, b) -> Copy_spec.Function (eval_prefixed vs xi a, eval_prefixed vs xi b)
 let[@def] (meaning @ total)
     (xi : (index @ immutable total -> Copy_spec.ty @ immutable total) @ total)
@@ -35,7 +39,8 @@ let rec (eval_embed @ total) :
     (t : Copy_spec.ty) @ immutable ->
     {u : unit | eval xi (embed t) === t} @ ghost = fun xi t -> ghost_ (
   embed_def t; let e = embed t in eval_def xi e;
-  (match t with Copy_spec.Variable _ | Copy_spec.Boolean -> ()
+  (match t with Copy_spec.Variable _ | Copy_spec.Boolean | Copy_spec.Word64 -> ()
+    | Copy_spec.List_type a -> eval_embed xi a; ()
     | Copy_spec.Function (a, b) -> eval_embed xi a; eval_embed xi b; ());
   ())
 
@@ -43,7 +48,8 @@ let rec (embed_wf @ total) : (n : index) @ immutable ->
     (t : Copy_spec.ty) @ immutable ->
     {u : unit | mono_wf n (embed t)} @ ghost = fun n t -> ghost_ (
   embed_def t; let e = embed t in mono_wf_def n e;
-  (match t with Copy_spec.Variable _ | Copy_spec.Boolean -> ()
+  (match t with Copy_spec.Variable _ | Copy_spec.Boolean | Copy_spec.Word64 -> ()
+    | Copy_spec.List_type a -> embed_wf n a; ()
     | Copy_spec.Function (a, b) -> embed_wf n a; embed_wf n b; ());
   ())
 
@@ -80,7 +86,8 @@ let rec (eval_open @ total) :
     let opened = open_type args t in eval_def xi opened;
     (match t with
     | Parameter i -> eval_open_index xi args i; ()
-    | Free _ | Boolean -> ()
+    | Free _ | Boolean | Word64 -> ()
+    | List_type a -> eval_open xi args a; ()
     | Function (a, b) -> eval_open xi args a; eval_open xi args b; ());
     ())
 
@@ -137,7 +144,8 @@ let rec (eval_shift @ total) : (ws : values) @ immutable ->
     eval_prefixed_def ws zeta shifted; eval_prefixed_def ws xi t;
     (match t with
     | Parameter i -> prefix_shift ws vs xi zeta equal i; ()
-    | Free _ | Boolean -> ()
+    | Free _ | Boolean | Word64 -> ()
+    | List_type a -> eval_shift ws vs xi zeta equal a; ()
     | Function (a, b) -> eval_shift ws vs xi zeta equal a;
       eval_shift ws vs xi zeta equal b; ());
     ())
@@ -192,7 +200,8 @@ let rec (open_wf @ total) : (n : index) @ immutable ->
     let opened = open_type args t in mono_wf_def n opened;
     match t with
     | Parameter i -> let () = open_index_wf n args i () in ()
-    | Free _ | Boolean -> ()
+    | Free _ | Boolean | Word64 -> ()
+    | List_type a -> open_wf n args a (); ()
     | Function (a, b) -> open_wf n args a ();
       open_wf n args b (); ())
 
@@ -232,7 +241,25 @@ let rec (typing_scoped @ total) : (n : index) @ immutable ->
     | Variable _ -> (match e with Bound i -> (match lookup g i with
       | None -> () | Some s -> let () = lookup_scoped g i s () in ())
       | _ -> ())
-    | Constant -> ()
+    | Constant | Word_constant | Empty_list _ -> ()
+    | List_cons (a, head, tail) -> (match e with
+      | Cons (h, r) -> typing_scoped n g h a head (); typing_scoped n g r t tail (); ()
+      | _ -> ())
+    | List_case (a, scrutinee, empty, nonempty) -> (match e with
+      | CaseList (s, l, r) -> typing_scoped n g s (List_type a) scrutinee ();
+        typing_scoped n g l t empty ();
+        let tail = Binding (Forall (Z, List_type a), g) in
+        let both = Binding (Forall (Z, a), tail) in depth_def tail; depth_def both;
+        typing_scoped n both r t nonempty (); ()
+      | _ -> ())
+    | Conditional (condition, yes, no) -> (match e with
+      | If (c, a, b) -> typing_scoped n g c Boolean condition ();
+        typing_scoped n g a t yes (); typing_scoped n g b t no (); ()
+      | _ -> ())
+    | Word_primitive (left, right) -> (match e with
+      | Primitive (_, a, b) -> typing_scoped n g a Word64 left ();
+        typing_scoped n g b Word64 right (); ()
+      | _ -> ())
     | Abstraction (a, body) -> (match e, t with
       | Lambda e, Function (_, b) -> let next = Binding (Forall (Z, a), g) in
         depth_def next; typing_scoped n next e b body (); ()
@@ -285,7 +312,8 @@ let rec (shift_wf @ total) : (cut : index) @ immutable ->
     let shifted = shift cut k t in mono_wf_def total shifted;
     match t with
     | Parameter i -> shift_index_wf cut k n i (); ()
-    | Free _ | Boolean -> ()
+    | Free _ | Boolean | Word64 -> ()
+    | List_type a -> shift_wf cut k n a (); ()
     | Function (a, b) -> shift_wf cut k n a ();
       shift_wf cut k n b (); ())
 
@@ -314,7 +342,8 @@ let rec (open_empty @ total) : (t : mono) @ immutable ->
     let args = No_arguments in open_type_def args t;
     (match t with
     | Parameter i -> open_index_def args i; ()
-    | Free _ | Boolean -> ()
+    | Free _ | Boolean | Word64 -> ()
+    | List_type a -> open_empty a; ()
     | Function (a, b) -> open_empty a; open_empty b; ());
     ())
 
@@ -327,7 +356,8 @@ let rec (eval_valuation @ total) : (vs : values) @ immutable ->
     {u : unit | eval zeta t === eval_prefixed vs xi t} @ ghost =
   fun vs xi zeta equal t -> ghost_ (
     eval_def zeta t; eval_prefixed_def vs xi t;
-    (match t with Parameter i -> equal i; () | Free _ | Boolean -> ()
+    (match t with Parameter i -> equal i; () | Free _ | Boolean | Word64 -> ()
+    | List_type a -> eval_valuation vs xi zeta equal a; ()
     | Function (a, b) -> eval_valuation vs xi zeta equal a;
       eval_valuation vs xi zeta equal b; ());
     ())

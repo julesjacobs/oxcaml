@@ -45,11 +45,50 @@ let rec (run_invariant @ total) : (h : node Pref.heap) @ immutable ->
           () in
         Hm_effective_copy_runtime.copy_runtime h a b depth pool facts epoch d (refine_ raw_valid) x ();
         runtime_at_def after b depth final_pool x; ())
-    | RBool p -> let desc = Bool in allocated_def h depth p desc;
+    | RBool p | RFalse p -> let desc = Bool in allocated_def h depth p desc;
       facts x; A.allocate_runtime h a b depth pool p desc va (refine_ vb) x ();
       runtime_at_def after b depth final_pool x; ()
-    | RApp_left (left, _) ->
+    | RWord (_, p) -> let desc = Word in allocated_def h depth p desc;
+      facts x; A.allocate_runtime h a b depth pool p desc va (refine_ vb) x ();
+      runtime_at_def after b depth final_pool x; ()
+    | RApp_left (left, _) | RCons_left (left, _) ->
       run_invariant h a trees depth pool facts env left after b vb final_pool x (); ()
+    | RNil (arg, p) ->
+      let var = Var in
+      allocated_def h depth arg var;
+      let h1 = H.put h arg (cell var depth) in let h1_pool = Entry (arg, pool) in
+      let h1_trees : ((y : node Pref.t) @ immutable ->
+        {t : tree | tree_root t === y && (if H.mem h1 y then finite h1 t else observe h1 y === None)} @ immutable) @ total = fun y ->
+        let out = F.allocated_forest h trees depth arg var () in
+        let refine_ t = out y in refine_ t in
+      let[@def] h1_heads : E.heads = fun y -> let refine_ r = Forest_heads.select h1 h1_trees y in r in
+      let h1_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 h1_heads y}) @ total = fun y ->
+        h1_heads_def y; let refine_ r = Forest_heads.select h1 h1_trees y in
+        E.valid_head_def h1 h1_heads y; () in
+      let h1_facts : ((y : node Pref.t) @ immutable -> {u : unit | runtime_at h1 h1_heads depth h1_pool y}) @ total = fun y ->
+        facts y; A.allocate_runtime h a h1_heads depth pool arg var va (refine_ h1_valid) y (); () in
+      h1_valid arg; A.allocated_below h depth arg var h1_heads ();
+      let desc = List arg in allocated_def h1 depth p desc;
+      h1_facts x; A.allocate_runtime h1 h1_heads b depth h1_pool p desc h1_valid (refine_ vb) x ();
+      runtime_at_def after b depth final_pool x; ()
+    | RCaseList (_, _, _, body) ->
+      run_invariant h a trees depth pool facts env body after b vb final_pool x ()
+    | RIf (_, _, _, body) ->
+      run_invariant h a trees depth pool facts env body after b vb final_pool x ()
+    | RPrimitive (op, _, _, body, middle, body_pool, out) ->
+      (match result body with None ->
+        run_invariant h a trees depth pool facts env body after b vb final_pool x ()
+      | Some _ -> match out with None -> () | Some p ->
+        let ts : ((y : node Pref.t) @ immutable ->
+          {t : tree | tree_root t === y && (if H.mem middle y then finite middle t else observe middle y === None)} @ immutable) @ total = fun y ->
+          let refine_ t = F.run_forest h trees depth pool env body middle body_pool y () in refine_ t in
+        let[@def] mid_heads : E.heads = fun y -> let refine_ r = Forest_heads.select middle ts y in r in
+        let mid_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head middle mid_heads y}) @ total = fun y ->
+          mid_heads_def y; let refine_ r = Forest_heads.select middle ts y in E.valid_head_def middle mid_heads y; () in
+        let desc = primitive_desc op in primitive_desc_def op; allocated_def middle depth p desc;
+        run_invariant h a trees depth pool facts env body middle mid_heads mid_valid body_pool x ();
+        A.allocate_runtime middle mid_heads b depth body_pool p desc mid_valid (refine_ vb) x ();
+        runtime_at_def after b depth final_pool x; ())
     | RLam (arg, body, middle, body_pool, out) ->
       let var = Var in
       allocated_def h depth arg var;
@@ -84,7 +123,7 @@ let rec (run_invariant @ total) : (h : node Pref.heap) @ immutable ->
       let desc = Arrow (arg, target) in allocated_def middle depth p desc;
       middle_facts x; A.allocate_runtime middle middle_heads b depth body_pool p desc middle_valid (refine_ vb) x ();
       runtime_at_def after b depth final_pool x; ())
-    | RApp_right (left, right, h1, pool1) ->
+    | RApp_right (left, right, h1, pool1) | RCons_right (left, right, h1, pool1) ->
       let h1_trees : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h1 y then finite h1 t else observe h1 y === None)} @ immutable) @ total = fun y ->
         let refine_ t = F.run_forest h trees depth pool env left h1 pool1 y () in refine_ t in
@@ -95,6 +134,41 @@ let rec (run_invariant @ total) : (h : node Pref.heap) @ immutable ->
       let h1_facts : ((y : node Pref.t) @ immutable -> {u : unit | runtime_at h1 h1_heads depth pool1 y}) @ total = fun y ->
         run_invariant h a trees depth pool facts env left h1 h1_heads h1_valid pool1 y (); () in
       run_invariant h1 h1_heads h1_trees depth pool1 h1_facts env right after b vb final_pool x (); ()
+    | RCons (left, right, h1, pool1, h2, pool2, p, ok, d) ->
+      let h1_trees : ((y : node Pref.t) @ immutable ->
+        {t : tree | tree_root t === y && (if H.mem h1 y then finite h1 t else observe h1 y === None)} @ immutable) @ total = fun y ->
+        let refine_ t = F.run_forest h trees depth pool env left h1 pool1 y () in refine_ t in
+      let[@def] h1_heads : E.heads = fun y -> let refine_ r = Forest_heads.select h1 h1_trees y in r in
+      let h1_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head h1 h1_heads y}) @ total = fun y ->
+        h1_heads_def y; let refine_ r = Forest_heads.select h1 h1_trees y in
+        E.valid_head_def h1 h1_heads y; () in
+      let h1_facts : ((y : node Pref.t) @ immutable -> {u : unit | runtime_at h1 h1_heads depth pool1 y}) @ total = fun y ->
+        run_invariant h a trees depth pool facts env left h1 h1_heads h1_valid pool1 y (); () in
+      let h2_trees : ((y : node Pref.t) @ immutable ->
+        {t : tree | tree_root t === y && (if H.mem h2 y then finite h2 t else observe h2 y === None)} @ immutable) @ total = fun y ->
+        let refine_ t = F.run_forest h1 h1_trees depth pool1 env right h2 pool2 y () in refine_ t in
+      let[@def] h2_heads : E.heads = fun y -> let refine_ r = Forest_heads.select h2 h2_trees y in r in
+      let h2_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head h2 h2_heads y}) @ total = fun y ->
+        h2_heads_def y; let refine_ r = Forest_heads.select h2 h2_trees y in
+        E.valid_head_def h2 h2_heads y; () in
+      let h2_facts : ((y : node Pref.t) @ immutable -> {u : unit | runtime_at h2 h2_heads depth pool2 y}) @ total = fun y ->
+        run_invariant h1 h1_heads h1_trees depth pool1 h1_facts env right h2 h2_heads h2_valid pool2 y (); () in
+      (match result left with None -> () | Some f -> match result right with None -> () | Some target ->
+      h1_facts f; Hm_effective_result.result_below h trees depth pool env left h1 pool1 h1_heads f ();
+      h1_valid f; h2_valid f;
+      Hm_effective_paths.run_below h1 h1_heads h2_heads depth pool1 env right h2 pool2 f depth ();
+      let desc = List f in allocated_def h2 depth p desc;
+      let h3 = H.put h2 p (cell desc depth) in let h3_pool = Entry (p, pool2) in
+      let h3_trees : ((y : node Pref.t) @ immutable ->
+        {t : tree | tree_root t === y && (if H.mem h3 y then finite h3 t else observe h3 y === None)} @ immutable) @ total = fun y ->
+        let out = F.allocated_forest h2 h2_trees depth p desc () in let refine_ t = out y in refine_ t in
+      let[@def] h3_heads : E.heads = fun y -> let refine_ r = Forest_heads.select h3 h3_trees y in r in
+      let h3_valid : ((y : node Pref.t) @ immutable -> {u : unit | E.valid_head h3 h3_heads y}) @ total = fun y ->
+        h3_heads_def y; let refine_ r = Forest_heads.select h3 h3_trees y in E.valid_head_def h3 h3_heads y; () in
+      let h3_facts : ((y : node Pref.t) @ immutable -> {u : unit | runtime_at h3 h3_heads depth h3_pool y}) @ total = fun y ->
+        h2_facts y; A.allocate_runtime h2 h2_heads h3_heads depth pool2 p desc h2_valid (refine_ h3_valid) y (); () in
+      unify_runtime h3 h3_heads b depth h3_pool h3_facts target p ok after d vb h3_trees x ();
+      runtime_at_def after b depth final_pool x; ())
     | RApp (left, right, h1, pool1, h2, pool2, p, arrow, ok, d) ->
       let h1_trees : ((y : node Pref.t) @ immutable ->
         {t : tree | tree_root t === y && (if H.mem h1 y then finite h1 t else observe h1 y === None)} @ immutable) @ total = fun y ->

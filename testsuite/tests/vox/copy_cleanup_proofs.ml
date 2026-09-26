@@ -83,8 +83,8 @@ let (sweep_scope @ total) : (h : node Pref.heap) @ immutable ->
     (match H.at h x with None -> () | Some v ->
       (match v.memo with Empty_memo | Forward _ -> () | Memo (stamp, _) ->
         frame stamp; swept_at_def h after trail stamp; ());
-      match v.desc with Var | Bool -> ()
-      | Link p -> frame p; swept_at_def h after trail p; ()
+      match v.desc with Var | Bool | Word -> ()
+      | Link p | List p -> frame p; swept_at_def h after trail p; ()
       | Arrow (a, b) -> frame a; frame b;
         swept_at_def h after trail a; swept_at_def h after trail b; ());
     ())
@@ -113,8 +113,8 @@ let (sweep_order @ total) : (h : node Pref.heap) @ immutable ->
       match v.level with Generic -> () | Finite depth ->
         Level_spec.children_below_def h v.desc depth;
         Level_spec.children_below_def after v.desc depth;
-        match v.desc with Var | Bool -> ()
-        | Link p -> frame p; sweep_below h after trail p depth (); ()
+        match v.desc with Var | Bool | Word -> ()
+        | Link p | List p -> frame p; sweep_below h after trail p depth (); ()
         | Arrow (a, b) -> frame a; frame b;
           sweep_below h after trail a depth ();
           sweep_below h after trail b depth (); ());

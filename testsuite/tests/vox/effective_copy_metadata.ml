@@ -29,6 +29,7 @@ let (ready_scoped @ total) : (saved : node Pref.heap) @ immutable ->
     effective_ready_def saved heads d source dest;
     let h = heap saved epoch depth d in let v = cell dest depth in cell_def dest depth; payload_scoped_def h v;
     match source, dest with
+    | List a, List x -> target_allocated saved heads epoch depth d a x (); ()
     | Arrow (a, b), Arrow (x, y) -> target_allocated saved heads epoch depth d a x ();
       target_allocated saved heads epoch depth d b y (); ()
     | _ -> ())

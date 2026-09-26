@@ -26,21 +26,24 @@ let[@def] (covered @ total) (h : node Pref.heap @ immutable) (cut : int) (pool :
 
 let[@def] rec (unfolded @ total) (h : node Pref.heap @ immutable) (t : bounded @ immutable) = ghost_ (
   H.mem h (bound_root t) && match t with
-  | Tip p -> (match H.at h p with Some {desc = (Var | Bool); _} -> true | _ -> false)
-  | Through (p, c) -> (match H.at h p with Some {desc = Link q; _} -> q === bound_root c | _ -> false) && unfolded h c
+  | Tip p -> (match H.at h p with Some {desc = (Var | Bool | Word); _} -> true | _ -> false)
+  | Through (p, c) -> (match H.at h p with Some {desc = (Link q | List q); _} -> q === bound_root c | _ -> false) && unfolded h c
   | Fork (p, a, b) -> (match H.at h p with Some {desc = Arrow (x, y); _} -> x === bound_root a && y === bound_root b | _ -> false)
     && unfolded h a && unfolded h b)
 let[@def] rec (scheme @ total) (h : node Pref.heap @ immutable) (cut : int) (t : bounded @ immutable) = ghost_ (
   let p = bound_root t in
   if not (close_level cut (at_level h p) === Generic) then Boundary p else
   match t with
-  | Tip p -> (match H.at h p with Some {desc = Bool; _} -> Constant p | _ -> Parameter p)
-  | Through (p, c) -> Indirect (p, scheme h cut c)
+  | Tip p -> (match H.at h p with Some {desc = Bool; _} -> Constant p
+    | Some {desc = Word; _} -> Word_constant p | _ -> Parameter p)
+  | Through (p, c) -> (match H.at h p with
+    | Some {desc = List _; _} -> List_template (p, scheme h cut c)
+    | _ -> Indirect (p, scheme h cut c))
   | Fork (p, a, b) -> Product (p, scheme h cut a, scheme h cut b))
 
 type path = Stop | Step of node Pref.t * path [@@inductive]
 let[@def] (edge @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @ immutable) (q : node Pref.t @ immutable) = ghost_ (
-  match H.at h p with Some {desc = Link x; _} -> x === q
+  match H.at h p with Some {desc = (Link x | List x); _} -> x === q
   | Some {desc = Arrow (a, b); _} -> a === q || b === q | _ -> false)
 let[@def] rec (reaches @ total) (h : node Pref.heap @ immutable) (p : node Pref.t @ immutable)
     (q : node Pref.t @ immutable) (path : path @ immutable) = ghost_ (match path with
