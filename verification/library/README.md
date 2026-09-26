@@ -339,3 +339,11 @@ The operations retain exact payments and return no refunds. The
 proves conservation using `account` and `account_bounds`. The implementation's
 surplus and growth reserve remain private. The signature exposes no path,
 heap, rank, or reserve model.
+
+Connectivity states are valid by construction, so its contracts state
+membership through `contains (snapshot s) x` and results through `root`.
+`Vox_union_find_events` records completed operations newest first: `Initialize`
+(1), `Allocate` (3), `Find depth` (`4 * depth + 2`, depth nonnegative), `Link`
+(7) and `Union` (1). `event_cost` proves that the ticks equal the total weight
+of `events state`; together with `account_bounds` this bounds the event cost by
+the account.
