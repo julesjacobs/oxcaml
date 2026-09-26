@@ -170,3 +170,7 @@ type validity =
   | Unknown of string option
   | Timeout
   | Failure of string
+
+(** Explain the encoded goal, assumptions and available countermodel values.
+    Opaque calls may represent missing facts rather than runtime failures. *)
+val explain_invalid : query -> (Symbol.t * value) list option -> string

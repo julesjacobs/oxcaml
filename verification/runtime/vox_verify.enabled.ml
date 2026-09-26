@@ -61,13 +61,18 @@ let prove poll check loc query =
   let result : Vox_smt_solver.result = check query in
   match result.validity with
   | Vox_smt.Valid -> ()
-  | Invalid _ ->
+  | Invalid model ->
     raise
       (Vox_vc.Unproved
-         (Location.errorf ~loc "Refinement could not be proved (%s)"
-            (if abstract_multiplication query
-             then "countermodel for abstract multiplication"
-             else "counterexample")))
+         (if !dump_vc
+          then
+            Location.errorf ~loc "Refinement could not be proved.\n%s"
+              (Vox_smt.explain_invalid query model)
+          else
+            Location.errorf ~loc "Refinement could not be proved (%s)"
+              (if abstract_multiplication query
+               then "countermodel for abstract multiplication"
+               else "counterexample")))
   | Unknown reason ->
     raise
       (Vox_vc.Unproved
