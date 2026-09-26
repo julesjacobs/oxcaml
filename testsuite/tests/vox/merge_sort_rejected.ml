@@ -13,6 +13,16 @@
  }
 *)
 
+(* Load the implementation so that the accepted phrases below can be
+   evaluated. *)
+#load "vox_sequence.cmo";;
+#load "vox_ordered_sequence.cmo";;
+#load "vox_credits.cmo";;
+#load "vox_merge_proofs.cmo";;
+#load "vox_sort_cost.cmo";;
+#load "vox_merge_sort.cmo";;
+#load "merge_sort.cmo";;
+
 open Merge_sort;;
 [%%expect{|
 |}]
@@ -176,4 +186,44 @@ Line 15, characters 33-38:
 15 |   let u = () in (u : {u : unit | false});;
                                       ^^^^^
   The refinement is stated here.
+|}]
+
+(* [sort] of two elements needs budget 2 = 2 * height 2 credits; one credit
+   is rejected at the call, and the same call with two credits is
+   accepted. *)
+let underfunded_sort () =
+  let values = [2; 1] in
+  ghost_ (
+    Vox_sequence.length_def values;
+    Vox_sequence.length_def [1]; Vox_sequence.length_def [];
+    Vox_sort_cost.budget_def 2Z;
+    Vox_sort_cost.height_def 2Z; Vox_sort_cost.height_def 1Z);
+  let amount = 1 in
+  let initial : {n : int | n >= 0} = amount in
+  let token = C.Budget.create initial in
+  let #{ Sort.values = sorted; state = _ } = Sort.sort values token in
+  sorted;;
+[%%expect{|
+Line 11, characters 62-67:
+11 |   let #{ Sort.values = sorted; state = _ } = Sort.sort values token in
+                                                                   ^^^^^
+Error: Refinement could not be proved (counterexample)
+File "vox_merge_sort.mli", lines 51-52, characters 30-35:
+  The refinement is stated here.
+|}]
+
+let exactly_funded_sort () =
+  let values = [2; 1] in
+  ghost_ (
+    Vox_sequence.length_def values;
+    Vox_sequence.length_def [1]; Vox_sequence.length_def [];
+    Vox_sort_cost.budget_def 2Z;
+    Vox_sort_cost.height_def 2Z; Vox_sort_cost.height_def 1Z);
+  let amount = 2 in
+  let initial : {n : int | n >= 0} = amount in
+  let token = C.Budget.create initial in
+  let #{ Sort.values = sorted; state = _ } = Sort.sort values token in
+  sorted;;
+[%%expect{|
+val exactly_funded_sort : unit -> Merge_sort.O.elt list = <fun>
 |}]
