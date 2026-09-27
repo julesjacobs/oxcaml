@@ -1,7 +1,7 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "wasm_u32.ml hmc_word64.ml wasm_i32.ml wasm_i64.ml wasm_instruction.ml wasm_code.ml wasm_address.ml wasm_code_demo.ml";
+ prebuilt_modules = "wasm_u32.ml hmc_word64.ml wasm_i32.ml wasm_i64.ml wasm_instruction.ml wasm_code.ml wasm_address.ml";
  { bytecode; }
 *)
 module B = Wasm_u32

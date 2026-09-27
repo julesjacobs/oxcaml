@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml hm_elaboration_check.ml hm_checked_elaboration.mli hm_checked_elaboration.ml hm_checked_elaboration_demo.ml";
+ prebuilt_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml hm_elaboration_check.ml hm_checked_elaboration.mli hm_checked_elaboration.ml";
  { bytecode; }
 *)
 module D = Hm_declarative

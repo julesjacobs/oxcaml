@@ -64,10 +64,22 @@ the bytecode host:
 ```
 
 Several paths can be given; more than one selected test runs in parallel,
-and the ten slowest are listed at the end. Refinement verification results
+longest first by the durations of earlier runs, and the ten slowest are
+listed at the end. Refinement verification results
 are cached in `_build/vox-verify-cache`, keyed by the compiler binary, the
 source, the imported interfaces, the flags and the solver; set
 `VOX_VERIFY_CACHE=` to disable the cache.
+
+Vox tests take the verified library and shared test modules from a prebuilt
+test library instead of compiling them. A header lists them in
+`prebuilt_modules`, in link order and with the same syntax as `all_modules`,
+and the test links exactly those modules; `all_modules` then holds only the
+test's own file and anything that must be compiled with it. `./dev test`,
+`make test-one` and `make test` build the modules the selected tests list
+into `_build/vox-test-library` first, with `testsuite/vox-test-library.sh`:
+in parallel, with the test compilers, verifying each module with `ocamlc`.
+It rebuilds only what changed, and everything after a compiler change. Any
+compiler output while building the library fails the run.
 
 The incremental workflow does not cover changes to bootstrap-language support,
 the runtime, the standard library, the compiler-libs installation, or test

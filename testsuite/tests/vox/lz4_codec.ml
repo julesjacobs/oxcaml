@@ -2,41 +2,37 @@
  has-z3;
  flags = "-extension refinement_types -principal";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "vox_sequence.mli vox_sequence.ml \
-                vox_int_sequence.mli vox_int_sequence.ml \
-                vox_iarray.mli vox_iarray.ml \
-                vox_string_view.mli vox_string_view.ml \
-                borrow_iarray.mli borrow_iarray.ml pref.mli pref.ml \
-                ghost_pref.mli ghost_pref.ml raw_memory.mli raw_memory.ml vox_lz4_spec_storage.ml \
-                vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml \
-                vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml \
-                vox_lz4_heap_bytes.ml \
-                vox_lz4_spec_match.ml vox_lz4_spec_plan.ml \
-                vox_lz4_spec_token.ml vox_lz4_spec_wire.ml \
-                vox_lz4_spec_hashes.ml vox_lz4_spec_scan.ml \
-                vox_lz4_spec.ml \
-                vox_lz4_buffer.ml vox_lz4_packed.ml \
-                vox_lz4_encode_buffer.ml vox_lz4_packed_encode.ml \
-                vox_lz4_snapshot.ml \
-                vox_lz4_string_copy.mli vox_lz4_string_copy.ml \
-                vox_lz4_roundtrip.ml \
-                vox_lz4_general_match.ml vox_lz4_string_match.ml \
-                vox_lz4_general_plan.ml \
-                vox_lz4_general_encode.ml vox_lz4_general_wire.ml \
-                vox_lz4_decode_bytes_proof.ml vox_lz4_decode_bytes_roundtrip.ml \
-                vox_lz4_general_cost.ml vox_lz4_general_bridge.ml \
-                vox_lz4_general_sized.ml vox_lz4_string_encode.ml \
-                vox_lz4_general_roundtrip.ml \
-                vox_lz4_fast_plan_model.ml vox_lz4_mutable_scan.ml \
-                vox_lz4_string_scan.ml vox_lz4_string_decode.ml \
-                vox_lz4_string_codec.ml vox_lz4_string_roundtrip.ml \
-                vox_lz4_forward_model.ml vox_lz4_streaming.ml \
-                vox_lz4_streaming_codec.ml vox_lz4_streaming_roundtrip.ml \
-                vox_lz4_fast_plan_roundtrip.ml \
-                vox_lz4_fast_hints_reference.ml \
-                vox_lz4_checked_api.ml vox_lz4.mli vox_lz4.ml \
-                vox_lz4_baseline.ml \
-                lz4_codec.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml vox_int_sequence.mli \
+                     vox_int_sequence.ml vox_iarray.mli vox_iarray.ml \
+                     vox_string_view.mli vox_string_view.ml \
+                     borrow_iarray.mli borrow_iarray.ml pref.mli pref.ml \
+                     ghost_pref.mli ghost_pref.ml raw_memory.mli \
+                     raw_memory.ml vox_lz4_spec_storage.ml \
+                     vox_lz4_spec_parse.ml vox_lz4_spec_decode.ml \
+                     vox_lz4_spec_decode_bytes.ml vox_lz4_spec_bytes.ml \
+                     vox_lz4_heap_bytes.ml vox_lz4_spec_match.ml \
+                     vox_lz4_spec_plan.ml vox_lz4_spec_token.ml \
+                     vox_lz4_spec_wire.ml vox_lz4_spec_hashes.ml \
+                     vox_lz4_spec_scan.ml vox_lz4_spec.ml vox_lz4_buffer.ml \
+                     vox_lz4_packed.ml vox_lz4_encode_buffer.ml \
+                     vox_lz4_packed_encode.ml vox_lz4_snapshot.ml \
+                     vox_lz4_string_copy.mli vox_lz4_string_copy.ml \
+                     vox_lz4_roundtrip.ml vox_lz4_general_match.ml \
+                     vox_lz4_string_match.ml vox_lz4_general_plan.ml \
+                     vox_lz4_general_encode.ml vox_lz4_general_wire.ml \
+                     vox_lz4_decode_bytes_proof.ml \
+                     vox_lz4_decode_bytes_roundtrip.ml \
+                     vox_lz4_general_cost.ml vox_lz4_general_bridge.ml \
+                     vox_lz4_general_sized.ml vox_lz4_string_encode.ml \
+                     vox_lz4_general_roundtrip.ml vox_lz4_fast_plan_model.ml \
+                     vox_lz4_mutable_scan.ml vox_lz4_string_scan.ml \
+                     vox_lz4_string_decode.ml vox_lz4_string_codec.ml \
+                     vox_lz4_string_roundtrip.ml vox_lz4_forward_model.ml \
+                     vox_lz4_streaming.ml vox_lz4_streaming_codec.ml \
+                     vox_lz4_streaming_roundtrip.ml \
+                     vox_lz4_fast_plan_roundtrip.ml \
+                     vox_lz4_fast_hints_reference.ml vox_lz4_checked_api.ml \
+                     vox_lz4.mli vox_lz4.ml vox_lz4_baseline.ml";
  { native; }
 *)
 

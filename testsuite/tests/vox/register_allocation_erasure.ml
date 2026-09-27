@@ -1,12 +1,10 @@
 (* TEST
  has-z3;
  flags = "-extension refinement_types";
- all_modules = "register_allocation_spec.ml register_allocation.mli register_allocation.ml";
+ prebuilt_modules = "register_allocation_spec.ml register_allocation.mli register_allocation.ml";
  readonly_files = "register_allocation_erasure.ml";
- compile_only = "true";
  {
    setup-ocamlopt.opt-build-env;
-   ocamlopt.opt;
    flags += " -drawlambda -dcanonical-ids";
    run-expectnat;
    check-program-output;

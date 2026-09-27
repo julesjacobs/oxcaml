@@ -2,7 +2,7 @@
  flags = "-extension refinement_types";
  has-z3;
  timeout = "900";
- all_modules = "polymorphic_set_intf.mli polymorphic_list_set.mli polymorphic_list_set.ml polymorphic_sets.ml";
+ prebuilt_modules = "polymorphic_set_intf.mli polymorphic_list_set.mli polymorphic_list_set.ml";
  { bytecode; }
 *)
 

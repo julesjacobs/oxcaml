@@ -40,7 +40,13 @@ val readonly_files : Environments.t -> string list
 val setup_symlinks :
   ?source_directories:string list -> string -> string -> string list -> unit
 
-val setup_build_env : bool -> string list -> Actions.code
+val prebuilt_modules : Environments.t -> string list
+
+val prebuilt_view_directory : Environments.t -> string
+
+val prebuilt_implementations : Environments.t -> string list
+
+val setup_build_env : ?native:bool -> bool -> string list -> Actions.code
 
 val setup_simple_build_env : bool -> string list -> Actions.code
 

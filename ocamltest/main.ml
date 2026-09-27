@@ -492,6 +492,11 @@ let plan_incremental files =
         if environment_uses_expanded_generator env then
           fail_unsupported filename "generated lexer or parser sources";
         add_library_requirements filename env;
+        (* The prebuilt test library is built with both compilers. *)
+        if Actions_helpers.prebuilt_modules env <> [] then
+          compilerlibs_requirements :=
+            String.Set.add "ocamlc.opt"
+              (String.Set.add "ocamlopt.opt" !compilerlibs_requirements);
         plan_items filename env rest
     | Split alternatives :: rest ->
         List.concat_map
@@ -540,6 +545,79 @@ let plan_incremental files =
   let requirements = List.fold_left add_file String.Set.empty files in
   String.Set.union requirements !compilerlibs_requirements
   |> String.Set.iter print_endline
+
+(* Prints, for each test file, the source files its environments name:
+   [test <TAB> kind <TAB> path <TAB> flags], where kind is "prebuilt" for
+   prebuilt_modules and "source" for other compiled or read files. *)
+let list_sources files =
+  let print_sources filename =
+    let rootenv, tsl_ast = parse_test_file filename in
+    let test_dirname = Filename.dirname filename in
+    let source_directory = get_test_source_directory test_dirname in
+    let seen = Hashtbl.create 64 in
+    let print_env env =
+      let source_directories =
+        Actions_helpers.words_of_variable env
+          Builtin_variables.source_directories
+      in
+      let flags = Environments.safe_lookup Ocaml_variables.flags env in
+      let print kind variable =
+        List.iter
+          (fun name ->
+            let found =
+              List.find_opt
+                (fun directory ->
+                  Sys.file_exists (Filename.concat directory name))
+                (source_directory :: source_directories)
+            in
+            match found with
+            | None when kind = "prebuilt" ->
+                Printf.eprintf "%s: cannot find prebuilt module %s\n%!"
+                  filename name;
+                exit 2
+            | None -> ()
+            | Some directory ->
+                let line =
+                  String.concat "\t"
+                    [filename; kind; Filename.concat directory name; flags]
+                in
+                if not (Hashtbl.mem seen line) then begin
+                  Hashtbl.add seen line ();
+                  print_endline line
+                end)
+          (Actions_helpers.words_of_variable env variable)
+      in
+      print "prebuilt" Builtin_variables.prebuilt_modules;
+      List.iter (print "source")
+        [Ocaml_variables.all_modules; Ocaml_variables.modules;
+         Ocaml_variables.module_; Builtin_variables.readonly_files]
+    in
+    let rec items env = function
+      | [] -> [env]
+      | Environment_statement statement :: rest ->
+          items (interpret_environment_statement env statement) rest
+      | Test (_, _, modifiers) :: rest ->
+          let env = List.fold_left apply_modifiers env modifiers in
+          print_env env;
+          items env rest
+      | Split alternatives :: rest ->
+          List.concat_map (fun alternative -> items env (alternative @ rest))
+            alternatives
+    in
+    let rec tree env (Ast (statements, subtrees)) =
+      List.iter
+        (fun env -> List.iter (tree env) subtrees)
+        (items env statements)
+    in
+    let env =
+      Environments.from_bindings
+        [Builtin_variables.test_source_directory, source_directory;
+         Builtin_variables.test_file, Filename.basename filename]
+    in
+    let env = List.fold_left interpret_environment_statement env rootenv in
+    tree env tsl_ast
+  in
+  List.iter print_sources files
 
 let is_test filename =
   let input_channel = open_in filename in
@@ -607,7 +685,10 @@ let () =
   in
   let find_test_dirs dir = List.iter print_endline (find_test_dirs dir) in
   let doit f x = work_done := true; f x in
-  if Options.plan_incremental then begin
+  if Options.list_sources then begin
+    work_done := true;
+    list_sources Options.files_to_test
+  end else if Options.plan_incremental then begin
     if Options.translate || Options.find_test_dirs <> [] ||
        Options.list_tests <> [] then begin
       Printf.eprintf

@@ -2,7 +2,8 @@
  flags = "-extension refinement_types";
  has-z3;
  timeout = "120";
- all_modules = "int_set_intf.mli avl_sets.mli avl_sets.ml avl_set_client.ml avl_stdlib_set.ml";
+ prebuilt_modules = "int_set_intf.mli";
+ all_modules = "avl_sets.mli avl_sets.ml avl_set_client.ml avl_stdlib_set.ml";
  { bytecode; }
 *)
 

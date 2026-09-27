@@ -117,7 +117,74 @@ let setup_subdirectories source_directory build_directory subdirs =
   in
   List.iter cp_dir subdirs
 
-let setup_build_env add_testfile additional_files (_log : out_channel) env =
+let prebuilt_modules env =
+  words_of_variable env Builtin_variables.prebuilt_modules
+
+let prebuilt_library_directory () =
+  match Sys.safe_getenv "OCAMLTEST_VOX_TEST_LIBRARY" with
+  | "" ->
+      Filename.make_path
+        [Ocaml_directories.srcdir; Filename.parent_dir_name; "_build";
+         "vox-test-library"]
+  | directory -> directory
+
+let prebuilt_view_directory env =
+  Filename.concat (test_build_directory env) "prebuilt"
+
+let prebuilt_implementations env =
+  List.filter_map
+    (fun filename ->
+      if Filename.check_suffix filename ".ml"
+      then Some (Filename.chop_suffix filename ".ml")
+      else None)
+    (prebuilt_modules env)
+
+(* The build directory gets its own view of the prebuilt library, holding
+   exactly the modules that the test lists. Native compilers use the
+   library's native tree. *)
+let setup_prebuilt_view ~native env =
+  let root = prebuilt_library_directory () in
+  let library = if native then Filename.concat root "native" else root in
+  let view = prebuilt_view_directory env in
+  let link file =
+    let source = Filename.concat library file in
+    let destination = Filename.concat view file in
+    if not (Sys.file_exists source) then
+      Some (Printf.sprintf "prebuilt file %s is missing; see the output of \
+                            the prebuilt test library build"
+              source)
+    else begin
+      if not (Sys.file_exists destination) then begin
+        if Unix.has_symlink () then Unix.symlink source destination
+        else Sys.copy_file source destination
+      end;
+      None
+    end
+  in
+  let link_module filename =
+    let artifacts basename extensions =
+      List.find_map
+        (fun extension -> link (Filename.make_filename basename extension))
+        extensions
+    in
+    if Filename.check_suffix filename ".mli" then
+      artifacts (Filename.chop_suffix filename ".mli") ["cmi"]
+    else if Filename.check_suffix filename ".ml" then
+      artifacts (Filename.chop_suffix filename ".ml")
+        (if native then ["cmi"; "cmx"; Ocamltest_config.objext]
+         else ["cmi"; "cmo"])
+    else Some (Printf.sprintf "prebuilt module %s is not a .ml or .mli file"
+                 filename)
+  in
+  match prebuilt_modules env with
+  | [] -> None
+  | modules ->
+      Sys.rm_rf view;
+      Sys.make_directory view;
+      List.find_map link_module modules
+
+let setup_build_env ?(native = false) add_testfile additional_files
+    (_log : out_channel) env =
   let source_dir = (test_source_directory env) in
   let build_dir = (test_build_directory env) in
   let some_files = additional_files @ (readonly_files env) in
@@ -130,8 +197,11 @@ let setup_build_env add_testfile additional_files (_log : out_channel) env =
   setup_symlinks ~source_directories source_dir build_dir files;
   let subdirs = subdirectories env in
   setup_subdirectories source_dir build_dir subdirs;
-  Sys.chdir build_dir;
-  (Result.pass, env)
+  match setup_prebuilt_view ~native env with
+  | Some reason -> (Result.fail_with_reason reason, env)
+  | None ->
+      Sys.chdir build_dir;
+      (Result.pass, env)
 
 let setup_simple_build_env add_testfile additional_files log env =
   let build_env = Environments.add

@@ -2,10 +2,9 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- all_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml wasm_u32.ml wasm_word_memory.ml hmc_tagged_cell.ml hmc_u32_index.ml hmc_linear_bytes.ml hmc_linear_bounds.ml hmc_linear_preservation.ml";
+ prebuilt_modules = "pref.mli pref.ml copy_spec.ml hmc_word64.ml hm_declarative.ml wasm_u32.ml wasm_word_memory.ml hmc_tagged_cell.ml hmc_u32_index.ml hmc_linear_bytes.ml hmc_linear_bounds.ml hmc_linear_preservation.ml";
  readonly_files = "hmc_linear_memory_rejected.ml";
- compile_only = "true";
- { setup-ocamlc.opt-build-env; ocamlc.opt; run-expect; check-program-output; }
+ { setup-ocamlc.opt-build-env; run-expect; check-program-output; }
 *)
 module D = Hm_declarative
 module W = Hmc_word64
