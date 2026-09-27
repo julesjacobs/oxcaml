@@ -141,7 +141,7 @@ module E = Exercise (Key)
 module V = E.V
 
 (* The example again at top level, where Flambda can specialize the table's
-   functor. check_flat_hashtbl_public.sh dumps its native code with -O3. *)
+   functor. flat_hashtbl_boundary.ml checks its native code at -O3. *)
 let find_after_replace_int (key : int) (value : int) :
     {v : int option | v === Some value} =
   let c : int V.created = V.create (P.empty ()) in

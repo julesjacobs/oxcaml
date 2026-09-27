@@ -180,7 +180,7 @@ rejections, and integer and ranked-record clients.
 `Vox_verified_flat_hashtbl.Make` exposes an abstract finite map with its laws, abstract snapshots
 and normal-return ownership contracts. Start with the
 [ordered review surface](vox_flat_hashtbl_review.md); the public-only client
-check is `verification/clients/check_flat_hashtbl_public.sh`.
+check is `testsuite/tests/vox/flat_hashtbl_boundary.ml`.
 
 ## Union-find time credits
 

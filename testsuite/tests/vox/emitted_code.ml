@@ -69,6 +69,13 @@ let count pattern text = List.length (find_all pattern text)
 
 let occurs pattern text = find_all pattern text <> []
 
+(* Matches that do not start inside a word. *)
+let count_word pattern text =
+  List.length
+    (List.filter
+       (fun (start, _, _) -> start = 0 || not (is_word text.[start - 1]))
+       (find_all pattern text))
+
 let captures pattern text =
   List.concat_map (fun (_, _, captures) -> captures) (find_all pattern text)
   |> List.sort_uniq String.compare

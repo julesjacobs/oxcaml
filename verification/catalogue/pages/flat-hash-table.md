@@ -9,9 +9,8 @@ sources:
   - verification/library/vox_table_model.ml — Model of storage and of the SIMD masks
   - verification/library/vox_table_implementation.ml — Probing, insertion, deletion and rebuilding
   - verification/library/vox_flat_hashtbl_review.md — Review notes: reading order and trusted base
-  - verification/clients/flat_hashtbl_public.ml — Public-only client
-  - verification/clients/flat_hashtbl_rejections.py — Rejected clients
-  - verification/clients/check_flat_hashtbl_public.sh — The public check
+  - testsuite/tests/vox/flat_hashtbl_public.ml — Public-only client
+  - testsuite/tests/vox/flat_hashtbl_boundary.ml — The public check: public-only compile, rejected clients and erasure
 ---
 `Vox_verified_flat_hashtbl.Make` is a mutable open-addressing hash table whose operations are proved to act on a finite map: lookups return the map's answer, `replace` and `remove` return exactly `put` and `erase` of the previous map, and `length` is the number of bindings. The proof covers probing, replacement, deletion and rebuilding. The SIMD mask routines, the storage primitives and the checker itself are trusted.
 
@@ -21,26 +20,15 @@ Keys and values must be `immutable_data`. Every operation except `create` takes 
 
 From the public-only client, inside a functor over any `Key`, with `V = Vox_verified_flat_hashtbl.Make (Key)` and `P = Ghost_pref`. `{v : t | p}` is the type `t` refined by the predicate `p`, `===` is logical equality, and `ghost_ (...)` is proof code, checked and then erased. `c.#view` and `u.#view` are erased snapshots of the table. `c.#token` is the erased permission to use it, which `replace` consumes and returns anew and `borrow_` lends to a read.
 
-@code verification/clients/flat_hashtbl_public.ml "(* Reading a key back" "V.find_opt c.#table u.#view key"
+@code testsuite/tests/vox/flat_hashtbl_public.ml "(* Reading a key back" "V.find_opt c.#table u.#view key"
 
 ## A rejected program
 
-Claiming the wrong contents is a type error. This client stores 84 and states that `find` returns 85. The check compiles it after `module V = Flat_hashtbl_public.V`.
+Claiming the wrong contents is a type error. This client stores 84 and states that `find` returns 85. The test compiles it after `module V = Flat_hashtbl_public.V`, against the public interfaces and the client.
 
-@code verification/clients/flat_hashtbl_rejections.py "'false_lookup': ('''" "in value" after
+@code testsuite/tests/vox/flat_hashtbl_boundary.ml "(* A false claim about a lookup" "|}]"
 
-```
-File "false_lookup.ml", line 6, characters 4-60:
-6 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-File "false_lookup.ml", line 5, characters 25-31:
-5 |   let value : {v : int | v = 85} =
-                             ^^^^^^
-  The refinement is stated here.
-```
-
-The public check compiles 13 such programs with both compilers and requires each to fail. Six are ownership or refinement errors: this one, a stale view, a reused token, a token that does not own the table, and two false key laws. Seven are abstraction checks, such as reaching hidden internals or building a `Map.t` from a list. The stale-view, reused-token and missing-ownership programs are also compiled without `-extension refinement_types` and are still rejected.
+The test requires 13 such programs to be rejected, each with its exact error. Six are ownership or refinement errors: this one, a stale view, a reused token, a token that does not own the table, and two false key laws. Seven are abstraction checks, such as reaching hidden internals or building a `Map.t` from a list. The stale-view, reused-token and missing-ownership programs are also compiled with both compilers without `-extension refinement_types` and are still rejected.
 
 ## Native code
 
@@ -110,14 +98,10 @@ Against `Base.Hashtbl`, hits are 1.0–1.2× faster up to 1,024 entries and 1.8�
 
 ## Reproduce
 
-Checking happens during ordinary compilation; there is no separate verification tool. After `autoconf && ./configure --prefix=$PWD/_install`:
+Checking happens during ordinary compilation; there is no separate verification tool. After `autoconf && ./configure --prefix=$PWD/_install`, `make install` and `./dev init`:
 
 ```
-make install
-verification/library/build.sh _install
-verification/clients/check_flat_hashtbl_public.sh _install
-./dev init
-./dev test vox/table_model.ml vox/table_ownership_rejected.ml
+./dev test vox/flat_hashtbl_boundary.ml vox/table_model.ml vox/table_ownership_rejected.ml
 ```
 
-The library build checks and compiles the library's 128 modules, the table included, in about 30 seconds from scratch on an M4 Max. The SMT solver is Z3 4.16.0.
+`flat_hashtbl_boundary.ml` compiles, and so checks, the table's 32 modules with both compilers; compiles the public-only client against the `Pref`, `Ghost_pref` and `Vox_verified_flat_hashtbl` interfaces only, links and runs it; checks the rejected programs; and checks the client's Lambda and native Cmm, and the Cmm of the vacancy scan, for proof code and ownership primitives. The SMT solver is Z3 4.16.0.
