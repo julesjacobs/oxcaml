@@ -4,10 +4,9 @@
 #   index.html    the landing page (verification/site/index.html)
 #   catalogue/    the demo catalogue (verification/catalogue/build.py)
 #   playground/   the in-browser checker (verification/playground/build.sh)
-#   film/         the two-minute introduction (kept outside the repository)
 #
 #   verification/site/build-site.sh [--revision REV] [--prefix PREFIX]
-#                                   [--film FILE] [--out DIR]
+#                                   [--out DIR]
 #
 # The site describes one commit, REV, which must be on GitHub so that its
 # links resolve: by default the newest commit of HEAD on the `vox` branch of
@@ -16,12 +15,9 @@
 # differ from REV only in verification/site; the build stops otherwise.
 #
 # PREFIX is a compiler installed from a commit whose compiler-libs parse the
-# demos (the catalogue's line counts need it); default _install. FILE is the
-# film's HTML; default research/vox-intro-animation-20260927/index.html in
-# the Vox research directory next to the worktrees. It also needs what
-# verification/playground/build.sh needs (the oxcaml-5.4.0+oxcaml opam
-# switch, node and npm) and, on first use, network access to Google Fonts
-# for the film's fonts.
+# demos (the catalogue's line counts need it); default _install. It also
+# needs what verification/playground/build.sh needs (the oxcaml-5.4.0+oxcaml
+# opam switch, node and npm).
 #
 # The build fails on a broken local link anywhere in the site. Deploy with
 # verification/site/deploy.sh.
@@ -31,13 +27,11 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 revision=
 prefix=$root/_install
-film=$(cd "$root/../.." && pwd)/research/vox-intro-animation-20260927/index.html
 out=$root/_build/site/vox
 while [[ $# -gt 0 ]]; do
   case $1 in
     --revision) revision=$2; shift 2 ;;
     --prefix) prefix=$2; shift 2 ;;
-    --film) film=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
@@ -59,7 +53,6 @@ if ! git diff --quiet "$revision" -- . ':(exclude)verification/site'; then
   git diff --stat "$revision" -- . ':(exclude)verification/site' >&2
   exit 1
 fi
-[[ -f $film ]] || { echo "no film at $film" >&2; exit 1; }
 echo "== site for $revision in $out"
 rm -rf "$out"
 mkdir -p "$out"
@@ -80,9 +73,6 @@ index = json.load(open(path))
 index['revision'] = revision
 json.dump(index, open(path, 'w'))
 PY
-
-echo "== film"
-python3 "$here/film.py" "$film" "$out/film" "$root/_build/site-cache/fonts"
 
 echo "== landing page"
 python3 "$here/landing.py" "$revision" "$out"
