@@ -281,8 +281,8 @@ let[@def] valid (old : int list) (fresh : int list) (k : Bigint.t)
        Bigint.sub (Bigint.sub (size old) (size fresh)) k
     && cost e.rev = depth)
 
-let[@def] optional_valid old fresh k depth candidate =
-  match candidate with None -> true | Some e -> valid old fresh k depth e
+let[@def] optional_valid old fresh k depth candidate = ghost_ (
+  match candidate with None -> true | Some e -> valid old fresh k depth e)
 
 let[@def] settled (e : entry) =
   match e.old_tail, e.new_tail with

@@ -1,0 +1,15 @@
+File "partial_recursion_interface.ml", line 1:
+Error: The implementation partial_recursion_interface.ml
+       does not match the interface partial_recursion_interface.cmi: 
+       Values do not match:
+         val length : int list -> int (* in a structure at partial *)
+       is not included in
+         val length : int list -> int @@ total (* in a structure at partial *)
+       The first is partial
+       but the second is total.
+       File "partial_recursion_interface.mli", line 1, characters 0-37:
+         Expected declaration
+       File "partial_recursion_interface.ml", line 16, characters 8-14:
+         Actual declaration
+       File "partial_recursion_interface.ml", line 19, characters 18-26:
+         This recursive function is partial: the recursive argument is not a known proper descendant.

@@ -114,7 +114,6 @@ Line 3, characters 4-27:
 3 |     Slice.final (borrow_ s)
         ^^^^^^^^^^^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 module Runtime_final_check = struct
@@ -128,7 +127,9 @@ Line 4, characters 30-43:
 4 |     let checked : {u : unit | Slice.final s === []} = assume_ u in
                                   ^^^^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
+Hint: "assume_" checks this predicate at run time,
+where ghost values are unavailable.
+State the fact as a static refinement instead.
 |}]
 
 module Stale_model = struct

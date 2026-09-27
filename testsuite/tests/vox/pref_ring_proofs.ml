@@ -46,8 +46,7 @@ let (allocation_frame @ total) (n : node @ immutable)
       && H.at after other.next === H.at h other.next
       && not (n.prev === other.prev) && not (n.prev === other.next)
       && not (n.next === other.prev) && not (n.next === other.next)} @ ghost =
-  let _h = h in
-  ghost_ (())
+  ghost_ (let _h = h in ())
 
 let (isolated_four @ total) (h : node option Pref.heap @ immutable)
     (n0 : node @ immutable) (n1 : node @ immutable)

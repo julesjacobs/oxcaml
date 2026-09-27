@@ -37,9 +37,9 @@ let (certify0 @ total) (stop : node @ immutable)
       && present h stop && owns h (stop :: [])
       && H.at h (field false stop) === Some (Some (head [] stop))
       && H.at h (field true stop) === Some (Some (head [] stop))} @ ghost =
-  let expected = [] in
-  let backward = [] in
   ghost_ (
+    let expected = [] in
+    let backward = [] in
     let _unfolded = present_def h stop in
     let _unfolded = ring_def h stop expected in
     let direction = false in
@@ -85,9 +85,9 @@ let (certify1 @ total) (stop : node @ immutable) (n0 : node @ immutable)
       && present h stop && owns h (stop :: [n0])
       && H.at h (field false stop) === Some (Some (head [n0] stop))
       && H.at h (field true stop) === Some (Some (head [n0] stop))} @ ghost =
-  let expected = [n0] in
-  let backward = [n0] in
   ghost_ (
+    let expected = [n0] in
+    let backward = [n0] in
     let _unfolded = present_def h stop in
     let _unfolded = present_def h n0 in
     let _unfolded = ring_def h stop expected in
@@ -154,9 +154,9 @@ let (certify2 @ total) (stop : node @ immutable) (n0 : node @ immutable) (n1 :
       && H.at h (field false stop) === Some (Some (head [n0; n1] stop))
       && H.at h (field true stop) === Some (Some (head [n1; n0] stop))} @ ghost
           =
-  let expected = [n0; n1] in
-  let backward = [n1; n0] in
   ghost_ (
+    let expected = [n0; n1] in
+    let backward = [n1; n0] in
     let _unfolded = present_def h stop in
     let _unfolded = present_def h n0 in
     let _unfolded = present_def h n1 in
@@ -242,9 +242,9 @@ let (certify3 @ total) (stop : node @ immutable) (n0 : node @ immutable) (n1 :
       && H.at h (field false stop) === Some (Some (head [n0; n1; n2] stop))
       && H.at h (field true stop) === Some (Some (head [n2; n1; n0] stop))} @
           ghost =
-  let expected = [n0; n1; n2] in
-  let backward = [n2; n1; n0] in
   ghost_ (
+    let expected = [n0; n1; n2] in
+    let backward = [n2; n1; n0] in
     let _unfolded = present_def h stop in
     let _unfolded = present_def h n0 in
     let _unfolded = present_def h n1 in

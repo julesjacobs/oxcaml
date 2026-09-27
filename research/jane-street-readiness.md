@@ -132,9 +132,12 @@ this file.
       Afterwards, compare the implementation with the independent design in
       `research/subsumption-design-20260927/DESIGN.md` and its tests, and
       report divergences before merging.
-- [ ] **13. Prebuilt test library** (wart 33) and `./dev test --affected`
-      (branch `jujacobs/vox/fast-tests-20260927`, AMD box; target: full suite
-      about 5 minutes, from 22–28).
+- [x] **13. Prebuilt test library** (wart 33), `./dev test --affected` and
+      `VOX_TEST_TIMEOUT` (merged in `6390fe236b`): the full suite takes about
+      3 minutes warm and 6.5 after a compiler change, from 43 and 60. Being
+      made fully green on the merged trunk (branch
+      `jujacobs/vox/suite-green-20260927`), including a cache-dependent
+      counterexample in two tests.
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):

@@ -131,6 +131,9 @@ type submode_reason =
   | Function_value
   | Application of type_expr
   | Constructor of Longident.t
+  | Ghost_expression
+  | Assume_check of submode_reason
+  | Real_result of submode_reason
   | Other
 
 type always_heap_allocation =
@@ -480,6 +483,11 @@ type expected_mode =
 
         Each location points to the corresponding sub-pattern of [Ppat_tuple].
     *)
+
+    real_required : bool;
+    (** The ghostliness of [mode] was bounded by [real] before this position
+        was typed, by an annotation or the expected type, so wrapping the
+        expression in [ghost_] cannot help. Only used for error hints. *)
   }
 
 type position_and_mode = {
@@ -549,7 +557,8 @@ let mode_default mode =
   { position = RNontail;
     mode = Value.disallow_left mode;
     strictly_local = false;
-    tuple_modes = None }
+    tuple_modes = None;
+    real_required = false }
 
 let mode_legacy = mode_default Value.legacy
 
@@ -674,7 +683,8 @@ let mode_region ?region mode =
 let enter_region_if cond ?region env expected_mode =
   if cond then
     Env.add_region_lock env,
-    mode_region ?region (as_single_mode expected_mode),
+    { (mode_region ?region (as_single_mode expected_mode))
+      with real_required = expected_mode.real_required },
     [(Texp_ghost_region, Location.none, [])]
   else
     env, expected_mode, []
@@ -738,7 +748,8 @@ let mode_with_position mode position =
   { (mode_default mode) with position }
 
 (* Statement position discards the value, so even a ghost one is
-   admissible: nothing of it survives compilation. *)
+   admissible. The computation still runs unless it is [ghost_ e]
+   (warning 224). *)
 let mode_statement_with_position position =
   { (mode_default Value.max) with position }
 
@@ -852,6 +863,26 @@ let mode_argument ~funct ~index ~position_and_mode ~partial_app marg =
     mode_default vmode, vmode
   end
 
+(* Marks a function body whose ghostliness is already bounded by [real],
+   by an annotation or the expected type. *)
+let mark_real_required (expected_mode : expected_mode) =
+  if Ghostliness.is_real
+       (Value.proj_comonadic Ghostliness expected_mode.mode)
+  then { expected_mode with real_required = true }
+  else expected_mode
+
+(* Set while [assume_] types the predicate it checks at run time. *)
+let checking_assume = ref false
+
+(* Only the ghostliness hint reads these reasons; the other axes use the
+   wrapped one. *)
+let ghostliness_reason reason (expected_mode : expected_mode) =
+  match reason with
+  | _ when !checking_assume -> Assume_check reason
+  | Ghost_expression -> reason
+  | _ when expected_mode.real_required -> Real_result reason
+  | _ -> reason
+
 (* expected_mode.locality_context explains why expected_mode.mode is low;
    shared_context explains why mode.uniqueness is high *)
 let submode ~loc ~env ?(reason = Other) mode expected_mode =
@@ -869,6 +900,7 @@ let submode ~loc ~env ?(reason = Other) mode expected_mode =
   match res with
   | Ok () -> ()
   | Error failure_reason ->
+      let reason = ghostliness_reason reason expected_mode in
       let error = Submode_failed(failure_reason, reason) in
       raise (Error(loc, env, error))
 
@@ -2898,6 +2930,213 @@ let type_assume = ref
 
 let typing_refinement_predicate = ref false
 
+(* Erasure lints. [ghost_ e] is the only construct that erases; a ghost
+   result computed by real code runs and is then thrown away. *)
+
+let in_real_code env =
+  not (Env.in_ghost_context env || !typing_refinement_predicate
+       || Resolved_predicate.active ())
+
+let is_erased exp =
+  List.exists (function Texp_ghost, _, _ -> true | _ -> false) exp.exp_extra
+
+let requires_unique mode =
+  Uniqueness.is_unique (Alloc.proj_monadic Uniqueness mode)
+
+(* The result mode of applying a value of type [ty] to [n] arguments, if no
+   argument is required unique: [ghost_] makes the values it captures
+   aliased, so such an application cannot move under it. *)
+let rec shared_result_mode env ty n =
+  match get_desc (expand_head env ty) with
+  | Tpoly (ty, _) -> shared_result_mode env ty n
+  | Trefine { ref_payload; _ } -> shared_result_mode env ref_payload n
+  | Tarrow ((_, arg_mode, ret_mode, _), _, ret, _)
+    when n >= 1 && not (requires_unique arg_mode) ->
+      if n = 1 then Some ret_mode else shared_result_mode env ret (n - 1)
+  | _ -> None
+
+(* Applying a value of type [ty] to [n] arguments certainly gives a ghost
+   result, and [ghost_] around the application, or around the body of such
+   a function, keeps its modes. With [~unique_result:false] the result must
+   not be required unique either. *)
+let ghost_after_arguments ?(unique_result = true) env ty n =
+  match shared_result_mode env ty n with
+  | Some ret_mode ->
+      Ghostliness.is_ghost (Alloc.proj_comonadic Ghostliness ret_mode)
+      && (unique_result || not (requires_unique ret_mode))
+  | None -> false
+
+(* [ghost_] captures values through a total, stateless and portable
+   lock. *)
+let capturable mode =
+  Totality.is_total (Value.proj_comonadic Totality mode)
+  && Statefulness.is_stateless (Value.proj_comonadic Statefulness mode)
+  && Portability.is_portable (Value.proj_comonadic Portability mode)
+
+(* A total function that [ghost_] can capture. *)
+let is_capturable_ident exp =
+  match exp.exp_desc with
+  | Texp_ident { mode; _ } -> capturable mode
+  | _ -> false
+
+(* Expressions that can move under [ghost_] as they are: capturable
+   variables, constants, immutable data and applications of total
+   functions. *)
+let rec erasable_argument env exp =
+  is_erased exp ||
+  match exp.exp_desc with
+  | Texp_ident { desc = { val_kind = Val_reg _; _ }; mode; _ } ->
+      capturable mode
+  | Texp_constant _ -> true
+  | Texp_field { record; label; _ } ->
+      not (Types.is_mutable label.lbl_mut) && erasable_argument env record
+  | Texp_construct (_, _, _, args, _) ->
+      List.for_all (fun (_, arg) -> erasable_argument env arg) args
+  | Texp_tuple (args, _) ->
+      List.for_all (fun (_, arg) -> erasable_argument env arg) args
+  | Texp_apply (funct, args, _, _, _, _) -> erasable_application env funct args
+  | _ -> false
+
+and erasable_application env funct args =
+  is_capturable_ident funct
+  && List.for_all (function
+      | _, Arg (arg, _) -> erasable_argument env arg
+      | _, Omitted _ -> false) args
+  && Option.is_some
+       (shared_result_mode env funct.exp_type (List.length args))
+
+(* A call to a total function, with a ghost result, whose arguments can move
+   under [ghost_]. *)
+let is_unerased_ghost_call env exp =
+  not (is_erased exp) &&
+  match exp.exp_desc with
+  | Texp_apply (funct, args, _, _, _, _) ->
+      erasable_application env funct args
+      && ghost_after_arguments env funct.exp_type (List.length args)
+  | _ -> false
+
+let warn_unerased_ghost_call env exp =
+  if in_real_code env && is_unerased_ghost_call env exp then
+    Location.prerr_warning exp.exp_loc Warnings.Unerased_ghost_call
+
+(* An expression that computes nothing: a variable, a constant, or data or
+   an immutable field built from them. *)
+let rec is_trivial exp =
+  match exp.exp_desc with
+  | Texp_ident _ | Texp_constant _ -> true
+  | Texp_construct (_, _, _, args, _) ->
+      List.for_all (fun (_, arg) -> is_trivial arg) args
+  | Texp_field { record; label; _ } ->
+      not (Types.is_mutable label.lbl_mut) && is_trivial record
+  | _ -> false
+
+(* A total function with a ghost result whose body computes something
+   outside [ghost_ ...]. *)
+let rec has_unerased_ghost_body env exp =
+  match exp.exp_desc with
+  | Texp_function { params; body; _ } ->
+      begin match body with
+      | Tfunction_body ({ exp_desc = Texp_function _; _ } as inner)
+        when not (is_erased inner) ->
+          has_unerased_ghost_body env inner
+      | Tfunction_body body ->
+          not (is_erased body || is_trivial body)
+          && ghost_after_arguments ~unique_result:false env exp.exp_type
+               (List.length params)
+      | Tfunction_cases { fc_cases; _ } ->
+          List.exists
+            (fun case -> not (is_erased case.c_rhs || is_trivial case.c_rhs))
+            fc_cases
+          && ghost_after_arguments ~unique_result:false env exp.exp_type
+               (List.length params + 1)
+      end
+  | _ -> false
+
+(* Local bindings computed at run time but used only in ghost code
+   (warning 226). [proof_only_candidates] holds the bindings whose definition
+   could move under [ghost_]; [binding_uses] is called at each use of a
+   watched binding, with [true] for a use in real code. *)
+let proof_only_candidates : unit Types.Uid.Tbl.t = Types.Uid.Tbl.create 16
+
+let binding_uses : (bool -> unit) Types.Uid.Tbl.t = Types.Uid.Tbl.create 16
+
+let note_binding_use env (desc : Types.value_description) =
+  match Types.Uid.Tbl.find_opt binding_uses desc.val_uid with
+  | Some use ->
+      use (not (Env.in_ghost_context env || !typing_refinement_predicate))
+  | None -> ()
+
+let add_proof_only_candidates env bindings =
+  if in_real_code env then
+    List.iter (fun vb ->
+      match vb.vb_pat.pat_desc, vb.vb_expr.exp_desc with
+      | _, Texp_function _ -> ()
+      | Tpat_var { uid; name; _ }, _
+        when not (String.starts_with ~prefix:"_" name.txt
+                  || String.starts_with ~prefix:"*" name.txt)
+             (* An explicit mode may ask for a real value. *)
+             && not (List.exists (function
+                  | Tpat_constraint (_, { mode_desc = _ :: _; _ }), _, _ ->
+                      true
+                  | _ -> false) vb.vb_pat.pat_extra)
+             && not (is_erased vb.vb_expr || is_trivial vb.vb_expr)
+             && erasable_argument env vb.vb_expr ->
+          Types.Uid.Tbl.replace proof_only_candidates uid ()
+      | _ -> ())
+      bindings
+
+let is_refined_unit env ty =
+  match get_desc (expand_head env ty) with
+  | Trefine { ref_payload; _ } ->
+      begin match get_desc (expand_head env ref_payload) with
+      | Tconstr (path, [], _) -> Path.same path Predef.path_unit
+      | _ -> false
+      end
+  | _ -> false
+
+(* Let-bound variables whose definition has a refined [unit] type. Warning 26
+   or 27 on one of them says that its fact holds without the name. *)
+let refined_unit_bindings : unit Types.Uid.Tbl.t = Types.Uid.Tbl.create 16
+
+let add_refined_unit_bindings env bindings =
+  List.iter (fun vb ->
+    match vb.vb_pat.pat_desc with
+    | Tpat_var { uid; _ }
+      when is_refined_unit env vb.vb_expr.exp_type
+           || List.exists (function
+                | Texp_refinement { source; _ }, _, _ ->
+                    is_refined_unit env source
+                | _ -> false) vb.vb_expr.exp_extra ->
+        Types.Uid.Tbl.replace refined_unit_bindings uid ()
+    | _ -> ())
+    bindings
+
+let with_refined_unit_hint uid (w : Warnings.t) : Warnings.t =
+  match w with
+  | Unused_var r when Types.Uid.Tbl.mem refined_unit_bindings uid ->
+      Unused_var { r with refined_unit = true }
+  | Unused_var_strict r when Types.Uid.Tbl.mem refined_unit_bindings uid ->
+      Unused_var_strict { r with refined_unit = true }
+  | w -> w
+
+let warn_erasure_lints env bindings =
+  if in_real_code env then
+    List.iter (fun vb ->
+      Builtin_attributes.warning_scope ~ppwarning:false vb.vb_attributes
+        (fun () ->
+          match vb.vb_pat.pat_desc with
+          | Tpat_var { mode; name; _ }
+            when not (String.starts_with ~prefix:"*" name.txt)
+                 && Totality.is_total (Value.proj_comonadic Totality mode)
+                 && has_unerased_ghost_body env vb.vb_expr ->
+              Location.prerr_warning vb.vb_pat.pat_loc
+                Warnings.Unerased_ghost_body
+          | Tpat_any when is_unerased_ghost_call env vb.vb_expr ->
+              Location.prerr_warning vb.vb_expr.exp_loc
+                Warnings.Unerased_ghost_call
+          | _ -> ()))
+      bindings
+
 let definition_lemma : (Env.t -> value_binding -> value_binding * Env.t) ref =
   ref (fun _ _ -> Misc.fatal_error "Typecore.def: elaborator not installed")
 
@@ -3632,6 +3871,28 @@ let outer_refinement env ty =
        | Trefine r -> Some r
        | _ -> Btype.backtrack snapshot; None)
   | _ -> None
+
+(* In a refinement predicate a refinement cannot be introduced: the logic
+   assumes the refinement of every refined component, so a constructor
+   argument or record field must already have its refined type. *)
+let with_refined_component_hint env ty f =
+  if (!typing_refinement_predicate || Resolved_predicate.active ())
+     && Option.is_some (outer_refinement env ty)
+  then
+    try f () with
+    | Error (_, _, Expr_type_clash _) as exn ->
+        match Location.error_of_exn exn with
+        | Some (`Ok error) ->
+            let hint =
+              Location.msg "@[Hint: in a refinement predicate,@ this \
+                argument must already have its refined type.@ A helper \
+                function whose result type is refined works,@ for example \
+                %a.@]"
+                Style.inline_code "let f x : {y : int | y >= 0} = ..."
+            in
+            raise (Error_forward { error with sub = error.sub @ [hint] })
+        | Some `Already_displayed | None -> raise exn
+  else f ()
 
 let rec refinement_payload env ty =
   match outer_refinement env ty with
@@ -4530,8 +4791,10 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
         (pv, val_env, met_env) ->
          let check s =
            if pv_kind = As_var
-           then Warnings.Unused_var { name = s; mutated = false }
-           else Warnings.Unused_var_strict { name = s; mutated = false } in
+           then Warnings.Unused_var
+                  { name = s; mutated = false; refined_unit = false }
+           else Warnings.Unused_var_strict
+                  { name = s; mutated = false; refined_unit = false } in
          let id' = Ident.rename pv_id in
          let val_env =
           Env.add_value ~mode:Mode.Value.legacy pv_id
@@ -8255,6 +8518,7 @@ and type_expect_
       let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
         type_ident env ~recarg lid
       in
+      note_binding_use env desc;
       let exp_desc =
         match desc.val_kind with
         | Val_ivar (mutability, cl_num) ->
@@ -8480,8 +8744,8 @@ and type_expect_
             else Modules_rejected
           in
           let (pat_exp_list, new_env) =
-            type_let existential_context env mutable_flag rec_flag
-              spat_sexp_list allow_modules
+            type_let ~proof_only:true existential_context env mutable_flag
+              rec_flag spat_sexp_list allow_modules
           in
           Ctype.register_refinement_value_scope ~level:refinement_level
             (List.concat_map
@@ -10132,7 +10396,9 @@ and type_expect_
           rexp_type = Predef.type_bool;
           rexp_type_constraint = false;
           rexp_loc = loc } }) in
-      let check = Ast_helper.Exp.mk ~loc (Pexp_ghost unit_) in
+      let check =
+        Ast_helper.Exp.mk ~loc:(Location.ghostify loc) (Pexp_ghost unit_)
+      in
       let check, sort = type_statement env check in
       let check = introduce_refinement env false_unit loc check in
       let check = {check with exp_extra =
@@ -10214,7 +10480,10 @@ and type_expect_
          axis is constrained here. Inside, every value appears real (the
          ambient rule), implemented by [Env.enter_ghost_context] and the
          ghostliness carve-out in [submode]. *)
-      submode ~loc ~env
+      if Env.in_ghost_context env && not loc.loc_ghost
+         && not (!typing_refinement_predicate || Resolved_predicate.active ())
+      then Location.prerr_warning loc Warnings.Redundant_ghost;
+      submode ~loc ~env ~reason:Ghost_expression
         (Value.of_const { Value.Const.min with ghostliness = Ghost })
         expected_mode;
       let env = enter_total_ghost_context loc env in
@@ -11388,6 +11657,7 @@ and type_function
       match body with
       | Pfunction_body body ->
           let body_loc = body.pexp_loc in
+          let expected_mode = mark_real_required expected_mode in
           let body =
             match ret_type_constraint with
             | None -> type_expect env expected_mode body (mk_expected ty_expected)
@@ -11887,7 +12157,10 @@ and type_label_exp
            let (_, ty_arg) = unify_as_label ty in
            Assigning(ty_arg, mode)
       in
-      let arg = type_argument ~overwrite env arg_mode sarg ty_arg (instance ty_arg) in
+      let arg =
+        with_refined_component_hint env ty_arg (fun () ->
+          type_argument ~overwrite env arg_mode sarg ty_arg (instance ty_arg))
+      in
       (vars, arg)
     end
     ~before_generalize:(fun (vars, arg) ->
@@ -12669,7 +12942,8 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
          let argument_mode =
           mode_is_contained_by is_contained_by ~modalities argument_mode
          in
-         type_argument ~recarg ~overwrite env argument_mode e ty t0)
+         with_refined_component_hint env t0 (fun () ->
+           type_argument ~recarg ~overwrite env argument_mode e ty t0))
       sargs (List.combine ty_args ty_args0) overwrites
   in
   if constr.cstr_private = Private then
@@ -12740,6 +13014,7 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
     (* Only the statement checks discard the refinement wrappers. *)
     let exp = { exp with exp_type = statement_type exp.exp_type } in
     let subexp = final_subexpression exp in
+    warn_unerased_ghost_call env exp;
     let ty = expand_head env exp.exp_type in
     if is_Tvar ty
     && get_level ty > get_current_level ()
@@ -12943,9 +13218,11 @@ and map_half_typed_cases
           List.partition (fun pv -> pv.pv_kind = Continuation_var) pvs in
         let add_pattern_vars = add_pattern_variables
             ~check:(fun s ->
-              Warnings.Unused_var_strict { name = s; mutated = false })
+              Warnings.Unused_var_strict
+                { name = s; mutated = false; refined_unit = false })
             ~check_as:(fun s ->
-              Warnings.Unused_var { name = s; mutated = false})
+              Warnings.Unused_var
+                { name = s; mutated = false; refined_unit = false })
         in
         let when_env = add_pattern_vars ext_env pvs in
         let when_env = add_module_variables when_env mvs in
@@ -13211,6 +13488,7 @@ and type_effect_cases
 (* Typing of let bindings *)
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
+    ?(proof_only = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   let refinement_binding_level = get_current_level () in
   let decreases =
@@ -13478,16 +13756,20 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ~before_generalize: begin fun (mode_pat_typ_list, exp_list, _, _, _, pvs) ->
       if provisional_recursion then
         Option.iter (fun mode ->
-          let partial loc reason =
+          let partial ?uid loc reason =
             match Totality.submode Totality.partial
               (Value.proj_comonadic Axis.Totality mode) with
-            | Ok () -> ()
+            | Ok () ->
+                (* Kept for an interface that requires totality. *)
+                Option.iter (fun uid ->
+                  Types.Uid.Tbl.replace Includecore.partial_recursion uid
+                    (loc, reason)) uid
             | Error _ ->
                 Location.raise_errorf ~loc
                   "This recursive function cannot be total: %s." reason
           in
           match mode_pat_typ_list, exp_list with
-          | [(_, { pat_desc = Tpat_var { id; _ }; _ }, _)], [(exp, _)] ->
+          | [(_, { pat_desc = Tpat_var { id; uid; _ }; _ }, _)], [(exp, _)] ->
               begin match decreases with
               | Some measure ->
                   begin try
@@ -13505,7 +13787,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
               | None ->
                   begin match Structural_recursion.check id exp with
                   | Ok () -> ()
-                  | Error (loc, reason) -> partial loc reason
+                  | Error (loc, reason) -> partial ~uid loc reason
                   end
               end
           | _ ->
@@ -13612,6 +13894,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
       if pattern_needs_partial_application_check vb.vb_pat then
         check_partial_application ~statement:false vb.vb_expr
     ) l;
+  warn_erasure_lints env l;
+  if proof_only then add_proof_only_candidates env l;
+  add_refined_unit_bindings env l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
   match definitions, l with
@@ -13622,9 +13907,10 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   | _ -> assert false
 
 and type_let_def_wrap_warnings
-    ?(check = fun name mutated -> Warnings.Unused_var { name; mutated })
+    ?(check = fun name mutated ->
+      Warnings.Unused_var { name; mutated; refined_unit = false })
     ?(check_strict = fun name mutated ->
-      Warnings.Unused_var_strict { name; mutated } )
+      Warnings.Unused_var_strict { name; mutated; refined_unit = false } )
     ?(check_mutable = fun name -> Warnings.Unmutated_mutable name)
     ~is_recursive ~entirely_functions ~exp_env ~new_env ~spat_sexp_list
     ~attrs_list ~mode_pat_typ_list ~pvs
@@ -13646,6 +13932,7 @@ and type_let_def_wrap_warnings
               Warnings.is_active (check "" false)
            || Warnings.is_active (check_strict "" false)
            || Warnings.is_active (check_mutable "")
+           || Warnings.is_active (Warnings.Proof_only_binding "")
            || (is_recursive && (Warnings.is_active Warnings.Unused_rec_flag))))
       attrs_list
   in
@@ -13709,21 +13996,33 @@ and type_let_def_wrap_warnings
                    | Val_self _ | Val_anc _ -> false)
                 in
                 let mutated = ref false in
+                let real_use = ref false and ghost_use = ref false in
                 if not (name = "" || name.[0] = '_' || name.[0] = '#') then
+                  begin
+                  Types.Uid.Tbl.replace binding_uses vd.val_uid
+                    (fun real ->
+                      if real then real_use := true else ghost_use := true);
                   add_delayed_check
                     (fun () ->
                       let warn w =
                         Location.prerr_warning vd.Subst.Lazy.val_loc w
                       in
+                      Types.Uid.Tbl.remove binding_uses vd.val_uid;
                       if not !used then
                         warn
-                          ((if !some_used then check_strict else check)
-                            name !mutated)
+                          (with_refined_unit_hint vd.val_uid
+                            ((if !some_used then check_strict else check)
+                              name !mutated))
                       (* To reduce noise, don't issue an [unmutated-mutable]
                          warning with [unused-var] *)
                       else if mutable_ && not !mutated then
                         warn (check_mutable name)
-                    );
+                      else if !ghost_use && not !real_use
+                              && Types.Uid.Tbl.mem proof_only_candidates
+                                   vd.val_uid
+                      then warn (Warnings.Proof_only_binding name)
+                    )
+                  end;
                 Env.set_value_used_callback
                   vd
                   (fun () ->
@@ -14169,7 +14468,10 @@ and type_comprehension_clause ~loc ~comprehension_type ~container_type env
       List.iter (fun f -> f()) tps.tps_pattern_force;
       run_total_pattern_checks tps.tps_total_pattern_checks;
       let env =
-        let check s = Warnings.Unused_var { name = s; mutated = false } in
+        let check s =
+          Warnings.Unused_var
+            { name = s; mutated = false; refined_unit = false }
+        in
         let pvs = tps.tps_pattern_variables in
         Ctype.register_refinement_value_scope ~level:(get_current_level ())
           (List.map (fun pv -> pv.pv_id) pvs);
@@ -14645,7 +14947,8 @@ let escaping_submode_reason_hint =
           n args qualifier ]
     | None -> []
     end
-  | Constructor _ | Function_value | Other -> []
+  | Constructor _ | Function_value | Ghost_expression | Assume_check _
+  | Real_result _ | Other -> []
 
 let report_type_expected_explanation_opt expl =
   match expl with
@@ -15411,6 +15714,12 @@ let report_error ~loc env =
     (* CR-soon zqian: move the following hints into the new hint system, then
       we can invoke [submode_err] instead of [submode], and remove this
       exception. *)
+    let ghostliness_reason = submode_reason in
+    let submode_reason =
+      match submode_reason with
+      | Assume_check reason | Real_result reason -> reason
+      | reason -> reason
+    in
     let sub =
       match ax with
       | Comonadic Areality -> escaping_submode_reason_hint submode_reason
@@ -15419,10 +15728,24 @@ let report_error ~loc env =
              annotation after the arrow constrains the result value.@]"
              Style.inline_code "(f : (int -> int) @ total)"
              Style.inline_code "total"]
-      | Comonadic Ghostliness ->
-          [Location.msg "@[Hint: if this is proof code, wrap the enclosing \
-             expression in %a.@]"
-             Style.inline_code "ghost_ (...)"]
+      | Comonadic Ghostliness -> begin
+          match ghostliness_reason with
+          | Ghost_expression ->
+              [Location.msg "@[Hint: %a makes this value ghost,@ but it is \
+                 used here at run time.@ Move %a outward to cover the code \
+                 that uses it,@ or remove it.@]"
+                 Style.inline_code "ghost_" Style.inline_code "ghost_"]
+          | Assume_check _ ->
+              [Location.msg "@[Hint: %a checks this predicate at run time,@ \
+                 where ghost values are unavailable.@ State the fact as a \
+                 static refinement instead.@]"
+                 Style.inline_code "assume_"]
+          | Real_result _ -> []
+          | Function_value | Application _ | Constructor _ | Other ->
+              [Location.msg "@[Hint: if this is proof code, wrap the enclosing \
+                 expression in %a.@]"
+                 Style.inline_code "ghost_ (...)"]
+        end
       | _ -> []
     in
     let sub =
@@ -15432,7 +15755,8 @@ let report_error ~loc env =
         [ Location.msg "@[Hint: All arguments of the constructor %a@\n\
           must cross this axis to use it in this position.@]"
           quoted_longident name ]
-      | Application _ | Function_value | Other -> sub
+      | Application _ | Function_value | Ghost_expression | Assume_check _
+      | Real_result _ | Other -> sub
     in
     Location.error_of_printer ~loc ~sub (fun ppf e ->
       let open Format_doc in
@@ -16649,8 +16973,10 @@ let () =
        let return_env = Env.add_value ~mode:(total_mode ()) binder desc env in
        let predicate, return =
          with_resolved_refinement predicate_env loc predicate (fun syntax ->
-             let predicate = type_expect_in_expression predicate_env syntax
-                 (mk_expected Predef.type_bool) in
+             let predicate =
+               Misc.protect_refs [Misc.R (checking_assume, true)] (fun () ->
+                 type_expect_in_expression predicate_env syntax
+                   (mk_expected Predef.type_bool)) in
              let return = type_expect_in_expression return_env
                  ~mode:expected_mode
                  (Ast_helper.Exp.ident ~loc

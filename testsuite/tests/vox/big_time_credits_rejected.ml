@@ -35,6 +35,13 @@ module Empty = struct
     C.tick (token)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 5, characters 11-18:
 5 |     C.tick (token)
                ^^^^^^^
@@ -66,6 +73,13 @@ module Negative = struct
     C.Budget.create (amount)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 5, characters 20-28:
 5 |     C.Budget.create (amount)
                         ^^^^^^^^
