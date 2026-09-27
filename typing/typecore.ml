@@ -3052,6 +3052,40 @@ let rec has_unerased_ghost_body env exp =
       end
   | _ -> false
 
+let is_refined_unit env ty =
+  match get_desc (expand_head env ty) with
+  | Trefine { ref_payload; _ } ->
+      begin match get_desc (expand_head env ref_payload) with
+      | Tconstr (path, [], _) -> Path.same path Predef.path_unit
+      | _ -> false
+      end
+  | _ -> false
+
+(* Let-bound variables whose definition has a refined [unit] type. Warning 26
+   or 27 on one of them says that its fact holds without the name. *)
+let refined_unit_bindings : unit Types.Uid.Tbl.t = Types.Uid.Tbl.create 16
+
+let add_refined_unit_bindings env bindings =
+  List.iter (fun vb ->
+    match vb.vb_pat.pat_desc with
+    | Tpat_var { uid; _ }
+      when is_refined_unit env vb.vb_expr.exp_type
+           || List.exists (function
+                | Texp_refinement { source; _ }, _, _ ->
+                    is_refined_unit env source
+                | _ -> false) vb.vb_expr.exp_extra ->
+        Types.Uid.Tbl.replace refined_unit_bindings uid ()
+    | _ -> ())
+    bindings
+
+let with_refined_unit_hint uid (w : Warnings.t) : Warnings.t =
+  match w with
+  | Unused_var r when Types.Uid.Tbl.mem refined_unit_bindings uid ->
+      Unused_var { r with refined_unit = true }
+  | Unused_var_strict r when Types.Uid.Tbl.mem refined_unit_bindings uid ->
+      Unused_var_strict { r with refined_unit = true }
+  | w -> w
+
 let warn_erasure_lints env bindings =
   if in_real_code env then
     List.iter (fun vb ->
@@ -4683,8 +4717,10 @@ let type_class_arg_pattern cl_num val_env met_env l spat =
         (pv, val_env, met_env) ->
          let check s =
            if pv_kind = As_var
-           then Warnings.Unused_var { name = s; mutated = false }
-           else Warnings.Unused_var_strict { name = s; mutated = false } in
+           then Warnings.Unused_var
+                  { name = s; mutated = false; refined_unit = false }
+           else Warnings.Unused_var_strict
+                  { name = s; mutated = false; refined_unit = false } in
          let id' = Ident.rename pv_id in
          let val_env =
           Env.add_value ~mode:Mode.Value.legacy pv_id
@@ -12869,9 +12905,11 @@ and map_half_typed_cases
           List.partition (fun pv -> pv.pv_kind = Continuation_var) pvs in
         let add_pattern_vars = add_pattern_variables
             ~check:(fun s ->
-              Warnings.Unused_var_strict { name = s; mutated = false })
+              Warnings.Unused_var_strict
+                { name = s; mutated = false; refined_unit = false })
             ~check_as:(fun s ->
-              Warnings.Unused_var { name = s; mutated = false})
+              Warnings.Unused_var
+                { name = s; mutated = false; refined_unit = false })
         in
         let when_env = add_pattern_vars ext_env pvs in
         let when_env = add_module_variables when_env mvs in
@@ -13518,6 +13556,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         check_partial_application ~statement:false vb.vb_expr
     ) l;
   warn_erasure_lints env l;
+  add_refined_unit_bindings env l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
   match definitions, l with
@@ -13528,9 +13567,10 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
   | _ -> assert false
 
 and type_let_def_wrap_warnings
-    ?(check = fun name mutated -> Warnings.Unused_var { name; mutated })
+    ?(check = fun name mutated ->
+      Warnings.Unused_var { name; mutated; refined_unit = false })
     ?(check_strict = fun name mutated ->
-      Warnings.Unused_var_strict { name; mutated } )
+      Warnings.Unused_var_strict { name; mutated; refined_unit = false } )
     ?(check_mutable = fun name -> Warnings.Unmutated_mutable name)
     ~is_recursive ~entirely_functions ~exp_env ~new_env ~spat_sexp_list
     ~attrs_list ~mode_pat_typ_list ~pvs
@@ -13623,8 +13663,9 @@ and type_let_def_wrap_warnings
                       in
                       if not !used then
                         warn
-                          ((if !some_used then check_strict else check)
-                            name !mutated)
+                          (with_refined_unit_hint vd.val_uid
+                            ((if !some_used then check_strict else check)
+                              name !mutated))
                       (* To reduce noise, don't issue an [unmutated-mutable]
                          warning with [unused-var] *)
                       else if mutable_ && not !mutated then
@@ -14075,7 +14116,10 @@ and type_comprehension_clause ~loc ~comprehension_type ~container_type env
       List.iter (fun f -> f()) tps.tps_pattern_force;
       run_total_pattern_checks tps.tps_total_pattern_checks;
       let env =
-        let check s = Warnings.Unused_var { name = s; mutated = false } in
+        let check s =
+          Warnings.Unused_var
+            { name = s; mutated = false; refined_unit = false }
+        in
         let pvs = tps.tps_pattern_variables in
         Ctype.register_refinement_value_scope ~level:(get_current_level ())
           (List.map (fun pv -> pv.pv_id) pvs);

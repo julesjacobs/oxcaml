@@ -85,8 +85,10 @@ type t =
   | Useless_record_with of string           (* 23 *)
   | Bad_module_name of string               (* 24 *)
   | All_clauses_guarded                     (* 8, used to be 25 *)
-  | Unused_var of { name : string ; mutated : bool } (* 26 *)
-  | Unused_var_strict of { name : string ; mutated : bool } (* 27 *)
+  | Unused_var of { name : string ; mutated : bool ; refined_unit : bool }
+                                            (* 26 *)
+  | Unused_var_strict of
+      { name : string ; mutated : bool ; refined_unit : bool } (* 27 *)
   | Wildcard_arg_to_constant_constr         (* 28 *)
   | Eol_in_string                           (* 29 *)
   | Duplicate_definitions of string * string * string * string (*30 *)
@@ -1273,12 +1275,19 @@ let message = function
   | All_clauses_guarded ->
       msg "this pattern-matching is not exhaustive.@ \
            All clauses in this pattern-matching are guarded."
-  | Unused_var { name = v; mutated = false }
-  | Unused_var_strict { name = v; mutated = false } ->
+  | Unused_var { name = v; mutated = false; refined_unit = false }
+  | Unused_var_strict { name = v; mutated = false; refined_unit = false } ->
       msg "unused variable %a."
         Style.inline_code v
-  | Unused_var { name = v; mutated = true }
-  | Unused_var_strict { name = v; mutated = true } ->
+  | Unused_var { name = v; mutated = false; refined_unit = true }
+  | Unused_var_strict { name = v; mutated = false; refined_unit = true } ->
+      msg "unused variable %a.@ \
+           Hint: the binding is unnecessary, because the fact in its@ \
+           refined type holds without the name;@ \
+           a statement such as %a suffices."
+        Style.inline_code v Style.inline_code "lemma x;"
+  | Unused_var { name = v; mutated = true; _ }
+  | Unused_var_strict { name = v; mutated = true; _ } ->
       msg "variable %a was mutated but never used."
         Style.inline_code v
   | Wildcard_arg_to_constant_constr ->
