@@ -121,8 +121,11 @@ module Demo : sig end = struct
   module Verify_singletons (Order : Set.TotalOrderedType) = struct
     module S = Set.MakeTotal (Order)
 
-    let (member @ total) (element @ total) =
-      let present = S.mem element (S.Refined.singleton element) in
+    (* [S.mem] is modelled only at total, stateless arguments: an element
+       holding a stateful closure could compare differently each time. *)
+    let (member @ total) (element @ total stateless) =
+      let (set @ total stateless) = S.Refined.singleton element in
+      let present = S.mem element set in
       let proof : {b : bool | b} = present in
       let _ = proof in
       ()
