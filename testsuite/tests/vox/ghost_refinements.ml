@@ -53,6 +53,8 @@ let (proved @ total) x : {y : int | y >= 0} =
   let refine_ proof = ghost_ (Nonnegative.lemma x) in
   refine_ y;;
 [%%expect{|
+val proved : int -> {y : int | y >= 0} = <fun>
+|}, Principal{|
 val proved : int @ total -> {y : int | y >= 0} = <fun>
 |}]
 
@@ -79,6 +81,8 @@ let (proof_block @ total) x : {y : int | y >= 0} =
   in
   refine_ y;;
 [%%expect{|
+val proof_block : int -> {y : int | y >= 0} = <fun>
+|}, Principal{|
 val proof_block : int @ total -> {y : int | y >= 0} = <fun>
 |}]
 
@@ -254,5 +258,7 @@ let (statement_proof @ total) x : {y : int | y >= 0} =
   ghost_ (Nonnegative.lemma x);
   refine_ y;;
 [%%expect{|
+val statement_proof : int -> {y : int | y >= 0} = <fun>
+|}, Principal{|
 val statement_proof : int @ total -> {y : int | y >= 0} = <fun>
 |}]

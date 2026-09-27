@@ -225,6 +225,15 @@ val user_measure : int -> int = <fun>
 let rec self_measure n = if n > 0 then self_measure (n - 1) else 0
 [@@decreases self_measure n];;
 [%%expect{|
+Line 2, characters 13-25:
+2 | [@@decreases self_measure n];;
+                 ^^^^^^^^^^^^
+Error: The recursive function occurs in its own measure
+Line 2, characters 13-27:
+2 | [@@decreases self_measure n];;
+                 ^^^^^^^^^^^^^^
+  Required by this decreases attribute
+|}, Principal{|
 Line 2, characters 26-27:
 2 | [@@decreases self_measure n];;
                               ^

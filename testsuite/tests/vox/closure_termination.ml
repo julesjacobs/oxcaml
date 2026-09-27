@@ -75,6 +75,13 @@ end;;
 [%%expect{|
 module Measured :
   sig
+    val countdown : int -> int
+    val returned : int -> unit -> int
+    val bounded : int -> int
+  end
+|}, Principal{|
+module Measured :
+  sig
     val countdown : int @ total -> int
     val returned : int -> unit -> int
     val bounded : int -> int
