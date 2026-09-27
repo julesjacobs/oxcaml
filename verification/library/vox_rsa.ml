@@ -95,9 +95,7 @@ let (prime_inverse @ total) (p : t) (q : t) :
   power_def p (q - 1Z);
   ())
 
-(* Nonlinear integer arithmetic (the CRT recombination): about 5.6M solver
-   resource units, over the 1M slow-refinement threshold. *)
-let[@warning "-slow-refinement"] (recombine_correct @ total)
+let (recombine_correct @ total)
     (p : t) (q : t) (rp : t) (rq : t) (inverse : t) :
     {u : unit | let r = rp + p * (((rq - rp) * inverse) mod q) in
       if p > 0Z && q > 1Z && 0Z <= rp && rp < p
