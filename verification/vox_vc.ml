@@ -2879,10 +2879,17 @@ let expression_step e ty =
             Vox_proof_steps.create kind e.exp_loc)
       else None
 
+(* The locations of functions bound by [let]. The parameters of an anonymous
+   function passed as an argument have the refinements its callee requires,
+   which are not proof steps of this function. *)
+let let_bound_functions : (Location.t, unit) Hashtbl.t = Hashtbl.create 16
+
 (* A refined parameter, whose refinement the function assumes, when it is a
    variable that [fn] never uses at a refined type without a conversion. *)
 let argument_step fn (pat : pattern) =
-  if not (Vox_proof_steps.enabled ())
+  if
+    (not (Vox_proof_steps.enabled ()))
+    || not (Hashtbl.mem let_bound_functions fn.exp_loc)
   then None
   else
     match get_desc pat.pat_type, pat_bound_idents pat with
@@ -3612,6 +3619,8 @@ and value_bindings ctx s rec_flag bindings =
     | [] -> s, None
     | _ when impossible s -> s, None
     | vb :: rest ->
+      if Vox_proof_steps.enabled ()
+      then Hashtbl.replace let_bound_functions vb.vb_expr.exp_loc ();
       (* A proof step whose value is discarded: the pattern's refinement is the
          step's too. *)
       let discarded_step =
@@ -4332,6 +4341,7 @@ let steps_pass ?unused_steps ~report f =
       Hashtbl.reset observation_steps;
       Term_table.reset equation_steps;
       Hashtbl.reset value_steps;
+      Hashtbl.reset let_bound_functions;
       Hashtbl.reset argument_steps)
     (fun () -> Vox_proof_steps.pass ?checker:unused_steps ~report f)
 
@@ -4432,6 +4442,9 @@ let generate ?(poll = fun () -> ()) ?unused_steps ~prove str =
 let check_termination ?unused_steps ~poll ~prove ~self ~fn ~measure () =
   steps_pass ?unused_steps ~report:false @@ fun () ->
   poll ();
+  (* A recursive function is bound by [let]. *)
+  if Vox_proof_steps.enabled ()
+  then Hashtbl.replace let_bound_functions fn.exp_loc ();
   let params, body = Recursive_function.parameters fn in
   let ctx = context ~poll ~prove ~verify_introductions:false in
   (* The typer checked the measure as a total, stateless expression over
