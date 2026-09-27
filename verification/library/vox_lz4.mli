@@ -28,10 +28,18 @@ val decompress_verified : (wire : string) ->
   {decoded : Vox_lz4_spec.decoded |
     Vox_lz4_spec.matches_model wire capacity decoded}
 
-(** A string/result adapter over [decompress_verified]. Default capacity is
-    [max_block_size]. Invalid capacities return [Invalid_capacity]. Allocation
+(** A string/result adapter over [decompress_verified]. [c] is the optional
+    capacity as passed: without one the capacity is [max_block_size], and a
+    capacity outside [0, max_block_size] gives [Invalid_capacity]. Allocation
     may raise [Out_of_memory]. *)
-val decompress : ?capacity:int -> string -> (string, decode_error) result
+val decompress : ?capacity:(c : int) -> (wire : string) ->
+  {result : (string, decode_error) result |
+    match c with
+    | None -> Vox_lz4_spec.matches_model wire 4194304 result
+    | Some n ->
+        if 0 <= n && n <= 4194304
+        then Vox_lz4_spec.matches_model wire n result
+        else result === Error Invalid_capacity}
 
 (** Executable composition of [compress] and [decompress_verified], with a
     checked normal-return identity. The total-model round-trip theorem is
