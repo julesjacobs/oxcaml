@@ -1,6 +1,7 @@
 module M = Vox_table_model
 module S = Vox_sequence
 module Mask = Vox_table_mask
+module W = Vox_table_wrap
 
 module Make (Key : Vox_table_map.Key) = struct
   module Spec = Vox_table_search_spec.Make (Key)
@@ -122,13 +123,13 @@ module Make (Key : Vox_table_map.Key) = struct
   let (exhausted @ total) : ('a : immutable_data).
       (view : 'a I.view) @ immutable -> (query : Key.t) @ immutable ->
       {u : unit | not (I.valid view &&
-        Spec.prefix_absent view.model query (view.model.capacity lsr 4)) ||
+        Spec.prefix_absent view.model query (W.lsr4 view.model.capacity)) ||
         Map.absent view.model.slots query &&
         Map.lookup view.model.slots query === None} @ ghost =
     fun view query -> ghost_ (
       I.valid_def view;
       if I.valid view && Spec.prefix_absent view.model query
-          (view.model.capacity lsr 4) then begin
+          (W.lsr4 view.model.capacity) then begin
         Map.absent_intro view.model.slots query (fun index -> (
           match S.at view.model.slots index with
           | Some (Some (key, value)) ->
@@ -140,7 +141,7 @@ module Make (Key : Vox_table_map.Key) = struct
                I.route_def view.model index (Some (key, value)) path;
                I.route_position_def view.model.capacity (Key.hash key) index
                  path;
-               visited_misses view query (view.model.capacity lsr 4)
+               visited_misses view query (W.lsr4 view.model.capacity)
                  index key value rank lane;
                ())
           | _ -> ()));

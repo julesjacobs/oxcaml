@@ -409,6 +409,11 @@ let op_name n = match n with
   | 0x7c -> "i64.add" | 0x7d -> "i64.sub" | 0x83 -> "i64.and" | 0x84 -> "i64.or" | 0x86 -> "i64.shl"
   | 0x88 -> "i64.shr_u" | 0xa7 -> "i32.wrap_i64" | 0xad -> "i64.extend_i32_u"
   | n -> Printf.sprintf "(opcode 0x%02x)" n
+(* The generator's alignment exponents are small; a shift needs its count
+   in range. *)
+let alignment a =
+  if 0 <= a && a < 63 then 1 lsl a else invalid_arg "alignment exponent"
+
 let rec print_code indent code =
   List.iter (fun i ->
     let line s = Printf.printf "%s%s\n" indent s in
@@ -427,8 +432,8 @@ let rec print_code indent code =
     | G.Local_tee k -> line (Printf.sprintf "local.tee %d" k)
     | G.Global_get k -> line (Printf.sprintf "global.get %d" k)
     | G.Global_set k -> line (Printf.sprintf "global.set %d" k)
-    | G.Load (t, a, o) -> line (Printf.sprintf "%s.load offset=%d align=%d" (vt t) o (1 lsl a))
-    | G.Store (t, a, o) -> line (Printf.sprintf "%s.store offset=%d align=%d" (vt t) o (1 lsl a))
+    | G.Load (t, a, o) -> line (Printf.sprintf "%s.load offset=%d align=%d" (vt t) o (alignment a))
+    | G.Store (t, a, o) -> line (Printf.sprintf "%s.store offset=%d align=%d" (vt t) o (alignment a))
     | G.I32_const v -> line (Printf.sprintf "i32.const %ld" v)
     | G.I64_const v -> line (Printf.sprintf "i64.const %Ld" v)
     | G.Op n -> line (op_name n)

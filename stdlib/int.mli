@@ -66,6 +66,22 @@ module Refined : sig
   external ( mod ) : int -> {d : int | d <> 0} -> int @@ total = "%modint"
   external div : int -> {d : int | d <> 0} -> int @@ total = "%divint"
   external rem : int -> {d : int | d <> 0} -> int @@ total = "%modint"
+
+  (** Shifts whose count is in \[0, 63\], the range in which the result is
+      specified on 64-bit targets, so that they are total. *)
+
+  external ( lsl ) : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%lslint"
+  external ( lsr ) : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%lsrint"
+  external ( asr ) : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%asrint"
+  external shift_left : int -> {n : int | 0 <= n && n <= 63} -> int @@ total
+    = "%lslint"
+  external shift_right : int -> {n : int | 0 <= n && n <= 63} -> int
+    @@ total = "%asrint"
+  external shift_right_logical :
+    int -> {n : int | 0 <= n && n <= 63} -> int @@ total = "%lsrint"
 end
 
 external succ : (int[@local_opt]) -> int = "%succint"

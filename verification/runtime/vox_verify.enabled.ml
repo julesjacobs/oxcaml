@@ -81,8 +81,8 @@ let abstract_multiplication (query : Vox_smt.query) =
    covers termination checks and the unchanged parts of an edited unit, also
    across compiler rebuilds. Unit entries record only clean successes. The
    compiler is identified by a digest of its executable and the solver by the
-   version it reports, both computed once per process; when either is
-   unavailable, the caches that need it are not used. *)
+   version it reports and the platform, both computed once per process; when
+   either is unavailable, the caches that need it are not used. *)
 let cache_directory () =
   match Sys.getenv_opt "VOX_VERIFY_CACHE" with
   | None | Some "" -> None
@@ -99,9 +99,13 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
-(* The solver's configured name and the version it reports. A solver that
-   does not answer [-version] within a few seconds is treated as having no
-   version. *)
+(* The solver's configured name, the version it reports and the platform it
+   runs on. A solver that does not answer [-version] within a few seconds is
+   treated as having no version. The platform is part of the identity because
+   resource counts differ between builds of one version: the same query took
+   821,439 units with Z3 4.16.0 on macOS arm64 and 681,198 on Linux x86-64, so
+   a cache shared between machines could otherwise replay a proof or an
+   exhausted limit obtained under different counts. *)
 let solver_identity =
   lazy
     (let deadline = Unix.gettimeofday () +. 5. in
@@ -163,7 +167,7 @@ let solver_identity =
          let version = String.trim (Buffer.contents buffer) in
          (match wait finished with
          | Some (Unix.WEXITED 0) when finished && version <> "" ->
-           Some (!executable ^ "\000" ^ version)
+           Some (String.concat "\000" [!executable; version; Config.host])
          | _ | (exception Unix.Unix_error _) -> None)))
 
 let compiler_digest =

@@ -10,7 +10,7 @@ A Vox proof is a compile-time check: the compiler type-checks the program, gener
 - The OxCaml type checker, including the mode, uniqueness and ghost checks that make tokens affine and keep ghost code free of runtime effects.
 - Verification-condition generation in `verification/vox_vc.ml` and its translation to SMT-LIB in `verification/vox_smt.ml`.
 - Z3 4.16.0. A goal counts as proved only when Z3 reports `unsat` for its negation within the resource limit.
-- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort` does through a unique slice. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments.
+- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort` does through a unique slice. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments. The checker treats every total, stateless function as a function of its arguments, including functions of units it never verified, so each primitive declared `@@ total` must give equal results for equal arguments wherever it is compiled.
 - Ghost erasure: ghost arguments and ghost code are removed before code generation. Ghost record fields are removed in native code; bytecode keeps an empty slot for each. A lemma still compiles to a placeholder function whose body is erased.
 - The rest of the OxCaml compiler and runtime, which compile and run the erased program.
 
@@ -20,6 +20,7 @@ The checker gives these operations a fixed meaning instead of deriving it from c
 
 - `int` is a signed 63-bit integer with wrapping arithmetic. `Bigint.t` is an unbounded integer; its operations are the mathematical ones (`stdlib/bigint.mli`, implemented in C in `runtime/bigint.c`).
 - `=`, `<>`, `<`, `<=`, `>`, `>=` and `compare` are total and stateless at `int`, `bool` and `Bigint.t`, so they may appear in refinements.
+- `lsl`, `lsr` and `asr` are 63-bit shifts for a count in [0, 63]. OCaml leaves other counts unspecified, and native code really differs between evaluations (constant folding against the hardware's masking of the count), so every shift the program performs must have its count proved in range, and the standard shifts are partial. `Int.Refined` has total shifts whose count is refined to that range, and the checker rejects an `external` that declares a shift total without such a refinement.
 - `===` is logical equality: equality of complete values in the solver's model. It has no runtime counterpart.
 - `Vox_sequence.length` is the length of a list; the checker states this directly.
 - Ghost heaps. `Pref.Heap` is a finite map from locations to values. The checker encodes `empty`, `mem`, `at`, `put`, `union`, `restrict` and `exclude` by their pointwise meaning; `verification/library/vox_pref_semantics.ml` checks that this encoding gives the expected pointwise equations. The laws declared `external` in `verification/library/pref.mli` (`put_law`, `union_law`, `split_law` and others) are stated, not proved.

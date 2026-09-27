@@ -255,3 +255,13 @@ If it does not succeed, the query is retried with every machine integer as a
 63-bit bitvector, under its own limit; counterexamples and slow-proof warnings
 come from the attempt that decides the query. So a `land` fact in scope, such
 as a power-of-two capacity, costs little unless the goal depends on the bits.
+
+OCaml leaves `x lsl n`, `x lsr n` and `x asr n` unspecified for `n` outside
+[0, 63], and compiled code differs: native code folds `1 lsl 64` to 0, while
+arm64 computes `1 lsl n` with `n = 64` as 1. So every shift that verified code
+performs has the obligation `0 <= n && n <= 63`, whatever the type of the
+external that declares it, and the standard shifts are partial, like `( / )`.
+Total functions and predicates use the shifts of `Int.Refined`, whose count
+is refined to that range. A predicate cannot pass a constant to a refined
+parameter, so a specification names a shift by a constant with a total
+function (see `lsr4` in `verification/library/vox_table_wrap.ml`).

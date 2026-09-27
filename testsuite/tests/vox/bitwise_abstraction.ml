@@ -16,7 +16,7 @@ module Linear = struct
       (lo : {i : int | 0 <= i && i < capacity})
       (hi : {j : int | lo <= j && j < capacity}) :
       {r : int | lo <= r && r <= hi && (r - lo) + (r - lo) <= hi - lo + 1} =
-    lo + (hi - lo) lsr 1
+    lo + Int.Refined.((hi - lo) lsr 1)
 
   let (distance @ total) (capacity : capacity)
       (home : {i : int | 0 <= i && i < capacity})
@@ -48,20 +48,24 @@ module Linear :
   end
 |}]
 
-(* Facts about the abstracted operations: masks, low masks and shifts by a
-   constant. *)
+(* Facts about the abstracted operations: masks, low masks, shifts by a
+   constant and shifts by a count in range. *)
 module Facts = struct
   let (wrap @ total) (capacity : capacity) (i : int) :
       {r : int | 0 <= r && r < capacity} = i land (capacity - 1)
 
   let (split @ total) (x : {x : int | 0 <= x}) :
-      {r : int | 0 <= r && r < 16 && x = 16 * (x lsr 4) + r} = x land 15
+      {q : int | 0 <= x - 16 * q && x - 16 * q < 16} = Int.Refined.(x lsr 4)
 
   let (low_negative @ total) (x : {x : int | x < 0}) :
       {r : int | 0 <= r && r < 8 && (x - r) land 7 = 0} = x land 7
 
   let (top @ total) (x : {x : int | x < 0}) :
-      {r : int | 4 <= r && r <= 7} = x lsr 60
+      {r : int | 4 <= r && r <= 7} = Int.Refined.(x lsr 60)
+
+  let (halve_by @ total) (x : {x : int | x >= 0})
+      (k : {k : int | 0 <= k && k <= 63}) : {r : int | 0 <= r && r <= x} =
+    Int.Refined.(x lsr k)
 
   let (sign @ total) (x : {x : int | x < 0}) (y : int) :
       {r : int | r < 0} = x lor y
@@ -73,11 +77,14 @@ module Facts :
       (capacity : capacity) -> int -> {r : int | (0 <= r) && (r < capacity)}
     val split :
       (x : {x : int | 0 <= x}) ->
-      {r : int | (0 <= r) && ((r < 16) && (x = ((16 * (x lsr 4)) + r)))}
+      {q : int | (0 <= (x - (16 * q))) && ((x - (16 * q)) < 16)}
     val low_negative :
       (x : {x : int | x < 0}) ->
       {r : int | (0 <= r) && ((r < 8) && (((x - r) land 7) = 0))}
     val top : {x : int | x < 0} -> {r : int | (4 <= r) && (r <= 7)}
+    val halve_by :
+      (x : {x : int | x >= 0}) ->
+      {k : int | (0 <= k) && (k <= 63)} -> {r : int | (0 <= r) && (r <= x)}
     val sign : {x : int | x < 0} -> int -> {r : int | r < 0}
   end
 |}]

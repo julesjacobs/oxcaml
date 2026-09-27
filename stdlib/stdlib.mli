@@ -390,27 +390,30 @@ external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
 val lnot : int -> int
 (** Bitwise logical negation. *)
 
-external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
-  = "%lslint"
+external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%lslint"
 (** [n lsl m] shifts [n] to the left by [m] bits.
-    The result is unspecified if [m < 0] or [m > Sys.int_size].
+    The result is unspecified if [m < 0] or [m > Sys.int_size], and it can
+    differ between evaluations, so the shift is not total.
+    {!Int.Refined} has total shifts whose count is proved in range.
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
-  = "%lsrint"
+external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%lsrint"
 (** [n lsr m] shifts [n] to the right by [m] bits.
     This is a logical shift: zeroes are inserted regardless of
     the sign of [n].
-    The result is unspecified if [m < 0] or [m > Sys.int_size].
+    The result is unspecified if [m < 0] or [m > Sys.int_size], and it can
+    differ between evaluations, so the shift is not total.
+    {!Int.Refined} has total shifts whose count is proved in range.
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
-  = "%asrint"
+external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%asrint"
 (** [n asr m] shifts [n] to the right by [m] bits.
     This is an arithmetic shift: the sign bit of [n] is replicated.
-    The result is unspecified if [m < 0] or [m > Sys.int_size].
+    The result is unspecified if [m < 0] or [m > Sys.int_size], and it can
+    differ between evaluations, so the shift is not total.
+    {!Int.Refined} has total shifts whose count is proved in range.
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
