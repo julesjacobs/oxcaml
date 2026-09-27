@@ -116,19 +116,26 @@ let (partition_bounds @ total) : (values : int list) -> (pivot : int) -> (index 
   sub_suffix values next;
   let u = () in refine_ u
 
-let (glue_partition @ total) : (before : int list) -> (pivot : int) -> (index : Bigint.t) ->
+(* The pivot sits at [index]: no element before it is larger and no element
+   after it is smaller. *)
+let[@def] (partitioned @ total) (values : int list @ immutable) (index : Bigint.t) =
+  ghost_ (0Z <= index && index < length values
+    && range values (element values index) true 0Z index
+    && range values (element values index) false (Bigint.add index 1Z)
+      (length values))
+
+let (glue_partition @ total) : (before : int list) -> (index : Bigint.t) ->
     (left : int list) -> (middle : int list) -> (right : int list) ->
-    {u : unit | if 0Z <= index && index < length before
-      && element before index = pivot
-      && range before pivot true 0Z index
-      && range before pivot false ((Bigint.add index 1Z)) (length before)
+    {u : unit | if partitioned before index
       && sorted left && sorted right
       && permutation (take index before) left
       && middle === sub before index ((Bigint.add index 1Z))
       && permutation (drop ((Bigint.add index 1Z)) before) right then
       sorted (append left (append middle right))
       && permutation before (append left (append middle right)) else true} =
-    fun before pivot index left middle right ->
+    fun before index left middle right ->
+  let pivot = element before index in
+  partitioned_def before index;
   let next = (Bigint.add index 1Z) in
   let old_left = take index before in
   let old_middle = sub before index next in

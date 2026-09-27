@@ -56,7 +56,8 @@ let () =
             (Printf.sprintf "%s.%s runs no model or proof code" unit name))
         names
   in
-  audit "quicksort" [ "partition"; "sort_sized"; "sort"; "parallel_sort" ]
+  audit "quicksort"
+    [ "partition"; "partition_middle"; "sort_sized"; "sort"; "sort_owned" ]
     ~forbidden:
       [ "Quicksort_model"; "Vox_int_sequence"; "Vox_sequence";
         "caml_borrow_current"; "caml_borrow_final"; "caml_borrow_contents" ]

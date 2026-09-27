@@ -49,6 +49,9 @@ module Raw = struct
   external length : ('a : immutable_data).
     'a loan @ local immutable -> int @@ portable total =
       "caml_borrow_length"
+  external owned_length : ('a : immutable_data).
+    'a owned @ local immutable -> int @@ portable total =
+      "caml_borrow_length"
   external finish : ('a : immutable_data).
     'a loan @ local unique -> unit @@ portable total = "caml_borrow_finish"
   external split : ('a : immutable_data).
@@ -379,6 +382,25 @@ module Owned_array = struct
     (a : 'a t) @ unique ->
     {values : 'a iarray | Model.of_iarray values === contents a}
     @@ portable total = "caml_borrow_into_iarray"
+  let (length @ total) : ('a : immutable_data).
+    (a : 'a t) @ local immutable ->
+    {n : int | 0 <= n
+      && Bigint.of_int n === Model.length (contents a)} = fun a ->
+    let n = Raw.owned_length a in
+    n
+  external split_at : ('a : immutable_data).
+    (a : 'a t) @ unique ->
+    (index : {k : int | 0 <= k
+      && Bigint.compare (Bigint.of_int k) (Model.length (contents a)) <= 0}) ->
+    {r : 'a t * 'a t | let k = index in
+      match r with left, right ->
+        contents left === Model.take (Bigint.of_int k) (contents a)
+        && contents right === Model.drop (Bigint.of_int k) (contents a)}
+    @ unique @@ portable total = "caml_borrow_owned_split"
+  external append : ('a : immutable_data).
+    (left : 'a t) @ unique -> (right : 'a t) @ unique ->
+    {r : 'a t | contents r === Model.append (contents left) (contents right)}
+    @ unique @@ portable = "caml_borrow_owned_append"
   let (with_mut @ total) : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost))

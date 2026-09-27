@@ -171,6 +171,31 @@ module Owned_array : sig @@ portable
     (a : 'a t) @ unique ->
     {values : 'a iarray | Model.of_iarray values === contents a} @@ total
 
+  val length : ('a : immutable_data).
+    (a : 'a t) @ local immutable ->
+    {n : int | 0 <= n
+      && Bigint.of_int n === Model.length (contents a)} @@ total
+
+  (* The two owners share [a]'s storage; nothing is copied. *)
+  val split_at : ('a : immutable_data).
+    (a : 'a t) @ unique ->
+    (index : {k : int | 0 <= k
+      && Bigint.compare (Bigint.of_int k) (Model.length (contents a)) <= 0}) ->
+    {r : 'a t * 'a t | let k = index in
+      match r with left, right ->
+        contents left === Model.take (Bigint.of_int k) (contents a)
+        && contents right === Model.drop (Bigint.of_int k) (contents a)}
+    @ unique @@ total
+
+  (* Adjacent pieces of one array (as produced by [split_at]) are joined in
+     place; any other pair is copied into a new array. Not [total]: the copy
+     raises [Invalid_argument] if the combined length exceeds the maximum
+     array size. *)
+  val append : ('a : immutable_data).
+    (left : 'a t) @ unique -> (right : 'a t) @ unique ->
+    {r : 'a t | contents r === Model.append (contents left) (contents right)}
+    @ unique
+
   val with_mut : ('a : immutable_data) ('r : immutable_data).
       (a : 'a t) @ unique ->
       (post : ('r @ immutable total -> 'a Model.t @ immutable -> bool @ ghost))

@@ -12,7 +12,8 @@
  readonly_files += " vox_cdcl_total.ml vox_credits.mli vox_credits.ml";
  readonly_files += " vox_ordered_sequence.ml vox_merge_proofs.ml";
  readonly_files += " vox_sort_cost.ml vox_merge_sort.mli vox_merge_sort.ml";
- readonly_files += " vox_lz4_model.ml borrow.mli borrow.ml borrow_iarray.mli";
+ readonly_files += " vox_lz4_model.ml vox_parallel.mli vox_parallel.ml";
+ readonly_files += " borrow.mli borrow.ml borrow_iarray.mli";
  readonly_files += " borrow_iarray.ml pref.mli pref.ml vox_pref_semantics.mli";
  readonly_files += " vox_pref_semantics.ml ghost_pref.mli ghost_pref.ml";
  readonly_files += " vox_big_credits.mli vox_big_credits.ml vox_ackermann.ml";
@@ -99,7 +100,8 @@
    flags = "-extension refinement_types -principal";
    all_modules = "vox_credits.mli vox_credits.ml vox_ordered_sequence.ml";
    all_modules += " vox_merge_proofs.ml vox_sort_cost.ml vox_merge_sort.mli";
-   all_modules += " vox_merge_sort.ml vox_lz4_model.ml borrow.mli borrow.ml";
+   all_modules += " vox_merge_sort.ml vox_lz4_model.ml vox_parallel.mli";
+   all_modules += " vox_parallel.ml borrow.mli borrow.ml";
    all_modules += " borrow_iarray.mli borrow_iarray.ml pref.mli pref.ml";
    all_modules += " vox_pref_semantics.mli vox_pref_semantics.ml";
    all_modules += " ghost_pref.mli ghost_pref.ml vox_big_credits.mli";
@@ -214,7 +216,7 @@
    all_modules = "vox_lz4_model.ml";
    ocamlopt.opt;
    flags = "-extension refinement_types -principal -smt-assume-verified";
-   all_modules = "borrow.mli borrow.ml";
+   all_modules = "vox_parallel.mli vox_parallel.ml borrow.mli borrow.ml";
    ocamlopt.opt;
    flags = "-extension refinement_types -principal -smt-assume-verified -O3";
    all_modules = "borrow_iarray.mli borrow_iarray.ml";
