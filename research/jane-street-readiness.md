@@ -57,10 +57,18 @@ this file.
 - [ ] **2. Second review round** (brief:
       `research/demo-review-20260926/ROUND2-BRIEF.md`, Claude and Codex per
       demo), after item 1 merges; correct each page until **Reviewed**.
+  - [x] flat-hash-table, one-shot-channels: **owner-review** (merged
+        `103a45730c`; the rejected table example lacked the proof that
+        made its false claim the only reason for failure, fixed; the Cmm
+        excerpt regenerated from the current build on x86-64). Owner:
+        keep the full 201-line interface or use excerpts? The Cmm stamps
+        go stale on compiler changes and nothing checks the excerpt.
   - [ ] binary-search · constant-folding · dfa-equivalence · egraphs ·
-        flat-hash-table · hindley-milner · http · lz4 · mode-solver ·
-        one-shot-channels · online-union-find · reference-locks ·
-        regex-automata (its lowering gap stays, stated as an open question)
+        hindley-milner · http · lz4 · mode-solver · online-union-find ·
+        reference-locks · regex-automata (its lowering gap stays, stated as
+        an open question). In flight: regex/HM, binary-search/
+        constant-folding/union-find; dfa and locks after deduplication;
+        the rest after the presentation branch.
   - [ ] hm-wasm-compiler, after item 3.
 - [ ] **3. HM-to-Wasm is not trivial** (AMD box).
   - [x] Example programs compiled by the verified compiler and run, with
@@ -101,8 +109,11 @@ this file.
       compiler-printed ones (HTTP, mode solver, SAT spec); remove duplicated
       code (two DFA pipelines, near-copy lock modules, SAT solver variants).
 - [ ] **8. Remaining weak contracts** (fixed, or stated on the page):
-  - [ ] LZ4 `decompress` contract, via labelled arguments in dependent
-        types (wart 38).
+  - [x] LZ4 `decompress` contract, via labelled arguments in dependent
+        types (wart 38; `?capacity:(c : int) ->`; merged `2c5c38bbb0`).
+        Follow-ups: `parsing/attributes.ml` and `parsing/extensions.ml`
+        `-dparsetree` references lack the `None` binder line (pre-existing);
+        Merlin not updated for Vox typer changes.
   - [x] HTTP: malformed request and header lines must be rejected (three
         rejection laws; `Invalid_crlf` and mid-line budget exhaustion stay
         unspecified, stated on the page; merged `a4f6450a19`).
