@@ -92,6 +92,17 @@ this file.
         "verified to be 1: 2"). Agent on
         `jujacobs/vox/totality-knot-20260927`: map every route, principled
         fix, Codex review.
+  - [x] **Out-of-range shifts (found 27 September by the mastery
+        investigation):** one uninterpreted function per shift operator
+        made `(1 lsl n) = (1 lsl 64)` provable for n = 64, false in native
+        code. Branch `jujacobs/vox/shift-encoding-20260927`: every shift
+        in verified code needs a count in [0, 63] (`cbca48d5d5`), the
+        standard shifts are partial and `Int.Refined` has total ones, and a
+        shift may be declared `@@ total` only with that refinement
+        (`fc1e8cdc5e`, a route Codex found). Caches keyed by the solver's
+        platform (`b267ebcecd`). AMD: `./dev test vox` 458 passed, 7
+        skipped; typing-refinement-types 47 passed. Notes in
+        `research/shift-encoding-20260927` (Vox research directory).
   - [ ] Compare refinement predicates with their types (subsumption
         stage 2; design in `research/subsumption-design-20260927`).
 - [ ] **2. Second review round** (brief:
