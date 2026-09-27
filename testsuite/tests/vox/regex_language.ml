@@ -5,10 +5,10 @@ module Regex_language = struct
     {proof : Membership.evidence Ghost.t | if matches root word then
       Membership.valid root proof.ghost && Membership.word proof.ghost === word else true} =
     let proof = ghost_ (
-      ghost_ (matches_def root word);
+      matches_def root word;
       let proof = Regex.sound root word in
-      ghost_ (Regex.membership_valid root proof);
-      ghost_ (Regex.membership_word proof);
+      Regex.membership_valid root proof;
+      Regex.membership_word proof;
       proof
       : {proof : Membership.evidence | if matches root word then
         Membership.valid root proof && Membership.word proof === word else true}) in
@@ -17,10 +17,10 @@ module Regex_language = struct
     {u : unit | if Membership.valid root proof && Membership.word proof === word then
       matches root word else true} =
     let _proof = ghost_ (
-      ghost_ (matches_def root word);
-      ghost_ (Regex.membership_valid root proof);
-      ghost_ (Regex.membership_word proof);
-      ghost_ (Regex.complete root word proof);
+      matches_def root word;
+      Regex.membership_valid root proof;
+      Regex.membership_word proof;
+      Regex.complete root word proof;
       let u = () in u
       : {u : unit | if Membership.valid root proof && Membership.word proof === word then
         matches root word else true}) in
@@ -32,9 +32,9 @@ module Regex_language = struct
     {u : unit | match lower root with None -> true | Some machine ->
       Dfa_semantics.run machine word === matches root word} =
     let _proof = ghost_ (
-      ghost_ (lower_def root);
-      ghost_ (matches_def root word);
-      ghost_ (Regex_dfa_bridge.lower_compiled_matches root word);
+      lower_def root;
+      matches_def root word;
+      Regex_dfa_bridge.lower_compiled_matches root word;
       let u = () in u
       : {u : unit | match lower root with None -> true | Some machine ->
         Dfa_semantics.run machine word === matches root word}) in
@@ -43,8 +43,8 @@ module Regex_language = struct
     {u : unit | match lower root with None -> true | Some machine ->
       Dfa_semantics.valid machine} =
     let _proof = ghost_ (
-      ghost_ (lower_def root);
-      ghost_ (Regex_dfa_bridge.lower_compiled_valid root);
+      lower_def root;
+      Regex_dfa_bridge.lower_compiled_valid root;
       let u = () in u
       : {u : unit | match lower root with None -> true | Some machine ->
         Dfa_semantics.valid machine}) in
