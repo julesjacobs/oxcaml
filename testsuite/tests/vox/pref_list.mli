@@ -43,7 +43,7 @@ val rev_append_def :
 type result = { pointer : node option @@ aliased; state : node option Pref.token; }
 type built = {
   pointer : node option @@ aliased;
-  model : model @@ ghost aliased;
+  model : model @@ global ghost;
   state : node option Pref.token;
 }
 val reverse : (pointer : node option) @ immutable ->

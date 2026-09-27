@@ -233,9 +233,18 @@ let shown = { a = 10; p = "unseen"; b = 20 }
 val shown : r = {a = 10; p = <ghost>; b = 20}
 |}]
 
+(* A ghost field of a local record is local, as a real field would be: the
+   placeholder is fabricated, but locality also confines borrows (see
+   ghost_field_ownership.ml). *)
 let project (x : r @ local) : string @ global ghost = x.p
 [%%expect{|
-val project : r @ local -> string @ ghost = <fun>
+Line 1, characters 54-57:
+1 | let project (x : r @ local) : string @ global ghost = x.p
+                                                          ^^^
+Error: This value is "local" to the parent region
+         because it is the field "p" of the record at line 1, characters 54-55
+         which is "local" to the parent region.
+       However, the highlighted expression is expected to be "global".
 |}]
 
 type opaque

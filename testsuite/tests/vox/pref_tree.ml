@@ -248,7 +248,7 @@ let mirror_with_frame :
 
 type built = {
   pointer : node option @@ aliased;
-  model : tree @@ aliased ghost;
+  model : tree @@ global ghost;
   state : node option Pref.token;
 }
 
