@@ -34,6 +34,34 @@ No GitHub CI (owner's decision, 27 September): the fork's upstream workflows
 need Jane Street's paid runners and never run. The full suite is our own run
 on the AMD box (`~/vox-check-run.sh` on the `incoming` branch there).
 
+Multidomain runs: our other builds are configured without
+`--enable-multidomain`, so the seven tests marked `multicore` (one-shot
+parallel, channel buffer, raw memory, borrow, quicksort frame, the two lock
+tests) are skipped and `parallel_sort` runs sequentially. The AMD clone
+`~/git/vox-multidomain` is configured with `--enable-multidomain
+--enable-poll-insertion` (configure refuses the first without the second).
+Run the suite there with each batched full run, and before merging changes to
+the concurrency libraries, `Borrow` or the runtime. From the Mac, in the
+worktree to test:
+
+```
+amd=jules@jules-b650-aorus-elite-ax-v2
+base=$(ssh $amd git -C git/vox-multidomain rev-parse HEAD)
+git bundle create /tmp/vox-md.bundle HEAD ^$base
+scp /tmp/vox-md.bundle $amd:vox-multidomain-incoming.bundle
+ssh $amd "nohup ./vox-multidomain-check.sh $(git rev-parse HEAD) \
+  > vox-multidomain-check.log 2>&1 &"
+ssh $amd cat vox-multidomain-check.log    # when it has finished
+```
+
+The script builds incrementally, runs `./dev test vox`, prints the counts and
+exits nonzero if a test fails or is skipped (`Domain.recommended_domain_count
+()` below 2 would skip them). First run (27 September, `8527a3fb7b`): 464
+passed, none skipped; about 6.5 minutes with a cold library, after a
+12-minute initial build. The parallel tests and the quicksort clients also
+passed 200 runs each, native and bytecode, with a 4k-word minor heap and on
+two CPUs (`~/vox-multidomain-stress.sh`).
+
 Catalogue statuses: **Reviewed** means checked by the owner. **Ready for owner
 review** means two independent reviews found no false claim and the page
 states every gap. Decisions that need the owner are collected at the end of
@@ -220,10 +248,11 @@ this file.
 - [ ] **Erased lemmas still compile to placeholder functions** (both
       backends; stated on the pages). Stripping exported lemma fields would
       be a compiler change; decide whether it matters for the pitch.
-- [ ] **Multidomain test runs**: no build is configured with
-      `--enable-multidomain`, so the 7 parallel tests (one-shot, buffer,
-      raw memory, borrow, quicksort frame, locks) never run. Agent setting
-      up `~/git/vox-multidomain` on the AMD box (27 September).
+- [x] **Multidomain test runs**: `~/git/vox-multidomain` on the AMD box
+      (see the testing policy). All 7 parallel tests pass there, with the
+      rest of the suite; stress runs found no failure or hang. Open: the
+      one-shot and reference-lock pages name only `--enable-multidomain`,
+      which configure rejects without `--enable-poll-insertion`.
 - [ ] **`_trust.md` line 13** (owner-reviewed page) conflates totality and
       statelessness: total functions may write through uniquely owned
       storage (`Quicksort.sort`). Wording proposed to the owner.
