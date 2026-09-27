@@ -5,8 +5,9 @@
 
 Fills verification/site/index.html with the demo count from the catalogue
 and the `clamp` example from the playground, both read with `git show` at
-REVISION like the catalogue's quotes, and with the size of the playground
-already built in SITE_DIR/playground. Writes SITE_DIR/index.html and copies
+REVISION like the catalogue's quotes, with the size of the playground
+already built in SITE_DIR/playground, and with the size of the compiler
+from the source explorer's data in SITE_DIR/source. Writes SITE_DIR/index.html and copies
 the catalogue's style.css next to it.
 """
 import datetime
@@ -54,6 +55,15 @@ def first_visit_bytes(playground):
     return total
 
 
+def source_lines(explorer):
+    """The lines of the compiler proper that the explorer shows, rounded
+    to thousands (its tree.json, already built in SITE_DIR/source)."""
+    tree = json.loads((explorer / 'data' / 'tree.json').read_text())
+    scope = next(s for s in tree['scopes'] if s['id'] == 'proper')
+    lines = sum(f[1] for f in tree['files'] if any(f[0].startswith(p) for p in scope['prefixes']))
+    return f'{round(lines / 1000):,}k'
+
+
 def main():
     revision, site = sys.argv[1], Path(sys.argv[2])
     full = subprocess.run(['git', '-C', str(ROOT), 'rev-parse', revision],
@@ -68,6 +78,7 @@ def main():
         'revision_short': full[:10],
         'example': highlight(example),
         'playground_mb': str(round(first_visit_bytes(site / 'playground') / 1e6)),
+        'source_lines': source_lines(site / 'source'),
         'date': datetime.date.today().strftime('%-d %B %Y'),
         'css': hashlib.sha256(css).hexdigest()[:10],
     }

@@ -80,6 +80,10 @@ expect() {  # URL, then grep patterns that the response headers must match
 expect "$url/" '^HTTP/[0-9.]* 200' 'content-type: text/html'
 expect "$url/catalogue/" '^HTTP/[0-9.]* 200'
 expect "$url/film/" '^HTTP/[0-9.]* 404'
+expect "$url/source/" '^HTTP/[0-9.]* 200' 'content-type: text/html'
+expect "$url/source/data/tree.json" '^HTTP/[0-9.]* 200' 'content-encoding: \(zstd\|gzip\)'
+expect "$url/source/src/typing/typecore.ml.txt" '^HTTP/[0-9.]* 200' 'content-type: text/plain' \
+  'content-encoding: \(zstd\|gzip\)'
 expect "$url/playground/" '^HTTP/[0-9.]* 200' \
   'cross-origin-opener-policy: same-origin' 'cross-origin-embedder-policy: require-corp'
 expect "$url/playground/z3-built.wasm" '^HTTP/[0-9.]* 200' 'content-type: application/wasm' \
