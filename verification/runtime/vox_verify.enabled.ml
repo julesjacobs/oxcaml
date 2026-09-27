@@ -80,10 +80,9 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
-(* The solver's configured name and the version it reports. A solver that
-   does not answer [-version] within a few seconds is treated as having no
-   version. *)
-let solver_identity =
+(* What the solver reports for [-version]. A solver that does not answer
+   within a few seconds is treated as having no version. *)
+let solver_version =
   lazy
     (let deadline = Unix.gettimeofday () +. 5. in
      match Unix.pipe ~cloexec:true () with
@@ -143,9 +142,48 @@ let solver_identity =
          then (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
          let version = String.trim (Buffer.contents buffer) in
          (match wait finished with
-         | Some (Unix.WEXITED 0) when finished && version <> "" ->
-           Some (!executable ^ "\000" ^ version)
+         | Some (Unix.WEXITED 0) when finished && version <> "" -> Some version
          | _ | (exception Unix.Unix_error _) -> None)))
+
+(* The solver's configured name and the version it reports, which both caches
+   include in their keys. *)
+let solver_identity =
+  lazy
+    (Option.map
+       (fun version -> !executable ^ "\000" ^ version)
+       (Lazy.force solver_version))
+
+let any_solver_version = ref false
+
+(* A proof counts only when the solver is the version the verifier is tested
+   with, unless -smt-solver-any-version says otherwise; the compiled unit
+   then records the version used. *)
+let solver_version_error () =
+  if !any_solver_version
+  then begin
+    (match Lazy.force solver_version with
+    | Some version when Vox_smt_solver.is_expected_version version -> ()
+    | Some version -> Vox_trust.unexpected_solver := version
+    | None -> Vox_trust.unexpected_solver := "unknown");
+    None
+  end
+  else
+    match Lazy.force solver_version with
+    | Some version when Vox_smt_solver.is_expected_version version -> None
+    | Some version ->
+      Some
+        (Printf.sprintf
+           "Refinement solver %s reports %S, but proofs are checked with Z3 \
+            %s. Install that version, or pass -smt-solver-any-version to use \
+            this one."
+           !executable version Vox_smt_solver.expected_version)
+    | None ->
+      Some
+        (Printf.sprintf
+           "Cannot determine the version of refinement solver %s (%s \
+            -version); proofs are checked with Z3 %s. Pass \
+            -smt-solver-any-version to use it anyway."
+           !executable !executable Vox_smt_solver.expected_version)
 
 let compiler_digest =
   lazy
@@ -170,6 +208,7 @@ let unit_cache_file ~whole_unit =
     with
     | exception Sys_error _ -> None
     | None, _, _ | _, None, _ -> None
+    | _ when Option.is_some (solver_version_error ()) -> None
     | Some compiler, Some solver, source ->
       let rec flags = function
         | ("-o" | "-I" | "-use-runtime") :: _ :: rest -> flags rest
@@ -343,6 +382,9 @@ let prove poll check ~batch loc query =
   if !resource_limit < 0 || !resource_warning < 0
   then
     Location.raise_errorf ~loc "Refinement resource bounds must be nonnegative";
+  Option.iter
+    (fun message -> Location.raise_errorf ~loc "%s" message)
+    (solver_version_error ());
   let positive n = if n > 0 then Some n else None in
   (* A batch that is not proved within the warning threshold is retried one
      obligation at a time, so slow obligations are reported where they are. *)
@@ -640,6 +682,11 @@ let install () =
         ( "-smt-solver",
           Arg.Set_string executable,
           "<path> Refinement solver executable (default z3)" );
+        ( "-smt-solver-any-version",
+          Arg.Set any_solver_version,
+          Printf.sprintf
+            " Accept a refinement solver other than Z3 %s"
+            Vox_smt_solver.expected_version );
         ( "-smt-timeout",
           Arg.Set_int timeout_ms,
           Printf.sprintf

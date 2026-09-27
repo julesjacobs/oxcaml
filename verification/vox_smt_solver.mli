@@ -9,6 +9,13 @@ type config =
     executable is invoked directly with [-in -smt2], never via a shell. *)
 val default_config : config
 
+(** The solver version proofs are checked with, as [z3 -version] reports it
+    after ["Z3 version "]. *)
+val expected_version : string
+
+(** Whether the output of [-version] names [expected_version]. *)
+val is_expected_version : string -> bool
+
 (** [resources] is the Z3 resource count ([rlimit] units) used by the query,
     when the solver reports it. Unlike the timings, it does not depend on
     machine load. [encoding_seconds] covers serialization; [solving_seconds]
