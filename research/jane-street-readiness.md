@@ -265,7 +265,19 @@ this file.
       (`vox_rsa_fermat.ml:150`, "ys is partial but expected total"),
       unannotated parameters used in predicates (labelled-args report),
       polymorphic `[@def] rec` helpers under `ghost_` (presentation report).
-      One root cause is likely; investigate and fix in the typer.
+      *Diagnosed 27 September* (branch `jujacobs/vox/expect-principal-20260927`,
+      `research/warts-investigation-20260927/new-limitations.md`): two
+      causes. (1) RSA and the `[@def] rec` case are one Vox bug that also
+      occurs without `-principal`: typing a predicate that mentions `h a`
+      changes `h`'s own inferred modes, so a later, unrelated `ghost_` use
+      of `h`'s result is rejected (default-mode repro with
+      `let (dup @ total) x = [x]`). Fix in the typer. (2) Unannotated
+      parameters: principal mode rightly refuses mode crossing on a type
+      learned by unification, and Vox predicates need crossing (variables
+      at `immutable`, functions expecting `read_write`). Fix: no
+      `read_write` requirement in erased predicates. The `node option`
+      and sparse-arrays rejections are the upstream kind limitation
+      (ticket 5111), nothing to fix in Vox.
 - [ ] **Erased lemmas still compile to placeholder functions** (both
       backends; stated on the pages). Stripping exported lemma fields would
       be a compiler change; decide whether it matters for the pitch.
@@ -290,6 +302,11 @@ this file.
       convinced first; an agent is reproducing both on upstream OxCaml
       (`research/upstream-bugs-20260927/REPORT.md`). Previously listed: the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
+      *27 September:* the expect-tool bug is fixed upstream (`9dc1ddfb2f`,
+      #6806); cherry-picked as `ba068ca404` on
+      `jujacobs/vox/expect-principal-20260927`, with nine tests promoted to
+      two blocks (`e0a5031b11`); merge into the trunk. The kind error is
+      upstream ticket 5111; no report needed.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
       ghost field of a ghost record (9), implicit `'a` in predicates (1),
       constructor terms at any type (4), `[@def]` on constants (5), lemma
