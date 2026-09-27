@@ -30,6 +30,10 @@ item 13 lands). The full suite then runs asynchronously on the AMD box after
 merges, batched; a red result means a fix-up or a revert. `vox` is pushed
 only at commits whose full suite passed.
 
+No GitHub CI (owner's decision, 27 September): the fork's upstream workflows
+need Jane Street's paid runners and never run. The full suite is our own run
+on the AMD box (`~/vox-check-run.sh` on the `incoming` branch there).
+
 Catalogue statuses: **Reviewed** means checked by the owner. **Ready for owner
 review** means two independent reviews found no false claim and the page
 states every gap. Decisions that need the owner are collected at the end of
