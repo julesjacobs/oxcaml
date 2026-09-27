@@ -1,6 +1,6 @@
 title: Binary search and sorted updates
 blurb: A persistent sorted array of integers whose searches, insertion and removal are proved against its elements.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/sorted_array.mli — Public interface
@@ -33,7 +33,7 @@ A failed search cannot be used to claim membership. `(() : {u : unit | p})` asks
 
 @code testsuite/tests/vox/sorted_array_rejected.ml "let invalid_search_result" "| Some _ -> ();;"
 
-@text testsuite/tests/vox/sorted_array_rejected.ml "Line 3, characters 13-15:" "|}]"
+@text testsuite/tests/vox/sorted_array_rejected.ml "Line 3, characters 13-15:" "The refinement is stated here."
 
 The same test also rejects removing index 0 from `empty`, passing a plain `int iarray` as a `Sorted_array.t`, and claiming that `insert` puts the new element at position 0.
 
@@ -41,12 +41,12 @@ The same test also rejects removing index 0 from `empty`, passing a plain `int i
 
 @code testsuite/tests/vox/sorted_array.mli
 
-`length`, `at`, `occurs`, `occurs_between`, `range_spec`, `edited` and `edit_suffix` are total functions used in the contracts; `length` and `at` are primitive, and the `_equation` lemmas define the other five in terms of them. `length_bounds` says that `length a` is nonnegative and that `length a + 1` does not wrap around. `at` returns 0 outside the array (`at_outside`), and `occurs_between a v i j` asks whether `v` occurs at an index from `i` to `j - 1`; it is false when `i` is negative. `contents` is an erased view of the array as a `Vox_sequence.t`, a list, tied to `length` and `at` by `contents_length` and `contents_at`; no operation contract uses it. `@@ total` declares a function total: it terminates without raising or touching mutable state, which lets it appear in refinements.
+`length`, `at`, `occurs`, `occurs_between`, `range_spec`, `edited` and `edit_suffix` are total functions used in the contracts; `length` and `at` are primitive, and the `_equation` lemmas define the other five in terms of them. `length` and `at` are also the run-time accessors, which the client uses to read arrays back. `length_bounds` says that `length a` is nonnegative and that `length a + 1` does not wrap around. `at` returns 0 outside the array (`at_outside`) instead of raising, and `occurs_between a v i j` asks whether `v` occurs at an index from `i` to `j - 1`; it is false when `i` is negative. `contents` is an erased view of the array as a `Vox_sequence.t`, a list, tied to `length` and `at` by `contents_length` and `contents_at`; no operation contract uses it. `@@ total` declares a function total: it terminates without raising or touching mutable state, which lets it appear in refinements.
 
 ## Trusted base
 
 - `sorted_array_proofs.ml` declares integer division locally as `external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"`. The refined type and `total` are not checked; the checker's integer encoding gives the quotient its meaning.
-- Insertion and removal build their results with `Iarray.sub` and `Iarray.append`. The checker has built-in models of both (`verification/vox_encoding.ml`, `verification/vox_vc.ml`), and they are implemented by `caml_array_sub` and `caml_array_append` in `runtime/array.c`.
+- Insertion and removal build their results with `Iarray.sub` and `Iarray.append`. The checker has built-in models of both (`verification/vox_encoding.ml`, `verification/vox_vc.ml`); on normal return it assumes that `Iarray.sub`'s bounds were valid and that `Iarray.append`'s result length did not overflow. They are OCaml functions in `stdlib/iarray.ml` over `caml_array_sub` and `caml_array_append` in `runtime/array.c`: `Iarray.sub` raises `Invalid_argument` on bad bounds, `caml_array_append` raises it when the result would be too long, and `Iarray.append` returns an operand unchanged when the other is empty.
 - The checker's built-in meaning of `Iarray.length` and of the bounds-checked reads `Iarray.Refined.get`, `Vox_iarray.get` and `Vox_sequence.iarray_get`; the last two are `external "%array_safe_get"` declarations in `verification/library` whose refined types and `total` are not checked.
 - None of the demo's files uses `assume_`.
 
@@ -55,7 +55,7 @@ The same test also rejects removing index 0 from `empty`, passing a plain `int i
 - Operations: `empty`, `mem`, `equal_range`, `find_first`, `find_last`, `insert`, `remove_at` and `remove_one`, with the observers `length`, `at` and `contents`. There is no constructor from an arbitrary array, no merge and no iteration.
 - `insert` raises `Invalid_argument` if the result would be longer than an array can be; this is not part of its contract, which describes normal return. `remove_at` requires an index in bounds.
 - `insert` does not say where among equal elements the new one goes.
-- `insert`, `remove_at` and a successful `remove_one` allocate a new array; the three are not declared `total`, and their contracts describe normal return. The searches are `total`.
+- `insert`, `remove_at` and a successful `remove_one` return a new array and leave their argument unchanged (removing the only element returns the shared empty array); the three are not declared `total`, and their contracts describe normal return. The searches are `total`.
 - `at` is 0 outside the array, and `occurs_between` reads `at`, so for an interval that runs past the end it can report an occurrence of 0; the contracts of the operations use only intervals in bounds. Likewise `edited` alone does not require the lengths or the position to be valid; the contracts of `insert` and the removals state those separately.
 - Elements are `int`. No bound on the number of comparisons is proved.
 
