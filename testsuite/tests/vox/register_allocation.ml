@@ -945,34 +945,6 @@ let rec (color_sound @ total) :
           proper_from_def graph index (chosen :: colors);
           ())))
 
-let (color_separates @ total) :
-  (graph : edge list) -> (choices : int list) ->
-  (vertices : int list) -> (a : int) -> (b : int) -> (chosen : int) ->
-  {u : unit |
-    match color graph choices 0 vertices with
-    | None -> true
-    | Some colors ->
-      a < 0 || b < 0 || a = b || not (adjacent a b graph)
-      || not (nth colors a === Some chosen)
-      || not (nth colors b === Some chosen)}
-  @ ghost =
-  fun graph choices vertices a b chosen -> ghost_ (
-  color_sound graph choices 0 vertices;
-  match color graph choices 0 vertices with
-  | None -> ()
-  | Some colors ->
-    if a < 0 || b < 0 then ()
-    else if a < b then begin
-      proper_separates graph 0 colors a b chosen;
-      ()
-    end else if b < a then begin
-      edge_symmetric a b;
-      adjacent_def a b graph;
-      adjacent_def b a graph;
-      proper_separates graph 0 colors b a chosen;
-      ()
-    end else ())
-
 (* Renaming, finite-list and bounds proofs. *)
 
 let rec (rename_nth @ total) :
@@ -1541,30 +1513,6 @@ let (color_total @ total) :
   color_valid graph (range physical) 0 (zeros registers) physical;
   ())
 
-let (color_lookup @ total) :
-  (graph : edge list) -> (registers : int) -> (physical : int) ->
-  (reg : int) ->
-  {u : unit |
-    registers < 0 || reg < 0 || reg >= registers
-    || (match color graph (range physical) 0 (zeros registers) with
-        | None -> true
-        | Some colors ->
-          match nth colors reg with
-          | None -> false
-          | Some chosen -> valid_reg physical chosen)}
-  @ ghost =
-  fun graph registers physical reg -> ghost_ (
-  color_total graph registers physical;
-  match color graph (range physical) 0 (zeros registers) with
-  | None -> ()
-  | Some colors ->
-    nth_present colors reg;
-    (match nth colors reg with
-     | None -> ()
-     | Some chosen ->
-       all_valid_reg_lookup physical colors reg chosen;
-       ()))
-
 let rec (valid_instruction_lookup @ total) :
   (registers : int) -> (nodes : int) -> (code : instruction list) ->
   (pc : int) -> (instruction : instruction) ->
@@ -1647,57 +1595,6 @@ let (rename_operand_valid @ total) :
      | Some chosen ->
        all_valid_reg_lookup physical colors reg chosen;
        valid_operand_def physical (Reg chosen);
-       ()))
-
-let (rename_instruction_valid @ total) :
-  (colors : int list) -> (registers : int) -> (physical : int) ->
-  (nodes : int) -> (instruction : instruction) ->
-  {u : unit |
-    not (length colors = registers
-         && all_valid_reg physical colors
-         && valid_instruction registers nodes instruction)
-    || (match rename_instruction colors instruction with
-        | None -> true
-        | Some renamed -> valid_instruction physical nodes renamed)}
-  @ ghost =
-  fun colors registers physical nodes instruction -> ghost_ (
-  rename_instruction_def colors instruction;
-  valid_instruction_def registers nodes instruction;
-  match instruction with
-  | Move (dst, operand, next) ->
-    rename_operand_valid colors registers physical operand;
-    (match nth colors dst, rename_operand colors operand with
-     | Some chosen, Some renamed ->
-       all_valid_reg_lookup physical colors dst chosen;
-       valid_instruction_def physical nodes (Move (chosen, renamed, next));
-       ()
-     | _ -> ())
-  | Binary (dst, operation, left, right, next) ->
-    rename_operand_valid colors registers physical left;
-    rename_operand_valid colors registers physical right;
-    (match nth colors dst, rename_operand colors left, rename_operand colors right with
-     | Some chosen, Some left, Some right ->
-       all_valid_reg_lookup physical colors dst chosen;
-       valid_instruction_def physical nodes
-         (Binary (chosen, operation, left, right, next));
-       ()
-     | _ -> ())
-  | Jump next ->
-    valid_instruction_def physical nodes (Jump next);
-    ()
-  | Branch (condition, yes, no) ->
-    rename_operand_valid colors registers physical condition;
-    (match rename_operand colors condition with
-     | None -> ()
-     | Some renamed ->
-       valid_instruction_def physical nodes (Branch (renamed, yes, no));
-       ())
-  | Return operand ->
-    rename_operand_valid colors registers physical operand;
-    (match rename_operand colors operand with
-     | None -> ()
-     | Some renamed ->
-       valid_instruction_def physical nodes (Return renamed);
        ()))
 
 (* Liveness validity and allocation prerequisites. *)
@@ -2127,7 +2024,12 @@ let (allocation_ready @ total) :
     color_total (graph program.code live) program.registers physical;
     ())
 
-(* Allocation entrypoint. *)
+(* Allocation entrypoint.
+
+   Liveness gets 2049 sweeps. A sweep that reports a change adds a register
+   to some live set, and a valid program has at most 64 sets of at most 32
+   registers, so 2048 changing sweeps are the most there can be. Nothing
+   proves this; a program whose liveness did not settle would get [None]. *)
 
 let[@def] (allocate @ total) (program : program) physical =
   if not (valid program) || physical <= 0 || physical > 32 then None

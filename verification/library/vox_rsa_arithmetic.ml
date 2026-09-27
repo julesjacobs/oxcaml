@@ -102,12 +102,6 @@ let rec (reduce_power @ total) : (a : t) -> (e : t) -> (n : t) ->
   end)
 [@@decreases e]
 
-
-let (divides_factor @ total) (n : t) (k : t) :
-    {u : unit | if n > 0Z then (n * k) mod n = 0Z else true} @ ghost = ghost_ (
-  remainder_unique (n * k) n k 0Z;
-  ())
-
 let (divides_sum @ total) (n : t) (a : t) (b : t) (x : t) (y : t) :
     {u : unit | if n > 0Z && a mod n = 0Z && b mod n = 0Z then
       (a * x + b * y) mod n = 0Z else true} @ ghost = ghost_ (
