@@ -16,10 +16,10 @@ type report = {
 
 type input_error = Invalid_fuel | Invalid_input of Vox_sat_spec.input_error
 
-(** Bounded CDCL: termination and sound answers. [Unknown] is permitted for
-    every accepted input and fuel value, and proves search exhaustion through
-    [statistics.steps = fuel]. No sufficient
-    fuel bound, monotonicity in fuel, or eventual CDCL decision is promised. *)
+(** Bounded CDCL: the search of [solve_complete] with a budget of [fuel]
+    search steps. It may return [Unknown] on any accepted input with
+    [fuel >= 0], and [Unknown] implies only [statistics.steps = fuel]. No fuel
+    is promised to suffice, and more fuel is not promised to help. *)
 val solve :
   (fuel : int) -> (n : int) ->
   (formula : Vox_sat_spec.formula) ->

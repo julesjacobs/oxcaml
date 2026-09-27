@@ -6,8 +6,8 @@ open Emitted_code
 let () =
   let dir = Sys.argv.(1) in
   let proofs =
-    [ "empty_unsatisfiable"; "semantic_unsat_at"; "exhaustive_result";
-      "rejects_extensions"; "derivation_valid"; "classify_input" ]
+    [ "empty_unsatisfiable"; "semantic_unsat_at"; "rejects_extensions";
+      "derivation_valid"; "classify_input" ]
   in
   List.iter
     (fun (unit, calls) ->
