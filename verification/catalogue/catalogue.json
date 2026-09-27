@@ -170,7 +170,7 @@
   {
    "id": "stateful-termination",
    "name": "Termination of stateful code",
-   "summary": "`total` means terminating and free of effects, so code that reads or writes arrays is never `total`. A separate guarantee that stateful code terminates would be a new mode; no demo needs it yet.",
+   "summary": "`total` means terminating without raising. It covers pure code and writes through uniquely owned storage (`Quicksort.sort` writes a unique slice), but not code that mutates shared state, such as the hash table, the rings or Hindley–Milner inference. A termination guarantee for such code would be a separate mode.",
    "question": true,
    "demos": []
   },
