@@ -18,8 +18,11 @@ Waves, merged into `vox` with a full suite run on the AMD box after each:
    presentation; the remaining weak contracts.
 3. **After wave 2 merges:** the second review round of every page, page
    corrections, then status **Ready for owner review**.
-4. **Then:** subsumption stages 1–4, medium warts, the prebuilt test
-   library, the x86 benchmark (on an idle AMD box).
+4. **Started early where independent:** subsumption stages 1–4, solver
+   encoding and termination measures (34, 77), inductive relations and named
+   predicates (56, 20), all on the AMD box. Later: ghost ownership and
+   layouts (after the soundness fix), the prebuilt test library (after the
+   tooling branch), the x86 benchmark (on an idle AMD box).
 
 Catalogue statuses: **Reviewed** means checked by the owner. **Ready for owner
 review** means two independent reviews found no false claim and the page
@@ -94,7 +97,11 @@ this file.
       52), layouts (10, 11, 13), inductive relations (56), named predicates
       (20), termination measures (77), bitwise solver fallback (34),
       well-formedness obligations for partial operations (67).
-- [ ] **12. Subsumption stages 1, 3 and 4** (after the design review).
+- [ ] **12. Subsumption stages 1–4**, implemented as one piece from a
+      complete design (branch `jujacobs/vox/subsumption-20260927`, AMD box).
+      Afterwards, compare the implementation with the independent design in
+      `research/subsumption-design-20260927/DESIGN.md` and its tests, and
+      report divergences before merging.
 - [ ] **13. Prebuilt test library** (wart 33).
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
