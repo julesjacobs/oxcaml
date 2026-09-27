@@ -103,6 +103,16 @@ let record_external_symbols () =
       else Some (Primitive.native_name prim))
       !Translmod.primitive_declarations)
 
+let read_vox_record filename =
+  match
+    In_channel.with_open_bin filename (fun ic ->
+        let buffer = really_input_string ic (String.length cmx_magic_number) in
+        if buffer <> cmx_magic_number then None
+        else Cmi_format.input_vox_record ic)
+  with
+  | record -> record
+  | exception (Sys_error _ | End_of_file | Failure _) -> None
+
 let read_unit_info filename =
   let ic = open_in_bin filename in
   try
@@ -111,6 +121,7 @@ let read_unit_info filename =
       close_in ic;
       raise(Error(Not_a_unit_info filename))
     end;
+    let (_ : Cmi_format.vox_unit option) = Cmi_format.input_vox_record ic in
     let uir = (input_value ic : unit_infos_raw) in
     let first_section_offset = pos_in ic in
     seek_in ic (first_section_offset + uir.uir_sections_length);
@@ -292,7 +303,11 @@ let ensure_sharing_between_cmi_and_cmx_imports cmi_imports cmx_imports =
     cmx_imports
 *)
 
-let write_unit_info info filename =
+(* A .cmx file holds its magic number, the unit's Vox record (see
+   [Vox_trust]; absent from older files), its [unit_infos_raw], its sections
+   and the digest of all these. The Vox record comes first, so that code that
+   does not know [unit_infos_raw] can read it. *)
+let write_unit_info ?vox info filename =
   let serialized_sections, toc, total_length =
     File_sections.serialize info.ui_file_sections
   in
@@ -317,6 +332,7 @@ let write_unit_info info filename =
   } in
   Misc.protect_output_to_file filename (fun oc ->
   output_string oc cmx_magic_number;
+  Cmi_format.output_vox_record oc vox;
   output_value oc raw_info;
   Array.iter (output_string oc) serialized_sections;
   flush oc;
@@ -359,7 +375,7 @@ let save_unit_info filename ~main_module_block_format ~arg_descr ~static_data =
   let current_unit =
     build_unit_info ~main_module_block_format ~arg_descr ~static_data
   in
-  write_unit_info current_unit filename
+  write_unit_info ?vox:!Vox_trust.implementation_record current_unit filename
 
 let new_const_symbol () =
   Current_unit.symbol_for_new_const ()

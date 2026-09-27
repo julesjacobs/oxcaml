@@ -1,6 +1,6 @@
 (* TEST
  modules = "assume_stubs.c";
- flags = "-extension refinement_types -noassert";
+ flags = "-extension refinement_types -w -trusted-external -noassert";
  { bytecode; }
  { native; }
 *)

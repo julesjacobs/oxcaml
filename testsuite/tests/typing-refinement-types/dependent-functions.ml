@@ -129,6 +129,12 @@ let mutate_returned_box box =
   returned.contents <- 1;;
 [%%expect{|
 type box = { mutable contents : int; }
+Line 2, characters 0-82:
+2 | external same_box : box @ immutable -> box @ immutable -> bool @@ total = "%equal"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external same_box : box @ immutable -> box @ immutable -> bool = "%equal"
 val keep_box : (box : box) -> {result : box | same_box result box} = <fun>
 val mutate_returned_box : box -> unit = <fun>
@@ -193,6 +199,12 @@ Error: This value is "partial" but is expected to be "total".
 external increment : int -> int @@ total = "%identity"
 let good_total = apply_function increment;;
 [%%expect{|
+Line 1, characters 0-54:
+1 | external increment : int -> int @@ total = "%identity"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external increment : int -> int = "%identity"
 val good_total : int = 0
 |}]

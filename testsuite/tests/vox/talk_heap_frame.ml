@@ -88,7 +88,7 @@ Line 6, characters 23-24:
 6 |   Pref.read q (borrow_ t);;
                            ^
 Error: Refinement could not be proved (counterexample)
-File "pref.mli", line 139, characters 23-41:
+File "pref.mli", line 142, characters 23-41:
   The refinement is stated here.
 |}]
 

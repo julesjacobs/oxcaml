@@ -477,6 +477,8 @@ let to_file outchan cu artifact_info ~required_globals ~main_module_block_format
       ~kind:"bytecode unit"
       outchan compunit
   in
+  (* Readers of the unit description ignore what follows it. *)
+  Cmi_format.output_vox_record outchan !Vox_trust.implementation_record;
   seek_out outchan pos_depl;
   output_binary_int outchan pos_compunit)
 

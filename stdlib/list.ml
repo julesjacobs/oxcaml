@@ -25,15 +25,16 @@ type ('a : value_or_null) t = 'a list = [] | (::) of 'a * 'a list [@@inductive]
 
 external trust_total : ('a : value_or_null). 'a -> 'a @ total = "%identity"
 
-let rec length_aux len = function
+let rec (length_aux @ total) len l =
+  match l with
     [] -> len
   | _::l -> length_aux (len + 1) l
 
-let length l = length_aux 0 l
+let (length @ total) l = length_aux 0 l
 
-let cons a l = a::l
+let (cons @ total) a l = a::l
 
-let singleton a = [a]
+let (singleton @ total) a = [a]
 
 let hd = function
     [] -> failwith "hd"
@@ -59,14 +60,14 @@ let nth_opt l n =
     | a::l -> if n = 0 then Some a else nth_aux l (n-1)
   in nth_aux l n
 
-let append = (@)
+let (append @ total) = (@)
 
-let rec rev_append l1 l2 =
+let rec (rev_append @ total) l1 l2 =
   match l1 with
     [] -> l2
   | a :: l -> rev_append l (a :: l2)
 
-let rev l = rev_append l []
+let (rev @ total) l = rev_append l []
 
 let[@tail_mod_cons] rec init i last f =
   if i > last then []
@@ -80,13 +81,15 @@ let init len f =
   if len < 0 then invalid_arg "List.init" else
   init 0 (len - 1) f
 
-let rec flatten = function
+let rec (flatten @ total) ls =
+  match ls with
     [] -> []
   | l::r -> l @ flatten r
 
-let concat = flatten
+let (concat @ total) = flatten
 
-let[@tail_mod_cons] rec map f = function
+let[@tail_mod_cons] rec (map @ total) f l =
+  match l with
     [] -> []
   | [a1] ->
       let r1 = f a1 in
@@ -96,7 +99,8 @@ let[@tail_mod_cons] rec map f = function
       let r2 = f a2 in
       r1::r2::map f l
 
-let[@tail_mod_cons] rec mapi i f = function
+let[@tail_mod_cons] rec (mapi @ total) i f l =
+  match l with
     [] -> []
   | [a1] ->
       let r1 = f i a1 in
@@ -106,32 +110,35 @@ let[@tail_mod_cons] rec mapi i f = function
       let r2 = f (i+1) a2 in
       r1::r2::mapi (i+2) f l
 
-let mapi f l = mapi 0 f l
+let (mapi @ total) f l = mapi 0 f l
 
-let rev_map f l =
-  let rec rmap_f f accu = function
+let (rev_map @ total) f l =
+  let rec (rmap_f @ total) f accu l =
+    match l with
     | [] -> accu
     | a::l -> rmap_f f (f a :: accu) l
   in
   rmap_f f [] l
 
 
-let rec iter f = function
+let rec (iter @ total) f l =
+  match l with
     [] -> ()
   | a::l -> f a; iter f l
 
-let rec iteri i f = function
+let rec (iteri @ total) i f l =
+  match l with
     [] -> ()
   | a::l -> f i a; iteri (i + 1) f l
 
-let iteri f l = iteri 0 f l
+let (iteri @ total) f l = iteri 0 f l
 
-let rec fold_left f accu l =
+let rec (fold_left @ total) f accu l =
   match l with
     [] -> accu
   | a::l -> fold_left f (f accu a) l
 
-let rec fold_right f l accu =
+let rec (fold_right @ total) f l accu =
   match l with
     [] -> accu
   | a::l -> f a (fold_right f l accu)
@@ -176,11 +183,13 @@ let rec fold_right2 f l1 l2 accu =
   | (a1::l1, a2::l2) -> f a1 a2 (fold_right2 f l1 l2 accu)
   | (_, _) -> invalid_arg "List.fold_right2"
 
-let rec for_all p = function
+let rec (for_all @ total) p l =
+  match l with
     [] -> true
   | a::l -> p a && for_all p l
 
-let rec exists p = function
+let rec (exists @ total) p l =
+  match l with
     [] -> false
   | a::l -> p a || exists p l
 
@@ -241,17 +250,20 @@ let rec find p = function
   | [] -> raise Not_found
   | x :: l -> if p x then x else find p l
 
-let rec find_opt p = function
+let rec (find_opt @ total) p l =
+  match l with
   | [] -> None
   | x :: l -> if p x then Some x else find_opt p l
 
-let find_index p =
-  let rec aux i = function
+let (find_index @ total) p l =
+  let rec (aux @ total) p i l =
+    match l with
     [] -> None
-    | a::l -> if p a then Some i else aux (i+1) l in
-  aux 0
+    | a::l -> if p a then Some i else aux p (i+1) l in
+  aux p 0 l
 
-let rec find_map f = function
+let rec (find_map @ total) f l =
+  match l with
   | [] -> None
   | x :: l ->
      begin match f x with
@@ -259,31 +271,35 @@ let rec find_map f = function
        | None -> find_map f l
      end
 
-let find_mapi f =
-  let rec aux f i = function
+let (find_mapi @ total) f l =
+  let rec (aux @ total) f i l =
+  match l with
   | [] -> None
   | x :: l ->
      begin match f i x with
        | Some _ as result -> result
        | None -> aux f (i+1) l
      end in
-  aux f 0
+  aux f 0 l
 
-let[@tail_mod_cons] rec find_all p = function
+let[@tail_mod_cons] rec (find_all @ total) p l =
+  match l with
   | [] -> []
   | x :: l -> if p x then x :: find_all p l else find_all p l
 
-let filter = find_all
+let (filter @ total) = find_all
 
-let[@tail_mod_cons] rec filteri p i = function
+let[@tail_mod_cons] rec (filteri @ total) p i l =
+  match l with
   | [] -> []
   | x::l ->
       let i' = i + 1 in
       if p i x then x :: filteri p i' l else filteri p i' l
 
-let filteri p l = filteri p 0 l
+let (filteri @ total) p l = filteri p 0 l
 
-let[@tail_mod_cons] rec filter_map f = function
+let[@tail_mod_cons] rec (filter_map @ total) f l =
+  match l with
   | [] -> []
   | x :: l ->
       match f x with
@@ -298,48 +314,54 @@ and[@tail_mod_cons] prepend_concat_map ys f xs =
   | [] -> concat_map f xs
   | y :: ys -> y :: prepend_concat_map ys f xs
 
-let take n l =
-  let[@tail_mod_cons] rec aux n l =
+let (take @ total) n l =
+  let[@tail_mod_cons] rec (aux @ total) n l =
     match n, l with
     | 0, _ | _, [] -> []
     | n, x::l -> x::aux (n - 1) l
   in
   if n <= 0 then [] else aux n l
 
-let drop n l =
-  let rec aux i = function
-    | _x::l when i < n -> aux (i + 1) l
+let (drop @ total) n l =
+  let rec (aux @ total) (n : int) (i : int) l =
+    match l with
+    | _x::l when i < n -> aux n (i + 1) l
     | rest -> rest
   in
-  if n <= 0 then l else aux 0 l
+  if n <= 0 then l else aux n 0 l
 
-let take_while p l =
-  let[@tail_mod_cons] rec aux = function
-    | x::l when p x -> x::aux l
+let (take_while @ total) p l =
+  let[@tail_mod_cons] rec (aux @ total) p l =
+    match l with
+    | x::l when p x -> x::aux p l
     | _rest -> []
   in
-  aux l
+  aux p l
 
-let rec drop_while p = function
+let rec (drop_while @ total) p l =
+  match l with
   | x::l when p x -> drop_while p l
   | rest -> rest
 
-let fold_left_map f accu l =
-  let rec aux f accu l_accu = function
+let (fold_left_map @ total) f accu l =
+  let rec (aux @ total) f accu l_accu l =
+    match l with
     | [] -> accu, rev l_accu
     | x :: l ->
         let accu, x = f accu x in
         aux f accu (x :: l_accu) l in
   aux f accu [] l
 
-let partition p l =
-  let rec part p yes no = function
+let (partition @ total) p l =
+  let rec (part @ total) p yes no l =
+  match l with
   | [] -> (rev yes, rev no)
   | x :: l -> if p x then part p (x :: yes) no l else part p yes (x :: no) l in
   part p [] [] l
 
-let partition_map p l =
-  let rec part p left right = function
+let (partition_map @ total) p l =
+  let rec (part @ total) p left right l =
+  match l with
   | [] -> (rev left, rev right)
   | x :: l ->
      begin match p x with
@@ -349,7 +371,8 @@ let partition_map p l =
   in
   part p [] [] l
 
-let rec split = function
+let rec (split @ total) l =
+  match l with
     [] -> ([], [])
   | (x,y)::l ->
       let (rx, ry) = split l in (x::rx, y::ry)
@@ -559,14 +582,14 @@ let sort_uniq cmp l =
   if len < 2 then l else fst (sort len l)
 
 
-let rec compare_lengths l1 l2 =
+let rec (compare_lengths @ total) l1 l2 =
   match l1, l2 with
   | [], [] -> 0
   | [], _ -> -1
   | _, [] -> 1
   | _ :: l1, _ :: l2 -> compare_lengths l1 l2
 
-let rec compare_length_with l n =
+let rec (compare_length_with @ total) l n =
   match l with
   | [] ->
     if n = 0 then 0 else
@@ -575,7 +598,8 @@ let rec compare_length_with l n =
     if n <= 0 then 1 else
       compare_length_with l (n-1)
 
-let is_empty = function
+let (is_empty @ total) l =
+  match l with
   | [] -> true
   | _ :: _ -> false
 
@@ -586,13 +610,13 @@ let is_empty = function
    immediately start with distinct elements. It is also incorrect for
    [compare] below, and it is better (principle of least surprise) to
    use the same approach for both functions. *)
-let rec equal eq l1 l2 =
+let rec (equal @ total) eq l1 l2 =
   match l1, l2 with
   | [], [] -> true
   | [], _::_ | _::_, [] -> false
   | a1::l1, a2::l2 -> eq a1 a2 && equal eq l1 l2
 
-let rec compare cmp l1 l2 =
+let rec (compare @ total) cmp l1 l2 =
   match l1, l2 with
   | [], [] -> 0
   | [], _::_ -> -1
@@ -620,50 +644,12 @@ let[@tail_mod_cons] rec of_seq seq =
       | Seq.Cons (x2, seq) -> x1 :: x2 :: of_seq seq
       end
 
-let length = trust_total length
-let cons = trust_total cons
-let singleton = trust_total singleton
-let append = trust_total append
-let rev_append = trust_total rev_append
-let rev = trust_total rev
-let flatten = trust_total flatten
-let concat = trust_total concat
-let map = trust_total map
-let mapi = trust_total mapi
-let rev_map = trust_total rev_map
-let iter = trust_total iter
-let iteri = trust_total iteri
-let fold_left = trust_total fold_left
-let fold_right = trust_total fold_right
-let for_all = trust_total for_all
-let exists = trust_total exists
-let find_opt = trust_total find_opt
-let find_index = trust_total find_index
-let find_map = trust_total find_map
-let find_mapi = trust_total find_mapi
-let find_all = trust_total find_all
-let filter = trust_total filter
-let filteri = trust_total filteri
-let filter_map = trust_total filter_map
 let concat_map = trust_total concat_map
-let fold_left_map = trust_total fold_left_map
-let take = trust_total take
-let drop = trust_total drop
-let take_while = trust_total take_while
-let drop_while = trust_total drop_while
-let partition = trust_total partition
-let partition_map = trust_total partition_map
-let split = trust_total split
 let merge = trust_total merge
 let stable_sort = trust_total stable_sort
 let sort = trust_total sort
 let fast_sort = trust_total fast_sort
 let sort_uniq = trust_total sort_uniq
-let compare_lengths = trust_total compare_lengths
-let compare_length_with = trust_total compare_length_with
-let is_empty = trust_total is_empty
-let equal = trust_total equal
-let compare = trust_total compare
 let to_seq = trust_total to_seq
 
 module Refined = struct

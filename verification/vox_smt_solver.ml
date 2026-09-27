@@ -8,6 +8,15 @@ type config =
 
 let default_config = { executable = "z3"; timeout_ms = 5000 }
 
+let expected_version = "4.16.0"
+
+let is_expected_version output =
+  let prefix = "Z3 version " ^ expected_version in
+  let output = String.trim output in
+  String.starts_with ~prefix output
+  && (String.length output = String.length prefix
+     || output.[String.length prefix] = ' ')
+
 external monotonic_time : unit -> float = "caml_vox_smt_monotonic_time"
 
 type result =
@@ -292,9 +301,9 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
           | Unix.Unix_error (Unix.ENOENT, "create_process", _) ->
             Failure
               (Printf.sprintf
-                 "Cannot execute %S: install Z3 4.16.0 or set the solver \
+                 "Cannot execute %S: install Z3 %s or set the solver \
                   executable"
-                 config.executable)
+                 config.executable expected_version)
           | Unix.Unix_error (error, call, _) ->
             Failure (Printf.sprintf "%s: %s" call (Unix.error_message error)))
     with

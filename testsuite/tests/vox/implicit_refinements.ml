@@ -393,6 +393,14 @@ Line 1, characters 57-63:
 external total_identity : (x : int) -> {y : int | y = x} @@ total = "%identity";;
 [%%expect{|
 external total_identity : (x : int) -> {y : int | y = x} = "%identity"
+|}, Principal{|
+Line 1, characters 0-79:
+1 | external total_identity : (x : int) -> {y : int | y = x} @@ total = "%identity";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
+external total_identity : (x : int) -> {y : int | y = x} = "%identity"
 |}]
 
 let ghost_local_argument () =

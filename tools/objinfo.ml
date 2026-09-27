@@ -531,6 +531,7 @@ let dump_obj_by_kind filename ic obj_kind =
       let cms = Cms_format.read filename in
       print_cms_infos cms
     | Cmx ->
+       let (_ : Cmi_format.vox_unit option) = Cmi_format.input_vox_record ic in
        let uir = (input_value ic : unit_infos_raw) in
        let first_section_offset = pos_in ic in
        seek_in ic (first_section_offset + uir.uir_sections_length);

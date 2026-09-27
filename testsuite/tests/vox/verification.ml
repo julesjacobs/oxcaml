@@ -300,6 +300,12 @@ val greater_equal : int -> {n : int | ge n 0} = <fun>
 
 external to_int : bool -> int @@ total = "%identity";;
 [%%expect{|
+Line 1, characters 0-52:
+1 | external to_int : bool -> int @@ total = "%identity";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external to_int : bool -> int = "%identity"
 |}]
 
@@ -351,6 +357,12 @@ val physical_refined : zero -> {b : bool | b} = <fun>
 external physical_equal : 'a @ immutable -> 'a @ immutable -> bool @@ total =
   "%eq";;
 [%%expect{|
+Lines 1-2, characters 0-7:
+1 | external physical_equal : 'a @ immutable -> 'a @ immutable -> bool @@ total =
+2 |   "%eq"..
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 external physical_equal : 'a @ immutable -> 'a @ immutable -> bool = "%eq"
 |}]
 

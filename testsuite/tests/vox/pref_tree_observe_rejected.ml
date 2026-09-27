@@ -3,9 +3,9 @@
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "pref.mli pref_tree.mli";
  setup-ocamlc.opt-build-env;
- flags = "-extension refinement_types";
+ flags = "-extension refinement_types -vox-library";
  module = "pref.mli";
- ocamlc.opt;
+ ocamlc.opt; flags = "-extension refinement_types";
  module = "pref_tree.mli";
  ocamlc.opt;
  module = "pref_tree_observe_rejected.ml";

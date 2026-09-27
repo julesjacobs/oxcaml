@@ -56,9 +56,10 @@ weaken() {
   done
 }
 
-# build DIR NAME: compile the (real or weakened) library module NAME in DIR.
+# build DIR NAME: compile the (real or weakened) library module NAME in DIR,
+# as a library unit (-vox-library), whose trusted externals are expected.
 build() {
-  ( cd "$1" && "$OCAMLC" $FLAGS -I ../prebuilt -c "$2.mli" "$2.ml" 2>&1 ) ||
+  ( cd "$1" && "$OCAMLC" $FLAGS -vox-library -I ../prebuilt -c "$2.mli" "$2.ml" 2>&1 ) ||
     echo "the library module $2 in $1 does not compile"
 }
 

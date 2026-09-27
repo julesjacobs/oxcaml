@@ -65,6 +65,12 @@ module Overflowing = struct
 
 end;;
 [%%expect{|
+Line 2, characters 2-73:
+2 |   external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 Line 37, characters 12-16:
 37 |         let half = divide distance (two) in
                  ^^^^
@@ -135,6 +141,12 @@ module Safe = struct
 
 end;;
 [%%expect{|
+Line 2, characters 2-73:
+2 |   external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 module Safe :
   sig
     external divide : int -> {d : int | d <> 0} -> int = "%divint"

@@ -218,11 +218,23 @@ external shift : int -> int -> int @@ total = "%lslint";;
 Line 1, characters 0-55:
 1 | external shift : int -> int -> int @@ total = "%lslint";;
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
+Line 1, characters 0-55:
+1 | external shift : int -> int -> int @@ total = "%lslint";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: A shift declared total must refine its count to [0, 63], as in Int.Refined: {n : int | 0 <= n && n <= 63}. OCaml leaves other counts unspecified, and their results differ between evaluations.
 |}]
 
 external shift : int -> {n : int | n <= 63} -> int @@ total = "%lslint";;
 [%%expect{|
+Line 1, characters 0-71:
+1 | external shift : int -> {n : int | n <= 63} -> int @@ total = "%lslint";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 Line 1, characters 0-71:
 1 | external shift : int -> {n : int | n <= 63} -> int @@ total = "%lslint";;
     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -232,6 +244,12 @@ Error: A shift declared total must refine its count to [0, 63], as in Int.Refine
 external shift : int -> {n : int | 0 <= n && n < 64} -> int @@ total
   = "%lslint";;
 [%%expect{|
+Lines 1-2, characters 0-13:
+1 | external shift : int -> {n : int | 0 <= n && n < 64} -> int @@ total
+2 |   = "%lslint"..
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
 external shift : int -> {n : int | (0 <= n) && (n < 64)} -> int = "%lslint"
 |}]
 

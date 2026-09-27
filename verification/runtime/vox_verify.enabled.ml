@@ -21,7 +21,8 @@ let timeout_ms = ref 60_000
 
 let budget_ms = ref 0
 
-let assume_verified = ref false
+(* Shared with the type checker, which records it in the compiled unit. *)
+let assume_verified = Vox_trust.assume_verified
 
 let precise_unused_steps = ref false
 
@@ -82,11 +83,25 @@ let abstract_multiplication (query : Vox_smt.query) =
    across compiler rebuilds. Unit entries record only clean successes. The
    compiler is identified by a digest of its executable and the solver by the
    version it reports and the platform, both computed once per process; when
-   either is unavailable, the caches that need it are not used. *)
+   either is unavailable, the caches that need it are not used.
+
+   Whoever can write to the cache directory can mark units and queries as
+   proved, so a directory that another user owns or that other users can
+   write to is not used. *)
+let trusted_directory directory =
+  match Unix.stat directory with
+  | { st_kind = S_DIR; st_uid; st_perm; _ } ->
+    st_uid = Unix.getuid () && st_perm land 0o022 = 0
+  | _ -> false
+  (* [record_entry] creates it. *)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+  | exception Unix.Unix_error _ -> false
+
 let cache_directory () =
   match Sys.getenv_opt "VOX_VERIFY_CACHE" with
   | None | Some "" -> None
   | Some _ when !dump_vc || !dump_smtlib || !dump_resources -> None
+  | Some directory when not (trusted_directory directory) -> None
   | directory -> directory
 
 let record_entry file contents =
@@ -99,14 +114,9 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
-(* The solver's configured name, the version it reports and the platform it
-   runs on. A solver that does not answer [-version] within a few seconds is
-   treated as having no version. The platform is part of the identity because
-   resource counts differ between builds of one version: the same query took
-   821,439 units with Z3 4.16.0 on macOS arm64 and 681,198 on Linux x86-64, so
-   a cache shared between machines could otherwise replay a proof or an
-   exhausted limit obtained under different counts. *)
-let solver_identity =
+(* What the solver reports for [-version]. A solver that does not answer
+   within a few seconds is treated as having no version. *)
+let solver_version =
   lazy
     (let deadline = Unix.gettimeofday () +. 5. in
      match Unix.pipe ~cloexec:true () with
@@ -166,9 +176,52 @@ let solver_identity =
          then (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
          let version = String.trim (Buffer.contents buffer) in
          (match wait finished with
-         | Some (Unix.WEXITED 0) when finished && version <> "" ->
-           Some (String.concat "\000" [!executable; version; Config.host])
+         | Some (Unix.WEXITED 0) when finished && version <> "" -> Some version
          | _ | (exception Unix.Unix_error _) -> None)))
+
+(* The solver's configured name, the version it reports and the platform it
+   runs on, which both caches include in their keys. The platform is part of
+   the identity because resource counts differ between builds of one version:
+   the same query took 821,439 units with Z3 4.16.0 on macOS arm64 and 681,198
+   on Linux x86-64, so a cache shared between machines could otherwise replay a
+   proof or an exhausted limit obtained under different counts. *)
+let solver_identity =
+  lazy
+    (Option.map
+       (fun version -> String.concat "\000" [!executable; version; Config.host])
+       (Lazy.force solver_version))
+
+let any_solver_version = ref false
+
+(* A proof counts only when the solver is the version the verifier is tested
+   with, unless -smt-solver-any-version says otherwise; the compiled unit
+   then records the version used. *)
+let solver_version_error () =
+  if !any_solver_version
+  then begin
+    (match Lazy.force solver_version with
+    | Some version when Vox_smt_solver.is_expected_version version -> ()
+    | Some version -> Vox_trust.unexpected_solver := version
+    | None -> Vox_trust.unexpected_solver := "unknown");
+    None
+  end
+  else
+    match Lazy.force solver_version with
+    | Some version when Vox_smt_solver.is_expected_version version -> None
+    | Some version ->
+      Some
+        (Printf.sprintf
+           "Refinement solver %s reports %S, but proofs are checked with Z3 \
+            %s. Install that version, or pass -smt-solver-any-version to use \
+            this one."
+           !executable version Vox_smt_solver.expected_version)
+    | None ->
+      Some
+        (Printf.sprintf
+           "Cannot determine the version of refinement solver %s (%s \
+            -version); proofs are checked with Z3 %s. Pass \
+            -smt-solver-any-version to use it anyway."
+           !executable !executable Vox_smt_solver.expected_version)
 
 let compiler_digest =
   lazy
@@ -185,6 +238,14 @@ let unit_cache_file ~whole_unit =
      which are not part of this key. *)
   | Some _ when not (whole_unit && List.mem !Location.input_name arguments) ->
     None
+  (* The key has the source's digest, not that of what a preprocessor makes
+     of it, and the command line, not the arguments read from a file. *)
+  | Some _
+    when Option.is_some !Clflags.preprocessor
+         || !Clflags.all_ppx <> []
+         || List.mem "-args" arguments
+         || List.mem "-args0" arguments ->
+    None
   | Some directory -> (
     match
       ( Lazy.force compiler_digest,
@@ -193,6 +254,7 @@ let unit_cache_file ~whole_unit =
     with
     | exception Sys_error _ -> None
     | None, _, _ | _, None, _ -> None
+    | _ when Option.is_some (solver_version_error ()) -> None
     | Some compiler, Some solver, source ->
       let rec flags = function
         | ("-o" | "-I" | "-use-runtime") :: _ :: rest -> flags rest
@@ -218,7 +280,10 @@ let unit_cache_file ~whole_unit =
              compiler;
              solver;
              Digest.to_hex source;
-             Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"" ]
+             Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"";
+             (* The settings that change how the source is typed or what
+                verification may rely on, however they were set. *)
+             Vox_trust.config () ]
           @ (if Option.is_some (unused_steps_report ())
              then
                [ "unused-steps"
@@ -228,7 +293,10 @@ let unit_cache_file ~whole_unit =
           @ List.sort compare imports
           @ flags (match arguments with _ :: rest -> rest | [] -> []))
       in
-      Some (Filename.concat directory (Digest.to_hex (Digest.string key))))
+      (* The entry names its key, so that only an entry this code wrote for
+         this unit counts as a verification, not any file at that path. *)
+      let digest = Digest.to_hex (Digest.string key) in
+      Some (Filename.concat directory digest, "verified unit " ^ digest))
 
 type outcome =
   | Proved of int option  (** with the resources used, when known *)
@@ -372,6 +440,9 @@ let prove poll check ~batch loc query =
   if !resource_limit < 0 || !resource_warning < 0
   then
     Location.raise_errorf ~loc "Refinement resource bounds must be nonnegative";
+  Option.iter
+    (fun message -> Location.raise_errorf ~loc "%s" message)
+    (solver_version_error ());
   let positive n = if n > 0 then Some n else None in
   (* A batch that is not proved within the warning threshold is retried one
      obligation at a time, so slow obligations are reported where they are. *)
@@ -804,6 +875,7 @@ let install () =
   if not !installed
   then begin
     installed := true;
+    Vox_trust.add_arguments ();
     let with_prover f =
       let int_width = if Target_system.is_64_bit () then 63 else 31 in
       let dump =
@@ -841,21 +913,24 @@ let install () =
     Verification.install (fun ~whole_unit structure ->
         if not !assume_verified
         then
+          (* An entry's first line names its key (see [unit_cache_file]). *)
+          let recorded (file, entry) =
+            let first = entry ^ "\n" in
+            match In_channel.with_open_bin file In_channel.input_all with
+            | contents when String.starts_with ~prefix:first contents ->
+              Some
+                (String.sub contents (String.length first)
+                   (String.length contents - String.length first))
+            | _ | (exception Sys_error _) -> None
+          in
           match unit_cache_file ~whole_unit with
-          | Some file when Sys.file_exists file -> (
-            match
-              ( unused_steps_report (),
-                In_channel.with_open_bin file In_channel.input_all )
-            with
-            | Some report, entry -> (
-              match String.index_opt entry '\n' with
-              | Some i ->
-                append_report report
-                  (String.sub entry (i + 1) (String.length entry - i - 1))
-              | None -> ())
-            | None, _ -> ()
-            | exception Sys_error _ -> ())
-          | file ->
+          | Some cache when Option.is_some (recorded cache) -> (
+            (* The entry's other lines are the unused proof steps found when
+               it was recorded. *)
+            match unused_steps_report (), recorded cache with
+            | Some report, Some steps -> append_report report steps
+            | _ -> ())
+          | cache ->
             cacheable := true;
             Buffer.clear reported_steps;
             with_prover (fun poll prove unused_steps ->
@@ -863,10 +938,10 @@ let install () =
             if !cacheable
             then
               Option.iter
-                (fun file ->
+                (fun (file, entry) ->
                   record_entry file
-                    ("verified\n" ^ Buffer.contents reported_steps))
-                file);
+                    (entry ^ "\n" ^ Buffer.contents reported_steps))
+                cache);
     Verification.install_termination (fun ~self ~fn ~measure ->
         if not !assume_verified
         then
@@ -908,6 +983,11 @@ let install () =
         ( "-smt-solver",
           Arg.Set_string executable,
           "<path> Refinement solver executable (default z3)" );
+        ( "-smt-solver-any-version",
+          Arg.Set any_solver_version,
+          Printf.sprintf
+            " Accept a refinement solver other than Z3 %s"
+            Vox_smt_solver.expected_version );
         ( "-smt-timeout",
           Arg.Set_int timeout_ms,
           Printf.sprintf
