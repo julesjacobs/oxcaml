@@ -1,12 +1,15 @@
 title: Quantifier elimination over a three-element chain
 blurb: Quantifier elimination by enumeration for formulas over Global < Regional < Local, proved to preserve their meaning in every environment; it is not connected to OxCaml's mode solver.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/mode_solver_public.mli — Public interface
   - testsuite/tests/vox/mode_solver_semantics.ml — The chain, terms, formulas, their evaluation and scoping
+  - testsuite/tests/vox/mode_solver_semantics.mli — The same definitions as equations, as printed by the compiler
   - testsuite/tests/vox/mode_solver_graph_semantics.ml — Constraint graphs and existential projection of them
+  - testsuite/tests/vox/mode_solver_graph_semantics.mli — Its interface, as printed by the compiler
   - testsuite/tests/vox/mode_solver_guarded_semantics.ml — Guarded quantifier prefixes
+  - testsuite/tests/vox/mode_solver_guarded_semantics.mli — Its interface, as printed by the compiler
   - testsuite/tests/vox/mode_solver_three_qe_proof.ml — Substitution, `eliminate` and its proofs
   - testsuite/tests/vox/mode_solver_graph_qe_proof.ml — Graph projection and graph subsumption
   - testsuite/tests/vox/mode_solver_retained_symbolic.ml — Guarded projection
@@ -31,7 +34,7 @@ The meaning of terms and formulas:
 
 `scoped depth f` in the same file holds when every variable of `f` is bound by a quantifier in `f` or is one of `depth` outer variables, and `subsumption_formula guard obligation` is `∀x. ¬guard ∨ ∃y. obligation`. `Mode_solver_graph_semantics` defines a graph as a list of inequalities between terms, `models env graph` as all of them holding, and `models_exists count env graph` as `models` holding for some values of `count` further variables; `count` is a `unit list` used as a natural number. `Mode_solver_guarded_semantics` defines the two-player reading of a quantifier prefix whose variables must satisfy a guard (`admissible`, `game`, `normalized_game`).
 
-The public interface, which opens the three semantics modules. `@@ total` declares each function total, which lets the specifications below it apply the function (the specifications of `eliminate_exact` and `eliminate_scoped` mention `eliminate`, for example).
+The public interface, which opens the three semantics modules. The operations are abstract: the interface exports none of their definitions, so a client knows each result only through its theorems. `@@ total` declares each function total, which lets the specifications below it apply the function (the specifications of `eliminate_exact` and `eliminate_scoped` mention `eliminate`, for example).
 
 @code testsuite/tests/vox/mode_solver_public.mli
 
@@ -43,7 +46,7 @@ Nothing beyond the shared base.
 
 - Nine operations: `eliminate`, `decide_checked`, `project_graph`, `decide_graph_checked`, `subsumption_residual`, `assert_subsumption`, `project_guarded`, `project_admissible` and `assert_graph_subsumption`. Each has an exact truth-value theorem. `regionality_adjunction` is a fact about the chain, not about an operation.
 - Output size is exponential in the nesting depth of quantifiers; running time is not stated.
-- `assert_subsumption` and `project_guarded` have no theorem about which variables their results mention; the other operations do.
+- `assert_subsumption` and `project_guarded` have no theorem about which variables their results mention; the other operations that return formulas do.
 - `project_scopes_compose` states that two ways of building a `project_guarded` result give the same syntax tree (`===`), not just the same truth value.
 - `assert_graph_subsumption_exact` is stated as a nine-case expansion instead of through a named predicate.
 - The theorems return their refined `unit` `@ ghost`: their bodies are erased, though each still compiles to a small function that returns a placeholder.
@@ -58,4 +61,4 @@ After `make install` and `./dev init`:
 ./dev test vox/mode_solver_public_client.ml vox/mode_solver_retained_symbolic.ml
 ```
 
-`mode_solver_public_client.ml` compiles the three semantics modules, the three proof modules, the public interface and implementation, and the client, as native code, and runs the assertions. `mode_solver_retained_symbolic.ml` checks the guarded-projection proofs on their own, also as native code.
+`./dev test` first builds the modules that the tests list as prebuilt (the three semantics modules and their interfaces, the three proof modules, and the public interface and implementation) with both compilers, checking every proof. `mode_solver_public_client.ml` then compiles the client against them as native code and runs the assertions. `mode_solver_retained_symbolic.ml` checks the guarded-projection proofs on their own, also as native code.

@@ -24,12 +24,11 @@ let (stuck_is_equivalent @ total) :
     unit -> {u : unit | observable_equal Stuck Stuck} @ ghost =
   fun () -> ghost_ (
   observable_equal_def Stuck Stuck;
-  let u = () in
-  u);;
+  ());;
 [%%expect{|
-Line 8, characters 2-3:
-8 |   u);;
-      ^
+Line 7, characters 2-4:
+7 |   ());;
+      ^^
 Error: Refinement could not be proved (counterexample)
 Line 4, characters 24-52:
 4 |     unit -> {u : unit | observable_equal Stuck Stuck} @ ghost =
@@ -41,12 +40,11 @@ let (different_results_are_equivalent @ total) :
     unit -> {u : unit | observable_equal (Done 1) (Done 2)} @ ghost =
   fun () -> ghost_ (
   observable_equal_def (Done 1) (Done 2);
-  let u = () in
-  u);;
+  ());;
 [%%expect{|
-Line 6, characters 2-3:
-6 |   u);;
-      ^
+Line 5, characters 2-4:
+5 |   ());;
+      ^^
 Error: Refinement could not be proved (counterexample)
 Line 2, characters 24-58:
 2 |     unit -> {u : unit | observable_equal (Done 1) (Done 2)} @ ghost =

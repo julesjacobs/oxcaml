@@ -1,6 +1,6 @@
 title: Register allocation
 blurb: A liveness-based register allocator for a small register machine, proved to preserve every finite run of a program it allocates; it may refuse any program.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/register_allocation_spec.ml — The register machine: instructions, execution, validity, initial states and observation
@@ -19,15 +19,15 @@ Nothing is proved about when `allocate` succeeds: every theorem is conditional o
 
 From the public-only client, which is compiled against `register_allocation.mli` and uses only the two public modules. `(program : program) -> ...` names an argument so that later types can mention it, `{result : state option | p}` is the type refined by the predicate `p`, `ghost_ (...)` is proof code, checked and then erased, and `@ total` declares a function that the checker proves terminates without raising. `fuel` is a unary natural number (`Z | S of fuel`). `verified_run` runs the allocated code, and its type states that the result agrees with the source program at the same number of steps.
 
-@code testsuite/tests/vox/register_allocation_client.ml "let (verified_run @ total) :" "    result"
+@code testsuite/tests/vox/register_allocation_client.ml "let (verified_run @ total) :" "    Some (advance"
 
 ## A rejected program
 
 `observable_equal` does not identify two stuck states, so a claim that it does is a type error. `observable_equal_def` gives the solver the definition of `observable_equal` at these arguments.
 
-@code testsuite/tests/vox/register_allocation_rejected.ml "let (stuck_is_equivalent @ total) :" "  u);;"
+@code testsuite/tests/vox/register_allocation_rejected.ml "let (stuck_is_equivalent @ total) :" "  ());;"
 
-@text testsuite/tests/vox/register_allocation_rejected.ml "Line 8, characters 2-3:" "Error: Refinement could not be proved"
+@text testsuite/tests/vox/register_allocation_rejected.ml "Line 7, characters 2-4:" "Error: Refinement could not be proved"
 
 The same test rejects a claim that `Done 1` and `Done 2` are observably equal, and a client that uses the private function `Register_allocation.graph`.
 
@@ -53,7 +53,7 @@ Nothing beyond the shared base. The one `unreachable_ ()` (in `color_at`, `regis
 - The theorem compares source and target after the same number of steps, which fits an allocator that only renames registers; one that inserted moves would need a different statement. It says nothing for argument lists of the wrong length.
 - If an input register is declared twice, the last argument wins, in the source and the target alike.
 - `allocation` is a public record, so a client can build one by hand; the theorems cover only records returned by `allocate`.
-- The 93 private lemmas in `register_allocation.ml` return their results `@ ghost`, so their bodies are erased; in bytecode each still compiles to a small function that returns a placeholder, and native code drops them.
+- The 92 private lemmas in `register_allocation.ml` return their results `@ ghost`, so their bodies are erased; each still compiles to a small function that returns a placeholder.
 
 ## Reproduce
 
@@ -63,4 +63,4 @@ After `make install` and `./dev init`:
 ./dev test vox/register_allocation_client.ml vox/register_allocation_rejected.ml vox/register_allocation_erasure.ml
 ```
 
-The client test compiles the spec, the interface, the implementation and the client, as bytecode and as native code, and compares the output with `register_allocation_client.reference`. The rejection test runs as bytecode. The erasure test compiles, natively, a function that calls `preserves` inside `ghost_` and returns 7, and checks that the body of that function in the Lambda output is just the constant 7.
+`./dev test` first builds the spec, the interface and the implementation, which the three tests list as prebuilt, with both compilers, checking every proof. The client test then compiles the client against them as bytecode and as native code, runs it, and compares the output with `register_allocation_client.reference`. The rejection test runs as bytecode. The erasure test compiles, natively, a function that calls `preserves` inside `ghost_` and returns 7, and checks that the body of that function in the Lambda output is just the constant 7.
