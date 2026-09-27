@@ -431,7 +431,7 @@
    vox_lz4_public_client.ml is compiled with only the public semantic
    interfaces, linked and run; lz4_boundary_check.ml checks that its
    Lambda calls Vox_lz4 twice and nothing of the specification. The
-   phrases below are rejected against the same interfaces. Last,
+   phrases below are checked against the same interfaces. Last,
    lz4_finalizers.ml checks explicit release and reclamation by the
    finalizer after simulated Out_of_memory exits, and raw_memory_demo.ml
    the raw-memory primitives, linked with the library. *)
@@ -501,5 +501,49 @@ Lines 2-5, characters 32-24:
 3 |       | Ok _ -> true
 4 |       | Error Vox_lz4_spec.Output_limit -> true
 5 |       | Error _ -> false...
+  The refinement is stated here.
+|}]
+
+(* [decompress]'s contract: a capacity out of range gives
+   [Invalid_capacity], and without one the capacity is 4194304. *)
+let invalid (wire : string) :
+    {d : Vox_lz4_spec.decoded | d === Error Vox_lz4_spec.Invalid_capacity} =
+  Vox_lz4.decompress ~capacity:(-1) wire
+
+let default (wire : string) :
+    {d : Vox_lz4_spec.decoded | Vox_lz4_spec.matches_model wire 4194304 d} =
+  Vox_lz4.decompress wire
+
+let explicit (wire : string) (n : {n : int | 0 <= n && n <= 4194304}) :
+    {d : Vox_lz4_spec.decoded | Vox_lz4_spec.matches_model wire n d} =
+  Vox_lz4.decompress wire ~capacity:n;;
+[%%expect{|
+val invalid :
+  string ->
+  {d : Vox_lz4_spec.decoded
+    | d === (Stdlib.Error Vox_lz4_spec.Invalid_capacity)} =
+  <fun>
+val default :
+  (wire : string) ->
+  {d : Vox_lz4_spec.decoded | Vox_lz4_spec.matches_model wire 4194304 d} =
+  <fun>
+val explicit :
+  (wire : string) ->
+  (n : {n : int | (0 <= n) && (n <= 4194304)}) ->
+  {d : Vox_lz4_spec.decoded | Vox_lz4_spec.matches_model wire n d} = <fun>
+|}]
+
+(* The default capacity is not 0. *)
+let default_is_zero (wire : string) :
+    {d : Vox_lz4_spec.decoded | Vox_lz4_spec.matches_model wire 0 d} =
+  Vox_lz4.decompress wire;;
+[%%expect{|
+Line 3, characters 2-25:
+3 |   Vox_lz4.decompress wire;;
+      ^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 2, characters 32-67:
+2 |     {d : Vox_lz4_spec.decoded | Vox_lz4_spec.matches_model wire 0 d} =
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
