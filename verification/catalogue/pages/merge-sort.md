@@ -1,6 +1,6 @@
 title: Merge sort
 blurb: A generic merge sort on immutable lists, proved to return a sorted permutation of its input while spending at most n⌈log₂ n⌉ erased credits, one per comparator call.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - verification/library/vox_merge_sort.mli — Public interface

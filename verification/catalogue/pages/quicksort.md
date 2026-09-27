@@ -1,6 +1,6 @@
 title: Quicksort
 blurb: An in-place quicksort on mutable `int` arrays, sequential and parallel, proved to leave the array sorted and a permutation of its input.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/quicksort.mli — Public interface

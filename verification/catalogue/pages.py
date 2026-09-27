@@ -25,8 +25,8 @@ import csv, html, json, os, re, shlex, statistics, subprocess
 from highlight_code import highlight
 
 esc = html.escape
-STATUS = {'reviewed': 'Reviewed', 'review-pending': 'Review pending',
-          'in-progress': 'In progress'}
+STATUS = {'reviewed': 'Reviewed', 'owner-review': 'Ready for owner review',
+          'review-pending': 'Review pending', 'in-progress': 'In progress'}
 HERE = Path(__file__).resolve().parent
 
 

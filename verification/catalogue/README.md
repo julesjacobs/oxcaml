@@ -47,10 +47,11 @@ example; a rejected program with the compiler's message; interface; trusted
 base; scope; reproduce. Write plainly; define Vox syntax the first time a
 page uses it.
 
-Status: `reviewed` when two independent reviews found no false claim and the
-page states every gap they found; `review-pending` when a review found
-something to fix or has not been redone; `in-progress` when a public
-contract is weaker than the demo needs, stated on the page.
+Status: `owner-review` when two independent reviews found no false claim
+and the page states every gap they found; `reviewed` once the owner has
+checked it after that; `review-pending` when a review found something to
+fix or has not been redone; `in-progress` while work on the demo is under
+way.
 
 When a demo's code changes, rebuild: a quote whose pattern no longer matches
 fails the build, and the counts follow the code.

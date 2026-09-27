@@ -1,6 +1,6 @@
 title: Functional queue
 blurb: A persistent two-list queue proved to act on the list of its elements: `enqueue` appends, and `dequeue` of a nonempty queue returns the first element and the rest.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/functional_queue.mli — Public interface

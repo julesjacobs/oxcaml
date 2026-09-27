@@ -1,6 +1,6 @@
 title: Doubly linked rings
 blurb: Circular doubly linked lists with a sentinel, built from mutable cells: reversal of a ring of any length and moving a range of nodes between two rings, each proved to give the stated rings and the stated final heap.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/pref_ring_general.mli — Reversal of any ring, and the `Owned` interface for one ring

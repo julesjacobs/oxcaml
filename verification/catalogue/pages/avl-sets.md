@@ -1,6 +1,6 @@
 title: AVL sets
 blurb: Persistent AVL trees of integers proved to act as sets: membership after `add` and `union` is exact, and `equal` holds exactly when two sets have the same members.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/int_set_intf.mli — Public signatures `Operations` and `Extensional`

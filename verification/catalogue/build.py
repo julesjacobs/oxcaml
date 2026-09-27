@@ -37,10 +37,10 @@ ROUTE = [
      'A result type that carries its own evidence: SAT returns a model, UNSAT a proof that no assignment satisfies the formula, both erased.'),
 ]
 
-LEGEND = ('<p><strong>Reviewed</strong>: two independent reviews found no false claim, and the page states every gap '
-          'they found. <strong>Review pending</strong>: the page is current, but a review found something to fix or has '
-          'not been redone. <strong>In progress</strong>: a public contract is weaker than the demo needs, and the page '
-          'says how.</p>')
+LEGEND = ('<p><strong>Reviewed</strong>: checked by the owner after independent reviews. <strong>Ready for owner '
+          'review</strong>: two independent reviews found no false claim, and the page states every gap they found. '
+          '<strong>Review pending</strong>: the page is current, but a review found something to fix or has not been '
+          'redone. <strong>In progress</strong>: work on the demo is under way.</p>')
 
 COUNTS = ('<p>Line counts are physical lines with code, comments excluded. <strong>Spec</strong> is the interface the '
           'page quotes. <strong>Impl</strong> and <strong>Proof</strong> cover every module reachable from the demo\'s root '

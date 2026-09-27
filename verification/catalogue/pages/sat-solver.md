@@ -1,6 +1,6 @@
 title: CDCL SAT solver
 blurb: A CDCL SAT solver proved to terminate on every CNF formula within its size limits with `Sat` and a satisfying assignment or `Unsat` and a proof that no assignment satisfies it.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - verification/library/vox_cdcl_total.mli — Public interface of the demo solver, `solve_complete`, and two bounded variants

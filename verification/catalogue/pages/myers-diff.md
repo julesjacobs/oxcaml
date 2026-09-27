@@ -1,6 +1,6 @@
 title: Myers diff
 blurb: An edit script between two integer lists, proved to turn the first into the second at the minimum number of insertions and deletions.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - verification/library/vox_diff_spec.mli — Edit scripts and the edit distance, specified by equations

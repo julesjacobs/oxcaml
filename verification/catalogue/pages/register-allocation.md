@@ -1,6 +1,6 @@
 title: Register allocation
 blurb: A liveness-based register allocator for a small register machine, proved to preserve every finite run of a program it allocates; it may refuse any program.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/register_allocation_spec.ml — The register machine: instructions, execution, validity, initial states and observation

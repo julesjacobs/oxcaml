@@ -1,6 +1,6 @@
 title: Textbook RSA
 blurb: Modular exponentiation on unbounded integers, proved to compute `a^e mod n`, and the RSA round trip proved for any two distinct primes and any message below their product.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - verification/library/vox_rsa.mli — Public interface

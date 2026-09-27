@@ -1,6 +1,6 @@
 title: Sparse array overlays
 blurb: A persistent array made of an immutable base and a list of overriding writes, with laws that give the value read at every index after any sequence of writes and clears.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/sparse_overlay.mli — Public interface

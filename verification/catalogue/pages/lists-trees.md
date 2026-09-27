@@ -1,6 +1,6 @@
 title: Mutable lists and trees
 blurb: In-place reversal of a linked list and mirroring of a binary tree built from mutable cells, proved against an erased model of the nodes and of the cells they own.
-status: reviewed
+status: review-pending
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/pref_list.mli — List: public interface
