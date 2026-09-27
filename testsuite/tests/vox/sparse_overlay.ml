@@ -22,12 +22,11 @@ let rec (find_remove @ total) : ('a : immutable_data).
   find_def query bindings;
   let remaining = remove index bindings in
   find_def query remaining;
-  let u = () in
   match bindings with
-  | [] -> u
+  | [] -> ()
   | (key, value) :: rest ->
     find_remove rest index query;
-    u
+    ()
 
 type ('a : value mod separable) t : immutable_data with 'a =
   { base : 'a iarray; updates : (int * 'a) list }
@@ -60,9 +59,7 @@ let[@def] (lookup @ total) : ('a : value mod separable).
     int -> 'a t @ total -> 'a option @ total =
   fun index overlay ->
   if 0 <= index && index < Iarray.length overlay.base then
-    let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
-      index in
-    Some (get_raw overlay bounded)
+    Some (get_raw overlay index)
   else None
 
 let[@def] (get @ total) : ('a : value mod separable).
@@ -89,7 +86,7 @@ module Laws (Element : sig type t : immutable_data end) = struct
   let (length_equation @ total) : (overlay : Element.t t) ->
     {u : unit | length overlay = Iarray.length (base overlay)} =
     fun overlay -> length_def overlay; base_def overlay;
-    let u = () in u
+    ()
 
   let (get_lookup @ total) : (overlay : Element.t t) ->
     (index : {i : int | 0 <= i && i < length overlay}) ->
@@ -98,21 +95,21 @@ module Laws (Element : sig type t : immutable_data end) = struct
     fun overlay index ->
     let i = index in
     length_def overlay; get_def overlay index; lookup_def i overlay;
-    let u = () in u
+    ()
 
   let (lookup_outside @ total) : (overlay : Element.t t) -> (index : int) ->
     {u : unit | if index < 0 || length overlay <= index then
       lookup index overlay === None else true} =
     fun overlay index ->
     length_def overlay; lookup_def index overlay;
-    let u = () in u
+    ()
 
   let (empty_base @ total) : (values : Element.t iarray) ->
     {u : unit | base (empty values) === values} =
     fun values ->
     empty_def values;
     let overlay = empty values in base_def overlay;
-    let u = () in u
+    ()
 
   let (empty_lookup @ total) : (values : Element.t iarray) -> (index : int) ->
     {u : unit | lookup index (empty values) ===
@@ -123,13 +120,11 @@ module Laws (Element : sig type t : immutable_data end) = struct
     lookup_def index overlay;
     Vox_iarray.at_outside values index;
     if 0 <= index && index < Iarray.length values then (
-      let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
-        index in
-      get_raw_def overlay bounded;
+      get_raw_def overlay index;
       find_def index overlay.updates;
-      Vox_iarray.at_get values bounded;
-      let u = () in u)
-    else let u = () in u
+      Vox_iarray.at_get values index;
+      ())
+    else ()
 
   let (set_base @ total) : (overlay : Element.t t) -> (index : int) ->
     (value : Element.t) ->
@@ -138,7 +133,7 @@ module Laws (Element : sig type t : immutable_data end) = struct
     set_def index value overlay;
     let updated = set index value overlay in
     base_def overlay; base_def updated;
-    let u = () in u
+    ()
 
   let (set_lookup @ total) : (overlay : Element.t t) -> (index : int) ->
     (value : Element.t) -> (query : int) ->
@@ -151,15 +146,11 @@ module Laws (Element : sig type t : immutable_data end) = struct
     length_def overlay;
     lookup_def query updated; lookup_def query overlay;
     if 0 <= query && query < Iarray.length overlay.base then (
-      let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
-        query in
-      let changed : {i : int | 0 <= i && i < Iarray.length updated.base} =
-        query in
-      get_raw_def overlay bounded; get_raw_def updated changed;
+      get_raw_def overlay query; get_raw_def updated query;
       find_def query updated.updates;
       find_remove overlay.updates index query;
-      let u = () in u)
-    else let u = () in u
+      ())
+    else ()
 
   let (clear_base @ total) : (overlay : Element.t t) -> (index : int) ->
     {u : unit | base (clear index overlay) === base overlay} =
@@ -167,7 +158,7 @@ module Laws (Element : sig type t : immutable_data end) = struct
     clear_def index overlay;
     let updated = clear index overlay in
     base_def overlay; base_def updated;
-    let u = () in u
+    ()
 
   let (clear_lookup @ total) : (overlay : Element.t t) -> (index : int) ->
     (query : int) ->
@@ -182,14 +173,10 @@ module Laws (Element : sig type t : immutable_data end) = struct
     lookup_def query updated; lookup_def query overlay;
     Vox_iarray.at_outside values query;
     if 0 <= query && query < Iarray.length overlay.base then (
-      let bounded : {i : int | 0 <= i && i < Iarray.length overlay.base} =
-        query in
-      let changed : {i : int | 0 <= i && i < Iarray.length updated.base} =
-        query in
-      get_raw_def overlay bounded; get_raw_def updated changed;
+      get_raw_def overlay query; get_raw_def updated query;
       find_remove overlay.updates index query;
-      Vox_iarray.at_get values bounded;
-      let u = () in u)
-    else let u = () in u
+      Vox_iarray.at_get values query;
+      ())
+    else ()
 
 end

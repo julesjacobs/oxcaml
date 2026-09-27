@@ -227,7 +227,7 @@ module Make (C : Vox_big_credits.S) = struct
   let make_set : (state : {s : t | size s < Bigint.of_int max_int}) @ unique
         read_write total ->
       (fee : {b : C.token | C.credits b = 11Z}) @ unique total ghost ->
-      {r : result | let state = state in added (snapshot state) (snapshot r.#state) r.#value &&
+      {r : result | added (snapshot state) (snapshot r.#state) r.#value &&
         size r.#state = Bigint.add (size state) 1Z &&
         contains (snapshot r.#state) r.#value &&
         account r.#state = Bigint.add (account state) 11Z &&
@@ -247,10 +247,9 @@ module Make (C : Vox_big_credits.S) = struct
 
   let find : (x : elem) @ immutable ->
       (state : {s : t | contains (snapshot s) x}) @ unique read_write total ->
-      (fee : {b : C.token | let state = state in
-        C.credits b = find_fee state})
+      (fee : {b : C.token | C.credits b = find_fee state})
         @ unique total ghost ->
-      {r : result | let state = state in found (snapshot state) (snapshot r.#state) x &&
+      {r : result | found (snapshot state) (snapshot r.#state) x &&
         size r.#state = size state && r.#value === root (snapshot state) x &&
         account r.#state = Bigint.add (account state) (find_fee state) &&
         snapshot r.#state === compressed (snapshot state) x &&
@@ -274,10 +273,9 @@ module Make (C : Vox_big_credits.S) = struct
   let union : (x : elem) @ immutable -> (y : elem) @ immutable ->
       (state : {s : t | contains (snapshot s) x && contains (snapshot s) y}) @ unique
         read_write total ->
-      (fee : {b : C.token | let state = state in
-        C.credits b = union_fee state})
+      (fee : {b : C.token | C.credits b = union_fee state})
         @ unique total ghost ->
-      {r : result | let state = state in joined (snapshot state) (snapshot r.#state) x y r.#value &&
+      {r : result | joined (snapshot state) (snapshot r.#state) x y r.#value &&
         size r.#state = size state &&
         account r.#state = Bigint.add (account state) (union_fee state) &&
         events r.#state === E.Union :: E.Link ::

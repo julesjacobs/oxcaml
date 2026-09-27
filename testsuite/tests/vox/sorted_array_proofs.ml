@@ -28,8 +28,6 @@ module Binary = struct
           left <= l && r <= right && r = l + 1
           && not (p l) && p r} =
       fun left right invariant ->
-      let _invariant = invariant in
-      let u = () in
       let distance = right - left in
       if distance <= 1 then
         let result = left, right in
@@ -42,15 +40,14 @@ module Binary = struct
           middle in
         let yes = evaluate index in
         if yes then
-          let result = loop left middle (u) in
+          let result = loop left middle () in
           result
         else
-          let result = loop middle right (u) in
+          let result = loop middle right () in
           result
     [@@decreases right - left]
     in
-    let u = () in
-    let result = loop lower upper (u) in
+    let result = loop lower upper () in
     result
 
 end
@@ -59,7 +56,7 @@ module Arrays = struct
   let[@def] at (array : int iarray) (index : int) =
     if 0 <= index && index < Iarray.length array then
       let bounded : {i : int | 0 <= i && i < Iarray.length array} =
-        refine_ index in
+        index in
       Iarray.Refined.get array bounded
     else 0
 
@@ -77,7 +74,6 @@ module Arrays = struct
         && not (above array target strict left)
         && above array target strict right} =
     fun array target strict size ->
-    let refine_ size = size in
     let lower = -1 in
     let upper = Iarray.length array in
     let[@def] p (index : int) = above array target strict index in
@@ -86,20 +82,18 @@ module Arrays = struct
       p_def upper;
       above_def array target strict lower;
       above_def array target strict upper;
-      let u = () in
-      (refine_ u : {u : unit | -1 <= lower && lower < upper
+      (() : {u : unit | -1 <= lower && lower < upper
         && 0 < upper - lower && not (p lower) && p upper}))
     in
-    let refine_ result = Binary.search_midpoint p lower upper premise in
+    let result = Binary.search_midpoint p lower upper premise in
     let (left : int), (right : int) = result in
     ghost_ (
       p_def left;
       p_def right;
-      let u = () in
-      (refine_ u : {u : unit |
+      (() : {u : unit |
         not (above array target strict left)
         && above array target strict right}));
-    refine_ result
+    result
 
   let (at_model @ total) : (array : int iarray) -> (index : int) ->
       {u : unit | at array index = Vox_iarray.Int.element array index} =
@@ -108,12 +102,12 @@ module Arrays = struct
     Vox_iarray.Int.element_def array index;
     if 0 <= index && index < Iarray.length array then
       let bounded : {i : int | 0 <= i && i < Iarray.length array} =
-        refine_ index in
+        index in
       Vox_iarray.at_get array bounded;
-      let u = () in refine_ u
+      ()
     else
       (Vox_iarray.at_outside array index;
-      let u = () in refine_ u)
+      ())
 
   let (ordered @ total) : (array : int iarray) -> (i : int) -> (j : int) ->
       {u : unit | 0 <= i && i <= j && j < Iarray.length array
@@ -123,7 +117,7 @@ module Arrays = struct
     Vox_iarray.Int.ordered array i j;
     at_model array i;
     at_model array j;
-    let u = () in refine_ u
+    ()
 
   let (partition @ total) :
       (array : int iarray) -> (target : int) -> (strict : bool) ->
@@ -142,15 +136,14 @@ module Arrays = struct
            else at array index >= target)} =
     fun array target strict left right index premise ->
     premise;
-    let u = () in
     if index <= left then
       (above_def array target strict left;
-      ordered array index left (refine_ u);
-      refine_ u)
+      ordered array index left ();
+      ())
     else
       (above_def array target strict right;
-      ordered array right index (refine_ u);
-      refine_ u)
+      ordered array right index ();
+      ())
 
 
   let[@def] range_spec (array : int iarray) (target : int)
@@ -177,12 +170,11 @@ module Arrays = struct
     let upper_left = past - 1 in
     let lower_strict = false in
     let upper_strict = true in
-    let u = () in
     partition array target lower_strict
-      lower_left first index (refine_ u);
+      lower_left first index ();
     partition array target upper_strict
-      upper_left past index (refine_ u);
-    refine_ u
+      upper_left past index ();
+    ()
 
   let[@def] rec occurs (array : int iarray) (target : int)
       (start : int) (stop : int) =
@@ -206,14 +198,13 @@ module Arrays = struct
     premise;
     range_spec_def array target first past;
     occurs_def array target start stop;
-    let u = () in
-    if start = stop then refine_ u
+    if start = stop then ()
     else
-      (range_at array target first past start (refine_ u);
+      (range_at array target first past start ();
       let next = start + 1 in
       occurs_range array target first past
-        next stop (refine_ u);
-      refine_ u)
+        next stop ();
+      ())
   [@@decreases stop - start]
 
   let (equal_range @ total) :
@@ -225,11 +216,10 @@ module Arrays = struct
         && occurs array target 0 (Iarray.length array) = (first < past)} =
     fun array target premise ->
     premise;
-    let u = () in
     let lower_strict = false in
     let upper_strict = true in
-    let refine_ lower = bounds array target lower_strict (refine_ u) in
-    let refine_ upper = bounds array target upper_strict (refine_ u) in
+    let lower = bounds array target lower_strict () in
+    let upper = bounds array target upper_strict () in
     let (lower_left : int), (first : int) = lower in
     let (upper_left : int), (past : int) = upper in
     ghost_ (
@@ -239,18 +229,18 @@ module Arrays = struct
       above_def array target upper_strict upper_left;
       (if past < first then
           (partition array target lower_strict
-            lower_left first past (refine_ u);
-          (refine_ u : {u : unit | first <= past}))
-        else (refine_ u : {u : unit | first <= past}));
+            lower_left first past ();
+          (() : {u : unit | first <= past}))
+        else (() : {u : unit | first <= past}));
       range_spec_def array target first past;
       let zero = 0 in
       let stop = Iarray.length array in
       occurs_range array target first past
-        zero stop (refine_ u);
-      (refine_ u : {u : unit | range_spec array target first past
+        zero stop ();
+      (() : {u : unit | range_spec array target first past
         && occurs array target 0 (Iarray.length array) = (first < past)}));
     let result = first, past in
-    refine_ result
+    result
 
 
   let (find_first @ total) :
@@ -262,23 +252,22 @@ module Arrays = struct
         | Some index -> 0 <= index && index < Iarray.length array
           && at array index = target && not (occurs array target 0 index)} =
     fun array target premise ->
-    let refine_ range = equal_range array target premise in
+    let range = equal_range array target premise in
     let (first : int), (past : int) = range in
     if first = past then
       let result = None in
-      refine_ result
+      result
     else
       (ghost_ (
         range_spec_def array target first past;
-        let u = () in
-        range_at array target first past first (refine_ u);
+        range_at array target first past first ();
         let zero = 0 in
         occurs_range array target first past
-          zero first (refine_ u);
-        (refine_ u : {u : unit | 0 <= first && first < Iarray.length array
+          zero first ();
+        (() : {u : unit | 0 <= first && first < Iarray.length array
           && at array first = target && not (occurs array target 0 first)}));
       let result = Some first in
-      refine_ result)
+      result)
 
   let (find_last @ total) :
       (array : int iarray) -> (target : int) ->
@@ -290,25 +279,24 @@ module Arrays = struct
           && at array index = target
           && not (occurs array target (index + 1) (Iarray.length array))} =
     fun array target premise ->
-    let refine_ range = equal_range array target premise in
+    let range = equal_range array target premise in
     let (first : int), (past : int) = range in
     if first = past then
       let result = None in
-      refine_ result
+      result
     else
       let index = past - 1 in
       ghost_ (
         range_spec_def array target first past;
-        let u = () in
-        range_at array target first past index (refine_ u);
+        range_at array target first past index ();
         let stop = Iarray.length array in
         occurs_range array target first past
-          past stop (refine_ u);
-        (refine_ u : {u : unit | 0 <= index && index < Iarray.length array
+          past stop ();
+        (() : {u : unit | 0 <= index && index < Iarray.length array
           && at array index = target
           && not (occurs array target (index + 1) (Iarray.length array))}));
       let result = Some index in
-      refine_ result
+      result
 
   let (mem @ total) :
       (array : int iarray) -> (target : int) ->
@@ -316,10 +304,10 @@ module Arrays = struct
         && Vox_iarray.Int.sorted array} @ ghost ->
       {result : bool | result = occurs array target 0 (Iarray.length array)} =
     fun array target premise ->
-    let refine_ range = equal_range array target premise in
+    let range = equal_range array target premise in
     let (first : int), (past : int) = range in
     let result = first < past in
-    refine_ result
+    result
 
 
   let[@def] edit_value (source : int iarray) (position : int)
@@ -353,13 +341,12 @@ module Arrays = struct
     fun source result position value inserting start stop index premise ->
     premise;
     edited_def source result position value inserting start stop;
-    let u = () in
-    if start = index then refine_ u
+    if start = index then ()
     else
       let next = start + 1 in
       edited_at source result position value
-        inserting next stop index (refine_ u);
-      refine_ u
+        inserting next stop index ();
+      ()
   [@@decreases index - start]
 
   let insert :
@@ -373,8 +360,7 @@ module Arrays = struct
         && edited source result position value true 0 (Iarray.length result)} =
     fun source value premise ->
     premise;
-    let u = () in
-    let refine_ range = equal_range source value (refine_ u) in
+    let range = equal_range source value () in
     let (position : int), (past : int) = range in
     let prefix = Iarray.sub source ~pos:0 ~len:position in
     let suffix = Iarray.sub source ~pos:position
@@ -389,50 +375,49 @@ module Arrays = struct
           {u : unit | 0 <= start && start <= stop} @ ghost ->
           {u : unit | edited source result position value inserting start stop} =
         fun start bounds ->
-        let refine_ bounds = bounds in
         edited_def source result position value inserting start stop;
-        if start = stop then refine_ u
+        if start = stop then ()
         else
           let next = start + 1 in
-          certify next (refine_ u);
+          certify next ();
           at_def result start;
           edit_value_def source position value inserting start;
           let original = if start < position then start else start - 1 in
           at_def source original;
 
-          refine_ u
+          ()
       [@@decreases stop - start]
       in
-      certify zero (refine_ u);
+      certify zero ();
       Vox_iarray.Int.sorted_intro result (fun start ->
         if 0 <= start && start < stop - 1 then (
           let next = start + 1 in
           let original = if start < position then start else start - 1 in
           let original_next = if next < position then next else next - 1 in
           edited_at source result position value
-            inserting zero stop start (refine_ u);
+            inserting zero stop start ();
           edited_at source result position value
-            inserting zero stop next (refine_ u);
+            inserting zero stop next ();
           edit_value_def source position value inserting start;
           edit_value_def source position value inserting next;
           (if start = position then
-              (range_at source value position past original_next (refine_ u);
-              (refine_ u : {u : unit | at result start <= at result next}))
+              (range_at source value position past original_next ();
+              (() : {u : unit | at result start <= at result next}))
             else if next = position then
-              (range_at source value position past original (refine_ u);
-              (refine_ u : {u : unit | at result start <= at result next}))
+              (range_at source value position past original ();
+              (() : {u : unit | at result start <= at result next}))
             else
               (ordered source original original_next
-                (refine_ u);
-              (refine_ u : {u : unit | at result start <= at result next})));
+                ();
+              (() : {u : unit | at result start <= at result next})));
           at_model result start;
           at_model result next;
-          refine_ u)
-        else refine_ u);
-      (refine_ u : {u : unit | Vox_iarray.Int.sorted result
+          ())
+        else ());
+      (() : {u : unit | Vox_iarray.Int.sorted result
         && edited source result position value true 0 (Iarray.length result)}));
     let pair = position, result in
-    refine_ pair
+    pair
 
 
   let remove_at :
@@ -453,45 +438,43 @@ module Arrays = struct
       let zero = 0 in
       let value = 0 in
       let inserting = false in
-      let u = () in
       let rec (certify @ total) : (start : int) ->
           {u : unit | 0 <= start && start <= stop} @ ghost ->
           {u : unit | edited source result position value inserting start stop} =
         fun start bounds ->
-        let refine_ bounds = bounds in
         edited_def source result position value inserting start stop;
-        if start = stop then refine_ u
+        if start = stop then ()
         else
           let next = start + 1 in
-          certify next (refine_ u);
+          certify next ();
           at_def result start;
           edit_value_def source position value inserting start;
           let original = if start < position then start else start + 1 in
           at_def source original;
 
-          refine_ u
+          ()
       [@@decreases stop - start]
       in
-      certify zero (refine_ u);
+      certify zero ();
       Vox_iarray.Int.sorted_intro result (fun start ->
         if 0 <= start && start < stop - 1 then (
           let next = start + 1 in
           let original = if start < position then start else start + 1 in
           let original_next = if next < position then next else next + 1 in
           edited_at source result position value
-            inserting zero stop start (refine_ u);
+            inserting zero stop start ();
           edited_at source result position value
-            inserting zero stop next (refine_ u);
+            inserting zero stop next ();
           edit_value_def source position value inserting start;
           edit_value_def source position value inserting next;
-          ordered source original original_next (refine_ u);
+          ordered source original original_next ();
           at_model result start;
           at_model result next;
-          refine_ u)
-        else refine_ u);
-      (refine_ u : {u : unit | Vox_iarray.Int.sorted result
+          ())
+        else ());
+      (() : {u : unit | Vox_iarray.Int.sorted result
         && edited source result position 0 false 0 (Iarray.length result)}));
-    refine_ result
+    result
 
   let remove_one :
       (source : int iarray) -> (value : int) ->
@@ -508,16 +491,15 @@ module Arrays = struct
           && edited source array position 0 false 0 (Iarray.length array)} =
     fun source value premise ->
     premise;
-    let u = () in
-    let refine_ found = find_first source value (refine_ u) in
+    let found = find_first source value () in
     match found with
     | None ->
       let result = None in
-      refine_ result
+      result
     | Some position ->
       let position : int = position in
-      let refine_ array = remove_at source position (refine_ u) in
+      let array = remove_at source position () in
       let result = Some (position, array) in
-      refine_ result
+      result
 
 end

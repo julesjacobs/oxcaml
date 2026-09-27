@@ -29,15 +29,13 @@ open Merge_sort;;
 
 let third () =
   let amount = 2 in
-  let initial : {n : int | n >= 0} = amount in
-  let token = C.Budget.create initial in
-  let input : {t : C.token | C.credits t >= 2} = token in
-  let result = two 3 2 1 input in
+  let token = C.Budget.create amount in
+  let result = two 3 2 1 token in
   let #{ Compare.before = _; state } = result in
   Compare.compare 1 0 (state);;
 [%%expect{|
-Line 8, characters 22-29:
-8 |   Compare.compare 1 0 (state);;
+Line 6, characters 22-29:
+6 |   Compare.compare 1 0 (state);;
                           ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 File "merge_sort.ml", line 26, characters 30-45:

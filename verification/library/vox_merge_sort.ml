@@ -56,7 +56,6 @@ end) = struct
           Bigint.sub (Bigint.of_int (C.credits token))
             (Bigint.add (S.length left) (S.length right))} @ unique =
       fun size left right token ->
-    let token = token in
     ghost_ (S.length_def left; S.length_def right);
     match left, right with
     | [], _ ->
@@ -69,17 +68,11 @@ end) = struct
       result
     | x :: xs, y :: ys ->
       ghost_ (P.sorted_def left; P.sorted_def right; O.totality x y);
-      let available : {t : C.token | C.credits t > 0} = token in
-      let compared = Compare.compare x y available in
+      let compared = Compare.compare x y token in
       let #{ Compare.before; state } = compared in
       if before then (
         let next_size = ghost_ (Bigint.sub size 1Z) in
-        let next : {t : C.token | next_size =
-          Bigint.add (S.length xs) (S.length right) &&
-          P.sorted xs && P.sorted right &&
-          Bigint.of_int (C.credits t) >=
-            Bigint.add (S.length xs) (S.length right)} = state in
-        let merged = merge next_size xs right next in
+        let merged = merge next_size xs right state in
         let #{ values; state } = merged in
         let output = x :: values in
         ghost_ (Proof.lower x y ys;
@@ -89,12 +82,7 @@ end) = struct
         result)
       else (
         let next_size = ghost_ (Bigint.sub size 1Z) in
-        let next : {t : C.token | next_size =
-          Bigint.add (S.length left) (S.length ys) &&
-          P.sorted left && P.sorted ys &&
-          Bigint.of_int (C.credits t) >=
-            Bigint.add (S.length left) (S.length ys)} = state in
-        let merged = merge next_size left ys next in
+        let merged = merge next_size left ys state in
         let #{ values; state } = merged in
         let output = y :: values in
         ghost_ (Proof.right_head x xs y ys values; S.length_def output);
@@ -115,7 +103,6 @@ end) = struct
         Bigint.of_int (C.credits r.#state) >=
           Bigint.sub (Bigint.of_int (C.credits token)) (Bigint.mul size depth)}
         @ unique = fun size depth values token ->
-    let token = token in
     ghost_ (S.length_def values; Vox_sort_cost.power_def depth);
     match values with
     | [] | [_] ->
@@ -130,40 +117,18 @@ end) = struct
       let next_depth = ghost_ (Bigint.sub depth 1Z) in
       let capacity = ghost_ (C.credits (borrow_ token)) in
       let left_budget = ghost_ (Bigint.mul left_size next_depth) in
-      let bounded : {n : Bigint.t | 0Z <= n &&
-        n <= Bigint.of_int capacity} = left_budget in
       let amount =
-        ghost_ (Vox_sort_cost.bounded_int capacity bounded) in
-      let amount : int = amount in
-      let available : {t : C.token | 0 <= amount && amount <= C.credits t} =
-        token in
-      let parts = C.split amount available in
+        ghost_ (Vox_sort_cost.bounded_int capacity left_budget) in
+      let parts = C.split amount token in
       let { C.left = left_state; right = right_state } = parts in
-      let left_token : {t : C.token | left_size = S.length halves.left &&
-        0Z <= next_depth && left_size <= Vox_sort_cost.power next_depth &&
-        Bigint.mul left_size next_depth <= Bigint.of_int (C.credits t)} =
-        left_state in
       let left_result =
-        sort_at_depth left_size next_depth halves.left left_token in
+        sort_at_depth left_size next_depth halves.left left_state in
       let #{ values = sorted_left; state = left_state } = left_result in
-      let right_token : {t : C.token | right_size = S.length halves.right &&
-        0Z <= next_depth && right_size <= Vox_sort_cost.power next_depth &&
-        Bigint.mul right_size next_depth <= Bigint.of_int (C.credits t)} =
-        right_state in
       let right_result =
-        sort_at_depth right_size next_depth halves.right right_token in
+        sort_at_depth right_size next_depth halves.right right_state in
       let #{ values = sorted_right; state = right_state } = right_result in
-      let joinable : {t : C.token | 0 <= C.credits left_state &&
-        0 <= C.credits t && 0 <= C.credits left_state + C.credits t} =
-        right_state in
-      let combined = C.merge left_state joinable in
-      let merge_token : {t : C.token |
-        size = Bigint.add (S.length sorted_left) (S.length sorted_right) &&
-        P.sorted sorted_left && P.sorted sorted_right &&
-        Bigint.of_int (C.credits t) >=
-          Bigint.add (S.length sorted_left) (S.length sorted_right)} =
-        combined in
-      let merged = merge size sorted_left sorted_right merge_token in
+      let combined = C.merge left_state right_state in
+      let merged = merge size sorted_left sorted_right combined in
       let #{ values = output; state } = merged in
       ghost_ (
         let original = S.append halves.left halves.right in
@@ -186,14 +151,10 @@ end) = struct
           Bigint.sub (Bigint.of_int (C.credits token))
             (Vox_sort_cost.budget (S.length values))} @ unique =
       fun values token ->
-    let token = token in
     let size = ghost_ (S.length values) in
     let depth = ghost_ (Vox_sort_cost.height size) in
     ghost_ (Vox_sort_cost.height_bound size; Vox_sort_cost.budget_def size);
-    let input : {t : C.token | size = S.length values && 0Z <= depth &&
-      size <= Vox_sort_cost.power depth &&
-      Bigint.mul size depth <= Bigint.of_int (C.credits t)} = token in
-    let result = sort_at_depth size depth values input in
+    let result = sort_at_depth size depth values token in
     result
 
 end

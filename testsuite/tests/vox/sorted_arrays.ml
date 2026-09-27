@@ -915,6 +915,6 @@ Line 5, characters 56-67:
 5 |   let refine_ result = Arrays.remove_at source position (refine_ u) in
                                                             ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array_proofs.ml", lines 440-441, characters 18-39:
+File "sorted_array_proofs.ml", lines 425-426, characters 18-39:
   The refinement is stated here.
 |}]

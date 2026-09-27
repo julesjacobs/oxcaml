@@ -41,8 +41,8 @@ The test funds the token with `C.Budget.create`, which is not available inside t
 Compiled as a file after `open Merge_sort`, the installed compiler prints:
 
 ```
-File "third.ml", line 9, characters 22-29:
-9 |   Compare.compare 1 0 (state)
+File "third.ml", line 7, characters 22-29:
+7 |   Compare.compare 1 0 (state)
                           ^^^^^^^
 Error: Refinement could not be proved (counterexample)
 File "merge_sort.ml", line 26, characters 30-45:

@@ -24,12 +24,8 @@ let (lambda_lcm @ total) (p : t) (q : t) (multiple : t) :
 let (reduce_divisor @ total) (a : t) (p : t) (q : t) :
     {u : unit | if p > 0Z && q > 0Z then
       (a mod (p * q)) mod p = a mod p else true} @ ghost = ghost_ (
-  if p <= 0Z || q <= 0Z then ()
-  else begin
-    let r = a mod (p * q) in
-    remainder_unique a p (q * (a / (p * q)) + r / p) (r mod p);
-    ()
-  end)
+  let r = a mod (p * q) in
+  remainder_unique a p (q * (a / (p * q)) + r / p) (r mod p))
 
 
 let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
@@ -38,25 +34,18 @@ let (rsa_power @ total) (p : t) (q : t) (e : t) (d : t) (m : t) :
       && 0Z <= m && m < p * q
       then power m (e * d) mod (p * q) = m else true} @ ghost = ghost_ (
   prime_def p; prime_def q; lambda_def p q;
-  let u = () in
-  if not (prime p && prime q && p <> q
-      && e > 0Z && d > 0Z && (e * d - 1Z) mod lambda p q = 0Z
-      && 0Z <= m && m < p * q) then u
-  else begin
-    let k = e * d - 1Z in
-    lambda_lcm p q k;
-    divides_transitive (p - 1Z) (lambda p q) k;
-    divides_transitive (q - 1Z) (lambda p q) k;
-    let kp = k / (p - 1Z) in
-    let kq = k / (q - 1Z) in
-    fermat_period m p kp;
-    fermat_period m q kq;
-    let a = power m (e * d) in
-    reduce_divisor a p q;
-    reduce_divisor a q p;
-    crt_unique p q (a mod (p * q)) m;
-    u
-  end)
+  let k = e * d - 1Z in
+  lambda_lcm p q k;
+  divides_transitive (p - 1Z) (lambda p q) k;
+  divides_transitive (q - 1Z) (lambda p q) k;
+  let kp = k / (p - 1Z) in
+  let kq = k / (q - 1Z) in
+  fermat_period m p kp;
+  fermat_period m q kq;
+  let a = power m (e * d) in
+  reduce_divisor a p q;
+  reduce_divisor a q p;
+  crt_unique p q (a mod (p * q)) m)
 
 let encrypt = modexp
 let decrypt = modexp
