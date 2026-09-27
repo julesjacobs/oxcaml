@@ -274,7 +274,8 @@ this file.
       rest of the suite; stress runs found no failure or hang. Open: the
       one-shot and reference-lock pages name only `--enable-multidomain`,
       which configure rejects without `--enable-poll-insertion`.
-- [ ] **`_trust.md` line 13** (owner-reviewed page) conflates totality and
+- [x] **`_trust.md` line 13** (fixed with the owner's approval; page back
+      to owner-review) conflates totality and
       statelessness: total functions may write through uniquely owned
       storage (`Quicksort.sort`). Wording proposed to the owner.
       Also: it says ghost fields are removed before code generation, but
@@ -308,10 +309,16 @@ function for proving and running (48); termination for stateful code (88).
 
 ## Decisions waiting for the owner
 
-- **`[@def]` lemmas are generated and trusted, not re-proved by the
-  verifier** (found by the typer group's Codex review). Every change to the
-  lemma generator rests on the generator being right. Proposed: add a
-  re-proof of each generated lemma as a safety net (small to medium).
+- *Decided 27 September:* `[@def]` lemmas are not re-proved. The generated
+  equation is the definition mechanism itself (how the verifier knows an
+  identifier equals its right-hand side), so there is nothing separate to
+  prove.
+- *Decided 27 September:* no stated limitation becomes proof work before
+  the pitch (HTTP CRLF/budget laws, e-matching, erased-lemma stubs stay as
+  stated).
+- *Decided 27 September:* host everything at lab.julesjacobs.com/vox/
+  (landing page, catalogue, playground, film). Caddy route with COOP/COEP
+  for /vox/playground/ added (backup `/srv/lab/Caddyfile.pre-vox`).
 
 - **Item 6**: reading the four route pages is yours.
 - **Subsumption open questions** (DESIGN.md §9), answered with defaults so

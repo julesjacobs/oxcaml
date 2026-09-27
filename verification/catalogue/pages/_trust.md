@@ -1,6 +1,6 @@
 title: What every demo trusts
 blurb: The checker, the built-in meanings it assumes, and the unverified runtime code shared by all demos.
-status: reviewed
+status: owner-review
 date: 27 September 2026
 ---
 A Vox proof is a compile-time check: the compiler type-checks the program, generates verification conditions from its refinements, and asks Z3 to prove them. A demo's theorems therefore hold only if the components below are correct. None of them is verified. Each demo page lists, in addition, what that demo alone trusts.
@@ -10,8 +10,8 @@ A Vox proof is a compile-time check: the compiler type-checks the program, gener
 - The OxCaml type checker, including the mode, uniqueness and ghost checks that make tokens affine and keep ghost code free of runtime effects.
 - Verification-condition generation in `verification/vox_vc.ml` and its translation to SMT-LIB in `verification/vox_smt.ml`.
 - Z3 4.16.0. A goal counts as proved only when Z3 reports `unsat` for its negation within the resource limit.
-- The totality check: a function declared `@@ total` or `@ total` must terminate without raising or touching mutable state. Only such functions may appear in refinements.
-- Ghost erasure: ghost arguments, fields and code are removed before code generation.
+- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort` does through a unique slice. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments.
+- Ghost erasure: ghost arguments and ghost code are removed before code generation. Ghost record fields are removed in native code; bytecode keeps an empty slot for each. A lemma still compiles to a placeholder function whose body is erased.
 - The rest of the OxCaml compiler and runtime, which compile and run the erased program.
 
 ## Built-in meanings
