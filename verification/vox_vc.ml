@@ -182,6 +182,9 @@ type context =
     pref_observers :
       (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
+    (* Module aliases inside structures ([module B = Base]), by the local path
+       and by the paths that export it. Signatures do not keep them. *)
+    mutable module_aliases : Path.t Path.Map.t;
     mutable argument_values : value option Path.Map.t;
     (* Each function body's commands, with the warning settings in effect where
        it was written ([@warning] attributes apply to its proofs). *)
@@ -1062,8 +1065,23 @@ let instantiate_path ctx env ty path value =
     end
   | _ -> value
 
-let lookup ctx s env ty path =
+let rec resolve_module_alias ctx = function
+  | Path.Pdot (prefix, name) -> (
+    match Path.Map.find_opt prefix ctx.module_aliases with
+    | Some target -> Some (Path.Pdot (target, name))
+    | None ->
+      Option.map
+        (fun prefix -> Path.Pdot (prefix, name))
+        (resolve_module_alias ctx prefix))
+  | _ -> None
+
+let rec lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
+  match resolve_module_alias ctx path with
+  | Some path -> lookup ctx s env ty path
+  | None -> lookup_normalized ctx s env ty path
+
+and lookup_normalized ctx s env ty path =
   match sort ctx.encoding env ty with
   | Some set_sort
     when is_set_sort ctx.encoding set_sort && is_set_empty env path ->
@@ -2400,7 +2418,20 @@ let export_module ctx id str s =
         | Some path -> Path.Map.add path value values)
       values s.values
   in
+  ctx.module_aliases
+    <- Path.Map.fold
+         (fun path target aliases ->
+           match exported path with
+           | None -> aliases
+           | Some path -> Path.Map.add path target aliases)
+         ctx.module_aliases ctx.module_aliases;
   { s with values }
+
+let rec module_alias m =
+  match m.mod_desc with
+  | Tmod_ident (path, _) -> Some path
+  | Tmod_constraint (m, _, _, _) -> module_alias m
+  | _ -> None
 
 let forwards_result e =
   match e.exp_desc with
@@ -3009,6 +3040,13 @@ and structure ctx s str =
               (fun () -> structure ctx s str)
           in
           export_module ctx id str s, None
+        | Tstr_module { mb_id = Some id; mb_expr; _ }
+          when Option.is_some (module_alias mb_expr) ->
+          (* The alias and its target are the same module at run time. *)
+          let target = Option.get (module_alias mb_expr) in
+          ctx.module_aliases
+            <- Path.Map.add (Path.Pident id) target ctx.module_aliases;
+          s, None
         | _ ->
           let state = ref s in
           let iterator = iterator ctx state in
@@ -3419,6 +3457,7 @@ let context ~poll ~prove ~verify_introductions =
     pref_constructors = Hashtbl.create 8;
     pref_observers = Hashtbl.create 8;
     free = Path.Map.empty;
+    module_aliases = Path.Map.empty;
     argument_values = Path.Map.empty;
     batches = [];
     named_terms = Hashtbl.create 32;
