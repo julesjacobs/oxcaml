@@ -5784,10 +5784,56 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                 raise(Error(first_arg_loc, env,
                             Function_type_not_rep(ty_arg, err)))
             in
+            let eliminated =
+              Option.is_none arg_opt && omittable
+              && List.mem_assoc Nolabel sargs
+            in
+            (* A supplied argument is checked against a type in which the
+               binders of omitted parameters would be unbound. *)
+            if eliminated || Option.is_some arg_opt then
+              List.iter
+                (function
+                  | (_, Omitted { binder = Some omitted; _ })
+                    when Ctype.refinement_ident_occurs omitted ty_arg ->
+                      let loc =
+                        match arg_opt with
+                        | Some (sarg, _, ~commuted:_) -> sarg.pexp_loc
+                        | None -> funct.exp_loc
+                      in
+                      raise
+                        (Error_forward
+                           (Location.errorf ~loc
+                              "The type of this argument mentions the \
+                               dependent parameter %a, which this \
+                               application omits"
+                              Style.inline_code (Ident.name omitted)))
+                  | _ -> ())
+                rev_args;
+            let option_constructor name args =
+              Rexp_construct
+                (Path.Pextra_ty (Predef.path_option, Path.Pcstr_ty name),
+                 args)
+            in
             let ty_ret, ty_ret0, logical_name =
               match binder, arg_opt with
               | None, _ -> ty_ret, ty_ret0, None
-              | Some binder, Some (sarg, _, ~commuted:_) ->
+              | Some binder, Some (sarg, l', ~commuted:_) ->
+                  (* [~lab:arg] for [?lab:(x : t)] gives [x] the value
+                     [Some arg]. *)
+                  let wrapped_in_some = optional && not (is_optional l') in
+                  let ty_arg_mono = tpoly_get_mono ty_arg in
+                  let ty_payload =
+                    if wrapped_in_some then extract_option_type env ty_arg_mono
+                    else ty_arg_mono
+                  in
+                  let wrap (argument : refinement_expression) =
+                    if not wrapped_in_some then argument
+                    else
+                      { argument with
+                        rexp_desc = option_constructor "Some" [argument];
+                        rexp_type = ty_arg_mono;
+                        rexp_type_constraint = false }
+                  in
                   let existing_path =
                     match sarg.pexp_desc with
                     | Pexp_ident lid
@@ -5805,13 +5851,14 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                   let stable = match existing_path with
                     | Some _ -> None
                     | None ->
-                        !stable_dependent_argument env sarg
-                          (tpoly_get_mono ty_arg)
+                        !stable_dependent_argument env sarg ty_payload
                   in
                   let path, logical_name = match existing_path, stable with
                     | _, Some _ -> Path.Pident binder, None
                     | Some path, None -> path, None
                     | None, None ->
+                        (* The logical name denotes the whole argument,
+                           including the [Some] of [wrapped_in_some]. *)
                         let id = Ident.create_local "*argument*" in
                         Ident.Tbl.replace argument_origins id
                           (Ident.name binder, sarg.pexp_loc);
@@ -5821,11 +5868,20 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                         Path.Pident id, Some id
                   in
                   let substitute binder ty =
-                    match stable with
-                    | Some argument ->
+                    match stable, existing_path with
+                    | Some argument, _ ->
                         Ctype.substitute_refinement_expression
-                          binder argument ty
-                    | None ->
+                          binder (wrap argument) ty
+                    | None, Some path when wrapped_in_some ->
+                        let argument =
+                          { rexp_desc = Rexp_ident path;
+                            rexp_type = ty_payload;
+                            rexp_type_constraint = false;
+                            rexp_loc = sarg.pexp_loc }
+                        in
+                        Ctype.substitute_refinement_expression
+                          binder (wrap argument) ty
+                    | None, _ ->
                         Subst.type_expr
                           (Subst.add_value binder path Subst.identity) ty
                   in
@@ -5839,6 +5895,27 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                     | None -> assert false
                   in
                   ty_ret, ty_ret0, logical_name
+              | Some binder, None when eliminated && optional ->
+                  (* An eliminated optional argument is [None]. *)
+                  let none =
+                    { rexp_desc = option_constructor "None" [];
+                      rexp_type = tpoly_get_mono ty_arg;
+                      rexp_type_constraint = false;
+                      rexp_loc = funct.exp_loc }
+                  in
+                  let ty_ret =
+                    Ctype.substitute_refinement_expression binder none ty_ret
+                  in
+                  let ty_ret0 =
+                    match binder0 with
+                    | Some binder0 ->
+                        Ctype.substitute_refinement_expression binder0
+                          { none with
+                            rexp_type = tpoly_get_mono ty_arg0 }
+                          ty_ret0
+                    | None -> assert false
+                  in
+                  ty_ret, ty_ret0, None
               | Some _, None -> ty_ret, ty_ret0, None
             in
             let arg =
@@ -5852,7 +5929,7 @@ let collect_apply_args env funct ignore_labels ty_fun ty_fun0 mode_fun sargs
                     { sarg; ty_arg; ty_arg0; commuted; sort_arg;
                       mode_fun; mode_arg; wrapped_in_some; logical_name })
               | None ->
-                if omittable && List.mem_assoc Nolabel sargs then begin
+                if eliminated then begin
                   may_warn funct.exp_loc (Warnings.Non_principal_labels
                                             "eliminated omittable argument");
                   Arg (Eliminated_optional_arg
@@ -11367,6 +11444,15 @@ and type_function
               ~contains_gadt:param_contains_gadt ->
               let opening =
                 match binder, pat.pat_desc with
+                | Some _, _ when Option.is_some default_arg ->
+                    (* The binder denotes the option the caller passed, which
+                       the defaulted parameter does not name. *)
+                    raise
+                      (Error_forward
+                         (Location.errorf ~loc:pparam_loc
+                            "An optional parameter with a default value \
+                             cannot be named by a dependent binder; take \
+                             the option and match on it instead"))
                 | Some binder, Tpat_var { id = parameter; _ } ->
                     Some { binder; parameter }
                 | Some _, _ ->
@@ -11527,12 +11613,19 @@ and type_function
         match expected_binder, !introduced_dependency with
         | (Some _ as binder), _ -> binder
         | None, Some (opening, closed_body_type) ->
-            if typed_arg_label <> Nolabel then
+            if is_position typed_arg_label then
               raise
                 (Error_forward
                    (Location.errorf ~loc:pparam_loc
-                       "Dependent binders are supported only on unlabelled \
+                       "Dependent binders are not supported on call-position \
                        parameters"));
+            if Option.is_some default_arg then
+              raise
+                (Error_forward
+                   (Location.errorf ~loc:pparam_loc
+                       "An optional parameter with a default value cannot be \
+                       named by a dependent binder; take the option and \
+                       match on it instead"));
             unify_exp_types loc env closed_body_type ty_ret;
             Some opening.binder
         | None, None -> None
@@ -12259,10 +12352,25 @@ and type_argument ?explanation ?recarg ?defer_primitive_mode ~overwrite env
       in
       let rec make_args args ty_fun =
         match get_desc (expand_head env ty_fun) with
-        | Tarrow ((l,_marg,_mret,_),ty_arg,ty_fun,_) when is_optional l ->
+        | Tarrow ((l,_marg,_mret,binder),ty_arg,ty_fun,_) when is_optional l ->
             let ty =
               type_option_none env (instance (tpoly_get_mono ty_arg))
                 sarg.pexp_loc
+            in
+            let ty_fun =
+              match binder with
+              | None -> ty_fun
+              | Some binder ->
+                  Ctype.substitute_refinement_expression binder
+                    { rexp_desc =
+                        Rexp_construct
+                          (Path.Pextra_ty
+                             (Predef.path_option, Path.Pcstr_ty "None"),
+                           []);
+                      rexp_type = tpoly_get_mono ty_arg;
+                      rexp_type_constraint = false;
+                      rexp_loc = sarg.pexp_loc }
+                    ty_fun
             in
             (* CR layouts v5: change value assumption below when we allow
                non-values in structures. *)
