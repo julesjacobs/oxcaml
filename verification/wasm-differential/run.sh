@@ -31,8 +31,11 @@ tests=$root/testsuite/tests/vox
 build=$root/_build/wasm-differential
 mkdir -p "$build"
 export VOX_VERIFY_CACHE=${VOX_VERIFY_CACHE-$root/_build/vox-verify-cache}
-# The modules, in dependency order, as listed in the test's header.
-modules=$(sed -n 's/^ *all_modules = "\(.*\)";/\1/p' "$tests/wasm_differential.ml")
+# The modules, in dependency order, as listed in the test's header, then the
+# test itself.
+prebuilt=$(sed -n 's/^ *prebuilt_modules = "\(.*\)";/\1/p' "$tests/wasm_differential.ml")
+[[ -n $prebuilt ]] || { echo "no prebuilt_modules in wasm_differential.ml" >&2; exit 2; }
+modules="$prebuilt wasm_differential.ml"
 cp "$root/verification/library/pref.ml" "$root/verification/library/pref.mli" "$build/"
 objects=()
 dirty=
