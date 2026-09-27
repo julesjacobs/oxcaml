@@ -145,6 +145,13 @@
     "hindley-milner",
     "constant-folding"
    ]
+  },
+  {
+   "id": "inductive-definitions",
+   "name": "Inductive definitions",
+   "future": true,
+   "summary": "Relations defined by inference rules, written as ordinary variants whose fields carry the premises as refinements. Today such relations are written by hand as a derivation datatype with a validity predicate; this needs fields whose refinements mention earlier fields.",
+   "demos": []
   }
  ],
  "census": {

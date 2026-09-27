@@ -96,7 +96,9 @@ def build(args):
         f'<span class="status status-{pages[d][0]["status"]}">{P.STATUS[pages[d][0]["status"]]}</span></h3>'
         f'<p>{P.inline(pages[d][0]["blurb"])}</p><p>{counts_line(stats[d], "")}</p></li>' for d in demos)
     mechanisms = ''.join(
-        f'<li><h3>{esc(m["name"])}</h3><p>{P.inline(m["summary"])}</p>'
+        f'<li><h3>{esc(m["name"])}'
+        + (' <span class="status status-future">Future</span>' if m.get('future') else '')
+        + f'</h3><p>{P.inline(m["summary"])}</p>'
         + (('<p class="related">Used in, for example: '
             + ', '.join(f'<a href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a>' for d in m['demos'] if d in pages)
             + '</p>') if any(d in pages for d in m['demos']) else '') + '</li>'
