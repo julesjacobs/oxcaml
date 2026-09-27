@@ -53,7 +53,7 @@ Nothing beyond the shared base.
 - `roundtrip_correct` returns its result `@ ghost`, so its proof is erased and never computes `power m (e * d)` at run time.
 - `modexp` branches on the bits of the exponent; the number of squarings is logarithmic in the exponent, but no running-time theorem is stated.
 - `@@ total` means termination in the checker's model; memory and time are not bounded.
-- One lemma, `prime_cancel` in `vox_rsa_number_theory.ml`, suppresses the slow-refinement warning: its proof uses about 16 million solver resource units, against a warning threshold of 1 million and a limit of 40 million.
+- One lemma, `prime_cancel` in `vox_rsa_number_theory.ml`, suppresses the slow-refinement warning: on macOS (arm64) its proof uses about 16 million solver resource units, against a warning threshold of 1 million and a limit of 40 million. Counts differ between platforms; on x86-64, `reduce_power` in `vox_rsa_arithmetic.ml` also passes the threshold (about 7 million).
 
 ## Reproduce
 
