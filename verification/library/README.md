@@ -22,7 +22,7 @@ its modules include the ownership primitives and derived collections.
 [`Vox_http`](vox_http.md) is an incremental HTTP/1.1 request parser with direct
 accepted-input soundness, roundtrip, chunking, accounting, and request-separation
 proofs. Its semantic module and sealed API define the human review surface.
-Run its streaming demo with `verification/demos/http_stream.sh`.
+`./dev test vox/http_stream_demo.ml` runs its streaming demo.
 
 [`Vox_sat`](vox_sat.md) is a bounded DPLL solver for in-memory CNFs. Its SAT
 and UNSAT guarantees are checked in Vox.
