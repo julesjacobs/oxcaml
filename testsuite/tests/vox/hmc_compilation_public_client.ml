@@ -115,3 +115,43 @@ let compile_identity : (configuration : M.layout) @ immutable -> (argument : W.t
         | C.Entry_type_mismatch -> C.no_entry_type rejection typing ()
         | _ -> ());
     out
+
+(* The identity applied to [w] returns [w] after 7 steps of the source machine. *)
+let (identity_steps @ total) : (w : W.t) @ immutable ->
+    {u : unit | M.source_returns (D.Lambda (D.Bound D.Z)) w
+      (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z))))))) w} @ ghost =
+  fun w -> ghost_ (
+    let module S = Hmc_source_semantics in
+    let module V = Hm_interpreter_typing in
+    let identity = D.Lambda (D.Bound D.Z) in
+    let s0 = S.initial (D.Apply (identity, D.Word w)) in
+    S.initial_def (D.Apply (identity, D.Word w));
+    let s1 = S.step s0 in S.step_def s0;
+    let s2 = S.step s1 in S.step_def s1;
+    let s3 = S.step s2 in S.step_def s2;
+    let s4 = S.step s3 in S.step_def s3;
+    let s5 = S.step s4 in S.step_def s4;
+    let s6 = S.step s5 in S.step_def s5; S.lookup_def (V.Bind (V.Word w, V.Empty)) D.Z;
+    let s7 = S.step s6 in S.step_def s6;
+    S.advance_def D.Z s7;
+    S.advance_def (D.S D.Z) s6;
+    S.advance_def (D.S (D.S D.Z)) s5;
+    S.advance_def (D.S (D.S (D.S D.Z))) s4;
+    S.advance_def (D.S (D.S (D.S (D.S D.Z)))) s3;
+    S.advance_def (D.S (D.S (D.S (D.S (D.S D.Z))))) s2;
+    S.advance_def (D.S (D.S (D.S (D.S (D.S (D.S D.Z)))))) s1;
+    S.advance_def (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z))))))) s0;
+    M.source_returns_def identity w (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z))))))) w)
+
+(* If the identity compiles and the layout meets [sufficient] for 7 source
+   steps, the module returns its input. *)
+let (identity_returns @ total) : (artifact : C.artifact) @ immutable ->
+    {u : unit | C.source artifact === D.Lambda (D.Bound D.Z)
+      && M.sufficient (C.layout artifact) (C.bytes artifact) (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z)))))))} ->
+    {out : M.execution | Wasm_binary_execution.run out.M.fuel (C.bytes artifact)
+        (Wasm_code.Succ (C.layout artifact).M.host_capacity)
+        === Wasm_binary_execution.Result (Wasm_calls.Finished out.M.after)
+      && M.returned out.M.after (C.input artifact)} @ immutable ghost =
+  fun artifact premise -> ghost_ (
+    identity_steps (C.input artifact);
+    C.normal artifact (C.input artifact) (D.S (D.S (D.S (D.S (D.S (D.S (D.S D.Z))))))) ())
