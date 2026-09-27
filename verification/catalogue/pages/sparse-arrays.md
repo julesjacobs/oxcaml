@@ -1,6 +1,6 @@
 title: Sparse array overlays
 blurb: A persistent array made of an immutable base and a list of overriding writes, with laws that give the value read at every index after any sequence of writes and clears.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/sparse_overlay.mli — Public interface
@@ -53,4 +53,4 @@ Reading index 0 of an overlay built on the empty array is a type error. `[: :]` 
 ./dev test vox/sparse_overlay_client.ml vox/collections_boundary.ml
 ```
 
-The test compiles `Vox_sequence`, `Vox_int_sequence`, `Vox_iarray`, the overlay and the client, and runs the client as bytecode and native code. `collections_boundary.ml` compiles the client against the public interfaces only, links and runs it with both compilers, requires the rejected programs (this one among them) to fail with their exact errors, and checks in the emitted Lambda that `empty`, `set`, `clear`, `lookup` and `get` call no law, no `find_remove` and nothing in `Vox_iarray`.
+The test compiles `Vox_sequence`, `Vox_int_sequence`, `Vox_iarray`, the overlay and the client, and runs the client as bytecode and native code. `collections_boundary.ml` compiles the client against the public interfaces only, links and runs it with both compilers, requires the rejected programs (this one among them) to fail with their exact errors, and checks in the emitted Lambda that the bodies of `empty`, `set`, `clear`, `lookup` and `get` call no `_def` equation and mention neither `find_remove` nor `Vox_iarray`. The check is textual and does not follow the helpers `get_raw` and `length_known` that `lookup` and `get` call; by inspection, they call no proof code either.

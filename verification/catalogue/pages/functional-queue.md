@@ -1,6 +1,6 @@
 title: Functional queue
 blurb: A persistent two-list queue proved to act on the list of its elements: `enqueue` appends, and `dequeue` of a nonempty queue returns the first element and the rest.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/functional_queue.mli — Public interface
@@ -22,7 +22,7 @@ From the client, which uses only the public interface. It enqueues two values in
 
 ## A rejected program
 
-Dequeuing from the empty queue is a type error. This client claims that `empty` is nonempty in order to pass it to `dequeue`.
+Dequeuing from the empty queue is a type error. This client passes `empty` to `dequeue`, and the checker cannot prove the precondition stated in the interface.
 
 @code testsuite/tests/vox/queue_rejected.ml "let () =" "  ()"
 
