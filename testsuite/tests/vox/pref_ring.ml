@@ -167,7 +167,7 @@ let read_link : (p : node option Pref.t) @ immutable ->
     {n : node | n === expected} @ immutable = fun p expected t ->
   let v = Pref.read p t in
   match v with
-  | None -> failwith "unlinked node"
+  | None -> unreachable_ ()
   | Some n -> n
 
 let (walk_view @ total) (backward : bool) (cursor : node @ immutable)
