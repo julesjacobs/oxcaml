@@ -7083,7 +7083,25 @@ let pat_modes ~force_toplevel rec_mode_var ~is_lpoly (attrs, spat) =
   let pat_mode, exp_mode =
     if force_toplevel then
       let mode = match rec_mode_var with
-        | None -> Value.legacy
+        | None
+          when not (Language_extension.is_enabled Refinement_types)
+               || (mode_annots_from_pat spat).mode_modes.totality
+                  <> Some Totality.Const.Total ->
+            Value.legacy
+        | None ->
+            (* The binding is annotated [total]. As in a compiled structure,
+               totality and the axes it implies are kept, so that later
+               phrases can use the value in predicates; the other axes stay
+               legacy. *)
+            let mode = Value.newvar () in
+            Value.submode_exn
+              (Value.of_const {Value.Const.legacy with
+                totality = Totality.Const.Total;
+                statefulness = Statefulness.Const.Stateless;
+                portability = Portability.Const.Portable})
+              mode;
+            Value.submode_exn mode Value.legacy;
+            mode
         | Some recursive_mode ->
             let mode = Value.newvar () in
             Value.submode_exn
