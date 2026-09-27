@@ -92,6 +92,13 @@ this file.
         "verified to be 1: 2"). Agent on
         `jujacobs/vox/totality-knot-20260927`: map every route, principled
         fix, Codex review.
+  - [ ] **Out-of-range shift counts (found 27 September):** one
+        uninterpreted function per shift operator equates results that
+        differ between constant-folded and run-time code; a verified program
+        returns false where true was proved, and segfaults through an
+        unchecked string read. Agent on `jujacobs/vox/shift-encoding-20260927`
+        (in-range count as an obligation; audit other unspecified
+        operators; platform in the cache key).
   - [ ] Compare refinement predicates with their types (subsumption
         stage 2; design in `research/subsumption-design-20260927`).
 - [ ] **2. Second review round** (brief:
