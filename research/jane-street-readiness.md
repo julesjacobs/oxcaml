@@ -336,6 +336,15 @@ this file.
       `read_write`: do not require `read_write` in erased predicates;
       (b3, cosmetic) refinement carriers print through the alias the
       predicate names.
+- [ ] **Trusted base hardening** (from the mastery audit; agent on
+      `jujacobs/vox/trust-hardening-20260927`): built-in meanings keyed by
+      declaration identity, not C primitive name (a user `external` naming
+      `caml_bigint_add` got addition semantics while native subtracted);
+      warning for refined/total externals and `trust_total` casts outside the
+      library; `-vox-audit` listing trusted items transitively; mark units
+      compiled with `-smt-assume-verified`; enforce the solver version; prove
+      the four heap laws extensionality now gives; shrink `trust_total`;
+      corrected `_trust.md` draft for owner review.
 - [ ] **14. Upstream OxCaml reports:** the owner wants to understand and be
       convinced first; an agent is reproducing both on upstream OxCaml
       (`research/upstream-bugs-20260927/REPORT.md`). Previously listed: the expect tool overwrites single
