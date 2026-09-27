@@ -209,3 +209,33 @@ let runtime = bit 5, low_byte 0x1234 1, Named.left 3 2, Named.right (-8) 1,
 [%%expect{|
 val runtime : int * int * int * int * int * int = (32, 18, 12, -4, 1, 1024)
 |}]
+
+(* A total, stateless function is a function of its arguments even in a unit
+   that is never verified, so a shift may be declared total only with its
+   count refined to [0, 63]. *)
+external shift : int -> int -> int @@ total = "%lslint";;
+[%%expect{|
+Line 1, characters 0-55:
+1 | external shift : int -> int -> int @@ total = "%lslint";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: A shift declared total must refine its count to [0, 63], as in Int.Refined: {n : int | 0 <= n && n <= 63}. OCaml leaves other counts unspecified, and their results differ between evaluations.
+|}]
+
+external shift : int -> {n : int | n <= 63} -> int @@ total = "%lslint";;
+[%%expect{|
+Line 1, characters 0-71:
+1 | external shift : int -> {n : int | n <= 63} -> int @@ total = "%lslint";;
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: A shift declared total must refine its count to [0, 63], as in Int.Refined: {n : int | 0 <= n && n <= 63}. OCaml leaves other counts unspecified, and their results differ between evaluations.
+|}]
+
+external shift : int -> {n : int | 0 <= n && n < 64} -> int @@ total
+  = "%lslint";;
+[%%expect{|
+external shift : int -> {n : int | (0 <= n) && (n < 64)} -> int = "%lslint"
+|}]
+
+external shift : int -> int -> int = "%lslint";;
+[%%expect{|
+external shift : int -> int -> int = "%lslint"
+|}]

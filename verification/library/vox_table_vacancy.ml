@@ -56,7 +56,8 @@ module Make (Key : Vox_table_map.Key)
       (query : Key.t) -> (value : 'a) @ ghost ->
       (capacity : {c : int | c = view.model.capacity}) ->
       (hash : {h : int | h = Key.hash query}) ->
-      (rank : {r : int | 0 <= r && r <= (W.lsr4 view.model.capacity)}) @ ghost ->
+      (rank : {r : int | 0 <= r && r <= W.lsr4 view.model.capacity})
+        @ ghost ->
       (group : int) -> (step : int) ->
       (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
         table) === Some
