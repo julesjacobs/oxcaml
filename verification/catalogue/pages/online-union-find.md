@@ -1,6 +1,6 @@
 title: Online union–find
 blurb: Union by rank with path compression, proved to maintain a partition; each operation's contract states the steps it is charged for, and their total under a hand-placed cost model is proved to stay within inverse-Ackermann amortized fees.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - verification/library/vox_connectivity.mli — Public interface
@@ -32,15 +32,15 @@ From the public client. `funded` pairs a state with a ghost wallet of credits. T
 
 @code testsuite/tests/vox/connectivity.ml "let find : (x : U.elem) @ immutable ->" "let r = #{value; owned} in r"
 
-After five insertions, four unions and two finds, the client proves:
-
-@code testsuite/tests/vox/connectivity.ml "let proof : {u : unit | root0 === root3 &&" "U.ticks owned.#state <= initial} = () in"
-
-`initial` is the 1,000 credits the client minted. A third find, of the root `root0` returned by the first, is allowed because `root_law` shows that `root0` is a member; it returns `root0` and costs exactly 2 ticks, because a root has depth 0. From the events the client then proves the run's exact cost. `work6` to `work9` are the links followed by each union's two finds and `work10` and `work11` those of the first two finds, named before each call; `U.depth_law` makes each nonnegative.
+After five insertions, four unions and two finds, of `x0` and of `x3`, the client calls `find` on `root0`, the root returned by the first find. This is allowed because `root_law` shows that `root0` is a member; the find returns `root0` and costs exactly 2 ticks, because a root has depth 0. From the events the client then proves the run's exact cost. `work6` to `work9` are the links followed by each union's two finds and `work10` and `work11` those of the first two finds, named before each call; `U.depth_law` makes each nonnegative.
 
 @code testsuite/tests/vox/connectivity.ml "(* The whole run:" "work >= 0Z} = () in"
 
-It then sums the fees over the recorded accounts to prove that 70 + 4·`work` is at most 1 + 11·5 + 44·3 + 132·4 = 716, so all the finds together follow at most 161 parent links. It uses a = 8, which is what `Vox_ackermann.inverse`'s contract allows for N = 8, rather than a = 3.
+It then proves:
+
+@code testsuite/tests/vox/connectivity.ml "let proof : {u : unit | root0 === root3 &&" "U.ticks owned.#state <= initial} = () in"
+
+`initial` is the 1,000 credits the client minted. Last, it sums the fees over the recorded accounts to prove that 70 + 4·`work` is at most 1 + 11·5 + 44·3 + 132·4 = 716, so all the finds together, including the two inside each union, follow at most 161 parent links. For these fees it bounds a by 8, using the conjunct `k <= capacity` of `Vox_ackermann.inverse`'s contract with N = 8. The rest of that contract determines a = 3, but the client does not unfold `iter` and `below` to show it.
 
 ## A rejected program
 
@@ -48,7 +48,7 @@ Paying 10 credits for `make_set`, which requires exactly 11, is a type error. Th
 
 @code testsuite/tests/vox/connectivity_rejected.ml "module Underpay_insertion = struct" "Error: Refinement could not be proved"
 
-The same test rejects ten more programs against the public interface: paying 12 credits, using a state after `find` consumed it, reading the hidden savings field, asserting without proof that an element is a member, inserting into a state of `max_int` elements, reaching the hidden `contents`, asserting a `found` transition without calling `find`, a find that returns its state unchanged while claiming the event a find records, a wrapper around `find` that claims every find costs 2 ticks, and splitting 11 credits from a wallet of 10.
+The same test rejects ten more programs against the public interface: paying 12 credits, using a state after `find` consumed it, naming the online layer's `savings` field (not in scope here), asserting without proof that an element is a member, inserting into a state of `max_int` elements, reaching the hidden `contents`, asserting a `found` transition without calling `find`, a find that returns its state unchanged while claiming the event a find records, a wrapper around `find` that claims every find costs 2 ticks, and splitting 11 credits from a wallet of 10.
 
 ## Interface
 
@@ -80,7 +80,7 @@ Credits (`Vox_big_credits.S`) are ghost tokens with a nonnegative count. `split`
 - `make_set` requires fewer than `max_int` elements. The ghost capacity doubles as elements are added, so there is no fixed population limit below that.
 - Payments are exact: overpaying is rejected as well as underpaying. Credits are ghost and erased.
 - `depth` is abstract beyond being nonnegative and 0 exactly at a root (see above), so the interface fixes which events each operation records but not how many links a find follows.
-- `link` ends in `| _ -> assert false` for a case its precondition excludes; this is a run-time assertion, not a checked `unreachable_`. `Vox_union_find_online.create` checks `max_int >= 1` at run time and raises `Invalid_argument` otherwise, because `max_int` carries no refinement.
+- `Vox_union_find_online.create` checks `max_int >= 1` at run time and raises `Invalid_argument` otherwise, because `max_int` carries no refinement.
 - Only normal return is specified. An exception such as `Out_of_memory` during allocation loses the state.
 - The tests run in bytecode only.
 
