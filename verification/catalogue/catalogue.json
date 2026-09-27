@@ -363,7 +363,6 @@
   "sat-solver": {
    "roots": [
     "vox_sat",
-    "vox_cdcl",
     "vox_cdcl_total"
    ],
    "owned": [

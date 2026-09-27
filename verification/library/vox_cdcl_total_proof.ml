@@ -4569,52 +4569,6 @@ let (solve_complete @ total) : (n : int) -> (formula : formula) ->
     Invalid_formula)
   else Ok (start_search None n formula)
 
-let (solve_with_fallback @ total) :
-    (fuel : int) -> (depth_fuel : int) -> (n : int) -> (formula : formula) ->
-    {r : (report, input_error) result |
-      match r with
-      | Error Invalid_fuel -> fuel < 0 || depth_fuel < 0
-      | Error (Invalid_input Unsupported_variable_count) ->
-        0 <= fuel && 0 <= depth_fuel && (n < 0 || n > 256)
-      | Error (Invalid_input Too_many_clauses) ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && not (clauses_fit 4096 formula)
-      | Error (Invalid_input Too_many_literals) ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && clauses_fit 4096 formula
-        && not (literals_fit 65536 formula)
-      | Error (Invalid_input Invalid_formula) ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && clauses_fit 4096 formula
-        && literals_fit 65536 formula && not (valid_formula n formula)
-      | Ok report ->
-        0 <= fuel && 0 <= depth_fuel && 0 <= n && n <= 256
-        && clauses_fit 4096 formula
-        && literals_fit 65536 formula && valid_formula n formula
-        && match report.answer with
-        | Sat assignment -> check n formula assignment
-        | Unsat entry ->
-          derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause
-          && entry.clause === []
-        | Unknown -> depth_fuel <= n && report.statistics.steps = fuel} =
-  fun fuel depth_fuel n formula ->
-  if depth_fuel < 0 then Error Invalid_fuel
-  else match solve fuel n formula with
-  | Error error -> Error error
-  | Ok report ->
-    match report.answer with
-    | Sat _ | Unsat _ -> Ok report
-    | Unknown ->
-      match Vox_sat_proof.decide_depth depth_fuel n formula with
-      | Vox_sat_proof.Sat assignment ->
-        ghost_ (check_def n formula assignment);
-        Ok {report with answer = Sat assignment}
-      | Vox_sat_proof.Unsat ->
-        let proof = exhaustive_result n formula in
-        Ok {report with answer = Unsat proof}
-      | Vox_sat_proof.Unknown -> Ok report
-
 let (unsat_at @ total) :
     (formula : formula) ->
     (report : {r : report |

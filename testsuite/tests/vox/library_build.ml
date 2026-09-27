@@ -7,8 +7,7 @@
  readonly_files += " vox_iarray.ml vox_string_view.mli vox_string_view.ml";
  readonly_files += " vox_sat_spec.mli vox_sat_spec.ml vox_sat_proof.mli";
  readonly_files += " vox_sat_proof.ml vox_sat.mli vox_sat.ml";
- readonly_files += " vox_cdcl_proof.mli vox_cdcl_proof.ml vox_cdcl.mli";
- readonly_files += " vox_cdcl.ml vox_cdcl_total_proof.mli";
+ readonly_files += " vox_cdcl_total_proof.mli";
  readonly_files += " vox_cdcl_total_proof.ml vox_cdcl_total.mli";
  readonly_files += " vox_cdcl_total.ml vox_credits.mli vox_credits.ml";
  readonly_files += " vox_ordered_sequence.ml vox_merge_proofs.ml";
@@ -92,8 +91,6 @@
    all_modules += " vox_iarray.ml vox_string_view.mli vox_string_view.ml";
    all_modules += " vox_sat_spec.mli vox_sat_spec.ml vox_sat_proof.mli";
    all_modules += " vox_sat_proof.ml vox_sat.mli vox_sat.ml";
-   all_modules += " vox_cdcl_proof.mli vox_cdcl_proof.ml vox_cdcl.mli";
-   all_modules += " vox_cdcl.ml";
    ocamlc.opt;
    flags = "-extension refinement_types";
    all_modules = "vox_cdcl_total_proof.mli vox_cdcl_total_proof.ml";
@@ -203,8 +200,6 @@
    flags = "-extension refinement_types -principal -smt-assume-verified";
    all_modules = "vox_sat_spec.mli vox_sat_spec.ml vox_sat_proof.mli";
    all_modules += " vox_sat_proof.ml vox_sat.mli vox_sat.ml";
-   all_modules += " vox_cdcl_proof.mli vox_cdcl_proof.ml vox_cdcl.mli";
-   all_modules += " vox_cdcl.ml";
    ocamlopt.opt;
    flags = "-extension refinement_types -smt-assume-verified";
    all_modules = "vox_cdcl_total_proof.mli vox_cdcl_total_proof.ml";

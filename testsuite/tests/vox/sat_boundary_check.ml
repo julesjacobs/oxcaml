@@ -17,7 +17,7 @@ let () =
         (unit ^ " names no proof function");
       check (applications lambda = calls)
         (Printf.sprintf "%s makes %d calls" unit calls))
-    [ "vox_sat", 1; "vox_cdcl", 1; "vox_cdcl_total", 6 ];
+    [ "vox_sat", 0; "vox_cdcl_total", 4 ];
   if Array.length Sys.argv > 2 then begin
     let obj = read Sys.argv.(2) in
     let measures =

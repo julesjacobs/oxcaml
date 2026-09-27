@@ -8,7 +8,7 @@ output="$root/_build/vox-library"
 destination="$prefix/lib/ocaml/vox"
 modules=(vox_sequence vox_http_spec vox_http vox_int_sequence vox_iarray vox_string_view
          vox_sat_spec vox_sat_proof vox_sat
-         vox_cdcl_proof vox_cdcl vox_cdcl_total_proof vox_cdcl_total
+         vox_cdcl_total_proof vox_cdcl_total
          vox_credits vox_ordered_sequence vox_merge_proofs vox_sort_cost
          vox_merge_sort vox_lz4_model borrow borrow_iarray
          pref vox_pref_semantics ghost_pref vox_big_credits vox_ackermann
@@ -132,7 +132,7 @@ make -s -f build.mk -j "${VOX_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN)}"
 mkdir -p "$destination"
 for module in "${modules[@]}"; do
   case "$module" in
-    vox_sat_proof | vox_cdcl_proof | vox_cdcl_total_proof) continue ;;
+    vox_sat_proof | vox_cdcl_total_proof) continue ;;
   esac
   cp "$module".{cmi,cmx} "$destination/"
   if [[ -f "$module.mli" ]]; then

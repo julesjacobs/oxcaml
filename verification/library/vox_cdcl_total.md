@@ -1,8 +1,8 @@
 # Complete and bounded CDCL
 
 `Vox_cdcl_total.solve_complete n formula` is a total CDCL solver. For every
-accepted input it returns `Sat` or `Unsat`, with no caller-supplied budget and
-no DPLL fallback. `Sat` carries an assignment proved to satisfy the formula;
+accepted input it returns `Sat` or `Unsat`, with no caller-supplied budget.
+`Sat` carries an assignment proved to satisfy the formula;
 nullary `Unsat` proves `Vox_sat_spec.unsatisfiable n formula`.
 
 Accepted inputs have 0–256 variables, at most 4,096 clauses, and at most
@@ -52,11 +52,11 @@ level; valid, unique trail literals give a bound of 512 over the entire input
 domain. Level increments therefore cannot overflow. Statistics use machine
 integers and do not control complete search or its termination proof.
 
-Both CDCL implementations scan clauses for propagation. They have no watched
+The solver scans clauses for propagation. They have no watched
 literals, restarts, or clause deletion. Persistent binding access and updates
 use lists; variable occurrence scores are computed once per solve.
 
-## Other entrypoints
+## Bounded search
 
 `solve fuel n formula` runs the same CDCL search with a nonnegative budget.
 It may return `Unknown`; that result proves `statistics.steps = fuel`.
@@ -64,19 +64,13 @@ The budget counts search steps, including their propagation and analysis,
 and does not count individual operations. Its public contract supplies no
 sufficient machine-integer fuel bound or fuel-monotonicity theorem.
 
-`solve_with_fallback fuel depth_fuel n formula` retains its separate behavior:
-a bounded CDCL attempt followed, on `Unknown`, by persistent DPLL. For accepted
-inputs and nonnegative CDCL fuel, `depth_fuel >= n + 1` guarantees a decision.
-Its statistics describe only the CDCL attempt. This guarantee remains distinct
-from the complete CDCL entrypoint.
-
 ## Checks and review surface
 
 `./dev test vox/sat_cdcl_total.ml` checks totality and arbitrary-input public
 completeness, truth-table agreement, learning, backjumping, duplicate-unit
-propagation, input-error precedence, bounded/fallback statistics, and the
-256-variable boundary. The bounded-budget and fallback-depth rejection tests
-retain their original scopes.
+propagation, input-error precedence, bounded statistics, and the
+256-variable boundary. The bounded-budget rejection test retains its original
+scope.
 
 `./dev test vox/sat_boundary.ml` derives semantic SAT and UNSAT results and
 complete-CDCL decisions using only the public interfaces, and checks public
@@ -84,6 +78,6 @@ bytecode/native Lambda and private native symbols for surviving proof
 computations.
 
 See [the review boundary](vox_sat_boundary.md) for the exact semantic interface
-closure and shared language trust assumptions. The benchmark driver remains
-`verification/benchmarks/vox_cdcl_compare.ml`; it must use the compiler produced
-by `make install`.
+closure and shared language trust assumptions. The benchmark driver
+`verification/benchmarks/vox_cdcl_compare.ml` times `solve` and
+`solve_complete`; it must use the compiler produced by `make install`.
