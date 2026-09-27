@@ -139,6 +139,19 @@ let prebuilt_implementations env =
       else None)
     (prebuilt_modules env)
 
+(* ./dev builds the library while the first tests run; the marker file holds
+   the build's process id while it runs. *)
+let wait_for_prebuilt_library root =
+  let marker = Filename.concat root ".building" in
+  let building () =
+    match String.trim (Sys.string_of_file marker) with
+    | exception Sys_error _ -> false
+    | pid ->
+        pid <> "" && String.for_all (fun c -> c >= '0' && c <= '9') pid
+        && Sys.command ("kill -0 " ^ pid ^ " 2>/dev/null") = 0
+  in
+  while building () do ignore (Sys.command "sleep 1") done
+
 (* The build directory gets its own view of the prebuilt library, holding
    exactly the modules that the test lists. Native compilers use the
    library's native tree. *)
@@ -179,6 +192,7 @@ let setup_prebuilt_view ~native env =
   match prebuilt_modules env with
   | [] -> None
   | modules ->
+      wait_for_prebuilt_library root;
       Sys.rm_rf view;
       Sys.make_directory view;
       List.find_map link_module modules

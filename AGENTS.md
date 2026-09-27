@@ -76,10 +76,11 @@ test library instead of compiling them. A header lists them in
 and the test links exactly those modules; `all_modules` then holds only the
 test's own file and anything that must be compiled with it. `./dev test`,
 `make test-one` and `make test` build the modules the selected tests list
-into `_build/vox-test-library` first, with `testsuite/vox-test-library.sh`:
-in parallel, with the test compilers, verifying each module with `ocamlc`.
-It rebuilds only what changed, and everything after a compiler change. Any
-compiler output while building the library fails the run.
+into `_build/vox-test-library` with `testsuite/vox-test-library.sh`: in
+parallel, with the test compilers, verifying each module. It rebuilds only
+what changed, and everything after a compiler change. Any compiler output
+while building the library fails the run. `./dev test` builds it while the
+tests that do not use it run.
 
 To test only what a change can affect, pass a base revision instead of
 paths:
