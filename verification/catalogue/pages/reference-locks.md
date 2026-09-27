@@ -1,6 +1,6 @@
 title: Reference and unique-payload locks
 blurb: Two spin locks whose acquire and release are checked to hand out and take back exactly the ownership of the guarded cell; one guards a nonnegative integer, the other a unique payload.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - verification/library/reference_lock.mli — Lock over a nonnegative integer: interface
@@ -18,10 +18,11 @@ sources:
   - testsuite/tests/vox/reference_lock_parallel.ml — Four domains incrementing the reference lock
   - testsuite/tests/vox/unique_lock_parallel.ml — Four domains incrementing the unique lock
   - testsuite/tests/vox/concurrency_boundary.ml — Public-only compile, rejections (including the one shown below) and erasure check
+  - testsuite/tests/vox/concurrency_boundary_check.ml — The erasure check's list of ghost primitives
 ---
 `Reference_lock` and `Unique_lock.Make` are spin locks built on one atomic flag: `try_acquire` makes one compare-and-set from 0 to 1, and `release` one from 1 back to 0. Both are instances of one functor, `Spin_lock.Make`, which proves the protocol once for any cell with a ghost location and a predicate saying when its payload is full. Holding the lock means holding a ghost permission, erased at run time, for the cell the lock guards. The interfaces prove that a successful `try_acquire` returns a permission that owns exactly that cell and nothing else, that a failed one returns a permission that owns nothing, and that `release` requires and consumes exactly such a permission. The proof also shows that the flag is 1 when `release`'s compare-and-set runs, so that step always succeeds. For `Reference_lock` the cell holds an integer that must be nonnegative whenever the lock is released; `read_owned` returns it. For `Unique_lock` the cell holds a unique payload: `take` moves it out and `put` moves one back, and `release` requires the cell to be full again.
 
-Nothing is proved about the sequence of events: no mutual-exclusion theorem over executions, no linearizability, deadlock freedom, progress or fairness. Exclusion follows only from the ownership model, under which two live permissions never own the same cell. `make` records no relation between its argument and what a later holder observes, and `Reference_lock.try_increment` has no contract at all. Contracts describe normal return: a holder that raises or drops its permission leaves the lock held forever. The concurrency argument is not mechanized. It rests on the `Verified_atomic` and `Unique_cell` contracts listed on the shared page and on the assumptions under Trusted base.
+Nothing is proved about the sequence of events: no mutual-exclusion theorem over executions, no linearizability, deadlock freedom, progress or fairness. Exclusion follows only from the ownership model, under which two live permissions never own the same cell. `make` records no relation between its argument and what a later holder observes, and `Reference_lock.try_increment` has no contract at all. The interfaces alone admit trivial locks: a `try_acquire` that always fails with an empty permission, or a `release` that discards the permission without resetting the flag, meets them. That `release` resets the flag is proved only inside `Spin_lock.Make`, against the flag's invariant, and is not exported. Contracts describe normal return: a holder that raises or drops its permission leaves the lock held forever. The concurrency argument is not mechanized. It rests on the `Verified_atomic` and `Unique_cell` contracts listed on the shared page and on the assumptions under Trusted base.
 
 ## Client example
 
@@ -39,7 +40,7 @@ The test `concurrency_boundary.ml` checks it against the public `.cmi` files, wi
 
 @code testsuite/tests/vox/concurrency_boundary.ml "(* unique-release-empty *)" "|}]"
 
-The same test requires ten more rejected lock programs to fail, each with its exact error: releasing with an empty permission or with another lock's permission, reading with a permission that `release` has consumed, reading after a failed acquire, claiming a negative value, taking with an empty permission, taking twice with one permission, passing one payload to `make` twice, and reaching the hidden atomic of either lock.
+The same test requires ten more rejected lock programs to fail, each with its exact error: releasing with an empty permission or with another lock's permission, reading with a permission that `release` has consumed, reading after a failed acquire, claiming a negative value, taking with an empty permission, taking twice with one permission, passing one payload to `make` twice, and reaching the atomic of either lock through its hidden `Spin_lock.Make` instance.
 
 ## Interface
 
@@ -49,13 +50,13 @@ The same test requires ten more rejected lock programs to fail, each with its ex
 
 `Unique_cell.Payload` supplies the payload type `V.t`, which must be `value mod portable contended` (shareable between domains without a lock), and a ghost `snapshot` of it. A permission gives the cell the contents `Some m` while it holds a payload with snapshot `m`, and `None` after `take`; `Ghost_pref.Heap.at` wraps these in one more `Some`. `Ghost_pref.Heap.put h p x` is `h` with location `p` set to `x`, and `===` is logical equality. `@ unique ghost` marks a permission that is consumed and erased.
 
+Each lock takes `try_acquire` and `release` from its `Spin_lock.Make` instance through a wrapper that restates their contracts, because signature matching compares refinements syntactically and the instance's contracts say `L.owned` where the interface says `owned`. The wrappers are checked like the rest of the code.
+
 ## Trusted base
 
-- `Unique_cell.Make`'s `create`, `take`, `put` and `replace` are C externals (`caml_unique_cell_*` in `runtime/pref.c`), although `unique_cell.mli` declares them with `val` and gives `Make` no comment saying so.
-- `Ghost_pref.alloc`, which `Reference_lock.make` uses to allocate the integer cell, is an external (`caml_pref_alloc_step`), although `ghost_pref.mli` declares it with `val`.
 - The guarded cell is read and written with ordinary, non-atomic accesses. The proof assumes that the sequentially consistent compare-and-set on the flag orders them between domains, as `concurrency-boundary.md` states. This is not derived from a memory model.
 - The buffer client relies on `Raw_memory`'s externals (`malloc`, `read`, `write`, `free` and others, in `runtime/pref.c`) and on its `location_law` axiom.
-- The multi-domain tests and `concurrency_boundary.ml` disable the `do_not_spawn_domains` alert.
+- `atomic_lock.ml`, the multi-domain tests and `concurrency_boundary.ml` disable the `do_not_spawn_domains` alert, which warns that more domains than cores slow the GC; it is not a safety check.
 
 ## Scope
 

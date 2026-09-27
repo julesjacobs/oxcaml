@@ -1,6 +1,6 @@
 title: DFA equivalence and minimization
 blurb: Language equivalence of two DFA tables, with an erased counterexample word, and minimization of tables of at most 64 rows, proved to preserve the language and to give the fewest states.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/dfa_semantics.ml — DFA tables, `run`, validity and sizes
@@ -10,6 +10,7 @@ sources:
   - testsuite/tests/vox/dfa_public_client.ml — Client using only the public interface
   - testsuite/tests/vox/dfa_equivalence.ml — Test that checks the proofs and runs examples
   - testsuite/tests/vox/dfa_boundary.ml — The only compile of the public interface and client, and the erasure check
+  - testsuite/tests/vox/dfa_boundary_check.ml — The erasure check's list of certificate-building functions
 ---
 `Dfa_equivalence` compares two deterministic automata and minimizes one. A machine is a plain table: an initial state id and a list of rows, each with a state id, an accepting bit, a list of `(letter, target)` edges and a default target for every other letter. Letters and state ids are `int`s. `Dfa_semantics.run m w` follows the table from the initial state over the word `w` and returns the accepting bit of the last state.
 
@@ -17,7 +18,7 @@ sources:
 
 `reduce source limit` returns a machine or `None`. If it returns `Some c`, then `c` gives the same answer as `source` on every word, and `c` has no more rows than any valid machine that gives the same answers as `source`. `reduce` returns `Some` of a valid machine when `source` is valid, no row has more than 64 edges, and `source` has at most `limit` rows with `0 < limit <= 64`.
 
-`reduce`'s cap counts table rows, reachable or not: it returns `None` for any table of more than 64 rows, including one whose other rows are unreachable. `compare`'s `limit` bounds the number of state pairs it visits; the product of row counts is only the condition under which an answer is guaranteed. The interface states that a `Some` result of `reduce` is `valid` only under the premises above, although the implementation proves it for every `Some`. The result of `reduce` can also fall outside those premises: each of its rows has an edge for every letter used by the reachable part of the source, so two states with 33 different letters each reduce to rows of 66 edges, and `compare` of that result with itself returns `Comparison_limit`. Running time and memory are not proved.
+`reduce`'s cap counts table rows, reachable or not: it returns `None` for any table of more than 64 rows, including one whose other rows are unreachable, and for any table with a row of more than 64 edges, reachable or not. `compare`'s `limit` bounds the number of state pairs it visits; the product of row counts is only the condition under which an answer is guaranteed. The interface states that a `Some` result of `reduce` is `valid` only under the premises above, although the implementation proves it for every `Some`. The result of `reduce` can also fall outside those premises: each of its rows has an edge for every letter used by the reachable part of the source, so two states with 33 different letters each reduce to rows of 66 edges, and `compare` of that result with itself returns `Comparison_limit`. Running time and memory are not proved.
 
 ## Client example
 
@@ -39,7 +40,9 @@ Claiming that any two machines agree on a word is a type error. The test `dfa_bo
 
 @code testsuite/tests/vox/dfa_semantics.ml
 
-`let[@def]` defines a total function that refinements may mention, together with a lemma stating its defining equation. A missing state reads as a non-accepting row whose letters all lead to state 0; `valid` rules this out by requiring that the initial state and every target and default exist, and that state ids and the letters of each row are unique. `labels_bounded` requires at most 64 edges per row, counted by `list_size`, whose count saturates at 129. `state_size` is the number of rows. `has_state` is not used by the public contracts.
+`let[@def]` defines a total function that refinements may mention, together with a lemma stating its defining equation. A missing state reads as a non-accepting row whose letters all lead to state 0; `valid` rules this out by requiring that the initial state and every target and default exist, and that state ids and the letters of each row are unique. On a valid table, `labels_bounded` requires at most 64 edges per row, counted by `list_size`, whose count saturates at 129. `state_size` is the number of rows. `has_state` is not used by the public contracts.
+
+The proofs are in `dfa_equivalence_proof.ml`, and `dfa_equivalence_core.ml` restates them against the interface. `compare` runs one search over pairs of states. Along with its answer it builds, in erased code, either a relation that contains the pair of initial states and is closed under steps (related states agree on acceptance, and their successors on every letter are related), which gives `compare_equal`, or a word on which the two machines differ, which gives `comparison_witness`. `reduce` collects the reachable states, refines a partition of them until it is stable, and builds the quotient table. Its proofs use an erased certificate: such a closed relation between the source and the result, a word reaching each state of the result, and a word separating each pair of its states. The separating words come from the same pair search, run in erased code on two states of the source. `reduce_minimum` follows: in a machine with the same language, the words reaching two distinct states of the result must reach states that the separating word tells apart, so that machine has at least as many rows.
 
 ## Trusted base
 
@@ -62,4 +65,4 @@ After `make install` and `./dev init`, from the repository root:
 ./dev test vox/dfa_equivalence.ml vox/dfa_boundary.ml
 ```
 
-The test checks the implementation and its proofs and runs comparison and minimization examples with exact and insufficient limits and default edges, and checks hand-written reduction certificates with `Dfa_proof.check_reduction`. `dfa_boundary.ml` compiles all DFA and regex modules with both compilers, the public interfaces with `-opaque`, compiles `dfa_public_client.ml` against the public DFA interface only, links and runs it, and requires four programs to fail with their exact errors: this one and three that name hidden functions or modules. It also follows the named calls in the `-drawlambda` output to check that `compare` and `reduce` do not reach a fixed list of certificate-building functions, and checks that the public proof functions make no calls.
+The test checks the implementation and its proofs and runs comparison and minimization examples with exact and insufficient limits and default edges, and checks hand-written reduction certificates with `Dfa_proof.check_reduction`. `dfa_boundary.ml` compiles all DFA and regex modules with `-opaque` with both compilers, compiles `dfa_public_client.ml` against the public DFA interface only, links and runs it, and requires five programs to fail with their exact errors: this one, three that name hidden functions or modules, and one from the regex demo. It also follows the named calls in the `-drawlambda` output to check that `compare` and `reduce` do not reach a fixed list of certificate-building functions, and checks that the public proof functions make no calls.
