@@ -60,7 +60,7 @@ module Client :
 module Model = struct
   type ('a : immutable_data) t =
     { storage : 'a array;
-      contents : 'a list @@ ghost }
+      contents : 'a list @@ ghost global }
 
   let[@def] (contents @ total) (value @ local immutable) =
     value.contents
@@ -74,7 +74,7 @@ module Model :
   sig
     type ('a : immutable_data) t = {
       storage : 'a array;
-      contents : 'a list @@ ghost;
+      contents : 'a list @@ ghost global;
     }
     val contents :
       ('a : immutable_data). 'a t @ local immutable -> 'a list @ ghost
@@ -89,7 +89,7 @@ module Model :
   sig
     type ('a : immutable_data) t = {
       storage : 'a array;
-      contents : 'a list @@ ghost;
+      contents : 'a list @@ ghost global;
     }
     val contents :
       ('a : immutable_data).

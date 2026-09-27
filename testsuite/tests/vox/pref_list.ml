@@ -46,7 +46,7 @@ type result = { pointer : node option @@ aliased; state : node option Pref.token
 
 type built = {
   pointer : node option @@ aliased;
-  model : model @@ aliased ghost;
+  model : model @@ global ghost;
   state : node option Pref.token;
 }
 

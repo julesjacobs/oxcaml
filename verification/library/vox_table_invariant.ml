@@ -6,9 +6,9 @@ module Make (Key : Vox_table_map.Key) = struct
   module Map = Vox_table_map.Make (Key)
 
   type ('a : immutable_data) view = {
-    model : (Key.t, 'a) M.state @@ ghost;
-    routes : (int * int) list @@ ghost;
-    plan : Vox_table_probe.plan @@ ghost;
+    model : (Key.t, 'a) M.state @@ ghost global;
+    routes : (int * int) list @@ ghost global;
+    plan : Vox_table_probe.plan @@ ghost global;
   }
 
   let[@def] (wrap @ total) (capacity : int) (index : int) =

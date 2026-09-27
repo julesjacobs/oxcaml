@@ -1166,6 +1166,15 @@ module Jkind0 = struct
            modal-kinds setup to allow for more mode-crossing in the presence of
            non-constant non-identity modalities. *)
         | Nonmodal Externality -> true)
+
+    (* A ghost field has no slot, so its type does not bear on whether the
+       record needs scanning (externality); it bears on every modal axis,
+       because a ghost-field read takes the record's mode. *)
+    let relevant_axes_of_field ?(ghost = false) ~modality () =
+      let axes = relevant_axes_of_modality ~modality in
+      if ghost
+      then Jkind_axis.Axis_set.remove axes (Nonmodal Externality)
+      else axes
   end
 
   module Quality = struct
@@ -1245,10 +1254,10 @@ module Jkind0 = struct
           | Some ti -> Some (With_bounds_type_info.join ti type_info))
         tys
 
-    let add_modality ~modality ~type_expr
+    let add_modality ?ghost ~modality ~type_expr
         (t : (allowed * 'r) t) : (allowed * 'r) t =
       let relevant_axes =
-        Mod_bounds.relevant_axes_of_modality ~modality
+        Mod_bounds.relevant_axes_of_field ?ghost ~modality ()
       in
       match t with
       | No_with_bounds ->
@@ -1972,7 +1981,7 @@ module Jkind0 = struct
 
     let map_type_expr f t = Base_and_axes.map_type_expr f t
 
-    let add_with_bounds ~type_expr ~modality t =
+    let add_with_bounds ?ghost ~type_expr ~modality t =
       match get_desc type_expr with
       | Tarrow (_, _, _, _) ->
         (* Optimization: all arrow types have the same (with-bound-free) jkind,
@@ -1984,12 +1993,12 @@ module Jkind0 = struct
             Mod_bounds.join t.mod_bounds
               (Mod_bounds.set_min_in_set Mod_bounds.for_arrow
                  (Jkind_axis.Axis_set.complement
-                    (Mod_bounds.relevant_axes_of_modality ~modality)))
+                    (Mod_bounds.relevant_axes_of_field ?ghost ~modality ())))
         }
       | _ ->
         { t with
           with_bounds =
-            With_bounds.add_modality ~type_expr ~modality
+            With_bounds.add_modality ?ghost ~type_expr ~modality
               t.with_bounds
         }
 
@@ -2298,6 +2307,12 @@ module Jkind0 = struct
           Jkind_desc.add_with_bounds ~type_expr ~modality t.jkind
       }
 
+    let add_field_with_bounds ~ghost ~modality ~type_expr t =
+      { t with
+        jkind =
+          Jkind_desc.add_with_bounds ~ghost ~type_expr ~modality t.jkind
+      }
+
     let jkind_of_mutability mutability ~why =
       (match mutability with
       | Immutable -> Builtin.immutable_data
@@ -2322,12 +2337,14 @@ module Jkind0 = struct
     let add_labels_as_with_bounds lbls jkind =
       List.fold_right
         (fun ((lbl : label_declaration), ld_type, _sort) jkind ->
-          (* A ghost field stores nothing, so its type contributes no bounds
-             to the record's kind. *)
-          if lbl.ld_ghost then jkind
-          else
-            add_with_bounds ~type_expr:ld_type ~modality:lbl.ld_modalities
-              jkind)
+          (* A ghost field stores nothing, but its type still bounds the
+             record's mode crossing: a ghost-field read takes the record's
+             mode, so a record may cross a modal axis only if its ghost
+             fields' types do. Otherwise a record holding a ghost ownership
+             token could be declared to cross uniqueness and the token
+             taken twice. *)
+          add_field_with_bounds ~ghost:lbl.ld_ghost ~type_expr:ld_type
+            ~modality:lbl.ld_modalities jkind)
         lbls jkind
 
     let for_boxed_record_with_updates lbls =

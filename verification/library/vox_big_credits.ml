@@ -31,7 +31,7 @@ end
 
 module Make () = struct
   type amount = {n : Bigint.t | n >= 0Z}
-  type token = { balance : amount @@ ghost total contended aliased }
+  type token = { balance : amount @@ ghost global total contended }
   type partition = { left : token @@ ghost; right : token @@ ghost }
 
   let[@def] credits (token : token @ local immutable total ghost) =
