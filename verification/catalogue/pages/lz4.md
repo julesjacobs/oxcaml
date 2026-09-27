@@ -16,7 +16,7 @@ sources:
   - verification/library/vox_lz4_string_copy.mli — Trusted copy from raw memory to a string
   - verification/library/vox_lz4_review_boundary.md — Reading order and trusted base
   - testsuite/tests/vox/vox_lz4_public_client.ml — Public-only client
-  - verification/benchmarks/lz4_boundary_check.py — Public-only compile, erasure check and rejected clients
+  - testsuite/tests/vox/lz4_boundary.ml — Public-only compile, erasure check, rejected clients and finalizer checks
 ---
 `Vox_lz4` compresses and decompresses independent raw LZ4 blocks of up to 4 MiB (4,194,304 bytes), with no frame header, checksum or dictionary. Its specification is two models written as total functions in `vox_lz4_spec_*.ml`: a compressor model that fixes which positions are hashed, which earlier position is tried as a match and how the matches are laid out on the wire, and a decoder model that fixes the status and output bytes for every input. `compress source` is proved to return exactly the wire bytes of the compressor model, not merely some valid encoding. `decompress_verified wire capacity` is proved to agree with the decoder model: the same status (success, malformed or output limit) and, on success, the same length and every byte. `roundtrip`, an erased theorem, proves that decoding the compressor model's output with a capacity from the source length to 4,194,304 gives back the source, and `compress_decompress source`, which runs both functions, is proved to return the source.
 
@@ -28,26 +28,15 @@ From the public-only client. `(source : {s : string | p})` names the argument so
 
 @code testsuite/tests/vox/vox_lz4_public_client.ml "let roundtrip" "| Error _ -> assert false"
 
-`lz4_boundary_check.py` compiles this client against only the `.cmi` files of `Vox_lz4`, the ten specification modules and three sequence and string modules, runs it with both compilers, and checks that its `-dlambda` output contains exactly two calls into `Vox_lz4` and no reference to `Vox_lz4_spec`.
+`lz4_boundary.ml` compiles this client against only the `.cmi` files of `Vox_lz4`, the ten specification modules and three sequence and string modules, runs it with both compilers, and checks that its `-dlambda` output contains exactly two calls into `Vox_lz4` and no reference to `Vox_lz4_spec`.
 
 ## A rejected program
 
-The decoder model classifies inputs precisely enough to refute false claims about them. This program claims that decoding with capacity 0 never reports a malformed block; the empty string is malformed, so the check fails. The script requires both compilers to reject it with a refinement error.
+The decoder model classifies inputs precisely enough to refute false claims about them. This program claims that decoding with capacity 0 never reports a malformed block; the empty string is malformed, so the check fails. The test `lz4_boundary.ml` compiles it against the public interfaces only and requires this error.
 
-@code verification/benchmarks/lz4_boundary_check.py "'false_decode_status': ('" "Vox_lz4.decompress_verified wire 0" after
+@code testsuite/tests/vox/lz4_boundary.ml "let f (wire : string) :" "|}]"
 
-```
-File "false_decode_status.ml", line 1, characters 142-176:
-1 | let f (wire : string) : {d : Vox_lz4_spec.decoded | match d with Ok _ -> true | Error Vox_lz4_spec.Output_limit -> true | Error _ -> false} = Vox_lz4.decompress_verified wire 0
-                                                                                                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-File "false_decode_status.ml", line 1, characters 52-138:
-1 | let f (wire : string) : {d : Vox_lz4_spec.decoded | match d with Ok _ -> true | Error Vox_lz4_spec.Output_limit -> true | Error _ -> false} = Vox_lz4.decompress_verified wire 0
-                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  The refinement is stated here.
-```
-
-The same script also requires rejection of a claim that `compress` returns its input, a runtime use of the erased `contents`, and two references to implementation modules that the client cannot see.
+The same test also requires rejection of a claim that `compress` returns its input, a runtime use of the erased `contents`, and two references to implementation modules that the client cannot see, each with its exact error.
 
 ## Interface
 
@@ -83,10 +72,7 @@ The same script also requires rejection of a claim that `compress` returns its i
 After `make install` and `./dev init`:
 
 ```
-verification/library/build.sh _install
-python3 verification/benchmarks/lz4_boundary_check.py
-python3 verification/benchmarks/lz4_finalizers.py
-./dev test vox/lz4_codec.ml vox/lz4_fast_decoder_reference.ml
+./dev test vox/lz4_boundary.ml vox/lz4_codec.ml vox/lz4_fast_decoder_reference.ml
 ```
 
-The library build checks all LZ4 modules. `lz4_boundary_check.py` compiles the public-only client and the rejected programs; `lz4_finalizers.py` checks explicit release and reclamation by the finalizer after simulated `Out_of_memory` exits, raised after the codec has run rather than inside the public calls, with both compilers. `lz4_codec.ml` compiles every module `Vox_lz4` depends on and tests the codec on fixed, malformed, random and 4 MiB inputs. With liblz4 installed, `python3 verification/benchmarks/lz4_interop.py _install/bin/ocamlopt` cross-checks blocks in both directions against it.
+`lz4_boundary.ml` compiles, and so checks, the LZ4 modules with both compilers (natively at `-O3`, as `verification/library/build.sh` does), compiles the public-only client and the rejected programs, and checks explicit release and reclamation by the finalizer after simulated `Out_of_memory` exits, raised after the codec has run rather than inside the public calls, with both compilers. `lz4_codec.ml` compiles every module `Vox_lz4` depends on and tests the codec on fixed, malformed, random and 4 MiB inputs. Separately, and outside the test suite because it needs liblz4, `python3 verification/benchmarks/lz4_interop.py _install/bin/ocamlopt` cross-checks blocks in both directions against it.
