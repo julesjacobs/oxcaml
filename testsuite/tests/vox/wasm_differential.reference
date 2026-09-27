@@ -1,0 +1,17 @@
+Differential test of the WebAssembly model against Node: 300 modules, seed 20260927, ids 0-299
+Model fuel 300000 steps, host call depth 400; memories of at most 1 page(s)
+  agree: both reject                                                                 78
+  agree: both return the same result, globals and memory                             86
+  agree: both trap                                                                   83
+  engine limit: model validates a module above a JS API implementation limit          3
+  expected: model rejects a valid module outside its binary subset                   32
+  kind: corrupted                                                                    28
+  kind: generated                                                                   172
+  kind: mutated                                                                      63
+  kind: not instantiated by the model                                                 5
+  kind: outside the subset                                                           32
+  no verdict: model does not instantiate                                              7
+  no verdict: model fuel exhausted                                                    2
+  no verdict: model host call depth                                                   6
+  no verdict: model instruction not supported                                         3
+Disagreements: 0
