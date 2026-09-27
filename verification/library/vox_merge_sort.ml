@@ -40,11 +40,9 @@ end) = struct
 
   type result = #{ values : O.elt list @@ aliased; state : C.token @@ ghost }
 
-  let rec (merge @ total) : (size : Bigint.t) @ ghost ->
-      (left : O.elt list) @ immutable ->
+  let rec (merge @ total) : (left : O.elt list) @ immutable ->
       (right : O.elt list) @ immutable ->
       (token : {t : C.token |
-        size = Bigint.add (S.length left) (S.length right) &&
         P.sorted left && P.sorted right &&
         Bigint.of_int (C.credits t) >=
           Bigint.add (S.length left) (S.length right)}) @ unique total ghost ->
@@ -55,7 +53,7 @@ end) = struct
         Bigint.of_int (C.credits r.#state) >=
           Bigint.sub (Bigint.of_int (C.credits token))
             (Bigint.add (S.length left) (S.length right))} @ unique =
-      fun size left right token ->
+      fun left right token ->
     let token = token in
     ghost_ (S.length_def left; S.length_def right);
     match left, right with
@@ -73,13 +71,10 @@ end) = struct
       let compared = Compare.compare x y available in
       let #{ Compare.before; state } = compared in
       if before then (
-        let next_size = ghost_ (Bigint.sub size 1Z) in
-        let next : {t : C.token | next_size =
-          Bigint.add (S.length xs) (S.length right) &&
-          P.sorted xs && P.sorted right &&
+        let next : {t : C.token | P.sorted xs && P.sorted right &&
           Bigint.of_int (C.credits t) >=
             Bigint.add (S.length xs) (S.length right)} = state in
-        let merged = merge next_size xs right next in
+        let merged = merge xs right next in
         let #{ values; state } = merged in
         let output = x :: values in
         ghost_ (Proof.lower x y ys;
@@ -88,19 +83,16 @@ end) = struct
         let result = #{ values = output; state } in
         result)
       else (
-        let next_size = ghost_ (Bigint.sub size 1Z) in
-        let next : {t : C.token | next_size =
-          Bigint.add (S.length left) (S.length ys) &&
-          P.sorted left && P.sorted ys &&
+        let next : {t : C.token | P.sorted left && P.sorted ys &&
           Bigint.of_int (C.credits t) >=
             Bigint.add (S.length left) (S.length ys)} = state in
-        let merged = merge next_size left ys next in
+        let merged = merge left ys next in
         let #{ values; state } = merged in
         let output = y :: values in
         ghost_ (Proof.right_head x xs y ys values; S.length_def output);
         let result = #{ values = output; state } in
         result)
-  [@@decreases size]
+  [@@decreases Bigint.add (S.length left) (S.length right)]
 
   let rec (sort_at_depth @ total) : (size : Bigint.t) @ ghost ->
       (depth : Bigint.t) @ ghost -> (values : O.elt list) @ immutable ->
@@ -146,6 +138,9 @@ end) = struct
       let left_result =
         sort_at_depth left_size next_depth halves.left left_token in
       let #{ values = sorted_left; state = left_state } = left_result in
+      let _ : {u : unit | Bigint.mul size depth =
+        Bigint.add size (Bigint.add (Bigint.mul left_size next_depth)
+          (Bigint.mul right_size next_depth))} = () in
       let right_token : {t : C.token | right_size = S.length halves.right &&
         0Z <= next_depth && right_size <= Vox_sort_cost.power next_depth &&
         Bigint.mul right_size next_depth <= Bigint.of_int (C.credits t)} =
@@ -158,12 +153,11 @@ end) = struct
         right_state in
       let combined = C.merge left_state joinable in
       let merge_token : {t : C.token |
-        size = Bigint.add (S.length sorted_left) (S.length sorted_right) &&
         P.sorted sorted_left && P.sorted sorted_right &&
         Bigint.of_int (C.credits t) >=
           Bigint.add (S.length sorted_left) (S.length sorted_right)} =
         combined in
-      let merged = merge size sorted_left sorted_right merge_token in
+      let merged = merge sorted_left sorted_right merge_token in
       let #{ values = output; state } = merged in
       ghost_ (
         let original = S.append halves.left halves.right in
