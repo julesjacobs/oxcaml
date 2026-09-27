@@ -118,3 +118,30 @@ val header_outcome : (line : bytes) -> (headers : int list list) ->
        | Too_large r -> Limit r
        | Length n -> if n = 0 then Complete request else Incomplete)
     else true} @ ghost @@ total
+val request_line_rejection : (line : bytes) -> (suffix : bytes) ->
+  {u : unit | if safe_line line && not (valid_request_line line)
+      && fits 16384 (Vox_sequence.append line [13; 10]) then
+    let result =
+      feed (initial ()) (Vox_sequence.append line (13 :: 10 :: suffix)) in
+    status result.state === Malformed Invalid_request_line
+    && result.rest === suffix
+    else true} @ ghost @@ total
+val header_rejection : (request_line : bytes) -> (headers : int list list) ->
+  (line : bytes) -> (suffix : bytes) ->
+  {u : unit | if valid_request_line request_line && safe_line request_line
+      && header_lines headers && nonempty line && safe_line line
+      && not (valid_header line)
+      && fits 16384 (Vox_sequence.append request_line (13 :: 10 ::
+        header_prefix headers (Vox_sequence.append line [13; 10]))) then
+    let result = feed (initial ()) (Vox_sequence.append request_line
+      (13 :: 10 :: header_prefix headers
+        (Vox_sequence.append line (13 :: 10 :: suffix)))) in
+    status result.state === Malformed Invalid_header
+    && result.rest === suffix
+    else true} @ ghost @@ total
+val invalid_byte_rejection : (state : state) -> (b : int) -> (rest : bytes) ->
+  {u : unit | if status state === Incomplete && total_consumed state < 16384
+      && not (byte b) then
+    let result = feed state (b :: rest) in
+    status result.state === Malformed Invalid_byte && result.rest === rest
+    else true} @ ghost @@ total

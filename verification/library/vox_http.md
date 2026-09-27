@@ -146,6 +146,15 @@ beyond the bound.
   `framing`. `framing_rejection` specifies TE/CL ambiguity and unsupported TE
   outcomes. A separate compiled client composes these to prove rejection by
   the actual byte parser.
+- `request_line_rejection line suffix`: a request line whose bytes are in
+  0-255, contain no CR or LF, and fail `valid_request_line`, followed by CRLF
+  and any suffix, gives `Malformed Invalid_request_line` with exactly `suffix`
+  unconsumed, when the line and its CRLF fit the message budget.
+  `header_rejection` states the same for the first header line that fails
+  `valid_header` after a valid request line and valid header lines, with
+  `Malformed Invalid_header`. `invalid_byte_rejection`: an incomplete state
+  with budget left rejects a value outside 0-255 as `Invalid_byte` and
+  consumes nothing after it.
 - `roundtrip request suffix`: for every `well_formed request` and arbitrary
   suffix, feeding `serialize request @ suffix` returns exactly `request` and
   exactly `suffix`. Consumed bytes equal the serialized length. Instantiating
@@ -186,13 +195,15 @@ From the configured worktree:
 ./dev test vox/http_suffix_rejected.ml
 ./dev test vox/http_body_rejected.ml
 ./dev test vox/http_private_rejected.ml
+./dev test vox/http_rejection_rejected.ml
 ./dev test vox/http_stream_demo.ml
 ```
 
 This verifies the focused fixture and runs it as bytecode.
 The rejected fixtures prevent a client from claiming that parsing discards a
-pipelined suffix or that every accepted body is empty, and reject access to
-private implementation helpers. The separately compiled positive clients
+pipelined suffix or that every accepted body is empty, reject false claims
+about the line-error laws, and reject access to private implementation
+helpers. The separately compiled positive clients
 import only `Vox_http_spec` and `Vox_http` (plus the public sequence interface).
 They derive every former explicit feed/parse clause from `transition_def` and
 prove soundness for arbitrary input, two-chunk reconstruction without
