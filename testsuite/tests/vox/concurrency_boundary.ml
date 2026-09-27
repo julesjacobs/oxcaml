@@ -508,12 +508,12 @@ Line 3, characters 39-44:
 |}]
 
 (* hidden *)
-module A = Reference_lock.A;;
+module A = Reference_lock.L.A;;
 [%%expect{|
 Line 1, characters 11-27:
-1 | module A = Reference_lock.A;;
+1 | module A = Reference_lock.L.A;;
                ^^^^^^^^^^^^^^^^
-Error: Unbound module "Reference_lock.A"
+Error: Unbound module "Reference_lock.L"
 |}]
 
 (* payload-reuse *)
@@ -553,12 +553,12 @@ Line 4, characters 37-44:
 |}]
 
 (* unique-hidden *)
-module A = L.A;;
+module A = L.L.A;;
 [%%expect{|
 Line 1, characters 11-14:
-1 | module A = L.A;;
+1 | module A = L.L.A;;
                ^^^
-Error: Unbound module "L.A"
+Error: Unbound module "L.L"
 |}]
 
 (* unique-release-empty *)
