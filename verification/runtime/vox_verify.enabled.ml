@@ -135,13 +135,14 @@ let source_name label =
          | _ -> false)
        label
 
-(* Z3's models often pick extreme integers. A countermodel found under extra
-   assumptions is still a countermodel of the goal, so when a source integer
-   in [model] is large, look once for a model with every source integer in
-   [-100, 100], and keep [model] if there is none. *)
+(* Z3's models often pick extreme integers, and its builds for different
+   platforms pick differently. A countermodel found under extra assumptions is
+   still a countermodel of the goal, so look for one with every source integer
+   within 0, then 1, 10 and 100 of zero, and keep [model] if there is none.
+   Trying the tightest bound first also makes the reported values agree
+   across platforms in most cases. *)
 let smaller_model check ?resource_limit (query : Vox_smt.query) model =
-  let small = 100L in
-  let bound symbol : Vox_smt.term option =
+  let bound small symbol : Vox_smt.term option =
     let v = Vox_smt.Var symbol in
     match Vox_smt.Symbol.sort symbol with
     | Int63 ->
@@ -155,44 +156,54 @@ let smaller_model check ?resource_limit (query : Vox_smt.query) model =
       Some
         (App
            ( And,
-             [ App (Int_le, [Big_integer ("-" ^ bound); v]);
+             [ App (Int_le, [Big_integer (Int64.to_string (Int64.neg small)); v]);
                App (Int_le, [v; Big_integer bound]) ] ))
     | Bool | Opaque _ | Datatype _ -> None
   in
-  let large (symbol, (value : Vox_smt.value)) =
-    source_name (Vox_smt.Symbol.label symbol)
-    &&
-    match value with
-    | Int_value n -> Int64.abs n > small
-    | Bigint_value n -> (
-      match Int64.of_string_opt n with
-      | Some n -> Int64.abs n > small
-      | None -> true)
-    | Bool_value _ -> false
+  let magnitude (symbol, (value : Vox_smt.value)) =
+    if not (source_name (Vox_smt.Symbol.label symbol))
+    then None
+    else
+      match value with
+      | Int_value n -> Some (Int64.abs n)
+      | Bigint_value n ->
+        Some
+          (match Int64.of_string_opt n with
+          | Some n -> Int64.abs n
+          | None -> Int64.max_int)
+      | Bool_value _ -> None
   in
-  if not (List.exists large model)
-  then model
-  else
-    let bounds =
+  let largest = List.fold_left max 0L (List.filter_map magnitude model) in
+  let within small =
+    match
       List.filter_map
         (fun symbol ->
-          if source_name (Vox_smt.Symbol.label symbol) then bound symbol else None)
+          if source_name (Vox_smt.Symbol.label symbol)
+          then bound small symbol
+          else None)
         query.symbols
-    in
-    match bounds with
-    | [] -> model
+    with
+    | [] -> None
     | first :: rest -> (
       let term =
         List.fold_left (fun a b -> Vox_smt.App (And, [a; b])) first rest
       in
       let query =
         { query with
-          Vox_smt.facts = query.facts @ [{ Vox_smt.label = "small values"; term }]
+          Vox_smt.facts =
+            query.facts @ [{ Vox_smt.label = "small values"; term }]
         }
       in
       match (check ?resource_limit query : Vox_smt_solver.result).validity with
-      | Invalid (Some smaller) -> smaller
-      | _ -> model)
+      | Invalid (Some smaller) -> Some smaller
+      | _ -> None)
+  in
+  let rec search = function
+    | small :: rest when small < largest -> (
+      match within small with Some smaller -> smaller | None -> search rest)
+    | _ -> model
+  in
+  search [0L; 1L; 10L; 100L]
 
 (* The counterexample restricted to variables named in the source. *)
 let counterexample model =
@@ -277,7 +288,7 @@ let prove poll check ~batch loc query =
         (* The version names the entry format: bump it when an outcome
            records more, so older entries are not replayed without it. *)
         Filename.concat directory
-          ("query-3-"
+          ("query-4-"
           ^ Digest.to_hex (Digest.string (!executable ^ "\000" ^ text))))
       (cache_directory ())
   in
