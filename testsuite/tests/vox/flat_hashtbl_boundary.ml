@@ -436,19 +436,34 @@ Line 3, characters 48-56:
 
 |}]
 
+(* A lookup after an update, with its proof: the ghost block shows that key
+   1 is bound to 84. The true claim is accepted. *)
+let f () =
+  let r : int V.created = V.create (Ghost_pref.empty ()) in
+  let changed = V.replace r.#table r.#view 1 84 r.#token in
+  ghost_ (Flat_hashtbl_public.Key.reflexive 1;
+    V.Map.put_get (V.bindings r.#view) 1 84 1);
+  let value : {v : int | v = 84} =
+    V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
+[%%expect{|
+val f : unit -> int = <fun>
+|}]
+
 (* A false claim about a lookup: 84 is stored, 85 is claimed. *)
 let f () =
   let r : int V.created = V.create (Ghost_pref.empty ()) in
   let changed = V.replace r.#table r.#view 1 84 r.#token in
+  ghost_ (Flat_hashtbl_public.Key.reflexive 1;
+    V.Map.put_get (V.bindings r.#view) 1 84 1);
   let value : {v : int | v = 85} =
     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
 [%%expect{|
-Line 5, characters 4-60:
-5 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
+Line 7, characters 4-60:
+7 |     V.find r.#table changed.#view 1 (borrow_ changed.#token) in value;;
         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Line 4, characters 25-31:
-4 |   let value : {v : int | v = 85} =
+Line 6, characters 25-31:
+6 |   let value : {v : int | v = 85} =
                              ^^^^^^
   The refinement is stated here.
 |}]
