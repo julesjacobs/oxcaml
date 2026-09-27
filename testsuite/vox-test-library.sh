@@ -75,7 +75,7 @@ if [ ! -s "$work/selected" ]; then
   exit 0
 fi
 tr '\n' '\0' < "$work/selected" |
-  xargs -0 "$ocamltest" -list-sources > "$work/raw-sources"
+  xargs -0 -n 1 "$ocamltest" -list-sources > "$work/raw-sources"
 normalize < "$work/raw-sources" > "$work/selected-sources"
 tab=$(printf '\t')
 awk -F '\t' '$2 == "prebuilt" { print $1 "\t" $3 }' "$work/selected-sources" |
@@ -102,7 +102,7 @@ sed 's|/[^/]*$||' "$work/selected" | LC_ALL=C sort -u |
     grep -l -e prebuilt_modules -- "$directory"/*.ml || true
   done > "$work/all-tests"
 tr '\n' '\0' < "$work/all-tests" |
-  xargs -0 "$ocamltest" -list-sources > "$work/raw-sources"
+  xargs -0 -n 1 "$ocamltest" -list-sources > "$work/raw-sources"
 normalize < "$work/raw-sources" > "$work/all-sources"
 
 # One line per needed source: basename, path, flags.

@@ -60,7 +60,7 @@ fi
 
 # Sources named by the headers, relative to the root.
 (cd "$root" && tr '\n' '\0' < "$work/tests" |
-  xargs -0 "$ocamltest" -list-sources) > "$work/raw-sources"
+  xargs -0 -n 1 "$ocamltest" -list-sources) > "$work/raw-sources"
 awk -F '\t' -v root="$root/" '{
     n = split($3, parts, "/"); m = 0
     for (i = 1; i <= n; i++) {
