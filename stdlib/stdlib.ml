@@ -112,7 +112,9 @@ external ( * ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
 external ( / ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%divint"
 external ( mod ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%modint"
 
-let abs x = if x >= 0 then x else -x
+external int_greaterequal : (int[@local_opt]) -> (int[@local_opt]) -> bool
+  @@ portable total = "%geint"
+let (abs @ total) x = if int_greaterequal x 0 then x else -x
 
 external ( land ) : (int[@local_opt]) -> (int[@local_opt]) -> int
   @@ portable total = "%andint"
@@ -123,10 +125,12 @@ external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int
 
 let lnot x = x lxor (-1)
 
-external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%lslint"
+external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%lslint"
 external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int
   @@ total portable = "%lsrint"
-external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ portable = "%asrint"
+external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int
+  @@ total portable = "%asrint"
 
 let max_int = (-1) lsr 1
 let min_int = max_int + 1

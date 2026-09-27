@@ -112,8 +112,17 @@ type obligation =
   { loc : Location.t;
     origin : Location.t;  (** where the required refinement is written *)
     goal : term;
-    omitted_premises : (Location.t * Location.error) list
+    omitted_premises : (Location.t * Location.error) list;
+    group : int
+        (** The conjuncts of one refinement share a group, which is proved as
+            one query; the conjuncts are proved alone only to name a failure. *)
   }
+
+let next_group = ref 0
+
+let fresh_group () =
+  incr next_group;
+  !next_group
 
 (* Command lists are stored in reverse execution order. Define binds a fresh
    symbol to a total SMT expression; it does not restrict reachability. Check
@@ -182,6 +191,11 @@ type context =
     pref_observers :
       (Function.t, (Constructor.t * Constructor.t) option) Hashtbl.t;
     mutable free : value option Path.Map.t;
+    (* Module aliases inside structures ([module B = Base]), by the local path
+       and by the paths that export it. Signatures do not keep them. *)
+    mutable module_aliases : Path.t Path.Map.t;
+    (* Whether the predicate being evaluated is a goal. *)
+    mutable in_goal : bool;
     mutable argument_values : value option Path.Map.t;
     (* Each function body's commands, with the warning settings in effect where
        it was written ([@warning] attributes apply to its proofs). *)
@@ -1062,8 +1076,23 @@ let instantiate_path ctx env ty path value =
     end
   | _ -> value
 
-let lookup ctx s env ty path =
+let rec resolve_module_alias ctx = function
+  | Path.Pdot (prefix, name) -> (
+    match Path.Map.find_opt prefix ctx.module_aliases with
+    | Some target -> Some (Path.Pdot (target, name))
+    | None ->
+      Option.map
+        (fun prefix -> Path.Pdot (prefix, name))
+        (resolve_module_alias ctx prefix))
+  | _ -> None
+
+let rec lookup ctx s env ty path =
   let path = Env.normalize_value_path None env path in
+  match resolve_module_alias ctx path with
+  | Some path -> lookup ctx s env ty path
+  | None -> lookup_normalized ctx s env ty path
+
+and lookup_normalized ctx s env ty path =
   match sort ctx.encoding env ty with
   | Some set_sort
     when is_set_sort ctx.encoding set_sort && is_set_empty env path ->
@@ -1360,6 +1389,59 @@ let rec pref_disjoint ctx budget left right =
     in
     observe_iarray ctx call value
 
+(* Extensionality of heaps, instantiated at one location: if [left] and [right]
+   agree at [Pref.diff left right], they are equal. In the model, a heap is a
+   partial map from locations to payloads, [at] is lookup and [mem] is
+   membership in the domain, and [diff] picks a location where two different
+   heaps differ. This is Z3's array extensionality lemma. *)
+let pref_extensionality ctx env heap_type left right =
+  let heap_sort = term_sort left in
+  let payload =
+    match get_desc (Ctype.expand_head env heap_type) with
+    | Tconstr (_, [payload], _) -> Some payload
+    | _ -> None
+  in
+  let option_type = Option.map Predef.type_option payload in
+  match
+    ( Option.bind option_type (sort ctx.encoding env),
+      Option.bind option_type (data_of_type ctx env) )
+  with
+  | Some option_sort, Some data
+    when Hashtbl.mem ctx.pref_heaps heap_sort && term_sort right = heap_sort
+    -> (
+    let key_sort =
+      match Hashtbl.find_opt ctx.map_class_sorts heap_sort with
+      | Some sort -> sort
+      | None ->
+        let sort = fresh_opaque_sort ctx.encoding in
+        Hashtbl.add ctx.map_class_sorts heap_sort sort;
+        sort
+    in
+    match data_constructor data "Some", data_constructor data "None" with
+    | Some some, Some none ->
+      let diff =
+        intern_function ctx "Pref.diff" [heap_sort; heap_sort] key_sort
+      in
+      let key = Call (diff, [left; right]) in
+      let at =
+        intern_function ctx "Pref.at" [heap_sort; key_sort] option_sort
+      in
+      Hashtbl.replace ctx.pref_observers at (Some (some, none));
+      let mem = intern_function ctx "Pref.mem" [heap_sort; key_sort] Bool in
+      Hashtbl.replace ctx.pref_observers mem None;
+      let observe fn heap = pref_observe ctx 128 fn heap key in
+      let domain heap =
+        both Eq (observe mem heap) (Is (some, observe at heap))
+      in
+      Some
+        (both And
+           (both And (domain left) (domain right))
+           (both Implies
+              (both Eq (observe at left) (observe at right))
+              (both Eq left right)))
+    | _ -> None)
+  | _ -> None
+
 let operation ctx env function_type result_type name args =
   match name, args with
   | "caml_pref_heap_disjoint", [left; right] ->
@@ -1456,6 +1538,24 @@ let operation ctx env function_type result_type name args =
           scalar_value (pref_observe ctx 128 fn heap key))
     | _ -> None
     end
+  | "caml_bigint_to_int_opt", [value] -> (
+    match scalar value with
+    | Some value when term_sort value = Int -> (
+      let in_range =
+        App
+          ( And,
+            [ App (Int_le, [Big_integer "-4611686018427387904"; value]);
+              App (Int_le, [value; Big_integer "4611686018427387903"]) ] )
+      in
+      match
+        ( construct ctx env result_type "Some"
+            [scalar_value (App (Int63_of_int, [value]))],
+          construct ctx env result_type "None" [] )
+      with
+      | Some (Scalar some), Some (Scalar none) ->
+        scalar_value (App (Ite, [in_range; some; none]))
+      | _ -> None)
+    | _ -> None)
   | "caml_vox_sequence_length", [values] ->
     Option.bind (scalar values) (fun values ->
         scalar_value (vox_sequence_length ctx values))
@@ -2002,9 +2102,9 @@ let rec predicate ctx env s e =
       let s, value = eval s body in
       expose_outer ctx env s source value e.rexp_loc
     | Rexp_ghost body -> eval s body
-    | Rexp_logical_equal (left, right) ->
+    | Rexp_logical_equal (left_exp, right) ->
       let s, right = eval s right in
-      let s, left = eval s left in
+      let s, left = eval s left_exp in
       if s.dead
       then s, None
       else
@@ -2012,7 +2112,17 @@ let rec predicate ctx env s e =
         let right = required e.rexp_loc right in
         if sort_has_unsupported_logical_equality ctx.encoding (term_sort left)
         then unsupported e.rexp_loc
-        else name ctx s (scalar_value (both Eq left right))
+        else
+          let s =
+            match
+              if ctx.in_goal
+              then pref_extensionality ctx env left_exp.rexp_type left right
+              else None
+            with
+            | Some lemma -> fact s "heap extensionality" lemma
+            | None -> s
+          in
+          name ctx s (scalar_value (both Eq left right))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose ctx s
@@ -2400,7 +2510,20 @@ let export_module ctx id str s =
         | Some path -> Path.Map.add path value values)
       values s.values
   in
+  ctx.module_aliases
+    <- Path.Map.fold
+         (fun path target aliases ->
+           match exported path with
+           | None -> aliases
+           | Some path -> Path.Map.add path target aliases)
+         ctx.module_aliases ctx.module_aliases;
   { s with values }
+
+let rec module_alias m =
+  match m.mod_desc with
+  | Tmod_ident (path, _) -> Some path
+  | Tmod_constraint (m, _, _, _) -> module_alias m
+  | _ -> None
 
 let forwards_result e =
   match e.exp_desc with
@@ -2487,8 +2610,23 @@ and expression_extras ?deferred ctx s e ty = function
 and introduce ctx env s ty value loc =
   match get_desc (Ctype.expand_head env ty) with
   | Trefine r when ctx.verify_introductions && not s.dead ->
-    let goals, goal =
-      try predicate ctx env (bind s r.ref_binder value) r.ref_pred
+    (* Each conjunct of a top-level [&&] chain is an obligation of its own,
+       proved under the conjuncts before it, as [&&] evaluates. A failure then
+       names the conjunct. *)
+    let rec conjuncts p =
+      match p.rexp_desc with
+      | Rexp_apply ({ rexp_desc = Rexp_ident path; _ }, [(_, a); (_, b)])
+        when primitive env path = Some ("%sequand", 2) ->
+        conjuncts a @ conjuncts b
+      | _ -> [p]
+    in
+    let evaluate goals p =
+      let in_goal = ctx.in_goal in
+      ctx.in_goal <- true;
+      try
+        Fun.protect
+          ~finally:(fun () -> ctx.in_goal <- in_goal)
+          (fun () -> predicate ctx env goals p)
       with Location.Error error ->
         raise
           (Location.Error
@@ -2498,19 +2636,32 @@ and introduce ctx env s ty value loc =
                  @ [Location.msg ~loc "Required by this refinement introduction"]
              })
     in
-    let assertion =
-      Assert
-        { loc;
-          origin = r.ref_pred.rexp_loc;
-          goal =
-            (if goals.dead
-             then Boolean true
-             else required r.ref_pred.rexp_loc goal);
-          omitted_premises = goals.omitted_premises
-        }
+    let group = fresh_group () in
+    let prove goals p =
+      if goals.dead
+      then goals
+      else
+        let goals, goal = evaluate goals p in
+        let goal =
+          if goals.dead then Boolean true else required p.rexp_loc goal
+        in
+        let assertion =
+          Assert
+            { loc;
+              origin = p.rexp_loc;
+              goal;
+              omitted_premises = goals.omitted_premises;
+              group
+            }
+        in
+        branch { goals with code = assertion :: goals.code } goal
     in
-    let check = assertion :: added_prefix ~base:s.code goals.code in
-    let s = { s with code = Check check :: s.code } in
+    let goals =
+      List.fold_left prove (bind s r.ref_binder value) (conjuncts r.ref_pred)
+    in
+    let s =
+      { s with code = Check (added_prefix ~base:s.code goals.code) :: s.code }
+    in
     expose_outer ctx env s ty value loc
   | _ -> s, value
 
@@ -2815,6 +2966,21 @@ and expression_desc ?deferred ctx s e =
     in
     s, opaque ()
   | Texp_exclave body -> result s body
+  | Texp_assert
+      ( { exp_desc = Texp_construct (_, { cstr_name = "false"; _ }, _, _, _); _ },
+        _ ) ->
+    (* Compiled to a raise, even under [-noassert]. *)
+    branch s (Boolean false), None
+  | Texp_assert (condition, _) when not !Clflags.noassert ->
+    (* The continuation runs only if the condition evaluated to true. Under
+       [-noassert] the condition is not evaluated at all. *)
+    let s, condition = eval s condition in
+    let s =
+      match scalar condition with
+      | Some condition when not s.dead -> branch s condition
+      | _ -> s
+    in
+    s, opaque ()
   | _ ->
     (* Unknown evaluation/control-flow forms lose outgoing facts, but cannot
        hide obligations in their children or delayed bodies. *)
@@ -2849,6 +3015,7 @@ and check_function ctx s e params body value =
         branch s condition)
       s params
   in
+  let s = assume_lemma_premise ctx s body in
   let arguments =
     Misc.Stdlib.List.map_option
       (fun p ->
@@ -2885,6 +3052,60 @@ and check_function ctx s e params body value =
       fn.lambda
         := logical_lambda ctx captured captured_arguments parameters body
     | _ -> ()
+
+(* An erased lemma whose conclusion is [{u : unit | if p then q else true}] is
+   proved under [p]. Its body never runs, and under [not p] its conclusion holds
+   trivially; a recursive call still has to establish the callee's own premise
+   to use its conclusion. *)
+and assume_lemma_premise ctx s body =
+  match body with
+  | Tfunction_body body
+    when (not s.dead)
+         && List.exists
+              (function Texp_ghost, _, _ -> true | _ -> false)
+              body.exp_extra -> (
+    let env = body.exp_env in
+    (* Only a body whose single refinement is this conclusion: another one (an
+       inner annotation) would be checked under [p] as well. *)
+    let conclusions =
+      List.filter_map
+        (function
+          | Texp_refinement { target; _ }, _, _ -> (
+            match get_desc (Ctype.expand_head env target) with
+            | Trefine r -> Some r
+            | _ -> None)
+          | _ -> None)
+        body.exp_extra
+    in
+    match conclusions with
+    | [ ({ ref_pred =
+             { rexp_desc =
+                 Rexp_ifthenelse
+                   ( premise,
+                     _,
+                     Some
+                       { rexp_desc =
+                           Rexp_construct
+                             (Path.Pextra_ty (_, Path.Pcstr_ty "true"), []);
+                         _
+                       } );
+               _
+             };
+           _
+         } as r) ]
+      when match get_desc (Ctype.expand_head env r.ref_payload) with
+           | Tconstr (path, [], _) -> Path.same path Predef.path_unit
+           | _ -> false -> (
+      let unit = fresh ctx env r.ref_payload "result" in
+      match predicate ctx env (bind s r.ref_binder unit) premise with
+      | assumed, premise when not assumed.dead -> (
+        match scalar premise with
+        | Some premise -> branch { assumed with values = s.values } premise
+        | None -> s)
+      | _ -> s
+      | exception Location.Error _ -> s)
+    | _ -> s)
+  | _ -> s
 
 and value_bindings ctx s rec_flag bindings =
   let s =
@@ -2994,6 +3215,13 @@ and structure ctx s str =
               (fun () -> structure ctx s str)
           in
           export_module ctx id str s, None
+        | Tstr_module { mb_id = Some id; mb_expr; _ }
+          when Option.is_some (module_alias mb_expr) ->
+          (* The alias and its target are the same module at run time. *)
+          let target = Option.get (module_alias mb_expr) in
+          ctx.module_aliases
+            <- Path.Map.add (Path.Pident id) target ctx.module_aliases;
+          s, None
         | _ ->
           let state = ref s in
           let iterator = iterator ctx state in
@@ -3262,6 +3490,27 @@ let query ctx code =
           definitions
             := { label = "pref identity"; term = axiom } :: !definitions;
           Queue.add axiom pending
+        | Call (fn, [array])
+          when observation_function "Iarray.length" fn
+               && Option.is_none (iarray_origin ctx array)
+               &&
+               match expose_head ctx array with
+               | App (Ite, _) -> false
+               | _ -> true ->
+          (* Every iarray, ghost or real, is built by a literal, a partial
+             allocation that raises above [Sys.max_array_length], a total
+             operation that keeps or shrinks a length, or a view of a real array
+             or string, so its length is at most 2^57. Arrays built from others
+             get their lengths from those, and are not bounded here: their
+             construction may not have returned. *)
+          let axiom =
+            both And
+              (both Le (Integer 0L) term)
+              (both Le term (Integer 1152921504606846975L))
+          in
+          definitions
+            := { label = "iarray length bound"; term = axiom } :: !definitions;
+          Queue.add axiom pending
         | _ -> ()
         end;
         begin match term with
@@ -3373,13 +3622,42 @@ let verify_batch ctx prove code =
         (Location.Error
            { error with sub = error.sub @ origin @ omitted_premise_messages s })
   in
-  match goals with
+  (* The conjuncts of a refinement are consecutive goals of one group. A group
+     is proved as one query, which is as cheap as proving the whole refinement;
+     only if it fails is each conjunct proved alone, to name the one that
+     fails. *)
+  let rec groups = function
+    | [] -> []
+    | ((o : obligation), _) :: _ as goals ->
+      let members, rest =
+        List.partition (fun ((m : obligation), _) -> m.group = o.group) goals
+      in
+      members :: groups rest
+  in
+  let prove_group members query =
+    match members with
+    | [(o, _)] -> prove_one o (Lazy.force query)
+    | (first, _) :: _ -> (
+      try prove ~batch:false first.loc (Lazy.force query)
+      with Unproved _ ->
+        (* If every conjunct is proved alone, the refinement holds. *)
+        List.iter (fun (o, term) -> prove_one o (expand term)) members)
+    | [] -> ()
+  in
+  let conjunction members =
+    List.fold_left (fun q (_, goal) -> both And q goal) (Boolean true) members
+  in
+  match groups goals with
   | [] -> ()
-  | [(o, _)] -> prove_one o query
-  | (first, _) :: _ -> (
+  | [members] -> prove_group members (lazy query)
+  | ((first, _) :: _) :: _ as groups -> (
     try prove ~batch:true first.loc query
     with Unproved _ ->
-      List.iter (fun (o, term) -> prove_one o (expand term)) goals)
+      List.iter
+        (fun members ->
+          prove_group members (lazy (expand (conjunction members))))
+        groups)
+  | [] :: _ -> ()
 
 let context ~poll ~prove ~verify_introductions =
   { poll;
@@ -3404,6 +3682,8 @@ let context ~poll ~prove ~verify_introductions =
     pref_constructors = Hashtbl.create 8;
     pref_observers = Hashtbl.create 8;
     free = Path.Map.empty;
+    module_aliases = Path.Map.empty;
+    in_goal = false;
     argument_values = Path.Map.empty;
     batches = [];
     named_terms = Hashtbl.create 32;
@@ -3556,7 +3836,8 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
                         (both Int_ge value (Big_integer "0"))
                         (both Int_lt value entry_measure)
                     | Bool | Opaque _ | Datatype _ -> reject measure);
-                 omitted_premises = checked.omitted_premises
+                 omitted_premises = checked.omitted_premises;
+                 group = fresh_group ()
                }
             :: checked.code)
       | _ -> ()

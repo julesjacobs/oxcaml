@@ -49,7 +49,7 @@ let (prime_coprime @ total) (p : t) (a : t) :
   prime_divisors p r.g;
   r)
 
-(* Nonlinear integer arithmetic (products modulo a prime): about 5M solver
+(* Nonlinear integer arithmetic (products modulo a prime): about 15.6M solver
    resource units, over the 1M slow-refinement threshold. *)
 let[@warning "-slow-refinement"] (prime_cancel @ total) (p : t) (a : t) (b : t) :
     {u : unit | if prime p && a >= 0Z && a mod p <> 0Z

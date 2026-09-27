@@ -146,6 +146,8 @@ type op =
   | Bit_or
   | Bit_xor
   | Shift_right_logical
+  | Shift_left
+  | Shift_right_arithmetic
   | Eq
   | Ne
   | Lt
@@ -168,6 +170,7 @@ type op =
   | Int_gt
   | Int_ge
   | Int_of_int63
+  | Int63_of_int
 
 type term =
   | Boolean of bool
@@ -208,6 +211,8 @@ let operator = function
   | Bit_or -> "int63_or"
   | Bit_xor -> "int63_xor"
   | Shift_right_logical -> "int63_lsr"
+  | Shift_left -> "int63_lsl"
+  | Shift_right_arithmetic -> "int63_asr"
   | Eq -> "="
   | Ne -> "distinct"
   | Lt -> "<"
@@ -229,6 +234,7 @@ let operator = function
   | Int_gt -> ">"
   | Int_ge -> ">="
   | Int_of_int63 -> "int_of_int63"
+  | Int63_of_int -> "int63_of_int"
 
 let sort_name = function
   | Bool -> "Bool"
@@ -255,7 +261,8 @@ type operator_signature =
 
 let operator_signature = function
   | Add | Sub | Mul | Div | Rem -> Fixed ([Int63; Int63], Int63)
-  | Bit_and | Bit_or | Bit_xor | Shift_right_logical ->
+  | Bit_and | Bit_or | Bit_xor | Shift_right_logical | Shift_left
+  | Shift_right_arithmetic ->
     Fixed ([Int63; Int63], Int63)
   | Neg -> Fixed ([Int63], Int63)
   | Lt | Le | Gt | Ge -> Fixed ([Int63; Int63], Bool)
@@ -267,6 +274,7 @@ let operator_signature = function
   | Int_neg -> Fixed ([Int], Int)
   | Int_lt | Int_le | Int_gt | Int_ge -> Fixed ([Int; Int], Bool)
   | Int_of_int63 -> Fixed ([Int63], Int)
+  | Int63_of_int -> Fixed ([Int], Int63)
 
 let rec term_sort = function
   | Boolean _ -> Bool
@@ -579,7 +587,13 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
     (fun index id -> Hashtbl.add opaque_names id ("s" ^ string_of_int index))
     opaque_ids;
   let has_bitwise =
-    List.exists uses [Bit_and; Bit_or; Bit_xor; Shift_right_logical]
+    List.exists uses
+      [ Bit_and;
+        Bit_or;
+        Bit_xor;
+        Shift_right_logical;
+        Shift_left;
+        Shift_right_arithmetic ]
   in
   let smt_sort = function
     | Bool -> "Bool"
@@ -606,6 +620,21 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
       if has_bitwise then add "(int63_of_bits ";
       term argument;
       if has_bitwise then add ")"
+    | App (Int63_of_int, [argument]) ->
+      (* Wraps modulo 2^63, like [int2bv]. *)
+      if has_bitwise
+      then begin
+        add "((_ int2bv 63) ";
+        term argument;
+        add ")"
+      end
+      else begin
+        add "(- (mod (+ ";
+        term argument;
+        add " 4611686018427387904) ";
+        add modulus;
+        add ") 4611686018427387904)"
+      end
     | App (Div, [dividend; Integer divisor])
       when divisor <> 0L && not has_bitwise ->
       add "(let ((x ";
@@ -670,16 +699,28 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
       add " ";
       term value;
       add ")"
-    | App (Shift_right_logical, [value; count]) ->
+    | App
+        ( ((Shift_right_logical | Shift_left | Shift_right_arithmetic) as op),
+          [value; count] ) ->
+      let shift, unspecified =
+        match op with
+        | Shift_left -> "bvshl", "int63_lsl_unspecified"
+        | Shift_right_arithmetic -> "bvashr", "int63_asr_unspecified"
+        | _ -> "bvlshr", "int63_lsr_unspecified"
+      in
       add "(ite (and (bvsge ";
       term count;
       add " (_ bv0 63)) (bvsle ";
       term count;
-      add " (_ bv63 63))) (bvlshr ";
+      add " (_ bv63 63))) (";
+      add shift;
+      add " ";
       term value;
       add " ";
       term count;
-      add ") (int63_lsr_unspecified ";
+      add ") (";
+      add unspecified;
+      add " ";
       term value;
       add " ";
       term count;
@@ -750,11 +791,17 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
       \  (ite (= ((_ extract 62 62) x) #b0) (bv2int x)\n\
       \    (- (bv2int x) 9223372036854775808)))\n"
   end;
-  if uses Shift_right_logical
-  then
-    add
-      "(declare-fun int63_lsr_unspecified ((_ BitVec 63) (_ BitVec 63)) (_ \
-       BitVec 63))\n";
+  List.iter
+    (fun (op, name) ->
+      if uses op
+      then
+        add
+          (Printf.sprintf
+             "(declare-fun %s ((_ BitVec 63) (_ BitVec 63)) (_ BitVec 63))\n"
+             name))
+    [ Shift_right_logical, "int63_lsr_unspecified";
+      Shift_left, "int63_lsl_unspecified";
+      Shift_right_arithmetic, "int63_asr_unspecified" ];
   if uses Add && not has_bitwise
   then
     add
@@ -989,7 +1036,10 @@ let explain_invalid query model =
         | Bit_or -> "lor"
         | Bit_xor -> "lxor"
         | Shift_right_logical -> "lsr"
+        | Shift_left -> "lsl"
+        | Shift_right_arithmetic -> "asr"
         | Int_of_int63 -> "Bigint.of_int"
+        | Int63_of_int -> "int_of_bigint"
       in
       match args with
       | [left; right] ->

@@ -107,6 +107,6 @@ Line 19, characters 65-76:
 19 |       mgu_factor_at h p q after d trees sigma normal rho model x (refine_ u))
                                                                       ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "level_mgu_proofs.ml", line 74, characters 16-61:
+File "level_mgu_proofs.ml", line 74, characters 46-61:
   The refinement is stated here.
 |}]

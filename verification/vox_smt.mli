@@ -74,6 +74,8 @@ type op =
   | Bit_or
   | Bit_xor
   | Shift_right_logical
+  | Shift_left
+  | Shift_right_arithmetic
   | Eq
   | Ne
   | Lt
@@ -96,6 +98,7 @@ type op =
   | Int_gt
   | Int_ge
   | Int_of_int63
+  | Int63_of_int  (** Wraps modulo [2^63]. *)
 
 type term =
   | Boolean of bool

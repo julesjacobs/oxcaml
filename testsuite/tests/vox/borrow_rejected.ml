@@ -101,9 +101,9 @@ Line 7, characters 6-10:
 7 |       size in
           ^^^^
 Error: Refinement could not be proved (counterexample)
-Lines 5-6, characters 27-82:
-5 | ...........................0 <= i
-6 |       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0...
+Line 6, characters 9-82:
+6 |       && Bigint.compare (Bigint.of_int i) (Model.length (Slice.current state)) < 0} =
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 

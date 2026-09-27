@@ -33,7 +33,7 @@ Line 5, characters 59-70:
 5 |   let refine_ result = Sorted_array.remove_at source index (refine_ u) in
                                                                ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array.mli", line 29, characters 14-55:
+File "sorted_array.mli", line 29, characters 31-55:
   The refinement is stated here.
 |}]
 
