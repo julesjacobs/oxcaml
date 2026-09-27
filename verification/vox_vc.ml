@@ -1474,6 +1474,24 @@ let operation ctx env function_type result_type name args =
           scalar_value (pref_observe ctx 128 fn heap key))
     | _ -> None
     end
+  | "caml_bigint_to_int_opt", [value] -> (
+    match scalar value with
+    | Some value when term_sort value = Int -> (
+      let in_range =
+        App
+          ( And,
+            [ App (Int_le, [Big_integer "-4611686018427387904"; value]);
+              App (Int_le, [value; Big_integer "4611686018427387903"]) ] )
+      in
+      match
+        ( construct ctx env result_type "Some"
+            [scalar_value (App (Int63_of_int, [value]))],
+          construct ctx env result_type "None" [] )
+      with
+      | Some (Scalar some), Some (Scalar none) ->
+        scalar_value (App (Ite, [in_range; some; none]))
+      | _ -> None)
+    | _ -> None)
   | "caml_vox_sequence_length", [values] ->
     Option.bind (scalar values) (fun values ->
         scalar_value (vox_sequence_length ctx values))

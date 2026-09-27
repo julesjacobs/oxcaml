@@ -170,6 +170,7 @@ type op =
   | Int_gt
   | Int_ge
   | Int_of_int63
+  | Int63_of_int
 
 type term =
   | Boolean of bool
@@ -233,6 +234,7 @@ let operator = function
   | Int_gt -> ">"
   | Int_ge -> ">="
   | Int_of_int63 -> "int_of_int63"
+  | Int63_of_int -> "int63_of_int"
 
 let sort_name = function
   | Bool -> "Bool"
@@ -272,6 +274,7 @@ let operator_signature = function
   | Int_neg -> Fixed ([Int], Int)
   | Int_lt | Int_le | Int_gt | Int_ge -> Fixed ([Int; Int], Bool)
   | Int_of_int63 -> Fixed ([Int63], Int)
+  | Int63_of_int -> Fixed ([Int], Int63)
 
 let rec term_sort = function
   | Boolean _ -> Bool
@@ -617,6 +620,21 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
       if has_bitwise then add "(int63_of_bits ";
       term argument;
       if has_bitwise then add ")"
+    | App (Int63_of_int, [argument]) ->
+      (* Wraps modulo 2^63, like [int2bv]. *)
+      if has_bitwise
+      then begin
+        add "((_ int2bv 63) ";
+        term argument;
+        add ")"
+      end
+      else begin
+        add "(- (mod (+ ";
+        term argument;
+        add " 4611686018427387904) ";
+        add modulus;
+        add ") 4611686018427387904)"
+      end
     | App (Div, [dividend; Integer divisor])
       when divisor <> 0L && not has_bitwise ->
       add "(let ((x ";
@@ -1021,6 +1039,7 @@ let explain_invalid query model =
         | Shift_left -> "lsl"
         | Shift_right_arithmetic -> "asr"
         | Int_of_int63 -> "Bigint.of_int"
+        | Int63_of_int -> "int_of_bigint"
       in
       match args with
       | [left; right] ->
