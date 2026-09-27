@@ -161,6 +161,11 @@ function for proving and running (48); termination for stateful code (88).
 
 ## Decisions waiting for the owner
 
+- **`[@def]` lemmas are generated and trusted, not re-proved by the
+  verifier** (found by the typer group's Codex review). Every change to the
+  lemma generator rests on the generator being right. Proposed: add a
+  re-proof of each generated lemma as a safety net (small to medium).
+
 - **Item 6**: reading the four route pages is yours.
 - **Subsumption open questions** (DESIGN.md §9), answered with defaults so
   the implementation can proceed; to confirm when comparing it with the
