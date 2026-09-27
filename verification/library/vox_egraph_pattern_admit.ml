@@ -1,3 +1,12 @@
+(* Admits the instance of a pattern under a list of bindings: a variable is
+   looked up in the bindings (no new node), a constructor is hash-consed
+   bottom-up. [Vox_egraph_rule_rewrite] uses it to add a rule's right-hand
+   side. The result's origin is [R.instantiate pat subst], for a ghost
+   [subst] that [agrees] with the bindings. If no node was added, the
+   returned id already matches [pat] under the bindings in the unchanged
+   graph; this is what lets an application that changes nothing establish
+   closure. *)
+
 open Vox_egraph_rule_hashcons
 module R = Vox_egraph_rule_spec
 module Q = Vox_egraph_match_spec
@@ -123,6 +132,9 @@ let rec admit :
           match value with None -> () | Some id -> SI.constructor store pat bindings id node ());
       #{value; state = {owner; store}}
     | R.Add (left, right) | R.Eq_int (left, right) ->
+      (* Re-establish [bounded], [agrees] and [available] for the next
+         subpattern in the grown graph; the same steps precede each
+         recursive call below. *)
       ghost_ (
         let view = borrow_ state in
         BF.weaken count view.owner.count bindings ();

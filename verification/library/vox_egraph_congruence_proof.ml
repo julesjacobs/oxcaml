@@ -1,3 +1,10 @@
+(* Turns the result of a complete rebuild pass, [V.closed_fuel state 0 0
+   fuel], into the trusted [Vox_egraph_congruence_spec.closed] on the model.
+   [signature] shows that two nodes are congruent in the model exactly when
+   their signatures ([Vox_egraph_rule_node.signature]) are equal, [scan_at]
+   reads one pair out of [closed_fuel], and [row] and [rows] follow the
+   nested loop of the spec. *)
+
 module C = Vox_egraph_congruence_spec
 module Q = Vox_egraph_match_spec
 module P = Vox_egraph_match_evidence

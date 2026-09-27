@@ -1,3 +1,9 @@
+(* For a valid store, the trusted reconstruction
+   [Vox_egraph_snapshot_spec.origin] of an id in the model
+   [Vox_egraph_match_evidence.view] is the ghost origin recorded when the id
+   was admitted. By recursion on the id; the store invariant puts every
+   child below its parent. *)
+
 module C = Vox_egraph_snapshot_spec
 module V = Vox_egraph_rule_store
 module P = Vox_egraph_match_evidence

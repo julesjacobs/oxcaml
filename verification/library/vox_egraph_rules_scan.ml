@@ -1,3 +1,11 @@
+(* One pass of the rule search over every rule, for
+   [Vox_egraph_rule_saturate]. [scan] walks the rule list, keeping
+   [todo = Cursor.drop rules index], and runs [Vox_egraph_rule_scan.rule] on
+   each rule; it stops at the first result other than [Stable]. [Stable]
+   means the store did not change and every rule in [todo] is closed on it.
+   The bound [fuel <= 4611686018427387903 - index] (max_int on 64 bits)
+   keeps [index + 1] from overflowing, since each rule costs a unit. *)
+
 module Frame = Vox_egraph_origin_frame
 open Vox_egraph_rule_scan
 module Cursor = Vox_egraph_rule_cursor

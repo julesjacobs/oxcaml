@@ -1,3 +1,12 @@
+(* The runtime hash-cons table: an arena of keys indexed by node id and a
+   flat hash table ([Vox_table_implementation.Make]) from key to id. [token]
+   is affine ghost ownership of the heap that holds the table's state;
+   callers keep [H.at (P.own token) (T.location memo) === Some view.model],
+   which the table's operations require. [valid] says the first [count]
+   arena cells are filled and that the table and the arena agree both ways:
+   every table entry names a filled cell holding its key ([X.valid]), and
+   every filled cell is found by lookup ([X.indexed]). *)
+
 module P = Ghost_pref
 module H = P.Heap
 module T = Vox_table_storage
@@ -120,6 +129,9 @@ let append : (owner : {o : t | valid o && Memo.Spec.valid o.view &&
       let before = ghost_ (A.contents (borrow_ arena)) in
       let post = ghost_ (fun (_ : unit) (after : K.t option iarray @ immutable) ->
         after === I.updated before count (Some key)) in
+      (* Write the key into cell [count] through a mutable borrow of the
+         owned arena; [post] is the ghost postcondition on its final
+         contents. *)
       let result = A.with_mut arena post (fun slice ->
         let slice = slice in
         let slot :
@@ -129,6 +141,9 @@ let append : (owner : {o : t | valid o && Memo.Spec.valid o.view &&
         Slice.finish slice;
         ()) in
       let {Borrow_iarray.state = arena; _} = result in
+      (* The new slot list has the same bindings as [put slots key count]
+         ([same]); [X.valid_agrees] and [X.indexed_same] move the invariants
+         to it. *)
       let changed = Memo.replace memo view key count token in
       ghost_ (
         S.append_preserves before count key ();

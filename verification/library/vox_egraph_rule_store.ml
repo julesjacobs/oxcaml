@@ -1,3 +1,13 @@
+(* The e-graph store without the hash-cons index: the proof-producing
+   union-find [semantic] ([Vox_egraph_rule_union]), a node per id and a sort
+   per id, all 512-entry immutable arrays. The invariant [valid] asks, for
+   every id below the count, that the node's children are smaller ids of the
+   right sorts, that the recorded sort is the node's, and that the ghost
+   origin is the node applied to its children's origins ([node_ok]). [add]
+   writes only at the next id. The module also builds the derivations that
+   justify congruence merges and defines the closure state that rebuilding
+   establishes. *)
+
 module I = Vox_iarray
 module F = Vox_egraph_origin_frame
 module L = Vox_egraph_language_spec
@@ -15,6 +25,8 @@ type t = {
   sorts : L.sort iarray;
 }
 
+(* The invariant is stated on the arrays themselves ([_data]) so that the
+   frame lemmas below can apply it to updated arrays. *)
 let[@def] (node_ok_data @ total)
     (nodes : N.t option iarray @ immutable)
     (sorts : L.sort iarray @ immutable)
@@ -51,6 +63,10 @@ let[@def] valid (state : t @ immutable) = ghost_ (
   Iarray.length state.sorts = 512 &&
   nodes_valid state state.semantic.union.count)
 
+(* [node_at] and [node_at_data] read one id's [node_ok] out of
+   [nodes_valid]; [child_origin_sort] and [node_origin_typed] give the sorts
+   of origins; the frame lemmas show that appending a well-typed node at
+   [count] keeps [nodes_valid] for [count + 1]. *)
 let rec (node_at @ total) :
     (state : t) @ immutable -> (count : int) -> (id : int) ->
     {u : unit | nodes_valid state count && 0 <= id && id < count} ->
@@ -235,6 +251,9 @@ let (nodes_valid_appended @ total) :
   nodes_valid_data_def changed_nodes changed_sorts changed_origins (count + 1);
   ())
 
+(* Creation and admission of one node. [add] refuses an ill-typed node and a
+   full graph; otherwise the node gets id [count] and the origin
+   [N.origin origins node]. *)
 type add_result = #{value : int option; state : t}
 
 let create : (rules : Vox_egraph_rule_spec.t) @ immutable ghost ->
@@ -300,6 +319,8 @@ let add : (state : {s : t | valid s}) @ immutable ->
       ghost_ (nodes_valid_def next semantic.union.count; valid_def next);
       #{value = Some id; state = next}
 
+(* Computes an id's origin at run time by following children, which the
+   invariant puts below their parent. *)
 let rec (extract_origin @ total) :
     (state : {s : t | valid s}) @ immutable ->
     (id : {i : int | 0 <= i && i < state.semantic.union.count}) ->
@@ -332,9 +353,14 @@ let rec (extract_origin @ total) :
           extract_origin state b) in
     ghost_ (N.origin_def state.semantic.origins node);
     result
+  (* Unreachable for a valid store. *)
   | _ -> L.Int_input
   [@@decreases if id > 0 then id else 0]
 
+(* Congruence evidence: for two nodes with the same constructor whose
+   children are pairwise in the same class, a derivation between their
+   origins, built from the children's class derivations and the matching
+   congruence step. One lemma per constructor with children. *)
 let (add_congruence @ total) :
     (state : t) @ immutable ->
     (left : int) -> (right : int) ->
@@ -569,6 +595,12 @@ let (bool_if_congruence @ total) :
   N.origin_def origins (N.Bool_if (c2, y2, n2));
   proof)
 
+(* Pairwise congruence closure, the state that [H.rebuild] establishes.
+   [collision]: two nodes have the same signature. [pair_closed]: if they
+   do, they have the same root. [closed_fuel state left right fuel]: every
+   pair from [(left, right)] onwards, in row-major order, is [pair_closed];
+   it is false if [fuel] runs out first. [collision_evidence] is the
+   derivation that justifies merging a collision. *)
 let[@def] (collision @ total) (state : t @ immutable)
     (left : int) (right : int) = ghost_ (
   match I.at state.nodes left, I.at state.nodes right with
@@ -661,6 +693,8 @@ let (collision_evidence @ total) :
   | _ -> (E.Refl (S.origin origins left)))
 
 
+(* The converse of [child_origin_sort], used when a node is built from
+   children that were just admitted. *)
 let (child_typed @ total) :
     (state : t) @ immutable -> (id : int) -> (expected : L.sort) ->
     {u : unit | valid state && 0 <= id &&

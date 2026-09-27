@@ -1,3 +1,8 @@
+(* Cost model of the bounded matcher [Vox_egraph_match_bounded], a diagnostic
+   that is separate from the saturation fuel. [work count pat] is the exact
+   number of units that matching [pat] against a graph of [count] nodes
+   charges. *)
+
 module R = Vox_egraph_rule_spec
 
 (* One unit per pattern constructor and per node position scanned.

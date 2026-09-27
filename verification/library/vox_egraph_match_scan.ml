@@ -1,3 +1,11 @@
+(* The executable matcher. Each function is proved equal to its counterpart
+   in the trusted [Vox_egraph_match_spec] on the model
+   [O.observe nodes parents count], reading nodes and roots directly without
+   building the model. [classes] computes, bottom-up over the pattern, the
+   class labels at which the pattern matches, scanning every node once per
+   constructor; [find_layer] finds a node of a given class that realises one
+   constructor. *)
+
 module Q = Vox_egraph_match_spec
 module R = Vox_egraph_rule_spec
 module O = Vox_egraph_match_observation
