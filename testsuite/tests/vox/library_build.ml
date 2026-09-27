@@ -56,7 +56,8 @@
  readonly_files += " vox_lz4.mli vox_lz4.ml verified_atomic.mli";
  readonly_files += " verified_atomic.ml unique_cell.mli unique_cell.ml";
  readonly_files += " one_shot.mli one_shot.ml channel_buffer.mli";
- readonly_files += " channel_buffer.ml unique_lock.mli unique_lock.ml";
+ readonly_files += " channel_buffer.ml spin_lock.mli spin_lock.ml";
+ readonly_files += " unique_lock.mli unique_lock.ml";
  readonly_files += " reference_lock.mli reference_lock.ml vox_control.mli";
  readonly_files += " vox_control.ml vox_table_model.ml";
  readonly_files += " vox_table_model_proofs.ml vox_table_bits.ml";
@@ -146,7 +147,8 @@
    all_modules += " vox_lz4.mli vox_lz4.ml verified_atomic.mli";
    all_modules += " verified_atomic.ml unique_cell.mli unique_cell.ml";
    all_modules += " one_shot.mli one_shot.ml channel_buffer.mli";
-   all_modules += " channel_buffer.ml unique_lock.mli unique_lock.ml";
+   all_modules += " channel_buffer.ml spin_lock.mli spin_lock.ml";
+   all_modules += " unique_lock.mli unique_lock.ml";
    all_modules += " reference_lock.mli reference_lock.ml vox_control.mli";
    all_modules += " vox_control.ml";
    ocamlc.opt;
@@ -270,7 +272,8 @@
    flags = "-extension refinement_types -principal -smt-assume-verified";
    all_modules = "verified_atomic.mli verified_atomic.ml unique_cell.mli";
    all_modules += " unique_cell.ml one_shot.mli one_shot.ml";
-   all_modules += " channel_buffer.mli channel_buffer.ml unique_lock.mli";
+   all_modules += " channel_buffer.mli channel_buffer.ml spin_lock.mli";
+   all_modules += " spin_lock.ml unique_lock.mli";
    all_modules += " unique_lock.ml reference_lock.mli reference_lock.ml";
    all_modules += " vox_control.mli vox_control.ml";
    ocamlopt.opt;

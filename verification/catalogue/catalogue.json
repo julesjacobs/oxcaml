@@ -224,6 +224,7 @@
     "verified_atomic",
     "one_shot",
     "channel_buffer",
+    "spin_lock",
     "reference_lock",
     "unique_lock",
     "hmc_word64"
@@ -354,6 +355,7 @@
     "unique_lock"
    ],
    "owned": [
+    "spin_lock",
     "reference_lock",
     "unique_lock"
    ]

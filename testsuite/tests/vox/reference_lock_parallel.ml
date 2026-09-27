@@ -3,7 +3,7 @@
  multicore;
  flags = "-extension refinement_types -alert -do_not_spawn_domains";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml verified_atomic.mli verified_atomic.ml reference_lock.mli reference_lock.ml";
+ prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml verified_atomic.mli verified_atomic.ml spin_lock.mli spin_lock.ml reference_lock.mli reference_lock.ml";
  { bytecode; }
 *)
 module L = Reference_lock

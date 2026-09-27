@@ -33,6 +33,12 @@ observes. Ownership transfer still applies when that observation is constant.
 Nonnegative reference locks: items 1–3 above, followed by
 `verification/library/reference_lock.mli`.
 
+Both lock implementations instantiate `Spin_lock.Make`
+(`verification/library/spin_lock.mli`), which holds the flag protocol, its
+invariant and the proofs of `try_acquire` and `release` once, for any cell
+with a ghost location and a `full` predicate. It is an implementation module:
+neither lock interface mentions it.
+
 `owned_def` completely characterizes ownership: the heap is a singleton at the
 lock's location, containing a payload snapshot (unique lock) or a nonnegative
 integer (reference lock). No invariant predicate or atomic implementation

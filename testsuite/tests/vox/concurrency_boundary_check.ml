@@ -17,5 +17,6 @@ let () =
           check (not (occurs primitive dump))
             (Printf.sprintf "%s does not use %s" unit primitive))
         primitives)
-    [ "one_shot"; "channel_buffer"; "unique_lock"; "reference_lock" ];
+    [ "one_shot"; "channel_buffer"; "spin_lock"; "unique_lock";
+      "reference_lock" ];
   finish ()

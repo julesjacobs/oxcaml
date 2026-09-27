@@ -12,6 +12,13 @@ ok: channel_buffer does not use caml_pref_split
 ok: channel_buffer does not use caml_pref_join
 ok: channel_buffer does not use caml_vox_atomic_key
 ok: channel_buffer does not use caml_unique_cell_location
+ok: spin_lock was dumped
+ok: spin_lock does not use caml_pref_own
+ok: spin_lock does not use caml_pref_heap_
+ok: spin_lock does not use caml_pref_split
+ok: spin_lock does not use caml_pref_join
+ok: spin_lock does not use caml_vox_atomic_key
+ok: spin_lock does not use caml_unique_cell_location
 ok: unique_lock was dumped
 ok: unique_lock does not use caml_pref_own
 ok: unique_lock does not use caml_pref_heap_
