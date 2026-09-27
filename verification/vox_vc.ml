@@ -311,6 +311,56 @@ let at_mode mode = function
     Some (Function { f with total = true })
   | value -> value
 
+(* Totality is relative to the arguments: a total, stateless [apply f x = f x]
+   runs whatever effects [f] has. A call is therefore a function of its
+   arguments only when each argument is itself total and stateless at the
+   call: its type crosses both axes (data without closures), it is a function
+   value seen at such a mode, it is an identifier (or an immutable field of
+   one) whose use-site mode is, or it fills a dependent parameter, whose mode
+   is total and stateless by construction. Other arguments, such as inline
+   closures and applications returning closures or data holding them, make
+   the call opaque.
+
+   The verifier runs after typing, when every type is known, so crossing
+   ignores [-principal]: under it, [Ctype.cross_left] refuses to cross types
+   that were not principal during inference. *)
+let rec use_mode (e : expression) =
+  (* An immutable field has its record's mode after the field's modalities,
+     as in [Typecore]; a mutable field may since have been overwritten. *)
+  let field record modalities =
+    Option.map (Mode.Modality.Const.apply_left modalities) (use_mode record)
+  in
+  match e.exp_desc with
+  | Texp_ident { mode; _ } -> Some mode
+  | Texp_field { record; label = { lbl_mut = Immutable; _ } as label; _ } ->
+    field record label.lbl_modalities
+  | Texp_unboxed_field { record; label; _ } ->
+    field record label.lbl_modalities
+  | _ -> None
+
+let logical_argument ~dependent (e : expression) value =
+  dependent
+  || (match value with Some (Function { total; _ }) -> total | _ -> false)
+  ||
+  let mode =
+    match use_mode e with
+    | Some mode -> mode
+    | None -> Mode.Value.(disallow_right max)
+  in
+  logical_function_mode
+    (Misc.protect_refs
+       [Misc.R (Clflags.principal, false)]
+       (fun () -> Ctype.cross_left e.exp_env e.exp_type mode))
+
+(* Whether each parameter of a function type, in order, is dependent. *)
+let rec dependent_parameters env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Tarrow ((_, _, _, binder), _, result, _) ->
+    Option.is_some binder :: dependent_parameters env result
+  | Tpoly (ty, []) | Trefine { ref_payload = ty; _ } ->
+    dependent_parameters env ty
+  | _ -> []
+
 let fresh_symbol sort label = Var (Symbol.create ~label sort)
 
 let name ctx s = function
@@ -3332,11 +3382,41 @@ and expression_desc ?deferred ctx s e =
       let complete =
         Array.for_all (function _, Arg _ -> true | _, Omitted _ -> false) args
       in
+      let logical_arguments =
+        lazy
+          (let dependent =
+             Array.of_list (dependent_parameters fn.exp_env fn.exp_type)
+           in
+           Array.for_all Fun.id
+             (Array.mapi
+                (fun index (_, arg) ->
+                  match arg with
+                  | Omitted _ -> true
+                  | Arg (e, _) ->
+                    let dependent =
+                      index < Array.length dependent && dependent.(index)
+                    in
+                    logical_argument ~dependent e values.(index))
+                args))
+      in
       let s, args = !s, Array.to_list values in
       if not s.dead then ctx.check_call ctx s e args;
       let prim = stored_primitive prim fn_value in
+      (* Set and map operations are modelled through the ordering, which the
+         operation applies to the elements: an element holding an effectful
+         closure can compare differently each time. *)
+      let prim =
+        match prim with
+        | Some (name, _)
+          when (String.starts_with ~prefix:"%set_" name
+               || String.starts_with ~prefix:"%map_" name)
+               && not (Lazy.force logical_arguments) ->
+          None
+        | _ -> prim
+      in
       let total =
-        match fn_value with Some (Function { total; _ }) -> total | _ -> false
+        (match fn_value with Some (Function { total; _ }) -> total | _ -> false)
+        && Lazy.force logical_arguments
       in
       let value =
         apply_function ctx e.exp_env fn.exp_type e.exp_type prim fn_value args

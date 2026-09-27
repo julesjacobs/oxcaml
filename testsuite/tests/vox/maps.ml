@@ -155,9 +155,12 @@ module Demo : sig end = struct
         'a @ total =
       fun map key -> M.Refined.find map key
 
+    (* [M.mem] is modelled only at total, stateless arguments: a key
+       holding a stateful closure could compare differently each time. *)
     let (singleton_member @ total)
-        (key @ total) (data @ total) =
-      let present = M.mem key (M.Refined.singleton key data) in
+        (key @ total stateless) (data @ total stateless) =
+      let (map @ total stateless) = M.Refined.singleton key data in
+      let present = M.mem key map in
       let proof : {b : bool | b} = present in
       let _ = proof in
       ()
