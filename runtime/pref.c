@@ -199,6 +199,64 @@ CAMLprim value caml_vox_atomic_cas_bytecode(value *argv, int argn)
   CAMLreturn(result);
 }
 
+/* The runtime's atomic field operations are sequentially consistent. */
+CAMLextern value caml_atomic_fetch_add_field(value, value, value);
+
+CAMLprim value caml_vox_atomic_exchange(value cell, value desired, value post,
+                                      value transition)
+{
+  return caml_atomic_exchange_field(cell, Val_long(0), desired);
+}
+
+CAMLprim value caml_vox_atomic_exchange_bytecode(value cell, value desired,
+                                               value post, value token,
+                                               value transition)
+{
+  CAMLparam2(cell, desired);
+  CAMLlocal1(result);
+  result = caml_alloc_small(2, 0);
+  Field(result, 1) = Val_unit;
+  Field(result, 0) = caml_vox_atomic_exchange(cell, desired, post, transition);
+  CAMLreturn(result);
+}
+
+CAMLprim value caml_vox_atomic_set(value cell, value desired, value post,
+                                 value transition)
+{
+  caml_atomic_exchange_field(cell, Val_long(0), desired);
+  return Val_unit;
+}
+
+CAMLprim value caml_vox_atomic_set_bytecode(value cell, value desired,
+                                          value post, value token,
+                                          value transition)
+{
+  CAMLparam2(cell, desired);
+  CAMLlocal1(result);
+  result = caml_alloc_small(2, 0);
+  Field(result, 1) = Val_unit;
+  Field(result, 0) = caml_vox_atomic_set(cell, desired, post, transition);
+  CAMLreturn(result);
+}
+
+CAMLprim value caml_vox_atomic_fetch_add(value cell, value n, value post,
+                                       value transition)
+{
+  return caml_atomic_fetch_add_field(cell, Val_long(0), n);
+}
+
+CAMLprim value caml_vox_atomic_fetch_add_bytecode(value cell, value n,
+                                                value post, value token,
+                                                value transition)
+{
+  CAMLparam2(cell, n);
+  CAMLlocal1(result);
+  result = caml_alloc_small(2, 0);
+  Field(result, 1) = Val_unit;
+  Field(result, 0) = caml_vox_atomic_fetch_add(cell, n, post, transition);
+  CAMLreturn(result);
+}
+
 CAMLprim value caml_unique_cell_location(value cell) { return Val_unit; }
 
 static value unique_cell_create(value initial, mlsize_t fields)
