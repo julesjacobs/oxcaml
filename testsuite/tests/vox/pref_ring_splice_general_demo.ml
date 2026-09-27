@@ -45,9 +45,9 @@ let () =
     append_def [] [b; c];
     append_def [d] [e];
     append_def [] [e];
-    S.last_def b [];
-    S.last_def t [d];
-    S.last_def d [];
+    last_def b [];
+    last_def t [d];
+    last_def d [];
     ());
   let state = S.splice (ghost_ s) (ghost_ t) (ghost_ [a]) b (ghost_ []) b
     (ghost_ [c]) (ghost_ [d]) d (ghost_ [e]) state in
@@ -70,8 +70,8 @@ let () =
     append_def [] [c];
     append_def [] [a; c];
     append_def [] [d; b; e];
-    S.last_def a [];
-    S.last_def t [];
+    last_def a [];
+    last_def t [];
     ());
   let rings = S.Owned.splice (ghost_ []) a (ghost_ []) a (ghost_ [c])
     (ghost_ []) t (ghost_ [d; b; e]) rings in
@@ -88,12 +88,12 @@ let () =
     append_def [b; e] [];
     append_def [e] [];
     append_def [] [];
-    S.last_def c [];
-    S.last_def t [a; d; b; e];
-    S.last_def a [d; b; e];
-    S.last_def d [b; e];
-    S.last_def b [e];
-    S.last_def e [];
+    last_def c [];
+    last_def t [a; d; b; e];
+    last_def a [d; b; e];
+    last_def d [b; e];
+    last_def b [e];
+    last_def e [];
     ());
   let rings = S.Owned.splice (ghost_ []) c (ghost_ []) c (ghost_ [])
     (ghost_ [a; d; b; e]) e (ghost_ []) rings in
@@ -116,12 +116,12 @@ let () =
     append_def [c] [];
     append_def [] [];
     append_def [] [a; d; b; e; c];
-    S.last_def a [d; b; e; c];
-    S.last_def d [b; e; c];
-    S.last_def b [e; c];
-    S.last_def e [c];
-    S.last_def c [];
-    S.last_def s [];
+    last_def a [d; b; e; c];
+    last_def d [b; e; c];
+    last_def b [e; c];
+    last_def e [c];
+    last_def c [];
+    last_def s [];
     ());
   let rings = S.Owned.splice (ghost_ []) a (ghost_ [d; b; e; c]) c (ghost_ [])
     (ghost_ []) s (ghost_ []) rings in

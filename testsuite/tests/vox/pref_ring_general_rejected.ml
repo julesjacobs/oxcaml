@@ -11,8 +11,8 @@
  }
 *)
 
-(* Rejections for the generic ring reversal and range splice. The rings v3
-   package checked these with a separate script; here they are expect cases. *)
+(* Rejections for the ring operations of any length: reversal, insertion,
+   removal and range splice. *)
 
 open Pref_ring
 open Pref_ring_general
@@ -33,7 +33,7 @@ Line 5, characters 24-25:
 5 |     reverse sentinel ns t
                             ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_general.mli", line 15, characters 6-32:
+File "pref_ring_general.mli", line 20, characters 6-32:
   The refinement is stated here.
 |}, Principal{|
 Line 3, characters 56-57:
@@ -55,7 +55,7 @@ module Wrong_endpoint = struct
       (rest : node list) @ immutable ghost -> (final : node) @ immutable ->
       (suffix : node list) @ immutable ghost ->
       (destination_prefix : node list) @ immutable ghost ->
-      (destination_left : {n : node | n === S.last t destination_prefix}) @ immutable ->
+      (destination_left : {n : node | n === last t destination_prefix}) @ immutable ->
       (destination_suffix : node list) @ immutable ghost ->
       (state : {state : node option Pref.token |
         ring (Pref.own state) s (append prefix (append (first :: rest) suffix)) &&
@@ -73,7 +73,7 @@ Line 17, characters 35-40:
 17 |     S.splice s t prefix first rest final suffix destination_prefix
                                         ^^^^^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_splice_general.mli", line 21, characters 25-46:
+File "pref_ring_splice_general.mli", line 16, characters 25-46:
   The refinement is stated here.
 |}, Principal{|
 Line 10, characters 23-28:
@@ -93,7 +93,7 @@ module Wrong_placement = struct
   let bad : (s : node) @ immutable ghost -> (t : node) @ immutable ghost ->
       (prefix : node list) @ immutable ghost -> (first : node) @ immutable ->
       (rest : node list) @ immutable ghost ->
-      (final : {n : node | n === S.last first rest}) @ immutable ->
+      (final : {n : node | n === last first rest}) @ immutable ->
       (suffix : node list) @ immutable ghost ->
       (destination_prefix : node list) @ immutable ghost ->
       (destination_left : node) @ immutable ->
@@ -114,7 +114,7 @@ Line 19, characters 6-22:
 19 |       destination_left destination_suffix state
            ^^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_splice_general.mli", line 24, characters 36-67:
+File "pref_ring_splice_general.mli", line 19, characters 36-67:
   The refinement is stated here.
 |}, Principal{|
 Line 11, characters 23-28:
@@ -175,6 +175,79 @@ Line 2, characters 23-24:
 
 |}]
 
+(* Insertion needs [left] to be the node before the insertion point. *)
+module Insert_anywhere = struct
+  let bad (prefix : node list @ immutable ghost) (left : node @ immutable)
+      (suffix : node list @ immutable ghost)
+      (state : {state : Owned.t | Owned.model state === append prefix suffix} @ unique) =
+    Owned.insert prefix left suffix 0 state
+end;;
+[%%expect{|
+Line 5, characters 38-43:
+5 |     Owned.insert prefix left suffix 0 state
+                                          ^^^^^
+Error: Refinement could not be proved (counterexample)
+File "pref_ring_general.mli", line 84, characters 8-45:
+  The refinement is stated here.
+|}]
+
+(* The inserted node goes after [left], not always to the front. *)
+module Insert_front = struct
+  let bad (prefix : node list @ immutable ghost) (left : node @ immutable)
+      (suffix : node list @ immutable ghost)
+      (state : {state : Owned.t | Owned.model state === append prefix suffix &&
+        left === last (Owned.sentinel state) prefix} @ unique) :
+      {r : Owned.insertion |
+        Owned.model r.#ring === r.#node :: Owned.model state} @ unique =
+    Owned.insert prefix left suffix 0 state
+end;;
+[%%expect{|
+Line 8, characters 4-43:
+8 |     Owned.insert prefix left suffix 0 state
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 7, characters 8-60:
+7 |         Owned.model r.#ring === r.#node :: Owned.model state} @ unique =
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
+(* Only a node of the ring can be removed. *)
+module Remove_absent = struct
+  let bad (prefix : node list @ immutable ghost) (n : node @ immutable)
+      (suffix : node list @ immutable ghost)
+      (state : {state : Owned.t | Owned.model state === append prefix suffix} @ unique) =
+    Owned.remove prefix n suffix state
+end;;
+[%%expect{|
+Line 5, characters 33-38:
+5 |     Owned.remove prefix n suffix state
+                                     ^^^^^
+Error: Refinement could not be proved (counterexample)
+File "pref_ring_general.mli", line 94, characters 28-71:
+  The refinement is stated here.
+|}]
+
+(* Removal changes the model. *)
+module Remove_nothing = struct
+  let bad (prefix : node list @ immutable ghost) (n : node @ immutable)
+      (suffix : node list @ immutable ghost)
+      (state : {state : Owned.t |
+        Owned.model state === append prefix (n :: suffix)} @ unique) :
+      {next : Owned.t | Owned.model next === Owned.model state} @ unique =
+    Owned.remove prefix n suffix state
+end;;
+[%%expect{|
+Line 7, characters 4-38:
+7 |     Owned.remove prefix n suffix state
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample)
+Line 6, characters 24-62:
+6 |       {next : Owned.t | Owned.model next === Owned.model state} @ unique =
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+|}]
+
 (* Private proofs and model definitions are hidden by the interfaces. *)
 let hidden = Pref_ring_general.reverse_law;;
 [%%expect{|
@@ -192,12 +265,12 @@ Line 1, characters 13-46:
 Error: Unbound value "Pref_ring_general.Owned.model_def"
 |}]
 
-let hidden = Pref_ring_splice_general.chain_split;;
+let hidden = Pref_ring_splice_general.splice_law;;
 [%%expect{|
-Line 1, characters 13-49:
-1 | let hidden = Pref_ring_splice_general.chain_split;;
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Unbound value "Pref_ring_splice_general.chain_split"
+Line 1, characters 13-48:
+1 | let hidden = Pref_ring_splice_general.splice_law;;
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Error: Unbound value "Pref_ring_splice_general.splice_law"
 |}]
 
 let hidden = Pref_ring_splice_general.Owned.source_def;;
