@@ -556,3 +556,157 @@ module Wrap :
     module Aliased : sig module N : sig val x : {n : int | n >= 0} end end
   end
 |}]
+
+(* Predicates are compared with the refinements the verifier assumes while
+   evaluating them: of a [let refine_] binding, of a pattern, and of a
+   function parameter.  Two predicates with the same syntax whose exposed
+   refinements differ are different predicates.  Here the declaration's u is
+   {v >= 0} and the implementation's {v > 0}: after the inclusion
+   substitution the declared type w names the implementation's u, but its
+   predicate's nodes keep the declaration's types, so [let refine_ y = u]
+   assumes y >= 0 on one side and y > 0 on the other.  Type declarations
+   compare predicates exactly, so this is rejected; with equal refinements
+   it is accepted. *)
+module Refine_exposed_same : sig
+  val u : {v : int | v > 0}
+  type w = {r : int | let refine_ y = u in r = y}
+end = struct
+  let u : {v : int | v > 0} = 1
+  type w = {r : int | let refine_ y = u in r = y}
+end;;
+[%%expect{|
+module Refine_exposed_same :
+  sig
+    val u : {v : int | v > 0}
+    type w = {r : int | let refine_ y = u in r = y}
+  end
+|}]
+
+module Refine_exposed_different : sig
+  val u : {v : int | v >= 0}
+  type w = {r : int | let refine_ y = u in r = y}
+end = struct
+  let u : {v : int | v > 0} = 1
+  type w = {r : int | let refine_ y = u in r = y}
+end;;
+[%%expect{|
+Lines 4-7, characters 6-3:
+4 | ......struct
+5 |   let u : {v : int | v > 0} = 1
+6 |   type w = {r : int | let refine_ y = u in r = y}
+7 | end..
+Error: Signature mismatch:
+       Modules do not match:
+         sig
+           val u : {v : int | v > 0}
+           type w = {r : int | let refine_ y = u in r = y}
+         end
+       is not included in
+         sig
+           val u : {v : int | v >= 0}
+           type w = {r : int | let refine_ y = u in r = y}
+         end
+       Type declarations do not match:
+         type w = {r : int | let refine_ y = u in r = y}
+       is not included in
+         type w = {r : int | let refine_ y = u in r = y}
+       The type "{r : int | let refine_ y = u in r = y}"
+       is not equal to the type "{r : int | let refine_ y = u in r = y}"
+       Type "{v : int | v > 0}" is not equal to type "{v : int | v >= 0}"
+|}]
+
+module Pattern_exposed_same : sig
+  val u : {v : int | v > 0}
+  type w = {r : bool | r = (match u with y -> y > 0)}
+end = struct
+  let u : {v : int | v > 0} = 1
+  type w = {r : bool | r = (match u with y -> y > 0)}
+end;;
+[%%expect{|
+module Pattern_exposed_same :
+  sig
+    val u : {v : int | v > 0}
+    type w = {r : bool | r = (match u with | y -> y > 0)}
+  end
+|}]
+
+module Pattern_exposed_different : sig
+  val u : {v : int | v >= 0}
+  type w = {r : bool | r = (match u with y -> y > 0)}
+end = struct
+  let u : {v : int | v > 0} = 1
+  type w = {r : bool | r = (match u with y -> y > 0)}
+end;;
+[%%expect{|
+Lines 4-7, characters 6-3:
+4 | ......struct
+5 |   let u : {v : int | v > 0} = 1
+6 |   type w = {r : bool | r = (match u with y -> y > 0)}
+7 | end..
+Error: Signature mismatch:
+       Modules do not match:
+         sig
+           val u : {v : int | v > 0}
+           type w = {r : bool | r = (match u with | y -> y > 0)}
+         end
+       is not included in
+         sig
+           val u : {v : int | v >= 0}
+           type w = {r : bool | r = (match u with | y -> y > 0)}
+         end
+       Type declarations do not match:
+         type w = {r : bool | r = (match u with | y -> y > 0)}
+       is not included in
+         type w = {r : bool | r = (match u with | y -> y > 0)}
+       The type "{r : bool | r = (match u with | y -> y > 0)}"
+       is not equal to the type "{r : bool | r = (match u with | y -> y > 0)}"
+       Type "{v : int | v > 0}" is not equal to type "{v : int | v >= 0}"
+|}]
+
+module Lambda_exposed_same : sig
+  val u : {v : int | v > 0}
+  type w = {r : bool | r = (fun y -> y > 0) u}
+end = struct
+  let u : {v : int | v > 0} = 1
+  type w = {r : bool | r = (fun y -> y > 0) u}
+end;;
+[%%expect{|
+module Lambda_exposed_same :
+  sig
+    val u : {v : int | v > 0}
+    type w = {r : bool | r = ((fun y -> y > 0) u)}
+  end
+|}]
+
+module Lambda_exposed_different : sig
+  val u : {v : int | v >= 0}
+  type w = {r : bool | r = (fun y -> y > 0) u}
+end = struct
+  let u : {v : int | v > 0} = 1
+  type w = {r : bool | r = (fun y -> y > 0) u}
+end;;
+[%%expect{|
+Lines 4-7, characters 6-3:
+4 | ......struct
+5 |   let u : {v : int | v > 0} = 1
+6 |   type w = {r : bool | r = (fun y -> y > 0) u}
+7 | end..
+Error: Signature mismatch:
+       Modules do not match:
+         sig
+           val u : {v : int | v > 0}
+           type w = {r : bool | r = ((fun y -> y > 0) u)}
+         end
+       is not included in
+         sig
+           val u : {v : int | v >= 0}
+           type w = {r : bool | r = ((fun y -> y > 0) u)}
+         end
+       Type declarations do not match:
+         type w = {r : bool | r = ((fun y -> y > 0) u)}
+       is not included in
+         type w = {r : bool | r = ((fun y -> y > 0) u)}
+       The type "{r : bool | r = ((fun y -> y > 0) u)}"
+       is not equal to the type "{r : bool | r = ((fun y -> y > 0) u)}"
+       Type "{v : int | v > 0}" is not equal to type "{v : int | v >= 0}"
+|}]

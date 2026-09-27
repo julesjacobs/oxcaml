@@ -413,7 +413,7 @@ val refinement_operand_mode : unit -> ('l * 'r) Mode.Value.t
 val refinement_predicate_types :
   Env.t -> pairs:(Ident.t * Ident.t) list ->
   refinement_expression -> refinement_expression ->
-  (type_expr * type_expr) list option
+  Refinement_predicate.type_pair list option
 
 (* While [f] runs, [equal] relates the types of predicate nodes up to a
    renaming of their type variables other than [params], as for two
@@ -422,11 +422,12 @@ val with_predicate_variable_renaming :
   params:type_expr list -> (unit -> 'a) -> 'a
 
 (* [relate_predicate_types env relate types] relates the skeletons of those
-   types (ignoring refinements and arrow modes), applying [relate] where the
-   skeletons stop. *)
+   types (ignoring arrow modes, and refinements except in exposed types),
+   applying [relate] where the skeletons stop and to refinements of exposed
+   types that are not alpha-equal. *)
 val relate_predicate_types :
   Env.t -> (type_expr -> type_expr -> unit) ->
-  (type_expr * type_expr) list -> unit
+  Refinement_predicate.type_pair list -> unit
 
 val moregeneral: ?refinements:refinement_inclusion -> Env.t -> bool ->
   Jkind_types.Sort.var list -> Jkind_types.Sort.var list ->

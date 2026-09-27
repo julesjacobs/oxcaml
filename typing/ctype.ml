@@ -5380,8 +5380,12 @@ let refinement_predicate_types env ~pairs pred1 pred2 =
    skeletons: the verifier encodes a predicate by sorts, which ignore
    refinements and modes, so only the instantiation of the types matters (a
    law about [int t] is not a law about [bool t]).  [relate] is applied where
-   the skeletons stop, in particular at type variables. *)
-let relate_predicate_type env relate ty1 ty2 =
+   the skeletons stop, in particular at type variables.  An [exposed] type's
+   refinements are assumed by the verifier, so they are compared too: two
+   refinements must have alpha-equal predicates whose own types are related
+   in the same way, and any other refinement is left to [relate], which
+   compares refinements exactly.  Arrow modes are ignored throughout. *)
+let rec relate_predicate_type env relate ~exposed ~binders ty1 ty2 =
   let in_scope univar =
     List.exists
       (fun (cl1, cl2) ->
@@ -5390,25 +5394,43 @@ let relate_predicate_type env relate ty1 ty2 =
       !univar_pairs
   in
   let visited = TypePairs.create 7 in
-  let rec skeleton ty1 ty2 =
+  (* [binders] pairs the binders of the arrows around the current types, which
+     their refinements may mention. *)
+  let rec skeleton ?(binders = []) ty1 ty2 =
     let ty1 = expand_head env ty1 and ty2 = expand_head env ty2 in
     if eq_type ty1 ty2 || TypePairs.mem visited (ty1, ty2) then () else begin
       TypePairs.add visited (ty1, ty2);
       match get_desc ty1, get_desc ty2 with
-      | Trefine r, _ -> skeleton r.ref_payload ty2
-      | _, Trefine r -> skeleton ty1 r.ref_payload
-      | Tarrow ((l1, _, _, _), a1, r1, _), Tarrow ((l2, _, _, _), a2, r2, _)
+      | Trefine r1, Trefine r2 when exposed -> (
+          match
+            refinement_predicate_types env
+              ~pairs:((r1.ref_binder, r2.ref_binder) :: binders)
+              r1.ref_pred r2.ref_pred
+          with
+          | Some types ->
+              skeleton ~binders r1.ref_payload r2.ref_payload;
+              relate_predicate_types env relate types
+          | None -> relate ty1 ty2)
+      | (Trefine _, _ | _, Trefine _) when exposed -> relate ty1 ty2
+      | Trefine r, _ -> skeleton ~binders r.ref_payload ty2
+      | _, Trefine r -> skeleton ~binders ty1 r.ref_payload
+      | Tarrow ((l1, _, _, b1), a1, r1, _), Tarrow ((l2, _, _, b2), a2, r2, _)
         when l1 = l2 ->
-          skeleton a1 a2;
-          skeleton r1 r2
-      | Tpoly (t1, []), Tpoly (t2, []) -> skeleton t1 t2
+          skeleton ~binders a1 a2;
+          let binders =
+            match b1, b2 with
+            | Some b1, Some b2 -> (b1, b2) :: binders
+            | _ -> binders
+          in
+          skeleton ~binders r1 r2
+      | Tpoly (t1, []), Tpoly (t2, []) -> skeleton ~binders t1 t2
       | Ttuple c1, Ttuple c2
         when List.equal (fun (l1, _) (l2, _) -> Option.equal String.equal l1 l2)
                c1 c2 ->
-          List.iter2 (fun (_, t1) (_, t2) -> skeleton t1 t2) c1 c2
+          List.iter2 (fun (_, t1) (_, t2) -> skeleton ~binders t1 t2) c1 c2
       | Tconstr (p1, a1, _), Tconstr (p2, a2, _)
         when Path.same p1 p2 && List.compare_lengths a1 a2 = 0 ->
-          List.iter2 skeleton a1 a2
+          List.iter2 (skeleton ~binders) a1 a2
       | Tunivar _, (Tvar _ | Tunivar _) when not (in_scope ty1) -> ()
       | (Tvar _ | Tunivar _), Tunivar _ when not (in_scope ty2) -> ()
           (* A type variable that occurs only in a predicate is not
@@ -5421,7 +5443,13 @@ let relate_predicate_type env relate ty1 ty2 =
       | _ -> relate ty1 ty2
     end
   in
-  skeleton ty1 ty2
+  skeleton ~binders ty1 ty2
+
+and relate_predicate_types env relate types =
+  List.iter
+    (fun { Refinement_predicate.left; right; exposed; binders } ->
+      relate_predicate_type env relate ~exposed ~binders left right)
+    types
 
 (* Set while comparing two type declarations (see [Includecore]), with their
    parameters, which are shared by the two declarations at that point. *)
@@ -5433,8 +5461,6 @@ let with_predicate_variable_renaming ~params f =
   predicate_variable_renaming := Some (free_variables_list params);
   Fun.protect ~finally:(fun () -> predicate_variable_renaming := saved) f
 
-let relate_predicate_types env relate types =
-  List.iter (fun (ty1, ty2) -> relate_predicate_type env relate ty1 ty2) types
 
 (*
    1. When unifying two non-abbreviated types, one type is made a link
