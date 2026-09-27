@@ -2763,9 +2763,9 @@ and pattern_fallback : type k.
   in
   [s, required p.pat_loc (fresh ctx p.pat_env Predef.type_bool "pattern")]
 
-(* Asserts the predicate of refinement [r] of [value].  Each conjunct of a
-   top-level [&&] chain is an obligation of its own, proved under the
-   conjuncts before it, as [&&] evaluates; a failure then names the conjunct.
+(* Asserts the predicate of refinement [r] of [value]. Each conjunct of a
+   top-level [&&] chain is an obligation of its own, proved under the conjuncts
+   before it, as [&&] evaluates; a failure then names the conjunct.
    [required_by] explains a predicate that cannot be translated. *)
 let assert_refinement ctx env s r value ~loc ~headline ~context ~required_by =
   let rec conjuncts p =
@@ -2783,13 +2783,7 @@ let assert_refinement ctx env s r value ~loc ~headline ~context ~required_by =
         ~finally:(fun () -> ctx.in_goal <- in_goal)
         (fun () -> predicate ctx env goals p)
     with Location.Error error ->
-      raise
-        (Location.Error
-           { error with
-             sub =
-               error.sub
-               @ required_by
-           })
+      raise (Location.Error { error with sub = error.sub @ required_by })
   in
   let group = fresh_group () in
   let prove goals p =
@@ -2817,7 +2811,6 @@ let assert_refinement ctx env s r value ~loc ~headline ~context ~required_by =
     List.fold_left prove (bind s r.ref_binder value) (conjuncts r.ref_pred)
   in
   { s with code = Check (added_prefix ~base:s.code goals.code) :: s.code }
-
 
 (* Refinement subsumption: every value of [source] is a value of [target].
    Typing compared the two types up to refinements ([Ctype.moregen],
@@ -3815,6 +3808,7 @@ and structure ctx s str =
           when Option.is_some (module_alias mb_expr) ->
           (* The alias and its target are the same module at run time. *)
           let target = Option.get (module_alias mb_expr) in
+          discharge_constraints ctx s mb_expr;
           ctx.module_aliases
             <- Path.Map.add (Path.Pident id) target ctx.module_aliases;
           s, None

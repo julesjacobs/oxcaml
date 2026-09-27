@@ -7577,10 +7577,42 @@ let rec eliminate_refinement_to env target exp =
                    { source = exp.exp_type; target = ref_payload },
                  exp.exp_loc, []) :: exp.exp_extra }
 
+(* An elimination of [source] followed by an introduction of [target]
+   cancel when the two are equal, or when [source] only has type variables
+   in its predicate's types where [target] has closed types: those are
+   instantiated (a law about a polymorphic constant holds at each
+   instance).  Predicates at different types do not cancel. *)
+let cancels_refinement env source target =
+  Ctype.is_equal env true [source] [target]
+  ||
+  match get_desc (Ctype.expand_head env source),
+        get_desc (Ctype.expand_head env target) with
+  | Trefine r1, Trefine r2
+    when Ctype.is_equal env true [r1.ref_payload] [r2.ref_payload] -> (
+      match
+        Ctype.refinement_predicate_types env
+          ~pairs:[r1.ref_binder, r2.ref_binder] r1.ref_pred r2.ref_pred
+      with
+      | None -> false
+      | Some types ->
+          let exception Different in
+          let snapshot = Btype.snapshot () in
+          let relate ty1 ty2 =
+            if Ctype.is_equal env true [ty1] [ty2] then ()
+            else if Btype.is_Tvar ty1 && Ctype.free_variables ty2 = [] then
+              (try Ctype.unify env ty1 (instance ty2)
+               with Ctype.Unify _ -> raise Different)
+            else raise Different
+          in
+          match Ctype.relate_predicate_types env relate types with
+          | () -> true
+          | exception Different -> Btype.backtrack snapshot; false)
+  | _ -> false
+
 let introduce_refinement env target loc exp =
   let rec cancel prefix = function
     | (Texp_refinement { source; _ }, _, _) :: rest
-      when Ctype.is_equal env true [source] [target] ->
+      when cancels_refinement env source target ->
         Some (List.rev_append prefix rest)
     | (Texp_refinement _, _, _) :: _ -> None
     | extra :: rest -> cancel (extra :: prefix) rest

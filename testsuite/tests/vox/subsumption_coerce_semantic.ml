@@ -78,9 +78,9 @@ let first (xs : {x : int | x > 0} list) : {r : int | r >= 0} =
 val first : {x : int | x > 0} list -> {r : int | r >= 0} = <fun>
 |}]
 
-(* [stage 4] Strengthening fails.  s0 is defined in an earlier phrase, which
-   the expect tool verifies separately, so its result is a fresh symbol named
-   after the target's binder r (in one unit it is the reflected term s0 x).
+(* [stage 4] Strengthening fails.  No source-named integer is involved (the
+   parameter has no binder and s0 is total, so its result is the term s0 x),
+   hence no values are shown.
    Currently: 'Type "int -> {r : int | r >= 0}" is not a subtype of
    "int -> {r : int | r > 0}"'. *)
 let s1 = (s0 :> int -> {r : int | r > 0});;
@@ -88,15 +88,14 @@ let s1 = (s0 :> int -> {r : int | r > 0});;
 Line 1, characters 9-41:
 1 | let s1 = (s0 :> int -> {r : int | r > 0});;
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample: r = 0)
+Error: Refinement could not be proved (counterexample)
 Line 1, characters 34-39:
 1 | let s1 = (s0 :> int -> {r : int | r > 0});;
                                       ^^^^^
   The refinement is stated here.
 |}]
 
-(* [stage 4] Wrapping: r >= x does not imply r > x - 1 at x = min_int (r is
-   a fresh symbol, as for s1).
+(* [stage 4] Wrapping: r >= x does not imply r > x - 1 at x = min_int.
    Currently: 'Type "(x : int) -> {r : int | r >= x}" is not a subtype of
    "(x : int) -> {r : int | r > (x - 1)}"'. *)
 let d5 = (d :> (x : int) -> {r : int | r > x - 1});;
@@ -104,7 +103,7 @@ let d5 = (d :> (x : int) -> {r : int | r > x - 1});;
 Line 1, characters 9-50:
 1 | let d5 = (d :> (x : int) -> {r : int | r > x - 1});;
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample: r = -4611686018427387904, x = -4611686018427387904)
+Error: Refinement could not be proved (counterexample: x = -4611686018427387904)
 Line 1, characters 39-48:
 1 | let d5 = (d :> (x : int) -> {r : int | r > x - 1});;
                                            ^^^^^^^^^

@@ -183,5 +183,4 @@ Line 4, characters 27-42:
 4 |   let cast (x : int law) = (x :> bool law)
                                ^^^^^^^^^^^^^^^
 Error: Type "int law" is not a subtype of "bool law"
-       Type "int" is not compatible with type "bool"
 |}]

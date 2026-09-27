@@ -538,3 +538,21 @@ module Same_parameter :
   functor (X : sig val f : {x : int | x < 100} -> {r : int | r > 100} end) ->
     sig val f : (x : {x : int | x < 100}) -> {r : int | r > x} end
 |}]
+
+(* A constraint on a module path (a module alias) is proved with the facts of
+   that module. *)
+module Wrap = struct
+  module A2 = struct
+    let x = 1
+    module N = struct let x = 0 end
+  end
+  module Aliased =
+    (A2 : sig module N : sig val x : {n : int | n >= 0} end end)
+end;;
+[%%expect{|
+module Wrap :
+  sig
+    module A2 : sig val x : int module N : sig val x : int end end
+    module Aliased : sig module N : sig val x : {n : int | n >= 0} end end
+  end
+|}]
