@@ -102,6 +102,10 @@ this file.
         existentials, abstract/open types and unpacked modules (possibly
         recursive unless the jkind excludes functions or a recorded guarantee
         holds). Agent on `jujacobs/vox/totality-existentials-20260927`.
+  - [ ] **Ghost-field reads cross locality (found 27 September):** a token
+        borrowed for a read escapes its `borrow_` region through a ghost
+        field ("verified to be 1: 2"). Agent on
+        `jujacobs/vox/ghost-field-locality-20260927`.
   - [ ] **Out-of-range shift counts (found 27 September):** one
         uninterpreted function per shift operator equates results that
         differ between constant-folded and run-time code; a verified program
