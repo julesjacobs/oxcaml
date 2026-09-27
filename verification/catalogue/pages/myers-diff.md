@@ -43,7 +43,7 @@ The same test rejects a false claim about the patched result, a conclusion drawn
 
 ## Trusted base
 
-- `diff_boundary.ml` is the only check that `diff` runs no proof code. It compiles the library with `-drawlambda` and requires, for each function `diff` runs (named in `diff_boundary_check.ml`), a fixed set of callees and no reference to `minimum_cost` or `Bigint`. The one function of the `Proof` module that runs is `reverse_into`, which `finished` calls to build the result script.
+- `diff_boundary.ml` is the only check that `diff` runs no proof code. It compiles the library with `-drawlambda` and requires, for each function `diff` runs (listed by hand in `diff_boundary_check.ml`), that every application in its body is one of a fixed set of calls, and that it mentions neither `minimum_cost` nor `Bigint`. Since each listed function calls only listed functions, the list covers everything `diff` runs. The one function of the `Proof` module that runs is `reverse_into`, which `finished` calls to build the result script; for it the check looks only at calls by name (it calls only itself) and at references to other modules, not at every application.
 
 ## Scope
 
