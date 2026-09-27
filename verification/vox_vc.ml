@@ -2913,6 +2913,7 @@ and check_function ctx s e params body value =
         branch s condition)
       s params
   in
+  let s = assume_lemma_premise ctx s body in
   let arguments =
     Misc.Stdlib.List.map_option
       (fun p ->
@@ -2949,6 +2950,60 @@ and check_function ctx s e params body value =
       fn.lambda
         := logical_lambda ctx captured captured_arguments parameters body
     | _ -> ()
+
+(* An erased lemma whose conclusion is [{u : unit | if p then q else true}] is
+   proved under [p]. Its body never runs, and under [not p] its conclusion holds
+   trivially; a recursive call still has to establish the callee's own premise
+   to use its conclusion. *)
+and assume_lemma_premise ctx s body =
+  match body with
+  | Tfunction_body body
+    when (not s.dead)
+         && List.exists
+              (function Texp_ghost, _, _ -> true | _ -> false)
+              body.exp_extra -> (
+    let env = body.exp_env in
+    (* Only a body whose single refinement is this conclusion: another one (an
+       inner annotation) would be checked under [p] as well. *)
+    let conclusions =
+      List.filter_map
+        (function
+          | Texp_refinement { target; _ }, _, _ -> (
+            match get_desc (Ctype.expand_head env target) with
+            | Trefine r -> Some r
+            | _ -> None)
+          | _ -> None)
+        body.exp_extra
+    in
+    match conclusions with
+    | [ ({ ref_pred =
+             { rexp_desc =
+                 Rexp_ifthenelse
+                   ( premise,
+                     _,
+                     Some
+                       { rexp_desc =
+                           Rexp_construct
+                             (Path.Pextra_ty (_, Path.Pcstr_ty "true"), []);
+                         _
+                       } );
+               _
+             };
+           _
+         } as r) ]
+      when match get_desc (Ctype.expand_head env r.ref_payload) with
+           | Tconstr (path, [], _) -> Path.same path Predef.path_unit
+           | _ -> false -> (
+      let unit = fresh ctx env r.ref_payload "result" in
+      match predicate ctx env (bind s r.ref_binder unit) premise with
+      | assumed, premise when not assumed.dead -> (
+        match scalar premise with
+        | Some premise -> branch { assumed with values = s.values } premise
+        | None -> s)
+      | _ -> s
+      | exception Location.Error _ -> s)
+    | _ -> s)
+  | _ -> s
 
 and value_bindings ctx s rec_flag bindings =
   let s =
