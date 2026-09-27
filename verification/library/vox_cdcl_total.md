@@ -78,11 +78,10 @@ propagation, input-error precedence, bounded/fallback statistics, and the
 256-variable boundary. The bounded-budget and fallback-depth rejection tests
 retain their original scopes.
 
-`verification/clients/check_sat_public.sh _install` derives semantic SAT and
-UNSAT results and complete-CDCL decisions using only installed public
-interfaces. `check_sat_erasure.sh _install` checks public bytecode/native
-Lambda and private native symbols for surviving proof computations. Both
-scripts accept an optional second argument to retain their evidence directory.
+`./dev test vox/sat_boundary.ml` derives semantic SAT and UNSAT results and
+complete-CDCL decisions using only the public interfaces, and checks public
+bytecode/native Lambda and private native symbols for surviving proof
+computations.
 
 See [the review boundary](vox_sat_boundary.md) for the exact semantic interface
 closure and shared language trust assumptions. The benchmark driver remains
