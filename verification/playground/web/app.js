@@ -76,7 +76,8 @@ $('restore').addEventListener('click', () => {
 
 let worker = null;
 let ready = false;
-let pending = null; // { id, started, timer }
+let pending = null; // the running check: { id, file, source, started, timer }
+let requested = false; // a check was asked for while another was running
 let nextId = 0;
 
 function startWorker() {
@@ -99,16 +100,21 @@ function startWorker() {
   };
   worker.onerror = (event) => {
     show('failed', 'The checker stopped', event.message || 'An error occurred in the worker.');
+    if (pending) clearTimeout(pending.timer);
     pending = null;
   };
 }
 
 function check() {
   if (!ready || !current) return;
-  if (pending) return;
+  if (pending) {
+    requested = true;
+    return;
+  }
   const id = ++nextId;
   pending = {
     id,
+    file: current.file,
     source: editor.getValue(),
     started: performance.now(),
     // A check that runs long can be stopped; the worker is then restarted.
@@ -123,6 +129,7 @@ stopButton.addEventListener('click', () => {
   if (!pending) return;
   clearTimeout(pending.timer);
   pending = null;
+  requested = false;
   worker.terminate();
   stopButton.hidden = true;
   show('stopped', 'Stopped', 'The check was stopped. Restarting the checker…');
@@ -132,11 +139,24 @@ stopButton.addEventListener('click', () => {
 checkButton.addEventListener('click', () => check());
 
 function finish({ result, error }) {
-  const { source, started, timer } = pending;
+  const { file, source, started, timer } = pending;
   clearTimeout(timer);
   pending = null;
   stopButton.hidden = true;
   checkButton.disabled = false;
+  // The visitor switched examples during the check: its result is not shown.
+  if (file !== current.file) {
+    requested = false;
+    check();
+    return;
+  }
+  if (requested) {
+    requested = false;
+    if (source !== editor.getValue()) {
+      check();
+      return;
+    }
+  }
   if (error) {
     show('failed', 'The checker failed', error);
     return;
@@ -160,7 +180,12 @@ function finish({ result, error }) {
     lambda.textContent = result.lambda;
     erased.hidden = false;
   }
-  if (source === editor.getValue()) markEditor(result.output);
+  if (source === editor.getValue()) {
+    markEditor(result.output);
+  } else {
+    verdict.dataset.state = 'stale';
+    verdictDetail.textContent = 'The program has changed since this check. Press Check again.';
+  }
 }
 
 function show(state, text, detail) {

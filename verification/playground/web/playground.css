@@ -28,7 +28,7 @@
 .vox-note{text-decoration-style:dotted;text-decoration-color:#355b76;background:#eef3f6}
 .vox-line-error{background:#fff7f6}
 .vox-line-warning{background:#fffbf2}
-.result{min-width:0}
+.source,.result{min-width:0}
 .verdict{padding:12px 14px;border:1px solid var(--line);border-radius:5px;background:#f7f9fa;margin-bottom:10px}
 .verdict strong{font-size:17px}
 .verdict p{font-size:13px;color:var(--muted);margin:5px 0 0}
@@ -48,5 +48,5 @@
 .erased pre{font-size:12px;max-height:50vh;overflow:auto}
 .about{font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:8px}
 .about p{margin:0 0 6px}
-@media(max-width:980px){.workspace{grid-template-columns:1fr}.editor .CodeMirror{height:auto;min-height:0}.editor .CodeMirror-scroll{max-height:70vh}}
+@media(max-width:980px){.workspace{grid-template-columns:minmax(0,1fr)}.editor .CodeMirror{height:auto;min-height:0}.editor .CodeMirror-scroll{max-height:70vh}}
 @media(max-width:640px){.playground{padding:12px 16px 24px}.toolbar select{flex:1 1 100%}.shortcut{display:none}}

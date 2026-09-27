@@ -74,10 +74,12 @@ includes=(-I "$boot/.ocamlcommon.objs/byte" -I "$boot/.ocamlfrontend.objs/byte"
 )
 
 echo "== JavaScript"
-js_of_ocaml --opt=3 --no-sourcemap \
-  "$here/runtime.js" \
-  -o "$work/vox.js" "$work/vox_playground.bc" 2>&1 \
-  | grep -v "^Warning: your program contains effect handlers" || true
+# js_of_ocaml lists the C primitives it does not provide: Unix process
+# functions and terminfo, which the checker links but never calls.
+rm -f "$work/vox.js"
+js_of_ocaml --opt=3 --no-sourcemap "$here/runtime.js" \
+  -o "$work/vox.js" "$work/vox_playground.bc" 2> "$work/js_of_ocaml.log" \
+  || { cat "$work/js_of_ocaml.log"; exit 1; }
 
 echo "== Z3, CodeMirror and coi-serviceworker from npm"
 (cd "$here" && npm ci --ignore-scripts --no-audit --no-fund --silent)

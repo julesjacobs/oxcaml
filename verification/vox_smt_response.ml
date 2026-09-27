@@ -184,9 +184,9 @@ let followup symbols answer =
 
 let resource_request = "(get-info :rlimit)\n"
 
-(* The resource count restarts at each reset. *)
-let interpret_response symbols answer text =
-  let resources = ref None in
+(* The resource count restarts at each reset. It is recorded before the rest
+   of the response is interpreted, which may fail. *)
+let interpret_response ~resources symbols answer text =
   let response =
     match List.rev (parse text) with
     | List [Atom ":rlimit"; Atom count] :: rest -> (
@@ -198,4 +198,4 @@ let interpret_response symbols answer text =
     | Atom "unsupported" :: rest -> List.rev rest
     | response -> List.rev response
   in
-  interpret symbols answer response, !resources
+  interpret symbols answer response

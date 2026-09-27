@@ -215,7 +215,8 @@ def main():
                 print('--- native\n' + n['output'] + '--- browser\n' + b['output'])
             if not result.get('same_lambda', True):
                 print('--- erased program differs')
-        if key in other and not result['same_other']:
+        if key in other and not result['same_other'] and b['status'] != 3:
+            disagreements += 1
             print(f'DISAGREE with {args.compare_with}: {key}'
                   + ('' if result['native_platforms_agree'] else ' (the two native compilers also disagree)'))
     for group, stats in by_group.items():

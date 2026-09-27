@@ -23,7 +23,10 @@ val followup : Vox_smt.Symbol.t list -> string -> string
 (** Asks for the resource count of the query since the reset. *)
 val resource_request : string
 
-(** The validity and resource count from the answer and the responses to
-    [followup] and [resource_request]. *)
+(** The validity from the answer and the responses to [followup] and
+    [resource_request]. The resource count, when the solver reports one, is
+    stored in [resources] first, even if interpreting the rest raises
+    [Protocol_error]. *)
 val interpret_response :
-  Vox_smt.Symbol.t list -> string -> string -> Vox_smt.validity * int option
+  resources:int option ref ->
+  Vox_smt.Symbol.t list -> string -> string -> Vox_smt.validity

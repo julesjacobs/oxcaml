@@ -30,7 +30,8 @@ that front end; they are identical to the installed ones. Options:
 - `--library-prefix PREFIX`: also ship the verified library's interfaces from
   `PREFIX/lib/ocaml/vox` (installed by `verification/library/build.sh PREFIX`),
   so that programs can use `Vox_sequence` and the rest. The examples do not
-  need them.
+  need them, and they are large: 125 interfaces, 19 MB (4.6 MB compressed),
+  against 2 MB for the standard library.
 
 ## Hosting
 

@@ -68,7 +68,8 @@ let check_impl ?(config = default_config) ?(dump = fun _ -> ())
       ?resource_limit ~int_width ~timeout_ms:config.timeout_ms q
   in
   let encoded = monotonic_time () in
-  let validity, resources =
+  let resources = ref None in
+  let validity =
     try
       let input = Vox_smt_response.session_input input in
       dump input;
@@ -81,15 +82,15 @@ let check_impl ?(config = default_config) ?(dump = fun _ -> ())
       let response = rest ^ eval request in
       (* Z3's own [:timeout] option, set by [to_smtlib], stands in for the
          native runner's deadline: it answers unknown with reason timeout. *)
-      Vox_smt_response.interpret_response q.symbols answer response
+      Vox_smt_response.interpret_response ~resources q.symbols answer response
     with
-    | Vox_smt_response.Protocol_error message -> Failure message, None
-    | Solver_error message -> Failure message, None
+    | Vox_smt_response.Protocol_error message -> Failure message
+    | Solver_error message -> Failure message
   in
   let finished = monotonic_time () in
   { validity;
     stderr = "";
-    resources;
+    resources = !resources;
     encoding_seconds = encoded -. started;
     solving_seconds = finished -. encoded
   }

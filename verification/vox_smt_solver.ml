@@ -257,10 +257,10 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
       if !offset <> String.length !pending
       then protocol "Incomplete query write";
       ignore (poll ());
-      let result, count =
-        interpret_response q.symbols answer (Buffer.contents response)
+      let result =
+        interpret_response ~resources q.symbols answer
+          (Buffer.contents response)
       in
-      resources := count;
       ignore (poll ());
       (match result with
       | Timeout | Failure _ -> ()

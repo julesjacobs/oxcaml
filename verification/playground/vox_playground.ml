@@ -104,34 +104,44 @@ let target_int literal =
     then Some value
     else None
 
-let check_literal ~loc = function
-  | Parsetree.Pconst_integer (literal, (None | Some 'm'))
-  | Pconst_unboxed_integer (literal, 'm') -> (
-    let host = Option.map Int64.of_int (int_of_string_opt literal) in
-    match target_int literal with
-    | Some value when host <> Some value ->
-      raise
-        (Unsupported
-           ( loc,
-             Printf.sprintf
-               "The integer literal %s does not fit in the 32-bit int of \
-                this JavaScript build."
-               literal ))
-    | _ -> ())
-  | Pconst_integer (literal, Some 'n') | Pconst_unboxed_integer (literal, 'n')
-    -> (
-    (* A 64-bit target's nativeint has the semantics of [Int64]. *)
-    let host = Option.map Int64.of_nativeint (Nativeint.of_string_opt literal) in
-    match Int64.of_string_opt literal with
-    | Some value when host <> Some value ->
-      raise
-        (Unsupported
-           ( loc,
-             Printf.sprintf
-               "The nativeint literal %sn does not fit in the 32-bit \
-                nativeint of this JavaScript build."
-               literal ))
-    | _ -> ())
+(* Literals of type [int], and those of [int8] and [int16], which the typer
+   also reads with [int_of_string] before checking their range, must have
+   the same value on the host as on the target. So must [nativeint] literals,
+   which a 64-bit target reads as [Int64] does. [int32] and [int64] literals
+   are read with [Int32] and [Int64], which do not depend on the host. *)
+let check_literal ~loc constant =
+  let unsupported literal suffix kind =
+    raise
+      (Unsupported
+         ( loc,
+           Printf.sprintf
+             "The literal %s%s does not fit in the 32-bit %s of this \
+              JavaScript build."
+             literal
+             (Option.fold ~none:"" ~some:(String.make 1) suffix)
+             kind ))
+  in
+  let host_int literal = Option.map Int64.of_int (int_of_string_opt literal) in
+  let host_nativeint literal =
+    Option.map Int64.of_nativeint (Nativeint.of_string_opt literal)
+  in
+  let check literal suffix =
+    match suffix with
+    | None | Some ('m' | 's' | 'S') -> (
+      match target_int literal with
+      | Some value when host_int literal <> Some value ->
+        unsupported literal suffix "int"
+      | _ -> ())
+    | Some 'n' -> (
+      match Int64.of_string_opt literal with
+      | Some value when host_nativeint literal <> Some value ->
+        unsupported literal suffix "nativeint"
+      | _ -> ())
+    | Some _ -> ()
+  in
+  match (constant : Parsetree.constant_desc) with
+  | Pconst_integer (literal, suffix) -> check literal suffix
+  | Pconst_unboxed_integer (literal, suffix) -> check literal (Some suffix)
   | _ -> ()
 
 let check_literals structure =
