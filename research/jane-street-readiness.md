@@ -124,7 +124,10 @@ this file.
   - All 24 demo pages except hm-wasm-compiler are at owner-review.
   - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
         reference-locks (after deduplication and the inventory comments).
-  - [ ] hm-wasm-compiler, after item 3.
+  - [x] hm-wasm-compiler: **owner-review** (review merged with this
+        commit; two reproduce scripts, including the AMD box's 100k
+        differential, had silently selected no modules since the switch
+        to `prebuilt_modules`; fixed to fail on an empty list).
 - [x] **3. HM-to-Wasm is not trivial** (AMD box).
   - [x] Example programs compiled by the verified compiler and run, with
         exact results and resource use, as a suite test: eight programs, all
@@ -191,7 +194,7 @@ this file.
         and the HM files still have many `let u = () in`.
 - [ ] **10. Performance story.**
   - [ ] Flat hash table benchmark on x86-64 (AMD box).
-  - [ ] State on the compiler page that the backend manages its own stack
+  - [x] State on the compiler page that the backend manages its own stack
         in memory (for honest exhaustion) and is not an optimizing backend.
 
 ## Nice to have

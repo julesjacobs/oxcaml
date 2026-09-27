@@ -714,9 +714,8 @@ let binary_prefixes () =
         if not (Wasm_static_control.function_bodies (State.module_ program prepared.Init.lowered prepared.Init.context)
             (Registers.globals prepared.Init.state.State.registers)) then failwith "binary body typing";
         if not (Wasm_static_module.bytes_valid bytes) then failwith "binary module validity";
-        (* One module, run on several inputs. *)
-        List.iter (fun number ->
-        let input = Hmc_wasm_header_update.number number in
+        (* One module, run on several inputs, the last one 2^64 - 1. *)
+        List.iter (fun (input : Hmc_word64.t) ->
         let source_fuel = index 100 in
         (match Hmc_source_semantics.advance source_fuel
             (Hmc_source_semantics.initial (D.Apply (source, D.Word input))) with
@@ -744,7 +743,9 @@ let binary_prefixes () =
                     (Hmc_source_semantics.initial (D.Apply (source, D.Word input)))
                     <> Hmc_source_semantics.Done (Hm_interpreter_typing.Word word) then failwith "binary source reflection"
               | _ -> failwith "binary result stack")
-          | _ -> failwith "binary unsafe prefix") [0; 1; 5; 31; 511]) [0; 42; 4294967295]
+          | _ -> failwith "binary unsafe prefix") [0; 1; 5; 31; 511])
+          [Hmc_wasm_header_update.number 0; Hmc_wasm_header_update.number 42;
+           {Hmc_word64.lo = 4294967295; hi = 4294967295}]
     | _ -> failwith "binary fixture initialization"
 let fixtures () =
   let module Capacity = Hmc_memory_stack_capacity in
