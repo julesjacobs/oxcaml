@@ -21,3 +21,4 @@
 .site-nav{font-size:13px;color:var(--muted);margin:14px 0 18px}.demo-list{list-style:none;padding:0;margin:0 0 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:4px 28px}.demo-list li{border-bottom:1px solid var(--line);padding:10px 0}.demo-list h3{font-size:15px;margin:0 0 4px}.demo-list h3 .status{margin-left:6px;vertical-align:1px}.demo-list p{margin:0 0 4px;color:var(--muted)}.spec-page>h2{margin-top:28px}
 .status-owner-review{background:#e8f0fb;color:#24476b;border-color:#b9cde6}
 .status-future{background:#f1ecf8;color:#4f3a73;border-color:#cdbfe3}
+.status-question{background:#f3f4f6;color:#46525c;border-color:#c9d0d6;border-style:dashed}

@@ -98,6 +98,7 @@ def build(args):
     mechanisms = ''.join(
         f'<li><h3>{esc(m["name"])}'
         + (' <span class="status status-future">Future</span>' if m.get('future') else '')
+        + (' <span class="status status-question">Open question</span>' if m.get('question') else '')
         + f'</h3><p>{P.inline(m["summary"])}</p>'
         + (('<p class="related">Used in, for example: '
             + ', '.join(f'<a href="specs/{d}.html">{P.inline(pages[d][0]["title"])}</a>' for d in m['demos'] if d in pages)

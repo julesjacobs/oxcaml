@@ -152,6 +152,34 @@
    "future": true,
    "summary": "Relations defined by inference rules, written as ordinary variants whose fields carry the premises as refinements. Today such relations are written by hand as a derivation datatype with a validity predicate; this needs fields whose refinements mention earlier fields.",
    "demos": []
+  },
+  {
+   "id": "automatic-laws",
+   "name": "Applying laws automatically",
+   "summary": "Clients call an abstract structure's laws by hand, which is most of their proof lines. Z3 quantifiers would apply them automatically but make proofs sensitive to unrelated edits; Vox could instead instantiate a declared set of laws itself on matching terms. Whether either is worth its cost in predictability is open.",
+   "question": true,
+   "demos": []
+  },
+  {
+   "id": "data-sizes",
+   "name": "Sizes of in-memory data",
+   "summary": "Machine integers wrap in the logic and ghost code can build lists of any length, so facts such as distinct row numbers need a size premise. A mode for values only run-time code can produce would let the checker bound them; whether that is worth a new mode is open.",
+   "question": true,
+   "demos": []
+  },
+  {
+   "id": "stateful-termination",
+   "name": "Termination of stateful code",
+   "summary": "`total` means terminating and free of effects, so code that reads or writes arrays is never `total`. A separate guarantee that stateful code terminates would be a new mode; no demo needs it yet.",
+   "question": true,
+   "demos": []
+  },
+  {
+   "id": "proof-polymorphism",
+   "name": "Code that both proves and runs",
+   "summary": "Some demos keep a certificate-producing and an erased version of the same function. Polymorphism over whether a value is ghost would let one definition serve both, at the cost of a deeper mode system.",
+   "question": true,
+   "demos": []
   }
  ],
  "census": {
