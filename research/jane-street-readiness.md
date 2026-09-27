@@ -124,9 +124,14 @@ this file.
 ## Nice to have
 
 - [ ] **11. Medium warts:** ghost ownership inside `ghost_` (12, 45, 46,
-      52), layouts (10, 11, 13), inductive relations (56), named predicates
-      (20), termination measures (77), bitwise solver fallback (34),
-      well-formedness obligations for partial operations (67).
+      52), layouts (10, 11, 13), well-formedness obligations for partial
+      operations (67). Done: termination measures (77) and bitwise solver
+      fallback (34); named predicates (20) as `[@def transparent]`, with the
+      flat hash table's precondition named `current table view` (merged
+      `0a37492c3d`); inductive relations (56) are not a language feature —
+      the owner chose the hand-written derivation pattern
+      (`testsuite/tests/vox/relations.ml`) and listed inductive definitions
+      as a future mechanism in the catalogue.
 - [ ] **12. Subsumption stages 1–4**, implemented as one piece from a
       complete design (branch `jujacobs/vox/subsumption-20260927`, AMD box).
       Afterwards, compare the implementation with the independent design in
