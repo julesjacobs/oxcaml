@@ -7334,6 +7334,44 @@ let arrow_has_refinement env ty =
   in
   visit TypeSet.empty ty
 
+let type_contains_refinement env ty =
+  (may_have_refinement_types ()
+   || Language_extension.is_enabled Refinement_types)
+  &&
+  let seen = ref TypeSet.empty in
+  let rec visit ty =
+    let ty = Ctype.expand_head env ty in
+    if TypeSet.mem ty !seen then false else begin
+      seen := TypeSet.add ty !seen;
+      match get_desc ty with
+      | Trefine _ -> true
+      | _ ->
+          let found = ref false in
+          Btype.iter_type_expr
+            (fun ty -> if not !found then found := visit ty) ty;
+          !found
+    end
+  in
+  visit ty
+
+(* The value's type carries a refinement, or a refinement of a subexpression
+   was eliminated, so the verifier knows facts about it at its binding. *)
+let mentions_refinement env exp =
+  type_contains_refinement env exp.exp_type
+  ||
+  let found = ref false in
+  let iterator =
+    { Tast_iterator.default_iterator with
+      expr = (fun self e ->
+        if List.exists
+             (function (Texp_refinement _, _, _) -> true | _ -> false)
+             e.exp_extra
+        then found := true
+        else Tast_iterator.default_iterator.expr self e) }
+  in
+  iterator.expr iterator exp;
+  !found
+
 let rec type_exp ?recarg ?defer_primitive_mode ?(overwrite=No_overwrite)
     env expected_mode sexp =
   (* We now delegate everything to type_expect *)
@@ -13315,11 +13353,16 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         (fun (_, pat, _) (exp, vars) ->
           if maybe_expansive exp then lower_contravariant env pat.pat_type;
           (* In ghost code a polymorphic non-function value would give each
-             use its own instance, which the proofs cannot relate. *)
+             use its own instance, which the proofs cannot relate. The same
+             holds in real code for a local value whose type carries a
+             refinement: its facts would be stated at one instance and used
+             at others. *)
           match exp.exp_desc, vars with
           | Texp_function _, _ | _, Some _ -> ()
           | _, None ->
               if Env.in_ghost_context env
+                 || (existential_context <> At_toplevel
+                     && mentions_refinement env exp)
               then lower_variables_only env (get_current_level ())
                      pat.pat_type)
         mode_pat_typ_list exp_list;
