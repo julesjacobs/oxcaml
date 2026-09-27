@@ -32,9 +32,14 @@ this file.
 ## Must have
 
 - [ ] **1. Soundness.**
-  - [ ] Merge the ghost-field ownership fix (branch
-        `jujacobs/vox/ghostfield-20260927`; checker fix `ec365027eb`),
-        with the list of demo proofs that relied on the bug.
+  - [x] Ghost-field ownership fix, merged in `3f313103a3` (checker fix
+        `ec365027eb`). No demo took a token twice; the demos that broke relied
+        on the construction-side hole (repairs in `3b2a3047e5`, `13f99dd368`).
+  - [ ] W8: a type parameter used only in a refinement predicate was treated
+        as phantom, so `int law :> bool law` was accepted (branch
+        `jujacobs/vox/fix-soundness-20260927`).
+  - [ ] W9: the verification cache must identify the solver version and the
+        compiler binary (same branch).
   - [ ] Compare refinement predicates with their types (subsumption
         stage 2; design in `research/subsumption-design-20260927`).
 - [ ] **2. Second review round** (brief:
@@ -126,4 +131,11 @@ function for proving and running (48); termination for stateful code (88).
 
 ## Decisions waiting for the owner
 
-(none yet)
+- **Item 6**: reading the four route pages is yours.
+- **Subsumption open questions** (DESIGN.md §9), answered with defaults so
+  the implementation can proceed; to confirm when comparing it with the
+  design: keep a side table of sites with a fallback; stage 3 checks types,
+  not implementation bodies; recursive modules and packs stay syntactic;
+  invariant positions stay syntactic; functor applications in type paths
+  stay syntactic; the proposed error wording; measure stage 2's fallout
+  first; the mode condition uses position modes; `refine_` stays as it is.
