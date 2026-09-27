@@ -8,22 +8,23 @@
 # staging directory on the host `lab` (an ssh alias), then exchanges the
 # staging directory with /srv/lab/site/vox in one rename (renameat2
 # RENAME_EXCHANGE, `mv --exchange`), so a visitor sees either the old site
-# or the new one. The old site is kept as /srv/lab/site/vox.previous; to go
-# back, run on the host
+# or the new one. The staging directory and the old site live in
+# /srv/lab/vox-deploy, outside the served tree but on the same file system
+# (the exchange needs that): the old site is kept as
+# /srv/lab/vox-deploy/previous. To go back, run on the host
 #
-#   mv --exchange /srv/lab/site/vox.previous /srv/lab/site/vox
+#   mv --exchange -T /srv/lab/vox-deploy/previous /srv/lab/site/vox
 #
-# Caddy serves /srv/lab/site (read-only at /srv in its container) and sends
-# the cross-origin isolation headers for /vox/playground/*; this script
-# changes nothing else on the host. Both directories are in the served tree,
-# so the old site stays reachable at /vox.previous/ and the staging
-# directory, for the minute of the upload, under a random hidden name.
+# (running it again goes forward). Caddy serves /srv/lab/site (read-only
+# at /srv in its container) and sends the cross-origin isolation headers
+# for /vox/playground/*; this script changes nothing else on the host.
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
 host=lab
 site=/srv/lab/site
+work=/srv/lab/vox-deploy
 url=https://lab.julesjacobs.com/vox
 build=1
 options=()
@@ -49,14 +50,17 @@ COPYFILE_DISABLE=1 tar -C "$out" --no-xattrs -cf - . | zstd -q -3 -T0 \
   | ssh "$host" "set -euo pipefail
       exec 9> /tmp/vox-site-deploy.lock
       flock -n 9 || { echo 'another deploy is running' >&2; exit 1; }
-      staging=\$(mktemp -d '$site/.vox-staging-XXXXXXXX')
+      mkdir -p '$work'
+      [[ \$(stat -c %d '$work') == \$(stat -c %d '$site') ]] \\
+        || { echo '$work and $site are on different file systems' >&2; exit 1; }
+      staging=\$(mktemp -d '$work/staging-XXXXXXXX')
       trap 'rm -rf \"\$staging\"' ERR
       zstd -dc | tar -xf - -C \"\$staging\" --no-same-owner --no-same-permissions
       chmod -R u=rwX,go=rX \"\$staging\"
       if [[ -e '$site/vox' ]]; then
         mv --exchange -T \"\$staging\" '$site/vox'
-        rm -rf '$site/vox.previous'
-        mv -T \"\$staging\" '$site/vox.previous'
+        rm -rf '$work/previous'
+        mv -T \"\$staging\" '$work/previous'
       else
         mv -T \"\$staging\" '$site/vox'
       fi
@@ -81,5 +85,6 @@ expect "$url/playground/" '^HTTP/[0-9.]* 200' \
 expect "$url/playground/z3-built.wasm" '^HTTP/[0-9.]* 200' 'content-type: application/wasm' \
   'content-encoding: \(zstd\|gzip\)' 'cross-origin-embedder-policy: require-corp'
 expect "$url/playground/probe.txt" '^HTTP/[0-9.]* 404'
+expect "${url%/vox}/vox.previous/" '^HTTP/[0-9.]* 404'
 [[ -z $fail ]] || { echo "published, but a check failed" >&2; exit 1; }
 echo "published $url/"
