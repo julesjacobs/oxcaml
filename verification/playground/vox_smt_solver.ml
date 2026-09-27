@@ -44,7 +44,8 @@ let eval text =
     Js.Unsafe.fun_call eval [| Js.Unsafe.inject (Js.string text) |]
   with
   | output -> Js.to_string output
-  | exception Js_error.Exn error -> raise (Solver_error (Js_error.message error))
+  | exception Js_error.Exn error ->
+    raise (Solver_error (Js_error.message error))
 
 let first_line text =
   let rec skip text =

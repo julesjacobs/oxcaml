@@ -100,6 +100,14 @@ rm "$out/index.html.orig"
 mkdir -p "$out/examples"
 cp "$here"/examples/*.ml "$here/examples/index.json" "$out/examples/"
 cp "$root/verification/catalogue/style.css" "$out/catalogue.css"
+# The sources of those interfaces, which the page shows when a message
+# points into them.
+mkdir -p "$out/lib/src/ocaml"
+cp "$root"/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib/*.mli "$out/lib/src/ocaml/"
+if [[ -n $library_prefix && -d $library_prefix/lib/ocaml/vox ]]; then
+  mkdir -p "$out/lib/src/vox"
+  cp "$root"/verification/library/*.mli "$out/lib/src/vox/"
+fi
 # The interfaces, as one bundle with an index: the standard library, and the
 # verified library when it is installed.
 directories=("ocaml=$root/_build/runtime_stdlib_install/lib/ocaml_runtime_stdlib")

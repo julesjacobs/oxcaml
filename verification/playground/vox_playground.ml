@@ -38,6 +38,76 @@ let work_directory = "/static/work"
 
 let stderr_buffer = Buffer.create 4096
 
+(* The locations of the compiler's messages, where they are printed. The
+   report printer wraps each location it prints (the main one, and those of
+   submessages such as "The refinement is stated here.") in a semantic tag.
+   Standard error writes straight into [stderr_buffer], so when the
+   formatter outputs a tag, the buffer's length is the offset of the text
+   that follows. (The style tags of Misc.Style, installed later, keep these
+   functions for other tags.) *)
+type role =
+  | Main
+  | Sub
+
+type Format.stag += Location_tag of role * Location.report_kind * Location.t
+
+type printed_location =
+  { first : int;  (** offset of the location's text in the output *)
+    last : int;
+    role : role;
+    kind : Location.report_kind;
+    loc : Location.t
+  }
+
+let printed_locations = ref []
+
+let open_locations = ref []
+
+let capture_locations () =
+  let ppf = Format.err_formatter in
+  Format.pp_set_formatter_output_functions ppf
+    (Buffer.add_substring stderr_buffer)
+    ignore;
+  (* Marking functions run when the formatter outputs the tag, in order with
+     the text around it. They print nothing here. *)
+  let functions = Format.pp_get_formatter_stag_functions ppf () in
+  Format.pp_set_mark_tags ppf true;
+  Format.pp_set_formatter_stag_functions ppf
+    { functions with
+      mark_open_stag =
+        (function
+        | Location_tag _ ->
+          open_locations := Buffer.length stderr_buffer :: !open_locations;
+          ""
+        | stag -> functions.mark_open_stag stag);
+      mark_close_stag =
+        (function
+        | Location_tag (role, kind, loc) ->
+          (match !open_locations with
+          | first :: rest ->
+            open_locations := rest;
+            printed_locations
+              := { first; last = Buffer.length stderr_buffer; role; kind; loc }
+                 :: !printed_locations
+          | [] -> ());
+          ""
+        | stag -> functions.mark_close_stag stag)
+    };
+  let default = !Location.report_printer in
+  Location.report_printer
+    := fun () ->
+         let printer = default () in
+         let tagged role print self report ppf loc =
+           Format.pp_open_stag ppf
+             (Location_tag (role, report.Location.kind, loc));
+           print self report ppf loc;
+           Format.pp_close_stag ppf ()
+         in
+         { printer with
+           pp_main_loc = tagged Main printer.pp_main_loc;
+           pp_submsg_loc = tagged Sub printer.pp_submsg_loc
+         }
+
 let initialized = ref false
 
 let initialize () =
@@ -46,6 +116,7 @@ let initialize () =
     initialized := true;
     Sys_js.set_channel_flusher stderr (Buffer.add_string stderr_buffer);
     Sys_js.set_channel_flusher stdout (Buffer.add_string stderr_buffer);
+    capture_locations ();
     Vox_verify.install ();
     Clflags.add_arguments __LOC__ Options.list;
     Compenv.parse_arguments (ref arguments)
@@ -212,6 +283,8 @@ let compile ~source_file =
    from the snapshot, and warnings and the location printer are reset. *)
 let reset () =
   Buffer.clear stderr_buffer;
+  printed_locations := [];
+  open_locations := [];
   Warnings.reset_fatal ();
   Location.reset ()
 
@@ -249,9 +322,39 @@ let check name source want_lambda =
   let output = Buffer.contents stderr_buffer in
   Buffer.clear stderr_buffer;
   let lambda = if want_lambda then lambda else None in
+  let location { first; last; role; kind; loc } =
+    let open Lexing in
+    let position p =
+      Js.Unsafe.obj
+        [| "line", Js.Unsafe.inject p.pos_lnum;
+           (* Byte offsets, from the start of the file and of the line. *)
+           "offset", Js.Unsafe.inject p.pos_cnum;
+           "column", Js.Unsafe.inject (p.pos_cnum - p.pos_bol) |]
+    in
+    let severity =
+      match (kind : Location.report_kind) with
+      | Report_error | Report_warning_as_error _ | Report_alert_as_error _ ->
+        "error"
+      | Report_warning _ | Report_alert _ -> "warning"
+    in
+    Js.Unsafe.obj
+      [| "first", Js.Unsafe.inject first;
+         "last", Js.Unsafe.inject last;
+         ( "role",
+           Js.Unsafe.inject
+             (Js.string (match role with Main -> "main" | Sub -> "sub")) );
+         "severity", Js.Unsafe.inject (Js.string severity);
+         "file", Js.Unsafe.inject (Js.string loc.Location.loc_start.pos_fname);
+         "start", Js.Unsafe.inject (position loc.loc_start);
+         "end", Js.Unsafe.inject (position loc.loc_end) |]
+  in
+  let locations =
+    Js.array (Array.of_list (List.rev_map location !printed_locations))
+  in
   Js.Unsafe.obj
     [| "status", Js.Unsafe.inject status;
        "output", Js.Unsafe.inject (Js.string output);
+       "locations", Js.Unsafe.inject locations;
        ( "lambda",
          match lambda with
          | Some text -> Js.Unsafe.inject (Js.string text)

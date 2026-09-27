@@ -25,7 +25,9 @@
 .vox-mark{text-decoration-line:underline;text-decoration-thickness:2px;text-underline-offset:3px}
 .vox-error{text-decoration-style:wavy;text-decoration-color:#b3261e;background:#fdecea}
 .vox-warning{text-decoration-style:wavy;text-decoration-color:#a86200;background:#fff4e0}
-.vox-note{text-decoration-style:dotted;text-decoration-color:#355b76;background:#eef3f6}
+.vox-hover{background:#e3ecf2;outline:1px solid #b9cbd8}
+.vox-flash{animation:vox-flash .9s ease-out}
+@keyframes vox-flash{from{background:#ffe58a}to{background:transparent}}
 .vox-line-error{background:#fff7f6}
 .vox-line-warning{background:#fffbf2}
 .source,.result{min-width:0}
@@ -40,7 +42,16 @@
 .verdict[data-state=unsupported],.verdict[data-state=stale]{border-color:#dfb65e;background:#fffaf0}
 .verdict[data-state=failed]{border-color:#c78d88;background:#fff7f5}
 .diagnostics{margin:0 0 10px;font-size:12.5px;line-height:1.5;background:#f5f6f7;border:1px solid var(--line);border-radius:4px;max-height:52vh;overflow:auto;white-space:pre}
-.diagnostics a{color:var(--link)}
+.diagnostics a.location{color:inherit;text-decoration:none}
+.diagnostics a.location:hover,.diagnostics a.location:focus-visible{text-decoration:underline;text-underline-offset:2px}
+.diagnostics a.location:focus-visible{outline:1px dotted var(--muted);outline-offset:1px}
+.location-tooltip{position:absolute;z-index:10;max-width:min(680px,calc(100vw - 16px));background:#fff;border:1px solid #b9c3cb;border-radius:4px;box-shadow:0 2px 8px rgba(0,0,0,.12);padding:6px 8px}
+.location-tooltip p,.peek p{font-size:12px;color:var(--muted);margin:0 0 4px}
+.location-tooltip pre,.peek pre{margin:0;font-size:12px;line-height:1.5;background:none;padding:0;overflow-x:auto}
+.location-tooltip mark,.peek mark{background:#e3ecf2;color:inherit}
+.peek{border:1px solid var(--line);border-radius:4px;padding:6px 8px;margin:-4px 0 10px;background:#fbfbfc}
+.peek p{display:flex;justify-content:space-between;align-items:center}
+.peek button{font:inherit;font-size:12px;border:1px solid #b9c3cb;border-radius:4px;background:#f5f7f8;padding:2px 8px;cursor:pointer}
 .erased{border-top:1px solid var(--line);padding-top:6px;margin-bottom:10px}
 .erased summary{cursor:pointer;color:var(--link);font-size:13.5px}
 .erased[open] summary{font-weight:600}

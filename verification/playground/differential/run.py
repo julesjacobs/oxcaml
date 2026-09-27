@@ -9,7 +9,9 @@ Every input is compiled twice, as `ocamlc -extension refinement_types
 -color never -c FILE` would compile it alone in a directory: by the native
 compiler installed in PREFIX, and by the playground's checker (the built site,
 run in Node with check-node.js). The status and the complete compiler output
-must agree. For accepted examples, the erased program (-dlambda
+must agree. Every location the browser reports must be printed where it
+says and denote a valid range in the source (or in an interface source
+the site ships). For accepted examples, the erased program (-dlambda
 -dcanonical-ids) must agree too. The browser may instead decline to check a
 file (status 3, for an integer literal beyond 32 bits); such files are listed
 as NOT CHECKED, the others that differ as DISAGREE. The exit status is 1 if
@@ -116,6 +118,68 @@ def browser(site, files, lambda_=False):
     return results
 
 
+INLINE_LOCATION = re.compile(
+    r'file "([^"]+)", (?:line (\d+)|lines (\d+)-(\d+)), characters (\d+)-(\d+)')
+LOCATION_LINE = re.compile(r'^File "[^"]*", lines? [0-9-]+, characters \d+-\d+:', re.M)
+
+
+def location_problems(result, source, name, site):
+    """What is wrong with the locations the browser reported for a file.
+
+    Each must be printed where the checker says, exactly as its fields
+    describe it, and denote a valid range: in the checked source, or in an
+    interface source the site ships. Every location line in the output must
+    be one of them."""
+    problems = []
+    output = result['output'].encode()
+    for loc in result['locations']:
+        start, end = loc['start'], loc['end']
+        printed = output[loc['first']:].split(b'\n', 1)[0].decode().rstrip(':')
+        lines = (f'line {start["line"]}' if start['line'] == end['line']
+                 else f'lines {start["line"]}-{end["line"]}')
+        expected = f'File "{loc["file"]}", {lines}, characters {start["column"]}-{end["column"]}'
+        if printed != expected:
+            problems.append(f'printed {printed!r}, reported {expected!r}')
+            continue
+        if loc['file'] == name:
+            text = source
+        else:
+            candidates = [os.path.join(site, 'lib', 'src', d, os.path.basename(loc['file']))
+                          for d in ('ocaml', 'vox')]
+            found = [c for c in candidates if os.path.exists(c)]
+            if not found:
+                problems.append(f'{expected}: the site does not ship {loc["file"]}')
+                continue
+            text = open(found[0]).read()
+        data = text.encode()
+        bol = data.split(b'\n')
+        ok = (1 <= start['line'] <= end['line'] <= len(bol)
+              and start['column'] <= len(bol[start['line'] - 1])
+              and end['column'] <= len(bol[end['line'] - 1])
+              and (start['line'], start['column']) <= (end['line'], end['column'])
+              and data[start['offset']:end['offset']]
+              == b'\n'.join(bol[start['line'] - 1:end['line']])[start['column']:]
+              [:end['offset'] - start['offset']])
+        if not ok:
+            problems.append(f'{expected}: not a valid range in {loc["file"]}')
+    # Locations inside message text, which the page links by their printed
+    # form, must denote valid ranges too.
+    for match in INLINE_LOCATION.finditer(result['output']):
+        file, line, first, last, start, end = match.groups()
+        first, last = int(line or first), int(line or last)
+        if file != name:
+            continue
+        lines = source.encode().split(b'\n')
+        if not (1 <= first <= last <= len(lines) and int(start) <= len(lines[first - 1])
+                and int(end) <= len(lines[last - 1])):
+            problems.append(f'{match.group(0)}: not a valid range in {file}')
+    printed_lines = len(LOCATION_LINE.findall(result['output']))
+    if printed_lines != len(result['locations']):
+        problems.append(f'{printed_lines} location lines printed, '
+                        f'{len(result["locations"])} reported')
+    return problems
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--native', required=True, help='prefix of a native Vox install')
@@ -181,8 +245,18 @@ def main():
             results[file]['native_lambda'] = native(args.native, file, lambda_=True)
             results[file]['browser_lambda'] = lambdas[file]
     other = json.load(open(args.compare_with)) if args.compare_with else {}
-
     disagreements = 0
+
+    location_count = 0
+    for file in files:
+        result = results[file]['browser']
+        problems = location_problems(result, open(file).read(), os.path.basename(file), args.site)
+        location_count += len(result['locations'])
+        results[file]['location_problems'] = problems
+        for problem in problems:
+            disagreements += 1
+            print(f'LOCATION {os.path.relpath(file, args.work)}: {problem}')
+
     by_group = {}
     for file in files:
         result = results[file]
@@ -223,6 +297,8 @@ def main():
         print(f'{group}: {stats["agree"]}/{stats["files"] - stats["limitation"]} checked files agree '
               f'({stats["accepted"]} accepted, {stats["rejected"]} rejected; '
               f'{stats["limitation"]} not checked in the browser)')
+    print(f'locations: {location_count} printed locations checked, '
+          f'{sum(len(r["location_problems"]) for r in results.values())} problems')
     if other:
         agree = sum(1 for r in results.values() if r.get('same_other'))
         compared = sum(1 for r in results.values() if 'same_other' in r)

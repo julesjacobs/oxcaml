@@ -70,6 +70,17 @@ the build output.
   check, since a worker cannot start one while it runs synchronous code.
 - `web/worker.js` runs the checker in a worker; `web/app.js` is the page
   (CodeMirror 5, the example picker, diagnostics marked in the editor).
+- Every location in the messages is a link. The driver reports where the
+  output prints each location, with the location itself: the report
+  printer wraps locations in a semantic tag, and the tag's marking
+  functions record the output offset. Hovering a link highlights its range
+  in the editor (with an excerpt when the range is scrolled out of view);
+  clicking or pressing Enter selects it. A location in another file, such
+  as `int.mli`, shows that file's source read-only; the site ships the
+  standard library's `.mli` files (and the verified library's, with
+  `--library-prefix`) for this, fetched when first shown. Locations inside
+  message text ("at file ..., line 4, characters 23-71") are linked by their
+  printed form.
 - `examples/` holds the examples and `examples/index.json` their order.
 
 ## Limitations
@@ -97,6 +108,7 @@ compares the built site (run in Node) with the native compiler installed in
 `_install` on the examples, the integer boundary cases in
 `differential/cases`, and every phrase of the expect tests listed in
 `differential/sample.txt`. It prints each disagreement and each file the
-browser build declines to check. With `--browser-bundle`, it also writes
+browser build declines to check, and checks that every location the browser
+reports is printed where it says and denotes a valid range. With `--browser-bundle`, it also writes
 `differential/browser.html` into the site, which repeats the comparison in a
 real browser.

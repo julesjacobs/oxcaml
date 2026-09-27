@@ -175,13 +175,13 @@ function finish({ result, error }) {
   } else {
     show('rejected', 'Rejected', `The compiler rejects this program. ${timing}`);
   }
-  renderDiagnostics(result.output, source);
+  renderDiagnostics(result, source);
   if (result.lambda) {
     lambda.textContent = result.lambda;
     erased.hidden = false;
   }
   if (source === editor.getValue()) {
-    markEditor(result.output);
+    markEditor(result);
   } else {
     verdict.dataset.state = 'stale';
     verdictDetail.textContent = 'The program has changed since this check. Press Check again.';
@@ -197,6 +197,7 @@ function show(state, text, detail) {
 function clearResult() {
   diagnostics.hidden = true;
   diagnostics.textContent = '';
+  closePeek();
   erased.hidden = true;
   lambda.textContent = '';
   clearMarks();
@@ -215,95 +216,275 @@ editor.on('change', () => {
 
 // ---- Diagnostics
 
-// A location as the compiler prints it. Character positions are byte
-// offsets in the line.
-const LOCATION = /^File "([^"]*)", (?:line (\d+)|lines (\d+)-(\d+)), characters (\d+)-(\d+):$/;
+// The compiler's messages, with every location it prints as a link. The
+// checker reports where the output prints each location of a message (its
+// main location, and those of notes such as "The refinement is stated
+// here."), with the location itself; see vox_playground.ml. Locations inside
+// a message's text ("at file "x.ml", line 4, characters 23-71") are found by
+// their printed form.
 
-// The compiler's messages as blocks, each starting at a location.
-function blocks(output) {
-  const result = [];
-  let block = null;
-  for (const line of output.split('\n')) {
-    const match = LOCATION.exec(line);
-    if (match) {
-      const [, file, line1, first, last, start, end] = match;
-      block = {
-        file,
-        from: { line: Number(line1 || first), byte: Number(start) },
-        to: { line: Number(line1 || last), byte: Number(end) },
-        lines: [line],
-      };
-      result.push(block);
-    } else if (block) {
-      block.lines.push(line);
-    }
-  }
-  for (const b of result) {
-    const text = b.lines.join('\n');
-    b.kind = /^Error/m.test(text) ? 'error' : /^Warning/m.test(text) ? 'warning' : 'note';
-  }
-  return result;
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+// The string index of a UTF-8 byte offset in [text].
+function indexOfByte(text, byte) {
+  return decoder.decode(encoder.encode(text).subarray(0, byte)).length;
 }
 
-// The editor position of a byte offset in a line of [source].
-function position(source, { line, byte }) {
+// The editor position of a location's position ({ line, column }, the column
+// in bytes) in [source].
+function editorPosition(source, { line, column }) {
   const text = source.split('\n')[line - 1] ?? '';
-  const bytes = new TextEncoder().encode(text);
-  const ch = new TextDecoder().decode(bytes.subarray(0, Math.min(byte, bytes.length))).length;
-  return { line: line - 1, ch };
+  return { line: line - 1, ch: indexOfByte(text, column) };
 }
 
-function renderDiagnostics(output, source) {
+const INLINE = /file "([^"]+)", (?:line (\d+)|lines (\d+)-(\d+)), characters (\d+)-(\d+)/g;
+
+let shown = null; // { source, locations } of the displayed result
+
+function renderDiagnostics(result, source) {
   diagnostics.textContent = '';
+  closePeek();
+  const output = result.output;
+  shown = { source, locations: [] };
   if (!output) {
     diagnostics.hidden = true;
     return;
   }
   diagnostics.hidden = false;
-  for (const line of output.replace(/\n$/, '').split('\n')) {
-    const match = LOCATION.exec(line);
-    if (match && match[1] === current.file) {
-      const [, , line1, first, , start] = match;
-      const link = document.createElement('a');
-      link.href = '#';
-      link.textContent = line;
-      const from = position(source, { line: Number(line1 || first), byte: Number(start) });
-      link.addEventListener('click', (event) => {
-        event.preventDefault();
-        editor.focus();
-        editor.setCursor(from);
-        editor.scrollIntoView(from, 80);
-      });
-      diagnostics.append(link, '\n');
-    } else {
-      diagnostics.append(line + '\n');
+  // Structured locations: the link is the location's first line, without
+  // the colon that ends it.
+  const spans = [];
+  for (const location of result.locations) {
+    const first = indexOfByte(output, location.first);
+    let last = output.indexOf('\n', first);
+    if (last < 0) last = output.length;
+    if (output[last - 1] === ':') last -= 1;
+    spans.push({ first, last, location });
+  }
+  spans.sort((a, b) => a.first - b.first);
+  let cursor = 0;
+  const plain = (text) => {
+    // Locations inside message text.
+    let at = 0;
+    for (const match of text.matchAll(INLINE)) {
+      diagnostics.append(text.slice(at, match.index));
+      const [, file, line, firstLine, lastLine, start, end] = match;
+      diagnostics.append(link(match[0], {
+        role: 'inline', file,
+        start: { line: Number(line || firstLine), column: Number(start) },
+        end: { line: Number(line || lastLine), column: Number(end) },
+      }));
+      at = match.index + match[0].length;
     }
+    diagnostics.append(text.slice(at));
+  };
+  for (const { first, last, location } of spans) {
+    if (first < cursor) continue;
+    plain(output.slice(cursor, first));
+    diagnostics.append(link(output.slice(first, last), location));
+    cursor = last;
+  }
+  plain(output.slice(cursor));
+}
+
+function link(text, location) {
+  const element = document.createElement('a');
+  element.href = '#';
+  element.className = 'location';
+  element.textContent = text;
+  shown.locations.push(location);
+  element.addEventListener('click', (event) => {
+    event.preventDefault();
+    go(location);
+  });
+  element.addEventListener('mouseenter', () => preview(location, element));
+  element.addEventListener('focus', () => preview(location, element));
+  element.addEventListener('mouseleave', endPreview);
+  element.addEventListener('blur', endPreview);
+  return element;
+}
+
+// Is the location in the program in the editor? (It may have been edited
+// since the check; its positions then refer to the lines as they were.)
+function local(location) {
+  return location.file === current.file;
+}
+
+function range(location) {
+  const source = shown && shown.source === editor.getValue() ? shown.source : editor.getValue();
+  return {
+    from: editorPosition(source, location.start),
+    to: editorPosition(source, location.end),
+  };
+}
+
+let hoverMark = null;
+
+function preview(location, element) {
+  endPreview();
+  if (local(location)) {
+    const { from, to } = range(location);
+    hoverMark = editor.markText(from, to, { className: 'vox-hover' });
+    // The range is out of view: show it next to the link.
+    const view = editor.getViewport();
+    if (from.line < view.from || to.line >= view.to || !visible(from, to)) {
+      tooltip(element, current.file, editor.getValue(), location);
+    }
+  } else {
+    sourceOf(location.file).then((text) => {
+      if (document.activeElement === element || element.matches(':hover')) {
+        tooltip(element, location.file, text, location);
+      }
+    });
   }
 }
 
+function visible(from, to) {
+  const scroll = editor.getScrollInfo();
+  const top = editor.charCoords(from, 'local').top;
+  const bottom = editor.charCoords(to, 'local').bottom;
+  return top >= scroll.top && bottom <= scroll.top + scroll.clientHeight;
+}
+
+function endPreview() {
+  if (hoverMark) hoverMark.clear();
+  hoverMark = null;
+  const tip = document.getElementById('tooltip');
+  if (tip) tip.remove();
+}
+
+function go(location) {
+  endPreview();
+  if (local(location)) {
+    closePeek();
+    const { from, to } = range(location);
+    editor.focus();
+    editor.setSelection(from, to);
+    editor.scrollIntoView({ from, to }, 60);
+    const flash = editor.markText(from, to, { className: 'vox-flash' });
+    setTimeout(() => flash.clear(), 900);
+  } else {
+    sourceOf(location.file).then((text) => peek(location.file, text, location));
+  }
+}
+
+// A few lines of [text] around the location, with its range emphasized.
+function excerpt(text, location) {
+  const lines = text === null ? [] : text.split('\n');
+  const figure = document.createElement('pre');
+  if (!lines.length || location.start.line > lines.length) {
+    figure.textContent = `The source of ${location.file} is not included in the playground.`;
+    return figure;
+  }
+  const first = Math.max(1, location.start.line - 2);
+  const last = Math.min(lines.length, location.end.line + 2);
+  const width = String(last).length;
+  for (let n = first; n <= last; n++) {
+    const line = lines[n - 1];
+    const from = n === location.start.line ? indexOfByte(line, location.start.column) : 0;
+    const to = n === location.end.line ? indexOfByte(line, location.end.column)
+      : n > location.start.line && n < location.end.line ? line.length
+      : n === location.start.line ? line.length : 0;
+    const inside = n >= location.start.line && n <= location.end.line;
+    figure.append(`${String(n).padStart(width)} | `);
+    if (inside) {
+      const mark = document.createElement('mark');
+      mark.textContent = line.slice(from, to);
+      figure.append(line.slice(0, from), mark, line.slice(to) + '\n');
+    } else {
+      figure.append(line + '\n');
+    }
+  }
+  return figure;
+}
+
+function tooltip(element, file, text, location) {
+  endPreviewTooltip();
+  const tip = document.createElement('div');
+  tip.id = 'tooltip';
+  tip.className = 'location-tooltip';
+  tip.setAttribute('role', 'tooltip');
+  const title = document.createElement('p');
+  title.textContent = file === current.file ? `${file}, line ${location.start.line}` : `${file} (read-only)`;
+  tip.append(title, excerpt(text, location));
+  document.body.append(tip);
+  const box = element.getBoundingClientRect();
+  tip.style.left = `${Math.max(8, Math.min(box.left, window.innerWidth - tip.offsetWidth - 8)) + window.scrollX}px`;
+  tip.style.top = `${box.bottom + 4 + window.scrollY}px`;
+}
+
+function endPreviewTooltip() {
+  const tip = document.getElementById('tooltip');
+  if (tip) tip.remove();
+}
+
+// A read-only view of another file's source, below the messages.
+function peek(file, text, location) {
+  closePeek();
+  const panel = document.createElement('div');
+  panel.id = 'peek';
+  panel.className = 'peek';
+  const head = document.createElement('p');
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.textContent = 'Close';
+  close.addEventListener('click', closePeek);
+  head.append(`${file}, line ${location.start.line} (read-only)`, close);
+  panel.append(head, excerpt(text, location));
+  diagnostics.after(panel);
+  close.focus();
+}
+
+function closePeek() {
+  const panel = document.getElementById('peek');
+  if (panel) panel.remove();
+}
+
+// Interface sources shipped with the page, fetched when first shown.
+const sources = new Map();
+
+function sourceOf(file) {
+  const name = file.split('/').pop();
+  if (!sources.has(name)) {
+    sources.set(name, (async () => {
+      for (const directory of ['lib/src/ocaml/', 'lib/src/vox/']) {
+        const response = await fetch(directory + name);
+        if (response.ok) return response.text();
+      }
+      return null;
+    })());
+  }
+  return sources.get(name);
+}
+
+// The editor keeps a mark on each message's main location in this program.
 let marks = [];
 
 function clearMarks() {
   for (const mark of marks) mark.clear();
   editor.eachLine((line) => editor.removeLineClass(line, 'background'));
   marks = [];
+  endPreview();
 }
 
-function markEditor(output) {
+function markEditor(result) {
   clearMarks();
-  const source = editor.getValue();
-  for (const block of blocks(output)) {
-    if (block.file !== current.file) continue;
-    const from = position(source, block.from);
-    const to = position(source, block.to);
-    const title = block.lines.slice(block.lines.findIndex((l) => /^(Error|Warning)/.test(l)))
-      .join('\n').trim();
+  const output = result.output;
+  const locations = [...result.locations].sort((a, b) => a.first - b.first);
+  locations.forEach((location, i) => {
+    if (location.role !== 'main' || location.file !== current.file) return;
+    const { from, to } = range(location);
+    // The message: what the output prints after the location and its
+    // excerpt, up to the next location.
+    const next = i + 1 < locations.length ? locations[i + 1].first : encoder.encode(output).length;
+    const message = output.slice(indexOfByte(output, location.last), indexOfByte(output, next));
     marks.push(editor.markText(from, to, {
-      className: `vox-mark vox-${block.kind}`,
-      attributes: { title: block.kind === 'note' ? block.lines.slice(-2).join('\n').trim() : title },
+      className: `vox-mark vox-${location.severity}`,
+      attributes: { title: message.trim() },
     }));
-    if (block.kind !== 'note') editor.addLineClass(from.line, 'background', `vox-line-${block.kind}`);
-  }
+    editor.addLineClass(from.line, 'background', `vox-line-${location.severity}`);
+  });
 }
 
 // ---- Start

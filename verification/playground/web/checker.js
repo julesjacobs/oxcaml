@@ -4,7 +4,7 @@
 //
 //   const check = await createChecker({ initZ3, loadChecker, fetchBytes });
 //   check('main.ml', source, wantLambda)
-//     -> { status, output, lambda, queries, solverMs, totalMs }
+//     -> { status, output, locations, lambda, queries, solverMs, totalMs }
 //
 // initZ3 is the Emscripten factory from z3-solver's z3-built.js,
 // loadChecker(): evaluates vox.js and returns its exports, and
@@ -76,6 +76,12 @@ async function createChecker({ initZ3, loadChecker, fetchBytes, z3Options = {} }
     return {
       status: result.status,
       output: result.output,
+      // Where the output prints each location, in UTF-8 bytes, with the
+      // location itself: see vox_playground.ml.
+      locations: Array.from(result.locations, (l) => ({
+        first: l.first, last: l.last, role: l.role, severity: l.severity, file: l.file,
+        start: { ...l.start }, end: { ...l.end },
+      })),
       lambda: result.lambda,
       queries,
       solverMs,
