@@ -590,11 +590,42 @@ order_slowest_first()
   mv -f "$temp_dir/ordered-tests" "$test_files"
 }
 
+# Each command a test runs is killed after VOX_TEST_TIMEOUT seconds (0: no
+# limit).
+set_test_timeout()
+{
+  test_timeout=${VOX_TEST_TIMEOUT:-600}
+  case "$test_timeout" in
+    ''|*[!0-9]*) die "VOX_TEST_TIMEOUT must be a number of seconds" ;;
+  esac
+}
+
+# Lists the failed tests that ocamltest killed at the time limit, so that
+# they are not mistaken for wrong results.
+report_timeouts()
+{
+  log=$1
+  awk '
+    /^Running tests from / { expired = 0 }
+    /^Timeout expired, killing all child processes/ { expired = 1 }
+    /^ \.\.\. testing .* => failed/ && expired {
+      name = $0
+      sub(/^ \.\.\. testing \047/, "", name)
+      sub(/\047.*/, "", name)
+      print "  " name
+      expired = 0
+    }' "$log" > "$temp_dir/timeouts"
+  if [ -s "$temp_dir/timeouts" ]; then
+    echo "Failed by exceeding the ${test_timeout}s limit (VOX_TEST_TIMEOUT):"
+    LC_ALL=C sort -u "$temp_dir/timeouts"
+  fi
+}
+
 run_planned_tests()
 {
   log=$1
   execution_status=0
-  planner_flags='-timeout 600'
+  planner_flags="-timeout $test_timeout"
   if [ "$promote" = true ]; then
     planner_flags="$planner_flags -promote"
   fi
@@ -620,14 +651,14 @@ run_planned_tests()
     while IFS= read -r test_file; do
       echo "Running tests from '$(dirname "$test_file")' ..." >> "$log"
       if [ "$promote" = true ]; then
-        if run_locked "$planner" -timeout 600 -promote "$test_file" \
-            >> "$log" 2>&1; then
+        if run_locked "$planner" -timeout "$test_timeout" -promote \
+            "$test_file" >> "$log" 2>&1; then
           :
         else
           execution_status=1
         fi
       else
-        if run_locked "$planner" -timeout 600 "$test_file" \
+        if run_locked "$planner" -timeout "$test_timeout" "$test_file" \
             >> "$log" 2>&1; then
           :
         else
@@ -772,6 +803,7 @@ run_test()
     fi
   }
   validate_state
+  set_test_timeout
   if [ -n "$affected_base" ]; then
     selected=$temp_dir/selected-tests
     select_affected_tests > "$selected"
@@ -929,6 +961,7 @@ run_test()
     echo "Proofs over the solver resource warning threshold:"
     LC_ALL=C sort -u "$VOX_SLOW_PROOFS" | sed 's/^/  /'
   fi
+  report_timeouts "$log"
   if [ -f "$run_dir/jobs.log" ]; then
     echo "Slowest tests:"
     awk -F '\t' 'NR > 1 {

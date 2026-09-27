@@ -68,7 +68,10 @@ longest first by the durations of earlier runs, and the ten slowest are
 listed at the end. Refinement verification results
 are cached in `_build/vox-verify-cache`, keyed by the compiler binary, the
 source, the imported interfaces, the flags and the solver; set
-`VOX_VERIFY_CACHE=` to disable the cache.
+`VOX_VERIFY_CACHE=` to disable the cache. Each command a test runs is killed
+after `VOX_TEST_TIMEOUT` seconds (default 600; 0 disables the limit), for
+example on a heavily loaded machine; tests failed that way are listed
+separately at the end, so they are not mistaken for wrong results.
 
 Vox tests take the verified library and shared test modules from a prebuilt
 test library instead of compiling them. A header lists them in
