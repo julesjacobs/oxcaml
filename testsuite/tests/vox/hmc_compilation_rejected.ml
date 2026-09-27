@@ -46,6 +46,6 @@ Line 8, characters 84-86:
 8 |   fun artifact input fuel word premise -> ghost_ (C.normal artifact input word fuel ());;
                                                                                         ^^
 Error: Refinement could not be proved (counterexample)
-File "hmc_compilation.mli", lines 86-87, characters 14-66:
+File "hmc_compilation.mli", line 87, characters 7-66:
   The refinement is stated here.
 |}]

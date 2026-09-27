@@ -770,7 +770,7 @@ Line 13, characters 39-46:
 13 |   Binary.search_midpoint p start upper premise;;
                                             ^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array_proofs.ml", lines 7-8, characters 18-35:
+File "sorted_array_proofs.ml", line 8, characters 11-24:
   The refinement is stated here.
 |}]
 
@@ -873,9 +873,9 @@ Line 10, characters 51-64:
 10 |     && not (Arrays.occurs array target 0 index)} = refine_ later in
                                                         ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Lines 9-10, characters 30-47:
- 9 | ..............................Arrays.at array index = target
-10 |     && not (Arrays.occurs array target 0 index)....................
+Line 10, characters 7-47:
+10 |     && not (Arrays.occurs array target 0 index)} = refine_ later in
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 
@@ -897,9 +897,9 @@ Line 11, characters 60-73:
 11 |     && not (Arrays.occurs array target (index + 1) stop)} = refine_ first in
                                                                  ^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-Lines 10-11, characters 30-56:
-10 | ..............................Arrays.at array index = target
-11 |     && not (Arrays.occurs array target (index + 1) stop)....................
+Line 11, characters 7-56:
+11 |     && not (Arrays.occurs array target (index + 1) stop)} = refine_ first in
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}]
 
@@ -915,6 +915,6 @@ Line 5, characters 56-67:
 5 |   let refine_ result = Arrays.remove_at source position (refine_ u) in
                                                             ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array_proofs.ml", lines 425-426, characters 18-39:
+File "sorted_array_proofs.ml", line 425, characters 35-66:
   The refinement is stated here.
 |}]
