@@ -12,7 +12,8 @@
    Each case is a module from Wasm_differential_gen, encoded by that file's
    own encoder. The model decodes, validates and runs the bytes
    (Wasm_static_module.bytes_valid, Wasm_binary_execution.run); Node validates,
-   instantiates and runs the same bytes with wasm_differential_harness.js. The
+   instantiates and runs the same bytes with wasm_differential_harness.js. Both
+   set the exported global payload to the case's input before calling run. The
    two must agree on validity and, for valid modules, on trap versus return,
    the returned value, every global and every byte of final memory. The
    model's fuel and host call limits and its unsupported instructions give no
@@ -51,13 +52,13 @@ type model =
   | Finished of { result : string; globals : string list; memory : string; tag : int; payload : int }
   | Trap | Type_error | Host_limit | Not_supported | Out_of_fuel
 
-let model ~fuel ~capacity s =
+let model ~fuel ~capacity ~input s =
   let bytes = bytes_of_string s in
   if not (Wasm_static_module.bytes_valid bytes) then Invalid else
   let exports = match Wasm_binary_module.decode bytes with
     | Some (image, _) -> image.Wasm_binary_module.exports
     | None -> failwith "a valid module does not decode" in
-  match Wasm_binary_execution.run fuel bytes capacity with
+  match Wasm_binary_execution.run fuel bytes input capacity with
   | Wasm_binary_execution.Rejected -> Not_materialized
   | Wasm_binary_execution.Result (Wasm_calls.Finished state) ->
     let execution = state.Wasm_global_execution.execution in
@@ -112,7 +113,7 @@ let engine dir from to_ =
 
 type kind = Generated | Mutated of string | Corrupted of string | Outside of string | Unmaterialized of string
 type case = { id : int; kind : kind; module_ : G.module_ option; style : G.style;
-              canonical : string; variant : string option }
+              canonical : string; variant : string option; input : Hmc_word64.t }
 
 let kind_name = function
   | Generated -> "generated" | Mutated _ -> "mutated" | Corrupted _ -> "corrupted"
@@ -120,11 +121,22 @@ let kind_name = function
 let kind_detail = function
   | Generated -> "generated" | Mutated s | Corrupted s | Outside s | Unmaterialized s -> s
 
-let build id kind style m =
-  { id; kind; module_ = Some m; style; canonical = G.encode style m;
+let build input id kind style m =
+  { id; kind; module_ = Some m; style; canonical = G.encode style m; input;
     variant = Some (G.encode { style with G.export_globals = true } m) }
 
+(* The input a case's module runs on, drawn apart from the module so that the
+   modules do not depend on it. *)
+let input ~seed id =
+  let r = Random.State.make [| seed; id; 1 |] in
+  let lo = Random.State.full_int r 0x100000000 in
+  let hi = Random.State.full_int r 0x100000000 in
+  if lo < 0 || lo >= 0x100000000 || hi < 0 || hi >= 0x100000000 then invalid_arg "input"
+  else { Hmc_word64.lo; hi }
+
 let make ~seed ~pages id =
+  let input = input ~seed id in
+  let build = build input in
   let r = Random.State.make [| seed; id |] in
   let settings = { G.guarded = not (G.chance r 0.15); unsupported = G.chance r 0.15; max_pages = pages } in
   let m = G.generate r settings in
@@ -138,7 +150,7 @@ let make ~seed ~pages id =
      | None -> build id Generated base m)
   else if roll < 87 then
     let (name, bytes) = G.corrupt r (G.encode base m) (String.length m.G.data) in
-    { id; kind = Corrupted name; module_ = None; style = base; canonical = bytes; variant = None }
+    { id; kind = Corrupted name; module_ = None; style = base; canonical = bytes; variant = None; input }
   else
     let (name, m, style, materialization) = G.outside r m in
     build id (if materialization then Unmaterialized name else Outside name) { style with G.pad } m
@@ -221,13 +233,17 @@ let compare_case dir case model engine =
 let model_seconds = ref 0.0
 type config = { fuel : C.count; capacity : C.count; dir : string }
 
+let show_word (w : Hmc_word64.t) =
+  Printf.sprintf "%Lu" (Int64.logor (Int64.shift_left (Int64.of_int w.Hmc_word64.hi) 32) (Int64.of_int w.Hmc_word64.lo))
+
 let write_case dir case =
   write_file (Filename.concat dir (string_of_int case.id ^ ".wasm")) case.canonical;
+  write_file (Filename.concat dir (string_of_int case.id ^ ".input")) (show_word case.input);
   Option.iter (write_file (Filename.concat dir (string_of_int case.id ^ ".variant.wasm"))) case.variant
 
 let clean_case dir id =
   List.iter (fun suffix -> remove (Filename.concat dir (string_of_int id ^ suffix)))
-    [".wasm"; ".variant.wasm"; ".memory"]
+    [".wasm"; ".variant.wasm"; ".memory"; ".input"]
 
 (* Evaluate cases whose ids are distinct and within [from, to_). *)
 let evaluate config cases from to_ =
@@ -235,7 +251,7 @@ let evaluate config cases from to_ =
   let engines = engine config.dir from to_ in
   let results = List.map (fun case ->
     let start = Sys.time () in
-    let m = model ~fuel:config.fuel ~capacity:config.capacity case.canonical in
+    let m = model ~fuel:config.fuel ~capacity:config.capacity ~input:case.input case.canonical in
     model_seconds := Sys.time () -. start;
     let verdict = match Hashtbl.find_opt engines case.id with
       | None -> Disagree "engine produced no result (harness)"
@@ -264,7 +280,7 @@ let instruction_name (i : Wasm_instruction.t) = match i with
   | I32_store _ -> "i32.store" | I64_store _ -> "i64.store"
 
 (* Step the model as Wasm_binary_execution.run does, counting what it executes. *)
-let trace ~fuel ~capacity s =
+let trace ~fuel ~capacity ~input s =
   let bytes = bytes_of_string s in
   let bump k = Hashtbl.replace coverage k (1 + Option.value ~default:0 (Hashtbl.find_opt coverage k)) in
   match Wasm_binary_module.decode bytes with
@@ -280,10 +296,14 @@ let trace ~fuel ~capacity s =
       | Wasm_calls.Finished _ -> bump "(outcome: return)" | Wasm_calls.Trap -> bump "(outcome: trap)"
       | _ -> bump "(outcome: other)"
     end in
-    (match Wasm_calls.start module_ image.Wasm_binary_module.exports.Wasm_export_section.run
-             image.Wasm_binary_module.data image.Wasm_binary_module.globals capacity with
-     | Wasm_calls.Running c -> go fuel c
-     | _ -> ())
+    (match Wasm_globals.set image.Wasm_binary_module.globals
+             image.Wasm_binary_module.exports.Wasm_export_section.payload (S.I64 input) with
+     | None -> ()
+     | Some globals ->
+       match Wasm_calls.start module_ image.Wasm_binary_module.exports.Wasm_export_section.run
+               image.Wasm_binary_module.data globals capacity with
+       | Wasm_calls.Running c -> go fuel c
+       | _ -> ())
   | _ -> ()
 
 (* ---------- Minimization ---------- *)
@@ -360,7 +380,7 @@ let minimize config case reason =
       let rec search = function
         | [] -> None
         | chunk :: rest ->
-          let cases = List.mapi (fun i c -> build i case.kind case.style c) chunk in
+          let cases = List.mapi (fun i c -> build case.input i case.kind case.style c) chunk in
           let results = evaluate config cases 0 (List.length cases) in
           match List.find_opt (fun (_, _, v) -> match v with Disagree r -> same_class r reason | _ -> false) results with
           | Some (c, _, Disagree r) -> Some (Option.get c.module_, r)
@@ -458,7 +478,7 @@ let () =
         bump ("kind: " ^ kind_name case.kind);
         let key = match verdict with
           | Agree s ->
-            if !coverage_ && s <> "both reject" then trace ~fuel:!fuel ~capacity:config.capacity case.canonical;
+            if !coverage_ && s <> "both reject" then trace ~fuel:!fuel ~capacity:config.capacity ~input:case.input case.canonical;
             "agree: " ^ s
           | Expected s -> "expected: " ^ s
           | No_verdict s -> "no verdict: " ^ s
@@ -485,7 +505,8 @@ let () =
   let disagreements = List.rev !disagreements in
   Printf.printf "Disagreements: %d\n" (List.length disagreements);
   List.iteri (fun index (case, reason) ->
-    Printf.printf "case %d (%s: %s): %s\n" case.id (kind_name case.kind) (kind_detail case.kind) reason;
+    Printf.printf "case %d (%s: %s, input %s): %s\n" case.id (kind_name case.kind) (kind_detail case.kind)
+      (show_word case.input) reason;
     if !keep <> "" then write_file (Filename.concat !keep (Printf.sprintf "case-%d-%d.wasm" !seed case.id)) case.canonical;
     if !minimize_ && index < !minimize_limit then
       match minimize config case reason with

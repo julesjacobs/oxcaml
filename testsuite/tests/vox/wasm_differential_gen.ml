@@ -51,7 +51,7 @@ type style = {
   extra_export : bool;           (* a fifth export (outside) *)
   param_type : bool;             (* an extra type with a parameter (outside) *)
   mistyped_global : int option;  (* global k initialized with the other type (invalid) *)
-  export_globals : bool;         (* export every global as g<k>: the engine's view *)
+  export_globals : bool;         (* export every global as g<k>, and payload: the engine's view *)
 }
 
 let plain_style = { pad = None; short_consts = false; grouped_locals = false;
@@ -183,7 +183,8 @@ let encode style m =
   section style 7 b (fun o ->
     let exports =
       [ ("run", 0, m.run); ("memory", 2, 0) ] @
-      (if style.export_globals then List.mapi (fun k _ -> (Printf.sprintf "g%d" k, 3, k)) m.globals
+      (if style.export_globals then
+         List.mapi (fun k _ -> (Printf.sprintf "g%d" k, 3, k)) m.globals @ [ ("payload", 3, m.payload) ]
        else [ ("tag", 3, m.tag); ("payload", 3, m.payload) ]) @
       (if style.extra_export then [ ("extra", 0, m.run) ] else []) in
     u32 o (List.length exports);
@@ -484,13 +485,22 @@ let generate r s =
     let type_index = pick r (indices (fun x -> x = result) types) in
     { result; type_index; locals; body = code }) results) in
   let mem_max = match rint r 8 with 0 -> 65536 | 1 -> pages | _ -> pages + rint r 4 in
-  { types = Array.to_list types; funcs;
+  let m = { types = Array.to_list types; funcs;
     table_min = table; table_max = table + (if chance r 0.5 then 0 else rint r 10);
     elems = List.init table (fun _ -> rint r nfuncs);
     mem_min = pages; mem_max; globals = Array.to_list globals;
     run = (if chance r 0.6 then 0 else rint r nfuncs);
     tag = rint r (Array.length globals); payload = rint r (Array.length globals);
-    data = data r (pages * 65536) }
+    data = data r (pages * 65536) } in
+  (* The host sets payload to the input, so it must be a mutable i64 global:
+     keep the one drawn if it is, else take the first such global, else add
+     one. This draws nothing, so the rest of the module is as drawn. *)
+  let settable g = g.ty = I64 && g.mutable_ in
+  if settable globals.(m.payload) then m else
+  match List.find_index settable m.globals with
+  | Some k -> { m with payload = k }
+  | None -> { m with payload = Array.length globals;
+                     globals = m.globals @ [ { ty = I64; mutable_ = true; init = 0L } ] }
 
 (* ---------- Mutations ---------- *)
 

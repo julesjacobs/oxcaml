@@ -2,7 +2,8 @@
 // Usage: node wasm_differential_harness.js DIR FROM TO [TIMEOUT_MS]
 // For each id in [FROM, TO), reads DIR/<id>.wasm (the module as the model sees
 // it) and, if present, DIR/<id>.variant.wasm (the same module exporting every
-// global as g<k>). Prints one line per id; on a return, writes the final
+// global as g<k>), and DIR/<id>.input, the input as an unsigned decimal.
+// Prints one line per id; on a return, writes the final
 // memory to DIR/<id>.memory. Each module runs in a worker thread that is
 // terminated after TIMEOUT_MS.
 'use strict';
@@ -19,9 +20,9 @@ function show(v) {
 
 function clean(s) { return String(s).replace(/\s+/g, '_'); }
 
-// Instantiate with no imports (the modules define their own memory and table)
-// and call the export run.
-function execute(bytes) {
+// Instantiate with no imports (the modules define their own memory and table),
+// set the exported global payload to the input and call the export run.
+function execute(bytes, input) {
   let instance;
   try {
     instance = new WebAssembly.Instance(new WebAssembly.Module(bytes), {});
@@ -29,6 +30,11 @@ function execute(bytes) {
     return { outcome: 'instantiate_error', detail: e.constructor.name + ':' + e.message };
   }
   const exports = instance.exports;
+  try {
+    exports.payload.value = input;
+  } catch (e) {
+    return { outcome: 'input_error', detail: e.constructor.name + ':' + e.message };
+  }
   try {
     const value = exports.run();
     return { outcome: 'return', value: show(value), exports };
@@ -195,7 +201,8 @@ function run(dir, id) {
     fields.push('outcome=invalid', 'detail=' + clean(detail));
     return fields.join(' ');
   }
-  const main = execute(bytes);
+  const input = BigInt(fs.readFileSync(path.join(dir, id + '.input'), 'utf8'));
+  const main = execute(bytes, input);
   fields.push('outcome=' + main.outcome);
   if (main.outcome === 'return') {
     fields.push('value=' + main.value, 'tag=' + global(main.exports, 'tag'),
@@ -208,7 +215,7 @@ function run(dir, id) {
     if (!WebAssembly.validate(variantBytes)) {
       fields.push('variant=invalid');
     } else {
-      const variant = execute(variantBytes);
+      const variant = execute(variantBytes, input);
       fields.push('variant=' + variant.outcome);
       if (variant.outcome === 'return') {
         const values = [];
