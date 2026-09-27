@@ -286,7 +286,9 @@ this file.
       code and suggest `unreachable_ ()`.
 - [ ] **HTTP laws for `Invalid_crlf` and budget exhaustion** (new proofs;
       stated as unspecified on the page). Owner to decide.
-- [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
+- [ ] **14. Upstream OxCaml reports:** the owner wants to understand and be
+      convinced first; an agent is reproducing both on upstream OxCaml
+      (`research/upstream-bugs-20260927/REPORT.md`). Previously listed: the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
       ghost field of a ghost record (9), implicit `'a` in predicates (1),
@@ -321,9 +323,8 @@ function for proving and running (48); termination for stateful code (88).
   for /vox/playground/ added (backup `/srv/lab/Caddyfile.pre-vox`).
 
 - **Item 6**: reading the four route pages is yours.
-- **Subsumption open questions** (DESIGN.md §9), answered with defaults so
-  the implementation can proceed; to confirm when comparing it with the
-  design: keep a side table of sites with a fallback; stage 3 checks types,
+- *Confirmed by the owner, 27 September:* **Subsumption open questions**
+  (DESIGN.md §9), answered with defaults: keep a side table of sites with a fallback; stage 3 checks types,
   not implementation bodies; recursive modules and packs stay syntactic;
   invariant positions stay syntactic; functor applications in type paths
   stay syntactic; the proposed error wording; measure stage 2's fallout
