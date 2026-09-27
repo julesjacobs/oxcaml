@@ -136,34 +136,35 @@ def build(args):
 
 
 def compiler_example(output, source, linked):
-    """Two WebAssembly modules emitted by the HM-to-Wasm compiler for the
-    design document's id/map example, run in the browser."""
+    """The WebAssembly module emitted by the HM-to-Wasm compiler for the
+    design document's id/map example, run in the browser on two inputs."""
     example = HERE / 'compiler-example'
     target = output / 'demos' / 'compiler'
     target.mkdir(parents=True)
-    cases = []
-    for n, result in ((4, '12'), (8, '0')):
-        entry = {'input': n, 'output': result, 'status': 1, 'tag': '1'}
-        for kind, name in (('wasm', f'input-{n}.wasm'), ('memory', f'input-{n}.memory.bin')):
-            raw = (example / name).read_bytes()
-            (target / name).write_bytes(raw)
-            entry[kind] = {'url': f'demos/compiler/{name}', 'sha256': hashlib.sha256(raw).hexdigest()}
-        cases.append(entry)
-    (target / 'manifest.json').write_text(json.dumps({'cases': cases}, indent=1) + '\n')
+
+    def asset(name):
+        raw = (example / name).read_bytes()
+        (target / name).write_bytes(raw)
+        return {'url': f'demos/compiler/{name}', 'sha256': hashlib.sha256(raw).hexdigest()}
+    module = asset('program.wasm')
+    cases = [{'input': n, 'output': result, 'status': 1, 'tag': '1', 'memory': asset(f'input-{n}.memory.bin')}
+             for n, result in ((4, '12'), (8, '0'))]
+    (target / 'manifest.json').write_text(json.dumps({'wasm': module, 'cases': cases}, indent=1) + '\n')
     fixture = 'verification/catalogue/compiler-example/original_run_smoke.ml'
     source.read(fixture)
     return ('<section class="tour-step compiler-example" id="compiler-example" data-state="idle">'
             '<p class="eyebrow">Compiler example · In progress</p><h2>Polymorphic id and map, compiled to WebAssembly</h2>'
             '<p>The worked example of the compiler\'s design combines polymorphic <code>id</code> and <code>map</code>, '
-            'captured closures, recursion and a final branch. The buttons run the two modules the verified compiler '
-            'emits for the inputs 4 and 8, and check the result and every byte of final memory against what the '
-            'compiler\'s WebAssembly model predicts. The modules are saved outputs of '
+            'captured closures, recursion and a final branch. The verified compiler emits one module for it; the '
+            'buttons run that module on the inputs 4 and 8, passing the input in the exported global '
+            '<code>payload</code> before calling <code>run</code>, and check the result and every byte of final '
+            'memory against what the compiler\'s WebAssembly model predicts. The module and memories are saved outputs of '
             f'<a href="{esc(source.view(fixture))}">original_run_smoke.ml</a>, which compiles the example with the '
             'compiler on this commit and gives the same bytes; this page does not compile anything.</p>'
             '<div class="demo-actions"><button type="button" data-wasm-case="0">Run input 4</button>'
             '<button type="button" data-wasm-case="1">Run input 8</button></div>'
             '<div class="demo-result" role="status" aria-live="polite"><strong data-wasm-result>Choose an input to run '
-            'its emitted program.</strong><p data-wasm-detail>Expected results: 4 → 12 and 8 → 0.</p></div>'
+            'the emitted program.</strong><p data-wasm-detail>Expected results: 4 → 12 and 8 → 0.</p></div>'
             '<p class="tour-limit">The compiler\'s theorems are conditional'
             + ('; see <a href="specs/hm-wasm-compiler.html">its page</a>' if linked else '')
             + '.</p></section>')

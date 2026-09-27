@@ -33,9 +33,9 @@ pages.
   a refined `unit` result that run at run time (`runtime_units`).
 - `line_stats.py`, `source_inventory.ml`: the line counts; the convention is
   stated on the generated line-count pages.
-- `compiler-example/`: the two WebAssembly modules the HM-to-Wasm compiler
-  emits for its design example, run in the browser on the presentation page.
-  `original_run_smoke.ml` produces them.
+- `compiler-example/`: the WebAssembly module the HM-to-Wasm compiler emits
+  for its design example and its final memory for the inputs 4 and 8, run in
+  the browser on the presentation page. `original_run_smoke.ml` produces them.
 
 ## Writing a page
 
