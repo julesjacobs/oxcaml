@@ -143,6 +143,13 @@ val term_sort : term -> sort
     Undeclared and duplicate symbols are errors. *)
 val check : ?poll:(unit -> unit) -> int_width:int -> query -> unit
 
+(** Replaces each bitwise operation by an uninterpreted function, adding facts
+    that hold for the 63-bit operation (sign and range facts, low masks, and
+    shifts by a constant). [None] when the query has no bitwise operation. The
+    result only has weaker premises, so its validity implies the query's; it
+    avoids the bitvector encoding of [to_smtlib]. *)
+val abstract_bitwise : query -> query option
+
 (** [poll] is called during traversal and may raise to cancel construction.
     Always checks sorts first. Names [v0], [v1], ... follow declaration order.
     Includes options, declarations, assertions and a satisfiability check, but

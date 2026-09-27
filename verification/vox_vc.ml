@@ -3729,69 +3729,52 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
   poll ();
   let params, body = Recursive_function.parameters fn in
   let ctx = context ~poll ~prove ~verify_introductions:false in
-  let reject e =
-    Location.raise_errorf ~loc:e.exp_loc
-      "Unsupported decreases expression: expected scalar primitive operations"
+  (* The typer checked the measure as a total, stateless expression over
+     immutable parameters, so it denotes a function of their values and may call
+     total functions. Refinement introductions are not verified in this pass, so
+     the measure may not contain any: a precondition assumed but not checked
+     could make a callee's postcondition vacuous. *)
+  let scan =
+    { Tast_iterator.default_iterator with
+      expr =
+        (fun it e ->
+          (match intro_loc e with
+          | Some loc ->
+            Location.raise_errorf ~loc
+              "Unsupported decreases expression: a measure cannot contain a \
+               refinement introduction"
+          | None -> ());
+          Tast_iterator.default_iterator.expr it e)
+    }
   in
-  let rec check e =
-    if
-      Option.is_some (intro_loc e)
-      || sort ctx.encoding e.exp_env e.exp_type = None
-    then reject e;
-    match e.exp_desc with
-    | Texp_ident { desc = { val_kind = Val_reg _; _ }; _ }
-    | Texp_constant (Const_int _) ->
-      ()
-    | Texp_construct (_, c, _, [], _)
-      when Option.is_some (constructor ctx e.exp_env e.exp_type c.cstr_name) ->
-      ()
-    | Texp_apply
-        (({ exp_desc = Texp_ident { path; _ }; _ } as f), args, _, _, _, _) ->
-      let args =
-        List.map
-          (function
-            | Nolabel, Arg (e, _) ->
-              check e;
-              e
-            | _ -> reject e)
-          args
-      in
-      begin match primitive f.exp_env path with
-      | Some (name, arity) when arity = List.length args ->
-        let values =
-          List.map
-            (fun arg ->
-              match sort ctx.encoding arg.exp_env arg.exp_type with
-              | Some Bool -> scalar_value (Boolean false)
-              | Some Int63 -> scalar_value (Integer 0L)
-              | Some Int -> scalar_value (Big_integer "0")
-              | Some (Opaque _ | Datatype _) -> reject arg
-              | None -> reject arg)
-            args
-        in
-        if operation ctx e.exp_env f.exp_type e.exp_type name values = None
-        then reject e
-      | _ -> reject e
-      end
-    | Texp_let (Asttypes.Nonrecursive, bindings, body) ->
-      List.iter
-        (fun vb ->
-          begin match vb.vb_pat.pat_desc with
-          | Tpat_var _ | Tpat_any -> ()
-          | _ -> reject vb.vb_expr
-          end;
-          check vb.vb_expr)
-        bindings;
-      check body
-    | Texp_ifthenelse (c, t, Some f) -> List.iter check [c; t; f]
-    | Texp_open ({ open_expr = { mod_desc = Tmod_ident _; _ }; _ }, body) ->
-      check body
-    | Texp_sequence (a, _, b) ->
-      check a;
-      check b
-    | _ -> reject e
+  scan.expr scan measure;
+  (* A tuple is a lexicographic measure. *)
+  let components =
+    match measure.exp_desc with
+    | Texp_tuple (components, _) -> List.map snd components
+    | _ -> [measure]
   in
-  check measure;
+  List.iter
+    (fun e ->
+      match sort ctx.encoding e.exp_env e.exp_type with
+      | Some (Int63 | Int) -> ()
+      | Some (Bool | Opaque _ | Datatype _) | None ->
+        Location.raise_errorf ~loc:e.exp_loc
+          "Unsupported decreases expression: expected int or Bigint.t")
+    components;
+  let evaluate s =
+    let s, values =
+      List.fold_left
+        (fun (s, values) e ->
+          let s, value = expression ctx s e in
+          s, (e.exp_loc, value) :: values)
+        (s, []) components
+    in
+    ( s,
+      if s.dead
+      then []
+      else List.rev_map (fun (loc, value) -> required loc value) values )
+  in
   let entry =
     List.fold_left
       (fun s (id, pat) ->
@@ -3802,10 +3785,9 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
         branch s condition)
       empty params
   in
-  let entry, entry_measure = expression ctx entry measure in
+  let entry, entry_measure = evaluate entry in
   if not entry.dead
   then begin
-    let entry_measure = required measure.exp_loc entry_measure in
     let check_call ctx s call args =
       match call.exp_desc with
       | Texp_apply
@@ -3819,7 +3801,27 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
         let call_state =
           List.fold_left2 (fun s (id, _) value -> bind s id value) s params args
         in
-        let checked, value = expression ctx call_state measure in
+        let checked, value = evaluate call_state in
+        (* Each component is bounded below when it decreases: an int by its
+           range, a Bigint.t by zero. *)
+        let rec decreases = function
+          | [] -> Boolean false
+          | (value, entry) :: rest ->
+            let smaller =
+              match term_sort entry with
+              | Int63 -> both Lt value entry
+              | Int ->
+                both And
+                  (both Int_ge value (Big_integer "0"))
+                  (both Int_lt value entry)
+              | Bool | Opaque _ | Datatype _ -> assert false
+            in
+            if rest = []
+            then smaller
+            else
+              App
+                (Or, [smaller; both And (both Eq value entry) (decreases rest)])
+        in
         if not checked.dead
         then
           verify_batch ctx prove
@@ -3827,15 +3829,7 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
                { loc = call.exp_loc;
                  (* The error already points at the decreases attribute. *)
                  origin = call.exp_loc;
-                 goal =
-                   (let value = required measure.exp_loc value in
-                    match term_sort entry_measure with
-                    | Int63 -> both Lt value entry_measure
-                    | Int ->
-                      both And
-                        (both Int_ge value (Big_integer "0"))
-                        (both Int_lt value entry_measure)
-                    | Bool | Opaque _ | Datatype _ -> reject measure);
+                 goal = decreases (List.combine value entry_measure);
                  omitted_premises = checked.omitted_premises;
                  group = fresh_group ()
                }

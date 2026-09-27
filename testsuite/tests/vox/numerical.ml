@@ -149,10 +149,10 @@ module User_measure = struct
   [@@decreases identity n]
 end;;
 [%%expect{|
-Line 4, characters 15-25:
-4 |   [@@decreases identity n]
-                   ^^^^^^^^^^
-Error: Unsupported decreases expression: expected scalar primitive operations
+Line 3, characters 33-45:
+3 |   let rec loop n = if n > 0 then loop (n - 1) else 0
+                                     ^^^^^^^^^^^^
+Error: Refinement could not be proved (counterexample: n = 1)
 Line 4, characters 15-25:
 4 |   [@@decreases identity n]
                    ^^^^^^^^^^

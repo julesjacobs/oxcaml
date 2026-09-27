@@ -3253,8 +3253,6 @@ let rec (analyze @ total) :
       derivation_valid formula e.proof
       && same_clause (conclusion formula e.proof) e.clause
       && false_clause (binding_values state.bindings) e.clause}) ->
-    (rank : {r : Bigint.t | r === clause_rank state.trail current.clause})
-      @ ghost ->
     {entry : proof_result |
       (unique_literals entry.clause || entry.clause === current.clause)
       && derivation_valid formula entry.proof
@@ -3272,7 +3270,7 @@ let rec (analyze @ total) :
           && not (current_covered [] state.bindings state.level current.clause)
         then not (current_covered [] state.bindings state.level entry.clause)
         else true)} =
-  fun n formula database state stop current rank ->
+  fun n formula database state stop current ->
   ghost_ (clause_rank_nonnegative state.trail current.clause;
     conflict_characterization (binding_values state.bindings) current.clause;
     let _ = partial_of_bindings state.bindings in
@@ -3292,8 +3290,7 @@ let rec (analyze @ total) :
       current (ghost_ variables) pivot in
     ghost_ (clause_rank_nonnegative state.trail resolved.clause);
     analyze (ghost_ n) formula database state stop resolved
-      (ghost_ (clause_rank state.trail resolved.clause))
-[@@decreases rank]
+[@@decreases clause_rank state.trail current.clause]
 
 let[@def] at_level (bindings : binding option list) (level : int) literal =
   match at bindings (variable literal) with
@@ -4336,8 +4333,6 @@ let rec (search @ total) :
       && reason_order formula database s.learned s.bindings s.trail}) ->
     (fuel : {f : int option | match f with
       | None -> true | Some remaining -> 0 <= remaining}) ->
-    (rank : {r : Bigint.t |
-      r === progress_measure n database state.bindings}) @ ghost ->
     {r : report |
       match r.answer with
       | Sat assignment -> eval_formula assignment formula
@@ -4350,7 +4345,7 @@ let rec (search @ total) :
       | Unknown -> match fuel with
         | None -> false
         | Some remaining -> r.statistics.steps = state.steps + remaining} =
-  fun n formula scores database state fuel rank ->
+  fun n formula scores database state fuel ->
   let initial_bindings = ghost_ state.bindings in
   ghost_ (progress_nonnegative n database state.bindings);
   match fuel with
@@ -4401,8 +4396,7 @@ let rec (search @ total) :
                ghost_ (progress_decision n database initial_bindings
                  state.bindings;
                  progress_nonnegative n database state.bindings);
-               search (ghost_ n) formula scores database state remaining
-                 (ghost_ (progress_measure n database state.bindings)))))
+               search (ghost_ n) formula scores database state remaining)))
     | Conflict (entry, state) ->
       let state = {state with conflicts = state.conflicts + 1} in
       ghost_ (
@@ -4414,8 +4408,7 @@ let rec (search @ total) :
           not (current_covered [] state.bindings state.level entry.clause)
           else true} = () in ());
       let stop = if state.level = 0 then 0 else 1 in
-      let learned = analyze (ghost_ n) formula database state stop entry
-        (ghost_ (clause_rank state.trail entry.clause)) in
+      let learned = analyze (ghost_ n) formula database state stop entry in
       ghost_ (result_clause_valid n formula learned);
       if state.level = 0 then (
         ghost_ (
@@ -4460,9 +4453,8 @@ let rec (search @ total) :
            ghost_ (progress_learning n previous_database learned
              initial_bindings state.bindings;
              progress_nonnegative n database state.bindings);
-           search (ghost_ n) formula scores database state remaining
-             (ghost_ (progress_measure n database state.bindings))))
-[@@decreases rank]
+           search (ghost_ n) formula scores database state remaining))
+[@@decreases progress_measure n database state.bindings]
 
 let (start_search @ total) :
     (fuel : {f : int option | match f with
@@ -4508,8 +4500,7 @@ let (start_search @ total) :
     prefix_stable_def formula database initial.bindings 0;
     reason_order_def formula database 0 initial.bindings [];
     reason_order_from_def formula database 0 initial.bindings [] []);
-  let report = search (ghost_ n) formula scores database initial fuel
-    (ghost_ (progress_measure n database initial.bindings)) in
+  let report = search (ghost_ n) formula scores database initial fuel in
   match report.answer with
   | Sat assignment ->
     ghost_ (assignment_length n assignment);
