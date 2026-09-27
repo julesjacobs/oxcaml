@@ -181,15 +181,13 @@
    reference = "${here}/collections_boundary_client.reference";
    run;
    check-program-output;
-   check-ocamlc.opt-output;
-   (* Unchecked output: these clients have unused proof bindings. *)
-   compiler_output2 = "${lib}.public/parallel.output";
    all_modules = "quicksort_frame_client.ml";
    program = "${lib}.public/quicksort_frame_client.exe";
    ocamlc.opt;
    all_modules = "borrow_parallel.ml";
    program = "${lib}.public/borrow_parallel.exe";
    ocamlc.opt;
+   check-ocamlc.opt-output;
    binary_modules = "${lib}/avl_sets avl_set_client";
    all_modules = "avl_stdlib_set.ml";
    program = "${lib}.public/avl_legacy.exe";
@@ -398,15 +396,13 @@
    reference = "${here}/collections_boundary_client.reference";
    run;
    check-program-output;
-   check-ocamlopt.opt-output;
-   (* Unchecked output: these clients have unused proof bindings. *)
-   compiler_output2 = "${lib}.public/parallel.output";
    all_modules = "quicksort_frame_client.ml";
    program = "${lib}.public/quicksort_frame_client.exe";
    ocamlopt.opt;
    all_modules = "borrow_parallel.ml";
    program = "${lib}.public/borrow_parallel.exe";
    ocamlopt.opt;
+   check-ocamlopt.opt-output;
    binary_modules = "${lib}/avl_sets avl_set_client";
    all_modules = "avl_stdlib_set.ml";
    program = "${lib}.public/avl_legacy.exe";
@@ -581,15 +577,13 @@
    reference = "${here}/collections_boundary_client.reference";
    run;
    check-program-output;
-   check-ocamlc.opt-output;
-   (* Unchecked output: these clients have unused proof bindings. *)
-   compiler_output2 = "${lib}.public/parallel.output";
    all_modules = "quicksort_frame_client.ml";
    program = "${lib}.public/quicksort_frame_client.exe";
    ocamlc.opt;
    all_modules = "borrow_parallel.ml";
    program = "${lib}.public/borrow_parallel.exe";
    ocamlc.opt;
+   check-ocamlc.opt-output;
    binary_modules = "${lib}/avl_sets avl_set_client";
    all_modules = "avl_stdlib_set.ml";
    program = "${lib}.public/avl_legacy.exe";
@@ -769,15 +763,13 @@
    reference = "${here}/collections_boundary_client.reference";
    run;
    check-program-output;
-   check-ocamlopt.opt-output;
-   (* Unchecked output: these clients have unused proof bindings. *)
-   compiler_output2 = "${lib}.public/parallel.output";
    all_modules = "quicksort_frame_client.ml";
    program = "${lib}.public/quicksort_frame_client.exe";
    ocamlopt.opt;
    all_modules = "borrow_parallel.ml";
    program = "${lib}.public/borrow_parallel.exe";
    ocamlopt.opt;
+   check-ocamlopt.opt-output;
    binary_modules = "${lib}/avl_sets avl_set_client";
    all_modules = "avl_stdlib_set.ml";
    program = "${lib}.public/avl_legacy.exe";
