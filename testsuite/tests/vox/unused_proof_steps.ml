@@ -209,6 +209,32 @@ module Batched :
   sig val f : (x : int) -> int -> {r : int | r = (2 * x)} @ ghost end
 |}]
 
+(* Steps about arrays, whose terms request observations: the length fact is
+   not needed (every array length is nonnegative), the bound on [i] is. *)
+module Arrays = struct
+  let (length_nonnegative @ total) (a : int iarray) :
+      {u : unit | Iarray.length a >= 0} @ ghost =
+    ghost_ ()
+
+  let (first @ total) (a : int iarray) (i : {i : int | 0 <= i}) : int =
+    ghost_ (length_nonnegative a);
+    if i < Iarray.length a then Iarray.Refined.get a i else 0
+end;;
+[%%expect{|
+Line 7, characters 11-33:
+7 |     ghost_ (length_nonnegative a);
+               ^^^^^^^^^^^^^^^^^^^^^^
+Warning 227 [unused-proof-step]: No refinement proof in this function used the fact from this
+  call to "length_nonnegative".
+
+module Arrays :
+  sig
+    val length_nonnegative :
+      (a : int iarray) -> {u : unit | (Iarray.length a) >= 0} @ ghost
+    val first : int iarray -> {i : int | 0 <= i} -> int
+  end
+|}]
+
 (* A function with no proof at all uses none of its steps. *)
 module No_proof = struct
   open Lemmas

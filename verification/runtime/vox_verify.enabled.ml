@@ -594,8 +594,10 @@ let core poll check loc (query : Vox_smt.query) ~assumptions =
   let positive n = if n > 0 then Some n else None in
   let attempt ~exact ~limit query =
     let text () =
-      Vox_smt.to_smtlib ~poll ?resource_limit:limit ~assumptions ~int_width
-        ~timeout_ms:!timeout_ms query
+      try
+        Vox_smt.to_smtlib ~poll ?resource_limit:limit ~assumptions ~int_width
+          ~timeout_ms:!timeout_ms query
+      with Vox_smt.Sort_error message -> "sort error: " ^ message
     in
     let cached =
       match cache_directory () with
@@ -642,7 +644,17 @@ let core poll check loc (query : Vox_smt.query) ~assumptions =
     | Some outcome -> outcome
     | None ->
       let result : Vox_smt_solver.result =
-        check ?resource_limit:limit ?assumptions:(Some assumptions) query
+        (* The check is a diagnostic: a malformed second query counts its
+           steps as used rather than failing the compilation. *)
+        try check ?resource_limit:limit ?assumptions:(Some assumptions) query
+        with Vox_smt.Sort_error message ->
+          { validity = Failure message;
+            stderr = "";
+            resources = None;
+            core = None;
+            encoding_seconds = 0.;
+            solving_seconds = 0.
+          }
       in
       if !dump_resources
       then

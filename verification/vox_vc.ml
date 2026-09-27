@@ -4142,7 +4142,7 @@ let query ?indicators ctx code =
       Option.iter
         (fun value ->
           with_guard
-            (union !guard (fresh_indicators (equation_steps_of term)))
+            (union !guard (declared (equation_steps_of term)))
             (fun () -> define "iarray observation" term value))
         (observation_equation term);
       match term with
@@ -4152,7 +4152,7 @@ let query ?indicators ctx code =
           (fun value ->
             with_guard
               (union !guard
-                 (fresh_indicators
+                 (declared
                     (Option.value ~default:[]
                        (Hashtbl.find_opt observation_steps symbol))))
               (fun () -> define "observation" term value))
@@ -4161,6 +4161,12 @@ let query ?indicators ctx code =
         List.iter visit args
       | Is (_, arg) | Select (_, _, arg) -> visit arg
       | _ -> ()
+    (* Fresh indicators for the steps that recorded an observation, declared in
+       the query. *)
+    and declared steps =
+      let indicators = fresh_indicators steps in
+      List.iter (fun u -> visit (Var u)) indicators;
+      indicators
     and define label term value =
       let equation = both Eq term (rename value) in
       add label equation;
