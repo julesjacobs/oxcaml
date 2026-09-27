@@ -152,10 +152,10 @@ let merge : (state : {s : t | valid s}) @ immutable ->
   let #{U.merged; winner = _; state = union} = U.union state.union a b in
   if not merged then #{merged = false; state}
   else
-    let ra = M.root state.union.parents a in
-    let rb = M.root state.union.parents b in
-    let loser = U.larger ra rb in
-    let winner = U.smaller ra rb in
+    let ra = ghost_ (M.root state.union.parents a) in
+    let rb = ghost_ (M.root state.union.parents b) in
+    let loser = ghost_ (U.larger ra rb) in
+    let winner = ghost_ (U.smaller ra rb) in
     let edges = ghost_ (I.updated state.edges loser (Some proof)) in
     ghost_ (
       M.root_spec state.union.parents state.union.count a ();

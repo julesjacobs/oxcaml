@@ -60,6 +60,12 @@ Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body
   "ghost_", so the body is computed when the function is called and its
   value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
 
+Line 8, characters 8-9:
+8 |     let y = x + 1 in
+            ^
+Warning 226 [proof-only-binding]: "y" is computed at run time but used only in ghost code.
+  Wrap its definition in "ghost_ (...)" to erase it.
+
 module Bodies :
   sig
     val lemma : (x : int) -> {u : unit | (x + 0) = x} @ ghost

@@ -32,7 +32,7 @@ let expect term ty proof expected =
   match C.check term ty proof with
   | None -> failwith "invalid source machine fixture"
   | Some checked ->
-    let d = C.derivation checked in
+    let d = ghost_ (C.derivation checked) in
     ghost_ (P.source_safe budget term ty d ());
     let direct = I.run term #{I.ty = ghost_ ty; derivation = ghost_ d} in
     ghost_ (

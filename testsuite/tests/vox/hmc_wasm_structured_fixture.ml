@@ -107,7 +107,7 @@ let fixture (base : B.u32) enough =
         (D.List_type D.Word64) D.Word64 next context1 G.Empty_temporaries fragment 8 100 old_pc head V.Nil
         heap_base 1 2 cells padding Hmc_closure_ir.Empty heap limit slots frame_stop state 0 base bytes suffix () in
       let result = entry.Entry.result in
-      let cost = Entry.cost fragment 0 1 2 slots heap_base limit in
+      let cost = ghost_ (Entry.cost fragment 0 1 2 slots heap_base limit) in
       ghost_ (Entry.locals_def 0 1 2 slots;
         Hmc_wasm_structured_execute.correct prepared old_pc 0 base outer state cost (T.Running entry.Entry.target) ();
         (match result.Guarded.allocation with

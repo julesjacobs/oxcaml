@@ -50,8 +50,8 @@ let (correct @ total) : (table : K.table) @ immutable -> (heap : Heap.heap) @ im
           && V.length out.state.X.memory === V.length state.X.memory)} @ immutable =
   fun table heap head tail state base limit base_local limit_local head_tag head_payload tail_tag tail_payload premise ->
     ghost_ (Four.width_def ());
-    let body = Allocate.emit base_local head_tag head_payload tail_tag tail_payload in
-    let success = Lift.embed body T.Empty in
+    let body = ghost_ (Allocate.emit base_local head_tag head_payload tail_tag tail_payload) in
+    let success = ghost_ (Lift.embed body T.Empty) in
     ghost_ (Select.correct 32 base_local limit_local base limit state T.No_labels success T.Empty T.Empty ();
       emit_def base_local limit_local head_tag head_payload tail_tag tail_payload;
       cost_def base limit base_local limit_local head_tag head_payload tail_tag tail_payload;

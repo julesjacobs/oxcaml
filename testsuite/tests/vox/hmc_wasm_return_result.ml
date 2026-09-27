@@ -65,8 +65,8 @@ let (update @ total) : (signature : G.signature) @ immutable -> (pc : D.index) @
       Codec.decode_def signature pc (H.Cell (saved.F.current, H.Cell (value, rest)));
       Bounds.same_length state.X.memory memory limit ());
     ghost_ (end_offset_def ());
-    let old_header = Cells.header encoded_pc saved.F.current saved.F.accumulator in
-    let new_header = Cells.header encoded_pc saved.F.current value in
+    let old_header = ghost_ (Cells.header encoded_pc saved.F.current saved.F.accumulator) in
+    let new_header = ghost_ (Cells.header encoded_pc saved.F.current value) in
     ghost_ (Cells.header_def encoded_pc saved.F.current saved.F.accumulator; Cells.header_def encoded_pc saved.F.current value;
       H.length_def old_header; H.length_def new_header;
       H.length_def (H.Cell (saved.F.current, H.Cell (saved.F.accumulator, H.Empty)));
@@ -82,8 +82,8 @@ let (update @ total) : (signature : G.signature) @ immutable -> (pc : D.index) @
       Seg.append_def (H.Cell (saved.F.current, H.Cell (saved.F.accumulator, H.Empty))) rest;
       Seg.append_def (H.Cell (saved.F.current, H.Cell (value, H.Empty))) rest;
       Seg.append_def (H.Cell (saved.F.accumulator, H.Empty)) rest; Seg.append_def (H.Cell (value, H.Empty)) rest; Seg.append_def H.Empty rest);
-    let old_rest = Wasm_word_sequence.split (Hmc_wire_word_sequence.words old_header) (Hmc_wire_word_sequence.words rest) before suffix () in
-    let new_rest = Wasm_word_sequence.split (Hmc_wire_word_sequence.words new_header) (Hmc_wire_word_sequence.words rest) bytes suffix () in
+    let old_rest = ghost_ (Wasm_word_sequence.split (Hmc_wire_word_sequence.words old_header) (Hmc_wire_word_sequence.words rest) before suffix ()) in
+    let new_rest = ghost_ (Wasm_word_sequence.split (Hmc_wire_word_sequence.words new_header) (Hmc_wire_word_sequence.words rest) bytes suffix ()) in
     ghost_ (Wasm_word_sequence.unique (Hmc_wire_word_sequence.words rest) old_rest new_rest suffix ();
       Wasm_word_sequence.prefix (Hmc_wire_word_sequence.words old_header) before before old_rest old_rest 48 ();
       Wasm_word_sequence.prefix (Hmc_wire_word_sequence.words new_header) bytes bytes new_rest new_rest 48 ();

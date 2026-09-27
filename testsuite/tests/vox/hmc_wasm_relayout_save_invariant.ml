@@ -42,8 +42,8 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (next_signature
   fun signature next_signature activation next_activation frames next fragment capacity max_pc old_pc cells old_padding state base_local base before_frame tail premise ->
     ghost_ (Geometry.matches_def signature (G.Save_environment next) capacity max_pc fragment.Lower.copies fragment.Lower.pc fragment.Lower.required);
     let view = Hmc_frame_slices.decode signature activation cells old_padding () in
-    let env_count = Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity () in
-    let old_count = Hmc_wasm_schema_counts.encode (Codec.temporaries_size signature.G.temporaries) capacity () in
+    let env_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity ()) in
+    let old_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.temporaries_size signature.G.temporaries) capacity ()) in
     let values = Seg.append view.Hmc_frame_slices.env view.Hmc_frame_slices.old in
     let prefix = Seg.append view.Hmc_frame_slices.env values in
     let target = D.S (D.S (Heap.length prefix)) in

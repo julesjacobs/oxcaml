@@ -194,11 +194,11 @@ module Slice = struct
       @ local unique = fun s first past post body ->
     exclave_ (
       let before = ghost_ (current (borrow_ s)) in
-      let size = length (borrow_ s) in
+      let size = ghost_ (length (borrow_ s)) in
       let i = first in
       let j = past in
       let width = j - i in
-      let rest_size = size - i in
+      let rest_size = ghost_ (size - i) in
       let zero = 0 in
       let outer_post = ghost_ (fun (value : 'r @ immutable)
           (left : 'a iarray @ total immutable) (rest : 'a iarray @ total

@@ -48,7 +48,7 @@ let (correct @ total) : (program : I.program) @ immutable -> (globals : Machine.
       && Codec.decode signature saved.F.pc (H.Cell (saved.F.current, H.Cell (activation.F.accumulator, rest))) ===
         Some ({saved with F.accumulator = activation.F.accumulator}, H.Empty)} @ immutable =
   fun program globals heap heap_limit stack_limit activation saved frames signature pc source_pc rest source_rest state source base limit before suffix source_bytes source_suffix source_local caller_local premise ->
-    let source_cells = Cells.cells source_pc activation.F.current activation.F.accumulator source_rest in
+    let source_cells = ghost_ (Cells.cells source_pc activation.F.current activation.F.accumulator source_rest) in
     ghost_ (Cells.cells_def source_pc activation.F.current activation.F.accumulator source_rest;
       Hmc_heap_simple.lookup_def source_cells (D.S (D.S D.Z));
       Hmc_heap_simple.lookup_def (H.Cell (activation.F.current, H.Cell (activation.F.accumulator, source_rest))) (D.S D.Z);

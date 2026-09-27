@@ -57,9 +57,9 @@ let (header @ total) : (count : D.index) @ immutable -> (bytes : B.bytes) @ immu
         (match V.decode after_current with
         | None -> unreachable_ ()
         | Some (_, suffix) ->
-          let pc_middle = parts bytes (V.Word code) after_pc () in
-          let current_middle = parts after_pc current after_current () in
-          let acc_middle = parts after_current accumulator suffix () in
+          let pc_middle = ghost_ (parts bytes (V.Word code) after_pc ()) in
+          let current_middle = ghost_ (parts after_pc current after_current ()) in
+          let acc_middle = ghost_ (parts after_current accumulator suffix ()) in
           ghost_ (
             Hmc_wasm_header_update.number_def pc; H.layout_def code (V.tag current) (V.payload current) (V.tag accumulator) (V.payload accumulator);
             H.tag_def (); V.tag_def (V.Word code); V.payload_def (V.Word code);

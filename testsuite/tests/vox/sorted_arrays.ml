@@ -602,7 +602,7 @@ module Examples : sig end = struct
         premise;
         ghost_ (
           Arrays.partition array target strict left right index (refine_ u));
-        let value : int = Iarray.Refined.get array bounded in
+        let value : int = ghost_ (Iarray.Refined.get array bounded) in
         ghost_ (Arrays.at_def array index);
         let guarantee : {u : unit |
           if index <= left then
@@ -644,7 +644,7 @@ module Examples : sig end = struct
       certificate;
       ghost_ (
         Arrays.range_at array target first past index (refine_ u));
-      let value : int = Iarray.Refined.get array bounded in
+      let value : int = ghost_ (Iarray.Refined.get array bounded) in
       ghost_ (Arrays.at_def array index);
       let guarantee : {u : unit |
         if index < first then value < target

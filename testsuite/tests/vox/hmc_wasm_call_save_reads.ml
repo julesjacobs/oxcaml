@@ -37,8 +37,8 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (activation : F
       && Range.reads memory base position out.Slice.remaining} @ immutable =
   fun signature activation cells padding context ty schema next env_count count position pc memory base bytes suffix premise ->
     let out = Slice.correct signature activation cells padding context ty schema next () in
-    let view = View.decode signature activation cells padding () in
-    let full = H.Cell (V.Word (Header.number pc), cells) in
+    let view = ghost_ (View.decode signature activation cells padding ()) in
+    let full = ghost_ (H.Cell (V.Word (Header.number pc), cells)) in
     ghost_ (H.length_def full; Wasm_scatter_memory.zero_def ();
       Index.represents_def D.Z 0; Index.represents_def (D.S D.Z) 1; Index.represents_def (D.S (D.S D.Z)) 2;
       Hmc_heap_simple.lookup_def full D.Z;

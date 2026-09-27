@@ -44,7 +44,7 @@ let run reject =
   let refine_ state = state in
   let refine_ step = Pooled_allocator.allocate allocation_heap0 1 desc1 pool0 (refine_ state) in
   let a = step.#value in let pool1 = step.#pool in let state = step.#state in
-  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = cell desc1 1 in
+  let h1 = ghost_ (Pref.own (borrow_ state)) in let v1 = ghost_ (cell desc1 1) in
   ghost_ (cell_def desc1 1; payload_scoped_def h0 v1; allocatable_def h0 v1;
     (match desc1 with Var | Bool | Word -> () | Link q | List q -> below_def h0 q 2; ()
     | Arrow (a, b) -> below_def h0 a 2; below_def h0 b 2; ()));
@@ -64,7 +64,7 @@ let run reject =
   let refine_ state = state in
   let refine_ step = Pooled_allocator.allocate allocation_heap1 2 desc2 pool1 (refine_ state) in
   let b = step.#value in let pool2 = step.#pool in let state = step.#state in
-  let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = cell desc2 2 in
+  let h2 = ghost_ (Pref.own (borrow_ state)) in let v2 = ghost_ (cell desc2 2) in
   ghost_ (cell_def desc2 2; payload_scoped_def h1 v2; allocatable_def h1 v2;
     (match desc2 with Var | Bool | Word -> () | Link q | List q -> below_def h1 q 2; ()
     | Arrow (a, b) -> below_def h1 a 2; below_def h1 b 2; ()));
@@ -85,7 +85,7 @@ let run reject =
   let refine_ state = state in
   let refine_ step = Pooled_allocator.allocate allocation_heap2 2 desc3 pool2 (refine_ state) in
   let root = step.#value in let pool3 = step.#pool in let state = step.#state in
-  let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = cell desc3 2 in
+  let h3 = ghost_ (Pref.own (borrow_ state)) in let v3 = ghost_ (cell desc3 2) in
   ghost_ (cell_def desc3 2; payload_scoped_def h2 v3; allocatable_def h2 v3;
     (match desc3 with Var | Bool | Word -> () | Link q | List q -> below_def h2 q 2; ()
     | Arrow (a, b) -> below_def h2 a 2; below_def h2 b 2; ()));

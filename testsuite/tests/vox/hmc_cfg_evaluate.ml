@@ -21,7 +21,7 @@ let (step @ total) : (program : C.program) @ immutable -> (term : K.term) @ immu
   fun program term trace k accumulator premise ->
     let control = W.Evaluate (term, trace) in
     let state = W.Running (control, k, accumulator) in
-    let a = W.activation control k accumulator in
+    let a = ghost_ (W.activation control k accumulator) in
     ghost_ (Height.continuation_def k; Height.grow (Height.continuation k);
       Height.reflexive (D.S (Height.continuation k)); Height.reflexive (Height.continuation k);
       Height.state_def W.Stuck; Height.le_def D.Z (D.S (Height.continuation k));

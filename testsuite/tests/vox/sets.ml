@@ -39,12 +39,12 @@ module Demo : sig end = struct
     ()
 
   let (membership_laws @ total) x (set @ total) =
-    let singleton = Int_set.Refined.singleton x in
-    let added = Int_set.Refined.add x set in
-    let union = Int_set.Refined.union set singleton in
-    let inter = Int_set.Refined.inter added singleton in
-    let removed = Int_set.Refined.remove x set in
-    let diff = Int_set.Refined.diff set set in
+    let singleton = ghost_ (Int_set.Refined.singleton x) in
+    let added = ghost_ (Int_set.Refined.add x set) in
+    let union = ghost_ (Int_set.Refined.union set singleton) in
+    let inter = ghost_ (Int_set.Refined.inter added singleton) in
+    let removed = ghost_ (Int_set.Refined.remove x set) in
+    let diff = ghost_ (Int_set.Refined.diff set set) in
     let result = () in
     let proof :
         {u : unit |
@@ -63,7 +63,7 @@ module Demo : sig end = struct
   let (aliased_operations @ total) x (set @ total) =
     let insert = Int_set.Refined.add in
     let contains = Int_set.mem in
-    let present = contains x (insert x set) in
+    let present = ghost_ (contains x (insert x set)) in
     let unit = () in
     let proof : {u : unit | present} = unit in
     let _ = proof in
@@ -105,9 +105,9 @@ module Demo : sig end = struct
         int @ total =
       Int_set.Refined.find
     in
-    let representative = find set member in
+    let representative = ghost_ (find set member) in
     let member = member in
-    let singleton = Int_set.Refined.singleton member in
+    let singleton = ghost_ (Int_set.Refined.singleton member) in
     let unit = () in
     let proof :
         {u : unit |

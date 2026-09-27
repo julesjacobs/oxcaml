@@ -124,8 +124,8 @@ let (normal @ total) : (program : I.program) @ immutable -> (globals : Machine.g
     ghost_ (State.valid_def program globals lowered context before; State.configuration_def before;
       Resources.valid_def program globals lowered.Lower.width context.State.stack_base before.State.frame_end before.State.abstract
         before.State.heap before.State.activation before.State.frames before.State.registers before.State.memory);
-    let final = Hmc_heap_resources.sufficient program globals before.State.registers.Registers.heap_limit context.State.stack_capacity
-      budget (State.configuration before) before.State.abstract () in
+    let final = ghost_ (Hmc_heap_resources.sufficient program globals before.State.registers.Registers.heap_limit context.State.stack_capacity
+      budget (State.configuration before) before.State.abstract ()) in
     let out = E.run budget program globals lowered context before () in
     ghost_ (Inv.valid_def program globals before.State.registers.Registers.heap_limit final (U.advance program budget before.State.abstract);
       Hmc_heap_execute.word_agreement final.Machine.heap final.Machine.state word;

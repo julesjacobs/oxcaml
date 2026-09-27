@@ -62,7 +62,7 @@ let (correct @ total) : (program : Program.program) @ immutable -> (globals : Ma
         T.branch depth labels {X.memory = state.X.memory; machine = {E.locals = out; stack = S.Empty}}} @ immutable =
   fun program globals heap heap_limit stack_limit activation pc rest state base bytes suffix frame_local tag_local payload_local top_local stack_base width depth labels premise ->
     let plan = reads tag_local payload_local in
-    let cells = Cells.cells pc activation.F.current activation.F.accumulator rest in
+    let cells = ghost_ (Cells.cells pc activation.F.current activation.F.accumulator rest) in
     ghost_ (Cells.cells_def pc activation.F.current activation.F.accumulator rest;
       Hmc_heap_simple.lookup_def cells (D.S (D.S D.Z));
       Hmc_heap_simple.lookup_def (H.Cell (activation.F.current, H.Cell (activation.F.accumulator, rest))) (D.S D.Z);

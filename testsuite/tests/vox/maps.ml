@@ -46,12 +46,12 @@ module Demo : sig end = struct
     ()
 
   let (constructor_laws @ total) (key @ total) =
-    let empty = M.Refined.empty () in
+    let empty = ghost_ (M.Refined.empty ()) in
     let singleton = M.Refined.singleton key 10 in
     let added = M.Refined.add key 20 singleton in
     let wrapped = {map = added} in
-    let removed = M.Refined.remove key added in
-    let found = M.Refined.find added key in
+    let removed = ghost_ (M.Refined.remove key added) in
+    let found = ghost_ (M.Refined.find added key) in
     let result = () in
     let proof :
         {u : unit |
@@ -74,10 +74,10 @@ module Demo : sig end = struct
     found
 
   let (multiple_value_sorts @ total) (key @ total) =
-    let ints = M.Refined.singleton key 7 in
-    let bools = M.Refined.singleton key true in
-    let integer = M.Refined.find ints key in
-    let boolean = M.Refined.find bools key in
+    let ints = ghost_ (M.Refined.singleton key 7) in
+    let bools = ghost_ (M.Refined.singleton key true) in
+    let integer = ghost_ (M.Refined.find ints key) in
+    let boolean = ghost_ (M.Refined.find bools key) in
     let result = () in
     let proof : {u : unit | integer = 7 && boolean} = result in
     let _ = proof in
@@ -88,10 +88,10 @@ module Demo : sig end = struct
       {other : Key.t | M.mem other (M.Refined.singleton key 0)} ->
       unit =
     fun key equivalent ->
-    let bools = M.Refined.singleton key true in
+    let bools = ghost_ (M.Refined.singleton key true) in
     let equivalent = equivalent in
-    let present = M.mem equivalent bools in
-    let found = M.Refined.find bools equivalent in
+    let present = ghost_ (M.mem equivalent bools) in
+    let found = ghost_ (M.Refined.find bools equivalent) in
     let result = () in
     let proof : {u : unit | present && found} = result in
     let _ = proof in
@@ -102,15 +102,17 @@ module Demo : sig end = struct
     let lookup = M.Refined.find in
     let contains = M.mem in
     let map = insert key 31 input in
-    let found : int = lookup map key in
+    (* Proof-only, but [ghost_ (lookup map key)] is rejected: the alias
+       expects a read_write map, and [ghost_] sees [map] as immutable. *)
+    let[@warning "-226"] found : int = lookup map key in
     let result = () in
     let proof : {u : unit | contains key map && found = 31} = result in
     let _ = proof in
     ()
 
   let (module_aliases @ total) (key @ total) =
-    let map = Alias.Refined.singleton key false in
-    let found = Alias.Refined.find map key in
+    let map = ghost_ (Alias.Refined.singleton key false) in
+    let found = ghost_ (Alias.Refined.find map key) in
     let result = () in
     let proof : {u : unit | Alias.mem key map && found = false} =
       result
@@ -119,8 +121,8 @@ module Demo : sig end = struct
     ()
 
   let (ascribed_aliases @ total) (key @ total) =
-    let map = Ascribed.Refined.singleton key 42 in
-    let found = Ascribed.Refined.find map key in
+    let map = ghost_ (Ascribed.Refined.singleton key 42) in
+    let found = ghost_ (Ascribed.Refined.find map key) in
     let result = () in
     let proof : {u : unit | Ascribed.mem key map && found = 42} =
       result
@@ -129,9 +131,9 @@ module Demo : sig end = struct
     ()
 
   let (more_labels @ total) (key @ total) =
-    let empty = More_labeled.Refined.empty () in
-    let map = More_labeled.Refined.singleton key 17 in
-    let found = More_labeled.Refined.find map key in
+    let empty = ghost_ (More_labeled.Refined.empty ()) in
+    let map = ghost_ (More_labeled.Refined.singleton key 17) in
+    let found = ghost_ (More_labeled.Refined.find map key) in
     let result = () in
     let proof :
         {u : unit |

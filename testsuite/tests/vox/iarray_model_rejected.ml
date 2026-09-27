@@ -110,7 +110,7 @@ let wrong_map_length (values : int list) =
     let[@def] apply (value : int) = value
   end in
   let module M = Vox_sequence.Map (F) in
-  let result = M.map values in
+  let result = ghost_ (M.map values) in
   let _ = M.map_length values in
   let (_ : {u : unit | Vox_sequence.length result < Vox_sequence.length values}) =
     let u = () in u in

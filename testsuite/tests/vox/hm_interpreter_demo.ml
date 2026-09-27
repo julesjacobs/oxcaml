@@ -71,7 +71,7 @@ let checked_eval term ty derivation =
   match Hm_checked_elaboration.check term ty derivation with
   | None -> failwith "invalid interpreter fixture"
   | Some checked ->
-    let d = Hm_checked_elaboration.derivation checked in
+    let d = ghost_ (Hm_checked_elaboration.derivation checked) in
     let out = I.run term #{I.ty = ghost_ ty; derivation = ghost_ d} in
     out.#value
 
@@ -141,7 +141,7 @@ let nil_principal (element : Copy_spec.ty @ immutable) =
   ghost_ (D.scoped_term_def D.Z term);
   let inferred = V.infer term in
   let target = Copy_spec.List_type element in
-  let d = D.Empty_list (D.embed element) in
+  let d = ghost_ (D.Empty_list (D.embed element)) in
   ghost_ (D.embed_def target; Hm_type_proofs.embed_wf D.Z element;
     Hm_type_proofs.embed_wf D.Z target;
     D.context_wf_def D.Z D.Empty_context;

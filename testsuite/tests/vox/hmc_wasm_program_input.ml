@@ -137,10 +137,10 @@ let (frame_words @ total) : (count : D.index) @ immutable -> (bytes : B.bytes) @
           match V.decode b3 with
           | None -> unreachable_ ()
           | Some (_, rest) ->
-            let m0 = Words.parts bytes a b1 () in
-            let m1 = Words.parts b1 b b2 () in
-            let m2 = Words.parts b2 c b3 () in
-            let m3 = Words.parts b3 d rest () in
+            let m0 = ghost_ (Words.parts bytes a b1 ()) in
+            let m1 = ghost_ (Words.parts b1 b b2 ()) in
+            let m2 = ghost_ (Words.parts b2 c b3 ()) in
+            let m3 = ghost_ (Words.parts b3 d rest ()) in
             ghost_ (
               let w7 = Sequence.Word (V.payload d, Sequence.End) in
               let w6 = Sequence.Word (V.tag d, w7) in

@@ -336,7 +336,7 @@ end = struct
   let (raw_unique_cons @ total) key accepting row rest :
       {u : unit | raw_unique_keys ((key, accepting, row) :: rest) ===
         (not (raw_has_key rest key) && raw_unique_keys rest)} =
-    let table = (key, accepting, row) :: rest in
+    let table = ghost_ ((key, accepting, row) :: rest) in
     ghost_ (raw_unique_keys_def table);
     ghost_ (raw_unique_keys_def rest);
     ghost_ (raw_has_key_def rest key);
@@ -364,7 +364,7 @@ end = struct
       (state : int) :
       {u : unit | raw_has_key ((key, accepting, row) :: rest) state ===
         (key = state || raw_has_key rest state)} =
-    let table = (key, accepting, row) :: rest in
+    let table = ghost_ ((key, accepting, row) :: rest) in
     ghost_ (raw_has_key_def table state);
     ghost_ (raw_has_key_def rest state);
     ghost_ (has_key_def state table);
@@ -373,7 +373,7 @@ end = struct
   let (raw_unique_head @ total) (key : int) accepting row rest :
       {u : unit | if raw_unique_keys ((key, accepting, row) :: rest)
         then not (raw_has_key rest key) else true} =
-    let table = (key, accepting, row) :: rest in
+    let table = ghost_ ((key, accepting, row) :: rest) in
     ghost_ (raw_unique_keys_def table);
     ghost_ (unique_keys_def table);
     ghost_ (raw_has_key_def rest key);
@@ -389,7 +389,7 @@ end = struct
   let (raw_unique_tail @ total) (key : int) accepting row rest :
       {u : unit | if raw_unique_keys ((key, accepting, row) :: rest)
         then raw_unique_keys rest else true} =
-    let table = (key, accepting, row) :: rest in
+    let table = ghost_ ((key, accepting, row) :: rest) in
     ghost_ (raw_unique_keys_def table);
     ghost_ (raw_unique_keys_def rest);
     ghost_ (unique_keys_def table);
@@ -415,7 +415,7 @@ end = struct
       (state : int) :
       {u : unit | raw_view ((key, accepting, row) :: rest) state ===
         (if key = state then accepting, row else raw_view rest state)} =
-    let table = (key, accepting, row) :: rest in
+    let table = ghost_ ((key, accepting, row) :: rest) in
     ghost_ (raw_view_def table state);
     ghost_ (raw_view_def rest state);
     ghost_ (view_def table state);
@@ -438,7 +438,7 @@ end = struct
       {u : unit | raw_edge_step ((label, target) :: rest) fallback letter ===
         (if label = letter then target
          else raw_edge_step rest fallback letter)} =
-    let edges = (label, target) :: rest in
+    let edges = ghost_ ((label, target) :: rest) in
     ghost_ (raw_edge_step_def edges fallback letter);
     ghost_ (raw_edge_step_def rest fallback letter);
     ghost_ (edge_step_def edges fallback letter);
@@ -469,7 +469,7 @@ end = struct
   let (raw_row_step_edges @ total) edges fallback letter :
       {u : unit | raw_row_step (edges, fallback) letter ===
         raw_edge_step edges fallback letter} =
-    let row = edges, fallback in
+    let row = ghost_ (edges, fallback) in
     ghost_ (raw_row_step_def row letter);
     ghost_ (raw_edge_step_def edges fallback letter);
     ghost_ (row_step_def row letter);
@@ -519,8 +519,8 @@ end = struct
         execute (right_initial, table) state word}
         @ immutable contended =
     fun left_initial right_initial table state word ->
-    let left = left_initial, table in
-    let right = right_initial, table in
+    let left = ghost_ (left_initial, table) in
+    let right = ghost_ (right_initial, table) in
     ghost_ (execute_def left state word);
     ghost_ (execute_def right state word);
     match word with
@@ -531,7 +531,7 @@ end = struct
     | letter :: suffix ->
       ghost_ (step_def left state letter);
       ghost_ (step_def right state letter);
-      let target = step left state letter in
+      let target = ghost_ (step left state letter) in
       ghost_ (execute_same_table left_initial right_initial table target suffix);
       ()
 
@@ -540,7 +540,7 @@ end = struct
       {u : unit | let source_initial, table = source in
         run (initial, table) word === run_from source initial word} =
     let source_initial, table = source in
-    let rebased = initial, table in
+    let rebased = ghost_ (initial, table) in
     ghost_ (run_def rebased word);
     ghost_ (run_from_def source initial word);
     ghost_ (execute_same_table initial source_initial table initial word);
@@ -569,7 +569,7 @@ end = struct
       {u : unit | run_from machine state (letter :: suffix) ===
         run_from machine (step machine state letter) suffix} =
     let word = letter :: suffix in
-    let target = step machine state letter in
+    let target = ghost_ (step machine state letter) in
     ghost_ (run_from_def machine state word);
     ghost_ (execute_def machine state word);
     ghost_ (run_from_def machine target suffix);
@@ -587,7 +587,7 @@ end = struct
       {u : unit | raw_run_from raw state (letter :: suffix) ===
         raw_run_from raw (raw_step raw state letter) suffix} =
     let word = letter :: suffix in
-    let target = raw_step raw state letter in
+    let target = ghost_ (raw_step raw state letter) in
     ghost_ (raw_run_from_def raw state word);
     ghost_ (raw_run_from_def raw target suffix);
     ghost_ (raw_step_def raw state letter);
@@ -629,7 +629,7 @@ end = struct
     | [] -> ()
     | (key, _, (edges, fallback)) :: rest ->
       if state = key then begin
-        let row = edges, fallback in
+        let row = ghost_ (edges, fallback) in
         ghost_ (row_step_def row c);
         ghost_ (edge_step_valid table edges fallback c);
         ()
@@ -644,7 +644,7 @@ end = struct
     let _, table = machine in
     ghost_ (valid_def machine);
     ghost_ (has_state_def machine state);
-    let next = step machine state c in
+    let next = ghost_ (step machine state c) in
     ghost_ (step_def machine state c);
     ghost_ (has_state_def machine next);
     ghost_ (view_step_valid table table state c);
@@ -660,7 +660,7 @@ end = struct
     match word with
     | [] -> ()
     | c :: rest ->
-      let next = step machine state c in
+      let next = ghost_ (step machine state c) in
       ghost_ (step_valid machine state c);
       ghost_ (drive_valid machine next rest);
       ()
@@ -671,13 +671,13 @@ end = struct
     let initial, _ = machine in
     ghost_ (valid_def machine);
     ghost_ (has_state_def machine initial);
-    let state = reached machine word in
+    let state = ghost_ (reached machine word) in
     ghost_ (reached_def machine word);
     ghost_ (drive_valid machine initial word);
     ghost_ (has_state_def machine state);
     ()
 
-  let[@def] rec append xs ys =
+  let[@def] rec append (xs : int list) (ys : int list) =
     match xs with [] -> ys | x :: rest -> x :: append rest ys
 
   let rec (execute_after @ total) :
@@ -687,14 +687,14 @@ end = struct
         execute machine state (append prefix suffix)}
         @ immutable contended =
     fun machine state prefix suffix ->
-    let combined = append prefix suffix in
+    let combined = ghost_ (append prefix suffix) in
     ghost_ (append_def prefix suffix);
     ghost_ (drive_def machine state prefix);
     ghost_ (execute_def machine state combined);
     match prefix with
     | [] -> ()
     | c :: rest ->
-      let next = step machine state c in
+      let next = ghost_ (step machine state c) in
       ghost_ (execute_after machine next rest suffix);
       ()
 
@@ -705,14 +705,14 @@ end = struct
         drive machine (drive machine state prefix) suffix}
         @ immutable contended =
     fun machine state prefix suffix ->
-    let combined = append prefix suffix in
+    let combined = ghost_ (append prefix suffix) in
     ghost_ (append_def prefix suffix);
     ghost_ (drive_def machine state combined);
     ghost_ (drive_def machine state prefix);
     match prefix with
     | [] -> ()
     | c :: rest ->
-      let next = step machine state c in
+      let next = ghost_ (step machine state c) in
       ghost_ (drive_after machine next rest suffix);
       ()
 
@@ -727,7 +727,7 @@ end = struct
     match word with
     | [] -> ()
     | c :: rest ->
-      let next = step machine state c in
+      let next = ghost_ (step machine state c) in
       ghost_ (execute_reached machine next rest);
       ()
 
@@ -762,7 +762,7 @@ end = struct
     match ys with
     | [] -> ()
     | head :: rest ->
-      let filtered = remove_one x ys in
+      let filtered = ghost_ (remove_one x ys) in
       ghost_ (has_letter_def y rest);
       ghost_ (has_letter_def y filtered);
       ghost_ (remove_preserves_other x y rest);
@@ -780,8 +780,8 @@ end = struct
     match ys with
     | [] -> ()
     | _ :: rest ->
-      let filtered = remove_one x ys in
-      let filtered_rest = remove_one x rest in
+      let filtered = ghost_ (remove_one x ys) in
+      let filtered_rest = ghost_ (remove_one x rest) in
       ghost_ (big_length_def filtered);
       ghost_ (big_length_def rest);
       ghost_ (big_length_def filtered_rest);
@@ -797,7 +797,7 @@ end = struct
     fun x xs ys ->
     ghost_ (has_letter_def x xs);
     ghost_ (included_def xs ys);
-    let filtered = remove_one x ys in
+    let filtered = ghost_ (remove_one x ys) in
     ghost_ (included_def xs filtered);
     match xs with
     | [] -> ()
@@ -832,7 +832,7 @@ end = struct
       ghost_ (big_length_nonnegative ys);
       ()
     | head :: rest ->
-      let filtered = remove_one head ys in
+      let filtered = ghost_ (remove_one head ys) in
       ghost_ (included_remove head rest ys);
       ghost_ (remove_size head ys);
       ghost_ (included_bound rest filtered);
@@ -884,7 +884,7 @@ end = struct
       {u : unit | has_letter c (append xs ys) ===
         (has_letter c xs || has_letter c ys)} @ immutable contended =
     fun xs ys c ->
-    let joined = append xs ys in
+    let joined = ghost_ (append xs ys) in
     ghost_ (append_def xs ys);
     ghost_ (has_letter_def c xs);
     ghost_ (has_letter_def c joined);
@@ -900,7 +900,7 @@ end = struct
         then edge_step edges default c === default
         else true} @ immutable contended =
     fun edges default c ->
-    let letters = edge_labels edges in
+    let letters = ghost_ (edge_labels edges) in
     ghost_ (edge_labels_def edges);
     ghost_ (edge_step_def edges default c);
     ghost_ (has_letter_def c letters);
@@ -954,7 +954,7 @@ end = struct
         related (p, q) pairs then pair_closed left right p q relation else true}
         @ immutable contended =
     fun left right relation pairs p q ->
-    let pair = (p, q) in
+    let pair = ghost_ ((p, q)) in
     ghost_ (all_closed_def left right relation pairs);
     ghost_ (related_def pair pairs);
     match pairs with
@@ -993,8 +993,8 @@ end = struct
         @ immutable contended =
     fun source left_initial right_initial p q letters relation ->
     let _, table = source in
-    let left = left_initial, table in
-    let right = right_initial, table in
+    let left = ghost_ (left_initial, table) in
+    let right = ghost_ (right_initial, table) in
     ghost_ (labelled_closed_def left right p q letters relation);
     ghost_ (labelled_closed_def source source p q letters relation);
     match letters with
@@ -1017,8 +1017,8 @@ end = struct
         @ immutable contended =
     fun source left_initial right_initial relation pairs ->
     let _, table = source in
-    let left = left_initial, table in
-    let right = right_initial, table in
+    let left = ghost_ (left_initial, table) in
+    let right = ghost_ (right_initial, table) in
     ghost_ (all_closed_def left right relation pairs);
     ghost_ (all_closed_def source source relation pairs);
     match pairs with
@@ -1038,7 +1038,7 @@ end = struct
       ghost_ (labels_def right q);
       ghost_ (labels_def source p);
       ghost_ (labels_def source q);
-      let letters = append (labels source p) (labels source q) in
+      let letters = ghost_ (append (labels source p) (labels source q)) in
       ghost_ (labelled_closed_rebased source left_initial right_initial p q letters
         relation);
       ghost_ (all_closed_rebased source left_initial right_initial relation rest);
@@ -1061,8 +1061,8 @@ end = struct
       ()
     | c :: rest ->
       ghost_ (closed_step left right relation p q c);
-      let next_p = step left p c in
-      let next_q = step right q c in
+      let next_p = ghost_ (step left p c) in
+      let next_q = ghost_ (step right q c) in
       ghost_ (execute_agrees left right relation
         next_p next_q rest);
       ()
@@ -1105,7 +1105,7 @@ end = struct
       {u : unit | has_letter state (state_ids table) === has_key state table}
       @ immutable contended =
     fun table state ->
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     ghost_ (state_ids_def table);
     ghost_ (has_key_def state table);
     ghost_ (has_letter_def state states);
@@ -1149,7 +1149,7 @@ end = struct
         distinct_ints (state_ids table) else true}
         @ immutable contended =
     fun table ->
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     ghost_ (unique_keys_def table);
     ghost_ (state_ids_def table);
     ghost_ (distinct_ints_def states);
@@ -1237,7 +1237,7 @@ end = struct
           ((left, right, word) :: separate) else true}
         @ immutable contended =
     fun machine p others separate left right word ->
-    let extended = (left, right, word) :: separate in
+    let extended = ghost_ ((left, right, word) :: separate) in
     ghost_ (separates_from_def machine p others separate);
     ghost_ (separates_from_def machine p others extended);
     match others with
@@ -1307,7 +1307,7 @@ end = struct
           ((left, right, word) :: separate) else true}
         @ immutable contended =
     fun machine states remaining separate left right word ->
-    let extended = (left, right, word) :: separate in
+    let extended = ghost_ ((left, right, word) :: separate) in
     ghost_ (all_separated_def machine states remaining separate);
     ghost_ (all_separated_def machine states remaining extended);
     match remaining with
@@ -1350,7 +1350,7 @@ end = struct
         else true} =
     let _, access, _ = certificate in
     let _, table = candidate in
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     let word = access_word state access in
     ghost_ (check_reduction_def source candidate certificate);
     ghost_ (has_state_def candidate state);
@@ -1374,7 +1374,7 @@ end = struct
         else true} =
     let _, _, separate = certificate in
     let _, table = candidate in
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     let word = separating_word p q separate in
     ghost_ (check_reduction_def source candidate certificate);
     ghost_ (has_state_def candidate p);
@@ -1406,7 +1406,7 @@ end = struct
     let _, candidate_table = candidate in
     let candidate_initial, _ = candidate in
     let other_initial, _ = other in
-    let states = state_ids candidate_table in
+    let states = ghost_ (state_ids candidate_table) in
     let up = access_word p access in
     let uq = access_word q access in
     let suffix = separating_word p q separate in
@@ -1420,8 +1420,8 @@ end = struct
     ghost_ (all_separated_member candidate states states separate p q);
     match up, uq, suffix with
     | Some wp, Some wq, Some separating ->
-      let first = append wp separating in
-      let second = append wq separating in
+      let first = ghost_ (append wp separating) in
+      let second = ghost_ (append wq separating) in
       ghost_ (reached_def candidate wp);
       ghost_ (reached_def candidate wq);
       ghost_ (run_from_def candidate p separating);
@@ -1460,7 +1460,7 @@ end = struct
     let _, candidate_table = candidate in
     let candidate_initial, _ = candidate in
     let other_initial, _ = other in
-    let states = state_ids candidate_table in
+    let states = ghost_ (state_ids candidate_table) in
     let up = access_word p access in
     let uq = access_word q access in
     let suffix = separating_word p q separate in
@@ -1512,7 +1512,7 @@ end = struct
         else true} =
     let _, access, _ = certificate in
     let _, table = candidate in
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     let word = access_word state access in
     ghost_ (check_reduction_def source candidate certificate);
     ghost_ (has_state_def candidate state);
@@ -1522,7 +1522,7 @@ end = struct
     match word with
     | None -> ()
     | Some found ->
-      let image = reached other found in
+      let image = ghost_ (reached other found) in
       ghost_ (reached_valid other found);
       ghost_ (has_state_def other image);
       ()
@@ -1559,7 +1559,7 @@ end = struct
       {u : unit | big_length (image_ids certificate other states) ===
         big_length states} @ immutable contended =
     fun certificate other states ->
-    let images = image_ids certificate other states in
+    let images = ghost_ (image_ids certificate other states) in
     ghost_ (image_ids_def certificate other states);
     ghost_ (big_length_def images);
     ghost_ (big_length_def states);
@@ -1623,17 +1623,17 @@ end = struct
     fun source candidate certificate other states ->
     let _, candidate_table = candidate in
     let _, other_table = other in
-    let candidate_states = state_ids candidate_table in
-    let other_states = state_ids other_table in
-    let images = image_ids certificate other states in
+    let candidate_states = ghost_ (state_ids candidate_table) in
+    let other_states = ghost_ (state_ids other_table) in
+    let images = ghost_ (image_ids certificate other states) in
     ghost_ (included_def states candidate_states);
     ghost_ (image_ids_def certificate other states);
     ghost_ (included_def images other_states);
     match states with
     | [] -> ()
     | state :: rest ->
-      let image = image_number certificate other state in
-      let tail_images = image_ids certificate other rest in
+      let image = ghost_ (image_number certificate other state) in
+      let tail_images = ghost_ (image_ids certificate other rest) in
       ghost_ (included_def rest candidate_states);
       ghost_ (included_def tail_images other_states);
       ghost_ (has_letter_def state candidate_states);
@@ -1659,9 +1659,9 @@ end = struct
         @ immutable contended =
     fun source candidate certificate other relation state states ->
     let _, table = candidate in
-    let candidate_states = state_ids table in
-    let image = image_number certificate other state in
-    let images = image_ids certificate other states in
+    let candidate_states = ghost_ (state_ids table) in
+    let image = ghost_ (image_number certificate other state) in
+    let images = ghost_ (image_ids certificate other states) in
     ghost_ (has_letter_def state states);
     ghost_ (included_def states candidate_states);
     ghost_ (image_ids_def certificate other states);
@@ -1686,9 +1686,9 @@ end = struct
         distinct_ints (image_ids certificate other states) else true}
         @ immutable contended =
     fun source candidate certificate other relation states ->
-    let images = image_ids certificate other states in
+    let images = ghost_ (image_ids certificate other states) in
     let _, table = candidate in
-    let candidate_states = state_ids table in
+    let candidate_states = ghost_ (state_ids table) in
     ghost_ (distinct_ints_def states);
     ghost_ (included_def states candidate_states);
     ghost_ (image_ids_def certificate other states);
@@ -1716,9 +1716,9 @@ end = struct
         @ immutable contended =
     fun source candidate certificate other agreement state states ->
     let _, table = candidate in
-    let candidate_states = state_ids table in
-    let image = image_number certificate other state in
-    let images = image_ids certificate other states in
+    let candidate_states = ghost_ (state_ids table) in
+    let image = ghost_ (image_number certificate other state) in
+    let images = ghost_ (image_ids certificate other states) in
     ghost_ (has_letter_def state states);
     ghost_ (included_def states candidate_states);
     ghost_ (image_ids_def certificate other states);
@@ -1746,9 +1746,9 @@ end = struct
         distinct_ints (image_ids certificate other states) else true}
         @ immutable contended =
     fun source candidate certificate other agreement states ->
-    let images = image_ids certificate other states in
+    let images = ghost_ (image_ids certificate other states) in
     let _, table = candidate in
-    let candidate_states = state_ids table in
+    let candidate_states = ghost_ (state_ids table) in
     ghost_ (distinct_ints_def states);
     ghost_ (included_def states candidate_states);
     ghost_ (image_ids_def certificate other states);
@@ -1775,9 +1775,9 @@ end = struct
         else true} =
     let _, candidate_table = candidate in
     let _, other_table = other in
-    let candidate_states = state_ids candidate_table in
-    let other_states = state_ids other_table in
-    let images = image_ids certificate other candidate_states in
+    let candidate_states = ghost_ (state_ids candidate_table) in
+    let other_states = ghost_ (state_ids other_table) in
+    let images = ghost_ (image_ids certificate other candidate_states) in
     ghost_ (check_reduction_def source candidate certificate);
     ghost_ (state_ids_unique candidate_table);
     ghost_ (self_included candidate_states);
@@ -1819,9 +1819,9 @@ end = struct
         else true} =
     let _, candidate_table = candidate in
     let _, other_table = other in
-    let candidate_states = state_ids candidate_table in
-    let other_states = state_ids other_table in
-    let images = image_ids certificate other candidate_states in
+    let candidate_states = ghost_ (state_ids candidate_table) in
+    let other_states = ghost_ (state_ids other_table) in
+    let images = ghost_ (image_ids certificate other candidate_states) in
     ghost_ (check_reduction_def source candidate certificate);
     ghost_ (state_ids_unique candidate_table);
     ghost_ (self_included candidate_states);
@@ -1858,7 +1858,7 @@ end = struct
     fun left right ->
     ghost_ (append_def left right);
     ghost_ (big_length_def left);
-    let joined = append left right in
+    let joined = ghost_ (append left right) in
     match left with
     | [] -> ()
     | _ :: rest ->
@@ -1869,7 +1869,7 @@ end = struct
   let (pair_labels_size @ total) (left : int list) (right : int list) :
       {u : unit | if list_size left <= 64 && list_size right <= 64 then
         list_size (append left right) <= 128 else true} =
-    let joined = append left right in
+    let joined = ghost_ (append left right) in
     ghost_ (list_size_properties left);
     ghost_ (list_size_properties right);
     ghost_ (list_size_properties joined);
@@ -1895,7 +1895,7 @@ end = struct
           bounded_labels_from source states} @ immutable contended =
     fun source initial states ->
     let _, table = source in
-    let rebased = initial, table in
+    let rebased = ghost_ (initial, table) in
     ghost_ (bounded_labels_from_def source states);
     ghost_ (bounded_labels_from_def rebased states);
     match states with
@@ -1910,7 +1910,7 @@ end = struct
       {u : unit | if labels_bounded machine && has_state machine state then
         list_size (labels machine state) <= 64 else true} =
     let _, table = machine in
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     ghost_ (labels_bounded_def machine);
     ghost_ (has_state_def machine state);
     ghost_ (ids_member table state);
@@ -2010,7 +2010,7 @@ end = struct
     match pairs with
     | [] -> ()
     | head :: rest ->
-      let filtered = remove_pair pair pairs in
+      let filtered = ghost_ (remove_pair pair pairs) in
       ghost_ (related_def other filtered);
       ghost_ (same_pair_correct pair head);
       ghost_ (same_pair_correct other head);
@@ -2029,8 +2029,8 @@ end = struct
     match pairs with
     | [] -> ()
     | _ :: rest ->
-      let filtered = remove_pair pair pairs in
-      let filtered_rest = remove_pair pair rest in
+      let filtered = ghost_ (remove_pair pair pairs) in
+      let filtered_rest = ghost_ (remove_pair pair rest) in
       ghost_ (big_length_def filtered);
       ghost_ (big_length_def rest);
       ghost_ (big_length_def filtered_rest);
@@ -2046,7 +2046,7 @@ end = struct
     fun pair before after ->
     ghost_ (related_def pair before);
     ghost_ (relation_included_def before after);
-    let filtered = remove_pair pair after in
+    let filtered = ghost_ (remove_pair pair after) in
     ghost_ (relation_included_def before filtered);
     match before with
     | [] -> ()
@@ -2077,18 +2077,19 @@ end = struct
     match before with
     | [] -> relation_length_nonnegative after; ()
     | pair :: rest ->
-      let filtered = remove_pair pair after in
+      let filtered = ghost_ (remove_pair pair after) in
       ghost_ (relation_included_remove pair rest after);
       ghost_ (remove_pair_size pair after);
       ghost_ (relation_included_bound rest filtered);
       ()
 
-  let[@def] rec product_row state others tail =
+  let[@def] rec product_row (state : int) (others : int list)
+      (tail : (int * int) list) =
     match others with
     | [] -> tail
     | other :: rest -> (state, other) :: product_row state rest tail
 
-  let[@def] rec state_product left right =
+  let[@def] rec state_product (left : int list) (right : int list) =
     match left with
     | [] -> []
     | state :: rest -> product_row state right (state_product rest right)
@@ -2101,7 +2102,7 @@ end = struct
     fun state others tail ->
     ghost_ (product_row_def state others tail);
     ghost_ (big_length_def others);
-    let pairs = product_row state others tail in
+    let pairs = ghost_ (product_row state others tail) in
     match others with
     | [] -> ()
     | _ :: rest ->
@@ -2121,7 +2122,7 @@ end = struct
     match left with
     | [] -> big_length_def pairs; ()
     | state :: rest ->
-      let tail = state_product rest right in
+      let tail = ghost_ (state_product rest right) in
       ghost_ (product_row_length state right tail);
       ghost_ (state_product_length rest right);
       ()
@@ -2140,8 +2141,8 @@ end = struct
     match others with
     | [] -> ()
     | other :: rest ->
-      let head = state, other in
-      let pairs = product_row state others tail in
+      let head = ghost_ (state, other) in
+      let pairs = ghost_ (product_row state others tail) in
       ghost_ (related_def pair pairs);
       ghost_ (same_pair_correct pair head);
       ghost_ (product_row_member state rest tail pair);
@@ -2159,11 +2160,11 @@ end = struct
     ghost_ (has_letter_def p left);
     match left with
     | [] ->
-      let pairs = state_product left right in
+      let pairs = ghost_ (state_product left right) in
       ghost_ (related_def pair pairs);
       ()
     | state :: rest ->
-      let tail = state_product rest right in
+      let tail = ghost_ (state_product rest right) in
       ghost_ (product_row_member state right tail pair);
       ghost_ (state_product_member rest right pair);
       ()
@@ -2184,15 +2185,15 @@ end = struct
     fun left right pairs ->
     let _, left_table = left in
     let _, right_table = right in
-    let left_states = state_ids left_table in
-    let right_states = state_ids right_table in
-    let domain = state_product left_states right_states in
+    let left_states = ghost_ (state_ids left_table) in
+    let right_states = ghost_ (state_ids right_table) in
+    let domain = ghost_ (state_product left_states right_states) in
     ghost_ (pairs_valid_def left right pairs);
     ghost_ (relation_included_def pairs domain);
     match pairs with
     | [] -> ()
     | (p, q) :: rest ->
-      let pair = p, q in
+      let pair = ghost_ (p, q) in
       ghost_ (has_state_def left p);
       ghost_ (has_state_def right q);
       ghost_ (ids_member left_table p);
@@ -2208,9 +2209,9 @@ end = struct
           (Bigint.mul (state_size left) (state_size right)) <= 0 else true} =
     let _, left_table = left in
     let _, right_table = right in
-    let left_states = state_ids left_table in
-    let right_states = state_ids right_table in
-    let domain = state_product left_states right_states in
+    let left_states = ghost_ (state_ids left_table) in
+    let right_states = ghost_ (state_ids right_table) in
+    let domain = ghost_ (state_product left_states right_states) in
     ghost_ (pairs_valid_included left right pairs);
     ghost_ (relation_included_bound pairs domain);
     ghost_ (state_product_length left_states right_states);
@@ -2265,7 +2266,7 @@ end = struct
     match letters with
     | [] -> ()
     | letter :: rest ->
-      let pair = step left p letter, step right q letter in
+      let pair = ghost_ (step left p letter, step right q letter) in
       ghost_ (related_included pair before after);
       ghost_ (labelled_closed_weaken left right p q rest before after);
       ()
@@ -2275,8 +2276,8 @@ end = struct
       {u : unit | if relation_included before after &&
         pair_closed left right p q before then
         pair_closed left right p q after else true} =
-    let default_pair = default left p, default right q in
-    let letters = append (labels left p) (labels right q) in
+    let default_pair = ghost_ (default left p, default right q) in
+    let letters = ghost_ (append (labels left p) (labels right q)) in
     ghost_ (pair_closed_def left right p q before);
     ghost_ (pair_closed_def left right p q after);
     ghost_ (related_included default_pair before after);
@@ -2327,7 +2328,7 @@ end = struct
       (rest : (int * int * int list) list) :
       {u : unit | pending_member pair ((p, q, word) :: rest) ===
         (same_pair pair (p, q) || pending_member pair rest)} =
-    let extended = (p, q, word) :: rest in
+    let extended = ghost_ ((p, q, word) :: rest) in
     ghost_ (pending_member_def pair extended);
     ()
 
@@ -2346,7 +2347,7 @@ end = struct
         else true} @ immutable contended =
     fun seen processed pending p q word ->
     ghost_ (all_seen_accounted_def seen processed pending);
-    let extended = (p, q, word) :: pending in
+    let extended = ghost_ ((p, q, word) :: pending) in
     ghost_ (all_seen_accounted_def seen processed extended);
     match seen with
     | [] -> ()
@@ -2365,7 +2366,7 @@ end = struct
         else true} @ immutable contended =
     fun seen processed p q word rest ->
     let pair = p, q in
-    let pending = (p, q, word) :: rest in
+    let pending = ghost_ ((p, q, word) :: rest) in
     let updated_processed = pair :: processed in
     ghost_ (all_seen_accounted_def seen processed pending);
     ghost_ (all_seen_accounted_def seen updated_processed rest);
@@ -2421,7 +2422,7 @@ end = struct
       {u : unit | if reached left word = p && reached right word = q then
         pending_valid left right [p, q, word] else true} =
     let empty = [] in
-    let singleton = [p, q, word] in
+    let singleton = ghost_ ([p, q, word]) in
     ghost_ (pending_valid_def left right empty);
     ghost_ (pending_valid_def left right singleton);
     ()
@@ -2432,9 +2433,9 @@ end = struct
         step machine (reached machine word) letter} =
     let initial, _ = machine in
     let suffix = [letter] in
-    let joined = append word suffix in
-    let state = drive machine initial word in
-    let next = step machine state letter in
+    let joined = ghost_ (append word suffix) in
+    let state = ghost_ (drive machine initial word) in
+    let next = ghost_ (step machine state letter) in
     let nil = [] in
     ghost_ (append_def word suffix);
     ghost_ (reached_def machine word);
@@ -2467,7 +2468,7 @@ end = struct
     let left_initial, _ = left in
     let right_initial, _ = right in
     let nil = [] in
-    let pending = [left_initial, right_initial, nil] in
+    let pending = ghost_ ([left_initial, right_initial, nil]) in
     ghost_ (reached_empty_equal left);
     ghost_ (reached_empty_equal right);
     ghost_ (pending_singleton left right left_initial right_initial nil);
@@ -2529,7 +2530,7 @@ end = struct
         else true} =
     ghost_ (push_pair_def limit pair word pending seen count);
     let p, q = pair in
-    let new_pending = (p, q, word) :: pending in
+    let new_pending = ghost_ ((p, q, word) :: pending) in
     let new_seen = pair :: seen in
     ghost_ (big_length_def new_pending);
     ghost_ (big_length_def new_seen);
@@ -2646,7 +2647,7 @@ end = struct
     else if count >= limit then ()
     else begin
       let p, q = pair in
-      let updated_pending = (p, q, word) :: pending in
+      let updated_pending = ghost_ ((p, q, word) :: pending) in
       let updated_seen = pair :: seen in
       ghost_ (accounted_pending_weaken seen processed pending p q word);
       ghost_ (all_seen_accounted_def updated_seen processed updated_pending);
@@ -2667,7 +2668,7 @@ end = struct
         else true} =
     ghost_ (push_pair_def limit pair word pending seen count);
     let p, q = pair in
-    let new_pending = (p, q, word) :: pending in
+    let new_pending = ghost_ ((p, q, word) :: pending) in
     ghost_ (pending_valid_def left right new_pending);
     ()
 
@@ -2954,12 +2955,12 @@ end = struct
         @ immutable contended =
     fun start remaining symbol ->
     ghost_ (symbol_range_def start remaining);
-    let symbols = symbol_range start remaining in
+    let symbols = ghost_ (symbol_range start remaining) in
     ghost_ (has_letter_def symbol symbols);
     if remaining <= 0 then ()
     else begin
-      let next_start = start + 1 in
-      let next_remaining = remaining - 1 in
+      let next_start = ghost_ (start + 1) in
+      let next_remaining = ghost_ (remaining - 1) in
       ghost_ (symbol_range_member next_start next_remaining symbol);
       ()
     end
@@ -2974,13 +2975,13 @@ end = struct
         else true} @ immutable contended =
     fun start remaining ->
     ghost_ (symbol_range_def start remaining);
-    let symbols = symbol_range start remaining in
+    let symbols = ghost_ (symbol_range start remaining) in
     ghost_ (distinct_ints_def symbols);
     ghost_ (big_length_def symbols);
     if remaining <= 0 then ()
     else begin
-      let next_start = start + 1 in
-      let next_remaining = remaining - 1 in
+      let next_start = ghost_ (start + 1) in
+      let next_remaining = ghost_ (remaining - 1) in
       ghost_ (symbol_range_member next_start next_remaining start);
       ghost_ (symbol_range_properties next_start next_remaining);
       ()
@@ -3007,8 +3008,8 @@ end = struct
     ghost_ (missing_letter_def letters candidate remaining);
     if remaining <= 0 then ()
     else if has_letter candidate letters then begin
-      let next_candidate = candidate + 1 in
-      let next_remaining = remaining - 1 in
+      let next_candidate = ghost_ (candidate + 1) in
+      let next_remaining = ghost_ (remaining - 1) in
       ghost_ (missing_letter_sound letters next_candidate next_remaining);
       ()
     end else ()
@@ -3022,12 +3023,12 @@ end = struct
     fun letters candidate remaining ->
     ghost_ (missing_letter_def letters candidate remaining);
     ghost_ (symbol_range_def candidate remaining);
-    let symbols = symbol_range candidate remaining in
+    let symbols = ghost_ (symbol_range candidate remaining) in
     ghost_ (included_def symbols letters);
     if remaining <= 0 then ()
     else if has_letter candidate letters then begin
-      let next_candidate = candidate + 1 in
-      let next_remaining = remaining - 1 in
+      let next_candidate = ghost_ (candidate + 1) in
+      let next_remaining = ghost_ (remaining - 1) in
       ghost_ (missing_letter_exhausted letters next_candidate next_remaining);
       ()
     end else ()
@@ -3042,7 +3043,7 @@ end = struct
         | None -> false
         | Some _ -> true
         else true} =
-    let symbols = symbol_range candidate remaining in
+    let symbols = ghost_ (symbol_range candidate remaining) in
     ghost_ (symbol_range_properties candidate remaining);
     ghost_ (missing_letter_exhausted letters candidate remaining);
     ghost_ (included_bound symbols letters);
@@ -3056,7 +3057,7 @@ end = struct
         else true} =
     ghost_ (list_size_properties letters);
     let zero = 0 in
-    let budget = list_size letters + 1 in
+    let budget = ghost_ (list_size letters + 1) in
     ghost_ (missing_letter_complete letters zero budget);
     ()
 
@@ -3068,8 +3069,8 @@ end = struct
           step left p outsider === step left p letter &&
           step right q outsider === step right q letter
         else true} =
-    let left_labels = labels left p in
-    let right_labels = labels right q in
+    let left_labels = ghost_ (labels left p) in
+    let right_labels = ghost_ (labels right q) in
     ghost_ (append_letter left_labels right_labels outsider);
     ghost_ (append_letter left_labels right_labels letter);
     ghost_ (step_outside left p outsider);
@@ -3086,8 +3087,8 @@ end = struct
           step left p outsider === default left p &&
           step right q outsider === default right q
         else true} =
-    let left_labels = labels left p in
-    let right_labels = labels right q in
+    let left_labels = ghost_ (labels left p) in
+    let right_labels = ghost_ (labels right q) in
     ghost_ (append_letter left_labels right_labels outsider);
     ghost_ (step_outside left p outsider);
     ghost_ (step_outside right q outsider);
@@ -3265,7 +3266,7 @@ end = struct
                 ghost_ (all_closed_def left right next_seen new_processed);
                 let left_initial, _ = left in
                 let right_initial, _ = right in
-                let initial_pair = left_initial, right_initial in
+                let initial_pair = ghost_ (left_initial, right_initial) in
                 ghost_ (related_included initial_pair seen next_seen);
                 let next_remaining = ghost_ (remaining - 1) in
                 let recursive_decision =
@@ -3364,7 +3365,7 @@ end = struct
     ghost_ (labels_bounded_def source);
     ghost_ (labels_bounded_def left);
     ghost_ (labels_bounded_def right);
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     ghost_ (bounded_labels_rebased source p states);
     ghost_ (bounded_labels_rebased source q states);
     ghost_ (state_size_via_ids source);
@@ -3423,7 +3424,7 @@ end = struct
       {u : unit | access_valid source [state, word] ===
         (reached source word = state)} =
     let empty = [] in
-    let singleton = [state, word] in
+    let singleton = ghost_ ([state, word]) in
     ghost_ (access_valid_def source singleton);
     ghost_ (access_valid_def source empty);
     ()
@@ -3516,7 +3517,7 @@ end = struct
     | letter :: rest ->
       ghost_ (all_reach_closed_member source seen seen state);
       ghost_ (reach_state_closed_step source seen state letter);
-      let target = step source state letter in
+      let target = ghost_ (step source state letter) in
       ghost_ (drive_reach_closed source seen target rest);
       ()
 
@@ -3531,7 +3532,7 @@ end = struct
     ghost_ (reached_def source word);
     ()
 
-  let[@def] rec states_of_entries entries =
+  let[@def] rec states_of_entries (entries : (int * int list) list) =
     match entries with
     | [] -> []
     | (state, _) :: rest -> state :: states_of_entries rest
@@ -3543,7 +3544,7 @@ end = struct
     fun entries state ->
     ghost_ (states_of_entries_def entries);
     ghost_ (access_member_def state entries);
-    let states = states_of_entries entries in
+    let states = ghost_ (states_of_entries entries) in
     ghost_ (has_letter_def state states);
     match entries with
     | [] -> ()
@@ -3558,7 +3559,7 @@ end = struct
     fun entries ->
     ghost_ (states_of_entries_def entries);
     ghost_ (big_length_def entries);
-    let states = states_of_entries entries in
+    let states = ghost_ (states_of_entries entries) in
     ghost_ (big_length_def states);
     match entries with
     | [] -> ()
@@ -3574,8 +3575,8 @@ end = struct
         else true} @ immutable contended =
     fun source entries ->
     let _, table = source in
-    let states = states_of_entries entries in
-    let domain = state_ids table in
+    let states = ghost_ (states_of_entries entries) in
+    let domain = ghost_ (state_ids table) in
     ghost_ (states_of_entries_def entries);
     ghost_ (access_valid_def source entries);
     ghost_ (included_def states domain);
@@ -3595,8 +3596,8 @@ end = struct
         Bigint.compare (big_length entries) (state_size source) <= 0
         else true} =
     let _, table = source in
-    let states = states_of_entries entries in
-    let domain = state_ids table in
+    let states = ghost_ (states_of_entries entries) in
+    let domain = ghost_ (state_ids table) in
     ghost_ (access_states_included source entries);
     ghost_ (states_of_entries_length entries);
     ghost_ (included_bound states domain);
@@ -3612,7 +3613,7 @@ end = struct
           (state_size source) <= 0 else true} =
     let _, table = source in
     let states = states_of_entries entries in
-    let domain = state_ids table in
+    let domain = ghost_ (state_ids table) in
     let extended = state :: states in
     ghost_ (access_states_included source entries);
     ghost_ (states_of_entries_length entries);
@@ -3636,7 +3637,7 @@ end = struct
     ghost_ (states_of_entries_member entries state);
     ghost_ (all_reach_closed_member source entries entries state);
     ghost_ (reach_state_closed_step source entries state letter);
-    let target = step source state letter in
+    let target = ghost_ (step source state letter) in
     ghost_ (states_of_entries_member entries target);
     ()
 
@@ -3649,7 +3650,7 @@ end = struct
     ghost_ (states_of_entries_member entries state);
     ghost_ (all_reach_closed_member source entries entries state);
     ghost_ (reach_state_closed_def source entries state);
-    let target = default source state in
+    let target = ghost_ (default source state) in
     ghost_ (states_of_entries_member entries target);
     ()
 
@@ -3657,7 +3658,7 @@ end = struct
       (word : int list) (rest : (int * int list) list) :
       {u : unit | access_member state ((head, word) :: rest) ===
         (state = head || access_member state rest)} =
-    let extended = (head, word) :: rest in
+    let extended = ghost_ ((head, word) :: rest) in
     ghost_ (access_member_def state extended);
     ()
 
@@ -3698,7 +3699,7 @@ end = struct
         @ immutable contended =
     fun before after head word ->
     ghost_ (access_included_def before after);
-    let extended = (head, word) :: after in
+    let extended = ghost_ ((head, word) :: after) in
     ghost_ (access_included_def before extended);
     match before with
     | [] -> ()
@@ -3770,7 +3771,7 @@ end = struct
     match letters with
     | [] -> ()
     | letter :: rest ->
-      let target = step source state letter in
+      let target = ghost_ (step source state letter) in
       ghost_ (access_member_included target before after);
       ghost_ (reach_labels_closed_weaken source before after state rest);
       ()
@@ -3781,8 +3782,8 @@ end = struct
       {u : unit | if access_included before after &&
         reach_state_closed source before state then
         reach_state_closed source after state else true} =
-    let fallback = default source state in
-    let letters = labels source state in
+    let fallback = ghost_ (default source state) in
+    let letters = ghost_ (labels source state) in
     ghost_ (reach_state_closed_def source before state);
     ghost_ (reach_state_closed_def source after state);
     ghost_ (access_member_included fallback before after);
@@ -3830,7 +3831,7 @@ end = struct
       (word : int list) :
       {u : unit | reach_accounted [state, word] [] [state, word]} =
     let empty = [] in
-    let singleton = [state, word] in
+    let singleton = ghost_ ([state, word]) in
     ghost_ (access_member_cons state state word empty);
     ghost_ (reach_accounted_empty empty singleton);
     ghost_ (reach_accounted_def singleton empty singleton);
@@ -3846,7 +3847,7 @@ end = struct
         else true} @ immutable contended =
     fun seen processed pending state word ->
     ghost_ (reach_accounted_def seen processed pending);
-    let extended = (state, word) :: pending in
+    let extended = ghost_ ((state, word) :: pending) in
     ghost_ (reach_accounted_def seen processed extended);
     match seen with
     | [] -> ()
@@ -3865,8 +3866,8 @@ end = struct
         reach_accounted seen ((state, word) :: processed) rest
         else true} @ immutable contended =
     fun seen processed state word rest ->
-    let pending = (state, word) :: rest in
-    let new_processed = (state, word) :: processed in
+    let pending = ghost_ ((state, word) :: rest) in
+    let new_processed = ghost_ ((state, word) :: processed) in
     ghost_ (reach_accounted_def seen processed pending);
     ghost_ (reach_accounted_def seen new_processed rest);
     match seen with
@@ -3940,9 +3941,9 @@ end = struct
         else true} =
     ghost_ (push_state_def limit state word pending seen count);
     ghost_ (states_of_entries_member seen state);
-    let extended = (state, word) :: seen in
+    let extended = ghost_ ((state, word) :: seen) in
     ghost_ (states_of_entries_def extended);
-    let states = states_of_entries extended in
+    let states = ghost_ (states_of_entries extended) in
     ghost_ (distinct_ints_def states);
     ()
 
@@ -3960,8 +3961,8 @@ end = struct
             Bigint.add (Bigint.of_int count) (big_length new_pending)
         else true} =
     ghost_ (push_state_def limit state word pending seen count);
-    let new_pending = (state, word) :: pending in
-    let new_seen = (state, word) :: seen in
+    let new_pending = ghost_ ((state, word) :: pending) in
+    let new_seen = ghost_ ((state, word) :: seen) in
     ghost_ (big_length_def new_pending);
     ghost_ (big_length_def new_seen);
     ()
@@ -4053,8 +4054,8 @@ end = struct
     if access_member state seen then ()
     else if count >= limit then ()
     else begin
-      let new_pending = (state, word) :: pending in
-      let new_seen = (state, word) :: seen in
+      let new_pending = ghost_ ((state, word) :: pending) in
+      let new_seen = ghost_ ((state, word) :: seen) in
       ghost_ (reach_accounted_pending_weaken seen processed
         pending state word);
       ghost_ (reach_accounted_def new_seen processed new_pending);
@@ -4489,7 +4490,7 @@ end = struct
 
   let (access_member_self @ total) (state : int) (word : int list) :
       {u : unit | access_member state [state, word]} =
-    let singleton = [state, word] in
+    let singleton = ghost_ ([state, word]) in
     ghost_ (access_member_def state singleton);
     ()
 
@@ -4520,7 +4521,7 @@ end = struct
     let zero = 0 in
     ghost_ (big_length_def empty_entries);
     ghost_ (states_of_entries_def empty_entries);
-    let empty_states = states_of_entries empty_entries in
+    let empty_states = ghost_ (states_of_entries empty_entries) in
     ghost_ (distinct_ints_def empty_states);
     ghost_ (access_valid_def source empty_entries);
     ghost_ (reach_accounted_empty empty_entries empty_entries);
@@ -4958,9 +4959,9 @@ end = struct
          successor_classes source partition alphabet left ===
            successor_classes source partition alphabet right)} =
     let left_successors =
-      successor_classes source partition alphabet left in
+      ghost_ (successor_classes source partition alphabet left) in
     let right_successors =
-      successor_classes source partition alphabet right in
+      ghost_ (successor_classes source partition alphabet right) in
     ghost_ (same_ints_correct left_successors right_successors);
     ghost_ (same_partition_signature_def source partition alphabet left right);
     ()
@@ -5075,7 +5076,7 @@ end = struct
     | [] -> ()
     | head :: rest ->
       let representative =
-        first_partition_match source partition alphabet state states in
+        ghost_ (first_partition_match source partition alphabet state states) in
       ghost_ (has_letter_def representative states);
       ghost_ (same_partition_signature_refl source partition alphabet head);
       if same_partition_signature source partition alphabet state head
@@ -5095,9 +5096,9 @@ end = struct
         === same_partition_signature source partition alphabet left right
         else true} =
     let left_match =
-      first_partition_match source partition alphabet left states in
+      ghost_ (first_partition_match source partition alphabet left states) in
     let right_match =
-      first_partition_match source partition alphabet right states in
+      ghost_ (first_partition_match source partition alphabet right states) in
     ghost_ (first_partition_match_sound source partition alphabet left states);
     ghost_ (first_partition_match_sound source partition alphabet right states);
     ghost_ (first_partition_match_equiv source partition alphabet left right states);
@@ -5132,10 +5133,10 @@ end = struct
     match remaining with
     | [] -> ()
     | head :: rest ->
-      let tail = refine_partition_rows source partition alphabet states rest in
+      let tail = ghost_ (refine_partition_rows source partition alphabet states rest) in
       let class_id =
-        first_partition_match source partition alphabet head states in
-      let rows = (head, class_id) :: tail in
+        ghost_ (first_partition_match source partition alphabet head states) in
+      let rows = ghost_ ((head, class_id) :: tail) in
       ghost_ (partition_class_def rows state);
       if equal_int head state then ()
       else begin
@@ -5189,8 +5190,8 @@ end = struct
         let representative = partition_class refined state in
         partition_class refined representative === representative
         else true} =
-    let refined = refine_partition source partition alphabet states in
-    let representative = partition_class refined state in
+    let refined = ghost_ (refine_partition source partition alphabet states) in
+    let representative = ghost_ (partition_class refined state) in
     ghost_ (refine_partition_representative source partition alphabet
       states state);
     ghost_ (refine_partition_def source partition alphabet states);
@@ -5300,7 +5301,7 @@ end = struct
         else true} @ immutable contended =
     fun partition states pairs left right ->
     ghost_ (partition_respects_def partition states pairs);
-    let pair = left, right in
+    let pair = ghost_ (left, right) in
     ghost_ (related_def pair pairs);
     match pairs with
     | [] -> ()
@@ -5316,7 +5317,7 @@ end = struct
         partition_respects (initial_partition source states) states pairs
         else true} @ immutable contended =
     fun source states relation pairs ->
-    let partition = initial_partition source states in
+    let partition = ghost_ (initial_partition source states) in
     ghost_ (partition_respects_def partition states pairs);
     ghost_ (all_closed_def source source relation pairs);
     match pairs with
@@ -5341,14 +5342,14 @@ end = struct
             successor_classes source partition alphabet right
         else true} @ immutable contended =
     fun source entries partition relation alphabet left right ->
-    let states = states_of_entries entries in
+    let states = ghost_ (states_of_entries entries) in
     ghost_ (successor_classes_def source partition alphabet left);
     ghost_ (successor_classes_def source partition alphabet right);
     match alphabet with
     | [] -> ()
     | letter :: rest ->
-      let next_left = step source left letter in
-      let next_right = step source right letter in
+      let next_left = ghost_ (step source left letter) in
+      let next_right = ghost_ (step source right letter) in
       ghost_ (all_reach_closed_member source entries entries left);
       ghost_ (all_reach_closed_member source entries entries right);
       ghost_ (reach_state_closed_step source entries left letter);
@@ -5374,8 +5375,8 @@ end = struct
             (refine_partition source partition alphabet states) states pairs
         else true} @ immutable contended =
     fun source entries partition relation pairs alphabet ->
-    let states = states_of_entries entries in
-    let next = refine_partition source partition alphabet states in
+    let states = ghost_ (states_of_entries entries) in
+    let next = ghost_ (refine_partition source partition alphabet states) in
     ghost_ (partition_respects_def next states pairs);
     ghost_ (all_closed_def source source relation pairs);
     ghost_ (relation_included_def pairs relation);
@@ -5388,8 +5389,8 @@ end = struct
       ghost_ (all_reach_closed_member source entries entries right);
       ghost_ (reach_state_closed_def source entries left);
       ghost_ (reach_state_closed_def source entries right);
-      let default_left = default source left in
-      let default_right = default source right in
+      let default_left = ghost_ (default source left) in
+      let default_right = ghost_ (default source right) in
       ghost_ (states_of_entries_member entries default_left);
       ghost_ (states_of_entries_member entries default_right);
       ghost_ (pair_closed_def source source left right relation);
@@ -5562,7 +5563,7 @@ end = struct
         accepting_row source (initial_partition source states)
           left others else true} @ immutable contended =
     fun source states left others ->
-    let initial = initial_partition source states in
+    let initial = ghost_ (initial_partition source states) in
     ghost_ (accepting_row_def source initial left others);
     ghost_ (letters_in_def others states);
     match others with
@@ -5581,7 +5582,7 @@ end = struct
         (initial_partition source states) states remaining else true}
         @ immutable contended =
     fun source states remaining ->
-    let initial = initial_partition source states in
+    let initial = ghost_ (initial_partition source states) in
     ghost_ (accepting_rows_def source initial states remaining);
     ghost_ (letters_in_def remaining states);
     match remaining with
@@ -5599,7 +5600,7 @@ end = struct
         (initial_partition source states) states} =
     ghost_ (letters_in_refl states);
     ghost_ (initial_accepting_rows source states states);
-    let initial = initial_partition source states in
+    let initial = ghost_ (initial_partition source states) in
     ghost_ (accepting_partition_def source initial states);
     ()
 
@@ -5613,7 +5614,7 @@ end = struct
           (refine_partition source partition alphabet states)
           left others else true} @ immutable contended =
     fun source partition alphabet states left others ->
-    let next = refine_partition source partition alphabet states in
+    let next = ghost_ (refine_partition source partition alphabet states) in
     ghost_ (accepting_row_def source next left others);
     ghost_ (letters_in_def others states);
     match others with
@@ -5635,7 +5636,7 @@ end = struct
           (refine_partition source partition alphabet states)
           states remaining else true} @ immutable contended =
     fun source partition alphabet states remaining ->
-    let next = refine_partition source partition alphabet states in
+    let next = ghost_ (refine_partition source partition alphabet states) in
     ghost_ (accepting_rows_def source next states remaining);
     ghost_ (letters_in_def remaining states);
     match remaining with
@@ -5656,7 +5657,7 @@ end = struct
         else true} =
     ghost_ (letters_in_refl states);
     ghost_ (refine_accepting_rows source partition alphabet states states);
-    let next = refine_partition source partition alphabet states in
+    let next = ghost_ (refine_partition source partition alphabet states) in
     ghost_ (accepting_partition_def source next states);
     ()
 
@@ -5668,7 +5669,7 @@ end = struct
       {u : unit | has_letter query (insert_letter letter alphabet) ===
         (equal_int query letter || has_letter query alphabet)} =
     ghost_ (insert_letter_def letter alphabet);
-    let inserted = insert_letter letter alphabet in
+    let inserted = ghost_ (insert_letter letter alphabet) in
     ghost_ (has_letter_def query inserted);
     ()
 
@@ -5677,11 +5678,12 @@ end = struct
       {u : unit | if distinct_ints alphabet then
         distinct_ints (insert_letter letter alphabet) else true} =
     ghost_ (insert_letter_def letter alphabet);
-    let inserted = insert_letter letter alphabet in
+    let inserted = ghost_ (insert_letter letter alphabet) in
     ghost_ (distinct_ints_def inserted);
     ()
 
-  let[@def] rec (quotient_access @ total) partition entries =
+  let[@def] rec (quotient_access @ total) (partition : (int * int) list)
+      (entries : (int * int list) list) =
     match entries with
     | [] -> []
     | (state, word) :: rest ->
@@ -5710,9 +5712,9 @@ end = struct
     match states with
     | [] -> ()
     | head :: rest ->
-      let tail = collect_classes partition rest in
-      let head_class = partition_class partition head in
-      let state_class = partition_class partition state in
+      let tail = ghost_ (collect_classes partition rest) in
+      let head_class = ghost_ (partition_class partition head) in
+      let state_class = ghost_ (partition_class partition state) in
       ghost_ (insert_letter_member head_class tail state_class);
       ghost_ (collect_classes_member partition rest state);
       ()
@@ -5725,13 +5727,13 @@ end = struct
     ghost_ (collect_classes_def partition states);
     match states with
     | [] ->
-      let empty = collect_classes partition states in
+      let empty = ghost_ (collect_classes partition states) in
       ghost_ (distinct_ints_def empty);
       ()
     | state :: rest ->
       ghost_ (collect_classes_distinct partition rest);
-      let tail = collect_classes partition rest in
-      let class_id = partition_class partition state in
+      let tail = ghost_ (collect_classes partition rest) in
+      let class_id = ghost_ (partition_class partition state) in
       ghost_ (insert_letter_distinct class_id tail);
       ()
 
@@ -5745,17 +5747,17 @@ end = struct
           has_letter class_id (collect_classes stable remaining) then
           has_letter class_id states else true} @ immutable contended =
     fun source previous alphabet states remaining class_id ->
-    let stable = refine_partition source previous alphabet states in
+    let stable = ghost_ (refine_partition source previous alphabet states) in
     ghost_ (collect_classes_def stable remaining);
     ghost_ (letters_in_def remaining states);
     match remaining with
     | [] ->
-      let empty_classes = collect_classes stable remaining in
+      let empty_classes = ghost_ (collect_classes stable remaining) in
       ghost_ (has_letter_def class_id empty_classes);
       ()
     | head :: rest ->
-      let head_class = partition_class stable head in
-      let tail = collect_classes stable rest in
+      let head_class = ghost_ (partition_class stable head) in
+      let tail = ghost_ (collect_classes stable rest) in
       ghost_ (insert_letter_member head_class tail class_id);
       ghost_ (refine_partition_representative source previous alphabet
         states head);
@@ -5775,17 +5777,17 @@ end = struct
           partition_class stable class_id === class_id else true}
         @ immutable contended =
     fun source previous alphabet states remaining class_id ->
-    let stable = refine_partition source previous alphabet states in
+    let stable = ghost_ (refine_partition source previous alphabet states) in
     ghost_ (collect_classes_def stable remaining);
     ghost_ (letters_in_def remaining states);
     match remaining with
     | [] ->
-      let empty_classes = collect_classes stable remaining in
+      let empty_classes = ghost_ (collect_classes stable remaining) in
       ghost_ (has_letter_def class_id empty_classes);
       ()
     | head :: rest ->
-      let head_class = partition_class stable head in
-      let tail = collect_classes stable rest in
+      let head_class = ghost_ (partition_class stable head) in
+      let tail = ghost_ (collect_classes stable rest) in
       ghost_ (insert_letter_member head_class tail class_id);
       ghost_ (refine_partition_idempotent source previous alphabet states head);
       ghost_ (letters_in_tail remaining states);
@@ -5803,9 +5805,9 @@ end = struct
     fun partition entries class_id ->
     ghost_ (quotient_access_def partition entries);
     ghost_ (states_of_entries_def entries);
-    let access = quotient_access partition entries in
-    let states = states_of_entries entries in
-    let classes = collect_classes partition states in
+    let access = ghost_ (quotient_access partition entries) in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes partition states) in
     ghost_ (access_member_def class_id access);
     ghost_ (collect_classes_def partition states);
     match entries with
@@ -5813,9 +5815,9 @@ end = struct
       ghost_ (has_letter_def class_id classes);
       ()
     | (state, _) :: rest ->
-      let head_class = partition_class partition state in
-      let tail_states = states_of_entries rest in
-      let tail_classes = collect_classes partition tail_states in
+      let head_class = ghost_ (partition_class partition state) in
+      let tail_states = ghost_ (states_of_entries rest) in
+      let tail_classes = ghost_ (collect_classes partition tail_states) in
       ghost_ (insert_letter_member head_class tail_classes class_id);
       ghost_ (quotient_access_member partition rest class_id);
       ()
@@ -5832,7 +5834,7 @@ end = struct
     fun source partition entries class_id ->
     ghost_ (quotient_access_def partition entries);
     ghost_ (access_valid_def source entries);
-    let access = quotient_access partition entries in
+    let access = ghost_ (quotient_access partition entries) in
     ghost_ (access_word_def class_id access);
     match entries with
     | [] -> ()
@@ -5858,7 +5860,7 @@ end = struct
     fun source partition representative alphabet letter ->
     ghost_ (quotient_edges_def source partition representative alphabet);
     ghost_ (has_letter_def letter alphabet);
-    let edges = quotient_edges source partition representative alphabet in
+    let edges = ghost_ (quotient_edges source partition representative alphabet) in
     ghost_ (has_label_def letter edges);
     match alphabet with
     | [] -> ()
@@ -5875,7 +5877,7 @@ end = struct
     fun source partition representative alphabet ->
     ghost_ (quotient_edges_def source partition representative alphabet);
     ghost_ (distinct_ints_def alphabet);
-    let edges = quotient_edges source partition representative alphabet in
+    let edges = ghost_ (quotient_edges source partition representative alphabet) in
     ghost_ (unique_labels_def edges);
     match alphabet with
     | [] -> ()
@@ -5897,7 +5899,7 @@ end = struct
     fun source partition representative alphabet fallback letter ->
     ghost_ (quotient_edges_def source partition representative alphabet);
     ghost_ (has_letter_def letter alphabet);
-    let edges = quotient_edges source partition representative alphabet in
+    let edges = ghost_ (quotient_edges source partition representative alphabet) in
     ghost_ (edge_step_def edges fallback letter);
     match alphabet with
     | [] -> ()
@@ -5927,7 +5929,7 @@ end = struct
         @ immutable contended =
     fun source partition alphabet classes ->
     ghost_ (quotient_table_def source partition alphabet classes);
-    let table = quotient_table source partition alphabet classes in
+    let table = ghost_ (quotient_table source partition alphabet classes) in
     ghost_ (state_ids_def table);
     match classes with
     | [] -> ()
@@ -5944,7 +5946,7 @@ end = struct
     fun source partition alphabet classes key ->
     ghost_ (quotient_table_def source partition alphabet classes);
     ghost_ (has_letter_def key classes);
-    let table = quotient_table source partition alphabet classes in
+    let table = ghost_ (quotient_table source partition alphabet classes) in
     ghost_ (has_key_def key table);
     match classes with
     | [] -> ()
@@ -5965,17 +5967,17 @@ end = struct
             (quotient_edges source partition representative remaining)
         else true} @ immutable contended =
     fun source entries partition representative alphabet remaining ->
-    let states = states_of_entries entries in
-    let classes = collect_classes partition states in
-    let table = quotient_table source partition alphabet classes in
-    let edges = quotient_edges source partition representative remaining in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes partition states) in
+    let table = ghost_ (quotient_table source partition alphabet classes) in
+    let edges = ghost_ (quotient_edges source partition representative remaining) in
     ghost_ (quotient_edges_def source partition representative remaining);
     ghost_ (targets_valid_def table edges);
     match remaining with
     | [] -> ()
     | letter :: rest ->
-      let target = step source representative letter in
-      let target_class = partition_class partition target in
+      let target = ghost_ (step source representative letter) in
+      let target_class = ghost_ (partition_class partition target) in
       ghost_ (all_reach_closed_member source entries entries representative);
       ghost_ (reach_state_closed_step source entries representative letter);
       ghost_ (states_of_entries_member entries target);
@@ -5994,7 +5996,7 @@ end = struct
     fun source partition alphabet classes ->
     ghost_ (quotient_table_def source partition alphabet classes);
     ghost_ (distinct_ints_def classes);
-    let table = quotient_table source partition alphabet classes in
+    let table = ghost_ (quotient_table source partition alphabet classes) in
     ghost_ (unique_keys_def table);
     match classes with
     | [] -> ()
@@ -6017,7 +6019,7 @@ end = struct
     fun source partition alphabet classes representative ->
     ghost_ (quotient_table_def source partition alphabet classes);
     ghost_ (has_letter_def representative classes);
-    let table = quotient_table source partition alphabet classes in
+    let table = ghost_ (quotient_table source partition alphabet classes) in
     ghost_ (view_def table representative);
     match classes with
     | [] -> ()
@@ -6043,7 +6045,7 @@ end = struct
     | [] -> ()
     | letter :: rest ->
       ghost_ (add_letters_member rest alphabet query);
-      let tail_alphabet = add_letters rest alphabet in
+      let tail_alphabet = ghost_ (add_letters rest alphabet) in
       ghost_ (insert_letter_member letter tail_alphabet query);
       ()
 
@@ -6058,7 +6060,7 @@ end = struct
     | [] -> ()
     | letter :: rest ->
       ghost_ (add_letters_distinct rest alphabet);
-      let tail = add_letters rest alphabet in
+      let tail = ghost_ (add_letters rest alphabet) in
       ghost_ (insert_letter_distinct letter tail);
       ()
 
@@ -6082,8 +6084,8 @@ end = struct
     | [] -> ()
     | head :: rest ->
       ghost_ (collect_alphabet_member source rest state letter);
-      let head_labels = labels source head in
-      let tail_alphabet = collect_alphabet source rest in
+      let head_labels = ghost_ (labels source head) in
+      let tail_alphabet = ghost_ (collect_alphabet source rest) in
       ghost_ (add_letters_member head_labels tail_alphabet letter);
       ()
 
@@ -6095,13 +6097,13 @@ end = struct
     ghost_ (collect_alphabet_def source states);
     match states with
     | [] ->
-      let alphabet = collect_alphabet source states in
+      let alphabet = ghost_ (collect_alphabet source states) in
       ghost_ (distinct_ints_def alphabet);
       ()
     | state :: rest ->
       ghost_ (collect_alphabet_distinct source rest);
-      let tail = collect_alphabet source rest in
-      let row_labels = labels source state in
+      let tail = ghost_ (collect_alphabet source rest) in
+      let row_labels = ghost_ (labels source state) in
       ghost_ (add_letters_distinct row_labels tail);
       ()
 
@@ -6119,9 +6121,9 @@ end = struct
         else true} =
     let alphabet = collect_alphabet source states in
     let fallback =
-      partition_class partition (default source representative) in
-    let edges = quotient_edges source partition representative alphabet in
-    let row = edges, fallback in
+      ghost_ (partition_class partition (default source representative)) in
+    let edges = ghost_ (quotient_edges source partition representative alphabet) in
+    let row = ghost_ (edges, fallback) in
     ghost_ (row_step_def row letter);
     ghost_ (quotient_edges_step source partition representative alphabet
       fallback letter);
@@ -6154,13 +6156,13 @@ end = struct
     fun partition states state ->
     ghost_ (quotient_relation_def partition states);
     ghost_ (has_letter_def state states);
-    let relation = quotient_relation partition states in
-    let pair = state, partition_class partition state in
+    let relation = ghost_ (quotient_relation partition states) in
+    let pair = ghost_ (state, partition_class partition state) in
     ghost_ (related_def pair relation);
     match states with
     | [] -> ()
     | head :: rest ->
-      let head_pair = head, partition_class partition head in
+      let head_pair = ghost_ (head, partition_class partition head) in
       ghost_ (same_pair_def pair head_pair);
       ghost_ (quotient_related partition rest state);
       ()
@@ -6171,8 +6173,8 @@ end = struct
       {u : unit | if has_letter representative classes then
         final (quotient_raw source partition states classes initial)
           representative === final source representative else true} =
-    let alphabet = collect_alphabet source states in
-    let raw = quotient_raw source partition states classes initial in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let raw = ghost_ (quotient_raw source partition states classes initial) in
     ghost_ (quotient_raw_def source partition states classes initial);
     ghost_ (quotient_table_view source partition alphabet classes representative);
     ghost_ (final_def raw representative);
@@ -6188,8 +6190,8 @@ end = struct
           representative letter ===
         partition_class partition (step source representative letter)
         else true} =
-    let alphabet = collect_alphabet source states in
-    let raw = quotient_raw source partition states classes initial in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let raw = ghost_ (quotient_raw source partition states classes initial) in
     ghost_ (quotient_raw_def source partition states classes initial);
     ghost_ (quotient_table_view source partition alphabet classes representative);
     ghost_ (step_def raw representative letter);
@@ -6204,8 +6206,8 @@ end = struct
           representative ===
         partition_class partition (default source representative)
         else true} =
-    let alphabet = collect_alphabet source states in
-    let raw = quotient_raw source partition states classes initial in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let raw = ghost_ (quotient_raw source partition states classes initial) in
     ghost_ (quotient_raw_def source partition states classes initial);
     ghost_ (quotient_table_view source partition alphabet classes representative);
     ghost_ (default_def raw representative);
@@ -6373,7 +6375,7 @@ end = struct
         partition_stable_row (refine_partition source partition alphabet states)
           partition state others else true} @ immutable contended =
     fun source partition alphabet states state others ->
-    let next = refine_partition source partition alphabet states in
+    let next = ghost_ (refine_partition source partition alphabet states) in
     ghost_ (partition_stable_row_def next partition state others);
     ghost_ (letters_in_def others states);
     match others with
@@ -6390,7 +6392,7 @@ end = struct
         partition_stable (refine_partition source partition alphabet states)
           partition remaining else true} @ immutable contended =
     fun source partition alphabet states remaining ->
-    let next = refine_partition source partition alphabet states in
+    let next = ghost_ (refine_partition source partition alphabet states) in
     ghost_ (partition_stable_def next partition remaining);
     ghost_ (letters_in_def remaining states);
     match remaining with
@@ -6410,7 +6412,7 @@ end = struct
           (partition_class partition right) then
         same_partition_signature source partition alphabet left right
         else true} =
-    let next = refine_partition source partition alphabet states in
+    let next = ghost_ (refine_partition source partition alphabet states) in
     ghost_ (partition_stable_pair partition next states left right);
     ghost_ (refine_partition_exact source partition alphabet states left right);
     ()
@@ -6493,14 +6495,14 @@ end = struct
           partition_class stable (step source left letter) ===
             partition_class stable (step source right letter)
         else true} =
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
     ghost_ (refine_partition_refines source previous alphabet states left right);
     ghost_ (partition_stable_step source previous states left right letter);
     ghost_ (reachable_states_step source entries left letter);
     ghost_ (reachable_states_step source entries right letter);
-    let left_target = step source left letter in
-    let right_target = step source right letter in
+    let left_target = ghost_ (step source left letter) in
+    let right_target = ghost_ (step source right letter) in
     ghost_ (partition_stable_pair previous stable states
       left_target right_target);
     ()
@@ -6520,14 +6522,14 @@ end = struct
           partition_class stable (default source left) ===
             partition_class stable (default source right)
         else true} =
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
     ghost_ (refine_partition_refines source previous alphabet states left right);
     ghost_ (partition_stable_default source previous alphabet states left right);
     ghost_ (reachable_states_default source entries left);
     ghost_ (reachable_states_default source entries right);
-    let left_target = default source left in
-    let right_target = default source right in
+    let left_target = ghost_ (default source left) in
+    let right_target = ghost_ (default source right) in
     ghost_ (partition_stable_pair previous stable states
       left_target right_target);
     ()
@@ -6549,7 +6551,7 @@ end = struct
           run_from source left word === run_from source right word
         else true} @ immutable contended =
     fun source entries previous stable left right word ->
-    let states = states_of_entries entries in
+    let states = ghost_ (states_of_entries entries) in
     match word with
     | [] ->
       ghost_ (accepting_partition_pair source stable states left right);
@@ -6561,8 +6563,8 @@ end = struct
         left right letter);
       ghost_ (reachable_states_step source entries left letter);
       ghost_ (reachable_states_step source entries right letter);
-      let left_target = step source left letter in
-      let right_target = step source right letter in
+      let left_target = ghost_ (step source left letter) in
+      let right_target = ghost_ (step source right letter) in
       ghost_ (stable_partition_language source entries previous stable
         left_target right_target suffix);
       ghost_ (run_from_letter source left letter suffix);
@@ -6587,10 +6589,10 @@ end = struct
           step quotient representative letter ===
             partition_class stable (step source state letter)
         else true} =
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
-    let classes = collect_classes stable states in
-    let representative = partition_class stable state in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let classes = ghost_ (collect_classes stable states) in
+    let representative = ghost_ (partition_class stable state) in
     ghost_ (collect_classes_member stable states state);
     ghost_ (letters_in_refl states);
     ghost_ (collect_classes_representatives source previous alphabet
@@ -6623,11 +6625,11 @@ end = struct
           labelled_closed source quotient state representative
             letters relation else true} @ immutable contended =
     fun source entries previous stable initial state letters ->
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
-    let representative = partition_class stable state in
-    let relation = quotient_relation stable states in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
+    let representative = ghost_ (partition_class stable state) in
+    let relation = ghost_ (quotient_relation stable states) in
     ghost_ (labelled_closed_def source quotient state representative
       letters relation);
     match letters with
@@ -6636,7 +6638,7 @@ end = struct
       ghost_ (quotient_one_step source entries previous stable
         initial state letter);
       ghost_ (reachable_states_step source entries state letter);
-      let target = step source state letter in
+      let target = ghost_ (step source state letter) in
       ghost_ (quotient_related stable states target);
       ghost_ (quotient_labels_closed source entries previous stable
         initial state rest);
@@ -6659,15 +6661,15 @@ end = struct
           has_letter state states then
           pair_closed source quotient state representative relation
         else true} =
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
-    let representative = partition_class stable state in
-    let relation = quotient_relation stable states in
-    let source_labels = labels source state in
-    let quotient_labels = labels quotient representative in
-    let letters = append source_labels quotient_labels in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
+    let representative = ghost_ (partition_class stable state) in
+    let relation = ghost_ (quotient_relation stable states) in
+    let source_labels = ghost_ (labels source state) in
+    let quotient_labels = ghost_ (labels quotient representative) in
+    let letters = ghost_ (append source_labels quotient_labels) in
     ghost_ (pair_closed_def source quotient state representative relation);
     let zero = 0 in
     ghost_ (quotient_one_step source entries previous stable initial state zero);
@@ -6680,7 +6682,7 @@ end = struct
     ghost_ (stable_partition_default source entries previous stable
       state representative);
     ghost_ (reachable_states_default source entries state);
-    let target = default source state in
+    let target = ghost_ (default source state) in
     ghost_ (quotient_related stable states target);
     ghost_ (quotient_labels_closed source entries previous stable
       initial state letters);
@@ -6705,11 +6707,11 @@ end = struct
             (quotient_relation stable remaining) else true}
         @ immutable contended =
     fun source entries previous stable initial remaining ->
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
-    let relation = quotient_relation stable states in
-    let pairs = quotient_relation stable remaining in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
+    let relation = ghost_ (quotient_relation stable states) in
+    let pairs = ghost_ (quotient_relation stable remaining) in
     ghost_ (quotient_relation_def stable remaining);
     ghost_ (all_closed_def source quotient relation pairs);
     ghost_ (letters_in_def remaining states);
@@ -6737,10 +6739,10 @@ end = struct
           stable === refine_partition source previous alphabet states then
           check source quotient relation else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
-    let relation = quotient_relation stable states in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
+    let relation = ghost_ (quotient_relation stable states) in
     ghost_ (states_of_entries_member entries initial);
     ghost_ (quotient_related stable states initial);
     ghost_ (letters_in_refl states);
@@ -6767,9 +6769,9 @@ end = struct
           of_raw raw === Some reduced then
           check source reduced relation else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let raw = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let raw = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (quotient_check source entries previous stable);
     ghost_ (of_raw_identity raw reduced);
     ()
@@ -6791,10 +6793,10 @@ end = struct
           run_from quotient (partition_class stable state) word ===
             run_from source state word else true} @ immutable contended =
     fun source entries previous stable initial state word ->
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
-    let representative = partition_class stable state in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
+    let representative = ghost_ (partition_class stable state) in
     match word with
     | [] ->
       let zero = 0 in
@@ -6806,7 +6808,7 @@ end = struct
       ghost_ (quotient_one_step source entries previous stable
         initial state letter);
       ghost_ (reachable_states_step source entries state letter);
-      let next = step source state letter in
+      let next = ghost_ (step source state letter) in
       ghost_ (quotient_run_from source entries previous stable
         initial next suffix);
       ghost_ (run_from_letter quotient representative letter suffix);
@@ -6829,10 +6831,10 @@ end = struct
           stable === refine_partition source previous alphabet states then
           run quotient word === run source word else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
-    let representative = partition_class stable initial in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
+    let representative = ghost_ (partition_class stable initial) in
     ghost_ (quotient_raw_def source stable states classes initial);
     ghost_ (states_of_entries_member entries initial);
     ghost_ (quotient_run_from source entries previous stable initial initial word);
@@ -6860,10 +6862,10 @@ end = struct
             partition_class stable (drive source state word)
         else true} @ immutable contended =
     fun source entries previous stable initial state word ->
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
-    let representative = partition_class stable state in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
+    let representative = ghost_ (partition_class stable state) in
     ghost_ (drive_def quotient representative word);
     ghost_ (drive_def source state word);
     match word with
@@ -6872,7 +6874,7 @@ end = struct
       ghost_ (quotient_one_step source entries previous stable
         initial state letter);
       ghost_ (reachable_states_step source entries state letter);
-      let next = step source state letter in
+      let next = ghost_ (step source state letter) in
       ghost_ (quotient_drive source entries previous stable
         initial next suffix);
       ()
@@ -6895,9 +6897,9 @@ end = struct
             partition_class stable (reached source word)
         else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (states_of_entries_member entries initial);
     ghost_ (quotient_drive source entries previous stable initial initial word);
     ghost_ (quotient_raw_def source stable states classes initial);
@@ -6956,9 +6958,9 @@ end = struct
         @ immutable contended =
     fun source entries previous stable remaining ->
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
     let access = quotient_access stable entries in
     ghost_ (all_access_def quotient remaining access);
     ghost_ (letters_in_def remaining classes);
@@ -6991,8 +6993,8 @@ end = struct
           partition_stable previous stable states &&
           stable === refine_partition source previous alphabet states then
           all_access quotient classes access else true} =
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
     ghost_ (letters_in_refl classes);
     ghost_ (quotient_all_access_rows source entries previous stable classes);
     ()
@@ -7017,10 +7019,10 @@ end = struct
           of_raw raw === Some reduced then
           all_access reduced (state_ids table) access else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
-    let classes = collect_classes stable states in
-    let raw = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let classes = ghost_ (collect_classes stable states) in
+    let raw = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (quotient_all_access source entries previous stable);
     ghost_ (quotient_state_ids source stable alphabet classes);
     ghost_ (quotient_raw_def source stable states classes initial);
@@ -7045,10 +7047,10 @@ end = struct
           execute quotient p word <> execute quotient q word
         else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (letters_in_refl states);
     ghost_ (collect_classes_representatives source previous alphabet
       states states p);
@@ -7085,9 +7087,9 @@ end = struct
         @ immutable contended =
     fun source entries previous stable p others separate ->
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (separates_from_def source p others separate);
     ghost_ (separates_from_def quotient p others separate);
     ghost_ (letters_in_def others classes);
@@ -7141,9 +7143,9 @@ end = struct
         @ immutable contended =
     fun source entries previous stable remaining separate ->
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let quotient = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let quotient = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (letters_in_refl classes);
     ghost_ (letters_in_def remaining classes);
     ghost_ (all_separated_def source classes remaining separate);
@@ -7178,10 +7180,10 @@ end = struct
           all_separated reduced (state_ids table)
             (state_ids table) separate else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
-    let classes = collect_classes stable states in
-    let raw = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let classes = ghost_ (collect_classes stable states) in
+    let raw = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (letters_in_refl classes);
     ghost_ (quotient_all_separated_rows source entries previous stable classes
       separate);
@@ -7220,7 +7222,7 @@ end = struct
           Bigint.mul (Bigint.of_int limit) (Bigint.of_int limit) then
         separation_budget source pair_limit else true} =
     let _, table = source in
-    let states = state_ids table in
+    let states = ghost_ (state_ids table) in
     ghost_ (big_length_nonnegative states);
     ghost_ (state_size_via_ids source);
     ghost_ (separation_budget_def source pair_limit);
@@ -7353,9 +7355,9 @@ end = struct
           of_raw raw === Some reduced then
           run reduced word === run source word else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let raw = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let classes = ghost_ (collect_classes stable states) in
+    let raw = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (quotient_run source entries previous stable word);
     ghost_ (of_raw_run raw reduced word);
     ghost_ (raw_run_def raw word);
@@ -7450,12 +7452,12 @@ end = struct
           rows_valid table (quotient_table source stable alphabet remaining)
         else true} @ immutable contended =
     fun source entries previous remaining ->
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
-    let stable = refine_partition source previous alphabet states in
-    let classes = collect_classes stable states in
-    let table = quotient_table source stable alphabet classes in
-    let rows = quotient_table source stable alphabet remaining in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let stable = ghost_ (refine_partition source previous alphabet states) in
+    let classes = ghost_ (collect_classes stable states) in
+    let table = ghost_ (quotient_table source stable alphabet classes) in
+    let rows = ghost_ (quotient_table source stable alphabet remaining) in
     ghost_ (quotient_table_def source stable alphabet remaining);
     ghost_ (rows_valid_def table rows);
     ghost_ (letters_in_def remaining classes);
@@ -7468,8 +7470,8 @@ end = struct
       ghost_ (states_of_entries_member entries representative);
       ghost_ (all_reach_closed_member source entries entries representative);
       ghost_ (reach_state_closed_def source entries representative);
-      let fallback = default source representative in
-      let fallback_class = partition_class stable fallback in
+      let fallback = ghost_ (default source representative) in
+      let fallback_class = ghost_ (partition_class stable fallback) in
       ghost_ (states_of_entries_member entries fallback);
       ghost_ (collect_classes_member stable states fallback);
       ghost_ (quotient_table_keys source stable alphabet classes fallback_class);
@@ -7493,12 +7495,12 @@ end = struct
           valid (quotient_raw source stable states classes initial)
         else true} =
     let initial, _ = source in
-    let states = states_of_entries entries in
-    let alphabet = collect_alphabet source states in
-    let stable = refine_partition source previous alphabet states in
-    let classes = collect_classes stable states in
-    let initial_class = partition_class stable initial in
-    let raw = quotient_raw source stable states classes initial in
+    let states = ghost_ (states_of_entries entries) in
+    let alphabet = ghost_ (collect_alphabet source states) in
+    let stable = ghost_ (refine_partition source previous alphabet states) in
+    let classes = ghost_ (collect_classes stable states) in
+    let initial_class = ghost_ (partition_class stable initial) in
+    let raw = ghost_ (quotient_raw source stable states classes initial) in
     ghost_ (states_of_entries_member entries initial);
     ghost_ (collect_classes_member stable states initial);
     ghost_ (quotient_table_keys source stable alphabet classes initial_class);

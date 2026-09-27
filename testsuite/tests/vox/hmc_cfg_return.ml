@@ -20,7 +20,7 @@ let (step @ total) : (program : C.program) @ immutable -> (k : W.continuation) @
       && W.target out === S.step program (W.target (W.Running (W.Returning, k, accumulator)))} @ immutable =
   fun program k accumulator premise ->
     let state = W.Running (W.Returning, k, accumulator) in
-    let a = W.activation W.Returning k accumulator in
+    let a = ghost_ (W.activation W.Returning k accumulator) in
     ghost_ (Height.continuation_def k; Height.grow (Height.continuation k);
       Height.reflexive (D.S (Height.continuation k)); Height.reflexive (Height.continuation k);
       Height.state_def W.Stuck; Height.le_def D.Z (Height.continuation k);

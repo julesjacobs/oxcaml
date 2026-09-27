@@ -130,7 +130,7 @@ let fixture : (program : Program.program) @ immutable -> (globals : Machine.glob
             let result = Source.correct selected.T.labels depth 1 program globals 8192 (D.S (D.S D.Z)) frames empty signature element activation next head tail list capacity 1000 old_pc cells padding
               table heap address 7 2 frame_stop state 0 base slots transported.Hmc_wasm_frame_transport.bytes transported.Hmc_wasm_frame_transport.tail () in
             let after = {X.memory = result.Full.frame.Finished.memory; machine = {E.locals = result.Full.locals; stack = S.Empty}} in
-            let cost = Conditional.cost fragment list.List_lower.empty_pc 0 7 slots (Hmc_wasm_list_probe.is_nil activation.Frame.accumulator) in
+            let cost = ghost_ (Conditional.cost fragment list.List_lower.empty_pc 0 7 slots (Hmc_wasm_list_probe.is_nil activation.Frame.accumulator)) in
             ghost_ (Hmc_wasm_structured_unwind.correct prepared old_pc 0 base outer state after cost ());
             let structured = Select.emit prepared 0 in
             let code = T.flatten structured C.Empty in

@@ -50,8 +50,8 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (element : D.mo
     ghost_ (Hmc_wasm_list_relayout.matches_def signature next capacity max_pc fragment);
     let view = View.decode signature activation cells old_padding () in
     let env = view.View.env in let old = view.View.old in
-    let env_count = Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity () in
-    let old_count = Hmc_wasm_schema_counts.encode (Codec.temporaries_size signature.G.temporaries) capacity () in
+    let env_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity ()) in
+    let old_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.temporaries_size signature.G.temporaries) capacity ()) in
     let values = Seg.append (Seg.append env env) (Seg.append old Heap.Empty) in
     let target = D.S (D.S (D.S (D.S (Heap.length values)))) in
     ghost_ (
