@@ -177,6 +177,7 @@ type t =
                                             (* 222 *)
   | Unerased_ghost_body                     (* 223 *)
   | Unerased_ghost_call                     (* 224 *)
+  | Redundant_ghost                         (* 225 *)
 
 type alert = {kind:string; message:string; def:loc; use:loc}
 

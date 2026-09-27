@@ -174,6 +174,7 @@ type t =
                                             (* 222 *)
   | Unerased_ghost_body                     (* 223 *)
   | Unerased_ghost_call                     (* 224 *)
+  | Redundant_ghost                         (* 225 *)
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
    the numbers of existing warnings.
@@ -280,6 +281,7 @@ let number = function
   | Slow_refinement _ -> 222
   | Unerased_ghost_body -> 223
   | Unerased_ghost_call -> 224
+  | Redundant_ghost -> 225
 ;;
 (* DO NOT REMOVE the ;; above: it is used by
    the testsuite/ests/warnings/mnemonics.mll test to determine where
@@ -736,6 +738,10 @@ let descriptions = [
     names = ["unerased-ghost-call"];
     description = "Real code calls a total function only to discard its ghost\n\
     \    result; the call runs.";
+    since = since 5 4 };
+  { number = 225;
+    names = ["redundant-ghost"];
+    description = "ghost_ inside code that is already ghost.";
     since = since 5 4 };
 ]
 
@@ -1656,6 +1662,9 @@ let message = function
            result.@ \
            Wrap the call in %a to erase it."
         Style.inline_code "ghost_ (...)"
+  | Redundant_ghost ->
+      msg "This %a is redundant: the enclosing code is already ghost."
+        Style.inline_code "ghost_"
 ;;
 
 let nerrors = ref 0

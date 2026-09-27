@@ -10047,7 +10047,9 @@ and type_expect_
           rexp_type = Predef.type_bool;
           rexp_type_constraint = false;
           rexp_loc = loc } }) in
-      let check = Ast_helper.Exp.mk ~loc (Pexp_ghost unit_) in
+      let check =
+        Ast_helper.Exp.mk ~loc:(Location.ghostify loc) (Pexp_ghost unit_)
+      in
       let check, sort = type_statement env check in
       let check = introduce_refinement env false_unit loc check in
       let check = {check with exp_extra =
@@ -10129,6 +10131,9 @@ and type_expect_
          axis is constrained here. Inside, every value appears real (the
          ambient rule), implemented by [Env.enter_ghost_context] and the
          ghostliness carve-out in [submode]. *)
+      if Env.in_ghost_context env && not loc.loc_ghost
+         && not (!typing_refinement_predicate || Resolved_predicate.active ())
+      then Location.prerr_warning loc Warnings.Redundant_ghost;
       submode ~loc ~env
         (Value.of_const { Value.Const.min with ghostliness = Ghost })
         expected_mode;
