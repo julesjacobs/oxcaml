@@ -1,6 +1,6 @@
 title: LZ4 block compression
 blurb: An LZ4 block compressor and decoder whose outputs are proved equal to a specification written as a scanner model and a decoder model, with a round-trip theorem.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - verification/library/vox_lz4.mli — Public interface
@@ -20,19 +20,19 @@ sources:
 ---
 `Vox_lz4` compresses and decompresses independent raw LZ4 blocks of up to 4 MiB (4,194,304 bytes), with no frame header, checksum or dictionary. Its specification is two models written as total functions in `vox_lz4_spec_*.ml`: a compressor model that fixes which positions are hashed, which earlier position is tried as a match and how the matches are laid out on the wire, and a decoder model that fixes the status and output bytes for every input. `compress source` is proved to return exactly the wire bytes of the compressor model, not merely some valid encoding. `decompress_verified wire capacity` is proved to agree with the decoder model: the same status (success, malformed or output limit) and, on success, the same length and every byte. The ordinary entry point `decompress ?capacity wire` is proved to agree with the same model at the capacity it is given, or at 4,194,304 without one, and to return `Invalid_capacity` for a capacity outside 0 to 4,194,304. `roundtrip`, an erased theorem, proves that decoding the compressor model's output with a capacity from the source length to 4,194,304 gives back the source, and `compress_decompress source`, which runs both functions, is proved to return the source.
 
-The position carried by `Malformed` is not specified. The models are the definition of LZ4 here; their agreement with liblz4 is tested, not proved. Only normal return is specified; the codec functions may raise `Out_of_memory`, and `compress` raises `Invalid_argument` above 4 MiB.
+The reason and position carried by `Malformed` are not specified. The models are the definition of LZ4 here; their agreement with liblz4 is tested, not proved. Only normal return is specified; the codec functions may raise `Out_of_memory`, and `compress` raises `Invalid_argument` above 4 MiB.
 
 ## Client example
 
-From the public-only client. `(source : {s : string | p})` names the argument so that the result type can refer to it, and `{v : t | p}` is the type `t` refined by the predicate `p`. `V.contents s` is an erased view of a string as a `char iarray`, and `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls the `roundtrip` theorem, whose result type states that `decoded` is `Ok` with the source's contents. `assert false` gives the checker no facts, so the result refinement holds in the `Error` branch only because that theorem makes the branch unreachable; without the `ghost_` line the function is rejected.
+From the public-only client. `(source : {s : string | p})` names the argument so that the result type can refer to it, and `{v : t | p}` is the type `t` refined by the predicate `p`. `V.contents s` is an erased view of a string as a `char iarray`, and `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; here it calls the `roundtrip` theorem, whose result type states that `decoded` is `Ok` with the source's contents. `unreachable_ ()` asks the checker to prove that its branch cannot be reached (unlike `assert false`, which the checker treats as a failure that may happen). The theorem gives both that and, in the `Ok` branch, the equality of contents; without the `ghost_` line the function is rejected.
 
-@code testsuite/tests/vox/vox_lz4_public_client.ml "let roundtrip" "| Error _ -> assert false"
+@code testsuite/tests/vox/vox_lz4_public_client.ml "let roundtrip" "| Error _ -> unreachable_ ()"
 
 `lz4_boundary.ml` compiles this client against only the `.cmi` files of `Vox_lz4`, the ten specification modules and three sequence and string modules, runs it with both compilers, and checks that its `-dlambda` output contains exactly two calls into `Vox_lz4` and no reference to `Vox_lz4_spec`.
 
 ## A rejected program
 
-The decoder model classifies inputs precisely enough to refute false claims about them. This program claims that decoding with capacity 0 never reports a malformed block; the empty string is malformed, so the check fails. The test `lz4_boundary.ml` compiles it against the public interfaces only and requires this error.
+The contract does not let a client claim more than the decoder model says. This program claims that decoding with capacity 0 never reports a malformed block. That is false, since the empty string is a malformed block, and the checker rejects it. The test `lz4_boundary.ml` compiles it against the public interfaces only and requires this error.
 
 @code testsuite/tests/vox/lz4_boundary.ml "let f (wire : string) :" "|}]"
 
@@ -50,7 +50,7 @@ In `decompress`, `?capacity:(c : int)` names the optional argument as the caller
 
 ## Trusted base
 
-- Raw memory: the `external` functions of `raw_memory.mli` (`malloc`, `read`, `write`, `free`, `length`, `location`, and `equal`, which is `%eq`) and the axiom `location_law`, which states that locations of distinct buffers or indices differ. All but `equal` are implemented by the `caml_raw_memory_*` functions in `runtime/pref.c`, which do not check bounds, and `read`, `write` and `length` are lowered to unchecked loads and stores in `backend/cmm_builtins.ml`. The same C file attaches a finalizer that frees a buffer once it is unreachable; it reclaims buffers whose ownership an exception discarded.
+- Raw memory: the `external` functions of `raw_memory.mli` (`malloc`, `read`, `write`, `free`, `length`, `location`, and `equal`, which is `%eq`) and the axiom `location_law`, which states that locations of distinct buffers or indices differ. All the functions but `equal` are implemented by the `caml_raw_memory_*` functions in `runtime/pref.c`, which do not check bounds, and `read`, `write` and `length` are lowered to unchecked loads and stores in `backend/cmm_builtins.ml`. The same C file attaches a finalizer that frees a buffer once it is unreachable; it reclaims buffers whose ownership an exception discarded.
 - The final copy: `Vox_lz4_string_copy.copy_prefix` is assumed to return a string holding the first `count` bytes of a buffer. It is an allocation followed by `memcpy` in `runtime/pref.c`.
 - Strings and immutable arrays: `Vox_string_view.contents`, `length` and `get` (`%string_unsafe_get`), `Vox_sequence.iarray_get`, and `Vox_iarray.get`, `set`, `sub` and `extensional` (two arrays with equal lengths and elements are equal).
 - Bytes: `byte_of_char` and `char_of_byte` in `vox_lz4_spec_parse.ml` and `same_char` in `vox_lz4_spec_bytes.ml` are primitives with stated contracts. A second `char_of_byte` in `vox_lz4_snapshot.ml` states `byte_of_char (char_of_byte b) = b`, which the first pair does not imply.
@@ -58,7 +58,7 @@ In `decompress`, `?capacity:(c : int)` names the optional argument as the caller
 
 ## Scope
 
-- Operations: `compress`, `decompress_verified`, `decompress`, `compress_decompress` and `roundtrip`. There is no frame format, streaming across blocks or dictionary.
+- Operations: `compress`, `decompress_verified`, `decompress`, `compress_decompress` and `roundtrip`, and the constant `max_block_size`. There is no frame format, streaming across blocks or dictionary.
 - Sizes: sources above 4,194,304 bytes make `compress` and `compress_decompress` raise `Invalid_argument`. `decompress_verified` requires a capacity from 0 to 4,194,304 as a precondition; `decompress` returns `Invalid_capacity` outside that range, as its contract states. The limit is on uncompressed bytes: `compress` output can be longer, and the wire model allows up to 4,210,768 bytes.
 - Each decoding call with a valid capacity allocates a raw buffer of `capacity` bytes, so `decompress` without `~capacity` allocates 4 MiB whatever the input. Allocation failure raises `Out_of_memory`.
 - `compress`'s contract fixes the output bytes. A compressor that chose different matches would not meet it, and nothing requires the output to be shorter than the input.
