@@ -129,6 +129,7 @@
 
 (* The linked lists, trees and rings: the named runtime functions of
    pref_list, pref_tree and the ring modules, compiled natively with
-   -dlambda, call no model or proof function and use no model module, and
-   the observers do not split or join tokens (see
-   structures_erasure_check.ml). *)
+   -dlambda, and every function of the same module they call by name, call
+   only runtime functions of a fixed list, no model function, lemma, [_def]
+   equation or heap law, and use no model module; the observers do not
+   split or join tokens (see structures_erasure_check.ml). *)

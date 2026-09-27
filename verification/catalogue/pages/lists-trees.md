@@ -1,6 +1,6 @@
 title: Mutable lists and trees
 blurb: In-place reversal of a linked list and mirroring of a binary tree built from mutable cells, proved against an erased model of the nodes and of the cells they own.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/pref_list.mli — List: public interface
@@ -47,9 +47,9 @@ File "no_reversal.ml", line 11, characters 4-5:
 11 |     r
          ^
 Error: Refinement could not be proved (counterexample)
-File "no_reversal.ml", lines 7-8, characters 20-56:
-7 | ....................r.pointer === root (rev_append xs Nil)
-8 |         && Pref.own r.state === heap (rev_append xs Nil)............
+File "no_reversal.ml", line 7, characters 20-58:
+7 |       {r : result | r.pointer === root (rev_append xs Nil)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 ```
 
@@ -69,14 +69,14 @@ The tree interface defines `root`, `links`, `heap` and `valid` in the same way (
 
 ## Trusted base
 
-- The cell operations `Pref.empty`, `alloc`, `read`, `write`, `split` and `join` are `external`s whose contracts are assumed, like the `Ghost_pref` operations on the shared page.
-- The list proofs use the stated heap laws `partition_law`, `put_law`, `put_union_law` and `union_law`; the tree proofs also use `commute_law`, `domain_law` and `union_domain_law`.
+- Nothing beyond the shared base, which covers the `Pref` cell operations and the heap laws. The list proofs use the stated heap laws `partition_law`, `put_law`, `put_union_law` and `union_law`; the tree proofs also use `commute_law`, `domain_law` and `union_domain_law`.
 
 ## Scope
 
 - List: `reverse` (with a frame), `empty`, `cons`, `of_list`, `observe_read` and `observe`; `Owned` has `empty`, `of_list`, `reverse`, `observe`, `adopt` and `release`. Tree: `mirror_with_frame`, `empty`, `leaf`, `branch`, `observe_read` and `observe`; `Owned` has `empty`, `leaf`, `branch`, `mirror`, `observe`, `adopt` and `release`. There is no insertion, deletion, search or length.
 - Values are `int`.
 - All operations that touch cells are partial; contracts describe normal return.
+- List reversal is tail-recursive. The list observers and `of_list` are not: their stack depth grows linearly with the list's length. The tree operations recurse to the depth of the tree.
 - A token owns cells of one payload type. The frame passed through `reverse` or `mirror_with_frame` must consist of `node option` cells; a cell of another type needs its own token, as in the clients.
 - `observe` in both modules takes the token and returns it with the same heap; `observe_read` and both `Owned.observe` functions borrow it.
 - Under `-principal`, neither interface type-checks, nor does client code that passes `node option` cells or tokens to `Pref` functions: the compiler cannot show that `node option` has kind `immutable_data`. The rejection tests record this error for their `-principal` variant.
@@ -90,4 +90,4 @@ After `make install` and `./dev init`:
 ./dev test vox/pref_list_client.ml vox/pref_tree_client.ml vox/pref_owned_client.ml vox/pref_list_rejected.ml vox/pref_tree_rejected.ml vox/pref_tree_observe_rejected.ml vox/structures_erasure.ml
 ```
 
-The client tests check `Pref_list` and `Pref_tree` while compiling them and run as bytecode and native code. `structures_erasure.ml` checks in the native `-dlambda` output that `reverse`, `mirror` and the observers call no model or proof function, and that the observers neither split nor join tokens.
+The client tests check `Pref_list` and `Pref_tree` while compiling them and run as bytecode and native code. `structures_erasure.ml` checks in the native `-dlambda` output that `reverse`, `mirror`, `mirror_with_frame` and the observers, and every function of the same module that they call by name, call only functions on a fixed list of runtime functions (so no model function, lemma, `_def` equation or heap law) and refer to no model module, and that the observers neither split nor join tokens. Calls into other modules are not followed.

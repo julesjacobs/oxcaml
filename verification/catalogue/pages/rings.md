@@ -1,6 +1,6 @@
 title: Doubly linked rings
 blurb: Circular doubly linked lists with a sentinel, built from mutable cells: insertion, removal and reversal in a ring of any length and moving a range of nodes between two rings, each proved to give the stated rings and the stated final heap.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - testsuite/tests/vox/pref_ring_general.mli — Insertion, removal and reversal for rings of any length, and the `Owned` interface for one ring
@@ -9,6 +9,7 @@ sources:
   - testsuite/tests/vox/pref_ring_splice_general.ml — Range move: implementation and proofs
   - testsuite/tests/vox/pref_ring.mli — Nodes, the ring predicates and the raw operations
   - testsuite/tests/vox/pref_ring.ml — Raw operations: implementation
+  - testsuite/tests/vox/pref_ring_proofs.ml — Lemmas about single heap writes, used by the proofs above
   - verification/library/pref.mli — Mutable cells, typed heaps and ownership tokens
   - testsuite/tests/vox/pref_ring_general_client.ml — Client of the one-ring interface: builds a ring with `insert`, removes nodes and reverses it
   - testsuite/tests/vox/pref_ring_splice_general_client.ml — Client of the range-move interface
@@ -25,7 +26,7 @@ A ring is a circular doubly linked list with a sentinel node. Each node record h
 
 Each has an `Owned` interface that hides the ring invariant: `Owned.insert`, `Owned.remove` and `Owned.reverse` for one ring, and `Owned.splice` and `Owned.swap` for a pair of rings. Their contracts give the new model and the exact new heap. `Pref_ring` also exports raw operations (`connect`, `insert_between`, `remove`, `splice_range`, `make_node`, `traverse`, `detach`, `reverse_nodes`) whose contracts state heap updates, the nodes traversed or a split of ownership, not that the result is a ring.
 
-Through the one-ring `Owned` interface a client builds a ring of any length from `Owned.empty ()` with `Owned.insert`, and takes nodes out with `Owned.remove`; `Owned.observe` returns the nodes and `Owned.sentinel_node` the sentinel, which a client passes to insert at the front. There is still no way to create a pair of rings through the pair interface: its client `adopt`s rings built with the raw operations. Nothing is proved about termination, since every operation that reads or writes a cell is partial. Reversal first copies the ring's nodes into a list, so it uses space linear in the ring's length.
+Through the one-ring `Owned` interface a client builds a ring of any length from `Owned.empty ()` with `Owned.insert`, and takes nodes out with `Owned.remove`; `Owned.observe` returns the nodes and `Owned.sentinel_node` the sentinel, which a client passes to insert at the front. There is still no way to create a pair of rings through the pair interface: its client takes a raw pair as an argument, and its demo builds two rings with the raw operations and `adopt`s them. Nothing is proved about termination, since every operation that reads or writes a cell is partial. Reversal first copies the ring's nodes into a list, so it uses space linear in the ring's length.
 
 ## Client example
 
@@ -50,7 +51,7 @@ File "missing_separation.ml", line 7, characters 24-25:
 7 |     reverse sentinel ns t
                             ^
 Error: Refinement could not be proved (counterexample)
-File "pref_ring_general.mli", lines 14-15, characters 39-32:
+File "pref_ring_general.mli", line 20, characters 6-32:
   The refinement is stated here.
 ```
 
@@ -79,7 +80,7 @@ The same test rejects a range move whose `final` is not the last node of the ran
 - Proved for any length: `insert`, `remove` and `reverse` in one ring and `splice` of a nonempty range between two separated rings, with `Owned` versions and `Owned.swap`, which exchanges the two rings of a pair. Moving a range within one ring is not covered.
 - A caller names the insertion point or the removed node and splits the model around it; there is no search, indexing or length. `remove` keeps the removed node's cells in the token, linked to itself.
 - The fixed-size demos `Pref_ring_reverse.reverse_demo` (three nodes) and `Pref_ring_splice.splice_demo` (two nodes) and their setup modules predate the general operations. `Pref_ring_insert_remove.insert_remove_demo` inserts two nodes into an empty ring and removes one, proving the ring predicate after each step.
-- All operations that touch cells are partial. The helpers that read a link (`Pref_ring.read_link`, and `read_node` in `pref_ring_general.ml` and `pref_ring_splice_general.ml`) call `failwith` in a branch the contracts rule out.
+- All operations that touch cells are partial. The helpers that read a link (`Pref_ring.read_link`, and `read_node` in `pref_ring_general.ml` and `pref_ring_splice_general.ml`) end in `unreachable_ ()` for an empty link, a branch the checker proves dead from their preconditions.
 - `reverse` and `Owned.observe` traverse the ring with a recursion that is not tail-recursive and build a list of its nodes.
 - A token owns cells of one payload type; an unrelated cell of another type needs its own token.
 - Under `-principal`, the ring interfaces fail to type-check with a kind error on `node option`; the rejection tests' `-principal` expectations record the same error in client code.
@@ -92,4 +93,4 @@ After `make install` and `./dev init`:
 ./dev test vox/pref_ring_general_client.ml vox/pref_ring_splice_general_client.ml vox/pref_ring_general_demo.ml vox/pref_ring_splice_general_demo.ml vox/pref_ring_insert_remove_demo.ml vox/pref_ring_general_rejected.ml vox/structures_erasure.ml
 ```
 
-The client tests check `Pref_ring`, `Pref_ring_general` and `Pref_ring_splice_general` while compiling them and run as bytecode and native code. At run time the one-ring client builds, edits, reverses and empties a ring of up to three nodes and checks the observed values; the range-move client calls nothing, and the demos, which run as bytecode, move ranges between nonempty rings. `structures_erasure.ml` checks in the native `-dlambda` output that the ring operations (`insert`, `remove`, `reverse`, `splice`, `adopt`, `release`, `swap`, `sentinel_node` and the demos' entry points) call no model or proof function and use no model module.
+The client tests check `Pref_ring`, `Pref_ring_general` and `Pref_ring_splice_general` while compiling them and run as bytecode and native code. At run time the one-ring client builds, edits, reverses and empties a ring of up to three nodes and checks the observed values; the range-move client calls nothing. The demos run as bytecode: `pref_ring_general_demo.ml` reverses a three-node ring, `pref_ring_insert_remove_demo.ml` inserts two nodes and removes one, and `pref_ring_splice_general_demo.ml` moves single nodes and then a whole range between two rings, emptying one ring and filling an empty one. `structures_erasure.ml` checks in the native `-dlambda` output that the ring operations (`insert`, `remove`, `reverse`, `splice`, `adopt`, `release`, `swap`, `observe`, the observers of a pair, `sentinel_node`, the raw operations and the fixed-size demos' entry points), and every function of the same module that they call by name, call only functions on a fixed list of runtime functions (so no model function, lemma, `_def` equation or heap law) and refer to no model module. Calls into other modules are not followed.

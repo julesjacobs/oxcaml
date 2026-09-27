@@ -1,19 +1,23 @@
 ok: pref_list.reverse_into is defined
 ok: pref_list.reverse_into#1 calls no model or proof function
 ok: pref_list.reverse_into#1 uses no model module
+ok: pref_list.reverse_into reaches only runtime functions: reverse_into
 ok: pref_list.reverse is defined
 ok: pref_list.reverse#1 calls no model or proof function
 ok: pref_list.reverse#1 uses no model module
 ok: pref_list.reverse#2 calls no model or proof function
 ok: pref_list.reverse#2 uses no model module
+ok: pref_list.reverse reaches only runtime functions: reverse reverse_into
 ok: pref_list.observe_framed is defined
 ok: pref_list.observe_framed#1 calls no model or proof function
 ok: pref_list.observe_framed#1 uses no model module
 ok: pref_list.observe_framed#1 neither splits nor joins tokens
+ok: pref_list.observe_framed reaches only runtime functions: observe_framed
 ok: pref_list.observe_read is defined
 ok: pref_list.observe_read#1 calls no model or proof function
 ok: pref_list.observe_read#1 uses no model module
 ok: pref_list.observe_read#1 neither splits nor joins tokens
+ok: pref_list.observe_read reaches only runtime functions: observe_framed observe_read
 ok: pref_list.observe is defined
 ok: pref_list.observe#1 calls no model or proof function
 ok: pref_list.observe#1 uses no model module
@@ -21,22 +25,27 @@ ok: pref_list.observe#1 neither splits nor joins tokens
 ok: pref_list.observe#2 calls no model or proof function
 ok: pref_list.observe#2 uses no model module
 ok: pref_list.observe#2 neither splits nor joins tokens
+ok: pref_list.observe reaches only runtime functions: observe observe_framed observe_read
 ok: pref_tree.mirror is defined
 ok: pref_tree.mirror#1 calls no model or proof function
 ok: pref_tree.mirror#1 uses no model module
 ok: pref_tree.mirror#2 calls no model or proof function
 ok: pref_tree.mirror#2 uses no model module
+ok: pref_tree.mirror reaches only runtime functions: mirror mirror_with_frame set_links
 ok: pref_tree.mirror_with_frame is defined
 ok: pref_tree.mirror_with_frame#1 calls no model or proof function
 ok: pref_tree.mirror_with_frame#1 uses no model module
+ok: pref_tree.mirror_with_frame reaches only runtime functions: mirror mirror_with_frame set_links
 ok: pref_tree.observe_framed is defined
 ok: pref_tree.observe_framed#1 calls no model or proof function
 ok: pref_tree.observe_framed#1 uses no model module
 ok: pref_tree.observe_framed#1 neither splits nor joins tokens
+ok: pref_tree.observe_framed reaches only runtime functions: observe_framed
 ok: pref_tree.observe_read is defined
 ok: pref_tree.observe_read#1 calls no model or proof function
 ok: pref_tree.observe_read#1 uses no model module
 ok: pref_tree.observe_read#1 neither splits nor joins tokens
+ok: pref_tree.observe_read reaches only runtime functions: observe_framed observe_read
 ok: pref_tree.observe is defined
 ok: pref_tree.observe#1 calls no model or proof function
 ok: pref_tree.observe#1 uses no model module
@@ -44,53 +53,107 @@ ok: pref_tree.observe#1 neither splits nor joins tokens
 ok: pref_tree.observe#2 calls no model or proof function
 ok: pref_tree.observe#2 uses no model module
 ok: pref_tree.observe#2 neither splits nor joins tokens
+ok: pref_tree.observe reaches only runtime functions: observe observe_framed observe_read
+ok: pref_ring.connect is defined
+ok: pref_ring.connect#1 calls no model or proof function
+ok: pref_ring.connect#1 uses no model module
+ok: pref_ring.connect reaches only runtime functions: connect
+ok: pref_ring.insert_between is defined
+ok: pref_ring.insert_between#1 calls no model or proof function
+ok: pref_ring.insert_between#1 uses no model module
+ok: pref_ring.insert_between reaches only runtime functions: connect insert_between
+ok: pref_ring.remove is defined
+ok: pref_ring.remove#1 calls no model or proof function
+ok: pref_ring.remove#1 uses no model module
+ok: pref_ring.remove reaches only runtime functions: connect remove
+ok: pref_ring.make_node is defined
+ok: pref_ring.make_node#1 calls no model or proof function
+ok: pref_ring.make_node#1 uses no model module
+ok: pref_ring.make_node reaches only runtime functions: make_node
+ok: pref_ring.traverse is defined
+ok: pref_ring.traverse#1 calls no model or proof function
+ok: pref_ring.traverse#1 uses no model module
+ok: pref_ring.traverse reaches only runtime functions: field read_link traverse walk
 ok: pref_ring.splice_range is defined
 ok: pref_ring.splice_range#1 calls no model or proof function
 ok: pref_ring.splice_range#1 uses no model module
+ok: pref_ring.splice_range reaches only runtime functions: connect splice_range
 ok: pref_ring.reverse_nodes is defined
 ok: pref_ring.reverse_nodes#1 calls no model or proof function
 ok: pref_ring.reverse_nodes#1 uses no model module
+ok: pref_ring.reverse_nodes reaches only runtime functions: reverse_nodes
+ok: pref_ring.detach is defined
+ok: pref_ring.detach#1 calls no model or proof function
+ok: pref_ring.detach#1 uses no model module
+ok: pref_ring.detach reaches only runtime functions: detach
 ok: pref_ring_splice.splice_demo is defined
 ok: pref_ring_splice.splice_demo#1 calls no model or proof function
 ok: pref_ring_splice.splice_demo#1 uses no model module
+ok: pref_ring_splice.splice_demo reaches only runtime functions: splice_demo
 ok: pref_ring_reverse.reverse_demo is defined
 ok: pref_ring_reverse.reverse_demo#1 calls no model or proof function
 ok: pref_ring_reverse.reverse_demo#1 uses no model module
+ok: pref_ring_reverse.reverse_demo reaches only runtime functions: reverse_demo
 ok: pref_ring_general.reverse is defined
 ok: pref_ring_general.reverse#1 calls no model or proof function
 ok: pref_ring_general.reverse#1 uses no model module
 ok: pref_ring_general.reverse#2 calls no model or proof function
 ok: pref_ring_general.reverse#2 uses no model module
+ok: pref_ring_general.reverse reaches only runtime functions: reverse
 ok: pref_ring_general.insert is defined
 ok: pref_ring_general.insert#1 calls no model or proof function
 ok: pref_ring_general.insert#1 uses no model module
 ok: pref_ring_general.insert#2 calls no model or proof function
 ok: pref_ring_general.insert#2 uses no model module
+ok: pref_ring_general.insert reaches only runtime functions: insert read_node
 ok: pref_ring_general.remove is defined
 ok: pref_ring_general.remove#1 calls no model or proof function
 ok: pref_ring_general.remove#1 uses no model module
 ok: pref_ring_general.remove#2 calls no model or proof function
 ok: pref_ring_general.remove#2 uses no model module
+ok: pref_ring_general.remove reaches only runtime functions: read_node remove
 ok: pref_ring_general.adopt is defined
 ok: pref_ring_general.adopt#1 calls no model or proof function
 ok: pref_ring_general.adopt#1 uses no model module
+ok: pref_ring_general.adopt reaches only runtime functions: adopt
 ok: pref_ring_general.release is defined
 ok: pref_ring_general.release#1 calls no model or proof function
 ok: pref_ring_general.release#1 uses no model module
+ok: pref_ring_general.release reaches only runtime functions: release
+ok: pref_ring_general.observe is defined
+ok: pref_ring_general.observe#1 calls no model or proof function
+ok: pref_ring_general.observe#1 uses no model module
+ok: pref_ring_general.observe#1 neither splits nor joins tokens
+ok: pref_ring_general.observe reaches only runtime functions: observe
 ok: pref_ring_general.sentinel_node is defined
 ok: pref_ring_general.sentinel_node#1 calls no model or proof function
 ok: pref_ring_general.sentinel_node#1 uses no model module
+ok: pref_ring_general.sentinel_node reaches only runtime functions: sentinel_node
 ok: pref_ring_splice_general.splice is defined
 ok: pref_ring_splice_general.splice#1 calls no model or proof function
 ok: pref_ring_splice_general.splice#1 uses no model module
 ok: pref_ring_splice_general.splice#2 calls no model or proof function
 ok: pref_ring_splice_general.splice#2 uses no model module
+ok: pref_ring_splice_general.splice reaches only runtime functions: read_node splice
 ok: pref_ring_splice_general.adopt is defined
 ok: pref_ring_splice_general.adopt#1 calls no model or proof function
 ok: pref_ring_splice_general.adopt#1 uses no model module
+ok: pref_ring_splice_general.adopt reaches only runtime functions: adopt
 ok: pref_ring_splice_general.release is defined
 ok: pref_ring_splice_general.release#1 calls no model or proof function
 ok: pref_ring_splice_general.release#1 uses no model module
+ok: pref_ring_splice_general.release reaches only runtime functions: release
+ok: pref_ring_splice_general.observe_source is defined
+ok: pref_ring_splice_general.observe_source#1 calls no model or proof function
+ok: pref_ring_splice_general.observe_source#1 uses no model module
+ok: pref_ring_splice_general.observe_source#1 neither splits nor joins tokens
+ok: pref_ring_splice_general.observe_source reaches only runtime functions: observe_source
+ok: pref_ring_splice_general.observe_destination is defined
+ok: pref_ring_splice_general.observe_destination#1 calls no model or proof function
+ok: pref_ring_splice_general.observe_destination#1 uses no model module
+ok: pref_ring_splice_general.observe_destination#1 neither splits nor joins tokens
+ok: pref_ring_splice_general.observe_destination reaches only runtime functions: observe_destination
 ok: pref_ring_splice_general.swap is defined
 ok: pref_ring_splice_general.swap#1 calls no model or proof function
 ok: pref_ring_splice_general.swap#1 uses no model module
+ok: pref_ring_splice_general.swap reaches only runtime functions: swap

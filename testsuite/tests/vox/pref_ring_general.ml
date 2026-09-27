@@ -782,7 +782,7 @@ let read_node : (p : node option Pref.t) @ immutable ->
       H.at (Pref.own state) p === Some (Some expected)}) @ local read ->
     {n : node | n === expected} @ immutable = fun p expected state ->
   match Pref.read p state with
-  | None -> failwith "unlinked node"
+  | None -> unreachable_ ()
   | Some n -> n
 
 let insert : (sentinel : node) @ immutable ghost ->
