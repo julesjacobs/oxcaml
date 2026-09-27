@@ -275,7 +275,7 @@ let rec pointer_fill :
       P.own r.#state === H.put (P.own token) (T.location table) r.#view.model} @ unique =
   fun table index view token ->
     if index >= 300 then begin
-      ghost_ (H.put_law (P.own token) (T.location table) view.model view.model);
+      ghost_ (H.put_law (P.own (borrow_ token)) (T.location table) view.model view.model);
       #{Verified.view; state = token}
     end else begin
       let heap = ghost_ (P.own (borrow_ token)) in

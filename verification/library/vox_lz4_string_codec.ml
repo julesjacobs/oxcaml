@@ -29,14 +29,20 @@ let compress :
     | None -> raise Out_of_memory
     | Some buffer ->
       let { B.block; permission; used } = buffer in
-      let wire : {s : string | Iarray.length (V.contents s) = used
+      (* The handler must not release the buffer itself: the uniqueness
+         analysis does not know that [raise] leaves, so a release there would
+         conflict with the release on the normal path. *)
+      let copied : ({s : string | Iarray.length (V.contents s) = used
           && Vox_lz4_heap_bytes.prefix_matches (V.contents s)
-               (G.own permission) block used} =
-        try Copy.copy_prefix block used (borrow_ permission)
-        with exn ->
-          B.release { B.block; permission; used };
-          raise exn
+               (G.own permission) block used}, exn) result =
+        try Ok (Copy.copy_prefix block used (borrow_ permission))
+        with exn -> Error exn
       in
+      match copied with
+      | Error exn ->
+        B.release { B.block; permission; used };
+        raise exn
+      | Ok wire ->
       ghost_ (
         C.encoded_size_capacity model 0 plan;
         C.encode_model_size model 0 plan block 0 (M.footprint block);
