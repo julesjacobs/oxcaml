@@ -2285,7 +2285,7 @@ let (allocate_sound @ total) :
           | Some coloring ->
             all_valid_live_def program.registers live;
             all_valid_reg_def program.registers [];
-            let _code = rename_total coloring (ghost_ (length program.code))
+            let _code = rename_total coloring (length program.code)
               program.code in
             let _slots = build_slots_total coloring entry in
             u)

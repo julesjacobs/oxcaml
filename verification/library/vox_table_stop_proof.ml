@@ -110,7 +110,7 @@ module Make (Key : Vox_table_map.Key) = struct
           M.matching view.model (I.group view.model.capacity (Key.hash query)
             stop)
             128 16 <> 0 then begin
-        Map.absent_intro view.model.slots query (fun index -> ghost_ (
+        Map.absent_intro view.model.slots query (fun index -> (
           match S.at view.model.slots index with
           | Some (Some (key, value)) -> stored_misses view query stop index
             key value
@@ -129,7 +129,7 @@ module Make (Key : Vox_table_map.Key) = struct
       I.valid_def view;
       if I.valid view && Spec.prefix_absent view.model query
           (view.model.capacity lsr 4) then begin
-        Map.absent_intro view.model.slots query (fun index -> ghost_ (
+        Map.absent_intro view.model.slots query (fun index -> (
           match S.at view.model.slots index with
           | Some (Some (key, value)) ->
             R.route_at view.model view.model.slots view.routes 0Z index

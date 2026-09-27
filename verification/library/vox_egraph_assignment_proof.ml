@@ -75,7 +75,7 @@ let rec (assignments @ total) : (graph : Q.graph) @ immutable ->
         (count : int) ->
         {u : unit | closed_prefixed graph rule prefix
           (A.choices count (A.assignments graph.count rest)) =
-          B.closed_bindings graph rule vars prefix count} @ ghost = fun count -> ghost_ (
+          B.closed_bindings graph rule vars prefix count} @ ghost = fun count -> (
       let cases = A.assignments graph.count rest in
       B.closed_bindings_def graph rule vars prefix count;
       A.choices_def count cases;

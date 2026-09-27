@@ -248,7 +248,7 @@ module Make (Key : Key) = struct
       | _ :: tail ->
         proof 0Z;
         Vox_sequence.at_def slots 0Z;
-        absent_intro tail query (fun index -> ghost_ (
+        absent_intro tail query (fun index -> (
           proof (Bigint.add index 1Z);
           Vox_sequence.at_def slots (Bigint.add index 1Z);
           ()));
@@ -367,7 +367,7 @@ module Make (Key : Key) = struct
     | [] -> ()
     | _ :: tail ->
       proof 0Z; S.at_def left 0Z;
-      agrees_intro tail right (fun index -> ghost_ (
+      agrees_intro tail right (fun index -> (
         proof (Bigint.add index 1Z);
         S.at_def left (Bigint.add index 1Z);
         ()));
@@ -382,12 +382,12 @@ module Make (Key : Key) = struct
       @ ghost = fun left right proof -> ghost_ (
     same_def left right;
     if distinct left && distinct right then begin
-      agrees_intro left right (fun index -> ghost_ (
+      agrees_intro left right (fun index -> (
         match S.at left index with
         | Some (Some (key, value)) ->
           Key.reflexive key; lookup_at left index key value key; proof key; ()
         | _ -> ()));
-      agrees_intro right left (fun index -> ghost_ (
+      agrees_intro right left (fun index -> (
         match S.at right index with
         | Some (Some (key, value)) ->
           Key.reflexive key; lookup_at right index key value key; proof key; ()
@@ -440,7 +440,7 @@ module Make (Key : Key) = struct
             begin
         distinct_remove slots index; erase_distinct slots key;
         same_intro (S.set slots index None) (erase slots key)
-          (fun query -> ghost_ (
+          (fun query -> (
             remove_at slots index key query;
             erase_get slots key query;
             ()));
@@ -496,7 +496,7 @@ module Make (Key : Key) = struct
       then begin
       distinct_insert slots index key value; put_distinct slots key value;
       same_intro (S.set slots index (Some (key, value))) (put slots key value)
-        (fun query -> ghost_ (
+        (fun query -> (
           insert_at slots index key value query;
           put_get slots key value query;
           ()));
@@ -510,7 +510,7 @@ module Make (Key : Key) = struct
     if distinct slots && absent slots key then begin
       erase_distinct slots key;
       absent_lookup slots key;
-      same_intro slots (erase slots key) (fun query -> ghost_ (
+      same_intro slots (erase slots key) (fun query -> (
         lookup_congruent slots key query;
         erase_get slots key query;
         ()));
@@ -525,7 +525,7 @@ module Make (Key : Key) = struct
     fun slots left right -> ghost_ (
       if distinct slots && Key.equal left right then begin
         erase_distinct slots left; erase_distinct slots right;
-        same_intro (erase slots left) (erase slots right) (fun query -> ghost_ (
+        same_intro (erase slots left) (erase slots right) (fun query -> (
           Key.symmetric left right;
           Key.transitive left right query;
           Key.transitive right left query;
@@ -543,7 +543,7 @@ module Make (Key : Key) = struct
       if distinct left && distinct right && same left middle && same middle
         right
       then begin
-        same_intro left right (fun query -> ghost_ (
+        same_intro left right (fun query -> (
           same_get left middle query; same_get middle right query; ()));
         ()
       end else ())
@@ -557,7 +557,7 @@ module Make (Key : Key) = struct
       if distinct slots && Key.equal left right then begin
         put_distinct slots left value; put_distinct slots right value;
         same_intro (put slots left value) (put slots right value) (fun query
-          -> ghost_ (
+          -> (
           Key.symmetric left right;
           Key.transitive left right query; Key.transitive right left query;
           put_get slots left value query; put_get slots right value query;
@@ -575,7 +575,7 @@ module Make (Key : Key) = struct
       if distinct before && distinct after && same before after then begin
         put_distinct before key value; put_distinct after key value;
         same_intro (put before key value) (put after key value) (fun query ->
-          ghost_ (
+          (
           put_get before key value query; put_get after key value query;
           same_get before after query;
           ()));

@@ -120,7 +120,7 @@ module Make (Key : Vox_table_map.Key)
          Map.same after (Map.put before key value) then begin
         take_distinct source (Bigint.add index 1Z);
         Map.same_intro after (S.take (Bigint.add index 1Z) source)
-          (fun query -> ghost_ (
+          (fun query -> (
             Map.same_get before (S.take index source) query;
             Map.same_get after (Map.put before key value) query;
             Map.put_get before key value query;
@@ -143,7 +143,7 @@ module Make (Key : Vox_table_map.Key)
       then begin
         take_distinct source (Bigint.add index 1Z);
         Map.same_intro destination (S.take (Bigint.add index 1Z) source)
-          (fun query -> ghost_ (
+          (fun query -> (
             Map.same_get destination (S.take index source) query;
             prefix_next source index query;
             ()));
@@ -161,7 +161,7 @@ module Make (Key : Vox_table_map.Key)
       S.take_def 0Z source;
       Map.distinct_def (S.take 0Z source);
       Map.same_intro (M.repeat capacity entry) (S.take 0Z source)
-        (fun query -> ghost_ (
+        (fun query -> (
           Map.empty_lookup capacity entry query;
           Map.lookup_def (S.take 0Z source) query;
           ()));

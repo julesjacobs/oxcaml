@@ -143,10 +143,9 @@ let rec (eliminate_exact @ total) :
     subst_qf_exact env Global (eliminate a);
     subst_qf_exact env Regional (eliminate a);
     subst_qf_exact env Local (eliminate a);
-    ghost_
-      (eval_qf_def env
-         (Or (subst_qf Regional (eliminate a),
-              subst_qf Local (eliminate a))));
+    (eval_qf_def env
+       (Or (subst_qf Regional (eliminate a),
+            subst_qf Local (eliminate a))));
     ()
   | Forall a ->
     eliminate_exact (Global :: env) a;
@@ -155,10 +154,9 @@ let rec (eliminate_exact @ total) :
     subst_qf_exact env Global (eliminate a);
     subst_qf_exact env Regional (eliminate a);
     subst_qf_exact env Local (eliminate a);
-    ghost_
-      (eval_qf_def env
-         (And (subst_qf Regional (eliminate a),
-               subst_qf Local (eliminate a))));
+    (eval_qf_def env
+       (And (subst_qf Regional (eliminate a),
+             subst_qf Local (eliminate a))));
     ())
 
 let rec (subst_term_scoped @ total) :
@@ -223,20 +221,18 @@ let rec (eliminate_scoped @ total) :
     subst_qf_scoped depth Global (eliminate a);
     subst_qf_scoped depth Regional (eliminate a);
     subst_qf_scoped depth Local (eliminate a);
-    ghost_
-      (scoped_qf_def depth
-         (Or (subst_qf Regional (eliminate a),
-              subst_qf Local (eliminate a))));
+    (scoped_qf_def depth
+       (Or (subst_qf Regional (eliminate a),
+            subst_qf Local (eliminate a))));
     ()
   | Forall a ->
     eliminate_scoped (depth + 1) a;
     subst_qf_scoped depth Global (eliminate a);
     subst_qf_scoped depth Regional (eliminate a);
     subst_qf_scoped depth Local (eliminate a);
-    ghost_
-      (scoped_qf_def depth
-         (And (subst_qf Regional (eliminate a),
-               subst_qf Local (eliminate a))));
+    (scoped_qf_def depth
+       (And (subst_qf Regional (eliminate a),
+             subst_qf Local (eliminate a))));
     ())
 
 let[@def] (decide @ total) f = eval_qf [] (eliminate f)
