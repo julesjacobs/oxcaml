@@ -1,0 +1,78 @@
+title: DFA equivalence and minimization
+blurb: Language equivalence of two DFA tables, with an erased counterexample word, and minimization of tables of at most 64 rows, proved to preserve the language and to give the fewest states.
+status: review-pending
+date: 27 September 2026
+sources:
+  - testsuite/tests/vox/dfa_semantics.ml — DFA tables, `run`, validity and sizes
+  - testsuite/tests/vox/dfa_equivalence_core.mli — Public interface
+  - testsuite/tests/vox/dfa_equivalence_core.ml — Proofs of the public contracts from the implementation
+  - testsuite/tests/vox/dfa_equivalence_proof.ml — Comparison search, partition refinement and their proofs
+  - testsuite/tests/vox/dfa_public_client.ml — Client using only the public interface
+  - testsuite/tests/vox/dfa_equivalence.ml — Test that checks the proofs and runs examples
+  - testsuite/tests/vox/dfa_boundary_check.py — The only compile of the public interface and client
+---
+`Dfa_equivalence` compares two deterministic automata and minimizes one. A machine is a plain table: an initial state id and a list of rows, each with a state id, an accepting bit, a list of `(letter, target)` edges and a default target for every other letter. Letters and state ids are `int`s. `Dfa_semantics.run m w` follows the table from the initial state over the word `w` and returns the accepting bit of the last state.
+
+`compare left right limit` returns `Equivalent`, `Inequivalent` or `Comparison_limit`. If it returns `Equivalent`, the two machines give the same answer on every word; if `Inequivalent`, an erased word on which they differ is available to proofs. These two facts hold for any tables. `compare` does not return `Comparison_limit` when both machines are `valid`, no row has more than 64 edges, `0 < limit <= 65,536`, and the product of the two row counts is at most `limit`.
+
+`reduce source limit` returns a machine or `None`. If it returns `Some c`, then `c` gives the same answer as `source` on every word, and `c` has no more rows than any valid machine that gives the same answers as `source`. `reduce` returns `Some` of a valid machine when `source` is valid, no row has more than 64 edges, and `source` has at most `limit` rows with `0 < limit <= 64`.
+
+`reduce`'s cap counts table rows, reachable or not: it returns `None` for any table of more than 64 rows, including one whose other rows are unreachable. `compare`'s `limit` bounds the number of state pairs it visits; the product of row counts is only the condition under which an answer is guaranteed. The interface states that a `Some` result of `reduce` is `valid` only under the premises above, although the implementation proves it for every `Some`. The result of `reduce` can also fall outside those premises: each of its rows has an edge for every letter used by the reachable part of the source, so two states with 33 different letters each reduce to rows of 66 edges, and `compare` of that result with itself returns `Comparison_limit`. Running time and memory are not proved.
+
+## Client example
+
+From the public client. `(x : t) -> ...` names an argument so that later types can mention it, and `{u : unit | p}` is `unit` refined by the predicate `p`: returning it proves `p`. `agreement` is a proof passed as a function: for each word it returns a `unit` refined by the fact that `source` and `other` agree on that word. `ghost_ (...)` is proof code, checked and then erased, and `@ total` marks a total function, one that terminates without raising or touching mutable state.
+
+@code testsuite/tests/vox/dfa_public_client.ml "let (minimum @ total)" "let u = () in u"
+
+## A rejected program
+
+Claiming that any two machines agree on a word is a type error. The script `dfa_boundary_check.py` writes this program, compiles it against the public interfaces only, and requires it to fail with `Refinement could not be proved`. The installed compiler prints:
+
+@code testsuite/tests/vox/dfa_boundary_check.py "false_claim.write_text('''" "  let u = () in u" after
+
+```
+File "false_equality.ml", line 5, characters 16-17:
+5 |   let u = () in u
+                    ^
+Error: Refinement could not be proved (counterexample)
+File "false_equality.ml", line 4, characters 16-76:
+4 |     {u : unit | Dfa_semantics.run left word === Dfa_semantics.run right word} =
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  The refinement is stated here.
+```
+
+## Interface
+
+@code testsuite/tests/vox/dfa_equivalence_core.mli
+
+`@@ total` on a declaration marks a total function, which may appear in refinements; `@ total` on a result type marks a value at the `total` mode, which total code may consume. `===` is logical equality. `Ghost.t` wraps a value that is erased at run time; `witness.ghost` reads it in specifications. `Bigint` is unbounded integers, used for row counts. The interface declares a module `Dfa_equivalence`, and `dfa_semantics.ml` a module `Dfa_semantics`, because the tests load the files into the toplevel with `#use`. The contracts use these definitions:
+
+@code testsuite/tests/vox/dfa_semantics.ml
+
+`let[@def]` defines a total function that refinements may mention, together with a lemma stating its defining equation. A missing state reads as a non-accepting row whose letters all lead to state 0; `valid` rules this out by requiring that the initial state and every target and default exist, and that state ids and the letters of each row are unique. `labels_bounded` requires at most 64 edges per row, counted by `list_size`, whose count saturates at 129. `state_size` is the number of rows. `has_state` is not used by the public contracts.
+
+## Trusted base
+
+- `dfa_boundary_check.py` is the only program that compiles `dfa_equivalence_core.mli` against its implementation, and the only one that compiles `dfa_public_client.ml`. `./dev test` does not run it. The test `dfa_equivalence.ml` checks the implementation and the proofs in `dfa_equivalence_core.ml`, without the `.mli`.
+- `dfa_equivalence_proof.ml` declares three `external` aliases of the primitives `%equal` and `%greaterequal` at `int` (`equal_int`, `same_int` and `>=`). The checker gives them the meaning of `=` and `>=`.
+
+## Scope
+
+- Operations: `compare` and `reduce`. There is no construction API (tables are plain data), no product, complement or determinization, and no reachability or emptiness query.
+- Caps: `reduce` handles at most 64 rows and `limit <= 64`; `compare` treats a `limit` above 65,536 as 65,536 and returns `Comparison_limit` for `limit <= 0`. The completeness of both requires at most 64 edges per row.
+- On an invalid table, `reduce` returns `None`, and `compare` may return any result, but `Equivalent` and `Inequivalent` are still correct.
+- The minimal machine is compared with valid machines only. The erased word from `comparison_witness` is not available at run time.
+- Every operation and proof function is declared `total`: it terminates without raising, except by running out of memory or stack. Time, memory and stack depth are not bounded.
+
+## Reproduce
+
+After `make install` and `./dev init`, from the repository root:
+
+```
+./dev test vox/dfa_equivalence.ml
+python3 testsuite/tests/vox/dfa_boundary_check.py
+python3 testsuite/tests/vox/dfa_boundary_check.py --compiler _install/bin/ocamlc.opt
+```
+
+The test checks the implementation and its proofs and runs comparison and minimization examples, mostly through the diagnostic versions in `Dfa_proof` that also return certificates, with exact and insufficient limits and default edges. The script compiles all DFA and regex modules with `_install/bin/ocamlopt.opt` (or the compiler given by `--compiler`), compiles the public interfaces with `-opaque`, compiles `dfa_public_client.ml` against the public DFA interface only, links and runs it, and requires four programs to fail: this one and three that name hidden functions or modules. It also follows the named calls in the `-drawlambda` output to check that `compare` and `reduce` do not reach a fixed list of certificate-building functions, and checks that the public proof functions make no calls. It writes into a temporary directory and prints its path.

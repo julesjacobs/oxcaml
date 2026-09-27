@@ -1,0 +1,430 @@
+{
+ "demos": [
+  "flat-hash-table",
+  "hindley-milner",
+  "online-union-find",
+  "quicksort",
+  "regex-automata",
+  "merge-sort",
+  "one-shot-channels",
+  "avl-sets",
+  "binary-search",
+  "functional-queue",
+  "lists-trees",
+  "rings",
+  "sparse-arrays",
+  "constant-folding",
+  "reference-locks",
+  "sat-solver",
+  "egraphs",
+  "dfa-equivalence",
+  "lz4",
+  "register-allocation",
+  "mode-solver",
+  "rsa",
+  "http",
+  "myers-diff",
+  "hm-wasm-compiler"
+ ],
+ "mechanisms": [
+  {
+   "id": "interfaces",
+   "name": "Abstract interfaces",
+   "summary": "Hide representations while exporting observations and laws for client proofs.",
+   "demos": [
+    "flat-hash-table",
+    "hindley-milner",
+    "quicksort",
+    "merge-sort",
+    "avl-sets",
+    "binary-search",
+    "functional-queue",
+    "sparse-arrays"
+   ]
+  },
+  {
+   "id": "refinements",
+   "name": "Refinements",
+   "summary": "Express preconditions, postconditions, and datatype invariants in types.",
+   "demos": [
+    "quicksort",
+    "merge-sort",
+    "avl-sets",
+    "binary-search",
+    "functional-queue"
+   ]
+  },
+  {
+   "id": "runtime-checks",
+   "name": "Runtime checks and testing",
+   "summary": "Check refinements with `assume_`, then use the facts in proofs and executable tests.",
+   "demos": [
+    "regex-automata",
+    "merge-sort",
+    "binary-search"
+   ]
+  },
+  {
+   "id": "heap-ownership",
+   "name": "Heap ownership and framing",
+   "summary": "Track permission to read and update a heap fragment while preserving the rest.",
+   "demos": [
+    "flat-hash-table",
+    "hindley-milner",
+    "online-union-find",
+    "lists-trees",
+    "rings",
+    "reference-locks"
+   ]
+  },
+  {
+   "id": "borrowing",
+   "name": "Borrowing with prophecies",
+   "summary": "Name a loan’s eventual contents and relate them to the owner returned afterward.",
+   "demos": [
+    "quicksort"
+   ]
+  },
+  {
+   "id": "concurrency",
+   "name": "Ownership transfer and parallelism",
+   "summary": "Transfer exclusive resources through channels or give parallel callbacks disjoint slices.",
+   "demos": [
+    "quicksort",
+    "one-shot-channels"
+   ]
+  },
+  {
+   "id": "atomics",
+   "name": "Atomic invariants",
+   "summary": "Exchange protected resources at atomic events while maintaining a shared invariant.",
+   "demos": [
+    "one-shot-channels",
+    "reference-locks"
+   ]
+  },
+  {
+   "id": "time-credits",
+   "name": "Time credits and amortized analysis",
+   "summary": "Use consumable ghost budgets and potentials to bound charged operations.",
+   "demos": [
+    "online-union-find",
+    "merge-sort"
+   ]
+  },
+  {
+   "id": "definitions",
+   "name": "Definitions and induction",
+   "summary": "Unfold equations with `[@def]` and prove recursive properties by induction.",
+   "demos": [
+    "regex-automata",
+    "merge-sort",
+    "avl-sets",
+    "functional-queue",
+    "sparse-arrays",
+    "constant-folding"
+   ]
+  },
+  {
+   "id": "totality",
+   "name": "Totality",
+   "summary": "Check termination and definedness for specification functions and erasable proofs.",
+   "demos": [
+    "hindley-milner",
+    "quicksort",
+    "regex-automata",
+    "binary-search",
+    "constant-folding"
+   ]
+  },
+  {
+   "id": "ghost",
+   "name": "Ghost code and erasure",
+   "summary": "Use checked proofs without executing them; erase evidence from runtime representations.",
+   "demos": [
+    "hindley-milner",
+    "constant-folding"
+   ]
+  }
+ ],
+ "census": {
+  "flat-hash-table": {
+   "roots": [
+    "vox_verified_flat_hashtbl"
+   ],
+   "owned": [
+    "vox_verified_flat_hashtbl",
+    "vox_table"
+   ]
+  },
+  "hindley-milner": {
+   "roots": [
+    "hm_inference"
+   ],
+   "owned": [
+    "hm_",
+    "copy_",
+    "level_",
+    "generalize",
+    "unify",
+    "verified_hm",
+    "pool",
+    "forest",
+    "marked",
+    "lower_",
+    "scoped_",
+    "shared_",
+    "shape_",
+    "scheme_"
+   ],
+   "shared_modules": [
+    "pref",
+    "ghost_pref",
+    "unique_cell",
+    "borrow",
+    "borrow_iarray",
+    "vox_sequence",
+    "vox_int_sequence",
+    "vox_iarray",
+    "verified_atomic",
+    "one_shot",
+    "channel_buffer",
+    "reference_lock",
+    "unique_lock",
+    "hmc_word64"
+   ]
+  },
+  "online-union-find": {
+   "roots": [
+    "vox_connectivity",
+    "vox_union_find_online"
+   ],
+   "owned": [
+    "vox_union_find",
+    "vox_connectivity",
+    "vox_ackermann"
+   ]
+  },
+  "quicksort": {
+   "roots": [
+    "quicksort"
+   ],
+   "owned": [
+    "quicksort"
+   ]
+  },
+  "regex-automata": {
+   "roots": [
+    "regex_language"
+   ],
+   "owned": [
+    "regex_"
+   ],
+   "module_sources": {
+    "Regex": "testsuite/tests/vox/regex_core.ml",
+    "Regex_dfa_bridge": "testsuite/tests/vox/regex_dfa_bridge_core.ml",
+    "Dfa_proof": "testsuite/tests/vox/dfa_equivalence_proof.ml"
+   }
+  },
+  "merge-sort": {
+   "roots": [
+    "vox_merge_sort"
+   ],
+   "owned": [
+    "vox_merge_sort",
+    "vox_sort_cost",
+    "vox_merge_proofs"
+   ]
+  },
+  "one-shot-channels": {
+   "roots": [
+    "one_shot",
+    "channel_buffer"
+   ],
+   "owned": [
+    "one_shot",
+    "channel_buffer"
+   ]
+  },
+  "avl-sets": {
+   "roots": [
+    "avl_sets"
+   ],
+   "owned": [
+    "avl_sets",
+    "int_set_intf"
+   ]
+  },
+  "binary-search": {
+   "roots": [
+    "sorted_array"
+   ],
+   "owned": [
+    "sorted_array"
+   ]
+  },
+  "functional-queue": {
+   "roots": [
+    "functional_queue"
+   ],
+   "owned": [
+    "functional_queue"
+   ]
+  },
+  "lists-trees": {
+   "roots": [
+    "pref_list",
+    "pref_tree"
+   ],
+   "owned": [
+    "pref_list",
+    "pref_tree"
+   ]
+  },
+  "rings": {
+   "roots": [
+    "pref_ring",
+    "pref_ring_splice",
+    "pref_ring_reverse",
+    "pref_ring_general",
+    "pref_ring_splice_general"
+   ],
+   "owned": [
+    "pref_ring"
+   ]
+  },
+  "sparse-arrays": {
+   "roots": [
+    "sparse_overlay"
+   ],
+   "owned": [
+    "sparse_overlay"
+   ]
+  },
+  "constant-folding": {
+   "roots": [
+    "expression_folding",
+    "clamp",
+    "int_lists"
+   ],
+   "owned": [
+    "expression",
+    "clamp",
+    "int_list"
+   ]
+  },
+  "reference-locks": {
+   "roots": [
+    "reference_lock",
+    "unique_lock"
+   ],
+   "owned": [
+    "reference_lock",
+    "unique_lock"
+   ]
+  },
+  "sat-solver": {
+   "roots": [
+    "vox_sat",
+    "vox_cdcl",
+    "vox_cdcl_total"
+   ],
+   "owned": [
+    "vox_sat",
+    "vox_cdcl"
+   ]
+  },
+  "egraphs": {
+   "roots": [
+    "vox_egraph_rule_handle"
+   ],
+   "owned": [
+    "vox_egraph"
+   ]
+  },
+  "dfa-equivalence": {
+   "roots": [
+    "dfa_equivalence_core"
+   ],
+   "owned": [
+    "dfa_"
+   ],
+   "module_sources": {
+    "Regex": "testsuite/tests/vox/regex_core.ml",
+    "Regex_dfa_bridge": "testsuite/tests/vox/regex_dfa_bridge_core.ml",
+    "Dfa_proof": "testsuite/tests/vox/dfa_equivalence_proof.ml"
+   }
+  },
+  "lz4": {
+   "roots": [
+    "vox_lz4"
+   ],
+   "owned": [
+    "vox_lz4",
+    "vox_string_view"
+   ]
+  },
+  "register-allocation": {
+   "roots": [
+    "register_allocation"
+   ],
+   "owned": [
+    "register_allocation"
+   ]
+  },
+  "mode-solver": {
+   "roots": [
+    "mode_solver_public"
+   ],
+   "owned": [
+    "mode_solver"
+   ]
+  },
+  "rsa": {
+   "roots": [
+    "vox_rsa"
+   ],
+   "owned": [
+    "vox_rsa"
+   ]
+  },
+  "http": {
+   "roots": [
+    "vox_http"
+   ],
+   "owned": [
+    "vox_http"
+   ]
+  },
+  "myers-diff": {
+   "roots": [
+    "vox_diff"
+   ],
+   "owned": [
+    "vox_diff"
+   ]
+  },
+  "hm-wasm-compiler": {
+   "roots": [
+    "hmc_compilation"
+   ],
+   "owned": [
+    "hmc_",
+    "wasm_"
+   ]
+  }
+ },
+ "runtime_units": {
+  "verification/library/borrow.ml": {
+   "Slice.finish": "Ends a loan at run time; its refined unit result does not make it proof."
+  },
+  "verification/library/borrow_iarray.ml": {
+   "Slice.finish": "Ends a loan at run time; its refined unit result does not make it proof."
+  },
+  "testsuite/tests/vox/quicksort.ml": {
+   "sort": "Sorts the slice at run time; its refined unit result does not make it proof.",
+   "sort_sized": "Sorts the slice at run time; its refined unit result does not make it proof.",
+   "sort_with_budget": "Sorts the slice at run time; its refined unit result does not make it proof."
+  }
+ }
+}
