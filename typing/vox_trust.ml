@@ -4,6 +4,8 @@ open Types
 
 let library = ref false
 
+let audit = ref false
+
 let registered = ref false
 
 let add_arguments () =
@@ -14,7 +16,11 @@ let add_arguments () =
       [ ( "-vox-library",
           Arg.Set library,
           " Compile a unit of the verified Vox library or of the standard \
-           library, whose trusted declarations are part of the trusted base" ) ]
+           library, whose trusted declarations are part of the trusted base" );
+        ( "-vox-audit",
+          Arg.Set audit,
+          " Print what the verification of this unit trusts, including in \
+           the units it depends on" ) ]
   end
 
 type external_kind =
@@ -270,3 +276,379 @@ let check_external env (description : Typedtree.value_description) =
              | Total -> Warnings.Trusted_totality
              | Total_cast -> Warnings.Trusted_total_cast)))
       (trusted_external env description)
+
+(* The record of a unit, and its uses of unsafe features (-vox-audit) *)
+
+let assume_verified = ref false
+
+let unexpected_solver = ref ""
+
+(* Values that break parametricity or memory safety, so that a refinement
+   instantiated at their result can be false: everything in [Obj], reading
+   marshalled data, primitives named unsafe, and externals whose result may
+   be of any type. *)
+
+let contains_substring ~sub s =
+  let n = String.length sub in
+  let rec loop i =
+    i + n <= String.length s && (String.sub s i n = sub || loop (i + 1))
+  in
+  loop 0
+
+(* The final result of [ty] is a type variable that no argument mentions. *)
+let returns_anything env ty =
+  let rec split ty =
+    match get_desc (Ctype.expand_head env ty) with
+    | Tarrow (_, argument, result, _) ->
+      let arguments, result = split result in
+      argument :: arguments, result
+    | Tpoly (ty, _) -> split ty
+    | _ -> [], ty
+  in
+  let arguments, result = split ty in
+  let result = Ctype.expand_head env result in
+  match get_desc result with
+  | (Tvar _ | Tunivar _) when arguments <> [] ->
+    let exception Mentioned in
+    let seen = Hashtbl.create 16 in
+    let rec visit ty =
+      let id = get_id ty in
+      if id = get_id result
+      then raise Mentioned
+      else if not (Hashtbl.mem seen id)
+      then begin
+        Hashtbl.add seen id ();
+        Btype.iter_type_expr visit ty
+      end
+    in
+    (match List.iter visit arguments with
+    | () -> true
+    | exception Mentioned -> false)
+  | _ -> false
+
+let unsafe_primitive env (description : value_description) =
+  match description.val_kind with
+  | Val_prim { prim_name; _ } ->
+    contains_substring ~sub:"unsafe" prim_name
+    || String.starts_with ~prefix:"%obj_" prim_name
+    || String.starts_with ~prefix:"caml_obj_" prim_name
+    || (returns_anything env description.val_type
+        && not
+             (String.starts_with ~prefix:"%raise" prim_name
+             || String.starts_with ~prefix:"%reraise" prim_name))
+  | _ -> false
+
+(* A refined external, such as a read whose bounds its contract requires, is
+   not an unsafe use: its precondition is verified where it is used, and the
+   external itself is listed as a refined external. Its declared type decides,
+   not the type it is instantiated at. *)
+let unsafe_value env path (description : value_description) =
+  let path = try Env.normalize_value_path None env path with _ -> path in
+  let name = Path.last path in
+  let unit_name = Ident.name (Path.head path) in
+  let global = Ident.is_global (Path.head path) in
+  let declared_type () =
+    match Env.find_value path env with
+    | declaration -> (Subst.Lazy.force_value_description declaration).val_type
+    | exception Not_found -> description.val_type
+  in
+  (global && String.equal unit_name "Stdlib__Obj")
+  || global
+     && String.equal unit_name "Stdlib__Marshal"
+     && String.starts_with ~prefix:"from_" name
+  || (global && String.equal unit_name "Stdlib" && name = "input_value")
+  || (unsafe_primitive env description
+      || global
+         && String.starts_with ~prefix:"Stdlib" unit_name
+         && contains_substring ~sub:"unsafe" name)
+     && not (mentions_refinement env (declared_type ()))
+
+(* Items, keyed by kind and name, with their first location and a count. *)
+module Items = struct
+  type t = (Cmi_format.vox_item_kind * string, string * int) Hashtbl.t
+
+  let create () : t = Hashtbl.create 16
+
+  let add (items : t) kind name (loc : Location.t) =
+    let key = kind, name in
+    match Hashtbl.find_opt items key with
+    | Some (location, count) -> Hashtbl.replace items key (location, count + 1)
+    | None ->
+      let position = loc.loc_start in
+      let location =
+        if position.pos_fname = ""
+        then ""
+        else
+          Printf.sprintf "%s:%d"
+            (Filename.basename position.pos_fname)
+            position.pos_lnum
+      in
+      Hashtbl.replace items key (location, 1)
+
+  let to_list (items : t) =
+    Hashtbl.fold
+      (fun (kind, name) (location, count) acc ->
+        { Cmi_format.vox_kind = kind;
+          vox_name = name;
+          vox_location = location;
+          vox_count = count }
+        :: acc)
+      items []
+    |> List.sort compare
+end
+
+let qualified modules name = String.concat "." (List.rev (name :: modules))
+
+let add_external items modules env (description : Typedtree.value_description)
+    =
+  let name = qualified modules description.val_name.txt in
+  let loc = description.val_loc in
+  (match description.val_val.val_kind with
+  | Val_prim primitive
+    when Vox_type.is_builtin_c_primitive primitive
+         && Vox_type.carries_builtin_meaning description.val_val.val_uid
+              primitive ->
+    Items.add items Cmi_format.Vox_builtin name loc
+  | _ -> ());
+  match trusted_external env description with
+  | Some Refined -> Items.add items Cmi_format.Vox_refined_external name loc
+  | Some Total -> Items.add items Cmi_format.Vox_total_external name loc
+  | Some Total_cast -> Items.add items Cmi_format.Vox_total_cast name loc
+  | None ->
+    if unsafe_primitive env description.val_val
+    then Items.add items Cmi_format.Vox_unsafe name loc
+    else if not !library
+    then Items.add items Cmi_format.Vox_external name loc
+
+let add_type_declaration items modules
+    (declaration : Typedtree.type_declaration) =
+  if Builtin_attributes.has_unsafe_allow_any_mode_crossing
+       declaration.typ_attributes
+  then
+    Items.add items Cmi_format.Vox_unsafe
+      (Printf.sprintf "type %s [@@unsafe_allow_any_mode_crossing]"
+         (qualified modules declaration.typ_name.txt))
+      declaration.typ_loc
+
+let binding_name (binding : Typedtree.value_binding) =
+  match binding.vb_pat.pat_desc with
+  | Tpat_var { name; _ } | Tpat_alias { name; _ } -> Some name.txt
+  | _ -> None
+
+let scan ~structure ~signature =
+  let items = Items.create () in
+  if !Clflags.unsafe
+  then
+    Items.add items Cmi_format.Vox_unsafe "-unsafe (no bounds checks)"
+      (Location.in_file !Location.input_name);
+  let modules = ref [] and binding = ref None in
+  let within name f =
+    let saved = !modules in
+    modules := Option.value name ~default:"_" :: saved;
+    Fun.protect ~finally:(fun () -> modules := saved) f
+  in
+  let open Tast_iterator in
+  let iterator =
+    { default_iterator with
+      structure_item =
+        (fun self item ->
+          (match item.str_desc with
+          | Tstr_primitive description ->
+            add_external items !modules item.str_env description
+          | Tstr_type (_, declarations) ->
+            List.iter (add_type_declaration items !modules) declarations
+          | _ -> ());
+          default_iterator.structure_item self item);
+      signature_item =
+        (fun self item ->
+          (match item.sig_desc with
+          | Tsig_value ({ val_val = { val_kind = Val_prim _; _ }; _ } as value)
+            ->
+            add_external items !modules item.sig_env value
+          | Tsig_type (_, declarations) ->
+            List.iter (add_type_declaration items !modules) declarations
+          | _ -> ());
+          default_iterator.signature_item self item);
+      module_binding =
+        (fun self binding ->
+          within binding.mb_name.txt (fun () ->
+              default_iterator.module_binding self binding));
+      module_declaration =
+        (fun self declaration ->
+          within declaration.md_name.txt (fun () ->
+              default_iterator.module_declaration self declaration));
+      value_binding =
+        (fun self value_binding ->
+          let saved = !binding in
+          (match binding_name value_binding with
+          | Some name -> binding := Some (qualified !modules name)
+          | None -> ());
+          Fun.protect
+            ~finally:(fun () -> binding := saved)
+            (fun () -> default_iterator.value_binding self value_binding));
+      expr =
+        (fun self expression ->
+          (match expression.exp_desc with
+          | Texp_ident { path; desc; _ } ->
+            let env = expression.exp_env in
+            if is_total_cast env desc
+            then
+              Items.add items Cmi_format.Vox_cast_use
+                (Option.value !binding ~default:"_")
+                expression.exp_loc
+            else if unsafe_value env path desc
+            then
+              Items.add items Cmi_format.Vox_unsafe
+                (Path.name
+                   (try Env.normalize_value_path None env path
+                    with _ -> path))
+                expression.exp_loc
+          | _ -> ());
+          default_iterator.expr self expression) }
+  in
+  Option.iter (iterator.structure iterator) structure;
+  Option.iter (iterator.signature iterator) signature;
+  Items.to_list items
+
+let file_digest source_file =
+  match Digest.file source_file with
+  | digest -> Digest.to_hex digest
+  | exception Sys_error _ -> ""
+
+(* The program that was verified: the parse tree after preprocessing, and the
+   flags that change how it is typed or what the compiled code does where
+   verification relied on it. *)
+let source_digest (ast : Parsetree.structure) =
+  Digest.to_hex (Digest.string (Marshal.to_string ast [Marshal.No_sharing]))
+
+let config () =
+  String.concat " "
+    ([ Printf.sprintf "noassert=%b unsafe=%b nopervasives=%b rectypes=%b"
+         !Clflags.noassert !Clflags.unsafe !Clflags.nopervasives
+         !Clflags.recursive_types ]
+    @ List.rev_map
+        (function
+          | Clflags.Open name -> "open=" ^ name
+          | Clflags.Open_cmi name -> "open_cmi=" ^ name)
+        !Clflags.open_args
+    @ List.filter_map
+        (fun extension ->
+          if Language_extension.Exist.is_enabled extension
+          then Some ("extension=" ^ Language_extension.Exist.to_string extension)
+          else None)
+        Language_extension.Exist.all)
+
+let enabled () = Language_extension.is_enabled Refinement_types
+
+let implementation_record = ref None
+
+(* The interfaces a compilation read, with their digests. *)
+let imports () =
+  List.map
+    (fun import ->
+      Compilation_unit.Name.to_string (Import_info.name import)
+      ^ "="
+      ^ Option.fold ~none:"" ~some:Digest.to_hex (Import_info.crc import))
+    (Env.imports ())
+  |> List.sort_uniq String.compare
+
+let interface_record ~source_file signature =
+  if enabled ()
+  then
+    Some
+      { Cmi_format.vox_status = Cmi_format.Vox_interface;
+        vox_library = !library;
+        vox_source = file_digest source_file;
+        vox_config = config ();
+        vox_solver = "";
+        vox_imports = [];
+        vox_items = scan ~structure:None ~signature:(Some signature) }
+  else None
+
+(* The record in a compiled interface. *)
+let interface_file_record file =
+  match Cmi_format.read_cmi_lazy file with
+  | cmi -> Cmi_format.vox_unit cmi.cmi_flags
+  | exception _ -> None
+
+(* A pack's record gathers its members': their items, named within the pack,
+   their imports from outside it, and the weakest status, counting a member
+   without a record as not verified. *)
+let pack_record members =
+  if List.for_all (fun (_, record) -> Option.is_none record) members
+  then None
+  else
+    let records = List.filter_map snd members in
+    let internal import =
+      List.exists
+        (fun (name, _) -> String.starts_with ~prefix:(name ^ "=") import)
+        members
+    in
+    Some
+      { Cmi_format.vox_status =
+          (if
+             List.for_all
+               (fun (_, record) ->
+                 match record with
+                 | Some
+                     { Cmi_format.vox_status =
+                         Cmi_format.Vox_verified | Cmi_format.Vox_interface;
+                       _ } ->
+                   true
+                 | Some _ | None -> false)
+               members
+           then Cmi_format.Vox_verified
+           else Cmi_format.Vox_not_verified);
+        vox_library =
+          List.for_all (fun (r : Cmi_format.vox_unit) -> r.vox_library) records;
+        vox_source = "";
+        vox_config = config ();
+        vox_solver =
+          String.concat " "
+            (List.filter_map
+               (fun (r : Cmi_format.vox_unit) ->
+                 if r.vox_solver = "" then None else Some r.vox_solver)
+               records);
+        vox_imports =
+          List.sort_uniq String.compare
+            (List.filter
+               (fun import -> not (internal import))
+               (List.concat_map
+                  (fun (r : Cmi_format.vox_unit) -> r.vox_imports)
+                  records));
+        vox_items =
+          List.concat_map
+            (fun (name, record) ->
+              match record with
+              | None -> []
+              | Some (r : Cmi_format.vox_unit) ->
+                List.map
+                  (fun (item : Cmi_format.vox_item) ->
+                    { item with vox_name = name ^ "." ^ item.vox_name })
+                  r.vox_items)
+            members }
+
+let reset () =
+  implementation_record := None;
+  unexpected_solver := ""
+
+let record_implementation ~source_file:_ ~ast structure =
+  if enabled ()
+  then begin
+    let source = source_digest ast
+    and config = config ()
+    and imports = imports () in
+    let record : Cmi_format.vox_unit =
+      { vox_status =
+          (if !assume_verified
+           then Cmi_format.Vox_not_verified
+           else Cmi_format.Vox_verified);
+        vox_library = !library;
+        vox_source = source;
+        vox_config = config;
+        vox_solver = !unexpected_solver;
+        vox_imports = imports;
+        vox_items = scan ~structure:(Some structure) ~signature:None }
+    in
+    implementation_record := Some record
+  end

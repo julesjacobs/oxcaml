@@ -5209,6 +5209,7 @@ let type_implementation target modulename initial_env ast =
           in
           Typecore.force_delayed_checks ();
           Verification.run_unit str;
+          Vox_trust.record_implementation ~source_file:sourcefile ~ast str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* It is important to run these checks after the inclusion test above,
@@ -5259,6 +5260,7 @@ let type_implementation target modulename initial_env ast =
           in
           Typecore.force_delayed_checks ();
           Verification.run_unit str;
+          Vox_trust.record_implementation ~source_file:sourcefile ~ast str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* See comment above. Here the target signature contains all
@@ -5274,7 +5276,8 @@ let type_implementation target modulename initial_env ast =
             in
             let cmi =
               Profile.record_call "save_cmi" (fun () ->
-                Env.save_signature ~alerts (simple_sg, Staticity.Dynamic)
+                Env.save_signature ?vox:!Vox_trust.implementation_record
+                  ~alerts (simple_sg, Staticity.Dynamic)
                   name kind (Unit_info.cmi target))
             in
             Profile.record_call "save_cmt" (fun () ->
@@ -5616,6 +5619,22 @@ let package_units initial_env objfiles target_cmi modulename =
           let name = Import_info.name import in
           not (List.mem name unit_names))
         (Env.imports()) in
+    (* The members' records, so that a verified client of a member whose
+       verification was skipped is warned about. *)
+    let vox =
+      Vox_trust.pack_record
+        (List.map
+           (fun f ->
+              let for_pack_prefix = Compilation_unit.to_prefix modulename in
+              let artifact =
+                Unit_info.Artifact.from_filename ~for_pack_prefix f in
+              Compilation_unit.(Name.to_string (name
+                (Unit_info.Artifact.modname artifact))),
+              Vox_trust.interface_file_record
+                (Unit_info.Artifact.filename
+                   (Unit_info.companion_cmi artifact)))
+           objfiles)
+    in
     (* Write packaged signature *)
     if not !Clflags.dont_write_files then begin
       let cmi_arg_for =
@@ -5625,7 +5644,8 @@ let package_units initial_env objfiles target_cmi modulename =
       let name = Compilation_unit.name modulename in
       let kind = Cmi_format.Normal { cmi_impl = modulename; cmi_arg_for } in
       let cmi =
-        Env.save_signature_with_imports ~alerts:Misc.Stdlib.String.Map.empty
+        Env.save_signature_with_imports ?vox
+          ~alerts:Misc.Stdlib.String.Map.empty
           (sg, Staticity.Dynamic) name kind target_cmi
           (Array.of_list imports)
       in

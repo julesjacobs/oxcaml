@@ -1,0 +1,44 @@
+== Warnings for axioms.ml
+File "axioms.ml", line 1, characters 0-66:
+1 | external bogus : unit -> {u : unit | false} @@ total = "%identity"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
+File "axioms.ml", line 2, characters 0-53:
+2 | external trust_total : 'a -> 'a @ total = "%identity"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's cast of its argument to a total function;
+  nothing checks it.
+== Audit of client.ml
+Vox audit of client.ml and the N units it depends on
+Externals whose refinement is assumed:
+  Axioms.bogus (axioms.ml:1)
+Casts to total:
+  Axioms.trust_total (axioms.ml:2)
+Definitions that apply a cast to total:
+  Axioms.total_spin (axioms.ml:4)
+Unsafe features (Obj, Marshal, unsafe primitives, -unsafe):
+  Axioms: Stdlib__Obj.magic (axioms.ml:5)
+Other externals outside the library:
+  Axioms.stub (axioms.ml:6)
+== Assumptions that are easy to miss
+File "hidden.ml", line 7, characters 0-57:
+7 | external packed : unit -> (module S) = "vox_audit_packed"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's refinement;
+  nothing checks it.
+
+File "hidden.ml", line 9, characters 0-48:
+9 | external boxed : unit -> box = "vox_audit_boxed"
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+Vox audit of hidden_client.ml and the N units it depends on
+Externals whose refinement is assumed:
+  Hidden.packed (hidden.ml:7)
+Externals assumed total:
+  Hidden.boxed (hidden.ml:9)
+Unsafe features (Obj, Marshal, unsafe primitives, -unsafe):
+  Hidden: Stdlib__Array.unsafe_get (hidden.ml:11)
+  Hidden: type cell [@@unsafe_allow_any_mode_crossing] (hidden.ml:12)

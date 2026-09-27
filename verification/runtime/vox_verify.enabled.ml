@@ -21,7 +21,8 @@ let timeout_ms = ref 60_000
 
 let budget_ms = ref 0
 
-let assume_verified = ref false
+(* Shared with the type checker, which records it in the compiled unit. *)
+let assume_verified = Vox_trust.assume_verified
 
 (* Cleared when a proof is slow enough to warn, so that the warning is reported
    again rather than skipped by the cache. *)

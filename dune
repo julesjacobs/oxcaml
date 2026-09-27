@@ -361,6 +361,7 @@
   compenv
   compmisc
   makedepend
+  vox_audit
   compile_common
   instantiator
   functorizer
