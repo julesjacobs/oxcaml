@@ -25,7 +25,7 @@
   // ---------------------------------------------------------------- data
 
   function load() {
-    const get = (name) => fetch(`data/${name}.json?v=${version}`).then((r) => {
+    const get = (name) => fetch(`data/${name}.json?v=${version}`, { cache: 'no-cache' }).then((r) => {
       if (!r.ok) throw new Error(`data/${name}.json: ${r.status}`);
       return r.json();
     });
@@ -1291,7 +1291,7 @@
     S.layout = layout(S.root, S.W, S.H);
     render();
     route().then(() => {
-      window.__explorer = { ready: true, layoutMs: performance.now() - started, S, render, layout };
+      window.__explorer = { ready: true, readyAt: performance.now(), layoutMs: performance.now() - started, S, render, layout };
     });
   }).catch((e) => {
     panel.innerHTML = `<h2>Could not load the explorer</h2><p>${esc(e.message)}</p>`;
