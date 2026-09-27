@@ -1,274 +1,9 @@
 open Vox_sat_spec
 
-  let[@def] shift literal =
-    match literal with
-    | Positive index -> Positive (index - 1)
-    | Negative index -> Negative (index - 1)
-
-  let[@def] rec reduce_clause value clause =
-    match clause with
-    | [] -> Some []
-    | literal :: rest ->
-      (match literal with
-       | Positive 0 -> if value then None else reduce_clause value rest
-       | Negative 0 -> if value then reduce_clause value rest else None
-       | _ ->
-         match reduce_clause value rest with
-         | None -> None
-         | Some reduced -> Some (shift literal :: reduced))
-
-  let[@def] rec reduce_formula value formula =
-    match formula with
-    | [] -> []
-    | clause :: rest ->
-      (match reduce_clause value clause with
-       | None -> reduce_formula value rest
-       | Some reduced -> reduced :: reduce_formula value rest)
-
-  let rec (reduce_clause_correct @ total) :
-      (value : bool) -> (clause : literal list) ->
-      (assignment : bool list) ->
-      {u : unit |
-        match reduce_clause value clause with
-        | None -> eval_clause (value :: assignment) clause
-        | Some reduced ->
-          eval_clause (value :: assignment) clause =
-          eval_clause assignment reduced} @ ghost =
-    fun value clause assignment -> ghost_ (
-    reduce_clause_def value clause;
-    eval_clause_def (value :: assignment) clause;
-    match clause with
-    | [] ->
-      eval_clause_def assignment [];
-      ()
-    | literal :: rest ->
-      reduce_clause_correct value rest assignment;
-      eval_literal_def (value :: assignment) literal;
-      (match literal with
-       | Positive index | Negative index ->
-         lookup_def (value :: assignment) index);
-      (match reduce_clause value rest with
-       | None -> ()
-       | Some reduced ->
-         eval_clause_def assignment reduced;
-         eval_clause_def assignment (shift literal :: reduced);
-         shift_def literal;
-         eval_literal_def assignment (shift literal));
-      ())
-
-  let rec (reduce_formula_correct @ total) :
-      (value : bool) -> (formula : formula) ->
-      (assignment : bool list) ->
-      {u : unit |
-        eval_formula (value :: assignment) formula =
-        eval_formula assignment (reduce_formula value formula)} @ ghost =
-    fun value formula assignment -> ghost_ (
-    reduce_formula_def value formula;
-    eval_formula_def (value :: assignment) formula;
-    match formula with
-    | [] ->
-      eval_formula_def assignment [];
-      ()
-    | clause :: rest ->
-      reduce_clause_correct value clause assignment;
-      reduce_formula_correct value rest assignment;
-      (match reduce_clause value clause with
-       | None -> ()
-       | Some reduced ->
-         eval_formula_def assignment
-           (reduced :: reduce_formula value rest);
-          ());
-      ())
-
-  let[@def] rec has_empty_clause formula =
-    match formula with
-    | [] -> false
-    | clause :: rest ->
-      (match clause with [] -> true | _ :: _ -> has_empty_clause rest)
-
-  let rec (empty_conflict @ total) :
-      (assignment : bool list) -> (formula : formula) ->
-      {u : unit |
-        if has_empty_clause formula then
-          not (eval_formula assignment formula)
-        else true} @ ghost =
-    fun assignment formula -> ghost_ (
-    has_empty_clause_def formula;
-    eval_formula_def assignment formula;
-    match formula with
-    | [] -> ()
-    | clause :: rest ->
-      (match clause with
-       | [] -> eval_clause_def assignment []; ()
-       | _ :: _ -> empty_conflict assignment rest))
-
-  let[@def] rec unit_zero formula =
-    match formula with
-    | [] -> None
-    | clause :: rest ->
-      (match clause with
-       | [Positive 0] -> Some true
-       | [Negative 0] -> Some false
-       | _ -> unit_zero rest)
-
-  let rec (unit_zero_forces @ total) :
-      (formula : formula) -> (value : bool) ->
-      (assignment : bool list) ->
-      {u : unit |
-        match unit_zero formula with
-        | None -> true
-        | Some forced ->
-          if eval_formula (value :: assignment) formula then
-            value = forced
-          else true} @ ghost =
-    fun formula value assignment -> ghost_ (
-    unit_zero_def formula;
-    eval_formula_def (value :: assignment) formula;
-    match formula with
-    | [] -> ()
-    | clause :: rest ->
-      (match clause with
-       | [Positive 0] ->
-         eval_clause_def (value :: assignment) clause;
-         eval_clause_def (value :: assignment) [];
-         eval_literal_def (value :: assignment) (Positive 0);
-         lookup_def (value :: assignment) 0;
-         ()
-       | [Negative 0] ->
-         eval_clause_def (value :: assignment) clause;
-         eval_clause_def (value :: assignment) [];
-         eval_literal_def (value :: assignment) (Negative 0);
-         lookup_def (value :: assignment) 0;
-         ()
-       | _ -> unit_zero_forces rest value assignment))
-
   let[@def] same_literal left right =
     match left, right with
     | Positive x, Positive y | Negative x, Negative y -> x = y
     | Positive _, Negative _ | Negative _, Positive _ -> false
-
-  let[@def] rec has_unit literal formula =
-    match formula with
-    | [] -> false
-    | clause :: rest ->
-      (match clause with
-       | [candidate] -> same_literal candidate literal || has_unit literal rest
-       | _ -> has_unit literal rest)
-
-  let rec (has_unit_implies @ total) :
-      (literal : literal) -> (formula : formula) ->
-      (assignment : bool list) ->
-      {u : unit |
-        if has_unit literal formula
-        && eval_formula assignment formula then
-          eval_literal assignment literal
-        else true} @ ghost =
-    fun literal formula assignment -> ghost_ (
-    has_unit_def literal formula;
-    eval_formula_def assignment formula;
-    match formula with
-    | [] -> ()
-    | clause :: rest ->
-      (match clause with
-       | [candidate] ->
-         if same_literal candidate literal then (
-           same_literal_def candidate literal;
-           eval_clause_def assignment clause;
-           eval_clause_def assignment [];
-           ())
-         else has_unit_implies literal rest assignment
-       | _ -> has_unit_implies literal rest assignment))
-
-  let[@def] rec conflicting_units formula =
-    match formula with
-    | [] -> false
-    | clause :: rest ->
-      (match clause with
-       | [Positive index] ->
-         has_unit (Negative index) rest || conflicting_units rest
-       | [Negative index] ->
-         has_unit (Positive index) rest || conflicting_units rest
-       | _ -> conflicting_units rest)
-
-  let rec (conflicting_units_unsat @ total) :
-      (formula : formula) -> (assignment : bool list) ->
-      {u : unit |
-        if conflicting_units formula then
-          not (eval_formula assignment formula)
-        else true} @ ghost =
-    fun formula assignment -> ghost_ (
-    conflicting_units_def formula;
-    eval_formula_def assignment formula;
-    match formula with
-    | [] -> ()
-    | clause :: rest ->
-      (match clause with
-       | [Positive index] ->
-         has_unit_implies (Negative index) rest assignment;
-         if not (has_unit (Negative index) rest) then
-           conflicting_units_unsat rest assignment;
-         eval_clause_def assignment clause;
-         eval_clause_def assignment [];
-         eval_literal_def assignment (Positive index);
-         eval_literal_def assignment (Negative index);
-         ()
-       | [Negative index] ->
-         has_unit_implies (Positive index) rest assignment;
-         if not (has_unit (Positive index) rest) then
-           conflicting_units_unsat rest assignment;
-         eval_clause_def assignment clause;
-         eval_clause_def assignment [];
-         eval_literal_def assignment (Positive index);
-         eval_literal_def assignment (Negative index);
-         ()
-       | _ -> conflicting_units_unsat rest assignment))
-
-  let[@def] rec refutes n formula =
-    if has_empty_clause formula || conflicting_units formula then true
-    else if n <= 0 then not (eval_formula [] formula)
-    else match unit_zero formula with
-      | Some value -> refutes (n - 1) (reduce_formula value formula)
-      | None ->
-        refutes (n - 1) (reduce_formula true formula)
-        && refutes (n - 1) (reduce_formula false formula)
-  [@@decreases n]
-
-  let rec (refutes_sound @ total) :
-      (n : int) -> (formula : formula) -> (assignment : bool list) ->
-      {u : unit |
-        if 0 <= n && well_sized n assignment && refutes n formula then
-          not (eval_formula assignment formula)
-        else true} @ ghost =
-    fun n formula assignment -> ghost_ (
-    refutes_def n formula;
-    well_sized_def n assignment;
-    if has_empty_clause formula then
-      empty_conflict assignment formula
-    else if conflicting_units formula then
-      conflicting_units_unsat formula assignment
-    else if n <= 0 then (
-      match assignment with
-      | [] -> eval_formula_def [] formula; ()
-      | _ :: _ -> ())
-    else
-      match assignment with
-      | [] -> ()
-      | value :: rest ->
-        well_sized_def n assignment;
-        reduce_formula_correct value formula rest;
-        (match unit_zero formula with
-         | Some forced ->
-           unit_zero_forces formula value rest;
-           (match value, forced with
-            | true, true | false, false ->
-              refutes_sound (n - 1) (reduce_formula forced formula) rest
-            | true, false | false, true -> ())
-         | None ->
-           if value then
-             refutes_sound (n - 1) (reduce_formula true formula) rest
-           else
-             refutes_sound (n - 1) (reduce_formula false formula) rest))
-  [@@decreases n]
 
   let[@def] rec resize_assignment n assignment =
     if n <= 0 then []
@@ -348,269 +83,6 @@ open Vox_sat_spec
     | clause :: rest ->
       resize_assignment_clause n assignment clause;
       resize_assignment_formula n assignment rest)
-
-  let (refutes_sound_any @ total) :
-      (n : {n : int | 0 <= n}) ->
-      (formula : {f : formula | valid_formula n f && refutes n f}) ->
-      (assignment : bool list) ->
-      {u : unit | not (eval_formula assignment formula)} @ ghost =
-    fun n formula assignment -> ghost_ (
-    resize_assignment_size n assignment;
-    refutes_sound n formula (resize_assignment n assignment);
-    resize_assignment_formula n assignment formula)
-
-  let[@def] opposite literal =
-    match literal with
-    | Positive index -> Negative index
-    | Negative index -> Positive index
-
-  let (opposite_eval @ total) :
-      (literal : literal) -> (assignment : bool list) ->
-      {u : unit |
-        eval_literal assignment (opposite literal) =
-        not (eval_literal assignment literal)} @ ghost =
-    fun literal assignment -> ghost_ (
-    opposite_def literal;
-    eval_literal_def assignment literal;
-    eval_literal_def assignment (opposite literal);
-    ())
-
-  let[@def] rec negated_units clause =
-    match clause with
-    | [] -> []
-    | literal :: rest -> [opposite literal] :: negated_units rest
-
-  let rec (negated_units_if_false @ total) :
-      (clause : literal list) -> (assignment : bool list) ->
-      {u : unit |
-        if not (eval_clause assignment clause) then
-          eval_formula assignment (negated_units clause)
-        else true} @ ghost =
-    fun clause assignment -> ghost_ (
-    negated_units_def clause;
-    eval_clause_def assignment clause;
-    match clause with
-    | [] -> eval_formula_def assignment []; ()
-    | literal :: rest ->
-      opposite_eval literal assignment;
-      negated_units_if_false rest assignment;
-      eval_formula_def assignment (negated_units clause);
-      eval_clause_def assignment [opposite literal];
-      eval_clause_def assignment [];
-      ())
-
-  let[@def] rec prepend_formula left right =
-    match left with
-    | [] -> right
-    | clause :: rest -> clause :: prepend_formula rest right
-
-  let rec (prepend_formula_eval @ total) :
-      (left : formula) -> (right : formula) ->
-      (assignment : bool list) ->
-      {u : unit |
-        eval_formula assignment (prepend_formula left right) =
-        (eval_formula assignment left && eval_formula assignment right)}
-      @ ghost =
-    fun left right assignment -> ghost_ (
-    prepend_formula_def left right;
-    eval_formula_def assignment left;
-    match left with
-    | [] -> ()
-    | clause :: rest ->
-      prepend_formula_eval rest right assignment;
-      eval_formula_def assignment (prepend_formula left right);
-      eval_formula_def assignment rest;
-      ())
-
-  let[@def] rec first_unit formula =
-    match formula with
-    | [] -> None
-    | clause :: rest ->
-      (match clause with
-       | [literal] -> Some literal
-       | _ -> first_unit rest)
-
-  let rec (first_unit_forces @ total) :
-      (formula : formula) -> (assignment : bool list) ->
-      {u : unit |
-        match first_unit formula with
-        | Some literal ->
-          if eval_formula assignment formula then
-            eval_literal assignment literal
-          else true
-        | None -> true} @ ghost =
-    fun formula assignment -> ghost_ (
-    first_unit_def formula;
-    eval_formula_def assignment formula;
-    match formula with
-    | [] -> ()
-    | clause :: rest ->
-      (match clause with
-       | [literal] ->
-         eval_clause_def assignment clause;
-         eval_clause_def assignment [];
-         ()
-       | _ -> first_unit_forces rest assignment))
-
-  let[@def] rec reduce_clause_at index value clause =
-    match clause with
-    | [] -> Some []
-    | literal :: rest ->
-      let action =
-        match literal with
-        | Positive v when v = index -> if value then 1 else 0
-        | Negative v when v = index -> if value then 0 else 1
-        | _ -> 2
-      in
-      if action = 1 then None
-      else
-        match reduce_clause_at index value rest with
-        | None -> None
-        | Some reduced ->
-          if action = 0 then Some reduced
-          else Some (literal :: reduced)
-
-  let[@def] rec reduce_formula_at index value formula =
-    match formula with
-    | [] -> []
-    | clause :: rest ->
-      match reduce_clause_at index value clause with
-      | None -> reduce_formula_at index value rest
-      | Some reduced -> reduced :: reduce_formula_at index value rest
-
-  let rec (reduce_clause_at_correct @ total) :
-      (index : int) -> (value : bool) ->
-      (clause : literal list) -> (assignment : bool list) ->
-      {u : unit |
-        if lookup assignment index = value then
-          match reduce_clause_at index value clause with
-          | None -> eval_clause assignment clause
-          | Some reduced ->
-            eval_clause assignment clause = eval_clause assignment reduced
-        else true} @ ghost =
-    fun index value clause assignment -> ghost_ (
-    reduce_clause_at_def index value clause;
-    eval_clause_def assignment clause;
-    match clause with
-    | [] -> eval_clause_def assignment []; ()
-    | literal :: rest ->
-      reduce_clause_at_correct index value rest assignment;
-      eval_literal_def assignment literal;
-      (match literal with
-       | Positive v | Negative v -> lookup_def assignment v);
-      (match reduce_clause_at index value rest with
-       | None -> ()
-       | Some reduced ->
-         eval_clause_def assignment reduced;
-         eval_clause_def assignment (literal :: reduced));
-      ())
-
-  let rec (reduce_formula_at_correct @ total) :
-      (index : int) -> (value : bool) ->
-      (formula : formula) -> (assignment : bool list) ->
-      {u : unit |
-        if lookup assignment index = value then
-          eval_formula assignment formula =
-          eval_formula assignment (reduce_formula_at index value formula)
-        else true} @ ghost =
-    fun index value formula assignment -> ghost_ (
-    reduce_formula_at_def index value formula;
-    eval_formula_def assignment formula;
-    match formula with
-    | [] -> eval_formula_def assignment []; ()
-    | clause :: rest ->
-      reduce_clause_at_correct index value clause assignment;
-      reduce_formula_at_correct index value rest assignment;
-      (match reduce_clause_at index value clause with
-       | None -> ()
-       | Some reduced ->
-         eval_formula_def assignment
-           (reduced :: reduce_formula_at index value rest));
-      ())
-
-  let[@def] rec unit_refutes fuel formula =
-    if has_empty_clause formula then true
-    else if fuel <= 0 then false
-    else
-      match first_unit formula with
-      | None -> false
-      | Some literal ->
-        (match literal with
-         | Positive index ->
-           unit_refutes (fuel - 1) (reduce_formula_at index true formula)
-         | Negative index ->
-           unit_refutes (fuel - 1) (reduce_formula_at index false formula))
-  [@@decreases fuel]
-
-  let rec (unit_refutes_sound @ total) :
-      (fuel : int) -> (formula : formula) ->
-      (assignment : bool list) ->
-      {u : unit |
-        if unit_refutes fuel formula then
-          not (eval_formula assignment formula)
-        else true} @ ghost =
-    fun fuel formula assignment -> ghost_ (
-    unit_refutes_def fuel formula;
-    if has_empty_clause formula then
-      empty_conflict assignment formula
-    else if fuel <= 0 then ()
-    else
-      match first_unit formula with
-      | None -> ()
-      | Some literal ->
-        first_unit_forces formula assignment;
-        eval_literal_def assignment literal;
-        (match literal with
-         | Positive index ->
-           reduce_formula_at_correct index true formula assignment;
-           unit_refutes_sound (fuel - 1)
-             (reduce_formula_at index true formula) assignment
-         | Negative index ->
-           reduce_formula_at_correct index false formula assignment;
-           unit_refutes_sound (fuel - 1)
-             (reduce_formula_at index false formula) assignment))
-  [@@decreases fuel]
-
-  let[@def] rec check_unsat_trace n database trace =
-    match trace with
-    | [] -> false
-    | clause :: rest ->
-      if valid_clause n clause
-         && unit_refutes n
-              (prepend_formula database (negated_units clause))
-      then
-        match clause with
-        | [] -> true
-        | _ :: _ -> check_unsat_trace n (clause :: database) rest
-      else false
-
-  let rec (unsat_trace_sound @ total) :
-      (n : int) -> (database : formula) ->
-      (trace : formula) -> (assignment : bool list) ->
-      {u : unit |
-        if 0 <= n && well_sized n assignment
-           && eval_formula assignment database
-           && check_unsat_trace n database trace
-        then false else true} @ ghost =
-    fun n database trace assignment -> ghost_ (
-    check_unsat_trace_def n database trace;
-    match trace with
-    | [] -> ()
-    | clause :: rest ->
-      if valid_clause n clause
-         && unit_refutes n
-              (prepend_formula database (negated_units clause))
-      then (
-        unit_refutes_sound n
-          (prepend_formula database (negated_units clause)) assignment;
-        prepend_formula_eval database (negated_units clause) assignment;
-        negated_units_if_false clause assignment;
-        match clause with
-        | [] -> eval_clause_def assignment []; ()
-        | _ :: _ ->
-          eval_formula_def assignment (clause :: database);
-          unsat_trace_sound n (clause :: database) rest assignment)
-      else ())
 
   let[@def] rec remove_positive index clause =
     match clause with
@@ -920,8 +392,6 @@ open Vox_sat_spec
       same_clause_eval rest_left rest_right assignment
     | [], [] | [], _ :: _ | _ :: _, [] -> ())
 
-  let[@def] identical_formula left right = ghost_ (left === right)
-
   let[@def] rec clause_at formula index =
     match formula with
     | [] -> None
@@ -950,7 +420,6 @@ open Vox_sat_spec
 
   type derivation : immutable_data mod total =
     | Input of int
-    | Exhaustion of int
     | Resolution of int * literal list * literal list
         * derivation * derivation
   [@@inductive]
@@ -961,7 +430,6 @@ open Vox_sat_spec
       (match clause_at formula index with
        | Some clause -> clause
        | None -> [])
-    | Exhaustion _ -> []
     | Resolution (index, left_clause, right_clause, _, _) ->
       resolve_clause index left_clause right_clause
 
@@ -969,8 +437,6 @@ open Vox_sat_spec
     match derivation with
     | Input index ->
       (match clause_at formula index with Some _ -> true | None -> false)
-    | Exhaustion n ->
-      0 <= n && valid_formula n formula && refutes n formula
     | Resolution (_, left_clause, right_clause, left, right) ->
       derivation_valid formula left
       && derivation_valid formula right
@@ -990,10 +456,6 @@ open Vox_sat_spec
     conclusion_def formula derivation;
     match derivation with
     | Input index -> clause_at_sound formula index assignment
-    | Exhaustion n ->
-      if derivation_valid formula derivation then
-        refutes_sound_any n formula assignment;
-      ()
     | Resolution (index, left_clause, right_clause, left, right) ->
       derivation_sound formula left assignment;
       derivation_sound formula right assignment;
@@ -1058,87 +520,10 @@ open Vox_sat_spec
     eval_clause_def assignment [];
     ())
 
-  let[@def] rec aligned formula database proofs =
-    match database, proofs with
-    | [], [] -> true
-    | clause :: rest, proof :: proof_rest ->
-      derivation_valid formula proof
-      && same_clause (conclusion formula proof) clause
-      && aligned formula rest proof_rest
-    | [], _ :: _ | _ :: _, [] -> false
-
-  let (aligned_cons @ total) :
-      (formula : formula) ->
-      (clause : literal list) ->
-      (proof : {d : derivation |
-        derivation_valid formula d
-        && same_clause (conclusion formula d) clause}) @ ghost ->
-      (database : formula) ->
-      (proofs : {p : derivation list | aligned formula database p})
-        @ ghost ->
-      {u : unit |
-        aligned formula (clause :: database) (proof :: proofs)} @ ghost =
-    fun formula clause proof database proofs -> ghost_ (
-      aligned_def formula (clause :: database) (proof :: proofs);
-      ())
-
-  let[@def] rec learned_clause_at database index =
-    match database with
-    | [] -> None
-    | clause :: rest ->
-      if index = 0 then Some clause
-      else learned_clause_at rest (index - 1)
-
-  let[@def] rec learned_proof_at proofs index =
-    match proofs with
-    | [] -> None
-    | proof :: rest ->
-      if index = 0 then Some proof
-      else learned_proof_at rest (index - 1)
-
-  let rec (aligned_at @ total) :
-      (formula : formula) -> (database : formula) ->
-      (proofs : derivation list) -> (index : int) ->
-      {u : unit |
-        if aligned formula database proofs then
-          match learned_clause_at database index,
-                learned_proof_at proofs index with
-          | Some clause, Some proof ->
-            derivation_valid formula proof
-            && same_clause (conclusion formula proof) clause
-          | _ -> true
-        else true} @ ghost =
-    fun formula database proofs index -> ghost_ (
-    aligned_def formula database proofs;
-    learned_clause_at_def database index;
-    learned_proof_at_def proofs index;
-    match database, proofs with
-    | clause :: rest, proof :: proof_rest ->
-      if index = 0 then ()
-      else aligned_at formula rest proof_rest (index - 1)
-    | [], [] | [], _ :: _ | _ :: _, [] -> ())
-
   type proof_result : immutable_data mod total = {
     clause : literal list;
     proof : derivation @@ ghost;
   }
-
-  let (exhaustive_result @ total) :
-      (n : {n : int | 0 <= n}) ->
-      (formula : {f : formula | valid_formula n f && refutes n f}) ->
-      {r : proof_result |
-        derivation_valid formula r.proof
-        && same_clause (conclusion formula r.proof) r.clause
-        && r.clause === []} =
-    fun n formula ->
-    let proof : {d : derivation | derivation_valid formula d
-      && same_clause (conclusion formula d) []} @ ghost = ghost_ (
-      let proof = Exhaustion n in
-      derivation_valid_def formula proof;
-      conclusion_def formula proof;
-      same_clause_reflexive [];
-      proof) in
-    {clause = []; proof}
 
   let (original_result @ total) :
       (formula : formula) -> (index : int) ->
@@ -1222,102 +607,15 @@ open Vox_sat_spec
     | [] -> []
     | entry :: rest -> entry.clause :: database_clauses rest
 
-  let rec (database_at @ total) :
-      (formula : formula) ->
-      (entries : {es : proof_result list | database_valid formula es}) ->
-      (index : int) ->
-      {r : proof_result option |
-        match r with
-        | None -> clause_at (database_clauses entries) index === None
-        | Some entry ->
-          derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause
-          && clause_at (database_clauses entries) index === Some entry.clause} =
-    fun formula entries index ->
-    ghost_ (database_valid_def formula entries);
-    ghost_ (database_clauses_def entries);
-    ghost_ (clause_at_def (database_clauses entries) index);
-    match entries with
-    | [] -> None
-    | entry :: rest ->
-      if index = 0 then Some entry
-      else database_at formula rest (index - 1)
-
   type clause_source =
     | Original_clause of int
     | Learned_clause of int
   [@@inductive]
 
-  type resolution_instruction = {
-    pivot : int;
-    source : clause_source;
-    current_positive : bool;
-  }
-
   let[@def] source_clause formula database source =
     match source with
     | Original_clause index -> clause_at formula index
     | Learned_clause index -> clause_at (database_clauses database) index
-
-  let (fetch_result @ total) :
-      (formula : formula) ->
-      (database : {d : proof_result list | database_valid formula d}) ->
-      (source : clause_source) ->
-      {r : proof_result option |
-        match r with
-        | None -> source_clause formula database source === None
-        | Some entry ->
-          derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause
-          && source_clause formula database source === Some entry.clause} =
-    fun formula database source ->
-    ghost_ (source_clause_def formula database source);
-    match source with
-    | Original_clause index -> original_result formula index
-    | Learned_clause index -> database_at formula database index
-
-  let rec (execute_resolution_steps @ total) :
-      (formula : formula) ->
-      (database : {d : proof_result list | database_valid formula d}) ->
-      (current : {e : proof_result |
-        derivation_valid formula e.proof
-        && same_clause (conclusion formula e.proof) e.clause}) ->
-      (steps : resolution_instruction list) ->
-      {r : proof_result option |
-        match r with
-        | None -> true
-        | Some entry ->
-          derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause} =
-    fun formula database current steps ->
-    match steps with
-    | [] -> Some current
-    | step :: rest ->
-      (match fetch_result formula database step.source with
-       | None -> None
-       | Some reason ->
-         let resolved =
-           if step.current_positive then
-             resolve_result formula step.pivot current reason
-           else resolve_result formula step.pivot reason current
-         in
-         execute_resolution_steps formula database resolved rest)
-
-  let (execute_resolution @ total) :
-      (formula : formula) ->
-      (database : {d : proof_result list | database_valid formula d}) ->
-      (start : clause_source) ->
-      (steps : resolution_instruction list) ->
-      {r : proof_result option |
-        match r with
-        | None -> true
-        | Some entry ->
-          derivation_valid formula entry.proof
-          && same_clause (conclusion formula entry.proof) entry.clause} =
-    fun formula database start steps ->
-    match fetch_result formula database start with
-    | None -> None
-    | Some first -> execute_resolution_steps formula database first steps
 
   type input_error = Vox_sat_spec.input_error =
   | Invalid_formula
@@ -1713,7 +1011,6 @@ let rec (derivation_clause_valid @ total) :
     | Input index ->
       clause_at_valid n formula index;
       valid_clause_def n []
-    | Exhaustion _ -> valid_clause_def n []
     | Resolution (index, left_clause, right_clause, left, right) ->
       derivation_clause_valid n formula left;
       derivation_clause_valid n formula right;
@@ -1845,36 +1142,6 @@ let (scan_formula_unit_reason @ total) :
   scan_formula_from_unit_reason partial limit 0 formula;
   ())
 
-let rec (database_formula_valid @ total) : (n : int) -> (formula : formula) ->
-    (database : proof_result list) ->
-    {u : unit | if valid_formula n formula && database_valid formula database
-      then valid_formula n (database_clauses database) else true} @ ghost =
-  fun n formula database -> ghost_ (
-  (
-    database_valid_def formula database;
-    database_clauses_def database;
-    valid_formula_def n (database_clauses database);
-    match database with
-    | [] -> ()
-    | entry :: rest ->
-      if database_valid formula database then
-        result_clause_valid n formula entry;
-      database_formula_valid n formula rest);
-  ())
-
-let (source_clause_valid @ total) : (n : int) -> (formula : formula) ->
-    (database : proof_result list) -> (source : clause_source) ->
-    {u : unit | if valid_formula n formula && database_valid formula database
-      then match source_clause formula database source with
-        | None -> true | Some clause -> valid_clause n clause
-      else true} @ ghost =
-  fun n formula database source -> ghost_ (
-  source_clause_def formula database source;
-  database_formula_valid n formula database;
-  match source with
-  | Original_clause index -> clause_at_valid n formula index
-  | Learned_clause index -> clause_at_valid n (database_clauses database) index)
-
 let[@def] rec false_clause partial clause =
   match clause with
   | [] -> true
@@ -1933,20 +1200,6 @@ let (scan_stable_no_conflict @ total) : (partial : bool option list) ->
   fun partial formula -> ghost_ (
   scan_formula_def partial formula;
   scan_stable_no_conflict_from partial 0 formula)
-
-let rec (no_conflict_clause @ total) : (partial : bool option list) ->
-    (formula : formula) -> (index : int) ->
-    {u : unit | if no_conflict partial formula then
-      match clause_at formula index with
-      | None -> true | Some clause -> not (false_clause partial clause)
-      else true} @ ghost =
-  fun partial formula index -> ghost_ (
-  no_conflict_def partial formula;
-  clause_at_def formula index;
-  match formula with
-  | [] -> ()
-  | _ :: rest -> if index <> 0 then no_conflict_clause partial rest (index - 1);
-    ())
 
 let rec (false_clause_member @ total) : (partial : bool option list) ->
     (clause : literal list) -> (query : literal) ->

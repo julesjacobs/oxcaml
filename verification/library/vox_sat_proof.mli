@@ -1,16 +1,5 @@
 open Vox_sat_spec
 
-val refutes : int -> formula -> bool @@ total
-val check_unsat_trace : int -> formula -> formula -> bool @@ total
-val unsat_trace_sound :
-  (n : int) -> (database : formula) -> (trace : formula) ->
-  (assignment : bool list) ->
-  {u : unit |
-    if 0 <= n && well_sized n assignment
-       && eval_formula assignment database
-       && check_unsat_trace n database trace
-    then false else true} @ ghost @@ total
-
 type derivation : immutable_data mod total
 val clause_at : formula -> int -> literal list option @@ total
 val clause_at_def : (formula : formula) -> (index : int) ->
@@ -62,12 +51,6 @@ type proof_result : immutable_data mod total = private {
   clause : literal list;
   proof : derivation @@ ghost;
 }
-val exhaustive_result : (n : {n : int | 0 <= n}) ->
-  (formula : {f : formula | valid_formula n f && refutes n f}) ->
-  {r : proof_result |
-    derivation_valid formula r.proof
-    && same_clause (conclusion formula r.proof) r.clause
-    && r.clause === []} @@ total
 val original_result :
   (formula : formula) -> (index : int) ->
   {r : proof_result option |
@@ -118,26 +101,9 @@ val database_clauses_def : (entries : proof_result list) ->
   {u : unit | database_clauses entries ===
     (match entries with [] -> []
      | entry :: rest -> entry.clause :: database_clauses rest)} @@ total
-val database_at :
-  (formula : formula) ->
-  (entries : {es : proof_result list | database_valid formula es}) ->
-  (index : int) ->
-  {r : proof_result option |
-    match r with
-    | None -> clause_at (database_clauses entries) index === None
-    | Some entry ->
-      derivation_valid formula entry.proof
-      && same_clause (conclusion formula entry.proof) entry.clause
-          && clause_at (database_clauses entries) index === Some entry.clause}
-  @@ total
 
 type clause_source = Original_clause of int | Learned_clause of int
 [@@inductive]
-type resolution_instruction = {
-  pivot : int;
-  source : clause_source;
-  current_positive : bool;
-}
 val source_clause : formula -> proof_result list -> clause_source ->
   literal list option @@ total
 val source_clause_def : (formula : formula) ->
@@ -146,30 +112,6 @@ val source_clause_def : (formula : formula) ->
     (match source with
      | Original_clause index -> clause_at formula index
      | Learned_clause index -> clause_at (database_clauses database) index)}
-  @@ total
-val fetch_result :
-  (formula : formula) ->
-  (database : {d : proof_result list | database_valid formula d}) ->
-  (source : clause_source) ->
-  {r : proof_result option |
-    match r with
-    | None -> source_clause formula database source === None
-    | Some entry ->
-      derivation_valid formula entry.proof
-      && same_clause (conclusion formula entry.proof) entry.clause
-          && source_clause formula database source === Some entry.clause}
-  @@ total
-val execute_resolution :
-  (formula : formula) ->
-  (database : {d : proof_result list | database_valid formula d}) ->
-  (start : clause_source) ->
-  (steps : resolution_instruction list) ->
-  {r : proof_result option |
-    match r with
-    | None -> true
-    | Some entry ->
-      derivation_valid formula entry.proof
-      && same_clause (conclusion formula entry.proof) entry.clause}
   @@ total
 
 type input_error = Vox_sat_spec.input_error =
@@ -305,13 +247,6 @@ val scan_formula_unit_reason : (limit : {n : int | 0 <= n}) @ ghost ->
           && has_literal forced clause)
     | Scan_stable | Scan_conflict _ -> true} @ ghost @@ total
 
-val source_clause_valid : (n : int) -> (formula : formula) ->
-  (database : proof_result list) -> (source : clause_source) ->
-  {u : unit | if valid_formula n formula && database_valid formula database
-    then match source_clause formula database source with
-      | None -> true | Some clause -> valid_clause n clause
-    else true} @ ghost @@ total
-
 val false_clause : bool option list -> literal list -> bool @@ total
 val conflict_characterization : (partial : bool option list) ->
   (clause : literal list) ->
@@ -366,13 +301,6 @@ val scan_stable_no_conflict : (partial : bool option list) ->
   (formula : formula) ->
   {u : unit | if scan_formula partial formula === Scan_stable then
     no_conflict partial formula else true} @ ghost @@ total
-val no_conflict_clause : (partial : bool option list) ->
-  (formula : formula) -> (index : int) ->
-  {u : unit | if no_conflict partial formula then
-    match clause_at formula index with
-    | None -> true | Some clause -> not (false_clause partial clause)
-    else true} @ ghost @@ total
-
 val false_clause_member : (partial : bool option list) ->
   (clause : literal list) -> (query : literal) ->
   {u : unit | if false_clause partial clause && has_literal query clause then
