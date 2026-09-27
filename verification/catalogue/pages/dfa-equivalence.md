@@ -9,7 +9,7 @@ sources:
   - testsuite/tests/vox/dfa_equivalence_proof.ml — Comparison search, partition refinement and their proofs
   - testsuite/tests/vox/dfa_public_client.ml — Client using only the public interface
   - testsuite/tests/vox/dfa_equivalence.ml — Test that checks the proofs and runs examples
-  - testsuite/tests/vox/dfa_boundary_check.py — The only compile of the public interface and client
+  - testsuite/tests/vox/dfa_boundary.ml — The only compile of the public interface and client, and the erasure check
 ---
 `Dfa_equivalence` compares two deterministic automata and minimizes one. A machine is a plain table: an initial state id and a list of rows, each with a state id, an accepting bit, a list of `(letter, target)` edges and a default target for every other letter. Letters and state ids are `int`s. `Dfa_semantics.run m w` follows the table from the initial state over the word `w` and returns the accepting bit of the last state.
 
@@ -27,20 +27,9 @@ From the public client. `(x : t) -> ...` names an argument so that later types c
 
 ## A rejected program
 
-Claiming that any two machines agree on a word is a type error. The script `dfa_boundary_check.py` writes this program, compiles it against the public interfaces only, and requires it to fail with `Refinement could not be proved`. The installed compiler prints:
+Claiming that any two machines agree on a word is a type error. The test `dfa_boundary.ml` checks this program against the public interfaces only and requires this error:
 
-@code testsuite/tests/vox/dfa_boundary_check.py "false_claim.write_text('''" "  let u = () in u" after
-
-```
-File "false_equality.ml", line 5, characters 16-17:
-5 |   let u = () in u
-                    ^
-Error: Refinement could not be proved (counterexample)
-File "false_equality.ml", line 4, characters 16-76:
-4 |     {u : unit | Dfa_semantics.run left word === Dfa_semantics.run right word} =
-                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  The refinement is stated here.
-```
+@code testsuite/tests/vox/dfa_boundary.ml "(* Two machines need not agree on a word. *)" "|}]"
 
 ## Interface
 
@@ -54,7 +43,7 @@ File "false_equality.ml", line 4, characters 16-76:
 
 ## Trusted base
 
-- `dfa_boundary_check.py` is the only program that compiles `dfa_equivalence_core.mli` against its implementation, and the only one that compiles `dfa_public_client.ml`. `./dev test` does not run it. The test `dfa_equivalence.ml` checks the implementation and the proofs in `dfa_equivalence_core.ml`, without the `.mli`.
+- The test `dfa_boundary.ml` is the only one that compiles `dfa_equivalence_core.mli` against its implementation, and the only one that compiles `dfa_public_client.ml`. The test `dfa_equivalence.ml` checks the implementation and the proofs in `dfa_equivalence_core.ml`, without the `.mli`.
 - `dfa_equivalence_proof.ml` declares three `external` aliases of the primitives `%equal` and `%greaterequal` at `int` (`equal_int`, `same_int` and `>=`). The checker gives them the meaning of `=` and `>=`.
 
 ## Scope
@@ -70,9 +59,7 @@ File "false_equality.ml", line 4, characters 16-76:
 After `make install` and `./dev init`, from the repository root:
 
 ```
-./dev test vox/dfa_equivalence.ml
-python3 testsuite/tests/vox/dfa_boundary_check.py
-python3 testsuite/tests/vox/dfa_boundary_check.py --compiler _install/bin/ocamlc.opt
+./dev test vox/dfa_equivalence.ml vox/dfa_boundary.ml
 ```
 
-The test checks the implementation and its proofs and runs comparison and minimization examples, mostly through the diagnostic versions in `Dfa_proof` that also return certificates, with exact and insufficient limits and default edges. The script compiles all DFA and regex modules with `_install/bin/ocamlopt.opt` (or the compiler given by `--compiler`), compiles the public interfaces with `-opaque`, compiles `dfa_public_client.ml` against the public DFA interface only, links and runs it, and requires four programs to fail: this one and three that name hidden functions or modules. It also follows the named calls in the `-drawlambda` output to check that `compare` and `reduce` do not reach a fixed list of certificate-building functions, and checks that the public proof functions make no calls. It writes into a temporary directory and prints its path.
+The test checks the implementation and its proofs and runs comparison and minimization examples, mostly through the diagnostic versions in `Dfa_proof` that also return certificates, with exact and insufficient limits and default edges. `dfa_boundary.ml` compiles all DFA and regex modules with both compilers, the public interfaces with `-opaque`, compiles `dfa_public_client.ml` against the public DFA interface only, links and runs it, and requires four programs to fail with their exact errors: this one and three that name hidden functions or modules. It also follows the named calls in the `-drawlambda` output to check that `compare` and `reduce` do not reach a fixed list of certificate-building functions, and checks that the public proof functions make no calls.

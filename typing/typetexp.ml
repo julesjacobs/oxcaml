@@ -389,16 +389,35 @@ end = struct
 
   let univars = ref ([] : poly_univars)
 
+  (* A refinement predicate is translated in the middle of an enclosing type.
+     Its local variables are its own, but a global variable it introduces,
+     such as ['a] in [(e : 'a t)], is the ['a] of the enclosing binding. *)
   let protect_reentrant f =
-    Misc.protect_refs
-      [ Misc.R (type_variables, !type_variables);
-        Misc.R (used_variables, !used_variables);
-        Misc.R (used_anonymous_variables, !used_anonymous_variables);
-        Misc.R (warned_imprecise_locs, !warned_imprecise_locs);
-        Misc.R (pre_univars, !pre_univars);
-        Misc.R (univars, !univars)
-      ]
-      f
+    let outer_globals = !type_variables in
+    let keep_globals () =
+      let added =
+        TyVarMap.filter
+          (fun name _ -> not (TyVarMap.mem name outer_globals))
+          !type_variables
+      in
+      TyVarMap.union (fun _ outer _ -> Some outer) outer_globals added
+    in
+    let result =
+      try
+        Misc.protect_refs
+          [ Misc.R (used_variables, !used_variables);
+            Misc.R (used_anonymous_variables, !used_anonymous_variables);
+            Misc.R (warned_imprecise_locs, !warned_imprecise_locs);
+            Misc.R (pre_univars, !pre_univars);
+            Misc.R (univars, !univars)
+          ]
+          f
+      with exn ->
+        type_variables := outer_globals;
+        raise exn
+    in
+    type_variables := keep_globals ();
+    result
   let assert_univars uvs =
     assert (List.for_all (fun (_name, v, _stage) -> not_generic v.univar) uvs)
 

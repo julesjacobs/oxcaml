@@ -356,7 +356,7 @@ external ( mod ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%modint"
    @raise Division_by_zero if [y] is zero.
 *)
 
-val abs : int -> int
+val abs : int -> int @@ total
 (** [abs x] is the absolute value of [x]. On [min_int] this
    is [min_int] itself and thus remains negative. *)
 
@@ -390,7 +390,8 @@ external ( lxor ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
 val lnot : int -> int
 (** Bitwise logical negation. *)
 
-external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%lslint"
+external ( lsl ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%lslint"
 (** [n lsl m] shifts [n] to the left by [m] bits.
     The result is unspecified if [m < 0] or [m > Sys.int_size].
     Right-associative operator, see {!Ocaml_operators} for more information.
@@ -405,7 +406,8 @@ external ( lsr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
     Right-associative operator, see {!Ocaml_operators} for more information.
 *)
 
-external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int = "%asrint"
+external ( asr ) : (int[@local_opt]) -> (int[@local_opt]) -> int @@ total
+  = "%asrint"
 (** [n asr m] shifts [n] to the right by [m] bits.
     This is an arithmetic shift: the sign bit of [n] is replicated.
     The result is unspecified if [m < 0] or [m > Sys.int_size].

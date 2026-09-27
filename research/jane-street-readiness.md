@@ -18,8 +18,21 @@ Waves, merged into `vox` with a full suite run on the AMD box after each:
    presentation; the remaining weak contracts.
 3. **After wave 2 merges:** the second review round of every page, page
    corrections, then status **Ready for owner review**.
-4. **Then:** subsumption stages 1–4, medium warts, the prebuilt test
-   library, the x86 benchmark (on an idle AMD box).
+4. **Started early where independent:** subsumption stages 1–4, solver
+   encoding and termination measures (34, 77), inductive relations and named
+   predicates (56, 20), all on the AMD box. Later: ghost ownership and
+   layouts (after the soundness fix), the prebuilt test library (after the
+   tooling branch), the x86 benchmark (on an idle AMD box).
+
+Testing policy (27 September): a branch merges when its agent's own run
+passes and every affected test passes (`./dev test --affected <base>` once
+item 13 lands). The full suite then runs asynchronously on the AMD box after
+merges, batched; a red result means a fix-up or a revert. `vox` is pushed
+only at commits whose full suite passed.
+
+No GitHub CI (owner's decision, 27 September): the fork's upstream workflows
+need Jane Street's paid runners and never run. The full suite is our own run
+on the AMD box (`~/vox-check-run.sh` on the `incoming` branch there).
 
 Catalogue statuses: **Reviewed** means checked by the owner. **Ready for owner
 review** means two independent reviews found no false claim and the page
@@ -29,9 +42,16 @@ this file.
 ## Must have
 
 - [ ] **1. Soundness.**
-  - [ ] Merge the ghost-field ownership fix (branch
-        `jujacobs/vox/ghostfield-20260927`; checker fix `ec365027eb`),
-        with the list of demo proofs that relied on the bug.
+  - [x] Ghost-field ownership fix, merged in `3f313103a3` (checker fix
+        `ec365027eb`). No demo took a token twice; the demos that broke relied
+        on the construction-side hole (repairs in `3b2a3047e5`, `13f99dd368`).
+  - [x] W8: type parameters used only in refinement predicates are now
+        invariant (merged in `4e24de3229`). Still open through type
+        abbreviations and re-exported signatures; closes with subsumption
+        stage 2 (predicates compared with their types).
+  - [x] W9: the caches are keyed by the compiler digest and solver version
+        (`4e24de3229`); follow-up: query cache keyed by solver only, and a
+        timeout on the version probe.
   - [ ] Compare refinement predicates with their types (subsumption
         stage 2; design in `research/subsumption-design-20260927`).
 - [ ] **2. Second review round** (brief:
@@ -43,25 +63,34 @@ this file.
         regex-automata (its lowering gap stays, stated as an open question)
   - [ ] hm-wasm-compiler, after item 3.
 - [ ] **3. HM-to-Wasm is not trivial** (AMD box).
-  - [ ] Example programs compiled by the verified compiler and run, with
-        exact results and resource use, as a suite test (branch
-        `jujacobs/vox/hmc-resources-20260927`).
-  - [ ] Input as a run-time value through the exported `payload` global;
-        theorems for every input (branch `jujacobs/vox/hmc-input-20260927`).
-  - [ ] WebAssembly model tested against Node by random modules (branch
-        `jujacobs/vox/wasm-diff-20260927`).
-- [ ] **4. Every page claim checked by `./dev test`.**
-  - [ ] Port the 13 hand-run check scripts into the suite (wart 26).
-  - [ ] E-graphs: review the public boundary, regenerate
-        `vox_egraph_rule_handle.spec.json`, put the check in the suite.
-- [ ] **5. Bugs an expert could hit live.**
-  - [ ] `include M` with a refinement on an included value: escape error,
-        and a `Refinement_scope_escape` crash with `let rec`.
-  - [ ] `ocamlc -i` drops `@@ total`.
-  - [ ] Spurious escape error with the dependent-parameter sugar.
-  - [ ] `let rec` with a refined parameter: type error with identical types.
-  - [ ] `assert false` counted as returning; `assert e` not assumed after.
-  - [ ] `max_int`, `min_int` and other primitives unknown to the solver.
+  - [x] Example programs compiled by the verified compiler and run, with
+        exact results and resource use, as a suite test: eight programs, all
+        agreeing with Node (`hmc_compilation_examples.ml`, merged in
+        `e8eb54786f`). Resource theorems: not attempted; what they need is in
+        `research/hmc-resources-20260927/resource-theorem-notes.md` (only self
+        tail calls reuse frames; no garbage collector; layout rejections
+        depend on inference, which is not proved deterministic).
+  - [x] Input as a run-time value through the exported `payload` global;
+        theorems for every input (merged in `01b1df3709`); the example suite
+        runs one module per program on several inputs (`1111bd1927`). Open,
+        stated on the page: a module whose heap starts full could make
+        `sufficient` false and always report exhaustion.
+  - [x] WebAssembly model tested against Node: 100,000 random modules, no
+        disagreement; a 40-module smoke check in the suite (merged in
+        `123348b625`, `78020e455a`).
+- [x] **4. Every page claim checked by `./dev test`** (merged in
+      `075d6f9146`). The 13 hand-run scripts are ocamltest tests with exact
+      expected errors and positive controls, and are deleted; every page's
+      Reproduce section lists only `./dev test` commands. Outside the suite,
+      stated on the pages: `lz4_interop.py` (needs liblz4) and `run-diff-demo`
+      on other inputs.
+  - [x] E-graphs: boundary reviewed (the trusted surface is 13 files, as the
+        page says), manifest regenerated, check in the suite.
+- [x] **5. Bugs an expert could hit live**, all fixed with regression tests:
+      the `include` escape error and crash, `-i` dropping `@@ total`, the
+      dependent-parameter sugar, the identical-types `let rec` error (typer
+      branch, merged in `011f3cafb8`); `assert false` and `assert e`,
+      `max_int`/`min_int`/`abs`/shifts (verifier branch, `10d8f2bcd8`).
 - [ ] **6. A person reads the four route pages end to end:** flat hash
       table, Myers diff, one-shot channels, SAT.
 
@@ -78,11 +107,15 @@ this file.
   - [ ] Rings: insert and remove in the `Owned` interface.
   - [ ] Lists/trees: lemma relating `contents`, `nodes` and `List.rev`.
 - [ ] **9. Diagnostics and proof noise.**
-  - [ ] Name the failing conjunct of an `&&` goal (wart 14).
+  - [x] Name the failing conjunct of an `&&` goal (wart 14, `10d8f2bcd8`).
   - [ ] Erasure lints: total function with a ghost result whose body is not
         `ghost_`; real code discarding a ghost result (warts 41, 42).
-  - [ ] Remove the stale workarounds now unnecessary (about 160 lines;
-        `logic-automation.md`, items 58–62).
+  - [x] Remove the stale workarounds now unnecessary: about 555 lines net in
+        15 demos, merged in `4c74143232`. Leftovers for item 7: client files
+        the pages quote still use `refine_` and `let u = () in u`
+        (quicksort, queue, sorted-array, expressions, the DFA and regex
+        clients); `dfa_equivalence_proof` (313), `register_allocation` (85)
+        and the HM files still have many `let u = () in`.
 - [ ] **10. Performance story.**
   - [ ] Flat hash table benchmark on x86-64 (AMD box).
   - [ ] State on the compiler page that the backend manages its own stack
@@ -94,8 +127,14 @@ this file.
       52), layouts (10, 11, 13), inductive relations (56), named predicates
       (20), termination measures (77), bitwise solver fallback (34),
       well-formedness obligations for partial operations (67).
-- [ ] **12. Subsumption stages 1, 3 and 4** (after the design review).
-- [ ] **13. Prebuilt test library** (wart 33).
+- [ ] **12. Subsumption stages 1–4**, implemented as one piece from a
+      complete design (branch `jujacobs/vox/subsumption-20260927`, AMD box).
+      Afterwards, compare the implementation with the independent design in
+      `research/subsumption-design-20260927/DESIGN.md` and its tests, and
+      report divergences before merging.
+- [ ] **13. Prebuilt test library** (wart 33) and `./dev test --affected`
+      (branch `jujacobs/vox/fast-tests-20260927`, AMD box; target: full suite
+      about 5 minutes, from 22–28).
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
@@ -104,11 +143,11 @@ this file.
       premise assumed (57), top-level `@ total` in expect tests (79),
       comparator key distinctness (65), total division (71),
       `Bigint.to_int_opt` (69), iarray length bound (68), heap
-      extensionality (74), atomics (73), table modules at `-O3` (19),
-      `binary_modules` documentation (85), nested `ghost_` warning (80),
+      extensionality (74), atomics (73), table modules at `-O3` (19, done),
+      `binary_modules` documentation (85, done in `075d6f9146`), nested `ghost_` warning (80),
       ghost hint (81), unused refined binding hint (21), real bindings used
       only in ghost code (44), refined-result helper diagnostic (63),
-      `./dev --promote` exit status (25), verifier ignores
+      `./dev --promote` exit status (25, done), verifier ignores
       `module B = Base` (37), `[@def]` partial application order (50),
       polymorphic `let` outside ghost code (62).
 
@@ -119,4 +158,16 @@ function for proving and running (48); termination for stateful code (88).
 
 ## Decisions waiting for the owner
 
-(none yet)
+- **`[@def]` lemmas are generated and trusted, not re-proved by the
+  verifier** (found by the typer group's Codex review). Every change to the
+  lemma generator rests on the generator being right. Proposed: add a
+  re-proof of each generated lemma as a safety net (small to medium).
+
+- **Item 6**: reading the four route pages is yours.
+- **Subsumption open questions** (DESIGN.md §9), answered with defaults so
+  the implementation can proceed; to confirm when comparing it with the
+  design: keep a side table of sites with a fallback; stage 3 checks types,
+  not implementation bodies; recursive modules and packs stay syntactic;
+  invariant positions stay syntactic; functor applications in type paths
+  stay syntactic; the proposed error wording; measure stage 2's fallout
+  first; the mode condition uses position modes; `refine_` stays as it is.

@@ -5,8 +5,8 @@ module C := Representative_certificate
 module E := Effective_level
 
 type instance = #{value : node Pref.t @@ aliased; state : node Pref.token;
-  pool : pool @@ aliased; epoch : node Pref.t @@ ghost; history : history @@ ghost;
-  certificate : C.certificate @@ ghost}
+  pool : pool @@ aliased; epoch : node Pref.t @@ ghost aliased;
+  history : history @@ ghost aliased; certificate : C.certificate @@ ghost aliased}
 
 val instantiate :
   (c : Effective_copy_spec.context) @ immutable -> (heads : E.heads Ghost.t) @ total ->

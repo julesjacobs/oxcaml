@@ -46,7 +46,7 @@ Line 5, characters 32-33:
 5 |     (fun index -> let u = () in u) in
                                     ^
 Error: Refinement could not be proved (counterexample)
-File "vox_iarray.mli", lines 40-41, characters 16-38:
+File "vox_iarray.mli", line 41, characters 6-38:
   The refinement is stated here.
 |}]
 
@@ -61,7 +61,7 @@ Line 5, characters 32-33:
 5 |     (fun index -> let u = () in u) in
                                     ^
 Error: Refinement could not be proved (counterexample)
-File "vox_iarray.mli", lines 40-41, characters 16-38:
+File "vox_iarray.mli", line 40, characters 16-56:
   The refinement is stated here.
 |}]
 

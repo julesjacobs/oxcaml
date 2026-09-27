@@ -26,8 +26,9 @@ if (demo) {
       const manifest = await response.json();
       const example = manifest.cases[Number(button.dataset.wasmCase)];
       if (!example) throw new Error('This example is unavailable.');
-      const [bytes, expectedMemory] = await Promise.all([checked(example.wasm), checked(example.memory)]);
+      const [bytes, expectedMemory] = await Promise.all([checked(manifest.wasm), checked(example.memory)]);
       const { instance } = await WebAssembly.instantiate(bytes);
+      instance.exports.payload.value = BigInt(example.input);
       const status = instance.exports.run() >>> 0;
       const tag = BigInt.asUintN(64, instance.exports.tag.value).toString();
       const payload = BigInt.asUintN(64, instance.exports.payload.value).toString();

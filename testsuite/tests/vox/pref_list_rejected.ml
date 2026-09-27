@@ -31,9 +31,9 @@ Line 12, characters 4-5:
 12 |     r
          ^
 Error: Refinement could not be proved (counterexample)
-Lines 8-9, characters 20-56:
-8 | ....................r.pointer === root (rev_append xs Nil)
-9 |         && Pref.own r.state === heap (rev_append xs Nil)............
+Line 8, characters 20-58:
+8 |       {r : result | r.pointer === root (rev_append xs Nil)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   The refinement is stated here.
 |}, Principal{|
 Line 7, characters 20-21:

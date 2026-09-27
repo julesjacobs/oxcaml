@@ -23,9 +23,6 @@ let[@def] (correct @ total) (program : I.program @ immutable) (layout : Init.lay
     let prepared = execution.prepared in
     Init.correct program layout input memory (Init.Initialized (execution.start, prepared))
     && E.valid program execution.start.Heap.globals prepared.Init.lowered prepared.Init.context execution.run.E.endpoint
-    && Calls.start (State.module_ program prepared.Init.lowered prepared.Init.context) prepared.Init.context.State.block_count
-      prepared.Init.state.State.memory (Registers.globals prepared.Init.state.State.registers) (C.Succ prepared.Init.context.State.host_capacity)
-      === Calls.Running (Entry.configuration prepared.Init.context prepared.Init.state)
     && Calls.run (C.Succ execution.run.E.fuel) (State.module_ program prepared.Init.lowered prepared.Init.context)
       (Entry.configuration prepared.Init.context prepared.Init.state) === E.target prepared.Init.context execution.run.E.endpoint)
 let (run @ total) : (program : I.program) @ immutable -> (layout : Init.layout) @ immutable ->
@@ -70,11 +67,11 @@ let (preservation @ total) : (program : I.program) @ immutable -> (layout : Init
 let (safe @ total) : (program : I.program) @ immutable -> (layout : Init.layout) @ immutable ->
     (input : Hmc_word64.t) @ immutable -> (memory : Wasm_u32.bytes) @ immutable ->
     (start : Heap.start) @ immutable -> (prepared : Init.prepared) @ immutable -> (prefix : C.count) @ immutable ->
-    {u : unit | Init.correct program layout input memory (Init.Initialized (start, prepared))} ->
+    {u : unit | Init.ready program layout input memory start prepared} ->
     {u : unit | match Calls.run prefix (State.module_ program prepared.Init.lowered prepared.Init.context)
       (Entry.configuration prepared.Init.context prepared.Init.state) with Calls.Running _ | Calls.Finished _ -> true | _ -> false} @ ghost =
   fun program layout input memory start prepared prefix premise -> ghost_ (
-    Init.correct_def program layout input memory (Init.Initialized (start, prepared));
+    Init.ready_def program layout input memory start prepared;
     Init.installed_def program layout input memory start prepared;
     let witness = Hmc_wasm_program_observe.entry program start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state prefix () in
     Hmc_wasm_program_observe.matches_def prepared.Init.context witness.E.endpoint
@@ -83,7 +80,7 @@ let (reflection @ total) : (program : I.program) @ immutable -> (layout : Init.l
     (input : Hmc_word64.t) @ immutable -> (memory : Wasm_u32.bytes) @ immutable ->
     (start : Heap.start) @ immutable -> (prepared : Init.prepared) @ immutable -> (prefix : C.count) @ immutable ->
     (after : Wasm_global_execution.state) @ immutable -> (registers : Registers.registers) @ immutable -> (word : Hmc_word64.t) @ immutable ->
-    {u : unit | Init.correct program layout input memory (Init.Initialized (start, prepared))
+    {u : unit | Init.ready program layout input memory start prepared
       && Calls.run prefix (State.module_ program prepared.Init.lowered prepared.Init.context)
         (Entry.configuration prepared.Init.context prepared.Init.state) === Calls.Finished after
       && after.Wasm_global_execution.globals === Registers.globals registers && registers.Registers.status = 1
@@ -94,6 +91,6 @@ let (reflection @ total) : (program : I.program) @ immutable -> (layout : Init.l
       (Hmc_monomorphic_simulation.source_start program.I.origin.Cfg.origin.Closure.origin input)
       === Hmc_source_semantics.Done (Hm_interpreter_typing.Word word)} @ immutable =
   fun program layout input memory start prepared prefix after registers word premise ->
-    ghost_ (Init.correct_def program layout input memory (Init.Initialized (start, prepared));
+    ghost_ (Init.ready_def program layout input memory start prepared;
       Init.installed_def program layout input memory start prepared);
     Hmc_wasm_program_observe.reflection program start.Heap.globals prepared.Init.lowered prepared.Init.context prepared.Init.state prefix after registers word ()

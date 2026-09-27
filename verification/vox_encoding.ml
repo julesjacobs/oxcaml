@@ -618,6 +618,10 @@ let same_nominal_data_type env left right =
   match type_key env left, type_key env right with
   | Some (Constructor (source, _)), Some (Constructor (expected, _)) ->
     Path.same source expected
+  | Some (Tuple source), Some (Tuple expected) ->
+    List.equal
+      (fun (left, _) (right, _) -> Option.equal String.equal left right)
+      source expected
   | _ -> false
 
 let declarations_of_sort ctx = function
@@ -670,6 +674,9 @@ let iarray_value_path fields =
     (Path.Pident (Ident.create_persistent "Stdlib__Iarray"))
     fields
 
+let stdlib_value_path name =
+  Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib"), name)
+
 let same_value env description path =
   let standard = Subst.Lazy.force_value_description (Env.find_value path env) in
   Uid.equal description.val_uid standard.val_uid
@@ -702,6 +709,8 @@ let primitive env path =
           then Some ("caml_array_append", 2)
           else if same_value env description (iarray_value_path ["sub"])
           then Some ("%iarray_sub", 3)
+          else if same_value env description (stdlib_value_path "abs")
+          then Some ("%vox_abs_int", 1)
           else None))
   with Not_found -> None
 
@@ -709,16 +718,29 @@ let is_set_empty env path = set_value env path = Some ("%set_empty", 0)
 
 let is_map_empty env path = map_value env path = Some ("%map_empty", 0)
 
+let int_value_path name =
+  Path.Pdot (Path.Pident (Ident.create_persistent "Stdlib__Int"), name)
+
 let value_constant ctx env ty path =
-  if sort ctx env ty <> Some Int
-  then None
-  else
-    let path = Env.normalize_value_path None env path in
+  let path = Env.normalize_value_path None env path in
+  match sort ctx env ty with
+  | Some Int ->
     if Path.same path (Vox_type.bigint_path "zero")
     then Some (Big_integer "0")
     else if Path.same path (Vox_type.bigint_path "one")
     then Some (Big_integer "1")
     else None
+  | Some Int63 ->
+    if
+      Path.same path (stdlib_value_path "max_int")
+      || Path.same path (int_value_path "max_int")
+    then Some (Integer 4611686018427387903L)
+    else if
+      Path.same path (stdlib_value_path "min_int")
+      || Path.same path (int_value_path "min_int")
+    then Some (Integer (-4611686018427387904L))
+    else None
+  | _ -> None
 
 let operation ctx env ~function_type ~result_type name args =
   let unary sort op =
@@ -805,10 +827,25 @@ let operation ctx env ~function_type ~result_type name args =
       | _ -> binary Int63 (if name = "%divint" then Div else Rem)
       end
     | "%negint" -> unary Int63 Neg
+    | "%succint" -> (
+      match args with
+      | [Some x] when term_sort x = Int63 -> Some (App (Add, [x; Integer 1L]))
+      | _ -> None)
+    | "%predint" -> (
+      match args with
+      | [Some x] when term_sort x = Int63 -> Some (App (Sub, [x; Integer 1L]))
+      | _ -> None)
+    | "%vox_abs_int" -> (
+      match args with
+      | [Some x] when term_sort x = Int63 ->
+        Some (App (Ite, [App (Lt, [x; Integer 0L]); App (Neg, [x]); x]))
+      | _ -> None)
     | "%andint" -> binary Int63 Bit_and
     | "%orint" -> binary Int63 Bit_or
     | "%xorint" -> binary Int63 Bit_xor
     | "%lsrint" -> binary Int63 Shift_right_logical
+    | "%lslint" -> binary Int63 Shift_left
+    | "%asrint" -> binary Int63 Shift_right_arithmetic
     | "%equal" -> structural_equality Eq
     | "%notequal" -> structural_equality Ne
     | "%eq" -> physical_equality Eq

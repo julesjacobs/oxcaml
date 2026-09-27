@@ -289,14 +289,20 @@ let decode_string : (wire : string) ->
         B.release { B.block; permission; used };
         decoded
       | None ->
-        let output : {s : string | Iarray.length (V.contents s) = used
+        (* The handler must not release the buffer itself: the uniqueness
+           analysis does not know that [raise] leaves, so a release there
+           would conflict with the release on the normal path. *)
+        let copied : ({s : string | Iarray.length (V.contents s) = used
             && Vox_lz4_heap_bytes.prefix_matches (V.contents s)
-                 (P.own permission) block used} =
-          try Copy.copy_prefix block used (borrow_ permission)
-          with exn ->
-            B.release { B.block; permission; used };
-            raise exn
+                 (P.own permission) block used}, exn) result =
+          try Ok (Copy.copy_prefix block used (borrow_ permission))
+          with exn -> Error exn
         in
+        match copied with
+        | Error exn ->
+          B.release { B.block; permission; used };
+          raise exn
+        | Ok output ->
         ghost_ (Bytes_proof.observations (V.contents output)
           (P.own (borrow_ permission)) block used pure_model.reversed);
         let decoded : decoded = Ok output in

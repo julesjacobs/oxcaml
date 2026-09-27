@@ -601,8 +601,33 @@ run_planned_tests()
     done < "$test_files"
   fi
   cat "$log"
+  summary=$temp_dir/summary
   report_status=0
-  awk -f "$root/testsuite/summarize.awk" < "$log" || report_status=$?
+  awk -f "$root/testsuite/summarize.awk" < "$log" > "$summary" ||
+    report_status=$?
+  cat "$summary"
+  # ocamltest reports a promoted output as a failure, and stops the test at
+  # that action. Run the failed tests again without promotion: the command
+  # succeeds only if they now pass.
+  if [ "$promote" = true ] && [ "$report_status" -eq 4 ] &&
+     [ "$execution_status" -eq 0 ] &&
+     grep -Eq '^ +0 unexpected errors$' "$summary"; then
+    promoted_tests=$temp_dir/promoted-tests
+    awk -v only_report_failed_tests=1 -f "$root/testsuite/summarize.awk" \
+      < "$log" | LC_ALL=C sort > "$promoted_tests"
+    if [ -s "$promoted_tests" ]; then
+      echo "Checking the failed tests again without promotion:"
+      test_files=$promoted_tests
+      promote=false
+      if [ "$(wc -l < "$test_files")" -gt 1 ]; then
+        selection_kind=directory
+      else
+        selection_kind=file
+      fi
+      run_planned_tests "$run_dir/recheck.log"
+      return
+    fi
+  fi
   [ "$report_status" -eq 0 ] || return "$report_status"
   return "$execution_status"
 }

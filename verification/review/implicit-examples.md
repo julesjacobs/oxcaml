@@ -13,18 +13,8 @@ native and principal variants. They cover the remaining seven support modules
 through their dependency headers; the HOF benchmark additionally compiles all
 four HOF units and generated clients with both compilers. Rejection diagnostic
 spans and inferred output were refreshed without promoting new error classes or
-unused-variable warnings. The two final window/environment examples also pass
-through the committed runner:
-
-```
-python3 verification/review/check_implicit_examples.py COMPILER_ROOT
-```
-
-`COMPILER_ROOT` must contain an existing `_install`, `_runtest/ocamltest/ocamltest`,
-and `_build/main/oxcaml/testsuite/tools/{expect,expectnat}.exe`. The runner writes
-only this checkout's `_build/implicit-examples`; it neither rebuilds nor changes
-the compiler installation. The installation used here is the read-only
-`worktrees/time-credits` installation pinned in `implicit-library.md`.
+unused-variable warnings. The 45 roots are ordinary tests of the Vox suite,
+so `./dev test vox/` runs them; the former runner script is removed.
 
 `borrow_parallel.ml` compiles in both backends, with and without principal.
 The installed test harness skips its multicore predicate. Direct execution

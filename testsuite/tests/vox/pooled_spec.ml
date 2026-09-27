@@ -13,6 +13,6 @@ let[@def] rec (touched @ total) (d : history @ immutable) = ghost_ (
   | Fresh (rest, p, _, _, _) | Alias (rest, p, _, _) -> Entry (p, touched rest))
 
 type allocated = #{value : node Pref.t @@ aliased; state : node Pref.token; pool : pool @@ aliased}
-type copied = #{value : node Pref.t @@ aliased; state : node Pref.token; pool : pool @@ aliased; trail : pool @@ aliased; history : history @@ ghost}
+type copied = #{value : node Pref.t @@ aliased; state : node Pref.token; pool : pool @@ aliased; trail : pool @@ aliased; history : history @@ ghost aliased}
 type instance = #{value : node Pref.t @@ aliased; state : node Pref.token; pool : pool @@ aliased; trail : pool @@ aliased;
-  epoch : node Pref.t @@ ghost; history : history @@ ghost}
+  epoch : node Pref.t @@ ghost aliased; history : history @@ ghost aliased}

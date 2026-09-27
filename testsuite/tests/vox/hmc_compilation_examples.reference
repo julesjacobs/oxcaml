@@ -1,0 +1,18 @@
+design (input 4): returned 12; 207 source steps, 27635 WebAssembly steps; heap 480 of 65536 bytes; stack 3 of 128 frames (368 bytes each); sufficient: no
+design (input 8): returned 0; 175 source steps, 23243 WebAssembly steps; heap 480 of 65536 bytes; stack 3 of 128 frames (368 bytes each); sufficient: no
+design: one module ran on the inputs 4, 8
+identity (input 42): returned 42; 7 source steps, 113 WebAssembly steps; heap 16 of 65536 bytes; stack 0 of 128 frames (64 bytes each); sufficient: no
+identity, small frame region (input 42): returned 42; 7 source steps, 113 WebAssembly steps; heap 16 of 65536 bytes; stack 0 of 128 frames (64 bytes each); sufficient: yes
+fibonacci (input 1): returned 1; 22 source steps, 1180 WebAssembly steps; heap 32 of 65536 bytes; stack 1 of 128 frames (224 bytes each); sufficient: no
+fibonacci (input 10): returned 55; 3190 source steps, 297036 WebAssembly steps; heap 32 of 65536 bytes; stack 10 of 128 frames (224 bytes each); sufficient: no
+fibonacci (input 15): returned 610; 35518 source steps, 3316112 WebAssembly steps; heap 32 of 65536 bytes; stack 15 of 128 frames (224 bytes each); sufficient: no
+fibonacci: one module ran on the inputs 1, 10, 15
+sum-list (input 0): returned 0; 33 source steps, 2152 WebAssembly steps; heap 48 of 65536 bytes; stack 1 of 128 frames (304 bytes each); sufficient: no
+sum-list (input 100): returned 5050; 3233 source steps, 355152 WebAssembly steps; heap 3248 of 65536 bytes; stack 101 of 128 frames (304 bytes each); sufficient: no
+sum-list: one module ran on the inputs 0, 100
+count (input 0): returned 3000; 48022 source steps, 3487138 WebAssembly steps; heap 32 of 65536 bytes; stack 1 of 128 frames (176 bytes each); sufficient: no
+accumulate (input 100): returned 5050; 2527 source steps, 293308 WebAssembly steps; heap 4880 of 65536 bytes; stack 101 of 128 frames (272 bytes each); sufficient: no
+closures (input 7): returned 34; 73 source steps, 7544 WebAssembly steps; heap 240 of 65536 bytes; stack 3 of 128 frames (224 bytes each); sufficient: no
+polymorphism (input 3): returned 21; 367 source steps, 49891 WebAssembly steps; heap 704 of 65536 bytes; stack 5 of 128 frames (368 bytes each); sufficient: no
+sum-list, 8 frames (input 100): out of stack (the source returns 5050); 3233 source steps, 13540 WebAssembly steps; heap 48 of 65536 bytes; stack 8 of 8 frames (304 bytes each); sufficient: no
+sum-list, 2 KiB heap (input 100): out of heap (the source returns 5050); 3233 source steps, 184101 WebAssembly steps; heap 2032 of 2048 bytes; stack 101 of 128 frames (304 bytes each); sufficient: no

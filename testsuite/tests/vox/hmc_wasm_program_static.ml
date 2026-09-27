@@ -88,7 +88,22 @@ let (dispatcher_typed @ total) : (program : I.program) @ immutable -> (lowered :
     L.get_def g0 5; L.get_def g1 4; L.get_def g2 3; L.get_def g3 2; L.get_def g4 1; L.get_def g5 0;
     Wasm_static_types.global_def (Registers.globals registers) 0;
     Wasm_static_types.global_def (Registers.globals registers) 5;
+    G.get_def (Registers.globals registers) 7;
+    L.get_def g0 7; L.get_def g1 6; L.get_def g2 5; L.get_def g3 4; L.get_def g4 3; L.get_def g5 2; L.get_def g6 1; L.get_def g7 0;
+    Wasm_static_types.global_def (Registers.globals registers) 7;
+    Registers.permissions_def ();
+    let p7 = G.Global (true, G.Empty) in
+    let p6 = G.Global (true, p7) in
+    let p5 = G.Global (true, p6) in
+    let p4 = G.Global (false, p5) in
+    let p3 = G.Global (true, p4) in
+    let p2 = G.Global (false, p3) in
+    let p1 = G.Global (true, p2) in
+    let p0 = G.Global (false, p1) in
+    G.writable_def p0 7; G.writable_def p1 6; G.writable_def p2 5; G.writable_def p3 4;
+    G.writable_def p4 3; G.writable_def p5 2; G.writable_def p6 1; G.writable_def p7 0;
     Hmc_wasm_static_runtime.zero_def (); Hmc_wasm_static_runtime.status_index_def ();
+    Hmc_wasm_static_runtime.payload_index_def ();
     Hmc_wasm_static_runtime.dispatcher module_ (Registers.globals registers) ())
 let (bodies @ total) : (program : I.program) @ immutable -> (globals : Hmc_heap_machine.globals) @ immutable ->
     (lowered : Lower.program) @ immutable -> (context : State.context) @ immutable -> (registers : Registers.registers) @ immutable ->

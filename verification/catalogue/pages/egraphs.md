@@ -18,6 +18,7 @@ sources:
   - verification/library/vox_egraph_interpret_wrapping.mli — From derivations to equal evaluations
   - verification/library/vox_egraph_rule_handle.md — Reading order, resource limits and fuel
   - testsuite/tests/vox/egraph_rule_public.ml — Public-only client
+  - testsuite/tests/vox/egraph_boundary.ml — Public-only compile of the client, rejected programs, erasure check and the declaration inventory
   - testsuite/tests/vox/egraph_rule_rejected.ml — Rejected derivations
 ---
 `Vox_egraph_rule_handle` is an e-graph: a union-find over hash-consed expression nodes. The expressions are those of a small typed language with integer and boolean literals, one integer and one boolean input, addition, integer equality and conditionals. The graph is created with a list of rewrite rules, each a pair of patterns over typed variables, and "equal" means derivable from these rules by reflexivity, symmetry, transitivity and congruence. The rules need not agree with the language's evaluator. The interface proves that `admit` returns an id whose reconstructed expression is exactly the admitted one, and returns `None` only for an ill-typed expression or when the graph has reached 512 nodes; that `query` answers `Equal` only together with an erased derivation, valid for the rules, from the left expression to the right one; that `saturate` answers `Fixed_point` only when, for every rule and every assignment of existing nodes of the right sorts to its variables (`-1` stands for no node), a class matched by the left-hand side is also matched by the right-hand side, and all congruent nodes share a class; and that `same_class` answers exactly whether two ids have the same class label and, when they do, supplies a valid derivation between their expressions. Every operation keeps the rules and the expressions of existing ids. A separate theorem, `Vox_egraph_interpret_wrapping.sound`, turns a valid derivation into equality of evaluations, given a proof that every instance of every rule preserves evaluation.
@@ -53,7 +54,7 @@ The same test rejects a transitivity step whose two halves do not meet (`0 = 0` 
 - The node index is the flat hash table's implementation (`Vox_table_implementation.Make`), so the e-graph trusts what the [flat hash table](flat-hash-table.html) trusts: the SIMD group matching in `runtime/vox_control.c` and `backend/cmm_builtins.ml`, the storage contracts of `verification/library/vox_table_storage.mli`, and count-trailing-zeros returning 63 for zero.
 - `Vox_iarray.get` and `Vox_iarray.set` (`verification/library/vox_iarray.mli`) are `external`s whose meaning is built into the checker (`verification/vox_vc.ml`); `set` is implemented in `runtime/borrow.c`.
 - `Iarray.length` and `Iarray.Refined.get` (`stdlib/iarray.mli`), and the checker's built-in rule that `Iarray.init n f` has length `n`.
-- Three programs that must fail to compile against the interface (`verification/tests/egraph_boundary/abstract_state.ml`, `invalid_rules.ml` and `limit_is_not_fixed.ml`), a compile of the public client with only the public interfaces visible, and a search of five modules' emitted Lambda for calls to five proof modules are run only by `verification/tests/check_egraph_boundary.py`. That script is currently broken (see Reproduce), so none of these is checked on the trunk.
+- `verification/library/vox_egraph_rule_handle.spec.json` records the exact text of every top-level declaration of the thirteen files a reader must trust (the eleven semantic and interface files listed above and `vox_egraph_closure_spec.ml` and `vox_egraph_quantifier.mli`), and the trusted standard-library primitives. `egraph_boundary.ml` regenerates it from the sources and fails if it differs.
 
 ## Scope
 
@@ -70,9 +71,9 @@ The same test rejects a transitivity step whose two halves do not meet (`0 = 0` 
 After `make install` and `./dev init`:
 
 ```
-./dev test vox/egraph_rule_public.ml vox/egraph_rule_rejected.ml vox/egraph_rule_saturate.ml vox/egraph_derivation.ml
+./dev test vox/egraph_rule_public.ml vox/egraph_rule_rejected.ml vox/egraph_rule_saturate.ml vox/egraph_derivation.ml vox/egraph_boundary.ml
 ```
 
 `egraph_rule_public.ml` compiles the library modules the e-graph needs, including the hash table, and the client, as bytecode and native code; it also checks that the graph handle has two runtime fields in native code. `egraph_rule_rejected.ml` holds the two rejected derivations. `egraph_rule_saturate.ml` reaches a fixed point and the search, rebuild and round limits, calling the saturation module below the public interface. The public client reaches the 512-node limit. `egraph_derivation.ml` proves the interpretation premise for a concrete rule and applies `sound`.
 
-`verification/tests/check_egraph_boundary.py` is currently broken: the declaration inventory it starts from, `verification/library/vox_egraph_rule_handle.spec.json`, records an older `vox_egraph_saturation_spec.ml`, so the script stops with "Stale specification inventory" before running any check.
+`egraph_boundary.ml` compiles the library, compiles the public client with only the thirteen public interfaces visible, requires three programs to fail with their exact errors (forging a graph handle, creating a graph from a rule whose sides have different sorts, and claiming a fixed point after a saturation that stopped at a limit), searches the emitted Lambda of five modules for calls to five proof modules, and checks the declaration inventory.

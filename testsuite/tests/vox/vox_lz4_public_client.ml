@@ -1,5 +1,5 @@
 (* This client is compiled with only public semantic CMIs; see
-   verification/benchmarks/lz4_boundary_check.py. *)
+   lz4_boundary.ml. *)
 module C = Vox_lz4
 module V = Vox_string_view
 

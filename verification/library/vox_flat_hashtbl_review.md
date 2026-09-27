@@ -127,14 +127,13 @@ internal regression clients; they are excluded from the public-only client's
 include directory. The storage-level `table_model.ml` regression deliberately
 uses the internal driver to retain its detailed representation checks.
 
-Reproduce the boundary check after `make install` and
-`bash verification/library/build.sh _install`:
+Reproduce the boundary check after `make install` and `./dev init`:
 
 ```
-verification/clients/check_flat_hashtbl_public.sh
+./dev test vox/flat_hashtbl_boundary.ml
 ```
 
-The script copies only `Pref`, `Ghost_pref` and `Vox_verified_flat_hashtbl`
+The test copies only `Pref`, `Ghost_pref` and `Vox_verified_flat_hashtbl`
 CMIs into its public include directory. The independently compiled generic
 client derives empty lookup, arbitrary-query replacement/removal/clearing,
 the length after replacement and removal, and an unrelated owned table's
@@ -144,8 +143,10 @@ aliased handles, GC compaction and subsequent lookup. Additional cases update
 a key beyond a tombstone without duplication and replace/remove logically
 different keys in the same `Key.equal` equivalence class.
 
-Both bytecode and native clients pass. Thirteen rejection cases pass in both modes (six ownership or refinement
-errors and seven abstraction checks):
+Both bytecode and native clients pass. Thirteen rejection cases pass, each
+with its exact error (six ownership or refinement errors and seven
+abstraction checks); three of them are also compiled with both compilers
+without the refinement extension:
 false reflexivity, inconsistent hashing, hidden invariant/implementation/proof/
 representation/compaction/list-model access, constructing a `Map.t` from a
 list, stale views, missing ownership, token reuse and a false lookup result. The erasure check inspects both emitted Lambda files: generic
@@ -154,7 +155,7 @@ lemmas, and neither the default nor the `-O3` native Cmm calls an ownership
 primitive. Native snapshots and tokens have zero layout, and mutation results
 contain only zero-layout fields. There is no runtime certificate accumulation
 or final semantic checker. Runtime asserts in regression clients are tests.
-`_build/flat-hashtbl-public/erasure.json` records the checked properties.
+`flat_hashtbl_boundary.checks-*.reference` lists the checked properties.
 
 The implementation also passed `table_model.ml` in bytecode and native:
 10,000 differential operations, 65,536-entry growth, GC/pointer payload and

@@ -43,21 +43,30 @@ let skip = make
     let result = Result.skip_with_reason reason in
     (result, env))
 
+let on_path executable =
+  let path = Option.value ~default:"" (Sys.getenv_opt "PATH") in
+  let separator, executable =
+    if Sys.win32 then ';', executable ^ ".exe" else ':', executable in
+  List.exists (fun directory ->
+    let file = Filename.concat directory executable in
+    Unix.is_executable file && not (Sys.is_directory file))
+    (String.split_on_char separator path)
+
 let has_z3 = make
   ~name:"has-z3"
   ~description:"Pass if Z3 is available on PATH"
   ~does_something:false
   (fun log env ->
-    let path = Option.value ~default:"" (Sys.getenv_opt "PATH") in
-    let separator, executable =
-      if Sys.win32 then ';', "z3.exe" else ':', "z3" in
-    let available = List.exists (fun directory ->
-      let file = Filename.concat directory executable in
-      Unix.is_executable file && not (Sys.is_directory file))
-      (String.split_on_char separator path)
-    in
-    Actions_helpers.predicate available
+    Actions_helpers.predicate (on_path "z3")
       "Z3 is available" "Z3 is unavailable" log env)
+
+let has_node = make
+  ~name:"has-node"
+  ~description:"Pass if Node.js is available on PATH"
+  ~does_something:false
+  (fun log env ->
+    Actions_helpers.predicate (on_path "node")
+      "Node.js is available" "Node.js is unavailable" log env)
 
 let fail = make
   ~name:"fail"
@@ -511,6 +520,7 @@ let init () =
     pass;
     skip;
     has_z3;
+    has_node;
     fail;
     cd;
     dumpenv;

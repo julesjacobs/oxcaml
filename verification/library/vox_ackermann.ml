@@ -10,11 +10,7 @@ let[@def] rec iter (cap : Bigint.t) (level : Bigint.t)
   else
     let next = iter cap (Bigint.sub level 1Z) (Bigint.add start 1Z) start in
     iter cap level (Bigint.sub count 1Z) next
-[@@decreases let cap : Bigint.t = cap in
-  let level : Bigint.t = level in let count : Bigint.t = count in
-  let start : Bigint.t = start in if cap >= 1Z && level >= 0Z && count >= 0Z &&
-  count <= cap && start >= 0Z && start <= cap
-  then Bigint.add (Bigint.mul level (Bigint.add cap 1Z)) count else 0Z]
+[@@decreases (level, count)]
 
 let rec (bounds @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     (count : Bigint.t) -> (start : Bigint.t) ->
@@ -37,11 +33,7 @@ let rec (bounds @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     let next = iter cap lower repetitions start in
     bounds cap level (Bigint.sub count 1Z) next;
     ())
-[@@decreases let cap : Bigint.t = cap in
-  let level : Bigint.t = level in let count : Bigint.t = count in
-  let start : Bigint.t = start in if cap >= 1Z && level >= 0Z && count >= 0Z &&
-  count <= cap && start >= 0Z && start <= cap
-  then Bigint.add (Bigint.mul level (Bigint.add cap 1Z)) count else 0Z]
+[@@decreases (level, count)]
 
 let rec (monotone @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     (small : Bigint.t) -> (large : Bigint.t) ->
@@ -74,9 +66,7 @@ let rec (monotone @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     let u = () in
     monotone cap level s l next_x next_y (u);
     ())
-[@@decreases let cap : Bigint.t = cap in
-  let level : Bigint.t = level in let small : Bigint.t = small in
-  Bigint.add (Bigint.mul level (Bigint.add cap 1Z)) small]
+[@@decreases (level, small)]
 
 let rec (growth @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     (count : Bigint.t) -> (start : Bigint.t) ->
@@ -101,12 +91,7 @@ let rec (growth @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     growth cap level rest next;
     minimum_def cap (Bigint.add next rest);
     ())
-[@@decreases let cap : Bigint.t = cap in
-  let level : Bigint.t = level in let count : Bigint.t = count in
-  let start : Bigint.t = start in
-  if cap >= 1Z && level >= 0Z && count >= 0Z && count <= cap &&
-    start >= 0Z && start <= cap
-  then Bigint.add (Bigint.mul level (Bigint.add cap 1Z)) count else 0Z]
+[@@decreases (level, count)]
 
 let rec (compose @ total) : (cap : Bigint.t) -> (level : Bigint.t) ->
     (first : Bigint.t) -> (second : Bigint.t) -> (start : Bigint.t) ->
@@ -241,9 +226,7 @@ let rec (coherent @ total) : (small : Bigint.t) -> (large : Bigint.t) ->
       let u = () in coherent small large level rest b (u);
       minimum_def small (iter large level rest b);
       ()))
-[@@decreases let small : Bigint.t = small in
-  let level : Bigint.t = level in let count : Bigint.t = count in
-  Bigint.add (Bigint.mul level (Bigint.add small 1Z)) count]
+[@@decreases (level, count)]
 
 let rec (below_elim @ total) : (cap : Bigint.t) -> (a : Bigint.t) ->
     (k : Bigint.t) ->

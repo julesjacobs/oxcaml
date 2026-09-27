@@ -9,12 +9,15 @@ module Check = Wasm_static_control
 module Runtime = Hmc_wasm_program_runtime
 let[@def] (zero @ total) (unit : unit) : B.u32 = 0
 let[@def] (status_index @ total) (unit : unit) : B.u32 = 5
+let[@def] (payload_index @ total) (unit : unit) : B.u32 = 7
 let (dispatcher @ total) : (module_ : F.module_) @ immutable -> (globals : G.t) @ immutable ->
     {u : unit | F.signature module_.F.signatures (zero ()) === Some F.Void
-      && V.global globals (zero ()) === Some V.I32 && V.global globals (status_index ()) === Some V.I32} ->
+      && V.global globals (zero ()) === Some V.I32 && V.global globals (status_index ()) === Some V.I32
+      && V.global globals (payload_index ()) === Some V.I64 && G.writable globals.G.permissions (payload_index ())} ->
     {u : unit | Check.function_ module_ globals (Runtime.dispatcher ())} @ ghost =
   fun module_ globals premise -> ghost_ (
-    zero_def (); status_index_def (); Runtime.dispatcher_def (); Runtime.dispatch_body_def ();
+    zero_def (); status_index_def (); payload_index_def (); Runtime.dispatcher_def (); Runtime.dispatch_body_def ();
+    Runtime.loop_code_def (); Runtime.prologue_def (Runtime.loop_code ());
     let context = {V.module_; globals; locals = F.No_locals; result = F.I32} in
     let empty = V.initial () in
     let value = V.push V.I32 empty in
@@ -40,6 +43,21 @@ let (dispatcher @ total) : (module_ : F.module_) @ immutable -> (globals : G.t) 
     let finish = T.Instruction (I.Global_get 5, T.Empty) in
     Check.check_def context (Check.Root F.I32) T.Empty value;
     Check.check_def context (Check.Root F.I32) finish empty;
-    Check.check_def context (Check.Root F.I32) (Runtime.dispatcher ()).F.code empty;
+    Check.check_def context (Check.Root F.I32) (Runtime.loop_code ()) empty;
     V.finish_def F.I32 value; V.consume_result_def F.I32 value;
+    let reset = T.Instruction (I.Global_set 7, Runtime.loop_code ()) in
+    let clear = T.Instruction (I.I64_const {Hmc_word64.lo = 0; hi = 0}, reset) in
+    let store = T.Instruction (I.I64_store (3, 56), clear) in
+    let input = T.Instruction (I.Global_get 7, store) in
+    let wide = V.push V.I64 empty in
+    let address = V.push V.I64 value in
+    Step.global_set context 7 V.I64 empty ();
+    Step.constant64 context {Hmc_word64.lo = 0; hi = 0} empty;
+    Step.store64 context 3 56 empty;
+    Step.global_get context 7 V.I64 value ();
+    Check.check_def context (Check.Root F.I32) reset wide;
+    Check.check_def context (Check.Root F.I32) clear empty;
+    Check.check_def context (Check.Root F.I32) store address;
+    Check.check_def context (Check.Root F.I32) input value;
+    Check.check_def context (Check.Root F.I32) (Runtime.dispatcher ()).F.code empty;
     Check.function__def module_ globals (Runtime.dispatcher ()))
