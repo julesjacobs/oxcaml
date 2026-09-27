@@ -12,7 +12,10 @@ solver() {
   rm -f solver
   {
     echo '#!/bin/sh'
-    echo "if [ \"\$1\" = -version ]; then echo 'Z3 version $1'; exit 0; fi"
+    case "$1" in
+      hangs) echo 'if [ "$1" = -version ]; then exec sleep 60; fi' ;;
+      *) echo "if [ \"\$1\" = -version ]; then echo 'Z3 version $1'; exit 0; fi" ;;
+    esac
     case "$2" in
       works) echo "exec '$Z3' \"\$@\"" ;;
       fails) echo 'exit 1' ;;
@@ -55,3 +58,9 @@ step "6 (rebuilt compiler, failing, no query cache)" ./rebuilt
 # The query cache is not: it answers after a compiler rebuild.
 mv queries/* "$VOX_VERIFY_CACHE"/
 step "7 (rebuilt compiler, failing, query cache)" ./rebuilt
+# A solver that does not answer -version: nothing is cached, and the probe
+# gives up after a few seconds.
+solver hangs works
+step "8 (no version, working)" "$OCAMLC"
+solver hangs fails
+step "9 (no version, failing)" "$OCAMLC"

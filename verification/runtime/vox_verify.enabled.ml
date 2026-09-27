@@ -72,21 +72,72 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
-(* The solver's configured name and the version it reports. *)
+(* The solver's configured name and the version it reports. A solver that
+   does not answer [-version] within a few seconds is treated as having no
+   version. *)
 let solver_identity =
   lazy
-    (match
-       Unix.open_process_args_in !executable [| !executable; "-version" |]
-     with
-    | exception Unix.Unix_error _ -> None
-    | channel -> (
-      let version =
-        try String.trim (In_channel.input_all channel) with Sys_error _ -> ""
-      in
-      match Unix.close_process_in channel with
-      | Unix.WEXITED 0 when version <> "" ->
-        Some (!executable ^ "\000" ^ version)
-      | _ | (exception Unix.Unix_error _) -> None))
+    (let deadline = Unix.gettimeofday () +. 5. in
+     match Unix.pipe ~cloexec:true () with
+     | exception Unix.Unix_error _ -> None
+     | output, input -> (
+       let pid =
+         try
+           let null = Unix.openfile "/dev/null" [Unix.O_RDWR; Unix.O_CLOEXEC] 0 in
+           Fun.protect
+             ~finally:(fun () -> Unix.close null)
+             (fun () ->
+               Some
+                 (Unix.create_process !executable
+                    [| !executable; "-version" |]
+                    null input null))
+         with Unix.Unix_error _ -> None
+       in
+       Unix.close input;
+       let buffer = Buffer.create 64 and bytes = Bytes.create 256 in
+       let rec read () =
+         let remaining = deadline -. Unix.gettimeofday () in
+         if remaining <= 0. || Buffer.length buffer > 4096
+         then false
+         else
+           match Unix.select [output] [] [] remaining with
+           | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+           | [], _, _ -> false
+           | _ -> (
+             match Unix.read output bytes 0 (Bytes.length bytes) with
+             | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+             | 0 -> true
+             | n ->
+               Buffer.add_subbytes buffer bytes 0 n;
+               read ())
+       in
+       let finished = Option.is_some pid && read () in
+       Unix.close output;
+       match pid with
+       | None -> None
+       | Some pid ->
+         (* The solver may also close its output and keep running. *)
+         let rec wait finished =
+           match
+             Unix.waitpid (if finished then [Unix.WNOHANG] else []) pid
+           with
+           | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait finished
+           | 0, _ when Unix.gettimeofday () < deadline ->
+             Unix.sleepf 0.01;
+             wait finished
+           | 0, _ ->
+             (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+             ignore (wait false);
+             None
+           | _, status -> Some status
+         in
+         if not finished
+         then (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+         let version = String.trim (Buffer.contents buffer) in
+         (match wait finished with
+         | Some (Unix.WEXITED 0) when finished && version <> "" ->
+           Some (!executable ^ "\000" ^ version)
+         | _ | (exception Unix.Unix_error _) -> None)))
 
 let compiler_digest =
   lazy
