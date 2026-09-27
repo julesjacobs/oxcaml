@@ -396,7 +396,39 @@ val filter_method: Env.t -> string -> type_expr -> type_expr
         (* A special case of unification (with {m : 'a; 'b}).  Raises
            [Filter_method_failed] instead of [Unify]. *)
 val occur_in: Env.t -> type_expr -> type_expr -> bool
-val moregeneral: Env.t -> bool ->
+
+(* A request for semantic refinement subsumption.  [root_mode] is the mode of
+   the compared value, when known.  After a successful check, [instantiated]
+   is the pair of types whose refinements the verifier must still relate, or
+   [None] when forgetting refinements was enough. *)
+type refinement_inclusion =
+  { root_mode : Mode.Value.l option;
+    mutable instantiated : (type_expr * type_expr) option }
+
+(* The mode refinement operands are checked at: total, stateless and
+   portable. *)
+val refinement_operand_mode : unit -> ('l * 'r) Mode.Value.t
+
+(* Alpha-equal predicates, with the types of their corresponding nodes. *)
+val refinement_predicate_types :
+  Env.t -> pairs:(Ident.t * Ident.t) list ->
+  refinement_expression -> refinement_expression ->
+  (type_expr * type_expr) list option
+
+(* While [f] runs, [equal] relates the types of predicate nodes up to a
+   renaming of their type variables other than [params], as for two
+   separately elaborated type declarations whose parameters are shared. *)
+val with_predicate_variable_renaming :
+  params:type_expr list -> (unit -> 'a) -> 'a
+
+(* [relate_predicate_types env relate types] relates the skeletons of those
+   types (ignoring refinements and arrow modes), applying [relate] where the
+   skeletons stop. *)
+val relate_predicate_types :
+  Env.t -> (type_expr -> type_expr -> unit) ->
+  (type_expr * type_expr) list -> unit
+
+val moregeneral: ?refinements:refinement_inclusion -> Env.t -> bool ->
   Jkind_types.Sort.var list -> Jkind_types.Sort.var list ->
   type_expr -> type_expr -> Jkind_types.Sort.t option list
         (* Check if the first type scheme is more general than the second.
@@ -493,7 +525,9 @@ val match_class_declarations:
 
 val enlarge_type: Env.t -> type_expr -> type_expr * bool
         (* Make a type larger, flag is true if some pruning had to be done *)
-val subtype: Env.t -> type_expr -> type_expr -> unit -> unit
+val subtype:
+  ?refinements:refinement_inclusion ->
+  Env.t -> type_expr -> type_expr -> unit -> unit
         (* [subtype env t1 t2] checks that [t1] is a subtype of [t2].
            It accumulates the constraints the type variables must
            enforce and returns a function that enforces this

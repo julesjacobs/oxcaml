@@ -3567,7 +3567,10 @@ let package_subtype env pack1 pack2 =
       Result.Error (Errortrace.Package_cannot_scrape r)
   | mty1, mty2 ->
     let loc = Location.none in
-    match Includemod.modtypes ~loc ~mark:true env ~modes:All mty1 mty2 with
+    match
+      Includemod.without_refinements (fun () ->
+        Includemod.modtypes ~loc ~mark:true env ~modes:All mty1 mty2)
+    with
     | Tcoerce_none -> Ok ()
     | c ->
         let msg =
@@ -3580,16 +3583,27 @@ let package_subtype env pack1 pack2 =
 
 let () = Ctype.package_subtype := package_subtype
 
+(* Obligations of a signature constraint or functor application are
+   discharged by the verifier where it meets the module expression. *)
+let attach_refinement_site mod_desc kind loc obligations =
+  if obligations <> [] then
+    Verification.attach_refinement_site mod_desc
+      { rs_kind = kind; rs_loc = loc; rs_obligations = obligations }
+
 let wrap_constraint_package env mark arg mty mode explicit =
   let mty1 = Subst.modtype Keep Subst.identity arg.mod_type in
   let mty2 = Subst.modtype Keep Subst.identity mty in
   let modes : Includemod.modes = Specific (arg.mod_mode, mode) in
-  let coercion =
-    try
-      Includemod.modtypes ~loc:arg.mod_loc env ~mark ~modes mty1 mty2
-    with Includemod.Error msg ->
-      raise(Error(arg.mod_loc, env, Not_included msg)) in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
+  let coercion, obligations =
+    Includemod.collect_refinements (fun () ->
+      try
+        Includemod.modtypes ~loc:arg.mod_loc env ~mark ~modes mty1 mty2
+      with Includemod.Error msg ->
+        raise(Error(arg.mod_loc, env, Not_included msg)))
+  in
+  let mod_desc = Tmod_constraint(arg, mty, explicit, coercion) in
+  attach_refinement_site mod_desc Rsite_constraint arg.mod_loc obligations;
+  { mod_desc;
     mod_type = mty;
     mod_mode = Value.disallow_right mode, None;
     mod_env = env;
@@ -3599,13 +3613,17 @@ let wrap_constraint_package env mark arg mty mode explicit =
 let wrap_constraint_with_shape env mark arg mty mode
   shape explicit =
   let modes : Includemod.modes = Specific (arg.mod_mode, mode) in
-  let coercion, shape =
-    try
-      Includemod.modtypes_constraint ~shape ~loc:arg.mod_loc env ~mark
-        ~modes arg.mod_type mty
-    with Includemod.Error msg ->
-      raise(Error(arg.mod_loc, env, Not_included msg)) in
-  { mod_desc = Tmod_constraint(arg, mty, explicit, coercion);
+  let (coercion, shape), obligations =
+    Includemod.collect_refinements (fun () ->
+      try
+        Includemod.modtypes_constraint ~shape ~loc:arg.mod_loc env ~mark
+          ~modes arg.mod_type mty
+      with Includemod.Error msg ->
+        raise(Error(arg.mod_loc, env, Not_included msg)))
+  in
+  let mod_desc = Tmod_constraint(arg, mty, explicit, coercion) in
+  attach_refinement_site mod_desc Rsite_constraint arg.mod_loc obligations;
+  { mod_desc;
     mod_type = mty;
     mod_mode = Value.disallow_right mode, None;
     mod_env = env;
@@ -4023,11 +4041,12 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
       | { arg = None; _ } -> apply_error ()
       | { loc = app_loc; attributes = app_attributes;
           arg = Some { shape = arg_shape; path = arg_path; arg } } ->
-      let coercion =
-        try Includemod.modtypes ~loc:arg.mod_loc ~mark:true env
-              arg.mod_type mty_param
-              ~modes:(Specific (arg.mod_mode, mm_param))
-        with Includemod.Error _ -> apply_error ()
+      let coercion, obligations =
+        Includemod.collect_refinements (fun () ->
+          try Includemod.modtypes ~loc:arg.mod_loc ~mark:true env
+                arg.mod_type mty_param
+                ~modes:(Specific (arg.mod_mode, mm_param))
+          with Includemod.Error _ -> apply_error ())
       in
       let mty_appl =
         match arg_path with
@@ -4104,12 +4123,16 @@ and type_one_application ~ctx:(apply_loc,sfunct,md_f,args)
               (Staticity.apply_hint (Functor_to_application funct.mod_loc)
                  funct_staticity) ]
       in
-      { mod_desc =
-          Tmod_apply
-            (funct, arg, coercion,
-             functor_application_yielding ~funct
-               ~arg_mode:(fst arg.mod_mode),
-             Staticity.disallow_left staticity);
+      let mod_desc =
+        Tmod_apply
+          (funct, arg, coercion,
+           functor_application_yielding ~funct
+             ~arg_mode:(fst arg.mod_mode),
+           Staticity.disallow_left staticity)
+      in
+      attach_refinement_site mod_desc Rsite_functor_argument app_loc
+        obligations;
+      { mod_desc;
         mod_type = mty_appl;
         mod_mode = mm_res, None;
         mod_env = env;
@@ -4735,6 +4758,7 @@ let check_refinement_types_options () =
 
 let type_toplevel_phrase env sig_acc s =
   check_refinement_types_options ();
+  Verification.reset_refinement_sites ();
   Env.reset_required_globals ();
   Env.reset_probes ();
   Typecore.reset_allocations ();
@@ -5035,6 +5059,7 @@ let check_argument_type_if_given env sourcefile ~actual_staticity actual_sig
            }
 
 let type_implementation target modulename initial_env ast =
+  Verification.reset_refinement_sites ();
   let sourcefile = Unit_info.original_source_file target in
   let error e =
     raise (Error (Location.in_file sourcefile, initial_env, e))
@@ -5142,14 +5167,23 @@ let type_implementation target modulename initial_env ast =
             error (Inconsistent_argument_types
                      { new_arg_type = arg_type; old_source_file = source_intf;
                        old_arg_type = arg_type_from_cmi });
-          let coercion, shape =
+          let (coercion, shape), interface_obligations =
             Profile.record_call "check_sig" (fun () ->
-              Includemod.compunit
-                initial_env ~mark:true sourcefile
-                ~modes:(Includecore.Specific
-                  ((mode, None),
-                   Persistent_env.mode_pers_mod staticity))
-                sg compiled_intf_file_name dclsig shape)
+              Includemod.collect_refinements (fun () ->
+                Includemod.compunit
+                  initial_env ~mark:true sourcefile
+                  ~modes:(Includecore.Specific
+                    ((mode, None),
+                     Persistent_env.mode_pers_mod staticity))
+                  sg compiled_intf_file_name dclsig shape))
+          in
+          let interface =
+            match interface_obligations with
+            | [] -> None
+            | obligations ->
+                Some { rs_kind = Rsite_interface source_intf;
+                       rs_loc = Location.in_file sourcefile;
+                       rs_obligations = obligations }
           in
           (* Check the _mli_ against the argument type, since the mli determines
              the visible type of the module and that's what needs to conform to
@@ -5165,7 +5199,7 @@ let type_implementation target modulename initial_env ast =
               ~actual_staticity:staticity dclsig arg_type
           in
           Typecore.force_delayed_checks ();
-          Verification.run_unit str;
+          Verification.run_unit ?interface str;
           Mode.erase_hints ();
           Typecore.optimise_allocations ();
           (* It is important to run these checks after the inclusion test above,

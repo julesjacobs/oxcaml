@@ -3459,7 +3459,8 @@ and quote_expression_extra ~env ~scopes _stage extra lambda =
   | Texp_ghost_region -> lambda
   | Texp_borrowed ->
     Exp_desc.borrow loc (mk_exp_noattr loc lambda) |> Exp_desc.wrap
-  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _ ->
+  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _
+  | Texp_subsumption _ ->
     lambda
 
 and update_env_with_extra ~loc extra =
@@ -3474,7 +3475,8 @@ and update_env_with_extra ~loc extra =
   | Texp_inspected_type _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
-  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _ ->
+  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _
+  | Texp_subsumption _ ->
     ()
 
 and update_env_without_extra ~loc extra =
@@ -3489,7 +3491,8 @@ and update_env_without_extra ~loc extra =
   | Texp_inspected_type _ -> ()
   | Texp_ghost_region -> ()
   | Texp_borrowed -> ()
-  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _ ->
+  | Texp_refine | Texp_let_refine _ | Texp_refinement _ | Texp_value_name _
+  | Texp_subsumption _ ->
     ()
 
 and quote_expression_desc ~scopes ~transl stage e : Exp_desc.t =

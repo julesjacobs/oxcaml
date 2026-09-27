@@ -1,0 +1,7 @@
+File "weaker.ml", line 2, characters 4-5:
+2 | let f = identity
+        ^
+Error: The value "f" does not satisfy its declaration in "weaker.mli".
+       Refinement could not be proved (counterexample: x = 0)
+File "weaker.mli", line 1, characters 32-37:
+  The refinement is stated here.

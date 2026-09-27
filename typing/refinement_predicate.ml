@@ -373,9 +373,12 @@ let constant_equal (c1 : Parsetree.constant) (c2 : Parsetree.constant) =
       String.equal s1 s2 && Option.equal String.equal d1 d2
   | desc1, desc2 -> desc1 = desc2
 
-let equal ~pairs rexp1 rexp2 =
+let equal_with_types ~pairs rexp1 rexp2 =
   (* [pairs] pairs the binders of the left predicate with the binders of
-     the right one, innermost first. *)
+     the right one, innermost first.  The types of corresponding nodes are
+     collected; the caller decides how they must be related. *)
+  let types = ref [] in
+  let pair_types ty1 ty2 = types := (ty1, ty2) :: !types in
   let var_eq pairs id1 id2 =
     let rec find = function
       | [] -> Ident.same id1 id2
@@ -390,6 +393,12 @@ let equal ~pairs rexp1 rexp2 =
     match rexp1.rexp_desc, rexp2.rexp_desc with
     | Rexp_refinement (_, e1), _ -> eq pairs e1 rexp2
     | _, Rexp_refinement (_, e2) -> eq pairs rexp1 e2
+    | _ ->
+        pair_types rexp1.rexp_type rexp2.rexp_type;
+        eq_desc pairs rexp1 rexp2
+  and eq_desc pairs rexp1 rexp2 =
+    match rexp1.rexp_desc, rexp2.rexp_desc with
+    | Rexp_refinement _, _ | _, Rexp_refinement _ -> eq pairs rexp1 rexp2
     | Rexp_var id1, Rexp_var id2 -> var_eq pairs id1 id2
     | Rexp_ident p1, Rexp_ident p2 -> Path.same p1 p2
     | Rexp_var id1, Rexp_ident (Pident id2)
@@ -438,10 +447,12 @@ let equal ~pairs rexp1 rexp2 =
     | Rexp_sequence (f1, s1), Rexp_sequence (f2, s2) ->
         eq pairs f1 f2 && eq pairs s1 s2
     | Rexp_let (b1, body1), Rexp_let (b2, body2) ->
+        pair_types b1.rb_type b2.rb_type;
         b1.rb_kind = b2.rb_kind
         && eq pairs b1.rb_expr b2.rb_expr
         && eq ((b1.rb_ident, b2.rb_ident) :: pairs) body1 body2
-    | Rexp_fun (p1, _, _, body1), Rexp_fun (p2, _, _, body2) ->
+    | Rexp_fun (p1, ty1, _, body1), Rexp_fun (p2, ty2, _, body2) ->
+        pair_types ty1 ty2;
         eq ((p1, p2) :: pairs) body1 body2
     | Rexp_match (s1, cases1), Rexp_match (s2, cases2) ->
         eq pairs s1 s2
@@ -462,6 +473,7 @@ let equal ~pairs rexp1 rexp2 =
         Option.equal (eq pairs) case1.rc_guard case2.rc_guard
         && eq pairs case1.rc_rhs case2.rc_rhs
   and eq_pat pairs pat1 pat2 =
+    pair_types pat1.rpat_type pat2.rpat_type;
     match pat1.rpat_desc, pat2.rpat_desc with
     | Rpat_any, Rpat_any -> Some pairs
     | Rpat_var id1, Rpat_var id2 -> Some ((id1, id2) :: pairs)
@@ -503,7 +515,10 @@ let equal ~pairs rexp1 rexp2 =
         | Rpat_construct _ | Rpat_record _ | Rpat_alias _ | Rpat_or _ ), _ ) ->
         None
   in
-  eq pairs rexp1 rexp2
+  if eq pairs rexp1 rexp2 then Some (List.rev !types) else None
+
+let equal ~pairs rexp1 rexp2 =
+  Option.is_some (equal_with_types ~pairs rexp1 rexp2)
 
 (* Back to surface syntax *)
 

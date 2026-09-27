@@ -5892,7 +5892,8 @@ let report_error ~loc = function
       let get_jkind_error : _ Errortrace.elt -> _ = function
       | Bad_jkind (ty, violation) | Bad_jkind_sort (ty, violation) ->
         Some (ty, violation)
-      | Unequal_var_jkinds _ | Unequal_tof_kind_jkinds _ | Diff _ | Variant _
+      | Unequal_var_jkinds _ | Unequal_tof_kind_jkinds _ | Refinement _
+      | Diff _ | Variant _
       | Obj _ | Escape _ | Incompatible_fields _ | Rec_occur _
       | Function_label_mismatch _ | Tuple_label_mismatch _
       | First_class_module _ -> None

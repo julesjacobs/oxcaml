@@ -49,6 +49,14 @@ val equal :
   pairs:(Ident.t * Ident.t) list ->
   refinement_expression -> refinement_expression -> bool
 
+(** [equal], returning the types of corresponding nodes when the predicates
+    are alpha-equivalent.  Equal predicates denote the same proposition only
+    when these types are also related. *)
+val equal_with_types :
+  pairs:(Ident.t * Ident.t) list ->
+  refinement_expression -> refinement_expression ->
+  (type_expr * type_expr) list option
+
 (** Back to surface syntax, for printing.  [var_name] chooses the printed
     name of a bound ident; [value_ident] renders a free ident from its
     resolved (possibly substituted) path. [type_constraint] optionally

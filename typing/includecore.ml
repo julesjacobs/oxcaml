@@ -175,9 +175,9 @@ let value_descriptions_consistency _env vd1 vd2 =
   | (_, Val_prim _) -> raise (Dont_match Not_a_primitive)
   | (_, _) -> Tcoerce_none
 
-let moregeneral_lpoly env pat_lpoly subj_lpoly ty1 ty2 =
+let moregeneral_lpoly ?refinements env pat_lpoly subj_lpoly ty1 ty2 =
   let pat_refs =
-    Ctype.moregeneral env true pat_lpoly subj_lpoly ty1 ty2
+    Ctype.moregeneral ?refinements env true pat_lpoly subj_lpoly ty1 ty2
   in
   (* Map from RHS sort poly var to its 1-indexed position *)
   let subj_index = List.mapi (fun i v -> (v, i + 1)) subj_lpoly in
@@ -228,7 +228,12 @@ let value_descriptions_zero_alloc
   | Ok () -> prim_coercion_zero_alloc_check
   | Error e -> raise (Dont_match (Zero_alloc e))
 
-let value_descriptions ~loc env name
+let is_refined env ty =
+  match get_desc (Ctype.expand_head env ty) with
+  | Trefine _ -> true
+  | _ -> false
+
+let value_descriptions ?refinements ~loc env name
     ~mmodes
     (vd1 : Types.value_description)
     (vd2 : Types.value_description) =
@@ -250,6 +255,42 @@ let value_descriptions ~loc env name
   | Ok () -> ()
   | Error e -> raise (Dont_match (Mode e))
   end;
+  (* Refinements that differ semantically are recorded for the verifier
+     ([refinements]).  [check_modes] crossed with the declared type, which
+     hides the value's own modes when the declaration adds a refinement: a
+     refined type crosses portability, totality and statefulness only because
+     its values have them. *)
+  let request =
+    Option.map
+      (fun _ ->
+        let root_mode =
+          match modes with
+          | All -> None
+          | Specific ((m0, _), _) -> Some (Mode.Value.disallow_right m0)
+        in
+        { Ctype.root_mode; instantiated = None })
+      refinements
+  in
+  let check_root_mode ty1 =
+    match request with
+    | Some { root_mode = Some m0; _ }
+      when is_refined env vd2.val_type && not (is_refined env ty1)
+           && not (Btype.is_Tvar (Ctype.expand_head env ty1)) ->
+        begin match
+          Mode.Value.submode (Ctype.cross_left env ty1 m0)
+            (Ctype.refinement_operand_mode ())
+        with
+        | Ok () -> ()
+        | Error e -> raise (Dont_match (Mode e))
+        end
+    | _ -> ()
+  in
+  let record_refinements () =
+    match refinements, request with
+    | Some record, Some { instantiated = Some (source, target); _ } ->
+        record ~source ~target
+    | _ -> ()
+  in
   let val_lpoly1 = Lpoly.get_exn vd1.val_lpoly in
   let val_lpoly2 = Lpoly.get_exn vd2.val_lpoly in
   match vd1.val_kind with
@@ -287,8 +328,12 @@ let value_descriptions ~loc env name
         let ty1, mode_l1, _, sort1 =
           Ctype.instance_prim env p1 vd1.val_type
         in
-        (try moregeneral_lpoly env val_lpoly1 val_lpoly2 ty1 vd2.val_type
+        check_root_mode ty1;
+        (try
+           moregeneral_lpoly ?refinements:request env val_lpoly1 val_lpoly2
+             ty1 vd2.val_type
          with Ctype.Moregen err -> raise (Dont_match (Type err)));
+        record_refinements ();
         let pc =
           {pc_desc = p1; pc_type = vd2.Types.val_type;
            pc_poly_mode = Option.map Mode.Locality.disallow_right mode_l1;
@@ -301,10 +346,12 @@ let value_descriptions ~loc env name
         Tcoerce_primitive pc
      end
   | _ ->
-     match moregeneral_lpoly env
+     check_root_mode vd1.val_type;
+     match moregeneral_lpoly ?refinements:request env
              val_lpoly1 val_lpoly2 vd1.val_type vd2.val_type with
      | exception Ctype.Moregen err -> raise (Dont_match (Type err))
      | () -> begin
+       record_refinements ();
        match vd2.val_kind with
          | Val_prim _ -> raise (Dont_match Not_a_primitive)
          | _ -> Tcoerce_none
@@ -1702,6 +1749,12 @@ let type_declarations ?(equality = false) ~loc env ~mark name
       | () -> None
   in
   if err <> None then err else
+  (* The type variables that occur only in the predicates of the two
+     declarations (the instances of polymorphic constants there) are distinct
+     nodes of each; they are compared up to renaming.  The parameters are now
+     shared. *)
+  Ctype.with_predicate_variable_renaming ~params:decl2.type_params
+  @@ fun () ->
   let err = match (decl1.type_manifest, decl2.type_manifest) with
       (_, None) -> None
     | (Some ty1, Some ty2) ->

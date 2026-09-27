@@ -222,6 +222,7 @@ type error =
   | Unbound_instance_variable of string * string list
   | Instance_variable_not_mutable of string
   | Not_subtype of Errortrace.Subtype.error
+  | Refinement_coercion_unsupported
   | Outside_class
   | Value_multiply_overridden of string
   | Coercion_failure of
@@ -6727,6 +6728,9 @@ type 'ret constraint_arg =
         the presence of a constraint.
     *)
     is_self: 'ret -> bool;
+    add_extra: ('ret -> exp_extra -> Location.t -> 'ret) option;
+    (** Adds an extra to an expression body, for a coercion that the
+        verifier must justify; [None] for other bodies. *)
   }
 
 (* The result of splitting a function type into its argument/return types along
@@ -10234,6 +10238,9 @@ and expression_constraint pexp =
          match expr.exp_desc with
          | Texp_ident { desc = { val_kind = Val_self _ }; _ } -> true
          | _ -> false);
+    add_extra =
+      Some (fun expr extra loc ->
+        { expr with exp_extra = (extra, loc, []) :: expr.exp_extra });
   }
 
 (** Types a body in the scope of a coercion (with an optional constraint)
@@ -10249,8 +10256,36 @@ and type_coerce
   (* Pretend separate = true, 1% slowdown for lablgtk *)
   (* Also see PR#7199 for a problem with the following:
       let separate = !Clflags.principal || Env.has_local_constraints env in*)
-  let { is_self; type_with_constraint; type_without_constraint } =
+  let { is_self; type_with_constraint; type_without_constraint; add_extra } =
     constraint_arg
+  in
+  (* Refinements that the target adds are proved by the verifier
+     ([Texp_subsumption]).  A value entering an outer refinement must be
+     total, stateless and portable, as for any refinement introduction. *)
+  let refinement_mode target expected_mode =
+    match outer_refinement env target with
+    | None -> expected_mode
+    | Some _ ->
+        let payload = refinement_payload env target in
+        let required = expect_mode_cross env payload
+            (mode_default (refinement_operand_mode ())) in
+        mode_coerce required.mode expected_mode
+  in
+  let refinement_request target =
+    { Ctype.root_mode =
+        (match outer_refinement env target with
+         | None -> None
+         | Some _ -> Some (Value.disallow_right (refinement_operand_mode ())));
+      instantiated = None }
+  in
+  let with_subsumption request arg =
+    match request.Ctype.instantiated with
+    | None -> arg
+    | Some (source, target) ->
+        match add_extra with
+        | Some add -> add arg (Texp_subsumption { source; target }) loc
+        | None ->
+            raise (Error (loc, env, Refinement_coercion_unsupported))
   in
   match sty with
   | None ->
@@ -10264,12 +10299,16 @@ and type_coerce
     let arg, arg_type, gen =
       let lv = get_current_level () in
       with_local_level_generalize begin fun () ->
-          let arg, arg_type = type_without_constraint env expected_mode in
+          let arg, arg_type =
+            type_without_constraint env
+              (refinement_mode opened_ty' expected_mode)
+          in
           arg, arg_type, generalizable lv arg_type
         end
         ~before_generalize:
          (fun (_, arg_type, _) -> enforce_current_level env arg_type)
     in
+    let request = refinement_request opened_ty' in
     begin match !self_coercion, get_desc opened_ty' with
       | ((path, r) :: _, Tconstr (path', _, _))
         when is_self arg && Path.same path path' ->
@@ -10287,7 +10326,10 @@ and type_coerce
               backtrack snap; false
           then ()
           else begin try
-            let force' = subtype env arg_type (generic_instance opened_ty') in
+            let force' =
+              subtype ~refinements:request env arg_type
+                (generic_instance opened_ty')
+            in
             force (); force' ();
             if not gen && !Clflags.principal then
               Location.prerr_warning loc
@@ -10306,7 +10348,7 @@ and type_coerce
                           ({ ty = opened_ty'; expanded }, err, b)))
           end
       end;
-      (arg, ty', Texp_coerce (None, cty'))
+      (with_subsumption request arg, ty', Texp_coerce (None, cty'))
   | Some sty ->
       let cty, ty, force, cty', ty', force' =
         with_refinement_type_closing dependent_openings (fun () ->
@@ -10321,16 +10363,23 @@ and type_coerce
       in
       let opened_ty = open_dependent_type dependent_openings ty in
       let opened_ty' = open_dependent_type dependent_openings ty' in
+      let request = refinement_request opened_ty' in
       begin try
         let force'' =
-          subtype env (generic_instance opened_ty)
+          subtype ~refinements:request env (generic_instance opened_ty)
             (generic_instance opened_ty')
         in
         force (); force' (); force'' ()
       with Subtype err ->
         raise (Error (loc, env, Not_subtype err))
       end;
-      (type_with_constraint env expected_mode opened_ty,
+      let expected_mode =
+        match outer_refinement env opened_ty with
+        | Some _ -> expected_mode
+        | None -> refinement_mode opened_ty' expected_mode
+      in
+      (with_subsumption request
+         (type_with_constraint env expected_mode opened_ty),
        instance ty', Texp_coerce (Some cty, cty'))
 
 and type_constraint env sty type_mode =
@@ -11156,6 +11205,7 @@ and type_function
                     cases' inferred type to [type_constraint_expect]. *)
               let function_cases_constraint_arg =
                 { is_self = (fun _ -> false);
+                  add_extra = None;
                   type_with_constraint = (fun env expected_mode ty ->
                     let cases, _, fun_alloc_mode, ret_info,
                         calling_convention_sorts =
@@ -14648,6 +14698,10 @@ let report_error ~loc env =
       Location.errorf ~loc "%t" (fun ppf ->
         Errortrace_report.subtype ppf env err "is not a subtype of"
       )
+  | Refinement_coercion_unsupported ->
+      Location.errorf ~loc
+        "This coercion adds refinements, which can only be proved for an \
+         expression"
   | Outside_class ->
       Location.errorf ~loc
         "This object duplication occurs outside a method definition"
@@ -15772,7 +15826,7 @@ let refinement_expression_of_typed ?(definition_body = false) bound_values
          | Texp_refine when definition_body -> result
          | Texp_refine ->
              unsupported_refinement_syntax loc "This expression annotation"
-         | Texp_coerce _ | Texp_poly _ | Texp_newtype _
+         | Texp_coerce _ | Texp_subsumption _ | Texp_poly _ | Texp_newtype _
          | Texp_stack
          | Texp_borrowed | Texp_ghost_region ->
              unsupported_refinement_syntax loc "This expression annotation"
