@@ -851,11 +851,11 @@ Error: Unbound module "Avl_sets.Core"
 (* avl_structural_equality *)
 let invalid (a : Avl_sets.t) (b : Avl_sets.t)
   (same : {u : unit | Avl_sets.equal a b}) : {u : unit | a === b} =
-  let u = same in u;;
+  same;;
 [%%expect{|
-Line 3, characters 18-19:
-3 |   let u = same in u;;
-                      ^
+Line 3, characters 2-6:
+3 |   same;;
+      ^^^^
 Error: Refinement could not be proved (counterexample)
 Line 2, characters 57-64:
 2 |   (same : {u : unit | Avl_sets.equal a b}) : {u : unit | a === b} =
