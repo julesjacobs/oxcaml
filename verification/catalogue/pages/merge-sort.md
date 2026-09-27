@@ -1,6 +1,6 @@
 title: Merge sort
 blurb: A generic merge sort on immutable lists, proved to return a sorted permutation of its input while spending at most n⌈log₂ n⌉ erased credits, one per comparator call.
-status: review-pending
+status: owner-review
 date: 27 September 2026
 sources:
   - verification/library/vox_merge_sort.mli — Public interface
@@ -38,24 +38,17 @@ The test funds the token with `C.Budget.create`, which is not available inside t
 
 @code testsuite/tests/vox/merge_sort_rejected.ml "let third () =" "Compare.compare 1 0 (state);;"
 
-Compiled as a file after `open Merge_sort`, the installed compiler prints:
+The expected error, with lines counted from the start of the phrase; line 26 of `merge_sort.ml` is the precondition `C.credits t > 0` of the client's `compare`:
 
-```
-File "third.ml", line 7, characters 22-29:
-7 |   Compare.compare 1 0 (state)
-                          ^^^^^^^
-Error: Refinement could not be proved (counterexample)
-File "merge_sort.ml", line 26, characters 30-45:
-  The refinement is stated here.
-```
+@text testsuite/tests/vox/merge_sort_rejected.ml "Line 6, characters 22-29:" "The refinement is stated here."
 
-The test also rejects claims that `[]` is a permutation of `[1]`, that `[1; 1]` is a permutation of `[1]`, and that `[a; b]` is a permutation of `[a; a]` when the records `a` and `b` have equal ranks and different payloads. It checks that `false` cannot be proved after splitting and merging credits, after the two `height` lemmas, or after a funded sort. No test rejects a call to `sort` with too few credits.
+The test also rejects claims that `[]` is a permutation of `[1]`, that `[1; 1]` is a permutation of `[1]`, and that `[a; b]` is a permutation of `[a; a]` when the records `a` and `b` have equal ranks and different payloads. It checks that `false` cannot be proved after splitting and merging credits, after the two `height` lemmas, or after a funded sort. It rejects sorting `[2; 1]` with one credit, at the precondition of `sort`, and accepts the same call with the two credits that `budget 2` requires.
 
 ## Interface
 
 @code verification/library/vox_merge_sort.mli
 
-`O` must be a total preorder: `le` is a ghost function (`@ ghost`, usable only in specifications) with proofs of reflexivity, totality and transitivity. The `P` laws characterize `count`, `permutation` and `sorted` completely. `S.length` is the length of a list as a `Bigint.t`, an unbounded integer. The credit tokens have this signature, which has no operation that adds credits:
+`O` must be a total preorder: `le` is a ghost function (`@ ghost`, usable only in specifications and ghost code) with proofs of reflexivity, totality and transitivity. The `P` laws characterize `count`, `permutation` and `sorted` completely. `S.length` is the length of a list as a `Bigint.t`, an unbounded integer. The credit tokens have this signature, which has no operation that adds credits:
 
 @code verification/library/vox_credits.mli "module type S = sig" "end"
 
