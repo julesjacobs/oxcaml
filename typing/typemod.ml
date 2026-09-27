@@ -759,7 +759,8 @@ let params_are_constrained =
   in
   loop
 
-let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
+let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality
+    ?(zap_module_modality = zap_modality) sg =
   let sg_item = function
     | Sig_value (id, desc, vis) ->
         let val_modalities =
@@ -773,10 +774,10 @@ let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
     | Sig_module (id, pres, md, re, vis) ->
         let md_type =
           remove_modality_and_zero_alloc_variables_mty env ~zap_modality
-            md.md_type
+            ~zap_module_modality md.md_type
         in
         let md_modalities =
-          md.md_modalities |> zap_modality |> Mode.Modality.of_const
+          md.md_modalities |> zap_module_modality |> Mode.Modality.of_const
         in
         let md = {md with md_type; md_modalities} in
         Sig_module (id, pres, md, re, vis)
@@ -784,14 +785,16 @@ let rec remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg =
   in
   List.map sg_item sg
 
-and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
+and remove_modality_and_zero_alloc_variables_mty env ~zap_modality
+    ?(zap_module_modality = zap_modality) mty =
   match mty with
   | Mty_ident _ | Mty_alias _ ->
     (* module types with names can't have inferred modalities. *)
     mty
   | Mty_signature sg ->
     Mty_signature
-      (remove_modality_and_zero_alloc_variables_sg env ~zap_modality sg)
+      (remove_modality_and_zero_alloc_variables_sg env ~zap_modality
+         ~zap_module_modality sg)
   | Mty_functor (param, mty, mm) ->
     let param : Types.functor_parameter =
       match param with
@@ -804,7 +807,8 @@ and remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty =
       | Unit -> Unit
     in
     let mty =
-      remove_modality_and_zero_alloc_variables_mty env ~zap_modality mty
+      remove_modality_and_zero_alloc_variables_mty env ~zap_modality
+        ~zap_module_modality mty
     in
     Mty_functor (param, mty, mm)
   | Mty_strengthen (mty, path, alias) ->
@@ -5083,14 +5087,40 @@ let type_implementation target modulename initial_env ast =
       let simple_sg = Signature_names.simplify finalenv names sg in
       if !Clflags.print_types then begin
         remove_mode_and_jkind_variables finalenv sg;
-        let zap_modality =
+        let zap_module_modality =
           Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha
+        in
+        let zap_modality =
+          if Language_extension.(is_at_least Mode Alpha)
+             || not (Language_extension.is_enabled Refinement_types)
+          then zap_module_modality
+          else
+            (* Keep the totality and ghostliness of values, which clients
+               of the printed interface depend on. [total] implies
+               [stateless portable], so those are kept with it. *)
+            fun m ->
+              let floor = Modality.zap_to_floor m in
+              let keep ax acc =
+                Modality.Const.set ax (Modality.Const.proj ax floor) acc
+              in
+              let total =
+                not (Modality.Per_axis.is_id (Comonadic Totality)
+                       (Modality.Const.proj (Comonadic Totality) floor))
+              in
+              Modality.Const.id
+              |> keep (Comonadic Totality)
+              |> keep (Comonadic Ghostliness)
+              |> (if total then fun m ->
+                    m
+                    |> keep (Comonadic Statefulness)
+                    |> keep (Comonadic Portability)
+                  else Fun.id)
         in
         let simple_sg =
           (* Printing [.mli] from [.ml], we zap to identity modality for legacy
              compatibility. *)
           remove_modality_and_zero_alloc_variables_sg finalenv ~zap_modality
-            simple_sg
+            ~zap_module_modality simple_sg
         in
         Typecore.force_delayed_checks ();
         Verification.run_unit str;
