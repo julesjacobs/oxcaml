@@ -212,9 +212,16 @@ let check_pipeline program result =
       || Wasm_functions.signature module_.Wasm_functions.signatures 1 <> Some Wasm_functions.I32
       then failwith "assembled function signatures";
     let expected_entry = Hmc_wasm_program_state_entry.configuration context state in
-    if Wasm_calls.start module_ context.State.block_count state.State.memory (Registers.globals state.State.registers)
-        (Wasm_code.Succ context.State.host_capacity) <> Wasm_calls.Running expected_entry
-      then failwith "initialized dispatcher entry";
+    (* The host sets global 7 to the input; the state was built for that
+       input, so the prologue's store leaves the memory unchanged. *)
+    let host = match Wasm_globals.set (Registers.globals state.State.registers) 7 (Wasm_scalar.I64 context.State.input) with
+      | Some host -> host | None -> failwith "initialized input global" in
+    (match Wasm_calls.start module_ context.State.block_count state.State.memory host
+        (Wasm_code.Succ context.State.host_capacity) with
+    | Wasm_calls.Running initial ->
+      if Wasm_calls.run (Hmc_wasm_program_dispatch.five ()) module_ initial <> Wasm_calls.Running expected_entry
+        then failwith "initialized dispatcher prologue"
+    | _ -> failwith "initialized dispatcher entry");
     let run = execution.Hmc_wasm_program_run.run in
     if Wasm_calls.run (Wasm_code.Succ run.Hmc_wasm_program_execution.fuel) module_ expected_entry
       <> Hmc_wasm_program_execution.target context run.Hmc_wasm_program_execution.endpoint
@@ -650,7 +657,8 @@ let divergent_prefixes () =
       let limited = limit_heap program start.Hmc_heap_initialize.globals lowered context before before.State.registers.Registers.heap () in
       List.iter (fun count ->
         let prefix = Wasm_execution_budget.of_index (index count) in
-        ghost_ (Hmc_wasm_program_run.safe program layout input memory start prepared prefix ());
+        ghost_ (Hmc_wasm_program_initialize.ready_def program layout input memory start prepared;
+          Hmc_wasm_program_run.safe program layout input memory start prepared prefix ());
         check_observation program start.Hmc_heap_initialize.globals lowered context limited prefix ();
         match Wasm_calls.run prefix (State.module_ program lowered context) (Hmc_wasm_program_state_entry.configuration context limited) with
         | Wasm_calls.Running current ->
@@ -665,71 +673,65 @@ let binary_prefixes () =
   let module Init = Hmc_wasm_program_initialize in
   let module Binary = Hmc_wasm_program_binary in
   let module Execute = Wasm_binary_execution in
+  let module Input = Hmc_wasm_program_input in
   let source = D.Lambda (D.Bound D.Z) in
-  let input = Hmc_wasm_header_update.number 42 in
+  let placeholder = Input.placeholder () in
   let memory = zeros 65536 in
   let pages : B.u32 = 1 in
   let layout = {Init.table_base = 0; frame_base = 263; stack_base = 1024;
     heap_base = 4096; heap_limit = 8192; max_pc = 1000; stack_capacity = D.Z; host_capacity = Wasm_code.Zero} in
   match Bytes.drop memory 8192 with None -> failwith "binary fixture memory" | Some _ ->
     let _ = ghost_ (Bounds.covers_def memory 8192; Init.valid_layout_def layout memory) in
-    let compilation = Hmc_compiler.compile source layout input memory pages () in
+    let compilation = Hmc_compiler.compile source layout memory pages () in
     match compilation with
     | Hmc_compiler.Compiled artifact ->
-      ghost_ (Hmc_compiler.correct_def source layout input memory pages artifact);
+      ghost_ (Hmc_compiler.correct_def source layout memory pages artifact);
       let program : I.program = match Hmc_specialization.compile source with
         | Hmc_specialization.Compiled monomorphic ->
           I.build (Hmc_cfg_program.build (Hmc_closure_program.build monomorphic))
         | _ -> failwith "diagnostic source compilation" in
-      let compiled : {c : Binary.compiled | Binary.compilable program layout input memory pages
-        && Binary.accepted program layout input memory pages c} =
-        match Binary.compile program layout input memory pages () with
+      let compiled : {c : Binary.compiled | Binary.compilable program layout memory pages
+        && Binary.accepted program layout memory pages c} =
+        match Binary.compile program layout memory pages () with
         | Binary.Compiled compiled -> compiled
         | _ -> failwith "diagnostic binary compilation" in
       if compiled.Binary.bytes <> artifact.Hmc_compiler.bytes then failwith "public and diagnostic bytes differ";
-      ghost_ (Binary.accepted_def program layout input memory pages compiled);
+      ghost_ (Binary.accepted_def program layout memory pages compiled);
       let start = compiled.Binary.start in
       let prepared = compiled.Binary.prepared in
       let _ = ghost_ (Hmc_wasm_program_static.dispatcher_typed program prepared.Init.lowered prepared.Init.context
         prepared.Init.state.State.registers) in
-      let compiled_again = Binary.sufficient program layout input memory pages () in
+      let compiled_again = Binary.sufficient program layout memory pages () in
       if compiled_again.Binary.bytes <> compiled.Binary.bytes then failwith "binary acceptance completeness";
-      ghost_ (Init.correct_def program layout input memory (Init.Initialized (start, prepared)));
-      let start_again, prepared_again = Init.sufficient program layout input memory () in
+      ghost_ (Binary.built_def program layout memory start prepared pages compiled.Binary.bytes;
+        Init.correct_def program layout placeholder memory (Init.Initialized (start, prepared)));
+      let start_again, prepared_again = Init.sufficient program layout placeholder memory () in
       if start_again <> start || prepared_again <> prepared then failwith "initializer acceptance completeness";
       if Binary.emit program prepared.Init.lowered prepared.Init.context prepared.Init.state 0 <> None
         then failwith "incorrect memory size accepted";
       let bytes = artifact.Hmc_compiler.bytes in
-        let _ = ghost_ (Hmc_compiler.static_validity source layout input memory pages artifact ()) in
+        let _ = ghost_ (Hmc_compiler.static_validity source layout memory pages artifact ()) in
         if not (Wasm_static_control.function_bodies (State.module_ program prepared.Init.lowered prepared.Init.context)
             (Registers.globals prepared.Init.state.State.registers)) then failwith "binary body typing";
         if not (Wasm_static_module.bytes_valid bytes) then failwith "binary module validity";
-
+        (* One module, run on several inputs. *)
+        List.iter (fun number ->
+        let input = Hmc_wasm_header_update.number number in
         let source_fuel = index 100 in
         (match Hmc_source_semantics.advance source_fuel
             (Hmc_source_semantics.initial (D.Apply (source, D.Word input))) with
         | Hmc_source_semantics.Done (Hm_interpreter_typing.Word word) ->
-          let _preserved = ghost_ (Hmc_compiler.preservation source layout input memory pages artifact word source_fuel ()) in ()
+          let _preserved = ghost_ (
+            let target = Hmc_compiler.target source layout memory pages artifact input () in
+            Hmc_compiler.preservation source layout memory pages artifact input target word source_fuel ()) in ()
         | _ -> failwith "binary source fixture fuel");
-        let budget = index 100 in
-        (match U.advance program budget prepared.Init.state.State.abstract with
-        | Hmc_cfg_semantics.Done (Hmc_closure_semantics.V.Word word) ->
-          if Hmc_heap_extent.fits (Hmc_heap_demand.heap_plan program budget prepared.Init.state.State.abstract)
-              (H.used prepared.Init.state.State.heap) prepared.Init.state.State.registers.Registers.heap_limit &&
-              Hmc_frame_capacity.le (Hmc_heap_demand.stack_plan program budget prepared.Init.state.State.abstract) prepared.Init.context.State.stack_capacity then (
-            let normal = Binary.normal program layout input memory start prepared pages compiled.Binary.bytes word budget () in
-            if Execute.run (Wasm_code.Succ normal.Hmc_wasm_program_execution.fuel) compiled.Binary.bytes
-                (Wasm_code.Succ prepared.Init.context.State.host_capacity) <>
-                Execute.Result (Hmc_wasm_program_execution.target prepared.Init.context normal.Hmc_wasm_program_execution.endpoint)
-              then failwith "binary sufficient-resource execution")
-          else failwith "binary fixture resource bounds"
-        | _ -> failwith "binary abstract fixture fuel");
         List.iter (fun n ->
           let prefix = Wasm_execution_budget.of_index (index n) in
-          ghost_ (Hmc_compiler.safe source layout input memory pages artifact prefix ());
-          match Execute.run prefix bytes (Wasm_code.Succ layout.host_capacity) with
+          ghost_ (Hmc_compiler.safe source layout memory pages artifact input prefix ());
+          match Execute.run prefix bytes input (Wasm_code.Succ layout.host_capacity) with
           | Execute.Result (Wasm_calls.Running _) -> if n = 511 then failwith "binary fixture did not return"
           | Execute.Result (Wasm_calls.Finished after) ->
+            if n < 6 then failwith "binary fixture returned inside the prologue";
             (match Registers.read after.Wasm_global_execution.globals with None -> failwith "binary result registers" | Some registers ->
               match after.Wasm_global_execution.execution.Wasm_memory_execution.machine.Wasm_execution.stack with
               | Wasm_scalar.Push (Wasm_scalar.I32 status, Wasm_scalar.Empty) ->
@@ -737,12 +739,12 @@ let binary_prefixes () =
                 if registers.Registers.tag.Hmc_word64.lo <> 1 || registers.Registers.tag.Hmc_word64.hi <> 0 then failwith "binary result tag" else
                 let word = registers.Registers.payload in
                 let _ = ghost_ (Hmc_tagged_cell.tag_def (Hmc_tagged_cell.Word word)) in
-                let _source_steps = ghost_ (Hmc_compiler.reflection source layout input memory pages artifact prefix after registers word ()) in
+                let _source_steps = ghost_ (Hmc_compiler.reflection source layout memory pages artifact input prefix after registers word ()) in
                 if word <> input || Hmc_source_semantics.advance source_fuel
                     (Hmc_source_semantics.initial (D.Apply (source, D.Word input)))
                     <> Hmc_source_semantics.Done (Hm_interpreter_typing.Word word) then failwith "binary source reflection"
               | _ -> failwith "binary result stack")
-          | _ -> failwith "binary unsafe prefix") [0; 1; 31; 511]
+          | _ -> failwith "binary unsafe prefix") [0; 1; 5; 31; 511]) [0; 42; 4294967295]
     | _ -> failwith "binary fixture initialization"
 let fixtures () =
   let module Capacity = Hmc_memory_stack_capacity in

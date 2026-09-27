@@ -75,9 +75,9 @@ let[@def] rec (valid @ total) (saved : node Pref.heap @ immutable)
     && old.level === Generic && mapping rest p === None
     && (match old.desc with Link x -> target_for saved rest x q | _ -> false))
 
-type copied = #{value : node Pref.t @@ aliased; state : node Pref.token; history : history @@ ghost}
+type copied = #{value : node Pref.t @@ aliased; state : node Pref.token; history : history @@ ghost aliased}
 type instance = #{value : node Pref.t @@ aliased; state : node Pref.token;
-  epoch : node Pref.t @@ ghost; history : history @@ ghost}
+  epoch : node Pref.t @@ ghost aliased; history : history @@ ghost aliased}
 
 let[@def] (instance_at @ total) (saved : node Pref.heap @ immutable)
     (rho : (node Pref.t @ immutable total -> ty @ immutable total) @ total)

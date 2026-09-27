@@ -1,0 +1,9 @@
+1 (version 1.0, working): accepted
+2 (version 2.0, failing, query cache): rejected
+3 (version 2.0, failing, unit cache): rejected
+4 (version 1.0, failing, unit cache): accepted
+5 (version 1.0, failing, query cache): accepted
+6 (rebuilt compiler, failing, no query cache): rejected
+7 (rebuilt compiler, failing, query cache): accepted
+8 (no version, working): accepted
+9 (no version, failing): rejected

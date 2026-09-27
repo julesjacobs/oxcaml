@@ -9,7 +9,7 @@ sources:
   - testsuite/tests/vox/collections_boundary_client.ml — Client: the order of insertions does not matter
   - testsuite/tests/vox/avl_set_client.ml — Client with runtime checks against lists
   - testsuite/tests/vox/avl_stdlib_set.ml — Membership compared with `Set.MakeTotal`
-  - verification/review/collections.py — Rejected clients
+  - testsuite/tests/vox/collections_boundary.ml — Public-only compile of the collection clients, rejected clients and erasure checks
 ---
 `Avl_sets` is a persistent set of `int`s stored as an AVL tree. Its interface is stated in terms of membership alone: `lookup x empty` is false, `lookup x (add y s)` is `x = y || lookup x s`, and `lookup x (union s t)` is `lookup x s || lookup x t`. `equal s t` is true exactly when `s` and `t` have the same members, which can hold for trees of different shape. Inside the implementation, every operation is proved to keep the tree ordered and balanced with correct cached heights, and to agree with a sorted-list model. The abstract type `t` hides both the tree and these invariants.
 
@@ -25,18 +25,7 @@ From a client that sees only the public interface. `@ total` marks a function th
 
 `equal` is not structural equality. This client assumes `equal a b` and claims `a === b`. It is compiled against the public interface only.
 
-@code verification/review/collections.py '"avl_structural_equality": """' "let u = same in u" after
-
-```
-File "avl_structural_equality.ml", line 3, characters 18-19:
-3 |   let u = same in u
-                      ^
-Error: Refinement could not be proved (counterexample)
-File "avl_structural_equality.ml", line 2, characters 57-64:
-2 |   (same : {u : unit | Avl_sets.equal a b}) : {u : unit | a === b} =
-                                                             ^^^^^^^
-  The refinement is stated here.
-```
+@code testsuite/tests/vox/collections_boundary.ml "(* avl_structural_equality *)" "|}]"
 
 ## Interface
 
@@ -63,7 +52,7 @@ File "avl_structural_equality.ml", line 2, characters 57-64:
 ## Reproduce
 
 ```
-./dev test vox/avl_sets.ml vox/collections_boundary_client.ml
+./dev test vox/avl_sets.ml vox/collections_boundary_client.ml vox/collections_boundary.ml
 ```
 
-`avl_sets.ml` compiles the interface, the implementation, `avl_set_client.ml` and `avl_stdlib_set.ml` as bytecode, runs them and compares the output with `avl_sets.reference`. `collections_boundary_client.ml` compiles the client above, with the quicksort demo, and runs it as bytecode and native code. The rejected program is one of the fixtures in `verification/review/collections.py`. On the trunk that script requires a compiler configured with multiple domains and poll insertion, and after compiling the clients and fixtures it stops at erasure checks that name functions that no longer exist (`normalize` in the queue, `search` in the sorted-array proofs).
+`avl_sets.ml` compiles the interface, the implementation, `avl_set_client.ml` and `avl_stdlib_set.ml` as bytecode, runs them and compares the output with `avl_sets.reference`. `collections_boundary_client.ml` compiles the client above, with the quicksort demo, and runs it as bytecode and native code. `collections_boundary.ml` compiles the collection clients against the public interfaces only, with and without `-principal`, links and runs them with both compilers, requires the rejected programs (this one among them) to fail with their exact errors, and checks in the emitted Lambda that `add`, `union`, `lookup` and the tree functions call no validity or model proof.

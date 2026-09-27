@@ -51,8 +51,11 @@ let abstract_multiplication (query : Vox_smt.query) =
    unit is not verified again when the compiler, the source, the interfaces it
    imports, the flags and the solver are all unchanged. A solver query is not
    sent again when its SMT-LIB text and the solver are unchanged; this covers
-   termination checks and the unchanged parts of an edited unit. Only clean
-   successes are recorded. *)
+   termination checks and the unchanged parts of an edited unit, also across
+   compiler rebuilds. Only clean successes are recorded. The compiler is
+   identified by a digest of its executable and the solver by the version it
+   reports, both computed once per process; when either is unavailable, the
+   caches that need it are not used. *)
 let cache_directory () =
   match Sys.getenv_opt "VOX_VERIFY_CACHE" with
   | None | Some "" -> None
@@ -69,6 +72,79 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
+(* The solver's configured name and the version it reports. A solver that
+   does not answer [-version] within a few seconds is treated as having no
+   version. *)
+let solver_identity =
+  lazy
+    (let deadline = Unix.gettimeofday () +. 5. in
+     match Unix.pipe ~cloexec:true () with
+     | exception Unix.Unix_error _ -> None
+     | output, input -> (
+       let pid =
+         try
+           let null = Unix.openfile "/dev/null" [Unix.O_RDWR; Unix.O_CLOEXEC] 0 in
+           Fun.protect
+             ~finally:(fun () -> Unix.close null)
+             (fun () ->
+               Some
+                 (Unix.create_process !executable
+                    [| !executable; "-version" |]
+                    null input null))
+         with Unix.Unix_error _ -> None
+       in
+       Unix.close input;
+       let buffer = Buffer.create 64 and bytes = Bytes.create 256 in
+       let rec read () =
+         let remaining = deadline -. Unix.gettimeofday () in
+         if remaining <= 0. || Buffer.length buffer > 4096
+         then false
+         else
+           match Unix.select [output] [] [] remaining with
+           | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+           | [], _, _ -> false
+           | _ -> (
+             match Unix.read output bytes 0 (Bytes.length bytes) with
+             | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+             | 0 -> true
+             | n ->
+               Buffer.add_subbytes buffer bytes 0 n;
+               read ())
+       in
+       let finished = Option.is_some pid && read () in
+       Unix.close output;
+       match pid with
+       | None -> None
+       | Some pid ->
+         (* The solver may also close its output and keep running. *)
+         let rec wait finished =
+           match
+             Unix.waitpid (if finished then [Unix.WNOHANG] else []) pid
+           with
+           | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait finished
+           | 0, _ when Unix.gettimeofday () < deadline ->
+             Unix.sleepf 0.01;
+             wait finished
+           | 0, _ ->
+             (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+             ignore (wait false);
+             None
+           | _, status -> Some status
+         in
+         if not finished
+         then (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+         let version = String.trim (Buffer.contents buffer) in
+         (match wait finished with
+         | Some (Unix.WEXITED 0) when finished && version <> "" ->
+           Some (!executable ^ "\000" ^ version)
+         | _ | (exception Unix.Unix_error _) -> None)))
+
+let compiler_digest =
+  lazy
+    (match Digest.file Sys.executable_name with
+    | exception Sys_error _ -> None
+    | digest -> Some (Digest.to_hex digest))
+
 let unit_cache_file ~whole_unit =
   let arguments = Array.to_list Sys.argv in
   match cache_directory () with
@@ -79,9 +155,14 @@ let unit_cache_file ~whole_unit =
   | Some _ when not (whole_unit && List.mem !Location.input_name arguments) ->
     None
   | Some directory -> (
-    match Unix.stat Sys.executable_name, Digest.file !Location.input_name with
-    | exception (Unix.Unix_error _ | Sys_error _) -> None
-    | compiler, source ->
+    match
+      ( Lazy.force compiler_digest,
+        Lazy.force solver_identity,
+        Digest.file !Location.input_name )
+    with
+    | exception Sys_error _ -> None
+    | None, _, _ | _, None, _ -> None
+    | Some compiler, Some solver, source ->
       let rec flags = function
         | ("-o" | "-I" | "-use-runtime") :: _ :: rest -> flags rest
         | argument :: rest
@@ -102,12 +183,10 @@ let unit_cache_file ~whole_unit =
       in
       let key =
         String.concat "\000"
-          ([ "vox-verify-1";
-             Sys.executable_name;
-             string_of_int compiler.st_size;
-             Printf.sprintf "%.6f" compiler.st_mtime;
+          ([ "vox-verify-2";
+             compiler;
+             solver;
              Digest.to_hex source;
-             !executable;
              Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"" ]
           @ List.sort compare imports
           @ flags (match arguments with _ :: rest -> rest | [] -> []))
@@ -293,18 +372,21 @@ let prove poll check ~batch loc query =
            ~timeout_ms:!timeout_ms query)
     end;
     let cached =
-      Option.map
-        (fun directory ->
-          let text =
-            Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
-              ~timeout_ms:!timeout_ms query
-          in
-          (* The version names the entry format: bump it when an outcome records
-             more, so older entries are not replayed without it. *)
-          Filename.concat directory
-            ("query-4-"
-            ^ Digest.to_hex (Digest.string (!executable ^ "\000" ^ text))))
-        (cache_directory ())
+      match cache_directory () with
+      | None -> None
+      | Some directory ->
+        Option.map
+          (fun solver ->
+            let text =
+              Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
+                ~timeout_ms:!timeout_ms query
+            in
+            (* The version names the entry format: bump it when an outcome
+               records more, so older entries are not replayed without it. *)
+            Filename.concat directory
+              ("query-4-"
+              ^ Digest.to_hex (Digest.string (solver ^ "\000" ^ text))))
+          (Lazy.force solver_identity)
     in
     (* Resource limits make every outcome except a wall-clock timeout or a
        solver failure reproducible, so failures are cached too. *)

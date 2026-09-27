@@ -80,9 +80,7 @@ let connect (left : node @ immutable) (right : node @ immutable)
   let q = right.prev in
   let right_value = Some right in
   let left_value = Some left in
-  let t : {t : node option Pref.token | H.mem (Pref.own t) p} = t in
   let t = Pref.write p right_value t in
-  let t : {t : node option Pref.token | H.mem (Pref.own t) q} = t in
   let t = Pref.write q left_value t in
   t
 
@@ -104,12 +102,7 @@ let (insert_access @ total) (left : node @ immutable) (n : node @ immutable)
     let _ = present_def before right in
     let _ = inserted_def before left n right in
     let _ = connected_def before left n in
-    let u = () in
-    let proof : {u : unit | H.mem before left.next && H.mem before n.prev
-      && H.mem (connected before left n) n.next
-      && H.mem (connected before left n) right.prev
-      && inserted before left n right ===
-        connected (connected before left n) n right} = u in proof)
+    ())
 
 let insert_between (left : node @ immutable) (n : node @ immutable)
     (right : node @ immutable)
@@ -125,11 +118,7 @@ let insert_between (left : node @ immutable) (n : node @ immutable)
       @ unique =
   let before = ghost_ (Pref.own (borrow_ t)) in
   ghost_ (insert_access left n right before);
-  let t : {t : node option Pref.token | H.mem (Pref.own t) left.next
-    && H.mem (Pref.own t) n.prev} = t in
   let t = connect left n t in
-  let t : {t : node option Pref.token | H.mem (Pref.own t) n.next
-    && H.mem (Pref.own t) right.prev} = t in
   let t = connect n right t in
   t
 
@@ -151,12 +140,7 @@ let (remove_access @ total) (left : node @ immutable) (n : node @ immutable)
     let _ = present_def before right in
     let _ = removed_def before left n right in
     let _ = connected_def before left right in
-    let u = () in
-    let proof : {u : unit | H.mem before left.next && H.mem before right.prev
-      && H.mem (connected before left right) n.next
-      && H.mem (connected before left right) n.prev
-      && removed before left n right ===
-        connected (connected before left right) n n} = u in proof)
+    ())
 
 let remove (sentinel : node @ immutable) (left : node @ immutable)
     (n : node @ immutable) (right : node @ immutable)
@@ -172,11 +156,7 @@ let remove (sentinel : node @ immutable) (left : node @ immutable)
       @ unique =
   let before = ghost_ (Pref.own (borrow_ t)) in
   ghost_ (remove_access left n right before);
-  let t : {t : node option Pref.token | H.mem (Pref.own t) left.next
-    && H.mem (Pref.own t) right.prev} = t in
   let t = connect left right t in
-  let t : {t : node option Pref.token | H.mem (Pref.own t) n.next
-    && H.mem (Pref.own t) n.prev} = t in
   let t = connect n n t in
   t
 
@@ -185,8 +165,7 @@ let read_link : (p : node option Pref.t) @ immutable ->
     (t : {t : node option Pref.token | H.mem (Pref.own t) p
       && H.at (Pref.own t) p === Some (Some expected)}) @ local read ->
     {n : node | n === expected} @ immutable = fun p expected t ->
-  let b : {t : node option Pref.token | H.mem (Pref.own t) p} = t in
-  let v = Pref.read p b in
+  let v = Pref.read p t in
   match v with
   | None -> failwith "unlinked node"
   | Some n -> n
@@ -203,13 +182,7 @@ let (walk_view @ total) (backward : bool) (cursor : node @ immutable)
     let _ = path_def h backward model stop in
     let _ = head_def model stop in
     let _ = tail_def model in
-    let u = () in
-    let proof : {u : unit | (match model with
-      | [] -> cursor === stop
-      | n :: rest -> cursor === n && not cursor.sentinel
-        && rest === tail model && present h cursor
-        && H.at h (field backward cursor) === Some (Some (head rest stop))
-        && path h backward rest stop)} = u in proof)
+    ())
 
 let rec walk : (backward : bool) -> (cursor : node) @ immutable ->
     (stop : node) @ immutable -> (model : node list) @ immutable ghost ->
@@ -228,14 +201,9 @@ let rec walk : (backward : bool) -> (cursor : node) @ immutable ->
     let _ = ghost_ (
       let _ = present_def h cursor in
       let _ = field_def backward cursor in
-      let u = () in
-      let proof : {u : unit | H.mem h p} = u in proof) in
-    let b : {t : node option Pref.token | H.mem (Pref.own t) p
-      && H.at (Pref.own t) p === Some (Some expected)} = t in
-    let next = read_link p expected b in
-    let b : {t : node option Pref.token | stop.sentinel && next === head rest stop
-      && path (Pref.own t) backward rest stop} = t in
-    let ns = walk backward next stop rest b in
+      ()) in
+    let next = read_link p expected t in
+    let ns = walk backward next stop rest t in
     let ns = cursor :: ns in ns
 
 let[@def] (value @ total) (h : node option Pref.heap @ immutable)
@@ -281,11 +249,9 @@ let rec reverse_nodes : (ns : node list) @ immutable ->
     let _ = ghost_ (present_def before n) in
     let prev : {v : node option | Some v === H.at before p} =
       let b = borrow_ t in
-      let b : {t : node option Pref.token | H.mem (Pref.own t) p} = b in
       let prev = Pref.read p b in prev in
     let next : {v : node option | Some v === H.at before q} =
       let b = borrow_ t in
-      let b : {t : node option Pref.token | H.mem (Pref.own t) q} = b in
       let next = Pref.read q b in next in
     let _ = ghost_ (
       let _ = value_def before p in
@@ -294,16 +260,11 @@ let rec reverse_nodes : (ns : node list) @ immutable ->
       let _ = owns_put before rest p next in
       let h = H.put before p next in
       let _ = owns_put h rest q prev in
-      let u = () in
-      let proof : {u : unit |
+      (() : {u : unit |
         H.put (H.put before p next) q prev === flipped before n
-        && owns (H.put (H.put before p next) q prev) rest} = u in proof)
-            in
-    let t : {t : node option Pref.token | H.mem (Pref.own t) p} = t in
+        && owns (H.put (H.put before p next) q prev) rest})) in
     let t = Pref.write p next t in
-    let t : {t : node option Pref.token | H.mem (Pref.own t) q} = t in
     let t = Pref.write q prev t in
-    let t : {t : node option Pref.token | owns (Pref.own t) rest} = t in
     let t = reverse_nodes rest t in
     t
 
@@ -331,9 +292,7 @@ let make_node (sentinel : bool) (value : int) (t : node option Pref.token @ uniq
   let t = b.state in
   let node = {value; sentinel; prev; next} in
   let v = Some node in
-  let t : {t : node option Pref.token | H.mem (Pref.own t) prev} = t in
   let t = Pref.write prev v t in
-  let t : {t : node option Pref.token | H.mem (Pref.own t) next} = t in
   let t = Pref.write next v t in
   let after = ghost_ (Pref.own (borrow_ t)) in
   let _ = ghost_ (present_def after node) in
@@ -412,15 +371,9 @@ let traverse : (backward : bool) -> (sentinel : node) @ immutable ->
   let _ = ghost_ (
     let _ = present_def h sentinel in
     let _ = field_def backward sentinel in
-    let u = () in
-    let proof : {u : unit | H.mem h p} = u in proof) in
-  let b : {t : node option Pref.token | H.mem (Pref.own t) p
-    && H.at (Pref.own t) p === Some (Some start)} = t in
-  let first = read_link p start b in
-  let b : {t : node option Pref.token | sentinel.sentinel
-    && first === head expected sentinel
-    && path (Pref.own t) backward expected sentinel} = t in
-  let ns = walk backward first sentinel expected b in
+    ()) in
+  let first = read_link p start t in
+  let ns = walk backward first sentinel expected t in
   ns
 
 

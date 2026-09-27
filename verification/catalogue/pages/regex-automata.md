@@ -12,7 +12,7 @@ sources:
   - testsuite/tests/vox/regex_public_client.ml — Client using only the public interfaces
   - testsuite/tests/vox/regex.ml — Runtime tests and rejected programs for the matcher
   - testsuite/tests/vox/regex_dfa_bridge.ml — Test that checks the conversion proof
-  - testsuite/tests/vox/dfa_boundary_check.py — The only compile of the public interface and client
+  - testsuite/tests/vox/dfa_boundary.ml — The only compile of the public interface and client, and the erasure check
 ---
 `Regex_language.matches r w` decides whether the regular expression `r` matches the word `w`, where symbols are `int`s and the syntax is `Empty`, `Epsilon`, `Symbol`, `Alt`, `Seq` and `Star`. It is proved to agree with an inductive membership relation: `Membership.valid r p` says that `p` derives a word from `r` by the usual rules, and `Membership.word p` is that word. `sound` returns an erased derivation of `w` whenever `matches r w` is true, and `complete` shows that `matches r w` is true whenever such a derivation exists. The matcher uses Brzozowski derivatives.
 
@@ -66,7 +66,7 @@ Each file wraps its contents in a module (`regex_core.ml` defines `Regex`) becau
 
 ## Trusted base
 
-- `dfa_boundary_check.py` is the only program that compiles `regex_language.mli`, `regex_language.ml` (the proofs of `sound`, `complete`, `lower_matches` and `lower_valid` from the implementation) and `regex_public_client.ml`. `./dev test` does not run it. The tests `regex.ml` and `regex_dfa_bridge.ml` check the implementation and its proofs, but not these three files.
+- The test `dfa_boundary.ml` is the only one that compiles `regex_language.mli`, `regex_language.ml` (the proofs of `sound`, `complete`, `lower_matches` and `lower_valid` from the implementation) and `regex_public_client.ml`. The tests `regex.ml` and `regex_dfa_bridge.ml` check the implementation and its proofs, but not these three files.
 - `lower` checks its table with `Dfa_proof.of_raw` from the DFA demo, whose module declares three `external` aliases of `%equal` and `%greaterequal` at `int` (`dfa_equivalence_proof.ml`). The checker gives them the meaning of `=` and `>=`.
 
 ## Scope
@@ -83,9 +83,7 @@ Each file wraps its contents in a module (`regex_core.ml` defines `Regex`) becau
 After `make install` and `./dev init`, from the repository root:
 
 ```
-./dev test vox/regex.ml vox/regex_dfa_bridge.ml
-python3 testsuite/tests/vox/dfa_boundary_check.py
-python3 testsuite/tests/vox/dfa_boundary_check.py --compiler _install/bin/ocamlc.opt
+./dev test vox/regex.ml vox/regex_dfa_bridge.ml vox/dfa_boundary.ml
 ```
 
-`regex.ml` checks the matcher and the internal automaton, compares `matches` with a separate runtime matcher on 3,244 small regexes, and requires three false claims to fail. `regex_dfa_bridge.ml` checks the conversion proof. The script compiles all DFA and regex modules with `_install/bin/ocamlopt.opt` (or the compiler given by `--compiler`), compiles the public interfaces with `-opaque`, compiles `regex_public_client.ml` against the public interfaces only, links and runs it, and checks from `-drawlambda` output that the proof functions `sound`, `complete`, `lower_matches` and `lower_valid` make no runtime calls. It also requires a public client that claims `lower` always returns `Some` to fail. It writes into a temporary directory and prints its path.
+`regex.ml` checks the matcher and the internal automaton, compares `matches` with a separate runtime matcher on 3,244 small regexes, and requires three false claims to fail. `regex_dfa_bridge.ml` checks the conversion proof. `dfa_boundary.ml` compiles all DFA and regex modules with both compilers, the public interfaces with `-opaque`, compiles `regex_public_client.ml` against the public interfaces only, links and runs it, and checks from `-drawlambda` output that the proof functions `sound`, `complete`, `lower_matches` and `lower_valid` make no runtime calls. It also requires a public client that claims `lower` always returns `Some` to fail with its exact error.

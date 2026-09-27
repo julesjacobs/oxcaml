@@ -690,14 +690,49 @@ let mode_max =
   mode_default value_max_real
 
 (* Ghost fields contain total logical values but have no runtime slot.
-   Construction checks totality; projection fabricates a ghost placeholder. *)
-let ghost_field_read_mode () =
-  Value.disallow_right
-    (Value.of_const { Value.Const.min with ghostliness = Ghost })
+   Construction checks totality; projection fabricates a ghost placeholder.
 
-let mode_ghost_field_write () =
+   A ghost field is still a component of its record for ownership: reading
+   it inherits the record's mode (after the field's modalities) on every
+   axis except three.
+   - Ghostliness: the read is [ghost], since there is no run-time value.
+   - Areality (with forkable and yielding, which follow it): the
+     placeholder is fabricated, not loaded from the record, so it is
+     [global]; correspondingly construction accepts [local] values (they
+     never reach run time).
+   - Totality: construction requires a [total] value, so the read is [total].
+   In particular uniqueness, linearity, visibility and contention come from
+   the record: a ghost field of an aliased record is aliased, so an
+   ownership token stored in it cannot be taken twice. *)
+let ghost_field_crossing =
+  Crossing.create ~regionality:true ~forkable:true ~yielding:true
+    ~ghostliness:true
+    ~linearity:false ~uniqueness:false ~portability:false ~contention:false
+    ~totality:false ~statefulness:false ~visibility:false ~staticity:false
+
+(* [mode] is the record's mode after the field's modalities. *)
+let ghost_field_read_mode mode =
+  let mode =
+    Crossing.apply_left ghost_field_crossing mode
+    |> Value.meet_const_with Totality Totality.Const.Total
+  in
+  Value.join
+    [ mode; Value.of_const { Value.Const.min with ghostliness = Ghost } ]
+
+(* [expected_mode] is the expected mode of the field's argument after the
+   field's modalities. The axes of [ghost_field_crossing] are lifted;
+   totality is required. The other axes are those of an ordinary field, so
+   a unique record only holds unique ghost components. *)
+let mode_ghost_field_write expected_mode =
+  let mode =
+    as_single_mode expected_mode
+    |> Crossing.apply_right ghost_field_crossing
+  in
   mode_default
-    (Value.of_const {Value.Const.max with totality = Totality.Const.Total})
+    (Value.meet
+       [ mode;
+         Value.of_const
+           { Value.Const.max with totality = Totality.Const.Total } ])
 
 let mode_with_position mode position =
   { (mode_default mode) with position }
@@ -3770,7 +3805,7 @@ and type_pat_aux
             ~modalities:label.lbl_modalities alloc_mode.mode
         in
         let mode =
-          if label.lbl_ghost then ghost_field_read_mode () else mode
+          if label.lbl_ghost then ghost_field_read_mode mode else mode
         in
         let alloc_mode = simple_pat_mode mode in
         let ty_sort =
@@ -7551,10 +7586,12 @@ and type_expect_
             container = (loc, Expression) }
         in
         let argument_mode =
-          if label.lbl_ghost then mode_ghost_field_write ()
-          else
-            mode_is_contained_by is_contained_by
-              ~modalities:label.lbl_modalities record_mode
+          mode_is_contained_by is_contained_by
+            ~modalities:label.lbl_modalities record_mode
+        in
+        let argument_mode =
+          if label.lbl_ghost then mode_ghost_field_write argument_mode
+          else argument_mode
         in
         type_label_exp ~overwrite true env argument_mode loc ty_record x record_form
       in
@@ -7616,7 +7653,7 @@ and type_expect_
                   ~modalities:lbl.lbl_modalities mode
               in
               let mode =
-                if lbl.lbl_ghost then ghost_field_read_mode () else mode
+                if lbl.lbl_ghost then ghost_field_read_mode mode else mode
               in
               let mode = cross_left env lbl.lbl_arg mode in
               check_construct_mutability ~loc:record_loc ~env lbl.lbl_mut
@@ -7626,10 +7663,12 @@ and type_expect_
                   container = (record_loc, Expression) }
               in
               let argument_mode =
-                if lbl.lbl_ghost then mode_ghost_field_write ()
-                else
-                  mode_is_contained_by is_contained_by
-                    ~modalities:lbl.lbl_modalities record_mode
+                mode_is_contained_by is_contained_by
+                  ~modalities:lbl.lbl_modalities record_mode
+              in
+              let argument_mode =
+                if lbl.lbl_ghost then mode_ghost_field_write argument_mode
+                else argument_mode
               in
               submode ~loc:extended_expr_loc ~env mode argument_mode;
               Kept (ty_arg1, lbl.lbl_mut,
@@ -8713,7 +8752,7 @@ and type_expect_
           ~modalities:label.lbl_modalities mode
       in
       let mode =
-        if label.lbl_ghost then ghost_field_read_mode () else mode
+        if label.lbl_ghost then ghost_field_read_mode mode else mode
       in
       let boxing : texp_field_boxing =
         let is_float_boxing =
@@ -8786,7 +8825,7 @@ and type_expect_
           ~modalities:label.lbl_modalities mode
       in
       let mode =
-        if label.lbl_ghost then ghost_field_read_mode () else mode
+        if label.lbl_ghost then ghost_field_read_mode mode else mode
       in
       let mode = cross_left env ty_arg mode in
       submode ~loc ~env mode expected_mode;

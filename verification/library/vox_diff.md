@@ -8,7 +8,7 @@ scripts/run-diff-demo 'abab' 'baba'
 scripts/run-diff-demo '' 'hello'
 ./dev test vox/diff.ml
 ./dev test vox/diff_rejected.ml
-scripts/check-diff-erasure
+./dev test vox/diff_boundary.ml
 ```
 
 ## Exact human-review surface
@@ -124,10 +124,10 @@ optimality, and proves the error case impossible for accepted input sizes.
 It also derives the former complete recursive `apply_def` equation from
 `apply_characterization` and the public source/target equations, preserving
 its semantic consequences (the public theorem name changes).
-`scripts/check-diff-erasure` compiles it in a directory containing only the
-two public `.cmi` files, in bytecode and native principal modes. The same
-script audits executable Lambda call targets, including reconstruction, for
-surviving model, proof, certificate or bigint computations. It additionally
+`diff_boundary.ml` compiles it in a directory containing only the two public
+interfaces, in bytecode and native principal modes. The same test audits
+executable Lambda call targets, including reconstruction, for surviving
+model, proof, certificate or bigint computations. It additionally
 checks that search has no integer arithmetic, comparison, or trap, and that
 `diff` has no integer addition for initial fuel.
 
@@ -140,5 +140,5 @@ patches, the exact million-element limit and oversized-input rejection.
 An independent dynamic-programming oracle checks edit cost. `diff.ml` is a
 proof test and runs as bytecode only, and `diff_rejected.ml` is an expect test
 (the backend policy is in `testsuite/tests/vox/README.md`);
-`scripts/check-diff-erasure` covers bytecode and native `-principal`
-compilation of the public client.
+`diff_boundary.ml` covers bytecode and native `-principal` compilation of the
+public client, and runs the command-line demo on `ABCABBA` and `CBABAC`.

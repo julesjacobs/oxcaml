@@ -1,0 +1,83 @@
+ok: pref_list.reverse_into is defined
+ok: pref_list.reverse_into#1 calls no model or proof function
+ok: pref_list.reverse_into#1 uses no model module
+ok: pref_list.reverse is defined
+ok: pref_list.reverse#1 calls no model or proof function
+ok: pref_list.reverse#1 uses no model module
+ok: pref_list.reverse#2 calls no model or proof function
+ok: pref_list.reverse#2 uses no model module
+ok: pref_list.observe_framed is defined
+ok: pref_list.observe_framed#1 calls no model or proof function
+ok: pref_list.observe_framed#1 uses no model module
+ok: pref_list.observe_framed#1 neither splits nor joins tokens
+ok: pref_list.observe_read is defined
+ok: pref_list.observe_read#1 calls no model or proof function
+ok: pref_list.observe_read#1 uses no model module
+ok: pref_list.observe_read#1 neither splits nor joins tokens
+ok: pref_list.observe is defined
+ok: pref_list.observe#1 calls no model or proof function
+ok: pref_list.observe#1 uses no model module
+ok: pref_list.observe#1 neither splits nor joins tokens
+ok: pref_list.observe#2 calls no model or proof function
+ok: pref_list.observe#2 uses no model module
+ok: pref_list.observe#2 neither splits nor joins tokens
+ok: pref_tree.mirror is defined
+ok: pref_tree.mirror#1 calls no model or proof function
+ok: pref_tree.mirror#1 uses no model module
+ok: pref_tree.mirror#2 calls no model or proof function
+ok: pref_tree.mirror#2 uses no model module
+ok: pref_tree.mirror_with_frame is defined
+ok: pref_tree.mirror_with_frame#1 calls no model or proof function
+ok: pref_tree.mirror_with_frame#1 uses no model module
+ok: pref_tree.observe_framed is defined
+ok: pref_tree.observe_framed#1 calls no model or proof function
+ok: pref_tree.observe_framed#1 uses no model module
+ok: pref_tree.observe_framed#1 neither splits nor joins tokens
+ok: pref_tree.observe_read is defined
+ok: pref_tree.observe_read#1 calls no model or proof function
+ok: pref_tree.observe_read#1 uses no model module
+ok: pref_tree.observe_read#1 neither splits nor joins tokens
+ok: pref_tree.observe is defined
+ok: pref_tree.observe#1 calls no model or proof function
+ok: pref_tree.observe#1 uses no model module
+ok: pref_tree.observe#1 neither splits nor joins tokens
+ok: pref_tree.observe#2 calls no model or proof function
+ok: pref_tree.observe#2 uses no model module
+ok: pref_tree.observe#2 neither splits nor joins tokens
+ok: pref_ring.splice_range is defined
+ok: pref_ring.splice_range#1 calls no model or proof function
+ok: pref_ring.splice_range#1 uses no model module
+ok: pref_ring.reverse_nodes is defined
+ok: pref_ring.reverse_nodes#1 calls no model or proof function
+ok: pref_ring.reverse_nodes#1 uses no model module
+ok: pref_ring_splice.splice_demo is defined
+ok: pref_ring_splice.splice_demo#1 calls no model or proof function
+ok: pref_ring_splice.splice_demo#1 uses no model module
+ok: pref_ring_reverse.reverse_demo is defined
+ok: pref_ring_reverse.reverse_demo#1 calls no model or proof function
+ok: pref_ring_reverse.reverse_demo#1 uses no model module
+ok: pref_ring_general.reverse is defined
+ok: pref_ring_general.reverse#1 calls no model or proof function
+ok: pref_ring_general.reverse#1 uses no model module
+ok: pref_ring_general.reverse#2 calls no model or proof function
+ok: pref_ring_general.reverse#2 uses no model module
+ok: pref_ring_general.adopt is defined
+ok: pref_ring_general.adopt#1 calls no model or proof function
+ok: pref_ring_general.adopt#1 uses no model module
+ok: pref_ring_general.release is defined
+ok: pref_ring_general.release#1 calls no model or proof function
+ok: pref_ring_general.release#1 uses no model module
+ok: pref_ring_splice_general.splice is defined
+ok: pref_ring_splice_general.splice#1 calls no model or proof function
+ok: pref_ring_splice_general.splice#1 uses no model module
+ok: pref_ring_splice_general.splice#2 calls no model or proof function
+ok: pref_ring_splice_general.splice#2 uses no model module
+ok: pref_ring_splice_general.adopt is defined
+ok: pref_ring_splice_general.adopt#1 calls no model or proof function
+ok: pref_ring_splice_general.adopt#1 uses no model module
+ok: pref_ring_splice_general.release is defined
+ok: pref_ring_splice_general.release#1 calls no model or proof function
+ok: pref_ring_splice_general.release#1 uses no model module
+ok: pref_ring_splice_general.swap is defined
+ok: pref_ring_splice_general.swap#1 calls no model or proof function
+ok: pref_ring_splice_general.swap#1 uses no model module

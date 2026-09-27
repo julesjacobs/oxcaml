@@ -38,6 +38,7 @@ let[@def] (installed @ total) (program : I.program @ immutable) (layout : layout
   && out.context.State.stack_capacity === layout.stack_capacity && out.context.State.host_capacity === layout.host_capacity
   && out.state.State.registers.Registers.frame = layout.frame_base
   && out.state.State.registers.Registers.heap_limit = layout.heap_limit
+  && out.state.State.registers.Registers.payload === {Hmc_word64.lo = 0; hi = 0}
   && V.length out.state.State.memory === V.length memory)
 let[@def] (installable @ total) (program : I.program @ immutable) (layout : layout @ immutable) (start : Init.start @ immutable) = ghost_ (
   match start.Init.configuration.Machine.state with
@@ -114,7 +115,7 @@ let (install @ total) : (program : I.program) @ immutable -> (layout : layout) @
             U.advance_def program D.Z abstract;
             State.valid_def program globals lowered context state; State.configuration_def state);
           let out = {lowered; context; state} in
-          ghost_ (installed_def program layout input memory start out); Some out
+          ghost_ (V.payload_def V.Nil; installed_def program layout input memory start out); Some out
         | _ -> None)
       | _ -> None)
     | _ -> unreachable_ ()
@@ -132,6 +133,12 @@ let[@def] (correct @ total) (program : I.program @ immutable) (layout : layout @
   | Heap_exhausted (heap, code) -> Init.correct program layout.heap_base layout.heap_limit input (Init.Heap_exhausted (heap, code))
     && not (layout_accepts program layout input)
   | Layout_rejected -> not (layout_accepts program layout input))
+(* What the theorems about a run use: the heap-machine start and the installed
+   state for [input]. [correct] adds that the layout was accepted. *)
+let[@def] (ready @ total) (program : I.program @ immutable) (layout : layout @ immutable)
+    (input : Hmc_word64.t @ immutable) (memory : B.bytes @ immutable) (start : Init.start @ immutable) (prepared : prepared @ immutable) = ghost_ (
+  Init.correct program layout.heap_base layout.heap_limit input (Init.Initialized start)
+  && installed program layout input memory start prepared)
 let (initialize @ total) : (program : I.program) @ immutable -> (layout : layout) @ immutable ->
     (input : Hmc_word64.t) @ immutable -> (memory : B.bytes) @ immutable -> {u : unit | valid_layout layout memory} ->
     {out : result | correct program layout input memory out} @ immutable =

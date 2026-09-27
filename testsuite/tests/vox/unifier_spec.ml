@@ -117,7 +117,7 @@ let[@def] rec (unified @ total) (h : node Pref.heap @ immutable)
 type result = #{
   ok : bool;
   state : node Pref.token;
-  derivation : derivation @@ ghost;
+  derivation : derivation @@ ghost aliased;
 }
 
 type edits = Unchanged | Set of node Pref.t * node Pref.t | Then of edits * edits

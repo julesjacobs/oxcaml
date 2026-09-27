@@ -16,10 +16,10 @@ module Make (C : Vox_big_credits.S) = struct
   type t = #{
     raw : W.resource;
     paths : M.path list @@ ghost immutable total aliased;
-    capacity : Bigint.t @@ ghost;
-    alpha : Bigint.t @@ ghost;
-    spent : Bigint.t @@ ghost;
-    events : E.event list @@ ghost;
+    capacity : Bigint.t @@ ghost aliased;
+    alpha : Bigint.t @@ ghost aliased;
+    spent : Bigint.t @@ ghost aliased;
+    events : E.event list @@ ghost aliased;
   }
   type result = #{value : M.elem @@ aliased; state : t;
     refund : C.token @@ ghost total}

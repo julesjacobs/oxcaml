@@ -10,18 +10,11 @@
  {
    setup-ocamlc.opt-build-env;
    ocamlc.opt;
+   binary_modules = "vox_rsa_spec vox_rsa_arithmetic vox_rsa_number_theory vox_rsa_fermat vox_rsa";
    run-expect;
    check-program-output;
  }
 *)
-
-(* Load the implementation so that the accepted phrases below can be
-   evaluated. *)
-#load "vox_rsa_spec.cmo";;
-#load "vox_rsa_arithmetic.cmo";;
-#load "vox_rsa_number_theory.cmo";;
-#load "vox_rsa_fermat.cmo";;
-#load "vox_rsa.cmo";;
 
 let negative_exponent () =
   let e = -1Z in let n = 35Z in

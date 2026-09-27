@@ -6,8 +6,8 @@ module E = Effective_level
 module R = Effective_copy_runtime
 
 type instance = #{value : node Pref.t @@ aliased; state : node Pref.token;
-  pool : pool @@ aliased; epoch : node Pref.t @@ ghost; history : history @@ ghost;
-  certificate : C.certificate @@ ghost}
+  pool : pool @@ aliased; epoch : node Pref.t @@ ghost aliased;
+  history : history @@ ghost aliased; certificate : C.certificate @@ ghost aliased}
 
 let instantiate : (c : Effective_copy_spec.context) @ immutable -> (heads : E.heads Ghost.t) @ total ->
     (scope : (((x : node Pref.t) @ immutable ->

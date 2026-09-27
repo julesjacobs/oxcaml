@@ -186,7 +186,7 @@ From the configured worktree:
 ./dev test vox/http_suffix_rejected.ml
 ./dev test vox/http_body_rejected.ml
 ./dev test vox/http_private_rejected.ml
-verification/demos/http_stream.sh
+./dev test vox/http_stream_demo.ml
 ```
 
 This verifies the focused fixture and runs it as bytecode.
@@ -197,8 +197,8 @@ import only `Vox_http_spec` and `Vox_http` (plus the public sequence interface).
 They derive every former explicit feed/parse clause from `transition_def` and
 prove soundness for arbitrary input, two-chunk reconstruction without
 invariant arguments, serializer roundtrip, and byte-parser TE rejection. The
-streaming script builds with the installed compiler and
-prints each incomplete/completed state. The positive fixture includes a
+streaming demo prints each incomplete/completed state, and the test compares
+that output with a reference. The positive fixture includes a
 two-request stream split inside CRLF, a header name, and the body;
 every two-chunk split of a pipeline; byte-at-a-time input; every incomplete
 prefix; malformed request lines and headers; framing ambiguity; and exact

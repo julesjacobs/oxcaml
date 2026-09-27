@@ -95,7 +95,7 @@ let[@def] rec (built @ total) (h : node Pref.heap @ immutable) (env : env @ immu
     && not (H.mem h2 p) && not (H.mem (H.put h2 p Var) arrow)
     && after === H.put (H.put h2 p Var) arrow (Arrow (root a, p)))
 
-type generated = #{ value : node Pref.t @@ aliased; equations : equations @@ aliased; state : node Pref.token; graph : graph @@ ghost }
+type generated = #{ value : node Pref.t @@ aliased; equations : equations @@ aliased; state : node Pref.token; graph : graph @@ ghost aliased }
 type solving = Done | Unified of derivation | Sequence of node Pref.heap * bool * solving * solving [@@inductive]
 let[@def] rec (solved @ total) (h : node Pref.heap @ immutable) (eqs : equations @ immutable)
     (ok : bool) (after : node Pref.heap @ immutable) (d : solving @ immutable) = ghost_ (
@@ -106,7 +106,7 @@ let[@def] rec (solved @ total) (h : node Pref.heap @ immutable) (eqs : equations
     | And (a, b) -> solved h a left_ok middle left
       && (if left_ok then solved middle b ok after right else not ok && after === middle)
     | _ -> false))
-type solved_result = #{ ok : bool; state : node Pref.token; solving : solving @@ ghost }
+type solved_result = #{ ok : bool; state : node Pref.token; solving : solving @@ ghost aliased }
 
 let[@def] (describes @ total)
     (rho : (node Pref.t @ immutable total -> ty @ immutable total) @ total)
@@ -125,5 +125,5 @@ let[@def] (inferred @ total) (e : term @ immutable) (middle : node Pref.heap @ i
     (g : graph @ immutable) (ok : bool) (after : node Pref.heap @ immutable) (d : solving @ immutable) = ghost_ (
   source g === e && built (H.empty ()) Empty g middle && solved middle (constraints g) ok after d)
 type inference = #{ value : node Pref.t @@ aliased; ok : bool; state : node Pref.token;
-  graph : graph @@ ghost; generated_heap : node Pref.heap @@ ghost; solving : solving @@ ghost;
-  tree : Unifier_finite_spec.tree @@ ghost }
+  graph : graph @@ ghost aliased; generated_heap : node Pref.heap @@ ghost aliased;
+  solving : solving @@ ghost aliased; tree : Unifier_finite_spec.tree @@ ghost aliased }

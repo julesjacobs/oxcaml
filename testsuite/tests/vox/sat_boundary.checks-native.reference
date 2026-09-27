@@ -1,0 +1,22 @@
+ok: vox_sat names no proof function
+ok: vox_sat makes 1 calls
+ok: vox_cdcl names no proof function
+ok: vox_cdcl makes 1 calls
+ok: vox_cdcl_total names no proof function
+ok: vox_cdcl_total makes 6 calls
+ok: no symbol for clause_rank in the proof module's object
+ok: no symbol for resolve_rank in the proof module's object
+ok: no symbol for earlier_clause_rank in the proof module's object
+ok: no symbol for variable_source_member in the proof module's object
+ok: no symbol for prefix_ in the proof module's object
+ok: no symbol for no_current_false in the proof module's object
+ok: no symbol for resolve_preserves_current in the proof module's object
+ok: no symbol for clause_universe in the proof module's object
+ok: no symbol for literal_universe in the proof module's object
+ok: no symbol for count_absent in the proof module's object
+ok: no symbol for progress_measure in the proof module's object
+ok: no symbol for progress_learning in the proof module's object
+ok: no symbol for progress_decision in the proof module's object
+ok: no symbol for trail_levels in the proof module's object
+ok: no symbol for decision_level_bound in the proof module's object
+ok: the proof module's object has symbols

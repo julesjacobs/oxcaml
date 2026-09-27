@@ -2,8 +2,8 @@ open Copy_spec
 open Generalize_spec
 
 type instance = #{value : node Pref.t @@ aliased; state : node Pref.token;
-  pool : pool @@ aliased; epoch : node Pref.t @@ ghost;
-  history : history @@ ghost}
+  pool : pool @@ aliased; epoch : node Pref.t @@ ghost aliased;
+  history : history @@ ghost aliased}
 
 let[@def] (clear_memo @ total) (v : node @ immutable) =
   {v with memo = Empty_memo}

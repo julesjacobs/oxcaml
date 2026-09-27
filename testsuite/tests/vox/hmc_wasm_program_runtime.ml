@@ -29,6 +29,23 @@ let[@def] (dispatch_body @ total) (unit : unit) =
         T.Instruction (I.Global_get 5,
           T.Instruction (I.Plain I.I32_eqz,
             T.Instruction (I.Br_if 0, T.Empty))))))
+let[@def] (loop_code @ total) (unit : unit) = T.Loop (dispatch_body (), T.Instruction (I.Global_get 5, T.Empty))
+(* The host passes the input in the exported global [payload] (7). The
+   prologue stores it as the payload of the entry frame's first environment
+   cell, 56 bytes above the frame base in global 0, and then resets [payload]
+   to the payload of [Nil], the initial accumulator. *)
+let[@def] (input_offset @ total) (unit : unit) : B.u32 = 56
+let[@def] (prologue_code @ total) (unit : unit) : Wasm_code.t @ immutable =
+  Wasm_code.Next (I.Global_get 0,
+    Wasm_code.Next (I.Global_get 7,
+      Wasm_code.Next (I.I64_store (3, 56),
+        Wasm_code.Next (I.I64_const {Hmc_word64.lo = 0; hi = 0},
+          Wasm_code.Next (I.Global_set 7, Wasm_code.Empty)))))
+let[@def] (prologue @ total) (code : T.code @ immutable) =
+  T.Instruction (I.Global_get 0,
+    T.Instruction (I.Global_get 7,
+      T.Instruction (I.I64_store (3, 56),
+        T.Instruction (I.I64_const {Hmc_word64.lo = 0; hi = 0},
+          T.Instruction (I.Global_set 7, code)))))
 let[@def] (dispatcher @ total) (unit : unit) =
-  {F.result = F.I32; locals = F.No_locals;
-    code = T.Loop (dispatch_body (), T.Instruction (I.Global_get 5, T.Empty))}
+  {F.result = F.I32; locals = F.No_locals; code = prologue (loop_code ())}

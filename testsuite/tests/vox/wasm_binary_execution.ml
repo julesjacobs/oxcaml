@@ -24,17 +24,27 @@ let[@def] (materialized @ total) (image : Binary.image @ immutable) =
   table_targets image.Binary.module_.F.functions image.Binary.module_.F.table &&
   image.Binary.exports.Exports.memory = 0
 type result = Rejected | Result of Calls.result [@@inductive]
-let[@def] (run @ total) (fuel : C.count @ immutable) (bytes : B.bytes @ immutable) (capacity : C.count @ immutable) : result @ immutable =
+(* The host sets the exported global [payload] to [input] and then calls the
+   exported function [run], as in [instance.exports.payload.value = input;
+   instance.exports.run ()]. Setting the global fails unless it is a mutable
+   i64 global. *)
+let[@def] (run @ total) (fuel : C.count @ immutable) (bytes : B.bytes @ immutable) (input : Hmc_word64.t @ immutable)
+    (capacity : C.count @ immutable) : result @ immutable =
   match Binary.decode bytes with
   | Some (image, B.End) ->
     if not (materialized image) then Rejected else
-    (match Calls.start image.Binary.module_ image.Binary.exports.Exports.run image.Binary.data image.Binary.globals capacity with
-    | Calls.Running configuration -> Result (Calls.run fuel image.Binary.module_ configuration)
-    | result -> Result result)
+    (match G.set image.Binary.globals image.Binary.exports.Exports.payload (Wasm_scalar.I64 input) with
+    | None -> Rejected
+    | Some globals ->
+      match Calls.start image.Binary.module_ image.Binary.exports.Exports.run image.Binary.data globals capacity with
+      | Calls.Running configuration -> Result (Calls.run fuel image.Binary.module_ configuration)
+      | result -> Result result)
   | _ -> Rejected
 let (correspondence @ total) : (image : Binary.image) @ immutable -> (bytes : B.bytes) @ immutable ->
+    (input : Hmc_word64.t) @ immutable -> (globals : G.t) @ immutable ->
     (fuel : C.count) @ immutable -> (capacity : C.count) @ immutable -> (configuration : Calls.configuration) @ immutable ->
-    {u : unit | Binary.decode bytes === Some (image, B.End) && materialized image &&
-      Calls.start image.Binary.module_ image.Binary.exports.Exports.run image.Binary.data image.Binary.globals capacity === Calls.Running configuration} ->
-    {u : unit | run fuel bytes capacity === Result (Calls.run fuel image.Binary.module_ configuration)} @ ghost =
-  fun image bytes fuel capacity configuration premise -> ghost_ (run_def fuel bytes capacity)
+    {u : unit | Binary.decode bytes === Some (image, B.End) && materialized image
+      && G.set image.Binary.globals image.Binary.exports.Exports.payload (Wasm_scalar.I64 input) === Some globals
+      && Calls.start image.Binary.module_ image.Binary.exports.Exports.run image.Binary.data globals capacity === Calls.Running configuration} ->
+    {u : unit | run fuel bytes input capacity === Result (Calls.run fuel image.Binary.module_ configuration)} @ ghost =
+  fun image bytes input globals fuel capacity configuration premise -> ghost_ (run_def fuel bytes input capacity)

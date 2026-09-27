@@ -83,7 +83,7 @@ The same test rejects a range move whose `final` is not the last node of the ran
 After `make install` and `./dev init`:
 
 ```
-./dev test vox/pref_ring_general_client.ml vox/pref_ring_splice_general_client.ml vox/pref_ring_general_demo.ml vox/pref_ring_splice_general_demo.ml vox/pref_ring_insert_remove_demo.ml vox/pref_ring_general_rejected.ml
+./dev test vox/pref_ring_general_client.ml vox/pref_ring_splice_general_client.ml vox/pref_ring_general_demo.ml vox/pref_ring_splice_general_demo.ml vox/pref_ring_insert_remove_demo.ml vox/pref_ring_general_rejected.ml vox/structures_erasure.ml
 ```
 
-The client tests check `Pref_ring`, `Pref_ring_general` and `Pref_ring_splice_general` while compiling them and run as bytecode and native code. At run time the reversal client reverses only an empty ring and the range-move client calls nothing; the demos, which run as bytecode, execute the operations on nonempty rings.
+The client tests check `Pref_ring`, `Pref_ring_general` and `Pref_ring_splice_general` while compiling them and run as bytecode and native code. At run time the reversal client reverses only an empty ring and the range-move client calls nothing; the demos, which run as bytecode, execute the operations on nonempty rings. `structures_erasure.ml` checks in the native `-dlambda` output that the ring operations (`reverse`, `splice`, `adopt`, `release`, `swap` and the demos' entry points) call no model or proof function and use no model module.
