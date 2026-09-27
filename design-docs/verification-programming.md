@@ -156,42 +156,18 @@ lemma keeps the definition's) are premises: the definition unfolds where the
 arguments satisfy them. Partial applications, aliases and functions passed as
 arguments keep the opaque meaning.
 
-## Relations
+## Inductive definitions
 
-An inductive relation is declared by its rules. Each constructor of a variant
-type is one rule: its fields are the rule's variables and premise
-derivations, the guard its premises and the result its conclusion.
-
-```ocaml
-let[@def transparent] step (x : int) (y : int) = x < y
-
-type star = Refl of int | Step of int * int * int * star
-[@@relation function
-  | Refl x -> (x, x)
-  | Step (x, y, z, rest) when step x y && star rest y z -> (x, z)]
-```
-
-The declaration expands to the derivation datatype and ordinary checked
-definitions: `star_concl` (a rule's conclusion, transparent), `star_valid`
-(every rule's premises hold), the transparent predicate `star d x z` (`d`
-derives `(x, z)`), and the lemma `star_inversion d x z`, the equation between
-`star d x z` and the premises of `d`'s rule. That equation is both the
-inversion and the introduction rule. Rule induction is structural recursion
-over the derivation:
-
-```ocaml
-let rec (monotone @ total) :
-    (d : star) -> (x : int) -> (z : int) ->
-    {u : unit | if star d x z then x <= z else true} @ ghost =
-  fun d x z -> ghost_ (
-    star_inversion d x z;
-    match d with
-    | Refl _ -> ()
-    | Step (_, y, _, rest) -> monotone rest y z)
-```
-
-Declare relations in structures; an interface lists the generated values, as
-the printed signature shows them.
+Vox has no declaration form for inductive relations. Write one as a
+derivation datatype with one constructor per rule, whose fields are the
+rule's variables and premise derivations, together with a transparent
+conclusion function, a recursive `[@def]` validity predicate that checks
+every rule's premises, and a transparent predicate such as
+`derives d x z` (`valid d && concl d === (x, z)`). Calling `valid_def d`
+gives the premises of `d`'s last rule, both to invert a derivation and to
+build one. Rule induction is structural recursion over the derivation.
+`testsuite/tests/vox/relations.ml` proves a reflexive-transitive closure
+monotone this way and builds derivations for transitivity.
 
 ## Models, evidence, and runtime checks
 

@@ -73,11 +73,7 @@ let warn_misplaced_attributes () =
       if sloc.txt = "decreases" || sloc.txt = "ocaml.decreases" then
         Location.raise_errorf ~loc:sloc.loc
           "The decreases attribute is only supported on recursive function \
-           bindings";
-      if sloc.txt = "relation" || sloc.txt = "ocaml.relation" then
-        Location.raise_errorf ~loc:sloc.loc
-          "The relation attribute is only supported on a type declaration \
-           in a structure") keys;
+           bindings") keys;
   if not (compiler_stops_before_attributes_consumed ()) then
     let keys = List.sort attr_order keys in
     List.iter (fun sloc ->
@@ -112,7 +108,6 @@ let builtin_attrs =
   [ "inline"
   ; "def"
   ; "decreases"
-  ; "relation"
   ; "atomic"
   ; "inlined"
   ; "specialise"
