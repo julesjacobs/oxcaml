@@ -190,3 +190,12 @@ Machine-int constant multiplication uses exact wrapping arithmetic. Queries
 using bitvectors also encode variable multiplication exactly. Other variable
 multiplication is conservative and uninterpreted; a failed proof involving it
 reports an abstract countermodel rather than a concrete program counterexample.
+
+A query that contains a bitwise operation (`land`, `lor`, `lxor`, `lsr`) is
+first tried with those operations uninterpreted, over bounded integers, with
+facts about signs and ranges, low masks (`x land (2^k - 1)` is `x mod 2^k`)
+and shifts by a constant. This attempt is limited to the warning threshold.
+If it does not succeed, the query is retried with every machine integer as a
+63-bit bitvector, under its own limit; counterexamples and slow-proof warnings
+come from the attempt that decides the query. So a `land` fact in scope, such
+as a power-of-two capacity, costs little unless the goal depends on the bits.

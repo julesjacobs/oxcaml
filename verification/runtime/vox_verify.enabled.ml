@@ -124,8 +124,15 @@ type outcome =
    role. *)
 let source_name label =
   let internal =
-    [ "value"; "reachable"; "observation"; "pattern"; "result";
-      "refinement_function"; "recursive"; "condition"; "argument" ]
+    [ "value";
+      "reachable";
+      "observation";
+      "pattern";
+      "result";
+      "refinement_function";
+      "recursive";
+      "condition";
+      "argument" ]
   in
   label <> ""
   && (not (List.mem label internal))
@@ -139,8 +146,8 @@ let source_name label =
    platforms pick differently. A countermodel found under extra assumptions is
    still a countermodel of the goal, so look for one with every source integer
    within 0, then 1, 10 and 100 of zero, and keep [model] if there is none.
-   Trying the tightest bound first also makes the reported values agree
-   across platforms in most cases. *)
+   Trying the tightest bound first also makes the reported values agree across
+   platforms in most cases. *)
 let smaller_model check ?resource_limit (query : Vox_smt.query) model =
   let bound small symbol : Vox_smt.term option =
     let v = Vox_smt.Var symbol in
@@ -258,80 +265,87 @@ let prove poll check ~batch loc query =
     | true, Some warning, None -> Some warning
     | _, _, limit -> limit
   in
-  if !dump_vc
-  then begin
-    Format.eprintf "%a:@." Location.print_loc loc;
-    List.iteri
-      (fun i s ->
-        Format.eprintf "  v%d: %s (%s)@." i (Vox_smt.Symbol.label s)
-          (match Vox_smt.Symbol.sort s with
-          | Bool -> "bool"
-          | Int63 -> "int"
-          | Int -> "bigint"
-          | Opaque _ -> "opaque"
-          | Datatype datatype -> Vox_smt.Datatype.label datatype))
-      query.Vox_smt.symbols;
-    List.iteri
-      (fun i f -> Format.eprintf "  f%d: %s@." i (Vox_smt.Function.label f))
-      query.Vox_smt.functions;
-    Format.eprintf "%s@."
-      (Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
-         ~timeout_ms:!timeout_ms query)
-  end;
-  let cached =
-    Option.map
-      (fun directory ->
-        let text =
-          Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
-            ~timeout_ms:!timeout_ms query
-        in
-        (* The version names the entry format: bump it when an outcome
-           records more, so older entries are not replayed without it. *)
-        Filename.concat directory
-          ("query-4-"
-          ^ Digest.to_hex (Digest.string (!executable ^ "\000" ^ text))))
-      (cache_directory ())
-  in
-  (* Resource limits make every outcome except a wall-clock timeout or a solver
-     failure reproducible, so failures are cached too. *)
-  let recorded =
-    match cached with
-    | Some file when Sys.file_exists file -> (
-      match In_channel.with_open_bin file In_channel.input_all with
-      | "proved" -> Some (Proved None)
-      | "refuted" -> Some (Refuted None)
-      | "exhausted" -> Some Exhausted
-      | "unknown" -> Some (Inconclusive None)
-      | entry -> (
-        match String.index_opt entry ' ' with
-        | Some i when String.sub entry 0 i = "proved" ->
-          Option.map
-            (fun n -> Proved (Some n))
-            (int_of_string_opt
-               (String.sub entry (i + 1) (String.length entry - i - 1)))
-        | Some i when String.sub entry 0 i = "refuted" ->
-          Some
-            (Refuted
-               (Some (String.sub entry (i + 1) (String.length entry - i - 1))))
-        | Some i when String.sub entry 0 i = "unknown" ->
-          Some
-            (Inconclusive
-               (Some (String.sub entry (i + 1) (String.length entry - i - 1))))
-        | _ -> None)
-      | exception Sys_error _ -> None)
-    | _ -> None
-  in
-  let outcome =
+  (* A query with bitwise operations is first tried with them abstracted, which
+     avoids bit-blasting every integer in it. Only a proof counts: any other
+     outcome is replaced by that of the exact query, which has its own budget.
+     The abstract attempt is limited like a batch, so a failed attempt costs at
+     most the warning threshold. *)
+  let attempt ~exact ~limit query =
+    if !dump_vc
+    then begin
+      Format.eprintf "%a:%s@." Location.print_loc loc
+        (if exact then "" else " (bitwise operations abstracted)");
+      List.iteri
+        (fun i s ->
+          Format.eprintf "  v%d: %s (%s)@." i (Vox_smt.Symbol.label s)
+            (match Vox_smt.Symbol.sort s with
+            | Bool -> "bool"
+            | Int63 -> "int"
+            | Int -> "bigint"
+            | Opaque _ -> "opaque"
+            | Datatype datatype -> Vox_smt.Datatype.label datatype))
+        query.Vox_smt.symbols;
+      List.iteri
+        (fun i f -> Format.eprintf "  f%d: %s@." i (Vox_smt.Function.label f))
+        query.Vox_smt.functions;
+      Format.eprintf "%s@."
+        (Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
+           ~timeout_ms:!timeout_ms query)
+    end;
+    let cached =
+      Option.map
+        (fun directory ->
+          let text =
+            Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
+              ~timeout_ms:!timeout_ms query
+          in
+          (* The version names the entry format: bump it when an outcome records
+             more, so older entries are not replayed without it. *)
+          Filename.concat directory
+            ("query-4-"
+            ^ Digest.to_hex (Digest.string (!executable ^ "\000" ^ text))))
+        (cache_directory ())
+    in
+    (* Resource limits make every outcome except a wall-clock timeout or a
+       solver failure reproducible, so failures are cached too. *)
+    let recorded =
+      match cached with
+      | Some file when Sys.file_exists file -> (
+        match In_channel.with_open_bin file In_channel.input_all with
+        | "proved" -> Some (Proved None)
+        | "refuted" -> Some (Refuted None)
+        | "exhausted" -> Some Exhausted
+        | "unknown" -> Some (Inconclusive None)
+        | entry -> (
+          match String.index_opt entry ' ' with
+          | Some i when String.sub entry 0 i = "proved" ->
+            Option.map
+              (fun n -> Proved (Some n))
+              (int_of_string_opt
+                 (String.sub entry (i + 1) (String.length entry - i - 1)))
+          | Some i when String.sub entry 0 i = "refuted" ->
+            Some
+              (Refuted
+                 (Some (String.sub entry (i + 1) (String.length entry - i - 1))))
+          | Some i when String.sub entry 0 i = "unknown" ->
+            Some
+              (Inconclusive
+                 (Some (String.sub entry (i + 1) (String.length entry - i - 1))))
+          | _ -> None)
+        | exception Sys_error _ -> None)
+      | _ -> None
+    in
     match recorded with
     | Some outcome -> outcome
-    | None ->
+    | None -> (
       let result : Vox_smt_solver.result = check ?resource_limit:limit query in
       if !dump_resources
       then
         Format.eprintf
-          "%a: %s %s, %s resource units, %.3f s encoding, %.3f s solving@."
+          "%a: %s%s %s, %s resource units, %.3f s encoding, %.3f s solving@."
           Location.print_loc loc
           (if batch then "batch" else "obligation")
+          (if exact then "" else " (bitwise operations abstracted)")
           (validity_name result.validity)
           (match result.resources with
           | Some n -> string_of_int n
@@ -344,19 +358,22 @@ let prove poll check ~batch loc query =
       in
       let outcome =
         match result.validity with
-        | Vox_smt.Valid -> Proved result.resources
-        | (Unknown _ | Timeout) when exhausted -> Exhausted
+        | Vox_smt.Valid -> Some (Proved result.resources)
+        | (Unknown _ | Timeout) when exhausted -> Some Exhausted
+        | Invalid _ when not exact -> Some (Refuted None)
+        | (Timeout | Failure _) when not exact -> None
         | Invalid model when !dump_vc ->
           raise
             (Vox_vc.Unproved
                (Location.errorf ~loc "Refinement could not be proved.\n%s"
                   (Vox_smt.explain_invalid query model)))
         | Invalid (Some model) when not batch ->
-          Refuted
-            (counterexample
-               (Some (smaller_model check ?resource_limit:limit query model)))
-        | Invalid model -> Refuted (counterexample model)
-        | Unknown reason -> Inconclusive reason
+          Some
+            (Refuted
+               (counterexample
+                  (Some (smaller_model check ?resource_limit:limit query model))))
+        | Invalid model -> Some (Refuted (counterexample model))
+        | Unknown reason -> Some (Inconclusive reason)
         | Timeout ->
           raise
             (Vox_vc.Unproved
@@ -364,43 +381,61 @@ let prove poll check ~batch loc query =
         | Failure reason ->
           Location.raise_errorf ~loc "Refinement solver failed: %s" reason
       in
-      Option.iter
-        (fun file ->
-          record_entry file
-            (match outcome with
-            | Proved None -> "proved"
-            | Proved (Some n) -> "proved " ^ string_of_int n
-            | Refuted None -> "refuted"
-            | Refuted (Some values) -> "refuted " ^ values
-            | Exhausted -> "exhausted"
-            | Inconclusive None -> "unknown"
-            | Inconclusive (Some reason) -> "unknown " ^ reason))
-        cached;
-      outcome
+      match outcome with
+      | None -> Inconclusive None
+      | Some outcome ->
+        Option.iter
+          (fun file ->
+            record_entry file
+              (match outcome with
+              | Proved None -> "proved"
+              | Proved (Some n) -> "proved " ^ string_of_int n
+              | Refuted None -> "refuted"
+              | Refuted (Some values) -> "refuted " ^ values
+              | Exhausted -> "exhausted"
+              | Inconclusive None -> "unknown"
+              | Inconclusive (Some reason) -> "unknown " ^ reason))
+          cached;
+        outcome)
+  in
+  let outcome =
+    let exact () = attempt ~exact:true ~limit query in
+    match Vox_smt.abstract_bitwise query with
+    | None -> exact ()
+    | Some abstract -> (
+      let limit =
+        match positive !resource_warning, limit with
+        | Some warning, Some limit -> Some (min warning limit)
+        | Some warning, None -> Some warning
+        | None, limit -> limit
+      in
+      match attempt ~exact:false ~limit abstract with
+      | Proved _ as proved -> proved
+      | Refuted _ | Exhausted | Inconclusive _ -> exact ())
   in
   match outcome with
   | Proved (Some resources)
     when (not batch) && !resource_warning > 0 && resources > !resource_warning
-    ->
+    -> (
     cacheable := false;
     let warning =
       Warnings.Slow_refinement
         { resources; threshold = !resource_warning; limit = !resource_limit }
     in
-    (* Resource counts differ between platforms, so a test harness collects
-       slow proofs in a report rather than in compiler output. *)
-    (match Sys.getenv_opt "VOX_SLOW_PROOFS" with
+    (* Resource counts differ between platforms, so a test harness collects slow
+       proofs in a report rather than in compiler output. *)
+    match Sys.getenv_opt "VOX_SLOW_PROOFS" with
     | Some file when file <> "" ->
       if Warnings.is_active warning
-      then begin
-        try
+      then
+        begin try
           Out_channel.with_open_gen [Open_append; Open_creat; Open_text]
             0o644 file (fun channel ->
               Printf.fprintf channel "%s:%d: %d resource units\n"
                 loc.Location.loc_start.Lexing.pos_fname
                 loc.Location.loc_start.Lexing.pos_lnum resources)
         with Sys_error _ -> ()
-      end
+        end
     | _ -> Location.prerr_warning loc warning)
   | Proved _ -> ()
   | Exhausted ->
