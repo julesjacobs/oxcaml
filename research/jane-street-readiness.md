@@ -77,7 +77,12 @@ this file.
   - [x] avl-sets, rings, lists-trees: **owner-review** (merged
         `217d986873`; rings and lists had stale quoted messages; the
         structures erasure check strengthened to an allow-list).
-  - [ ] In flight (27 September, evening): myers-diff · http · lz4.
+  - [x] myers-diff, http, lz4, egraphs: **owner-review** (merged
+        `35e8e3cc07`, egraphs after). LZ4's explanation of `assert false`
+        was false (it discharges its branch; the client now uses
+        `unreachable_ ()`); e-graphs now states the search is exhaustive,
+        not e-matching, one rewrite per round.
+  - [ ] In flight: sat-solver | dfa-equivalence · reference-locks.
   - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
         reference-locks (after deduplication and the inventory comments).
   - [ ] hm-wasm-compiler, after item 3.
@@ -229,6 +234,14 @@ this file.
 - [ ] **`_trust.md` line 13** (owner-reviewed page) conflates totality and
       statelessness: total functions may write through uniquely owned
       storage (`Quicksort.sort`). Wording proposed to the owner.
+      Also: it says ghost fields are removed before code generation, but
+      bytecode keeps an empty slot for them (native removes them).
+- [ ] **`assert false` lint**: it ends a path with nothing to prove, which
+      is sound for normal-return claims (and rejected in `total` code), but
+      reviews found several demos relying on it silently. Warn in verified
+      code and suggest `unreachable_ ()`.
+- [ ] **HTTP laws for `Invalid_crlf` and budget exhaustion** (new proofs;
+      stated as unspecified on the page). Owner to decide.
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
