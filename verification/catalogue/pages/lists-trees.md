@@ -85,7 +85,7 @@ The tree interface defines `root`, `links`, `heap` and `valid` in the same way (
 After `make install` and `./dev init`:
 
 ```
-./dev test vox/pref_list_client.ml vox/pref_tree_client.ml vox/pref_owned_client.ml vox/pref_list_rejected.ml vox/pref_tree_rejected.ml
+./dev test vox/pref_list_client.ml vox/pref_tree_client.ml vox/pref_owned_client.ml vox/pref_list_rejected.ml vox/pref_tree_rejected.ml vox/structures_erasure.ml
 ```
 
-The client tests check `Pref_list` and `Pref_tree` while compiling them and run as bytecode and native code.
+The client tests check `Pref_list` and `Pref_tree` while compiling them and run as bytecode and native code. `structures_erasure.ml` checks in the native `-dlambda` output that `reverse`, `mirror` and the observers call no model or proof function, and that the observers neither split nor join tokens.

@@ -84,7 +84,7 @@ The test also rejects claims that `[]` is a permutation of `[1]`, that `[1; 1]` 
 After `make install` and `./dev init`:
 
 ```
-./dev test vox/merge_sort.ml vox/merge_sort_rejected.ml
+./dev test vox/merge_sort.ml vox/merge_sort_rejected.ml vox/library_build.ml
 ```
 
-Both tests check `Vox_sequence`, `Vox_ordered_sequence`, `Vox_credits`, `Vox_merge_proofs`, `Vox_sort_cost` and `Vox_merge_sort` while compiling them. `verification/library/build.sh _install` also checks these modules as part of the installed library.
+Both tests check `Vox_sequence`, `Vox_ordered_sequence`, `Vox_credits`, `Vox_merge_proofs`, `Vox_sort_cost` and `Vox_merge_sort` while compiling them. `library_build.ml` also checks these modules as part of the whole library, compiled as `verification/library/build.sh` compiles it.
