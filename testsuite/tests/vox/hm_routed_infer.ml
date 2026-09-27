@@ -26,8 +26,9 @@ external[@layout_poly] raise_any : ('a : any).
   exn -> 'a @ portable unique = "%raise"
 
 type inference = #{value : node Pref.t option @@ aliased; state : node Pref.token;
-  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost; execution : execution @@ ghost;
-  physical : pool @@ aliased; pools : pool B.t; routing : C.context @@ ghost}
+  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost aliased;
+  execution : execution @@ ghost aliased; physical : pool @@ aliased; pools : pool B.t;
+  routing : C.context @@ ghost aliased}
 
 type goal = {heap : node Pref.heap @@ ghost; depth : int @@ ghost; pool : pool @@ ghost;
   env : env @@ ghost; term : D.term @@ ghost; origin : S.store @@ ghost}
@@ -1209,7 +1210,8 @@ let closed_compiled_with_trace : (collect_trace : bool) ->
     pool = out.#pool; execution = out.#execution; routing = out.#routing}
 
 type answer = #{value : node Pref.t option @@ aliased; state : node Pref.token;
-  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost; execution : execution @@ ghost}
+  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost aliased;
+  execution : execution @@ ghost aliased}
 
 let closed_hm_with_trace : (collect_trace : bool) -> (e : {e : D.term | D.scoped_term D.Z e}) @ immutable ->
     {r : answer |

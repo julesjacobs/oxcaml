@@ -27,7 +27,7 @@ module E = Vox_egraph_derivation_spec
 module Fixed = Vox_egraph_fixedpoint_spec
 
 type equality = Equal | Not_proved | Invalid_input | Node_limit
-type query_result = #{status : equality; state : t; proof : E.evidence option @@ ghost}
+type query_result = #{status : equality; state : t; proof : E.evidence option @@ ghost aliased}
 
 val query : (state : t) @ unique -> (left : L.expr) @ immutable -> (right : L.expr) @ immutable ->
     {r : query_result | rules r.#state === rules state &&
@@ -58,7 +58,7 @@ val preserved_origin : (before : Q.graph) @ immutable -> (after : Q.graph) @ imm
     {u : unit | Preserves.extends before after && 0 <= id && id < before.count} ->
     {u : unit | Snapshot.origin before id === Snapshot.origin after id} @ ghost @@ total
 
-type class_result = #{equal : bool; state : t; proof : E.evidence option @@ ghost}
+type class_result = #{equal : bool; state : t; proof : E.evidence option @@ ghost aliased}
 
 val same_class : (state : t) @ unique ->
     (a : {i : int | 0 <= i && i < (model state).count}) ->
