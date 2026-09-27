@@ -112,7 +112,7 @@ After `make install` and `./dev init`:
 
 Each test compiles, and so checks, the whole composition in dependency order: 774 files for the public client and 953 for the sample-program test, which also compares its output with `hmc_wasm_relayout_demo.reference`. The public client runs on both backends.
 
-The differential test of the WebAssembly model runs 300 fixed modules and compares its tally with `wasm_differential.reference`; it is skipped where `node` is not installed:
+The differential test of the WebAssembly model runs 40 fixed modules (a smoke check; the 100,000-module run is `verification/wasm-differential/run.sh --jobs 16 -count 100000 -seed 1 -pages 2`) and compares its tally with `wasm_differential.reference`; it is skipped where `node` is not installed:
 
 ```
 ./dev test vox/wasm_differential.ml

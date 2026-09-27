@@ -424,7 +424,7 @@ let print_module (m : G.module_) =
 (* ---------- Main ---------- *)
 
 let () =
-  let count_ = ref 300 and seed = ref 20260927 and from = ref 0 and fuel = ref 300000
+  let count_ = ref 40 and seed = ref 20260927 and from = ref 0 and fuel = ref 300000
   and capacity = ref 400 and pages = ref 1 and keep = ref "" and minimize_ = ref false
   and verbose = ref false and coverage_ = ref false and detail = ref false and minimize_limit = ref 5 in
   Arg.parse [
