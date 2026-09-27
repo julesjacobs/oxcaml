@@ -8,15 +8,11 @@
  {
    setup-ocamlc.opt-build-env;
    ocamlc.opt;
+   binary_modules = "pref pref_ring";
    run-expect;
    check-program-output;
  }
 *)
-
-(* Load the implementation so that the accepted phrase below can be
-   evaluated. *)
-#load "pref.cmo";;
-#load "pref_ring.cmo";;
 
 open Pref_ring
 

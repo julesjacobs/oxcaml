@@ -46,6 +46,28 @@ Expect files show types, results, and nearby rejected programs. Definitions
 whose modes matter live inside modules to avoid the interactive toplevel's
 legacy-mode defaults.
 
+A rejection test against library units compiles them as real units, then
+runs the expect file against them:
+
+```
+ all_modules = "vox_rsa_spec.mli vox_rsa_spec.ml vox_rsa.mli vox_rsa.ml";
+ compile_only = "true";
+ {
+   setup-ocamlc.opt-build-env;
+   ocamlc.opt;
+   binary_modules = "vox_rsa_spec vox_rsa";
+   run-expect;
+   check-program-output;
+ }
+```
+
+`compile_only` compiles `all_modules` but loads nothing into the toplevel:
+the type checker sees the units, but an accepted phrase that calls them
+fails at run time. `binary_modules`, set after the compilation step (the
+compiler would otherwise receive the objects too) and listed in dependency
+order, loads their `.cmo` files before the script, as `#load` would. Keep an
+accepted phrase in each rejection test as a positive control.
+
 | Stage | Files | What is established |
 | --- | --- | --- |
 | Dev loop | `smoke.ml` | The expect-test workflow runs. |
