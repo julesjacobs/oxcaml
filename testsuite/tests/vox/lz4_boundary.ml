@@ -52,6 +52,7 @@
    src += " ${lib}/vox_lz4_spec_scan.cmi";
    dst = "${test_build_directory_prefix}/ocamlc.opt.public/";
    compiler_directory_suffix = ".public";
+   all_modules = "vox_lz4_public_client.ml";
    readonly_files = "vox_lz4_public_client.ml emitted_code.ml";
    readonly_files += " lz4_boundary_check.ml lz4_boundary.ml";
    setup-ocamlc.opt-build-env;
@@ -290,6 +291,7 @@
    src += " ${lib}/vox_lz4_checked_api.cmx ${lib}/vox_lz4.cmx";
    dst = "${test_build_directory_prefix}/ocamlopt.opt.public/";
    compiler_directory_suffix = ".public";
+   all_modules = "vox_lz4_public_client.ml";
    readonly_files = "vox_lz4_public_client.ml emitted_code.ml";
    readonly_files += " lz4_boundary_check.ml lz4_boundary.ml";
    setup-ocamlopt.opt-build-env;
