@@ -10,6 +10,11 @@ end
 module L = Spin_lock.Make (Cell)
 type t = L.t
 let[@def] (location @ total) (a : t @ immutable) = L.cell a
+(* [owned], [try_acquire] and [release] are the functor's. The last two are
+   wrapped, restating their contracts, because signature matching compares
+   refinements syntactically and the functor's mention [L.owned], not
+   [owned]. [owned_def] states the functor's in this module's terms and is
+   proved from it. *)
 let owned = L.owned
 let (owned_def @ total) (a : t @ immutable) (h : int P.heap @ immutable) :
     {u : unit | owned a h === (ghost_ (

@@ -14,6 +14,11 @@ end
 module L = Spin_lock.Make (Spec)
 type t = L.t
 type contents = Cell.contents
+(* [owned], [try_acquire] and [release] are the functor's. The last two are
+   wrapped, restating their contracts, because signature matching compares
+   refinements syntactically and the functor's mention [L.owned], not
+   [owned]. [owned_def] states the functor's in this module's terms and is
+   proved from it. *)
 let owned = L.owned
 let[@def] (location @ total) (a : t @ local immutable) =
   ghost_ (Cell.location (L.cell a))
