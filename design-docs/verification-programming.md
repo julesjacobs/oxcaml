@@ -33,6 +33,19 @@ Use `Spec` and `Proof` modules when the size of the example makes their roles
 hard to follow. Small examples can keep their definitions together. Module
 signatures should preserve the totality needed by callers' ghost expressions.
 
+A recursive function that does not recurse on a structurally smaller argument
+states a measure with `[@@decreases e]`. The measure is a total, immutable
+expression over the parameters, of type `int` or `Bigint.t`; a `Bigint.t`
+measure must stay nonnegative when it decreases. It may call total and
+`[@def]` functions, for example `[@@decreases Bigint.add (S.length left)
+(S.length right)]`; the facts established before a recursive call, such as
+`S.length_def left`, are available when the measure is compared. A literal
+tuple `[@@decreases (level, count)]` is ordered lexicographically: each
+recursive call keeps a prefix of the components equal and decreases the next
+one. A measure cannot contain a refinement introduction, such as passing a
+literal to a refined parameter, because the termination check does not verify
+it.
+
 ## Proof blocks and fact scope
 
 For one lemma, use `ghost_ (lemma args); ...`.

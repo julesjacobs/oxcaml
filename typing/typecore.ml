@@ -15896,10 +15896,19 @@ let () = type_decreases := (fun self fn measure ->
       type_expect env ~mode:(total_immutable_mode ()) measure
         (mk_expected (newvar (Jkind.Builtin.any ~why:Dummy_jkind))))
   in
-  begin match Vox_type.classify env measure.exp_type with
-  | Some Bigint -> ()
-  | Some (Int | Bool) | None ->
-      unify_exp ~sexp env measure (instance Predef.type_int)
+  let component sexp measure =
+    match Vox_type.classify env measure.exp_type with
+    | Some Bigint -> ()
+    | Some (Int | Bool) | None ->
+        unify_exp ~sexp env measure (instance Predef.type_int)
+  in
+  (* A tuple is a lexicographic measure. *)
+  begin match sexp.pexp_desc, measure.exp_desc with
+  | Pexp_tuple scomponents, Texp_tuple (components, _)
+    when List.length scomponents = List.length components ->
+      List.iter2 (fun (_, sexp) (_, measure) -> component sexp measure)
+        scomponents components
+  | _ -> component sexp measure
   end;
   Recursive_function.check_predicates self measure;
   let default = Tast_iterator.default_iterator in
