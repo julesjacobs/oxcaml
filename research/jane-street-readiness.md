@@ -92,7 +92,7 @@ this file.
         "verified to be 1: 2"). Agent on
         `jujacobs/vox/totality-knot-20260927`: map every route, principled
         fix, Codex review.
-  - [ ] **Effectful callbacks break call congruence (found 27 September):**
+  - [x] **Effectful callbacks break call congruence (found 27 September; fixed, merged `0a76bf52f1`):**
         a call to a total, stateless function is encoded as a function of its
         arguments even when a callback argument is partial and stateful
         (`apply tick 0 = apply tick 0` proved, false at run time). Agent on
