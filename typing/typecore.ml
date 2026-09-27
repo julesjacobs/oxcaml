@@ -3645,6 +3645,25 @@ let logical_ascription env ty =
   then refinement_payload env ty
   else ty
 
+(* [arg] was typed at [payload], the payload of the [ascribed] type. If [arg]
+   already had the refined type [ascribed], and lost it only to fit
+   [payload], the ascription keeps the refined type, so that [(x : int t)]
+   still fits a parameter of type [int t]. No refinement is introduced.
+   Returns [arg] and the type of the ascription. *)
+let restore_ascribed_refinement env ~ascribed payload payload_instance arg =
+  if payload == ascribed then arg, payload_instance else
+  match arg.exp_extra with
+  | (Texp_refinement { source; _ }, _, _) :: extra ->
+      let snapshot = Btype.snapshot () in
+      let ascribed = instance ascribed in
+      begin match Ctype.unify env source ascribed with
+      | () -> { arg with exp_type = source; exp_extra = extra }, ascribed
+      | exception Ctype.Unify _ ->
+          Btype.backtrack snapshot;
+          arg, payload_instance
+      end
+  | _ -> arg, payload_instance
+
 (** [type_pat] propagates the expected type, and
     unification may update the typing environment. *)
 let rec type_pat
@@ -9263,8 +9282,10 @@ and type_expect_
       ; exp_extra = (Texp_mode modes, loc, []) :: exp.exp_extra
       }
   | Pexp_constraint (sarg, Some sty, []) ->
-      let (ty, exp_extra) = type_constraint env sty Mode.Alloc.Const.legacy in
-      let ty = logical_ascription env ty in
+      let (ascribed, exp_extra) =
+        type_constraint env sty Mode.Alloc.Const.legacy
+      in
+      let ty = logical_ascription env ascribed in
       let ty' = instance ty in
       let error_message_attr_opt =
         Builtin_attributes.error_message_attr sexp.pexp_attributes in
@@ -9274,6 +9295,7 @@ and type_expect_
         type_argument ~overwrite ?explanation ?defer_primitive_mode env
           expected_mode sarg ty (instance ty)
       in
+      let arg, ty' = restore_ascribed_refinement env ~ascribed ty ty' arg in
       rue {
         exp_desc = arg.exp_desc;
         exp_loc = arg.exp_loc;
@@ -9292,7 +9314,8 @@ and type_expect_
         in
         type_constraint env sty alloc_mode
       in
-      let ty = logical_ascription env ty in
+      let ascribed = ty in
+      let ty = logical_ascription env ascribed in
       let expected_mode =
         type_expect_mode ~loc ~env ~modes:modes.mode_modes expected_mode
       in
@@ -9305,6 +9328,7 @@ and type_expect_
         type_argument ~overwrite ?explanation ?defer_primitive_mode env
           expected_mode sarg ty (instance ty)
       in
+      let arg, ty' = restore_ascribed_refinement env ~ascribed ty ty' arg in
       rue {
         exp_desc = arg.exp_desc;
         exp_loc = arg.exp_loc;
