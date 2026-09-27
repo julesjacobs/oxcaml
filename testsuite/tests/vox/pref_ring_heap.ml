@@ -17,8 +17,8 @@ let (insert_contents @ total) (left : node @ immutable) (n : node @ immutable)
       && H.mem (inserted h left n right) right.prev
         && H.at (inserted h left n right) right.prev === Some (Some n)} @ ghost
           =
-  let h = h in
   ghost_ (
+    let h = h in
     let _a = inserted_def h left n right in
     let _b = connected_def h left n in
     let h1 = connected h left n in
@@ -39,8 +39,8 @@ let (inserted_link_frame @ total) (left : node @ immutable) (n : node @
     {u : unit | let h = h in
       H.mem (inserted h left n right) q = H.mem h q
       && H.at (inserted h left n right) q === H.at h q} @ ghost =
-  let h = h in
   ghost_ (
+    let h = h in
     let _a = inserted_def h left n right in
     let _b = connected_def h left n in
     let h1 = connected h left n in
@@ -62,8 +62,8 @@ let (removed_link_frame @ total) (left : node @ immutable) (n : node @
     {u : unit | let h = h in
       H.mem (removed h left n right) q = H.mem h q
       && H.at (removed h left n right) q === H.at h q} @ ghost =
-  let h = h in
   ghost_ (
+    let h = h in
     let _a = removed_def h left n right in
     let _b = connected_def h left right in
     let h1 = connected h left right in
@@ -91,8 +91,8 @@ let (remove_contents @ total) (left : node @ immutable) (n : node @ immutable)
         && H.at (removed h left n right) n.next === Some (Some n)
       && H.mem (removed h left n right) n.prev
         && H.at (removed h left n right) n.prev === Some (Some n)} @ ghost =
-  let h = h in
   ghost_ (
+    let h = h in
     let _a = removed_def h left n right in
     let _b = connected_def h left right in
     let h1 = connected h left right in

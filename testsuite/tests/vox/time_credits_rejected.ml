@@ -39,6 +39,13 @@ module Empty = struct
     C.tick (refine_ token)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 7, characters 11-26:
 7 |     C.tick (refine_ token)
                ^^^^^^^^^^^^^^^
@@ -210,6 +217,13 @@ module Exhausted = struct
     C.tick (refine_ after_two)
 end;;
 [%%expect{|
+Line 3, characters 6-9:
+3 |   let bad () =
+          ^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 11, characters 11-30:
 11 |     C.tick (refine_ after_two)
                 ^^^^^^^^^^^^^^^^^^^

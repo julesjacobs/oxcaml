@@ -141,9 +141,8 @@ let () =
 let observe_sequence : (array : t) -> (index : int) ->
     {u : unit | 0 <= index && index < length array} @ ghost ->
     {u : unit | Vox_sequence.at (contents array) (Bigint.of_int index)
-      === Some (at array index)} @ ghost = fun array index premise ->
+      === Some (at array index)} @ ghost = fun array index premise -> ghost_ (
   premise;
   let bounded : {i : int | 0 <= i && i < length array} = index in
-  ghost_ (
-    contents_at array bounded;
-    let u = () in u)
+  contents_at array bounded;
+  let u = () in u)

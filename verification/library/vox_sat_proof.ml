@@ -1189,10 +1189,10 @@ open Vox_sat_spec
     empty_proof_at formula entry.proof assignment;
     ())
 
-  let[@def] rec database_valid formula entries =
+  let[@def] rec database_valid formula entries = ghost_ (
     match entries with
-    | [] -> ghost_ true
-    | entry :: rest -> ghost_ (
+    | [] -> true
+    | entry :: rest ->
       derivation_valid formula entry.proof
       && same_clause (conclusion formula entry.proof) entry.clause
       && database_valid formula rest)

@@ -4,7 +4,7 @@ type t = {array : int iarray |
   0 < Iarray.length array + 1 && Vox_iarray.Int.sorted array}
 
 let[@def] (contents @ total) (array : t) =
-  let array = array in ghost_ (Vox_sequence.of_iarray array)
+  ghost_ (Vox_sequence.of_iarray array)
 
 let[@def] (length @ total) (array : t) =
   let array = array in Iarray.length array

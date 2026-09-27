@@ -58,7 +58,9 @@ let (tuple_pattern @ total) (value : int) : {u : unit | true} =
   let refine_ proof = proof in
   refine_ u
 
-let (specialized @ total) () =
+(* Real code that specializes a ghost value: the body stays real on
+   purpose. *)
+let[@warning "-unerased-ghost-body"] (specialized @ total) () =
   let empty = ghost_ (fun (u : unit) -> []) in
   let u = () in
   let integers : int list @ ghost = ghost_ (empty u) in
