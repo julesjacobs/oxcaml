@@ -57,13 +57,18 @@ this file.
         regex-automata (its lowering gap stays, stated as an open question)
   - [ ] hm-wasm-compiler, after item 3.
 - [ ] **3. HM-to-Wasm is not trivial** (AMD box).
-  - [ ] Example programs compiled by the verified compiler and run, with
-        exact results and resource use, as a suite test (branch
-        `jujacobs/vox/hmc-resources-20260927`).
+  - [x] Example programs compiled by the verified compiler and run, with
+        exact results and resource use, as a suite test: eight programs, all
+        agreeing with Node (`hmc_compilation_examples.ml`, merged in
+        `e8eb54786f`). Resource theorems: not attempted; what they need is in
+        `research/hmc-resources-20260927/resource-theorem-notes.md` (only self
+        tail calls reuse frames; no garbage collector; layout rejections
+        depend on inference, which is not proved deterministic).
   - [ ] Input as a run-time value through the exported `payload` global;
         theorems for every input (branch `jujacobs/vox/hmc-input-20260927`).
-  - [ ] WebAssembly model tested against Node by random modules (branch
-        `jujacobs/vox/wasm-diff-20260927`).
+  - [x] WebAssembly model tested against Node: 100,000 random modules, no
+        disagreement; a 40-module smoke check in the suite (merged in
+        `123348b625`, `78020e455a`).
 - [ ] **4. Every page claim checked by `./dev test`.**
   - [ ] Port the 13 hand-run check scripts into the suite (wart 26).
   - [ ] E-graphs: review the public boundary, regenerate
