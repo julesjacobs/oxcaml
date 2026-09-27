@@ -238,8 +238,6 @@ module Dfa_proof :
     type raw = int * (int * bool * row) list
     type machine = Dfa_semantics.machine
     type relation = (int * int) list
-    type decision = Equal of relation | Different of int list | Limit
-    [@@inductive]
     type reduction_certificate =
         relation * (int * int list) list * (int * int * int list) list
     val valid : machine -> bool @@ total
@@ -470,33 +468,7 @@ module Dfa_proof :
           else true}
       @@ total
     val check : machine -> machine -> relation -> bool @@ total
-    val valid_decision : machine -> machine -> decision -> bool @@ total
     val labels_bounded : machine -> bool @@ total
-    val diagnose_comparison :
-      (left : machine) ->
-      (right : machine) ->
-      (limit : int) ->
-      {decision : decision
-        | (valid_decision left right decision) &&
-            (if
-               (Dfa_semantics.valid left) &&
-                 ((Dfa_semantics.valid right) &&
-                    ((Dfa_semantics.labels_bounded left) &&
-                       ((Dfa_semantics.labels_bounded right) &&
-                          ((0 < limit) &&
-                             ((limit <= 65536) &&
-                                ((Bigint.compare
-                                    (Bigint.mul
-                                       (Dfa_semantics.state_size left)
-                                       (Dfa_semantics.state_size right))
-                                    (Bigint.of_int limit))
-                                   <= 0))))))
-             then
-               match decision with
-               | Limit -> false
-               | Equal _ | Different _ -> true
-             else true)}
-      @@ total
     type comparison = Equivalent | Inequivalent | Comparison_limit
     [@@inductive]
     val compare : machine -> machine -> int -> comparison @ total @@ total
@@ -543,24 +515,6 @@ module Dfa_proof :
           then
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
-          else true}
-      @@ total
-    val decision_correct :
-      (left : machine) ->
-      (right : machine) ->
-      (decision : decision) ->
-      (word : int list) ->
-      {u : unit
-        | if valid_decision left right decision
-          then
-            match decision with
-            | Equal _ ->
-                (Dfa_semantics.run left word) ===
-                  (Dfa_semantics.run right word)
-            | Different witness ->
-                (Dfa_semantics.run left witness) <>
-                  (Dfa_semantics.run right witness)
-            | Limit -> true
           else true}
       @@ total
     val check_reduction : machine -> machine -> reduction_certificate -> bool
@@ -704,25 +658,6 @@ module Dfa_proof :
                (Dfa_semantics.state_size other))
               <= 0
           else true}
-      @@ total
-    val diagnose_reduction :
-      (source : machine) ->
-      (limit : int) ->
-      {result : (machine * reduction_certificate) option
-        | (if
-             (Dfa_semantics.valid source) &&
-               ((Dfa_semantics.labels_bounded source) &&
-                  ((0 < limit) &&
-                     ((limit <= 64) &&
-                        ((Bigint.compare (Dfa_semantics.state_size source)
-                            (Bigint.of_int limit))
-                           <= 0))))
-           then match result with | None -> false | Some _ -> true
-           else true) &&
-            (match result with
-             | None -> true
-             | Some (candidate, certificate) ->
-                 check_reduction source candidate certificate)}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
     val reduce_complete :
@@ -1149,8 +1084,6 @@ module Dfa_proof :
     type raw = int * (int * bool * row) list
     type machine = Dfa_semantics.machine
     type relation = (int * int) list
-    type decision = Equal of relation | Different of int list | Limit
-    [@@inductive]
     type reduction_certificate =
         relation * (int * int list) list * (int * int * int list) list
     val valid : machine -> bool @@ total
@@ -1381,33 +1314,7 @@ module Dfa_proof :
           else true}
       @@ total
     val check : machine -> machine -> relation -> bool @@ total
-    val valid_decision : machine -> machine -> decision -> bool @@ total
     val labels_bounded : machine -> bool @@ total
-    val diagnose_comparison :
-      (left : machine) ->
-      (right : machine) ->
-      (limit : int) ->
-      {decision : decision
-        | (valid_decision left right decision) &&
-            (if
-               (Dfa_semantics.valid left) &&
-                 ((Dfa_semantics.valid right) &&
-                    ((Dfa_semantics.labels_bounded left) &&
-                       ((Dfa_semantics.labels_bounded right) &&
-                          ((0 < limit) &&
-                             ((limit <= 65536) &&
-                                ((Bigint.compare
-                                    (Bigint.mul
-                                       (Dfa_semantics.state_size left)
-                                       (Dfa_semantics.state_size right))
-                                    (Bigint.of_int limit))
-                                   <= 0))))))
-             then
-               match decision with
-               | Limit -> false
-               | Equal _ | Different _ -> true
-             else true)}
-      @@ total
     type comparison = Equivalent | Inequivalent | Comparison_limit
     [@@inductive]
     val compare : machine -> machine -> int -> comparison @ total @@ total
@@ -1454,24 +1361,6 @@ module Dfa_proof :
           then
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
-          else true}
-      @@ total
-    val decision_correct :
-      (left : machine) ->
-      (right : machine) ->
-      (decision : decision) ->
-      (word : int list) ->
-      {u : unit
-        | if valid_decision left right decision
-          then
-            match decision with
-            | Equal _ ->
-                (Dfa_semantics.run left word) ===
-                  (Dfa_semantics.run right word)
-            | Different witness ->
-                (Dfa_semantics.run left witness) <>
-                  (Dfa_semantics.run right witness)
-            | Limit -> true
           else true}
       @@ total
     val check_reduction : machine -> machine -> reduction_certificate -> bool
@@ -1615,25 +1504,6 @@ module Dfa_proof :
                (Dfa_semantics.state_size other))
               <= 0
           else true}
-      @@ total
-    val diagnose_reduction :
-      (source : machine) ->
-      (limit : int) ->
-      {result : (machine * reduction_certificate) option
-        | (if
-             (Dfa_semantics.valid source) &&
-               ((Dfa_semantics.labels_bounded source) &&
-                  ((0 < limit) &&
-                     ((limit <= 64) &&
-                        ((Bigint.compare (Dfa_semantics.state_size source)
-                            (Bigint.of_int limit))
-                           <= 0))))
-           then match result with | None -> false | Some _ -> true
-           else true) &&
-            (match result with
-             | None -> true
-             | Some (candidate, certificate) ->
-                 check_reduction source candidate certificate)}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
     val reduce_complete :
@@ -1843,14 +1713,9 @@ let () =
   assert (compare singleton singleton (-1) = Comparison_limit);
   assert (compare singleton singleton 65_537 = Equivalent);
   let budget = 1 in
-  let comparison = diagnose_comparison singleton singleton budget in
-  (match comparison with
-   | Equal _ -> ()
-   | Different _ | Limit -> assert false);
-  let minimized = diagnose_reduction singleton budget in
-  (match minimized with
-   | Some (reduced, certificate) ->
-     assert (check_reduction singleton reduced certificate);
+  (match reduce singleton budget with
+   | Some reduced ->
+     assert (valid reduced);
      assert (state_count reduced = 1)
    | None -> assert false);
   let (load @ total) (raw @ total) : machine @ total =
@@ -1864,22 +1729,10 @@ let () =
   let relation = [0, 10; 1, 20] in
   assert (check left right relation);
   let comparison_budget = 4 in
-  let comparison = diagnose_comparison left right comparison_budget in
-  (match comparison with
-   | Equal certificate -> assert (check left right certificate)
-   | Different _ | Limit -> assert false);
   assert (compare left right comparison_budget = Equivalent);
   let exact_budget = 2 in
-  let comparison = diagnose_comparison left right exact_budget in
-  (match comparison with
-   | Equal certificate -> assert (check left right certificate)
-   | Different _ | Limit -> assert false);
   assert (compare left right exact_budget = Equivalent);
   let limited_budget = 1 in
-  let comparison = diagnose_comparison left right limited_budget in
-  (match comparison with
-   | Limit -> ()
-   | Equal _ | Different _ -> assert false);
   assert (compare left right limited_budget = Comparison_limit);
   List.iter (fun word ->
     assert (run left word = run right word))
@@ -1888,10 +1741,6 @@ let () =
     [10, true, ([(0, 10)], 10)]) in
   assert (not (check left wrong_default [0, 10; 1, 10]));
   assert (run left [max_int] <> run wrong_default [max_int]);
-  let comparison = diagnose_comparison left wrong_default comparison_budget in
-  (match comparison with
-   | Different word -> assert (run left word <> run wrong_default word)
-   | Equal _ | Limit -> assert false);
   assert (compare left wrong_default comparison_budget = Inequivalent);
   let clone = load (0,
     [0, true, ([(0, 2)], 1);
@@ -1918,33 +1767,29 @@ let () =
   assert (access_image reduction right p = Some 10);
   assert (access_image reduction right q = Some 20);
   let limit = 4 in
-  let reduced_clone = diagnose_reduction clone limit in
-  (match reduced_clone with
+  (match reduce clone limit with
    | None -> assert false
-   | Some (reduced, certificate) ->
-     assert (check_reduction clone reduced certificate);
+   | Some reduced ->
+     assert (valid reduced);
      assert (state_count reduced = 2);
      List.iter (fun word -> assert (run clone word = run reduced word))
        [[]; [0]; [1]; [0; 1]; [max_int]]);
   let exact_budget = 3 in
-  let reduced_clone = diagnose_reduction clone exact_budget in
-  (match reduced_clone with
-   | Some (reduced, certificate) ->
-     assert (check_reduction clone reduced certificate);
+  (match reduce clone exact_budget with
+   | Some reduced ->
+     assert (valid reduced);
      assert (state_count reduced = 2)
    | None -> assert false);
   let limit = 1 in
-  let limited = diagnose_reduction clone limit in
-  assert (limited = None);
+  assert (reduce clone limit = None);
   let all_accept = load (0,
     [0, true, ([(min_int, 1)], 1);
      1, true, ([], 1)]) in
   let limit = 4 in
-  let reduced_accept = diagnose_reduction all_accept limit in
-  (match reduced_accept with
+  (match reduce all_accept limit with
    | None -> assert false
-   | Some (reduced, certificate) ->
-     assert (check_reduction all_accept reduced certificate);
+   | Some reduced ->
+     assert (valid reduced);
      assert (state_count reduced = 1);
      List.iter (fun word -> assert (run reduced word))
        [[]; [min_int]; [max_int]; [min_int; max_int]]);
@@ -1976,11 +1821,10 @@ let () =
     | Some source -> source
     | None -> assert false in
   let limit = 8 in
-  let result = diagnose_reduction source limit in
-  match result with
+  match reduce source limit with
   | None -> assert false
-  | Some (reduced, certificate) ->
-    assert (check_reduction source reduced certificate);
+  | Some reduced ->
+    assert (valid reduced);
     assert (state_count reduced = 5);
     List.iter (fun word -> assert (run source word = run reduced word))
       [[]; [1]; [1; 1]; [1; 1; 1]; [2]; [2; 1]; [2; 1; 1];
@@ -1999,11 +1843,10 @@ let () =
     | Some source -> source
     | None -> assert false in
   let limit = 2 in
-  let result = diagnose_reduction source limit in
-  match result with
+  match reduce source limit with
   | None -> assert false
-  | Some (reduced, certificate) ->
-    assert (check_reduction source reduced certificate);
+  | Some reduced ->
+    assert (valid reduced);
     assert (state_count reduced = 2)
 ;;
 [%%expect{|

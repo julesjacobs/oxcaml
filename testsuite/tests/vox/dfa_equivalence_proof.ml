@@ -3,8 +3,6 @@ module Dfa_proof : sig
   type raw = int * (int * bool * row) list
   type machine = Dfa_semantics.machine
   type relation = (int * int) list
-  type decision = Equal of relation | Different of int list | Limit
-  [@@inductive]
   type reduction_certificate =
     relation * (int * int list) list * (int * int * int list) list
 
@@ -119,16 +117,7 @@ module Dfa_proof : sig
     {u : unit | if Dfa_semantics.valid machine then Dfa_semantics.has_state machine (reached machine word)
       else true} @@ total
   val check : machine -> machine -> relation -> bool @@ total
-  val valid_decision : machine -> machine -> decision -> bool @@ total
   val labels_bounded : machine -> bool @@ total
-  val diagnose_comparison : (left : machine) -> (right : machine) -> (limit : int) ->
-    {decision : decision | valid_decision left right decision &&
-      (if Dfa_semantics.valid left && Dfa_semantics.valid right && Dfa_semantics.labels_bounded left && Dfa_semantics.labels_bounded right &&
-        0 < limit && limit <= 65_536 &&
-        Bigint.compare (Bigint.mul (Dfa_semantics.state_size left) (Dfa_semantics.state_size right))
-          (Bigint.of_int limit) <= 0 then
-        match decision with Limit -> false | Equal _ | Different _ -> true
-       else true)} @@ total
   type comparison = Equivalent | Inequivalent | Comparison_limit
   [@@inductive]
   val compare : machine -> machine -> int -> comparison @ total @@ total
@@ -146,13 +135,6 @@ module Dfa_proof : sig
   val comparison_witness : (left : machine) -> (right : machine) -> (limit : int) ->
     {witness : int list Ghost.t | if compare left right limit === Inequivalent then
       Dfa_semantics.run left witness.ghost <> Dfa_semantics.run right witness.ghost else true} @@ total
-  val decision_correct : (left : machine) -> (right : machine) ->
-    (decision : decision) -> (word : int list) ->
-    {u : unit | if valid_decision left right decision then
-      match decision with
-      | Equal _ -> Dfa_semantics.run left word === Dfa_semantics.run right word
-      | Different witness -> Dfa_semantics.run left witness <> Dfa_semantics.run right witness
-      | Limit -> true else true} @@ total
   val check_reduction : machine -> machine -> reduction_certificate -> bool
     @@ total
   val reduction_preserves : (source : machine) -> (candidate : machine) ->
@@ -224,16 +206,6 @@ module Dfa_proof : sig
       Dfa_semantics.valid other then
       Bigint.compare (Dfa_semantics.state_size candidate) (Dfa_semantics.state_size other) <= 0
       else true} @@ total
-  val diagnose_reduction : (source : machine) -> (limit : int) ->
-    {result : (machine * reduction_certificate) option |
-      (if Dfa_semantics.valid source && Dfa_semantics.labels_bounded source &&
-        0 < limit && limit <= 64 &&
-        Bigint.compare (Dfa_semantics.state_size source) (Bigint.of_int limit) <= 0 then
-        match result with None -> false | Some _ -> true else true) &&
-      match result with
-      | None -> true
-      | Some (candidate, certificate) ->
-        check_reduction source candidate certificate} @@ total
   val reduce : machine -> int -> machine option @ total @@ total
   val reduce_complete : (source : machine) -> (limit : int) ->
     {u : unit | if Dfa_semantics.valid source && Dfa_semantics.labels_bounded source &&
@@ -1078,27 +1050,6 @@ end = struct
     ghost_ (run_def right word);
     ghost_ (execute_agrees left right relation left_initial right_initial word);
     ()
-
-  let[@def] valid_decision (left : machine) (right : machine)
-      (decision : decision) =
-    match decision with
-    | Equal relation -> check left right relation
-    | Different word -> run left word <> run right word
-    | Limit -> true
-
-  let (decision_correct @ total) (left : machine) (right : machine)
-      (decision : decision) (word : int list) :
-      {u : unit | if valid_decision left right decision then
-        match decision with
-        | Equal _ -> run left word === run right word
-        | Different witness -> run left witness <> run right witness
-        | Limit -> true else true} =
-    ghost_ (valid_decision_def left right decision);
-    match decision with
-    | Equal relation ->
-      ghost_ (check_agrees left right relation word);
-      ()
-    | Different _ | Limit -> ()
 
   let rec (ids_member @ total) : (table : (int * bool * row) list) ->
       (state : int) ->
@@ -3137,275 +3088,6 @@ end = struct
          ghost_ (pair_closed_def left right p q final_seen);
          ())
 
-  let rec (search_product @ total) :
-      (left : machine) -> (right : machine) ->
-      (pending : (int * int * int list) list) ->
-      (seen : relation) -> (processed : relation) @ ghost ->
-      (count : int) -> (limit : int) ->
-      (remaining : {fuel : int | 0 <= fuel && fuel <= 65_536 &&
-        0 <= count && count <= limit && limit <= 65_536 &&
-        Bigint.of_int count === big_length seen &&
-        pending_valid left right pending && distinct_pairs seen &&
-        (if valid left && valid right then pairs_valid left right seen else true) &&
-        Bigint.add (Bigint.of_int fuel) (Bigint.of_int count) ===
-          Bigint.add (Bigint.of_int limit) (big_length pending)}) @ ghost ->
-      {decision : decision |
-        (if valid left && valid right && labels_bounded left && labels_bounded right &&
-          Bigint.compare (Bigint.mul (state_size left) (state_size right))
-            (Bigint.of_int limit) <= 0 then
-          match decision with Limit -> false | Equal _ | Different _ -> true
-         else true) &&
-        (match decision with
-         | Equal relation -> distinct_pairs relation &&
-           (if valid left && valid right then pairs_valid left right relation
-            else true)
-         | Different _ | Limit -> true) &&
-        (match pending with
-         | [] -> decision === Equal seen
-         | _ :: _ -> true) &&
-        let left_initial, _ = left in
-        let right_initial, _ = right in
-        if pending_valid left right pending &&
-          all_seen_accounted seen processed pending &&
-          all_closed left right seen processed &&
-          related (left_initial, right_initial) seen then
-        match decision with
-        | Different word -> run left word <> run right word
-        | Equal relation -> check left right relation
-        | Limit -> true
-        else true} @ immutable contended =
-    fun left right pending seen processed count limit remaining ->
-    match pending with
-    | [] ->
-      ghost_ (accounted_empty_included seen processed);
-      ghost_ (closed_processed_covers_seen left right seen processed seen);
-      ghost_ (check_def left right seen);
-      let decision = Equal seen in decision
-    | (p, q, word) :: rest ->
-      ghost_ (big_length_def pending);
-      ghost_ (product_pending_length_nonnegative rest);
-      ghost_ (pending_valid_def left right pending);
-      ghost_ (reached_valid left word);
-      ghost_ (reached_valid right word);
-      ghost_ (labels_bounded_state left p);
-      ghost_ (labels_bounded_state right q);
-      if final left p <> final right q then
-        let left_initial, _ = left in
-        let right_initial, _ = right in
-        ghost_ (reached_def left word);
-        ghost_ (reached_def right word);
-        ghost_ (execute_reached left left_initial word);
-        ghost_ (execute_reached right right_initial word);
-        ghost_ (run_def left word);
-        ghost_ (run_def right word);
-        let decision = Different word in decision
-      else
-        let left_labels = labels left p in
-        let right_labels = labels right q in
-        if list_size left_labels > 64 || list_size right_labels > 64
-        then let decision = Limit in decision
-        else
-          let letters = append left_labels right_labels in
-          let zero = 0 in
-          let missing_budget = list_size letters + 1 in
-          ghost_ (pair_labels_size left_labels right_labels);
-          ghost_ (missing_letter_budget letters);
-          ghost_ (missing_letter_sound letters zero missing_budget);
-          match missing_letter letters zero missing_budget with
-          | None -> let decision = Limit in decision
-          | Some outsider ->
-            let new_processed = ghost_ ((p, q) :: processed) in
-            ghost_ (accounted_pop seen processed p q word rest);
-            ghost_ (push_labels_accounted left right p q word letters
-              rest seen new_processed count limit);
-            ghost_ (push_labels_counts left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_distinct left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_domain left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_capacity left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_valid left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_seen_included left right p q word letters
-              rest seen count limit);
-            ghost_ (expanded_pair_closed left right p q word outsider
-              rest seen count limit);
-            match push_labels left right p q word letters
-                rest seen count limit with
-            | None -> let decision = Limit in decision
-            | Some (updated_pending, updated_seen, updated_count) ->
-              let pair = step left p outsider, step right q outsider in
-              let next_word = append word [outsider] in
-              ghost_ (reached_push left word outsider);
-              ghost_ (reached_push right word outsider);
-              ghost_ (push_pair_accounted limit pair next_word
-                updated_pending updated_seen new_processed updated_count);
-              ghost_ (push_pair_seen_included limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_valid left right limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_counts limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_distinct limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (step_valid left p outsider);
-              ghost_ (step_valid right q outsider);
-              ghost_ (push_pair_domain left right limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_capacity left right limit pair next_word
-                updated_pending updated_seen updated_count);
-              match push_pair limit pair next_word
-                  updated_pending updated_seen updated_count with
-              | None -> let decision = Limit in decision
-              | Some (next_pending, next_seen, next_count) ->
-                ghost_ (relation_included_trans seen updated_seen next_seen);
-                ghost_ (all_closed_weaken left right seen next_seen processed);
-                ghost_ (all_closed_def left right next_seen new_processed);
-                let left_initial, _ = left in
-                let right_initial, _ = right in
-                let initial_pair = left_initial, right_initial in
-                ghost_ (related_included initial_pair seen next_seen);
-                let next_remaining = ghost_ (remaining - 1) in
-                let recursive_decision =
-                  search_product left right next_pending next_seen new_processed
-                    next_count limit (next_remaining) in
-                (match recursive_decision with
-                 | Limit -> let decision = Limit in decision
-                 | Equal relation ->
-                   let decision = Equal relation in decision
-                 | Different word ->
-                   let decision = Different word in decision)
-  [@@decreases let fuel = remaining in fuel]
-
-  let (candidate @ total) (left : machine) (right : machine) (limit : int) :
-      {decision : decision |
-        (if valid left && valid right && labels_bounded left && labels_bounded right &&
-          0 < limit && limit <= 65_536 &&
-          Bigint.compare (Bigint.mul (state_size left) (state_size right))
-            (Bigint.of_int limit) <= 0 then
-          match decision with Limit -> false | Equal _ | Different _ -> true
-         else true) &&
-        match decision with
-        | Different word -> run left word <> run right word
-        | Equal relation -> check left right relation
-        | Limit -> true} =
-    let left_initial, _ = left in
-    let right_initial, _ = right in
-    let pair = left_initial, right_initial in
-    let count = if limit > 65_536 then 65_536 else limit in
-    if count <= 0 then let decision = Limit in decision
-    else
-      let empty_word = [] in
-      let empty_pending : (int * int * int list) list = [] in
-      let empty_seen : relation = [] in
-      let empty_processed = [] in
-      let zero = 0 in
-      let remaining = count in
-      ghost_ (big_length_def empty_pending);
-      ghost_ (big_length_def empty_seen);
-      ghost_ (distinct_pairs_def empty_seen);
-      ghost_ (pairs_valid_def left right empty_seen);
-      ghost_ (pending_valid_def left right empty_pending);
-      ghost_ (all_seen_accounted_def empty_seen empty_processed empty_pending);
-      ghost_ (reached_empty_equal left);
-      ghost_ (reached_empty_equal right);
-      ghost_ (reached_valid left empty_word);
-      ghost_ (reached_valid right empty_word);
-      ghost_ (push_pair_valid left right count pair empty_word empty_pending
-        empty_seen zero);
-      ghost_ (push_pair_accounted count pair empty_word empty_pending empty_seen
-        empty_processed zero);
-      ghost_ (push_pair_related count pair empty_word empty_pending empty_seen zero);
-      ghost_ (push_pair_counts count pair empty_word empty_pending empty_seen zero);
-      ghost_ (push_pair_distinct count pair empty_word empty_pending empty_seen zero);
-      ghost_ (push_pair_domain left right count pair empty_word empty_pending empty_seen zero);
-      ghost_ (pair_member_def pair empty_seen);
-      ghost_ (push_pair_def count pair empty_word empty_pending empty_seen zero);
-      match push_pair count pair empty_word empty_pending empty_seen zero with
-      | None -> let decision = Limit in decision
-      | Some (pending, seen, used) ->
-        ghost_ (big_length_def pending);
-        ghost_ (big_length_def seen);
-        ghost_ (all_closed_def left right seen empty_processed);
-        let recursive_decision =
-          search_product left right pending seen empty_processed
-            used count (remaining) in
-        match recursive_decision with
-        | Limit -> let decision = Limit in decision
-        | Equal relation ->
-          let decision = Equal relation in decision
-        | Different word ->
-          let decision = Different word in decision
-
-  let (compare_states @ total) (source : machine)
-      (p : int) (q : int) (limit : int) :
-      {decision : decision |
-        (if valid source && has_state source p && has_state source q &&
-          labels_bounded source && 0 < limit && limit <= 65_536 &&
-          Bigint.compare (Bigint.mul (state_size source) (state_size source))
-            (Bigint.of_int limit) <= 0 then
-          match decision with Limit -> false | Equal _ | Different _ -> true
-         else true) &&
-        match decision with
-        | Different word -> run_from source p word <> run_from source q word
-        | Equal relation -> related (p, q) relation &&
-          all_closed source source relation relation
-        | Limit -> true} =
-    let _, table = source in
-    let left = p, table in
-    let right = q, table in
-    ghost_ (valid_def source);
-    ghost_ (valid_def left);
-    ghost_ (valid_def right);
-    ghost_ (has_state_def source p);
-    ghost_ (has_state_def source q);
-    ghost_ (labels_bounded_def source);
-    ghost_ (labels_bounded_def left);
-    ghost_ (labels_bounded_def right);
-    let states = state_ids table in
-    ghost_ (bounded_labels_rebased source p states);
-    ghost_ (bounded_labels_rebased source q states);
-    ghost_ (state_size_via_ids source);
-    ghost_ (state_size_via_ids left);
-    ghost_ (state_size_via_ids right);
-    let decision = candidate left right limit in
-    match decision with
-    | Limit -> let result = Limit in result
-    | Equal relation ->
-      ghost_ (check_def left right relation);
-      ghost_ (all_closed_rebased source p q relation relation);
-      let result = Equal relation in result
-    | Different word ->
-      ghost_ (run_rebased source p word);
-      ghost_ (run_rebased source q word);
-      let result = Different word in result
-
-  let (diagnose_comparison @ total) (left : machine) (right : machine) (limit : int) :
-      {decision : decision | valid_decision left right decision &&
-        (if valid left && valid right && labels_bounded left && labels_bounded right &&
-          0 < limit && limit <= 65_536 &&
-          Bigint.compare (Bigint.mul (state_size left) (state_size right))
-            (Bigint.of_int limit) <= 0 then
-          match decision with Limit -> false | Equal _ | Different _ -> true
-         else true)} =
-    let proposal = candidate left right limit in
-    match proposal with
-    | Limit ->
-      let decision = Limit in
-      ghost_ (valid_decision_def left right decision);
-      decision
-
-    | Different word ->
-      let decision = Different word in
-      ghost_ (valid_decision_def left right decision);
-      decision
-    | Equal relation ->
-      let decision = Equal relation in
-      ghost_ (valid_decision_def left right decision);
-      decision
-
   let[@def] rec access_member state (entries : (int * int list) list) =
     match entries with
     | [] -> false
@@ -4345,210 +4027,6 @@ end = struct
          ghost_ (reach_state_closed_def source final_seen state);
          ())
 
-  let rec (reachable_search @ total) :
-      (source : machine) -> (pending : (int * int list) list) ->
-      (seen : (int * int list) list) ->
-      (processed : (int * int list) list) @ ghost ->
-      (count : int) -> (limit : int) ->
-      (remaining : {fuel : int | 0 <= fuel && fuel <= 65_536 &&
-        0 <= count && count <= limit && limit <= 65_536 &&
-        Bigint.of_int count === big_length seen &&
-        distinct_ints (states_of_entries seen) &&
-        Bigint.add (Bigint.of_int fuel) (Bigint.of_int count) ===
-          Bigint.add (Bigint.of_int limit) (big_length pending)}) @ ghost ->
-      {result : (int * int list) list option |
-        (if valid source && labels_bounded source &&
-          access_valid source pending && access_valid source seen &&
-          Bigint.compare (state_size source) (Bigint.of_int limit) <= 0 then
-          match result with None -> false | Some _ -> true
-         else true) &&
-        (match result with
-         | None -> true
-         | Some entries -> distinct_ints (states_of_entries entries)) &&
-        (match pending with
-         | [] -> result === Some seen
-         | _ :: _ -> true) &&
-        let initial, _ = source in
-        if access_valid source pending && access_valid source seen &&
-          reach_accounted seen processed pending &&
-          all_reach_closed source seen processed &&
-          access_member initial seen then
-          match result with
-          | None -> true
-          | Some entries -> access_valid source entries &&
-            all_reach_closed source entries entries &&
-            access_member initial entries
-        else true} @ immutable contended =
-    fun source pending seen processed count limit remaining ->
-    match pending with
-    | [] ->
-      ghost_ (reach_accounted_empty_included seen processed);
-      ghost_ (reach_closed_processed_covers_seen source seen processed seen);
-      let result = Some seen in result
-    | (state, word) :: rest ->
-      ghost_ (big_length_def pending);
-      ghost_ (access_length_nonnegative rest);
-      ghost_ (access_valid_def source pending);
-      ghost_ (reached_valid source word);
-      ghost_ (labels_bounded_state source state);
-      let letters = labels source state in
-      if list_size letters > 64 then
-        let result = None in result
-      else
-        let zero = 0 in
-        let missing_budget = list_size letters + 1 in
-        ghost_ (missing_letter_budget letters);
-        ghost_ (missing_letter_sound letters zero missing_budget);
-        match missing_letter letters zero missing_budget with
-        | None -> let result = None in result
-        | Some outsider ->
-          let new_processed = ghost_ ((state, word) :: processed) in
-          ghost_ (reach_accounted_pop seen processed state word rest);
-          ghost_ (expand_reachable_labels_accounted source state word letters
-            rest seen new_processed count limit);
-          ghost_ (expand_reachable_labels_counts source state word letters
-            rest seen count limit);
-          ghost_ (expand_reachable_labels_distinct source state word letters
-            rest seen count limit);
-          ghost_ (expand_reachable_labels_seen_included source state word letters
-            rest seen count limit);
-          ghost_ (expanded_reach_state_closed source state word outsider
-            rest seen count limit);
-          ghost_ (expand_reachable_labels_valid source state word letters
-            rest seen count limit);
-          ghost_ (expand_reachable_labels_capacity source state word letters
-            rest seen count limit);
-          (match expand_reachable_labels source state word letters
-              rest seen count limit with
-           | None -> let result = None in result
-           | Some (updated_pending, updated_seen, updated_count) ->
-             let target = step source state outsider in
-             let next_word = append word [outsider] in
-             ghost_ (reached_push source word outsider);
-             ghost_ (push_state_accounted limit target next_word
-               updated_pending updated_seen new_processed updated_count);
-             ghost_ (push_state_seen_included limit target next_word
-               updated_pending updated_seen updated_count);
-             ghost_ (push_state_valid source limit target next_word
-               updated_pending updated_seen updated_count);
-             ghost_ (push_state_counts limit target next_word
-               updated_pending updated_seen updated_count);
-             ghost_ (push_state_distinct limit target next_word
-               updated_pending updated_seen updated_count);
-             ghost_ (step_valid source state outsider);
-             ghost_ (push_state_capacity source limit target next_word
-               updated_pending updated_seen updated_count);
-             (match push_state limit target next_word
-                 updated_pending updated_seen updated_count with
-              | None -> let result = None in result
-              | Some (next_pending, next_seen, next_count) ->
-                ghost_ (access_included_trans seen updated_seen next_seen);
-                ghost_ (all_reach_closed_weaken source seen next_seen processed);
-                ghost_ (all_reach_closed_def source next_seen new_processed);
-                let initial, _ = source in
-                ghost_ (access_member_included initial seen next_seen);
-                let next_remaining = ghost_ (remaining - 1) in
-                let result = reachable_search source
-                  next_pending next_seen new_processed next_count limit
-                  (next_remaining) in
-                (match result with
-                 | None -> let result = None in result
-                 | Some entries ->
-                   let result = Some entries in result)))
-  [@@decreases let fuel = remaining in fuel]
-
-  let (reachable_initial_access @ total) (source : machine) :
-      {u : unit | let initial, _ = source in
-        access_valid source [initial, []]} =
-    let initial, _ = source in
-    let empty_word = [] in
-    ghost_ (reached_empty_equal source);
-    ghost_ (access_valid_singleton source initial empty_word);
-    ()
-
-  let rec (find_access @ total) :
-      (source : machine) -> (state : int) ->
-      (entries : (int * int list) list) ->
-      {result : int list option |
-        if access_valid source entries && access_member state entries then
-          match result with
-          | None -> false
-          | Some word -> reached source word === state
-        else true} @ immutable contended =
-    fun source state entries ->
-    ghost_ (access_valid_def source entries);
-    ghost_ (access_member_def state entries);
-    match entries with
-    | [] -> let result = None in result
-    | (candidate, word) :: rest ->
-      if state = candidate then
-        let result = Some word in result
-      else
-        let result = find_access source state rest in
-        result
-
-  let (access_member_self @ total) (state : int) (word : int list) :
-      {u : unit | access_member state [state, word]} =
-    let singleton = [state, word] in
-    ghost_ (access_member_def state singleton);
-    ()
-
-  let (reachable_search_initial @ total) (source : machine)
-      (limit : int) :
-      {result : (int * int list) list option |
-        (if valid source && labels_bounded source && 0 < limit && limit <= 65_536 &&
-          Bigint.compare (state_size source) (Bigint.of_int limit) <= 0 then
-          match result with None -> false | Some _ -> true
-         else true) &&
-        let initial, _ = source in
-        match result with
-        | None -> true
-        | Some entries ->
-          access_valid source entries &&
-          all_reach_closed source entries entries &&
-          access_member initial entries &&
-          distinct_ints (states_of_entries entries) &&
-          (if valid source then
-            Bigint.compare (big_length entries) (state_size source) <= 0
-           else true)} =
-    if limit <= 0 || limit > 65_536 then
-      let result = None in result
-    else
-    let initial, _ = source in
-    let empty_word = [] in
-    let empty_entries : (int * int list) list = [] in
-    let zero = 0 in
-    ghost_ (big_length_def empty_entries);
-    ghost_ (states_of_entries_def empty_entries);
-    let empty_states = states_of_entries empty_entries in
-    ghost_ (distinct_ints_def empty_states);
-    ghost_ (access_valid_def source empty_entries);
-    ghost_ (reach_accounted_empty empty_entries empty_entries);
-    ghost_ (reached_empty_equal source);
-    ghost_ (reached_valid source empty_word);
-    ghost_ (push_state_valid source limit initial empty_word empty_entries
-      empty_entries zero);
-    ghost_ (push_state_accounted limit initial empty_word empty_entries
-      empty_entries empty_entries zero);
-    ghost_ (push_state_target_member limit initial empty_word empty_entries
-      empty_entries zero);
-    ghost_ (push_state_counts limit initial empty_word empty_entries
-      empty_entries zero);
-    ghost_ (push_state_distinct limit initial empty_word empty_entries empty_entries zero);
-    ghost_ (push_state_capacity source limit initial empty_word empty_entries empty_entries zero);
-    match push_state limit initial empty_word empty_entries empty_entries
-        zero with
-    | None -> let result = None in result
-    | Some (pending, seen, count) ->
-      ghost_ (all_reach_closed_empty source seen);
-      let result = reachable_search source pending seen empty_entries
-        count limit (limit) in
-      (match result with
-       | None -> let result = None in result
-       | Some entries ->
-         ghost_ (access_count_bound source entries);
-         let result = Some entries in result)
-
   let rec (append_word @ total) :
       (left : int list) @ total -> (right : int list) @ total ->
       {result : int list | result === append left right}
@@ -4560,6 +4038,422 @@ end = struct
     | letter :: rest ->
       let tail = append_word rest right in
       let result = letter :: tail in result
+
+  type ('a, 'proof) proved = {
+    result_value : 'a @@ total;
+    result_proof : 'proof Ghost.t @@ total;
+  }
+
+  type comparison = Equivalent | Inequivalent | Comparison_limit
+  [@@inductive]
+
+  let[@def] decision_kind decision =
+    match decision with
+    | Equal _ -> Equivalent
+    | Different _ -> Inequivalent
+    | Limit -> Comparison_limit
+
+  module Pair_trace : sig
+    type t : value mod immutable
+    val entries : t -> (int * int * int list) list @@ total
+    val make : (values : (int * int * int list) list) @ total ->
+      {result : t | entries result === values} @ total @@ total
+  end = struct
+    type t = (int * int * int list) list
+    let[@def] entries values = values
+    let (make @ total) (values : (int * int * int list) list @ total) :
+        {result : t | entries result === values} @ total =
+      ghost_ (entries_def values);
+      values
+  end
+
+  let[@def] rec pairs_of_pending pending =
+    match pending with
+    | [] -> []
+    | (p, q, _) :: rest -> (p, q) :: pairs_of_pending rest
+
+  type pair_search = {
+    pending_pairs : relation @@ total;
+    seen_pairs : relation @@ total;
+    pair_count : int @@ total;
+    pending_trace : Pair_trace.t Ghost.t @@ total;
+  }
+
+  let[@def] pair_search_valid (search : pair_search @ total) = ghost_ (
+    search.pending_pairs ===
+      pairs_of_pending (Pair_trace.entries search.pending_trace.ghost))
+
+  let[@def] pair_search_view (search : pair_search @ total) = ghost_ (
+    Pair_trace.entries search.pending_trace.ghost,
+    search.seen_pairs, search.pair_count)
+
+  let (push_search_pair @ total) (limit : int) (pair : state_pair @ total)
+      (word : int list @ ghost) (before : pair_search @ total) :
+      {result : pair_search option |
+        if pair_search_valid before then
+          let pending, seen, count = pair_search_view before in
+          match result with
+          | None -> push_pair limit pair word pending seen count === None
+          | Some after -> pair_search_valid after &&
+            push_pair limit pair word pending seen count ===
+              Some (pair_search_view after)
+        else true} @ total =
+    let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
+    let seen = before.seen_pairs in
+    let count = before.pair_count in
+    ghost_ (pair_search_valid_def before);
+    ghost_ (pair_search_view_def before);
+    ghost_ (push_pair_def limit pair word pending seen count);
+    if pair_member pair seen then
+      let result = Some before in result
+    else if count >= limit then
+      let result = None in result
+    else
+      let pending_access = ghost_ (
+        let p, q = pair in (p, q, word) :: pending) in
+      let trace = ghost_ (Pair_trace.make pending_access) in
+      let after = {
+        pending_pairs = pair :: before.pending_pairs;
+        seen_pairs = pair :: seen;
+        pair_count = count + 1;
+        pending_trace = { ghost = trace };
+      } in
+      ghost_ (pairs_of_pending_def pending_access);
+      ghost_ (pair_search_valid_def after);
+      ghost_ (pair_search_view_def after);
+      let result = Some after in result
+
+  let rec (expand_search_pairs @ total) :
+      (left : machine) -> (right : machine) -> (p : int) -> (q : int) ->
+      (word : int list) @ ghost -> (letters : int list) ->
+      (before : pair_search) @ total -> (limit : int) ->
+      {result : pair_search option |
+        if pair_search_valid before then
+          let pending, seen, count = pair_search_view before in
+          match result with
+          | None -> push_labels left right p q word letters
+              pending seen count limit === None
+          | Some after -> pair_search_valid after &&
+            push_labels left right p q word letters pending seen count limit
+              === Some (pair_search_view after)
+        else true} @ total immutable contended =
+    fun left right p q word letters before limit ->
+    let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
+    let seen = before.seen_pairs in
+    let count = before.pair_count in
+    ghost_ (pair_search_view_def before);
+    ghost_ (push_labels_def left right p q word letters pending seen count limit);
+    match letters with
+    | [] -> let result = Some before in result
+    | letter :: rest ->
+      let pair = step left p letter, step right q letter in
+      let suffix = ghost_ [letter] in
+      let next_word = ghost_ (append_word word suffix) in
+      let pushed = push_search_pair limit pair next_word before in
+      match pushed with
+      | None -> let result = None in result
+      | Some updated ->
+        ghost_ (pair_search_view_def updated);
+        let result = expand_search_pairs left right p q word rest
+          updated limit in
+        result
+
+  let rec (search_pairs_loop @ total) :
+      (left : machine) -> (right : machine) ->
+      (before : pair_search) @ total ->
+      (processed : relation) @ ghost -> (limit : int) ->
+      (remaining : {fuel : int |
+        let pending, seen, count = pair_search_view before in
+        pair_search_valid before && 0 <= fuel && fuel <= 65_536 &&
+        0 <= count && count <= limit && limit <= 65_536 &&
+        Bigint.of_int count === big_length seen &&
+        pending_valid left right pending && distinct_pairs seen &&
+        (if valid left && valid right then pairs_valid left right seen else true) &&
+        Bigint.add (Bigint.of_int fuel) (Bigint.of_int count) ===
+          Bigint.add (Bigint.of_int limit) (big_length pending)}) @ ghost ->
+      {packet : (comparison, decision) proved |
+        let pending, seen, _ = pair_search_view before in
+        let decision = packet.result_proof.ghost in
+        packet.result_value === decision_kind decision &&
+        (if valid left && valid right && labels_bounded left && labels_bounded right &&
+          Bigint.compare (Bigint.mul (state_size left) (state_size right))
+            (Bigint.of_int limit) <= 0 then
+          match decision with Limit -> false | Equal _ | Different _ -> true
+         else true) &&
+        (match decision with
+         | Equal relation -> distinct_pairs relation &&
+           (if valid left && valid right then pairs_valid left right relation
+            else true)
+         | Different _ | Limit -> true) &&
+        (match pending with
+         | [] -> decision === Equal seen
+         | _ :: _ -> true) &&
+        let left_initial, _ = left in
+        let right_initial, _ = right in
+        if pending_valid left right pending &&
+          all_seen_accounted seen processed pending &&
+          all_closed left right seen processed &&
+          related (left_initial, right_initial) seen then
+        match decision with
+        | Different word -> run left word <> run right word
+        | Equal relation -> check left right relation
+        | Limit -> true
+        else true} @ total immutable contended =
+    fun left right before processed limit remaining ->
+    let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
+    let seen = before.seen_pairs in
+    let count = before.pair_count in
+    ghost_ (pair_search_valid_def before);
+    ghost_ (pair_search_view_def before);
+    ghost_ (pairs_of_pending_def pending);
+    match before.pending_pairs with
+    | [] ->
+      ghost_ (accounted_empty_included seen processed);
+      ghost_ (closed_processed_covers_seen left right seen processed seen);
+      ghost_ (check_def left right seen);
+      let decision = ghost_ (Equal seen) in
+      ghost_ (decision_kind_def decision);
+      let packet = { result_value = Equivalent; result_proof = { ghost = decision } } in
+      packet
+    | (p, q) :: rest_pairs ->
+      let word = ghost_ (match pending with [] -> [] | (_, _, word) :: _ -> word) in
+      let rest = ghost_ (match pending with [] -> [] | _ :: rest -> rest) in
+      let trace = ghost_ (Pair_trace.make rest) in
+      let popped = { before with pending_pairs = rest_pairs;
+        pending_trace = { ghost = trace } } in
+      ghost_ (pair_search_valid_def popped);
+      ghost_ (pair_search_view_def popped);
+      ghost_ (big_length_def pending);
+      ghost_ (product_pending_length_nonnegative rest);
+      ghost_ (pending_valid_def left right pending);
+      ghost_ (reached_valid left word);
+      ghost_ (reached_valid right word);
+      ghost_ (labels_bounded_state left p);
+      ghost_ (labels_bounded_state right q);
+      if final left p <> final right q then
+        let left_initial, _ = left in
+        let right_initial, _ = right in
+        ghost_ (reached_def left word);
+        ghost_ (reached_def right word);
+        ghost_ (execute_reached left left_initial word);
+        ghost_ (execute_reached right right_initial word);
+        ghost_ (run_def left word);
+        ghost_ (run_def right word);
+        let decision = ghost_ (Different word) in
+        ghost_ (decision_kind_def decision);
+        let packet = { result_value = Inequivalent; result_proof = { ghost = decision } } in
+        packet
+      else
+        let left_labels = labels left p in
+        let right_labels = labels right q in
+        if list_size left_labels > 64 || list_size right_labels > 64
+        then let decision = ghost_ (Limit) in
+          ghost_ (decision_kind_def decision);
+          let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
+          packet
+        else
+          let letters = append left_labels right_labels in
+          let zero = 0 in
+          let missing_budget = list_size letters + 1 in
+          ghost_ (pair_labels_size left_labels right_labels);
+          ghost_ (missing_letter_budget letters);
+          ghost_ (missing_letter_sound letters zero missing_budget);
+          match missing_letter letters zero missing_budget with
+          | None -> let decision = ghost_ (Limit) in
+            ghost_ (decision_kind_def decision);
+            let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
+            packet
+          | Some outsider ->
+            let new_processed = ghost_ ((p, q) :: processed) in
+            ghost_ (accounted_pop seen processed p q word rest);
+            ghost_ (push_labels_accounted left right p q word letters
+              rest seen new_processed count limit);
+            ghost_ (push_labels_counts left right p q word letters
+              rest seen count limit);
+            ghost_ (push_labels_distinct left right p q word letters
+              rest seen count limit);
+            ghost_ (push_labels_domain left right p q word letters
+              rest seen count limit);
+            ghost_ (push_labels_capacity left right p q word letters
+              rest seen count limit);
+            ghost_ (push_labels_valid left right p q word letters
+              rest seen count limit);
+            ghost_ (push_labels_seen_included left right p q word letters
+              rest seen count limit);
+            ghost_ (expanded_pair_closed left right p q word outsider
+              rest seen count limit);
+            let expanded = expand_search_pairs left right p q word letters popped limit in
+            match expanded with
+            | None -> let decision = ghost_ (Limit) in
+              ghost_ (decision_kind_def decision);
+              let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
+              packet
+            | Some updated ->
+              let updated_pending = ghost_ (Pair_trace.entries updated.pending_trace.ghost) in
+              let updated_seen = updated.seen_pairs in
+              let updated_count = updated.pair_count in
+              ghost_ (pair_search_view_def updated);
+              let pair = step left p outsider, step right q outsider in
+              let suffix = ghost_ [outsider] in
+              let next_word = ghost_ (append_word word suffix) in
+              ghost_ (reached_push left word outsider);
+              ghost_ (reached_push right word outsider);
+              ghost_ (push_pair_accounted limit pair next_word
+                updated_pending updated_seen new_processed updated_count);
+              ghost_ (push_pair_seen_included limit pair next_word
+                updated_pending updated_seen updated_count);
+              ghost_ (push_pair_valid left right limit pair next_word
+                updated_pending updated_seen updated_count);
+              ghost_ (push_pair_counts limit pair next_word
+                updated_pending updated_seen updated_count);
+              ghost_ (push_pair_distinct limit pair next_word
+                updated_pending updated_seen updated_count);
+              ghost_ (step_valid left p outsider);
+              ghost_ (step_valid right q outsider);
+              ghost_ (push_pair_domain left right limit pair next_word
+                updated_pending updated_seen updated_count);
+              ghost_ (push_pair_capacity left right limit pair next_word
+                updated_pending updated_seen updated_count);
+              let pushed = push_search_pair limit pair next_word updated in
+              match pushed with
+              | None -> let decision = ghost_ (Limit) in
+                ghost_ (decision_kind_def decision);
+                let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
+                packet
+              | Some next ->
+                let next_seen = next.seen_pairs in
+                ghost_ (pair_search_valid_def next);
+                ghost_ (pair_search_view_def next);
+                ghost_ (relation_included_trans seen updated_seen next_seen);
+                ghost_ (all_closed_weaken left right seen next_seen processed);
+                ghost_ (all_closed_def left right next_seen new_processed);
+                let left_initial, _ = left in
+                let right_initial, _ = right in
+                let initial_pair = ghost_ (left_initial, right_initial) in
+                ghost_ (related_included initial_pair seen next_seen);
+                let next_remaining = ghost_ (remaining - 1) in
+                let packet =
+                  search_pairs_loop left right next new_processed
+                    limit (next_remaining) in
+                packet
+  [@@decreases let fuel = remaining in fuel]
+
+
+  let (comparison_proved @ total) (left : machine) (right : machine) (limit : int) :
+      {packet : (comparison, decision) proved |
+        let decision = packet.result_proof.ghost in
+        packet.result_value === decision_kind decision &&
+        (if valid left && valid right && labels_bounded left && labels_bounded right &&
+          0 < limit && limit <= 65_536 &&
+          Bigint.compare (Bigint.mul (state_size left) (state_size right))
+            (Bigint.of_int limit) <= 0 then
+          match decision with Limit -> false | Equal _ | Different _ -> true
+         else true) &&
+        match decision with
+        | Different word -> run left word <> run right word
+        | Equal relation -> check left right relation
+        | Limit -> true} =
+    let left_initial, _ = left in
+    let right_initial, _ = right in
+    let pair = left_initial, right_initial in
+    let count = if limit > 65_536 then 65_536 else limit in
+    if count <= 0 then let decision = ghost_ Limit in
+      ghost_ (decision_kind_def decision);
+      let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
+      packet
+    else
+      let empty_word = ghost_ [] in
+      let empty_pending = ghost_ ([] : (int * int * int list) list) in
+      let empty_seen : relation = [] in
+      let empty_processed = ghost_ ([] : relation) in
+      let zero = 0 in
+      let remaining = ghost_ count in
+      let trace = ghost_ (Pair_trace.make empty_pending) in
+      let start = { pending_pairs = empty_seen; seen_pairs = empty_seen;
+        pair_count = zero; pending_trace = { ghost = trace } } in
+      ghost_ (pairs_of_pending_def empty_pending);
+      ghost_ (pair_search_valid_def start);
+      ghost_ (pair_search_view_def start);
+      ghost_ (big_length_def empty_pending);
+      ghost_ (big_length_def empty_seen);
+      ghost_ (distinct_pairs_def empty_seen);
+      ghost_ (pairs_valid_def left right empty_seen);
+      ghost_ (pending_valid_def left right empty_pending);
+      ghost_ (all_seen_accounted_def empty_seen empty_processed empty_pending);
+      ghost_ (reached_empty_equal left);
+      ghost_ (reached_empty_equal right);
+      ghost_ (reached_valid left empty_word);
+      ghost_ (reached_valid right empty_word);
+      ghost_ (push_pair_valid left right count pair empty_word empty_pending
+        empty_seen zero);
+      ghost_ (push_pair_accounted count pair empty_word empty_pending empty_seen
+        empty_processed zero);
+      ghost_ (push_pair_related count pair empty_word empty_pending empty_seen zero);
+      ghost_ (push_pair_counts count pair empty_word empty_pending empty_seen zero);
+      ghost_ (push_pair_distinct count pair empty_word empty_pending empty_seen zero);
+      ghost_ (push_pair_domain left right count pair empty_word empty_pending empty_seen zero);
+      ghost_ (pair_member_def pair empty_seen);
+      ghost_ (push_pair_def count pair empty_word empty_pending empty_seen zero);
+      let pushed = push_search_pair count pair empty_word start in
+      match pushed with
+      | None -> let decision = ghost_ Limit in
+        ghost_ (decision_kind_def decision);
+        let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
+        packet
+      | Some before ->
+        let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
+        let seen = before.seen_pairs in
+        ghost_ (pair_search_valid_def before);
+        ghost_ (pair_search_view_def before);
+        ghost_ (big_length_def pending);
+        ghost_ (big_length_def seen);
+        ghost_ (all_closed_def left right seen empty_processed);
+        let packet = search_pairs_loop left right before empty_processed
+          count (remaining) in
+        packet
+
+  let (compare_states @ total) (source : machine)
+      (p : int) (q : int) (limit : int) :
+      {decision : decision |
+        (if valid source && has_state source p && has_state source q &&
+          labels_bounded source && 0 < limit && limit <= 65_536 &&
+          Bigint.compare (Bigint.mul (state_size source) (state_size source))
+            (Bigint.of_int limit) <= 0 then
+          match decision with Limit -> false | Equal _ | Different _ -> true
+         else true) &&
+        match decision with
+        | Different word -> run_from source p word <> run_from source q word
+        | Equal relation -> related (p, q) relation &&
+          all_closed source source relation relation
+        | Limit -> true} @ ghost = ghost_ (
+    let _, table = source in
+    let left = p, table in
+    let right = q, table in
+    valid_def source;
+    valid_def left;
+    valid_def right;
+    has_state_def source p;
+    has_state_def source q;
+    labels_bounded_def source;
+    labels_bounded_def left;
+    labels_bounded_def right;
+    let states = state_ids table in
+    bounded_labels_rebased source p states;
+    bounded_labels_rebased source q states;
+    state_size_via_ids source;
+    state_size_via_ids left;
+    state_size_via_ids right;
+    let packet = comparison_proved left right limit in
+    match packet.result_proof.ghost with
+    | Limit -> Limit
+    | Equal relation ->
+      check_def left right relation;
+      all_closed_rebased source p q relation relation;
+      Equal relation
+    | Different word ->
+      run_rebased source p word;
+      run_rebased source q word;
+      Different word)
 
   module Access_trace : sig
     type t : value mod immutable
@@ -5419,15 +5313,15 @@ end = struct
           0 < limit && limit <= 65_536 &&
           Bigint.compare (Bigint.mul (state_size source) (state_size source))
             (Bigint.of_int limit) <= 0 then
-          match result with None -> false | Some _ -> true else true)} =
-    let decision = compare_states source p q limit in
-    match decision with
-    | Limit -> let result = None in result
+          match result with None -> false | Some _ -> true else true)}
+      @ ghost = ghost_ (
+    match compare_states source p q limit with
+    | Limit -> None
     | Equal relation ->
-      ghost_ (respect relation);
-      ghost_ (partition_respects_member partition states relation p q);
-      let result = None in result
-    | Different word -> let result = Some word in result
+      respect relation;
+      partition_respects_member partition states relation p q;
+      None
+    | Different word -> Some word)
 
   let (initial_partition_final @ total) (source : machine)
       (states : int list) (left : int) (right : int) :
@@ -7336,31 +7230,6 @@ end = struct
            ghost_ (all_separated_def source classes remaining extended);
            let result = Some extended in result)
 
-  let (quotient_of_raw_preserves @ total) (source : machine)
-      (entries : (int * int list) list)
-      (previous : (int * int) list) (stable : (int * int) list)
-      (reduced : machine) (word : int list) :
-      {u : unit | let initial, _ = source in
-        let states = states_of_entries entries in
-        let alphabet = collect_alphabet source states in
-        let classes = collect_classes stable states in
-        let raw = quotient_raw source stable states classes initial in
-        if all_reach_closed source entries entries &&
-          access_member initial entries &&
-          accepting_partition source stable states &&
-          partition_stable previous stable states &&
-          stable === refine_partition source previous alphabet states &&
-          of_raw raw === Some reduced then
-          run reduced word === run source word else true} =
-    let initial, _ = source in
-    let states = states_of_entries entries in
-    let classes = collect_classes stable states in
-    let raw = quotient_raw source stable states classes initial in
-    ghost_ (quotient_run source entries previous stable word);
-    ghost_ (of_raw_run raw reduced word);
-    ghost_ (raw_run_def raw word);
-    ()
-
   type 'a stable_partition = {
     stable_value : 'a @@ total;
     prior_value : 'a Ghost.t @@ total;
@@ -7510,110 +7379,6 @@ end = struct
     ghost_ (valid_def raw);
     ()
 
-  let (propose_reduction @ total) (source : machine) (limit : int) :
-      {result : (machine * reduction_certificate) option |
-        (if valid source && labels_bounded source &&
-          0 < limit && limit <= 64 &&
-          Bigint.compare (state_size source) (Bigint.of_int limit) <= 0 then
-          match result with None -> false | Some _ -> true else true) &&
-        match result with
-        | None -> true
-        | Some (candidate, certificate) ->
-          check_reduction source candidate certificate} =
-    let initial, _ = source in
-    if limit <= 0 || limit > 64 then
-      let result = None in result
-    else begin
-      let search_result = reachable_search_initial source limit in
-      match search_result with
-      | None -> let result = None in result
-      | Some entries ->
-        let reachable = states_of_entries entries in
-        let alphabet = collect_alphabet source reachable in
-        let initial_classes = initial_partition source reachable in
-        let refinement_measure = ghost_ (same_class_pairs initial_classes reachable) in
-        ghost_ (same_class_pairs_nonnegative initial_classes reachable);
-        let refinement_measure : {n : Bigint.t |
-          n === same_class_pairs initial_classes reachable &&
-          Bigint.compare 0Z n <= 0} = refinement_measure in
-        let partition_result =
-          refine_to_stable source alphabet reachable
-            initial_classes refinement_measure in
-        let previous = ghost_ partition_result.prior_value.ghost in
-        let partition = partition_result.stable_value in
-        let class_ids = collect_classes partition reachable in
-        let pair_limit = square_limit limit in
-        ghost_ (separation_budget_from_limit source limit pair_limit);
-        let candidate_raw =
-          quotient_raw source partition reachable class_ids initial in
-        ghost_ (initial_accepting_partition source reachable);
-        ghost_ (quotient_valid source entries previous);
-        ghost_ (of_raw_def candidate_raw);
-        let reduced = candidate_raw in
-        let equivalent =
-          quotient_relation partition reachable in
-        ghost_ (initial_accepting_partition source reachable);
-        ghost_ (quotient_check_reduced source entries previous
-          partition reduced);
-        ghost_ (quotient_all_access_reduced source entries previous
-          partition reduced);
-        ghost_ (of_raw_valid candidate_raw);
-        ghost_ (valid_def reduced);
-        let access = quotient_access partition entries in
-        let empty = [] in
-        ghost_ (all_separated_def source class_ids empty empty);
-        let (respect @ total) (relation : relation) :
-            {u : unit | if all_closed source source relation relation then
-              partition_respects partition reachable relation else true} =
-          ghost_ (initial_partition_respects source reachable relation
-            relation);
-          ghost_ (refine_to_stable_respects source alphabet reachable
-            initial_classes refinement_measure entries relation);
-          () in
-        let (distinguish @ total) (p : int) (q : int) :
-            {result : int list option |
-              (match result with None -> true | Some word ->
-                run_from source p word <> run_from source q word) &&
-              (if separation_budget source pair_limit &&
-                has_letter p class_ids && has_letter q class_ids && p <> q
-               then match result with None -> false | Some _ -> true
-               else true)} =
-          ghost_ (separation_budget_def source pair_limit);
-          ghost_ (letters_in_refl reachable);
-          ghost_ (collect_classes_representatives source previous alphabet
-            reachable reachable p);
-          ghost_ (collect_classes_representatives source previous alphabet
-            reachable reachable q);
-          ghost_ (collect_classes_fixed source previous alphabet reachable
-            reachable p);
-          ghost_ (collect_classes_fixed source previous alphabet reachable
-            reachable q);
-          ghost_ (states_of_entries_member entries p);
-          ghost_ (states_of_entries_member entries q);
-          ghost_ (access_member_valid source entries p);
-          ghost_ (access_member_valid source entries q);
-          let result = distinguish_classes source reachable
-            partition respect p q pair_limit in
-          result in
-        ghost_ (letters_in_refl class_ids);
-        let separation = cover_rows source class_ids
-          class_ids empty pair_limit distinguish in
-        (match separation with
-         | None -> let result = None in result
-         | Some separation ->
-           ghost_ (quotient_all_separated_reduced source entries previous
-             partition reduced separation);
-           let certificate = equivalent, access, separation in
-           ghost_ (check_reduction_def source reduced certificate);
-           let result = Some (reduced, certificate) in
-           result)
-    end
-
-  type ('a, 'proof) proved = {
-    result_value : 'a @@ total;
-    result_proof : 'proof Ghost.t @@ total;
-  }
-
   let (minimization_certificate @ total)
       (source : {source : machine | valid source && labels_bounded source})
       (entries : {entries : (int * int list) list |
@@ -7638,33 +7403,32 @@ end = struct
         valid reduced && reduced === quotient_raw source partition reachable
           (collect_classes partition reachable) initial}) :
       {certificate : reduction_certificate |
-        check_reduction source reduced certificate} =
-    let _ = ghost_ (refine_to_stable source alphabet reachable
-      initial_classes refinement_measure) in
+        check_reduction source reduced certificate} @ ghost = ghost_ (
+    let _ = refine_to_stable source alphabet reachable
+      initial_classes refinement_measure in
     let previous = partition_result.prior_value.ghost in
     let partition = partition_result.stable_value in
     let class_ids = collect_classes partition reachable in
     let candidate_raw = reduced in
-    ghost_ (initial_accepting_partition source reachable);
-    ghost_ (of_raw_def candidate_raw);
+    initial_accepting_partition source reachable;
+    of_raw_def candidate_raw;
     let equivalent =
       quotient_relation partition reachable in
-    ghost_ (quotient_check_reduced source entries previous
-      partition reduced);
-    ghost_ (quotient_all_access_reduced source entries previous
-      partition reduced);
-    ghost_ (of_raw_valid candidate_raw);
-    ghost_ (valid_def reduced);
+    quotient_check_reduced source entries previous
+      partition reduced;
+    quotient_all_access_reduced source entries previous
+      partition reduced;
+    of_raw_valid candidate_raw;
+    valid_def reduced;
     let access = quotient_access partition entries in
-    let empty = [] in
-    ghost_ (all_separated_def source class_ids empty empty);
+    all_separated_def source class_ids [] [];
     let (respect @ total) (relation : relation) :
         {u : unit | if all_closed source source relation relation then
           partition_respects partition reachable relation else true} =
-      ghost_ (initial_partition_respects source reachable relation
-        relation);
-      ghost_ (refine_to_stable_respects source alphabet reachable
-        initial_classes refinement_measure entries relation);
+      initial_partition_respects source reachable relation
+        relation;
+      refine_to_stable_respects source alphabet reachable
+        initial_classes refinement_measure entries relation;
       () in
     let (distinguish @ total) (p : int) (q : int) :
         {result : int list option |
@@ -7674,38 +7438,38 @@ end = struct
             has_letter p class_ids && has_letter q class_ids && p <> q
            then match result with None -> false | Some _ -> true
            else true)} =
-      ghost_ (separation_budget_def source pair_limit);
-      ghost_ (letters_in_refl reachable);
-      ghost_ (collect_classes_representatives source previous alphabet
-        reachable reachable p);
-      ghost_ (collect_classes_representatives source previous alphabet
-        reachable reachable q);
-      ghost_ (collect_classes_fixed source previous alphabet reachable
-        reachable p);
-      ghost_ (collect_classes_fixed source previous alphabet reachable
-        reachable q);
-      ghost_ (states_of_entries_member entries p);
-      ghost_ (states_of_entries_member entries q);
-      ghost_ (access_member_valid source entries p);
-      ghost_ (access_member_valid source entries q);
+      separation_budget_def source pair_limit;
+      letters_in_refl reachable;
+      collect_classes_representatives source previous alphabet
+        reachable reachable p;
+      collect_classes_representatives source previous alphabet
+        reachable reachable q;
+      collect_classes_fixed source previous alphabet reachable
+        reachable p;
+      collect_classes_fixed source previous alphabet reachable
+        reachable q;
+      states_of_entries_member entries p;
+      states_of_entries_member entries q;
+      access_member_valid source entries p;
+      access_member_valid source entries q;
       let result = distinguish_classes source reachable
         partition respect p q pair_limit in
       result in
-    ghost_ (letters_in_refl class_ids);
+    letters_in_refl class_ids;
     let separation = cover_rows source class_ids
-      class_ids empty pair_limit distinguish in
+      class_ids [] pair_limit distinguish in
     (match separation with
      | None ->
        let certificate : reduction_certificate = [], [], [] in
        (certificate : {certificate : reduction_certificate |
          check_reduction source reduced certificate})
      | Some separation ->
-       ghost_ (quotient_all_separated_reduced source entries previous
-         partition reduced separation);
+       quotient_all_separated_reduced source entries previous
+         partition reduced separation;
        let certificate = equivalent, access, separation in
-       ghost_ (check_reduction_def source reduced certificate);
+       check_reduction_def source reduced certificate;
        (certificate : {certificate : reduction_certificate |
-         check_reduction source reduced certificate}))
+         check_reduction source reduced certificate})))
 
   let[@def] (minimize_proved @ total) (source : machine) (limit : int) :
       {result : (machine, reduction_certificate) proved option |
@@ -7759,19 +7523,6 @@ end = struct
           result_proof = { ghost = certificate } } in
         let result = Some packet in result
     end
-
-  let (diagnose_reduction @ total) (source : machine) (limit : int) :
-      {result : (machine * reduction_certificate) option |
-        (if valid source && labels_bounded source &&
-          0 < limit && limit <= 64 &&
-          Bigint.compare (state_size source) (Bigint.of_int limit) <= 0 then
-          match result with None -> false | Some _ -> true else true) &&
-        match result with
-        | None -> true
-        | Some (candidate, certificate) ->
-          check_reduction source candidate certificate} =
-    let proposal = propose_reduction source limit in
-    proposal
 
   let[@def] (reduce @ total) (source : machine) (limit : int) :
       machine option @ total =
@@ -7843,376 +7594,6 @@ reduce_def source limit;
               Bigint.compare (state_size candidate) (state_size other) <= 0
             else true}) in
     ()
-  type comparison = Equivalent | Inequivalent | Comparison_limit
-  [@@inductive]
-
-  let[@def] decision_kind decision =
-    match decision with
-    | Equal _ -> Equivalent
-    | Different _ -> Inequivalent
-    | Limit -> Comparison_limit
-
-  module Pair_trace : sig
-    type t : value mod immutable
-    val entries : t -> (int * int * int list) list @@ total
-    val make : (values : (int * int * int list) list) @ total ->
-      {result : t | entries result === values} @ total @@ total
-  end = struct
-    type t = (int * int * int list) list
-    let[@def] entries values = values
-    let (make @ total) (values : (int * int * int list) list @ total) :
-        {result : t | entries result === values} @ total =
-      ghost_ (entries_def values);
-      values
-  end
-
-  let[@def] rec pairs_of_pending pending =
-    match pending with
-    | [] -> []
-    | (p, q, _) :: rest -> (p, q) :: pairs_of_pending rest
-
-  type pair_search = {
-    pending_pairs : relation @@ total;
-    seen_pairs : relation @@ total;
-    pair_count : int @@ total;
-    pending_trace : Pair_trace.t Ghost.t @@ total;
-  }
-
-  let[@def] pair_search_valid (search : pair_search @ total) = ghost_ (
-    search.pending_pairs ===
-      pairs_of_pending (Pair_trace.entries search.pending_trace.ghost))
-
-  let[@def] pair_search_view (search : pair_search @ total) = ghost_ (
-    Pair_trace.entries search.pending_trace.ghost,
-    search.seen_pairs, search.pair_count)
-
-  let (push_search_pair @ total) (limit : int) (pair : state_pair @ total)
-      (word : int list @ ghost) (before : pair_search @ total) :
-      {result : pair_search option |
-        if pair_search_valid before then
-          let pending, seen, count = pair_search_view before in
-          match result with
-          | None -> push_pair limit pair word pending seen count === None
-          | Some after -> pair_search_valid after &&
-            push_pair limit pair word pending seen count ===
-              Some (pair_search_view after)
-        else true} @ total =
-    let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
-    let seen = before.seen_pairs in
-    let count = before.pair_count in
-    ghost_ (pair_search_valid_def before);
-    ghost_ (pair_search_view_def before);
-    ghost_ (push_pair_def limit pair word pending seen count);
-    if pair_member pair seen then
-      let result = Some before in result
-    else if count >= limit then
-      let result = None in result
-    else
-      let pending_access = ghost_ (
-        let p, q = pair in (p, q, word) :: pending) in
-      let trace = ghost_ (Pair_trace.make pending_access) in
-      let after = {
-        pending_pairs = pair :: before.pending_pairs;
-        seen_pairs = pair :: seen;
-        pair_count = count + 1;
-        pending_trace = { ghost = trace };
-      } in
-      ghost_ (pairs_of_pending_def pending_access);
-      ghost_ (pair_search_valid_def after);
-      ghost_ (pair_search_view_def after);
-      let result = Some after in result
-
-  let rec (expand_search_pairs @ total) :
-      (left : machine) -> (right : machine) -> (p : int) -> (q : int) ->
-      (word : int list) @ ghost -> (letters : int list) ->
-      (before : pair_search) @ total -> (limit : int) ->
-      {result : pair_search option |
-        if pair_search_valid before then
-          let pending, seen, count = pair_search_view before in
-          match result with
-          | None -> push_labels left right p q word letters
-              pending seen count limit === None
-          | Some after -> pair_search_valid after &&
-            push_labels left right p q word letters pending seen count limit
-              === Some (pair_search_view after)
-        else true} @ total immutable contended =
-    fun left right p q word letters before limit ->
-    let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
-    let seen = before.seen_pairs in
-    let count = before.pair_count in
-    ghost_ (pair_search_view_def before);
-    ghost_ (push_labels_def left right p q word letters pending seen count limit);
-    match letters with
-    | [] -> let result = Some before in result
-    | letter :: rest ->
-      let pair = step left p letter, step right q letter in
-      let suffix = ghost_ [letter] in
-      let next_word = ghost_ (append_word word suffix) in
-      let pushed = push_search_pair limit pair next_word before in
-      match pushed with
-      | None -> let result = None in result
-      | Some updated ->
-        ghost_ (pair_search_view_def updated);
-        let result = expand_search_pairs left right p q word rest
-          updated limit in
-        result
-
-  let rec (search_pairs_loop @ total) :
-      (left : machine) -> (right : machine) ->
-      (before : pair_search) @ total ->
-      (processed : relation) @ ghost -> (limit : int) ->
-      (remaining : {fuel : int |
-        let pending, seen, count = pair_search_view before in
-        pair_search_valid before && 0 <= fuel && fuel <= 65_536 &&
-        0 <= count && count <= limit && limit <= 65_536 &&
-        Bigint.of_int count === big_length seen &&
-        pending_valid left right pending && distinct_pairs seen &&
-        (if valid left && valid right then pairs_valid left right seen else true) &&
-        Bigint.add (Bigint.of_int fuel) (Bigint.of_int count) ===
-          Bigint.add (Bigint.of_int limit) (big_length pending)}) @ ghost ->
-      {packet : (comparison, decision) proved |
-        let pending, seen, _ = pair_search_view before in
-        let decision = packet.result_proof.ghost in
-        packet.result_value === decision_kind decision &&
-        (if valid left && valid right && labels_bounded left && labels_bounded right &&
-          Bigint.compare (Bigint.mul (state_size left) (state_size right))
-            (Bigint.of_int limit) <= 0 then
-          match decision with Limit -> false | Equal _ | Different _ -> true
-         else true) &&
-        (match decision with
-         | Equal relation -> distinct_pairs relation &&
-           (if valid left && valid right then pairs_valid left right relation
-            else true)
-         | Different _ | Limit -> true) &&
-        (match pending with
-         | [] -> decision === Equal seen
-         | _ :: _ -> true) &&
-        let left_initial, _ = left in
-        let right_initial, _ = right in
-        if pending_valid left right pending &&
-          all_seen_accounted seen processed pending &&
-          all_closed left right seen processed &&
-          related (left_initial, right_initial) seen then
-        match decision with
-        | Different word -> run left word <> run right word
-        | Equal relation -> check left right relation
-        | Limit -> true
-        else true} @ total immutable contended =
-    fun left right before processed limit remaining ->
-    let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
-    let seen = before.seen_pairs in
-    let count = before.pair_count in
-    ghost_ (pair_search_valid_def before);
-    ghost_ (pair_search_view_def before);
-    ghost_ (pairs_of_pending_def pending);
-    match before.pending_pairs with
-    | [] ->
-      ghost_ (accounted_empty_included seen processed);
-      ghost_ (closed_processed_covers_seen left right seen processed seen);
-      ghost_ (check_def left right seen);
-      let decision = ghost_ (Equal seen) in
-      ghost_ (decision_kind_def decision);
-      let packet = { result_value = Equivalent; result_proof = { ghost = decision } } in
-      packet
-    | (p, q) :: rest_pairs ->
-      let word = ghost_ (match pending with [] -> [] | (_, _, word) :: _ -> word) in
-      let rest = ghost_ (match pending with [] -> [] | _ :: rest -> rest) in
-      let trace = ghost_ (Pair_trace.make rest) in
-      let popped = { before with pending_pairs = rest_pairs;
-        pending_trace = { ghost = trace } } in
-      ghost_ (pair_search_valid_def popped);
-      ghost_ (pair_search_view_def popped);
-      ghost_ (big_length_def pending);
-      ghost_ (product_pending_length_nonnegative rest);
-      ghost_ (pending_valid_def left right pending);
-      ghost_ (reached_valid left word);
-      ghost_ (reached_valid right word);
-      ghost_ (labels_bounded_state left p);
-      ghost_ (labels_bounded_state right q);
-      if final left p <> final right q then
-        let left_initial, _ = left in
-        let right_initial, _ = right in
-        ghost_ (reached_def left word);
-        ghost_ (reached_def right word);
-        ghost_ (execute_reached left left_initial word);
-        ghost_ (execute_reached right right_initial word);
-        ghost_ (run_def left word);
-        ghost_ (run_def right word);
-        let decision = ghost_ (Different word) in
-        ghost_ (decision_kind_def decision);
-        let packet = { result_value = Inequivalent; result_proof = { ghost = decision } } in
-        packet
-      else
-        let left_labels = labels left p in
-        let right_labels = labels right q in
-        if list_size left_labels > 64 || list_size right_labels > 64
-        then let decision = ghost_ (Limit) in
-          ghost_ (decision_kind_def decision);
-          let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
-          packet
-        else
-          let letters = append left_labels right_labels in
-          let zero = 0 in
-          let missing_budget = list_size letters + 1 in
-          ghost_ (pair_labels_size left_labels right_labels);
-          ghost_ (missing_letter_budget letters);
-          ghost_ (missing_letter_sound letters zero missing_budget);
-          match missing_letter letters zero missing_budget with
-          | None -> let decision = ghost_ (Limit) in
-            ghost_ (decision_kind_def decision);
-            let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
-            packet
-          | Some outsider ->
-            let new_processed = ghost_ ((p, q) :: processed) in
-            ghost_ (accounted_pop seen processed p q word rest);
-            ghost_ (push_labels_accounted left right p q word letters
-              rest seen new_processed count limit);
-            ghost_ (push_labels_counts left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_distinct left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_domain left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_capacity left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_valid left right p q word letters
-              rest seen count limit);
-            ghost_ (push_labels_seen_included left right p q word letters
-              rest seen count limit);
-            ghost_ (expanded_pair_closed left right p q word outsider
-              rest seen count limit);
-            let expanded = expand_search_pairs left right p q word letters popped limit in
-            match expanded with
-            | None -> let decision = ghost_ (Limit) in
-              ghost_ (decision_kind_def decision);
-              let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
-              packet
-            | Some updated ->
-              let updated_pending = ghost_ (Pair_trace.entries updated.pending_trace.ghost) in
-              let updated_seen = updated.seen_pairs in
-              let updated_count = updated.pair_count in
-              ghost_ (pair_search_view_def updated);
-              let pair = step left p outsider, step right q outsider in
-              let suffix = ghost_ [outsider] in
-              let next_word = ghost_ (append_word word suffix) in
-              ghost_ (reached_push left word outsider);
-              ghost_ (reached_push right word outsider);
-              ghost_ (push_pair_accounted limit pair next_word
-                updated_pending updated_seen new_processed updated_count);
-              ghost_ (push_pair_seen_included limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_valid left right limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_counts limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_distinct limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (step_valid left p outsider);
-              ghost_ (step_valid right q outsider);
-              ghost_ (push_pair_domain left right limit pair next_word
-                updated_pending updated_seen updated_count);
-              ghost_ (push_pair_capacity left right limit pair next_word
-                updated_pending updated_seen updated_count);
-              let pushed = push_search_pair limit pair next_word updated in
-              match pushed with
-              | None -> let decision = ghost_ (Limit) in
-                ghost_ (decision_kind_def decision);
-                let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
-                packet
-              | Some next ->
-                let next_seen = next.seen_pairs in
-                ghost_ (pair_search_valid_def next);
-                ghost_ (pair_search_view_def next);
-                ghost_ (relation_included_trans seen updated_seen next_seen);
-                ghost_ (all_closed_weaken left right seen next_seen processed);
-                ghost_ (all_closed_def left right next_seen new_processed);
-                let left_initial, _ = left in
-                let right_initial, _ = right in
-                let initial_pair = ghost_ (left_initial, right_initial) in
-                ghost_ (related_included initial_pair seen next_seen);
-                let next_remaining = ghost_ (remaining - 1) in
-                let packet =
-                  search_pairs_loop left right next new_processed
-                    limit (next_remaining) in
-                packet
-  [@@decreases let fuel = remaining in fuel]
-
-
-  let (comparison_proved @ total) (left : machine) (right : machine) (limit : int) :
-      {packet : (comparison, decision) proved |
-        let decision = packet.result_proof.ghost in
-        packet.result_value === decision_kind decision &&
-        (if valid left && valid right && labels_bounded left && labels_bounded right &&
-          0 < limit && limit <= 65_536 &&
-          Bigint.compare (Bigint.mul (state_size left) (state_size right))
-            (Bigint.of_int limit) <= 0 then
-          match decision with Limit -> false | Equal _ | Different _ -> true
-         else true) &&
-        match decision with
-        | Different word -> run left word <> run right word
-        | Equal relation -> check left right relation
-        | Limit -> true} =
-    let left_initial, _ = left in
-    let right_initial, _ = right in
-    let pair = left_initial, right_initial in
-    let count = if limit > 65_536 then 65_536 else limit in
-    if count <= 0 then let decision = ghost_ Limit in
-      ghost_ (decision_kind_def decision);
-      let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
-      packet
-    else
-      let empty_word = ghost_ [] in
-      let empty_pending = ghost_ ([] : (int * int * int list) list) in
-      let empty_seen : relation = [] in
-      let empty_processed = ghost_ ([] : relation) in
-      let zero = 0 in
-      let remaining = ghost_ count in
-      let trace = ghost_ (Pair_trace.make empty_pending) in
-      let start = { pending_pairs = empty_seen; seen_pairs = empty_seen;
-        pair_count = zero; pending_trace = { ghost = trace } } in
-      ghost_ (pairs_of_pending_def empty_pending);
-      ghost_ (pair_search_valid_def start);
-      ghost_ (pair_search_view_def start);
-      ghost_ (big_length_def empty_pending);
-      ghost_ (big_length_def empty_seen);
-      ghost_ (distinct_pairs_def empty_seen);
-      ghost_ (pairs_valid_def left right empty_seen);
-      ghost_ (pending_valid_def left right empty_pending);
-      ghost_ (all_seen_accounted_def empty_seen empty_processed empty_pending);
-      ghost_ (reached_empty_equal left);
-      ghost_ (reached_empty_equal right);
-      ghost_ (reached_valid left empty_word);
-      ghost_ (reached_valid right empty_word);
-      ghost_ (push_pair_valid left right count pair empty_word empty_pending
-        empty_seen zero);
-      ghost_ (push_pair_accounted count pair empty_word empty_pending empty_seen
-        empty_processed zero);
-      ghost_ (push_pair_related count pair empty_word empty_pending empty_seen zero);
-      ghost_ (push_pair_counts count pair empty_word empty_pending empty_seen zero);
-      ghost_ (push_pair_distinct count pair empty_word empty_pending empty_seen zero);
-      ghost_ (push_pair_domain left right count pair empty_word empty_pending empty_seen zero);
-      ghost_ (pair_member_def pair empty_seen);
-      ghost_ (push_pair_def count pair empty_word empty_pending empty_seen zero);
-      let pushed = push_search_pair count pair empty_word start in
-      match pushed with
-      | None -> let decision = ghost_ Limit in
-        ghost_ (decision_kind_def decision);
-        let packet = { result_value = Comparison_limit; result_proof = { ghost = decision } } in
-        packet
-      | Some before ->
-        let pending = ghost_ (Pair_trace.entries before.pending_trace.ghost) in
-        let seen = before.seen_pairs in
-        ghost_ (pair_search_valid_def before);
-        ghost_ (pair_search_view_def before);
-        ghost_ (big_length_def pending);
-        ghost_ (big_length_def seen);
-        ghost_ (all_closed_def left right seen empty_processed);
-        let packet = search_pairs_loop left right before empty_processed
-          count (remaining) in
-        packet
-
-
-
   let[@def] (compare @ total) (left : machine) (right : machine) (limit : int) :
       comparison @ total =
     let packet = comparison_proved left right limit in
