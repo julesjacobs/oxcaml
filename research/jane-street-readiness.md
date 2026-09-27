@@ -82,7 +82,14 @@ this file.
         was false (it discharges its branch; the client now uses
         `unreachable_ ()`); e-graphs now states the search is exhaustive,
         not e-matching, one rewrite per round.
-  - [ ] In flight: sat-solver | dfa-equivalence · reference-locks.
+  - [x] dfa-equivalence, reference-locks, sat-solver: **owner-review**
+        (merged `11439178cf`, `b231c28d78`). Locks: the hidden-atomic
+        fixtures named modules that no longer existed after deduplication,
+        so they rejected vacuously; fixed. SAT: ~750 lines of dead proof
+        code removed, including a non-resolution `Exhaustion` rule; new
+        "How it is proved" section. Erasure checks now see every Lambda
+        apply form (`Emitted_code.direct_calls`).
+  - All 24 demo pages except hm-wasm-compiler are at owner-review.
   - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
         reference-locks (after deduplication and the inventory comments).
   - [ ] hm-wasm-compiler, after item 3.
