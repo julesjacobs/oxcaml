@@ -24,6 +24,12 @@ Waves, merged into `vox` with a full suite run on the AMD box after each:
    layouts (after the soundness fix), the prebuilt test library (after the
    tooling branch), the x86 benchmark (on an idle AMD box).
 
+Testing policy (27 September): a branch merges when its agent's own run
+passes and every affected test passes (`./dev test --affected <base>` once
+item 13 lands). The full suite then runs asynchronously on the AMD box after
+merges, batched; a red result means a fix-up or a revert. `vox` is pushed
+only at commits whose full suite passed.
+
 Catalogue statuses: **Reviewed** means checked by the owner. **Ready for owner
 review** means two independent reviews found no false claim and the page
 states every gap. Decisions that need the owner are collected at the end of
@@ -107,7 +113,9 @@ this file.
       Afterwards, compare the implementation with the independent design in
       `research/subsumption-design-20260927/DESIGN.md` and its tests, and
       report divergences before merging.
-- [ ] **13. Prebuilt test library** (wart 33).
+- [ ] **13. Prebuilt test library** (wart 33) and `./dev test --affected`
+      (branch `jujacobs/vox/fast-tests-20260927`, AMD box; target: full suite
+      about 5 minutes, from 22–28).
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
