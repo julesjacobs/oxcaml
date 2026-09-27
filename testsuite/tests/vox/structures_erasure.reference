@@ -82,6 +82,10 @@ ok: pref_ring.reverse_nodes is defined
 ok: pref_ring.reverse_nodes#1 calls no model or proof function
 ok: pref_ring.reverse_nodes#1 uses no model module
 ok: pref_ring.reverse_nodes reaches only runtime functions: reverse_nodes
+ok: pref_ring.detach is defined
+ok: pref_ring.detach#1 calls no model or proof function
+ok: pref_ring.detach#1 uses no model module
+ok: pref_ring.detach reaches only runtime functions: detach
 ok: pref_ring_splice.splice_demo is defined
 ok: pref_ring_splice.splice_demo#1 calls no model or proof function
 ok: pref_ring_splice.splice_demo#1 uses no model module

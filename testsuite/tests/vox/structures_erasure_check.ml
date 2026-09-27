@@ -21,7 +21,7 @@ let runtime =
     "remove"; "read_link"; "walk"; "traverse"; "make_node"; "splice_range";
     "reverse_nodes"; "read_node"; "insert"; "splice"; "adopt"; "release";
     "sentinel_node"; "swap"; "observe_source"; "observe_destination";
-    "field" ]
+    "detach"; "field" ]
 
 (* The functions a body calls by name, including calls marked
    [(apply[yielding] ...)], which [Emitted_code.direct_calls] does not
@@ -97,7 +97,7 @@ let () =
         "observe" ];
       "pref_ring",
       [ "connect"; "insert_between"; "remove"; "make_node"; "traverse";
-        "splice_range"; "reverse_nodes" ];
+        "splice_range"; "reverse_nodes"; "detach" ];
       "pref_ring_splice", [ "splice_demo" ];
       "pref_ring_reverse", [ "reverse_demo" ];
       "pref_ring_general",
