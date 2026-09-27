@@ -143,4 +143,4 @@ Verdicts only, each with an accepted control.
   "verified true", prints false) is not a test: it declares a second
   external for `caml_pref_alloc_step`, whose meaning the name-keyed fix
   (`9864700994`, merged) removes, so this example no longer applies.
-- **DECIDE M** (a rejected non-minimal Myers script) has no experiment yet.
+- **DECIDE M** (a rejected non-minimal Myers script): `nonminimal` in `diff_rejected.ml` is that test; scene 04g quotes it.
