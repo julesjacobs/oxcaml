@@ -12,7 +12,7 @@ let roundtrip : (source : {s : string | Iarray.length (V.contents s) <= 4194304}
     ghost_ (C.roundtrip source wire capacity decoded);
     match decoded with
     | Ok output -> output
-    | Error _ -> assert false
+    | Error _ -> unreachable_ ()
 
 let () =
   let source = "let square x = x * x\nlet square x = x * x\n" in

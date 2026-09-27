@@ -54,6 +54,6 @@ let compress_decompress : (source : string) ->
       ghost_ (R.roundtrip source wire capacity decoded);
       match decoded with
       | Ok output -> output
-      | Error _ -> assert false
+      | Error _ -> unreachable_ ()
 
 let (roundtrip @ total) = R.roundtrip
