@@ -18,12 +18,12 @@
 #directory "ocamlc.opt";;
 
 let (blocking_sort @ total) (values : int Borrow.Owned_array.t @ unique) =
-  let refine_ result = Quicksort.parallel_sort_array ~max_domains:1 values in
+  let _result = Quicksort.parallel_sort_array ~max_domains:1 values in
   ();;
 [%%expect{|
-Line 2, characters 23-52:
-2 |   let refine_ result = Quicksort.parallel_sort_array ~max_domains:1 values in
-                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Line 2, characters 16-45:
+2 |   let _result = Quicksort.parallel_sort_array ~max_domains:1 values in
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Error: The value "Quicksort.parallel_sort_array" is "partial"
        but is expected to be "total"
          because it is used inside the function at lines 1-3, characters 28-4
@@ -34,20 +34,18 @@ module Blocking_callback = struct
   let rec forever () = forever ()
   let (invalid @ total) (values : int Borrow.Owned_array.t @ unique) =
     let post = ghost_ (fun (_ : unit) (_ : int Vox_sequence.t @ immutable) -> true) in
-    let refine_ result = Borrow.Owned_array.with_mut values post (fun loan ->
-      let refine_ s = loan in
+    let _result = Borrow.Owned_array.with_mut values post (fun s ->
       forever ();
-      let refine_ closed = Borrow.Slice.finish s in
-      let u = () in refine_ u) in
+      Borrow.Slice.finish s) in
     ()
 end;;
 [%%expect{|
-Line 7, characters 6-13:
-7 |       forever ();
+Line 6, characters 6-13:
+6 |       forever ();
           ^^^^^^^
 Error: The value "forever" is "partial"
        but is expected to be "total"
-         because it is used inside the function at lines 3-10, characters 24-6
+         because it is used inside the function at lines 3-8, characters 24-6
          which is expected to be "total".
 |}]
 
@@ -77,14 +75,12 @@ let (unchanged @ total) : (s : int Borrow.Slice.t) @ local unique ->
   let after = ghost_ (Borrow.Slice.final (borrow_ s)) in
   Borrow.Slice.finish s;
   ghost_ (Quicksort.Spec.permutation_refl before);
-  ghost_ (
-    let u = () in
-    (u : {u : unit | Quicksort.Spec.permutation before after}));
-  let u = () in u;;
+  ghost_ (() : {u : unit | Quicksort.Spec.permutation before after});
+  ();;
 [%%expect{|
-Line 11, characters 16-17:
-11 |   let u = () in u;;
-                     ^
+Line 9, characters 2-4:
+9 |   ();;
+      ^^
 Error: Refinement could not be proved (counterexample)
 Line 2, characters 16-60:
 2 |     {u : unit | Quicksort.Spec.sorted (Borrow.Slice.final s)} =
@@ -105,14 +101,12 @@ let (overwrite_then_sort @ total) : (s : int Borrow.Slice.t) @ local unique ->
       (Vox_sequence.length (Borrow.Slice.current s)) < 0} = 0 in
     let written = Borrow.Slice.set s first 0 in
     let sorted = Quicksort.sort written in
-    ghost_ (
-      let u = () in
-      (u : {u : unit | Quicksort.Spec.sorted after}));
+    ghost_ (() : {u : unit | Quicksort.Spec.sorted after});
     sorted
   end else Quicksort.sort s;;
 [%%expect{|
-Line 15, characters 4-10:
-15 |     sorted
+Line 13, characters 4-10:
+13 |     sorted
          ^^^^^^
 Error: Refinement could not be proved (counterexample)
 Lines 3-4, characters 9-30:

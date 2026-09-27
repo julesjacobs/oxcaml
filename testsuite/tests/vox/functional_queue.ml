@@ -22,9 +22,8 @@ let rec (reverse_append_correct @ total) :
   reverse_def xs;
   let reversed = reverse xs in
   append_def reversed acc;
-  let u = () in
   match xs with
-  | [] -> u
+  | [] -> ()
   | head :: tail ->
     let next = head :: acc in
     let singleton = [head] in
@@ -33,8 +32,7 @@ let rec (reverse_append_correct @ total) :
     reverse_append_correct tail next;
     append_associative rest singleton acc;
     append_def singleton acc;
-    append_def nil acc;
-    u
+    append_def nil acc
 
 type ('a : immutable_data) t = {front : 'a list; rear : 'a list}
 
