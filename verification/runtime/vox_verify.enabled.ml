@@ -587,8 +587,11 @@ let prove poll check ~batch loc query =
 (* The unsat core of a query that was proved, for the unused proof steps check
    (warning 227): the [assumptions] its proof used, or [None] when it is not
    proved with them. A query with bitwise operations is first tried with them
-   abstracted, as in [prove]. Outcomes are cached like proofs. *)
-let core poll check loc (query : Vox_smt.query) ~assumptions =
+   abstracted, as in [prove]. Outcomes are cached like proofs. The precise
+   mode's proofs without a step ([deletion]) get the warning threshold as
+   their budget: a step whose removal makes a proof that much slower is worth
+   keeping. *)
+let core poll check loc (query : Vox_smt.query) ~assumptions ~deletion =
   poll ();
   let int_width = 63 in
   let positive n = if n > 0 then Some n else None in
@@ -702,7 +705,12 @@ let core poll check loc (query : Vox_smt.query) ~assumptions =
           cached);
       outcome
   in
-  let limit = positive !resource_limit in
+  let limit =
+    match deletion, positive !resource_warning, positive !resource_limit with
+    | true, Some warning, Some limit -> Some (min warning limit)
+    | true, Some warning, None -> Some warning
+    | _, _, limit -> limit
+  in
   match Vox_smt.abstract_bitwise query with
   | None -> attempt ~exact:true ~limit query
   | Some abstract -> (
@@ -719,10 +727,10 @@ let core poll check loc (query : Vox_smt.query) ~assumptions =
 let unused_steps poll check =
   let report = unused_steps_report () in
   { Vox_proof_steps.core = core poll check;
-    precise =
-      !precise_unused_steps
-      || (Option.is_some report
-         && Sys.getenv_opt "VOX_UNUSED_STEPS_PRECISE" = Some "1");
+    precise = !precise_unused_steps;
+    precise_unreported =
+      Option.is_some report
+      && Sys.getenv_opt "VOX_UNUSED_STEPS_PRECISE" = Some "1";
     all_steps = Option.is_some report;
     abandoned = (function Budget_exceeded -> true | _ -> false);
     report =

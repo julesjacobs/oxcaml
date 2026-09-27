@@ -44,8 +44,14 @@ type checker =
       Location.t ->
       Vox_smt.query ->
       assumptions:Vox_smt.Symbol.t list ->
+      deletion:bool ->
       Vox_smt.Symbol.t list option;
+        (** [deletion] marks the precise mode's proofs without a step, which may
+            use a smaller budget. *)
     precise : bool;
+    precise_unreported : bool;
+        (** The precise mode, only for steps whose warning is disabled (that
+            [report] receives through [all_steps]). *)
     all_steps : bool;
         (** Check steps whose warning is disabled too; [report] then receives
             them, in their warning state. *)
@@ -138,37 +144,47 @@ let check checker loc (query : Vox_smt.query) indicators =
   in
   if List.exists (fun (_, step) -> not step.used) present
   then begin
-    let core assumptions =
-      checker.core loc query ~assumptions:(List.map fst assumptions)
+    let core ~deletion assumptions =
+      checker.core loc query ~assumptions:(List.map fst assumptions) ~deletion
       |> Option.map (fun core ->
           List.filter (fun (symbol, _) -> List.memq symbol core) assumptions)
     in
-    match core present with
+    let precise step =
+      checker.precise
+      || checker.precise_unreported
+         &&
+         let saved = Warnings.backup () in
+         Warnings.restore step.warnings;
+         Fun.protect
+           ~finally:(fun () -> Warnings.restore saved)
+           (fun () -> not (Warnings.is_active (warning step.kind)))
+    in
+    match core ~deletion:false present with
     | None -> List.iter (fun (_, step) -> use step) present
     | Some found ->
       let found =
-        if not checker.precise
-        then found
-        else
-          (* Drop one step at a time, keeping the smaller core of each proof
-             that succeeds without it. Steps already used elsewhere stay. *)
-          let candidates =
-            List.fold_left
-              (fun candidates (_, step) ->
-                if step.used || List.memq step candidates
-                then candidates
-                else step :: candidates)
-              [] found
-          in
+        (* Drop one step at a time, keeping the smaller core of each proof that
+           succeeds without it. Steps already used elsewhere stay. *)
+        let candidates =
           List.fold_left
-            (fun found step ->
-              if not (List.exists (fun (_, s) -> s == step) found)
-              then found
-              else
-                match core (List.filter (fun (_, s) -> s != step) found) with
-                | Some smaller -> smaller
-                | None -> found)
-            found (List.rev candidates)
+            (fun candidates (_, step) ->
+              if step.used || List.memq step candidates || not (precise step)
+              then candidates
+              else step :: candidates)
+            [] found
+        in
+        List.fold_left
+          (fun found step ->
+            if not (List.exists (fun (_, s) -> s == step) found)
+            then found
+            else
+              match
+                core ~deletion:true
+                  (List.filter (fun (_, s) -> s != step) found)
+              with
+              | Some smaller -> smaller
+              | None -> found)
+          found (List.rev candidates)
       in
       List.iter (fun (_, step) -> use step) found
   end
