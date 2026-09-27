@@ -113,10 +113,10 @@ Verdicts only, each with an accepted control.
 | Out-of-range shifts | `shift.ml`: `(1 lsl n) = (1 lsl 64)` | `int_shift_range.ml` (`same`, `same_lsr`, `same_asr`; controls `bit`, `bounds`), added by the fix | trunk (fix merged, `cca8ba889a`) |
 | | `oob.ml`: the string read that segfaulted | `talk_soundness_shift_read.ml` (control `read_in_range`, run) | trunk |
 | Effectful callbacks | `rel.ml`, `rel2.ml`, `rel3.ml`: `apply tick 0 = apply tick 0`, `List.map`, `unreachable_` | `call_congruence.ml` (`stateful_callback`, `stateful_map`, `crash`; control `apply inc`), added by the fix | trunk (fix merged, `0a76bf52f1`) |
-| Hidden types in the totality check | `knot.ml` (GADT existential), `knot_false.ml` (abstract type) | `talk_soundness_totality_knot.ml` (controls: an immediate existential, an immediate abstract type) | **awaits fix**: `jujacobs/vox/totality-existentials-20260927` (checked at its tip `37677100a1`) |
+| Hidden types in the totality check | `knot.ml` (GADT existential), `knot_false.ml` (abstract type) | `talk_soundness_totality_knot.ml` (controls: an immediate existential, an immediate abstract type) | **awaits fix**: `jujacobs/vox/totality-existentials-20260927`; the test is on `jujacobs/vox/talk-tests-20260928` (`8a6b85e05a`) and lands with the fix |
 | Ghost-field locality | `x4_borrow_escape.ml`, `x5_store_borrow.ml` | `ghost_field_ownership.ml` (`peek`/`one`, `box`; controls `get_borrowed`, `peek_global`, `box_global`), added by the fix | trunk (fix merged, `a0b99ddfeb`) |
-| Name-keyed built-ins | `natname.ml`: `caml_bigint_add`/`caml_bigint_sub` | `builtin_declaration_identity.ml`, on the fix's branch (control `library`) | **awaits fix**: commit `b5f3e0c50e` on `jujacobs/vox/trust-hardening-20260927`; the test lands with it |
-| | `e1_forged.ml`: a client external named `caml_borrow_finish` | `talk_soundness_borrow_symbol.ml` (control `resolved`) | **awaits fix**: the same commit |
+| Name-keyed built-ins | `natname.ml`: `caml_bigint_add`/`caml_bigint_sub` | `builtin_declaration_identity.ml` (control `library`) | **passes**: fixed by `9864700994`, merged in `a187b9ab9c` |
+| | `e1_forged.ml`: a client external named `caml_borrow_finish` | `talk_soundness_borrow_symbol.ml` (control `resolved`) | **passes**: same fix; test added in `a9affa02d4` |
 
 ## §9 The ask, and the hard questions
 
@@ -142,5 +142,5 @@ Verdicts only, each with an accepted control.
 - **The total `alloc` example** (§4d, optional: `Pref.equal (mk ()) (mk ())`
   "verified true", prints false) is not a test: it declares a second
   external for `caml_pref_alloc_step`, whose meaning the name-keyed fix
-  (`b5f3e0c50e`) removes, so its behaviour changes when that fix lands.
+  (`9864700994`, merged) removes, so this example no longer applies.
 - **DECIDE M** (a rejected non-minimal Myers script) has no experiment yet.
