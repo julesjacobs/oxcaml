@@ -8,4 +8,5 @@ let[@def] rec (rewritten @ total) (h : node Pref.heap @ immutable) (after : node
   | Write (p, q, r, path, rest) -> active h p && observe h p === Some (Link q)
     && resolves h p r path && rewritten (H.put h p (redirect h p r)) after rest)
 
-type result = #{ value : node Pref.t @@ aliased; state : node Pref.token; edits : edits @@ ghost; path : resolution @@ ghost }
+type result = #{ value : node Pref.t @@ aliased; state : node Pref.token;
+  edits : edits @@ ghost aliased; path : resolution @@ ghost aliased }

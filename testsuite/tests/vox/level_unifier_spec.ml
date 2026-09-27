@@ -134,9 +134,9 @@ let[@def] (reset_at @ total) (h : node Pref.heap @ immutable)
   | _ -> false)
 
 type scanning = #{state : node Pref.token; found : bool; trail : trail @@ aliased;
-  marks : marks @@ ghost; search : search @@ ghost}
+  marks : marks @@ ghost aliased; search : search @@ ghost aliased}
 type checked = #{state : node Pref.token; found : bool;
-  marks : marks @@ ghost; search : search @@ ghost}
+  marks : marks @@ ghost aliased; search : search @@ ghost aliased}
 
 let[@def] (scan_heap @ total) (h : node Pref.heap @ immutable) (d : marks @ immutable) =
   ghost_ (reset_heap (marked_heap h d) (mark_trail d))
@@ -206,7 +206,7 @@ let[@def] rec (unified @ total) (h : node Pref.heap @ immutable)
 type result = #{
   ok : bool;
   state : node Pref.token;
-  derivation : derivation @@ ghost;
+  derivation : derivation @@ ghost aliased;
 }
 
 type edits = Scanned_edit of node Pref.t * marks | Lowered of int * lowering | Unchanged | Set of node Pref.t * node Pref.t | Then of edits * edits

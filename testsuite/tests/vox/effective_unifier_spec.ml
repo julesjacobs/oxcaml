@@ -47,4 +47,5 @@ let[@def] rec (unified @ total) (h : node Pref.heap @ immutable)
   | Pre_compress (middle, edits, rest) -> Effective_compression_spec.effective_rewritten h middle edits
     && unified middle p q ok after rest)
 
-type result = #{ok : bool; state : node Pref.token; derivation : derivation @@ ghost}
+type result = #{ok : bool; state : node Pref.token;
+  derivation : derivation @@ ghost aliased}

@@ -9,11 +9,13 @@ module C := Hm_routed_context
 module B := Borrow_iarray.Owned_array
 
 type inference = #{value : node Pref.t option @@ aliased; state : node Pref.token;
-  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost; execution : execution @@ ghost;
-  physical : pool @@ aliased; pools : pool B.t; routing : C.context @@ ghost}
+  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost aliased;
+  execution : execution @@ ghost aliased; physical : pool @@ aliased; pools : pool B.t;
+  routing : C.context @@ ghost aliased}
 
 type answer = #{value : node Pref.t option @@ aliased; state : node Pref.token;
-  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost; execution : execution @@ ghost}
+  trace : Hm_annotation_trace.trace @@ aliased; pool : pool @@ ghost aliased;
+  execution : execution @@ ghost aliased}
 
 val closed_compiled :
   (input : {e : T.term | T.valid e && D.scoped_term D.Z (T.source e)}) @ immutable ->
