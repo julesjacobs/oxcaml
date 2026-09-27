@@ -30,11 +30,11 @@ The options each have a cost: a size premise on every such theorem, which client
 
 From the public client. `{u : unit | p}` is `unit` refined by the predicate `p`: returning it proves `p`. `===` is logical equality. `ghost_ (...)` is proof code, checked and then erased; the value it computes here is a `unit` whose refinement is written after the `:`. `@ total` after the function name declares it total: it terminates without raising or touching mutable state. The statement holds for every regex, limit and word, but it says nothing when either step returns `None`. `reduce` returns `None` when `limit` is not between 1 and 64 or the lowered table has more than `limit` rows, so every regex with more than 64 lowered rows is excluded.
 
-@code testsuite/tests/vox/regex_public_client.ml "let (minimized_regex @ total)" "let u = () in u"
+@code testsuite/tests/vox/regex_public_client.ml "let (minimized_regex @ total)" "  ()"
 
 The next theorem needs `lower_valid`: `reduce_complete` from the DFA interface requires a `valid` source, and here that premise is gone. The others remain: every row must list at most 64 symbols, and the table must fit in `limit`.
 
-@code testsuite/tests/vox/regex_public_client.ml "let (lowered_reduction_finishes @ total)" "let u = () in u"
+@code testsuite/tests/vox/regex_public_client.ml "let (lowered_reduction_finishes @ total)" "  ()"
 
 ## A rejected program
 

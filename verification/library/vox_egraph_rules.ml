@@ -1,3 +1,9 @@
+(* Sort lemmas for pattern instantiation: instantiating a pattern with a
+   substitution whose expressions have the variables' sorts gives an
+   expression of the pattern's sort. [instance_sorted] is the form used for
+   a [Rule] step: both sides of a valid rule instance have the same, defined
+   sort. *)
+
 open Vox_egraph_rule_spec
 
 let rec (lookup_sorted @ total) :

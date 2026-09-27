@@ -41,7 +41,7 @@ let (correct @ total) : (writes : Write.writes) @ immutable -> (prefix : H.cells
       P.seek state.X.memory padded.Memory.memory (base + 16 * position) base ();
       Bounds.distance_def base (base + 16 * position);
       Words.decode (H.length prefix) before prefix tail ());
-    let middle = Wasm_word_transport.sequence (Words.words prefix) before bytes tail (16 * position) () in
+    let middle = ghost_ (Wasm_word_transport.sequence (Words.words prefix) before bytes tail (16 * position) ()) in
     ghost_ (Q.prefix (Words.words prefix) bytes bytes middle middle (16 * position) ();
       Wasm_cell.shift padded.Memory.memory base (16 * position) (base + 16 * position) bytes ();
       Words.recover prefix bytes middle (); Pad.length n;

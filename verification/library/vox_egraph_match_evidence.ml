@@ -1,3 +1,12 @@
+(* Derivations from matches. [view] is the model of a store. [agrees origins
+   bindings subst] says the substitution names the origin of every bound id
+   (a negative id is unconstrained). [derive] turns a match of [pat] at
+   [root] into a derivation, valid for the rules, from [root]'s origin to
+   [R.instantiate pat subst]. It recurses on the pattern: it picks the node
+   of [root]'s class that realises the top constructor ([witness]), derives
+   its children, applies the congruence step and prepends the class
+   derivation from [root] to that node ([same]). *)
+
 module V = Vox_egraph_rule_store
 module G = Vox_egraph_rule_union
 module U = Vox_egraph_union
@@ -139,6 +148,8 @@ let (node_facts @ total) : (state : V.t) @ immutable ->
      child_sorted state id b L.Boolean ());
   ())
 
+(* Runs the executable search [Scan.find_layer] in ghost code; the premise
+   guarantees that it finds a node. *)
 let (witness @ total) : (state : V.t) @ immutable ->
     (pat : R.pat) @ immutable -> (first : int list) @ immutable ->
     (second : int list) @ immutable -> (third : int list) @ immutable ->

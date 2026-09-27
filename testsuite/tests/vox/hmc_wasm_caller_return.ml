@@ -93,7 +93,7 @@ let (correct @ total) : (runtime : Runtime.table) @ immutable -> (table_base : B
         Some ({saved with F.accumulator = activation.F.accumulator}, padding)} @ immutable =
   fun runtime table_base table_count root tail labels program globals heap heap_limit stack_limit activation saved frames signature pc source_pc rest padding source_rest plan count state source base top stack_base limit before suffix source_bytes source_suffix source_local caller_local premise ->
     let out = Source.correct program globals heap heap_limit stack_limit activation saved frames signature pc source_pc rest padding source_rest plan count state source base top stack_base limit before suffix source_bytes source_suffix source_local caller_local () in
-    let code = Full.emit plan (Restore.width count) source_local caller_local in
+    let code = ghost_ (Full.emit plan (Restore.width count) source_local caller_local) in
     ghost_ (Restore.width_def count;
       Table.preserve runtime state.X.memory out.Full.state.X.memory table_base table_count source ();
       Select.correct program.I.origin.Cfg.blocks (Q.Frame (saved, frames)) (Restore.width count) stack_base caller_local top state labels

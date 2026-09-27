@@ -73,7 +73,7 @@ Line 7, characters 24-31:
 module Effectful_not_repeated = struct
   let twice (f : unit -> int) =
     let r = Values.identity (f ()) in
-    let again = f () in
+    let[@warning "-226"] again = f () in
     let (_ : {n : int | n = again}) = r in
     ()
 end;;

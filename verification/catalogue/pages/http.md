@@ -50,7 +50,7 @@ The contracts do not let a client prove false properties of completed requests. 
 
 @code verification/library/vox_http.mli
 
-`bytes` is `int list`. `processed` is an erased observation: the bytes consumed so far for the current request, or `[]` after an error. `total_consumed` counts them at run time, and `consumed before after` is the difference. `Vox_sequence.length` returns a `Bigint.t`, hence the `Bigint.of_int` conversions. `transition_def` states the meaning of the erased relation `transition` that `feed` satisfies. `vox_http_spec.mli` states each definition of the grammar as an equation (`token_def` and so on), checked against `vox_http_spec.ml`, which is easier to read. `well_formed` is:
+`bytes` is `int list`. `processed` is an erased observation: the bytes consumed so far for the current request, or `[]` after an error. `total_consumed` counts them at run time, and `consumed before after` is the difference. `S` is `Vox_sequence`, whose `length` returns a `Bigint.t`, hence the `Bigint.of_int` conversions. `transition_def` states the meaning of the erased relation `transition` that `feed` satisfies. `vox_http_spec.mli` states each definition of the grammar as an equation (`token_def` and so on), checked against `vox_http_spec.ml`, which is easier to read. `well_formed` is:
 
 @code verification/library/vox_http_spec.ml "let[@def] well_formed request" "fits 16384 (serialize request)"
 

@@ -106,7 +106,7 @@ let (correct @ total) : (program : Hmc_tail_ir.program) @ immutable -> (globals 
             Some (Heap.Cell (V.Word (Header.number fragment.Lower.pc), frame.Invariant.cells), out.tail)
         | _ -> false)} @ immutable =
   fun program globals stack_limit signature next_signature activation next_activation frames result_type head_type next context schema fragment capacity max_pc old_pc left right heap_base heap_local limit_local cells old_padding table heap limit head_tag head_payload tail_tag tail_payload frame_stop state base_local base before_frame tail premise ->
-    let body = Success.emit fragment base_local heap_local head_tag head_payload tail_tag tail_payload in
+    let body = ghost_ (Success.emit fragment base_local heap_local head_tag head_payload tail_tag tail_payload) in
     let code = emit fragment base_local heap_local limit_local head_tag head_payload tail_tag tail_payload in
     let start = {T.code; labels = T.No_labels; state} in
     ghost_ (Wasm_four_words.width_def ();

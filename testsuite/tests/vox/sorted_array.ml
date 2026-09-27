@@ -215,8 +215,8 @@ let (find_last @ total) : (array : t) -> (value : int) ->
   | None -> result
   | Some index ->
     ghost_ (at_def array index);
-    let next = index + 1 in
-    let stop = length array in
+    let next = ghost_ (index + 1) in
+    let stop = ghost_ (length array) in
     ghost_ (occurs_between_def array value next stop);
     result
 

@@ -57,7 +57,7 @@ let fixture (base : B.u32) second first_value first_type second_value second_typ
     let expected = Wasm_memory_splice.replace memory base before_frame after_frame () in
     let locals = S.Push (S.I32 base, S.Push (S.I64 (word 37), S.Push (S.I64 (word 99), S.Empty))) in
     let state = {X.memory; machine = {E.locals; stack = S.Push (S.I32 91, S.Empty)}} in
-    let source_tag = Lower.slot_tag number in let source_payload = Lower.slot_payload number in
+    let source_tag = ghost_ (Lower.slot_tag number) in let source_payload = ghost_ (Lower.slot_payload number) in
     let derivation = D.Variable D.No_arguments in
     ghost_ (Wire.schema_def before_object; Wire.schema_def after_object;
       Heap.length_def frame_cells; Heap.length_def (Heap.Cell (old, cells));

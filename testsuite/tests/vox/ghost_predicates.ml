@@ -52,7 +52,7 @@ let (chosen @ total) (lower : bool) (value : int) : {u : unit | true} =
 
 let (tuple_pattern @ total) (value : int) : {u : unit | true} =
   let p = ghost_ (fun ((left, right) : int * int) -> left === right) in
-  let pair = value, value in
+  let pair = ghost_ (value, value) in
   let u = () in
   let proof : {u : unit | p pair} = refine_ u in
   let refine_ proof = proof in

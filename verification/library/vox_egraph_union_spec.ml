@@ -1,3 +1,12 @@
+(* Union-find over a parent array. [parent] reads an entry (an id outside the
+   array is its own parent). [ordered parents count] says every id below
+   [count] has a parent between 0 and itself, so following parents never
+   increases the id and [root] terminates by recursion on the id; it also
+   makes a root the smallest id of its class. The lemmas cover appending an
+   id as its own root ([append_preserves]), linking a root to a smaller one
+   ([link_frame]) and the roots after such a link ([root_after_link]).
+   [root] also runs at run time. *)
+
 module I = Vox_iarray
 
 let[@def] (parent @ total) (parents : int iarray @ immutable) (id : int) =

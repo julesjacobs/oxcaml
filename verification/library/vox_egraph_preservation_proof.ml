@@ -1,3 +1,10 @@
+(* Proves the trusted [Vox_egraph_preservation_spec.extends] for the models
+   of two stores from [Vox_egraph_origin_frame.preserved] on their ghost
+   origin arrays, which every mutating operation establishes. [origins] goes
+   id by id through [Vox_egraph_snapshot_proof.origin]. [at] and
+   [preserved_origin] read one id's origin out of [extends]; the latter is
+   exported as [Vox_egraph_rule_handle.preserved_origin]. *)
+
 module C = Vox_egraph_preservation_spec
 module S = Vox_egraph_snapshot_proof
 module P = Vox_egraph_match_evidence

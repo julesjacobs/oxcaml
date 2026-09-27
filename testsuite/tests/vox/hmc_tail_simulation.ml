@@ -1,3 +1,15 @@
+(* The tail program against the closure program, with the state relation
+   of Hmc_cfg_simulation (Hmc_cfg_states); Hmc_tail_runs and
+   Hmc_tail_normalize play the roles of Hmc_cfg_step and Hmc_cfg_normalize.
+   A tail call skips the blocks that would restore scopes and return.
+
+   [preservation] also bounds the tail run: it needs at most
+   [Height.twice fuel] steps for [fuel] closure steps. The resource premise
+   of Hmc_compilation.normal is stated for that many steps.
+
+   [source_preservation] and [source_reflection] compose this with
+   Hmc_closure_simulation and Hmc_monomorphic_simulation, down to the
+   source machine; these are the statements the Wasm proofs use. *)
 module Height = Hmc_cfg_height
 module D = Hm_declarative
 module K = Hmc_closure_ir

@@ -26,7 +26,7 @@ let rec (normalize @ total) : (program : C.program) @ immutable -> (k : W.contin
       let r = normalize program rest acc () in
       let state = W.Running (W.Returning, k, acc) in
       let next = W.Running (W.Returning, rest, acc) in
-      let a = W.activation W.Returning k acc in
+      let a = ghost_ (W.activation W.Returning k acc) in
       ghost_ (W.source_def state; W.source_def next;
         W.source_continuation_def k; W.target_def state; W.target_def next;
         W.activation_def W.Returning k acc; W.activation_def W.Returning rest acc;
@@ -39,7 +39,7 @@ let rec (normalize @ total) : (program : C.program) @ immutable -> (k : W.contin
       let r = normalize program rest acc () in
       let state = W.Running (W.Returning, k, acc) in
       let next = W.Running (W.Returning, rest, acc) in
-      let a = W.activation W.Returning k acc in
+      let a = ghost_ (W.activation W.Returning k acc) in
       ghost_ (W.source_def state; W.source_def next;
         W.source_continuation_def k; W.target_def state; W.target_def next;
         W.activation_def W.Returning k acc; W.activation_def W.Returning rest acc;

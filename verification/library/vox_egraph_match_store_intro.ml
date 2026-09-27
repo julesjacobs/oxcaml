@@ -1,3 +1,8 @@
+(* Ways to establish a match in the model of a store: [constructor] (a node
+   whose children match the subpatterns matches the pattern), [variable] (a
+   bound id matches its variable) and [same_match] (a match carries over to
+   any id of the same class). *)
+
 module V = Vox_egraph_rule_store
 module P = Vox_egraph_match_evidence
 module Q = Vox_egraph_match_spec

@@ -1,3 +1,13 @@
+(* Tail calls. Hmc_tail_sites selects, in each recursive function, the
+   [Call] blocks where the function calls itself in tail position: what
+   follows the call is only [Restore] blocks and then the function's
+   [Return] ([T.exit_valid]). [build] replaces the instruction of each such
+   block by [Tail_call] and keeps every other one ([related]); the blocks'
+   labels and signatures are those of the CFG program.
+
+   In Hmc_tail_semantics a [Tail_call] enters the callee without pushing a
+   frame. Hmc_tail_simulation proves this semantics against the closure
+   semantics, with at most twice as many steps. *)
 module D = Hm_declarative
 module G = Hmc_cfg_ir
 module C = Hmc_cfg_program

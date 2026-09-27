@@ -39,7 +39,7 @@ type t = {p : payload | valid p}
 let (instantiate @ total) : (instance : I.instance) @ immutable ->
     {body : t | body.origin === instance} @ immutable = fun instance ->
   let definition = instance.I.definition in
-  let args = A.declarative instance.I.key.A.arguments in
+  let args = ghost_ (A.declarative instance.I.key.A.arguments) in
   let action = substitution instance in
   let proof = S.act_typing action definition.T.derivation in
   ghost_ (

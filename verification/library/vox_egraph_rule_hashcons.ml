@@ -1,3 +1,15 @@
+(* The e-graph engine: the hash-cons table [Vox_egraph_owner] together with
+   the store [Vox_egraph_rule_store]. [matching] ties them: the arena holds
+   the key of each stored node, so a table hit on [N.key node] names an id
+   whose node is [node] ([lookup_origin]). Nodes are hash-consed with their
+   children as given, not by class; nodes that are congruent up to class
+   are merged by [rebuild], a pass over all pairs of nodes. Operations:
+   [add] (one node), [admit_expr] (an expression, bottom-up), [merge] and
+   [merge_nodes] (with an erased derivation), [rebuild] and [extract].
+   [valid] is the conjunction that the functions here, and the modules
+   built on them, state inline in their contracts. No operation changes the
+   origin of an existing id. *)
+
 module I = Vox_iarray
 module F = Vox_egraph_origin_frame
 module K = Vox_egraph_key
@@ -143,6 +155,10 @@ let create : (rules : Vox_egraph_rule_spec.t) @ immutable ghost ->
     let state = {owner; store} in
     state
 
+(* Hash-consed admission of a node whose children already exist. On a hit
+   nothing is added, and the contract states that the store is unchanged
+   whenever the count is; this is what later lets a rule application that
+   added nothing count as evidence of closure. *)
 let add : (state : {s : t | O.valid s.owner && V.valid s.store &&
       s.owner.count = s.store.semantic.union.count &&
       matching (A.contents s.owner.arena) s.store.nodes s.owner.count &&
@@ -218,6 +234,10 @@ let add : (state : {s : t | O.valid s.owner && V.valid s.store &&
         let state = {owner; store} in
         #{value = admitted; state}
 
+(* Admits an expression bottom-up and returns an id whose origin is exactly
+   [expr]. After each recursive call, the ghost block carries the origins
+   of the children admitted so far across the later admissions
+   ([F.weaken], [F.compose], [F.at]). *)
 let rec admit_raw :
     (state : {s : t | O.valid s.owner && V.valid s.store &&
       s.owner.count = s.store.semantic.union.count &&
@@ -445,6 +465,9 @@ let admit_expr :
          S.origin r.#state.store.semantic.origins id === expr)} @ unique =
   fun state expr -> admit_raw state expr
 
+(* Merging classes. [merge] needs a derivation between the origins of the
+   two roots, [merge_nodes] one between the origins of the two ids. Neither
+   changes nodes, sorts or origins. *)
 type merge_result = #{merged : bool; state : t}
 
 let merge : (state : {s : t | O.valid s.owner && V.valid s.store &&
@@ -536,6 +559,9 @@ let merge_nodes : (state : {s : t | O.valid s.owner && V.valid s.store &&
   let state = {owner; store = next_store} in
   #{merged; state}
 
+(* Rebuilding. [merge_collision] merges two nodes whose signatures (children
+   replaced by roots) are equal, with the congruence derivation from
+   [V.collision_evidence]; afterwards the pair is [V.pair_closed]. *)
 let merge_collision :
     (state : {s : t | O.valid s.owner && V.valid s.store &&
       s.owner.count = s.store.semantic.union.count &&
@@ -595,6 +621,11 @@ let merge_collision :
       let state = {owner; store} in
       #{merged = false; state}
 
+(* One rebuild pass visits the pairs in the order of [V.closed_fuel],
+   merging collisions as it goes. If it completes without a merge, the store
+   it returns is the one every pair was checked against, so [closed_fuel]
+   holds for it. A merge can create new collisions among pairs already
+   visited, so [rebuild] then runs another pass. *)
 type scan_result = #{changed : bool; complete : bool; state : t}
 
 let rec (scan_pairs @ total) :
@@ -664,6 +695,9 @@ let rec (scan_pairs @ total) :
       #{changed = merged || changed; complete; state}
   [@@decreases if fuel > 0 then fuel else 0]
 
+(* Runs passes until one merges nothing, at most [passes] of them. The pass
+   fuel 512 * 513 + 1 covers every pair of at most 512 nodes; the contract
+   does not rely on that and reports an incomplete pass as [Work_limit]. *)
 type rebuild_status = Stable_pass | Work_limit
 type rebuild_result = #{status : rebuild_status; state : t}
 
@@ -706,6 +740,8 @@ let rec (rebuild @ total) :
       else #{status = Stable_pass; state})
   [@@decreases if passes > 0 then passes else 0]
 
+(* The origin of [id]'s root (the smallest id in its class) and a derivation
+   from [id]'s origin to it. Not used by the public interface. *)
 type extract_result = #{expr : L.expr @@ aliased; state : t;
   proof : E.evidence @@ ghost aliased}
 

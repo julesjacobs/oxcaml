@@ -1,3 +1,10 @@
+(* The implementation of [Vox_egraph_rule_handle.same_class]: compares the
+   union-find roots of two ids and, when they agree, returns the erased
+   derivation from [Vox_egraph_match_evidence.same]. The ghost block relates
+   the answer to the model: [Q.same] on the model is equality of roots
+   ([Vox_egraph_match_observation.same]), and the model origin of each id is
+   its ghost origin ([Vox_egraph_snapshot_proof.origin]). *)
+
 module V = Vox_egraph_rule_store
 module P = Vox_egraph_match_evidence
 module O = Vox_egraph_match_observation

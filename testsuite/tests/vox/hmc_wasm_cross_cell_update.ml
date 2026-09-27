@@ -34,8 +34,8 @@ let (correct @ total) : (prefix : Heap.cells) @ immutable -> (rest : Heap.cells)
       && Copy.apply (Plan.Copy (source_tag, offset, Plan.Copy (source_payload, payload_offset, remaining))) source source_base base === Some after} @ immutable =
   fun prefix rest old value count before after base offset payload_offset before_frame after_frame tail source source_tag source_payload source_base remaining premise ->
     let p = Words.words prefix in let r = Words.words rest in
-    let old_tag = V.tag old in let new_tag = V.tag value in
-    let old_payload = V.payload old in let new_payload = V.payload value in
+    let old_tag = V.tag old in let new_tag = ghost_ (V.tag value) in
+    let old_payload = ghost_ (V.payload old) in let new_payload = V.payload value in
     let middle_words = Q.append p (Q.Word (old_tag, Q.Word (new_payload, r))) in
     let middle_frame = Q.encode middle_words tail in
     let middle = Splice.replace before base before_frame middle_frame () in

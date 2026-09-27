@@ -229,7 +229,7 @@ let rec collect : (program : P.program) @ immutable -> (globals : Machine.global
                     | Some count ->
                       if base + 16 * count > 4294967295 then failwith "literal frame extent" else
                       let after = step.Hmc_wasm_program_source_literal.source in
-                      let next_full = Heap.Cell (V.Word (Header.number pc), after.Hmc_wasm_literal_invariant.cells) in
+                      let next_full = ghost_ (Heap.Cell (V.Word (Header.number pc), after.Hmc_wasm_literal_invariant.cells)) in
                       ghost_ (Heap.length_def next_full;
                         Hmc_wasm_frame_preservation.correct memory after.Hmc_wasm_literal_invariant.memory base (base + 16 * count)
                           before_frame after.Hmc_wasm_literal_invariant.bytes full next_full tail count ());

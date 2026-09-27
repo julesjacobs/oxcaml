@@ -1,3 +1,12 @@
+(* The proof-producing part of the union-find, all ghost. Each id has an
+   origin (the expression it was admitted for) and, unless it is a root, an
+   edge: a derivation, valid for the rules, from its origin to its parent's
+   origin ([edge_ok]; a root has no edge). [explain] follows parents to the
+   root and chains the edges with [Trans], so two ids with the same root get
+   a derivation between their origins ([same_class_evidence]). The frame
+   lemmas show that appending an id, and linking a root to a smaller one
+   with a derivation for the new edge, keep [valid_edges]. *)
+
 module I = Vox_iarray
 module L = Vox_egraph_language_spec
 module LP = Vox_egraph_language_proof

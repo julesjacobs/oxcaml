@@ -1,3 +1,10 @@
+(* The saturation loop behind [Vox_egraph_rule_handle.saturate]. Each round
+   first rebuilds ([H.rebuild], pairwise congruence closure) and then runs
+   one pass of the rule search ([Vox_egraph_rules_scan.scan]). A pass that
+   changes the graph starts the next round; a [Stable] pass returns
+   [Fixed_point]. Search fuel carries over between rounds; rebuilding does
+   not use it. *)
+
 module Frame = Vox_egraph_origin_frame
 module H = Vox_egraph_rule_hashcons
 module V = Vox_egraph_rule_store
@@ -50,6 +57,8 @@ let rec saturate : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
       match status with
       | H.Work_limit -> #{status = Rebuild_limit; fuel; state}
       | H.Stable_pass ->
+        (* A complete pass gives [V.closed_fuel] from (0, 0); [CP.closed]
+           turns it into congruence closure of the model. *)
         let {H.owner; store} = state in
         ghost_ (
           CP.closed store (512 * 513 + 1) ();
@@ -68,6 +77,8 @@ let rec saturate : (state : {s : H.t | H.O.valid s.owner && V.valid s.store &&
             Frame.weaken middle view.store.semantic.origins middle_count count ();
             Frame.compose before middle view.store.semantic.origins count ());
           #{status; fuel; state}
+        (* A [Stable] pass leaves the store unchanged, so the congruence
+           closure from the rebuild still holds and [F.fixed] follows. *)
         | Scan.Stable ->
           let {H.owner; store} = state in
           ghost_ (F.fixed_def (P.view store) rules);

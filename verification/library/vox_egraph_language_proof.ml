@@ -1,3 +1,10 @@
+(* Lemmas about the trusted language. [same_expr] is a structural equality
+   test proved equal to [===]. [typed_eval] says a well-sorted expression
+   evaluates to a value of its sort. The evaluation lemmas that follow
+   prove, for common rewrite rules, that both sides evaluate alike; a client
+   uses them to discharge the premise of [Vox_egraph_interpret_wrapping.sound]
+   (see testsuite/tests/vox/egraph_derivation.ml). *)
+
 open Vox_egraph_language_spec
 
 let[@def] rec (same_expr @ total) (a : expr @ immutable)
@@ -51,6 +58,10 @@ let (typed_eval @ total) (expr : expr @ immutable)
   | Int_lit _ | Bool_lit _ | Int_input | Bool_input -> ()
   | Add _ | Eq_int _ | Int_if _ | Bool_if _ -> ()
 
+(* Most of these lemmas assume that a subexpression evaluates to a value of
+   the expected sort. [eval] coerces ill-sorted values ([as_int] of a
+   boolean is 0), so for example [Add (e, Int_lit 0)] evaluates like [e]
+   only when [e] evaluates to an integer. *)
 let (add_zero_right @ total) (expr : expr @ immutable)
     (env : env @ immutable) (value : int) :
     {u : unit | eval expr env === Int_value value} ->

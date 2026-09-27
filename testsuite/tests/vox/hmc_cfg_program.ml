@@ -1,3 +1,19 @@
+(* The control-flow graph. Hmc_cfg_lower compiles the body of each entry
+   of the closure table into blocks of one shared table (Hmc_cfg_ir). A
+   block holds one instruction and a signature: the types of its local
+   environment, of the temporaries saved in the frame, and of the
+   accumulator, which holds the last value computed. [G.valid] types every
+   block; a block's successors are added to the table before it, so the
+   table is checked as it grows.
+
+   Each function gets an entry label, a return block and a trace
+   (Hmc_cfg_origin) that records the blocks generated for each subterm of
+   its body. [function_valid] states these facts, and [mapped] states them
+   for the whole closure table. As in closure conversion the table only
+   grows, and [preserve] carries the facts to the larger table.
+   Hmc_cfg_simulation proves the CFG semantics against the closure
+   semantics; the end-to-end proof goes through Hmc_tail_simulation
+   instead, which reuses its state relation (Hmc_cfg_states). *)
 module D = Hm_declarative
 module C = Hmc_monomorphic
 module K = Hmc_closure_ir
@@ -86,6 +102,7 @@ let (build @ total) : (origin : P.program) @ immutable -> {p : program | p.origi
   ghost_ (valid_def out);
   let out : program = refine_ out in out
 
+(* Looking up a function's code, used by the simulation proofs. *)
 let rec (same_size @ total) : (blocks : G.table) @ immutable -> (source : K.table) @ immutable -> (functions : functions) @ immutable ->
     {u : unit | mapped blocks source functions} -> {u : unit | K.size source === size functions} @ ghost =
   fun blocks source functions premise -> ghost_ (

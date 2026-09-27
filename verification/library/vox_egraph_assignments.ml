@@ -1,3 +1,10 @@
+(* Executable, fuel-charged versions of the enumeration in
+   [Vox_egraph_assignment_spec]. Each call charges one unit; a function
+   returns [Exhausted] when fuel runs out and otherwise the same cases as
+   its spec counterpart with strictly less fuel left. This is the
+   assignment-generator part of the saturation fuel described in
+   vox_egraph_rule_handle.md. *)
+
 module C = Vox_egraph_assignment_spec
 module L = Vox_egraph_language_spec
 

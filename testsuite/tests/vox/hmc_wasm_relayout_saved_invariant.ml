@@ -46,9 +46,9 @@ let (correct @ total) : (signature : G.signature) @ immutable -> (next_signature
     ghost_ (Geometry.matches_def signature instruction capacity max_pc fragment.Lower.copies fragment.Lower.pc fragment.Lower.required);
     let view = Hmc_frame_slices.decode signature activation cells old_padding () in
     let saved = Hmc_frame_slices.saved context schema view.Hmc_frame_slices.temporaries activation.Frame.temporaries old_padding () in
-    let env_count = Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity () in
-    let saved_count = Hmc_wasm_schema_counts.encode (Codec.locals_size context) capacity () in
-    let old_count = Hmc_wasm_schema_counts.encode (Codec.temporaries_size schema) capacity () in
+    let env_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.locals_size signature.G.locals) capacity ()) in
+    let saved_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.locals_size context) capacity ()) in
+    let old_count = ghost_ (Hmc_wasm_schema_counts.encode (Codec.temporaries_size schema) capacity ()) in
     ghost_ (Hmc_frame_relayout_patch.replacement_def instruction saved.Hmc_frame_slices.saved activation.Frame.accumulator saved.Hmc_frame_slices.older);
     match Hmc_frame_relayout_patch.replacement instruction saved.Hmc_frame_slices.saved activation.Frame.accumulator saved.Hmc_frame_slices.older with
     | None -> unreachable_ ()

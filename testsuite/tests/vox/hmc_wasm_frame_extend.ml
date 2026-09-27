@@ -102,11 +102,11 @@ let (correct @ total) : (before : B.bytes) @ immutable -> (after : B.bytes) @ im
   fun before after base stop old_pc pc old_cells cells capacity used old_bytes bytes old_tail tail signature activation premise ->
     ghost_ (Cut.numeric (H.length cells) (H.length old_cells) used capacity ());
     let cut = Cut.split (H.length cells) old_cells () in
-    let old_prefix = H.Cell (V.Word (Header.number old_pc), cut.Cut.prefix) in
-    let full = H.Cell (V.Word (Header.number pc), cells) in
+    let old_prefix = ghost_ (H.Cell (V.Word (Header.number old_pc), cut.Cut.prefix)) in
+    let full = ghost_ (H.Cell (V.Word (Header.number pc), cells)) in
     ghost_ (Seg.append_def old_prefix cut.Cut.suffix; H.length_def old_prefix; H.length_def full;
       H.length_def (Seg.append old_prefix cut.Cut.suffix));
-    let middle = split_wire old_prefix cut.Cut.suffix old_bytes old_tail () in
+    let middle = ghost_ (split_wire old_prefix cut.Cut.suffix old_bytes old_tail ()) in
     ghost_ (Index.represents_def (D.S (H.length cells)) (used + 1);
       Frame.suffix before base stop old_bytes old_prefix middle (used + 1) ();
       Frame.suffix after base stop bytes full tail (used + 1) ();

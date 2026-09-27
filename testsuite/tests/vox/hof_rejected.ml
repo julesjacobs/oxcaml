@@ -23,8 +23,8 @@ module Functions :
 
 let same_capture (delta : int) (x : int) :
     {u : unit | apply (offset delta) x === apply (offset delta) x} =
-  let left = offset delta in
-  let right = offset delta in
+  let left = ghost_ (offset delta) in
+  let right = ghost_ (offset delta) in
   let u = () in
   let refine_ proof =
     (refine_ u : {u : unit | apply left x === apply right x}) in

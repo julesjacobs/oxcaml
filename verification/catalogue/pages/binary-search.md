@@ -15,7 +15,7 @@ sources:
 
 ## Client example
 
-From the client. `round_trip` inserts `value` and removes it again, and proves that the element at `index` is unchanged. `(x : a) -> b` names the argument so that `b` can mention it. `{u : unit | p}` is `unit` refined by the predicate `p`: an argument of this type is a proof of `p`, and `@ ghost` marks it as erased at runtime. Passing `(u)` asks the checker to prove the refinement that the parameter expects. `ghost_ (...)` is proof code, checked and then erased; here it applies `edited_at` to the removal and to the insertion. `length_bounds source` gives `0 < length source + 1`, so that `position <= length source` is a valid index of the array returned by `insert`, which is one longer.
+From the client. `round_trip` inserts `value` and removes it again, and proves that the element at `index` is unchanged. `(x : a) -> b` names the argument so that `b` can mention it. `{u : unit | p}` is `unit` refined by the predicate `p`: an argument of this type is a proof of `p`, and `@ ghost` marks it as erased at runtime. Passing `()` for it asks the checker to prove `p`. `ghost_ (...)` is proof code, checked and then erased; here it applies `edited_at` to the removal and to the insertion. `length_bounds source` gives `0 < length source + 1`, so that `position <= length source` is a valid index of the array returned by `insert`, which is one longer.
 
 @code testsuite/tests/vox/sorted_array_client.ml "let round_trip :" "  result"
 
@@ -29,11 +29,11 @@ The same client checks every operation against a list model on all 121 sequences
 
 ## A rejected program
 
-A failed search cannot be used to claim membership. `let refine_ x = e` binds `x` and keeps the refinement of `e`'s result as a fact about `x`, and `refine_ e` checks `e` against the refinement expected at that point. When `find_first` returns `None`, the checker knows that `value` does not occur, so the claim that it does is rejected.
+A failed search cannot be used to claim membership. `(() : {u : unit | p})` asks the checker to prove `p` at that point. When `find_first` returns `None`, the checker knows that `value` does not occur, so the claim that it does is rejected.
 
 @code testsuite/tests/vox/sorted_array_rejected.ml "let invalid_search_result" "| Some _ -> ();;"
 
-@text testsuite/tests/vox/sorted_array_rejected.ml "Line 6, characters 64-73:" "|}]"
+@text testsuite/tests/vox/sorted_array_rejected.ml "Line 3, characters 13-15:" "|}]"
 
 The same test also rejects removing index 0 from `empty`, passing a plain `int iarray` as a `Sorted_array.t`, and claiming that `insert` puts the new element at position 0.
 

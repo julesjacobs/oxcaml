@@ -89,8 +89,8 @@ let (correct @ total) : (outer : T.labels) @ immutable -> (continuation : T.code
       ghost_ (Heap.length_def cells; Heap.length_def (Heap.Cell (activation.Frame.accumulator, body));
         Probe.correct state base base_local activation.Frame.accumulator old_pc activation.Frame.current body before_frame suffix ());
       let nil = Probe.is_nil activation.Frame.accumulator in
-      let yes = Wasm_control_lift.embed (Hmc_wasm_pc_update.emit empty_pc base_local) T.Empty in
-      let no = Wasm_control_lift.embed (Entry.emit fragment base_local object_local slots) T.Empty in
+      let yes = ghost_ (Wasm_control_lift.embed (Hmc_wasm_pc_update.emit empty_pc base_local) T.Empty) in
+      let no = ghost_ (Wasm_control_lift.embed (Entry.emit fragment base_local object_local slots) T.Empty) in
       ghost_ (Select.correct (Probe.emit base_local) nil state outer yes no continuation ();
         emit_def fragment empty_pc base_local object_local slots continuation;
         cost_def fragment empty_pc base_local object_local slots nil;

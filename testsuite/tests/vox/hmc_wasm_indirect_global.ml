@@ -72,7 +72,7 @@ let (correct @ total) : (loads : Registers.plan) @ immutable -> (module_ : Func.
   fun loads module_ target call type_index slot function_index continuation caller_stack capacity program globals heap heap_limit stack_limit signature next_signature activation frames index ty derivation next fragment old_pc cells padding       state base_local base before_frame tail premise ->
     let source = Source.correct program globals heap heap_limit stack_limit signature next_signature activation frames index ty derivation next fragment old_pc cells padding       state base_local base before_frame tail () in
     let code = Lower.emit fragment base_local in
-    let body = Lift.embed code T.Empty in
+    let body = ghost_ (Lift.embed code T.Empty) in
     let after = {X.memory = source.Source.memory; machine = state.X.machine} in
     let imported = {GE.globals = call.Calls.current.P.globals; execution = state} in
     let exported = {GE.globals = call.Calls.current.P.globals; execution = after} in
