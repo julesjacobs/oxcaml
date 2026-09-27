@@ -3872,6 +3872,28 @@ let outer_refinement env ty =
        | _ -> Btype.backtrack snapshot; None)
   | _ -> None
 
+(* In a refinement predicate a refinement cannot be introduced: the logic
+   assumes the refinement of every refined component, so a constructor
+   argument or record field must already have its refined type. *)
+let with_refined_component_hint env ty f =
+  if (!typing_refinement_predicate || Resolved_predicate.active ())
+     && Option.is_some (outer_refinement env ty)
+  then
+    try f () with
+    | Error (_, _, Expr_type_clash _) as exn ->
+        match Location.error_of_exn exn with
+        | Some (`Ok error) ->
+            let hint =
+              Location.msg "@[Hint: in a refinement predicate,@ this \
+                argument must already have its refined type.@ A helper \
+                function whose result type is refined works,@ for example \
+                %a.@]"
+                Style.inline_code "let f x : {y : int | y >= 0} = ..."
+            in
+            raise (Error_forward { error with sub = error.sub @ [hint] })
+        | Some `Already_displayed | None -> raise exn
+  else f ()
+
 let rec refinement_payload env ty =
   match outer_refinement env ty with
   | Some { ref_payload; _ } -> refinement_payload env ref_payload
@@ -11882,7 +11904,10 @@ and type_label_exp
            let (_, ty_arg) = unify_as_label ty in
            Assigning(ty_arg, mode)
       in
-      let arg = type_argument ~overwrite env arg_mode sarg ty_arg (instance ty_arg) in
+      let arg =
+        with_refined_component_hint env ty_arg (fun () ->
+          type_argument ~overwrite env arg_mode sarg ty_arg (instance ty_arg))
+      in
       (vars, arg)
     end
     ~before_generalize:(fun (vars, arg) ->
@@ -12664,7 +12689,8 @@ and type_construct ~overwrite ~sexp env (expected_mode : expected_mode) lid sarg
          let argument_mode =
           mode_is_contained_by is_contained_by ~modalities argument_mode
          in
-         type_argument ~recarg ~overwrite env argument_mode e ty t0)
+         with_refined_component_hint env t0 (fun () ->
+           type_argument ~recarg ~overwrite env argument_mode e ty t0))
       sargs (List.combine ty_args ty_args0) overwrites
   in
   if constr.cstr_private = Private then
