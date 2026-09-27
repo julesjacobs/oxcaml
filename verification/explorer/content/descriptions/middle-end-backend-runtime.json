@@ -1,0 +1,643 @@
+{
+  "_about": "Subdirectories and key files of middle_end/, backend/ and runtime/. Vox changes in these trees (git diff f42b1a9726 HEAD): backend/cmm_builtins.ml, runtime/{pref,borrow,bigint,vox_control}.c (new), runtime/caml/custom.h, runtime/custom.c, runtime/dune. middle_end/ is unchanged. Sources: the code at HEAD, flambda2/docs, backend/regalloc/NOTES.md, flambda2/to_jsir/README.md.",
+  "middle_end/flambda2/": {
+    "what": {
+      "short": "Flambda 2, OxCaml's native middle end: Lambda to a CPS IR, simplification driven by an abstract domain of Flambda types, then Cmm.",
+      "long": [
+        "The pipeline is `from_lambda/` (CPS conversion and closure conversion), then `simplify/` (skipped under `-Oclassic`, where closure conversion does the inlining), then optionally the `reaper/` (`-flambda2-reaper`), then `to_cmm/`. `to_jsir/` is an alternative back end to js_of_ocaml's IR. The entry point is `Flambda2.lambda_to_cmm`.",
+        "Vox does not modify Flambda 2. Refinements are erased from types before Lambda is generated and `ghost_` code is replaced by placeholders, so the middle end sees ordinary Lambda. Vox's runtime primitives reach it as ordinary external calls; the native ones marked `[@@builtin]` are expanded when `to_cmm` calls `Cmm_builtins.extcall` (see [cmm_builtins.ml](src:backend/cmm_builtins.ml))."
+      ]
+    }
+  },
+  "middle_end/flambda2/flambda2.ml": {
+    "what": {
+      "short": "Driver of the Flambda 2 pipeline: lambda_to_cmm runs closure conversion, Simplify, the optional reaper and To_cmm, and records the .cmx export information."
+    }
+  },
+  "middle_end/flambda2/from_lambda/": {
+    "what": {
+      "short": "Lambda to Flambda: CPS conversion (Lambda_to_flambda) and closure conversion (Closure_conversion), including the translation of Lambda primitives.",
+      "long": "`Lambda_to_flambda` makes control flow explicit with continuations and exception continuations; `Closure_conversion` builds sets of closures, value slots and static data. Under `-Oclassic` closure conversion also performs the inlining that Simplify would otherwise do, using the approximations in `classic_mode_types/`."
+    }
+  },
+  "middle_end/flambda2/simplify/": {
+    "what": {
+      "short": "The simplifier: one downward and upward traversal per unit that inlines, specialises, unboxes, does CSE, lifts constants and removes dead code, guided by Flambda types.",
+      "long": [
+        "The downward pass carries the denv/dacc (typing environment, lifted constants, continuation uses); the upward pass rebuilds terms with the uacc and decides the final form of continuations. Each term constructor has its own `simplify_*` module; primitives are split by arity.",
+        "See [the encyclopaedia of optimisations](src:middle_end/flambda2/docs/encyclopaedia.md) and [inlining.md](src:middle_end/flambda2/docs/inlining.md)."
+      ]
+    }
+  },
+  "middle_end/flambda2/simplify/env/": {
+    "what": {
+      "short": "The simplifier's environments and accumulators: Downwards_env/Downwards_acc, Upwards_env/Upwards_acc, and the tracking of continuation uses."
+    }
+  },
+  "middle_end/flambda2/simplify/flow/": {
+    "what": {
+      "short": "Data-flow analysis run between the downward and upward passes: required names, continuation parameter aliases, and unboxing of mutable blocks (Mutable_unboxing)."
+    }
+  },
+  "middle_end/flambda2/simplify/inlining/": {
+    "what": {
+      "short": "Call-site inlining decisions and the inlining transformation itself."
+    }
+  },
+  "middle_end/flambda2/simplify/lifting/": {
+    "what": {
+      "short": "Lifting of constants to symbols: the lifted-constant state and the reification of Flambda types into static constants."
+    }
+  },
+  "middle_end/flambda2/simplify/unboxing/": {
+    "what": {
+      "short": "Unboxing of continuation parameters: deciding what to unbox from the types at the uses, and adding the extra parameters and arguments.",
+      "long": "See [unboxed_params.md](src:middle_end/flambda2/docs/unboxed_params.md)."
+    }
+  },
+  "middle_end/flambda2/types/": {
+    "what": {
+      "short": "Flambda types: the abstract domain the simplifier uses to track what is known about each name, with meet, join, typing environments and provers.",
+      "long": "Closer to an abstract interpretation domain than to a type system, and designed for a single pass without widening. See [types.md](src:middle_end/flambda2/docs/types.md)."
+    }
+  },
+  "middle_end/flambda2/types/env/": {
+    "what": {
+      "short": "Typing environments: levels and extensions, aliases with binding times, code age relations, and the environments used by meet and join."
+    }
+  },
+  "middle_end/flambda2/types/grammar/": {
+    "what": {
+      "short": "The grammar of Flambda types (Type_grammar, Type_descr) and constructors for building them."
+    }
+  },
+  "middle_end/flambda2/terms/": {
+    "what": {
+      "short": "The Flambda term language: Let, Let_cont, Apply, Apply_cont, Switch and Invalid expressions, primitives, sets of closures, static constants and code.",
+      "long": "Also the attributes carried by terms (inline, loopify, zero_alloc, poll, regalloc), effects and coeffects of primitives, and cost metrics used by inlining."
+    }
+  },
+  "middle_end/flambda2/term_basics/": {
+    "what": {
+      "short": "Small building blocks shared by terms and types: Simple, Coercion, Rec_info_expr, Or_variable, Symbol_projection and similar."
+    }
+  },
+  "middle_end/flambda2/identifiers/": {
+    "what": {
+      "short": "Interned identifiers: Variable, Symbol, Name, Continuation, Code_id, Function_slot, Value_slot, Reg_width_const, all backed by Int_ids tables."
+    }
+  },
+  "middle_end/flambda2/bound_identifiers/": {
+    "what": {
+      "short": "Binders: Bound_pattern, Bound_parameters, Bound_continuations, Bound_for_function and Bound_static, with their free-name operations."
+    }
+  },
+  "middle_end/flambda2/nominal/": {
+    "what": {
+      "short": "Name-binding machinery: Name_abstraction, Renaming and Permutation, Name_occurrences with Name_mode, and Ids_for_export."
+    }
+  },
+  "middle_end/flambda2/numbers/": {
+    "what": {
+      "short": "Target-width numbers: Targetint_32_64, Target_ocaml_int, bit representations of floats, vector constants and Or_infinity."
+    }
+  },
+  "middle_end/flambda2/algorithms/": {
+    "what": {
+      "short": "Generic data structures: Patricia trees and the container types built on them, Lmap, Table_by_int_id, Or_null and leapfrog triejoin."
+    }
+  },
+  "middle_end/flambda2/kinds/": {
+    "what": {
+      "short": "Flambda_kind (values, naked numbers and vectors, regions, rec info), Flambda_arity including unboxed products, and block tags."
+    }
+  },
+  "middle_end/flambda2/lattices/": {
+    "what": {
+      "short": "The small lattices Or_bottom, Or_unknown and Or_unknown_or_bottom used throughout the types."
+    }
+  },
+  "middle_end/flambda2/simplify_shared/": {
+    "what": {
+      "short": "Code shared by Simplify and classic-mode closure conversion: function-declaration and call-site inlining decisions, inlining reports, slot offsets."
+    }
+  },
+  "middle_end/flambda2/classic_mode_types/": {
+    "what": {
+      "short": "Value_approximation: the approximations that -Oclassic closure conversion uses for cross-module inlining instead of Flambda types."
+    }
+  },
+  "middle_end/flambda2/to_cmm/": {
+    "what": {
+      "short": "Flambda to Cmm: expressions, primitives, sets of closures and static data, with let-bound expressions substituted at their use according to their effects.",
+      "long": "External calls go through `Cmm_builtins.extcall`, which expands builtins inline. See [to_cmm.md](src:middle_end/flambda2/docs/to_cmm.md)."
+    }
+  },
+  "middle_end/flambda2/cmx/": {
+    "what": {
+      "short": "The Flambda part of .cmx files: the export format, exported code and types, and their loading for cross-module optimisation."
+    }
+  },
+  "middle_end/flambda2/reaper/": {
+    "what": {
+      "short": "The reaper: interprocedural, control-flow-insensitive dead-code removal and unboxing after Simplify, with the analysis written in Datalog.",
+      "long": "It computes the sources and usages of each value, replaces values without sources by `Invalid` and values without usages by a poison value, and changes the calling conventions of non-escaping functions. Enabled with `-flambda2-reaper`. See [reaper.md](src:middle_end/flambda2/docs/reaper.md)."
+    }
+  },
+  "middle_end/flambda2/datalog/": {
+    "what": {
+      "short": "A typed Datalog engine: relations stored as tries, queries compiled to cursors run by a small virtual machine, seminaive evaluation; used by the reaper."
+    }
+  },
+  "middle_end/flambda2/to_jsir/": {
+    "what": {
+      "short": "Translation from Flambda 2 to js_of_ocaml's IR, so that Flambda-optimised code can run in JavaScript without going through bytecode.",
+      "long": "See its [README](src:middle_end/flambda2/to_jsir/README.md) for number representations and the unsupported features."
+    }
+  },
+  "middle_end/flambda2/parser/": {
+    "what": {
+      "short": "Fexpr, a textual syntax for Flambda: lexer, Menhir parser, printer, and conversions to and from Flambda, used by the tests and tools."
+    }
+  },
+  "middle_end/flambda2/tests/": {
+    "what": {
+      "short": "Flambda 2's own tests: .fl inputs, meet and Datalog API tests, Patricia tree tests, reaper tests, and tools such as fexprc, fldiff and roundtrip."
+    }
+  },
+  "middle_end/flambda2/docs/": {
+    "what": {
+      "short": "Design notes: the encyclopaedia of optimisations, Flambda types, inlining, the reaper, To_cmm, unboxed parameters, exceptions in the backend, SIMD."
+    }
+  },
+  "middle_end/flambda2/z3/": {
+    "what": {
+      "short": "Z3 scripts that check bit-level identities behind Cmm helpers: tagged-integer comparisons and a sign-extension rewrite. Upstream; unrelated to Vox's use of Z3."
+    }
+  },
+  "middle_end/flambda2/ui/": {
+    "what": {
+      "short": "Flambda_features, the accessors for Flambda 2's command-line settings, and Flambda_colours for printing."
+    }
+  },
+  "middle_end/flambda2/compare/": {
+    "what": {
+      "short": "Comparison of two Flambda units up to alpha-equivalence, producing an approximant for readable diffs; used by fldiff."
+    }
+  },
+  "middle_end/compilenv.ml": {
+    "what": {
+      "short": "Per-unit compilation state shared by the middle end and backend: .cmx export info, imported unit infos, generic function needs, zero-alloc info."
+    }
+  },
+  "middle_end/backend_var.ml": {
+    "what": {
+      "short": "Variables of Cmm and the backend, with optional provenance (the source-level variable) for debugging information."
+    }
+  },
+  "backend/cfg/": {
+    "what": {
+      "short": "The CFG IR used after instruction selection, and its passes: liveness, dataflow, CSE, dead code, block merging, polling, prologue placement, vectorisation.",
+      "long": "`Cfg_with_layout` pairs the graph with a block order; `Cfg_to_linear` produces the `Linear` code that the emitters consume."
+    }
+  },
+  "backend/regalloc/": {
+    "what": {
+      "short": "Register allocation on the CFG: IRC, linear scan and a greedy-inspired allocator, chosen by -regalloc, with shared splitting, rewriting and a validator.",
+      "long": "See [NOTES.md](src:backend/regalloc/NOTES.md) for the parameters (`-regalloc-param`) and the common prelude and postlude."
+    }
+  },
+  "backend/debug/": {
+    "what": {
+      "short": "Debugging information: register availability, the live ranges of variables and inlined frames, and DWARF emission under dwarf/."
+    }
+  },
+  "backend/debug/dwarf/": {
+    "what": {
+      "short": "DWARF output in layers: dwarf_low (encodings, sections, location lists), dwarf_high (DIE construction), dwarf_ocaml (OCaml units, variables, types, inlined frames)."
+    }
+  },
+  "backend/amd64/": {
+    "what": {
+      "short": "The x86-64 target: Arch, Proc (registers and calling conventions), instruction selection, CSE, SIMD selection and vectorisation, and Emit to X86_ast.",
+      "long": "See [NOTES.md](src:backend/amd64/NOTES.md) for the supported platforms and ABIs."
+    }
+  },
+  "backend/arm64/": {
+    "what": {
+      "short": "The AArch64 target: the same modules as amd64, plus an assembly AST (ast/) and a direct machine-code encoder (binary_emitter/).",
+      "long": "See [NOTES.md](src:backend/arm64/NOTES.md)."
+    }
+  },
+  "backend/arm64/binary_emitter/": {
+    "what": {
+      "short": "Encodes AArch64 instructions and directives directly to bytes, with relocations and per-section state; also used by the JIT."
+    }
+  },
+  "backend/arm64/ast/": {
+    "what": {
+      "short": "A typed AST of AArch64 assembly, including the encoding of logical immediates."
+    }
+  },
+  "backend/internal_assembler/": {
+    "what": {
+      "short": "Writes ELF object files directly from the x86 binary emitter's output (sections, symbols, string tables, relocations), bypassing the system assembler."
+    }
+  },
+  "backend/asm_targets/": {
+    "what": {
+      "short": "Target-independent assembly output: Asm_directives, labels, sections and symbols, including the DWARF-specific directives."
+    }
+  },
+  "backend/binary_emitter_intf/": {
+    "what": {
+      "short": "The signature shared by the architectures' binary emitters, so that the JIT and the internal assembler can use either."
+    }
+  },
+  "backend/peephole/": {
+    "what": {
+      "short": "Peephole rewrites on CFG basic instructions, applied by Peephole_optimize.peephole_optimize_cfg."
+    }
+  },
+  "backend/x86_peephole/": {
+    "what": {
+      "short": "Peephole rewrites on the x86 assembly AST before it is printed or encoded."
+    }
+  },
+  "backend/llvm/": {
+    "what": {
+      "short": "An experimental LLVM back end (-llvm-backend): Llvmize translates CFG functions and data to LLVM IR, which clang compiles."
+    }
+  },
+  "backend/cmm.ml": {
+    "what": {
+      "short": "The Cmm IR: machine types, operations, expressions, function declarations and data items, the interface between To_cmm and instruction selection."
+    }
+  },
+  "backend/cmm_helpers.ml": {
+    "what": {
+      "short": "Smart constructors for Cmm used by To_cmm: tagging and boxing, block and array access, arithmetic with local simplifications, and the curry, apply and send functions."
+    }
+  },
+  "backend/cmm_builtins.ml": {
+    "what": {
+      "short": "Inline Cmm expansions of external calls marked [@@builtin]: bit operations, int128, SIMD intrinsics and similar; others become C calls.",
+      "long": "`extcall` builds the `Cextcall` and, for a builtin (or a name in `builtin_even_if_not_annotated`), asks `transl_builtin`, which returns `None` to fall back to the C call."
+    },
+    "vox": {
+      "short": "Native inline expansions of Vox runtime primitives: borrow int accesses, raw-memory bytes, flat-table fields and 16-byte SIMD control-group matching.",
+      "long": [
+        "Each case reads the block layout that the matching C stub in `runtime/pref.c` or `runtime/borrow.c` allocates; comments name the C function to keep in sync. None of these expansions checks an index: the refined external contracts in `verification/library/` make the index a verified precondition. The C versions used by bytecode check bounds for borrow slices (`borrow_index`) but not for raw memory or table slots.",
+        "`caml_vox_int_ctz_untagged` reuses the upstream count-trailing-zeros lowering, and `caml_pref_empty`, which returns a void token, becomes its argument followed by an empty tuple."
+      ]
+    },
+    "notes": [
+      {
+        "title": "SIMD matching of a 16-byte control group",
+        "from": "let vox_control_match ~table ~with_empty name args dbg =",
+        "to": "tag_int result dbg)))))",
+        "text": "Expands `match16` on arm64 and amd64 only; elsewhere it returns `None` and the C stub in `runtime/vox_control.c` is called. NEON compares with a broadcast byte, weights the lanes by powers of two and folds them with three pairwise adds; SSE2 broadcasts with a multiply by `0x0101010101010101` and uses `movemask`. The `_empty` variants also set bit 16 when some lane holds the empty byte `0x80`, and the table variants first load the control bytes from field 3 of the table. The upstream doc comment for `transl_builtin` now sits above this function."
+      },
+      {
+        "title": "Borrowed int slots without bounds checks",
+        "from": "(* Keep these layouts in sync with borrow_handle in runtime/borrow.c and",
+        "span": 36,
+        "text": "A borrow handle is `[backing; offset; length]`. The native `get_int`/`set_int` of `Borrow_iarray` load the backing array and offset and access the slot directly; the index bound comes from the refinement on the external's argument. The bytecode stubs `caml_borrow_int_get`/`set` check the bound and raise."
+      },
+      {
+        "title": "Raw memory bytes",
+        "from": "| \"caml_raw_memory_length\" ->",
+        "to": "(store ~dbg Byte_unsigned Assignment ~addr ~new_value:(untag_int byte dbg))",
+        "text": "A raw-memory handle is `[size; id; carrier]`, where the carrier is a custom block whose first payload word is the `malloc`ed data pointer. Reads and writes are single byte loads and stores at that pointer plus the index, with no check."
+      },
+      {
+        "title": "Flat hash table fields",
+        "from": "(* Keep this layout in sync with vox_table_create in runtime/pref.c. Backing",
+        "to": "Some (addr_array_ref entries index dbg)",
+        "text": "A table is an `Object_tag` block `[unit; id; entries; controls; size; deleted]`. Reads of control bytes, keys, values and the counts are inline loads, marked mutable because `caml_vox_table_exchange` swaps the backing blocks of two tables. Stores of keys and values stay C calls, which use `caml_modify`."
+      }
+    ]
+  },
+  "backend/cmmgen_state.ml": {
+    "what": {
+      "short": "Mutable state of Cmm generation for a unit: constants and data items queued for emission, and structured constants."
+    }
+  },
+  "backend/cfg_selectgen.ml": {
+    "what": {
+      "short": "Instruction selection from Cmm to CFG, a functor over the target's Cfg_selection module."
+    }
+  },
+  "backend/select_utils.ml": {
+    "what": {
+      "short": "Helpers shared by instruction selection: environments, trap-stack tracking, effect classification and register creation."
+    }
+  },
+  "backend/operation.ml": {
+    "what": {
+      "short": "The operations shared by the CFG and Linear IRs: moves, spills, loads and stores, integer and float operations, calls, allocation, trap stacks."
+    }
+  },
+  "backend/reg.ml": {
+    "what": {
+      "short": "Pseudo-registers and their locations (unknown, hardware register, stack slot), as used from selection through register allocation."
+    }
+  },
+  "backend/linear.ml": {
+    "what": {
+      "short": "The Linear IR: a list of instructions with labels and explicit branches, produced from the CFG and consumed by the emitters."
+    }
+  },
+  "backend/emitaux.ml": {
+    "what": {
+      "short": "Emission helpers shared by the targets: frame tables, debug info for frames, string and float literals, and emission hooks."
+    }
+  },
+  "backend/emit.mli": {
+    "what": {
+      "short": "The interface each target's emit.ml implements: emit a function or data, and begin and end the assembly of a unit."
+    }
+  },
+  "backend/proc.mli": {
+    "what": {
+      "short": "The interface each target's proc.ml implements: registers, calling conventions, destroyed registers and stack frame layout."
+    }
+  },
+  "backend/generic_fns.ml": {
+    "what": {
+      "short": "Tracks which generic functions (caml_curryN, caml_applyN, caml_sendN) units need, as recorded in .cmx files, and generates their code for linking."
+    }
+  },
+  "backend/zero_alloc_checker.ml": {
+    "what": {
+      "short": "The [@zero_alloc] checker: an interprocedural analysis on the CFG that functions do not allocate on the heap (local allocations are ignored), reporting witnesses."
+    }
+  },
+  "backend/cmm_peephole_engine.ml": {
+    "what": {
+      "short": "A pattern-matching engine for writing peephole rewrites on Cmm expressions."
+    }
+  },
+  "backend/cmm_invariants.ml": {
+    "what": {
+      "short": "Checks continuation-related invariants of a Cmm function, such as handlers being declared once and used with the right number of arguments."
+    }
+  },
+  "backend/x86_ast.mli": {
+    "what": {
+      "short": "The x86 assembly AST produced by the amd64 emitter and consumed by the GAS and MASM printers and the binary emitter."
+    }
+  },
+  "backend/x86_binary_emitter.ml": {
+    "what": {
+      "short": "Encodes X86_ast instructions to machine code, for the internal assembler and the JIT."
+    }
+  },
+  "backend/jit_backend.ml": {
+    "what": {
+      "short": "Architecture-independent dispatch for the JIT: registers a callback and packs binary-emitted sections with their emitter module."
+    }
+  },
+  "backend/vectorize_utils.ml": {
+    "what": {
+      "short": "Shared definitions for the CFG vectoriser: operand widths, memory access descriptions and dependency helpers."
+    }
+  },
+  "runtime/caml/": {
+    "what": {
+      "short": "The runtime's C headers: value representation (mlvalues.h), allocation and GC interfaces, domains, custom blocks, exceptions, and the platform layer.",
+      "long": "Headers guarded by `CAML_INTERNALS` are for the runtime itself; the rest form the C API used by stubs."
+    }
+  },
+  "runtime/caml/custom.h": {
+    "what": {
+      "short": "Custom blocks: struct custom_operations, the default operations, and the runtime's built-in operation tables."
+    },
+    "vox": {
+      "short": "Declares caml_bigint_ops, the custom operations of Vox's Bigint.t, next to the other built-in tables."
+    }
+  },
+  "runtime/custom.c": {
+    "what": {
+      "short": "Allocation of custom blocks and the registry of custom operations, which unmarshalling uses to find a block's operations by identifier."
+    },
+    "vox": {
+      "short": "Registers caml_bigint_ops at startup, so that marshalled Bigint.t values (identifier vox.bigint.v1) can be read back."
+    }
+  },
+  "runtime/dune": {
+    "what": {
+      "short": "Dune rules that build the runtime, including the list of C files scanned for bytecode primitives (the primitives table and prims.c)."
+    },
+    "vox": {
+      "short": "Adds bigint.c, borrow.c, pref.c and vox_control.c to the files scanned for primitives, so that bytecode programs can call the Vox stubs."
+    }
+  },
+  "runtime/pref.c": {
+    "what": {
+      "short": "C stubs for Vox's owned heap cells (Pref, Unique_cell), verified atomics, raw memory buffers and the flat hash table's storage.",
+      "long": [
+        "Every handle is an `Object_tag` block whose field 1 is a fresh identifier from `pref_fresh_id`, so polymorphic comparison and hashing see the identity rather than the payload, while the GC still scans the payload. Ownership is entirely in the types: tokens have layout `void`, so native stubs take no token and return the bare result, while the `_bytecode` variants receive unit placeholders and return records with a unit slot (see [pref.mli](src:verification/library/pref.mli)).",
+        "Stubs for ghost-only operations (`caml_pref_heap_*`, `caml_pref_own`, `caml_unique_cell_location`, `caml_raw_memory_location`) return `Val_unit`: their meaning exists only for the verifier. The contracts of all these stubs are trusted."
+      ]
+    },
+    "vox": {
+      "short": "New in Vox: the runtime side of the ownership library, whose trusted contracts are the externals in verification/library/.",
+      "long": "Native accessors for raw memory and tables are also expanded inline in [cmm_builtins.ml](src:backend/cmm_builtins.ml); the layouts here and there must agree. No stub checks an index: bounds are preconditions of the refined externals."
+    },
+    "notes": [
+      {
+        "title": "Identity and cell allocation",
+        "from": "static uintnat pref_fresh_id(void)",
+        "to": "CAMLreturn(cell);",
+        "text": "Identifiers come from one atomic counter shared by cells, atomics, raw-memory handles and tables; exhaustion raises `Out_of_memory`. A cell is `[unit; id; payload]`, and writes use `caml_modify`."
+      },
+      {
+        "title": "Native and bytecode result shapes",
+        "from": "static value pref_alloc_step(value initial, mlsize_t fields)",
+        "to": "return pref_alloc_step(initial, 2);",
+        "text": "A `step` record is `{ value; state : token }`. Natively the void `state` field has no slot, so the result is a one-field block; bytecode keeps the slot and fills it with unit. The same pattern recurs for `Unique_cell`, raw memory and tables."
+      },
+      {
+        "title": "Ghost and token stubs",
+        "from": "CAMLprim value caml_pref_heap_empty(value unit) { return Val_unit; }",
+        "to": "CAMLprim value caml_pref_heap_law5",
+        "text": "The finite-map operations on heaps are ghost externals that the verifier interprets by their C names (see `Vox_vc.operation`); the heap laws are trusted externals whose refined result types state the law. At run time these return unit if called. Splitting and joining tokens do nothing, since tokens have no representation; the bytecode split returns a pair of unit placeholders."
+      },
+      {
+        "title": "Atomics",
+        "from": "/* Invariant indices and authority are erased. Native results are scalars. */",
+        "to": "CAMLprim value caml_unique_cell_location(value cell)",
+        "text": "A verified atomic is `[value; id]` and each operation calls the runtime's sequentially consistent field operation on field 0. The ghost postcondition and transition arguments are ignored; bytecode wraps the result with a unit slot for the returned token."
+      },
+      {
+        "title": "Raw memory",
+        "from": "static value raw_memory_malloc(value size, mlsize_t fields)",
+        "to": "CAMLreturn(result);",
+        "text": "The handle is `[size; id; carrier]`, where the carrier is a custom block in the major heap holding the `malloc`ed pointer. `caml_raw_memory_free` and the carrier's finaliser share `raw_memory_release`, so storage is released once, either explicitly or when the handle becomes unreachable. A failed `malloc` returns `None` rather than raising."
+      },
+      {
+        "title": "Flat hash table storage",
+        "from": "static value vox_table_create(value capacity, mlsize_t fields)",
+        "to": "CAMLreturn(result);",
+        "text": "A table owns an entries block of `2 * capacity` fields (keys and values interleaved) and `capacity + 15` control bytes initialised to `128` (empty), so a 16-byte group load at any slot stays in bounds. `caml_vox_table_exchange` swaps fields 2 to 5 of two tables, which is how a resize replaces storage while the handle's identity stays the same."
+      }
+    ]
+  },
+  "runtime/borrow.c": {
+    "what": {
+      "short": "C stubs for Vox's Borrow and Borrow_iarray: owned arrays, exclusive slices over ranges of them, and helpers for Vox_sequence and Vox_iarray.",
+      "long": [
+        "A handle is `[backing; offset; length]`. Opening a loan pairs the owner with itself; restoring, transferring and recombining return their argument; splitting allocates two handles over the same backing array. The prophecy projections (`caml_borrow_current`, `final` and the frame projections) and `caml_borrow_contents` return unit: they are ghost, and the verifier interprets them by name. The file also holds three helpers for iarrays and one for `Vox_sequence.length`.",
+        "Slice `get` and `set` check their index in C (`borrow_index`) and raise `Invalid_argument`; the native int accessors in [cmm_builtins.ml](src:backend/cmm_builtins.ml) do not."
+      ]
+    },
+    "vox": {
+      "short": "New in Vox: the runtime of callback-scoped loans over owned arrays, whose trusted contracts are in verification/library/borrow.mli."
+    },
+    "notes": [
+      {
+        "title": "Handles",
+        "from": "static value borrow_handle(value base, intnat offset, intnat length)",
+        "span": 11,
+        "text": "Every handle is heap allocated, including those whose type is local to a borrow scope. Handles share storage; copies are made only by `of_iarray`, `snapshot`, `into_iarray` of a partial owner and a non-adjacent `append`."
+      },
+      {
+        "title": "Freezing, splitting and appending owners",
+        "from": "CAMLprim value caml_borrow_into_iarray(value owner)",
+        "to": "CAMLreturn(borrow_handle(joined, 0, left_length + right_length));",
+        "text": "An owner covering its whole backing array is the only live handle on it, so `into_iarray` returns the array without copying; this relies on split and append preserving disjointness. Appending the two pieces of a split rejoins them in place; any other pair is copied."
+      },
+      {
+        "title": "Checked slice access",
+        "from": "static intnat borrow_index(value loan, value index)",
+        "to": "CAMLprim value caml_borrow_snapshot(value loan)",
+        "text": "The index is checked against the loan's length and offset into the backing array. The int variants write the field directly, without `caml_modify`, since the element is an immediate."
+      }
+    ]
+  },
+  "runtime/bigint.c": {
+    "what": {
+      "short": "Arbitrary-precision integers for Vox's Bigint.t: a custom block of base-10^9 digits with comparison, hashing, marshalling and arithmetic.",
+      "long": [
+        "Multiplication is schoolbook; division is long division with a binary search for each quotient digit. Division and modulo are Euclidean (the remainder is non-negative), which is the semantics of SMT-LIB `div` and `mod` that the verifier gives them; a zero divisor yields quotient 0 and remainder equal to the dividend, matching `bigint_division` in [vox_encoding.ml](src:verification/vox_encoding.ml).",
+        "The OCaml side is [stdlib/bigint.ml](src:stdlib/bigint.ml), whose externals are declared `@@ total`."
+      ]
+    },
+    "vox": {
+      "short": "New in Vox: the runtime of the unbounded integers that refinements and ghost code use and that the verifier encodes as SMT Int."
+    },
+    "notes": [
+      {
+        "title": "Custom operations",
+        "from": "CAMLexport const struct custom_operations caml_bigint_ops = {",
+        "span": 10,
+        "text": "Comparison is numeric, so polymorphic `compare` and `=` agree with the SMT encoding. Deserialisation rejects digits out of range and non-canonical encodings."
+      },
+      {
+        "title": "Euclidean division",
+        "from": "static value bigint_divrem(value va, value vb, int remainder)",
+        "to": "CAMLreturn(remainder ? vr : vq);",
+        "text": "Magnitudes are divided first; for a negative dividend with a nonzero remainder the quotient's magnitude is incremented and the remainder replaced by `|b| - r`, giving a non-negative remainder for either sign of the divisor."
+      }
+    ]
+  },
+  "runtime/vox_control.c": {
+    "what": {
+      "short": "C fallbacks for the flat hash table's 16-byte control-group match (NEON, SSE2 or scalar) and a count-trailing-zeros primitive.",
+      "long": "Bit `i` of the result says whether byte `offset + i` equals the needle; the `_empty` variant sets bit 16 when some byte is `128`. Bounds are checked by the OCaml wrapper (`Vox_control.match16`) or are preconditions of the table's refined externals. Defining `VOX_CONTROL_SCALAR` forces the scalar loop."
+    },
+    "vox": {
+      "short": "New in Vox: used by bytecode and by native targets other than arm64 and amd64, where cmm_builtins.ml expands the match inline instead."
+    },
+    "notes": [
+      {
+        "title": "One group",
+        "from": "static unsigned match16(const unsigned char *p, unsigned char needle)",
+        "to": "#endif",
+        "text": "The three implementations compute the same 16-bit mask."
+      },
+      {
+        "title": "Trailing zeros",
+        "from": "CAMLprim intnat caml_vox_int_ctz_untagged(intnat input)",
+        "span": 11,
+        "text": "Setting the top bit bounds the count, so zero gives 63, as upstream's native lowering does and as the verifier's encoding of `caml_vox_int_ctz` states."
+      }
+    ]
+  },
+  "runtime/HACKING.adoc": {
+    "what": {
+      "short": "Notes for working on the runtime: layout of the sources, debugging runtimes, and conventions."
+    }
+  },
+  "runtime/domain.c": {
+    "what": {
+      "short": "Domains: creation and termination, the stop-the-world protocol, interrupts and per-domain state."
+    }
+  },
+  "runtime/minor_gc.c": {
+    "what": {
+      "short": "The per-domain minor heap and its collection, including promotion and the remembered set."
+    }
+  },
+  "runtime/major_gc.c": {
+    "what": {
+      "short": "The concurrent mark-and-sweep major collector shared by all domains: marking, sweeping, ephemerons and cycle phases."
+    }
+  },
+  "runtime/shared_heap.c": {
+    "what": {
+      "short": "The major heap's allocator: size-classed pools and large allocations, owned per domain and swept by the major GC."
+    }
+  },
+  "runtime/memory.c": {
+    "what": {
+      "short": "Allocation entry points and write barriers (caml_modify, caml_initialize), and dependent-memory accounting."
+    }
+  },
+  "runtime/fiber.c": {
+    "what": {
+      "short": "Fibers and effect handlers: stack allocation, growth and switching for continuations."
+    }
+  },
+  "runtime/interp.c": {
+    "what": {
+      "short": "The bytecode interpreter."
+    }
+  },
+  "runtime/compare.c": {
+    "what": {
+      "short": "Polymorphic comparison, which delegates to the custom operations of custom blocks and compares Object_tag blocks by their identifier."
+    }
+  },
+  "runtime/hash.c": {
+    "what": {
+      "short": "Polymorphic hashing (MurmurHash3-based mixing), used by Hashtbl.hash and by custom blocks' hash functions."
+    }
+  },
+  "runtime/extern.c": {
+    "what": {
+      "short": "Marshalling of values to bytes."
+    }
+  },
+  "runtime/intern.c": {
+    "what": {
+      "short": "Unmarshalling, including the lookup of custom operations by identifier."
+    }
+  },
+  "runtime/amd64.S": {
+    "what": {
+      "short": "x86-64 assembly glue: calls between OCaml and C, GC entry, exceptions, stack switching for fibers and stack growth."
+    }
+  },
+  "runtime/arm64.S": {
+    "what": {
+      "short": "AArch64 assembly glue: calls between OCaml and C, GC entry, exceptions, stack switching for fibers and stack growth."
+    }
+  },
+  "runtime/gen_primitives.sh": {
+    "what": {
+      "short": "Extracts the CAMLprim names from the runtime's C files to build the bytecode primitive table."
+    }
+  }
+}
