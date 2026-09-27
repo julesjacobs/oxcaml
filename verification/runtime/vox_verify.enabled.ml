@@ -35,7 +35,10 @@ let abstract_multiplication (query : Vox_smt.query) =
   let rec visit = function
     | Vox_smt.App (op, args) ->
       (match op, args with
-      | (Bit_and | Bit_or | Bit_xor | Shift_right_logical), _ -> bitwise := true
+      | ( ( Bit_and | Bit_or | Bit_xor | Shift_right_logical | Shift_left
+          | Shift_right_arithmetic ),
+          _ ) ->
+        bitwise := true
       | Mul, [Integer _; _] | Mul, [_; Integer _] -> ()
       | Mul, _ -> abstract := true
       | _ -> ());

@@ -74,6 +74,8 @@ type op =
   | Bit_or
   | Bit_xor
   | Shift_right_logical
+  | Shift_left
+  | Shift_right_arithmetic
   | Eq
   | Ne
   | Lt
