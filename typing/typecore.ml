@@ -7229,6 +7229,26 @@ let open_dependent_type openings ty =
       in
       Subst.type_expr subst ty
 
+(* A refinement in a later parameter's type may mention an earlier parameter,
+   which then has to become a dependent binder. *)
+let params_mention_name name params =
+  let found = ref false in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      expr = (fun self e ->
+        match e.pexp_desc with
+        | Pexp_ident { txt = Longident.Lident name'; _ }
+          when String.equal name name' -> found := true
+        | _ -> Ast_iterator.default_iterator.expr self e) }
+  in
+  List.iter
+    (function
+      | { pparam_desc = Pparam_val (_, _, pat); _ } ->
+          iterator.pat iterator pat
+      | { pparam_desc = Pparam_newtype _; _ } -> ())
+    params;
+  !found
+
 let close_dependent_type openings ty =
   match openings with
   | [] -> ty
@@ -10899,7 +10919,8 @@ and type_function
                             "A function checked against a dependent arrow \
                              must have a simple variable parameter"))
                 | None, Tpat_var { id = parameter; _ }
-                  when return_constraint_has_refinement ->
+                  when return_constraint_has_refinement
+                       || params_mention_name (Ident.name parameter) rest ->
                     let binder =
                       Ident.create_scoped ~scope:Ident.lowest_scope
                         (Ident.name parameter)
@@ -10932,15 +10953,20 @@ and type_function
                   } = type_body () in
               begin match opening, binder,
                   body_constraint.ret_type_constraint with
-              | Some ({ binder = opened_binder; _ } as opening), None, Some _ ->
-                  if Ctype.refinement_ident_occurs opened_binder body_type then
+              | Some ({ binder = opened_binder; parameter } as opening),
+                None, _ ->
+                  (* The result annotation mentions [opened_binder]; later
+                     parameter annotations mention [parameter]. *)
+                  if Ctype.refinement_ident_occurs opened_binder body_type
+                     || Ctype.refinement_ident_occurs parameter body_type
+                  then
                     introduced_dependency :=
                       Some (opening, close_dependent_type [opening] body_type)
                   else
                     unify_exp_types loc ext_env body_type ty_ret
               | Some _, Some _, Some _ ->
                   unify_exp_types loc ext_env body_type ty_ret
-              | None, _, _ | Some _, _, None -> ()
+              | None, _, _ | Some _, Some _, None -> ()
               end;
               let contains_gadt =
                 if param_contains_gadt then
