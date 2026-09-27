@@ -15,7 +15,9 @@ module Registers = Hmc_wasm_program_registers
 module State = Hmc_wasm_program_state
 module Calls = Wasm_calls
 type artifact = {bytes : B.bytes; program : Tail.program @@ ghost; binary : Binary.compiled @@ ghost}
-type result = Unbound_variable | Type_error | Entry_type_mismatch
+type result = Unbound_variable
+  | Type_error of Hmc_frontend.inference [@immediate_all_void_constructor]
+  | Entry_type_mismatch of Hmc_frontend.inference [@immediate_all_void_constructor]
   | Unsupported_fragment of Hmc_admission.error | Layout_rejected
   | Initialization_exhausted of Hmc_heap_objects.heap * D.index | Encoding_rejected
   | Compiled of artifact
@@ -30,11 +32,17 @@ let[@def] (correct @ total) (source : D.term @ immutable) (layout : Init.layout 
   Binary.compilable artifact.program layout input memory pages)
 let compile : (source : D.term) @ immutable -> (layout : Init.layout) @ immutable -> (input : W.t) @ immutable ->
     (memory : B.bytes) @ immutable -> (pages : B.u32) -> {u : unit | Init.valid_layout layout memory} ->
-    {out : result | match out with Compiled artifact -> correct source layout input memory pages artifact | _ -> true} @ immutable =
+    {out : result | match out with
+      | Compiled artifact -> correct source layout input memory pages artifact
+      | Unbound_variable -> not (D.scoped_term D.Z source)
+      | Type_error run -> Hmc_frontend.untyped source run
+      | Entry_type_mismatch run -> Hmc_frontend.mistyped source run
+      | Unsupported_fragment error -> Hmc_admission.meaning source error
+      | Layout_rejected | Initialization_exhausted _ | Encoding_rejected -> true} @ immutable =
   fun source layout input memory pages premise -> match S.compile source with
   | S.Unbound_variable -> Unbound_variable
-  | S.Type_error -> Type_error
-  | S.Entry_type_mismatch -> Entry_type_mismatch
+  | S.Type_error run -> Type_error run
+  | S.Entry_type_mismatch run -> Entry_type_mismatch run
   | S.Unsupported_fragment error -> Unsupported_fragment error
   | S.Compiled monomorphic ->
     let program = Tail.build (Cfg.build (Closure.build monomorphic)) in

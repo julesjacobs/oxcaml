@@ -4,6 +4,8 @@ module B = Wasm_u32
 module C = Wasm_code
 module M = Hmc_compilation_model
 module Core = Hmc_compiler
+module F = Hmc_frontend
+module A = Hmc_admission
 module Init = Hmc_wasm_program_initialize
 module R = Hmc_wasm_program_registers
 module S = Wasm_scalar
@@ -19,20 +21,69 @@ type error = Unbound_variable | Type_error | Entry_type_mismatch
   | Unsupported_polymorphic_local_let | Non_callable_outer_binding
   | Non_callable_entry | Invalid_annotation | Layout_rejected
   | Initialization_exhausted | Encoding_rejected
-type result = Rejected of error | Compiled of artifact
+(* Inference evidence, kept for the two type errors. *)
+type inference = No_inference | Inference of F.inference [@immediate_all_void_constructor]
+type diagnosis = {cause : error; rejected : D.term @@ ghost; run : inference @@ ghost}
+type rejection = {r : diagnosis | match r.cause with
+  | Type_error -> (match r.run with Inference run -> F.untyped r.rejected run | No_inference -> false)
+  | Entry_type_mismatch -> (match r.run with Inference run -> F.mistyped r.rejected run | No_inference -> false)
+  | _ -> true}
+type result = Rejected of rejection | Compiled of artifact
 
 let[@def] (bytes @ total) (artifact : artifact @ immutable) = artifact.code
 let[@def] (source @ total) (artifact : artifact @ immutable) = ghost_ artifact.term
 let[@def] (input @ total) (artifact : artifact @ immutable) = ghost_ artifact.argument
 let[@def] (layout @ total) (artifact : artifact @ immutable) = ghost_ artifact.configuration
+let[@def] (reason @ total) (rejection : rejection @ immutable) = rejection.cause
+let[@def] (program @ total) (rejection : rejection @ immutable) = ghost_ rejection.rejected
+
+let (refuse @ total) : (cause : error) -> (term : D.term) @ immutable -> (run : inference) @ immutable ->
+    {u : unit | match cause with
+      | Type_error -> (match run with Inference run -> F.untyped term run | No_inference -> false)
+      | Entry_type_mismatch -> (match run with Inference run -> F.mistyped term run | No_inference -> false)
+      | _ -> true} ->
+    {out : result | match out with Compiled _ -> false
+      | Rejected rejection -> reason rejection === cause && program rejection === term} @ immutable =
+  fun cause term run premise ->
+    let rejection : rejection = {cause; rejected = ghost_ term; run = ghost_ run} in
+    ghost_ (reason_def rejection; program_def rejection); Rejected rejection
+
+let rec (let_free_agrees @ total) : (term : D.term) @ immutable ->
+    {u : unit | M.let_free term = A.let_free term} @ ghost = fun term -> ghost_ (
+  M.let_free_def term; A.let_free_def term;
+  match term with
+  | D.Lambda body | D.Recursive body -> let_free_agrees body
+  | D.Apply (a, b) | D.Cons (a, b) | D.Primitive (_, a, b) -> let_free_agrees a; let_free_agrees b
+  | D.If (a, b, c) | D.CaseList (a, b, c) -> let_free_agrees a; let_free_agrees b; let_free_agrees c
+  | _ -> ())
+
+let rec (shape_agrees @ total) : (term : D.term) @ immutable ->
+    {u : unit | M.outer_callable term = A.outer_callable term
+      && M.entry_callable term = A.entry_callable term
+      && M.no_local_let term = A.no_local_let term} @ ghost = fun term -> ghost_ (
+  M.outer_callable_def term; A.outer_callable_def term; M.entry_callable_def term;
+  A.entry_callable_def term; M.no_local_let_def term; A.no_local_let_def term;
+  M.callable_def term; A.callable_def term; let_free_agrees term;
+  match term with
+  | D.Let (rhs, rest) -> M.callable_def rhs; A.callable_def rhs; let_free_agrees rhs; shape_agrees rest
+  | _ -> ())
 
 let compile : (term : D.term) @ immutable -> (configuration : M.layout) @ immutable ->
     (argument : W.t) @ immutable -> (memory : B.bytes) @ immutable -> (pages : B.u32) ->
     {u : unit | M.valid_layout configuration memory} ->
-    {out : result | match out with Rejected _ -> true | Compiled artifact ->
-      source artifact === term && input artifact === argument && layout artifact === configuration} @ immutable =
+    {out : result | match out with
+      | Rejected rejection -> program rejection === term && (match reason rejection with
+        | Unbound_variable -> not (D.scoped_term D.Z term)
+        | Non_callable_outer_binding -> not (M.outer_callable term)
+        | Non_callable_entry -> not (M.entry_callable term)
+        | Unsupported_polymorphic_local_let -> not (M.no_local_let term)
+        | Invalid_annotation -> false
+        | Type_error | Entry_type_mismatch | Layout_rejected | Initialization_exhausted
+        | Encoding_rejected -> true)
+      | Compiled artifact ->
+        source artifact === term && input artifact === argument && layout artifact === configuration} @ immutable =
   fun term configuration argument memory pages premise ->
-    ghost_ (M.valid_layout_def configuration memory;
+    ghost_ (M.valid_layout_def configuration memory; shape_agrees term;
       Init.valid_layout_def configuration memory; Hmc_linear_bounds.covers_def memory configuration.M.heap_limit);
     match Core.compile term configuration argument memory pages () with
     | Core.Compiled evidence ->
@@ -41,17 +92,40 @@ let compile : (term : D.term) @ immutable -> (configuration : M.layout) @ immuta
         pages = ghost_ pages; evidence = ghost_ evidence} in
       ghost_ (source_def artifact; input_def artifact; layout_def artifact);
       Compiled artifact
-    | Core.Unbound_variable -> Rejected Unbound_variable
-    | Core.Type_error -> Rejected Type_error
-    | Core.Entry_type_mismatch -> Rejected Entry_type_mismatch
-    | Core.Unsupported_fragment error -> Rejected (match error with
-      | Hmc_admission.Unsupported_polymorphic_local_let -> Unsupported_polymorphic_local_let
-      | Hmc_admission.Non_callable_outer_binding -> Non_callable_outer_binding
-      | Hmc_admission.Non_callable_entry -> Non_callable_entry
-      | Hmc_admission.Invalid_annotation -> Invalid_annotation)
-    | Core.Layout_rejected -> Rejected Layout_rejected
-    | Core.Initialization_exhausted _ -> Rejected Initialization_exhausted
-    | Core.Encoding_rejected -> Rejected Encoding_rejected
+    | Core.Unbound_variable -> refuse Unbound_variable term No_inference ()
+    | Core.Type_error run -> refuse Type_error term (Inference run) ()
+    | Core.Entry_type_mismatch run -> refuse Entry_type_mismatch term (Inference run) ()
+    | Core.Unsupported_fragment error ->
+      ghost_ (A.meaning_def term error);
+      refuse (match error with
+      | A.Unsupported_polymorphic_local_let -> Unsupported_polymorphic_local_let
+      | A.Non_callable_outer_binding -> Non_callable_outer_binding
+      | A.Non_callable_entry -> Non_callable_entry
+      | A.Invalid_annotation -> Invalid_annotation) term No_inference ()
+    | Core.Layout_rejected -> refuse Layout_rejected term No_inference ()
+    | Core.Initialization_exhausted _ -> refuse Initialization_exhausted term No_inference ()
+    | Core.Encoding_rejected -> refuse Encoding_rejected term No_inference ()
+
+let (untypable @ total) : (rejection : rejection) @ immutable -> (ty : Copy_spec.ty) @ immutable ->
+    (typing : D.typing) @ immutable ->
+    {u : unit | reason rejection === Type_error
+      && D.typed D.Z D.Empty_context (program rejection) (D.embed ty) typing} ->
+    {u : unit | false} @ ghost =
+  fun rejection ty typing premise -> ghost_ (
+    reason_def rejection; program_def rejection;
+    match rejection.run with
+    | Inference run -> F.untypable rejection.rejected run ty typing ()
+    | No_inference -> ())
+
+let (no_entry_type @ total) : (rejection : rejection) @ immutable -> (typing : D.typing) @ immutable ->
+    {u : unit | reason rejection === Entry_type_mismatch
+      && D.typed D.Z D.Empty_context (program rejection) (D.Function (D.Word64, D.Word64)) typing} ->
+    {u : unit | false} @ ghost =
+  fun rejection typing premise -> ghost_ (
+    reason_def rejection; program_def rejection;
+    match rejection.run with
+    | Inference run -> F.no_entry_type rejection.rejected run typing ()
+    | No_inference -> ())
 
 let (safe @ total) : (artifact : artifact) @ immutable -> (prefix : C.count) @ immutable ->
     {u : unit | match Wasm_binary_execution.run prefix (bytes artifact)

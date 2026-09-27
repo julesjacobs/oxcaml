@@ -12,6 +12,25 @@ let[@def] (valid_layout @ total) (layout : layout @ immutable) (memory : B.bytes
   && layout.heap_base <= layout.heap_limit
   && not (Hmc_linear_bytes.drop memory layout.heap_limit === None))
 
+(* The shape of a source program: outer [let]s binding functions, then a
+   function entry, with no [let] inside a binding or the entry. *)
+let[@def] (callable @ total) (term : D.term @ immutable) = match term with
+  | D.Lambda _ | D.Recursive _ -> true | _ -> false
+
+let[@def] rec (let_free @ total) (term : D.term @ immutable) = match term with
+  | D.Bound _ | D.Truth | D.False | D.Word _ | D.Nil -> true
+  | D.Lambda body | D.Recursive body -> let_free body
+  | D.Apply (a, b) | D.Cons (a, b) | D.Primitive (_, a, b) -> let_free a && let_free b
+  | D.If (a, b, c) | D.CaseList (a, b, c) -> let_free a && let_free b && let_free c
+  | D.Let _ -> false
+
+let[@def] rec (outer_callable @ total) (term : D.term @ immutable) = match term with
+  | D.Let (rhs, rest) -> callable rhs && outer_callable rest | _ -> true
+let[@def] rec (entry_callable @ total) (term : D.term @ immutable) = match term with
+  | D.Let (_, rest) -> entry_callable rest | _ -> callable term
+let[@def] rec (no_local_let @ total) (term : D.term @ immutable) = match term with
+  | D.Let (rhs, rest) -> let_free rhs && no_local_let rest | _ -> let_free term
+
 let[@def] (returned @ total) (after : GE.state @ immutable) (word : W.t @ immutable) = ghost_ (
   after.GE.execution.X.machine.E.stack === S.Push (S.I32 1, S.Empty)
   && match after.GE.globals.G.values, after.GE.globals.G.permissions with
