@@ -611,9 +611,15 @@ let abstract_bitwise q =
       }
   end
 
-let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
+let to_smtlib ?(poll = fun () -> ()) ?resource_limit ?assumptions ~int_width
+    ~timeout_ms q =
   check ~poll ~int_width q;
   if timeout_ms <= 0 then invalid_arg "Vox_smt.to_smtlib: timeout_ms";
+  Option.iter
+    (List.iter (fun s ->
+         if Symbol.sort s <> Bool || not (List.memq s q.symbols)
+         then invalid_arg "Vox_smt.to_smtlib: assumption"))
+    assumptions;
   (match resource_limit with
   | Some limit when limit <= 0 ->
     invalid_arg "Vox_smt.to_smtlib: resource_limit"
@@ -914,6 +920,8 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
   in
   add "(set-option :print-success false)\n";
   add "(set-option :produce-models true)\n";
+  if Option.is_some assumptions
+  then add "(set-option :produce-unsat-cores true)\n";
   add (Printf.sprintf "(set-option :timeout %d)\n" timeout_ms);
   (* Z3 options persist across queries in a session, so every query sets its own
      limit (0: unlimited). *)
@@ -1120,10 +1128,22 @@ let to_smtlib ?(poll = fun () -> ()) ?resource_limit ~int_width ~timeout_ms q =
   add "(assert (not ";
   term q.goal.term;
   add "))\n";
-  add
-    (if has_bitwise
-     then "(check-sat-using (then simplify solve-eqs smt))\n"
-     else "(check-sat)\n");
+  (match assumptions with
+  | Some assumptions ->
+    (* Z3's tactics do not report cores, so a query with assumptions always uses
+       its default solver. *)
+    add "(check-sat-assuming (";
+    List.iteri
+      (fun i s ->
+        if i > 0 then add " ";
+        term (Var s))
+      assumptions;
+    add "))\n"
+  | None ->
+    add
+      (if has_bitwise
+       then "(check-sat-using (then simplify solve-eqs smt))\n"
+       else "(check-sat)\n"));
   Buffer.contents b
 
 type value =

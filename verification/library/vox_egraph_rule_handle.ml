@@ -15,7 +15,7 @@ module R = Vox_egraph_rule_spec
 module Q = Vox_egraph_match_spec
 module P = Vox_egraph_match_evidence
 
-type raw = {engine : H.t; rules : R.t @@ global; model : Q.graph @@ ghost aliased}
+type raw = {engine : H.t; rules : R.t @@ global; model : Q.graph @@ ghost global}
 type t = {s : raw |  H.O.valid s.engine.owner && V.valid s.engine.store &&
       s.engine.owner.count = s.engine.store.semantic.union.count &&
       H.matching (H.A.contents s.engine.owner.arena)

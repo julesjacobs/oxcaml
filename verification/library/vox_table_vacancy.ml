@@ -35,7 +35,7 @@ module Make (Key : Vox_table_map.Key)
       (model : (Key.t, 'a) M.state) @ immutable -> (key : Key.t) ->
       (value : 'a) -> (rank : int) -> (group : int) ->
       (lane : int) -> (index : int) ->
-      {u : unit | not (0 <= rank && rank < (model.capacity lsr 4) &&
+      {u : unit | not (0 <= rank && rank < (W.lsr4 model.capacity) &&
         0 <= lane && lane < 16 && Read.I.group model.capacity (Key.hash key)
           rank = group &&
         index = Read.I.wrap model.capacity (group + lane) &&
@@ -56,7 +56,8 @@ module Make (Key : Vox_table_map.Key)
       (query : Key.t) -> (value : 'a) @ ghost ->
       (capacity : {c : int | c = view.model.capacity}) ->
       (hash : {h : int | h = Key.hash query}) ->
-      (rank : {r : int | 0 <= r && r <= (view.model.capacity lsr 4)}) @ ghost ->
+      (rank : {r : int | 0 <= r && r <= W.lsr4 view.model.capacity})
+        @ ghost ->
       (group : int) -> (step : int) ->
       (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
         table) === Some
@@ -119,7 +120,7 @@ module Make (Key : Vox_table_map.Key)
     ghost_ (
       Read.I.valid_def view; Read.capacity_bounds view.model;
       Read.I.empty_free_def view.model hash 0;
-      Read.I.probe_def capacity hash 0; Read.I.wrap_def capacity (hash lsr 7));
+      Read.I.probe_def capacity hash 0; Read.I.wrap_def capacity (W.lsr7 hash));
     scan table view query value capacity hash 0 group 16 token
 
 end

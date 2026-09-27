@@ -57,7 +57,10 @@ The table uses `C = current s`, `F = final s`, and bigint model indices.
 | Operation | Result and contract |
 | --- | --- |
 | `Owned_array.of_iarray xs` | Fresh copy with model `Model.of_iarray xs` |
-| `Owned_array.into_iarray a` | Consume ownership; freeze the underlying array without copying |
+| `Owned_array.into_iarray a` | Consume ownership; freeze the underlying array without copying (a piece of a split owner is copied out) |
+| `Owned_array.length (borrow_ a)` | Length of the contents |
+| `Owned_array.split_at a k` | Two owners of the first `k` and the remaining elements, sharing the storage without copying |
+| `Owned_array.append a b` | Owner of the concatenation; adjacent pieces of one array join in place, any other pair is copied |
 | `Owned_array.with_mut a post body` | Root loan; return the callback result and owner satisfying `post` |
 | `Slice.length (borrow_ s)` | Length of the current model |
 | `Slice.get (borrow_ s) i` | Shared element; `Some value === Model.at C i` |
@@ -133,7 +136,17 @@ domain, runs the right callback on the calling domain, and joins the left.
 The private transfer relies on descriptors always being heap allocated. It
 does not extend the lifetime of arbitrary local closures.
 
-Both callbacks must establish their supplied final postconditions. The wrapper
+Owned arrays are global, so they can also be passed to another domain by an
+ordinary thunk. `Vox_parallel.fork_join` has the plain polymorphic type
+`(unit -> 'a @ unique) @ portable once -> (unit -> 'b @ unique) @ portable
+once -> 'a * 'b @ unique`; instantiating `'a` and `'b` at refined owner types
+carries each branch's proof across the join. Parallel quicksort uses it on the
+owned pieces produced by `Owned_array.split_at`. Owners of one backing array
+cover disjoint ranges (owners are unique, `split_at` consumes its argument and
+`append` both of its arguments), so an owner covering the whole array is the
+only one and `into_iarray` may freeze it in place.
+
+Both `Slice.parallel` callbacks must establish their supplied final postconditions. The wrapper
 returns their conjunction. If either callback raises, the spawned domain is
 joined before propagation. If both raise, the right exception takes priority,
 with its original backtrace. Borrow contracts describe normal returns;
@@ -191,7 +204,7 @@ mutable reads in ghost code, and partial proof computations.
 | `borrow_parallel.ml` | Separate domains, sequential fallback, and joining before exception propagation |
 | `quicksort_client.ml` | Sequential and parallel sorting, with sortedness and preservation of every multiplicity |
 | `borrow_rejected.ml` | Ownership, bounds, ghost/runtime separation, stale models, and split consistency |
-| `borrow_runtime.ml` | Storage primitives, snapshots, empty slices, and float arrays |
+| `borrow_runtime.ml` | Storage primitives, snapshots, empty slices, float arrays, and owned splits and appends |
 
 Quicksort uses a middle-position pivot and distributes equal values using
 index parity. Partition maintains a lower prefix and upper middle region,
@@ -201,10 +214,14 @@ and permutation of the original model. Permutation is equality of canonical
 insertion-sorted models; additional checked lemmas establish equality of every
 element count.
 
-Parallel quicksort divides its domain budget between the two children and
+Parallel quicksort (`parallel_sort_array`) works on an owned array: it
+partitions in place through `with_mut`, splits the owner into left, pivot and
+right owners, sorts the two sides with `Vox_parallel.fork_join`, and appends
+the pieces in place. It divides its domain budget between the two children and
 spawns only when both children meet the cutoff. Sequential children retain
-the full budget for later splits. The public API accepts
-`?max_domains` and `?cutoff`. Tests exercise duplicates, integer extrema,
+the full budget for later splits; arrays of at most twice the cutoff, and all
+arrays once the budget is used up, are sorted by the sequential `sort_array`.
+The public API accepts `?max_domains` and `?cutoff`. Tests exercise duplicates, integer extrema,
 ordered/reverse-ordered inputs, and deterministic random inputs.
 
 Pure model functions and lemmas are total. Partition also has a checked

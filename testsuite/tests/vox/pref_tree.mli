@@ -71,7 +71,7 @@ val mirror_with_frame :
       @ unique
 type built = {
   pointer : node option @@ aliased;
-  model : tree @@ ghost aliased;
+  model : tree @@ global ghost;
   state : node option Pref.token;
 }
 val empty : unit ->

@@ -1,10 +1,10 @@
 module Key = struct
   type t = int
   let[@def] (equal @ total) (x : int) (y : int) = x = y
-  let[@def] (hash @ total) (x : int) =
-    let x = (x lxor (x lsr 16)) * 73244475 in
-    let x = (x lxor (x lsr 16)) * 73244475 in
-    x lxor (x lsr 16)
+  let (hash @ total) (x : int) =
+    let x = (x lxor Int.Refined.(x lsr 16)) * 73244475 in
+    let x = (x lxor Int.Refined.(x lsr 16)) * 73244475 in
+    x lxor Int.Refined.(x lsr 16)
   let (reflexive @ total) (x : int) : {u : unit | equal x x} = equal_def x x; ()
   let (symmetric @ total) (x : int) (y : int) :
       {u : unit | equal x y = equal y x} = equal_def x y; equal_def y x; ()

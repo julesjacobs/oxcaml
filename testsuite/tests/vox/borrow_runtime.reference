@@ -1,1 +1,2 @@
 borrow storage: copies, splits, snapshots, empty and float arrays
+owned storage: splits, in-place and copying appends, frozen pieces

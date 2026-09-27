@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml vox_int_sequence.mli vox_int_sequence.ml quicksort_model.ml quicksort.mli quicksort.ml";
+ prebuilt_modules = "vox_sequence.mli vox_sequence.ml borrow.mli borrow.ml vox_parallel.mli vox_parallel.ml vox_int_sequence.mli vox_int_sequence.ml quicksort_model.ml quicksort.mli quicksort.ml";
  { bytecode; }
  { native; }
 *)

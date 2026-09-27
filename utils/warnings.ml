@@ -59,6 +59,12 @@ type redundant_modifier_reason =
   | Default_bound
   | Implied_by of string
 
+(* A proof step whose facts no refinement proof used (warning 227). *)
+type unused_proof_step =
+  | Unused_lemma_call of string  (* the function called *)
+  | Unused_assume
+  | Unused_argument of string  (* the parameter *)
+
 type trusted_external_reason =
   | Trusted_refinement
   | Trusted_totality
@@ -183,6 +189,7 @@ type t =
   | Unerased_ghost_call                     (* 224 *)
   | Redundant_ghost                         (* 225 *)
   | Proof_only_binding of string            (* 226 *)
+  | Unused_proof_step of unused_proof_step   (* 227 *)
   | Trusted_external of trusted_external_reason (* 228 *)
   | Unverified_import of string            (* 229 *)
 
@@ -293,6 +300,7 @@ let number = function
   | Unerased_ghost_call -> 224
   | Redundant_ghost -> 225
   | Proof_only_binding _ -> 226
+  | Unused_proof_step _ -> 227
   | Trusted_external _ -> 228
   | Unverified_import _ -> 229
 ;;
@@ -761,6 +769,11 @@ let descriptions = [
     description = "A local value is computed at run time but used only in\n\
     \    ghost code.";
     since = since 5 4 };
+  { number = 227;
+    names = ["unused-proof-step"];
+    description = "A lemma call, assume_ or refined argument whose facts no\n\
+    \    refinement proof in its function used (checked with unsat cores).";
+    since = since 5 4 };
   { number = 228;
     names = ["trusted-external"];
     description = "An external declaration outside the verified library\n\
@@ -1183,7 +1196,7 @@ let parse_options errflag s =
   alerts
 
 (* If you change these, don't forget to change them in man/ocamlc.m *)
-let defaults_w = "+a-4-7-9-27-29-30-32..42-44-45-48-50-60-66..70-74-221"
+let defaults_w = "+a-4-7-9-27-29-30-32..42-44-45-48-50-60-66..70-74-221-227"
 let defaults_warn_error = "-a"
 let default_disabled_alerts = [ "unstable"; "unsynchronized_access" ]
 
@@ -1704,6 +1717,17 @@ let message = function
       msg "%a is computed at run time but used only in ghost code.@ \
            Wrap its definition in %a to erase it."
         Style.inline_code name Style.inline_code "ghost_ (...)"
+  | Unused_proof_step (Unused_lemma_call name) ->
+      msg "No refinement proof in this function used the fact from this@ \
+           call to %a."
+        Style.inline_code name
+  | Unused_proof_step Unused_assume ->
+      msg "No refinement proof in this function used the fact from this %a."
+        Style.inline_code "assume_"
+  | Unused_proof_step (Unused_argument name) ->
+      msg "No refinement proof in this function used the refinement of@ \
+           argument %a."
+        Style.inline_code name
   | Trusted_external reason ->
       msg "The verifier assumes this external's %s;@ nothing checks it."
         (match reason with

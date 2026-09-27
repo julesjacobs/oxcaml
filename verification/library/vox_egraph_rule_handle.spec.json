@@ -838,7 +838,7 @@
     },
     {
       "path": "stdlib/stdlib.mli",
-      "sha256": "a74c7432c25576a8be9c99a89d371b034f6b61b5d41adce973793952b328810b",
+      "sha256": "e62106198ecd30818d03e90ef23d6e0e3f9b26f71579b77c7edafe42ffd6f4ea",
       "role": "trusted_semantic_primitives",
       "declarations": [
         {

@@ -221,7 +221,8 @@ let is_total_cast env (description : value_description) =
 (* Primitives that the compiler implements and that terminate without raising
    when every argument and the result are of the sorts given: declaring one of
    them total at those types restates a fact about the compiler, which is
-   trusted anyway, rather than adding an assumption. *)
+   trusted anyway, rather than adding an assumption. Shifts are not among
+   them: their result is unspecified for counts outside [0, 63]. *)
 let total_primitive env (primitive : Primitive.description) ty =
   let rec sorts ty =
     match get_desc (Ctype.expand_head env ty) with
@@ -237,7 +238,7 @@ let total_primitive env (primitive : Primitive.description) ty =
   in
   match primitive.prim_name with
   | "%addint" | "%subint" | "%mulint" | "%negint" | "%succint" | "%predint"
-  | "%andint" | "%orint" | "%xorint" | "%lslint" | "%lsrint" | "%asrint" ->
+  | "%andint" | "%orint" | "%xorint" ->
     all [Vox_type.Int]
   | "%ltint" | "%leint" | "%gtint" | "%geint" ->
     all [Vox_type.Int; Vox_type.Bool]

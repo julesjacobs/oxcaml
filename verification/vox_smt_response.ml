@@ -166,9 +166,9 @@ let session_input input =
            else line)
          (String.split_on_char '\n' input))
 
-let followup symbols answer =
+let followup ?assumptions symbols answer =
   match answer with
-  | "unsat" -> ""
+  | "unsat" -> if Option.is_some assumptions then "(get-unsat-core)\n" else ""
   | "sat" ->
     if symbols = []
     then ""
@@ -184,9 +184,10 @@ let followup symbols answer =
 
 let resource_request = "(get-info :rlimit)\n"
 
-(* The resource count restarts at each reset. It is recorded before the rest
-   of the response is interpreted, which may fail. *)
-let interpret_response ~resources symbols answer text =
+(* The resource count restarts at each reset. It is recorded before the rest of
+   the response is interpreted, which may fail. *)
+let interpret_response ~resources ?assumptions ?(core = ref None) symbols answer
+    text =
   let response =
     match List.rev (parse text) with
     | List [Atom ":rlimit"; Atom count] :: rest -> (
@@ -197,5 +198,28 @@ let interpret_response ~resources symbols answer text =
       | _ -> protocol "Unexpected solver resource count")
     | Atom "unsupported" :: rest -> List.rev rest
     | response -> List.rev response
+  in
+  (* The core names the assumptions a proof used, as [to_smtlib] names
+     symbols. *)
+  let response =
+    match assumptions, answer, response with
+    | Some assumptions, "unsat", [List names] ->
+      let assumed = Hashtbl.create 16 in
+      List.iteri
+        (fun i s ->
+          if List.memq s assumptions
+          then Hashtbl.replace assumed ("v" ^ string_of_int i) s)
+        symbols;
+      core
+        := Some
+             (List.map
+                (function
+                  | Atom name when Hashtbl.mem assumed name ->
+                    Hashtbl.find assumed name
+                  | _ -> protocol "Unexpected unsat core")
+                names);
+      []
+    | Some _, "unsat", _ -> protocol "Missing unsat core"
+    | _ -> response
   in
   interpret symbols answer response

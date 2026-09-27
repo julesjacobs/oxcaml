@@ -35,9 +35,9 @@ need Jane Street's paid runners and never run. The full suite is our own run
 on the AMD box (`~/vox-check-run.sh` on the `incoming` branch there).
 
 Multidomain runs: our other builds are configured without
-`--enable-multidomain`, so the seven tests marked `multicore` (one-shot
-parallel, channel buffer, raw memory, borrow, quicksort frame, the two lock
-tests) are skipped and `parallel_sort` runs sequentially. The AMD clone
+`--enable-multidomain`, so the six tests marked `multicore` (one-shot
+parallel, channel buffer, raw memory, borrow, the two lock tests) are skipped
+and `parallel_sort_array` runs sequentially. The AMD clone
 `~/git/vox-multidomain` is configured with `--enable-multidomain
 --enable-poll-insertion` (configure refuses the first without the second).
 Run the suite there with each batched full run, and before merging changes to
@@ -92,7 +92,7 @@ this file.
         "verified to be 1: 2"). Agent on
         `jujacobs/vox/totality-knot-20260927`: map every route, principled
         fix, Codex review.
-  - [ ] **Effectful callbacks break call congruence (found 27 September):**
+  - [x] **Effectful callbacks break call congruence (found 27 September; fixed, merged `0a76bf52f1`):**
         a call to a total, stateless function is encoded as a function of its
         arguments even when a callback argument is partial and stateful
         (`apply tick 0 = apply tick 0` proved, false at run time). Agent on
@@ -102,17 +102,21 @@ this file.
         existentials, abstract/open types and unpacked modules (possibly
         recursive unless the jkind excludes functions or a recorded guarantee
         holds). Agent on `jujacobs/vox/totality-existentials-20260927`.
-  - [ ] **Ghost-field reads cross locality (found 27 September):** a token
+  - [x] **Ghost-field reads cross locality (found 27 September; fixed with record kinds and a one-field layout hole, `f409ea963e`, `9300e9c1fe`, `f05afd93e9`):** a token
         borrowed for a read escapes its `borrow_` region through a ghost
         field ("verified to be 1: 2"). Agent on
         `jujacobs/vox/ghost-field-locality-20260927`.
-  - [ ] **Out-of-range shift counts (found 27 September):** one
-        uninterpreted function per shift operator equates results that
-        differ between constant-folded and run-time code; a verified program
-        returns false where true was proved, and segfaults through an
-        unchecked string read. Agent on `jujacobs/vox/shift-encoding-20260927`
-        (in-range count as an obligation; audit other unspecified
-        operators; platform in the cache key).
+  - [x] **Out-of-range shifts (found 27 September by the mastery
+        investigation):** one uninterpreted function per shift operator
+        made `(1 lsl n) = (1 lsl 64)` provable for n = 64, false in native
+        code. Branch `jujacobs/vox/shift-encoding-20260927`: every shift
+        in verified code needs a count in [0, 63] (`cbca48d5d5`), the
+        standard shifts are partial and `Int.Refined` has total ones, and a
+        shift may be declared `@@ total` only with that refinement
+        (`fc1e8cdc5e`, a route Codex found). Caches keyed by the solver's
+        platform (`b267ebcecd`). AMD: `./dev test vox` 458 passed, 7
+        skipped; typing-refinement-types 47 passed. Notes in
+        `research/shift-encoding-20260927` (Vox research directory).
   - [ ] Compare refinement predicates with their types (subsumption
         stage 2; design in `research/subsumption-design-20260927`).
 - [ ] **2. Second review round** (brief:
@@ -345,6 +349,12 @@ this file.
       compiled with `-smt-assume-verified`; enforce the solver version; prove
       the four heap laws extensionality now gives; shrink `trust_total`;
       corrected `_trust.md` draft for owner review.
+- [ ] **Proof cleanup from warning 227** (owner: yes, after the soundness
+      fixes merge): remove the ~900 reported unused lemma calls, keeping the
+      two RSA budget helpers and intentional API-exercising calls in test
+      clients; re-verify everything.
+- [ ] **Soundness ledger** for the talk (owner: list all soundness bugs
+      briefly, including the early ones): `research/soundness-ledger-20260927/`.
 - [ ] **14. Upstream OxCaml reports:** the owner wants to understand and be
       convinced first; an agent is reproducing both on upstream OxCaml
       (`research/upstream-bugs-20260927/REPORT.md`). Previously listed: the expect tool overwrites single

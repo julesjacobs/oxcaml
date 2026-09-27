@@ -11,7 +11,7 @@ To get this list for a given program, compile a unit with `-vox-audit`. It print
 
 - The OxCaml type checker, including the mode, uniqueness and ghost checks that make tokens affine and keep ghost code free of run-time effects, and the Vox additions to it (`typing/typecore.ml`).
 - Verification-condition generation and the meaning of built-in operations (`verification/vox_vc.ml`, `verification/vox_encoding.ml`), their translation to SMT-LIB (`verification/vox_smt.ml`), and the solver driver and the reading of its answers (`verification/vox_smt_solver.ml`, `verification/vox_smt_response.ml`, `verification/runtime/vox_verify.enabled.ml`).
-- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort` does through a unique slice.
+- The totality check: a function declared `@@ total` or `@ total` must terminate without raising. Totality does not forbid writes: a total function may write to storage it owns uniquely, as `Quicksort.sort` does through a unique slice. Functions that appear in refinements must also be stateless, so that their result depends only on their arguments. The checker treats every total, stateless function as a function of its arguments, including functions of units it never verified, so each primitive declared `@@ total` must give equal results for equal arguments wherever it is compiled.
 - Ghost erasure (`lambda/translcore.ml`). Ghost code and `void` values are removed before code generation; a ghost argument of any other layout is passed as a placeholder constant. Ghost record fields are removed in native code; bytecode keeps an empty slot for each. A lemma is an ordinary compiled function; only its calls inside `ghost_` are erased.
 - `[@def]` lemmas. For a function marked `[@def]`, the type checker generates a lemma stating that the function equals its body. The verifier assumes it; it holds by construction.
 - The rest of the OxCaml compiler, runtime and standard library, which compile and run the erased program.
@@ -22,6 +22,7 @@ The checker gives these operations a fixed meaning instead of deriving it from c
 
 - `int` is a signed 63-bit integer with wrapping arithmetic; `max_int`, `min_int` and `abs` have their exact values. `Bigint.t` is an unbounded integer with the mathematical operations; `Bigint.div` and `Bigint.modulo` are Euclidean, with `div x 0 = 0` and `modulo x 0 = x` (`stdlib/bigint.mli`). The trailing-zero count of `Vox_table_bits` has its exact value.
 - `=`, `<>`, `<`, `<=`, `>`, `>=` and `compare` are total, stateless and portable at `int`, `bool` and `Bigint.t`, so they may appear in refinements.
+- `lsl`, `lsr` and `asr` are 63-bit shifts for a count in [0, 63]. OCaml leaves other counts unspecified, and native code really differs between evaluations (constant folding against the hardware's masking of the count), so every shift the program performs must have its count proved in range, and the standard shifts are partial. `Int.Refined` has total shifts whose count is refined to that range, and the checker rejects an `external` that declares a shift total without such a refinement.
 - `===` is logical equality: equality of complete values in the solver's model. Inside `assume_` it is checked at run time: exactly at `int`, `bool` and `Bigint.t`, and elsewhere by physical equality, raising `Invalid_argument` when that cannot decide.
 - `Iarray.length`, `get`, `sub`, `append` and `init` have their meaning, and every immutable array has at most 2^60 − 1 elements.
 - `Vox_sequence.length` is the length of a list.
@@ -32,7 +33,7 @@ The checker gives these operations a fixed meaning instead of deriving it from c
 
 ## Declared contracts
 
-An `external` has no body to check, so its type is an assumption: its refinements, its modes and, if it is declared total, its totality. The library's externals are in `verification/library/`: the token, cell and heap operations of `Pref` and `Ghost_pref`; borrowed slices (`borrow.mli`, `borrow_iarray.mli`, `vox_string_view.mli`); `Raw_memory`; the flat hash table's storage (`vox_table_storage.mli`); `Vox_iarray`, `Vox_sequence` and `Vox_control`; all seven atomic operations of `verified_atomic.mli`; and the operations of `Unique_cell`. The standard library's are the operations of `Bigint`, the division operators of `Int.Refined` (nonzero divisor), `Iarray.length` and `Iarray.Refined.get`, and `find` in the `Refined` modules of `Set.MakeTotal` and `Map.MakeTotal`. An interface can hide an external: `Pref.empty`, `Pref.alloc` and `Ghost_pref.alloc` are `val` in their `.mli` and `external` in their `.ml`, as are the operations of `Unique_cell` other than `location`. `-vox-audit` lists them all.
+An `external` has no body to check, so its type is an assumption: its refinements, its modes and, if it is declared total, its totality. The library's externals are in `verification/library/`: the token, cell and heap operations of `Pref` and `Ghost_pref`; borrowed slices and owned arrays (`borrow.mli`, `borrow_iarray.mli`, `vox_string_view.mli`), including `Owned_array.split_at` and `append`, whose results share storage with their arguments; `Raw_memory`; the flat hash table's storage (`vox_table_storage.mli`); `Vox_iarray`, `Vox_sequence` and `Vox_control`; all seven atomic operations of `verified_atomic.mli`; and the operations of `Unique_cell`. The standard library's are the operations of `Bigint`, the division and shift operators of `Int.Refined` (nonzero divisor, count in [0, 63]), `Iarray.length` and `Iarray.Refined.get`, and `find` in the `Refined` modules of `Set.MakeTotal` and `Map.MakeTotal`. An interface can hide an external: `Pref.empty`, `Pref.alloc`, `Ghost_pref.alloc`, `Borrow.Owned_array.split_at` and `append` are `val` in their `.mli` and `external` in their `.ml`, as are the operations of `Unique_cell` other than `location`. `-vox-audit` lists them all.
 
 ## Runtime code
 
@@ -40,7 +41,7 @@ These C and compiler files implement the externals. They are ordinary unverified
 
 - `runtime/bigint.c`: `Bigint`.
 - `runtime/pref.c`: `Pref` cells and tokens, the atomics, unique cells, raw memory and the flat hash table's storage.
-- `runtime/borrow.c`: borrowed slices, `Vox_sequence.length`, and `Vox_iarray.sub` and `set`.
+- `runtime/borrow.c`: borrowed slices, owned arrays (split and appended in place), `Vox_sequence.length`, and `Vox_iarray.sub` and `set`.
 - `runtime/vox_control.c`: the trailing-zero count and the 16-byte control-group scans.
 - `backend/cmm_builtins.ml`: native lowering of these primitives.
 
@@ -65,9 +66,11 @@ A few standard-library functions are made total by a cast, `external trust_total
 The guarantees assume that no linked code outside the standard library, which is trusted with the compiler, uses the following; each can make a refinement false at run time or duplicate ownership. `-vox-audit` lists their uses, including the standard library's.
 
 - `Obj`, the reading functions of `Marshal`, and `input_value`: each can return a value of any type, and the verifier assumes the refinement of the type it is given.
-- Unsafe primitives such as `Array.unsafe_get`, which skip the checks that a refinement would otherwise rely on. The library itself uses one: `Vox_lz4_checked_api` returns its output buffer with `Bytes.unsafe_to_string` after its last write.
+- Unsafe primitives such as `Array.unsafe_get`, which skip the checks that a refinement would otherwise rely on.
 - Other `external` declarations: like the library's, their types are assumptions.
 - A known OxCaml mode-soundness bug: first-class modules do not track the portability and contention of the exception constructors defined inside them, so an exception can carry an uncontended `ref` across capsules (`jane/doc/extensions/_05-modes/reference.md`). Whether it can duplicate a Vox token has not been determined.
+
+The library itself uses two of these, and trusts them. `Vox_lz4_checked_api` returns its output buffer with `Bytes.unsafe_to_string` after its last write. `Vox_parallel.fork_join`, used by the parallel quicksort, runs one branch in a new domain (`Domain.Safe.spawn`), joins it before returning or raising, and applies `Obj.magic_unique` to the joined result, which has no other reference because the domain handle is private and joined once; its interface is plain polymorphism with no refinements.
 
 ## What is not claimed
 

@@ -11,6 +11,13 @@
  }
 *)
 
+(* Talk, section 4e ("time credits: an attack table"). The six rows shown
+   are, in order: Mint ("mint inside an algorithm"), Reuse ("double
+   spend"), Borrowed_spend ("spend a borrowed token"), Ghost_consume
+   ("spend inside ghost_"), Foreign_budget ("a foreign budget") and
+   Free_comparison ("a comparator that doesn't pay"). Every rejection is an
+   existing OxCaml or Vox diagnostic. *)
+
 module Reuse = struct
   module C = Vox_credits.Make ()
   let bad (token : {t : C.token | C.credits t > 0} @ unique total ghost) =
@@ -26,6 +33,21 @@ Line 4, characters 19-24:
 4 |     let _ = C.tick token in
                        ^^^^^
 
+|}]
+
+(* Spending a borrowed token would keep the credit while paying with it. *)
+module Borrowed_spend = struct
+  module C = Vox_credits.Make ()
+  let bad (token : {t : C.token | C.credits t > 0} @ unique total ghost) =
+    let _ = C.tick (borrow_ token) in
+    C.tick token
+end;;
+[%%expect{|
+Line 4, characters 19-34:
+4 |     let _ = C.tick (borrow_ token) in
+                       ^^^^^^^^^^^^^^^
+Error: This value is "local" because it is borrowed.
+       However, the highlighted expression is expected to be "global".
 |}]
 
 module Empty = struct

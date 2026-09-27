@@ -8,7 +8,7 @@ external byte_of_char : (c : char) ->
 let (high4 @ total) : (token : byte) ->
     {high : int | 0 <= high && high <= 15
       && 16 * high <= token && token < 16 * (high + 1)} =
-  fun token -> token lsr 4
+  fun token -> Int.Refined.(token lsr 4)
 
 let (low15 @ total) : (token : byte) ->
     {low : int | 0 <= low && low <= 15

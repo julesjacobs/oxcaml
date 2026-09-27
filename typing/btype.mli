@@ -394,6 +394,12 @@ module Jkind0 : sig
     val relevant_axes_of_modality :
       modality:Mode.Modality.Const.t -> Jkind_axis.Axis_set.t
 
+    (** The axes on which a field's type bounds its record's kind. For a
+        [ghost] field (default [false]) that excludes externality. *)
+    val relevant_axes_of_field :
+      ?ghost:bool -> modality:Mode.Modality.Const.t -> unit ->
+      Jkind_axis.Axis_set.t
+
     val debug_print : Format.formatter -> t -> unit
   end
 
@@ -403,6 +409,7 @@ module Jkind0 : sig
     include Allow_disallow with type (_, _, 'd) sided = 'd t
 
     val add_modality :
+      ?ghost:bool ->
       modality:Mode.Modality.Const.t ->
       type_expr:type_expr ->
       (allowed * disallowed) t ->
@@ -723,6 +730,15 @@ module Jkind0 : sig
     end
 
     val add_with_bounds :
+      modality:Mode.Modality.Const.t ->
+      type_expr:type_expr ->
+      jkind_l ->
+      jkind_l
+
+    (** [add_with_bounds] for a record field. A [ghost] field's type bounds
+        every modal axis but not externality, since it has no slot. *)
+    val add_field_with_bounds :
+      ghost:bool ->
       modality:Mode.Modality.Const.t ->
       type_expr:type_expr ->
       jkind_l ->

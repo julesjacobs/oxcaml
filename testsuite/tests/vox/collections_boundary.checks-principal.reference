@@ -1,7 +1,8 @@
 ok: quicksort.partition runs no model or proof code
+ok: quicksort.partition_middle runs no model or proof code
 ok: quicksort.sort_sized runs no model or proof code
 ok: quicksort.sort runs no model or proof code
-ok: quicksort.parallel_sort runs no model or proof code
+ok: quicksort.sort_owned runs no model or proof code
 ok: functional_queue.enqueue runs no model or proof code
 ok: functional_queue.dequeue runs no model or proof code
 ok: avl_sets.add runs no model or proof code
