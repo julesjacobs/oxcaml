@@ -93,7 +93,7 @@ this file.
   - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
         reference-locks (after deduplication and the inventory comments).
   - [ ] hm-wasm-compiler, after item 3.
-- [ ] **3. HM-to-Wasm is not trivial** (AMD box).
+- [x] **3. HM-to-Wasm is not trivial** (AMD box).
   - [x] Example programs compiled by the verified compiler and run, with
         exact results and resource use, as a suite test: eight programs, all
         agreeing with Node (`hmc_compilation_examples.ml`, merged in
