@@ -86,14 +86,11 @@ this file.
       on other inputs.
   - [x] E-graphs: boundary reviewed (the trusted surface is 13 files, as the
         page says), manifest regenerated, check in the suite.
-- [ ] **5. Bugs an expert could hit live.**
-  - [ ] `include M` with a refinement on an included value: escape error,
-        and a `Refinement_scope_escape` crash with `let rec`.
-  - [ ] `ocamlc -i` drops `@@ total`.
-  - [ ] Spurious escape error with the dependent-parameter sugar.
-  - [ ] `let rec` with a refined parameter: type error with identical types.
-  - [ ] `assert false` counted as returning; `assert e` not assumed after.
-  - [ ] `max_int`, `min_int` and other primitives unknown to the solver.
+- [x] **5. Bugs an expert could hit live**, all fixed with regression tests:
+      the `include` escape error and crash, `-i` dropping `@@ total`, the
+      dependent-parameter sugar, the identical-types `let rec` error (typer
+      branch, merged in `011f3cafb8`); `assert false` and `assert e`,
+      `max_int`/`min_int`/`abs`/shifts (verifier branch, `10d8f2bcd8`).
 - [ ] **6. A person reads the four route pages end to end:** flat hash
       table, Myers diff, one-shot channels, SAT.
 
@@ -110,7 +107,7 @@ this file.
   - [ ] Rings: insert and remove in the `Owned` interface.
   - [ ] Lists/trees: lemma relating `contents`, `nodes` and `List.rev`.
 - [ ] **9. Diagnostics and proof noise.**
-  - [ ] Name the failing conjunct of an `&&` goal (wart 14).
+  - [x] Name the failing conjunct of an `&&` goal (wart 14, `10d8f2bcd8`).
   - [ ] Erasure lints: total function with a ghost result whose body is not
         `ghost_`; real code discarding a ghost result (warts 41, 42).
   - [x] Remove the stale workarounds now unnecessary: about 555 lines net in
