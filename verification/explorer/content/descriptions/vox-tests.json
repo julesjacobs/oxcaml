@@ -1,0 +1,1247 @@
+{
+ "_about": "testsuite/tests/vox/ (1,716 files). The directory key itself belongs to top-level.json, so the directory-level text is on README.md. About a hundred entries: one representative file per family of prefixes (hmc, wasm, hm, the HM development stages, effective, pref, mode, ghost, level, egraph, copy, lz4 and the smaller demo families), and the checker's regression tests grouped by topic in notes: totality and negative recursion; ghost and erasure; refinement typing and subsumption; soundness regressions; cache determinism. The demo tests are covered by the demo tours, which the entries link to. All Vox-only, so `what` only. American spelling.",
+ "_sources": "The code at HEAD 5c5e606aaf (outside verification/explorer and verification/site identical to trunk a0b99ddfeb): each file's TEST header and leading comment, the README, the catalogue pages' sources lists, design-docs/unifier-pr-sequence.md for the HM stages, research/mastery-20260927/INDEX.md Part C for the soundness record, git log for when regressions were added. Status of soundness items per the brief: shifts, call congruence and ghost-field locality fixed and merged; hidden types in the totality check and name-keyed built-ins in progress, unmerged; W1 open.",
+ "_talk_tests": "The talk tests (talk_*.ml, talk-*/, property_testing*.ml) and verification/talk/TESTS.md are on trunk after this worktree's HEAD (commits 001c5702df and 3cec777a08), so they cannot be described here without failing validation. Entries for them are drafted under _pending below, ready to be moved to top-level keys once the explorer is rebased onto trunk. talk_soundness_totality_knot.ml, builtin_declaration_identity.ml and talk_soundness_borrow_symbol.ml live on the unmerged fix branches only.",
+ "testsuite/tests/vox/README.md": {
+  "what": {
+   "short": "The guide to the Vox tests: a first tour, how proof, rejection and boundary tests are written, and one section per demo family.",
+   "long": [
+    "**How the tests are organized.** Proof tests compile once, as bytecode; public clients, representation tests and run-time tests run in both bytecode and native code. Rejection tests are expect files that pin the whole error and keep an accepted phrase as a positive control. Boundary tests (`*_boundary.ml`) compile a library in one directory, copy only its public `.cmi` (and `.cmx`) files to a second, compile the client there, and check emitted `-dlambda`/`-dcmm` text with a checker built on [emitted_code.ml](src:testsuite/tests/vox/emitted_code.ml). Most tests compile `verification/library` modules in place, through `source_directories` and `prebuilt_modules`.",
+    "**The large families.** Most of the 1,716 files belong to a few demos, one module per file:\n\n- `hmc_*` (687): the HM-to-WebAssembly compiler and its chain of simulation proofs; start at [hmc_compiler.ml](src:testsuite/tests/vox/hmc_compiler.ml) or the [tour](tour:hm-wasm-compiler).\n- `wasm_*` (162): the WebAssembly model that compiler is proved against, and its differential test against Node.\n- `hm_*` (151) and the stage families `unifier`, `stlc`, `copy`, `level`, `generalize`, `effective`, `representative`, `structure`, `compression`, `pooled`, `optimized`, `marked`, `pruned`, `nested_pool`, `provenance`: the verified Hindley–Milner inference and the stages that led to it; start at [hm_inference.mli](src:testsuite/tests/vox/hm_inference.mli) or the [tour](tour:hindley-milner).\n- `pref_*` (55): typed heaps, and the list, tree and ring demos over them; `mode_solver_*` (34), `egraph_*` (22), `lz4*` (17), `sat_*`, `dfa_*`, `regex*`, `register_allocation*`, `quicksort*`, `flat_hashtbl*`: the other demos.\n\nEach demo's files are walked through by its demo tour, for example the [flat hash table tour](tour:flat-hash-table); the entries below describe one representative file per family.",
+    "**The checker's own regression tests** are the remaining small files: totality and termination ([negative_totality.ml](src:testsuite/tests/vox/negative_totality.ml)), ghost code and erasure ([ghost_fields.ml](src:testsuite/tests/vox/ghost_fields.ml)), refinement typing ([implicit_refinements.ml](src:testsuite/tests/vox/implicit_refinements.ml)), soundness regressions ([call_congruence.ml](src:testsuite/tests/vox/call_congruence.ml), [int_shift_range.ml](src:testsuite/tests/vox/int_shift_range.ml), [ghost_field_ownership.ml](src:testsuite/tests/vox/ghost_field_ownership.ml), [predicate_variance.ml](src:testsuite/tests/vox/predicate_variance.ml)) and the verification caches ([verify-cache-determinism/](src:testsuite/tests/vox/verify-cache-determinism/)).",
+    "The README's stage table and demo sections were written as the stack grew; where they and a test's own header disagree, the header is newer."
+   ]
+  }
+ },
+ "testsuite/tests/vox/verify-cache-determinism/": {
+  "what": {
+   "short": "Checks that a compilation's output does not depend on what the query cache already holds: cold, warm, and warmed by another file.",
+   "long": "`run.sh` compiles `x_names.ml` and `y_names.ml`, which send the same SMT-LIB text under different source names, and `two_groups.ml`, whose batch is refuted before its single obligations. Counterexamples are printed with source names and single obligations search for small values, neither of which is in the query text, so both are part of the query cache key (commit 8bd508090c)."
+  }
+ },
+ "testsuite/tests/vox/verify-cache-determinism/test.ml": {
+  "what": {
+   "short": "The ocamltest driver for the determinism check; it runs run.sh, which drives separate compiler processes with VOX_VERIFY_CACHE set."
+  },
+  "notes": [
+   {
+    "title": "Why names are in the key",
+    "from": "(* A refuted query's counterexample is shown with the source names of its",
+    "span": 10,
+    "text": "Two files that produce identical query text must still print their own variable names in the counterexample. Without the names in the key, a warm cache would replay `x = 0` for `y_names.ml`."
+   }
+  ]
+ },
+ "testsuite/tests/vox/verify-cache-identity/": {
+  "what": {
+   "short": "Checks that both verification caches identify the solver by its reported version and platform, so a different solver at the same path does not replay old results.",
+   "long": "`run.sh` installs a wrapper `./solver` whose version and behavior change between steps, and a rebuilt compiler whose digest differs. A solver that fails every query can succeed only from a cache."
+  }
+ },
+ "testsuite/tests/vox/verify-cache-identity/test.reference": {
+  "what": {
+   "short": "The nine expected steps: the unit cache is keyed by compiler digest and solver version, the query cache by solver version only, and a solver without a version answer caches nothing."
+  },
+  "notes": [
+   {
+    "title": "Reading the steps",
+    "from": "1 (version 1.0, working): accepted",
+    "to": "9 (no version, failing): rejected",
+    "text": "Steps 2 and 3: a failing version 2.0 is rejected with both caches warm, because neither key matches. Steps 4 and 5: back to version 1.0, both caches answer. Step 6: a rebuilt compiler misses the unit cache; step 7: the query cache still answers, since its key has no compiler digest (8619ac8ff2). Steps 8 and 9: a solver that hangs on `-version` gets no cache at all."
+   }
+  ]
+ },
+ "testsuite/tests/vox/set-imported-provenance/": {
+  "what": {
+   "short": "Pins that the verifier does not give Set semantics to a Set.MakeTotal instance created in another compilation unit and reached through an alias.",
+   "long": "`provider.ml` applies `Set.MakeTotal` to an order with checked laws and exports an alias; `rejected.ml` cannot prove `mem x (singleton x)` through it. The encoding reduces module shapes to recognize instances, but reads shapes only of the standard-library units (`read_unit_shape` in [vox_encoding.ml](src:verification/vox_encoding.ml)), so an instance from a user unit stays opaque. The same check exists for `Map` in [map-imported-provenance/](src:testsuite/tests/vox/map-imported-provenance/)."
+  }
+ },
+ "testsuite/tests/vox/map-imported-provenance/": {
+  "what": {
+   "short": "The Map version of set-imported-provenance: membership after Refined.singleton cannot be proved through an instance imported from another unit."
+  }
+ },
+ "testsuite/tests/vox/call_congruence.ml": {
+  "what": {
+   "short": "Regression for the call-congruence hole: a call is a logical function of its arguments only when every argument is total and stateless at the call.",
+   "long": [
+    "Before the fix (merged in 0a76bf52f1), a call to a total, stateless head such as `apply` was encoded as an uninterpreted function whatever its arguments, so `apply tick 0 = apply tick 0` was proved for a stateful `tick`, and a compiled program printed a claim its run contradicted.",
+    "The test covers direct calls, `List.map`, a proved-dead branch that is reachable, partial applications, local closures, unmentioned parameters, closures inside data and behind abstract types, labelled arguments, transparent definitions, and `Set` membership through a closure-valued key. Each rejection has an accepted control with a total, stateless argument."
+   ]
+  },
+  "notes": [
+   {
+    "title": "The exploit",
+    "from": "(* Two calls of [apply tick 0] return 1 and 2. *)",
+    "to": "(* The standard library's total [List.map] is no different. *)",
+    "text": "Two equal-looking calls return 1 and 2 at run time. The claim `a = b` is now refuted, since the argument `tick` is partial and each call gets a fresh result."
+   },
+   {
+    "title": "A dead branch that is reachable",
+    "from": "(* The same mismatch would make a reachable branch look dead. *)",
+    "span": 9,
+    "text": "The same encoding error would let `unreachable_ ()` be proved in a branch that runs."
+   },
+   {
+    "title": "Controls",
+    "from": "(* Controls. A total, stateless argument keeps the call stable, directly, in",
+    "to": "(* A parameter that the contract mentions must be total and stateless. *)",
+    "text": "With a total, stateless argument (`inc`), the calls stay congruent: through `apply`, `List.map`, a partial application and a transparent definition."
+   },
+   {
+    "title": "Sets over effectful keys",
+    "from": "(* Set and map operations are modelled through the ordering, which calls into",
+    "span": 25,
+    "text": "`Set.MakeTotal` membership is modelled through the element ordering, which calls into the elements. For keys that are closures, two `mem` calls on the same key may differ, so stability is refuted; a set of integers keeps its model."
+   }
+  ]
+ },
+ "testsuite/tests/vox/int_shift_range.ml": {
+  "what": {
+   "short": "Regression for out-of-range shifts: every shift in verified code needs a count proved in [0, 63], and a shift declared total must refine its count.",
+   "long": [
+    "OCaml leaves `lsl`, `lsr` and `asr` unspecified outside [0, 63], and compiled code differs: native constant folding gives `1 lsl 64 = 0`, while arm64 computes `1 lsl n` with `n = 64` as 1. Before the fix (merged in cca8ba889a) one uninterpreted function per operator made `(1 lsl n) = (1 lsl 64)` provable, and a string read built on it segfaulted natively.",
+    "The standard shifts are now partial; total code and predicates use `Int.Refined`, whose count is refined. The same merge added the platform to the cache keys."
+   ]
+  },
+  "notes": [
+   {
+    "title": "The original claim, refuted",
+    "from": [
+     "(* OCaml leaves a shift by a count outside [0, 63] unspecified, and compiled",
+     "let same (n : {n : int | n = 64})"
+    ],
+    "span": 24,
+    "text": "`same`, `same_lsr` and `same_asr` are the reproducers; each is now rejected with the counterexample `n = 64`, and a negative count is rejected too."
+   },
+   {
+    "title": "Standard shifts are partial",
+    "from": "(* The standard shifts are not total, since their result for other counts",
+    "to": "module Named = struct",
+    "text": "`x lsl 3` in a total function is a mode error, since `#lsl` is partial. The refined shift is accepted when the count is proved in range, and `Int.Refined.(x lsl n)` with an arbitrary `n` fails at the refinement in `int.mli`."
+   },
+   {
+    "title": "Declaring a total shift",
+    "from": "(* A total, stateless function is a function of its arguments even in a unit",
+    "to": "external shift : int -> int -> int = \"%lslint\";;",
+    "text": "An `external` for `%lslint` declared `@@ total` must refine its count to exactly [0, 63]; `n <= 63` alone is refused. This closes the route through a unit that is never verified."
+   }
+  ]
+ },
+ "testsuite/tests/vox/ghost_field_ownership.ml": {
+  "what": {
+   "short": "Regression for ghost-field ownership: reading a ghost field inherits the record's uniqueness, linearity, visibility, contention and locality.",
+   "long": [
+    "Two holes are pinned here. The uniqueness hole (fixed in ec365027eb): a ghost-field read was always unique, so a token in an aliased record could be taken twice. The locality hole (fixed and merged in a0b99ddfeb): a read was always global and construction accepted local values, so a token borrowed with `borrow_` could escape its region. Each compiled exploit printed \"verified to be 1: 2\".",
+    "It also checks record kinds: a record may cross an axis only if its ghost fields' types do. `design-docs/ghost.md` still describes the old rule."
+   ]
+  },
+  "notes": [
+   {
+    "title": "The uniqueness exploit",
+    "from": "(* The end-to-end exploit: two unique tokens for one cell. Compiled, it",
+    "to": "(* Projection from an aliased record. *)",
+    "text": "Taking the token out of an aliased `cell` is now a uniqueness error. The cases that follow cover projection, patterns, unboxed records, record update, exception payloads, construction and linearity."
+   },
+   {
+    "title": "Locality",
+    "from": "(* Locality. The placeholder read from a ghost field is fabricated, so no",
+    "span": 6,
+    "text": "The placeholder read from a ghost field touches no memory, but locality is what confines `borrow_` to its region, so a ghost read must stay local."
+   },
+   {
+    "title": "The read-side exploit",
+    "from": "(* The read-side exploit: [peek] hands out the token of a borrowed record,",
+    "span": 17,
+    "text": "`peek` returns the token of a borrowed record, which `one` then uses to read after the owner has written. The escape from the borrow region is now a locality error."
+   },
+   {
+    "title": "The store-side exploit",
+    "from": "(* The store-side exploit: a borrowed token is stored in a record that",
+    "span": 8,
+    "text": "Storing a borrowed (local) token in a global record is now rejected at construction. `get_borrowed` below is the accepted control: inside the region the borrowed token reads."
+   },
+   {
+    "title": "Kinds count ghost fields",
+    "from": "(* Kinds. A ghost field has no slot, but a record's kind must still account",
+    "span": 5,
+    "text": "An unboxed record holding a token could be sealed as crossing every axis and give its token up twice. The kind of a record now includes its ghost fields' types."
+   }
+  ]
+ },
+ "testsuite/tests/vox/predicate_variance.ml": {
+  "what": {
+   "short": "Regression for phantom predicate parameters (W8): a type parameter that occurs only in a refinement predicate is invariant, so :> cannot move a law from int to bool.",
+   "long": [
+    "Before the fix (70a56a181f), such a parameter was phantom, and `(l :> bool law)` turned a law proved at `int` into the same law at `bool`. The test covers records, unboxed constructors, kind annotations, variance annotations and signatures.",
+    "It also records the open hole W1: predicates are compared without their types, so an abbreviation still unifies `int w` with `bool w`. The subsumption branch closes it; it is not merged."
+   ]
+  },
+  "notes": [
+   {
+    "title": "The coercion that verified",
+    "from": "(* Before the fix this was accepted, and [check] verified. *)",
+    "to": "(* The same through a record field, an unboxed constructor and a kind",
+    "text": "The coercion from `int law` to `bool law` is now a subtyping error."
+   },
+   {
+    "title": "W1, still open",
+    "from": "(* The same through an abbreviation: [put] and [get] share one weak",
+    "to": "(* Coercing a law to itself, and covariant parameters next to a",
+    "text": "Because the parameter is invariant, `cell ()`'s result is not generalized and one cell cannot store a law at `int` and return it at `bool`. The comment names the remaining hole: predicates are compared without their types, so an abbreviation unifies `int w` with `bool w`. No run-time exploit is known."
+   }
+  ]
+ },
+ "testsuite/tests/vox/iarray_length_bound.ml": {
+  "what": {
+   "short": "Every iarray, ghost or real, has a length in [0, 2^60 - 1], so Iarray.length a + 1 cannot wrap."
+  }
+ },
+ "testsuite/tests/vox/heap_extensionality.ml": {
+  "what": {
+   "short": "Heaps that agree at every location are equal: put over put and related identities are proved as === goals on Pref.Heap."
+  }
+ },
+ "testsuite/tests/vox/bitwise_abstraction.ml": {
+  "what": {
+   "short": "A query with a bitwise operation is first tried with the operators abstracted, then as 63-bit bitvectors; the file runs under -smt-resource-limit 150000 to keep that so."
+  }
+ },
+ "testsuite/tests/vox/totality.ml": {
+  "what": {
+   "short": "Totality constrains the function values an expression produces, whatever effects produce them; allocation, printing, captured partial functions and mutable reads are partial."
+  },
+  "notes": [
+   {
+    "title": "A total integer from an effect",
+    "from": "let value_after_effect = (Format.printf",
+    "span": 5,
+    "text": "Printing and then producing `42` at `@ total` is accepted: totality is a property of the function values an expression produces, and `42` is not one."
+   },
+   {
+    "title": "Total is not pure",
+    "from": [
+     "module Pure = struct",
+     "let (allocate_identity @ total) x = ref x;;"
+    ],
+    "to": "module Captured = struct",
+    "text": "`ref` and `print_endline` are partial, so a total function cannot allocate or print. `Pure.apply` is total, yet applied to a printing callback it runs the callback: totality is relative to the arguments, the point behind [call_congruence.ml](src:testsuite/tests/vox/call_congruence.ml)."
+   }
+  ]
+ },
+ "testsuite/tests/vox/negative_totality.ml": {
+  "what": {
+   "short": "Negative recursion cannot make a total function diverge or prove false: matching a negative variant, projecting a recursive record, and an alias-hidden negative type are partial.",
+   "long": [
+    "Total elimination requires the checked `[@@inductive]` guarantee; a type that is recursive through a function argument has none, so `match x with Roll f` is partial. The partial versions stay legal (`Ordinary_partial`). This closed the negative-datatype loophole (9278510f31).",
+    "Types hidden behind an abstract type in a signature, or behind a GADT existential, are the open case: the fix that makes the totality check see through them is in progress and not merged, so this file has no test for it. More totality tests are in [typing-modes/](src:testsuite/tests/typing-modes/) (`totality_*.ml`, `recursive_module_totality.ml`)."
+   ]
+  },
+  "notes": [
+   {
+    "title": "A proof of false through self-application",
+    "from": "module False_proof = struct",
+    "to": "module Negative_record = struct",
+    "text": "`self_apply (Roll self_apply)` would have a total result of type `{u : unit | false}`. It is rejected at the pattern `Roll f`, which is partial."
+   },
+   {
+    "title": "Through an alias",
+    "from": "module Negative_alias = struct",
+    "to": "module Ordinary_partial = struct",
+    "text": "The negative occurrence is hidden behind a type abbreviation; the check expands it."
+   }
+  ]
+ },
+ "testsuite/tests/vox/total_loop_rejected.ml": {
+  "what": {
+   "short": "A while loop in a total function is partial, even while false do () done; the compiler reference pins the error."
+  }
+ },
+ "testsuite/tests/vox/total_ref_rejected.ml": {
+  "what": {
+   "short": "Incrementing a reference in a total function is rejected; the compiler reference pins the error."
+  }
+ },
+ "testsuite/tests/vox/toplevel_total.ml": {
+  "what": {
+   "short": "A non-recursive toplevel binding annotated total stays total, as in a compiled structure, so later phrases can use it in predicates; unannotated toplevel bindings stay partial."
+  }
+ },
+ "testsuite/tests/vox/total_callback_diagnostics.ml": {
+  "what": {
+   "short": "The diagnostic for a callback whose result is total but which is itself partial says to annotate the callback itself: (f : (int -> int) @ total)."
+  }
+ },
+ "testsuite/tests/vox/partial_recursion_interface.ml": {
+  "what": {
+   "short": "When an interface requires totality and a recursive call does not decrease, the error points at the call, as [@ total] on the definition would."
+  }
+ },
+ "testsuite/tests/vox/closure_termination.ml": {
+  "what": {
+   "short": "Recursive calls inside named and returned closures keep their structural or measure obligations; escaped, partially applied and lazy recursive uses are rejected.",
+   "long": "This is the change described in [total-recursion-closures.md](src:design-docs/total-recursion-closures.md)."
+  },
+  "notes": [
+   {
+    "title": "Descent is still required",
+    "from": "module Same_structural = struct",
+    "span": 29,
+    "text": "Inside a closure, a call on the same parameter, or on a fresh parameter with the same name, is not a proper descendant. The `Same_measure` and `Arbitrary_measure` cases below refute measures that do not decrease."
+   },
+   {
+    "title": "Escaped and partial uses",
+    "from": "module Escaped = struct",
+    "to": "module Lazy_body = struct",
+    "text": "The recursive function must be called directly and with every value parameter: binding it to an alias, or partially applying it, is refused, and `lazy` makes the body partial."
+   }
+  ]
+ },
+ "testsuite/tests/vox/scoped_termination.ml": {
+  "what": {
+   "short": "Termination through local callbacks and a fixpoint combinator: an unchanged or delayed measure is refuted, and a partial blocking call is rejected."
+  }
+ },
+ "testsuite/tests/vox/decreases_measures.ml": {
+  "what": {
+   "short": "[@@decreases] measures may call total functions, and a tuple is a lexicographic measure (merge and Ackermann); a measure may not contain a refinement introduction."
+  },
+  "notes": [
+   {
+    "title": "Lexicographic order",
+    "from": "(* The first component must not grow when a later one decreases. *)",
+    "to": "(* A total function without a definition says nothing about its result. *)",
+    "text": "A later component may decrease only while the earlier ones do not grow, and a decreasing `Bigint` component must stay nonnegative; both are refuted with counterexamples."
+   },
+   {
+    "title": "Unchecked introductions are refused",
+    "from": "(* A refinement introduction in a measure would not be checked. *)",
+    "span": 10,
+    "text": "Measures are proved during typing, inside `type_let`, where a `refine_` in the measure would introduce a fact that nothing checks. It is refused with its own error."
+   }
+  ]
+ },
+ "testsuite/tests/vox/structural.ml": {
+  "what": {
+   "short": "Structural recursion over [@@inductive] types: a cyclic let rec value is rejected, a forged inductive signature is refused, and only proper descendants count."
+  },
+  "notes": [
+   {
+    "title": "No cyclic inductive values",
+    "from": [
+     "type two_elements = {xs : int V.List.t | V.List.length xs = 2}",
+     "let rec cycle = V.List.Cons (0, cycle);;"
+    ],
+    "span": 6,
+    "text": "An `[@@inductive]` type cannot be initialized cyclically, which is what makes structural descent sound."
+   },
+   {
+    "title": "Inductive is checked at signatures",
+    "from": "module Forged : sig",
+    "span": 12,
+    "text": "A signature cannot declare a type `[@@inductive]` when its implementation is not."
+   }
+  ]
+ },
+ "testsuite/tests/vox/numerical.ml": {
+  "what": {
+   "short": "Measure-based termination: countdown and Fibonacci, wraparound counterexamples, measures in branches, and the restrictions on what a measure may mention."
+  }
+ },
+ "testsuite/tests/vox/ghost.ml": {
+  "what": {
+   "short": "The ghostliness axis without refinements: ghost values cannot reach real positions (loop bounds, conditions, assert, guards, mutable fields), ghost_ produces them, and mod ghost is refused on kinds."
+  }
+ },
+ "testsuite/tests/vox/ghost_fields.ml": {
+  "what": {
+   "short": "@@ ghost record fields at the type level: reads are ghost, construction evaluates real expressions for effects only, and the field cannot be mutable, in a variant or in an [@@unboxed] record."
+  },
+  "notes": [
+   {
+    "title": "Where the modality is allowed",
+    "from": [
+     "let upd2 r = { r with p = \"replaced and dropped\" }",
+     "type bad = { mutable m : int @@ ghost }"
+    ],
+    "to": "module type Bad = sig",
+    "text": "A ghost field cannot be mutable (there is no slot to write), and `@@ ghost` is not a modality of unboxed records, constructor arguments or inline records."
+   },
+   {
+    "title": "All-ghost records are void",
+    "from": [
+     "type 'a box = { ghost : 'a @@ ghost }",
+     "let bad = [ wrap 1; wrap 2 ]"
+    ],
+    "span": 6,
+    "text": "A record whose fields are all ghost has kind `void`, so it cannot be a list element."
+   }
+  ]
+ },
+ "testsuite/tests/vox/ghost_fields_runtime.ml": {
+  "what": {
+   "short": "Run-time behavior of ghost fields in both backends: no native slot, construction effects only, ghost_ fields not evaluated, all-ghost records void, and Stdlib.Ghost."
+  },
+  "notes": [
+   {
+    "title": "Bytecode keeps a slot",
+    "from": "(* Runtime behaviour of ghost record fields: the field occupies no slot,",
+    "span": 10,
+    "text": "Slot elision is a native-code guarantee. Bytecode represents mixed records as ordinary blocks and keeps a placeholder word per ghost field, as for void-typed fields, hence the separate `.byte.reference` for block sizes."
+   }
+  ]
+ },
+ "testsuite/tests/vox/ghost_erasure.ml": {
+  "what": {
+   "short": "Prints the Lambda of a client of a recursive proof: the client contains no call to the proof helper, whether the proof is a ghost_ call or a proof statement."
+  }
+ },
+ "testsuite/tests/vox/erasure_lints.ml": {
+  "what": {
+   "short": "Warnings 223 and 224: a total function with a ghost result still runs its body unless it is ghost_ (...), and real code that discards a ghost result still runs the call."
+  },
+  "notes": [
+   {
+    "title": "Only ghost_ erases",
+    "from": "(* [ghost_ e] is the only construct that erases. A total function whose",
+    "span": 5,
+    "text": "`@ ghost` restricts where values flow; it does not remove code. The two warnings point at code that looks erased but runs. They change nothing about the program's meaning."
+   }
+  ]
+ },
+ "testsuite/tests/vox/ghost_refinements.ml": {
+  "what": {
+   "short": "Ghost code with refinements: an erased lemma supplies a required fact, erased expressions must be total, and assume_ cannot check a ghost value at run time."
+  },
+  "notes": [
+   {
+    "title": "ghost_ contents must be total",
+    "from": [
+     "let (proof_block @ total) x : {y : int | y >= 0} =",
+     "let rejected_effect () = ghost_ (print_endline \"erased\");;"
+    ],
+    "to": "let rejected_runtime_predicate x =",
+    "text": "Printing, raising and partial closures cannot be erased: erasure is sound only for code that terminates without effects."
+   },
+   {
+    "title": "Static versus run-time use of ghost values",
+    "from": "let static_ghost (x : int) : {y : int | y === ghost_ x} =",
+    "span": 12,
+    "text": "A predicate may mention a ghost value; `assume_`, which runs the predicate, may not."
+   }
+  ]
+ },
+ "testsuite/tests/vox/ghost_runtime.ml": {
+  "what": {
+   "short": "Ghost parameters at run time in both backends: a ghost_ argument is never evaluated, a real argument at a ghost parameter is evaluated and passed, and closures and partial application work."
+  }
+ },
+ "testsuite/tests/vox/ghost_subsumption.ml": {
+  "what": {
+   "short": "Subtyping on the ghost axis of arrows: a function taking a ghost argument can be used where a real argument is expected, and not the reverse, for values, objects and signatures."
+  }
+ },
+ "testsuite/tests/vox/redundant_ghost.ml": {
+  "what": {
+   "short": "Warning 225: ghost_ inside ghost code changes nothing. Predicates are not ghost code in this sense."
+  }
+ },
+ "testsuite/tests/vox/proof_only_binding.ml": {
+  "what": {
+   "short": "Warning 226: a local value computed at run time but used only in ghost code."
+  }
+ },
+ "testsuite/tests/vox/ghost_hints.ml": {
+  "what": {
+   "short": "The hint to wrap an expression in ghost_ (...) appears only where wrapping can help."
+  }
+ },
+ "testsuite/tests/vox/ghost_let_generalization.ml": {
+  "what": {
+   "short": "A non-function let inside ghost code is not generalized, so every use of the bound value is the same instance."
+  }
+ },
+ "testsuite/tests/vox/ghost_units.ml": {
+  "what": {
+   "short": "A ghost parameter used from another compilation unit, through the .cmi round trip, in both backends."
+  }
+ },
+ "testsuite/tests/vox/refinements.ml": {
+  "what": {
+   "short": "Refinement wrappers: refine_ introduces, let refine_ and implicit elimination remove the predicate, and a refinement cannot escape the scope of a binding it mentions."
+  },
+  "notes": [
+   {
+    "title": "refine_ needs a target",
+    "from": [
+     "(* Implicit elimination only removes the predicate; the base type must still",
+     "let unknown x = refine_ x;;"
+    ],
+    "span": 5,
+    "text": "Refinements are never inferred; `refine_` requires a known refinement type from its context."
+   },
+   {
+    "title": "No dropping from function types",
+    "from": "(* A refinement cannot be dropped from a function type, so a function whose",
+    "to": "Error: the refinement type of this expression escapes the scope",
+    "text": "Only the outer refinement of an expression is eliminated. A function whose result mentions a local binding cannot be returned out of its scope."
+   }
+  ]
+ },
+ "testsuite/tests/vox/implicit_refinements.ml": {
+  "what": {
+   "short": "Implicit introduction and elimination at expression boundaries, and their limit: only the outer refinement converts; a refinement inside a list or another type constructor is part of the type.",
+   "long": "This is the rigid behavior on trunk: `unify` compares refined types by payload and alpha-equal predicate, with no subsumption. The subsumption branch changes this and is not merged."
+  },
+  "notes": [
+   {
+    "title": "No deep conversion",
+    "from": "let refined_elements : {n : int | n >= 0} list = [0; 1]",
+    "span": 12,
+    "text": "A `{n : int | n >= 0} list` is not an `int list`: the refinement inside the list is part of the type. Extracting elements one at a time is the supported route."
+   },
+   {
+    "title": "Nor the other way",
+    "from": [
+     "val extracted : {n : int | n >= 0} list -> int = <fun>",
+     "let no_deep_conversion (xs : int list)"
+    ],
+    "span": 8,
+    "text": "An `int list` cannot be checked into a list of refined elements by one obligation."
+   }
+  ]
+ },
+ "testsuite/tests/vox/function_refinement.ml": {
+  "what": {
+   "short": "Checked adaptation of function refinements: an expected function type eta-wraps a local function and proves its result refinement pointwise."
+  }
+ },
+ "testsuite/tests/vox/dependent.ml": {
+  "what": {
+   "short": "Dependent arrows: results and recursive callback domains can depend on arguments; a client checked against a well-founded recursion combinator's signature only."
+  }
+ },
+ "testsuite/tests/vox/deferred_arguments.ml": {
+  "what": {
+   "short": "Non-variable arguments to dependent functions: stable literals and immutable projections are accepted, evaluation order and single evaluation are kept, and effectful arguments need a let."
+  }
+ },
+ "testsuite/tests/vox/refined_let_instance.ml": {
+  "what": {
+   "short": "A local let of a value with a refined type is not generalized, so its facts are stated and used at one instance."
+  }
+ },
+ "testsuite/tests/vox/predicate_equality.ml": {
+  "what": {
+   "short": "= in a refinement is interpreted only at int, bool and Bigint.t; other types need the logical equality ===."
+  }
+ },
+ "testsuite/tests/vox/predicate_ascription.ml": {
+  "what": {
+   "short": "Inside a predicate, a type ascription is only logical: the ascribed type's refinement is dropped."
+  }
+ },
+ "testsuite/tests/vox/polymorphic_constructor_values.ml": {
+  "what": {
+   "short": "A polymorphic value built only from constructors and literals is reflected at every instance in its compilation unit."
+  }
+ },
+ "testsuite/tests/vox/locally_abstract_refinement.ml": {
+  "what": {
+   "short": "type a. scopes over refinement predicates, also under -principal."
+  }
+ },
+ "testsuite/tests/vox/escape_argument.ml": {
+  "what": {
+   "short": "When a refinement mentions an argument that is not a variable, the escape error names the parameter and points at the argument."
+  }
+ },
+ "testsuite/tests/vox/principal.ml": {
+  "what": {
+   "short": "Mode crossing for ordinary polymorphic comparisons inside refinement predicates, under -principal."
+  }
+ },
+ "testsuite/tests/vox/equality.ml": {
+  "what": {
+   "short": "=== is logical equality in predicates and a checked equality in assume_."
+  }
+ },
+ "testsuite/tests/vox/definitions.ml": {
+  "what": {
+   "short": "[@def] definition equations: explicit f_def calls prove facts about calls, and an ignored lemma exposes no equation."
+  }
+ },
+ "testsuite/tests/vox/transparent_definitions.ml": {
+  "what": {
+   "short": "[@def transparent] names a non-recursive predicate or function whose definition the verifier unfolds at every direct application."
+  }
+ },
+ "testsuite/tests/vox/datatypes.ml": {
+  "what": {
+   "short": "SMT datatype reasoning for tuples, records, variants, patterns and recursive trees."
+  }
+ },
+ "testsuite/tests/vox/unchecked.ml": {
+  "what": {
+   "short": "refine_ x into {n : int | false} is refuted; accepted when refinements were only a type former, it now shows rejection by VC generation."
+  }
+ },
+ "testsuite/tests/vox/verification.ml": {
+  "what": {
+   "short": "VC generation basics: branches and successful run-time checks prove introductions; false claims and wraparound are rejected."
+  }
+ },
+ "testsuite/tests/vox/smt.ml": {
+  "what": {
+   "short": "Prints the SMT-LIB serialization of hand-built Vox_smt queries without running Z3."
+  }
+ },
+ "testsuite/tests/vox/smt_solver.ml": {
+  "what": {
+   "short": "Runs hand-built queries against Z3 and prints the verdicts; also built by verification/tests/dune and compared with smt_solver.reference."
+  }
+ },
+ "testsuite/tests/vox/unused_proof_steps.ml": {
+  "what": {
+   "short": "Warning 227 (off by default): lemma calls, assume_s and refined arguments whose facts no proof in their function used, found from Z3's unsat cores."
+  }
+ },
+ "testsuite/tests/vox/emitted_code.ml": {
+  "what": {
+   "short": "The pattern matcher the boundary tests use on dumped Lambda and Cmm: literal text with %d, %w and %s wildcards, each %w captured."
+  }
+ },
+ "testsuite/tests/vox/library_build.ml": {
+  "what": {
+   "short": "Builds verification/library as build.sh does, verified by ocamlc (-principal except for the exempt modules), then natively with -smt-assume-verified; a checker compares the module list."
+  }
+ },
+ "testsuite/tests/vox/hmc_compiler.ml": {
+  "what": {
+   "short": "The main file of the hmc family (687 files): the compiler pipeline from a closed HM term to Wasm bytes and its end-to-end theorems.",
+   "long": [
+    "Each pass states in its result type how its output relates to its input; semantic correctness is proved separately as a chain of machines, each simulated by the next. `Hmc_compilation` wraps `compile` behind the public interface.",
+    "The [HM-to-Wasm tour](tour:hm-wasm-compiler) walks this demo."
+   ]
+  },
+  "notes": [
+   {
+    "title": "The passes",
+    "from": "Pipeline, from a closed de Bruijn term of Hm_declarative to Wasm bytes:",
+    "span": 17,
+    "text": "Specialization (inference, grounding, admission and one monomorphic copy per use), closure conversion, a control-flow graph of one-instruction blocks, tail-call marking, and lowering with the initial heap image."
+   },
+   {
+    "title": "The chain of machines",
+    "from": "The semantic correctness of the passes is",
+    "to": "closure machine to the tail machine directly.",
+    "text": "Source machine, monomorphic and closure machines in lockstep, the tail machine within twice the steps, the heap machine with bounded heap and stack, one dispatcher iteration per heap step, and the decoded bytes. The CFG semantics is skipped: the tail simulation relates the closure machine to the tail machine directly."
+   }
+  ]
+ },
+ "testsuite/tests/vox/hmc_compilation.mli": {
+  "what": {
+   "short": "The public interface of the compiler: compile, the rejection reasons, and the theorems static_validity, safe, reflection, preservation, normal and exhaustion.",
+   "long": "Stated against `Hmc_compilation_model`, which restates what the theorems need independently of the passes' definitions. See the [HM-to-Wasm tour](tour:hm-wasm-compiler)."
+  }
+ },
+ "testsuite/tests/vox/hmc_compilation_public_client.ml": {
+  "what": {
+   "short": "A proof-only client of the public interfaces: it combines the theorems and proves that the compiled identity returns every input, under the resource premise."
+  }
+ },
+ "testsuite/tests/vox/hmc_compilation_rejected.ml": {
+  "what": {
+   "short": "Rejected clients of the compiler: the compiled artifact is sealed, so its evidence cannot be projected, and normal cannot be used without its sufficient-resource premise."
+  }
+ },
+ "testsuite/tests/vox/hmc_compilation_examples.ml": {
+  "what": {
+   "short": "Compiles eight example programs with the public compile and runs them in the Wasm model; checked runs, compared with the source interpreter and recorded with resource use.",
+   "long": "`verification/catalogue/compiler-example/run-examples.sh` runs the same modules in Node."
+  }
+ },
+ "testsuite/tests/vox/hmc_frontend.ml": {
+  "what": {
+   "short": "The frontend: scope check, verified inference, elaboration into a derivation, grounding and admission, and the lemmas that carry HM rejection to the compiler's type errors."
+  }
+ },
+ "testsuite/tests/vox/hmc_admission.ml": {
+  "what": {
+   "short": "Admission: the fragment the rest of the compiler accepts, top-level lets of functions ending in a function, with every inner let monomorphic in the derivation."
+  }
+ },
+ "testsuite/tests/vox/hmc_monomorphic_simulation.ml": {
+  "what": {
+   "short": "Representative of hmc_monomorphic_* and hmc_specializ*: the monomorphic program against the source machine, in lockstep, one step of each per step."
+  }
+ },
+ "testsuite/tests/vox/hmc_closure_program.ml": {
+  "what": {
+   "short": "Representative of hmc_closure_*: closure conversion into a closure table whose entries capture the whole local environment, and the lockstep simulation against the monomorphic program."
+  }
+ },
+ "testsuite/tests/vox/hmc_cfg_simulation.ml": {
+  "what": {
+   "short": "Representative of hmc_cfg_*: the CFG program against the closure program; a CFG step matches one closure step or none, when returning through a scope or a call frame."
+  }
+ },
+ "testsuite/tests/vox/hmc_tail_ir.ml": {
+  "what": {
+   "short": "Representative of hmc_tail_*: marks a recursive function's self-calls in tail position as Tail_call; the tail machine needs at most twice the closure machine's steps."
+  }
+ },
+ "testsuite/tests/vox/hmc_heap_machine.ml": {
+  "what": {
+   "short": "Representative of hmc_heap_* (59 files): the tail machine with values in a bounded heap of tagged cells and a bounded stack of frames, which may stop with heap or stack exhaustion."
+  }
+ },
+ "testsuite/tests/vox/hmc_memory_machine.ml": {
+  "what": {
+   "short": "Representative of hmc_memory_* (52 files): the heap machine's objects, frames and stack laid out as bytes of Wasm linear memory, related to the abstract heap."
+  }
+ },
+ "testsuite/tests/vox/hmc_frame_demo.ml": {
+  "what": {
+   "short": "Representative of hmc_frame_* (31 files), which define fixed-size frames, their codecs and relayout: this test runs sample programs and checks saved frames' capacity and peak depth."
+  }
+ },
+ "testsuite/tests/vox/hmc_wasm_program_binary.ml": {
+  "what": {
+   "short": "Representative of hmc_wasm_* (404 files): emission of the module (one function per block, the dispatcher, eight register globals, table, memory) and the theorems about running its bytes."
+  }
+ },
+ "testsuite/tests/vox/hmc_wasm_program_runtime.ml": {
+  "what": {
+   "short": "The exported run function: a prologue that stores the input from the payload global into the entry frame, then the dispatcher loop that calls each block through call_indirect."
+  }
+ },
+ "testsuite/tests/vox/hmc_wasm_program_input.ml": {
+  "what": {
+   "short": "The input as a run-time value: the memory image is built for a placeholder, and the proof shows the prologue's store gives the state built for the actual input."
+  }
+ },
+ "testsuite/tests/vox/hmc_wasm_relayout_demo.ml": {
+  "what": {
+   "short": "Runs the internal stages on sample programs and the internal compiler on the identity in the model; its fixture is hmc_wasm_program_state_fixture.ml."
+  }
+ },
+ "testsuite/tests/vox/hmc_source_semantics.ml": {
+  "what": {
+   "short": "The source semantics: an environment machine with explicit continuations over Hm_declarative terms, at the top of the simulation chain."
+  }
+ },
+ "testsuite/tests/vox/hmc_word64.ml": {
+  "what": {
+   "short": "64-bit words as pairs of 32-bit limbs, with total [@def] equality, unsigned comparison and wrapping addition; shared with the HM language's word type."
+  }
+ },
+ "testsuite/tests/vox/hmc_layout.ml": {
+  "what": {
+   "short": "The memory layout record the compiler takes: table, frame, stack and heap bases, heap limit, stack capacity and host call capacity."
+  }
+ },
+ "testsuite/tests/vox/wasm_differential.ml": {
+  "what": {
+   "short": "Differential test of the Wasm model against Node: random modules, mutants and corrupted bytes must get the same validity, trap or return, globals and final memory.",
+   "long": [
+    "The model's fuel and call limits and its unsupported instructions give no verdict and are counted. Without arguments it runs the fixed ocamltest configuration; `verification/wasm-differential/run.sh` runs larger ranges in parallel.",
+    "The catalogue page reports no disagreement on 100,000 modules (seed 1, Node 22). This test is the evidence that the model agrees with engines; there is no proof of it."
+   ]
+  }
+ },
+ "testsuite/tests/vox/wasm_differential_gen.ml": {
+  "what": {
+   "short": "Generates random modules in the model's supported subset, with its own syntax and binary encoder that share no code with the model, so the decoder is tested on bytes it did not produce."
+  }
+ },
+ "testsuite/tests/vox/wasm_differential_harness.js": {
+  "what": {
+   "short": "The engine side of the differential test: Node validates, instantiates and runs each module and reports status, result, globals and memory."
+  }
+ },
+ "testsuite/tests/vox/wasm_binary_execution.ml": {
+  "what": {
+   "short": "Representative of the model's top: decode, instantiate and run a module as a host does, by setting the payload global and calling run."
+  }
+ },
+ "testsuite/tests/vox/wasm_static_module.ml": {
+  "what": {
+   "short": "Validation of a decoded module in the model: sections, limits, exports, and the static typing of function bodies."
+  }
+ },
+ "testsuite/tests/vox/wasm_instruction.ml": {
+  "what": {
+   "short": "The instruction subset of the model and its binary encoding. The catalogue page notes a few opcodes (i32.mul, i64.shl and others) that the model decodes and validates but stops on with Not_supported."
+  }
+ },
+ "testsuite/tests/vox/wasm_calls.ml": {
+  "what": {
+   "short": "Execution with calls in the model, built from the scalar, memory, global and control layers (wasm_scalar, wasm_memory_execution, wasm_control and the rest)."
+  }
+ },
+ "testsuite/tests/vox/hm_inference.mli": {
+  "what": {
+   "short": "The public interface of verified HM inference: infer, and the theorems sound, principal (in continuation-passing form) and rejected against Hm_declarative.typed.",
+   "long": "The [Hindley–Milner tour](tour:hindley-milner) starts here. `result` is abstract, and the evidence behind it cannot be projected ([hm_inference_rejected.ml](src:testsuite/tests/vox/hm_inference_rejected.ml))."
+  }
+ },
+ "testsuite/tests/vox/hm_inference.ml": {
+  "what": {
+   "short": "Implements the public interface over Verified_hm, keeping the source term and the evidence in ghost fields of a refined record."
+  }
+ },
+ "testsuite/tests/vox/verified_hm.mli": {
+  "what": {
+   "short": "The internal interface behind Hm_inference: inference with its ghost evidence, readback of the inferred type, and elaboration into a typed derivation used by the compiler."
+  }
+ },
+ "testsuite/tests/vox/hm_declarative.ml": {
+  "what": {
+   "short": "The specification: terms, monotypes and schemes with de Bruijn indices, and the declarative typing relation typed as an [@@inductive] derivation checked by [@def] predicates."
+  }
+ },
+ "testsuite/tests/vox/hm_routed_infer.ml": {
+  "what": {
+   "short": "The inference algorithm (entry point closed_hm): mutable type nodes as Pref cells, representative-level unification, in-node copy forwarding and per-level pools."
+  }
+ },
+ "testsuite/tests/vox/hm_effective_sound.mli": {
+  "what": {
+   "short": "Representative of hm_effective_*: soundness and principality of a completed run from the empty heap, by building a declarative derivation at the readback type."
+  }
+ },
+ "testsuite/tests/vox/hm_effective_complete.mli": {
+  "what": {
+   "short": "Completeness and rejection of a completed run: if the source has a declarative typing the run succeeds, and a failed run contradicts any typing."
+  }
+ },
+ "testsuite/tests/vox/hm_elaboration.ml": {
+  "what": {
+   "short": "Representative of hm_elaboration_*: interpreting inferred types under generalization scopes, used to rebuild a typed derivation from an inference trace."
+  }
+ },
+ "testsuite/tests/vox/hm_interpreter.mli": {
+  "what": {
+   "short": "A typed evaluator for closed, declaratively typed terms whose run-time type-error branches are proved unreachable; evaluation may diverge."
+  }
+ },
+ "testsuite/tests/vox/hm_inference_public_client.ml": {
+  "what": {
+   "short": "The public-only client of HM inference: it builds a derivation for λx. x, uses principal and sound, and checks inferred types at run time in both backends."
+  }
+ },
+ "testsuite/tests/vox/hm_infer.ml": {
+  "what": {
+   "short": "An older inference driver for the original lambda/let fragment, kept as a stage of the development; the routed driver behind Verified_hm covers the full language."
+  }
+ },
+ "testsuite/tests/vox/unifier.ml": {
+  "what": {
+   "short": "Representative of unifier_* (13 files): the first mutable first-order unifier on Pref cells, with ghost execution evidence and rejected wrong implementations.",
+   "long": "It is a stage of the HM development recorded in [unifier-pr-sequence.md](src:design-docs/unifier-pr-sequence.md); see [mutable-unifier.md](src:design-docs/mutable-unifier.md). The HM inference uses the later richer-node unifier."
+  }
+ },
+ "testsuite/tests/vox/unifier_vox_limits.ml": {
+  "what": {
+   "short": "Regressions for Vox proof-ergonomics limits met while writing the unifier: recursive callbacks, dependent arguments and adaptation."
+  }
+ },
+ "testsuite/tests/vox/stlc_infer.ml": {
+  "what": {
+   "short": "Representative of stlc_* (11 files): principal inference for closed simply typed terms, the stage before let-polymorphism.",
+   "long": "See [stlc-inference.md](src:design-docs/stlc-inference.md)."
+  }
+ },
+ "testsuite/tests/vox/copy_spec.ml": {
+  "what": {
+   "short": "Representative of copy_* (22 files): the richer type node (descriptor, level, memo, visited mark) that the final inference uses, and exact scheme instantiation by copying.",
+   "long": "See [scheme-instantiation.md](src:design-docs/scheme-instantiation.md)."
+  }
+ },
+ "testsuite/tests/vox/level_unifier.ml": {
+  "what": {
+   "short": "Representative of level_* (23 files): richer-node unification with occurs check, level lowering before linking, and pool routing by level.",
+   "long": "See [level-generalization.md](src:design-docs/level-generalization.md)."
+  }
+ },
+ "testsuite/tests/vox/generalize_spec.ml": {
+  "what": {
+   "short": "Representative of generalize_* (7 files): pools of nodes, closing levels above a cut to Generic, and the specification of pool generalization."
+  }
+ },
+ "testsuite/tests/vox/effective_unifier_runtime.ml": {
+  "what": {
+   "short": "Representative of effective_* (63 files): unification, copying, lowering and compression stated against effective levels read through representatives."
+  }
+ },
+ "testsuite/tests/vox/representative_level.ml": {
+  "what": {
+   "short": "Representative of representative_* (8 files): levels and pools read through a node's representative."
+  }
+ },
+ "testsuite/tests/vox/compressed_representative.ml": {
+  "what": {
+   "short": "Representative of compression_* and compressed_*: path compression, recorded as explicit edits along a resolution path (Compression_spec.rewritten)."
+  }
+ },
+ "testsuite/tests/vox/structure_link.ml": {
+  "what": {
+   "short": "Representative of structure_* (7 files): structure linking without a unification pair cache."
+  }
+ },
+ "testsuite/tests/vox/pooled_allocator.ml": {
+  "what": {
+   "short": "Representative of pooled_* (7 files): allocation and copying that register new nodes in the current level's pool."
+  }
+ },
+ "testsuite/tests/vox/optimized_unifier.ml": {
+  "what": {
+   "short": "Representative of optimized_* (13 files): the unifier with compression and structure linking integrated, and its derivations."
+  }
+ },
+ "testsuite/tests/vox/marked_occurs.ml": {
+  "what": {
+   "short": "Representative of marked_* and graph_*: an occurs check that caches completed negative searches in each node's visited field and restores them on every return path."
+  }
+ },
+ "testsuite/tests/vox/pruned_lower.ml": {
+  "what": {
+   "short": "Representative of pruned_*, terminal_* and lower_locality_*: level lowering confined to a bounded tree of nodes."
+  }
+ },
+ "testsuite/tests/vox/nested_pool_spec.ml": {
+  "what": {
+   "short": "Representative of nested_pool*: transferring retained finite nodes from a child pool to its parent when a let's right-hand side is closed."
+  }
+ },
+ "testsuite/tests/vox/provenance_spec.ml": {
+  "what": {
+   "short": "Representative of provenance_* and leaf_*: where a low variable came from, a saved root and a path, as needed for principal generalization."
+  }
+ },
+ "testsuite/tests/vox/fast_environment.ml": {
+  "what": {
+   "short": "Representative of fast_*: a forest of weighted trees holding the environment's type nodes for access by index, used by the routed driver."
+  }
+ },
+ "testsuite/tests/vox/prefs.ml": {
+  "what": {
+   "short": "Representative of pref_* (55 files): typed heaps through Pref, updates, frames, old snapshots and stable identity; the list, tree and ring demos build on it.",
+   "long": "The demos: [lists and trees](tour:lists-trees) and [rings](tour:rings). See [typed-heaps.md](src:design-docs/typed-heaps.md)."
+  }
+ },
+ "testsuite/tests/vox/pref_layout.ml": {
+  "what": {
+   "short": "Prints the block size of Pref.alloc's result: 1 word natively, where the token field is omitted, and 2 in bytecode, which keeps a placeholder."
+  }
+ },
+ "testsuite/tests/vox/pref_modes.ml": {
+  "what": {
+   "short": "Tokens are void mod total contended and unique: a consumed token cannot be used again, and payload kinds must be immutable_data."
+  }
+ },
+ "testsuite/tests/vox/pref_rejected.ml": {
+  "what": {
+   "short": "Rejected heap programs: missing permission, stale ownership, ghost writes, false frames and values, and the typed-heap diagonal that closed the untyped-heap paradox."
+  },
+  "notes": [
+   {
+    "title": "The typed-heap diagonal",
+    "from": "module Typed_heap_diagonal = struct",
+    "to": "let wrong_payload (h : int Pref.heap @ immutable)",
+    "text": "A heap of callbacks that read the heap they live in would give Cantor's diagonal inside total ghost code. Projecting `run` from a `callback`, whose type recurs through `callback Pref.heap`, is partial, so `diagonal` cannot be total. This pins the route closed by the typed-heap redesign of 14 to 21 September; see [typed-heaps.md](src:design-docs/typed-heaps.md)."
+   },
+   {
+    "title": "One payload type per heap",
+    "from": "let wrong_payload (h : int Pref.heap @ immutable)",
+    "span": 23,
+    "text": "A `bool` cell cannot be put into an `int` heap, and tokens of different payload types cannot be joined: there is no universal heap to convert through."
+   }
+  ]
+ },
+ "testsuite/tests/vox/pref_list.ml": {
+  "what": {
+   "short": "In-place linked-list reversal with separate ownership for the rest and the reversed prefix, an exact node model, and an unrelated frame preserved.",
+   "long": "Part of [the lists and trees demo](tour:lists-trees)."
+  }
+ },
+ "testsuite/tests/vox/pref_ring_general.ml": {
+  "what": {
+   "short": "Insertion, removal and reversal of separated rings of any length, with the exact physical reverse and flipped heap; the largest ring module.",
+   "long": "Part of [the rings demo](tour:rings)."
+  }
+ },
+ "testsuite/tests/vox/mode_solver_public.mli": {
+  "what": {
+   "short": "Representative of mode_solver_* (34 files): quantifier elimination over Global < Regional < Local, with _exact and _scoped theorems for each operation.",
+   "long": "See [the mode-solver tour](tour:mode-solver). It is a demo about a three-element chain and is not connected to OxCaml's mode solver."
+  }
+ },
+ "testsuite/tests/vox/egraph_boundary.ml": {
+  "what": {
+   "short": "Representative of egraph_* (22 files): compiles the e-graph library, checks five modules' Lambda for proof calls, compiles the public client, and compares the declaration inventory.",
+   "long": "See [the e-graph tour](tour:egraphs)."
+  }
+ },
+ "testsuite/tests/vox/egraph_inventory.ml": {
+  "what": {
+   "short": "Prints every top-level declaration of the e-graph's public semantic files and the trusted primitives they use; a change fails until vox_egraph_rule_handle.spec.json is promoted."
+  }
+ },
+ "testsuite/tests/vox/lz4_boundary.ml": {
+  "what": {
+   "short": "Representative of lz4* (17 files): the LZ4 boundary, public-only client, erasure check, rejected clients and finalizer checks, with the library at -O3 natively.",
+   "long": "See [the LZ4 tour](tour:lz4). The LZ4 tests run natively because their inputs are large."
+  }
+ },
+ "testsuite/tests/vox/vox_lz4_baseline.ml": {
+  "what": {
+   "short": "An unverified raw LZ4 block codec used as a baseline; benchmarks/lz4_throughput.ml checks that the verified codec produces the same bytes."
+  }
+ },
+ "testsuite/tests/vox/lz4_finalizers.ml": {
+  "what": {
+   "short": "Fault injection: when an encode or decode is abandoned by an exception, the raw buffers it allocated are reclaimed by their finalizers (counted through C stubs)."
+  }
+ },
+ "testsuite/tests/vox/sat_boundary.ml": {
+  "what": {
+   "short": "Representative of sat_* (12 files): compiles the library as build.sh does, runs the public client against three interfaces, and checks the emitted code for proof code.",
+   "long": "See [the SAT tour](tour:sat-solver)."
+  }
+ },
+ "testsuite/tests/vox/sat_cdcl_total.ml": {
+  "what": {
+   "short": "Tests the CDCL solver against a truth table, at its size limits, and with the bounded solve whose Unknown means the fuel ran out."
+  }
+ },
+ "testsuite/tests/vox/borrow_demo.ml": {
+  "what": {
+   "short": "Representative of borrow_* (12 files): exact updates through scoped slice loans, split and reborrow reconstruction, preserved frames and snapshots.",
+   "long": "See [borrows-and-slices.md](src:design-docs/borrows-and-slices.md)."
+  }
+ },
+ "testsuite/tests/vox/borrow_rejected.ml": {
+  "what": {
+   "short": "Rejected borrow programs: ownership errors (consumed or suspended handles, escaping loans) and false proofs."
+  }
+ },
+ "testsuite/tests/vox/borrow_runtime.ml": {
+  "what": {
+   "short": "Exercises the runtime/borrow.c primitives directly, without refinements, in both backends."
+  }
+ },
+ "testsuite/tests/vox/borrow_parallel.ml": {
+  "what": {
+   "short": "Disjoint parallel callbacks on slices, the sequential fallback, and joining before an exception propagates; needs a multicore runtime."
+  }
+ },
+ "testsuite/tests/vox/quicksort_rejected.ml": {
+  "what": {
+   "short": "Rejected quicksort programs, including two false-contract mutants (a no-op sort, a zeroing sort) that show each half of the contract is needed.",
+   "long": "See [the quicksort tour](tour:quicksort)."
+  }
+ },
+ "testsuite/tests/vox/flat_hashtbl_boundary.ml": {
+  "what": {
+   "short": "Representative of flat_hashtbl* (11 files): the public check of the flat hash table, public-only client, rejected clients and Lambda/Cmm erasure checks at -O3.",
+   "long": "See [the flat hash table tour](tour:flat-hash-table). `flat_hashtbl_reused.ml`, `_stale.ml` and `_unowned.ml` are compiled without the refinement extension: ownership errors do not need it."
+  }
+ },
+ "testsuite/tests/vox/http_parser.ml": {
+  "what": {
+   "short": "Representative of http_* (10 files): client proofs about feeding chunks (byte accounting, the 16 KiB limit) and run-time tests of the parser.",
+   "long": "See [the HTTP tour](tour:http)."
+  }
+ },
+ "testsuite/tests/vox/dfa_equivalence_proof.ml": {
+  "what": {
+   "short": "The largest file in the directory (7,679 lines): comparison search and partition refinement for DFA tables, with their proofs.",
+   "long": "See [the DFA tour](tour:dfa-equivalence)."
+  }
+ },
+ "testsuite/tests/vox/regex_core.ml": {
+  "what": {
+   "short": "Representative of regex* (8 files): the derivative matcher, its internal automaton and their proofs against membership derivations.",
+   "long": "See [the regex tour](tour:regex-automata)."
+  }
+ },
+ "testsuite/tests/vox/register_allocation.ml": {
+  "what": {
+   "short": "Representative of register_allocation* (8 files): liveness, interference, greedy coloring, renaming and the simulation proof.",
+   "long": "See [the register allocation tour](tour:register-allocation)."
+  }
+ },
+ "testsuite/tests/vox/diff_boundary.ml": {
+  "what": {
+   "short": "Representative of diff* (7 files): the Myers diff's executable functions call no proof, metric or big-integer code, and the public client makes exactly one call.",
+   "long": "See [the Myers diff tour](tour:myers-diff)."
+  }
+ },
+ "testsuite/tests/vox/sorted_arrays.ml": {
+  "what": {
+   "short": "Representative of sorted_array* (7 files): generic binary search with adjacent endpoints, equal ranges, and insertion and removal preserving sortedness.",
+   "long": "See [the binary search tour](tour:binary-search)."
+  }
+ },
+ "testsuite/tests/vox/collections_boundary.ml": {
+  "what": {
+   "short": "Representative of collection* (12 files): the boundary of the queue, AVL sets, sorted arrays, quicksort and sparse overlays, with and without -principal.",
+   "long": "Tours: [queue](tour:functional-queue), [AVL sets](tour:avl-sets), [sparse arrays](tour:sparse-arrays)."
+  }
+ },
+ "testsuite/tests/vox/union_find_online.ml": {
+  "what": {
+   "short": "Representative of union_find* (5 files): the lower-level accounting regressions of the online union-find, below the sealed Vox_connectivity client connectivity.ml.",
+   "long": "See [the union-find tour](tour:online-union-find)."
+  }
+ },
+ "testsuite/tests/vox/concurrency_boundary.ml": {
+  "what": {
+   "short": "Representative of the concurrency families (atomic_*, one_shot_*, unique_lock_*, channel_*): the channels' and locks' boundary, with the Lambda and Cmm free of ghost primitives.",
+   "long": "Tours: [channels](tour:one-shot-channels), [locks](tour:reference-locks)."
+  }
+ },
+ "testsuite/tests/vox/atomic_operations.ml": {
+  "what": {
+   "short": "A counter kept within [0, 1000] through an atomic invariant, updated by exchange, set and fetch_and_add, in both backends."
+  }
+ },
+ "testsuite/tests/vox/rsa_public_client.ml": {
+  "what": {
+   "short": "Representative of rsa* (4 files): derives composition and CRT equivalence through the two public RSA interfaces only, then links and runs in both backends.",
+   "long": "See [the RSA tour](tour:rsa)."
+  }
+ },
+ "testsuite/tests/vox/time_credits_rejected.ml": {
+  "what": {
+   "short": "Representative of the credit tests (time_credits*, big_time_credits*): reuse, oversplitting, overflow, minting, a foreign budget, ghost consumption and free comparisons are rejected.",
+   "long": "The credit discipline is used by [merge sort](tour:merge-sort)."
+  }
+ },
+ "testsuite/tests/vox/iarrays.ml": {
+  "what": {
+   "short": "Representative of iarray* (7 files): iarray literals expose exact lengths and elements, and safe reads expose bounds on normal return."
+  }
+ },
+ "testsuite/tests/vox/int_primitives.ml": {
+  "what": {
+   "short": "Representative of int_* (9 files): the meaning of int primitives in the logic, max_int + 1 = min_int, and the Int module's constants."
+  }
+ },
+ "testsuite/tests/vox/bigints.ml": {
+  "what": {
+   "short": "Representative of bigint* (3 files): unbounded arithmetic, nonnegative decreasing Bigint measures, and Fibonacci beyond machine bounds."
+  }
+ },
+ "testsuite/tests/vox/maps.ml": {
+  "what": {
+   "short": "Standard-library maps with total comparators: refined updates and lookup expose membership and value facts; sets.ml is the Set counterpart."
+  }
+ },
+ "testsuite/tests/vox/polymorphic_sets.ml": {
+  "what": {
+   "short": "Representative of polymorphic_* (9 files): standard-library sets over records compared by rank."
+  }
+ },
+ "testsuite/tests/vox/hof_candidates.ml": {
+  "what": {
+   "short": "Representative of hof_* (4 files): the candidate higher-order contracts compared in design-docs/hof-idioms.md; hof_challenges.ml applies them."
+  }
+ },
+ "_pending": {
+  "verification/talk/": {
+   "what": {
+    "short": "The talk's evidence manifest: TESTS.md maps each slide that quotes a verdict or an output to the test that produces it."
+   }
+  },
+  "verification/talk/TESTS.md": {
+   "what": {
+    "short": "Slide to test: for each quoted verdict or output, the test in testsuite/tests/vox, where the output is read from, and whether it passes on trunk or awaits a named fix.",
+    "long": [
+     "Outputs are read from the first `[%%expect]` block of expect tests, from `*.reference` for run tests and from `*.compilers.reference` for compiler output. Measured numbers (query counts, times, resource counts) are regenerated by a script and are not tests.",
+     "The soundness table (section 6) lists each hole with its test: shifts and call congruence and ghost-field locality pass on trunk with their fixes merged; the totality knot and the name-keyed built-ins await their unmerged fix branches."
+    ]
+   }
+  },
+  "testsuite/tests/vox/talk_soundness_shift_read.ml": {
+   "what": {
+    "short": "The talk's out-of-range shift row: the verified string read that segfaulted natively is now rejected because the count 64 is out of range; an in-range read is the control.",
+    "long": "The plain equation `(1 lsl n) = (1 lsl 64)` is pinned in [int_shift_range.ml](src:testsuite/tests/vox/int_shift_range.ml)."
+   }
+  },
+  "testsuite/tests/vox/talk_midpoint_overflow.ml": {
+   "what": {
+    "short": "The binary-search midpoint: (left + right) / 2 is rejected with a counterexample where upper = max_int and the sum wraps; left + half is accepted."
+   }
+  },
+  "testsuite/tests/vox/talk_flat_hashtbl.ml": {
+   "what": {
+    "short": "The hash table slides: deletion writing EMPTY fails at the no-new-EMPTY premise while 254 is accepted, a commuted symmetric law is a signature mismatch, and 84 needs the law calls."
+   }
+  },
+  "testsuite/tests/vox/talk_heap_frame.ml": {
+   "what": {
+    "short": "Framing with tokens: an exact postcondition frames automatically, a weak one only after Pref.split, and without the split the proof fails; also a function that promises a heap and raises."
+   }
+  },
+  "testsuite/tests/vox/talk-atomics-deletions/": {
+   "what": {
+    "short": "The atomics restriction table: each row deletes one restriction from a copy of Verified_atomic or Unique_cell derived at test time, and records what then compiles and what runs wrong.",
+    "long": "The copies are never stored: `run.sh` derives each by one substitution from the library's current source and the reference records the changed lines, so a copy is always today's interface minus one restriction."
+   }
+  },
+  "testsuite/tests/vox/talk_atomic_erasure.ml": {
+   "what": {
+    "short": "The native Cmm of a lock's try_acquire: the ghost post and transition are passed to caml_vox_atomic_cas as the placeholder 48059 (0xBBBB) and never allocated."
+   }
+  },
+  "testsuite/tests/vox/talk_sat_unknown.ml": {
+   "what": {
+    "short": "unreachable_ () for Unknown verifies against the total, fuel-free solve_complete and is rejected against the fuelled solve, which may run out."
+   }
+  },
+  "testsuite/tests/vox/talk-sat-measure/": {
+   "what": {
+    "short": "A mutant copy of Vox_cdcl_total_proof whose termination measure drops the n+1 weight is rejected in progress_learning; the real module is accepted."
+   }
+  },
+  "testsuite/tests/vox/talk_add_def_interface.ml": {
+   "what": {
+    "short": "ocamlc -i prints a [@def] definition as a function whose type is its equation (add_def), and add_zero is proved by induction through the recursive call."
+   }
+  },
+  "testsuite/tests/vox/property_testing.ml": {
+   "what": {
+    "short": "Properties as lemmas whose proof is a run-time check (let u = () in assume_ u), driven by a fixed-seed random driver; the same output in bytecode, -principal and native -O3 -noassert."
+   }
+  },
+  "testsuite/tests/vox/property_testing_rejected.ml": {
+   "what": {
+    "short": "assume_ () is a compile error, a lemma call to the property is needed for insert_sorted to verify, and the driver's precondition filter is needed for the call to type-check."
+   }
+  },
+  "testsuite/tests/vox/property_testing_lambda.ml": {
+   "what": {
+    "short": "The -dlambda of a property: it evaluates only its claim, sorted (insert x xs), and never re-checks the precondition that every caller has proved."
+   }
+  },
+  "testsuite/tests/vox/talk-playground/": {
+   "what": {
+    "short": "Compiles four playground examples with the native compiler and pins their verdicts, which the browser build must match."
+   }
+  },
+  "testsuite/tests/vox/talk_language_basics.ml": {
+   "what": {
+    "short": "x + 1 > x fails at max_int, x * x >= 0 gets a countermodel of abstract multiplication, and reading a ref in total code is rejected."
+   }
+  },
+  "testsuite/tests/vox/talk_cyclic_list_no_extension.ml": {
+   "what": {
+    "short": "Without -extension refinement_types, let rec ones = 1 :: ones is rejected because list is [@@inductive]; a cyclic value of a non-inductive type is still accepted."
+   }
+  }
+ }
+}

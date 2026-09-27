@@ -1,0 +1,92 @@
+{
+  "_about": "Demo tour of the sparse array overlay. Sources: verification/catalogue/pages/sparse-arrays.md (its sources: list is the backbone), testsuite/tests/vox/collections_boundary.ml and collections_boundary_check.ml for the rejected programs and the erasure check, verification/vox_encoding.ml for the built-in meaning of Iarray.length and Iarray.Refined.get. Every claim re-checked against the code at 8479634adc.",
+  "id": "sparse-arrays",
+  "title": "Sparse array overlays",
+  "kind": "demo",
+  "demo": "sparse-arrays",
+  "order": 50,
+  "summary": [
+    "`Sparse_overlay` is a persistent array made of an immutable base array and a list of overriding writes. Its laws give the value `lookup` returns at every integer index after any sequence of `set` and `clear`, for elements of any `immutable_data` type. The demo is small, and it shows the pattern the larger ones use: operations defined with `let[@def]`, laws proved from the generated equations in a functor, and clients that reason only through the laws.",
+    "The [catalogue page](demo:sparse-arrays) states the claim, the trusted base and the scope."
+  ],
+  "stops": [
+    {
+      "title": "The operations",
+      "path": "testsuite/tests/vox/sparse_overlay.mli",
+      "from": "type ('a : value mod separable) t : immutable_data with 'a",
+      "to": [
+        "val clear",
+        "@@ total"
+      ],
+      "lines": "1-17",
+      "text": "The element kind is `value mod separable`, which admits records with mutable fields, and an overlay is `immutable_data with 'a`: immutable data whenever its elements are. Every operation is `@@ total`. `get` has a dependent type: its index must be proved in bounds for the overlay it reads, `{i : int | 0 <= i && i < length overlay}`. `lookup` accepts any index and returns an option. `base` is available only for `immutable_data` elements."
+    },
+    {
+      "title": "The laws: what lookup returns after set and clear",
+      "path": "testsuite/tests/vox/sparse_overlay.mli",
+      "from": "module Laws (Element : sig type t : immutable_data end) : sig",
+      "to": [
+        "val clear_lookup",
+        "end"
+      ],
+      "lines": "19-49",
+      "text": "The laws are lemmas: total functions returning `unit` refined by their conclusion, and `===` is logical equality. `set_lookup` says that after `set index value overlay`, index `query` reads `Some value` if it equals `index` and is in bounds, and otherwise what it read before. `clear_lookup` says that clearing an index restores the base value `Vox_iarray.at (base overlay) query` there and changes nothing else. With `get_lookup`, `lookup_outside` and the `length` and `base` laws, these determine `lookup` at every index. `Laws` is a functor over an `immutable_data` element type, so for other elements, such as a mutable record, only the types of the operations are checked."
+    },
+    {
+      "title": "A client proof: read after write",
+      "path": "testsuite/tests/vox/sparse_overlay_client.ml",
+      "from": "let (read_after_write @ total)",
+      "to": "    actual",
+      "lines": "14-28",
+      "text": "The client is a functor over any `immutable_data` element type and reasons only through `L = S.Laws (Element)`. The ghost block applies `set_base` and `length_equation` to show that `result` has the length of `source`, which lets the index be re-typed as in bounds for `result`, and `set_lookup` with `get_lookup` then give `r === value`. The same functor proves that the last of two writes wins, that writes to different indices commute and that clearing restores the base, all as equalities of `lookup` at every index. The file instantiates it at `int` and at a record type, and also runs `get` on an overlay of mutable cells, for which no law applies."
+    },
+    {
+      "title": "A rejected client: reading an empty overlay",
+      "path": "testsuite/tests/vox/collections_boundary.ml",
+      "from": "(* sparse_bounds *)",
+      "to": "|}]",
+      "lines": "1060-1074",
+      "text": "This phrase is compiled against the public interfaces only. The two laws tell the checker that an overlay built on `[: :]` has length 0, so index 0 does not satisfy `get`'s refinement, and the error points at that refinement in `sparse_overlay.mli`. The phrases around it reject naming the hidden `updates` field and claiming that a `set` of `value` reads back `Some (value + 1)`."
+    },
+    {
+      "title": "The representation: a base and a list of overrides",
+      "path": "testsuite/tests/vox/sparse_overlay.ml",
+      "from": "type ('a : value mod separable) t : immutable_data with 'a =",
+      "to": "fun values -> {base = values; updates = []}",
+      "lines": "31-47",
+      "text": "An overlay is a record of the base array and an association list from indices to values. The type is abstract in the interface, so clients cannot reach `updates`. The operations are defined with `let[@def]`, which keeps each body opaque behind a generated equation, such as `length_def` or `empty_def`, that a proof calls when it needs the body. `length_known` returns the length refined by both its definition and `Iarray.length`, for use in `get`."
+    },
+    {
+      "title": "Reads and writes",
+      "path": "testsuite/tests/vox/sparse_overlay.ml",
+      "from": "let[@def] (get_raw @ total)",
+      "to": "{overlay with updates}",
+      "lines": "49-83",
+      "text": "`get_raw` searches the overrides and falls back to `Iarray.Refined.get` on the base, a bounds-checked read whose meaning, like that of `Iarray.length`, is built into the checker; these are the demo's trusted base beyond the checker itself. `lookup` checks the bounds and `get` relies on its refinement. `set` removes any earlier entry for the index and conses the new one, and `clear` removes the entry. `set` does not check its index: an out-of-bounds write is stored, never read, and lengthens the list that later operations traverse. Reads and updates are linear in the number of overrides."
+    },
+    {
+      "title": "The one lemma about the association list",
+      "path": "testsuite/tests/vox/sparse_overlay.ml",
+      "from": "let rec (find_remove @ total)",
+      "span": 14,
+      "lines": "16-29",
+      "text": "`find_remove` states the only fact the laws need about the list: finding `query` after removing `index` gives `None` if the two are equal, and otherwise what it gave before. The proof is an induction written as a total recursive function on `bindings`: it unfolds `remove` and `find` with their `_def` equations and calls itself on the tail. It is stated for `immutable_data` elements."
+    },
+    {
+      "title": "The core proof: set_lookup",
+      "path": "testsuite/tests/vox/sparse_overlay.ml",
+      "from": "let (set_lookup @ total)",
+      "to": "else ()",
+      "lines": "138-153",
+      "text": "The law is proved by unfolding `set`, `length` and `lookup` on both overlays and, when `query` is in bounds, `get_raw` and `find` on the new list, whose head is the new entry, and applying `find_remove` to the rest. Outside the bounds both sides are `None` by `lookup_def`. `clear_lookup`, below, has the same shape, with `Vox_iarray.at_get` and `Vox_iarray.at_outside` relating the base read to `Vox_iarray.at`. The solver does the case analysis; each lemma call only supplies an equation."
+    },
+    {
+      "title": "Checked: the operations run no proof code",
+      "path": "testsuite/tests/vox/collections_boundary_check.ml",
+      "from": "audit ~optional:true \"sparse_overlay\"",
+      "span": 3,
+      "lines": "68-70",
+      "text": "[`collections_boundary.ml`](src:testsuite/tests/vox/collections_boundary.ml) compiles `sparse_overlay.ml` with `-dlambda`, compiles the client against the public interfaces, links it and runs it with both compilers. This check requires that the bodies of `empty`, `set`, `clear`, `lookup` and `get` call no `_def` equation and mention neither `find_remove` nor `Vox_iarray`. It is textual and does not follow `get_raw` and `length_known`, which call no proof code either. The audit is optional because the `-principal` build leaves this module out: with `-principal`, `sparse_overlay.ml` does not type-check."
+    }
+  ]
+}

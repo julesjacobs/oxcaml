@@ -1,0 +1,96 @@
+{
+  "_about": "Demo tour. Sources: verification/catalogue/pages/register-allocation.md (its sources: list is the backbone), testsuite/tests/vox/register_allocation_review.md, research/mastery-20260927/demos-algorithms.md §3.9 and §5.5; every claim re-checked against the code at HEAD 8479634adc (92 private lemmas: 94 '@ ghost =' results in register_allocation.ml, less preserves and allocation_domain).",
+  "id": "register-allocation",
+  "title": "Register allocation",
+  "kind": "demo",
+  "demo": "register-allocation",
+  "order": 20,
+  "summary": [
+    "`Register_allocation.allocate` maps the virtual registers of a program for a small register machine onto physical slots: liveness by repeated sweeps, an interference graph, greedy colouring and renaming, with no spilling. `preserves` states that a successful allocation agrees with the source program after any number of steps, and rules out stuck runs.",
+    "Nothing is proved about when `allocate` succeeds: a function that always returned `None` would meet the interface. The [catalogue page](demo:register-allocation) states the claim, scope and trusted base."
+  ],
+  "stops": [
+    {
+      "title": "The interface: one function, two theorems",
+      "path": "testsuite/tests/vox/register_allocation.mli",
+      "from": "val allocate : program -> int -> allocation option @@ total",
+      "to": [
+        "val allocation_domain",
+        "@ ghost @@ total"
+      ],
+      "lines": "3-28",
+      "text": "`allocate` is total, and the two theorems are ghost and total. `preserves` says that if `allocate program physical` returns `Some allocation` and `args` has one value per declared input, then after `fuel` steps the source program and `allocation.code` are observably equal. Every theorem is conditional on `Some`, so the interface promises nothing about when allocation succeeds; success is only tested. `allocation_domain` adds that a successful allocation implies `valid program` and 1 ≤ `physical` ≤ 32, and records `physical`, the register count and the inputs unchanged."
+    },
+    {
+      "title": "The contract: initial states and observation",
+      "path": "testsuite/tests/vox/register_allocation_spec.ml",
+      "from": "let[@def] (source_initial @ total)",
+      "to": [
+        "let[@def] (observable_equal @ total)",
+        "  | _ -> false"
+      ],
+      "lines": "138-171",
+      "text": "Every term in the theorems is defined in this file, which imports no other module; above this range are the instructions, `execute`, `step` and the fuel-indexed `advance`, all total `[@def]` functions over 63-bit wrapping `int`. `source_initial` loads the arguments into a zeroed file of virtual registers. `target_initial` loads them the same way and then copies the input registers into the physical slots listed in `input_slots`, which the allocation chooses. `observable_equal` relates two `Done` states with equal results or two `Running` states at the same program counter; it is false for `Stuck`, even against `Stuck`, so the theorem also rules out stuck runs."
+    },
+    {
+      "title": "A client proof",
+      "path": "testsuite/tests/vox/register_allocation_client.ml",
+      "from": "let (verified_run @ total) :",
+      "to": "Some (advance allocation.code fuel (initial_of_allocation allocation args))",
+      "lines": "33-48",
+      "text": "The client is compiled against `register_allocation.mli` and uses only the two public modules. `verified_run` runs the allocated code for `fuel` steps, and its type states that the result agrees with the source program at the same step count. The proof is the single `ghost_` call to `preserves`, which is erased. The rest of the file runs `allocate` on boundary cases, from a program that loops forever to one with 32 inputs and 64 instructions in 32 slots, and checks when it returns `Some` and when `None`."
+    },
+    {
+      "title": "A rejected client",
+      "path": "testsuite/tests/vox/register_allocation_rejected.ml",
+      "from": "let (stuck_is_equivalent @ total) :",
+      "to": "The refinement is stated here.",
+      "lines": "23-36",
+      "text": "A claim that two stuck states are observably equal is rejected, even with `observable_equal_def` giving the solver the definition at these arguments: a stuck run matches nothing, including another stuck run. The same file rejects a claim that `Done 1` and `Done 2` are equal, and a client that names the private `Register_allocation.graph`. The interface exports no definition of `allocate`, so a client also cannot prove that allocation succeeds on any particular program."
+    },
+    {
+      "title": "The allocator",
+      "path": "testsuite/tests/vox/register_allocation.ml",
+      "from": "(* Allocation entrypoint.",
+      "to": "source_inputs = program.inputs; input_slots}",
+      "lines": "2027-2057",
+      "text": "`allocate` checks `valid` and the slot count, computes liveness with at most 2049 sweeps, requires every register live at entry to be an input, builds the interference graph, colours it greedily with the colours `range physical` and renames every operand. It keeps no certificate: the `ghost_` calls are lemmas about `stabilize` and `color` that the proof uses, and they are erased. The comment's argument that 2048 changing sweeps are the most there can be is not proved; if liveness has not settled, the result is `None`. There is no spilling, so a colouring that does not fit is also `None`."
+    },
+    {
+      "title": "Liveness: any closed solution will do",
+      "path": "testsuite/tests/vox/register_allocation.ml",
+      "from": "let[@def] rec (sweep @ total) code live index = match code with",
+      "to": "[@@decreases fuel]",
+      "lines": "69-87",
+      "text": "Liveness is a list of live sets, one per instruction. `sweep` joins each set with the registers the instruction uses and those live after it that it does not define, and reports whether any set grew; `stabilize` repeats until nothing grows or its fuel runs out, with `[@@decreases fuel]` as the termination measure. The proof never needs the least fixpoint: `stabilize_closed` shows that whatever `stabilize` returns satisfies the dataflow inequations (`closed_from`), and that is all the simulation uses."
+    },
+    {
+      "title": "The key invariant: live registers agree with their slots",
+      "path": "testsuite/tests/vox/register_allocation.ml",
+      "from": "let[@def] (related @ total) registers physical nodes live colors source target =",
+      "to": "  | _ -> false",
+      "lines": "321-332",
+      "text": "`related` is the simulation relation: both machines are `Done` with the same value, or both are running at the same valid program counter, with files of the declared sizes, and every register live at that instruction holds the value of its colour's physical slot. Dead registers may disagree, which is what lets registers with disjoint live ranges share a slot. When an instruction writes a slot, `proper_from` on the interference graph ensures that no other register live across the write has that colour (`safe_write`)."
+    },
+    {
+      "title": "The core proof: preserves re-runs the allocator",
+      "path": "testsuite/tests/vox/register_allocation.ml",
+      "from": "let (preserves @ total) :",
+      "to": [
+        "let (preserves @ total) :",
+        "(advance program.code fuel (source_initial program args))",
+        "(advance target_code fuel"
+      ],
+      "lines": "2615-2658",
+      "text": "`preserves` repeats `allocate`'s steps inside the ghost proof: `stabilize` and `color` are `[@def]` total functions, so the solver reasons about their results symbolically. With the live sets and colouring in hand, it applies `initial_related` to the two initial states, then `advance_related`, an induction on fuel over `step_related`, and finally `related_observable`. The per-instruction case is `execute_related`, above. The file's 92 private lemmas return `@ ghost` results, so their bodies are erased."
+    },
+    {
+      "title": "Erasure, and the trusted base",
+      "path": "testsuite/tests/vox/register_allocation_erasure.ml",
+      "from": "let (with_preservation @ total) program physical args fuel =",
+      "to": "(makeblock 0 with_preservation/0))",
+      "lines": "14-36",
+      "text": "This test compiles, natively with `-drawlambda`, a function that calls `preserves` inside `ghost_` and returns 7, and checks that its body in Lambda is the constant 7. The demo trusts nothing beyond the shared base: the checker, Z3 and the compiler. The one `unreachable_ ()`, in `color_at`, is proved unreachable, and a run-time trap remains. The register machine exists only in `register_allocation_spec.ml`, and nothing relates it to OxCaml's backend or to hardware."
+    }
+  ]
+}
