@@ -50,9 +50,11 @@ let abstract_multiplication (query : Vox_smt.query) =
 (* With VOX_VERIFY_CACHE set, verification results are cached at two levels. A
    unit is not verified again when the compiler, the source, the interfaces it
    imports, the flags and the solver are all unchanged. A solver query is not
-   sent again when its SMT-LIB text and the solver are unchanged; this covers
-   termination checks and the unchanged parts of an edited unit. Only clean
-   successes are recorded. *)
+   sent again when its SMT-LIB text, the compiler and the solver are unchanged;
+   this covers termination checks and the unchanged parts of an edited unit.
+   Only clean successes are recorded. The compiler is identified by a digest of
+   its executable and the solver by the version it reports, both computed once
+   per process; when either is unavailable nothing is cached. *)
 let cache_directory () =
   match Sys.getenv_opt "VOX_VERIFY_CACHE" with
   | None | Some "" -> None
@@ -69,6 +71,30 @@ let record_entry file contents =
     Sys.rename temporary file
   with Sys_error _ -> ()
 
+let tool_identity =
+  lazy
+    (let solver_version () =
+       match
+         Unix.open_process_args_in !executable [| !executable; "-version" |]
+       with
+       | exception Unix.Unix_error _ -> None
+       | channel -> (
+         let version =
+           try String.trim (In_channel.input_all channel)
+           with Sys_error _ -> ""
+         in
+         match Unix.close_process_in channel with
+         | Unix.WEXITED 0 when version <> "" -> Some version
+         | _ | (exception Unix.Unix_error _) -> None)
+     in
+     match Digest.file Sys.executable_name with
+     | exception Sys_error _ -> None
+     | compiler ->
+       Option.map
+         (fun solver ->
+           String.concat "\000" [Digest.to_hex compiler; !executable; solver])
+         (solver_version ()))
+
 let unit_cache_file ~whole_unit =
   let arguments = Array.to_list Sys.argv in
   match cache_directory () with
@@ -79,9 +105,10 @@ let unit_cache_file ~whole_unit =
   | Some _ when not (whole_unit && List.mem !Location.input_name arguments) ->
     None
   | Some directory -> (
-    match Unix.stat Sys.executable_name, Digest.file !Location.input_name with
-    | exception (Unix.Unix_error _ | Sys_error _) -> None
-    | compiler, source ->
+    match Lazy.force tool_identity, Digest.file !Location.input_name with
+    | exception Sys_error _ -> None
+    | None, _ -> None
+    | Some tools, source ->
       let rec flags = function
         | ("-o" | "-I" | "-use-runtime") :: _ :: rest -> flags rest
         | argument :: rest
@@ -102,12 +129,9 @@ let unit_cache_file ~whole_unit =
       in
       let key =
         String.concat "\000"
-          ([ "vox-verify-1";
-             Sys.executable_name;
-             string_of_int compiler.st_size;
-             Printf.sprintf "%.6f" compiler.st_mtime;
+          ([ "vox-verify-2";
+             tools;
              Digest.to_hex source;
-             !executable;
              Option.value (Sys.getenv_opt "OCAMLPARAM") ~default:"" ]
           @ List.sort compare imports
           @ flags (match arguments with _ :: rest -> rest | [] -> []))
@@ -124,8 +148,15 @@ type outcome =
    role. *)
 let source_name label =
   let internal =
-    [ "value"; "reachable"; "observation"; "pattern"; "result";
-      "refinement_function"; "recursive"; "condition"; "argument" ]
+    [ "value";
+      "reachable";
+      "observation";
+      "pattern";
+      "result";
+      "refinement_function";
+      "recursive";
+      "condition";
+      "argument" ]
   in
   label <> ""
   && (not (List.mem label internal))
@@ -139,8 +170,8 @@ let source_name label =
    platforms pick differently. A countermodel found under extra assumptions is
    still a countermodel of the goal, so look for one with every source integer
    within 0, then 1, 10 and 100 of zero, and keep [model] if there is none.
-   Trying the tightest bound first also makes the reported values agree
-   across platforms in most cases. *)
+   Trying the tightest bound first also makes the reported values agree across
+   platforms in most cases. *)
 let smaller_model check ?resource_limit (query : Vox_smt.query) model =
   let bound small symbol : Vox_smt.term option =
     let v = Vox_smt.Var symbol in
@@ -279,18 +310,20 @@ let prove poll check ~batch loc query =
          ~timeout_ms:!timeout_ms query)
   end;
   let cached =
-    Option.map
-      (fun directory ->
-        let text =
-          Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
-            ~timeout_ms:!timeout_ms query
-        in
-        (* The version names the entry format: bump it when an outcome
-           records more, so older entries are not replayed without it. *)
-        Filename.concat directory
-          ("query-4-"
-          ^ Digest.to_hex (Digest.string (!executable ^ "\000" ^ text))))
-      (cache_directory ())
+    match cache_directory () with
+    | None -> None
+    | Some directory ->
+      Option.map
+        (fun tools ->
+          let text =
+            Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
+              ~timeout_ms:!timeout_ms query
+          in
+          (* The version names the entry format: bump it when an outcome records
+             more, so older entries are not replayed without it. *)
+          Filename.concat directory
+            ("query-4-" ^ Digest.to_hex (Digest.string (tools ^ "\000" ^ text))))
+        (Lazy.force tool_identity)
   in
   (* Resource limits make every outcome except a wall-clock timeout or a solver
      failure reproducible, so failures are cached too. *)
@@ -381,26 +414,26 @@ let prove poll check ~batch loc query =
   match outcome with
   | Proved (Some resources)
     when (not batch) && !resource_warning > 0 && resources > !resource_warning
-    ->
+    -> (
     cacheable := false;
     let warning =
       Warnings.Slow_refinement
         { resources; threshold = !resource_warning; limit = !resource_limit }
     in
-    (* Resource counts differ between platforms, so a test harness collects
-       slow proofs in a report rather than in compiler output. *)
-    (match Sys.getenv_opt "VOX_SLOW_PROOFS" with
+    (* Resource counts differ between platforms, so a test harness collects slow
+       proofs in a report rather than in compiler output. *)
+    match Sys.getenv_opt "VOX_SLOW_PROOFS" with
     | Some file when file <> "" ->
       if Warnings.is_active warning
-      then begin
-        try
+      then
+        begin try
           Out_channel.with_open_gen [Open_append; Open_creat; Open_text]
             0o644 file (fun channel ->
               Printf.fprintf channel "%s:%d: %d resource units\n"
                 loc.Location.loc_start.Lexing.pos_fname
                 loc.Location.loc_start.Lexing.pos_lnum resources)
         with Sys_error _ -> ()
-      end
+        end
     | _ -> Location.prerr_warning loc warning)
   | Proved _ -> ()
   | Exhausted ->
