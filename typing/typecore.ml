@@ -7340,6 +7340,132 @@ let rec module_expression_is_alias module_expr =
     module_expression_is_alias module_expr
   | _ -> false
 
+(* A definition lemma states [f x1 ... xn === body], so each parameter must be
+   a variable. [()], tuple and other pattern parameters, and the cases of
+   [function], become a fresh variable matched in the body. *)
+let desugar_definition_parameters sexp =
+  let used = Hashtbl.create 17 in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      expr = (fun self e ->
+        (match e.pexp_desc with
+         | Pexp_ident { txt = Longident.Lident name; _ } ->
+             Hashtbl.replace used name ()
+         | _ -> ());
+        Ast_iterator.default_iterator.expr self e);
+      pat = (fun self p ->
+        (match p.ppat_desc with
+         | Ppat_var { txt; _ } | Ppat_alias (_, { txt; _ }) ->
+             Hashtbl.replace used txt ()
+         | _ -> ());
+        Ast_iterator.default_iterator.pat self p) }
+  in
+  iterator.expr iterator sexp;
+  let counter = ref 0 in
+  let rec fresh () =
+    let name =
+      if !counter = 0 then "arg" else "arg" ^ Int.to_string !counter
+    in
+    incr counter;
+    if Hashtbl.mem used name then fresh ()
+    else (Hashtbl.replace used name (); name)
+  in
+  let rec is_variable pat =
+    match pat.ppat_desc with
+    | Ppat_var _ -> true
+    | Ppat_constraint (pat, _, _) -> is_variable pat
+    | _ -> false
+  in
+  let variable loc =
+    let loc = Location.ghostify loc in
+    let name = fresh () in
+    Ast_helper.Pat.var ~loc (Location.mkloc name loc),
+    Ast_helper.Exp.ident ~loc (Location.mkloc (Longident.Lident name) loc)
+  in
+  (* The matches go after all parameters, so a name bound by a pattern
+     parameter must not be bound again by a later parameter, which it would
+     otherwise shadow. Such a definition is left to be rejected. *)
+  let bound_names pat =
+    let names = ref [] in
+    let iterator =
+      { Ast_iterator.default_iterator with
+        pat = (fun self p ->
+          (match p.ppat_desc with
+           | Ppat_var { txt; _ } | Ppat_alias (_, { txt; _ }) ->
+               names := txt :: !names
+           | _ -> ());
+          Ast_iterator.default_iterator.pat self p) }
+    in
+    iterator.pat iterator pat;
+    !names
+  in
+  let rec shadows_pattern = function
+    | [] -> false
+    | { pparam_desc = Pparam_val (_, _, pat); _ } :: later
+      when not (is_variable pat) ->
+        let names = bound_names pat in
+        List.exists
+          (function
+            | { pparam_desc = Pparam_val (_, _, pat); _ } ->
+                List.exists (fun name -> List.mem name names)
+                  (bound_names pat)
+            | { pparam_desc = Pparam_newtype _; _ } -> false)
+          later
+        || shadows_pattern later
+    | _ :: later -> shadows_pattern later
+  in
+  let rec desugar sexp =
+    match sexp.pexp_desc with
+    | Pexp_newtype (name, jkind, body) ->
+        { sexp with pexp_desc = Pexp_newtype (name, jkind, desugar body) }
+    | Pexp_constraint (body, ty, modes) ->
+        { sexp with pexp_desc = Pexp_constraint (desugar body, ty, modes) }
+    | Pexp_function (params, _, _) when shadows_pattern params -> sexp
+    | Pexp_function (params, constraint_, body) ->
+        let matches = ref [] in
+        let params =
+          List.map
+            (fun param ->
+               match param.pparam_desc with
+               | Pparam_val (Nolabel, None, pat) when not (is_variable pat) ->
+                   let var, ident = variable pat.ppat_loc in
+                   matches := (ident, pat) :: !matches;
+                   { param with pparam_desc = Pparam_val (Nolabel, None, var) }
+               | _ -> param)
+            params
+        in
+        let params, body =
+          match body with
+          | Pfunction_cases (cases, loc, attrs)
+            when Option.is_none constraint_.ret_type_constraint ->
+              let var, ident = variable loc in
+              let param =
+                { pparam_loc = Location.ghostify loc;
+                  pparam_desc = Pparam_val (Nolabel, None, var) }
+              in
+              params @ [param],
+              Some (Ast_helper.Exp.match_ ~loc ~attrs ident cases)
+          | Pfunction_cases _ -> params, None
+          | Pfunction_body body -> params, Some body
+        in
+        begin match body with
+        | None -> sexp
+        | Some body ->
+            let body =
+              List.fold_left
+                (fun body (ident, pat) ->
+                   let loc = Location.ghostify pat.ppat_loc in
+                   Ast_helper.Exp.match_ ~loc ident
+                     [Ast_helper.Exp.case pat body])
+                body !matches
+            in
+            { sexp with pexp_desc =
+                Pexp_function (params, constraint_, Pfunction_body body) }
+        end
+    | _ -> sexp
+  in
+  desugar sexp
+
 let arrow_has_refinement env ty =
   let rec visit seen ty =
     let ty = Ctype.expand_head env ty in
@@ -13103,6 +13229,9 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
               | _ -> false)
             vb.pvb_modes
         in
+        let vb =
+          {vb with pvb_expr = desugar_definition_parameters vb.pvb_expr}
+        in
         if has_total then [vb]
         else
           [{vb with pvb_modes =
@@ -16158,13 +16287,17 @@ let make_definition_lemma_at_level env binding =
   let params, body = match binding.vb_expr.exp_desc with
     | Texp_function {params; body = Tfunction_body body; _} when params <> [] ->
         let params = List.map (fun param ->
-          match param.fp_arg_label, param.fp_kind, param.fp_newtypes with
-          | Nolabel, Tparam_pat ({pat_desc = Tpat_var {id; _}; _} as pat), [] ->
+          match param.fp_arg_label, param.fp_kind with
+          | Nolabel, Tparam_pat ({pat_desc = Tpat_var {id; _}; _} as pat) ->
               id, pat.pat_type
           | _ -> reject param.fp_loc) params in
         params, body
-    | _ -> reject binding.vb_expr.exp_loc
+    | Texp_function _ -> reject binding.vb_expr.exp_loc
+    | _ ->
+        (* A constant [c] gets [c_def : unit -> {u : unit | c === body}]. *)
+        [], binding.vb_expr
   in
+  let constant = params = [] in
   let binder = Ident.create_scoped ~scope:Ident.lowest_scope "u" in
   let bound = Ident.Set.of_list (List.map fst params) in
   let body_ir =
@@ -16205,7 +16338,12 @@ let make_definition_lemma_at_level env binding =
   let mk rexp_type rexp_desc =
     {rexp_type; rexp_desc; rexp_type_constraint = false; rexp_loc = loc}
   in
-  let call = mk (Subst.type_expr subst body.exp_type) (Rexp_apply
+  let call =
+    if constant then
+      mk (Subst.type_expr subst binding.vb_expr.exp_type)
+        (Rexp_ident (Path.Pident id))
+    else
+    mk (Subst.type_expr subst body.exp_type) (Rexp_apply
       (mk (Subst.type_expr subst binding.vb_expr.exp_type)
          (Rexp_ident (Path.Pident id)),
        List.map (fun (id, ty) -> Asttypes.Nolabel, mk ty (Rexp_var id))
@@ -16245,7 +16383,12 @@ let make_definition_lemma_at_level env binding =
         :: argument_modes ret params
     | _ -> assert false
   in
-  let argument_modes = argument_modes binding.vb_expr.exp_type type_params in
+  let unit_parameter = Ident.create_local "unit" in
+  let argument_modes =
+    if constant
+    then [unit_parameter, Alloc.of_const Alloc.Const.legacy]
+    else argument_modes binding.vb_expr.exp_type type_params
+  in
   let arrow id arg ret =
     let binder =
       if Ctype.refinement_ident_occurs id ret then Some id else None
@@ -16268,7 +16411,86 @@ let make_definition_lemma_at_level env binding =
     | Ttuple components -> List.map snd components
     | _ -> assert false
   in
-  let copied_types = instance_list (List.map snd type_params @ types) in
+  let lemma_types = List.map snd type_params @ types in
+  (* Locally abstract types become type variables in the lemma, as in
+     [type_newtype]. They are replaced in fresh copies. *)
+  let newtypes =
+    List.filter_map
+      (function (Texp_newtype (id, _, _, _), _, _) -> Some id | _ -> None)
+      binding.vb_expr.exp_extra
+    @ (match binding.vb_expr.exp_desc with
+       | Texp_function {params; _} ->
+           List.concat_map
+             (fun param ->
+                List.map (fun (id, _, _, _) -> id) param.fp_newtypes)
+             params
+       | _ -> [])
+  in
+  let lemma_types =
+    if newtypes = [] then lemma_types else begin
+      (* The function's own type already has a variable in place of each
+         locally abstract type: find it by matching the function type
+         against the parameter and body types, so that the call in the
+         equation shares it. *)
+      let found = ref [] in
+      let children ty =
+        let children = ref [] in
+        Btype.iter_type_expr (fun t -> children := t :: !children) ty;
+        List.rev !children
+      in
+      let rec matching function_ty ty =
+        let function_ty = expand_head env function_ty in
+        match get_desc ty with
+        | Tconstr (Path.Pident id, [], _)
+          when List.exists (Ident.same id) newtypes ->
+            if not (List.exists (fun (id', _) -> Ident.same id id') !found)
+            then found := (id, function_ty) :: !found
+        | _ ->
+            let left = children function_ty and right = children ty in
+            if List.compare_lengths left right = 0 then
+              List.iter2 matching left right
+      in
+      let rec match_function function_ty params =
+        match params, get_desc (expand_head env function_ty) with
+        | [], _ -> matching function_ty body.exp_type
+        | (_, ty) :: params, Tarrow (_, arg, ret, _) ->
+            matching (tpoly_get_mono arg) ty;
+            match_function ret params
+        | _ :: _, _ -> ()
+      in
+      match_function binding.vb_expr.exp_type params;
+      let variables =
+        List.map (fun id ->
+          match List.find_opt (fun (id', _) -> Ident.same id id') !found with
+          | Some (_, ty) when is_Tvar ty -> id, ty
+          | _ ->
+              id,
+              newgenvar ~name:(Ident.name id)
+                (Jkind.Builtin.value ~why:Univar))
+          newtypes
+      in
+      let lemma_types = copy_types Subst.identity lemma_types in
+      let seen = Hashtbl.create 8 in
+      let rec replace t =
+        if not (Hashtbl.mem seen (get_id t)) then begin
+          Hashtbl.add seen (get_id t) ();
+          match get_desc t with
+          | Tconstr (Path.Pident id, [], _)
+            when List.exists (Ident.same id) newtypes ->
+              link_type t
+                (snd (List.find (fun (id', _) -> Ident.same id id') variables))
+          | Trefine { ref_pred; _ } ->
+              Refinement_predicate.fold_types (fun () t -> replace t) ()
+                ref_pred;
+              Btype.iter_type_expr replace t
+          | _ -> Btype.iter_type_expr replace t
+        end
+      in
+      List.iter replace lemma_types;
+      lemma_types
+    end
+  in
+  let copied_types = instance_list lemma_types in
   let rec split_params params types =
     match params, types with
     | [], types -> [], types
@@ -16278,6 +16500,9 @@ let make_definition_lemma_at_level env binding =
     | _ -> assert false
   in
   let type_params, copied_types = split_params type_params copied_types in
+  let type_params =
+    if constant then [unit_parameter, Predef.type_unit] else type_params
+  in
   (* Share variables with the arguments, but keep their runtime modes separate
      from the normalized logical types. *)
   let copied_types = copy_types Subst.identity copied_types in
@@ -16321,7 +16546,7 @@ let make_definition_lemma_at_level env binding =
       {pparam_loc = loc;
        pparam_desc = Pparam_val (Asttypes.Nolabel, None,
            Ast_helper.Pat.var ~loc
-             (Location.mkloc (Ident.name id) loc))}) params in
+             (Location.mkloc (Ident.name id) loc))}) type_params in
   let syntax = Ast_helper.Exp.function_ ~loc syntax_params
       {mode_annotations = []; ret_mode_annotations = [];
        ret_type_constraint = None}
@@ -16347,7 +16572,8 @@ let make_definition_lemma_at_level env binding =
         let rec contract ty params = match get_desc ty, params with
           | Tarrow ((label, arg_mode, ret_mode, _), arg, ret, commu),
             (id, _) :: rest ->
-              newty (Tarrow ((label, arg_mode, ret_mode, Some id),
+              let binder = if constant then None else Some id in
+              newty (Tarrow ((label, arg_mode, ret_mode, binder),
                              arg, contract ret rest, commu))
           | _, [] -> result
           | _ -> assert false in
