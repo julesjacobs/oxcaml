@@ -102,17 +102,29 @@ let balanced text start =
   go start 0 false false
 
 (* The bodies of the functions bound to [name] in a Lambda dump, in order:
-   [name/N (function ...)] or [name/N = (function ...)]. *)
+   [name/N (function ...)], [name/N = (function ...)] or [name/N =a
+   (function ...)]. *)
 let function_bodies text name =
-  List.concat_map
-    (fun pattern ->
-      List.map
-        (fun (start, _, _) -> start)
-        (find_all (name ^ pattern) text))
-    [ "/%d%s(function"; "/%d%s=%s(function"; "/%d =(function" ]
-  |> List.sort_uniq compare
-  |> List.filter (fun start -> start = 0 || not (is_word text.[start - 1]))
-  |> List.map (fun start -> balanced text (String.index_from text start '('))
+  let len = String.length text in
+  List.filter_map
+    (fun (start, stop, _) ->
+      if start > 0 && is_word text.[start - 1] then None
+      else begin
+        let i = ref stop in
+        let skip () = while !i < len && is_space text.[!i] do incr i done in
+        skip ();
+        (* A let binding's kind follows the =, as in [=a?]. *)
+        if !i < len && text.[!i] = '=' then begin
+          while !i < len && text.[!i] <> '(' && not (is_space text.[!i]) do
+            incr i
+          done;
+          skip ()
+        end;
+        if !i + 9 <= len && String.sub text !i 9 = "(function"
+        then Some (balanced text !i)
+        else None
+      end)
+    (find_all (name ^ "/%d") text)
 
 let function_body text name =
   match function_bodies text name with
