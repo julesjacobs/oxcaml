@@ -2,7 +2,7 @@
 # Builds the Vox playground as a directory of static files.
 #
 #   verification/playground/build.sh [--out DIR] [--library-prefix PREFIX]
-#                                    [--catalogue-url URL]
+#                                    [--catalogue-url URL] [--home-url URL]
 #
 # Needs a configured checkout (see AGENTS.md) and the oxcaml-5.4.0+oxcaml
 # opam switch with js_of_ocaml 6.3.2, plus node and npm. Steps:
@@ -17,7 +17,8 @@
 #    the native Vox uses; CodeMirror 5; coi-serviceworker.
 # 4. Copy the page, the examples, the interfaces and those files into DIR
 #    (default _build/playground/site). The page links to the demonstration
-#    catalogue at URL (default ../catalogue/index.html).
+#    catalogue at URL (default ../catalogue/index.html) and, with
+#    --home-url, to the home page of the site it is part of.
 #
 # The verified library's interfaces are included when PREFIX/lib/ocaml/vox
 # exists (verification/library/build.sh PREFIX installs them there).
@@ -28,11 +29,13 @@ root=$(cd "$here/../.." && pwd)
 out=$root/_build/playground/site
 library_prefix=
 catalogue_url=../catalogue/index.html
+home_url=
 while [[ $# -gt 0 ]]; do
   case $1 in
     --out) out=$2; shift 2 ;;
     --library-prefix) library_prefix=$2; shift 2 ;;
     --catalogue-url) catalogue_url=$2; shift 2 ;;
+    --home-url) home_url=$2; shift 2 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -96,6 +99,10 @@ cp "$modules/codemirror/lib/codemirror.js" "$modules/codemirror/lib/codemirror.c
   "$modules/codemirror/mode/mllike/mllike.js" "$out/codemirror/"
 cp "$here"/web/* "$out/"
 sed -i.orig "s|href=\"../catalogue/index.html\"|href=\"$catalogue_url\"|" "$out/index.html"
+if [[ -n $home_url ]]; then
+  sed -i.orig "s|<nav><a id=\"catalogue-link\"|<nav><a href=\"$home_url\">Vox</a><a id=\"catalogue-link\"|" "$out/index.html"
+  grep -q "href=\"$home_url\">Vox<" "$out/index.html"
+fi
 rm "$out/index.html.orig"
 mkdir -p "$out/examples"
 cp "$here"/examples/*.ml "$here/examples/index.json" "$out/examples/"

@@ -66,10 +66,11 @@ mkdir -p "$out"
 
 echo "== catalogue"
 python3 verification/catalogue/build.py --revision "$revision" --prefix "$prefix" \
-  --output "$out/catalogue"
+  --output "$out/catalogue" --home-url /vox/
 
 echo "== playground"
-verification/playground/build.sh --out "$out/playground" --catalogue-url /vox/catalogue/
+verification/playground/build.sh --out "$out/playground" --catalogue-url /vox/catalogue/ \
+  --home-url /vox/
 # build.sh records HEAD, which may be a commit of this directory's own that
 # is not published; the checker's sources are those of $revision (checked above).
 python3 - "$out/playground/lib/index.json" "$(git rev-parse --short=10 "$revision")" <<'PY'
