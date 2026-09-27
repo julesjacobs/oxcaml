@@ -7960,7 +7960,7 @@ end = struct
         match reduce source limit with None -> false | Some candidate -> valid candidate
         else true} =
     let _proof = ghost_ (
-ghost_ (reduce_def source limit);
+reduce_def source limit;
     let proposal = minimize_proved source limit in
     let u = () in
     match proposal with None | Some _ -> u
@@ -7977,7 +7977,7 @@ ghost_ (reduce_def source limit);
         match result with None -> true | Some candidate ->
           run source word === run candidate word} =
     let _proof = ghost_ (
-      ghost_ (reduce_def source limit);
+      reduce_def source limit;
       let proposal = minimize_proved source limit in
       let u = () in
       (match proposal with
@@ -7985,7 +7985,7 @@ ghost_ (reduce_def source limit);
        | Some packet ->
          let candidate = packet.result_value in
          let certificate = packet.result_proof.ghost in
-         ghost_ (reduction_preserves source candidate certificate word);
+         reduction_preserves source candidate certificate word;
          u)
       : {u : unit | let result = reduce source limit in
           match result with None -> true | Some candidate ->
@@ -8002,7 +8002,7 @@ ghost_ (reduce_def source limit);
             Bigint.compare (state_size candidate) (state_size other) <= 0
           else true} =
     let _proof = ghost_ (
-      ghost_ (reduce_def source limit);
+      reduce_def source limit;
       let proposal = minimize_proved source limit in
       let u = () in
       (match proposal with
@@ -8010,7 +8010,7 @@ ghost_ (reduce_def source limit);
        | Some packet ->
          let candidate = packet.result_value in
          let certificate = packet.result_proof.ghost in
-         ghost_ (minimum_count_source_semantic source candidate certificate
+         (minimum_count_source_semantic source candidate certificate
            other agreement);
          u)
       : {u : unit | let result = reduce source limit in
@@ -8402,10 +8402,10 @@ ghost_ (reduce_def source limit);
       (match compare left right limit with Comparison_limit -> false
          | Equivalent | Inequivalent -> true) else true} =
     let _proof = ghost_ (
-      ghost_ (compare_def left right limit);
+      compare_def left right limit;
       let packet = comparison_proved left right limit in
       let decision = packet.result_proof.ghost in
-      ghost_ (decision_kind_def decision);
+      decision_kind_def decision;
       let u = () in
       (match decision with Equal _ | Different _ | Limit -> u)
       : {u : unit | if valid left && valid right && labels_bounded left && labels_bounded right &&
@@ -8421,13 +8421,13 @@ ghost_ (reduce_def source limit);
     {u : unit | if compare left right limit === Equivalent then
       run left word === run right word else true} =
     let _proof = ghost_ (
-      ghost_ (compare_def left right limit);
+      compare_def left right limit;
       let packet = comparison_proved left right limit in
       let decision = packet.result_proof.ghost in
-      ghost_ (decision_kind_def decision);
+      decision_kind_def decision;
       let u = () in
       (match decision with
-       | Equal relation -> ghost_ (check_agrees left right relation word); u
+       | Equal relation -> check_agrees left right relation word; u
        | Different _ | Limit -> u)
       : {u : unit | if compare left right limit === Equivalent then
         run left word === run right word else true}) in
@@ -8437,10 +8437,10 @@ ghost_ (reduce_def source limit);
     {witness : int list Ghost.t | if compare left right limit === Inequivalent then
       run left witness.ghost <> run right witness.ghost else true} =
     let word = ghost_ (
-      ghost_ (compare_def left right limit);
+      compare_def left right limit;
       let packet = comparison_proved left right limit in
       let decision = packet.result_proof.ghost in
-      ghost_ (decision_kind_def decision);
+      decision_kind_def decision;
       (match decision with
        | Different word -> word
        | Equal _ | Limit -> let word = [] in word)

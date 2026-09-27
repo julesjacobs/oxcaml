@@ -84,10 +84,13 @@ type t =
   | Useless_record_with of string           (* 23 *)
   | Bad_module_name of string               (* 24 *)
   | All_clauses_guarded                     (* 8, used to be 25 *)
-  | Unused_var of { name : string ; mutated : bool } (* 26
+  | Unused_var of { name : string ; mutated : bool ; refined_unit : bool }
+    (* 26
     [mutated] is set if the variable was mutated ([x <- 5]), allowing for a
-    more helpful error message. *)
-  | Unused_var_strict of { name : string ; mutated : bool } (* 27 *)
+    more helpful error message. [refined_unit] is set if its type is a
+    refinement of [unit], whose fact holds without the name. *)
+  | Unused_var_strict of
+      { name : string ; mutated : bool ; refined_unit : bool } (* 27 *)
   | Wildcard_arg_to_constant_constr         (* 28 *)
   | Eol_in_string                           (* 29
       Note: since OCaml 5.2, the lexer normalizes \r\n sequences in
@@ -175,6 +178,10 @@ type t =
   | Unused_alert_disable of string          (* 221 *)
   | Slow_refinement of { resources : int; threshold : int; limit : int }
                                             (* 222 *)
+  | Unerased_ghost_body                     (* 223 *)
+  | Unerased_ghost_call                     (* 224 *)
+  | Redundant_ghost                         (* 225 *)
+  | Proof_only_binding of string            (* 226 *)
 
 type alert = {kind:string; message:string; def:loc; use:loc}
 

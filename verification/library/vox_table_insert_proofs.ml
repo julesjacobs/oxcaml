@@ -147,13 +147,13 @@ module Make (Key : Vox_table_map.Key)
       let no_new_empty : (query : int) ->
           {u : unit | not (M.control after.model query === Some 128) ||
             M.control before.model query === Some 128} @ ghost =
-        fun query -> ghost_ (
+        fun query -> (
           L.byte_write before.model index byte query;
           M.control_def after.model query;
           M.control_def (M.set_byte before.model index byte) query;
           ()) in
       cells_set before.model after.model before.model.slots 0Z
-        (Bigint.of_int index) key value (fun query -> ghost_ (
+        (Bigint.of_int index) key value (fun query -> (
           L.byte_at_primary before.model index byte query; ()));
       Update.clones_byte before.model after.model index byte 15;
       Update.route_preserved before.model after.model (Bigint.of_int index)

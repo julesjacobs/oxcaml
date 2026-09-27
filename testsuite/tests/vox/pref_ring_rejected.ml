@@ -121,6 +121,8 @@ Line 7, characters 8-18:
 7 |     let definition = ghost_ (connected_def before left right) in
             ^^^^^^^^^^
 Warning 26 [unused-var]: unused variable "definition".
+  Hint: the binding is unnecessary, because the fact in its
+  refined type holds without the name; a statement such as "lemma x;" suffices.
 
 Line 12, characters 4-5:
 12 |     t

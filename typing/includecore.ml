@@ -55,6 +55,8 @@ type value_mismatch =
 
 exception Dont_match of value_mismatch
 
+let partial_recursion = Types.Uid.Tbl.create 16
+
 type mmodes =
   | All
   | Specific :

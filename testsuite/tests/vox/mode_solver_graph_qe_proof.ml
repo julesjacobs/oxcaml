@@ -176,14 +176,10 @@ let (assert_graph_subsumption_scoped @ total) :
  fun depth gamma guard obligations -> ghost_ (
   compile_scoped (depth + 1) guard;
   compile_scoped (depth + 2) obligations;
-  ghost_
-    (subsumption_residual_scoped depth
-       (compile guard) (compile obligations));
+  subsumption_residual_scoped depth (compile guard) (compile obligations);
   assert_graph_subsumption_def gamma guard obligations;
   assert_subsumption_def gamma (compile guard) (compile obligations);
-  ghost_
-    (scoped_qf_def depth
-       (assert_graph_subsumption gamma guard obligations));
+  scoped_qf_def depth (assert_graph_subsumption gamma guard obligations);
   ())
 
 let (guarded_at_exact @ total) :
@@ -199,11 +195,10 @@ let (guarded_at_exact @ total) :
          || models (Regional :: value :: env) obligations
          || models (Local :: value :: env) obligations)} @ ghost =
  fun env value guard obligations -> ghost_ (
-  ghost_
-    (eval_def (value :: env)
-       (Disj
-          (Neg (Plain (compile guard)),
-           Exists (Plain (compile obligations)))));
+  (eval_def (value :: env)
+     (Disj
+        (Neg (Plain (compile guard)),
+         Exists (Plain (compile obligations)))));
   eval_def (value :: env) (Neg (Plain (compile guard)));
   eval_def (value :: env) (Plain (compile guard));
   eval_def (value :: env) (Exists (Plain (compile obligations)));
@@ -236,15 +231,12 @@ let (assert_graph_subsumption_exact @ total) :
                  || models (Local :: Local :: env) obligations)))} @ ghost =
  fun env gamma guard obligations -> ghost_ (
   assert_graph_subsumption_def gamma guard obligations;
-  ghost_
-    (assert_subsumption_exact env gamma
-       (compile guard) (compile obligations));
-  ghost_
-    (subsumption_formula_def
-       (compile guard) (compile obligations));
-  ghost_
-    (eval_def env
-       (subsumption_formula (compile guard) (compile obligations)));
+  (assert_subsumption_exact env gamma
+     (compile guard) (compile obligations));
+  (subsumption_formula_def
+     (compile guard) (compile obligations));
+  (eval_def env
+     (subsumption_formula (compile guard) (compile obligations)));
   guarded_at_exact env Global guard obligations;
   guarded_at_exact env Regional guard obligations;
   guarded_at_exact env Local guard obligations;

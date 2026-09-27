@@ -15,8 +15,8 @@ module Dfa_equivalence = struct
       (match compare left right limit with Comparison_limit -> false
          | Equivalent | Inequivalent -> true) else true} =
     let _proof = ghost_ (
-      ghost_ (compare_def left right limit);
-      ghost_ (Dfa_proof.compare_complete left right limit);
+      compare_def left right limit;
+      Dfa_proof.compare_complete left right limit;
       let u = () in u
       : {u : unit | if valid left && valid right && labels_bounded left && labels_bounded right &&
       0 < limit && limit <= 65_536 &&
@@ -30,8 +30,8 @@ module Dfa_equivalence = struct
     {u : unit | if compare left right limit === Equivalent then
       run left word === run right word else true} =
     let _proof = ghost_ (
-      ghost_ (compare_def left right limit);
-      ghost_ (Dfa_proof.compare_equal left right limit word);
+      compare_def left right limit;
+      Dfa_proof.compare_equal left right limit word;
       let u = () in u
       : {u : unit | if compare left right limit === Equivalent then
       run left word === run right word else true}) in
@@ -40,7 +40,7 @@ module Dfa_equivalence = struct
     {witness : int list Ghost.t | if compare left right limit === Inequivalent then
       run left witness.ghost <> run right witness.ghost else true} =
     let witness = ghost_ (
-      ghost_ (compare_def left right limit);
+      compare_def left right limit;
       let witness = Dfa_proof.comparison_witness left right limit in
       let word = witness.Ghost.ghost in
       word
@@ -54,8 +54,8 @@ module Dfa_equivalence = struct
         match reduce source limit with None -> false | Some candidate -> valid candidate
         else true} =
     let _proof = ghost_ (
-      ghost_ (reduce_def source limit);
-      ghost_ (Dfa_proof.reduce_complete source limit);
+      reduce_def source limit;
+      Dfa_proof.reduce_complete source limit;
       let u = () in u
       : {u : unit | if valid source && labels_bounded source &&
         0 < limit && limit <= 64 &&
@@ -69,8 +69,8 @@ module Dfa_equivalence = struct
         match result with None -> true | Some candidate ->
           run source word === run candidate word} =
     let _proof = ghost_ (
-      ghost_ (reduce_def source limit);
-      ghost_ (Dfa_proof.reduce_preserves source limit word);
+      reduce_def source limit;
+      Dfa_proof.reduce_preserves source limit word;
       let u = () in u
       : {u : unit | let result = reduce source limit in
         match result with None -> true | Some candidate ->
@@ -86,8 +86,8 @@ module Dfa_equivalence = struct
             Bigint.compare (state_size candidate) (state_size other) <= 0
           else true} =
     let _proof = ghost_ (
-      ghost_ (reduce_def source limit);
-      ghost_ (Dfa_proof.reduce_minimum source limit other agreement);
+      reduce_def source limit;
+      Dfa_proof.reduce_minimum source limit other agreement;
       let u = () in u
       : {u : unit | let result = reduce source limit in
         match result with None -> true | Some candidate ->

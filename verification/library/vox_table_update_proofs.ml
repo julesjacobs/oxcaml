@@ -21,7 +21,7 @@ module Make (Key : Vox_table_map.Key)
       | [] -> ()
       | _ :: tail ->
         proof 0Z; S.at_def slots 0Z;
-        cells_intro model tail (Bigint.add start 1Z) (fun index -> ghost_ (
+        cells_intro model tail (Bigint.add start 1Z) (fun index -> (
           proof (Bigint.add index 1Z);
           S.at_def slots (Bigint.add index 1Z);
           ()));
@@ -44,7 +44,7 @@ module Make (Key : Vox_table_map.Key)
       match slots, paths with
       | _ :: tail, _ :: rest ->
         routes_intro model tail rest (Bigint.add start 1Z) (fun index ->
-          ghost_ (
+          (
           proof (Bigint.add index 1Z);
           S.at_def slots (Bigint.add index 1Z);
           S.at_def paths (Bigint.add index 1Z);
@@ -63,7 +63,7 @@ module Make (Key : Vox_table_map.Key)
       Invariant.clones_def model count;
       if count > 0 then begin
         proof (count - 1);
-        clones_intro model (count - 1) (fun lane -> ghost_ (proof lane; ()));
+        clones_intro model (count - 1) (fun lane -> (proof lane; ()));
         ()
       end else ())
     [@@decreases count]
@@ -565,12 +565,12 @@ module Make (Key : Vox_table_map.Key)
       Invariant.valid_def before; Invariant.shape_def before.model;
       Vox_table_model_proofs.remove_fields before.model index;
       cells_remove before.model after.model before.model.slots 0Z
-        (Bigint.of_int index) (fun query -> ghost_ (
+        (Bigint.of_int index) (fun query -> (
           Vox_table_model_proofs.byte_at_primary before.model index 254 query;
           ()));
       clones_byte before.model after.model index 254 15;
       routes_remove before.model after.model before.model.slots before.routes 0Z
-        (Bigint.of_int index) (fun query -> ghost_ (
+        (Bigint.of_int index) (fun query -> (
           Vox_table_model_proofs.byte_write before.model index 254 query;
           M.control_def after.model query;
           M.control_def (M.set_byte before.model index 254) query;
@@ -733,7 +733,7 @@ module Make (Key : Vox_table_map.Key)
         Invariant.Map.put_distinct before.model.slots key value;
         Invariant.Map.same_intro after.model.slots
           (Invariant.Map.put before.model.slots key value)
-          (fun query -> ghost_ (
+          (fun query -> (
             Key.reflexive key;
             Invariant.Map.replace_at before.model.slots (Bigint.of_int index)
               key value query;

@@ -35,7 +35,7 @@ module Make (Key : Vox_table_map.Key)
     | entry :: tail, byte :: rest ->
       L.length_nonnegative tail;
       occupied_def entry byte;
-      full_count tail rest (count - 1) (fun index -> ghost_ (
+      full_count tail rest (count - 1) (fun index -> (
         if 0 <= index && index < count - 1 then begin
           index_step count index;
           proof (index + 1);

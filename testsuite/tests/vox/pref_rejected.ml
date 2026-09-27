@@ -87,7 +87,6 @@ Line 5, characters 4-13:
 5 |     box.state
         ^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 module Total_read = struct
@@ -305,7 +304,6 @@ Line 5, characters 4-14:
 5 |     box.#state
         ^^^^^^^^^^
 Error: This value is "ghost" but is expected to be "real".
-Hint: if this is proof code, wrap the enclosing expression in "ghost_ (...)".
 |}]
 
 module Unboxed_ghost_join = struct

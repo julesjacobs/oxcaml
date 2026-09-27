@@ -383,7 +383,7 @@ let (reason_source_clause_valid @ total) : (n : int) -> (formula : formula) ->
       match reason_source_clause formula database reason with
       | None -> true | Some clause -> valid_clause n clause else true} @ ghost =
   fun n formula database learned reason -> ghost_ (
-  ghost_ (
+  (
   reason_source_valid_def formula database learned reason;
   reason_source_clause_def formula database reason;
   match reason with
@@ -3212,8 +3212,8 @@ let (resolve_latest @ total) :
   fun n formula database state current variables v ->
   match at state.bindings v with
   | Some (Some binding) ->
-    ghost_ (latest_binding_valid (ghost_ n) formula database state current
-      (ghost_ variables) v binding);
+    ghost_ (latest_binding_valid n formula database state current
+      variables v binding);
     (match fetch_reason formula (ghost_ database) (ghost_ state.learned)
         binding.reason with
      | None ->
@@ -3547,7 +3547,7 @@ let (scan_unit_binding @ total) :
       | Scan_stable | Scan_conflict _ -> true} @ ghost =
   fun limit bindings formula -> ghost_ (
   scan_formula_unit_unassigned (binding_values bindings) formula;
-  scan_formula_unit_reason (ghost_ limit) (binding_values bindings) formula;
+  scan_formula_unit_reason limit (binding_values bindings) formula;
   match scan_formula (binding_values bindings) formula with
   | Scan_stable | Scan_conflict _ -> ()
   | Scan_unit (_, literal) ->
@@ -3644,7 +3644,7 @@ let rec (propagate @ total) : (n : int) @ ghost ->
   match scan_formula partial formula with
   | Scan_conflict index ->
     ghost_ (
-      scan_formula_conflict_clause (ghost_ 4096) partial formula;
+      scan_formula_conflict_clause 4096 partial formula;
       source_clause_def formula database (Original_clause index);
       source_clause_member formula database (Original_clause index));
     (match original_result formula index with
@@ -3653,7 +3653,7 @@ let rec (propagate @ total) : (n : int) @ ghost ->
        let _ : {u : unit | false} = () in
        Stable (state, partial))
   | Scan_unit (index, literal) ->
-    ghost_ (scan_unit_binding (ghost_ 4096) state.bindings formula);
+    ghost_ (scan_unit_binding 4096 state.bindings formula);
     ghost_ (
       reason_source_valid_def formula database state.learned (Original index);
       implied_reason_def (Original index);
@@ -3678,7 +3678,7 @@ let rec (propagate @ total) : (n : int) @ ghost ->
         unit_clause_scan partial literal entry.clause;
         clauses_fit_def 1 [entry.clause];
         clauses_fit_def 0 [];
-        scan_unit_binding (ghost_ 1) state.bindings [entry.clause];
+        scan_unit_binding 1 state.bindings [entry.clause];
         reason_source_valid_def formula database state.learned reason;
         implied_reason_def reason;
         reason_source_clause_def formula database reason;
@@ -4252,7 +4252,7 @@ let (prepare_learning @ total) : (n : {n : int | 0 <= n && n <= 256}) ->
         (count_absent (clause_universe n (2 * n))
           (database_clauses database)) < 0} @ ghost =
   fun n formula database old learned literal target next -> ghost_ (
-  ghost_ (
+  (
     let witness = if 0 < target then
       find_level_literal old.bindings (variable literal) target learned.clause
       else Positive 0 in

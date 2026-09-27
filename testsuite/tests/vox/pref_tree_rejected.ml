@@ -56,6 +56,8 @@ Line 5, characters 8-18:
 5 |     let definition = ghost_ (valid_def shared) in
             ^^^^^^^^^^
 Warning 26 [unused-var]: unused variable "definition".
+  Hint: the binding is unnecessary, because the fact in its
+  refined type holds without the name; a statement such as "lemma x;" suffices.
 
 Line 7, characters 44-45:
 7 |     let claim : {u : unit | valid shared} = u in
