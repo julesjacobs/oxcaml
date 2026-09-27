@@ -2870,9 +2870,12 @@ let definition_attribute attrs =
   match Builtin_attributes.select_attributes ["def", Return] attrs with
   | [] -> None
   | [{attr_payload = PStr []; attr_loc; _}] -> Some attr_loc
+  | [{attr_loc; _} as attr]
+    when Builtin_attributes.is_transparent_definition [attr] ->
+      Some attr_loc
   | [attr] ->
       Location.raise_errorf ~loc:attr.attr_loc
-        "The def attribute takes no payload"
+        "The def attribute takes no payload or the payload transparent"
   | _ :: attr :: _ ->
       Location.raise_errorf ~loc:attr.attr_loc "Duplicate def attribute"
 
@@ -12943,6 +12946,24 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     | [loc], [vb]
       when mutable_flag = Asttypes.Immutable ->
         Language_extension.assert_enabled ~loc Refinement_types ();
+        let transparent =
+          List.filter
+            (fun attr -> Builtin_attributes.is_transparent_definition [attr])
+            vb.pvb_attributes
+        in
+        if rec_flag = Recursive && transparent <> [] then
+          Location.raise_errorf ~loc
+            "A transparent definition cannot be recursive";
+        (* The verifier finds the attribute on the value's description. *)
+        let rec mark pat =
+          match pat.ppat_desc with
+          | Ppat_constraint (inner, ty, modes) ->
+              {pat with ppat_desc = Ppat_constraint (mark inner, ty, modes)}
+          | _ -> {pat with ppat_attributes = transparent @ pat.ppat_attributes}
+        in
+        let vb =
+          if transparent = [] then vb else {vb with pvb_pat = mark vb.pvb_pat}
+        in
         let has_total =
           List.exists
             (fun {Location.txt; _} ->

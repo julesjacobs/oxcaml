@@ -113,6 +113,36 @@ and result sorts match its retained logical expression. Other applications
 retain their opaque meaning. This is explicit predicate construction; it does
 not infer a callback's postcondition.
 
+## Transparent definitions
+
+A `[@def]` definition stays opaque: a proof calls its `_def` lemma where the
+body is needed. A definition marked `[@def transparent]` is unfolded instead
+at every direct, full application, in predicates and in code. Use it to name a
+refinement that several contracts repeat:
+
+```ocaml
+let[@def transparent] within (x : int) (y : int) = 0 <= x && x < y
+
+let first : (x : int) -> (y : {y : int | within x y}) -> {r : int | r >= 0} =
+  fun x _ -> x
+```
+
+Transparency is chosen per definition and only for non-recursive
+definitions. The verifier assumes the refinement of `within_def` at each
+application, exactly as if the proof had called it there. An interface exports
+a transparent definition with the attribute and the lemma:
+
+```ocaml
+val within : int -> int -> bool @@ total [@@def transparent]
+val within_def : (x : int) -> (y : int) ->
+  {u : unit | within x y === (0 <= x && x < y)} @@ total
+```
+
+The lemma must be total. The refinements of its parameter types (a generated
+lemma keeps the definition's) are premises: the definition unfolds where the
+arguments satisfy them. Partial applications, aliases and functions passed as
+arguments keep the opaque meaning.
+
 ## Models, evidence, and runtime checks
 
 Use a local ghost value for a local proof. Use `Ghost.t` or a `@@ ghost` record
