@@ -298,6 +298,15 @@ this file.
       code and suggest `unreachable_ ()`.
 - [ ] **HTTP laws for `Invalid_crlf` and budget exhaustion** (new proofs;
       stated as unspecified on the page). Owner to decide.
+- [ ] **Typer bugs found by the `-principal` investigation** (after
+      subsumption merges; see `research/expect-principal-20260927/repro/`):
+      (b2, default mode too) typing a predicate that mentions `h a` narrows
+      `h`'s ungeneralized top-level modes, so a later unrelated use fails
+      ("ys is partial but is expected to be total"); (b1, `-principal`)
+      predicates use variables at `immutable` but `>=` etc. expect
+      `read_write`: do not require `read_write` in erased predicates;
+      (b3, cosmetic) refinement carriers print through the alias the
+      predicate names.
 - [ ] **14. Upstream OxCaml reports:** the owner wants to understand and be
       convinced first; an agent is reproducing both on upstream OxCaml
       (`research/upstream-bugs-20260927/REPORT.md`). Previously listed: the expect tool overwrites single
