@@ -42,7 +42,7 @@ let nonvariable_wrong : {n : int | n = x + y} = add (x + 1) y;;
 Line 1, characters 48-61:
 1 | let nonvariable_wrong : {n : int | n = x + y} = add (x + 1) y;;
                                                     ^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0, y = 0)
 Line 1, characters 35-44:
 1 | let nonvariable_wrong : {n : int | n = x + y} = add (x + 1) y;;
                                        ^^^^^^^^^

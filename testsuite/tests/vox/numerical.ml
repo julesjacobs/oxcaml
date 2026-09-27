@@ -40,11 +40,7 @@ let bad n =
 Line 2, characters 19-25:
 2 |   let rec loop n = loop n [@@decreases n] in loop n;;
                        ^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 2, characters 39-40:
-2 |   let rec loop n = loop n [@@decreases n] in loop n;;
-                                           ^
-  The refinement is stated here.
+Error: Refinement could not be proved (counterexample: n = -92)
 Line 2, characters 39-40:
 2 |   let rec loop n = loop n [@@decreases n] in loop n;;
                                            ^
@@ -57,11 +53,7 @@ let wraps () =
 Line 2, characters 19-31:
 2 |   let rec loop n = loop (n - 1) [@@decreases n] in loop 0;;
                        ^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 2, characters 45-46:
-2 |   let rec loop n = loop (n - 1) [@@decreases n] in loop 0;;
-                                                 ^
-  The refinement is stated here.
+Error: Refinement could not be proved (counterexample: n = -4611686018427387904)
 Line 2, characters 45-46:
 2 |   let rec loop n = loop (n - 1) [@@decreases n] in loop 0;;
                                                  ^
@@ -187,11 +179,7 @@ let enclosing_fact () =
 Line 3, characters 33-48:
 3 |   let rec loop n = if n > 0 then loop (n - step) else 0
                                      ^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 4, characters 15-16:
-4 |   [@@decreases n] in
-                   ^
-  The refinement is stated here.
+Error: Refinement could not be proved (counterexample: n = 1, step = 0)
 Line 4, characters 15-16:
 4 |   [@@decreases n] in
                    ^
@@ -268,10 +256,6 @@ Error: Refinement could not be proved (counterexample)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^
-  The refinement is stated here.
-Line 3, characters 13-14:
-3 | [@@decreases n];;
-                 ^
   Required by this decreases attribute
 |}]
 
@@ -333,11 +317,7 @@ let rec circular : (n : int) -> {r : int | r < n} = fun n ->
 Line 2, characters 10-20:
 2 |   let r = circular n in r
               ^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 3, characters 13-14:
-3 | [@@decreases n];;
-                 ^
-  The refinement is stated here.
+Error: Refinement could not be proved (counterexample: n = -92)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^
@@ -350,11 +330,7 @@ let rec nested n = if n > 0 then nested (nested n) else 0
 Line 1, characters 40-50:
 1 | let rec nested n = if n > 0 then nested (nested n) else 0
                                             ^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 2, characters 13-14:
-2 | [@@decreases n];;
-                 ^
-  The refinement is stated here.
+Error: Refinement could not be proved (counterexample: n = 1)
 Line 2, characters 13-14:
 2 | [@@decreases n];;
                  ^

@@ -107,7 +107,7 @@ let remove_does_not_restore key =
 Line 20, characters 27-34:
 20 |   let _ : {b : bool | b} = present in
                                 ^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: key = -92)
 Line 20, characters 22-23:
 20 |   let _ : {b : bool | b} = present in
                            ^

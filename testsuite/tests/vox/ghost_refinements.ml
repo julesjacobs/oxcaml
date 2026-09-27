@@ -63,7 +63,7 @@ let missing_proof x : {y : int | y >= 0} =
 Line 3, characters 2-11:
 3 |   refine_ y;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 1, characters 33-39:
 1 | let missing_proof x : {y : int | y >= 0} =
                                      ^^^^^^
@@ -101,7 +101,7 @@ let missing_conclusion x : {y : int | y >= 0} =
 Line 4, characters 2-11:
 4 |   refine_ y;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 1, characters 38-44:
 1 | let missing_conclusion x : {y : int | y >= 0} =
                                           ^^^^^^

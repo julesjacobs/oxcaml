@@ -74,7 +74,7 @@ end;;
 Line 3, characters 57-69:
 3 |     let refine_ depth = depth in let next = depth + 1 in refine_ next
                                                              ^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: depth = 4611686018427387903)
 Line 2, characters 55-61:
 2 |   let bad : (depth : {n : int | n >= 0}) -> {n : int | n >= 0} = fun depth ->
                                                            ^^^^^^

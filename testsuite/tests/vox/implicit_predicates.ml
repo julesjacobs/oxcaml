@@ -92,7 +92,7 @@ end;;
 Line 3, characters 56-58:
 3 |       {u : unit | (if b then I.id 0 else I.id 1) = 0} = ()
                                                             ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: b = false)
 Line 3, characters 18-52:
 3 |       {u : unit | (if b then I.id 0 else I.id 1) = 0} = ()
                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

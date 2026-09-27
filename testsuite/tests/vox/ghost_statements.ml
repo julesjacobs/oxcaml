@@ -67,7 +67,7 @@ let too_early x : {y : int | y >= 0} =
 Line 3, characters 36-45:
 3 |   let result : {y : int | y >= 0} = refine_ y in
                                         ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 3, characters 26-32:
 3 |   let result : {y : int | y >= 0} = refine_ y in
                               ^^^^^^

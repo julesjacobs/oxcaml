@@ -234,11 +234,7 @@ end;;
 Line 4, characters 4-14:
 4 |     rejected n
         ^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
-Line 5, characters 15-35:
-5 |   [@@decreases let n : int = n in n]
-                   ^^^^^^^^^^^^^^^^^^^^
-  The refinement is stated here.
+Error: Refinement could not be proved (counterexample: n = -92)
 Line 5, characters 15-35:
 5 |   [@@decreases let n : int = n in n]
                    ^^^^^^^^^^^^^^^^^^^^

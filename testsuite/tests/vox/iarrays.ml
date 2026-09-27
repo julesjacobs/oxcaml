@@ -344,7 +344,7 @@ let caught_slice (source : int iarray) (position : int) (size : int) :
 Line 5, characters 2-10:
 5 |   position
       ^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: position = -100)
 Line 2, characters 20-31:
 2 |     {result : int | 0 <= result} =
                         ^^^^^^^^^^^

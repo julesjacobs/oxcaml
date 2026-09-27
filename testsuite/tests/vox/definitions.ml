@@ -120,7 +120,7 @@ let wrapping x : {n : int | n > x} =
 Line 4, characters 2-8:
 4 |   result;;
       ^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 4611686018427387902)
 Line 1, characters 28-33:
 1 | let wrapping x : {n : int | n > x} =
                                 ^^^^^

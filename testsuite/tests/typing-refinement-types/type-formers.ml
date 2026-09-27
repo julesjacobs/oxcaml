@@ -145,6 +145,10 @@ Line 2, characters 44-55:
 2 | let unchecked : impossible = let raw = 0 in refine_ raw;;
                                                 ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
+Line 1, characters 30-35:
+1 | type impossible = { x : int | false }
+                                  ^^^^^
+  The refinement is stated here.
 |}]
 
 let no_implicit_unwrap : int = one;;
@@ -667,7 +671,11 @@ val accept_alias : Result_alias.t -> unit = <fun>
 Line 4, characters 24-25:
 4 |   Result.Refined.accept x;;
                             ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
+Line 5, characters 29-36:
+5 |     val accept : { x : int | holds x } -> unit @@ total
+                                 ^^^^^^^
+  The refinement is stated here.
 |}]
 
 module Empty = struct end
@@ -714,7 +722,11 @@ let first_is_not_second (x : First.t) : Second.t = x;;
 Line 1, characters 51-52:
 1 | let first_is_not_second (x : First.t) : Second.t = x;;
                                                        ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
+Line 3, characters 23-30:
+3 |   type t = { x : int | holds x }
+                           ^^^^^^^
+  The refinement is stated here.
 |}]
 
 let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
@@ -722,5 +734,9 @@ let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
 Line 1, characters 60-61:
 1 | let direct_is_not_first (x : Unstable(Empty).t) : First.t = x;;
                                                                 ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
+Line 3, characters 23-30:
+3 |   type t = { x : int | holds x }
+                           ^^^^^^^
+  The refinement is stated here.
 |}]

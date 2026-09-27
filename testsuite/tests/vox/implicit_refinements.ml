@@ -80,7 +80,7 @@ let wrong_match_argument b = consume (match b with true -> -1 | false -> -1);;
 Line 1, characters 59-61:
 1 | let wrong_match_argument b = consume (match b with true -> -1 | false -> -1);;
                                                                ^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: b = true)
 Line 6, characters 28-34:
 6 | let consume (x : {n : int | n >= 0}) = x + 1
                                 ^^^^^^
@@ -104,7 +104,7 @@ let wrong_chain (x : int) : {y : int | y >= 0} = step (step (step x));;
 Line 1, characters 49-69:
 1 | let wrong_chain (x : int) : {y : int | y >= 0} = step (step (step x));;
                                                      ^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 1, characters 39-45:
 1 | let wrong_chain (x : int) : {y : int | y >= 0} = step (step (step x));;
                                            ^^^^^^

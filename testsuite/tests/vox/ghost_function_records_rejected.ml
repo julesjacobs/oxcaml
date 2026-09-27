@@ -15,7 +15,7 @@ let conflate (r : callbacks @ total) (x : int) :
 Line 3, characters 16-25:
 3 |   let u = () in refine_ u;;
                     ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 2, characters 16-40:
 2 |     {u : unit | r.first x === r.second x} =
                     ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -97,7 +97,7 @@ let chosen (pick : bool) =
 Line 7, characters 67-76:
 7 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === 1} = refine_ u in
                                                                        ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: pick = false)
 Line 7, characters 48-63:
 7 |   ghost_ (let u = () in let proof : {u : unit | r.first 0 === 1} = refine_ u in
                                                     ^^^^^^^^^^^^^^^

@@ -73,7 +73,7 @@ let unchecked start stop : {width : int | 0 <= width} =
 Line 3, characters 2-7:
 3 |   width
       ^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: stop = -1, start = 0)
 Line 1, characters 42-52:
 1 | let unchecked start stop : {width : int | 0 <= width} =
                                               ^^^^^^^^^^

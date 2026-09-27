@@ -53,7 +53,7 @@ let overflow x : {n : int | n > x} =
 Line 2, characters 19-28:
 2 |   let y = x + 1 in refine_ y;;
                        ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 4611686018427387903)
 Line 1, characters 28-33:
 1 | let overflow x : {n : int | n > x} =
                                 ^^^^^
@@ -66,7 +66,7 @@ let bad_branch b : nonnegative =
 Line 2, characters 33-42:
 2 |   let x = if b then 1 else -1 in refine_ x;;
                                      ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: b = false)
 Line 2, characters 30-36:
 2 | type nonnegative = {n : int | n >= 0};;
                                   ^^^^^^
@@ -107,7 +107,7 @@ let hidden (r : zero) : zero =
 Line 2, characters 15-24:
 2 |   let x = 1 in refine_ x;;
                    ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: r = 0)
 Line 1, characters 23-28:
 1 | type zero = {n : int | n = 0}
                            ^^^^^
@@ -231,7 +231,7 @@ let unchecked_short_circuit x b : zero =
 Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -100, b = false)
 Line 1, characters 23-28:
 1 | type zero = {n : int | n = 0}
                            ^^^^^

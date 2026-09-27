@@ -38,7 +38,7 @@ let (bad_branch @ total) (x : int) =
 Line 2, characters 23-38:
 2 |   if x > 0 then x else unreachable_ ();;
                            ^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 |}]
 
 let (ghost_impossible @ total) (_ : {u : unit | false}) =

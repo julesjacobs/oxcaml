@@ -75,7 +75,7 @@ end;;
 Line 5, characters 29-39:
 5 |     ghost_ (compare_def x x; refine_ ())
                                  ^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 4, characters 18-33:
 4 |       {u : unit | compare x x = 0} @ ghost =
                       ^^^^^^^^^^^^^^^
@@ -92,7 +92,7 @@ end;;
 Line 5, characters 46-56:
 5 |     ghost_ (compare_def x y; compare_def y x; refine_ ())
                                                   ^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = -1, y = 0)
 Line 4, characters 18-55:
 4 |       {u : unit | (compare x y < 0) = (compare y x > 0)} @ ghost =
                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -113,7 +113,7 @@ end;;
 Line 9, characters 63-73:
 9 |     ghost_ (compare_def x y; compare_def y z; compare_def x z; refine_ ())
                                                                    ^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 2, y = 0, z = 1)
 Lines 7-8, characters 18-27:
 7 | ..................not (compare x y <= 0 && compare y z <= 0)
 8 |         || compare x z <= 0...........

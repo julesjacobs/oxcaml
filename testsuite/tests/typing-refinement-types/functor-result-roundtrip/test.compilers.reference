@@ -1,4 +1,6 @@
 File "inferred_consumer.ml", line 3, characters 49-50:
 3 | let distinct (x : Inferred.A.t) : Inferred.B.t = x
                                                      ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
+File "inferred.ml", line 12, characters 23-30:
+  The refinement is stated here.

@@ -323,7 +323,7 @@ let wrong_branch_pair b = pair (identity 1) (if b then (0, ()) else (2, ()));;
 Line 1, characters 56-57:
 1 | let wrong_branch_pair b = pair (identity 1) (if b then (0, ()) else (2, ()));;
                                                             ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: b = true)
 Line 1, characters 40-50:
 1 | let pair : (lower : int) -> ({n : int | n >= lower} * unit) -> int =
                                             ^^^^^^^^^^
@@ -423,7 +423,7 @@ let bad_result_adapter : (h : int) -> (k : int) ->
 Line 3, characters 54-55:
 3 |     (x : int) -> {y : int | y = x + k} = fun h k f -> f;;
                                                           ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: h = -1, k = 0)
 Line 3, characters 28-37:
 3 |     (x : int) -> {y : int | y = x + k} = fun h k f -> f;;
                                 ^^^^^^^^^
@@ -437,7 +437,7 @@ let bad_input_adapter : (h : int) -> (k : int) ->
 Line 3, characters 15-16:
 3 |   fun h k f -> f;;
                    ^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: k = 0, h = 1)
 Line 2, characters 16-22:
 2 |     ({x : int | x >= h} -> int) -> {x : int | x >= k} -> int =
                     ^^^^^^
