@@ -75,7 +75,7 @@ module Make (C : Vox_big_credits.S) = struct
           let state = {memory; bank} in
           ghost_ (heap_def (borrow_ state); balance_def (borrow_ state));
           let result = #{value = x; state} in result)
-      | _ -> assert false)
+      | _ -> unreachable_ ())
 
   let empty () =
     let memory = P.empty () in
