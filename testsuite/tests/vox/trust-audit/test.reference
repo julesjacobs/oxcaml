@@ -22,6 +22,24 @@ Unsafe features (Obj, Marshal, unsafe primitives, -unsafe):
   Axioms: Stdlib__Obj.magic (axioms.ml:5)
 Other externals outside the library:
   Axioms.stub (axioms.ml:6)
+== helper.ml, not verified; user.ml
+File "user.ml", line 1:
+Warning 229 [unverified-import]: The interface of Helper was produced by a compilation that skipped
+  verification (-smt-assume-verified), and no verified compilation
+  of the same program was found; its refinements are assumed.
+File "user.ml", line 1:
+Warning 229 [unverified-import]: The interface of Helper was produced by a compilation that skipped
+  verification (-smt-assume-verified), and no verified compilation
+  of the same program was found; its refinements are assumed.
+Vox audit of user.ml and the N units it depends on
+Verification skipped (-smt-assume-verified):
+  Helper
+== good.ml, verified and then compiled again without verifying
+== good.ml, edited and compiled without verifying
+File "good_user.ml", line 1:
+Warning 229 [unverified-import]: The interface of Good was produced by a compilation that skipped
+  verification (-smt-assume-verified), and no verified compilation
+  of the same program was found; its refinements are assumed.
 == Assumptions that are easy to miss
 File "hidden.ml", line 7, characters 0-57:
 7 | external packed : unit -> (module S) = "vox_audit_packed"
@@ -42,3 +60,8 @@ Externals assumed total:
 Unsafe features (Obj, Marshal, unsafe primitives, -unsafe):
   Hidden: Stdlib__Array.unsafe_get (hidden.ml:11)
   Hidden: type cell [@@unsafe_allow_any_mode_crossing] (hidden.ml:12)
+== asserted.ml, verified and then compiled with -noassert, not verified
+File "asserted_user.ml", line 1:
+Warning 229 [unverified-import]: The interface of Asserted was produced by a compilation that skipped
+  verification (-smt-assume-verified), and no verified compilation
+  of the same program was found; its refinements are assumed.

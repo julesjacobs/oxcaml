@@ -1,6 +1,7 @@
 (* TEST
  has-z3;
- readonly_files = "axioms.ml client.ml hidden.ml hidden_client.ml run.sh";
+ readonly_files = "axioms.ml client.ml helper.ml user.ml good.ml good_user.ml";
+ readonly_files += " hidden.ml hidden_client.ml asserted.ml asserted_user.ml run.sh";
  arguments = "${test_source_directory}/run.sh ${ocamlc_byte} ${ocamlsrcdir}/stdlib";
  bytecode;
 *)

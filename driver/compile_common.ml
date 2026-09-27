@@ -201,6 +201,7 @@ let implementation ~hook_parse_tree ~hook_typed_tree info ~backend =
     hook_parse_tree parsed;
     if Clflags.(should_stop_after Compiler_pass.Parsing) then () else begin
       Vox_trust.reset ();
+      Vox_trust.counterparts := Vox_audit.counterparts info.target;
       let typed = typecheck_impl info parsed in
       if !Vox_trust.audit then
         Vox_audit.print_unit

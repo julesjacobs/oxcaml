@@ -33,6 +33,15 @@ let read_cmo file =
 let read_cmx file =
   with_magic file Config.cmx_magic_number Cmi_format.input_vox_record
 
+let artifact target extension =
+  Unit_info.Artifact.filename (Unit_info.artifact target ~extension)
+
+(* The records that earlier compilations left in this unit's .cmo and .cmi. *)
+let counterparts target () =
+  List.filter_map Fun.id
+    [ Option.bind (read_cmo (artifact target ".cmo")) fst;
+      Option.bind (read_cmi (artifact target ".cmi")) fst ]
+
 let find name extension =
   match Load_path.find_normalized (name ^ extension) with
   | file -> Some file

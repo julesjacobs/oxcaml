@@ -188,6 +188,7 @@ type t =
   | Redundant_ghost                         (* 225 *)
   | Proof_only_binding of string            (* 226 *)
   | Trusted_external of trusted_external_reason (* 228 *)
+  | Unverified_import of string            (* 229 *)
 
 type alert = {kind:string; message:string; def:loc; use:loc}
 

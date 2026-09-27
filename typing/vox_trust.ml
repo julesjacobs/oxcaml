@@ -628,25 +628,66 @@ let pack_record members =
                   r.vox_items)
             members }
 
+(* Skipped verification (-smt-assume-verified, warning 229) *)
+
+let counterparts = ref (fun () -> [])
+
 let reset () =
   implementation_record := None;
-  unexpected_solver := ""
+  unexpected_solver := "";
+  counterparts := fun () -> []
 
-let record_implementation ~source_file:_ ~ast structure =
+(* A compilation with -smt-assume-verified is recorded as verified when a
+   verified compilation of the same program, with the same flags and against
+   the same interfaces, already produced this unit's .cmo or .cmi, as the
+   bytecode half of the library build does for the native half. Verification
+   may read more interfaces than compilation, so the other compilation's
+   imports need only include these. *)
+let status ~source ~config ~imports : Cmi_format.vox_status * string =
+  let verifies (record : Cmi_format.vox_unit) =
+    record.vox_status = Cmi_format.Vox_verified
+    && String.equal record.vox_source source
+    && String.equal record.vox_config config
+    && Bool.equal record.vox_library !library
+    && List.for_all (fun import -> List.mem import record.vox_imports) imports
+  in
+  if not !assume_verified
+  then Cmi_format.Vox_verified, !unexpected_solver
+  else
+    match List.find_opt verifies (!counterparts ()) with
+    (* The solver that verified it, too. *)
+    | Some (record : Cmi_format.vox_unit) ->
+      Cmi_format.Vox_verified, record.vox_solver
+    | None -> Cmi_format.Vox_not_verified, ""
+
+let check_imports ~source_file =
+  if not !assume_verified
+  then
+    List.iter
+      (fun import ->
+        let name = Import_info.name import in
+        match Env.vox_unit name with
+        | Some { Cmi_format.vox_status = Cmi_format.Vox_not_verified; _ } ->
+          Location.prerr_warning
+            (Location.in_file source_file)
+            (Warnings.Unverified_import (Compilation_unit.Name.to_string name))
+        | Some _ | None -> ())
+      (Env.imports ())
+
+let record_implementation ~source_file ~ast structure =
   if enabled ()
   then begin
+    check_imports ~source_file;
     let source = source_digest ast
     and config = config ()
     and imports = imports () in
+    let status, solver = status ~source ~config ~imports in
     let record : Cmi_format.vox_unit =
-      { vox_status =
-          (if !assume_verified
-           then Cmi_format.Vox_not_verified
-           else Cmi_format.Vox_verified);
+      { vox_status = status;
         vox_library = !library;
         vox_source = source;
         vox_config = config;
-        vox_solver = !unexpected_solver;
+        vox_solver = solver;
         vox_imports = imports;
         vox_items = scan ~structure:(Some structure) ~signature:None }
     in

@@ -39,7 +39,8 @@ val assume_verified : bool ref
     the expected one ([-smt-solver-any-version]). *)
 val unexpected_solver : string ref
 
-(** Record the unit just type-checked and verified. Does nothing without
+(** Record the unit just type-checked and verified, and warn if it imports an
+    interface whose verification was skipped. Does nothing without
     [-extension refinement_types]. *)
 val record_implementation :
   source_file:string -> ast:Parsetree.structure -> Typedtree.structure -> unit
@@ -63,5 +64,14 @@ val interface_file_record : string -> Cmi_format.vox_unit option
 val pack_record :
   (string * Cmi_format.vox_unit option) list -> Cmi_format.vox_unit option
 
-(** Forget the previous unit's record and solver. *)
+(** {1 Skipped verification} *)
+
+(** Set by the driver: the records of this unit that earlier compilations
+    left in its output files. A compilation with [-smt-assume-verified] is
+    recorded as verified if one of them is a verified compilation of the same
+    program, with the same flags, against the same interfaces, as the native
+    half of the library build has in the bytecode half. *)
+val counterparts : (unit -> Cmi_format.vox_unit list) ref
+
+(** Forget the previous unit's record, solver and counterparts. *)
 val reset : unit -> unit
