@@ -6091,6 +6091,8 @@ module Portability = struct
 
   include Comonadic_gen (Obj)
 
+  let is_portable m = Const.le (Guts.get_floor m) Const.Portable
+
   let legacy = of_const Const.legacy
 
   (* CR dkalinichenko: ideally, [reading] should zap to [shareable]. *)
@@ -6116,6 +6118,8 @@ module Uniqueness = struct
   let aliased = of_const Aliased
 
   let unique = of_const Unique
+
+  let is_unique m = Const.le (Guts.get_ceil m) Const.Unique
 
   let legacy = of_const Const.legacy
 
@@ -6181,6 +6185,8 @@ module Ghostliness = struct
   let real = of_const Real
 
   let ghost = of_const Ghost
+
+  let is_ghost m = Const.le Const.Ghost (Guts.get_floor m)
 
   let legacy = of_const Const.legacy
 

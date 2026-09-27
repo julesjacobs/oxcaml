@@ -738,7 +738,8 @@ let mode_with_position mode position =
   { (mode_default mode) with position }
 
 (* Statement position discards the value, so even a ghost one is
-   admissible: nothing of it survives compilation. *)
+   admissible. The computation still runs unless it is [ghost_ e]
+   (warning 224). *)
 let mode_statement_with_position position =
   { (mode_default Value.max) with position }
 
@@ -2897,6 +2898,146 @@ let type_assume = ref
        Misc.fatal_error "Typecore.assume: elaborator not installed")
 
 let typing_refinement_predicate = ref false
+
+(* Erasure lints. [ghost_ e] is the only construct that erases; a ghost
+   result computed by real code runs and is then thrown away. *)
+
+let in_real_code env =
+  not (Env.in_ghost_context env || !typing_refinement_predicate
+       || Resolved_predicate.active ())
+
+let is_erased exp =
+  List.exists (function Texp_ghost, _, _ -> true | _ -> false) exp.exp_extra
+
+let requires_unique mode =
+  Uniqueness.is_unique (Alloc.proj_monadic Uniqueness mode)
+
+(* The result mode of applying a value of type [ty] to [n] arguments, if no
+   argument is required unique: [ghost_] makes the values it captures
+   aliased, so such an application cannot move under it. *)
+let rec shared_result_mode env ty n =
+  match get_desc (expand_head env ty) with
+  | Tpoly (ty, _) -> shared_result_mode env ty n
+  | Trefine { ref_payload; _ } -> shared_result_mode env ref_payload n
+  | Tarrow ((_, arg_mode, ret_mode, _), _, ret, _)
+    when n >= 1 && not (requires_unique arg_mode) ->
+      if n = 1 then Some ret_mode else shared_result_mode env ret (n - 1)
+  | _ -> None
+
+(* Applying a value of type [ty] to [n] arguments certainly gives a ghost
+   result, and [ghost_] around the application, or around the body of such
+   a function, keeps its modes. With [~unique_result:false] the result must
+   not be required unique either. *)
+let ghost_after_arguments ?(unique_result = true) env ty n =
+  match shared_result_mode env ty n with
+  | Some ret_mode ->
+      Ghostliness.is_ghost (Alloc.proj_comonadic Ghostliness ret_mode)
+      && (unique_result || not (requires_unique ret_mode))
+  | None -> false
+
+(* [ghost_] captures values through a total, stateless and portable
+   lock. *)
+let capturable mode =
+  Totality.is_total (Value.proj_comonadic Totality mode)
+  && Statefulness.is_stateless (Value.proj_comonadic Statefulness mode)
+  && Portability.is_portable (Value.proj_comonadic Portability mode)
+
+(* A total function that [ghost_] can capture. *)
+let is_capturable_ident exp =
+  match exp.exp_desc with
+  | Texp_ident { mode; _ } -> capturable mode
+  | _ -> false
+
+(* Expressions that can move under [ghost_] as they are: capturable
+   variables, constants, immutable data and applications of total
+   functions. *)
+let rec erasable_argument env exp =
+  is_erased exp ||
+  match exp.exp_desc with
+  | Texp_ident { desc = { val_kind = Val_reg _; _ }; mode; _ } ->
+      capturable mode
+  | Texp_constant _ -> true
+  | Texp_field { record; label; _ } ->
+      not (Types.is_mutable label.lbl_mut) && erasable_argument env record
+  | Texp_construct (_, _, _, args, _) ->
+      List.for_all (fun (_, arg) -> erasable_argument env arg) args
+  | Texp_tuple (args, _) ->
+      List.for_all (fun (_, arg) -> erasable_argument env arg) args
+  | Texp_apply (funct, args, _, _, _, _) -> erasable_application env funct args
+  | _ -> false
+
+and erasable_application env funct args =
+  is_capturable_ident funct
+  && List.for_all (function
+      | _, Arg (arg, _) -> erasable_argument env arg
+      | _, Omitted _ -> false) args
+  && Option.is_some
+       (shared_result_mode env funct.exp_type (List.length args))
+
+(* A call to a total function, with a ghost result, whose arguments can move
+   under [ghost_]. *)
+let is_unerased_ghost_call env exp =
+  not (is_erased exp) &&
+  match exp.exp_desc with
+  | Texp_apply (funct, args, _, _, _, _) ->
+      erasable_application env funct args
+      && ghost_after_arguments env funct.exp_type (List.length args)
+  | _ -> false
+
+let warn_unerased_ghost_call env exp =
+  if in_real_code env && is_unerased_ghost_call env exp then
+    Location.prerr_warning exp.exp_loc Warnings.Unerased_ghost_call
+
+(* An expression that computes nothing: a variable, a constant, or data or
+   an immutable field built from them. *)
+let rec is_trivial exp =
+  match exp.exp_desc with
+  | Texp_ident _ | Texp_constant _ -> true
+  | Texp_construct (_, _, _, args, _) ->
+      List.for_all (fun (_, arg) -> is_trivial arg) args
+  | Texp_field { record; label; _ } ->
+      not (Types.is_mutable label.lbl_mut) && is_trivial record
+  | _ -> false
+
+(* A total function with a ghost result whose body computes something
+   outside [ghost_ ...]. *)
+let rec has_unerased_ghost_body env exp =
+  match exp.exp_desc with
+  | Texp_function { params; body; _ } ->
+      begin match body with
+      | Tfunction_body ({ exp_desc = Texp_function _; _ } as inner)
+        when not (is_erased inner) ->
+          has_unerased_ghost_body env inner
+      | Tfunction_body body ->
+          not (is_erased body || is_trivial body)
+          && ghost_after_arguments ~unique_result:false env exp.exp_type
+               (List.length params)
+      | Tfunction_cases { fc_cases; _ } ->
+          List.exists
+            (fun case -> not (is_erased case.c_rhs || is_trivial case.c_rhs))
+            fc_cases
+          && ghost_after_arguments ~unique_result:false env exp.exp_type
+               (List.length params + 1)
+      end
+  | _ -> false
+
+let warn_erasure_lints env bindings =
+  if in_real_code env then
+    List.iter (fun vb ->
+      Builtin_attributes.warning_scope ~ppwarning:false vb.vb_attributes
+        (fun () ->
+          match vb.vb_pat.pat_desc with
+          | Tpat_var { mode; name; _ }
+            when not (String.starts_with ~prefix:"*" name.txt)
+                 && Totality.is_total (Value.proj_comonadic Totality mode)
+                 && has_unerased_ghost_body env vb.vb_expr ->
+              Location.prerr_warning vb.vb_pat.pat_loc
+                Warnings.Unerased_ghost_body
+          | Tpat_any when is_unerased_ghost_call env vb.vb_expr ->
+              Location.prerr_warning vb.vb_expr.exp_loc
+                Warnings.Unerased_ghost_call
+          | _ -> ()))
+      bindings
 
 let definition_lemma : (Env.t -> value_binding -> value_binding * Env.t) ref =
   ref (fun _ _ -> Misc.fatal_error "Typecore.def: elaborator not installed")
@@ -12487,6 +12628,7 @@ and type_statement ?explanation ?(position=RNontail) env sexp =
     (* Only the statement checks discard the refinement wrappers. *)
     let exp = { exp with exp_type = statement_type exp.exp_type } in
     let subexp = final_subexpression exp in
+    warn_unerased_ghost_call env exp;
     let ty = expand_head env exp.exp_type in
     if is_Tvar ty
     && get_level ty > get_current_level ()
@@ -13338,6 +13480,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
       if pattern_needs_partial_application_check vb.vb_pat then
         check_partial_application ~statement:false vb.vb_expr
     ) l;
+  warn_erasure_lints env l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
   match definitions, l with

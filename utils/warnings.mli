@@ -175,6 +175,8 @@ type t =
   | Unused_alert_disable of string          (* 221 *)
   | Slow_refinement of { resources : int; threshold : int; limit : int }
                                             (* 222 *)
+  | Unerased_ghost_body                     (* 223 *)
+  | Unerased_ghost_call                     (* 224 *)
 
 type alert = {kind:string; message:string; def:loc; use:loc}
 

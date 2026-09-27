@@ -172,6 +172,8 @@ type t =
   | Unused_alert_disable of string          (* 221 *)
   | Slow_refinement of { resources : int; threshold : int; limit : int }
                                             (* 222 *)
+  | Unerased_ghost_body                     (* 223 *)
+  | Unerased_ghost_call                     (* 224 *)
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
    the numbers of existing warnings.
@@ -276,6 +278,8 @@ let number = function
   | Redundant_modality -> 220
   | Unused_alert_disable _ -> 221
   | Slow_refinement _ -> 222
+  | Unerased_ghost_body -> 223
+  | Unerased_ghost_call -> 224
 ;;
 (* DO NOT REMOVE the ;; above: it is used by
    the testsuite/ests/warnings/mnemonics.mll test to determine where
@@ -722,6 +726,16 @@ let descriptions = [
     names = ["slow-refinement"];
     description = "A refinement proof used more solver resources than the\n\
     \    warning threshold (see -smt-resource-warning).";
+    since = since 5 4 };
+  { number = 223;
+    names = ["unerased-ghost-body"];
+    description = "A total function returns a ghost result, but its body is\n\
+    \    not wrapped in ghost_, so the body runs when the function is called.";
+    since = since 5 4 };
+  { number = 224;
+    names = ["unerased-ghost-call"];
+    description = "Real code calls a total function only to discard its ghost\n\
+    \    result; the call runs.";
     since = since 5 4 };
 ]
 
@@ -1631,6 +1645,17 @@ let message = function
            over the warning threshold of %d (the limit is %d).@ \
            Split the proof with intermediate assertions or lemmas."
         resources threshold limit
+  | Unerased_ghost_body ->
+      msg "This function's result is ghost, but its body is not wrapped in@ \
+           %a, so the body is computed when the function is called and its@ \
+           value may be thrown away.@ \
+           Wrap the body in %a to erase it."
+        Style.inline_code "ghost_" Style.inline_code "ghost_ (...)"
+  | Unerased_ghost_call ->
+      msg "This call is evaluated at run time only to discard its ghost@ \
+           result.@ \
+           Wrap the call in %a to erase it."
+        Style.inline_code "ghost_ (...)"
 ;;
 
 let nerrors = ref 0
