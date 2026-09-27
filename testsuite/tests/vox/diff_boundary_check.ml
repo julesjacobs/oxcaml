@@ -70,7 +70,7 @@ let () =
   check (not (occurs "(%%int_add " diff || occurs "(+ " diff))
     "diff does no addition";
   let reverse = function_body library "reverse_into" in
-  check (direct_calls reverse = [ "reverse_into" ]
+  check (applications reverse = 1 && direct_calls reverse = [ "reverse_into" ]
          && not (occurs "global" reverse
                 || occurs "bigint" (String.lowercase_ascii reverse)))
     "reverse_into only calls itself";
