@@ -32,37 +32,26 @@ The test requires 13 such programs to be rejected, each with its exact error. Si
 
 ## Native code
 
-`ocamlopt -O3 -dcmm` output for the same example written at top level with integer keys (`find_after_replace_int` in the same client). Three calls remain: `create`, called directly, and `replace` and `find_opt`, through the closures of the table's functor instance. Views and tokens are passed as `[]`, the empty void argument, and the proof leaves only the trivial `catch` at the top. The check asserts that neither this nor the default build calls an ownership primitive or lemma.
+`ocamlopt -O3 -dcmm` output for the same example written at top level with integer keys (`find_after_replace_int` in the same client). The library's table modules are also compiled at `-O3`, so the table's functor instance is specialized in the client: `create` becomes the storage allocation primitive, `replace` is a direct call, and `find_opt` is inlined, down to the first SIMD group probe and a direct call to `Vox_table_search.groups` for the others. Tokens and views are gone, and the proof leaves only the trivial `catch` at the top. The beginning of the function, on x86-64:
 
 ```
 (function{flat_hashtbl_public.ml:145,27-339}
- camlFlat_hashtbl_public__find_after_replace_int_18_80_code
-     (key/8431: int value/8432: int) : val
- (catch (exit 134 (seq 1 [])) with(134)
+ camlFlat_hashtbl_public__find_after_replace_int_18_128_code
+     (key/9231: int value/9232: int) : val
+ (catch (exit 191 (seq 1 [])) with(191)
    (let
-     c_2670_unboxed0/8434
-       (app{flat_hashtbl_public.ml:147,26-47}
-         G:"camlFlat_hashtbl_public__create_15_63_code" val)
+     (allocated/9235
+        (extcall "caml_vox_table_create"{flat_hashtbl_public.ml:147,26-47;vox_verified_flat_hashtbl.ml:122,12-29;vox_table_mutation.ml:55,20-37}
+          33 int->val)
+      Pmixedfield/9236 (load val allocated/9235))
      (catch
-       (exit 135
+       (exit 192
          (app{flat_hashtbl_public.ml:148,10-55;vox_verified_flat_hashtbl.ml:171,12-63}
-           G:"caml_applyV__V_V__R" c_2670_unboxed0/8434 [] key/8431
-           value/8432 []
-           (load val
-             (+a
-               (load val (+a G:"camlFlat_hashtbl_public__replace_20_80" 24))
-               80))
-           unit))
-     with(135)
-       (app{flat_hashtbl_public.ml:150,2-52;vox_verified_flat_hashtbl.ml:144,4-48}
-         G:"caml_applyV__V_" c_2670_unboxed0/8434 [] key/8431 []
-         (load val
-           (+a (load val (+a G:"camlFlat_hashtbl_public__replace_20_80" 24))
-             16))
-         val)))) )
+           G:"camlFlat_hashtbl_public__replace_9_92_code" Pmixedfield/9236
+           key/9231 value/9232 unit))
 ```
 
-Erased values that the optimizer cannot drop are passed as a placeholder constant (48059); the `-O3` assembly of this client contains none.
+The test checks that this client makes no call through a closure of the functor instance (`caml_apply`), that it calls `Vox_table_search` directly, and that neither this nor the default build calls an ownership primitive or lemma. Erased values that the optimizer cannot drop are passed as a placeholder constant (48059), for example to the function that rebuilds the table.
 
 ## Interface
 

@@ -119,6 +119,22 @@ let function_body text name =
   | body :: _ -> body
   | [] -> failwith ("Emitted_code: no function " ^ name)
 
+(* The callees of the calls in Cmm code: the symbol of a direct call,
+   "<closure>" for a call through a value. *)
+let cmm_callees text =
+  List.map
+    (fun (_, stop, _) ->
+      let len = String.length text in
+      let i = ref stop in
+      if !i < len && text.[!i] = '{' then
+        i := String.index_from text !i '}' + 1;
+      while !i < len && is_space text.[!i] do incr i done;
+      if !i + 3 <= len && String.sub text !i 3 = "G:\"" then
+        let start = !i + 3 in
+        String.sub text start (String.index_from text start '"' - start)
+      else "<closure>")
+    (find_all "(app" text)
+
 (* Functions called directly by name in a Lambda expression. *)
 let direct_calls body = captures "(apply%s%w/%d" body
 

@@ -39,15 +39,31 @@ let () =
       (occurs "before/%d[#()]" exercise && occurs "token/%d[#()]" exercise
        && occurs "#(#(), #())" exercise)
       "snapshots and tokens have the zero-width native layout";
+    (* The lemmas' closures are fields of the table's module block, which
+       the client builds when the functor is specialized in it; only calls
+       count. *)
     List.iter
       (fun name ->
         let cmm = dump name in
+        let callees = cmm_callees cmm in
         check
           (occurs "find_after_replace" cmm
            && not (occurs "caml_pref" cmm)
-           && not (List.exists (fun lemma -> occurs lemma cmm) lemmas))
+           && not
+                (List.exists
+                   (fun lemma ->
+                     List.exists (fun callee -> occurs lemma callee) callees)
+                   lemmas))
           (name ^ " calls no ownership primitive and no lemma"))
       [ "client.cmm"; "client-O3.cmm" ];
+    (* At -O3 the table's functor instance is specialized: no call goes
+       through a closure of the instance. *)
+    check (not (occurs "caml_apply" (dump "client-O3.cmm")))
+      "the -O3 client makes no generic application";
+    check
+      (List.exists (occurs "Vox_table_search__")
+         (cmm_callees (dump "client-O3.cmm")))
+      "the -O3 client calls the table's search directly";
     let vacancy = dump "vacancy.cmm" in
     let scan =
       let marker =

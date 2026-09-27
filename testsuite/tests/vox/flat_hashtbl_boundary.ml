@@ -31,6 +31,7 @@
    src += " ${lib}/vox_verified_flat_hashtbl.cmi";
    dst = "${test_build_directory_prefix}/ocamlc.opt.public/";
    compiler_directory_suffix = ".public";
+   all_modules = "flat_hashtbl_public.ml";
    readonly_files = "flat_hashtbl_public.ml flat_hashtbl_boundary.ml";
    readonly_files += " emitted_code.ml flat_hashtbl_boundary_check.ml";
    readonly_files += " flat_hashtbl_stale.ml flat_hashtbl_unowned.ml";
@@ -140,7 +141,9 @@
    setup-ocamlopt.opt-build-env;
    lib = "${test_build_directory_prefix}/ocamlopt.opt";
    compile_only = "true";
+   flags = "-extension refinement_types -O3";
    ocamlopt.opt;
+   flags = "-extension refinement_types";
    src = "${lib}/pref.cmi ${lib}/ghost_pref.cmi";
    src += " ${lib}/vox_verified_flat_hashtbl.cmi";
    src += " ${lib}/vox_sequence.cmx ${lib}/vox_table_model.cmx";
@@ -168,6 +171,7 @@
    src += " ${lib}/vox_verified_flat_hashtbl.cmx";
    dst = "${test_build_directory_prefix}/ocamlopt.opt.public/";
    compiler_directory_suffix = ".public";
+   all_modules = "flat_hashtbl_public.ml";
    readonly_files = "flat_hashtbl_public.ml flat_hashtbl_boundary.ml";
    readonly_files += " emitted_code.ml flat_hashtbl_boundary_check.ml";
    readonly_files += " flat_hashtbl_stale.ml flat_hashtbl_unowned.ml";
@@ -245,7 +249,7 @@
    readonly_files = "vox_table_vacancy.ml emitted_code.ml";
    readonly_files += " flat_hashtbl_boundary_check.ml";
    setup-ocamlopt.opt-build-env;
-   flags = "-extension refinement_types -I ${lib} -dcmm";
+   flags = "-extension refinement_types -O3 -I ${lib} -dcmm";
    compiler_output2 = "${lib}.public/vacancy.cmm";
    all_modules = "vox_table_vacancy.ml";
    ocamlopt.opt;
@@ -270,7 +274,9 @@
    Ghost_pref and Vox_verified_flat_hashtbl interfaces, linked and run.
    flat_hashtbl_boundary_check.ml checks the client's Lambda (and, natively,
    its Cmm at the default level and at -O3, and the Cmm of the vacancy scan)
-   for proof code. Three misuses are compiled without the refinement
+   for proof code. The library is compiled natively at -O3, as
+   verification/library/build.sh does, so that the client's -O3 code calls
+   the table's functor instance directly. Three misuses are compiled without the refinement
    extension and must still be rejected. The phrases below are rejected
    against the public interfaces and the client. *)
 
