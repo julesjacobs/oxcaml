@@ -1,3 +1,20 @@
+(* Specialization: the frontend, then a monomorphic program with one copy
+   of a top-level function for each use of it.
+
+   In the grounded derivation, each use of a top-level definition in the
+   entry is at a ground instance of its scheme, and so is each use in the
+   body of a definition instantiated at ground types
+   ([Hmc_specialized_body.instantiate]). Hmc_reference_tree records the
+   instance at each use; Hmc_expansion expands each instance's body in turn,
+   and Hmc_manifest flattens the resulting tree into a table in which each
+   specialized body refers only to entries before it. The expansion
+   terminates because a body refers only to earlier definitions: its fuel
+   is the number of definitions. [C.build] then rewrites the entry and each
+   body to refer to table entries.
+
+   The result type says only that the program rebuilds to the source; the
+   invariant [C.ready] of [C.program] is what the typing lemmas
+   (Hmc_monomorphic_typing) and Hmc_monomorphic_simulation use. *)
 module D = Hm_declarative
 module F = Hmc_frontend
 module T = Hmc_templates

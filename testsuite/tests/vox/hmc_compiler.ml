@@ -1,3 +1,52 @@
+(* The compiler pipeline and its end-to-end theorems.
+
+   Pipeline, from a closed de Bruijn term of Hm_declarative to Wasm bytes:
+
+     Hmc_specialization.compile       scope check, inference, grounding and
+                                      admission (Hmc_frontend), then one
+                                      monomorphic copy of a top-level
+                                      function for each use of it
+                                      (Hmc_monomorphic)
+     Hmc_closure_program.build        closure conversion (Hmc_closure_ir)
+     Hmc_cfg_program.build            a control-flow graph of blocks with one
+                                      instruction each (Hmc_cfg_ir)
+     Hmc_tail_ir.build                marks a recursive function's calls to
+                                      itself in tail position as tail calls
+     Hmc_wasm_program_binary.compile  builds the initial heap and memory image
+                                      (Hmc_wasm_program_initialize), lowers
+                                      each block to a Wasm function
+                                      (Hmc_wasm_program_lower) and encodes
+                                      the module
+
+   Each pass states in its result type how its output relates to its input,
+   and the intermediate programs keep their input (in [origin], or [source]
+   for the monomorphic program). The semantic correctness of the passes is
+   proved separately from those relations, as a chain of machines, each
+   proved against the one above it:
+
+     Hmc_source_semantics       the source environment machine
+     Hmc_monomorphic_semantics  Hmc_monomorphic_simulation, in lockstep
+     Hmc_closure_semantics      Hmc_closure_simulation, in lockstep
+     Hmc_tail_semantics         Hmc_tail_simulation, within twice the steps
+     Hmc_heap_machine           Hmc_heap_runs: the tail machine with values
+                                in a bounded heap and a bounded stack; it may
+                                stop with exhaustion
+     Wasm_calls                 Hmc_wasm_program_execution: one iteration of
+                                the dispatcher loop per heap-machine step
+     Wasm_binary_execution      Hmc_wasm_program_binary: the bytes decode to
+                                the module, and its prologue installs the
+                                run's input
+
+   The CFG semantics is not in the chain: Hmc_tail_simulation relates the
+   closure machine to the tail machine directly.
+
+   Theorem shape. [compile] returns [Compiled artifact] with
+   [correct source layout memory pages artifact]. Each lemma below takes
+   [correct] as its premise and states one property of
+   [Execute.run k artifact.bytes input], for every input and step count [k]:
+   [safe], [reflection] and [preservation], and [static_validity] of the
+   bytes. Hmc_compilation keeps [correct] in an abstract type and adds
+   [normal] and [exhaustion]. *)
 module D = Hm_declarative
 module W = Hmc_word64
 module B = Wasm_u32
@@ -14,6 +63,8 @@ module Execute = Wasm_binary_execution
 module Registers = Hmc_wasm_program_registers
 module State = Hmc_wasm_program_state
 module Calls = Wasm_calls
+(* Only [bytes] exists at run time. The tail program and the compiled
+   binary are erased evidence: [correct] is stated about them. *)
 type artifact = {bytes : B.bytes; program : Tail.program @@ ghost; binary : Binary.compiled @@ ghost}
 type result = Unbound_variable
   | Type_error of Hmc_frontend.inference [@immediate_all_void_constructor]
@@ -21,6 +72,9 @@ type result = Unbound_variable
   | Unsupported_fragment of Hmc_admission.error | Layout_rejected
   | Initialization_exhausted of Hmc_heap_objects.heap * D.index | Encoding_rejected
   | Compiled of artifact
+(* The source term, rebuilt from the chain of [origin] fields that each pass
+   keeps: tail program, CFG program, closure program, monomorphic program,
+   then the frontend's top-level definitions and entry. *)
 let[@def] (origin @ total) (program : Tail.program @ immutable) =
   T.rebuild program.Tail.origin.Cfg.origin.Closure.origin.M.source.T.globals
     program.Tail.origin.Cfg.origin.Closure.origin.M.source.T.entry
@@ -80,6 +134,9 @@ let (target @ total) : (source : D.term) @ immutable -> (layout : Init.layout) @
     Binary.targets_def artifact.program layout memory artifact.binary.Binary.start artifact.binary.Binary.prepared input target;
     Input.retargeted_def artifact.binary.Binary.prepared input target;
     target)
+(* At every step count the run has decoded and started the module and has
+   neither trapped nor stopped for another reason: it is running or has
+   finished. *)
 let (safe @ total) : (source : D.term) @ immutable -> (layout : Init.layout) @ immutable ->
     (memory : B.bytes) @ immutable -> (pages : B.u32) -> (artifact : artifact) @ immutable ->
     (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->
@@ -90,6 +147,8 @@ let (safe @ total) : (source : D.term) @ immutable -> (layout : Init.layout) @ i
     let target = target source layout memory pages artifact input () in
     Binary.safe artifact.program layout memory artifact.binary.Binary.start artifact.binary.Binary.prepared pages
       artifact.bytes input target prefix ())
+(* A finished run whose globals say it returned [word] (status 1, tag of a
+   word, payload [word]) reflects a source run that returns [word]. *)
 let (reflection @ total) : (source : D.term) @ immutable -> (layout : Init.layout) @ immutable ->
     (memory : B.bytes) @ immutable -> (pages : B.u32) -> (artifact : artifact) @ immutable -> (input : W.t) @ immutable ->
     (prefix : C.count) @ immutable ->
@@ -111,6 +170,9 @@ let (reflection @ total) : (source : D.term) @ immutable -> (layout : Init.layou
       artifact.bytes input target prefix after registers word ())
 module E = Hmc_wasm_program_execution
 module Source = Hmc_wasm_program_source_execution
+(* A source run that returns [word] is matched by a run of the bytes that
+   finishes, returning [word] or reporting exhaustion. Its step count
+   includes the five steps of the prologue. *)
 let (preservation @ total) : (source : D.term) @ immutable -> (layout : Init.layout) @ immutable ->
     (memory : B.bytes) @ immutable -> (pages : B.u32) -> (artifact : artifact) @ immutable ->
     (input : W.t) @ immutable -> (target : Init.prepared) @ immutable -> (word : W.t) @ immutable -> (source_fuel : D.index) @ immutable ->
@@ -131,6 +193,8 @@ let (preservation @ total) : (source : D.term) @ immutable -> (layout : Init.lay
     Hmc_monomorphic_simulation.source_start_def artifact.program.Tail.origin.Cfg.origin.Closure.origin input;
     Binary.preservation artifact.program layout memory artifact.binary.Binary.start artifact.binary.Binary.prepared
       pages artifact.bytes input target word source_fuel ())
+(* Validation: [static_structure] is about the image the bytes decode to,
+   and [static_validity] lifts it to the bytes. *)
 let[@def] (binary_image @ total) (artifact : artifact @ immutable) (pages : B.u32) = ghost_ (
   Binary.image artifact.program artifact.binary.Binary.prepared.Init.lowered artifact.binary.Binary.prepared.Init.context
     artifact.binary.Binary.prepared.Init.state pages)

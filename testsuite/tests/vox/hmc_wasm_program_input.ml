@@ -50,6 +50,9 @@ let[@def] (restart @ total) (start : Heap.start @ immutable) (input : W.t @ immu
       {X.heap = start.Heap.configuration.X.heap; state = Q.Running (entered activation input, frames)}
     | _ -> start.Heap.configuration}
 
+(* [restart start input] satisfies [Heap.correct] for [input]: words are
+   stored in cells rather than on the heap, so the heap is unchanged and
+   only the entry's argument cell differs. *)
 let (heap @ total) : (program : I.program) @ immutable -> (base : W.limb) -> (limit : W.limb) ->
     (old : W.t) @ immutable -> (input : W.t) @ immutable -> (start : Heap.start) @ immutable ->
     {u : unit | Heap.correct program base limit old (Heap.Initialized start)} ->
@@ -190,6 +193,10 @@ let[@def] (retargeted @ total) (prepared : Init.prepared @ immutable) (input : W
   && Memory.store prepared.Init.state.State.memory prepared.Init.state.State.registers.Registers.frame
     (Runtime.input_offset ()) (S.I64 input) === Some target.Init.state.State.memory)
 
+(* The proof that the prologue's store of the input at byte
+   [Runtime.input_offset] of the entry frame yields a state that satisfies
+   [Init.ready] for [input], so that the proofs about runs, stated for the
+   initializer's state, apply to the module built for the placeholder. *)
 let (install @ total) : (program : I.program) @ immutable -> (layout : Init.layout) @ immutable ->
     (memory : B.bytes) @ immutable -> (start : Heap.start) @ immutable -> (prepared : Init.prepared) @ immutable ->
     (input : W.t) @ immutable ->

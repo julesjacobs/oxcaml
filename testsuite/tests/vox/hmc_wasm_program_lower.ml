@@ -1,3 +1,11 @@
+(* Lowering the tail program to Wasm code: the code of every block
+   (Hmc_wasm_program_table), a call plan for each entry of the closure table
+   (Hmc_wasm_call_plan_table) and the copy that restores a saved frame
+   (Hmc_wasm_frame_restore). Every frame has the same size, [width] bytes:
+   a 16-byte header and [capacity] cells of 16 bytes, where [capacity] is
+   the largest block signature (Hmc_frame_capacity). [corresponds] relates
+   the result to the tail program; [None] means that an index or size does
+   not fit its encoding ([encodable]). *)
 module B = Wasm_u32
 module I = Hmc_tail_ir
 module C = Hmc_cfg_program

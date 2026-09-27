@@ -1,3 +1,16 @@
+(* The monomorphic program: the specialized definitions and the entry, as
+   terms in which a use of a top-level definition is [Global (i, index,
+   id)]: the source's de Bruijn index [i], the definition's index among the
+   top-level ones, and the entry [id] of the specialized copy in the
+   definitions table. [erase] gives back the source term and [links] the
+   references to the table.
+
+   [ready], the invariant of [program], says that the source program is
+   [T.ready], that each definition erases to the source of the instance it
+   specializes ([origins]), that the table is valid and that the entry's
+   references are the instances its derivation uses. The semantics of these
+   terms is Hmc_monomorphic_semantics, related to the source machine by
+   Hmc_monomorphic_simulation. *)
 module D = Hm_declarative
 module M = Hmc_manifest
 module R = Hmc_reference_tree
@@ -29,6 +42,8 @@ let[@def] rec (links @ total) (term : term @ immutable) = match term with
   | Apply (a, b) | Cons (a, b) | Let (a, b) | Primitive (_, a, b) -> M.Pair (links a, links b)
   | If (a, b, c) | CaseList (a, b, c) -> M.Triple (links a, links b, links c)
 
+(* A source term with its derivation and references, as a monomorphic
+   term that erases to it. *)
 let rec (rewrite @ total) : (table : M.table) @ immutable -> (catalog : T.catalog) @ immutable ->
     (locals : D.context) @ immutable -> (source : D.term) @ immutable ->
     (d : D.typing) @ immutable -> (refs : M.references) @ immutable ->

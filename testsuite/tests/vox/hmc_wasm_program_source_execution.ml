@@ -1,3 +1,21 @@
+(* The dispatcher loop against the source machine.
+
+   [reflection]: a loop that stopped by returning [word] has taken the tail
+   machine to [Done] with that word (the heap invariant decodes the
+   returned value), so by Hmc_tail_simulation.source_reflection the source
+   machine returns it too.
+
+   [preservation]: if the source returns [word], Hmc_tail_simulation gives
+   a step count [budget] after which the tail machine has returned it. The
+   loop run for [budget] block steps follows the heap machine, which
+   follows the tail machine until it is blocked by exhaustion
+   (Hmc_heap_runs.correct). So the loop stops, returning [word] or
+   reporting exhaustion: a [Paused] endpoint would decode to a running tail
+   state after [budget] steps.
+
+   [normal]: when the heap and stack demand of those [budget] steps
+   (Hmc_heap_demand) fits in the space left, the heap machine is not
+   blocked (Hmc_heap_resources.sufficient) and the loop returns [word]. *)
 module D = Hm_declarative
 module W = Hmc_word64
 module I = Hmc_tail_ir

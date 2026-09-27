@@ -1,3 +1,18 @@
+(* The frontend: from a closed source term to the top-level definitions and
+   entry of Hmc_templates, each with a typing derivation.
+
+   [prepare] checks scope, runs the verified inference ([V.infer]),
+   elaborates its result into a derivation at the inferred type, grounds
+   it (Hmc_grounding: the free type variables of the program's type are
+   instantiated so that it becomes [word -> word], and the others at
+   [bool]), checks the admitted fragment (Hmc_admission) and splits off the
+   top-level [let]s ([T.extract]). Its result type says that a [Prepared]
+   program is [T.ready], that is well typed with no free type variables, and
+   rebuilds to the input term; it also gives the meaning of each rejection.
+
+   The type errors keep the inference run as erased evidence. [untypable]
+   and [no_entry_type] refute any typing of the term with the principality
+   of that run ([V.principal_evidence]). *)
 module D = Hm_declarative
 module V = Verified_hm
 module G = Hmc_grounding
