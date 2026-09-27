@@ -56,6 +56,12 @@ type value_mismatch =
 
 exception Dont_match of value_mismatch
 
+(** Recursive functions that the typechecker made partial because their
+    recursion is not structural, with the location of the offending call and
+    the reason, keyed by the function's uid. An interface that requires the
+    function to be total reports them. *)
+val partial_recursion : (Location.t * string) Types.Uid.Tbl.t
+
 (* Documents which kind of private thing would be revealed *)
 type privacy_mismatch =
   | Private_type_abbreviation

@@ -13487,16 +13487,20 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
     ~before_generalize: begin fun (mode_pat_typ_list, exp_list, _, _, _, pvs) ->
       if provisional_recursion then
         Option.iter (fun mode ->
-          let partial loc reason =
+          let partial ?uid loc reason =
             match Totality.submode Totality.partial
               (Value.proj_comonadic Axis.Totality mode) with
-            | Ok () -> ()
+            | Ok () ->
+                (* Kept for an interface that requires totality. *)
+                Option.iter (fun uid ->
+                  Types.Uid.Tbl.replace Includecore.partial_recursion uid
+                    (loc, reason)) uid
             | Error _ ->
                 Location.raise_errorf ~loc
                   "This recursive function cannot be total: %s." reason
           in
           match mode_pat_typ_list, exp_list with
-          | [(_, { pat_desc = Tpat_var { id; _ }; _ }, _)], [(exp, _)] ->
+          | [(_, { pat_desc = Tpat_var { id; uid; _ }; _ }, _)], [(exp, _)] ->
               begin match decreases with
               | Some measure ->
                   begin try
@@ -13514,7 +13518,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
               | None ->
                   begin match Structural_recursion.check id exp with
                   | Ok () -> ()
-                  | Error (loc, reason) -> partial loc reason
+                  | Error (loc, reason) -> partial ~uid loc reason
                   end
               end
           | _ ->
