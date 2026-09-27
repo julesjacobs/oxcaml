@@ -78,10 +78,14 @@ this file.
   - [x] WebAssembly model tested against Node: 100,000 random modules, no
         disagreement; a 40-module smoke check in the suite (merged in
         `123348b625`, `78020e455a`).
-- [ ] **4. Every page claim checked by `./dev test`.**
-  - [ ] Port the 13 hand-run check scripts into the suite (wart 26).
-  - [ ] E-graphs: review the public boundary, regenerate
-        `vox_egraph_rule_handle.spec.json`, put the check in the suite.
+- [x] **4. Every page claim checked by `./dev test`** (merged in
+      `075d6f9146`). The 13 hand-run scripts are ocamltest tests with exact
+      expected errors and positive controls, and are deleted; every page's
+      Reproduce section lists only `./dev test` commands. Outside the suite,
+      stated on the pages: `lz4_interop.py` (needs liblz4) and `run-diff-demo`
+      on other inputs.
+  - [x] E-graphs: boundary reviewed (the trusted surface is 13 files, as the
+        page says), manifest regenerated, check in the suite.
 - [ ] **5. Bugs an expert could hit live.**
   - [ ] `include M` with a refinement on an included value: escape error,
         and a `Refinement_scope_escape` crash with `let rec`.
@@ -142,11 +146,11 @@ this file.
       premise assumed (57), top-level `@ total` in expect tests (79),
       comparator key distinctness (65), total division (71),
       `Bigint.to_int_opt` (69), iarray length bound (68), heap
-      extensionality (74), atomics (73), table modules at `-O3` (19),
-      `binary_modules` documentation (85), nested `ghost_` warning (80),
+      extensionality (74), atomics (73), table modules at `-O3` (19, done),
+      `binary_modules` documentation (85, done in `075d6f9146`), nested `ghost_` warning (80),
       ghost hint (81), unused refined binding hint (21), real bindings used
       only in ghost code (44), refined-result helper diagnostic (63),
-      `./dev --promote` exit status (25), verifier ignores
+      `./dev --promote` exit status (25, done), verifier ignores
       `module B = Base` (37), `[@def]` partial application order (50),
       polymorphic `let` outside ghost code (62).
 
