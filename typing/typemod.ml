@@ -2343,6 +2343,17 @@ and transl_signature ?(interface_toplevel = false) env
         [Sig_value(tdesc.val_id, tdesc.val_val, Exported)],
         newenv
     | Psig_type (rec_flag, sdecls) ->
+        List.iter
+          (fun sdecl ->
+             List.iter
+               (fun attr ->
+                  if Builtin_attributes.attr_equals_builtin attr "relation"
+                  then
+                    Location.raise_errorf ~loc:attr.attr_loc
+                      "A relation must be declared in a structure; a \
+                       signature lists its generated values")
+               sdecl.ptype_attributes)
+          sdecls;
         let (decls, newenv, _shapes) =
           Typedecl.transl_type_decl env rec_flag sdecls
         in
@@ -3225,6 +3236,244 @@ and transl_recmodule_modtypes env ~sig_modalities sdecls =
 (* Try to convert a module expression to a module path. *)
 
 exception Not_a_path
+
+(* A relation declaration
+     [type r = C1 of t1 | ... [@@relation function | C1 x -> e1 when p1 | ...]]
+   lists one rule per constructor: the constructor's fields are the rule's
+   variables and premise derivations, the guard its premises and the result its
+   conclusion. It is sugar for ordinary definitions, all checked as usual: the
+   derivation type, [r_concl] and [r_valid], the predicate [r d a1 ... an] that
+   [d] derives the conclusion [(a1, ..., an)], and [r_inversion], which states
+   that [r d a1 ... an] holds exactly when the conclusion of [d]'s rule is
+   [(a1, ..., an)] and its premises hold. In a premise, [r d' b1 ... bn] means
+   [r_valid d' && r_concl d' === (b1, ..., bn)]. *)
+let expand_relation item rec_flag sdecl attr others =
+  ignore (Builtin_attributes.has_attribute "relation" [attr]);
+  Language_extension.assert_enabled ~loc:attr.attr_loc Refinement_types ();
+  let loc = { attr.attr_loc with loc_ghost = true } in
+  let name = sdecl.ptype_name.txt in
+  let error fmt = Location.raise_errorf ~loc:attr.attr_loc fmt in
+  let cases =
+    match attr.attr_payload with
+    | PStr [{pstr_desc = Pstr_eval
+                ({pexp_desc = Pexp_function
+                      ([], _, Pfunction_cases (cases, _, _)); _}, []);
+             _}] -> cases
+    | _ -> error "The relation attribute requires a function with one \
+                  case per rule"
+  in
+  let constructors =
+    match sdecl.ptype_kind with
+    | Ptype_variant constructors ->
+        List.map (fun cd -> cd.pcd_name.txt) constructors
+    | _ -> Location.raise_errorf ~loc:sdecl.ptype_loc
+             "A relation must be a variant type"
+  in
+  let variables = ref [] in
+  let simple pattern =
+    match pattern.ppat_desc with
+    | Ppat_var {txt; _} -> variables := txt :: !variables; true
+    | Ppat_any -> true
+    | _ -> false
+  in
+  let rule_constructor case =
+    let reject () =
+      Location.raise_errorf ~loc:case.pc_lhs.ppat_loc
+        "A rule matches one constructor of %s and binds each of its \
+         fields to a variable or _" name
+    in
+    match case.pc_lhs.ppat_desc with
+    | Ppat_construct ({txt = Lident constructor; _}, argument)
+      when List.mem constructor constructors ->
+        let fields =
+          match argument with
+          | None -> true
+          | Some ([], {ppat_desc = Ppat_tuple (patterns, Closed); _}) ->
+              List.for_all
+                (fun (label, pattern) -> label = None && simple pattern)
+                patterns
+          | Some ([], pattern) -> simple pattern
+          | Some (_ :: _, _) -> false
+        in
+        if not fields then reject ();
+        constructor
+    | _ -> reject ()
+  in
+  let ruled = List.map rule_constructor cases in
+  let names =
+    { Ast_iterator.default_iterator with
+      expr = (fun iterator e ->
+        (match e.pexp_desc with
+         | Pexp_ident {txt = Lident name; _} ->
+             variables := name :: !variables
+         | _ -> ());
+        Ast_iterator.default_iterator.expr iterator e) }
+  in
+  List.iter (names.case names) cases;
+  List.iter
+    (fun constructor ->
+       match List.filter (String.equal constructor) ruled with
+       | [_] -> ()
+       | [] -> error "The constructor %s has no rule" constructor
+       | _ -> error "The constructor %s has several rules" constructor)
+    constructors;
+  let tuple_length e =
+    match e.pexp_desc with
+    | Pexp_tuple components
+      when List.for_all (fun (label, _) -> label = None) components ->
+        Some (List.length components)
+    | _ -> None
+  in
+  let arity =
+    match List.map (fun case -> tuple_length case.pc_rhs) cases with
+    | Some n :: rest when List.for_all (( = ) (Some n)) rest -> n
+    | _ -> 1
+  in
+  let rec fresh base =
+    if List.mem base !variables then fresh (base ^ "'") else base
+  in
+  let d = fresh "d" in
+  let arguments =
+    List.init arity (fun i -> fresh (Printf.sprintf "a%d" (i + 1)))
+  in
+  let open Ast_helper in
+  let lid s = mkloc (Lident s) loc in
+  let ident ?(loc = loc) s = Exp.ident ~loc (mkloc (Lident s) loc) in
+  let apply ?(loc = loc) f args =
+    Exp.apply ~loc f (List.map (fun a -> Asttypes.Nolabel, a) args)
+  in
+  let conj ?(loc = loc) a b = apply ~loc (ident ~loc "&&") [a; b] in
+  let equal ?(loc = loc) a b = apply ~loc (ident ~loc "===") [a; b] in
+  let tuple ~loc = function
+    | [e] -> e
+    | es -> Exp.tuple ~loc (List.map (fun e -> None, e) es)
+  in
+  let concl = name ^ "_concl" and valid = name ^ "_valid" in
+  let arguments_text =
+    if arity = 1 then "one argument"
+    else Printf.sprintf "%d arguments" arity
+  in
+  let premise guard =
+    let expr mapper e =
+      match e.pexp_desc with
+      | Pexp_apply ({pexp_desc = Pexp_ident {txt = Lident n; _}; _}, args)
+        when n = name ->
+          if List.length args <> arity + 1
+          || List.exists (fun (label, _) -> label <> Asttypes.Nolabel) args
+          then
+            Location.raise_errorf ~loc:e.pexp_loc
+              "The relation %s takes a derivation and %s"
+              name arguments_text;
+          let args =
+            List.map (fun (_, a) -> mapper.Ast_mapper.expr mapper a) args
+          in
+          let derivation = List.hd args in
+          let loc = e.pexp_loc in
+          conj ~loc (apply ~loc (ident ~loc valid) [derivation])
+            (equal ~loc (apply ~loc (ident ~loc concl) [derivation])
+               (tuple ~loc (List.tl args)))
+      | Pexp_ident {txt = Lident n; _} when n = name ->
+          Location.raise_errorf ~loc:e.pexp_loc
+            "The relation %s takes a derivation and %s" name arguments_text
+      | _ -> Ast_mapper.default_mapper.expr mapper e
+    in
+    let mapper = {Ast_mapper.default_mapper with expr} in
+    mapper.expr mapper guard
+  in
+  let attribute name payload = Attr.mk ~loc (mkloc name loc) payload in
+  let definition ~transparent =
+    attribute "def"
+      (if transparent then PStr [Str.eval ~loc (ident "transparent")]
+       else PStr [])
+  in
+  let quiet =
+    attribute "warning"
+      (PStr [Str.eval ~loc (Exp.constant ~loc (Const.string "-26-27"))])
+  in
+  (* Immutable parameters accept refinement binders at any type. *)
+  let function_ ?(constraint_ = None) ?(ret_modes = []) params body =
+    Exp.function_ ~loc
+      (List.map (fun p ->
+           {pparam_loc = loc;
+            pparam_desc =
+              Pparam_val (Asttypes.Nolabel, None,
+                Pat.constraint_ ~loc (Pat.var ~loc (mkloc p loc)) None
+                  [mkloc (Mode "immutable") loc])})
+          params)
+      {mode_annotations = []; ret_mode_annotations = ret_modes;
+       ret_type_constraint = constraint_}
+      (Pfunction_body body)
+  in
+  let value ?(modes = []) rec_flag attrs name params ?constraint_ ?ret_modes
+      body =
+    Str.value ~loc rec_flag
+      [Vb.mk ~loc ~attrs ~modes (Pat.var ~loc (mkloc name loc))
+         (function_ ?constraint_ ?ret_modes params body)]
+  in
+  let rules f = Exp.match_ ~loc (ident d) (List.map f cases) in
+  let args = tuple ~loc (List.map ident arguments) in
+  let inductive =
+    if List.exists
+        (fun attr ->
+           Builtin_attributes.attr_equals_builtin attr "inductive")
+        others
+    then []
+    else [attribute "inductive" (PStr [])]
+  in
+  [ Str.type_ ~loc:item.pstr_loc rec_flag
+      [{sdecl with ptype_attributes = others @ inductive}];
+    value Nonrecursive [definition ~transparent:true; quiet] concl [d]
+      (rules (fun case -> Exp.case case.pc_lhs case.pc_rhs));
+    value Recursive [definition ~transparent:false; quiet] valid [d]
+      (Exp.ghost ~loc
+         (rules (fun case ->
+              Exp.case case.pc_lhs
+                (match case.pc_guard with
+                 | None -> Exp.construct ~loc (lid "true") None
+                 | Some guard -> premise guard))));
+    value Nonrecursive [definition ~transparent:true] name (d :: arguments)
+      (Exp.ghost ~loc
+         (conj (apply (ident valid) [ident d])
+            (equal (apply (ident concl) [ident d]) args)));
+    value Nonrecursive [quiet] (name ^ "_inversion") (d :: arguments)
+      ~modes:[mkloc (Mode "total") loc]
+      ~ret_modes:[mkloc (Mode "ghost") loc]
+      ~constraint_:(Some (Pconstraint
+        (Typ.refine ~loc (mkloc "u" loc)
+           (Typ.constr ~loc (lid "unit") [])
+           (equal
+              (apply (ident name) (ident d :: List.map ident arguments))
+              (rules (fun case ->
+                   let conclusion = equal args case.pc_rhs in
+                   Exp.case case.pc_lhs
+                     (match case.pc_guard with
+                      | None -> conclusion
+                      | Some guard -> conj conclusion guard)))))))
+      (Exp.ghost ~loc (apply (ident (valid ^ "_def")) [ident d])) ]
+
+let relation_expansion item =
+  let relation sdecl =
+    match
+      List.partition
+        (fun attr -> Builtin_attributes.attr_equals_builtin attr "relation")
+        sdecl.ptype_attributes
+    with
+    | [], _ -> None
+    | [attr], others -> Some (sdecl, attr, others)
+    | _ :: attr :: _, _ ->
+        Location.raise_errorf ~loc:attr.attr_loc "Duplicate relation attribute"
+  in
+  match item.pstr_desc with
+  | Pstr_type (rec_flag, sdecls) -> begin
+      match List.filter_map relation sdecls, sdecls with
+      | [], _ -> None
+      | [sdecl, attr, others], [_] ->
+          Some (expand_relation item rec_flag sdecl attr others)
+      | _ ->
+          Location.raise_errorf ~loc:item.pstr_loc
+            "A relation must be declared on its own"
+    end
+  | _ -> None
 
 let rec path_of_module mexp =
   match mexp.mod_desc with
@@ -4689,6 +4938,11 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
     | [] ->
       (List.rev str_acc, List.rev sig_acc, shape_map, env)
     | pstr :: srem ->
+        match relation_expansion pstr with
+        | Some items ->
+            type_struct env shape_map (items @ srem) str_acc sig_acc
+              sig_acc_include_functor
+        | None ->
         let previous_saved_types = Cmt_format.get_saved_types () in
         let desc, sg, shape_map, new_env =
           type_str_item env shape_map pstr sig_acc_include_functor
