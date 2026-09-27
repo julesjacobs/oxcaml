@@ -60,7 +60,7 @@ module Make (Key : Vox_table_map.Key) = struct
       (query : Key.t) ->
       (capacity : {c : int | c = view.model.capacity}) ->
       (hash : {h : int | h = Key.hash query}) ->
-      (rank : {r : int | 0 <= r && r <= (view.model.capacity lsr 4)}) ->
+      (rank : {r : int | 0 <= r && r <= (W.lsr4 view.model.capacity)}) ->
       (group : int) -> (step : int) ->
       (token : {t : (Key.t, 'a) M.state P.token | H.at (P.own t) (T.location
         table) ===
@@ -125,7 +125,7 @@ module Make (Key : Vox_table_map.Key) = struct
     ghost_ (
       I.valid_def view; R.capacity_bounds view.model;
       Spec.prefix_absent_def view.model query 0;
-      I.probe_def capacity hash 0; I.wrap_def capacity (hash lsr 7));
+      I.probe_def capacity hash 0; I.wrap_def capacity (W.lsr7 hash));
     if capacity = 16 then begin
       ghost_ (I.group_def capacity hash 0; R.group_in_shape view.model hash 0);
       let needle = hash land 127 in

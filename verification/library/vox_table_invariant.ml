@@ -1,5 +1,6 @@
 module S = Vox_sequence
 module M = Vox_table_model
+module W = Vox_table_wrap
 
 module Make (Key : Vox_table_map.Key) = struct
   module Map = Vox_table_map.Make (Key)
@@ -14,7 +15,7 @@ module Make (Key : Vox_table_map.Key) = struct
     index land (capacity - 1)
 
   let[@def] rec (probe @ total) (capacity : int) (hash : int) (depth : int) =
-    if depth <= 0 then (wrap capacity (hash lsr 7), 16)
+    if depth <= 0 then (wrap capacity (W.lsr7 hash), 16)
     else
       let group, step = probe capacity hash (depth - 1) in
       (wrap capacity (group + step), step + 16)
@@ -33,7 +34,7 @@ module Make (Key : Vox_table_map.Key) = struct
   let[@def] (route_position @ total) (capacity : int) (hash : int)
       (index : Bigint.t) (path : int * int) =
     let depth, lane = path in
-    0 <= depth && depth < (capacity lsr 4) && 0 <= lane && lane < 16
+    0 <= depth && depth < (W.lsr4 capacity) && 0 <= lane && lane < 16
     && index = Bigint.of_int
       (wrap capacity (group capacity hash depth + lane))
 
@@ -92,7 +93,16 @@ module Make (Key : Vox_table_map.Key) = struct
   let[@def] (power_of_two @ total) (capacity : int) =
     capacity land (capacity - 1) = 0
 
-  let[@def] (reserve @ total) (capacity : int) = capacity lsr 3
+  (* [capacity lsr 3]. Not a [@def]: a predicate cannot state a shift by a
+     constant, so [reserve_def] states the value arithmetically. *)
+  let (reserve @ total) (capacity : int) :
+      {r : int | W.shifted capacity 8 576460752303423488 r} =
+    W.lsr3 capacity
+
+  let (reserve_def @ total) (capacity : int) :
+      {u : unit | W.shifted capacity 8 576460752303423488 (reserve capacity)}
+      @ ghost =
+    ghost_ (let _ = reserve capacity in ())
 
   let[@def] (shape @ total) (s : (Key.t, 'a) M.state @ immutable) =
     16 <= s.capacity && s.capacity <= 1073741824

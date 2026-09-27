@@ -29,17 +29,17 @@ module Make (Key : Vox_table_map.Key)
       (groups : {n : int | 0 < n && n <= 67108864 && capacity = W.scale16 n}) ->
       (hash : int) -> (rank : {r : int | 0 <= r && r <= groups}) ->
       {u : unit | I.probe capacity hash rank ===
-        (P.addmod capacity (I.wrap capacity (hash lsr 7))
+        (P.addmod capacity (I.wrap capacity (W.lsr7 hash))
           (W.scale16 (P.triangle groups rank)), W.scale16 (rank + 1))}
       @ ghost = fun capacity groups hash rank -> ghost_ (
     I.probe_def capacity hash rank;
     P.triangle_def groups rank;
-    I.wrap_def capacity (hash lsr 7);
-    W.wrap_range capacity (hash lsr 7);
+    I.wrap_def capacity (W.lsr7 hash);
+    W.wrap_range capacity (W.lsr7 hash);
     W.scale16_def groups; W.scale16_def rank; W.scale16_def (rank + 1);
     if rank = 0 then begin
       W.scale16_def 0; W.scale16_def 1;
-      P.addmod_def capacity (I.wrap capacity (hash lsr 7)) 0;
+      P.addmod_def capacity (I.wrap capacity (W.lsr7 hash)) 0;
       ()
     end else begin
       probe_triangle capacity groups hash (rank - 1);
@@ -48,16 +48,16 @@ module Make (Key : Vox_table_map.Key)
       W.scale16_def (P.triangle groups (rank - 1));
       W.scale16_def (P.triangle groups rank);
       W.scale_addmod groups (P.triangle groups (rank - 1)) rank;
-      addmod_range capacity (I.wrap capacity (hash lsr 7))
+      addmod_range capacity (I.wrap capacity (W.lsr7 hash))
         (W.scale16 (P.triangle groups (rank - 1)));
       W.wrap_add capacity
-        (P.addmod capacity (I.wrap capacity (hash lsr 7))
+        (P.addmod capacity (I.wrap capacity (W.lsr7 hash))
           (W.scale16 (P.triangle groups (rank - 1))))
         (W.scale16 rank);
       I.wrap_def capacity
-        (P.addmod capacity (I.wrap capacity (hash lsr 7))
+        (P.addmod capacity (I.wrap capacity (W.lsr7 hash))
           (W.scale16 (P.triangle groups (rank - 1))) + W.scale16 rank);
-      addmod_associative capacity (I.wrap capacity (hash lsr 7))
+      addmod_associative capacity (I.wrap capacity (W.lsr7 hash))
         (W.scale16 (P.triangle groups (rank - 1))) (W.scale16 rank);
       ()
     end)
@@ -66,7 +66,7 @@ module Make (Key : Vox_table_map.Key)
       {u : unit | not (16 <= capacity && capacity <= 1073741824 &&
         P.valid plan && capacity = W.scale16 (P.groups plan)) ||
         0 < P.groups plan && P.groups plan <= 67108864 &&
-        capacity lsr 4 = P.groups plan} @ ghost = ghost_ (
+        W.lsr4 capacity = P.groups plan} @ ghost = ghost_ (
     P.groups_range plan; W.scale16_def (P.groups plan); ())
 
   let (distance_bounds @ total) (capacity : int) (start : int) (index : int) :
@@ -85,29 +85,29 @@ module Make (Key : Vox_table_map.Key)
       {u : unit | not (16 <= capacity && capacity <= 1073741824 &&
         0 < groups && groups <= 67108864 && capacity = W.scale16 groups &&
         0 <= distance && distance < capacity) ||
-        0 <= distance lsr 4 && distance lsr 4 < groups &&
-        0 <= W.scale16 (distance lsr 4) && W.scale16 (distance lsr 4) <
+        0 <= W.lsr4 distance && W.lsr4 distance < groups &&
+        0 <= W.scale16 (W.lsr4 distance) && W.scale16 (W.lsr4 distance) <
           capacity}
       @ ghost = ghost_ (
-    W.scale16_def groups; W.scale16_def (distance lsr 4); ())
+    W.scale16_def groups; W.scale16_def (W.lsr4 distance); ())
 
   let (cover @ total) (capacity : W.capacity)
       (plan : {p : P.plan | P.valid p && capacity = W.scale16 (P.groups p)}
         @ immutable)
       (hash : int) (index : {i : int | 0 <= i && i < capacity}) :
       {path : int * int | let rank, lane = path in
-        0 <= rank && rank < (capacity lsr 4) && 0 <= lane && lane < 16 &&
+        0 <= rank && rank < (W.lsr4 capacity) && 0 <= lane && lane < 16 &&
         index = I.wrap capacity (I.group capacity hash rank + lane)} @ ghost =
           ghost_ (
     groups_capacity capacity plan;
-    let start = I.wrap capacity (hash lsr 7) in
-    I.wrap_def capacity (hash lsr 7); W.wrap_range capacity (hash lsr 7);
+    let start = I.wrap capacity (W.lsr7 hash) in
+    I.wrap_def capacity (W.lsr7 hash); W.wrap_range capacity (W.lsr7 hash);
     let distance = if start <= index then index - start else capacity - start
       + index in
     distance_bounds capacity start index;
     block_bounds capacity (P.groups plan) distance;
     W.split16 distance;
-    let block = distance lsr 4 in
+    let block = W.lsr4 distance in
     let lane = distance land 15 in
     P.inverse_at plan block;
     let rank = P.inverse plan block in

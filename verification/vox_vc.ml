@@ -113,9 +113,11 @@ type obligation =
     origin : Location.t;  (** where the required refinement is written *)
     goal : term;
     omitted_premises : (Location.t * Location.error) list;
-    group : int
+    group : int;
         (** The conjuncts of one refinement share a group, which is proved as
             one query; the conjuncts are proved alone only to name a failure. *)
+    note : Location.msg option
+        (** Explains an obligation that no written refinement states. *)
   }
 
 let next_group = ref 0
@@ -1989,7 +1991,62 @@ let apply_function ctx env fn_type result_type prim fn args ~total =
     (* Trusted total declarations must respect the scalar encoding: equal bigint
        numbers are indistinguishable, regardless of allocation identity. *)
     function_call ctx env fn_type fn args
-  | None -> None
+  | None -> (
+    (* A partially applied shift is kept, so that its count is checked where the
+       shift is performed. *)
+    match prim, fn with
+    | ( Some (("%lslint" | "%lsrint" | "%asrint"), arity),
+        Some (Function { application = None; _ }) )
+      when List.length args < arity ->
+      function_call ctx env fn_type fn args
+    | _ -> None)
+
+(* OCaml leaves a shift by a count outside [0, 63] unspecified, and compiled
+   code really differs: constant folding and the hardware give different
+   results, and inlining decides which applies at each call. So every shift that
+   code performs must have a count in range, whatever its declared type; only
+   then is the value the encoding gives it the value the program computes. *)
+let shift_count fn prim args =
+  let is_shift = function
+    | "%lslint" | "%lsrint" | "%asrint" -> true
+    | _ -> false
+  in
+  let rec saturated fn args =
+    match fn with
+    | Some (Function { application = Some (_, original, prefix); _ }) ->
+      saturated (Some (Function original)) (prefix @ args)
+    | Some (Function { primitive = Some (name, 2); _ }) when is_shift name ->
+      Some args
+    | _ -> None
+  in
+  match prim, args with
+  | Some (name, 2), [_; count] when is_shift name -> Some count
+  | _ -> (
+    match saturated fn args with Some [_; count] -> Some count | _ -> None)
+
+let require_shift_count ctx s ~loc ~count_loc count =
+  if s.dead || not ctx.verify_introductions
+  then s
+  else
+    let goal =
+      match scalar count with
+      | Some n -> both And (both Le (Integer 0L) n) (both Le n (Integer 63L))
+      | None -> Boolean false
+    in
+    let obligation =
+      { loc = count_loc;
+        origin = count_loc;
+        goal;
+        omitted_premises = s.omitted_premises;
+        group = fresh_group ();
+        note =
+          Some
+            (Location.msg ~loc
+               "A shift count must be between 0 and 63: outside that range \
+                OCaml leaves the result unspecified.")
+      }
+    in
+    branch { s with code = Assert obligation :: s.code } goal
 
 let stored_primitive syntax = function
   | Some (Function { primitive = Some _ as primitive; _ }) -> primitive
@@ -2955,7 +3012,8 @@ and introduce ctx env s ty value loc =
               origin = p.rexp_loc;
               goal;
               omitted_premises = goals.omitted_premises;
-              group
+              group;
+              note = None
             }
         in
         branch { goals with code = assertion :: goals.code } goal
@@ -3128,6 +3186,7 @@ and expression_desc ?deferred ctx s e =
       short_circuit ctx eval e.exp_loc ~is_and:(op = "%sequand") s a b
     | _ -> (
       let args = Array.of_list args in
+      let args_expressions = args in
       let values = Array.make (Array.length args) None in
       let checks = Array.init (Array.length args) (fun _ -> ref []) in
       let entries = Array.make (Array.length args) s in
@@ -3167,6 +3226,20 @@ and expression_desc ?deferred ctx s e =
       let s, args = !s, Array.to_list values in
       if not s.dead then ctx.check_call ctx s e args;
       let prim = stored_primitive prim fn_value in
+      let s =
+        match
+          ( complete,
+            shift_count fn_value prim args,
+            List.rev
+              (List.filter_map
+                 (function _, Arg (e, _) -> Some e | _, Omitted _ -> None)
+                 (Array.to_list args_expressions)) )
+        with
+        | true, Some count, count_expression :: _ ->
+          require_shift_count ctx s ~loc:e.exp_loc
+            ~count_loc:count_expression.exp_loc count
+        | _ -> s
+      in
       let total =
         match fn_value with Some (Function { total; _ }) -> total | _ -> false
       in
@@ -3934,7 +4007,11 @@ let verify_batch ctx prove code =
       in
       raise
         (Location.Error
-           { error with sub = error.sub @ origin @ omitted_premise_messages s })
+           { error with
+             sub =
+               error.sub @ origin @ Option.to_list o.note
+               @ omitted_premise_messages s
+           })
   in
   (* The conjuncts of a refinement are consecutive goals of one group. A group
      is proved as one query, which is as cheap as proving the whole refinement;
@@ -4146,7 +4223,8 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
                  origin = call.exp_loc;
                  goal = decreases (List.combine value entry_measure);
                  omitted_premises = checked.omitted_premises;
-                 group = fresh_group ()
+                 group = fresh_group ();
+                 note = None
                }
             :: checked.code)
       | _ -> ()
