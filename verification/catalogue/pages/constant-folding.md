@@ -22,11 +22,11 @@ The public-only client, compiled against `expression_folding.mli`. `{result : in
 
 ## A rejected program
 
-A wrong folding rule is a type error. This function claims that `Add (Lit a, Lit b)` may be folded to `Lit (a - b)`; the equations of `eval` do not imply it, and the solver finds a counterexample. `refine_ u` asks the checker to prove that `u` has the refined result type. The test runs it against `Expr`, a copy of `Expression_folding` in the same file.
+A wrong folding rule is a type error. This function claims that `Add (Lit a, Lit b)` may be folded to `Lit (a - b)`; the equations of `eval` do not imply it, and the solver finds a counterexample. Returning `()` asks the checker to prove the refinement of the result type. The test runs it against `Expr`, a copy of `Expression_folding` in the same file.
 
-@code testsuite/tests/vox/expressions.ml "let bad_fold" "refine_ u"
+@code testsuite/tests/vox/expressions.ml "let bad_fold" "  ()"
 
-@text testsuite/tests/vox/expressions.ml "Line 14, characters 2-11:" "Error: Refinement could not be proved"
+@text testsuite/tests/vox/expressions.ml "Line 13, characters 2-4:" "Error: Refinement could not be proved"
 
 The same file also rejects an `eval` that recurses on its own argument instead of a subexpression, because it cannot be proved to terminate.
 
