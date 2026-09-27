@@ -57,8 +57,9 @@ ssh $amd cat vox-multidomain-check.log    # when it has finished
 The script builds incrementally, runs `./dev test vox`, prints the counts and
 exits nonzero if a test fails or is skipped (`Domain.recommended_domain_count
 ()` below 2 would skip them). First run (27 September, `8527a3fb7b`): 464
-passed, none skipped; about 6.5 minutes with a cold library, after a
-12-minute initial build. The parallel tests and the quicksort clients also
+passed, none skipped; 6.5 minutes with a cold library after a 12-minute
+initial build, 4.5 minutes for a documentation-only commit (script run on
+`a6838a87e0`). The parallel tests and the quicksort clients also
 passed 200 runs each, native and bytecode, with a 4k-word minor heap and on
 two CPUs (`~/vox-multidomain-stress.sh`).
 
