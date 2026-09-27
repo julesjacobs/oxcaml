@@ -548,7 +548,8 @@ let plan_incremental files =
 
 (* Prints, for each test file, the source files its environments name:
    [test <TAB> kind <TAB> path <TAB> flags], where kind is "prebuilt" for
-   prebuilt_modules and "source" for other compiled or read files. *)
+   prebuilt_modules and "source" for other compiled or read files. A missing
+   source is printed once for each directory that could hold it. *)
 let list_sources files =
   let print_sources filename =
     let rootenv, tsl_ast = parse_test_file filename in
@@ -564,27 +565,28 @@ let list_sources files =
       let print kind variable =
         List.iter
           (fun name ->
-            let found =
+            let directories = source_directory :: source_directories in
+            let print_path directory =
+              let line =
+                String.concat "\t"
+                  [filename; kind; Filename.concat directory name; flags]
+              in
+              if not (Hashtbl.mem seen line) then begin
+                Hashtbl.add seen line ();
+                print_endline line
+              end
+            in
+            match
               List.find_opt
                 (fun directory ->
                   Sys.file_exists (Filename.concat directory name))
-                (source_directory :: source_directories)
-            in
-            match found with
-            | None when kind = "prebuilt" ->
-                Printf.eprintf "%s: cannot find prebuilt module %s\n%!"
-                  filename name;
-                exit 2
-            | None -> ()
-            | Some directory ->
-                let line =
-                  String.concat "\t"
-                    [filename; kind; Filename.concat directory name; flags]
-                in
-                if not (Hashtbl.mem seen line) then begin
-                  Hashtbl.add seen line ();
-                  print_endline line
-                end)
+                directories
+            with
+            | Some directory -> print_path directory
+            | None ->
+                (* A missing file may have been deleted: print every place
+                   it could have been. *)
+                List.iter print_path directories)
           (Actions_helpers.words_of_variable env variable)
       in
       print "prebuilt" Builtin_variables.prebuilt_modules;

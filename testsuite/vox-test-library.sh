@@ -77,8 +77,25 @@ fi
 tr '\n' '\0' < "$work/selected" |
   xargs -0 "$ocamltest" -list-sources > "$work/raw-sources"
 normalize < "$work/raw-sources" > "$work/selected-sources"
-awk -F '\t' '$2 == "prebuilt" { print $3 }' "$work/selected-sources" |
-  LC_ALL=C sort -u > "$work/needed"
+tab=$(printf '\t')
+awk -F '\t' '$2 == "prebuilt" { print $1 "\t" $3 }' "$work/selected-sources" |
+  while IFS="$tab" read -r test path; do
+    if [ -f "$path" ]; then state=found; else state=missing; fi
+    printf '%s\t%s\t%s\n' "$state" "$test" "$path"
+  done > "$work/prebuilt"
+: > "$work/needed.raw"
+awk -F '\t' -v needed="$work/needed.raw" '
+  {
+    base = $3; sub(/.*\//, "", base)
+    key = $2 ": cannot find prebuilt module " base
+  }
+  $1 == "found" { found[key] = 1; print $3 > needed }
+  $1 == "missing" { missing[key] = 1 }
+  END {
+    for (key in missing) if (!(key in found)) { print key; bad = 1 }
+    exit bad
+  }' "$work/prebuilt" >&2
+LC_ALL=C sort -u "$work/needed.raw" > "$work/needed"
 
 sed 's|/[^/]*$||' "$work/selected" | LC_ALL=C sort -u |
   while IFS= read -r directory; do
@@ -114,6 +131,19 @@ duplicate=$(cut -f1 "$work/modules" | uniq -d | head -n 1)
   exit 2
 }
 
+# A unit whose interface is no longer listed loses the stale copy and its
+# objects, which would otherwise still constrain it.
+awk -F '\t' '{ print $1 }' "$work/modules" > "$work/names"
+grep '\.ml$' "$work/names" | while IFS= read -r base; do
+  if ! grep -qx "${base}i" "$work/names" && [ -f "$output/${base}i" ]; then
+    unit=${base%.ml}
+    rm -f "$output/${base}i" "$output/${base}i.flags" \
+      "$output/$unit.cmi" "$output/$unit.cmo" "$output/native/${base}i" \
+      "$output/native/$unit.cmi" "$output/native/$unit.cmx" \
+      "$output/native/$unit.o"
+  fi
+done
+
 # Copy only changed sources and flags, so that make rebuilds only what they
 # affect.
 while IFS="$(printf '\t')" read -r base path flags; do
@@ -133,7 +163,7 @@ default_flags="$default_flags -alert -unsafe_effects -dcanonical-ids"
   cksum < "$0"
   cksum < "$ocamlc"
   cksum < "$ocamlopt"
-  cksum < "$stdlib/stdlib.cmi"
+  cat "$stdlib"/*.cmi "$stdlib"/*.cmx | cksum
   printf '%s\n' "$default_flags"
 } > "$work/compilers.stamp"
 cmp -s "$work/compilers.stamp" "$output/compilers.stamp" ||
@@ -164,8 +194,9 @@ done < "$work/sources"
 tr '\n' '\0' < "$work/sources" |
   xargs -0 "$ocamlc" -depend -modules > "$work/depend"
 
-# Bytecode dependents of a unit with an interface need only its .cmi; native
-# dependents always wait for the .cmx, whose inlining information they read.
+# Dependents of a unit with an interface need only its .cmi, except that
+# native implementations wait for the .cmx, whose inlining information they
+# read.
 awk -F '\t' -v ocamlc="$ocamlc" -v ocamlopt="$ocamlopt" \
     -v stdlib="$stdlib" -v default_flags="$default_flags" \
     -v output="$output" '
@@ -185,7 +216,8 @@ awk -F '\t' -v ocamlc="$ocamlc" -v ocamlopt="$ocamlopt" \
       unit = tolower(substr(names[i], 1, 1)) substr(names[i], 2)
       if (unit in mli) byte[source] = byte[source] " " unit ".cmi"
       else if (unit in ml) byte[source] = byte[source] " " unit ".cmo"
-      if (unit in ml) native[source] = native[source] " native/" unit ".cmx"
+      if (unit in ml && (source ~ /\.ml$/ || !(unit in mli)))
+        native[source] = native[source] " native/" unit ".cmx"
       else if (unit in mli)
         native[source] = native[source] " native/" unit ".cmi"
     }
