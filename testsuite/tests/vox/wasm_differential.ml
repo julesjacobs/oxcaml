@@ -158,7 +158,10 @@ let make ~seed ~pages id =
 (* ---------- Comparison ---------- *)
 
 (* Limit: a module the model accepts that exceeds an implementation limit the
-   JS API sets for engines (the core specification allows such limits). *)
+   JS API sets for engines (the core specification allows such limits). Engines
+   enforce some limits when validating and others, depending on the version,
+   only when instantiating (Node 22 checks the table size at instantiation,
+   Node 25 at validation), so both count. *)
 type verdict = Agree of string | Expected of string | Limit of string | No_verdict of string | Disagree of string
 
 let first_difference a b =
@@ -169,6 +172,10 @@ let first_difference a b =
     while !i < String.length a && a.[!i] = b.[!i] do incr i done;
     Printf.sprintf "memory byte %d: model %d, engine %d" !i (Char.code a.[!i]) (Char.code b.[!i])
   end
+
+let limit_mutation case = match case.kind with
+  | Mutated ("more locals than the engine allows" | "table above the engine's size limit") -> true
+  | _ -> false
 
 let compare_case dir case model engine =
   let subset = field engine "subset" in
@@ -183,13 +190,14 @@ let compare_case dir case model engine =
     if inside then Disagree "model rejects a valid module in its binary subset"
     else Expected ("model rejects a valid module outside its binary subset ("
                    ^ String.sub subset 3 (String.length subset - 3) ^ ")")
-  | _, false when (match case.kind with
-      | Mutated ("more locals than the engine allows" | "table above the engine's size limit") -> true
-      | _ -> false) ->
+  | _, false when limit_mutation case ->
     Limit ("model validates a module above a JS API implementation limit: " ^ field engine "detail")
   | _, false -> Disagree ("model validates a module the engine rejects: " ^ field engine "detail")
   | _, true when not inside ->
     Disagree ("model validates a module the subset recognizer rejects (" ^ subset ^ ")")
+  | _, true when limit_mutation case && engine.outcome = "instantiate_error"
+                 && String.starts_with ~prefix:"RangeError:" (field engine "detail") ->
+    Limit ("model validates a module above a JS API implementation limit: " ^ field engine "detail")
   | Not_materialized, true -> No_verdict ("model does not instantiate (engine: " ^ engine.outcome ^ ")")
   | Out_of_fuel, true -> No_verdict ("model fuel exhausted (engine: " ^ engine.outcome ^ ")")
   | Host_limit, true -> No_verdict ("model host call depth (engine: " ^ engine.outcome ^ ")")
