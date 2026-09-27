@@ -68,8 +68,12 @@ this file.
         eight unreachable arms are `unreachable_ ()`; regex: the
         open-question section corrected (iarray bound reason, `lower`
         provably `None` for u ≥ 63 in the logic).
-  - [ ] dfa-equivalence · reference-locks (after deduplication) · egraphs ·
-        http · lz4 · mode-solver (presentation merged; next batch).
+  - [ ] In flight (27 September, evening): myers-diff · http · lz4 |
+        mode-solver · register-allocation · rsa | avl-sets · rings ·
+        lists-trees | functional-queue · merge-sort · quicksort ·
+        sparse-arrays.
+  - [ ] Waiting on other branches: dfa-equivalence, reference-locks and
+        sat-solver (deduplication), egraphs (inventory comments).
   - [ ] hm-wasm-compiler, after item 3.
 - [ ] **3. HM-to-Wasm is not trivial** (AMD box).
   - [x] Example programs compiled by the verified compiler and run, with
