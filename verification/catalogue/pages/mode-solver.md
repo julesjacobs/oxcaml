@@ -31,7 +31,7 @@ The meaning of terms and formulas:
 
 `scoped depth f` in the same file holds when every variable of `f` is bound by a quantifier in `f` or is one of `depth` outer variables, and `subsumption_formula guard obligation` is `∀x. ¬guard ∨ ∃y. obligation`. `Mode_solver_graph_semantics` defines a graph as a list of inequalities between terms, `models env graph` as all of them holding, and `models_exists count env graph` as `models` holding for some values of `count` further variables; `count` is a `unit list` used as a natural number. `Mode_solver_guarded_semantics` defines the two-player reading of a quantifier prefix whose variables must satisfy a guard (`admissible`, `game`, `normalized_game`).
 
-The public interface. Names from other modules carry their module path. `@@ total` declares each function total, which lets the specifications below it apply the function (the specifications of `eliminate_exact` and `eliminate_scoped` mention `eliminate`, for example).
+The public interface, which opens the three semantics modules. `@@ total` declares each function total, which lets the specifications below it apply the function (the specifications of `eliminate_exact` and `eliminate_scoped` mention `eliminate`, for example).
 
 @code testsuite/tests/vox/mode_solver_public.mli
 
