@@ -242,12 +242,54 @@ let both op a b =
   | Implies, x, Boolean false -> not_ x
   | _ -> App (op, [a; b])
 
+(* The assumptions made by each proof step (warning 227), by physical identity
+   of the command; see [Vox_proof_steps]. *)
+module Step_assumptions = Hashtbl.Make (struct
+  type t = command
+
+  let equal = ( == )
+
+  let hash = Hashtbl.hash
+end)
+
+let step_assumptions : Vox_proof_steps.step list Step_assumptions.t =
+  Step_assumptions.create 16
+
+(* Observation symbols and equations that the evaluation of proof steps recorded
+   in the context: an expansion that uses them depends on those steps. *)
+let observation_steps : (Symbol.t, Vox_proof_steps.step list) Hashtbl.t =
+  Hashtbl.create 16
+
+let equation_steps : Vox_proof_steps.step list Term_table.t =
+  Term_table.create 16
+
+let record_steps add key =
+  match !Vox_proof_steps.current with [] -> () | steps -> add key steps
+
+(* The values of refined parameters that are proof steps. Wherever such a
+   value's refinement is exposed again, its facts belong to the step. *)
+let value_steps : (Symbol.t, Vox_proof_steps.step) Hashtbl.t = Hashtbl.create 16
+
+let register_value step value =
+  match step, value with
+  | Some step, Some (Scalar (Var symbol)) ->
+    Hashtbl.replace value_steps symbol step
+  | _ -> ()
+
 let branch s term =
   match term with
   | Boolean true -> s
   | _ ->
+    let assumption = Assume term in
+    (match !Vox_proof_steps.current with
+    | [] -> ()
+    | steps ->
+      Step_assumptions.replace step_assumptions assumption steps;
+      (* Obligations on an impossible path are not generated, so no core can
+         show that they need the step. *)
+      if term = Boolean false then List.iter Vox_proof_steps.use steps);
     { s with
-      code = Assume term :: s.code;
+      code = assumption :: s.code;
       dead = s.dead || term = Boolean false
     }
 
@@ -283,7 +325,9 @@ let name ctx s = function
     let symbol = Symbol.create ~label:"value" (term_sort term) in
     Hashtbl.add ctx.named_terms symbol term;
     let value = Var symbol in
-    { s with code = Define (both Eq value term) :: s.code }, scalar_value value
+    let definition = Define (both Eq value term) in
+    record_steps (Step_assumptions.replace step_assumptions) definition;
+    { s with code = definition :: s.code }, scalar_value value
   | value -> s, value
 
 let rec expose_head ctx = function
@@ -548,6 +592,7 @@ let share_observation ctx term =
     | None ->
       let symbol = Symbol.create ~label:"observation" (term_sort term) in
       Hashtbl.add ctx.observation_definitions symbol term;
+      record_steps (Hashtbl.replace observation_steps) symbol;
       Hashtbl.add ctx.named_terms symbol term;
       let value = Var symbol in
       Term_table.add ctx.shared_observations term value;
@@ -643,7 +688,8 @@ let instantiate_lambda ctx lambda args =
       Option.iter
         (fun equation ->
           Hashtbl.replace ctx.observation_equations definition
-            (instantiate equation))
+            (instantiate equation);
+          record_steps (Term_table.replace equation_steps) definition)
         (Hashtbl.find_opt lambda.observations term);
       value
   in
@@ -667,8 +713,10 @@ let iarray_origin ctx array =
 
 let observe_iarray ctx call value =
   if call <> value
-  then
+  then begin
     Hashtbl.replace ctx.observation_equations call (share_observation ctx value);
+    record_steps (Term_table.replace equation_steps) call
+  end;
   call
 
 let rec iarray_length ctx iarray_sort array =
@@ -2626,6 +2674,15 @@ and assume_fact ctx env s p loc =
   assume s p
 
 and expose_fact ctx env s ty value loc =
+  match value with
+  | Some (Scalar (Var symbol)) when Hashtbl.mem value_steps symbol ->
+    (* The refinement exposed may be the parameter's or one assumed later (by
+       [assume_]): the facts belong to both steps. *)
+    Vox_proof_steps.also_step (Hashtbl.find value_steps symbol) (fun () ->
+        expose_value_fact ctx env s ty value loc)
+  | _ -> expose_value_fact ctx env s ty value loc
+
+and expose_value_fact ctx env s ty value loc =
   let assume s p = assume_fact ctx env s p loc in
   let ty = Ctype.expand_head env ty in
   match get_desc ty, scalar value with
@@ -2772,6 +2829,111 @@ let intro_loc e =
       | _ -> None)
     e.exp_extra
 
+(* The proof step whose facts evaluating [e] at type [ty] assumes: an [assume_],
+   or a lemma call (an application whose result is a refinement of [unit]). *)
+let step_kind e ty : Vox_proof_steps.kind option =
+  match e.exp_desc with
+  | Texp_assume _ -> Some Assume
+  | Texp_apply (fn, _, _, _, _, _) -> (
+    match get_desc (Ctype.expand_head e.exp_env ty) with
+    | Trefine r -> (
+      match get_desc (Ctype.expand_head e.exp_env r.ref_payload) with
+      | Tconstr (path, [], _) when Path.same path Predef.path_unit ->
+        Some
+          (Lemma_call
+             (match fn.exp_desc with
+             | Texp_ident { path; _ } -> Path.name path
+             | _ -> "this function"))
+      | _ -> None)
+    | _ -> None)
+  | _ -> None
+
+(* A step's refinement can also be needed by the typer, which accepts a value of
+   a refined type where that same type is expected without a proof. So a step is
+   only checked when its refined value is not used that way: when a conversion
+   drops its refinement where it is computed, or when it is bound by a [let]
+   pattern without variables ([discarded]). *)
+let converted e =
+  List.exists
+    (function Texp_refinement _, _, _ -> true | _ -> false)
+    e.exp_extra
+
+let discarded : expression option ref = ref None
+
+(* Checked refined parameters: a use of one exposes its refinement again, as
+   part of the same step. *)
+let argument_steps : (Ident.t, Vox_proof_steps.step) Hashtbl.t =
+  Hashtbl.create 16
+
+let expression_step e ty =
+  if not (Vox_proof_steps.enabled ())
+  then None
+  else
+    match e.exp_desc with
+    | Texp_ident { path = Path.Pident id; _ } ->
+      Hashtbl.find_opt argument_steps id
+    | _ ->
+      if converted e || match !discarded with Some d -> d == e | None -> false
+      then
+        Option.bind (step_kind e ty) (fun kind ->
+            Vox_proof_steps.create kind e.exp_loc)
+      else None
+
+(* The locations of functions bound by [let]. The parameters of an anonymous
+   function passed as an argument have the refinements its callee requires,
+   which are not proof steps of this function. *)
+let let_bound_functions : (Location.t, unit) Hashtbl.t = Hashtbl.create 16
+
+(* A refined parameter, whose refinement the function assumes, when it is a
+   variable that [fn] never uses at a refined type without a conversion. *)
+let argument_step fn (pat : pattern) =
+  if
+    (not (Vox_proof_steps.enabled ()))
+    || not (Hashtbl.mem let_bound_functions fn.exp_loc)
+  then None
+  else
+    match get_desc pat.pat_type, pat_bound_idents pat with
+    | Trefine _, [id]
+    (* A refinement written on the parameter: a refinement named by a type
+       abbreviation belongs to that type. The parameters of a generated
+       definition lemma have the location of the whole definition. *)
+      when pat.pat_loc <> fn.exp_loc -> (
+      let exception Refined_use in
+      let default = Tast_iterator.default_iterator in
+      let uses =
+        { default with
+          expr =
+            (fun it e ->
+              (match e.exp_desc with
+              | Texp_ident { path = Path.Pident id'; _ }
+                when Ident.same id id' && not (converted e) -> (
+                match get_desc (Ctype.expand_head e.exp_env e.exp_type) with
+                | Trefine _ -> raise Refined_use
+                | _ -> ())
+              | _ -> ());
+              default.expr it e)
+        }
+      in
+      match uses.expr uses fn with
+      | () ->
+        let step =
+          Vox_proof_steps.create (Argument (Ident.name id)) pat.pat_loc
+        in
+        Option.iter (Hashtbl.replace argument_steps id) step;
+        step
+      | exception Refined_use -> None)
+    | _ -> None
+
+(* Evaluate [f] from [s] as part of [step]. A step that makes its path
+   impossible is used: no obligation is generated on that path, so no core could
+   show that it needs the step. *)
+let in_step step s f =
+  let ((s', _) as result) = Vox_proof_steps.with_step step f in
+  (match step with
+  | Some step when s'.dead && not s.dead -> Vox_proof_steps.use step
+  | _ -> ());
+  result
+
 let omitted_premise_messages s =
   List.concat_map
     (fun (loc, (error : Location.error)) ->
@@ -2881,12 +3043,18 @@ let rec expression ?deferred ctx s e =
 
 and expression_extras ?deferred ctx s e ty = function
   | [] ->
-    let s, value = expression_desc ?deferred ctx s { e with exp_type = ty } in
-    (* The returned child's facts are already present when checked eagerly, and
-       its target must remain unavailable when checking is deferred. *)
-    if forwards_result e
-    then s, value
-    else expose_outer ctx e.exp_env s ty value e.exp_loc
+    (* A proof step's arguments are part of it: its terms can request
+       observations. *)
+    let step = if forwards_result e then None else expression_step e ty in
+    in_step step s (fun () ->
+        let s, value =
+          expression_desc ?deferred ctx s { e with exp_type = ty }
+        in
+        (* The returned child's facts are already present when checked eagerly,
+           and its target must remain unavailable when checking is deferred. *)
+        if forwards_result e
+        then s, value
+        else expose_outer ctx e.exp_env s ty value e.exp_loc)
   | (extra, loc, _) :: rest -> (
     let source =
       match extra with Texp_refinement { source; _ } -> source | _ -> ty
@@ -3323,8 +3491,11 @@ and check_function ctx s e params body value =
         let value =
           fresh ctx pat.pat_env pat.pat_type (Ident.name p.fp_param)
         in
+        let step = argument_step e pat in
+        register_value step value;
         let s, condition =
-          merge_patterns s (pattern ctx (bind s p.fp_param value) value pat)
+          in_step step s (fun () ->
+              merge_patterns s (pattern ctx (bind s p.fp_param value) value pat))
         in
         branch s condition)
       s params
@@ -3448,9 +3619,26 @@ and value_bindings ctx s rec_flag bindings =
     | [] -> s, None
     | _ when impossible s -> s, None
     | vb :: rest ->
-      let s, value =
+      if Vox_proof_steps.enabled ()
+      then Hashtbl.replace let_bound_functions vb.vb_expr.exp_loc ();
+      (* A proof step whose value is discarded: the pattern's refinement is the
+         step's too. *)
+      let discarded_step =
+        if pat_bound_idents vb.vb_pat = [] then Some vb.vb_expr else None
+      in
+      let s, value, step =
         Builtin_attributes.warning_scope ~ppwarning:false vb.vb_attributes
-          (fun () -> expression ctx s vb.vb_expr)
+          (fun () ->
+            let saved = !discarded in
+            discarded := discarded_step;
+            Fun.protect
+              ~finally:(fun () -> discarded := saved)
+              (fun () ->
+                let s, value = expression ctx s vb.vb_expr in
+                ( s,
+                  value,
+                  Option.bind discarded_step (fun e ->
+                      expression_step e e.exp_type) )))
       in
       let value =
         match rec_flag, value with
@@ -3458,7 +3646,10 @@ and value_bindings ctx s rec_flag bindings =
           Some (Function { fn with lambda = ref None })
         | _ -> value
       in
-      let s, condition = merge_patterns s (pattern ctx s value vb.vb_pat) in
+      let s, condition =
+        in_step step s (fun () ->
+            merge_patterns s (pattern ctx s value vb.vb_pat))
+      in
       loop (branch s condition) rest
   in
   loop s bindings
@@ -3617,8 +3808,35 @@ let slice_goal ?(rename = Fun.id) ctx query term =
     goal = { label = "refine_"; term }
   }
 
-let query ctx code =
+(* With [indicators], each assumption and definition made by a proof step is
+   guarded by a fresh Boolean indicator, recorded there with its step (warning
+   227). So are the facts that expansion derives from the terms of guarded facts
+   only: a step can also be needed for the observations its terms request. *)
+let query ?indicators ctx code =
   ctx.poll ();
+  let indicated = Hashtbl.create 16 in
+  let fresh_indicators steps =
+    match indicators with
+    | None -> []
+    | Some indicators ->
+      List.map
+        (fun step ->
+          let indicator = Symbol.create ~label:"proof step" Bool in
+          indicators := (indicator, step) :: !indicators;
+          Hashtbl.replace indicated indicator ();
+          indicator)
+        steps
+  in
+  let indicator command =
+    match indicators, Step_assumptions.find_opt step_assumptions command with
+    | Some _, Some steps -> fresh_indicators steps
+    | _ -> []
+  in
+  (* Nested implications, one per indicator, which expansion recognizes. *)
+  let guarded indicators p =
+    List.fold_left (fun p u -> both Implies (Var u) p) p indicators
+  in
+  let guard command p = guarded (indicator command) p in
   let definitions = ref [] in
   let share = function
     | App _ as term ->
@@ -3655,25 +3873,36 @@ let query ctx code =
     let reachable =
       List.fold_left
         (fun reachable -> function
-          | Assume p ->
+          | Assume p as command ->
             let p = rename p in
             if Term_table.mem assumed p
             then reachable
             else begin
               Term_table.add assumed p ();
               added := p :: !added;
-              share (both And reachable p)
+              share (both And reachable (guard command p))
             end
-          | Define term ->
+          | Define term as command ->
             (match rename term with
             | App (Eq, [Var symbol; value]) as term
               when not (Hashtbl.mem ctx.observation_definitions symbol) -> (
               match Term_table.find_opt defined value with
               | Some existing -> Hashtbl.replace renamed symbol existing
-              | None ->
-                Term_table.add defined value (Var symbol);
-                definitions := { label = "value"; term } :: !definitions)
-            | term -> definitions := { label = "value"; term } :: !definitions);
+              | None -> (
+                match indicator command with
+                | [] ->
+                  Term_table.add defined value (Var symbol);
+                  definitions := { label = "value"; term } :: !definitions
+                | indicators ->
+                  (* Not shared with later definitions, which then do not depend
+                     on the step. *)
+                  definitions
+                    := { label = "value"; term = guarded indicators term }
+                       :: !definitions))
+            | term ->
+              definitions
+                := { label = "value"; term = guard command term }
+                   :: !definitions);
             reachable
           | Assert o ->
             goals
@@ -3725,12 +3954,51 @@ let query ctx code =
     | None when Hashtbl.length renamed = 0 -> None
     | None -> Hashtbl.find_opt (Lazy.force generated_equations) term
   in
+  let renamed_equation_steps =
+    lazy
+      (let table = Term_table.create (Term_table.length equation_steps) in
+       Term_table.iter
+         (fun key steps -> Term_table.replace table (rename key) steps)
+         equation_steps;
+       table)
+  in
+  (* The steps whose evaluation recorded an observation equation or symbol. *)
+  let equation_steps_of term =
+    match Term_table.find_opt equation_steps term with
+    | Some steps -> steps
+    | None when Hashtbl.length renamed = 0 -> []
+    | None ->
+      Option.value ~default:[]
+        (Term_table.find_opt (Lazy.force renamed_equation_steps) term)
+  in
   let expand ~slice goal =
     let raw = { datatypes = []; symbols = []; functions = []; facts; goal } in
     let facts =
       if slice then (slice_goal ~rename ctx raw goal.term).facts else facts
     in
     let definitions = ref (List.rev facts) in
+    (* With indicators, a fact derived while visiting a guarded fact is guarded
+       by the same indicators, since only that step requested it. Unguarded
+       facts are visited first, so what they request is not guarded. Without
+       indicators, every guard is empty. *)
+    let guard = ref [] in
+    let with_guard g f =
+      let saved = !guard in
+      guard := g;
+      Fun.protect ~finally:(fun () -> guard := saved) f
+    in
+    let union a b = List.sort_uniq compare (a @ b) in
+    let add label term =
+      let term =
+        match !guard with
+        | [] -> term
+        | g ->
+          both Implies
+            (List.fold_left (fun c u -> both And c (Var u)) (Boolean true) g)
+            term
+      in
+      definitions := { label; term } :: !definitions
+    in
     (* These edges request observations; they do not assert array equality.
        Equality still follows from the original, possibly guarded facts. *)
     let array_equalities = Hashtbl.create 16 in
@@ -3741,15 +4009,15 @@ let query ctx code =
        observations. *)
     let observation_budget = ref 1024 in
     let propagated = Term_table.create 64 in
-    let propagate observe alias =
+    let propagate g observe alias =
       if !observation_budget > 0
       then begin
-        let term = observe alias in
+        let term = with_guard g (fun () -> observe alias) in
         if not (Term_table.mem propagated term)
         then begin
           Term_table.add propagated term ();
           decr observation_budget;
-          Queue.add term pending
+          Queue.add (term, g) pending
         end
       end
     in
@@ -3762,11 +4030,14 @@ let query ctx code =
         rename (expose_head ctx left) = rename (expose_head ctx right)
         && Option.is_some (iarray_origin ctx left)
       in
-      if left <> right && (not same_origin) && not (List.mem right previous)
+      if
+        left <> right && (not same_origin)
+        && not (List.exists (fun (known, _) -> known = right) previous)
       then begin
-        Hashtbl.replace array_equalities left (right :: previous);
+        let g = !guard in
+        Hashtbl.replace array_equalities left ((right, g) :: previous);
         List.iter
-          (fun observe -> propagate observe right)
+          (fun (observe, g') -> propagate (union g g') observe right)
           (entries array_observations left)
       end
     in
@@ -3776,122 +4047,155 @@ let query ctx code =
       = Some fn
     in
     let seen = Term_table.create 16 and symbols = ref [] in
+    let first_pass = ref (Option.is_some indicators) and deferred = ref [] in
     let rec visit term =
       if not (Term_table.mem seen term)
       then begin
         Term_table.add seen term ();
-        begin match term with
-        | Call (fn, []) when Hashtbl.mem ctx.string_literals fn ->
-          let tag =
-            intern_function ctx "string literal identity" [term_sort term] Int
-          in
-          let id = Hashtbl.find ctx.string_literals fn in
-          let axiom =
-            both Eq (Call (tag, [term])) (Big_integer (string_of_int id))
-          in
-          definitions
-            := { label = "string literal"; term = axiom } :: !definitions;
-          Queue.add axiom pending
-        | Call (fn, [pointer]) when observation_function "Pref.location" fn ->
-          (* A left inverse enforces injectivity with one equation per
-             pointer. *)
-          let inverse =
-            intern_function ctx "Pref.pointer"
-              [Function.result fn]
-              (term_sort pointer)
-          in
-          let axiom = both Eq (Call (inverse, [term])) pointer in
-          definitions
-            := { label = "pref identity"; term = axiom } :: !definitions;
-          Queue.add axiom pending
-        | Call (fn, [array])
-          when observation_function "Iarray.length" fn
-               && Option.is_none (iarray_origin ctx array)
-               &&
-               match expose_head ctx array with
-               | App (Ite, _) -> false
-               | _ -> true ->
-          (* Every iarray, ghost or real, is built by a literal, a partial
-             allocation that raises above [Sys.max_array_length], a total
-             operation that keeps or shrinks a length, or a view of a real array
-             or string, so its length is at most 2^57. Arrays built from others
-             get their lengths from those, and are not bounded here: their
-             construction may not have returned. *)
-          let axiom =
-            both And
-              (both Le (Integer 0L) term)
-              (both Le term (Integer 1152921504606846975L))
-          in
-          definitions
-            := { label = "iarray length bound"; term = axiom } :: !definitions;
-          Queue.add axiom pending
-        | _ -> ()
-        end;
-        begin match term with
-        | App (Eq, [left; right])
-          when is_iarray_sort ctx.encoding (term_sort left)
-               || Hashtbl.mem ctx.pref_heaps (term_sort left) ->
-          relate left right;
-          relate right left
-        | _ -> ()
-        end;
-        let observations =
-          match term with
-          | Call (fn, [heap; key]) when Hashtbl.mem ctx.pref_observers fn ->
-            [(heap, fun alias -> pref_observe ctx 128 fn alias key)]
-          | Call (fn, [left; right])
-            when observation_function "Pref.disjoint" fn ->
-            [ (left, fun alias -> pref_disjoint ctx 64 alias right);
-              (right, fun alias -> pref_disjoint ctx 64 left alias) ]
-          | Call (fn, [array; index]) when observation_function "Iarray.get" fn
-            ->
-            [ ( array,
-                fun alias ->
-                  iarray_get ctx (term_sort alias) (Function.result fn) alias
-                    index ) ]
-          | Call (fn, [array]) when observation_function "Iarray.length" fn ->
-            [(array, fun alias -> iarray_length ctx (term_sort alias) alias)]
-          | _ -> []
-        in
-        List.iter
-          (fun (array, read) ->
-            let observe alias =
-              let value = read alias in
-              if is_iarray_sort ctx.encoding (term_sort term)
-              then begin
-                relate term value;
-                relate value term
-              end;
-              value
-            in
-            Hashtbl.replace array_observations array
-              (observe :: entries array_observations array);
-            List.iter (propagate observe) (entries array_equalities array))
-          observations;
-        Option.iter
-          (define "iarray observation" term)
-          (observation_equation term);
         match term with
-        | Var symbol ->
-          symbols := symbol :: !symbols;
-          Option.iter
-            (define "observation" term)
-            (Hashtbl.find_opt ctx.observation_definitions symbol)
-        | App (_, args) | Call (_, args) | Construct (_, args) ->
-          List.iter visit args
-        | Is (_, arg) | Select (_, _, arg) -> visit arg
-        | _ -> ()
+        | App (Implies, [(Var indicator as var); fact])
+          when Hashtbl.mem indicated indicator ->
+          visit var;
+          if !first_pass
+          then deferred := (indicator, fact) :: !deferred
+          else with_guard (union !guard [indicator]) (fun () -> visit fact)
+        | _ -> expand_term term
       end
+    and expand_term term =
+      begin match term with
+      | Call (fn, []) when Hashtbl.mem ctx.string_literals fn ->
+        let tag =
+          intern_function ctx "string literal identity" [term_sort term] Int
+        in
+        let id = Hashtbl.find ctx.string_literals fn in
+        let axiom =
+          both Eq (Call (tag, [term])) (Big_integer (string_of_int id))
+        in
+        add "string literal" axiom;
+        Queue.add (axiom, !guard) pending
+      | Call (fn, [pointer]) when observation_function "Pref.location" fn ->
+        (* A left inverse enforces injectivity with one equation per pointer. *)
+        let inverse =
+          intern_function ctx "Pref.pointer"
+            [Function.result fn]
+            (term_sort pointer)
+        in
+        let axiom = both Eq (Call (inverse, [term])) pointer in
+        add "pref identity" axiom;
+        Queue.add (axiom, !guard) pending
+      | Call (fn, [array])
+        when observation_function "Iarray.length" fn
+             && Option.is_none (iarray_origin ctx array)
+             &&
+             match expose_head ctx array with
+             | App (Ite, _) -> false
+             | _ -> true ->
+        (* Every iarray, ghost or real, is built by a literal, a partial
+           allocation that raises above [Sys.max_array_length], a total
+           operation that keeps or shrinks a length, or a view of a real array
+           or string, so its length is at most 2^57. Arrays built from others
+           get their lengths from those, and are not bounded here: their
+           construction may not have returned. *)
+        let axiom =
+          both And
+            (both Le (Integer 0L) term)
+            (both Le term (Integer 1152921504606846975L))
+        in
+        add "iarray length bound" axiom;
+        Queue.add (axiom, !guard) pending
+      | _ -> ()
+      end;
+      begin match term with
+      | App (Eq, [left; right])
+        when is_iarray_sort ctx.encoding (term_sort left)
+             || Hashtbl.mem ctx.pref_heaps (term_sort left) ->
+        relate left right;
+        relate right left
+      | _ -> ()
+      end;
+      let observations =
+        match term with
+        | Call (fn, [heap; key]) when Hashtbl.mem ctx.pref_observers fn ->
+          [(heap, fun alias -> pref_observe ctx 128 fn alias key)]
+        | Call (fn, [left; right]) when observation_function "Pref.disjoint" fn
+          ->
+          [ (left, fun alias -> pref_disjoint ctx 64 alias right);
+            (right, fun alias -> pref_disjoint ctx 64 left alias) ]
+        | Call (fn, [array; index]) when observation_function "Iarray.get" fn ->
+          [ ( array,
+              fun alias ->
+                iarray_get ctx (term_sort alias) (Function.result fn) alias
+                  index ) ]
+        | Call (fn, [array]) when observation_function "Iarray.length" fn ->
+          [(array, fun alias -> iarray_length ctx (term_sort alias) alias)]
+        | _ -> []
+      in
+      List.iter
+        (fun (array, read) ->
+          let observe alias =
+            let value = read alias in
+            if is_iarray_sort ctx.encoding (term_sort term)
+            then begin
+              relate term value;
+              relate value term
+            end;
+            value
+          in
+          let g = !guard in
+          Hashtbl.replace array_observations array
+            ((observe, g) :: entries array_observations array);
+          List.iter
+            (fun (right, g') -> propagate (union g g') observe right)
+            (entries array_equalities array))
+        observations;
+      Option.iter
+        (fun value ->
+          with_guard
+            (union !guard (declared (equation_steps_of term)))
+            (fun () -> define "iarray observation" term value))
+        (observation_equation term);
+      match term with
+      | Var symbol ->
+        symbols := symbol :: !symbols;
+        Option.iter
+          (fun value ->
+            with_guard
+              (union !guard
+                 (declared
+                    (Option.value ~default:[]
+                       (Hashtbl.find_opt observation_steps symbol))))
+              (fun () -> define "observation" term value))
+          (Hashtbl.find_opt ctx.observation_definitions symbol)
+      | App (_, args) | Call (_, args) | Construct (_, args) ->
+        List.iter visit args
+      | Is (_, arg) | Select (_, _, arg) -> visit arg
+      | _ -> ()
+    (* Fresh indicators for the steps that recorded an observation, declared in
+       the query. *)
+    and declared steps =
+      let indicators = fresh_indicators steps in
+      List.iter (fun u -> visit (Var u)) indicators;
+      indicators
     and define label term value =
       let equation = both Eq term (rename value) in
-      definitions := { label; term = equation } :: !definitions;
+      add label equation;
       visit equation
+    in
+    let drain () =
+      while not (Queue.is_empty pending) do
+        let term, g = Queue.take pending in
+        with_guard g (fun () -> visit term)
+      done
     in
     List.iter (fun f -> visit f.term) facts;
     visit goal.term;
-    while not (Queue.is_empty pending) do
-      visit (Queue.take pending)
-    done;
+    drain ();
+    first_pass := false;
+    List.iter
+      (fun (indicator, fact) ->
+        with_guard [indicator] (fun () -> visit fact);
+        drain ())
+      (List.rev !deferred);
     { datatypes = List.rev ctx.datatypes;
       symbols = List.rev !symbols;
       functions = List.rev ctx.functions;
@@ -3906,11 +4210,13 @@ let query ctx code =
     goals,
     fun term -> slice (expand ~slice:true { label = "refine_"; term }) term )
 
-let verify_batch ctx prove code =
+(* [proved] receives the obligations of each query that was proved. *)
+let verify_batch ?(proved = fun _ -> ()) ctx prove code =
   let query, goals, expand = query ctx code in
   let prove_one (o : obligation) q =
-    try prove ~batch:false o.loc q
-    with Unproved error ->
+    match prove ~batch:false o.loc q with
+    | () -> proved [o]
+    | exception Unproved error ->
       let s = { empty with omitted_premises = o.omitted_premises } in
       let origin =
         if o.origin.loc_ghost || o.origin = o.loc
@@ -3952,8 +4258,9 @@ let verify_batch ctx prove code =
     match members with
     | [(o, _)] -> prove_one o (Lazy.force query)
     | (first, _) :: _ -> (
-      try prove ~batch:false first.loc (Lazy.force query)
-      with Unproved _ ->
+      match prove ~batch:false first.loc (Lazy.force query) with
+      | () -> proved (List.map fst members)
+      | exception Unproved _ ->
         (* If every conjunct is proved alone, the refinement holds. *)
         List.iter (fun (o, term) -> prove_one o (expand term)) members)
     | [] -> ()
@@ -3965,13 +4272,78 @@ let verify_batch ctx prove code =
   | [] -> ()
   | [members] -> prove_group members (lazy query)
   | ((first, _) :: _) :: _ as groups -> (
-    try prove ~batch:true first.loc query
-    with Unproved _ ->
+    match prove ~batch:true first.loc query with
+    | () -> proved (List.map fst goals)
+    | exception Unproved _ ->
       List.iter
         (fun members ->
           prove_group members (lazy (expand (conjunction members))))
         groups)
   | [] :: _ -> ()
+
+(* Whether [code] assumes facts of a proof step not yet known to be used. *)
+let rec has_unused_step code =
+  List.exists
+    (function
+      | (Assume _ | Define _) as command -> (
+        match Step_assumptions.find_opt step_assumptions command with
+        | Some steps ->
+          List.exists (fun step -> not step.Vox_proof_steps.used) steps
+        | None -> false)
+      | Choice (a, b) -> has_unused_step a || has_unused_step b
+      | Check code -> has_unused_step code
+      | Assert _ -> false)
+    code
+
+(* Prove [code]; with warning 227 enabled, then, after the pass's other proofs,
+   prove each query that was proved again with indicators on the proof steps'
+   assumptions, to find the steps that its proof used. *)
+let verify_steps ctx prove code =
+  match !Vox_proof_steps.active with
+  | None -> verify_batch ctx prove code
+  | Some checker ->
+    let proved = ref [] in
+    verify_batch
+      ~proved:(fun obligations -> proved := obligations :: !proved)
+      ctx prove code;
+    Vox_proof_steps.defer @@ fun () ->
+    if has_unused_step code
+    then begin
+      let indicators = ref [] in
+      let query, goals, expand = query ~indicators ctx code in
+      List.iter
+        (fun obligations ->
+          let selected =
+            List.filter (fun (o, _) -> List.memq o obligations) goals
+          in
+          let query =
+            if List.compare_lengths selected goals = 0
+            then query
+            else
+              expand
+                (List.fold_left
+                   (fun q (_, goal) -> both And q goal)
+                   (Boolean true) selected)
+          in
+          let loc =
+            match obligations with
+            | (o : obligation) :: _ -> o.loc
+            | [] -> Location.none
+          in
+          Vox_proof_steps.check checker loc query !indicators)
+        (List.rev !proved)
+    end
+
+let steps_pass ?unused_steps ~report f =
+  Fun.protect
+    ~finally:(fun () ->
+      Step_assumptions.reset step_assumptions;
+      Hashtbl.reset observation_steps;
+      Term_table.reset equation_steps;
+      Hashtbl.reset value_steps;
+      Hashtbl.reset let_bound_functions;
+      Hashtbl.reset argument_steps)
+    (fun () -> Vox_proof_steps.pass ?checker:unused_steps ~report f)
 
 let context ~poll ~prove ~verify_introductions =
   { poll;
@@ -4008,7 +4380,8 @@ let context ~poll ~prove ~verify_introductions =
     unfolding = []
   }
 
-let generate ?(poll = fun () -> ()) ~prove str =
+let generate ?(poll = fun () -> ()) ?unused_steps ~prove str =
+  steps_pass ?unused_steps ~report:true @@ fun () ->
   poll ();
   let exception Has_obligation in
   let scan =
@@ -4017,6 +4390,32 @@ let generate ?(poll = fun () -> ()) ~prove str =
         (fun self e ->
           poll ();
           if Option.is_some (intro_loc e) then raise Has_obligation;
+          (* A unit without obligations uses none of its proof steps. *)
+          if
+            Vox_proof_steps.enabled ()
+            &&
+            let source =
+              List.fold_left
+                (fun ty -> function
+                  | Texp_refinement { source; _ }, _, _ -> source | _ -> ty)
+                e.exp_type e.exp_extra
+            in
+            Option.is_some (step_kind e source)
+            ||
+            match e.exp_desc with
+            | Texp_function { params; _ } ->
+              List.exists
+                (fun p ->
+                  match p.fp_kind with
+                  | Tparam_pat pat | Tparam_optional_default (pat, _, _) -> (
+                    match
+                      get_desc (Ctype.expand_head pat.pat_env pat.pat_type)
+                    with
+                    | Trefine _ -> true
+                    | _ -> false))
+                params
+            | _ -> false
+          then raise Has_obligation;
           Tast_iterator.default_iterator.expr self e)
     }
   in
@@ -4036,12 +4435,16 @@ let generate ?(poll = fun () -> ()) ~prove str =
     in
     List.iter
       (fun (state, code) ->
-        with_warnings state (fun () -> verify_batch ctx ctx.prove code))
+        with_warnings state (fun () -> verify_steps ctx ctx.prove code))
       (List.rev ctx.batches);
-    with_warnings warnings (fun () -> verify_batch ctx prove result.code)
+    with_warnings warnings (fun () -> verify_steps ctx prove result.code)
 
-let check_termination ~poll ~prove ~self ~fn ~measure =
+let check_termination ?unused_steps ~poll ~prove ~self ~fn ~measure () =
+  steps_pass ?unused_steps ~report:false @@ fun () ->
   poll ();
+  (* A recursive function is bound by [let]. *)
+  if Vox_proof_steps.enabled ()
+  then Hashtbl.replace let_bound_functions fn.exp_loc ();
   let params, body = Recursive_function.parameters fn in
   let ctx = context ~poll ~prove ~verify_introductions:false in
   (* The typer checked the measure as a total, stateless expression over
@@ -4094,8 +4497,11 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
     List.fold_left
       (fun s (id, pat) ->
         let value = fresh ctx pat.pat_env pat.pat_type (Ident.name id) in
+        let step = argument_step fn pat in
+        register_value step value;
         let s, condition =
-          merge_patterns s (pattern ctx (bind s id value) value pat)
+          in_step step s (fun () ->
+              merge_patterns s (pattern ctx (bind s id value) value pat))
         in
         branch s condition)
       empty params
@@ -4139,7 +4545,7 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
         in
         if not checked.dead
         then
-          verify_batch ctx prove
+          verify_steps ctx prove
             (Assert
                { loc = call.exp_loc;
                  (* The error already points at the decreases attribute. *)

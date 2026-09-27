@@ -11,12 +11,15 @@ val default_config : config
 
 (** [resources] is the Z3 resource count ([rlimit] units) used by the query,
     when the solver reports it. Unlike the timings, it does not depend on
-    machine load. [encoding_seconds] covers serialization; [solving_seconds]
-    covers the rest of the check. *)
+    machine load. [core] is, for a valid query checked with assumptions, the
+    assumptions its proof used (an unsat core, not necessarily minimal).
+    [encoding_seconds] covers serialization; [solving_seconds] covers the rest
+    of the check. *)
 type result =
   { validity : Vox_smt.validity;
     stderr : string;
     resources : int option;
+    core : Vox_smt.Symbol.t list option;
     encoding_seconds : float;
     solving_seconds : float
   }
@@ -33,12 +36,14 @@ exception Cancelled
     block. Calls must be serialized: SIGPIPE is temporarily ignored and restored
     while writing to the solver. Solver stderr is retained for every returned
     outcome, including timeout and protocol failure. [resource_limit] bounds the
-    query's Z3 resources; exhausting it yields [Unknown]. *)
+    query's Z3 resources; exhausting it yields [Unknown]. [assumptions] are
+    passed to {!Vox_smt.to_smtlib}; a proof then also reports its core. *)
 val check :
   ?config:config ->
   ?dump:(string -> unit) ->
   ?cancelled:(unit -> bool) ->
   ?resource_limit:int ->
+  ?assumptions:Vox_smt.Symbol.t list ->
   int_width:int ->
   Vox_smt.query ->
   result
@@ -55,7 +60,11 @@ val with_session :
   ?dump:(string -> unit) ->
   ?cancelled:(unit -> bool) ->
   int_width:int ->
-  ((?resource_limit:int -> Vox_smt.query -> result) -> 'a) ->
+  ((?resource_limit:int ->
+   ?assumptions:Vox_smt.Symbol.t list ->
+   Vox_smt.query ->
+   result) ->
+  'a) ->
   'a
 
 (** Monotonic clock used for verification budgets. *)

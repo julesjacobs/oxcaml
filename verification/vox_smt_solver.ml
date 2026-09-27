@@ -14,6 +14,7 @@ type result =
   { validity : validity;
     stderr : string;
     resources : int option;
+    core : Symbol.t list option;
     encoding_seconds : float;
     solving_seconds : float
   }
@@ -49,12 +50,12 @@ let dispose connection =
     [connection.input; connection.output; connection.errors]
 
 let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
-    ?(cancelled = fun () -> false) ?resource_limit ~int_width q =
+    ?(cancelled = fun () -> false) ?resource_limit ?assumptions ~int_width q =
   if config.timeout_ms <= 0 then invalid_arg "Vox_smt_solver: timeout_ms";
   let keep = ref false in
   let started = monotonic_time () in
   let deadline = started +. (float config.timeout_ms /. 1000.) in
-  let encoded = ref started and resources = ref None in
+  let encoded = ref started and resources = ref None and core = ref None in
   let stderr = Buffer.create 128 in
   let descriptors = ref [] and child = ref None and exit_status = ref None in
   let stderr_fd = ref None in
@@ -114,7 +115,7 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
     let input =
       to_smtlib
         ~poll:(fun () -> ignore (poll ()))
-        ?resource_limit ~int_width ~timeout_ms:config.timeout_ms q
+        ?resource_limit ?assumptions ~int_width ~timeout_ms:config.timeout_ms q
     in
     encoded := monotonic_time ();
     let input = session_input input in
@@ -180,11 +181,11 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
           if answer = ""
           then output tail
           else begin
-            let followup = followup q.symbols answer in
+            let followup = followup ?assumptions q.symbols answer in
             status := Some answer;
             pending
-              := !pending ^ followup
-                 ^ resource_request ^ "(echo \"vox-query-done\")\n";
+              := !pending ^ followup ^ resource_request
+                 ^ "(echo \"vox-query-done\")\n";
             response_output tail
           end)
     in
@@ -258,7 +259,7 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
       then protocol "Incomplete query write";
       ignore (poll ());
       let result =
-        interpret_response ~resources q.symbols answer
+        interpret_response ~resources ?assumptions ~core q.symbols answer
           (Buffer.contents response)
       in
       ignore (poll ());
@@ -305,6 +306,7 @@ let check_impl session ?(config = default_config) ?(dump = fun _ -> ())
   { validity;
     stderr = Buffer.contents stderr;
     resources = !resources;
+    core = (match validity with Valid -> !core | _ -> None);
     encoding_seconds = !encoded -. started;
     solving_seconds = finished -. !encoded
   }
@@ -318,7 +320,7 @@ let with_session ?config ?dump ?cancelled ~int_width f =
       Option.iter dispose session.connection;
       session.connection <- None)
     (fun () ->
-      f (fun ?resource_limit query ->
+      f (fun ?resource_limit ?assumptions query ->
           if !closed then invalid_arg "Vox_smt_solver: closed session";
           if !busy then invalid_arg "Vox_smt_solver: recursive session query";
           busy := true;
@@ -326,8 +328,9 @@ let with_session ?config ?dump ?cancelled ~int_width f =
             ~finally:(fun () -> busy := false)
             (fun () ->
               check_impl session ?config ?dump ?cancelled ?resource_limit
-                ~int_width query)))
+                ?assumptions ~int_width query)))
 
-let check ?config ?dump ?cancelled ?resource_limit ~int_width query =
+let check ?config ?dump ?cancelled ?resource_limit ?assumptions ~int_width query
+    =
   with_session ?config ?dump ?cancelled ~int_width (fun check ->
-      check ?resource_limit query)
+      check ?resource_limit ?assumptions query)
