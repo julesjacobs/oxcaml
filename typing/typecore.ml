@@ -3052,6 +3052,39 @@ let rec has_unerased_ghost_body env exp =
       end
   | _ -> false
 
+(* Local bindings computed at run time but used only in ghost code
+   (warning 226). [proof_only_candidates] holds the bindings whose definition
+   could move under [ghost_]; [binding_uses] is called at each use of a
+   watched binding, with [true] for a use in real code. *)
+let proof_only_candidates : unit Types.Uid.Tbl.t = Types.Uid.Tbl.create 16
+
+let binding_uses : (bool -> unit) Types.Uid.Tbl.t = Types.Uid.Tbl.create 16
+
+let note_binding_use env (desc : Types.value_description) =
+  match Types.Uid.Tbl.find_opt binding_uses desc.val_uid with
+  | Some use ->
+      use (not (Env.in_ghost_context env || !typing_refinement_predicate))
+  | None -> ()
+
+let add_proof_only_candidates env bindings =
+  if in_real_code env then
+    List.iter (fun vb ->
+      match vb.vb_pat.pat_desc, vb.vb_expr.exp_desc with
+      | _, Texp_function _ -> ()
+      | Tpat_var { uid; name; _ }, _
+        when not (String.starts_with ~prefix:"_" name.txt
+                  || String.starts_with ~prefix:"*" name.txt)
+             (* An explicit mode may ask for a real value. *)
+             && not (List.exists (function
+                  | Tpat_constraint (_, { mode_desc = _ :: _; _ }), _, _ ->
+                      true
+                  | _ -> false) vb.vb_pat.pat_extra)
+             && not (is_erased vb.vb_expr || is_trivial vb.vb_expr)
+             && erasable_argument env vb.vb_expr ->
+          Types.Uid.Tbl.replace proof_only_candidates uid ()
+      | _ -> ())
+      bindings
+
 let is_refined_unit env ty =
   match get_desc (expand_head env ty) with
   | Trefine { ref_payload; _ } ->
@@ -8242,6 +8275,7 @@ and type_expect_
       let path, actual_mode, layout_args, desc, kind, primitive_mode_check =
         type_ident env ~recarg lid
       in
+      note_binding_use env desc;
       let exp_desc =
         match desc.val_kind with
         | Val_ivar (mutability, cl_num) ->
@@ -8467,8 +8501,8 @@ and type_expect_
             else Modules_rejected
           in
           let (pat_exp_list, new_env) =
-            type_let existential_context env mutable_flag rec_flag
-              spat_sexp_list allow_modules
+            type_let ~proof_only:true existential_context env mutable_flag
+              rec_flag spat_sexp_list allow_modules
           in
           Ctype.register_refinement_value_scope ~level:refinement_level
             (List.concat_map
@@ -13175,6 +13209,7 @@ and type_effect_cases
 (* Typing of let bindings *)
 
 and type_let ?check ?check_strict ?(force_toplevel = false)
+    ?(proof_only = false)
     existential_context env mutable_flag rec_flag spat_sexp_list allow_modules =
   let refinement_binding_level = get_current_level () in
   let decreases =
@@ -13556,6 +13591,7 @@ and type_let ?check ?check_strict ?(force_toplevel = false)
         check_partial_application ~statement:false vb.vb_expr
     ) l;
   warn_erasure_lints env l;
+  if proof_only then add_proof_only_candidates env l;
   add_refined_unit_bindings env l;
   (* See Note [add_module_variables after checking expressions] *)
   let new_env = add_module_variables new_env mvs in
@@ -13592,6 +13628,7 @@ and type_let_def_wrap_warnings
               Warnings.is_active (check "" false)
            || Warnings.is_active (check_strict "" false)
            || Warnings.is_active (check_mutable "")
+           || Warnings.is_active (Warnings.Proof_only_binding "")
            || (is_recursive && (Warnings.is_active Warnings.Unused_rec_flag))))
       attrs_list
   in
@@ -13655,12 +13692,18 @@ and type_let_def_wrap_warnings
                    | Val_self _ | Val_anc _ -> false)
                 in
                 let mutated = ref false in
+                let real_use = ref false and ghost_use = ref false in
                 if not (name = "" || name.[0] = '_' || name.[0] = '#') then
+                  begin
+                  Types.Uid.Tbl.replace binding_uses vd.val_uid
+                    (fun real ->
+                      if real then real_use := true else ghost_use := true);
                   add_delayed_check
                     (fun () ->
                       let warn w =
                         Location.prerr_warning vd.Subst.Lazy.val_loc w
                       in
+                      Types.Uid.Tbl.remove binding_uses vd.val_uid;
                       if not !used then
                         warn
                           (with_refined_unit_hint vd.val_uid
@@ -13670,7 +13713,12 @@ and type_let_def_wrap_warnings
                          warning with [unused-var] *)
                       else if mutable_ && not !mutated then
                         warn (check_mutable name)
-                    );
+                      else if !ghost_use && not !real_use
+                              && Types.Uid.Tbl.mem proof_only_candidates
+                                   vd.val_uid
+                      then warn (Warnings.Proof_only_binding name)
+                    )
+                  end;
                 Env.set_value_used_callback
                   vd
                   (fun () ->

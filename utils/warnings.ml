@@ -177,6 +177,7 @@ type t =
   | Unerased_ghost_body                     (* 223 *)
   | Unerased_ghost_call                     (* 224 *)
   | Redundant_ghost                         (* 225 *)
+  | Proof_only_binding of string            (* 226 *)
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
    the numbers of existing warnings.
@@ -284,6 +285,7 @@ let number = function
   | Unerased_ghost_body -> 223
   | Unerased_ghost_call -> 224
   | Redundant_ghost -> 225
+  | Proof_only_binding _ -> 226
 ;;
 (* DO NOT REMOVE the ;; above: it is used by
    the testsuite/ests/warnings/mnemonics.mll test to determine where
@@ -745,6 +747,11 @@ let descriptions = [
     names = ["redundant-ghost"];
     description = "ghost_ inside code that is already ghost.";
     since = since 5 4 };
+  { number = 226;
+    names = ["proof-only-binding"];
+    description = "A local value is computed at run time but used only in\n\
+    \    ghost code.";
+    since = since 5 4 };
 ]
 
 let name_to_number =
@@ -1157,7 +1164,7 @@ let parse_options errflag s =
   alerts
 
 (* If you change these, don't forget to change them in man/ocamlc.m *)
-let defaults_w = "+a-4-7-9-27-29-30-32..42-44-45-48-50-60-66..70-74-221"
+let defaults_w = "+a-4-7-9-27-29-30-32..42-44-45-48-50-60-66..70-74-221-226"
 let defaults_warn_error = "-a"
 let default_disabled_alerts = [ "unstable"; "unsynchronized_access" ]
 
@@ -1674,6 +1681,10 @@ let message = function
   | Redundant_ghost ->
       msg "This %a is redundant: the enclosing code is already ghost."
         Style.inline_code "ghost_"
+  | Proof_only_binding name ->
+      msg "%a is computed at run time but used only in ghost code.@ \
+           Wrap its definition in %a to erase it."
+        Style.inline_code name Style.inline_code "ghost_ (...)"
 ;;
 
 let nerrors = ref 0
