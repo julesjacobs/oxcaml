@@ -2,7 +2,7 @@
  has-z3;
  setup-ocamlc.opt-build-env;
  flags = "-extension refinement_types -principal";
- module = "sat_cdcl_array_bound_rejected.ml";
+ module = "refinement_array_length_rejected.ml";
  ocamlc_opt_exit_status = "2";
  ocamlc.opt;
  check-ocamlc.opt-output;
