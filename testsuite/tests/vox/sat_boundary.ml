@@ -10,7 +10,7 @@
  {
    setup-ocamlc.opt-build-env;
    lib = "${test_build_directory_prefix}/ocamlc.opt";
-   flags = "-extension refinement_types -principal";
+   flags = "-extension refinement_types -principal -vox-library";
    module = "vox_sequence.mli";
    ocamlc.opt;
    module = "vox_sequence.ml";
@@ -30,7 +30,7 @@
    module = "vox_sat.ml";
    ocamlc.opt;
    compiler_output2 = "${lib}/ocamlc.opt.output";
-   flags = "-extension refinement_types";
+   flags = "-extension refinement_types -vox-library";
    module = "vox_cdcl_total_proof.mli";
    ocamlc.opt;
    module = "vox_cdcl_total_proof.ml";
@@ -80,7 +80,7 @@
  {
    setup-ocamlopt.opt-build-env;
    lib = "${test_build_directory_prefix}/ocamlopt.opt";
-   flags = "-extension refinement_types -principal";
+   flags = "-extension refinement_types -principal -vox-library";
    module = "vox_sequence.mli";
    ocamlopt.opt;
    module = "vox_sequence.ml";
@@ -100,7 +100,7 @@
    module = "vox_sat.ml";
    ocamlopt.opt;
    compiler_output2 = "${lib}/ocamlopt.opt.output";
-   flags = "-extension refinement_types";
+   flags = "-extension refinement_types -vox-library";
    module = "vox_cdcl_total_proof.mli";
    ocamlopt.opt;
    module = "vox_cdcl_total_proof.ml";

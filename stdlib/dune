@@ -26,6 +26,7 @@
    -bin-annot
    -extension refinement_types
    -extension runtime_metaprogramming
+   -vox-library
    -nostdlib
    -safe-string
    -strict-formats

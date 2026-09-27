@@ -2,6 +2,7 @@ open Borrow
 module Spec = Vox_int_sequence
 
 external divide : int -> {d : int | d <> 0} -> int @@ total = "%divint"
+  [@@warning "-trusted-external"]
 let (half @ total) : (value : int) ->
     {result : int | if value > 0 then 0 <= result && result < value else true} =
     fun value ->

@@ -59,6 +59,11 @@ type redundant_modifier_reason =
   | Default_bound
   | Implied_by of string
 
+type trusted_external_reason =
+  | Trusted_refinement
+  | Trusted_totality
+  | Trusted_total_cast
+
 type t =
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
@@ -178,6 +183,7 @@ type t =
   | Unerased_ghost_call                     (* 224 *)
   | Redundant_ghost                         (* 225 *)
   | Proof_only_binding of string            (* 226 *)
+  | Trusted_external of trusted_external_reason (* 228 *)
 
 (* If you remove a warning, leave a hole in the numbering.  NEVER change
    the numbers of existing warnings.
@@ -286,6 +292,7 @@ let number = function
   | Unerased_ghost_call -> 224
   | Redundant_ghost -> 225
   | Proof_only_binding _ -> 226
+  | Trusted_external _ -> 228
 ;;
 (* DO NOT REMOVE the ;; above: it is used by
    the testsuite/ests/warnings/mnemonics.mll test to determine where
@@ -751,6 +758,11 @@ let descriptions = [
     names = ["proof-only-binding"];
     description = "A local value is computed at run time but used only in\n\
     \    ghost code.";
+    since = since 5 4 };
+  { number = 228;
+    names = ["trusted-external"];
+    description = "An external declaration outside the verified library\n\
+    \    states a refinement or totality that the verifier assumes.";
     since = since 5 4 };
 ]
 
@@ -1685,6 +1697,12 @@ let message = function
       msg "%a is computed at run time but used only in ghost code.@ \
            Wrap its definition in %a to erase it."
         Style.inline_code name Style.inline_code "ghost_ (...)"
+  | Trusted_external reason ->
+      msg "The verifier assumes this external's %s;@ nothing checks it."
+        (match reason with
+         | Trusted_refinement -> "refinement"
+         | Trusted_totality -> "totality"
+         | Trusted_total_cast -> "cast of its argument to a total function")
 ;;
 
 let nerrors = ref 0

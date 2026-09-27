@@ -298,6 +298,12 @@ module Frame_child_extent = struct
       let _ = (u : {u : unit | false}) in ())
 end;;
 [%%expect{|
+Lines 5-6, characters 2-39:
+5 | ..external left_final : frame @ local immutable -> int Model.t @ immutable total ghost
+6 |     @@ total = "caml_borrow_frame_left"
+Warning 228 [trusted-external]: The verifier assumes this external's totality;
+  nothing checks it.
+
 Line 18, characters 15-16:
 18 |       let _ = (u : {u : unit | false}) in ())
                     ^

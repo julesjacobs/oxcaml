@@ -562,6 +562,7 @@ let install () =
   if not !installed
   then begin
     installed := true;
+    Vox_trust.add_arguments ();
     let with_prover f =
       let int_width = if Target_system.is_64_bit () then 63 else 31 in
       let dump =

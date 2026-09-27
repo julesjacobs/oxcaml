@@ -1,9 +1,9 @@
 (* TEST
  setup-ocamlc.byte-build-env;
- flags = "-extension refinement_types -i";
+ flags = "-extension refinement_types -w -trusted-external -i";
  compiler_output = "inferred.mli";
  ocamlc.byte;
- flags = "-extension refinement_types";
+ flags = "-extension refinement_types -w -trusted-external";
  compiler_output = "compile.output";
  module = "inferred.mli";
  ocamlc.byte;

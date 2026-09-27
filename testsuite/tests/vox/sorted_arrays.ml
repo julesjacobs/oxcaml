@@ -770,7 +770,7 @@ Line 13, characters 39-46:
 13 |   Binary.search_midpoint p start upper premise;;
                                             ^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array_proofs.ml", line 8, characters 11-24:
+File "sorted_array_proofs.ml", line 9, characters 11-24:
   The refinement is stated here.
 |}]
 
@@ -915,6 +915,6 @@ Line 5, characters 56-67:
 5 |   let refine_ result = Arrays.remove_at source position (refine_ u) in
                                                             ^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array_proofs.ml", line 425, characters 35-66:
+File "sorted_array_proofs.ml", line 426, characters 35-66:
   The refinement is stated here.
 |}]

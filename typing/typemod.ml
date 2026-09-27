@@ -2349,6 +2349,7 @@ and transl_signature ?(interface_toplevel = false) env
               (Value.disallow_right md_mode, sig_modalities.moda_modalities))
             ~why:Signature_item
         in
+        Vox_trust.check_external env tdesc;
         Ctype.register_refinement_value_scope ~level:Ident.lowest_scope
           [tdesc.val_id];
         Signature_names.check_value names tdesc.val_loc tdesc.val_id;
@@ -4341,6 +4342,7 @@ and type_structure ?(toplevel = None) ~funct_body anchor env sstr =
           Typedecl.transl_value_decl env ~modal:Str_primitive
             ~why:Structure_item loc sdesc
         in
+        Vox_trust.check_external env desc;
         assert (desc.val_val.val_modalities |> Modality.is_undefined);
         let pp : Mode.Hint.pinpoint = (desc.val_loc, Expression) in
         let val_modalities =

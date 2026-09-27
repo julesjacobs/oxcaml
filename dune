@@ -278,6 +278,7 @@
   tast_mapper
   verification
   vox_type
+  vox_trust
   signature_group
   cmt_format
   cms_format

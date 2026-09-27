@@ -153,6 +153,7 @@ typing_SOURCES = \
   typing/typedecl_immediacy.mli typing/typedecl_immediacy.ml \
   typing/typedecl_separability.mli typing/typedecl_separability.ml \
   typing/typeopt.mli typing/typeopt.ml \
+  typing/vox_trust.mli typing/vox_trust.ml \
   typing/typedecl.mli typing/typedecl.ml \
   typing/value_rec_check.mli typing/value_rec_check.ml \
   typing/verification.mli typing/verification.ml \

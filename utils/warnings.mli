@@ -58,6 +58,11 @@ type redundant_modifier_reason =
   | Default_bound
   | Implied_by of string
 
+type trusted_external_reason =
+  | Trusted_refinement
+  | Trusted_totality
+  | Trusted_total_cast
+
 type t =
   | Comment_start                           (*  1 *)
   | Comment_not_end                         (*  2 *)
@@ -182,6 +187,7 @@ type t =
   | Unerased_ghost_call                     (* 224 *)
   | Redundant_ghost                         (* 225 *)
   | Proof_only_binding of string            (* 226 *)
+  | Trusted_external of trusted_external_reason (* 228 *)
 
 type alert = {kind:string; message:string; def:loc; use:loc}
 
