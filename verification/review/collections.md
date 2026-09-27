@@ -152,19 +152,18 @@ does not verify that historical implementation or claim its balanced-map cost.
 
 ## Reproduction and evidence
 
-Run `python3 verification/review/collections.py COMPILER_PREFIX` with a stable
-installed compiler from this baseline, configured for multidomain execution
-and poll insertion. It writes only `_build/collections-review` in this checkout;
-it does not install, mutate the supplied prefix, or invoke Make/Dune.
-
-The harness builds all actual implementations in bytecode/native. Quicksort,
+Run `./dev test vox/collections_boundary.ml`, which replaced the former
+`collections.py` harness. The test builds all actual implementations in
+bytecode/native. Quicksort,
 AVL, sorted arrays and queue also pass principal mode. Sparse overlays use
 ordinary mode: this compiler's principal mode rejects passing immutable
 polymorphic values to the generic writable list operations in `find_remove`.
 This is a type-checker limitation, not an assumed verification condition;
 all sparse contracts, implementations and clients undergo normal verification.
 The principal sparse compile failure is recorded in the delivery notes. Clients are compiled from a separate directory with
-only public interfaces, then linked against the verified implementations.
+only public interfaces, then linked against the verified implementations; the
+two clients that spawn domains are linked but run only by their own tests on a
+multidomain runtime.
 They cover all six scopes, including arbitrary-query/count laws; finite runtime
 oracles additionally cover duplicates, extrema, sorted/reverse inputs,
 rotations, persistent edit effects, FIFO values, fallback, mutable access,
@@ -172,10 +171,10 @@ subrange framing, spawning and exceptional worker joins.
 
 Negative clients must reject empty dequeue/removal, invalid sparse bounds,
 false multiplicity/update claims, deriving structural AVL equality, and access
-to private representations or proof modules. Rejections check the diagnostic
-reason, not only a nonzero exit status.
+to private representations or proof modules. Rejections are expect phrases that pin
+each whole diagnostic.
 
-Emitted bytecode/native Lambda is saved. The harness extracts actual operation
+The test extracts actual operation
 bodies and rejects calls to proof/model machinery in quicksort, queue and sparse
 execution. Ghost snapshots and callbacks lower to inert placeholders, not
 runtime sequences, proof closures or accumulated certificates. Sorted-array
@@ -183,8 +182,9 @@ and AVL execution paths are also inspected at closeout. Unused proof-function
 definitions may remain in a compilation unit; that is distinct from calls on
 ordinary execution paths. Explicit semantic observers remain executable.
 
-`report.json` lists each successful client run, rejection and erasure check;
-per-command logs retain the compiler prefix, commands, generated code and output.
+`collections_boundary.checks.reference` lists the erasure checks. The queue's
+`normalize` and the sorted-array proofs' `search`, which the harness also
+inspected, no longer exist.
 
 ## Delivery results (2026-09-25)
 
