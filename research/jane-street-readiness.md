@@ -68,8 +68,11 @@ this file.
         eight unreachable arms are `unreachable_ ()`; regex: the
         open-question section corrected (iarray bound reason, `lower`
         provably `None` for u ≥ 63 in the logic).
+  - [x] mode-solver, register-allocation, rsa: **owner-review** (merged
+        `f55601c65d`; regalloc's "native code drops 93 lemmas" was false:
+        92 lemmas, each a placeholder function in both backends).
   - [ ] In flight (27 September, evening): myers-diff · http · lz4 |
-        mode-solver · register-allocation · rsa | avl-sets · rings ·
+        avl-sets · rings ·
         lists-trees | functional-queue · merge-sort · quicksort ·
         sparse-arrays.
   - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
@@ -206,6 +209,16 @@ this file.
       as Wasm; 0 disagreements with native on 265 inputs; clickable
       locations. Hosting is the owner's decision (needs COOP/COEP headers
       or the bundled coi-serviceworker).
+- [ ] **Hand-written mode-solver semantics interfaces** (the three `.mli`
+      printed by the compiler, primed names), like the public one.
+- [ ] **`-principal` rejections** of verified code: the RSA library
+      (`vox_rsa_fermat.ml:150`, "ys is partial but expected total"),
+      unannotated parameters used in predicates (labelled-args report),
+      polymorphic `[@def] rec` helpers under `ghost_` (presentation report).
+      One root cause is likely; investigate and fix in the typer.
+- [ ] **Erased lemmas still compile to placeholder functions** (both
+      backends; stated on the pages). Stripping exported lemma fields would
+      be a compiler change; decide whether it matters for the pitch.
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
