@@ -1,3 +1,23 @@
+(* Derivations, the meaning of an [Equal] answer; part of the trusted
+   specification. An [evidence] is a finite proof tree: reflexivity,
+   symmetry, transitivity, a congruence step for each constructor with
+   children, and [Rule (i, rule, subst)], one instance of rule [i] from
+   [instantiate rule.lhs subst] to [instantiate rule.rhs subst]. A rule
+   applies at the root of its step; congruence steps put it in a context.
+   [endpoints] computes the two expressions a derivation relates, and [left]
+   and [right] select them.
+
+   [valid rules proof] checks every step: [Refl] of a well-sorted
+   expression; [Trans] only when the right end of the first part is
+   syntactically the left end of the second; congruence only when the left
+   ends of the parts have the sorts the constructor needs (the right ends
+   then have the same sorts, [Vox_egraph_derivation.sort_sound]); and
+   [Rule] only when rule [i] of [rules] is exactly [rule], it is valid and
+   [subst] gives each variable an expression of its sort. A [Rule] step
+   carries its rule, and this check is what ties a derivation to [rules]
+   (testsuite/tests/vox/egraph_rule_rejected.ml rejects a derivation that
+   uses a rule not in the list). *)
+
 module L = Vox_egraph_language_spec
 module R = Vox_egraph_rule_spec
 

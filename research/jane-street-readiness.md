@@ -195,9 +195,11 @@ this file.
       candidate's definition (fixpoint). Then remove the two
       `[@warning "-226"]` in `maps.ml` and `dependent_expressions.ml`.
       Start after subsumption merges (both touch `typecore.ml`).
-- [ ] **E-graph comments in the 13 inventory-locked files**, regenerating
-      `vox_egraph_rule_handle.spec.json` (owner: yes). Flat hash table page
-      keeps its full interface (owner: yes).
+- [x] **E-graph comments in the 13 inventory-locked files**, regenerating
+      `vox_egraph_rule_handle.spec.json` (owner: yes): a header comment in
+      each, before the first declaration; the inventory changes only in
+      hashes and line numbers (`d7e234bcfa`, merged). Flat hash table
+      page keeps its full interface (owner: yes).
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
