@@ -884,7 +884,7 @@ Line 5, characters 40-43:
 5 |   let _ = Sorted_array.remove_at a zero (u) in ();;
                                             ^^^
 Error: Refinement could not be proved (counterexample)
-File "sorted_array.mli", line 29, characters 14-55:
+File "sorted_array.mli", line 29, characters 31-55:
   The refinement is stated here.
 |}]
 
@@ -1035,7 +1035,7 @@ Line 6, characters 31-37:
 6 |   let _ = Sparse_overlay.get a (zero) in ();;
                                    ^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "sparse_overlay.mli", line 10, characters 33-61:
+File "sparse_overlay.mli", line 10, characters 43-61:
   The refinement is stated here.
 |}]
 

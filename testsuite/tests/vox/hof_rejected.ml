@@ -149,7 +149,7 @@ val needs_positive : {n : int | n > 0} -> int = <fun>
 Line 2, characters 52-63:
 2 | let missing_precondition (x : int) = needs_positive (refine_ x);;
                                                         ^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 1, characters 35-40:
 1 | let needs_positive (x : {n : int | n > 0}) = let refine_ n = x in n;;
                                        ^^^^^

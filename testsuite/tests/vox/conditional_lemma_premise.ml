@@ -69,6 +69,13 @@ module Runtime_body = struct
     step_pos x
 end;;
 [%%expect{|
+Line 8, characters 7-18:
+8 |   let (step_pos_if @ total) (x : int) :
+           ^^^^^^^^^^^
+Warning 223 [unerased-ghost-body]: This function's result is ghost, but its body is not wrapped in
+  "ghost_", so the body is computed when the function is called and its
+  value may be thrown away. Wrap the body in "ghost_ (...)" to erase it.
+
 Line 10, characters 13-14:
 10 |     step_pos x
                   ^

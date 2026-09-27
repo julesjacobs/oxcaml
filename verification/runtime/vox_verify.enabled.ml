@@ -53,12 +53,16 @@ let abstract_multiplication (query : Vox_smt.query) =
 (* With VOX_VERIFY_CACHE set, verification results are cached at two levels. A
    unit is not verified again when the compiler, the source, the interfaces it
    imports, the flags and the solver are all unchanged. A solver query is not
-   sent again when its SMT-LIB text and the solver are unchanged; this covers
-   termination checks and the unchanged parts of an edited unit, also across
-   compiler rebuilds. Only clean successes are recorded. The compiler is
-   identified by a digest of its executable and the solver by the version it
-   reports, both computed once per process; when either is unavailable, the
-   caches that need it are not used. *)
+   sent again when its SMT-LIB text, the solver, the source names of its
+   variables and the kind of attempt (batch or single obligation, exact or
+   with bitwise operations abstracted) are unchanged: a recorded refutation
+   holds counterexample values named after the source and found by a search
+   that only single exact obligations make, and neither is in the text. This
+   covers termination checks and the unchanged parts of an edited unit, also
+   across compiler rebuilds. Unit entries record only clean successes. The
+   compiler is identified by a digest of its executable and the solver by the
+   version it reports, both computed once per process; when either is
+   unavailable, the caches that need it are not used. *)
 let cache_directory () =
   match Sys.getenv_opt "VOX_VERIFY_CACHE" with
   | None | Some "" -> None
@@ -384,11 +388,22 @@ let prove poll check ~batch loc query =
               Vox_smt.to_smtlib ~poll ?resource_limit:limit ~int_width
                 ~timeout_ms:!timeout_ms query
             in
+            let attempt =
+              (if batch then "batch" else "obligation")
+              ^ if exact then "" else " abstract"
+            in
+            let labels =
+              List.map Vox_smt.Symbol.label query.Vox_smt.symbols
+            in
             (* The version names the entry format: bump it when an outcome
-               records more, so older entries are not replayed without it. *)
+               records more, or is shown differently, so older entries are not
+               replayed. *)
             Filename.concat directory
-              ("query-4-"
-              ^ Digest.to_hex (Digest.string (solver ^ "\000" ^ text))))
+              ("query-5-"
+              ^ Digest.to_hex
+                  (Digest.string
+                     (String.concat "\000"
+                        (solver :: attempt :: text :: labels)))))
           (Lazy.force solver_identity)
     in
     (* Resource limits make every outcome except a wall-clock timeout or a

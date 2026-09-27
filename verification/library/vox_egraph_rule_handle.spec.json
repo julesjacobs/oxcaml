@@ -654,7 +654,7 @@
     },
     {
       "path": "verification/library/vox_egraph_rule_handle.mli",
-      "sha256": "71b95c1eabb510111683a359ebdff22f892a452dab4e6fe99721a47cbe589f42",
+      "sha256": "b04b524ce1acdc61585e1d239df41412def4c1bc9e643150e4cf3bbfe04300e2",
       "role": "public_contracts",
       "declarations": [
         {
@@ -760,7 +760,7 @@
           "name": "query_result",
           "start_line": 30,
           "end_line": 30,
-          "code": "type query_result = #{status : equality; state : t; proof : E.evidence option @@ ghost}"
+          "code": "type query_result = #{status : equality; state : t; proof : E.evidence option @@ ghost aliased}"
         },
         {
           "kind": "val",
@@ -802,7 +802,7 @@
           "name": "class_result",
           "start_line": 61,
           "end_line": 61,
-          "code": "type class_result = #{equal : bool; state : t; proof : E.evidence option @@ ghost}"
+          "code": "type class_result = #{equal : bool; state : t; proof : E.evidence option @@ ghost aliased}"
         },
         {
           "kind": "val",
@@ -838,7 +838,7 @@
     },
     {
       "path": "stdlib/stdlib.mli",
-      "sha256": "40c28c27f13b99055ead2b35a40d6d9930b2435bf8677f4c3e1e9303b0d99619",
+      "sha256": "a74c7432c25576a8be9c99a89d371b034f6b61b5d41adce973793952b328810b",
       "role": "trusted_semantic_primitives",
       "declarations": [
         {
