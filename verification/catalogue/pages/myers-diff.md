@@ -10,8 +10,8 @@ sources:
   - testsuite/tests/vox/diff_public_client.ml — Client using only the public interfaces
   - testsuite/tests/vox/diff_rejected.ml — Rejected programs
   - testsuite/tests/vox/diff.ml — Runtime tests against a dynamic-programming oracle
-  - scripts/check-diff-erasure — Erasure audit and public-only compile of the client
-  - verification/demos/diff.ml — Command-line demo run by `scripts/run-diff-demo`
+  - testsuite/tests/vox/diff_boundary.ml — Erasure audit, public-only compile of the client and a run of the demo
+  - verification/demos/diff_demo.ml — Command-line demo, also run by `scripts/run-diff-demo`
 ---
 `Vox_diff.diff old fresh` computes an edit script between two `int` lists with Myers' frontier search. A script is a list of `Keep x`, `Delete x` and `Insert x`. `Vox_diff_spec` specifies, by equations, its source (the kept and deleted elements), its target (the kept and inserted elements), its cost (the number of deletions and insertions), `apply`, `invert` and the edit distance `minimum_cost`. When both inputs have at most 1,000,000 elements, `diff` returns `Ok s` with `source s = old`, `target s = fresh` and `cost s = minimum_cost old fresh`; otherwise it returns `Error Input_too_large`. `optimal_at` proves that no script turning `old` into `fresh` costs less. `invert` exchanges source and target and keeps the cost.
 
@@ -52,7 +52,7 @@ The same test rejects a false claim about the patched result, a conclusion drawn
 
 ## Trusted base
 
-- `scripts/check-diff-erasure` is the only check that `diff` runs no proof code. It compiles the library with `-drawlambda` and requires, for each function `diff` runs (named in the script), a fixed set of callees and no reference to `minimum_cost` or `Bigint`. `./dev test` does not run it. `optimal_at`, `invert_correct` and `inverse_patch` are ordinary functions that run their proofs if called outside `ghost_`; the client calls them inside it.
+- `diff_boundary.ml` is the only check that `diff` runs no proof code. It compiles the library with `-drawlambda` and requires, for each function `diff` runs (named in `diff_boundary_check.ml`), a fixed set of callees and no reference to `minimum_cost` or `Bigint`. `optimal_at`, `invert_correct` and `inverse_patch` are ordinary functions that run their proofs if called outside `ghost_`; the client calls them inside it.
 
 ## Scope
 
@@ -69,9 +69,7 @@ The same test rejects a false claim about the patched result, a conclusion drawn
 After `make install` and `./dev init`, from the repository root:
 
 ```
-./dev test vox/diff.ml vox/diff_rejected.ml
-scripts/check-diff-erasure
-scripts/run-diff-demo 'ABCABBA' 'CBABAC'
+./dev test vox/diff.ml vox/diff_rejected.ml vox/diff_boundary.ml
 ```
 
-`diff.ml` compiles the library and the public client, then compares `diff` with a dynamic-programming edit distance on all 3,969 pairs of binary words of length at most 5, 200 random pairs and other cases, and checks the million-element cap on both sides. `diff_rejected.ml` checks the five rejected programs. `scripts/check-diff-erasure` compiles the library with `_install/bin/ocamlc` and `_install/bin/ocamlopt`, audits the runtime functions, and compiles `diff_public_client.ml` with only the two public `.cmi` files available.
+`diff.ml` compiles the library and the public client, then compares `diff` with a dynamic-programming edit distance on all 3,969 pairs of binary words of length at most 5, 200 random pairs and other cases, and checks the million-element cap on both sides. `diff_rejected.ml` checks the five rejected programs. `diff_boundary.ml` compiles the library with both compilers, checks in its Lambda which functions each runtime function of `vox_diff.ml` calls (no proof, metric or big-integer code, and no runtime fuel in the search), compiles `diff_public_client.ml` with only the two public `.cmi` files available and checks that each of its functions makes one call, to `Vox_diff.diff`, and runs the demo on `ABCABBA` and `CBABAC` against its expected output. `scripts/run-diff-demo OLD NEW` runs the demo on other inputs.

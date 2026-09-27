@@ -8,20 +8,11 @@
  {
    setup-ocamlc.opt-build-env;
    ocamlc.opt;
+   binary_modules = "vox_sequence vox_ordered_sequence vox_credits vox_merge_proofs vox_sort_cost vox_merge_sort merge_sort";
    run-expect;
    check-program-output;
  }
 *)
-
-(* Load the implementation so that the accepted phrases below can be
-   evaluated. *)
-#load "vox_sequence.cmo";;
-#load "vox_ordered_sequence.cmo";;
-#load "vox_credits.cmo";;
-#load "vox_merge_proofs.cmo";;
-#load "vox_sort_cost.cmo";;
-#load "vox_merge_sort.cmo";;
-#load "merge_sort.cmo";;
 
 open Merge_sort;;
 [%%expect{|

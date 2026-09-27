@@ -114,9 +114,13 @@ compilers="$(cd "$prefix/bin" && pwd -P)/ocamlc.opt $(cd "$prefix/bin" && pwd -P
     fi
     printf '%s.cmo: %s.ml %s%s\n' "$module" "$module" "$interface" "$dependencies"
     printf '\t%s/bin/ocamlc %s -c %s.ml\n' "$prefix" "$module_flags" "$module"
+    # Flambda 2 inlines code from another unit at the level that unit was
+    # compiled with, so a functor's instances are only specialized in a
+    # client when the functor's own unit is built with -O3.
     native_flags=
     case "$module" in
-      vox_lz4* | vox_string_view | raw_memory | borrow_iarray)
+      vox_lz4* | vox_string_view | raw_memory | borrow_iarray | \
+      vox_table_* | vox_verified_flat_hashtbl)
         native_flags=" -O3" ;;
     esac
     printf '%s.cmx: %s.cmo%s\n' "$module" "$module" "$dependencies"
