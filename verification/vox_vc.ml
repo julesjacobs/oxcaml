@@ -185,6 +185,8 @@ type context =
     (* Module aliases inside structures ([module B = Base]), by the local path
        and by the paths that export it. Signatures do not keep them. *)
     mutable module_aliases : Path.t Path.Map.t;
+    (* Whether the predicate being evaluated is a goal. *)
+    mutable in_goal : bool;
     mutable argument_values : value option Path.Map.t;
     (* Each function body's commands, with the warning settings in effect where
        it was written ([@warning] attributes apply to its proofs). *)
@@ -1378,6 +1380,59 @@ let rec pref_disjoint ctx budget left right =
     in
     observe_iarray ctx call value
 
+(* Extensionality of heaps, instantiated at one location: if [left] and [right]
+   agree at [Pref.diff left right], they are equal. In the model, a heap is a
+   partial map from locations to payloads, [at] is lookup and [mem] is
+   membership in the domain, and [diff] picks a location where two different
+   heaps differ. This is Z3's array extensionality lemma. *)
+let pref_extensionality ctx env heap_type left right =
+  let heap_sort = term_sort left in
+  let payload =
+    match get_desc (Ctype.expand_head env heap_type) with
+    | Tconstr (_, [payload], _) -> Some payload
+    | _ -> None
+  in
+  let option_type = Option.map Predef.type_option payload in
+  match
+    ( Option.bind option_type (sort ctx.encoding env),
+      Option.bind option_type (data_of_type ctx env) )
+  with
+  | Some option_sort, Some data
+    when Hashtbl.mem ctx.pref_heaps heap_sort && term_sort right = heap_sort
+    -> (
+    let key_sort =
+      match Hashtbl.find_opt ctx.map_class_sorts heap_sort with
+      | Some sort -> sort
+      | None ->
+        let sort = fresh_opaque_sort ctx.encoding in
+        Hashtbl.add ctx.map_class_sorts heap_sort sort;
+        sort
+    in
+    match data_constructor data "Some", data_constructor data "None" with
+    | Some some, Some none ->
+      let diff =
+        intern_function ctx "Pref.diff" [heap_sort; heap_sort] key_sort
+      in
+      let key = Call (diff, [left; right]) in
+      let at =
+        intern_function ctx "Pref.at" [heap_sort; key_sort] option_sort
+      in
+      Hashtbl.replace ctx.pref_observers at (Some (some, none));
+      let mem = intern_function ctx "Pref.mem" [heap_sort; key_sort] Bool in
+      Hashtbl.replace ctx.pref_observers mem None;
+      let observe fn heap = pref_observe ctx 128 fn heap key in
+      let domain heap =
+        both Eq (observe mem heap) (Is (some, observe at heap))
+      in
+      Some
+        (both And
+           (both And (domain left) (domain right))
+           (both Implies
+              (both Eq (observe at left) (observe at right))
+              (both Eq left right)))
+    | _ -> None)
+  | _ -> None
+
 let operation ctx env function_type result_type name args =
   match name, args with
   | "caml_pref_heap_disjoint", [left; right] ->
@@ -2038,9 +2093,9 @@ let rec predicate ctx env s e =
       let s, value = eval s body in
       expose_outer ctx env s source value e.rexp_loc
     | Rexp_ghost body -> eval s body
-    | Rexp_logical_equal (left, right) ->
+    | Rexp_logical_equal (left_exp, right) ->
       let s, right = eval s right in
-      let s, left = eval s left in
+      let s, left = eval s left_exp in
       if s.dead
       then s, None
       else
@@ -2048,7 +2103,17 @@ let rec predicate ctx env s e =
         let right = required e.rexp_loc right in
         if sort_has_unsupported_logical_equality ctx.encoding (term_sort left)
         then unsupported e.rexp_loc
-        else name ctx s (scalar_value (both Eq left right))
+        else
+          let s =
+            match
+              if ctx.in_goal
+              then pref_extensionality ctx env left_exp.rexp_type left right
+              else None
+            with
+            | Some lemma -> fact s "heap extensionality" lemma
+            | None -> s
+          in
+          name ctx s (scalar_value (both Eq left right))
     | Rexp_ifthenelse (c, t, Some f) ->
       let s, c = eval s c in
       choose ctx s
@@ -2537,7 +2602,12 @@ and introduce ctx env s ty value loc =
   match get_desc (Ctype.expand_head env ty) with
   | Trefine r when ctx.verify_introductions && not s.dead ->
     let goals, goal =
-      try predicate ctx env (bind s r.ref_binder value) r.ref_pred
+      let in_goal = ctx.in_goal in
+      ctx.in_goal <- true;
+      try
+        Fun.protect
+          ~finally:(fun () -> ctx.in_goal <- in_goal)
+          (fun () -> predicate ctx env (bind s r.ref_binder value) r.ref_pred)
       with Location.Error error ->
         raise
           (Location.Error
@@ -3552,6 +3622,7 @@ let context ~poll ~prove ~verify_introductions =
     pref_observers = Hashtbl.create 8;
     free = Path.Map.empty;
     module_aliases = Path.Map.empty;
+    in_goal = false;
     argument_values = Path.Map.empty;
     batches = [];
     named_terms = Hashtbl.create 32;
