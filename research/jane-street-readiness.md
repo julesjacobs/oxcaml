@@ -345,6 +345,12 @@ this file.
       compiled with `-smt-assume-verified`; enforce the solver version; prove
       the four heap laws extensionality now gives; shrink `trust_total`;
       corrected `_trust.md` draft for owner review.
+- [ ] **Proof cleanup from warning 227** (owner: yes, after the soundness
+      fixes merge): remove the ~900 reported unused lemma calls, keeping the
+      two RSA budget helpers and intentional API-exercising calls in test
+      clients; re-verify everything.
+- [ ] **Soundness ledger** for the talk (owner: list all soundness bugs
+      briefly, including the early ones): `research/soundness-ledger-20260927/`.
 - [ ] **14. Upstream OxCaml reports:** the owner wants to understand and be
       convinced first; an agent is reproducing both on upstream OxCaml
       (`research/upstream-bugs-20260927/REPORT.md`). Previously listed: the expect tool overwrites single
