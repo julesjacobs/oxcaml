@@ -138,6 +138,21 @@ this file.
       made fully green on the merged trunk (branch
       `jujacobs/vox/suite-green-20260927`), including a cache-dependent
       counterexample in two tests.
+- [ ] **Unused proof steps from unsat cores** (owner's request, 27 September).
+      When a goal is proved, ask Z3 which named facts it used (`(get-unsat-core)`),
+      and report lemma calls and argument or path assumptions that no proof in
+      the function needed, as a warning. Notes:
+      - Naming assertions changes Z3's search and so the resource counts;
+        keep normal proofs unaffected by rerunning an already proved query with
+        named facts only when the check is requested, under a flag
+        (e.g. `-dsmt-unused-facts`, or a warning off by default), and cache it.
+      - Cores are not minimal. A fact is reported only if it is absent from
+        every core that covers its uses, or confirmed by re-proving without it
+        (more precise, slower; both behind the flag).
+      - Map facts back to source: each lemma call's result, each refined
+        argument, each `assume_`; batched goals need per-goal cores.
+      - Measure the cost on the library; if small, consider running it in
+        `dev test` by default.
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
