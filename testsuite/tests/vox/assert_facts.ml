@@ -32,8 +32,8 @@ let checked_condition (a : int iarray) (i : int) =
 Line 2, characters 31-32:
 2 |   assert (Iarray.Refined.get a i > 0);;
                                    ^
-Error: Refinement could not be proved (counterexample)
-File "iarray.mli", line 59, characters 15-37:
+Error: Refinement could not be proved (counterexample: i = -1)
+File "iarray.mli", line 59, characters 15-21:
   The refinement is stated here.
 |}]
 

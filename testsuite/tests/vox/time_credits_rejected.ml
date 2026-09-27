@@ -59,7 +59,7 @@ Line 6, characters 19-34:
 6 |     C.split amount (refine_ token)
                        ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_credits.mli", line 21, characters 26-60:
+File "vox_credits.mli", line 21, characters 41-60:
   The refinement is stated here.
 |}]
 
@@ -94,7 +94,7 @@ Line 8, characters 38-53:
 8 |     let refine_ result = C.merge left (refine_ right) in
                                           ^^^^^^^^^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_credits.mli", lines 27-28, characters 26-35:
+File "vox_credits.mli", line 28, characters 6-35:
   The refinement is stated here.
 |}]
 

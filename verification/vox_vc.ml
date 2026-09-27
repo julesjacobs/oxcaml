@@ -112,8 +112,17 @@ type obligation =
   { loc : Location.t;
     origin : Location.t;  (** where the required refinement is written *)
     goal : term;
-    omitted_premises : (Location.t * Location.error) list
+    omitted_premises : (Location.t * Location.error) list;
+    group : int
+        (** The conjuncts of one refinement share a group, which is proved as
+            one query; the conjuncts are proved alone only to name a failure. *)
   }
+
+let next_group = ref 0
+
+let fresh_group () =
+  incr next_group;
+  !next_group
 
 (* Command lists are stored in reverse execution order. Define binds a fresh
    symbol to a total SMT expression; it does not restrict reachability. Check
@@ -2601,13 +2610,23 @@ and expression_extras ?deferred ctx s e ty = function
 and introduce ctx env s ty value loc =
   match get_desc (Ctype.expand_head env ty) with
   | Trefine r when ctx.verify_introductions && not s.dead ->
-    let goals, goal =
+    (* Each conjunct of a top-level [&&] chain is an obligation of its own,
+       proved under the conjuncts before it, as [&&] evaluates. A failure then
+       names the conjunct. *)
+    let rec conjuncts p =
+      match p.rexp_desc with
+      | Rexp_apply ({ rexp_desc = Rexp_ident path; _ }, [(_, a); (_, b)])
+        when primitive env path = Some ("%sequand", 2) ->
+        conjuncts a @ conjuncts b
+      | _ -> [p]
+    in
+    let evaluate goals p =
       let in_goal = ctx.in_goal in
       ctx.in_goal <- true;
       try
         Fun.protect
           ~finally:(fun () -> ctx.in_goal <- in_goal)
-          (fun () -> predicate ctx env (bind s r.ref_binder value) r.ref_pred)
+          (fun () -> predicate ctx env goals p)
       with Location.Error error ->
         raise
           (Location.Error
@@ -2617,19 +2636,32 @@ and introduce ctx env s ty value loc =
                  @ [Location.msg ~loc "Required by this refinement introduction"]
              })
     in
-    let assertion =
-      Assert
-        { loc;
-          origin = r.ref_pred.rexp_loc;
-          goal =
-            (if goals.dead
-             then Boolean true
-             else required r.ref_pred.rexp_loc goal);
-          omitted_premises = goals.omitted_premises
-        }
+    let group = fresh_group () in
+    let prove goals p =
+      if goals.dead
+      then goals
+      else
+        let goals, goal = evaluate goals p in
+        let goal =
+          if goals.dead then Boolean true else required p.rexp_loc goal
+        in
+        let assertion =
+          Assert
+            { loc;
+              origin = p.rexp_loc;
+              goal;
+              omitted_premises = goals.omitted_premises;
+              group
+            }
+        in
+        branch { goals with code = assertion :: goals.code } goal
     in
-    let check = assertion :: added_prefix ~base:s.code goals.code in
-    let s = { s with code = Check check :: s.code } in
+    let goals =
+      List.fold_left prove (bind s r.ref_binder value) (conjuncts r.ref_pred)
+    in
+    let s =
+      { s with code = Check (added_prefix ~base:s.code goals.code) :: s.code }
+    in
     expose_outer ctx env s ty value loc
   | _ -> s, value
 
@@ -3590,13 +3622,42 @@ let verify_batch ctx prove code =
         (Location.Error
            { error with sub = error.sub @ origin @ omitted_premise_messages s })
   in
-  match goals with
+  (* The conjuncts of a refinement are consecutive goals of one group. A group
+     is proved as one query, which is as cheap as proving the whole refinement;
+     only if it fails is each conjunct proved alone, to name the one that
+     fails. *)
+  let rec groups = function
+    | [] -> []
+    | ((o : obligation), _) :: _ as goals ->
+      let members, rest =
+        List.partition (fun ((m : obligation), _) -> m.group = o.group) goals
+      in
+      members :: groups rest
+  in
+  let prove_group members query =
+    match members with
+    | [(o, _)] -> prove_one o (Lazy.force query)
+    | (first, _) :: _ -> (
+      try prove ~batch:false first.loc (Lazy.force query)
+      with Unproved _ ->
+        (* If every conjunct is proved alone, the refinement holds. *)
+        List.iter (fun (o, term) -> prove_one o (expand term)) members)
+    | [] -> ()
+  in
+  let conjunction members =
+    List.fold_left (fun q (_, goal) -> both And q goal) (Boolean true) members
+  in
+  match groups goals with
   | [] -> ()
-  | [(o, _)] -> prove_one o query
-  | (first, _) :: _ -> (
+  | [members] -> prove_group members (lazy query)
+  | ((first, _) :: _) :: _ as groups -> (
     try prove ~batch:true first.loc query
     with Unproved _ ->
-      List.iter (fun (o, term) -> prove_one o (expand term)) goals)
+      List.iter
+        (fun members ->
+          prove_group members (lazy (expand (conjunction members))))
+        groups)
+  | [] :: _ -> ()
 
 let context ~poll ~prove ~verify_introductions =
   { poll;
@@ -3775,7 +3836,8 @@ let check_termination ~poll ~prove ~self ~fn ~measure =
                         (both Int_ge value (Big_integer "0"))
                         (both Int_lt value entry_measure)
                     | Bool | Opaque _ | Datatype _ -> reject measure);
-                 omitted_premises = checked.omitted_premises
+                 omitted_premises = checked.omitted_premises;
+                 group = fresh_group ()
                }
             :: checked.code)
       | _ -> ()

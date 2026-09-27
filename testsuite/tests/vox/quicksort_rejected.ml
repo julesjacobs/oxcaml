@@ -115,9 +115,8 @@ Line 15, characters 4-10:
 15 |     sorted
          ^^^^^^
 Error: Refinement could not be proved (counterexample)
-Lines 2-4, characters 16-30:
-2 | ................Quicksort.Spec.sorted (Borrow.Slice.final s)
-3 |       && Quicksort.Spec.permutation (Borrow.Slice.current s)
+Lines 3-4, characters 9-30:
+3 | .........Quicksort.Spec.permutation (Borrow.Slice.current s)
 4 |         (Borrow.Slice.final s)...
   The refinement is stated here.
 |}]

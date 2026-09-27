@@ -73,6 +73,6 @@ Line 3, characters 20-26:
 3 |   V.elaborate input answer;;
                         ^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "verified_hm.mli", lines 104-110, characters 4-19:
+File "verified_hm.mli", line 104, characters 4-52:
   The refinement is stated here.
 |}]

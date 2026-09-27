@@ -28,7 +28,7 @@ Line 4, characters 74-76:
 4 |   C.construct D.Z D.Empty_context D.Truth word D.Constant D.Word_constant ());;
                                                                               ^^
 Error: Refinement could not be proved (counterexample)
-File "hm_primitive_constraints.ml", line 37, characters 16-77:
+File "hm_primitive_constraints.ml", line 37, characters 16-44:
   The refinement is stated here.
 |}]
 

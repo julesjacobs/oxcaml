@@ -151,7 +151,7 @@ Line 5, characters 28-29:
 5 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 22-39:
   The refinement is stated here.
 |}]
 
@@ -175,7 +175,7 @@ Line 5, characters 28-29:
 5 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 22-39:
   The refinement is stated here.
 |}]
 
@@ -199,7 +199,7 @@ Line 5, characters 28-29:
 5 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 54-63:
   The refinement is stated here.
 |}]
 
@@ -224,7 +224,7 @@ Line 6, characters 28-29:
 6 |   Vox_rsa.roundtrip p q e d m;;
                                 ^
 Error: Refinement could not be proved (counterexample)
-File "vox_rsa.mli", line 25, characters 22-63:
+File "vox_rsa.mli", line 25, characters 22-39:
   The refinement is stated here.
 |}]
 

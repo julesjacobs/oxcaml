@@ -57,7 +57,7 @@ Line 6, characters 19-26:
 6 |     C.split amount (token)
                        ^^^^^^^
 Error: Refinement could not be proved (counterexample)
-File "vox_big_credits.mli", line 21, characters 26-61:
+File "vox_big_credits.mli", line 21, characters 42-61:
   The refinement is stated here.
 |}]
 
