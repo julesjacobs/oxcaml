@@ -64,8 +64,11 @@ this file.
         `research/hmc-resources-20260927/resource-theorem-notes.md` (only self
         tail calls reuse frames; no garbage collector; layout rejections
         depend on inference, which is not proved deterministic).
-  - [ ] Input as a run-time value through the exported `payload` global;
-        theorems for every input (branch `jujacobs/vox/hmc-input-20260927`).
+  - [x] Input as a run-time value through the exported `payload` global;
+        theorems for every input (merged in `01b1df3709`); the example suite is
+        being adapted (branch `jujacobs/vox/examples-input-20260927`). Open,
+        stated on the page: a module whose heap starts full could make
+        `sufficient` false and always report exhaustion.
   - [x] WebAssembly model tested against Node: 100,000 random modules, no
         disagreement; a 40-module smoke check in the suite (merged in
         `123348b625`, `78020e455a`).
@@ -100,8 +103,12 @@ this file.
   - [ ] Name the failing conjunct of an `&&` goal (wart 14).
   - [ ] Erasure lints: total function with a ghost result whose body is not
         `ghost_`; real code discarding a ghost result (warts 41, 42).
-  - [ ] Remove the stale workarounds now unnecessary (about 160 lines;
-        `logic-automation.md`, items 58–62).
+  - [x] Remove the stale workarounds now unnecessary: about 555 lines net in
+        15 demos, merged in `4c74143232`. Leftovers for item 7: client files
+        the pages quote still use `refine_` and `let u = () in u`
+        (quicksort, queue, sorted-array, expressions, the DFA and regex
+        clients); `dfa_equivalence_proof` (313), `register_allocation` (85)
+        and the HM files still have many `let u = () in`.
 - [ ] **10. Performance story.**
   - [ ] Flat hash table benchmark on x86-64 (AMD box).
   - [ ] State on the compiler page that the backend manages its own stack
