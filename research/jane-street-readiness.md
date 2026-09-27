@@ -71,10 +71,11 @@ this file.
   - [x] mode-solver, register-allocation, rsa: **owner-review** (merged
         `f55601c65d`; regalloc's "native code drops 93 lemmas" was false:
         92 lemmas, each a placeholder function in both backends).
+  - [x] functional-queue, merge-sort, quicksort, sparse-arrays:
+        **owner-review** (merged `bf28fa14ea`; merge-sort and quicksort
+        each had a false "no test rejects …" claim).
   - [ ] In flight (27 September, evening): myers-diff · http · lz4 |
-        avl-sets · rings ·
-        lists-trees | functional-queue · merge-sort · quicksort ·
-        sparse-arrays.
+        avl-sets · rings · lists-trees.
   - [ ] Also in flight: egraphs | sat-solver | dfa-equivalence ·
         reference-locks (after deduplication and the inventory comments).
   - [ ] hm-wasm-compiler, after item 3.
@@ -219,6 +220,13 @@ this file.
 - [ ] **Erased lemmas still compile to placeholder functions** (both
       backends; stated on the pages). Stripping exported lemma fields would
       be a compiler change; decide whether it matters for the pitch.
+- [ ] **Multidomain test runs**: no build is configured with
+      `--enable-multidomain`, so the 7 parallel tests (one-shot, buffer,
+      raw memory, borrow, quicksort frame, locks) never run. Agent setting
+      up `~/git/vox-multidomain` on the AMD box (27 September).
+- [ ] **`_trust.md` line 13** (owner-reviewed page) conflates totality and
+      statelessness: total functions may write through uniquely owned
+      storage (`Quicksort.sort`). Wording proposed to the owner.
 - [ ] **14. Upstream OxCaml reports:** the expect tool overwrites single
       blocks with principal output; the `node option` kind error.
 - [ ] **Small warts** (group 3 in the conversation of 27 September):
