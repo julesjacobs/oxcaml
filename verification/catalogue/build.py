@@ -132,7 +132,7 @@ def build(args):
     source.write_views(output, CSS)
     shutil.copy(HERE / 'style.css', output / 'style.css')
     shutil.copy(HERE / 'compiler-demo.js', output / 'compiler-demo.js')
-    check(output)
+    check(output, partial=only is not None)
     print(f'Built {len(demos)} demo pages from {source.short} in {output}.')
 
 
@@ -215,8 +215,9 @@ class Links(HTMLParser):
         self.links += [a[k] for k in ('href', 'src') if k in a]
 
 
-def check(output):
-    """Every local link and anchor resolves."""
+def check(output, partial=False):
+    """Every local link and anchor resolves. A partial build may link to
+    demo pages it did not build."""
     pages = {p: Links(p.read_text()) for p in output.rglob('*.html')}
     errors = []
     for path, page in pages.items():
@@ -226,7 +227,8 @@ def check(output):
                 continue
             target = (path.parent / unquote(u.path)).resolve() if u.path else path
             if not target.exists():
-                errors.append((str(path.relative_to(output)), link))
+                if not (partial and target.parent == output.resolve() / 'specs'):
+                    errors.append((str(path.relative_to(output)), link))
             elif u.fragment and target in pages and unquote(u.fragment) not in pages[target].ids:
                 errors.append((str(path.relative_to(output)), link))
     assert not errors, errors[:20]
