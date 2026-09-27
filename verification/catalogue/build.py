@@ -69,7 +69,8 @@ def counts_line(stats, prefix):
 def build(args):
     source = P.Source(ROOT, args.revision, args.working_tree)
     catalogue = json.loads((HERE / 'catalogue.json').read_text())
-    only = set(args.pages.split(',')) if args.pages else None
+    # Every page links to the shared trust page, so a partial build keeps it.
+    only = set(args.pages.split(',')) | {'_trust'} if args.pages else None
     pages = P.load(only)
     demos = [d for d in catalogue['demos'] if d in pages]
     assert only or set(demos) == {p for p in pages if not p.startswith('_')}, 'catalogue.json lists every page'
