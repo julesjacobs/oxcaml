@@ -13,10 +13,9 @@ let () =
     "state_size counts rows without constructing state IDs";
   let proof = dump "dfa_equivalence_proof" in
   let certificates =
-    [ "append_word"; "quotient_relation"; "quotient_access"; "cover_rows";
-      "copy_access"; "copy_separations"; "same_class_pairs"; "candidate";
-      "search_product"; "copy_word"; "copy_relation"; "copy_table";
-      "copy_machine"; "minimization_certificate" ]
+    [ "append_word"; "quotient_relation"; "quotient_access"; "cover_row";
+      "cover_rows"; "same_class_pairs"; "compare_states";
+      "distinguish_classes"; "minimization_certificate" ]
   in
   List.iter
     (fun entry ->

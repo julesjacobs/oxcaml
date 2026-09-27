@@ -2,7 +2,7 @@
  has-z3;
  flags = "-extension refinement_types";
  source_directories = "${test_source_directory}/../../../verification/library";
- prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml verified_atomic.mli verified_atomic.ml unique_cell.mli unique_cell.ml unique_lock.mli unique_lock.ml";
+ prebuilt_modules = "pref.mli pref.ml ghost_pref.mli ghost_pref.ml verified_atomic.mli verified_atomic.ml unique_cell.mli unique_cell.ml spin_lock.mli spin_lock.ml unique_lock.mli unique_lock.ml";
  { bytecode; }
 *)
 

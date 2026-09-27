@@ -3,8 +3,7 @@
  source_directories = "${test_source_directory}/../../../verification/library";
  readonly_files = "vox_sequence.mli vox_sequence.ml vox_sat_spec.mli";
  readonly_files += " vox_sat_spec.ml vox_sat_proof.mli vox_sat_proof.ml";
- readonly_files += " vox_sat.mli vox_sat.ml vox_cdcl_proof.mli";
- readonly_files += " vox_cdcl_proof.ml vox_cdcl.mli vox_cdcl.ml";
+ readonly_files += " vox_sat.mli vox_sat.ml";
  readonly_files += " vox_cdcl_total_proof.mli vox_cdcl_total_proof.ml";
  readonly_files += " vox_cdcl_total.mli vox_cdcl_total.ml";
  set lib = "";
@@ -31,18 +30,6 @@
    module = "vox_sat.ml";
    ocamlc.opt;
    compiler_output2 = "${lib}/ocamlc.opt.output";
-   flags = "-extension refinement_types -principal";
-   module = "vox_cdcl_proof.mli";
-   ocamlc.opt;
-   module = "vox_cdcl_proof.ml";
-   ocamlc.opt;
-   module = "vox_cdcl.mli";
-   ocamlc.opt;
-   compiler_output2 = "${lib}/vox_cdcl.lambda";
-   flags += " -dlambda";
-   module = "vox_cdcl.ml";
-   ocamlc.opt;
-   compiler_output2 = "${lib}/ocamlc.opt.output";
    flags = "-extension refinement_types";
    module = "vox_cdcl_total_proof.mli";
    ocamlc.opt;
@@ -57,7 +44,7 @@
    compiler_output2 = "${lib}/ocamlc.opt.output";
    flags = "-extension refinement_types";
    src = "${lib}/vox_sat_spec.cmi ${lib}/vox_sat.cmi";
-   src += " ${lib}/vox_cdcl.cmi ${lib}/vox_cdcl_total.cmi";
+   src += " ${lib}/vox_cdcl_total.cmi";
    dst = "${test_build_directory_prefix}/ocamlc.opt.public/";
    compiler_directory_suffix = ".public";
    readonly_files = "sat_public.ml emitted_code.ml sat_boundary_check.ml";
@@ -67,7 +54,6 @@
    compile_only = "false";
    binary_modules = "${lib}/vox_sequence ${lib}/vox_sat_spec";
    binary_modules += " ${lib}/vox_sat_proof ${lib}/vox_sat";
-   binary_modules += " ${lib}/vox_cdcl_proof ${lib}/vox_cdcl";
    binary_modules += " ${lib}/vox_cdcl_total_proof ${lib}/vox_cdcl_total";
    all_modules = "sat_public.ml";
    program = "${lib}.public/sat_public.exe";
@@ -114,18 +100,6 @@
    module = "vox_sat.ml";
    ocamlopt.opt;
    compiler_output2 = "${lib}/ocamlopt.opt.output";
-   flags = "-extension refinement_types -principal";
-   module = "vox_cdcl_proof.mli";
-   ocamlopt.opt;
-   module = "vox_cdcl_proof.ml";
-   ocamlopt.opt;
-   module = "vox_cdcl.mli";
-   ocamlopt.opt;
-   compiler_output2 = "${lib}/vox_cdcl.lambda";
-   flags += " -dlambda";
-   module = "vox_cdcl.ml";
-   ocamlopt.opt;
-   compiler_output2 = "${lib}/ocamlopt.opt.output";
    flags = "-extension refinement_types";
    module = "vox_cdcl_total_proof.mli";
    ocamlopt.opt;
@@ -140,10 +114,9 @@
    compiler_output2 = "${lib}/ocamlopt.opt.output";
    flags = "-extension refinement_types";
    src = "${lib}/vox_sat_spec.cmi ${lib}/vox_sat.cmi";
-   src += " ${lib}/vox_cdcl.cmi ${lib}/vox_cdcl_total.cmi";
+   src += " ${lib}/vox_cdcl_total.cmi";
    src += " ${lib}/vox_sequence.cmx ${lib}/vox_sat_spec.cmx";
    src += " ${lib}/vox_sat_proof.cmx ${lib}/vox_sat.cmx";
-   src += " ${lib}/vox_cdcl_proof.cmx ${lib}/vox_cdcl.cmx";
    src += " ${lib}/vox_cdcl_total_proof.cmx ${lib}/vox_cdcl_total.cmx";
    dst = "${test_build_directory_prefix}/ocamlopt.opt.public/";
    compiler_directory_suffix = ".public";
@@ -154,7 +127,6 @@
    compile_only = "false";
    binary_modules = "${lib}/vox_sequence ${lib}/vox_sat_spec";
    binary_modules += " ${lib}/vox_sat_proof ${lib}/vox_sat";
-   binary_modules += " ${lib}/vox_cdcl_proof ${lib}/vox_cdcl";
    binary_modules += " ${lib}/vox_cdcl_total_proof ${lib}/vox_cdcl_total";
    all_modules = "sat_public.ml";
    program = "${lib}.public/sat_public.exe";
@@ -183,7 +155,6 @@
 (* The SAT solver's boundary. With each compiler, the library is compiled
    as verification/library/build.sh does (-principal except for the total
    solver), the public client sat_public.ml is compiled with only the
-   interfaces of Vox_sat_spec, Vox_sat, Vox_cdcl and Vox_cdcl_total, linked
-   and run, and sat_boundary_check.ml checks the Lambda of the three public
-   modules (and, natively, the object of the total solver's proof module)
+   interfaces of Vox_sat_spec, Vox_sat and Vox_cdcl_total, linked and run,
+   and sat_boundary_check.ml checks the Lambda of the two public modules (and, natively, the object of the total solver's proof module)
    for proof code. *)

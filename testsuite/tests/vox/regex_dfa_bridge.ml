@@ -502,8 +502,6 @@ module Dfa_proof :
     type raw = int * (int * bool * row) list
     type machine = Dfa_semantics.machine
     type relation = (int * int) list
-    type decision = Equal of relation | Different of int list | Limit
-    [@@inductive]
     type reduction_certificate =
         relation * (int * int list) list * (int * int * int list) list
     val valid : machine -> bool @@ total
@@ -734,33 +732,7 @@ module Dfa_proof :
           else true}
       @@ total
     val check : machine -> machine -> relation -> bool @@ total
-    val valid_decision : machine -> machine -> decision -> bool @@ total
     val labels_bounded : machine -> bool @@ total
-    val diagnose_comparison :
-      (left : machine) ->
-      (right : machine) ->
-      (limit : int) ->
-      {decision : decision
-        | (valid_decision left right decision) &&
-            (if
-               (Dfa_semantics.valid left) &&
-                 ((Dfa_semantics.valid right) &&
-                    ((Dfa_semantics.labels_bounded left) &&
-                       ((Dfa_semantics.labels_bounded right) &&
-                          ((0 < limit) &&
-                             ((limit <= 65536) &&
-                                ((Bigint.compare
-                                    (Bigint.mul
-                                       (Dfa_semantics.state_size left)
-                                       (Dfa_semantics.state_size right))
-                                    (Bigint.of_int limit))
-                                   <= 0))))))
-             then
-               match decision with
-               | Limit -> false
-               | Equal _ | Different _ -> true
-             else true)}
-      @@ total
     type comparison = Equivalent | Inequivalent | Comparison_limit
     [@@inductive]
     val compare : machine -> machine -> int -> comparison @ total @@ total
@@ -807,24 +779,6 @@ module Dfa_proof :
           then
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
-          else true}
-      @@ total
-    val decision_correct :
-      (left : machine) ->
-      (right : machine) ->
-      (decision : decision) ->
-      (word : int list) ->
-      {u : unit
-        | if valid_decision left right decision
-          then
-            match decision with
-            | Equal _ ->
-                (Dfa_semantics.run left word) ===
-                  (Dfa_semantics.run right word)
-            | Different witness ->
-                (Dfa_semantics.run left witness) <>
-                  (Dfa_semantics.run right witness)
-            | Limit -> true
           else true}
       @@ total
     val check_reduction : machine -> machine -> reduction_certificate -> bool
@@ -968,25 +922,6 @@ module Dfa_proof :
                (Dfa_semantics.state_size other))
               <= 0
           else true}
-      @@ total
-    val diagnose_reduction :
-      (source : machine) ->
-      (limit : int) ->
-      {result : (machine * reduction_certificate) option
-        | (if
-             (Dfa_semantics.valid source) &&
-               ((Dfa_semantics.labels_bounded source) &&
-                  ((0 < limit) &&
-                     ((limit <= 64) &&
-                        ((Bigint.compare (Dfa_semantics.state_size source)
-                            (Bigint.of_int limit))
-                           <= 0))))
-           then match result with | None -> false | Some _ -> true
-           else true) &&
-            (match result with
-             | None -> true
-             | Some (candidate, certificate) ->
-                 check_reduction source candidate certificate)}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
     val reduce_complete :
@@ -1297,8 +1232,6 @@ module Dfa_proof :
     type raw = int * (int * bool * row) list
     type machine = Dfa_semantics.machine
     type relation = (int * int) list
-    type decision = Equal of relation | Different of int list | Limit
-    [@@inductive]
     type reduction_certificate =
         relation * (int * int list) list * (int * int * int list) list
     val valid : machine -> bool @@ total
@@ -1529,33 +1462,7 @@ module Dfa_proof :
           else true}
       @@ total
     val check : machine -> machine -> relation -> bool @@ total
-    val valid_decision : machine -> machine -> decision -> bool @@ total
     val labels_bounded : machine -> bool @@ total
-    val diagnose_comparison :
-      (left : machine) ->
-      (right : machine) ->
-      (limit : int) ->
-      {decision : decision
-        | (valid_decision left right decision) &&
-            (if
-               (Dfa_semantics.valid left) &&
-                 ((Dfa_semantics.valid right) &&
-                    ((Dfa_semantics.labels_bounded left) &&
-                       ((Dfa_semantics.labels_bounded right) &&
-                          ((0 < limit) &&
-                             ((limit <= 65536) &&
-                                ((Bigint.compare
-                                    (Bigint.mul
-                                       (Dfa_semantics.state_size left)
-                                       (Dfa_semantics.state_size right))
-                                    (Bigint.of_int limit))
-                                   <= 0))))))
-             then
-               match decision with
-               | Limit -> false
-               | Equal _ | Different _ -> true
-             else true)}
-      @@ total
     type comparison = Equivalent | Inequivalent | Comparison_limit
     [@@inductive]
     val compare : machine -> machine -> int -> comparison @ total @@ total
@@ -1602,24 +1509,6 @@ module Dfa_proof :
           then
             (Dfa_semantics.run left witness.Ghost.ghost) <>
               (Dfa_semantics.run right witness.Ghost.ghost)
-          else true}
-      @@ total
-    val decision_correct :
-      (left : machine) ->
-      (right : machine) ->
-      (decision : decision) ->
-      (word : int list) ->
-      {u : unit
-        | if valid_decision left right decision
-          then
-            match decision with
-            | Equal _ ->
-                (Dfa_semantics.run left word) ===
-                  (Dfa_semantics.run right word)
-            | Different witness ->
-                (Dfa_semantics.run left witness) <>
-                  (Dfa_semantics.run right witness)
-            | Limit -> true
           else true}
       @@ total
     val check_reduction : machine -> machine -> reduction_certificate -> bool
@@ -1763,25 +1652,6 @@ module Dfa_proof :
                (Dfa_semantics.state_size other))
               <= 0
           else true}
-      @@ total
-    val diagnose_reduction :
-      (source : machine) ->
-      (limit : int) ->
-      {result : (machine * reduction_certificate) option
-        | (if
-             (Dfa_semantics.valid source) &&
-               ((Dfa_semantics.labels_bounded source) &&
-                  ((0 < limit) &&
-                     ((limit <= 64) &&
-                        ((Bigint.compare (Dfa_semantics.state_size source)
-                            (Bigint.of_int limit))
-                           <= 0))))
-           then match result with | None -> false | Some _ -> true
-           else true) &&
-            (match result with
-             | None -> true
-             | Some (candidate, certificate) ->
-                 check_reduction source candidate certificate)}
       @@ total
     val reduce : machine -> int -> machine option @ total @@ total
     val reduce_complete :
