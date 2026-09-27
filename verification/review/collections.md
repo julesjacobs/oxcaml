@@ -215,7 +215,8 @@ quicksort callback-signature binders now match the migrated Borrow interface.
 The full client/rejection/erasure matrix passed after this cleanup.
 
 The integrated shared-library dependency also passes
-`check_implicit_library.py` on both backends with the same read-only compiler.
+the library build check (now `library_build.ml`) on both backends with the
+same read-only compiler.
 The complete collection matrix was rerun after integration. All 134 displayed
 specification fragments match current source hashes and contain no obsolete
 refinement keywords.
