@@ -35,7 +35,10 @@ pages.
   stated on the generated line-count pages.
 - `compiler-example/`: the two WebAssembly modules the HM-to-Wasm compiler
   emits for its design example, run in the browser on the presentation page.
-  `original_run_smoke.ml` produces them.
+  `original_run_smoke.ml` produces them. `run-examples.sh` builds
+  `testsuite/tests/vox/hmc_compilation_examples.ml`, and
+  `run-examples-node.js` runs the modules it writes in Node and compares
+  them with the model.
 
 ## Writing a page
 
