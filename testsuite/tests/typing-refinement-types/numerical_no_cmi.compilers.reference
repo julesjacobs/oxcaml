@@ -1,7 +1,7 @@
 File "numerical_no_cmi.ml", line 22, characters 17-23:
 22 | let rec loop n = loop n [@@decreases n]
                       ^^^^^^
-Error: Refinement could not be proved (counterexample: n = -92)
+Error: Refinement could not be proved (counterexample: n = 0)
 File "numerical_no_cmi.ml", line 22, characters 37-38:
 22 | let rec loop n = loop n [@@decreases n]
                                           ^

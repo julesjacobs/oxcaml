@@ -46,7 +46,7 @@ let different_capture (a : int) (b : int) (x : int) :
 Line 3, characters 16-25:
 3 |   let u = () in refine_ u;;
                     ^^^^^^^^^
-Error: Refinement could not be proved (counterexample: b = 0, x = -19, a = 33)
+Error: Refinement could not be proved (counterexample: b = 1, x = -1, a = 0)
 Line 2, characters 16-57:
 2 |     {u : unit | apply (offset a) x === apply (offset b) x} =
                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -58,7 +58,7 @@ let false_callback : (x : int) -> {y : int | y > x} = fun x -> refine_ x;;
 Line 1, characters 63-72:
 1 | let false_callback : (x : int) -> {y : int | y > x} = fun x -> refine_ x;;
                                                                    ^^^^^^^^^
-Error: Refinement could not be proved (counterexample: x = -92)
+Error: Refinement could not be proved (counterexample: x = 0)
 Line 1, characters 45-50:
 1 | let false_callback : (x : int) -> {y : int | y > x} = fun x -> refine_ x;;
                                                  ^^^^^

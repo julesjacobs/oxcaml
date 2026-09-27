@@ -40,7 +40,7 @@ let bad n =
 Line 2, characters 19-25:
 2 |   let rec loop n = loop n [@@decreases n] in loop n;;
                        ^^^^^^
-Error: Refinement could not be proved (counterexample: n = -92)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 2, characters 39-40:
 2 |   let rec loop n = loop n [@@decreases n] in loop n;;
                                            ^
@@ -317,7 +317,7 @@ let rec circular : (n : int) -> {r : int | r < n} = fun n ->
 Line 2, characters 10-20:
 2 |   let r = circular n in r
               ^^^^^^^^^^
-Error: Refinement could not be proved (counterexample: n = -92)
+Error: Refinement could not be proved (counterexample: n = 0)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^

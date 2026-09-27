@@ -449,7 +449,7 @@ end;;
 Line 19, characters 36-41:
 19 |     let proof : {n : int | n = 1} = found in
                                          ^^^^^
-Error: Refinement could not be proved (counterexample: key = -92)
+Error: Refinement could not be proved (counterexample: key = 0)
 Line 19, characters 27-32:
 19 |     let proof : {n : int | n = 1} = found in
                                 ^^^^^
@@ -482,7 +482,7 @@ end;;
 Line 19, characters 36-41:
 19 |     let proof : {n : int | n = 1} = found in
                                          ^^^^^
-Error: Refinement could not be proved (counterexample: other = 0, key = -62)
+Error: Refinement could not be proved (counterexample: other = 0, key = 0)
 Line 19, characters 27-32:
 19 |     let proof : {n : int | n = 1} = found in
                                 ^^^^^
@@ -512,7 +512,7 @@ end;;
 Line 18, characters 23-26:
 18 |     M.Refined.find map key
                             ^^^
-Error: Refinement could not be proved (counterexample: key = -92)
+Error: Refinement could not be proved (counterexample: key = 0)
 File "map.mli", line 463, characters 21-32:
   The refinement is stated here.
 |}]
@@ -545,7 +545,7 @@ end;;
 Line 21, characters 33-38:
 21 |     let proof : {b : bool | b} = found in
                                       ^^^^^
-Error: Refinement could not be proved (counterexample: key = -92)
+Error: Refinement could not be proved (counterexample: key = 0)
 Line 21, characters 28-29:
 21 |     let proof : {b : bool | b} = found in
                                  ^
@@ -594,7 +594,7 @@ end;;
 Line 35, characters 33-39:
 35 |     let proof : {b : bool | b} = second in
                                       ^^^^^^
-Error: Refinement could not be proved (counterexample: key = 0, other = -62)
+Error: Refinement could not be proved (counterexample: key = 0, other = 1)
 Line 35, characters 28-29:
 35 |     let proof : {b : bool | b} = second in
                                  ^

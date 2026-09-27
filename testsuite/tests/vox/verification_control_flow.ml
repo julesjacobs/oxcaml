@@ -54,7 +54,7 @@ let unchecked_or x b : zero =
 Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample: b = true, x = -100)
+Error: Refinement could not be proved (counterexample: b = true, x = -1)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^
@@ -117,7 +117,7 @@ let not_left_to_right x =
 Line 3, characters 45-56:
 3 |   consume (let (_ : zero) = assume_ x in ()) (refine_ x);;
                                                  ^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample: x = -100)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^
@@ -181,7 +181,7 @@ let failing_batch x =
 Line 4, characters 19-28:
 4 |   let (_ : zero) = refine_ x in ();;
                        ^^^^^^^^^
-Error: Refinement could not be proved (counterexample: x = -100)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^
@@ -202,7 +202,7 @@ let branch_assertion x b =
 Line 2, characters 30-39:
 2 |   if b then (let (_ : zero) = refine_ x in raise Exit) else ();;
                                   ^^^^^^^^^
-Error: Refinement could not be proved (counterexample: x = -100, b = true)
+Error: Refinement could not be proved (counterexample: x = -1, b = true)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^
@@ -243,7 +243,7 @@ let conditional_assumption b x : zero =
 Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample: x = -100, b = false)
+Error: Refinement could not be proved (counterexample: x = -1, b = false)
 Line 4, characters 23-28:
 4 | type zero = {n : int | n = 0};;
                            ^^^^^

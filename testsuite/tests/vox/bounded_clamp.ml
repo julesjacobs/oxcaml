@@ -46,7 +46,7 @@ let wrong (x : int) : {r : int | 0 <= r && r <= 10} = x
 Line 1, characters 54-55:
 1 | let wrong (x : int) : {r : int | 0 <= r && r <= 10} = x
                                                           ^
-Error: Refinement could not be proved (counterexample: x = 27)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 1, characters 33-50:
 1 | let wrong (x : int) : {r : int | 0 <= r && r <= 10} = x
                                      ^^^^^^^^^^^^^^^^^
@@ -67,7 +67,7 @@ let opaque_result (x : int) : {r : int | 0 <= r && r <= 10} =
 Line 2, characters 2-21:
 2 |   opaque_clamp 0 10 x
       ^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample: x = 27)
+Error: Refinement could not be proved (counterexample: x = -1)
 Line 1, characters 41-58:
 1 | let opaque_result (x : int) : {r : int | 0 <= r && r <= 10} =
                                              ^^^^^^^^^^^^^^^^^

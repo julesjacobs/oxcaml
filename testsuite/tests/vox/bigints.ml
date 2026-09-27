@@ -163,7 +163,7 @@ let rec negative_measure (n : number) =
 Line 2, characters 18-50:
 2 |   if n > -3Z then negative_measure Bigint.(n - 1Z) else 0Z
                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Error: Refinement could not be proved (counterexample: n = -2Z)
+Error: Refinement could not be proved (counterexample: n = 0Z)
 Line 3, characters 13-14:
 3 | [@@decreases n];;
                  ^

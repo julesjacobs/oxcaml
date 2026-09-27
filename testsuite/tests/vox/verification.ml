@@ -231,7 +231,7 @@ let unchecked_short_circuit x b : zero =
 Line 3, characters 2-11:
 3 |   refine_ x;;
       ^^^^^^^^^
-Error: Refinement could not be proved (counterexample: x = -100, b = false)
+Error: Refinement could not be proved (counterexample: x = -1, b = false)
 Line 1, characters 23-28:
 1 | type zero = {n : int | n = 0}
                            ^^^^^
