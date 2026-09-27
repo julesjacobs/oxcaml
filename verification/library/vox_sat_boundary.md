@@ -65,7 +65,8 @@ stored reason occurs older than its assignment on the unique trail. This
 invariant survives enqueue, backtracking, and learned-clause insertion, and
 applies to the reason selected during conflict analysis. Latest-pivot selection
 and strict reason order prove a whole-clause rank decrease at every resolution.
-Analysis terminates and returns a clause without fuel; its rank is erased.
+Analysis terminates and returns a clause without fuel; its termination
+measure is that rank.
 A preserved ghost prefix invariant ensures that nonroot analysis retains a
 current-level variable; asserting construction and learned enqueue succeed.
 A stronger prefix invariant proves learned-clause freshness. Resolution
