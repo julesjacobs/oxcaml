@@ -15,7 +15,7 @@ sources:
   - testsuite/tests/vox/one_shot_rejected.ml — Rejected programs
   - testsuite/tests/vox/one_shot_parallel.ml — Clients on two domains, including nested endpoints
   - testsuite/tests/vox/channel_buffer_demo.ml — Buffer-protocol client
-  - verification/concurrency/check.sh — Public-only compile, rejections and erasure check
+  - testsuite/tests/vox/concurrency_boundary.ml — Public-only compile, rejections and erasure check
 ---
 `One_shot` is a channel for one message. `create` returns a sender and a receiver that share a cell and an atomic flag. `send` puts the payload in the cell and sets the flag from 0 to 1; `recv` spins until it can set the flag from 1 back to 0, then takes the payload out. The implementation is checked against the trusted contracts of the atomic flag and the cell. The flag's invariant states that at 0 the flag owns nothing (an endpoint holds the cell) and at 1 it owns the full cell. So `recv` takes from the cell only with the ownership its successful compare-and-set hands it, and `send` fills the cell only while it owns it empty. The proof also shows that the flag is 0 when `send`'s compare-and-set runs, so that step always succeeds. Endpoints are unique values, so each can be used at most once.
 
@@ -25,7 +25,7 @@ The interface itself has no refinements and records no history. For an unrefined
 
 ## Client example
 
-The public client, which uses only `one_shot.mli`; `check.sh` also compiles it with only the libraries' `.cmi` files present. `(n : int) -> {r : int | r = n}` names the argument and refines the result: `{r : int | p}` is `int` restricted to values satisfying `p`. The channel's payload type is the singleton `{v : int | v = n}`. The checker proves `n` has that type at `send`, and the result of `recv` has it, which proves the result type of `roundtrip`. The test runs in bytecode and native code.
+The public client, which uses only `one_shot.mli`; `concurrency_boundary.ml` also compiles it with only the libraries' `.cmi` (and `.cmx`) files present. `(n : int) -> {r : int | r = n}` names the argument and refines the result: `{r : int | p}` is `int` restricted to values satisfying `p`. The channel's payload type is the singleton `{v : int | v = n}`. The checker proves `n` has that type at `send`, and the result of `recv` has it, which proves the result type of `roundtrip`. The test runs in bytecode and native code.
 
 @code testsuite/tests/vox/one_shot_public_client.ml "let roundtrip" "One_shot.recv rx"
 
@@ -35,7 +35,7 @@ Sending a value that does not satisfy the payload refinement is a type error. Th
 
 @code testsuite/tests/vox/one_shot_rejected.ml "let bad_value () =" "Error: Refinement could not be proved"
 
-The same test rejects nine more programs: sending or receiving twice on one endpoint, using a receiver as a sender, claiming `n = 42` for a receive at plain `int`, using an endpoint after sending it as a payload, sending an `int ref`, reading the hidden `cell` field, and taking from an empty `Unique_cell.Slot` or filling one twice. `check.sh` compiles the 15 programs `verification/concurrency/reject-*.ml` against the public `.cmi` files only and requires each to fail; four are about channels (a reused sender, a false payload, a false buffer receipt and a hidden module), the rest about locks.
+The same test rejects nine more programs: sending or receiving twice on one endpoint, using a receiver as a sender, claiming `n = 42` for a receive at plain `int`, using an endpoint after sending it as a payload, sending an `int ref`, reading the hidden `cell` field, and taking from an empty `Unique_cell.Slot` or filling one twice. `concurrency_boundary.ml` compiles 15 more programs against the public `.cmi` files only and requires each to fail with its exact error; four are about channels (a reused sender, a false payload, a false buffer receipt and a hidden module), the rest about locks.
 
 ## Interface
 
@@ -52,7 +52,7 @@ The same test rejects nine more programs: sending or receiving twice on one endp
 - `Unique_cell.Slot.empty`, `put` and `take` are C externals (`caml_unique_cell_create`, `caml_unique_cell_put` and `caml_unique_cell_take` in `runtime/pref.c`), although `unique_cell.mli` declares them with `val`. The Boolean they record for the cell is the only link between the ghost state and what the cell holds: `take` returns whatever the cell contains at type `'a`, and an empty slot contains `()`. The proof shows `take` is called only when that Boolean records a full cell.
 - The payload is stored and loaded with ordinary, non-atomic accesses (`caml_modify` and a field load). The proof assumes that the sequentially consistent compare-and-set on the flag orders them for the other domain, as `concurrency-boundary.md` states. This is not derived from a memory model.
 - Buffer protocol only: `Raw_memory`'s `length`, `location`, `malloc`, `read`, `write` and `free` are externals implemented in `runtime/pref.c`, and `location_law` (distinct buffers or indices give distinct locations) is an axiom. A finalizer frees a buffer once its descriptor is unreachable.
-- `Domain.Safe.spawn`, `Domain.join` and `Domain.cpu_relax` from the standard library. The multi-domain tests and `check.sh` disable the `do_not_spawn_domains` alert.
+- `Domain.Safe.spawn`, `Domain.join` and `Domain.cpu_relax` from the standard library. The multi-domain tests and `concurrency_boundary.ml` disable the `do_not_spawn_domains` alert.
 
 ## Scope
 
@@ -67,8 +67,7 @@ The same test rejects nine more programs: sending or receiving twice on one endp
 ## Reproduce
 
 ```
-./dev test vox/one_shot_public_client.ml vox/one_shot_demo.ml vox/one_shot_rejected.ml vox/one_shot_parallel.ml vox/channel_buffer_demo.ml
-verification/concurrency/check.sh
+./dev test vox/one_shot_public_client.ml vox/one_shot_demo.ml vox/one_shot_rejected.ml vox/one_shot_parallel.ml vox/channel_buffer_demo.ml vox/concurrency_boundary.ml
 ```
 
-`one_shot_parallel.ml` and `channel_buffer_demo.ml` are skipped unless the compiler was configured with `--enable-multidomain` and `Domain.recommended_domain_count ()` is at least 2. `check.sh` compiles the channel and lock libraries with both compilers, compiles and runs the public clients against the libraries' `.cmi` files only, requires each `verification/concurrency/reject-*.ml` program to fail with the expected kind of error, and fails if one of a fixed list of ghost primitives (heap operations, token split and join, an atomic's invariant key, a cell's location) appears in the Lambda or Cmm of the four channel and lock libraries. It uses `rg`, and it runs the multi-domain clients, so it too needs `--enable-multidomain`.
+`one_shot_parallel.ml` and `channel_buffer_demo.ml` are skipped unless the compiler was configured with `--enable-multidomain` and `Domain.recommended_domain_count ()` is at least 2. `concurrency_boundary.ml` compiles the channel and lock libraries with both compilers, compiles the public clients against the libraries' `.cmi` files only (and, for native code, their `.cmx` files), links them and runs those that do not spawn domains, requires each of 15 rejected programs to fail with its exact error, and fails if one of a fixed list of ghost primitives (heap operations, token split and join, an atomic's invariant key, a cell's location) appears in the Lambda or Cmm of the four channel and lock libraries. It links the three clients that spawn domains without running them; their own tests run them.

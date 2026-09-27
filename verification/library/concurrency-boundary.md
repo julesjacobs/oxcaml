@@ -108,12 +108,16 @@ void invariant keys, and unboxed atomic results on commit d143961f17.
 
 Configure with `--prefix="$PWD/_install" --enable-multidomain
 --enable-poll-insertion`, then `./dev init`. Run
-`verification/concurrency/check.sh`. It compiles interfaces and implementations
-separately, copies only public `.cmi` files into a separate client directory,
-and compiles/runs the clients there with bytecode and native compilers. Source
-and implementation `.cmx` files are absent during client compilation.
-It then checks expected rejection categories and emitted Lambda for runtime
-heap/authority observations. Multidomain tests perform 4,000 successful updates
+`./dev test vox/concurrency_boundary.ml`. It compiles interfaces and
+implementations separately, copies only the libraries' `.cmi` files (and, for
+native code, their `.cmx` files) into a separate client directory, and
+compiles and links the clients there with bytecode and native compilers, and
+runs the five that do not spawn domains (the tests of the other three,
+`channel_buffer_demo.ml`, `reference_lock_parallel.ml` and
+`unique_lock_parallel.ml`, run them on a multidomain runtime). No source
+file of the libraries is present during client compilation. It then checks
+the exact error of each rejected program and emitted Lambda and Cmm for
+runtime heap/authority observations. Multidomain tests perform 4,000 successful updates
 and force collections; these executions support, but do not prove, concurrent
 progress or runtime correctness.
 
@@ -129,13 +133,12 @@ The public channel interface supplies payload-type preservation, not a separate
 history/linearizability theorem. No theorem equates arbitrary unrefined send
 and receive values via a public trace model.
 
-Fresh evidence is recorded in `verification/concurrency/evidence.json`.
-All eight public-only clients and 15 intended rejection cases pass in both
-backends on the multidomain/poll-insertion build. Library modules also compile
+All eight public-only clients compile and link in both backends, and the 15
+intended rejection cases are rejected. Library modules also compile
 with `-principal`; clients retain their existing non-principal configuration
 because the historical channel tuple fixture hits an unrelated principal-kind
-inference limitation. The existing `one_shot_rejected.ml` expect test passes in
-both backends. Native Cmm and arm64 assembly retain CAS/cell moves/reference
+inference limitation. The existing `one_shot_rejected.ml` expect test passes. Native Cmm and arm64
+assembly retain CAS/cell moves/reference
 access while heap observations, invariant keys, and permission fields erase.
 Primitive library definitions remain trusted; their exported external symbols
 are not themselves evidence of runtime observations in client code.
