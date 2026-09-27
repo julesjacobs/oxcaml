@@ -74,13 +74,13 @@ let () =
     D.Primitive (D.Add, var 0, D.Apply (var 3, var 1)))) in
   run (D.Let (sum, D.Lambda (D.Apply (var 1, D.Cons (var 0, D.Cons (word 2, D.Nil)))))) 40 42;
   run (D.Lambda (D.Let (D.Primitive (D.Add, var 0, word 1), var 0))) 41 42;
-  (match F.prepare (D.Apply (D.Truth, D.Truth)) with F.Type_error -> ()
+  (match F.prepare (D.Apply (D.Truth, D.Truth)) with F.Type_error _ -> ()
   | _ -> failwith "type error classification");
   (match F.prepare (var 0) with F.Unbound_variable -> ()
   | _ -> failwith "scope error classification");
-  (match F.prepare (D.Lambda D.Truth) with F.Entry_type_mismatch -> ()
+  (match F.prepare (D.Lambda D.Truth) with F.Entry_type_mismatch _ -> ()
   | _ -> failwith "entry interface mismatch classification");
-  (match F.prepare (D.Lambda (D.If (var 0, word 0, word 1))) with F.Entry_type_mismatch -> ()
+  (match F.prepare (D.Lambda (D.If (var 0, word 0, word 1))) with F.Entry_type_mismatch _ -> ()
   | _ -> failwith "Boolean entry argument admitted as Word64");
   (match F.prepare (D.Lambda (D.Let (id, var 1))) with
   | F.Unsupported_fragment A.Unsupported_polymorphic_local_let -> ()

@@ -68,3 +68,50 @@ let (honest_exhaustion @ total) : (artifact : C.artifact) @ immutable ->
     {witness : M.exhaustion | M.honest_exhaustion (C.bytes artifact)
       (Wasm_code.Succ (C.layout artifact).M.host_capacity) after witness} @ immutable ghost =
   fun artifact fuel after premise -> ghost_ (C.exhaustion artifact fuel after ())
+
+(* A typing of the identity at [Word64 -> Word64]. *)
+let (identity_typed @ total) : (u : unit) ->
+    {d : D.typing | D.typed D.Z D.Empty_context (D.Lambda (D.Bound D.Z)) (D.Function (D.Word64, D.Word64)) d}
+    @ immutable ghost =
+  fun u -> ghost_ (
+    let body = D.Variable D.No_arguments in
+    let d = D.Abstraction (D.Word64, body) in
+    let scheme = D.Forall (D.Z, D.Word64) in
+    let g = D.Binding (scheme, D.Empty_context) in
+    D.typed_def D.Z D.Empty_context (D.Lambda (D.Bound D.Z)) (D.Function (D.Word64, D.Word64)) d;
+    D.typed_def D.Z g (D.Bound D.Z) D.Word64 body;
+    D.context_wf_def D.Z D.Empty_context; D.context_wf_def D.Z g;
+    D.scheme_wf_def D.Z scheme; D.add_def D.Z D.Z;
+    D.mono_wf_def D.Z D.Word64; D.mono_wf_def D.Z (D.Function (D.Word64, D.Word64));
+    D.lookup_def g D.Z; D.length_def D.No_arguments; D.arity_def scheme;
+    D.arguments_wf_def D.Z D.No_arguments; D.open_scheme_def scheme D.No_arguments;
+    D.open_type_def D.No_arguments D.Word64;
+    d)
+
+(* The identity passes every source check, so the compiler can reject it only
+   for one of the three reasons that concern the layout and the compiled program. *)
+let compile_identity : (configuration : M.layout) @ immutable -> (argument : W.t) @ immutable ->
+    (memory : Wasm_u32.bytes) @ immutable -> (pages : Wasm_u32.u32) ->
+    {u : unit | M.valid_layout configuration memory} ->
+    {out : C.result | match out with
+      | C.Compiled artifact -> C.source artifact === D.Lambda (D.Bound D.Z)
+      | C.Rejected rejection -> (match C.reason rejection with
+        | C.Layout_rejected | C.Initialization_exhausted | C.Encoding_rejected -> true
+        | _ -> false)} @ immutable =
+  fun configuration argument memory pages premise ->
+    let term = D.Lambda (D.Bound D.Z) in
+    let out = C.compile term configuration argument memory pages () in
+    ghost_ (match out with
+      | C.Compiled _ -> ()
+      | C.Rejected rejection ->
+        let entry = Copy_spec.Function (Copy_spec.Word64, Copy_spec.Word64) in
+        let typing = identity_typed () in
+        D.embed_def entry; D.embed_def Copy_spec.Word64;
+        D.scoped_term_def D.Z term; D.scoped_term_def (D.S D.Z) (D.Bound D.Z); D.present_def (D.S D.Z) D.Z;
+        M.outer_callable_def term; M.entry_callable_def term; M.no_local_let_def term;
+        M.callable_def term; M.let_free_def term; M.let_free_def (D.Bound D.Z);
+        match C.reason rejection with
+        | C.Type_error -> C.untypable rejection entry typing ()
+        | C.Entry_type_mismatch -> C.no_entry_type rejection typing ()
+        | _ -> ());
+    out
