@@ -58,32 +58,38 @@ module Execute = Wasm_binary_execution
 module E = Hmc_wasm_program_execution
 module Returned = Hmc_wasm_program_source_execution
 
+module Input = Hmc_wasm_program_input
+module Dispatch = Hmc_wasm_program_dispatch
+module Fuel = Wasm_control_compose
+
 let (normal @ total) : (program : I.program) @ immutable -> (layout : Init.layout) @ immutable ->
-    (input : W.t) @ immutable -> (memory : B.bytes) @ immutable -> (pages : B.u32) ->
-    (compiled : Binary.compiled) @ immutable -> (word : W.t) @ immutable ->
-    (source_fuel : D.index) @ immutable ->
-    {u : unit | Binary.accepted program layout input memory pages compiled
+    (memory : B.bytes) @ immutable -> (pages : B.u32) ->
+    (compiled : Binary.compiled) @ immutable -> (input : W.t) @ immutable -> (target : Init.prepared) @ immutable ->
+    (word : W.t) @ immutable -> (source_fuel : D.index) @ immutable ->
+    {u : unit | Binary.accepted program layout memory pages compiled
+      && Binary.targets program layout memory compiled.Binary.start compiled.Binary.prepared input target
       && layout.Init.stack_capacity === D.Z
       && T.no_calls program.I.code && Constant.no_allocations program.I.code
       && Source.advance source_fuel
         (Origin.source_start program.I.origin.Cfg.origin.Closure.origin input)
         === Source.Done (V.Word word)} ->
     {out : E.execution |
-      E.valid program compiled.Binary.start.Heap.globals compiled.Binary.prepared.Init.lowered
-        compiled.Binary.prepared.Init.context out.E.endpoint
+      E.valid program compiled.Binary.start.Heap.globals target.Init.lowered target.Init.context out.E.endpoint
       && Returned.returned out.E.endpoint word
-      && Execute.run (C.Succ out.E.fuel) compiled.Binary.bytes
-        (C.Succ compiled.Binary.prepared.Init.context.State.host_capacity)
-        === Execute.Result (E.target compiled.Binary.prepared.Init.context out.E.endpoint)} @ immutable ghost =
-  fun program layout input memory pages compiled word source_fuel premise -> ghost_ (
+      && Execute.run (Fuel.add (Dispatch.five ()) (C.Succ out.E.fuel)) compiled.Binary.bytes input
+        (C.Succ target.Init.context.State.host_capacity)
+        === Execute.Result (E.target target.Init.context out.E.endpoint)} @ immutable ghost =
+  fun program layout memory pages compiled input target word source_fuel premise -> ghost_ (
     let start = compiled.Binary.start in
-    let prepared = compiled.Binary.prepared in
-    let state = prepared.Init.state in
-    let context = prepared.Init.context in
+    let next = Input.restart start input in
+    let state = target.Init.state in
+    let context = target.Init.context in
     let source = program.I.origin.Cfg.origin.Closure.origin in
-    Binary.accepted_def program layout input memory pages compiled;
-    Init.correct_def program layout input memory (Init.Initialized (start, prepared));
-    Init.installed_def program layout input memory start prepared;
+    Binary.accepted_def program layout memory pages compiled;
+    Binary.targets_def program layout memory start compiled.Binary.prepared input target;
+    Init.ready_def program layout input memory next target;
+    Init.installed_def program layout input memory next target;
+    Input.restart_def start input;
     M.ready_def source;
     let definitions : {d : M.definitions | M.origins d} = source.M.definitions in
     let budget = Tail.source_preservation program definitions input word source_fuel () in
@@ -91,11 +97,11 @@ let (normal @ total) : (program : I.program) @ immutable -> (layout : Init.layou
     T.initial program input;
     Constant.stack_plan program budget state.State.abstract ();
     Hmc_frame_capacity.le_def D.Z context.State.stack_capacity;
-    State.valid_def program start.Heap.globals prepared.Init.lowered context state;
-    Resources.valid_def program start.Heap.globals prepared.Init.lowered.Lower.width
+    State.valid_def program start.Heap.globals target.Init.lowered context state;
+    Resources.valid_def program start.Heap.globals target.Init.lowered.Lower.width
       context.State.stack_base state.State.frame_end state.State.abstract state.State.heap
       state.State.activation state.State.frames state.State.registers state.State.memory;
     Inv.valid_def program start.Heap.globals state.State.registers.Registers.heap_limit
       {Machine.heap = state.State.heap; state = Q.Running (state.State.activation, state.State.frames)} state.State.abstract;
     Hmc_heap_extent.fits_def D.Z (Hmc_heap_objects.used state.State.heap) state.State.registers.Registers.heap_limit;
-    Binary.normal program layout input memory start prepared pages compiled.Binary.bytes word budget ())
+    Binary.normal program layout memory start compiled.Binary.prepared pages compiled.Binary.bytes input target word budget ())

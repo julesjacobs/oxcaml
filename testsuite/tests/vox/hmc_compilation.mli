@@ -14,7 +14,6 @@ type result = Rejected of rejection | Compiled of artifact
 
 val bytes : artifact @ immutable -> B.bytes @ immutable @@ total
 val source : artifact @ immutable -> D.term @ immutable ghost @@ total
-val input : artifact @ immutable -> W.t @ immutable ghost @@ total
 val layout : artifact @ immutable -> M.layout @ immutable ghost @@ total
 
 val reason : rejection @ immutable -> error @@ total
@@ -28,7 +27,7 @@ val program : rejection @ immutable -> D.term @ immutable ghost @@ total
    and [Encoding_rejected] depend on the compiled program as well as on the
    layout, memory and pages, and are not characterized. *)
 val compile : (term : D.term) @ immutable -> (configuration : M.layout) @ immutable ->
-  (argument : W.t) @ immutable -> (memory : B.bytes) @ immutable -> (pages : B.u32) ->
+  (memory : B.bytes) @ immutable -> (pages : B.u32) ->
   {u : unit | M.valid_layout configuration memory} ->
   {out : result | match out with
     | Rejected rejection -> program rejection === term && (match reason rejection with
@@ -40,7 +39,7 @@ val compile : (term : D.term) @ immutable -> (configuration : M.layout) @ immuta
       | Type_error | Entry_type_mismatch | Layout_rejected | Initialization_exhausted
       | Encoding_rejected -> true)
     | Compiled artifact ->
-      source artifact === term && input artifact === argument && layout artifact === configuration} @ immutable
+      source artifact === term && layout artifact === configuration} @ immutable
 
 (* [Type_error]: the program has no type. *)
 val untypable : (rejection : rejection) @ immutable -> (ty : Copy_spec.ty) @ immutable ->
@@ -55,8 +54,12 @@ val no_entry_type : (rejection : rejection) @ immutable -> (typing : D.typing) @
     && D.typed D.Z D.Empty_context (program rejection) (D.Function (D.Word64, D.Word64)) typing} ->
   {u : unit | false} @ ghost @@ total
 
-val safe : (artifact : artifact) @ immutable -> (prefix : C.count) @ immutable ->
-  {u : unit | match Wasm_binary_execution.run prefix (bytes artifact)
+(* The theorems below hold for every [input]. [Wasm_binary_execution.run]
+   sets the module's exported global [payload] to [input] and calls its
+   exported function [run]; the source program is [source artifact] applied
+   to [input]. *)
+val safe : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->
+  {u : unit | match Wasm_binary_execution.run prefix (bytes artifact) input
       (C.Succ (layout artifact).M.host_capacity) with
     Wasm_binary_execution.Result (Wasm_calls.Running _)
     | Wasm_binary_execution.Result (Wasm_calls.Finished _) -> true | _ -> false} @ ghost @@ total
@@ -64,32 +67,32 @@ val safe : (artifact : artifact) @ immutable -> (prefix : C.count) @ immutable -
 val static_validity : (artifact : artifact) @ immutable ->
   {u : unit | Wasm_static_module.bytes_valid (bytes artifact)} @ ghost @@ total
 
-val reflection : (artifact : artifact) @ immutable -> (prefix : C.count) @ immutable ->
+val reflection : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->
   (after : Wasm_global_execution.state) @ immutable -> (word : W.t) @ immutable ->
-  {u : unit | Wasm_binary_execution.run prefix (bytes artifact)
+  {u : unit | Wasm_binary_execution.run prefix (bytes artifact) input
       (C.Succ (layout artifact).M.host_capacity) === Wasm_binary_execution.Result (Wasm_calls.Finished after)
     && M.returned after word} ->
-  {fuel : D.index | M.source_returns (source artifact) (input artifact) fuel word} @ immutable ghost @@ total
+  {fuel : D.index | M.source_returns (source artifact) input fuel word} @ immutable ghost @@ total
 
-val preservation : (artifact : artifact) @ immutable -> (word : W.t) @ immutable ->
+val preservation : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (word : W.t) @ immutable ->
   (source_fuel : D.index) @ immutable ->
-  {u : unit | M.source_returns (source artifact) (input artifact) source_fuel word} ->
-  {out : M.execution | Wasm_binary_execution.run out.M.fuel (bytes artifact)
+  {u : unit | M.source_returns (source artifact) input source_fuel word} ->
+  {out : M.execution | Wasm_binary_execution.run out.M.fuel (bytes artifact) input
       (C.Succ (layout artifact).M.host_capacity) === Wasm_binary_execution.Result (Wasm_calls.Finished out.M.after)
     && (M.returned out.M.after word || M.exhausted out.M.after)} @ immutable ghost @@ total
 
-val normal : (artifact : artifact) @ immutable -> (word : W.t) @ immutable ->
+val normal : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (word : W.t) @ immutable ->
   (source_fuel : D.index) @ immutable ->
-  {u : unit | M.source_returns (source artifact) (input artifact) source_fuel word
+  {u : unit | M.source_returns (source artifact) input source_fuel word
     && M.sufficient (layout artifact) (bytes artifact) source_fuel} ->
-  {out : M.execution | Wasm_binary_execution.run out.M.fuel (bytes artifact)
+  {out : M.execution | Wasm_binary_execution.run out.M.fuel (bytes artifact) input
       (C.Succ (layout artifact).M.host_capacity) === Wasm_binary_execution.Result (Wasm_calls.Finished out.M.after)
     && M.returned out.M.after word} @ immutable ghost @@ total
 
-val exhaustion : (artifact : artifact) @ immutable -> (prefix : C.count) @ immutable ->
+val exhaustion : (artifact : artifact) @ immutable -> (input : W.t) @ immutable -> (prefix : C.count) @ immutable ->
   (after : Wasm_global_execution.state) @ immutable ->
-  {u : unit | Wasm_binary_execution.run prefix (bytes artifact)
+  {u : unit | Wasm_binary_execution.run prefix (bytes artifact) input
       (C.Succ (layout artifact).M.host_capacity) === Wasm_binary_execution.Result (Wasm_calls.Finished after)
     && M.exhausted after} ->
-  {witness : M.exhaustion | M.honest_exhaustion (bytes artifact)
+  {witness : M.exhaustion | M.honest_exhaustion (bytes artifact) input
     (C.Succ (layout artifact).M.host_capacity) after witness} @ immutable ghost @@ total

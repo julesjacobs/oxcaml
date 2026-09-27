@@ -200,16 +200,26 @@ let build term (input : B.u32) (heap_limit : B.u32) (stack_frames : B.u32) =
             | _ -> failwith "initial memory coverage")
           | _ -> failwith "initial frame encoding");
           let wasm_globals = Hmc_wasm_program_registers.globals registers in
-          let before = Checked.start checked memory wasm_globals in
-          let verified_entry = Hmc_wasm_program_entry.start module_ count wasm_globals memory (Code.Succ Code.Zero) () in
+          (* The host passes the input in global 7; the prologue stores it in
+             the entry frame, where the initial memory already holds it. *)
+          let host_globals = match WG.set wasm_globals 7 (S.I64 (Header.number input)) with
+            | Some host -> host | None -> failwith "input global" in
+          let before = Checked.start checked memory host_globals in
+          let verified_entry = Hmc_wasm_program_entry.start module_ count host_globals memory (Code.Succ Code.Zero) () in
           if verified_entry <> before then failwith "verified module entry differs";
-          (match Calls.run (Code.Succ Code.Zero) module_ before with
-          | Calls.Running loop ->
-            if loop <> Dispatch.loop wasm_globals memory (Code.Succ Code.Zero) then failwith "dispatcher entry differs"
-          | _ -> failwith "dispatcher entry stopped");
+          (match Calls.run (Dispatch.five ()) module_ before with
+          | Calls.Running entered ->
+            if entered <> Dispatch.point (Runtime.loop_code ()) T.No_labels wasm_globals memory S.Empty (Code.Succ Code.Zero)
+              then failwith "dispatcher prologue differs";
+            (match Calls.run (Code.Succ Code.Zero) module_ entered with
+            | Calls.Running loop ->
+              if loop <> Dispatch.loop wasm_globals memory (Code.Succ Code.Zero) then failwith "dispatcher entry differs"
+            | _ -> failwith "dispatcher entry stopped")
+          | _ -> failwith "dispatcher prologue stopped");
           let two = Code.Succ (Code.Succ Code.Zero) in
           let four = Code.Succ (Code.Succ two) in
-          (match Calls.run four module_ {before with Calls.capacity = Code.Zero} with
+          let nine = Code.Succ (Code.Succ (Code.Succ (Code.Succ (Code.Succ four)))) in
+          (match Calls.run nine module_ {before with Calls.capacity = Code.Zero} with
           | Calls.Host_limit -> () | _ -> failwith "missing Wasm call slot accepted");
           let invalid = {before with Calls.current = {before.Calls.current with Wasm_instance_control.body =
             {before.Calls.current.Wasm_instance_control.body with T.code =
